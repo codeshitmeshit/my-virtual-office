@@ -107,6 +107,17 @@ docker compose up -d
 
 Then open `http://localhost:8090/setup` to run the setup wizard.
 
+### Docker Image / Platform Support
+
+The published Docker image is available at:
+- `ghcr.io/eliautobot/my-virtual-office:latest`
+
+Multi-arch images are published for:
+- `linux/amd64`
+- `linux/arm64`
+
+That means the same image tag works on standard x86_64 machines and ARM64 devices like a Raspberry Pi 5.
+
 ### First Run
 
 1. Open `http://localhost:8090/setup`
@@ -170,6 +181,12 @@ All settings live in `vo-config.json`. Environment variables override config val
 docker compose down
 docker compose pull
 docker compose up -d
+```
+
+Or pull the image directly:
+
+```bash
+docker pull ghcr.io/eliautobot/my-virtual-office:latest
 ```
 
 Your license key, office layout, and all settings persist across updates — they're stored in the `vo-data` volume.
