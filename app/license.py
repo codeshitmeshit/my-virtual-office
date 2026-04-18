@@ -22,7 +22,7 @@ import urllib.error
 
 # --- Config ---
 _LICENSE_FILE = os.path.join(
-    os.environ.get("VO_STATUS_DIR", "/tmp/vo-data"),
+    os.environ.get("VO_STATUS_DIR", "/data"),
     "license.json"
 )
 

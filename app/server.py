@@ -108,7 +108,7 @@ def _load_vo_config():
             "gatewayHttp": _env_or("VO_GATEWAY_HTTP", openclaw.get("gatewayHttp", "http://127.0.0.1:18789")),
         },
         "presence": {
-            "statusDir": _env_or("VO_STATUS_DIR", presence.get("statusDir", "/tmp/vo-data")),
+            "statusDir": _env_or("VO_STATUS_DIR", presence.get("statusDir", "/data")),
             "inferenceEnabled": presence.get("inferenceEnabled", True),
             "inferenceIdleTimeoutSec": presence.get("inferenceIdleTimeoutSec", 300),
         },

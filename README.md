@@ -191,7 +191,7 @@ All settings live in `vo-config.json`. Environment variables override config val
 | `VO_GATEWAY_URL` | ws://127.0.0.1:18789 | OpenClaw gateway WebSocket URL |
 | `VO_GATEWAY_HTTP` | http://127.0.0.1:18789 | OpenClaw gateway HTTP URL |
 | `VO_OPENCLAW_PATH` | ~/.openclaw | Path to OpenClaw home directory |
-| `VO_STATUS_DIR` | /tmp/vo-data | Directory for presence/status data |
+| `VO_STATUS_DIR` | /data | Directory for presence/status data inside the container. By default this is backed by the `vo-data` Docker volume. |
 | `VO_WEATHER_LOCATION` | *(none)* | Weather location for window display |
 
 ## Updating

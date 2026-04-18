@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """API Usage Collector — runs on the HOST (not in container).
-Calls `openclaw status --usage --json` and writes results to /tmp/vo-data/api-usage.json.
+Calls `openclaw status --usage --json` and writes results to /data/api-usage.json.
 Run via cron, systemd timer, or loop."""
 
 import json
@@ -9,7 +9,7 @@ import subprocess
 import sys
 import time
 
-STATUS_DIR = os.environ.get("VO_STATUS_DIR", "/tmp/vo-data")
+STATUS_DIR = os.environ.get("VO_STATUS_DIR", "/data")
 USAGE_FILE = os.path.join(STATUS_DIR, "api-usage.json")
 os.makedirs(STATUS_DIR, exist_ok=True)
 

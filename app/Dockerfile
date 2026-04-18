@@ -8,8 +8,8 @@ RUN pip install --no-cache-dir websockets
 # Copy application files
 COPY . .
 
-# Create data directories
-RUN mkdir -p /data /tmp/vo-data
+# Create data directory
+RUN mkdir -p /data
 
 # Default environment
 ENV VO_STATUS_DIR=/data \

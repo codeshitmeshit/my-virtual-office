@@ -18,7 +18,7 @@ Meeting types: 1on1, group (auto-detected if omitted)
 """
 import json, sys, time, uuid, os
 
-STATUS_DIR = os.environ.get("VO_STATUS_DIR", "/tmp/vo-data")
+STATUS_DIR = os.environ.get("VO_STATUS_DIR", "/data")
 STATUS_FILE = os.path.join(STATUS_DIR, "virtual-office-status.json")
 
 VALID_STATES = ["working", "idle", "meeting", "break", "lounge"]

@@ -38,7 +38,7 @@ from datetime import datetime, timezone, timedelta
 # Load status dir from vo-config.json or env, with fallback
 def _get_status_file():
     cfg_path = os.environ.get("VO_CONFIG", os.path.join(os.path.dirname(os.path.abspath(__file__)), "vo-config.json"))
-    status_dir = os.environ.get("VO_STATUS_DIR", "/tmp/vo-data")
+    status_dir = os.environ.get("VO_STATUS_DIR", "/data")
     try:
         with open(cfg_path, "r") as f:
             cfg = json.load(f)
@@ -103,7 +103,7 @@ def show(data):
 def _get_status_dir():
     """Return the status directory path."""
     cfg_path = os.environ.get("VO_CONFIG", os.path.join(os.path.dirname(os.path.abspath(__file__)), "vo-config.json"))
-    status_dir = os.environ.get("VO_STATUS_DIR", "/tmp/vo-data")
+    status_dir = os.environ.get("VO_STATUS_DIR", "/data")
     try:
         with open(cfg_path, "r") as f:
             cfg = json.load(f)

@@ -279,7 +279,7 @@
                             <code>docker run -d --name virtual-office \
   --network host \
   -v ~/.openclaw:/openclaw \
-  -v /tmp/vo-data:/tmp/vo-data \
+  -v vo-data:/data \
   ghcr.io/yourvirtualoffice/app:latest</code>
                         </div>
                     </div>
@@ -315,7 +315,7 @@
                     <div class="term-line"><span class="term-prompt">$</span> docker run -d --name virtual-office \</div>
                     <div class="term-line dim">    --network host \</div>
                     <div class="term-line dim">    -v ~/.openclaw:/openclaw \</div>
-                    <div class="term-line dim">    -v /tmp/vo-data:/tmp/vo-data \</div>
+                    <div class="term-line dim">    -v vo-data:/data \</div>
                     <div class="term-line dim">    ghcr.io/yourvirtualoffice/app:latest</div>
                     <div class="term-line"><span class="term-out">→</span> Container started</div>
                     <div class="term-line">&nbsp;</div>

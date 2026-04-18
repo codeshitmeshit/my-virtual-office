@@ -33,7 +33,7 @@ Config resolution chain (lines 22-98):
 1. `VO_CONFIG` env var → explicit path
 2. `VO_STATUS_DIR` env var → `/data/vo-config.json`
 3. `/app/vo-config.json` fallback
-4. Defaults: `statusDir` → `/tmp/vo-data`, `homePath` → `~/.openclaw`
+4. Defaults: `statusDir` → `/data`, `homePath` → `~/.openclaw`
 
 No hardcoded absolute paths in any project/task function.
 
