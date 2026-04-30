@@ -7,6 +7,7 @@ import base64
 import http.server
 import json
 import os
+import mimetypes
 import sys
 import threading
 import traceback
@@ -4687,6 +4688,8 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             self.wfile.write(json.dumps(self._get_sms_thread(phone, limit=limit)).encode())
         elif request_path == "/sms-media":
             self._handle_sms_media_proxy(query_params)
+        elif request_path == "/chat-media":
+            self._serve_chat_media(query_params)
         elif request_path == "/sms-mode":
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -4975,6 +4978,52 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                 self.end_headers()
         else:
             super().do_GET()
+
+    def _chat_media_allowed_roots(self):
+        roots = []
+        for candidate in [STATUS_DIR, WORKSPACE_BASE, os.path.expanduser("~/.openclaw"), "/tmp/vo-data"]:
+            try:
+                if candidate and os.path.isdir(candidate):
+                    roots.append(os.path.realpath(candidate))
+            except Exception:
+                pass
+        return roots
+
+    def _serve_chat_media(self, query_params):
+        raw_path = (query_params.get("path", [""])[0] or "").strip()
+        if not raw_path:
+            self.send_response(400)
+            self.send_header("Content-Type", "text/plain")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(b"Missing media path")
+            return
+        if raw_path.startswith("file://"):
+            raw_path = urllib.parse.urlparse(raw_path).path
+        raw_path = urllib.parse.unquote(raw_path)
+        if raw_path.startswith("/tmp/vo-data/"):
+            candidate = os.path.join(STATUS_DIR, raw_path[len("/tmp/vo-data/"):])
+        else:
+            candidate = raw_path
+        if not os.path.isabs(candidate):
+            candidate = os.path.join(WORKSPACE_BASE, candidate)
+        real_path = os.path.realpath(candidate)
+        allowed = any(real_path == root or real_path.startswith(root + os.sep) for root in self._chat_media_allowed_roots())
+        if not allowed or not os.path.isfile(real_path):
+            self.send_response(404)
+            self.send_header("Content-Type", "text/plain")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(b"Media not found")
+            return
+        content_type = mimetypes.guess_type(real_path)[0] or "application/octet-stream"
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Cache-Control", "private, max-age=3600")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        with open(real_path, "rb") as f:
+            shutil.copyfileobj(f, self.wfile)
 
     def _get_api_usage(self):
         """Return the latest API usage data collected by the background thread."""

@@ -293,7 +293,8 @@
           for (const msg of res.payload.messages) {
             const t = extractText(msg) || (typeof msg.content === 'string' ? msg.content : '');
             const ts = msg.timestamp || msg.ts || msg.message?.timestamp || null;
-            if (t) this.appendMessage(msg.role, t, ts);
+            const media = extractMedia(msg, t);
+            if (t || media.length) this.appendMessage(msg.role, t, ts, media);
           }
           this.scrollBottom();
         }
@@ -596,7 +597,7 @@
       }
     }
 
-    appendMessage(role, content, ts, images) {
+    appendMessage(role, content, ts, mediaItems) {
       const div = document.createElement('div');
       div.className = `chat-msg ${role}`;
       const bubble = document.createElement('div');
@@ -605,17 +606,9 @@
       if (role === 'tool' && displayContent.length > 3000) {
         displayContent = displayContent.substring(0, 2000) + '\n\n... [truncated - ' + displayContent.length + ' chars total] ...';
       }
-      if (images && images.length) {
-        const imgGrid = document.createElement('div');
-        imgGrid.className = 'chat-images';
-        for (const src of images) {
-          const img = document.createElement('img');
-          img.src = src;
-          img.className = 'chat-image-thumb';
-          img.addEventListener('click', () => openImageLightbox(src));
-          imgGrid.appendChild(img);
-        }
-        bubble.appendChild(imgGrid);
+      const media = normalizeChatMedia(mediaItems);
+      if (media.length) {
+        bubble.appendChild(renderChatMedia(media));
       }
       if (displayContent.trim()) {
         const textDiv = document.createElement('div');
@@ -653,12 +646,19 @@
       bubble.innerHTML = formatContent(content) + '<span class="cursor">▊</span>';
     }
 
-    finalizeStreamingMessage(content) {
+    finalizeStreamingMessage(content, mediaItems) {
       const div = this.messages.querySelector('.streaming-msg');
-      if (!div) return this.appendMessage('assistant', content, Date.now());
+      if (!div) return this.appendMessage('assistant', content, Date.now(), mediaItems);
       const bubble = div.querySelector('.chat-bubble');
       bubble.classList.remove('streaming');
-      bubble.innerHTML = formatContent(content || '');
+      bubble.innerHTML = '';
+      const media = normalizeChatMedia(mediaItems || extractMedia({ content }, content));
+      if (media.length) bubble.appendChild(renderChatMedia(media));
+      if ((content || '').trim()) {
+        const textDiv = document.createElement('div');
+        textDiv.innerHTML = formatContent(content || '');
+        bubble.appendChild(textDiv);
+      }
       const time = document.createElement('span');
       time.className = 'chat-time';
       time.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -1053,6 +1053,114 @@
     if (typeof c === 'string') return c;
     if (Array.isArray(c)) return c.filter(b => b.type === 'text').map(b => b.text).join('');
     return '';
+  }
+
+  function extractMedia(msg, text) {
+    const media = [];
+    const c = msg?.message?.content ?? msg?.content;
+    const add = (item) => {
+      const normalized = normalizeOneChatMedia(item);
+      if (normalized) media.push(normalized);
+    };
+    if (Array.isArray(c)) {
+      for (const b of c) {
+        if (!b || b.type === 'text') continue;
+        if (b.type === 'image' || b.type === 'image_url' || b.type === 'input_image') {
+          add({ url: b.url || b.image_url?.url || b.source?.url || b.path || b.filePath, mimeType: b.mimeType || b.media_type || b.source?.media_type || 'image/*', name: b.name || b.filename || 'image' });
+        } else if (b.type === 'file' || b.type === 'media' || b.type === 'attachment' || b.type === 'video' || b.type === 'audio') {
+          add({ url: b.url || b.path || b.filePath || b.source?.url, mimeType: b.mimeType || b.media_type || b.contentType || b.source?.media_type || '', name: b.name || b.filename });
+        }
+      }
+    }
+    const sourceText = text || '';
+    for (const rawLine of sourceText.split(/\r?\n/)) {
+      const line = rawLine.trim();
+      if (/^MEDIA:/i.test(line)) add({ url: line.replace(/^MEDIA:/i, '').trim() });
+      const attachMatch = line.match(/^\(attached file:\s*(.+?)\)$/i) || line.match(/^attached file:\s*(.+)$/i);
+      if (attachMatch) add({ url: attachMatch[1].trim() });
+    }
+    const seen = new Set();
+    return media.filter(item => {
+      const key = item.url || item.path;
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
+
+  function normalizeOneChatMedia(item) {
+    if (!item) return null;
+    if (typeof item === 'string') item = { url: item };
+    let url = item.url || item.path || item.filePath || item.href || item.mediaUrl || item.proxyUrl || '';
+    if (!url) return null;
+    url = String(url).trim();
+    const name = item.name || item.filename || decodeURIComponent((url.split('/').pop() || 'media').split('?')[0]);
+    const mimeType = item.mimeType || item.contentType || item.type || guessMimeFromName(name, url);
+    const isLocalPath = url.startsWith('/') && !url.startsWith('//') && !url.startsWith('/__openclaw__') && !url.startsWith('/sms-media') && !url.startsWith('/chat-media');
+    const src = isLocalPath ? '/chat-media?path=' + encodeURIComponent(url) : url;
+    return { url: src, originalUrl: url, name, mimeType };
+  }
+
+  function normalizeChatMedia(items) {
+    if (!items) return [];
+    if (!Array.isArray(items)) items = [items];
+    return items.map(normalizeOneChatMedia).filter(Boolean);
+  }
+
+  function guessMimeFromName(name, url) {
+    const v = (name || url || '').toLowerCase().split('?')[0];
+    if (/\.(png|jpg|jpeg|gif|webp|bmp|svg)$/.test(v)) return 'image/*';
+    if (/\.(mp4|webm|mov|m4v|ogg)$/.test(v)) return 'video/*';
+    if (/\.(mp3|wav|m4a|aac|flac|opus)$/.test(v)) return 'audio/*';
+    if (/\.pdf$/.test(v)) return 'application/pdf';
+    return '';
+  }
+
+  function renderChatMedia(media) {
+    const wrap = document.createElement('div');
+    wrap.className = 'chat-media-list';
+    for (const item of media) {
+      const type = (item.mimeType || '').toLowerCase();
+      const card = document.createElement('figure');
+      card.className = 'chat-media-item';
+      if (type.startsWith('image/') || type === 'image/*') {
+        const img = document.createElement('img');
+        img.src = item.url;
+        img.alt = item.name || 'image';
+        img.className = 'chat-image-thumb chat-image-clickable';
+        img.addEventListener('click', () => openImageLightbox(item.url));
+        card.appendChild(img);
+      } else if (type.startsWith('video/') || type === 'video/*') {
+        const video = document.createElement('video');
+        video.src = item.url;
+        video.controls = true;
+        video.preload = 'metadata';
+        video.className = 'chat-media-video';
+        card.appendChild(video);
+      } else if (type.startsWith('audio/') || type === 'audio/*') {
+        const audio = document.createElement('audio');
+        audio.src = item.url;
+        audio.controls = true;
+        audio.preload = 'metadata';
+        audio.className = 'chat-media-audio';
+        card.appendChild(audio);
+      } else {
+        const link = document.createElement('a');
+        link.href = item.url;
+        link.target = '_blank';
+        link.rel = 'noopener';
+        link.className = 'chat-media-file';
+        link.textContent = '📎 ' + (item.name || 'Open attachment');
+        card.appendChild(link);
+      }
+      if (item.name && (type.startsWith('image/') || type.startsWith('video/') || type.startsWith('audio/') || type.endsWith('/*'))) {
+        const cap = document.createElement('figcaption');
+        cap.textContent = item.name;
+        card.appendChild(cap);
+      }
+      wrap.appendChild(card);
+    }
+    return wrap;
   }
 
   function parseDataUrl(dataUrl) {
