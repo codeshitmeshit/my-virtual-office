@@ -4989,6 +4989,57 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                 pass
         return roots
 
+    def _resolve_chat_media_path(self, raw_path):
+        """Resolve chat media paths across VO instances without assuming one data dir.
+
+        Chat transcripts may contain paths produced by another Virtual Office
+        instance (for example /tmp/vo-data/uploads/...) while the current
+        instance has a different STATUS_DIR (for example /data).  Try the
+        literal path first, then remap upload-relative paths under allowed
+        OpenClaw roots so both personal and product offices can display the
+        same attachments.
+        """
+        if raw_path.startswith("file://"):
+            raw_path = urllib.parse.urlparse(raw_path).path
+        raw_path = urllib.parse.unquote(raw_path)
+        candidates = []
+        if raw_path.startswith("/tmp/vo-data/"):
+            candidates.append(os.path.join(STATUS_DIR, raw_path[len("/tmp/vo-data/"):]))
+        candidates.append(raw_path)
+        if not os.path.isabs(raw_path):
+            candidates.append(os.path.join(WORKSPACE_BASE, raw_path))
+
+        norm_parts = raw_path.replace("\\", "/").split("/")
+        if "uploads" in norm_parts:
+            idx = norm_parts.index("uploads")
+            upload_suffix = os.path.join(*norm_parts[idx:])
+            for root in self._chat_media_allowed_roots():
+                candidates.append(os.path.join(root, upload_suffix))
+            # Also scan one level below OpenClaw roots (vo-data/uploads,
+            # vo-data-product/uploads, workspace/uploads, etc.). This keeps the
+            # product generic while still supporting multiple VO instances.
+            for base in [WORKSPACE_BASE, os.path.expanduser("~/.openclaw")]:
+                try:
+                    candidates.extend(glob.glob(os.path.join(base, "*", upload_suffix)))
+                except Exception:
+                    pass
+
+        allowed_roots = self._chat_media_allowed_roots()
+        seen = set()
+        for candidate in candidates:
+            if not candidate:
+                continue
+            if not os.path.isabs(candidate):
+                candidate = os.path.join(WORKSPACE_BASE, candidate)
+            real_path = os.path.realpath(candidate)
+            if real_path in seen:
+                continue
+            seen.add(real_path)
+            allowed = any(real_path == root or real_path.startswith(root + os.sep) for root in allowed_roots)
+            if allowed and os.path.isfile(real_path):
+                return real_path
+        return None
+
     def _serve_chat_media(self, query_params):
         raw_path = (query_params.get("path", [""])[0] or "").strip()
         if not raw_path:
@@ -4998,18 +5049,8 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(b"Missing media path")
             return
-        if raw_path.startswith("file://"):
-            raw_path = urllib.parse.urlparse(raw_path).path
-        raw_path = urllib.parse.unquote(raw_path)
-        if raw_path.startswith("/tmp/vo-data/"):
-            candidate = os.path.join(STATUS_DIR, raw_path[len("/tmp/vo-data/"):])
-        else:
-            candidate = raw_path
-        if not os.path.isabs(candidate):
-            candidate = os.path.join(WORKSPACE_BASE, candidate)
-        real_path = os.path.realpath(candidate)
-        allowed = any(real_path == root or real_path.startswith(root + os.sep) for root in self._chat_media_allowed_roots())
-        if not allowed or not os.path.isfile(real_path):
+        real_path = self._resolve_chat_media_path(raw_path)
+        if not real_path:
             self.send_response(404)
             self.send_header("Content-Type", "text/plain")
             self.send_header("Access-Control-Allow-Origin", "*")
