@@ -13775,11 +13775,12 @@ function _mtgRender() {
             if (info.role) html += '<div class="mtg-participant-role">' + _escMtg(info.role) + '</div>';
             if (!isActive && m.actionItems && m.actionItems.length) {
                 var agentActions = m.actionItems.filter(function(item) {
-                    return item.toLowerCase().indexOf(info.name.toLowerCase()) >= 0 ||
-                           item.toLowerCase().indexOf(pKey.toLowerCase()) >= 0;
+                    var text = _mtgActionText(item).toLowerCase();
+                    return text.indexOf(info.name.toLowerCase()) >= 0 ||
+                           text.indexOf(pKey.toLowerCase()) >= 0;
                 });
                 if (agentActions.length) {
-                    html += '<div class="mtg-participant-actions">→ ' + agentActions.map(_escMtg).join('<br>→ ') + '</div>';
+                    html += '<div class="mtg-participant-actions">→ ' + agentActions.map(function(item) { return _escMtg(_mtgActionText(item)); }).join('<br>→ ') + '</div>';
                 }
             }
             html += '</div></div>';
@@ -13824,7 +13825,7 @@ function _mtgRender() {
             }
             if (m.actionItems && m.actionItems.length) {
                 html += '<div class="mtg-section"><div class="mtg-section-title">Action Items</div>';
-                html += '<div class="mtg-section-text">' + m.actionItems.map(function(a) { return '• ' + _escMtg(a); }).join('\n') + '</div></div>';
+                html += '<div class="mtg-section-text">' + m.actionItems.map(function(a) { return '• ' + _escMtg(_mtgActionText(a)); }).join('\n') + '</div></div>';
             }
             if (m.endedBy) {
                 var endInfo = _mtgAgentMap[m.endedBy] || { emoji: '🤖', name: m.endedBy };
@@ -13851,6 +13852,20 @@ function _mtgRender() {
 function _escMtg(s) {
     if (!s) return '';
     return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function _mtgActionText(action) {
+    if (!action) return '';
+    if (typeof action === 'string') return action;
+    if (typeof action === 'object') {
+        var owner = action.owner || action.agent || action.assignee || '';
+        var item = action.item || action.text || action.task || action.action || action.summary || '';
+        if (owner && item) return owner + ': ' + item;
+        if (item) return item;
+        if (owner) return owner;
+        try { return JSON.stringify(action); } catch (e) { return String(action); }
+    }
+    return String(action);
 }
 
 function mtgExpandAll() {
