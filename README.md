@@ -187,8 +187,24 @@ All settings live in `vo-config.json`. Environment variables override config val
 | `VO_GATEWAY_URL` | ws://127.0.0.1:18789 | OpenClaw gateway WebSocket URL |
 | `VO_GATEWAY_HTTP` | http://127.0.0.1:18789 | OpenClaw gateway HTTP URL |
 | `VO_OPENCLAW_PATH` | ~/.openclaw | Path to OpenClaw home directory |
+| `VO_HERMES_ENABLED` | true | Enable discovery of local Hermes Agent profiles when Hermes is available |
+| `VO_HERMES_HOME` | ~/.hermes | Path to the Hermes home/profile root directory |
+| `VO_HERMES_BIN` | ~/.local/bin/hermes | Hermes CLI binary used for discovery and safe request/response chat calls |
+| `VO_HERMES_TIMEOUT_SEC` | 600 | Timeout for Hermes CLI chat calls |
 | `VO_STATUS_DIR` | /data | Directory for presence/status data inside the container. By default this is backed by the `vo-data` Docker volume. |
 | `VO_WEATHER_LOCATION` | *(none)* | Weather location for window display |
+
+### Hermes Agent compatibility
+
+Virtual Office can now discover local Hermes Agent profiles as first-class office agents when the Hermes CLI and home directory are available to the app. The adapter is intentionally conservative:
+
+- discovery/status uses safe Hermes CLI surfaces (`profile list`, `profile show`, `status`-style metadata)
+- chat sends one-shot messages through `hermes -z` using the selected Hermes profile
+- replies are captured from stdout
+- local Virtual Office history is stored under `VO_STATUS_DIR`
+- Hermes secrets/config/memories/raw logs are not read or exposed by default
+
+For Docker deployments, mount or otherwise expose the Hermes home and CLI path to the container, then set `VO_HERMES_HOME` and `VO_HERMES_BIN` accordingly.
 
 ## Updating
 

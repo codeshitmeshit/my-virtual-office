@@ -1833,6 +1833,10 @@ function _buildAgentDefs(apiAgents) {
         defs.push({
             id: a.statusKey || a.id,
             statusKey: a.statusKey || a.id,
+            providerKind: a.providerKind || 'openclaw',
+            providerType: a.providerType || 'runtime',
+            providerAgentId: a.providerAgentId || a.id,
+            provider: a.provider || '',
             name: saved.name || a.name || a.id,
             emoji: saved.emoji || a.emoji || '🤖',
             role: saved.role || a.role || '',
@@ -6993,6 +6997,17 @@ function openModal(agent) {
     document.getElementById('modal-branch').textContent = getBranchDisplayName(agent.branch);
     document.getElementById('modal-updated').textContent = timeStr();
 
+    var providerLabel = agent.providerKind === 'hermes'
+        ? ('Hermes Agent' + (agent.providerAgentId ? ' · profile: ' + agent.providerAgentId : '') + (agent.provider ? ' · ' + agent.provider : ''))
+        : 'OpenClaw Agent';
+    var roleEl = document.getElementById('modal-role');
+    if (roleEl) roleEl.textContent = (agent.role || '') + (agent.role ? ' · ' : '') + providerLabel;
+
+    var isHermes = agent.providerKind === 'hermes';
+    var modelSection = document.querySelector('#modal-model-select')?.closest('.modal-section');
+    if (modelSection) modelSection.style.display = isHermes ? 'none' : '';
+    document.querySelectorAll('.bio-section').forEach(function(el) { el.style.display = isHermes ? 'none' : ''; });
+
     // Task I/O
     const inputBox = document.getElementById('modal-input');
     if (agent.lastInput) {
@@ -7024,8 +7039,10 @@ function openModal(agent) {
     });
     logBox.scrollTop = logBox.scrollHeight;
 
-    // Load skills for this agent
-    loadAgentSkills(agent.statusKey || agent.id);
+    // Load OpenClaw-only editable files/skills for OpenClaw agents. Hermes
+    // agents are connected through their public CLI surfaces; VO should not
+    // expose or edit Hermes config, memories, or private files here.
+    if (!isHermes) loadAgentSkills(agent.statusKey || agent.id);
 
     document.getElementById('agentModal').classList.remove('hidden');
 }
@@ -11438,6 +11455,10 @@ function _mmLoadCurrentSettings() {
         var weatherStateInput = document.getElementById('mm-weather-state');
         var pathInput = document.getElementById('mm-oc-path');
         var tokenInput = document.getElementById('mm-gateway-token');
+        var hermesCb = document.getElementById('mm-hermes-enable');
+        var hermesFields = document.getElementById('mm-hermes-fields');
+        var hermesHome = document.getElementById('mm-hermes-home');
+        var hermesBin = document.getElementById('mm-hermes-bin');
         if (gwInput) gwInput.value = (cfg.openclaw || {}).gatewayUrl || '';
         if (nameInput) nameInput.value = (cfg.office || {}).name || '';
         // Parse "City,State" or "City+Name,State" back into separate fields
@@ -11446,6 +11467,12 @@ function _mmLoadCurrentSettings() {
         if (weatherCityInput) weatherCityInput.value = (_wparts[0] || '').replace(/\+/g, ' ');
         if (weatherStateInput) weatherStateInput.value = (_wparts[1] || '').replace(/\+/g, ' ');
         if (pathInput) pathInput.value = (cfg.openclaw || {}).homePath || '';
+        var hermesCfg = cfg.hermes || {};
+        var hermesEnabled = hermesCfg.enabled !== false;
+        if (hermesCb) hermesCb.checked = hermesEnabled;
+        if (hermesFields) hermesFields.style.display = hermesEnabled ? 'block' : 'none';
+        if (hermesHome) hermesHome.value = hermesCfg.homePath || '';
+        if (hermesBin) hermesBin.value = hermesCfg.binary || '';
         // Auto-populate token from /gateway-info (shows current effective token)
         if (tokenInput) {
             fetch('/gateway-info').then(function(r) { return r.json(); }).then(function(gi) {
@@ -11506,6 +11533,48 @@ function _mmLoadCurrentSettings() {
         if (f) f.style.display = this.checked ? 'block' : 'none';
     });
 })();
+
+// Hermes toggle in settings
+(function() {
+    var _hCb = document.getElementById('mm-hermes-enable');
+    if (_hCb) _hCb.addEventListener('change', function() {
+        var f = document.getElementById('mm-hermes-fields');
+        if (f) f.style.display = this.checked ? 'block' : 'none';
+    });
+})();
+
+function mmTestHermes() {
+    var statusEl = document.getElementById('mm-hermes-status');
+    var enabled = !!(document.getElementById('mm-hermes-enable') || {}).checked;
+    var homePath = (document.getElementById('mm-hermes-home') || {}).value || '';
+    var binary = (document.getElementById('mm-hermes-bin') || {}).value || '';
+    if (!enabled) {
+        statusEl.innerHTML = '<div class="mm-status info">Hermes auto-detect is disabled.</div>';
+        return;
+    }
+    statusEl.innerHTML = '<div class="mm-status info">Saving and testing Hermes...</div>';
+    fetch('/setup/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hermes: { enabled: enabled, homePath: homePath || null, binary: binary || null } })
+    }).then(function() {
+        return fetch('/api/hermes/test', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ homePath: homePath || null, binary: binary || null })
+        });
+    }).then(function(r) { return r.json().then(function(d){ d._httpOk = r.ok; return d; }); }).then(function(d) {
+        if (d.ok) {
+            var count = (d.agents || []).length;
+            var names = (d.agents || []).slice(0, 5).map(function(a){ return (a.emoji || '⚕️') + ' ' + a.name + (a.model ? ' · ' + a.model : ''); }).join('<br>');
+            statusEl.innerHTML = '<div class="mm-status ok">✅ Hermes connected — ' + count + ' profile' + (count === 1 ? '' : 's') + ' found' + (names ? '<br>' + names : '') + '</div>';
+        } else {
+            statusEl.innerHTML = '<div class="mm-status err">❌ Hermes not reachable: ' + (d.error || 'unknown error') + '</div>';
+        }
+    }).catch(function(e) {
+        statusEl.innerHTML = '<div class="mm-status err">❌ Hermes test failed: ' + e.message + '</div>';
+    });
+}
 
 function mmTestCdp() {
     var cdpUrl = document.getElementById('mm-cdp-url').value.trim();
@@ -11669,6 +11738,16 @@ function mmSaveSettings() {
     }
     if (ocPath) config.openclaw.homePath = ocPath;
     if (gwToken) config.openclaw.gatewayToken = gwToken;
+    var _hCb = document.getElementById('mm-hermes-enable');
+    var _hHome = document.getElementById('mm-hermes-home');
+    var _hBin = document.getElementById('mm-hermes-bin');
+    if (_hCb) {
+        config.hermes = {
+            enabled: _hCb.checked,
+            homePath: (_hHome ? _hHome.value.trim() : '') || null,
+            binary: (_hBin ? _hBin.value.trim() : '') || null
+        };
+    }
     config.office = { name: officeName || 'Virtual Office' };
     config.weather = { location: weather || null };
     // PC Metrics

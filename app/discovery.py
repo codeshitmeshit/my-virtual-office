@@ -12,6 +12,7 @@ import os
 import re
 import glob
 import time
+from providers.hermes import HermesProvider
 
 def discover_agents(oc_home):
     """
@@ -90,6 +91,24 @@ def discover_agents(oc_home):
         })
 
     return roster
+
+
+def discover_hermes_agents(hermes_home=None, hermes_bin=None, enabled=True):
+    """Discover local Hermes Agent profiles as Virtual Office agents.
+
+    This intentionally uses Hermes' public CLI surfaces instead of reading
+    private config/auth/memory files. The first implementation is conservative:
+    expose the active/default profile as a single office agent when Hermes is
+    installed and its home directory exists.
+    """
+    return HermesProvider(home_path=hermes_home, binary=hermes_bin, enabled=enabled).discover_agents()
+
+
+def discover_all_agents(oc_home, hermes_home=None, hermes_bin=None, hermes_enabled=True):
+    """Discover OpenClaw agents plus optional local Hermes agents."""
+    agents = discover_agents(oc_home)
+    agents.extend(discover_hermes_agents(hermes_home=hermes_home, hermes_bin=hermes_bin, enabled=hermes_enabled))
+    return agents
 
 
 def _parse_identity(workspace_path):

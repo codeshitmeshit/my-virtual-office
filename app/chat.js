@@ -238,6 +238,8 @@
             opt.textContent = `${a.emoji} ${a.name}`;
             opt.dataset.sessionKey = a.sessionKey;
             opt.dataset.agentId = a.agentId;
+            opt.dataset.providerKind = a.providerKind || 'openclaw';
+            opt.dataset.providerAgentId = a.providerAgentId || a.agentId;
             group.appendChild(opt);
           }
           this.agentSelect.appendChild(group);
@@ -254,6 +256,7 @@
 
     async fetchContextUsage() {
       if (!this.isVisibleForPolling()) return;
+      if (this.isHermesSelected()) return;
       try {
         // Avoid broad sessions.list polling. Describe only the selected session.
         const res = await rpc('sessions.describe', { key: this.sessionKey });
@@ -275,15 +278,26 @@
       return opt?.dataset?.agentId || null;
     }
 
+    getSelectedProviderKind() {
+      const opt = this.agentSelect?.selectedOptions?.[0];
+      return opt?.dataset?.providerKind || 'openclaw';
+    }
+
+    isHermesSelected() {
+      return this.getSelectedProviderKind() === 'hermes' || String(this.sessionKey || '').startsWith('hermes:');
+    }
+
     async fetchSessionInfo() {
       let gatewayContext = 0;
       try {
         // Targeted lookup avoids rebuilding the full sessions.list index.
-        const res = await rpc('sessions.describe', { key: this.sessionKey });
-        const s = res?.payload?.session;
-        if (res.ok && s) {
-          if (s.totalTokens > 0) this.contextUsed = s.totalTokens;
-          if (s.contextTokens > 0) gatewayContext = s.contextTokens;
+        if (!this.isHermesSelected()) {
+          const res = await rpc('sessions.describe', { key: this.sessionKey });
+          const s = res?.payload?.session;
+          if (res.ok && s) {
+            if (s.totalTokens > 0) this.contextUsed = s.totalTokens;
+            if (s.contextTokens > 0) gatewayContext = s.contextTokens;
+          }
         }
       } catch (e) {
         console.warn('[chat] sessions.describe failed:', e);
@@ -309,6 +323,18 @@
 
     async loadHistory(opts = {}) {
       try {
+        if (this.isHermesSelected()) {
+          const res = await fetch('/api/hermes/history?agentId=' + encodeURIComponent(this.getSelectedAgentId() || this.selectedAgentKey));
+          const data = await res.json();
+          if (data.ok && Array.isArray(data.messages)) {
+            this.messages.innerHTML = '';
+            for (const msg of data.messages) {
+              if (msg.text) this.appendMessage(msg.role, msg.text, msg.ts || Date.now(), [], msg.role === 'assistant' ? resolveMessageSender(msg, this) : { label: 'You', kind: 'human' });
+            }
+            this.scrollBottom();
+          }
+          return;
+        }
         const res = await rpc('chat.history', { sessionKey: this.sessionKey, limit: 500 });
         if (res.ok && res.payload?.messages) {
           const messages = res.payload.messages;
@@ -343,9 +369,24 @@
     }
 
     async newSession() {
-      if (!connected) { this.appendSystem('Not connected'); return; }
       const agentName = this.agentSelect.selectedOptions[0]?.textContent.trim() || 'this agent';
       if (!confirm(`Start a new session for ${agentName}? This clears the conversation history.`)) return;
+      if (this.isHermesSelected()) {
+        try {
+          const res = await fetch('/api/hermes/history/clear', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ agentId: this.getSelectedAgentId() || this.selectedAgentKey })
+          });
+          const data = await res.json();
+          if (!data.ok) throw new Error(data.error || 'clear failed');
+          this.resetConversation('New Hermes session started');
+        } catch (e) {
+          this.appendSystem('Reset error: ' + e.message);
+        }
+        return;
+      }
+      if (!connected) { this.appendSystem('Not connected'); return; }
       try {
         const res = await rpc('sessions.reset', { key: this.sessionKey });
         if (res.ok) {
@@ -424,7 +465,7 @@
     async sendMessage() {
       let text = this.input.value.trim();
       const hasAttachments = this.pendingAttachments.length > 0;
-      if ((!text && !hasAttachments) || !connected) return;
+      if ((!text && !hasAttachments) || (!connected && !this.isHermesSelected())) return;
 
       this.input.value = '';
       this.input.style.height = 'auto';
@@ -510,6 +551,28 @@
 
       const params = { sessionKey: this.sessionKey, message: text || '(attached files)', idempotencyKey: `office-${Date.now()}-${Math.random().toString(36).slice(2)}` };
       if (attachments?.length) params.attachments = attachments;
+
+      if (this.isHermesSelected()) {
+        this.setStatus('Hermes working...', 'connecting');
+        this.updateTypingIndicator((this.agentSelect.selectedOptions[0]?.textContent.trim() || 'Hermes') + ' is thinking');
+        try {
+          const resp = await fetch('/api/hermes/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ agentId: this.getSelectedAgentId() || this.selectedAgentKey, message: text || '(attached files)' })
+          });
+          const data = await resp.json();
+          this.removeTypingIndicator();
+          if (!resp.ok || data.ok === false) throw new Error(data.error || data.reply || resp.statusText);
+          this.appendMessage('assistant', data.reply || '', Date.now(), [], { label: this.agentSelect.selectedOptions[0]?.textContent.trim() || 'Hermes', kind: 'agent' });
+          this.setStatus('Hermes ready', 'connected');
+        } catch (e) {
+          this.removeTypingIndicator();
+          this.appendSystem('Hermes send failed: ' + e.message);
+          this.setStatus('Hermes error', 'disconnected');
+        }
+        return;
+      }
 
       const sendSessionKey = this.sessionKey;
       rpc('chat.send', params).then(res => {

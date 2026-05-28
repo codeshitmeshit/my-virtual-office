@@ -40,6 +40,25 @@
                             <button class="mm-btn mm-btn-primary" onclick="mmTestConnection()">🔍 Test Connection</button>
                             <div id="mm-conn-status"></div>
                         </div>
+                        <!-- Hermes Connection -->
+                        <div class="mm-section">
+                            <div class="mm-section-title">⚕️ Hermes Agent Connection</div>
+                            <label class="mm-label" style="display:flex;align-items:center;gap:6px;">
+                                <input type="checkbox" id="mm-hermes-enable" checked> Auto-detect Hermes Agents
+                            </label>
+                            <div style="font-size:9px;color:#666;margin:4px 0 8px;line-height:1.4;">
+                                Connects local Hermes Agent profiles as first-class office agents. Virtual Office uses the Hermes CLI and safe status/session surfaces — not raw secrets or private memory files.
+                            </div>
+                            <div id="mm-hermes-fields" style="margin-top:8px;">
+                                <label class="mm-label">Hermes Home <span style="color:#666;font-size:9px">server-side</span></label>
+                                <input type="text" id="mm-hermes-home" class="mm-input" placeholder="/home/user/.hermes">
+                                <label class="mm-label">Hermes CLI <span style="color:#666;font-size:9px">server-side</span></label>
+                                <input type="text" id="mm-hermes-bin" class="mm-input" placeholder="/home/user/.local/bin/hermes">
+                                <div style="font-size:9px;color:#666;margin:4px 0 8px;">For Docker, mount the Hermes home/CLI into the container and use the mounted paths here.</div>
+                                <button class="mm-btn mm-btn-primary" onclick="mmTestHermes()">🔍 Test Hermes</button>
+                                <div id="mm-hermes-status"></div>
+                            </div>
+                        </div>
                         <!-- Office Settings -->
                         <div class="mm-section">
                             <div class="mm-section-title">🏢 Office</div>

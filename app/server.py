@@ -78,7 +78,24 @@ def _normalize_presence_map(data):
 
 def _get_normalized_presence_state():
     gateway_presence._sync_meetings_from_file()
-    return _normalize_presence_map(gateway_presence.get_state())
+    state = _normalize_presence_map(gateway_presence.get_state())
+    # Provider adapters such as Hermes do not emit OpenClaw gateway events.
+    # Keep them visible as idle/offline-capable office citizens unless a
+    # manual/process override (working, idle, error) has more current data.
+    now = int(time.time())
+    for agent in get_roster():
+        key = agent.get("statusKey") or agent.get("id")
+        if not key or key in state:
+            continue
+        provider_kind = agent.get("providerKind", "openclaw")
+        state[key] = {
+            "state": "idle",
+            "task": "",
+            "updated": int(agent.get("lastActiveAt") or now),
+            "source": f"{provider_kind}-discovery",
+            "providerKind": provider_kind,
+        }
+    return state
 
 
 # ─── CONFIGURATION ───────────────────────────────────────────────
@@ -154,6 +171,7 @@ def _load_vo_config():
     browser_cfg = cfg.get("browser") or {}
     weather_cfg = cfg.get("weather") or {}
     sms_cfg = cfg.get("sms") or {}
+    hermes_cfg = cfg.get("hermes") or {}
 
     return {
         "office": {
@@ -199,6 +217,12 @@ def _load_vo_config():
             "twilioAuthToken": _env_or("VO_TWILIO_AUTH_TOKEN", sms_cfg.get("twilioAuthToken")),
             "fromNumber": _env_or("VO_TWILIO_FROM_NUMBER", sms_cfg.get("fromNumber")),
         },
+        "hermes": {
+            "enabled": str(_env_or("VO_HERMES_ENABLED", hermes_cfg.get("enabled", True))).lower() not in ("0", "false", "no", "off"),
+            "homePath": _env_or("VO_HERMES_HOME", hermes_cfg.get("homePath", os.path.expanduser("~/.hermes"))),
+            "binary": _env_or("VO_HERMES_BIN", hermes_cfg.get("binary", os.path.expanduser("~/.local/bin/hermes"))),
+            "timeoutSec": int(_env_or("VO_HERMES_TIMEOUT_SEC", hermes_cfg.get("timeoutSec", 600))),
+        },
     }
 
 VO_CONFIG = _load_vo_config()
@@ -218,13 +242,289 @@ PROJECTS_FILE = os.path.join(STATUS_DIR, "projects.json")
 AUTH_PROFILES_PATH = os.path.join(WORKSPACE_BASE, "agents/main/agent/auth-profiles.json")
 
 # ─── DYNAMIC AGENT DISCOVERY ─────────────────────────────────
-from discovery import discover_agents, get_agent_workspace_dir, get_agent_session_id
+from discovery import discover_all_agents, get_agent_workspace_dir, get_agent_session_id
+from providers.hermes import HermesProvider
 from license import get_license_status, activate_license, deactivate_license, check_feature, get_agent_limit
 from project_store import MarkdownProjectStore
 
 PROJECT_STORE = MarkdownProjectStore(STATUS_DIR)
 
-_discovered_roster = discover_agents(WORKSPACE_BASE)
+
+AGENT_PLATFORM_COMM_SKILL_NAME = "AgentPlatform-to-AgentPlatform_Communications"
+
+
+def _agent_platform_comm_skill_content():
+    return '''---
+name: AgentPlatform-to-AgentPlatform_Communications
+description: "Talk to agents on OpenClaw, Hermes, or other Virtual Office-connected platforms through the office communication layer."
+---
+
+# AgentPlatform-to-AgentPlatform Communications
+
+Use this when you need to send a message, question, handoff, or task note to another agent in My Virtual Office, including agents from other platforms.
+
+## Rule
+
+Do **not** bypass the office with a direct CLI/private channel when the conversation should be visible to the office. Send through the Virtual Office communication endpoint so the interaction is logged for later chat bubbles, review, and cross-platform history.
+
+## Endpoint
+
+Default local endpoint:
+
+```bash
+POST http://127.0.0.1:8090/api/agent-platform-communications/send
+```
+
+If Virtual Office runs elsewhere, use that office base URL.
+
+## Message format
+
+```json
+{
+  "fromAgentId": "<your office agent id>",
+  "toAgentId": "<target office agent id>",
+  "message": "<clear message to the target agent>",
+  "conversationId": "<optional stable thread id>",
+  "metadata": {"topic": "optional"}
+}
+```
+
+Office agent IDs look like:
+
+- `main`, `dev-cody`, `pq-m-moe` for OpenClaw agents
+- `hermes-default` or `hermes-<profile>` for Hermes agents
+
+## Curl example
+
+```bash
+curl -sS -X POST http://127.0.0.1:8090/api/agent-platform-communications/send \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "fromAgentId":"main",
+    "toAgentId":"hermes-default",
+    "message":"Hi Hermes, can you review this idea and reply with your take?"
+  }'
+```
+
+## Response
+
+The response contains the target agent reply and office log IDs:
+
+```json
+{
+  "ok": true,
+  "conversationId": "...",
+  "messageId": "...",
+  "replyMessageId": "...",
+  "reply": "..."
+}
+```
+
+## Safety
+
+- Keep private data minimal.
+- Do not request config, credential, network, or infrastructure changes unless Eli explicitly approved them.
+- Use a clear `conversationId` when continuing the same topic.
+- If the endpoint fails, report the error instead of silently using an offscreen private channel.
+'''
+
+
+def _vo_presence_skill_content():
+    return '''---
+name: VirtualOffice-Presence-and-Status
+description: "Update and inspect Virtual Office presence states such as working, idle, break, and meeting."
+---
+
+# VirtualOffice Presence and Status
+
+Use this to make the office show what you are doing.
+
+## Set working
+
+```bash
+curl -sS -X POST http://127.0.0.1:8090/api/presence/YOUR_AGENT_ID \
+  -H 'Content-Type: application/json' \
+  -d '{"state":"working","task":"short task description"}'
+```
+
+## Set idle
+
+```bash
+curl -sS -X POST http://127.0.0.1:8090/api/presence/YOUR_AGENT_ID \
+  -H 'Content-Type: application/json' \
+  -d '{"state":"idle"}'
+```
+
+## Read presence
+
+```bash
+curl -sS http://127.0.0.1:8090/api/presence
+curl -sS http://127.0.0.1:8090/status
+```
+
+## Rules
+
+- Set `working` before visible work.
+- Keep task text short.
+- Set `idle` when done.
+- Do not fake another agent's status unless you are the office broker handling that agent's task.
+'''
+
+
+def _vo_browser_skill_content():
+    return '''---
+name: VirtualOffice-Browser-Control
+description: "Use the Virtual Office browser panel/status surface safely instead of direct Kasm/CDP credentials."
+---
+
+# VirtualOffice Browser Control
+
+Use this when you need the shared Virtual Office browser/Kasm panel.
+
+## Current safe read endpoints
+
+```bash
+curl -sS http://127.0.0.1:8090/browser-status
+curl -sS http://127.0.0.1:8090/browser-tabs
+curl -sS http://127.0.0.1:8090/browser-controller
+```
+
+## Rules
+
+- Treat the Virtual Office browser as a shared visible resource.
+- Do not use raw Kasm/CDP credentials directly unless the office/browser adapter explicitly gives you a safe action endpoint.
+- Announce/request browser use through presence or AgentPlatform communications so Eli can see who is using it.
+- If another agent/user controls the browser, wait or ask instead of fighting for control.
+
+## Current limitation
+
+This skill documents the shared browser surface. A provider-neutral browser action endpoint is planned next; until then, agents outside OpenClaw should not bypass the office to control Kasm directly.
+'''
+
+
+def _vo_meetings_skill_content():
+    return '''---
+name: VirtualOffice-Meetings
+description: "Create, inspect, and end visible Virtual Office meetings with summaries and action items."
+---
+
+# VirtualOffice Meetings
+
+Use meetings when multiple agents coordinate.
+
+## Read meetings
+
+```bash
+curl -sS http://127.0.0.1:8090/api/meetings/active
+curl -sS http://127.0.0.1:8090/api/meetings/history
+```
+
+## Create meeting
+
+```bash
+curl -sS -X POST http://127.0.0.1:8090/api/meetings/create \
+  -H 'Content-Type: application/json' \
+  -d '{"topic":"Topic","purpose":"Why we are meeting","kind":"discussion","organizer":"YOUR_AGENT_ID","participants":["YOUR_AGENT_ID","OTHER_AGENT_ID"]}'
+```
+
+## End meeting
+
+```bash
+curl -sS -X POST http://127.0.0.1:8090/api/meetings/end \
+  -H 'Content-Type: application/json' \
+  -d '{"id":"MEETING_ID","endedBy":"YOUR_AGENT_ID","summary":"What happened","resolution":"Decision/outcome","actionItems":["Next step"]}'
+```
+
+## Rules
+
+- Always end meetings with a useful summary.
+- Do not silently create meetings for casual one-off messages; use AgentPlatform communications for that.
+'''
+
+
+def _vo_projects_skill_content():
+    return '''---
+name: VirtualOffice-Projects-and-Tasks
+description: "Inspect and work with Virtual Office projects, tasks, workflow status, and agent scores."
+---
+
+# VirtualOffice Projects and Tasks
+
+Use this to inspect visible project/task state.
+
+## Read projects
+
+```bash
+curl -sS http://127.0.0.1:8090/api/projects
+curl -sS http://127.0.0.1:8090/api/projects/PROJECT_ID
+curl -sS http://127.0.0.1:8090/api/projects/PROJECT_ID/workflow/status
+```
+
+## Read scores
+
+```bash
+curl -sS http://127.0.0.1:8090/api/projects/scores
+```
+
+## Create a task
+
+```bash
+curl -sS -X POST http://127.0.0.1:8090/api/projects/PROJECT_ID/tasks \
+  -H 'Content-Type: application/json' \
+  -d '{"title":"Task title","description":"Task details","assignee":"AGENT_ID"}'
+```
+
+## Rules
+
+- Prefer project/task endpoints for durable work instead of private chat when the work belongs on a board.
+- Keep task titles short and descriptions concrete.
+- Do not delete or reorder project data unless explicitly asked.
+'''
+
+
+def _builtin_office_skill_contents():
+    return {
+        AGENT_PLATFORM_COMM_SKILL_NAME: _agent_platform_comm_skill_content(),
+        "VirtualOffice-Presence-and-Status": _vo_presence_skill_content(),
+        "VirtualOffice-Browser-Control": _vo_browser_skill_content(),
+        "VirtualOffice-Meetings": _vo_meetings_skill_content(),
+        "VirtualOffice-Projects-and-Tasks": _vo_projects_skill_content(),
+    }
+
+
+def _ensure_builtin_communication_skill():
+    """Seed built-in Virtual Office agent tool skills into the library."""
+    try:
+        lib_dir = _get_skills_library_dir()
+        first_path = ""
+        for skill_name, content in _builtin_office_skill_contents().items():
+            skill_dir = os.path.join(lib_dir, skill_name)
+            skill_file = os.path.join(skill_dir, "SKILL.md")
+            os.makedirs(skill_dir, exist_ok=True)
+            old = ""
+            if os.path.isfile(skill_file):
+                with open(skill_file, "r") as f:
+                    old = f.read()
+            if old != content:
+                with open(skill_file, "w") as f:
+                    f.write(content)
+            if skill_name == AGENT_PLATFORM_COMM_SKILL_NAME:
+                first_path = skill_file
+        return first_path
+    except Exception as e:
+        print(f"[SKILLS] Failed to seed built-in office skills: {e}")
+        return ""
+
+def _discover_roster():
+    hermes = VO_CONFIG.get("hermes", {})
+    return discover_all_agents(
+        WORKSPACE_BASE,
+        hermes_home=hermes.get("homePath"),
+        hermes_bin=hermes.get("binary"),
+        hermes_enabled=hermes.get("enabled", True),
+    )
+
+_discovered_roster = _discover_roster()
 _discovered_at = time.time()
 DISCOVERY_REFRESH_SEC = 300  # re-discover every 5 min
 
@@ -232,7 +532,7 @@ def _refresh_discovery():
     """Refresh agent roster if stale."""
     global _discovered_roster, _discovered_at
     if time.time() - _discovered_at > DISCOVERY_REFRESH_SEC:
-        _discovered_roster = discover_agents(WORKSPACE_BASE)
+        _discovered_roster = _discover_roster()
         _discovered_at = time.time()
 
 def get_roster():
@@ -240,13 +540,62 @@ def get_roster():
     _refresh_discovery()
     return _discovered_roster
 
+
+def _apply_agent_limit_balanced(agents):
+    """Apply product agent limits without hiding entire provider types.
+
+    The old behavior sliced the discovered list, which meant newly added
+    providers like Hermes could be detected but never visible in demo/limited
+    modes because OpenClaw agents came first. This keeps licensing limits while
+    trying to include at least one agent from each detected provider.
+    """
+    agent_limit = get_agent_limit()
+    if agent_limit <= 0 or len(agents) <= agent_limit:
+        return agents
+
+    selected = []
+    selected_keys = set()
+
+    def key_for(a):
+        return a.get("key") or a.get("statusKey") or a.get("agentId") or a.get("id")
+
+    # First pass: one representative from each provider in discovery order.
+    seen_providers = set()
+    for agent in agents:
+        provider = agent.get("providerKind", "openclaw")
+        if provider in seen_providers:
+            continue
+        seen_providers.add(provider)
+        k = key_for(agent)
+        selected.append(agent)
+        selected_keys.add(k)
+        if len(selected) >= agent_limit:
+            return selected
+
+    # Fill remaining slots using original order.
+    for agent in agents:
+        k = key_for(agent)
+        if k in selected_keys:
+            continue
+        selected.append(agent)
+        selected_keys.add(k)
+        if len(selected) >= agent_limit:
+            break
+    return selected
+
 # Build compatibility maps from discovery (these update on refresh)
 def _build_agent_info():
-    return {a["statusKey"]: {"id": a["id"], "emoji": a["emoji"], "name": a["name"], "branch": ""} for a in get_roster()}
+    return {a["statusKey"]: {"id": a["id"], "emoji": a["emoji"], "name": a["name"], "branch": "", "providerKind": a.get("providerKind", "openclaw")} for a in get_roster()}
 def _build_agent_workspaces():
-    return {a["statusKey"]: get_agent_workspace_dir(WORKSPACE_BASE, a["id"]).replace(WORKSPACE_BASE + "/", "") if a["workspace"].startswith(WORKSPACE_BASE) else os.path.basename(a["workspace"]) for a in get_roster()}
+    result = {}
+    for a in get_roster():
+        if a.get("providerKind") == "hermes":
+            result[a["statusKey"]] = a.get("home") or a.get("workspace") or ""
+        else:
+            result[a["statusKey"]] = get_agent_workspace_dir(WORKSPACE_BASE, a["id"]).replace(WORKSPACE_BASE + "/", "") if a["workspace"].startswith(WORKSPACE_BASE) else os.path.basename(a["workspace"])
+    return result
 def _build_agent_session_ids():
-    return {a["statusKey"]: get_agent_session_id(a["id"]) for a in get_roster()}
+    return {a["statusKey"]: (a.get("providerAgentId") if a.get("providerKind") == "hermes" else get_agent_session_id(a["id"])) for a in get_roster()}
 
 # Compatibility properties (lazily rebuilt)
 @property
@@ -337,6 +686,382 @@ def _agent_id_from_session_key(session_key):
         return ""
     m = re.match(r"^agent:([^:]+):", str(session_key))
     return m.group(1) if m else ""
+
+
+def _is_hermes_agent(agent_id_or_key):
+    needle = str(agent_id_or_key or "")
+    for a in get_roster():
+        if needle in (a.get("id"), a.get("statusKey"), a.get("providerAgentId")):
+            return a.get("providerKind") == "hermes"
+    return needle.startswith("hermes:") or needle.startswith("hermes-")
+
+
+def _get_hermes_agent(agent_id_or_key=None):
+    needle = str(agent_id_or_key or "")
+    for a in get_roster():
+        if a.get("providerKind") == "hermes" and (not needle or needle in (a.get("id"), a.get("statusKey"), a.get("providerAgentId"))):
+            return a
+    return None
+
+
+def _hermes_history_path(profile="default"):
+    safe_profile = re.sub(r"[^a-zA-Z0-9_.-]+", "-", profile or "default")[:80] or "default"
+    return os.path.join(STATUS_DIR, f"hermes-chat-{safe_profile}.json")
+
+
+def _load_hermes_history(profile="default"):
+    path = _hermes_history_path(profile)
+    try:
+        with open(path, "r") as f:
+            data = json.load(f)
+        messages = data.get("messages", []) if isinstance(data, dict) else []
+        return messages if isinstance(messages, list) else []
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return []
+
+
+def _save_hermes_history(profile, messages):
+    path = _hermes_history_path(profile)
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as f:
+            json.dump({"profile": profile, "messages": messages[-500:]}, f, indent=2)
+        try:
+            os.chmod(path, 0o666)
+        except OSError:
+            pass
+    except OSError as e:
+        print(f"[HERMES] Failed to save history: {e}")
+
+
+def _handle_hermes_chat(body):
+    """Send one message to a local Hermes agent via the public Hermes CLI.
+
+    This is intentionally a conservative v0 bridge: no config writes, no raw
+    Hermes DB/log scraping, and stdout is treated as the assistant response.
+    """
+    message = (body.get("message") or "").strip()
+    agent_key = body.get("agentId") or body.get("key") or body.get("sessionKey") or "hermes-default"
+    if not message:
+        return {"ok": False, "error": "message is required", "_status": 400}
+
+    agent = _get_hermes_agent(agent_key)
+    if not agent:
+        return {"ok": False, "error": f"Hermes agent '{agent_key}' not found", "_status": 404}
+
+    hermes_cfg = VO_CONFIG.get("hermes", {})
+    hermes_bin = os.path.expanduser(agent.get("binary") or hermes_cfg.get("binary") or "~/.local/bin/hermes")
+    timeout = int(body.get("timeoutSec") or hermes_cfg.get("timeoutSec") or 600)
+    profile = agent.get("profile") or agent.get("providerAgentId") or "default"
+
+    now_ms = int(time.time() * 1000)
+    history = _load_hermes_history(profile)
+    history.append({"role": "user", "text": message, "ts": now_ms, "agentId": agent.get("id")})
+    _save_hermes_history(profile, history)
+
+    gateway_presence.set_manual_override(agent.get("statusKey") or agent.get("id"), "working", "Hermes CLI task")
+    try:
+        provider = HermesProvider(
+            home_path=hermes_cfg.get("homePath"),
+            binary=hermes_bin,
+            enabled=hermes_cfg.get("enabled", True),
+            timeout_sec=timeout,
+        )
+        result = provider.send_message(profile, message, timeout_sec=timeout)
+        reply = result.get("reply", "")
+        stderr = result.get("stderr", "")
+        exit_code = result.get("exitCode")
+        history = _load_hermes_history(profile)
+        history.append({
+            "role": "assistant",
+            "text": reply,
+            "ts": int(time.time() * 1000),
+            "agentId": agent.get("id"),
+            "exitCode": exit_code,
+        })
+        _save_hermes_history(profile, history)
+        state = "idle" if result.get("ok") else "offline"
+        gateway_presence.set_manual_override(agent.get("statusKey") or agent.get("id"), state, "")
+        return {
+            "ok": bool(result.get("ok")),
+            "reply": reply,
+            "stderr": stderr[:2000],
+            "exitCode": exit_code,
+            "error": result.get("error"),
+            "agent": {"id": agent.get("id"), "name": agent.get("name"), "providerKind": "hermes", "profile": profile},
+        }
+    except Exception as e:
+        gateway_presence.set_manual_override(agent.get("statusKey") or agent.get("id"), "offline", "Hermes CLI error")
+        return {"ok": False, "error": str(e), "_status": 500}
+
+
+def _handle_hermes_test(body=None):
+    """Test the configured Hermes installation without changing Hermes state."""
+    body = body or {}
+    hermes_cfg = VO_CONFIG.get("hermes", {})
+    hermes_bin = os.path.expanduser(body.get("binary") or hermes_cfg.get("binary") or "~/.local/bin/hermes")
+    hermes_home = os.path.expanduser(body.get("homePath") or hermes_cfg.get("homePath") or "~/.hermes")
+    return HermesProvider(home_path=hermes_home, binary=hermes_bin, enabled=True).test()
+
+
+# ─── AGENT PLATFORM COMMUNICATION LAYER ─────────────────────────
+
+def _comm_log_path():
+    return os.path.join(STATUS_DIR, "agent-platform-communications.jsonl")
+
+
+def _office_agent_lookup(agent_id_or_key):
+    needle = str(agent_id_or_key or "").strip()
+    for agent in get_roster():
+        aliases = {
+            str(agent.get("id") or ""),
+            str(agent.get("statusKey") or ""),
+            str(agent.get("providerAgentId") or ""),
+        }
+        if needle in aliases:
+            return agent
+    return None
+
+
+def _office_agent_ref(agent_id_or_key):
+    agent = _office_agent_lookup(agent_id_or_key)
+    if agent:
+        return {
+            "id": agent.get("statusKey") or agent.get("id"),
+            "nativeId": agent.get("providerAgentId") or agent.get("id"),
+            "providerKind": agent.get("providerKind", "openclaw"),
+            "name": agent.get("name") or agent.get("id"),
+            "emoji": agent.get("emoji") or "",
+        }
+    return {
+        "id": str(agent_id_or_key or ""),
+        "nativeId": str(agent_id_or_key or ""),
+        "providerKind": "unknown",
+        "name": str(agent_id_or_key or ""),
+        "emoji": "",
+    }
+
+
+def _append_comm_event(event):
+    event = dict(event)
+    event.setdefault("ts", int(time.time() * 1000))
+    event.setdefault("id", str(uuid.uuid4()))
+    event.setdefault("schema", "vo.agent-platform-communication.v1")
+    path = _comm_log_path()
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "a") as f:
+            f.write(json.dumps(event, ensure_ascii=False) + "\n")
+        try:
+            os.chmod(path, 0o666)
+        except OSError:
+            pass
+    except OSError as e:
+        print(f"[COMM] Failed to append communication event: {e}")
+    return event
+
+
+def _load_comm_history(limit=200, conversation_id=None, agent_id=None):
+    path = _comm_log_path()
+    events = []
+    try:
+        with open(path, "r") as f:
+            for line in f:
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if conversation_id and event.get("conversationId") != conversation_id:
+                    continue
+                if agent_id:
+                    src = (event.get("from") or {}).get("id")
+                    dst = (event.get("to") or {}).get("id")
+                    if agent_id not in (src, dst):
+                        continue
+                events.append(event)
+    except FileNotFoundError:
+        pass
+    except OSError as e:
+        print(f"[COMM] Failed to load communication history: {e}")
+    return events[-max(1, min(int(limit or 200), 1000)):]
+
+
+def _comm_event_to_chat_message(event, agent_key):
+    """Convert a communication event into the existing bubble message shape."""
+    from_ref = event.get("from") or {}
+    to_ref = event.get("to") or {}
+    from_id = from_ref.get("id", "")
+    to_id = to_ref.get("id", "")
+    text = event.get("text", "")
+    if not text:
+        return None
+    from_label = (from_ref.get("name") or from_id or "Agent").strip()
+    to_label = (to_ref.get("name") or to_id or "Agent").strip()
+    # For an agent's own outgoing message, show it like assistant speech.
+    # Incoming messages keep role=user so the bubble renderer prefixes sender.
+    role = "assistant" if from_id == agent_key else "user"
+    return {
+        "role": role,
+        "text": text,
+        "ts": event.get("ts", 0),
+        "epochMs": event.get("ts", 0),
+        "from": from_label,
+        "fromAgentId": from_id,
+        "to": to_label,
+        "toAgentId": to_id,
+        "conversationId": event.get("conversationId", ""),
+        "source": "agent-platform-communications",
+        "commEventId": event.get("id", ""),
+    }
+
+
+def _merge_comm_events_into_agent_chat(result, per_agent_limit=500):
+    """Merge visible cross-platform comm events into /agent-chat payload.
+
+    Chat bubbles are supposed to show the latest real agent conversation,
+    regardless of whether it came from an OpenClaw transcript, Hermes history,
+    or the office-mediated cross-platform communication layer.
+    """
+    events = _load_comm_history(limit=1000)
+    if not events:
+        return result
+    valid_keys = set(AGENT_SESSION_IDS.keys()) | {a.get("statusKey") or a.get("id") for a in get_roster()}
+    for event in events:
+        if not event.get("visibleInOffice", True):
+            continue
+        refs = [event.get("from") or {}, event.get("to") or {}]
+        for ref in refs:
+            agent_key = ref.get("id")
+            if not agent_key or agent_key not in valid_keys:
+                continue
+            msg = _comm_event_to_chat_message(event, agent_key)
+            if not msg:
+                continue
+            result.setdefault(agent_key, []).append(msg)
+
+    # Sort/dedupe/trim so each bubble follows true recency.
+    for agent_key, msgs in list(result.items()):
+        seen = set()
+        cleaned = []
+        for msg in msgs:
+            unique = msg.get("commEventId") or (msg.get("role"), msg.get("text"), msg.get("epochMs") or msg.get("ts") or msg.get("time"))
+            if str(unique) in seen:
+                continue
+            seen.add(str(unique))
+            cleaned.append(msg)
+        cleaned.sort(key=lambda m: int(m.get("epochMs") or m.get("ts") or 0))
+        # Provider calls may also write their own local history (Hermes does).
+        # Prefer the communication-layer copy because it preserves from/to
+        # context needed for visible cross-platform bubbles.
+        comm_signatures = set()
+        for msg in cleaned:
+            if msg.get("source") == "agent-platform-communications":
+                ts = int(msg.get("epochMs") or msg.get("ts") or 0)
+                comm_signatures.add((msg.get("role"), msg.get("text"), ts // 5000))
+        if comm_signatures:
+            filtered = []
+            for msg in cleaned:
+                if msg.get("source") == "agent-platform-communications":
+                    filtered.append(msg)
+                    continue
+                raw_text = str(msg.get("text") or "")
+                if raw_text.lstrip().startswith("[A2A ") or "via My Virtual Office AgentPlatform-to-AgentPlatform Communications" in raw_text:
+                    continue
+                ts = int(msg.get("epochMs") or msg.get("ts") or 0)
+                sigs = [(msg.get("role"), msg.get("text"), ts // 5000), (msg.get("role"), msg.get("text"), (ts // 5000) - 1), (msg.get("role"), msg.get("text"), (ts // 5000) + 1)]
+                if any(sig in comm_signatures for sig in sigs):
+                    continue
+                filtered.append(msg)
+            cleaned = filtered
+        result[agent_key] = cleaned[-per_agent_limit:]
+    return result
+
+
+def _handle_agent_platform_comm_send(body):
+    """Send a visible office-mediated message between provider agents.
+
+    The sender/target may be OpenClaw, Hermes, or future provider agents. The
+    actual provider routing uses the existing agent-call abstraction, while the
+    office owns the cross-platform log that future chat bubbles can render.
+    """
+    from_agent_id = (body.get("fromAgentId") or body.get("from") or "").strip()
+    to_agent_id = (body.get("toAgentId") or body.get("to") or "").strip()
+    message = (body.get("message") or body.get("text") or "").strip()
+    if not from_agent_id:
+        return {"ok": False, "error": "fromAgentId is required", "_status": 400}
+    if not to_agent_id:
+        return {"ok": False, "error": "toAgentId is required", "_status": 400}
+    if not message:
+        return {"ok": False, "error": "message is required", "_status": 400}
+
+    to_agent = _office_agent_lookup(to_agent_id)
+    if not to_agent:
+        return {"ok": False, "error": f"Target agent '{to_agent_id}' not found", "_status": 404}
+
+    from_ref = _office_agent_ref(from_agent_id)
+    to_ref = _office_agent_ref(to_agent_id)
+    conversation_id = (body.get("conversationId") or body.get("threadId") or f"{from_ref['id']}__{to_ref['id']}").strip()
+    metadata = body.get("metadata") if isinstance(body.get("metadata"), dict) else {}
+    timeout = int(body.get("timeoutSec") or body.get("timeout") or 600)
+
+    inbound = _append_comm_event({
+        "type": "message",
+        "direction": "request",
+        "conversationId": conversation_id,
+        "from": from_ref,
+        "to": to_ref,
+        "text": message,
+        "metadata": metadata,
+        "visibleInOffice": True,
+    })
+
+    sender_label = f"{from_ref.get('name') or from_ref['id']} {from_ref.get('emoji') or ''}".strip()
+    target_prompt = (
+        f"[A2A from={from_ref['id']} name={json.dumps(sender_label)} to={to_ref['id']} isUser=false]\n"
+        f"Message from {sender_label} via My Virtual Office AgentPlatform-to-AgentPlatform Communications.\n\n"
+        f"{message}\n\n"
+        "Reply directly to the sender. Keep the reply concise unless detail is needed."
+    )
+
+    gateway_presence.set_manual_override(to_ref["id"], "working", f"Replying to {from_ref['name']}")
+    try:
+        reply = _wf_call_agent(to_ref["id"], target_prompt, timeout=timeout, project_id="agent-platform-communications", task_id=conversation_id)
+        ok = not str(reply or "").startswith("[ERROR]")
+    except Exception as e:
+        reply = f"[ERROR] {e}"
+        ok = False
+    finally:
+        gateway_presence.set_manual_override(to_ref["id"], "idle", "")
+
+    outbound = _append_comm_event({
+        "type": "message",
+        "direction": "reply",
+        "conversationId": conversation_id,
+        "from": to_ref,
+        "to": from_ref,
+        "text": reply,
+        "inReplyTo": inbound["id"],
+        "metadata": metadata,
+        "visibleInOffice": True,
+        "ok": ok,
+    })
+
+    return {
+        "ok": ok,
+        "conversationId": conversation_id,
+        "messageId": inbound["id"],
+        "replyMessageId": outbound["id"],
+        "from": from_ref,
+        "to": to_ref,
+        "reply": reply,
+    }
+
+
+def _handle_agent_platform_comm_history(query):
+    limit = int((query.get("limit") or [200])[0] or 200)
+    conversation_id = (query.get("conversationId") or query.get("threadId") or [None])[0]
+    agent_id = (query.get("agentId") or [None])[0]
+    return {"ok": True, "events": _load_comm_history(limit=limit, conversation_id=conversation_id, agent_id=agent_id)}
 
 
 def _parse_a2a_envelope(text):
@@ -659,6 +1384,7 @@ def _parse_skill_frontmatter(content):
 
 def _handle_skills_library_list():
     """GET /api/skills-library — list all library skills."""
+    _ensure_builtin_communication_skill()
     lib_dir = _get_skills_library_dir()
     skills = []
     for entry in sorted(os.listdir(lib_dir)):
@@ -684,6 +1410,8 @@ def _handle_skills_library_list():
 
 def _handle_skills_library_get(skill_name):
     """GET /api/skills-library/<name> — read a specific library skill."""
+    if skill_name == AGENT_PLATFORM_COMM_SKILL_NAME:
+        _ensure_builtin_communication_skill()
     lib_dir = _get_skills_library_dir()
     skill_md = os.path.join(lib_dir, skill_name, "SKILL.md")
     if not os.path.isfile(skill_md):
@@ -1994,6 +2722,12 @@ def _wf_browser_exec_action_desc(command):
 
 
 def _wf_extract_session_activity(agent_id, project_id, task_id):
+    if _is_hermes_agent(agent_id):
+        agent = _get_hermes_agent(agent_id) or {}
+        profile = agent.get("profile") or agent.get("providerAgentId") or "default"
+        messages = _load_hermes_history(profile)[-12:]
+        return [{"type": "message", "summary": (m.get("text") or "")[:300], "ts": m.get("ts", 0)} for m in messages if m.get("text")]
+
     """Extract file activity and tool usage from a workflow task's session JSONL.
 
     Returns a dict with:
@@ -2326,6 +3060,9 @@ def _wf_delete_session_via_gateway(session_key):
 
 
 def _wf_cleanup_task_sessions(agent_id, project_id, task_id):
+    if _is_hermes_agent(agent_id):
+        return
+
     """Delete the single session created for this workflow task.
 
     Two-phase cleanup:
@@ -2388,6 +3125,12 @@ def _wf_call_agent(agent_id, message, timeout=600, project_id=None, task_id=None
 
     Both are portable — no hardcoded paths or tokens. Config comes from vo-config.json.
     """
+    if _is_hermes_agent(agent_id):
+        result = _handle_hermes_chat({"agentId": agent_id, "message": message, "timeoutSec": timeout})
+        if result.get("ok"):
+            return result.get("reply", "")
+        return f"[ERROR] Hermes agent failed: {result.get('error') or result.get('reply') or result}"
+
     # Use a stable session key per task — reused across all calls for this task
     session_key = None
     if project_id and task_id:
@@ -2395,11 +3138,163 @@ def _wf_call_agent(agent_id, message, timeout=600, project_id=None, task_id=None
 
     # Try gateway HTTP API first
     result = _wf_call_agent_http(agent_id, message, timeout, session_key=session_key)
-    if result is not None:
+    if result is not None and not str(result).startswith("[ERROR] Gateway returned HTTP 5"):
         return result
+
+    # Some OpenClaw installs do not expose a healthy /v1/chat/completions
+    # endpoint but the Control UI WebSocket chat path works. Use it before CLI
+    # so Dockerized Virtual Office can still deliver cross-platform messages
+    # without needing the host openclaw binary inside the container.
+    ws_result = _wf_call_agent_ws(agent_id, message, timeout, session_key=session_key)
+    if ws_result is not None:
+        return ws_result
 
     # Fall back to CLI (also pass session key if available)
     return _wf_call_agent_cli(agent_id, message, timeout, session_key=session_key)
+
+
+def _extract_openclaw_text(value):
+    """Normalize OpenClaw message/content shapes into plain text."""
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        parts = []
+        for item in value:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict):
+                parts.append(str(item.get("text") or item.get("content") or item.get("message") or ""))
+        return "".join(parts).strip()
+    if isinstance(value, dict):
+        return _extract_openclaw_text(value.get("text") or value.get("content") or value.get("message") or value.get("delta") or "")
+    return str(value)
+
+
+def _wf_call_agent_ws(agent_id, message, timeout, session_key=None):
+    """Call an OpenClaw agent through the gateway WebSocket chat path.
+
+    This mirrors the live Virtual Office chat client. It is intentionally a
+    fallback for product deployments where the HTTP OpenAI-compatible endpoint
+    is unavailable/unhealthy and the openclaw CLI is not present in the Docker
+    container.
+    """
+    token = _get_gateway_token()
+    if not token:
+        return None
+    session_key = session_key or f"agent:{agent_id}:main"
+    gw_url = VO_CONFIG.get("openclaw", {}).get("gatewayUrl", "ws://127.0.0.1:18789")
+    origin = f"http://127.0.0.1:{PORT}"
+
+    async def _call():
+        async with ws_connect(
+            gw_url,
+            max_size=1024 * 1024,
+            additional_headers={"Origin": origin},
+            close_timeout=3,
+        ) as ws:
+            # Challenge
+            await asyncio.wait_for(ws.recv(), timeout=5)
+            connect_id = f"vo-ws-connect-{uuid.uuid4()}"
+            await ws.send(json.dumps({
+                "type": "req",
+                "id": connect_id,
+                "method": "connect",
+                "params": {
+                    "minProtocol": 3,
+                    "maxProtocol": 3,
+                    "client": {"id": "openclaw-control-ui", "version": "2026.2.9", "platform": "web", "mode": "webchat"},
+                    "role": "operator",
+                    "scopes": ["operator.read", "operator.write", "operator.admin"],
+                    "caps": ["tool-events"],
+                    "commands": [],
+                    "permissions": {},
+                    "auth": {"token": token},
+                    "locale": "en-US",
+                    "userAgent": "virtual-office-server/1.0",
+                },
+            }))
+            # Wait for connect response, ignoring snapshot/events.
+            while True:
+                raw = await asyncio.wait_for(ws.recv(), timeout=10)
+                msg = json.loads(raw)
+                if msg.get("id") == connect_id:
+                    if not msg.get("ok"):
+                        return f"[ERROR] Gateway WS connect failed: {msg.get('error', {}).get('message', 'unknown')}"
+                    break
+
+            send_id = f"vo-ws-send-{uuid.uuid4()}"
+            await ws.send(json.dumps({
+                "type": "req",
+                "id": send_id,
+                "method": "chat.send",
+                "params": {
+                    "sessionKey": session_key,
+                    "message": message,
+                    "idempotencyKey": f"vo-a2a-{uuid.uuid4()}",
+                },
+            }))
+            run_id = None
+            final_seen = False
+            deadline = time.time() + timeout
+            while time.time() < deadline:
+                raw = await asyncio.wait_for(ws.recv(), timeout=min(30, max(1, deadline - time.time())))
+                msg = json.loads(raw)
+                if msg.get("id") == send_id:
+                    if not msg.get("ok"):
+                        return f"[ERROR] Gateway WS chat.send failed: {msg.get('error', {}).get('message', 'unknown')}"
+                    payload = msg.get("payload") or {}
+                    run_id = payload.get("runId")
+                elif msg.get("event") == "chat":
+                    payload = msg.get("payload") or {}
+                    if payload.get("sessionKey") == session_key and payload.get("state") in ("final", "done"):
+                        text = _extract_openclaw_text(payload.get("text") or payload.get("content") or payload.get("message") or payload.get("delta"))
+                        if text:
+                            return text
+                        final_seen = True
+                        break
+                    if run_id and payload.get("runId") == run_id and payload.get("state") in ("final", "done"):
+                        text = _extract_openclaw_text(payload.get("text") or payload.get("content") or payload.get("message") or payload.get("delta"))
+                        if text:
+                            return text
+                        final_seen = True
+                        break
+                elif msg.get("event") == "session.message":
+                    payload = msg.get("payload") or {}
+                    m = payload.get("message") if isinstance(payload.get("message"), dict) else payload
+                    if m.get("role") == "assistant" and (payload.get("sessionKey") in (None, session_key) or (run_id and payload.get("runId") == run_id)):
+                        text = _extract_openclaw_text(m.get("content") or m.get("text") or m)
+                        if text:
+                            return text
+
+            # Some gateway versions send final without text; fetch recent history.
+            hist_id = f"vo-ws-history-{uuid.uuid4()}"
+            await ws.send(json.dumps({"type": "req", "id": hist_id, "method": "chat.history", "params": {"sessionKey": session_key, "limit": 12}}))
+            while time.time() < deadline + 10:
+                raw = await asyncio.wait_for(ws.recv(), timeout=10)
+                msg = json.loads(raw)
+                if msg.get("id") != hist_id:
+                    continue
+                if not msg.get("ok"):
+                    return "[DELIVERED] Message delivered to OpenClaw agent; history fetch failed."
+                payload = msg.get("payload") or {}
+                messages = payload.get("messages") or payload.get("items") or payload.get("history") or []
+                if isinstance(messages, dict):
+                    messages = messages.get("messages") or messages.get("items") or []
+                for item in reversed(messages):
+                    role = item.get("role") or item.get("senderKind")
+                    text = _extract_openclaw_text(item.get("text") or item.get("content") or item.get("message") or item)
+                    if role == "assistant" and text:
+                        return text
+                return "[DELIVERED] Message delivered to OpenClaw agent."
+            return "[DELIVERED] Message delivered to OpenClaw agent." if final_seen else None
+
+    try:
+        return asyncio.run(_call())
+    except Exception as e:
+        print(f"[WORKFLOW] Gateway WS agent call failed: {e}")
+        return None
 
 
 def _wf_call_agent_http(agent_id, message, timeout, session_key=None):
@@ -3372,6 +4267,11 @@ def _handle_workflow_chat(project_id):
 
 
 def _wf_get_task_session_messages(agent_id, project_id, task_id, max_messages=50):
+    if _is_hermes_agent(agent_id):
+        agent = _get_hermes_agent(agent_id) or {}
+        profile = agent.get("profile") or agent.get("providerAgentId") or "default"
+        return _load_hermes_history(profile)[-max_messages:]
+
     """Read messages from the task-specific workflow session JSONL only."""
     session_key = _wf_task_session_key(agent_id, project_id, task_id)
     home_path = VO_CONFIG.get("openclaw", {}).get("homePath", os.path.expanduser("~/.openclaw"))
@@ -3480,6 +4380,9 @@ def _wf_get_task_session_messages(agent_id, project_id, task_id, max_messages=50
 
 
 def _wf_is_task_session_active(agent_id, project_id, task_id):
+    if _is_hermes_agent(agent_id):
+        return False
+
     """Check if the task-specific workflow session is still actively running."""
     session_key = _wf_task_session_key(agent_id, project_id, task_id)
     home_path = VO_CONFIG.get("openclaw", {}).get("homePath", os.path.expanduser("~/.openclaw"))
@@ -4499,29 +5402,32 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                 pass
             agents = []
             for a in get_roster():
-                session_key = f"agent:{a['id']}:main"
+                provider_kind = a.get("providerKind", "openclaw")
+                session_key = f"hermes:{a.get('profile', a['id'])}" if provider_kind == "hermes" else f"agent:{a['id']}:main"
                 # Prefer office-config name/emoji over IDENTITY.md
                 oc = _oc_overrides.get(a["statusKey"], {})
                 # Resolve branch ID to display name
                 branch_id = oc.get("branch", "")
                 branch_name = _oc_branches.get(branch_id, "") if branch_id else ""
                 if not branch_name:
-                    branch_name = "Unassigned"
+                    branch_name = "Hermes" if provider_kind == "hermes" else "Unassigned"
                 agents.append({
                     "key": a["statusKey"],
                     "agentId": a["id"],
                     "sessionKey": session_key,
+                    "providerKind": provider_kind,
+                    "providerType": a.get("providerType", "runtime"),
+                    "providerAgentId": a.get("providerAgentId", a["id"]),
                     "emoji": oc.get("emoji") or a["emoji"],
                     "name": oc.get("name") or a["name"],
                     "role": a.get("role", ""),
                     "model": a.get("model", ""),
+                    "provider": a.get("provider", ""),
                     "lastActiveAt": a.get("lastActiveAt", 0),
                     "branch": branch_name,
                 })
-            # Enforce agent limit in demo mode
-            agent_limit = get_agent_limit()
-            if agent_limit > 0 and len(agents) > agent_limit:
-                agents = agents[:agent_limit]
+            # Enforce agent limit in demo mode without hiding whole providers.
+            agents = _apply_agent_limit_balanced(agents)
             self.wfile.write(json.dumps({"agents": agents}).encode())
         elif self.path == "/gateway-info":
             # Tell the browser WS port + gateway token for chat connection
@@ -4537,15 +5443,23 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             self.end_headers()
             result = {}
             for agent_key in AGENT_SESSION_IDS:
-                msgs = get_agent_messages(agent_key, max_messages=500)
+                if _is_hermes_agent(agent_key):
+                    agent = _get_hermes_agent(agent_key) or {}
+                    profile = agent.get("profile") or agent.get("providerAgentId") or "default"
+                    msgs = _load_hermes_history(profile)[-500:]
+                else:
+                    msgs = get_agent_messages(agent_key, max_messages=500)
                 if msgs:
                     result[agent_key] = msgs
+            result = _merge_comm_events_into_agent_chat(result)
             # Build project-work map: which agents are currently working on project tasks
             # Primary detection: check each agent's most recently active session key
             # for the "wf-" prefix (workflow sessions created by the project system).
             # This works across all VO instances since they read the same session files.
             project_work = {}
             for agent_key, agent_id in AGENT_SESSION_IDS.items():
+                if _is_hermes_agent(agent_key):
+                    continue
                 try:
                     sdir = os.path.join(WORKSPACE_BASE, f"agents/{agent_id}/sessions")
                     sjson = os.path.join(sdir, "sessions.json")
@@ -4876,17 +5790,50 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                 roster.append({
                     "id": a["id"],
                     "statusKey": a["statusKey"],
+                    "providerKind": a.get("providerKind", "openclaw"),
+                    "providerType": a.get("providerType", "runtime"),
+                    "providerAgentId": a.get("providerAgentId", a["id"]),
                     "name": a["name"],
                     "emoji": a["emoji"],
                     "role": a.get("role", ""),
                     "model": a.get("model", ""),
+                    "provider": a.get("provider", ""),
                     "lastActiveAt": a.get("lastActiveAt", 0),
                 })
-            # Enforce agent limit in demo mode
-            agent_limit = get_agent_limit()
-            if agent_limit > 0 and len(roster) > agent_limit:
-                roster = roster[:agent_limit]
+            # Enforce agent limit in demo mode without hiding whole providers.
+            roster = _apply_agent_limit_balanced(roster)
             self.wfile.write(json.dumps({"agents": roster}).encode())
+        elif self.path == "/api/hermes/history" or self.path.startswith("/api/hermes/history?"):
+            qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            agent_key = (qs.get("agentId") or qs.get("key") or ["hermes-default"])[0]
+            agent = _get_hermes_agent(agent_key)
+            profile = (agent or {}).get("profile") or (agent or {}).get("providerAgentId") or "default"
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps({"ok": True, "messages": _load_hermes_history(profile)}).encode())
+        elif self.path == "/api/hermes/test":
+            result = _handle_hermes_test()
+            self.send_response(200 if result.get("ok") else 503)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps(result).encode())
+        elif self.path == "/api/agent-platform-communications/skill":
+            self.send_response(200)
+            self.send_header("Content-Type", "text/markdown; charset=utf-8")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(_agent_platform_comm_skill_content().encode("utf-8"))
+        elif self.path == "/api/agent-platform-communications/history" or self.path.startswith("/api/agent-platform-communications/history?"):
+            qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            result = _handle_agent_platform_comm_history(qs)
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps(result).encode())
         elif self.path.startswith("/api/agent/") and "/skills" in self.path:
             # GET /api/agent/<id>/skills — list skills for an agent
             parts = self.path.split("/api/agent/")[1].split("/skills")
@@ -5018,6 +5965,13 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                 "browser": {
                     "cdpUrl": VO_CONFIG.get("browser", {}).get("cdpUrl"),
                     "viewerUrl": VO_CONFIG.get("browser", {}).get("viewerUrl"),
+                },
+                "hermes": {
+                    "enabled": VO_CONFIG.get("hermes", {}).get("enabled", True),
+                    "homePath": VO_CONFIG.get("hermes", {}).get("homePath"),
+                    "binary": VO_CONFIG.get("hermes", {}).get("binary"),
+                    "timeoutSec": VO_CONFIG.get("hermes", {}).get("timeoutSec", 600),
+                    "detected": bool(_handle_hermes_test().get("ok")),
                 },
                 "license": {
                     "licensed": lic["licensed"],
@@ -5460,6 +6414,12 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
         When agent_id is provided, resolves that agent's configured model
         (per-agent override or default). Otherwise returns the main/default agent model.
         """
+        if agent_id and _is_hermes_agent(agent_id):
+            agent = _get_hermes_agent(agent_id) or {}
+            model = agent.get("model") or "Hermes"
+            provider = agent.get("provider") or "Hermes"
+            return {"model": model, "provider": provider, "providerKind": "hermes", "contextWindow": 0}
+
         # Known context windows — keyed by full provider/model AND by model name alone.
         # The model-name-only keys act as fallbacks for alternative providers
         # (e.g. openai-codex/gpt-5.4-pro matches via "gpt-5.4-pro" → "gpt-5" family).
@@ -6292,7 +7252,7 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                 # Always reload gateway globals (URL, host header, config path)
                 _reload_gateway_globals()
                 if WORKSPACE_BASE != old_path:
-                    _discovered_roster = discover_agents(WORKSPACE_BASE)
+                    _discovered_roster = _discover_roster()
                     _discovered_at = time.time()
                     refresh_agent_maps()
                 # Restart gateway presence listener only when gateway settings actually changed
@@ -6415,6 +7375,50 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(json.dumps({"ok": True, "agent": agent_id, "state": state}).encode())
+            return
+        elif self.path == "/api/hermes/chat":
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            result = _handle_hermes_chat(body)
+            self.send_response(result.get("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            result.pop("_status", None)
+            self.wfile.write(json.dumps(result).encode())
+            return
+        elif self.path == "/api/agent-platform-communications/send":
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            result = _handle_agent_platform_comm_send(body)
+            self.send_response(result.get("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            result.pop("_status", None)
+            self.wfile.write(json.dumps(result).encode())
+            return
+        elif self.path == "/api/hermes/history/clear":
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            agent = _get_hermes_agent(body.get("agentId") or body.get("key") or "hermes-default") or {}
+            profile = agent.get("profile") or agent.get("providerAgentId") or "default"
+            _save_hermes_history(profile, [])
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps({"ok": True}).encode())
+            return
+        elif self.path == "/api/hermes/test":
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            result = _handle_hermes_test(body)
+            self.send_response(200 if result.get("ok") else 503)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps(result).encode())
             return
         elif self.path == "/transcribe":
             # Proxy to host whisper server

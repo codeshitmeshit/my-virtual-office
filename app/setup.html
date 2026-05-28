@@ -111,10 +111,10 @@
             </div>
         </div>
 
-        <!-- Step 2: Connect to OpenClaw -->
+        <!-- Step 2: Connect Agent Providers -->
         <div class="step" id="step-2">
-            <div class="step-title">2. CONNECT TO OPENCLAW</div>
-            <div class="step-desc">Tell the Virtual Office where your OpenClaw installation lives so it can find your agents.</div>
+            <div class="step-title">2. CONNECT AGENT PROVIDERS</div>
+            <div class="step-desc">Tell the Virtual Office where your agent runtimes live. OpenClaw and Hermes agents can appear together in the same office.</div>
 
             <label>OpenClaw Home Directory</label>
             <input type="text" id="s-ocpath" value="" placeholder="/home/youruser/.openclaw">
@@ -167,6 +167,25 @@
                     <b>4. Permissions?</b><br>
                     The Virtual Office server needs read access to the agents/ folder.<br><br>
                     <b>Still stuck?</b> You can skip this step and set the path later from ☰ Menu. The office will work — agents just won't appear until connected.
+                </div>
+            </div>
+
+            <div style="border-top:1px solid #333;padding-top:16px;margin-top:18px;">
+                <div style="font-size:13px;color:#ffd700;font-weight:bold;margin-bottom:8px;">⚕️ Hermes Agents</div>
+                <label style="display:flex;align-items:center;gap:8px;margin-top:8px;">
+                    <input type="checkbox" id="s-hermes-enable" checked> Auto-detect local Hermes Agents
+                </label>
+                <div style="font-size:13px;color:#999;margin:6px 0 10px;line-height:1.5;">
+                    Virtual Office can also discover Hermes Agent profiles and show them beside OpenClaw agents. It uses the Hermes CLI/status surfaces and does not read Hermes secrets or private memory files.
+                </div>
+                <div id="hermes-fields" style="margin-top:10px;">
+                    <label>Hermes Home Directory</label>
+                    <input type="text" id="s-hermes-home" placeholder="/home/youruser/.hermes">
+                    <label>Hermes CLI Path</label>
+                    <input type="text" id="s-hermes-bin" placeholder="/home/youruser/.local/bin/hermes">
+                    <div style="font-size:12px;color:#666;margin:6px 0 12px;line-height:1.5;">Running in Docker? Mount the Hermes home/CLI into the container and enter the mounted paths.</div>
+                    <button onclick="testHermesConnection()" style="margin:0 0 12px;padding:8px 16px;font-size:9px;">🔍 TEST HERMES</button>
+                    <div id="hermes-test-status"></div>
                 </div>
             </div>
 
@@ -402,6 +421,24 @@
             document.getElementById('pcmetrics-fields').style.display = this.checked ? 'block' : 'none';
         });
 
+        // Hermes enable toggle
+        document.getElementById('s-hermes-enable').addEventListener('change', function() {
+            document.getElementById('hermes-fields').style.display = this.checked ? 'block' : 'none';
+        });
+
+        // Pre-populate Hermes fields from current config
+        fetch('/vo-config').then(function(r) { return r.json(); }).then(function(cfg) {
+            var h = cfg.hermes || {};
+            var hEnable = document.getElementById('s-hermes-enable');
+            var hHome = document.getElementById('s-hermes-home');
+            var hBin = document.getElementById('s-hermes-bin');
+            if (hEnable) hEnable.checked = h.enabled !== false;
+            if (hHome && h.homePath) hHome.value = h.homePath;
+            if (hBin && h.binary) hBin.value = h.binary;
+            var hFields = document.getElementById('hermes-fields');
+            if (hFields && hEnable) hFields.style.display = hEnable.checked ? 'block' : 'none';
+        }).catch(function(){});
+
         function testPcMetrics() {
             var url = document.getElementById('s-pcmetrics-url').value.trim();
             var statusEl = document.getElementById('pcmetrics-test-status');
@@ -427,6 +464,46 @@
                     statusEl.innerHTML = '<div class="status-box success">✅ Connected!<br>' + info + '</div>';
                 } else {
                     statusEl.innerHTML = '<div class="status-box error">❌ Unexpected response. Make sure pc-metrics-server.py is running.</div>';
+                }
+            }).catch(function(e) {
+                statusEl.innerHTML = '<div class="status-box error">Error: ' + e.message + '</div>';
+            });
+        }
+
+        function testHermesConnection() {
+            var enabled = document.getElementById('s-hermes-enable').checked;
+            var homePath = document.getElementById('s-hermes-home').value.trim();
+            var binary = document.getElementById('s-hermes-bin').value.trim();
+            var statusEl = document.getElementById('hermes-test-status');
+            if (!enabled) {
+                statusEl.innerHTML = '<div class="status-box info">Hermes auto-detect is disabled.</div>';
+                return;
+            }
+            statusEl.innerHTML = '<div class="status-box info">Saving and testing Hermes...</div>';
+            fetch('/setup/save', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ hermes: { enabled: enabled, homePath: homePath || null, binary: binary || null } })
+            }).then(function() {
+                return fetch('/api/hermes/test', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ homePath: homePath || null, binary: binary || null })
+                });
+            }).then(function(r) { return r.json(); }).then(function(d) {
+                if (d.ok) {
+                    var agents = d.agents || [];
+                    var html = '<div class="status-box success">✅ Hermes connected — found ' + agents.length + ' profile' + (agents.length === 1 ? '' : 's') + '</div>';
+                    if (agents.length) {
+                        html += '<div class="agent-list-preview">';
+                        agents.slice(0, 10).forEach(function(a) {
+                            html += '<div class="agent-row"><span class="emoji">' + (a.emoji || '⚕️') + '</span><span class="name">' + a.name + '</span><span class="role">' + (a.model || a.providerAgentId || 'Hermes') + '</span></div>';
+                        });
+                        html += '</div>';
+                    }
+                    statusEl.innerHTML = html;
+                } else {
+                    statusEl.innerHTML = '<div class="status-box error">❌ Hermes not reachable: ' + (d.error || 'unknown error') + '</div>';
                 }
             }).catch(function(e) {
                 statusEl.innerHTML = '<div class="status-box error">Error: ' + e.message + '</div>';
@@ -600,6 +677,7 @@
             var browserEnabled = document.getElementById('s-browser-enable').checked;
             var smsEnabled = document.getElementById('s-sms-enable').checked;
             var pcMetricsEnabled = document.getElementById('s-pcmetrics-enable').checked;
+            var hermesEnabled = document.getElementById('s-hermes-enable').checked;
             var gwToken = (document.getElementById('s-gateway-token') || {}).value || '';
             var config = {
                 office: { name: document.getElementById('s-name').value || 'Virtual Office' },
@@ -624,6 +702,11 @@
                 pcMetrics: pcMetricsEnabled ? {
                     url: document.getElementById('s-pcmetrics-url').value.trim() || null
                 } : {},
+                hermes: {
+                    enabled: hermesEnabled,
+                    homePath: document.getElementById('s-hermes-home').value.trim() || null,
+                    binary: document.getElementById('s-hermes-bin').value.trim() || null
+                },
                 _setupComplete: true
             };
 
