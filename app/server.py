@@ -258,6 +258,44 @@ WORKSPACE_BASE = VO_CONFIG["openclaw"]["homePath"]
 STATUS_DIR = VO_CONFIG["presence"]["statusDir"]
 os.makedirs(STATUS_DIR, exist_ok=True)
 STATUS_FILE = os.path.join(STATUS_DIR, "virtual-office-status.json")
+
+_OPENCLAW_VERSION_CACHE = None
+
+
+def _get_openclaw_version():
+    """Return the installed OpenClaw version for Gateway client identification."""
+    global _OPENCLAW_VERSION_CACHE
+    if _OPENCLAW_VERSION_CACHE:
+        return _OPENCLAW_VERSION_CACHE
+    try:
+        cfg_file = os.path.join(WORKSPACE_BASE, "openclaw.json")
+        with open(cfg_file, "r") as f:
+            cfg = json.load(f)
+        for value in (
+            ((cfg.get("meta") or {}).get("lastTouchedVersion")),
+            ((cfg.get("wizard") or {}).get("lastRunVersion")),
+        ):
+            if value:
+                _OPENCLAW_VERSION_CACHE = str(value)
+                return _OPENCLAW_VERSION_CACHE
+    except Exception:
+        pass
+    try:
+        result = subprocess.run(
+            ["openclaw", "--version"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        text_out = (result.stdout or result.stderr or "").strip()
+        match = re.search(r"OpenClaw\s+([^\s]+)", text_out)
+        if match:
+            _OPENCLAW_VERSION_CACHE = match.group(1)
+            return _OPENCLAW_VERSION_CACHE
+    except Exception:
+        pass
+    _OPENCLAW_VERSION_CACHE = os.environ.get("OPENCLAW_VERSION", "unknown")
+    return _OPENCLAW_VERSION_CACHE
 PROJECTS_FILE = os.path.join(STATUS_DIR, "projects.json")
 AGENT_WORKSPACES_FILE = os.path.join(STATUS_DIR, "agent-workspaces.json")
 AUTH_PROFILES_PATH = os.path.join(WORKSPACE_BASE, "agents/main/agent/auth-profiles.json")
@@ -2275,7 +2313,7 @@ async def _gateway_rpc_call_async(method, params=None, timeout=20):
             "params": {
                 "minProtocol": 4,
                 "maxProtocol": 4,
-                "client": {"id": "openclaw-control-ui", "version": "2026.5.27", "platform": "server", "mode": "webchat"},
+                "client": {"id": "openclaw-control-ui", "version": _get_openclaw_version(), "platform": "server", "mode": "webchat"},
                 "role": "operator",
                 "scopes": ["operator.read", "operator.write", "operator.admin"],
                 "caps": [],
@@ -4428,7 +4466,7 @@ def _wf_call_agent_ws(agent_id, message, timeout, session_key=None):
                 "params": {
                     "minProtocol": 4,
                     "maxProtocol": 4,
-                    "client": {"id": "openclaw-control-ui", "version": "2026.5.27", "platform": "web", "mode": "webchat"},
+                    "client": {"id": "openclaw-control-ui", "version": _get_openclaw_version(), "platform": "web", "mode": "webchat"},
                     "role": "operator",
                     "scopes": ["operator.read", "operator.write", "operator.admin"],
                     "caps": ["tool-events"],
@@ -6650,7 +6688,11 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
-            self.wfile.write(json.dumps({"wsPort": WS_PORT, "token": _get_gateway_token()}).encode())
+            self.wfile.write(json.dumps({
+                "wsPort": WS_PORT,
+                "token": _get_gateway_token(),
+                "openclawVersion": _get_openclaw_version(),
+            }).encode())
         elif self.path == "/agent-chat":
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -8513,7 +8555,7 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                 if gateway_changed or token_changed:
                     gateway_presence.stop()
                     if new_token:
-                        gateway_presence.start(GATEWAY_URL, new_token, port=PORT)
+                        gateway_presence.start(GATEWAY_URL, new_token, port=PORT, client_version=_get_openclaw_version())
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Access-Control-Allow-Origin", "*")
@@ -9115,7 +9157,7 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                             "method": "connect",
                             "params": {
                                 "minProtocol": 4, "maxProtocol": 4,
-                                "client": {"id": "openclaw-control-ui", "version": "2026.5.27", "platform": "server", "mode": "webchat"},
+                                "client": {"id": "openclaw-control-ui", "version": _get_openclaw_version(), "platform": "server", "mode": "webchat"},
                                 "role": "operator",
                                 "scopes": ["operator.read"],
                                 "caps": [], "commands": [], "permissions": {},
@@ -9864,7 +9906,7 @@ def start_http_server():
     # Start gateway presence listener
     gw_url = VO_CONFIG["openclaw"]["gatewayUrl"]
     if gw_token:
-        gateway_presence.start(gw_url, gw_token, port=PORT)
+        gateway_presence.start(gw_url, gw_token, port=PORT, client_version=_get_openclaw_version())
     else:
         print("⚠️  No gateway token found — gateway presence disabled")
 

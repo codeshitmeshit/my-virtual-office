@@ -6,6 +6,7 @@
   let connected = false;
   let pendingCallbacks = {};
   let _chatWsPort = 8091;
+  let GATEWAY_CLIENT_VERSION = 'unknown';
   let _modelBarInterval = null;
   let _sessionsListCache = { at: 0, promise: null, payload: null };
   const runOwners = new Map();
@@ -1559,7 +1560,7 @@
       type: 'req', id, method: 'connect',
       params: {
         minProtocol: 4, maxProtocol: 4,
-        client: { id: 'openclaw-control-ui', version: '2026.5.27', platform: 'web', mode: 'webchat' },
+        client: { id: 'openclaw-control-ui', version: GATEWAY_CLIENT_VERSION || 'unknown', platform: 'web', mode: 'webchat' },
         role: 'operator', scopes: ['operator.read', 'operator.write', 'operator.admin'], caps: ['tool-events'], commands: [], permissions: {},
         auth: { token: GATEWAY_TOKEN }, locale: 'en-US', userAgent: 'virtual-office-chat/1.0'
       }
@@ -2335,6 +2336,7 @@
   fetch('/gateway-info').then(r => r.json()).then(d => {
     if (d.wsPort) _chatWsPort = d.wsPort;
     if (d.token) GATEWAY_TOKEN = d.token;
+    if (d.openclawVersion) GATEWAY_CLIENT_VERSION = d.openclawVersion;
   }).catch(() => {});
 
   // --- MOVE / SNAP SYSTEM (primary window only) ---

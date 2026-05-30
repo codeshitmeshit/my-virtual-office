@@ -597,7 +597,7 @@ def _sync_meetings_from_file():
 
 # ─── Gateway Connection ──────────────────────────────────────────
 
-async def _gateway_loop(gateway_url, gateway_token, origin):
+async def _gateway_loop(gateway_url, gateway_token, origin, client_version="unknown"):
     """Main gateway connection loop with reconnection.
     
     Uses a single-reader architecture: one coroutine reads all WS messages
@@ -637,7 +637,7 @@ async def _gateway_loop(gateway_url, gateway_token, origin):
                         "maxProtocol": 4,
                         "client": {
                             "id": "openclaw-control-ui",
-                            "version": "2026.5.27",
+                            "version": client_version or "unknown",
                             "platform": "server",
                             "mode": "webchat"
                         },
@@ -787,7 +787,7 @@ _thread = None
 _loop = None
 
 
-def start(gateway_url, gateway_token, port=8090):
+def start(gateway_url, gateway_token, port=8090, client_version="unknown"):
     """Start the gateway presence listener in a background thread."""
     global _thread, _loop
 
@@ -809,7 +809,7 @@ def start(gateway_url, gateway_token, port=8090):
         _loop = loop
         asyncio.set_event_loop(loop)
         try:
-            loop.run_until_complete(_gateway_loop(gateway_url, gateway_token, origin))
+            loop.run_until_complete(_gateway_loop(gateway_url, gateway_token, origin, client_version))
         except RuntimeError as e:
             if "Event loop stopped" not in str(e):
                 print(f"⚠️  Gateway presence: runtime error: {e}")
