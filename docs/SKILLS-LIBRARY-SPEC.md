@@ -103,4 +103,4 @@ STATUS_DIR/
 - The UI is a convenience layer, files are source of truth
 - Agent copies are independent — edits don't sync back to library
 - Trainer agent uses agent-specific copies, not library originals
-- Product change only — port 8090 (Virtual-Office-Product)
+- Product change only; applies to the My Virtual Office app.

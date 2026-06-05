@@ -89,7 +89,7 @@ This implementation logs conversations in an office-owned communication log. `/a
 
 ## Verified
 
-Live 8090 tests passed:
+Product instance tests passed:
 
 - skill endpoint returns valid SKILL.md content
 - skill appears in Skills Library

@@ -1,7 +1,7 @@
 # Virtual Office Agent Tools
 
 Status: canonical agent-facing tool index  
-Scope: My Virtual Office Product / 8090
+Scope: My Virtual Office Product
 
 ## Purpose
 
@@ -56,7 +56,9 @@ These events are merged into `/agent-chat`, so chat bubbles can show cross-platf
 
 ### Presence and status
 
-Use when an agent starts/stops visible work.
+Virtual Office derives live presence from gateway/session activity. Use these
+endpoints when an external adapter or broker needs to set an explicit visible
+state that cannot be inferred automatically.
 
 - `GET /api/presence`
 - `GET /status`
