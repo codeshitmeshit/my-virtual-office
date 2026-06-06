@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Virtual Office — 一键部署脚本
-# 用法: ./start.sh
-#       ./start.sh --stop      停止服务
-#       ./start.sh --restart   重启服务
-#       ./start.sh --update    拉取最新镜像后重启
-#       ./start.sh --logs      查看日志
-#       ./start.sh --status    查看状态
+# Virtual Office — 一键启动脚本
+# 用法: ./start.sh              本地启动（默认）
+#       ./start.sh --docker     Docker 模式启动
+#       ./start.sh --stop       停止 Docker 服务
+#       ./start.sh --restart    重启服务
+#       ./start.sh --update     拉取最新镜像后重启
+#       ./start.sh --logs       查看日志
+#       ./start.sh --status     查看状态
 # =============================================================================
 
 set -euo pipefail
@@ -32,13 +33,14 @@ ${CYAN}My Virtual Office — 一键部署${NC}
 用法: $(basename "$0") [选项]
 
 选项:
-  (无)          启动服务（默认行为）
-  --stop        停止服务
+  (无)          本地启动（默认，直接运行 Python）
+  --docker      Docker 模式启动
+  --stop        停止 Docker 服务
   --restart     重启服务
   --update      拉取最新镜像并重启
   --logs        查看服务日志
   --status      查看服务状态
-  --clean       停止服务并删除数据卷（⚠️ 会丢失所有数据）
+  --clean       停止 Docker 服务并删除数据卷（⚠️ 会丢失所有数据）
   --help        显示此帮助信息
 
 ${CYAN}启动后访问: http://localhost:8090/setup${NC}
@@ -103,7 +105,7 @@ EOF
     fi
 
     # 检查 OpenClaw 路径是否存在
-    VO_PATH=$(grep '^VO_OPENCLAW_PATH=' "$ENV_FILE" | cut -d'=' -f2- | sed 's/^~/'"$HOME"'/')
+    VO_PATH=$(grep '^VO_OPENCLAW_PATH=' "$ENV_FILE" | cut -d'=' -f2- | sed "s#^~#$HOME#")
     VO_PATH="${VO_PATH/#\~/$HOME}"
     if [ ! -d "$VO_PATH" ]; then
         echo -e "  ${YELLOW}⚠ OpenClaw 路径不存在: $VO_PATH${NC}"
@@ -218,6 +220,85 @@ show_status() {
     fi
 }
 
+# ── 本地启动（无需 Docker）────────────────────────────────────────────────
+start_local() {
+    echo -e "${CYAN}"
+    echo "╔══════════════════════════════════════════╗"
+    echo "║   My Virtual Office 本地启动 🏢          ║"
+    echo "╚══════════════════════════════════════════╝"
+    echo -e "${NC}"
+
+    echo -e "${CYAN}[1/3] 检查运行环境...${NC}"
+
+    # 检查 Python3
+    if ! command -v python3 &>/dev/null; then
+        echo -e "${RED}✗ Python3 未安装${NC}"
+        echo "请先安装 Python 3.10+"
+        exit 1
+    fi
+    echo -e "  ${GREEN}✓${NC} Python $(python3 --version 2>&1)"
+
+    # 检查 websockets 库
+    if ! python3 -c "import websockets" 2>/dev/null; then
+        echo -e "  ${YELLOW}⚠ websockets 库未安装，正在安装...${NC}"
+        pip3 install websockets 2>&1 | tail -1
+        if ! python3 -c "import websockets" 2>/dev/null; then
+            echo -e "${RED}✗ websockets 安装失败${NC}"
+            echo "请手动运行: pip3 install websockets"
+            exit 1
+        fi
+    fi
+    echo -e "  ${GREEN}✓${NC} websockets 可用"
+
+    setup_env
+
+    echo -e "${CYAN}[2/3] 准备数据目录...${NC}"
+    local data_dir
+    data_dir=$(grep '^VO_OPENCLAW_PATH=' "$ENV_FILE" 2>/dev/null | cut -d'=' -f2- | sed "s#^~#$HOME#" || echo "$HOME/.openclaw")
+    data_dir="${data_dir/#\~/$HOME}"
+    local status_dir="$SCRIPT_DIR/data"
+    mkdir -p "$status_dir"
+    echo -e "  ${GREEN}✓${NC} 数据目录: $status_dir"
+
+    echo -e "${CYAN}[3/3] 启动服务...${NC}"
+
+    # 加载环境变量（.env 优先，未设置则使用默认值）
+    set -a
+    source "$ENV_FILE" 2>/dev/null || true
+    set +a
+
+    export VO_STATUS_DIR="${VO_STATUS_DIR:-$status_dir}"
+    export VO_OPENCLAW_PATH="${VO_OPENCLAW_PATH:-$data_dir}"
+    export VO_PORT="${VO_PORT:-8090}"
+    export VO_WS_PORT="${VO_WS_PORT:-8091}"
+    export VO_OFFICE_NAME="${VO_OFFICE_NAME:-Virtual Office}"
+    export VO_GATEWAY_URL="${VO_GATEWAY_URL:-ws://localhost:18789}"
+    export VO_GATEWAY_HTTP="${VO_GATEWAY_HTTP:-http://localhost:18789}"
+    export _VO_INT=1
+
+    echo -e "  ${GREEN}✓${NC} 环境已配置"
+    echo ""
+
+    # Cache-busting
+    local cache_v
+    cache_v=$(date +%s)
+    sed -i "s/?v=[0-9]*/?v=${cache_v}/g" "$SCRIPT_DIR/app/index.html" 2>/dev/null || true
+
+    echo -e "${GREEN}╔══════════════════════════════════════════════════╗${NC}"
+    echo -e "${GREEN}║      My Virtual Office 本地运行中! 🎉           ║${NC}"
+    echo -e "${GREEN}╠══════════════════════════════════════════════════╣${NC}"
+    echo -e "${GREEN}║${NC}"
+    echo -e "${GREEN}║  🌐 办公室:    http://localhost:${VO_PORT}           ${NC}"
+    echo -e "${GREEN}║  🧙 设置向导:  http://localhost:${VO_PORT}/setup     ${NC}"
+    echo -e "${GREEN}║${NC}"
+    echo -e "${GREEN}║  按 Ctrl+C 停止服务                                ${NC}"
+    echo -e "${GREEN}╚══════════════════════════════════════════════════╝${NC}"
+    echo ""
+
+    cd "$SCRIPT_DIR/app"
+    exec python3 server.py
+}
+
 # ── 清理数据 ──────────────────────────────────────────────────────────────
 clean_data() {
     echo -e "${RED}⚠️  警告: 此操作将停止服务并删除所有数据卷（包括办公室布局、配置等）${NC}"
@@ -236,6 +317,7 @@ clean_data() {
 main() {
     case "${1:-}" in
         --help|-h)   usage ;;
+        --docker)    check_prerequisites && setup_env && start_service && show_access_info ;;
         --stop)      stop_service ;;
         --restart)   stop_service && start_service && show_access_info ;;
         --update)    update_service ;;
@@ -243,15 +325,7 @@ main() {
         --status)    show_status ;;
         --clean)     clean_data ;;
         "")
-            echo -e "${CYAN}"
-            echo "╔══════════════════════════════════════════╗"
-            echo "║   My Virtual Office 一键部署 🏢          ║"
-            echo "╚══════════════════════════════════════════╝"
-            echo -e "${NC}"
-            check_prerequisites
-            setup_env
-            start_service
-            show_access_info
+            start_local
             ;;
         *)
             echo -e "${RED}未知选项: $1${NC}"
