@@ -3,8 +3,21 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Model Settings - Virtual Office</title>
-    <script>fetch('/vo-config').then(r=>r.json()).then(d=>{if(d.office&&d.office.name)document.title='Model Settings - '+d.office.name;}).catch(()=>{});</script>
+    <title>Model Settings — Virtual Office</title>
+    <script>fetch('/vo-config').then(r=>r.json()).then(d=>{if(d.office&&d.office.name)document.title='Model Settings — '+d.office.name;}).catch(()=>{});</script>
+    <!-- i18n: inline locale data for immediate init -->
+    <script id="locale-en" type="application/json">{}</script>
+    <script id="locale-zh" type="application/json">{}</script>
+    <script src="i18n.js"></script>
+    <script>
+    (function(){
+        var lang='en';
+        try{var s=localStorage.getItem('vo-i18n-lang');if(s==='zh')lang='zh';else if(navigator.language&&navigator.language.toLowerCase().indexOf('zh')>=0)lang='zh';}catch(e){}
+        var eE=document.getElementById('locale-en'),eZ=document.getElementById('locale-zh');
+        function load(l,el){fetch('locales/'+l+'.json').then(function(r){return r.json()}).then(function(d){el.textContent=JSON.stringify(d)}).catch(function(){});}
+        load('en',eE);load('zh',eZ);
+    })();
+    </script>
     <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
     <style>
         :root { --bg:#0d0d1a; --surface:#141428; --border:#2a2a4a; --gold:#ffd700; --text:#d8d8e8; --text-dim:#8f91aa; --green:#4caf50; --red:#f44336; --blue:#2196f3; --purple:#8b5cf6; }
@@ -61,20 +74,52 @@
     </style>
 </head>
 <body>
-    <a class="back-btn" href="/">← Back to Office</a>
-    <h1>⚙️ Model & Provider Settings</h1>
+    <a class="back-btn" href="/" data-i18n="back_to_office">← Back to Office</a>
+    <h1 data-i18n="model_settings_title">⚙️ Model & Provider Settings</h1>
+
     <div class="tabs">
-        <div class="tab active" onclick="showTab(event,'openclaw')">🧠 OpenClaw Models</div>
-        <div class="tab" onclick="showTab(event,'hermes')">☤ Hermes Models</div>
-        <div class="tab" onclick="showTab(event,'codex')">⌘ Codex CLI</div>
-        <div class="tab" onclick="showTab(event,'claude-code')">◇ Claude Code</div>
-        <div class="tab" onclick="showTab(event,'setup')">⚙️ Native Setup</div>
+        <div class="tab active" onclick="showTab('cloud')" data-i18n="cloud_providers">☁️ Cloud Providers</div>
+        <div class="tab" onclick="showTab('custom')" data-i18n="custom_providers">🔧 Custom Providers</div>
+        <div class="tab" onclick="showTab('ollama')" data-i18n="ollama">🦙 Ollama</div>
+        <div class="tab" onclick="showTab('lmstudio')" data-i18n="lmstudio">🖥️ LM Studio</div>
+
     </div>
-    <div id="panel-openclaw" class="panel active"><div id="openclaw-models">Loading...</div></div>
-    <div id="panel-hermes" class="panel"><div id="hermes-models">Loading...</div></div>
-    <div id="panel-codex" class="panel"><div id="codex-models">Loading...</div></div>
-    <div id="panel-claude-code" class="panel"><div id="claude-code-models">Loading...</div></div>
-    <div id="panel-setup" class="panel"><div id="native-setup">Loading...</div></div>
+
+    <!-- Cloud Providers Tab -->
+    <div id="panel-cloud" class="panel active">
+        <div id="cloud-providers" class="loading" data-i18n="loading">Loading providers...</div>
+    </div>
+
+    <!-- Custom Providers Tab -->
+    <div id="panel-custom" class="panel">
+        <div id="custom-providers"></div>
+        <div class="card" style="border-color: var(--gold);">
+            <h3 data-i18n="add_custom_provider">➕ Add Custom Provider</h3>
+            <div class="row"><label data-i18n="provider_name">Name:</label><input id="new-prov-name" placeholder="my-provider"></div>
+            <div class="row"><label data-i18n="base_url">Base URL:</label><input id="new-prov-url" placeholder="http://host:port/v1"></div>
+            <div class="row"><label data-i18n="api_type">API Type:</label>
+                <select id="new-prov-api">
+                    <option value="openai-completions">openai-completions</option>
+                    <option value="openai-responses">openai-responses</option>
+                    <option value="ollama">ollama</option>
+                </select>
+            </div>
+            <button class="btn btn-gold" onclick="addCustomProvider()" data-i18n="add_provider_btn">Add Provider</button>
+            <p id="new-prov-status" class="status-msg"></p>
+        </div>
+    </div>
+
+    <!-- Ollama Tab -->
+    <div id="panel-ollama" class="panel">
+        <div id="ollama-section" class="loading" data-i18n="loading">Loading Ollama config...</div>
+    </div>
+
+    <!-- LM Studio Tab -->
+    <div id="panel-lmstudio" class="panel">
+        <div id="lmstudio-section" class="loading" data-i18n="loading">Loading LM Studio config...</div>
+    </div>
+
+
 
 <script>
 let nativeData = null;
@@ -102,416 +147,17 @@ function showTab(event, name) {
     document.getElementById('panel-' + name).classList.add('active');
 }
 
-async function loadNativeModels() {
-    const res = await fetch('/api/native-models', { cache:'no-store' });
-    nativeData = await res.json();
-    renderOpenClaw();
-    renderHermes();
-    renderCodex();
-    renderClaudeCode();
-    renderSetup();
-}
-
-function modelOptions(models, current, providerFilter) {
-    const filtered = (models || [])
-        .filter(m => !providerFilter || m.provider === providerFilter)
-        .filter(m => !m.missing)
-        .sort((a,b) => (a.provider + a.name).localeCompare(b.provider + b.name));
-    return filtered.map(m => {
-        const label = (m.provider ? m.provider + '/' : '') + (m.name || m.id);
-        return `<option value="${esc(m.id)}" ${m.id === current ? 'selected' : ''}>${esc(label)}</option>`;
-    }).join('');
-}
-
-function providerOptions(providers, current) {
-    return (providers || []).sort().map(p => `<option value="${esc(p)}" ${p === current ? 'selected' : ''}>${esc(p)}</option>`).join('');
-}
-
-function modelsText(models) {
-    return (models || []).map(m => m.id || m.name || '').filter(Boolean).join('\n');
-}
-
-function localProviderSummary(provider) {
-    const bits = [];
-    if (provider.baseUrl) bits.push(provider.baseUrl);
-    if (provider.api) bits.push(provider.api);
-    if (provider.timeoutSeconds) bits.push('timeout ' + provider.timeoutSeconds + 's');
-    if (provider.apiKeyConfigured) bits.push('API key saved');
-    return bits.join(' · ') || 'No extra settings';
-}
-
-function renderOpenClawLocalProviders(oc) {
-    const providers = oc.localProviders || [];
-    if (!providers.length) {
-        return `<div class="card wide">
-            <div class="provider-name">Installed Local Providers</div>
-            <p class="muted">No local/custom OpenClaw providers are configured yet. Add Ollama, LM Studio, or an OpenAI-compatible endpoint below.</p>
-        </div>`;
-    }
-    return `<div class="card wide">
-        <div class="provider-header">
-            <div><div class="provider-name">Installed Local Providers</div><div class="muted">${providers.length} configured provider${providers.length === 1 ? '' : 's'} from <code>models.providers</code></div></div>
-        </div>
-        <div class="grid">${providers.map((provider, idx) => `
-            <div class="card">
-                <div class="provider-header">
-                    <div><div class="provider-name">${esc(provider.provider)}</div><div class="muted">${esc(localProviderSummary(provider))}</div></div>
-                    <div class="provider-tools">
-                        <button class="btn btn-green" onclick="saveOpenClawLocalProvider(${idx})">Save</button>
-                        <button class="btn btn-red" onclick="deleteOpenClawProviderById('${esc(provider.provider)}', 'oc-local-provider-status-${idx}')">Delete</button>
-                    </div>
-                </div>
-                <div class="row"><label>Provider ID</label><input id="oc-local-provider-id-${idx}" value="${esc(provider.provider)}"></div>
-                <div class="row"><label>Base URL</label><input id="oc-local-provider-url-${idx}" value="${esc(provider.baseUrl || '')}" placeholder="http://localhost:1234/v1"></div>
-                <div class="row"><label>API</label><select id="oc-local-provider-api-${idx}">
-                    <option value="openai-completions" ${(provider.api || '') !== 'ollama' ? 'selected' : ''}>OpenAI-compatible</option>
-                    <option value="ollama" ${(provider.api || '') === 'ollama' ? 'selected' : ''}>Ollama native</option>
-                </select></div>
-                <div class="row"><label>Timeout</label><input id="oc-local-provider-timeout-${idx}" type="number" min="1" value="${esc(provider.timeoutSeconds || '')}" placeholder="300"></div>
-                <div class="row"><label>API Key</label><input id="oc-local-provider-key-${idx}" type="password" autocomplete="off" placeholder="${provider.apiKeyConfigured ? 'Configured - leave blank to keep' : 'optional'}"></div>
-                <div class="row"><label>Models</label><textarea class="model-editor" id="oc-local-provider-models-${idx}" placeholder="one model per line">${esc(modelsText(provider.models))}</textarea></div>
-                <p class="muted">Add or remove models by editing this list, then Save.</p>
-                <p id="oc-local-provider-status-${idx}" class="status-msg"></p>
-            </div>
-        `).join('')}</div>
-    </div>`;
-}
-
-function renderOpenClawCloudProviders(oc) {
-    const providers = oc.cloudProviders || [];
-    if (!providers.length) {
-        return `<div class="card wide">
-            <div class="provider-name">Cloud Service Providers</div>
-            <p class="muted">No cloud provider auth profiles or configured cloud models were reported.</p>
-        </div>`;
-    }
-    return `<div class="card wide">
-        <div class="provider-header">
-            <div><div class="provider-name">Cloud Service Providers</div><div class="muted">${providers.length} configured cloud provider${providers.length === 1 ? '' : 's'} with API/OAuth/subscription auth state</div></div>
-        </div>
-        <div class="grid">${providers.map((provider, idx) => {
-            const profiles = provider.authProfiles || [];
-            return `<div class="card">
-                <div class="provider-header">
-                    <div><div class="provider-name">${esc(provider.provider)}</div><div class="muted">cloud service · ${(provider.models || []).length} configured model${(provider.models || []).length === 1 ? '' : 's'}</div></div>
-                    <div class="provider-current">${profiles.length ? esc((provider.authTypes || []).join(', ') || 'auth configured') : 'no auth profile'}</div>
-                </div>
-                <h3>Auth</h3>
-                ${profiles.length ? renderAuthTags(profiles) : '<div class="muted">No API key, OAuth, or subscription profile reported for this provider.</div>'}
-                <div class="row"><label>Profile ID</label><input id="oc-cloud-profile-${idx}" placeholder="${esc(provider.provider)}:manual"></div>
-                <div class="row"><label>API Key</label><input id="oc-cloud-key-${idx}" type="password" autocomplete="off" placeholder="paste API key"></div>
-                <button class="btn btn-green" onclick="saveOpenClawCloudApiKey(${idx})">Save API Key</button>
-                ${profiles.length ? `<div class="row"><label>Delete Profile</label><select id="oc-cloud-delete-${idx}">${profiles.map(p => `<option value="${esc(p.id || p.profileId || '')}">${esc(p.id || p.profileId || p.label || '')}</option>`).join('')}</select></div><button class="btn btn-red" onclick="deleteOpenClawCloudApiKey(${idx})">Delete Auth Profile</button>` : ''}
-                <p id="oc-cloud-status-${idx}" class="status-msg"></p>
-                <h3>Models</h3>
-                <div class="model-list">${(provider.models || []).length ? provider.models.map(m => `<div class="model-item"><span>${esc(m.id)}</span><span>${esc(m.source || 'configured')}</span></div>`).join('') : '<div class="model-item"><span>No configured models reported.</span><span></span></div>'}</div>
-            </div>`;
-        }).join('')}</div>
-    </div>`;
-}
-
-function renderOpenClaw() {
-    const root = document.getElementById('openclaw-models');
-    const oc = nativeData.openclaw || {};
-    if (!oc.ok) {
-        root.innerHTML = `<div class="card err">OpenClaw model catalog failed: ${esc(oc.error || 'unknown error')}</div>`;
-        return;
-    }
-    const agents = Object.values(oc.agents || {}).sort((a,b) => a.id.localeCompare(b.id));
-    const byProvider = {};
-    const localProviderIds = (oc.localProviders || []).map(p => p.provider).filter(Boolean);
-    for (const m of oc.models || []) (byProvider[m.provider || 'unknown'] ||= []).push(m);
-    let html = `<div class="grid">
-        <div class="card wide">
-            <div class="provider-header">
-                <div><div class="provider-name">OpenClaw Available Models</div><div class="muted">${(oc.models||[]).length} models · ${(oc.providers||[]).length} providers · default <code>${esc(oc.defaultModel || 'none')}</code></div></div>
-                <button class="btn btn-blue" onclick="reloadNative()">Refresh</button>
-            </div>
-            <h3>Auth Profiles</h3>${renderAuthTags(oc.authProfiles)}
-        </div>
-        ${renderOpenClawCloudProviders(oc)}
-        ${renderOpenClawLocalProviders(oc)}
-        <div class="card">
-            <div class="provider-name">Add Local or Custom Provider</div>
-            <p class="muted">Saving an existing Provider ID updates that provider's model list.</p>
-            <div class="row"><label>Preset</label><select id="oc-provider-preset" onchange="fillOpenClawPreset()"><option value="custom">Custom OpenAI-compatible</option><option value="ollama">Ollama</option><option value="lmstudio">LM Studio</option></select></div>
-            <div class="row"><label>Provider ID</label><input id="oc-provider-id" value="custom"></div>
-            <div class="row"><label>Base URL</label><input id="oc-provider-url" placeholder="http://localhost:1234/v1"></div>
-            <div class="row"><label>API</label><select id="oc-provider-api"><option value="openai-completions">OpenAI-compatible</option><option value="ollama">Ollama native</option></select></div>
-            <div class="row"><label>API Key</label><input id="oc-provider-key" type="password" autocomplete="off" placeholder="optional"></div>
-            <div class="row"><label>Models</label><textarea id="oc-provider-models" placeholder="one model per line"></textarea></div>
-            <button class="btn btn-green" onclick="saveOpenClawProvider()">Save Provider</button>
-            <p id="oc-provider-status" class="status-msg"></p>
-        </div>
-        <div class="card">
-            <div class="provider-name">Delete Local Provider</div>
-            <div class="row"><label>Provider</label><select id="oc-delete-provider">${providerOptions(localProviderIds, '')}</select></div>
-            <button class="btn btn-red" onclick="deleteOpenClawProvider()">Delete Local Provider</button>
-            <p id="oc-delete-status" class="status-msg"></p>
-        </div>
-        <div class="card wide">
-            <div class="provider-name">Assign OpenClaw Agent Models</div>
-            <div class="grid">${agents.map(agent => {
-                const model = agent.model || oc.defaultModel || '';
-                return `<div class="card">
-                    <div class="provider-header"><div class="provider-name">${esc(agent.id)}</div><div class="muted">${esc(model || 'default')}</div></div>
-                    <div class="row"><label>Model</label><select id="oc-agent-${esc(agent.id)}"><option value="">Default (${esc(oc.defaultModel || 'none')})</option>${modelOptions(oc.models, model)}</select></div>
-                    <button class="btn btn-green" onclick="setOpenClawAgentModel('${esc(agent.id)}')">Apply</button>
-                    <p id="oc-agent-status-${esc(agent.id)}" class="status-msg"></p>
-                </div>`;
-            }).join('')}</div>
-        </div>`;
-    for (const provider of Object.keys(byProvider).sort()) {
-        const models = byProvider[provider].sort((a,b) => a.id.localeCompare(b.id));
-        html += `<div class="card"><div class="provider-header"><div class="provider-name">${esc(provider)}</div><div class="muted">${models.length}</div></div><div class="model-list">`;
-        for (const m of models) html += `<div class="model-item"><span>${esc(m.id)}</span><span class="${m.available ? 'ok' : 'err'}">${m.available ? (m.local ? 'local' : 'available') : 'missing'}</span></div>`;
-        html += '</div></div>';
-    }
-    html += '</div>';
-    root.innerHTML = html;
-}
-
-function renderAuthTags(authProfiles) {
-    if (!authProfiles || !authProfiles.length) return '<div class="muted">No auth profiles reported.</div>';
-    return authProfiles.map(p => `<span class="tag">${esc(p.id || p.profileId || p.label)} · ${esc(p.provider)} · ${esc(p.type || p.mode || 'profile')}</span>`).join('');
-}
-
-function renderHermesAuth(auth) {
-    if (!auth || !auth.length) return '<div class="muted">No auth credentials reported.</div>';
-    return auth.map(p => `<div><span class="tag">${esc(p.provider)}</span>${(p.credentials||[]).map(c => `<span class="tag">${esc(c.label || c.source)} · ${esc(c.type)}</span>`).join('')}</div>`).join('');
-}
-
-function renderHermesLocalProviders(hermes) {
-    const providers = hermes.localProviders || [];
-    if (!providers.length) {
-        return `<div class="card wide">
-            <div class="provider-name">Installed Hermes Local Providers</div>
-            <p class="muted">No Hermes local/custom provider aliases are configured yet. Add Ollama, LM Studio, or another endpoint below.</p>
-        </div>`;
-    }
-    return `<div class="card wide">
-        <div class="provider-header">
-            <div><div class="provider-name">Installed Hermes Local Providers</div><div class="muted">${providers.length} profile/provider group${providers.length === 1 ? '' : 's'} from <code>model_aliases</code></div></div>
-        </div>
-        <div class="grid">${providers.map((provider, idx) => `
-            <div class="card">
-                <div class="provider-header">
-                    <div><div class="provider-name">${esc(provider.provider)}</div><div class="muted">profile ${esc(provider.profile)} · ${esc(provider.baseUrl || 'no base URL')}</div></div>
-                    <div class="provider-tools">
-                        <button class="btn btn-green" onclick="saveHermesLocalProvider(${idx})">Save</button>
-                        <button class="btn btn-red" onclick="deleteHermesLocalProvider(${idx})">Delete</button>
-                    </div>
-                </div>
-                <div class="row"><label>Profile</label><input id="hm-local-provider-profile-${idx}" value="${esc(provider.profile || 'default')}"></div>
-                <div class="row"><label>Provider ID</label><input id="hm-local-provider-id-${idx}" value="${esc(provider.provider)}"></div>
-                <div class="row"><label>Base URL</label><input id="hm-local-provider-url-${idx}" value="${esc(provider.baseUrl || '')}" placeholder="http://localhost:1234/v1"></div>
-                <div class="row"><label>Models</label><textarea class="model-editor" id="hm-local-provider-models-${idx}" placeholder="one model per line">${esc(modelsText(provider.models))}</textarea></div>
-                <p class="muted">Saving replaces this profile/provider model alias list.</p>
-                <p id="hm-local-provider-status-${idx}" class="status-msg"></p>
-            </div>
-        `).join('')}</div>
-    </div>`;
-}
-
-function renderHermes() {
-    const root = document.getElementById('hermes-models');
-    const hermes = nativeData.hermes || {};
-    const profiles = hermes.profiles || [];
-    const profileOpts = profiles.map(p => `<option value="${esc(p.id)}">${esc(p.id)}</option>`).join('');
-    const providers = hermes.providers || [];
-    let html = `<div class="grid">
-        <div class="card wide">
-            <div class="provider-header">
-                <div><div class="provider-name">Hermes Native Models</div><div class="muted">${(hermes.models||[]).length} models · ${profiles.length} profiles · ${(hermes.modelAliases||[]).length} custom aliases</div></div>
-                <button class="btn btn-blue" onclick="reloadNative()">Refresh</button>
-            </div>
-        </div>
-        ${renderHermesLocalProviders(hermes)}
-        <div class="card">
-            <div class="provider-name">Add Hermes API Key</div>
-            <div class="row"><label>Provider</label><input id="hm-key-provider" placeholder="openai-codex, anthropic, openrouter"></div>
-            <div class="row"><label>Label</label><input id="hm-key-label" placeholder="Virtual Office"></div>
-            <div class="row"><label>API Key</label><input id="hm-key-value" type="password" autocomplete="off" placeholder="paste key"></div>
-            <button class="btn btn-green" onclick="saveHermesApiKey()">Save API Key</button>
-            <p id="hm-key-status" class="status-msg"></p>
-        </div>
-        <div class="card">
-            <div class="provider-name">Add Hermes Local or Custom Provider</div>
-            <p class="muted">Saving an existing profile/provider updates that provider's model aliases.</p>
-            <div class="row"><label>Profile</label><select id="hm-provider-profile">${profileOpts}</select></div>
-            <div class="row"><label>Preset</label><select id="hm-provider-preset" onchange="fillHermesPreset()"><option value="custom">Custom OpenAI-compatible</option><option value="ollama">Ollama</option><option value="lmstudio">LM Studio</option></select></div>
-            <div class="row"><label>Provider ID</label><input id="hm-provider-id" value="custom"></div>
-            <div class="row"><label>Base URL</label><input id="hm-provider-url" placeholder="http://localhost:1234/v1"></div>
-            <div class="row"><label>Models</label><textarea id="hm-provider-models" placeholder="one model per line"></textarea></div>
-            <button class="btn btn-green" onclick="saveHermesProvider()">Save Provider</button>
-            <p id="hm-provider-status" class="status-msg"></p>
-        </div>
-        <div class="card">
-            <div class="provider-name">Delete Hermes Provider or Auth</div>
-            <div class="row"><label>Profile</label><select id="hm-delete-profile">${profileOpts}</select></div>
-            <div class="row"><label>Provider</label><select id="hm-delete-provider">${providerOptions(providers, '')}</select></div>
-            <button class="btn btn-red" onclick="deleteHermesProvider()">Delete Provider Aliases</button>
-            <div class="row"><label>Auth Target</label><input id="hm-delete-auth-target" placeholder="credential label, id, or index"></div>
-            <button class="btn btn-red" onclick="deleteHermesAuth()">Delete Auth</button>
-            <p id="hm-delete-status" class="status-msg"></p>
-        </div>`;
-    for (const profile of profiles) {
-        const current = profile.provider && profile.model ? `${profile.provider}/${profile.model}` : '';
-        html += `<div class="card">
-            <div class="provider-header"><div><div class="provider-name">${esc(profile.id)}</div><div class="muted">${esc(profile.configPath)}</div></div><div class="provider-current">${esc(current || 'not set')}</div></div>
-            <div class="row"><label>Provider</label><select id="hm-prov-${esc(profile.id)}" onchange="syncHermesModelOptions('${esc(profile.id)}')">${providerOptions(providers, profile.provider)}</select></div>
-            <div class="row"><label>Model</label><select id="hm-model-${esc(profile.id)}">${modelOptions(hermes.models, current, profile.provider)}</select></div>
-            <button class="btn btn-green" onclick="setHermesProfileModel('${esc(profile.id)}')">Apply</button>
-            <p id="hm-status-${esc(profile.id)}" class="status-msg"></p>
-            <h3>Auth</h3>${renderHermesAuth(profile.auth)}
-        </div>`;
-    }
-    if ((hermes.modelAliases || []).length) {
-        html += `<div class="card wide"><div class="provider-name">Hermes Custom Aliases</div><div class="model-list">${hermes.modelAliases.map(a => `<div class="model-item"><span>${esc(a.alias)} → ${esc(a.provider)}/${esc(a.model)}</span><span>${esc(a.profile)}</span></div>`).join('')}</div></div>`;
-    }
-    html += '</div>';
-    root.innerHTML = html;
-}
-
-function syncHermesModelOptions(profileId) {
-    const hermes = nativeData.hermes || {};
-    const provider = document.getElementById('hm-prov-' + profileId).value;
-    document.getElementById('hm-model-' + profileId).innerHTML = modelOptions(hermes.models, '', provider);
-}
-
-function renderCodex() {
-    const root = document.getElementById('codex-models');
-    const codex = nativeData.codex || {};
-    root.innerHTML = `<div class="grid">
-        <div class="card wide"><div class="provider-name">Codex CLI Agent Integration</div>
-            <p class="muted">Virtual Office can discover and create Codex-backed agents through the native Codex CLI. Chat uses <code>codex app-server --stdio</code> when enabled, with <code>codex exec</code> available as a compatibility fallback.</p>
-            <label class="checkbox-row"><input id="setup-codex-enabled" type="checkbox" ${codex.enabled !== false ? 'checked' : ''}> Enable Codex agents</label>
-            <label class="checkbox-row"><input id="setup-codex-appserver" type="checkbox" ${codex.preferAppServer !== false ? 'checked' : ''}> Prefer app-server protocol</label>
-            <label class="checkbox-row"><input id="setup-codex-main" type="checkbox" ${codex.includeMain !== false ? 'checked' : ''}> Show Codex Main agent</label>
-            <label class="checkbox-row"><input id="setup-codex-native" type="checkbox" ${codex.includeNativeAgents !== false ? 'checked' : ''}> Discover native <code>$CODEX_HOME/agents</code></label>
-            <div class="row"><label>Codex Home</label><input id="setup-codex-home" value="${esc(codex.homePath || '')}" placeholder="~/.codex"></div>
-            <div class="row"><label>Codex CLI</label><input id="setup-codex-bin" value="${esc(codex.binary || '')}" placeholder="codex or /path/to/codex"></div>
-            <div class="row"><label>Workspace Root</label><input id="setup-codex-workspace" value="${esc(codex.workspaceRoot || '')}" placeholder="/data/codex-agents"></div>
-            <div class="row"><label>Main Workspace</label><input id="setup-codex-main-workspace" value="${esc(codex.mainWorkspace || '')}" placeholder="/data/codex-main"></div>
-            <div class="row"><label>Default Model</label><input id="setup-codex-model" value="${esc(codex.model || '')}" placeholder="optional"></div>
-            <div class="row"><label>Sandbox</label><select id="setup-codex-sandbox">
-                <option value="workspace-write" ${(codex.sandbox || 'workspace-write') === 'workspace-write' ? 'selected' : ''}>workspace-write</option>
-                <option value="danger-full-access" ${(codex.sandbox || '') === 'danger-full-access' ? 'selected' : ''}>danger-full-access</option>
-                <option value="read-only" ${(codex.sandbox || '') === 'read-only' ? 'selected' : ''}>read-only</option>
-            </select></div>
-            <div class="row"><label>Approvals</label><select id="setup-codex-approval">
-                <option value="never" ${(codex.approvalPolicy || 'never') === 'never' ? 'selected' : ''}>never</option>
-                <option value="on-request" ${(codex.approvalPolicy || '') === 'on-request' ? 'selected' : ''}>on-request</option>
-                <option value="on-failure" ${(codex.approvalPolicy || '') === 'on-failure' ? 'selected' : ''}>on-failure</option>
-                <option value="untrusted" ${(codex.approvalPolicy || '') === 'untrusted' ? 'selected' : ''}>untrusted</option>
-            </select></div>
-            <div class="provider-tools" style="justify-content:flex-start">
-                <button class="btn btn-green" onclick="saveCodexSetup()">Save Codex Setup</button>
-                <button class="btn btn-blue" onclick="testCodexSetup()">Test Codex</button>
-            </div>
-            <p id="setup-codex-status" class="status-msg"></p>
-            <p><code>codex login</code></p>
-            <p><code>$CODEX_HOME/agents/*.toml</code></p>
-        </div>
-    </div>`;
-}
-
-function renderClaudeCode() {
-    const root = document.getElementById('claude-code-models');
-    const claude = nativeData.claudeCode || {};
-    root.innerHTML = `<div class="grid">
-        <div class="card wide"><div class="provider-name">Claude Code Agent Integration</div>
-            <p class="muted">Virtual Office can discover and create Claude Code-backed agents through the native Claude Code CLI. Chat streams through <code>claude -p --output-format stream-json --include-partial-messages</code> and keeps Claude session IDs for resume.</p>
-            <label class="checkbox-row"><input id="setup-claude-enabled" type="checkbox" ${claude.enabled !== false ? 'checked' : ''}> Enable Claude Code agents</label>
-            <label class="checkbox-row"><input id="setup-claude-main" type="checkbox" ${claude.includeMain !== false ? 'checked' : ''}> Show Claude Code Main agent</label>
-            <label class="checkbox-row"><input id="setup-claude-native" type="checkbox" ${claude.includeNativeAgents !== false ? 'checked' : ''}> Discover native <code>$CLAUDE_CONFIG_DIR/agents</code></label>
-            <label class="checkbox-row"><input id="setup-claude-register" type="checkbox" ${claude.registerNativeAgents !== false ? 'checked' : ''}> Register new standard agents in native Claude Code</label>
-            <div class="row"><label>Claude Config Dir</label><input id="setup-claude-home" value="${esc(claude.homePath || '')}" placeholder="~/.claude"></div>
-            <div class="row"><label>Claude CLI</label><input id="setup-claude-bin" value="${esc(claude.binary || '')}" placeholder="claude or /path/to/claude"></div>
-            <div class="row"><label>Workspace Root</label><input id="setup-claude-workspace" value="${esc(claude.workspaceRoot || '')}" placeholder="/data/claude-code-agents"></div>
-            <div class="row"><label>Main Workspace</label><input id="setup-claude-main-workspace" value="${esc(claude.mainWorkspace || '')}" placeholder="/data/claude-code-main"></div>
-            <div class="row"><label>Default Model</label><input id="setup-claude-model" value="${esc(claude.model || '')}" placeholder="optional"></div>
-            <div class="row"><label>Permission Mode</label><select id="setup-claude-permission">
-                <option value="acceptEdits" ${(claude.permissionMode || 'acceptEdits') === 'acceptEdits' ? 'selected' : ''}>acceptEdits</option>
-                <option value="default" ${(claude.permissionMode || '') === 'default' ? 'selected' : ''}>default</option>
-                <option value="auto" ${(claude.permissionMode || '') === 'auto' ? 'selected' : ''}>auto</option>
-                <option value="dontAsk" ${(claude.permissionMode || '') === 'dontAsk' ? 'selected' : ''}>dontAsk</option>
-                <option value="plan" ${(claude.permissionMode || '') === 'plan' ? 'selected' : ''}>plan</option>
-                <option value="bypassPermissions" ${(claude.permissionMode || '') === 'bypassPermissions' ? 'selected' : ''}>bypassPermissions</option>
-            </select></div>
-            <div class="provider-tools" style="justify-content:flex-start">
-                <button class="btn btn-green" onclick="saveClaudeCodeSetup()">Save Claude Code Setup</button>
-                <button class="btn btn-blue" onclick="testClaudeCodeSetup()">Test Claude Code</button>
-            </div>
-            <p id="setup-claude-status" class="status-msg"></p>
-            <p><code>claude auth login</code></p>
-            <p><code>claude -p --output-format stream-json --include-partial-messages</code></p>
-            <p><code>$CLAUDE_CONFIG_DIR/agents/*.md</code></p>
-        </div>
-    </div>`;
-}
-
-function renderSetup() {
-    const root = document.getElementById('native-setup');
-    root.innerHTML = `<div class="grid">
-        <div class="card wide"><div class="provider-name">Native Setup Guide</div>
-            <p class="muted">Use each provider tab for day-to-day settings. This guide shows where the underlying native configuration lives.</p>
-        </div>
-        <div class="card"><div class="provider-name">OpenClaw Cloud Providers</div>
-            <p class="muted">Anthropic, OpenAI, Google, OpenRouter, and similar services use auth profiles. They should not be edited like local endpoint providers.</p>
-            <p><code>openclaw models auth paste-api-key --provider &lt;provider&gt;</code></p>
-            <p><code>openclaw models auth login --provider &lt;provider&gt;</code></p>
-            <p><code>openclaw models auth list --json</code></p>
-            <p>Configure them in <code>OpenClaw Models → Cloud Service Providers</code>.</p>
-        </div>
-        <div class="card"><div class="provider-name">OpenClaw Local Providers</div>
-            <p class="muted">Ollama, LM Studio, and custom OpenAI-compatible endpoints use a base URL plus a model list.</p>
-            <p><code>models.providers.&lt;provider&gt;.baseUrl</code></p>
-            <p><code>models.providers.&lt;provider&gt;.api</code></p>
-            <p><code>models.providers.&lt;provider&gt;.models[]</code></p>
-            <p>Configure them in <code>OpenClaw Models → Installed Local Providers</code>.</p>
-        </div>
-        <div class="card"><div class="provider-name">Hermes Providers</div>
-            <p class="muted">Hermes profiles keep their active model in profile config and custom endpoints as aliases.</p>
-            <p><code>hermes auth add &lt;provider&gt; --type api-key</code></p>
-            <p><code>model.provider / model.default / model.base_url</code></p>
-            <p><code>model_aliases.&lt;alias&gt;</code></p>
-            <p>Configure them in <code>Hermes Models</code>.</p>
-        </div>
-        <div class="card"><div class="provider-name">Codex CLI Agents</div>
-            <p class="muted">Codex CLI has its own home, auth, workspaces, sandbox mode, and native custom-agent directory.</p>
-            <p><code>codex login</code></p>
-            <p><code>codex app-server --stdio</code></p>
-            <p><code>$CODEX_HOME/agents/*.toml</code></p>
-            <p>Configure it in the <code>Codex CLI</code> tab.</p>
-        </div>
-        <div class="card"><div class="provider-name">Claude Code Agents</div>
-            <p class="muted">Claude Code has its own config dir, auth state, workspace roots, permission mode, and markdown subagents.</p>
-            <p><code>claude auth login</code></p>
-            <p><code>claude -p --output-format stream-json --include-partial-messages</code></p>
-            <p><code>$CLAUDE_CONFIG_DIR/agents/*.md</code></p>
-            <p>Configure it in the <code>Claude Code</code> tab.</p>
-        </div>
-        <div class="card wide"><div class="provider-name">OAuth Note</div>
-            <p class="muted">API keys and local/custom providers can be completed inside Virtual Office. OAuth needs an interactive browser/device callback; the next step is wiring a guided callback window so users never touch terminal.</p>
-        </div>
-    </div>`;
-}
-
-function fillOpenClawPreset() {
-    const preset = val('oc-provider-preset');
-    if (preset === 'ollama') {
-        document.getElementById('oc-provider-id').value = 'ollama';
-        document.getElementById('oc-provider-url').value = 'http://localhost:11434';
-        document.getElementById('oc-provider-api').value = 'ollama';
-    } else if (preset === 'lmstudio') {
-        document.getElementById('oc-provider-id').value = 'lmstudio';
-        document.getElementById('oc-provider-url').value = 'http://localhost:1234/v1';
-        document.getElementById('oc-provider-api').value = 'openai-completions';
-    } else {
-        document.getElementById('oc-provider-id').value = 'custom';
-        document.getElementById('oc-provider-url').value = '';
-        document.getElementById('oc-provider-api').value = 'openai-completions';
+// --- Load Data ---
+async function loadProviders() {
+    try {
+        const res = await fetch('/config/providers');
+        providersData = await res.json();
+        renderCloudProviders();
+        renderCustomProviders();
+        renderOllama();
+        renderLMStudio();
+    } catch(e) {
+        document.getElementById('cloud-providers').innerHTML = '<p class="status-msg err">' + i18n.t('failed_to_load') + ': ' + e.message + '</p>';
     }
 }
 
@@ -550,32 +196,69 @@ function codexSetupPayload() {
     };
 }
 
-function claudeCodeSetupPayload() {
-    return {
-        enabled: !!document.getElementById('setup-claude-enabled')?.checked,
-        homePath: val('setup-claude-home') || null,
-        binary: val('setup-claude-bin') || null,
-        workspaceRoot: val('setup-claude-workspace') || null,
-        mainWorkspace: val('setup-claude-main-workspace') || null,
-        model: val('setup-claude-model') || '',
-        permissionMode: val('setup-claude-permission') || 'acceptEdits',
-        includeMain: !!document.getElementById('setup-claude-main')?.checked,
-        includeNativeAgents: !!document.getElementById('setup-claude-native')?.checked,
-        registerNativeAgents: !!document.getElementById('setup-claude-register')?.checked
-    };
-}
+    let html = '';
+    // Show known providers + any extras from auth profiles
+    const allProviders = new Set([...knownProviders, ...Object.keys(ap)]);
+    for (const prov of allProviders) {
+        const info = ap[prov] || {};
+        const hasKey = info.hasKey || false;
+        const masked = info.maskedKey || '';
+        const models = info.models || [];
+        const isOAuth = !!info.isOAuth || prov.endsWith('-token') || prov.endsWith('-oauth');
+        const authType = info.authType || (isOAuth ? 'subscription' : 'api_key');
+        const authLabel = isOAuth ? i18n.t('subscription') : i18n.t('api_key');
+        const placeholder = isOAuth ? i18n.t('token_placeholder') : i18n.t('api_key_placeholder');
 
-async function saveCodexSetup() {
-    const data = await postJson('/setup/save', { codex: codexSetupPayload() });
-    setStatus('setup-codex-status', data, 'Codex setup saved');
-    if (data.ok) setTimeout(reloadNative, 800);
-}
+        html += `<div class="card" id="prov-${prov}">
+            <div class="provider-header">
+                <span class="provider-name">${prov.toUpperCase()}</span>
+                <span class="key-status ${hasKey ? 'has-key' : 'no-key'}">${hasKey ? authLabel + masked : i18n.t('no_credential')}</span>
+            </div>
+            <div class="row">
+                <input id="key-${prov}" type="password" placeholder="${placeholder}" value="" autocomplete="off" ${isOAuth ? 'disabled' : ''}>
+                ${isOAuth ? '' : `<button class="btn btn-green" onclick="saveKey('${prov}')">Save</button>`}
+                ${hasKey ? `<button class="btn btn-red" onclick="deleteKey('${prov}', '${info.profileId || ''}')">Delete</button>` : ''}
+            </div>
+            <p id="key-status-${prov}" class="status-msg"></p>`;
 
-async function testCodexSetup() {
-    const status = document.getElementById('setup-codex-status');
-    if (status) {
-        status.className = 'status-msg muted';
-        status.textContent = 'Testing Codex CLI...';
+        // Collect configured models for this provider
+        const configuredModels = providersData.configuredModels || {};
+        // For anthropic-token, look for anthropic/ models
+        const baseProv = prov.replace(/-token$|(-oauth)$/, '');
+        const provConfigured = Object.keys(configuredModels).filter(mid => mid.startsWith(baseProv + '/'));
+
+        // Check if this is a subscription provider
+        const isSubscriptionProvider = prov.endsWith('-token') || prov.endsWith('-oauth');
+
+        // For API providers, use live-fetched models; for subscription, use configured models
+        let modelsToShow = [];
+        if (!isSubscriptionProvider) {
+            // API provider: show live-fetched models
+            modelsToShow = models.map(m => {
+                const id = typeof m === 'string' ? m : m.id || m;
+                return id.includes('/') ? id : prov + '/' + id;
+            });
+        } else {
+            // Subscription provider: show only configured models
+            modelsToShow = provConfigured;
+        }
+
+        if (modelsToShow.length > 0 || (isSubscriptionProvider && provConfigured.length === 0)) {
+            html += '<div class="model-list scrollable" style="max-height:300px">';
+
+            if (!isSubscriptionProvider) {
+                html += `<div style="padding:5px 6px;color:var(--green);font-size:7px;border-bottom:1px solid var(--border);background:rgba(76,175,80,0.08)">${i18n.t('api_key')} (${modelsToShow.length})</div>`;
+                html += modelsToShow.map(m => `<div class="model-item"><span>${m}</span><span style="color:var(--green);font-size:6px">API</span></div>`).join('');
+            } else {
+                html += `<div style="padding:5px 6px;color:var(--gold);font-size:7px;border-bottom:1px solid var(--border);background:rgba(255,215,0,0.08)">${i18n.t('subscription')} (${modelsToShow.length})</div>`;
+                html += modelsToShow.map(m => `<div class="model-item"><span>${m}</span><span style="color:var(--gold);font-size:6px">SUB</span></div>`).join('');
+            }
+
+            html += '</div>';
+        } else if (hasKey) {
+            html += `<p class="status-msg" style="color:var(--text-dim)">${i18n.t('no_models')}</p>`;
+        }
+        html += '</div>';
     }
     await postJson('/setup/save', { codex: codexSetupPayload() });
     const data = await postJson('/api/codex/test', codexSetupPayload());
@@ -595,22 +278,56 @@ async function saveClaudeCodeSetup() {
     if (data.ok) setTimeout(reloadNative, 800);
 }
 
-async function testClaudeCodeSetup() {
-    const status = document.getElementById('setup-claude-status');
-    if (status) {
-        status.className = 'status-msg muted';
-        status.textContent = 'Testing Claude Code CLI...';
+    if (!ollama) {
+        container.innerHTML = '<div class="card"><p>' + i18n.t('no_ollama') + '</p>' +
+            '<p style="margin-top:8px;color:var(--text-dim)">' + i18n.t('add_in_custom') + '</p></div>';
+        return;
     }
-    await postJson('/setup/save', { claudeCode: claudeCodeSetupPayload() });
-    const data = await postJson('/api/claude-code/test', claudeCodeSetupPayload());
-    const text = data.ok
-        ? 'Claude Code connected · found ' + ((data.agents || []).length) + ' agent' + (((data.agents || []).length) === 1 ? '' : 's')
-        : (data.error || 'Claude Code test failed');
-    if (status) {
-        status.className = 'status-msg ' + (data.ok ? 'ok' : 'err');
-        status.textContent = text;
+
+    let html = `<div class="card">
+        <div class="provider-header">
+            <span class="provider-name">🦙 OLLAMA</span>
+            <span style="font-size:6px;color:var(--text-dim)">${ollama.baseUrl} · api: ${ollama.api || 'ollama'} · key: ${ollama.apiKeyConfigured ? 'set' : 'missing'} · timeout: ${ollama.timeoutSeconds || 300}s</span>
+        </div>
+    </div>`;
+
+    // Models
+    html += '<h2>Models</h2>';
+    for (const m of (ollama.models || [])) {
+        const fullId = 'ollama/' + m.id;
+        const mp = params[fullId] || {};
+        html += `<div class="card">
+            <div class="provider-header">
+                <span class="provider-name">${m.name || m.id}</span>
+                <span style="font-size:6px;color:var(--text-dim)">ctx: ${m.contextWindow ? (m.contextWindow/1000)+'k' : '?'} | max: ${m.maxTokens || '?'}</span>
+            </div>
+            <div class="ollama-params" id="params-${m.id.replace(/[^a-zA-Z0-9]/g,'_')}">
+                <label>${i18n.t('temperature')}</label><input type="number" step="0.1" min="0" max="2" value="${mp.temperature ?? ''}" data-param="temperature" data-model="${fullId}">
+                <label>${i18n.t('top_p')}</label><input type="number" step="0.1" min="0" max="1" value="${mp.top_p ?? ''}" data-param="top_p" data-model="${fullId}">
+                <label>${i18n.t('top_k')}</label><input type="number" step="1" min="0" value="${mp.top_k ?? ''}" data-param="top_k" data-model="${fullId}">
+                <label>${i18n.t('repeat_penalty')}</label><input type="number" step="0.1" min="0" value="${mp.repeat_penalty ?? ''}" data-param="repeat_penalty" data-model="${fullId}">
+                <label>${i18n.t('num_predict')}</label><input type="number" step="1" value="${mp.num_predict ?? ''}" data-param="num_predict" data-model="${fullId}">
+                <label>${i18n.t('context_window')}</label><input type="number" step="1000" value="${m.contextWindow || ''}" data-field="contextWindow" data-model-id="${m.id}">
+                <label>${i18n.t('max_tokens')}</label><input type="number" step="1000" value="${m.maxTokens || ''}" data-field="maxTokens" data-model-id="${m.id}">
+            </div>
+            <button class="btn btn-gold" onclick="saveOllamaModel('${m.id.replace(/'/g,"\\'")}')" data-i18n="save_parameters">Save Parameters</button>
+            <button class="btn btn-red" onclick="removeOllamaModel('${m.id.replace(/'/g,"\\'")}')" data-i18n="remove_model">Remove Model</button>
+            <p id="ollama-status-${m.id.replace(/[^a-zA-Z0-9]/g,'_')}" class="status-msg"></p>
+        </div>`;
     }
-    if (data.ok) setTimeout(reloadNative, 800);
+
+    // Add model form
+    html += `<div class="card" style="border-color:var(--gold)">
+        <h3 data-i18n="add_ollama_model">➕ Add Ollama Model</h3>
+        <div class="row"><label data-i18n="model_id">Model ID:</label><input id="new-ollama-id" placeholder="model-name:tag"></div>
+        <div class="row"><label data-i18n="display_name">Display Name:</label><input id="new-ollama-name" placeholder="Friendly name"></div>
+        <div class="row"><label data-i18n="context_window">Context Window:</label><input id="new-ollama-ctx" type="number" value="100000"></div>
+        <div class="row"><label data-i18n="max_tokens">Max Tokens:</label><input id="new-ollama-max" type="number" value="8192"></div>
+        <button class="btn btn-gold" onclick="addOllamaModel()" data-i18n="add_model_btn">Add Model</button>
+        <p id="new-ollama-status" class="status-msg"></p>
+    </div>`;
+
+    container.innerHTML = html;
 }
 
 async function saveOpenClawApiKey() {
@@ -619,61 +336,165 @@ async function saveOpenClawApiKey() {
     if (data.ok) { document.getElementById('oc-key-value').value = ''; setTimeout(reloadNative, 800); }
 }
 
-async function saveOpenClawCloudApiKey(index) {
-    const provider = ((nativeData.openclaw || {}).cloudProviders || [])[index] || {};
-    const data = await postJson('/api/native-models/openclaw/auth/api-key', {
-        provider: provider.provider || '',
-        profileId: val('oc-cloud-profile-' + index),
-        apiKey: val('oc-cloud-key-' + index)
-    });
-    setStatus('oc-cloud-status-' + index, data, 'Saved ' + (data.profileId || data.provider));
-    if (data.ok) {
-        const keyEl = document.getElementById('oc-cloud-key-' + index);
-        if (keyEl) keyEl.value = '';
-        setTimeout(reloadNative, 800);
+function normalizeOllamaBaseUrl(url) {
+    return (url || '').trim().replace(/\/v1\/?$/, '');
+}
+
+async function saveKey(provider) {
+    const baseProvider = normalizeProvider(provider);
+    const input = document.getElementById('key-' + provider);
+    const status = document.getElementById('key-status-' + provider);
+    const key = input.value.trim();
+    if (!key) { status.className = 'status-msg err'; status.textContent = i18n.t('enter_api_key'); return; }
+    status.textContent = i18n.t('saving');
+    try {
+        const res = await fetch('/config/providers/save-key', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ provider: baseProvider, key })
+        });
+        const data = await res.json();
+        if (data.ok) {
+            status.className = 'status-msg ok'; status.textContent = i18n.t('key_saved');
+            input.value = '';
+            setTimeout(() => { providersData = null; loadProviders(); }, 1000);
+        } else {
+            status.className = 'status-msg err'; status.textContent = i18n.t('failed') + (data.error || i18n.t('error'));
+        }
+    } catch(e) {
+        status.className = 'status-msg err'; status.textContent = i18n.t('failed') + e.message;
     }
 }
 
-async function deleteOpenClawApiKey() {
-    const profileId = val('oc-key-delete-profile');
-    if (!profileId || !confirm('Delete OpenClaw API key profile ' + profileId + '?')) return;
-    const provider = profileId.includes(':') ? profileId.split(':')[0] : '';
-    const data = await postJson('/api/native-models/openclaw/auth/delete', { provider, profileId });
-    setStatus('oc-key-status', data, 'Deleted ' + profileId);
-    if (data.ok) setTimeout(reloadNative, 800);
+async function deleteKey(provider, profileId='') {
+    const baseProvider = normalizeProvider(provider);
+    if (!confirm(i18n.t('confirm_delete_key').replace('{provider}', profileId || baseProvider))) return;
+    const status = document.getElementById('key-status-' + provider);
+    status.textContent = i18n.t('deleting');
+    try {
+        const res = await fetch('/config/providers/delete-key', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ provider: baseProvider, profileId })
+        });
+        const data = await res.json();
+        if (data.ok) {
+            status.className = 'status-msg ok'; status.textContent = i18n.t('key_deleted');
+            setTimeout(() => { providersData = null; loadProviders(); }, 1000);
+        } else {
+            status.className = 'status-msg err'; status.textContent = i18n.t('failed') + (data.error || i18n.t('error'));
+        }
+    } catch(e) {
+        status.className = 'status-msg err'; status.textContent = i18n.t('failed') + e.message;
+    }
 }
 
-async function deleteOpenClawCloudApiKey(index) {
-    const provider = ((nativeData.openclaw || {}).cloudProviders || [])[index] || {};
-    const profileId = val('oc-cloud-delete-' + index);
-    if (!profileId || !confirm('Delete OpenClaw auth profile ' + profileId + '?')) return;
-    const data = await postJson('/api/native-models/openclaw/auth/delete', { provider: provider.provider || '', profileId });
-    setStatus('oc-cloud-status-' + index, data, 'Deleted ' + profileId);
-    if (data.ok) setTimeout(reloadNative, 800);
+async function addCustomProvider() {
+    const name = document.getElementById('new-prov-name').value.trim();
+    const url = document.getElementById('new-prov-url').value.trim();
+    const api = document.getElementById('new-prov-api').value;
+    const status = document.getElementById('new-prov-status');
+    if (!name || !url) { status.className = 'status-msg err'; status.textContent = i18n.t('name_url_required'); return; }
+    status.textContent = i18n.t('saving');
+    try {
+        const res = await fetch('/config/providers/save-custom', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ provider: name, baseUrl: url, models: [], api })
+        });
+        const data = await res.json();
+        if (data.ok) {
+            status.className = 'status-msg ok'; status.textContent = i18n.t('provider_added');
+            document.getElementById('new-prov-name').value = '';
+            document.getElementById('new-prov-url').value = '';
+            setTimeout(() => { providersData = null; loadProviders(); }, 1000);
+        } else {
+            status.className = 'status-msg err'; status.textContent = i18n.t('failed') + (data.error || i18n.t('error'));
+        }
+    } catch(e) {
+        status.className = 'status-msg err'; status.textContent = i18n.t('failed') + e.message;
+    }
 }
 
-async function saveOpenClawProvider() {
-    const data = await postJson('/api/native-models/openclaw/provider', { provider:val('oc-provider-id'), baseUrl:val('oc-provider-url'), api:val('oc-provider-api'), apiKey:val('oc-provider-key'), models:val('oc-provider-models') });
-    setStatus('oc-provider-status', data, 'Saved ' + (data.provider || 'provider'));
-    if (data.ok) { document.getElementById('oc-provider-key').value = ''; setTimeout(reloadNative, 800); }
+async function saveOllamaModel(modelId) {
+    const safeId = modelId.replace(/[^a-zA-Z0-9]/g, '_');
+    const status = document.getElementById('ollama-status-' + safeId);
+    // Gather current ollama config and update this model
+    const ollama = providersData.customProviders.ollama;
+    const models = (ollama.models || []).map(m => {
+        if (m.id === modelId) {
+            const container = document.getElementById('params-' + safeId);
+            const ctxInput = container.querySelector('[data-field="contextWindow"]');
+            const maxInput = container.querySelector('[data-field="maxTokens"]');
+            return {
+                ...m,
+                contextWindow: ctxInput ? parseInt(ctxInput.value) || m.contextWindow : m.contextWindow,
+                maxTokens: maxInput ? parseInt(maxInput.value) || m.maxTokens : m.maxTokens
+            };
+        }
+        return m;
+    });
+    status.textContent = i18n.t('saving');
+    try {
+        const res = await fetch('/config/providers/save-custom', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ provider: 'ollama', baseUrl: normalizeOllamaBaseUrl(ollama.baseUrl), api: 'ollama', apiKey: 'ollama-tailscale-local', timeoutSeconds: ollama.timeoutSeconds || 300, models })
+        });
+        const data = await res.json();
+        if (data.ok) {
+            status.className = 'status-msg ok'; status.textContent = i18n.t('saved');
+            setTimeout(() => { providersData = null; loadProviders(); }, 1000);
+        } else {
+            status.className = 'status-msg err'; status.textContent = i18n.t('failed') + (data.error || i18n.t('error'));
+        }
+    } catch(e) {
+        status.className = 'status-msg err'; status.textContent = i18n.t('failed') + e.message;
+    }
 }
 
-async function saveOpenClawLocalProvider(index) {
-    const timeoutRaw = val('oc-local-provider-timeout-' + index);
-    const body = {
-        provider: val('oc-local-provider-id-' + index),
-        baseUrl: val('oc-local-provider-url-' + index),
-        api: val('oc-local-provider-api-' + index),
-        apiKey: val('oc-local-provider-key-' + index),
-        timeoutSeconds: timeoutRaw ? Number(timeoutRaw) : null,
-        models: val('oc-local-provider-models-' + index)
-    };
-    const data = await postJson('/api/native-models/openclaw/provider', body);
-    setStatus('oc-local-provider-status-' + index, data, 'Saved ' + (data.provider || body.provider));
-    if (data.ok) {
-        const keyEl = document.getElementById('oc-local-provider-key-' + index);
-        if (keyEl) keyEl.value = '';
-        setTimeout(reloadNative, 800);
+async function removeOllamaModel(modelId) {
+    if (!confirm(i18n.t('confirm_remove_model').replace('{model}', modelId))) return;
+    const ollama = providersData.customProviders.ollama;
+    const models = (ollama.models || []).filter(m => m.id !== modelId);
+    try {
+        const res = await fetch('/config/providers/save-custom', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ provider: 'ollama', baseUrl: normalizeOllamaBaseUrl(ollama.baseUrl), api: 'ollama', apiKey: 'ollama-tailscale-local', timeoutSeconds: ollama.timeoutSeconds || 300, models })
+        });
+        const data = await res.json();
+        if (data.ok) {
+            providersData = null; loadProviders();
+        }
+    } catch(e) { alert(i18n.t('error') + ': ' + e.message); }
+}
+
+async function addOllamaModel() {
+    const id = document.getElementById('new-ollama-id').value.trim();
+    const name = document.getElementById('new-ollama-name').value.trim();
+    const ctx = parseInt(document.getElementById('new-ollama-ctx').value) || 100000;
+    const max = parseInt(document.getElementById('new-ollama-max').value) || 8192;
+    const status = document.getElementById('new-ollama-status');
+    if (!id) { status.className = 'status-msg err'; status.textContent = i18n.t('model_id_required'); return; }
+
+    const ollama = providersData.customProviders.ollama;
+    const models = [...(ollama.models || []), {
+        id, name: name || id, contextWindow: ctx, maxTokens: max,
+        reasoning: false, input: ["text"], cost: {input:0, output:0, cacheRead:0, cacheWrite:0}
+    }];
+    status.textContent = i18n.t('adding');
+    try {
+        const res = await fetch('/config/providers/save-custom', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ provider: 'ollama', baseUrl: normalizeOllamaBaseUrl(ollama.baseUrl), api: 'ollama', apiKey: 'ollama-tailscale-local', timeoutSeconds: ollama.timeoutSeconds || 300, models })
+        });
+        const data = await res.json();
+        if (data.ok) {
+            status.className = 'status-msg ok'; status.textContent = i18n.t('model_added');
+            document.getElementById('new-ollama-id').value = '';
+            document.getElementById('new-ollama-name').value = '';
+            setTimeout(() => { providersData = null; loadProviders(); }, 1000);
+        } else {
+            status.className = 'status-msg err'; status.textContent = i18n.t('failed') + (data.error || i18n.t('error'));
+        }
+    } catch(e) {
+        status.className = 'status-msg err'; status.textContent = i18n.t('failed') + e.message;
     }
 }
 
@@ -762,9 +583,77 @@ function reloadNative() {
     loadNativeModels().catch(e => {
         document.getElementById('openclaw-models').innerHTML = `<div class="card err">${esc(e.message)}</div>`;
     });
+    status.textContent = i18n.t('saving');
+    try {
+        const res = await fetch('/config/providers/save-custom', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ provider: 'lmstudio', baseUrl: lms.baseUrl, api: 'openai-completions', timeoutSeconds: lms.timeoutSeconds || 300, models })
+        });
+        const data = await res.json();
+        if (data.ok) {
+            status.className = 'status-msg ok'; status.textContent = i18n.t('saved');
+            setTimeout(() => { providersData = null; loadProviders(); }, 1000);
+        } else {
+            status.className = 'status-msg err'; status.textContent = i18n.t('failed') + (data.error || i18n.t('error'));
+        }
+    } catch(e) {
+        status.className = 'status-msg err'; status.textContent = i18n.t('failed') + e.message;
+    }
 }
 
-reloadNative();
+async function removeLMStudioModel(modelId) {
+    if (!confirm(i18n.t('confirm_remove_model').replace('{model}', modelId))) return;
+    const lms = providersData.customProviders.lmstudio;
+    const models = (lms.models || []).filter(m => m.id !== modelId);
+    try {
+        const res = await fetch('/config/providers/save-custom', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ provider: 'lmstudio', baseUrl: lms.baseUrl, api: 'openai-completions', timeoutSeconds: lms.timeoutSeconds || 300, models })
+        });
+        const data = await res.json();
+        if (data.ok) {
+            providersData = null; loadProviders();
+        }
+    } catch(e) { alert(i18n.t('error') + ': ' + e.message); }
+}
+
+async function addLMStudioModel() {
+    const id = document.getElementById('new-lms-id').value.trim();
+    const name = document.getElementById('new-lms-name').value.trim();
+    const ctx = parseInt(document.getElementById('new-lms-ctx').value) || 128000;
+    const max = parseInt(document.getElementById('new-lms-max').value) || 20000;
+    const status = document.getElementById('new-lms-status');
+    if (!id) { status.className = 'status-msg err'; status.textContent = i18n.t('model_id_required'); return; }
+
+    const lms = providersData.customProviders.lmstudio;
+    const models = [...(lms.models || []), {
+        id, name: name || id, contextWindow: ctx, maxTokens: max,
+        reasoning: false, input: ["text"], cost: {input:0, output:0, cacheRead:0, cacheWrite:0}
+    }];
+    status.textContent = i18n.t('adding');
+    try {
+        const res = await fetch('/config/providers/save-custom', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ provider: 'lmstudio', baseUrl: lms.baseUrl, api: 'openai-completions', timeoutSeconds: lms.timeoutSeconds || 300, models })
+        });
+        const data = await res.json();
+        if (data.ok) {
+            status.className = 'status-msg ok'; status.textContent = i18n.t('model_added');
+            document.getElementById('new-lms-id').value = '';
+            document.getElementById('new-lms-name').value = '';
+            setTimeout(() => { providersData = null; loadProviders(); }, 1000);
+        } else {
+            status.className = 'status-msg err'; status.textContent = i18n.t('failed') + (data.error || i18n.t('error'));
+        }
+    } catch(e) {
+        status.className = 'status-msg err'; status.textContent = i18n.t('failed') + e.message;
+    }
+}
+
+// --- Init ---
+loadProviders();
+
+
 </script>
 </body>
 </html>

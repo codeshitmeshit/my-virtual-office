@@ -1,5 +1,7 @@
 // SMS Panel — threaded inbox with per-contact takeover
 (function() {
+    const _t = (key) => typeof i18n !== 'undefined' ? i18n.t(key) : key;
+
     const panel = document.getElementById('sms-panel');
     const toggle = document.getElementById('sms-toggle');
     const closeBtn = document.getElementById('sms-close');
@@ -135,7 +137,7 @@
             }
             updateComposerState();
         } catch (e) {
-            alert('Failed to update thread mode: ' + e.message);
+            alert(_t('failed_update_thread_mode') + ': ' + e.message);
             const revertMode = mode === 'user' ? 'agent' : 'user';
             applyMode(revertMode);
         }
@@ -210,9 +212,9 @@
         if (ownerAgent && ownerAgent.id) {
             const emoji = ownerAgent.emoji || '🤖';
             const name = ownerAgent.name || ownerAgent.id;
-            ownerBadge.textContent = `${emoji} Owner: ${name}`;
+            ownerBadge.textContent = `${emoji} ${_t('owner_label')}: ${name}`;
         } else {
-            ownerBadge.textContent = 'Owner agent not assigned';
+            ownerBadge.textContent = _t('owner_not_assigned');
         }
     }
 
@@ -223,7 +225,7 @@
             const data = await resp.json();
             if (!data.ok) return;
             contactsMap = data.contacts || {};
-            recipientSelect.innerHTML = '<option value="">Select contact...</option>';
+            recipientSelect.innerHTML = `<option value="">${_t('select_contact')}</option>`;
             Object.entries(contactsMap)
                 .sort((a, b) => (a[1]?.name || a[0]).localeCompare(b[1]?.name || b[0]))
                 .forEach(([phone, info]) => {
@@ -265,14 +267,14 @@
         countBadge.textContent = String(threadMap.size);
         countBadge.classList.toggle('attention', waitingCount > 0);
         countBadge.title = waitingCount
-            ? `${waitingCount} thread${waitingCount === 1 ? '' : 's'} waiting on the latest reply`
-            : `${threadMap.size} thread${threadMap.size === 1 ? '' : 's'}`;
+            ? `${waitingCount} ${_t('threads_waiting_latest_reply')}`
+            : `${threadMap.size} ${_t('thread_count_label')}`;
         updateToggleAttention(waitingCount);
 
         if (threadMap.size === 0) {
             const empty = document.createElement('div');
             empty.className = 'sms-empty-state';
-            empty.textContent = 'No SMS threads yet.';
+            empty.textContent = _t('no_sms_threads');
             threadsDiv.appendChild(empty);
             return;
         }
@@ -293,11 +295,11 @@
                     <div class="sms-thread-time">${escapeHtml(formatThreadTime(thread.lastTimestamp))}</div>
                 </div>
                 <div class="sms-thread-phone">${escapeHtml(formatPhone(thread.phone))}</div>
-                <div class="sms-thread-preview">${escapeHtml(thread.lastMessage || 'No messages yet')}</div>
+                <div class="sms-thread-preview">${escapeHtml(thread.lastMessage || _t('no_messages_in_thread'))}</div>
                 <div class="sms-thread-badges">
-                    ${needsAttention ? '<span class="sms-thread-badge latest">Latest reply</span>' : ''}
-                    <span class="sms-thread-badge ${thread.activeMode === 'user' ? 'user' : 'agent'}">${thread.activeMode === 'user' ? 'User active' : 'Agent active'}</span>
-                    <span class="sms-thread-badge">${thread.messageCount || 0} msg</span>
+                    ${needsAttention ? `<span class="sms-thread-badge latest">${_t('latest_reply')}</span>` : ''}
+                    <span class="sms-thread-badge ${thread.activeMode === 'user' ? 'user' : 'agent'}">${thread.activeMode === 'user' ? _t('user_active') : _t('agent_active')}</span>
+                    <span class="sms-thread-badge">${thread.messageCount || 0} ${_t('msg_count')}</span>
                 </div>
             `;
             item.addEventListener('click', () => selectThread(thread.phone));
@@ -386,7 +388,7 @@
 
         messagesDiv.innerHTML = '';
         emptyState.style.display = messages.length ? 'none' : 'block';
-        emptyState.textContent = messages.length ? '' : 'No messages in this thread yet.';
+        emptyState.textContent = messages.length ? '' : _t('no_messages_yet');
         let lastDate = '';
         messages.forEach(msg => {
             const msgDate = formatDate(msg.timestamp);
@@ -406,8 +408,8 @@
         messagesDiv.innerHTML = '';
         messagesDiv.style.display = 'none';
         emptyState.style.display = 'block';
-        emptyState.textContent = 'Select a thread to open the conversation.';
-        threadTitle.textContent = 'SMS Inbox';
+        emptyState.textContent = _t('select_thread_to_open');
+        threadTitle.textContent = _t('sms_inbox');
         threadSubtitle.textContent = getInboxSummary();
     }
 
@@ -415,9 +417,9 @@
         messagesDiv.innerHTML = '';
         messagesDiv.style.display = 'none';
         emptyState.style.display = 'block';
-        emptyState.textContent = message || 'Select a contact thread on the left, or open a number to start a new one.';
-        threadTitle.textContent = 'Select a contact';
-        threadSubtitle.textContent = 'Choose a thread to view the conversation.';
+        emptyState.textContent = message || _t('select_contact_thread');
+        threadTitle.textContent = _t('select_a_contact');
+        threadSubtitle.textContent = _t('choose_thread');
         selectedPhone = '';
         applyMode('agent');
         updateComposerState();
@@ -427,7 +429,7 @@
     function applyMode(mode) {
         const isUser = mode === 'user';
         modeCheck.checked = isUser;
-        modeLabel.textContent = isUser ? 'User' : 'Agent';
+        modeLabel.textContent = isUser ? _t('user_mode') : _t('agent_mode');
         modeLabel.style.color = isUser ? '#ffd700' : '#fff';
         updateComposerState();
     }
@@ -436,7 +438,7 @@
         if (!selectedPhone) {
             inputBox.disabled = true;
             sendBtn.disabled = true;
-            inputBox.placeholder = 'Open a contact thread first...';
+            inputBox.placeholder = _t('open_thread_first');
             return;
         }
         const thread = threadMap.get(selectedPhone);
@@ -444,8 +446,8 @@
         inputBox.disabled = !isUser;
         sendBtn.disabled = !isUser;
         inputBox.placeholder = isUser
-            ? 'Type a message as you...'
-            : 'Agent owns this thread. Switch it to User to reply manually...';
+            ? _t('type_message')
+            : _t('agent_owns_thread');
     }
 
     function appendMessage(msg, thread) {
@@ -538,12 +540,12 @@
                 })
             });
             const result = await resp.json();
-            if (!result.ok) throw new Error(result.error || 'Unknown SMS error');
+            if (!result.ok) throw new Error(result.error || _t('unknown_sms_error'));
             inputBox.value = '';
             await Promise.all([loadContacts(), loadThreads()]);
             await loadThread(selectedPhone);
         } catch (e) {
-            alert('SMS failed: ' + e.message);
+            alert(_t('sms_failed') + ': ' + e.message);
         } finally {
             sendBtn.textContent = '▶';
             updateComposerState();
@@ -940,19 +942,19 @@
         toggle.classList.toggle('sms-toggle-alert', waitingCount > 0);
         if (waitingCount > 0) {
             toggle.dataset.alertCount = waitingCount > 9 ? '9+' : String(waitingCount);
-            toggle.title = `SMS/Phone Panel (${waitingCount} thread${waitingCount === 1 ? '' : 's'} with latest reply)`;
+            toggle.title = `${_t('sms_phone_panel')} (${waitingCount} ${_t('threads_with_latest_reply')})`;
         } else {
             delete toggle.dataset.alertCount;
-            toggle.title = 'SMS/Phone Panel';
+            toggle.title = _t('sms_phone_panel');
         }
     }
 
     function getInboxSummary() {
         const threads = Array.from(threadMap.values());
         const waitingCount = threads.filter(isThreadWaiting).length;
-        if (!threads.length) return 'No active SMS threads yet.';
-        if (!waitingCount) return `${threads.length} thread${threads.length === 1 ? '' : 's'} synced.`;
-        return `${waitingCount} thread${waitingCount === 1 ? '' : 's'} with the latest reply.`;
+        if (!threads.length) return _t('no_active_threads');
+        if (!waitingCount) return `${threads.length} ${_t('threads_synced')}.`;
+        return `${waitingCount} ${_t('threads_with_latest_reply')}.`;
     }
 
     function getRecipient() {

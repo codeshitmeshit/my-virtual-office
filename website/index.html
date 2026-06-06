@@ -9,6 +9,18 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Press+Start+2P&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="styles.css">
+    <script id="locale-en" type="application/json">{}</script>
+    <script id="locale-zh" type="application/json">{}</script>
+    <script src="../app/i18n.js"></script>
+    <script>
+    (function(){
+        var lang='en';
+        try{var s=localStorage.getItem('vo-i18n-lang');if(s==='zh')lang='zh';else if(navigator.language&&navigator.language.toLowerCase().indexOf('zh')>=0)lang='zh';}catch(e){}
+        var eE=document.getElementById('locale-en'),eZ=document.getElementById('locale-zh');
+        function load(l,el){fetch('../app/locales/'+l+'.json').then(function(r){return r.json()}).then(function(d){el.textContent=JSON.stringify(d)}).catch(function(){});}
+        load('en',eE);load('zh',eZ);
+    })();
+    </script>
 </head>
 <body>
 
@@ -17,32 +29,32 @@
     <div class="nav-inner">
         <a href="#" class="logo">
             <span class="logo-mark">⚡</span>
-            <span class="logo-text">Your Virtual Office</span>
+            <span class="logo-text" data-i18n="site_logo_text">Your Virtual Office</span>
         </a>
         <nav class="nav-links">
-            <a href="#features">Features</a>
-            <a href="#demo">Demo</a>
-            <a href="#pricing">Pricing</a>
-            <a href="#setup">Setup</a>
+            <a href="#features" data-i18n="nav_features">Features</a>
+            <a href="#demo" data-i18n="nav_demo">Demo</a>
+            <a href="#pricing" data-i18n="nav_pricing">Pricing</a>
+            <a href="#setup" data-i18n="nav_setup">Setup</a>
         </nav>
-        <a href="#pricing" class="nav-cta">Get It Now</a>
+        <a href="#pricing" class="nav-cta" data-i18n="nav_cta">Get It Now</a>
     </div>
 </header>
 
 <!-- Hero -->
 <section class="hero">
     <div class="hero-inner">
-        <div class="hero-badge">Built for OpenClaw</div>
-        <h1>Your AI agents deserve<br>an <span class="gradient-text">office</span>.</h1>
-        <p class="hero-sub">A live 2D AI workspace where your AI agents walk, work, and talk. Watch them in real time. Chat with them. Customize everything. Self-hosted with Docker.</p>
+        <div class="hero-badge" data-i18n="hero_bad">Built for OpenClaw</div>
+        <h1 data-i18n="hero_title">Your AI agents deserve<br>an <span class="gradient-text">office</span>.</h1>
+        <p class="hero-sub" data-i18n="hero_sub">A live pixel-art workspace where your AI agents walk, work, and talk. Watch them in real time. Chat with them. Customize everything. Self-hosted with Docker.</p>
         <div class="hero-buttons">
-            <a href="#pricing" class="btn btn-primary btn-lg">Get Early Access — $9.99</a>
-            <a href="#demo" class="btn btn-ghost btn-lg">See It In Action ↓</a>
+            <a href="#pricing" class="btn btn-primary btn-lg" data-i18n="hero_cta_primary">Get Early Access — $9.99</a>
+            <a href="#demo" class="btn btn-ghost btn-lg" data-i18n="hero_cta_secondary">See It In Action ↓</a>
         </div>
         <div class="hero-proof">
-            <div class="proof-item">🐳 One Docker command</div>
-            <div class="proof-item">🔒 Self-hosted, your data</div>
-            <div class="proof-item">⚡ Works with any OpenClaw setup</div>
+            <div class="proof-item" data-i18n="hero_proof_1">🐳 One Docker command</div>
+            <div class="proof-item" data-i18n="hero_proof_2">🔒 Self-hosted, your data</div>
+            <div class="proof-item" data-i18n="hero_proof_3">⚡ Works with any OpenClaw setup</div>
         </div>
     </div>
 
@@ -51,7 +63,7 @@
         <div class="preview-window">
             <div class="preview-titlebar">
                 <div class="titlebar-dots"><span></span><span></span><span></span></div>
-                <div class="titlebar-text">Your Virtual Office — localhost:8090</div>
+                <div class="titlebar-text" data-i18n="preview_titlebar">Your Virtual Office — localhost:8090</div>
             </div>
             <div class="preview-canvas">
                 <div class="floor"></div>
@@ -64,22 +76,22 @@
                 <div class="p-agent a1" style="left:14%;top:42%">
                     <div class="agent-body" style="background:#ffd700"></div>
                     <div class="agent-label">Elix ⚡</div>
-                    <div class="agent-status working">Working</div>
+                    <div class="agent-status working" data-i18n="status_working">Working</div>
                 </div>
                 <div class="p-agent a2" style="left:39%;top:57%">
                     <div class="agent-body" style="background:#4ecdc4"></div>
                     <div class="agent-label">Moe 🔧</div>
-                    <div class="agent-status idle">Idle</div>
+                    <div class="agent-status idle" data-i18n="status_idle">Idle</div>
                 </div>
                 <div class="p-agent a3" style="right:19%;top:47%">
                     <div class="agent-body" style="background:#ff6b6b"></div>
                     <div class="agent-label">Flo 📐</div>
-                    <div class="agent-status working">Delegating</div>
+                    <div class="agent-status working" data-i18n="status_delegating">Delegating</div>
                 </div>
                 <div class="p-agent a4" style="left:64%;top:72%">
                     <div class="agent-body" style="background:#a29bfe"></div>
                     <div class="agent-label">Ana 📊</div>
-                    <div class="agent-status idle">Idle</div>
+                    <div class="agent-status idle" data-i18n="status_idle_2">Idle</div>
                 </div>
                 <!-- Chat bubble -->
                 <div class="p-chat" style="left:32%;top:20%">
@@ -87,7 +99,7 @@
                 </div>
                 <!-- Sidebar mockup -->
                 <div class="p-sidebar">
-                    <div class="sb-title">💬 Chat</div>
+                    <div class="sb-title" data-i18n="sidebar_chat">💬 Chat</div>
                     <div class="sb-agent"><span style="color:#ffd700">⚡</span> Elix</div>
                     <div class="sb-agent active"><span style="color:#4ecdc4">🔧</span> Moe</div>
                     <div class="sb-agent"><span style="color:#ff6b6b">📐</span> Flo</div>
@@ -102,54 +114,54 @@
 <section id="features" class="features">
     <div class="section-inner">
         <div class="section-header">
-            <div class="section-badge">Features</div>
-            <h2>Everything your AI team needs.<br>In one place.</h2>
+            <div class="section-badge" data-i18n="features_badge">Features</div>
+            <h2 data-i18n="features_title">Everything your AI team needs.<br>In one place.</h2>
         </div>
         <div class="feature-grid">
             <div class="feature-card">
                 <div class="feature-icon">👀</div>
-                <h3>Live Agent Presence</h3>
-                <p>See which agents are working, idle, or in meetings. 2D characters walk around the office in real time.</p>
+                <h3 data-i18n="feat_live_presence">Live Agent Presence</h3>
+                <p data-i18n="feat_live_presence_desc">See which agents are working, idle, or in meetings. Pixel-art characters walk around the office in real time.</p>
             </div>
             <div class="feature-card">
                 <div class="feature-icon">💬</div>
-                <h3>Built-in Chat</h3>
-                <p>Talk to any agent directly from the office. Chat bubbles appear above agents showing live conversations.</p>
+                <h3 data-i18n="feat_chat">Built-in Chat</h3>
+                <p data-i18n="feat_chat_desc">Talk to any agent directly from the office. Chat bubbles appear above agents showing live conversations.</p>
             </div>
             <div class="feature-card">
                 <div class="feature-icon">✏️</div>
-                <h3>Office Editor</h3>
-                <p>Place desks, furniture, walls, and doors. Paint floors and walls. Create branches and rooms. Make it yours.</p>
+                <h3 data-i18n="feat_editor">Office Editor</h3>
+                <p data-i18n="feat_editor_desc">Place desks, furniture, walls, and doors. Paint floors and walls. Create branches and rooms. Make it yours.</p>
             </div>
             <div class="feature-card">
                 <div class="feature-icon">🌐</div>
-                <h3>Agent Browser</h3>
-                <p>Give agents a real browser and watch them browse live. Floating popup with Take Control mode.</p>
+                <h3 data-i18n="feat_browser">Agent Browser</h3>
+                <p data-i18n="feat_browser_desc">Give agents a real browser and watch them browse live. Floating popup with Take Control mode.</p>
             </div>
             <div class="feature-card">
                 <div class="feature-icon">🤖</div>
-                <h3>Model Manager</h3>
-                <p>Switch agent models on the fly. Supports Anthropic, OpenAI, Google, Ollama, LM Studio, and any OpenAI-compatible provider.</p>
+                <h3 data-i18n="feat_model_mgr">Model Manager</h3>
+                <p data-i18n="feat_model_mgr_desc">Switch agent models on the fly. Supports Anthropic, OpenAI, Google, Ollama, LM Studio, and any OpenAI-compatible provider.</p>
             </div>
             <div class="feature-card">
                 <div class="feature-icon">⏰</div>
-                <h3>Cron & Scheduling</h3>
-                <p>Create scheduled tasks for any agent. System events, standalone runs, one-shots — all from a visual UI.</p>
+                <h3 data-i18n="feat_cron">Cron & Scheduling</h3>
+                <p data-i18n="feat_cron_desc">Create scheduled tasks for any agent. System events, standalone runs, one-shots — all from a visual UI.</p>
             </div>
             <div class="feature-card">
                 <div class="feature-icon">📱</div>
-                <h3>SMS Panel</h3>
-                <p>Send and receive text messages through agents via Twilio. Monitor conversations and intervene when needed.</p>
+                <h3 data-i18n="feat_sms">SMS Panel</h3>
+                <p data-i18n="feat_sms_desc">Send and receive text messages through agents via Twilio. Monitor conversations and intervene when needed.</p>
             </div>
             <div class="feature-card">
                 <div class="feature-icon">🎨</div>
-                <h3>Full Customization</h3>
-                <p>Agent appearances, desk positions, wall colors, floor tiles, day/night cycle, weather — customize everything.</p>
+                <h3 data-i18n="feat_custom">Full Customization</h3>
+                <p data-i18n="feat_custom_desc">Agent appearances, desk positions, wall colors, floor tiles, day/night cycle, weather — customize everything.</p>
             </div>
             <div class="feature-card">
                 <div class="feature-icon">📊</div>
-                <h3>API Usage Tracking</h3>
-                <p>Monitor token usage and costs across all providers. See which agents consume the most resources.</p>
+                <h3 data-i18n="feat_api_usage">API Usage Tracking</h3>
+                <p data-i18n="feat_api_usage_desc">Monitor token usage and costs across all providers. See which agents consume the most resources.</p>
             </div>
         </div>
     </div>
@@ -159,40 +171,40 @@
 <section id="demo" class="demo-section">
     <div class="section-inner">
         <div class="section-header">
-            <div class="section-badge">See It Live</div>
-            <h2>More than a dashboard.<br>A living workspace.</h2>
-            <p class="section-sub">Agents don't just show status — they walk around, visit each other, hold meetings at tables, and wander to the lounge when idle.</p>
+            <div class="section-badge" data-i18n="demo_badge">See It Live</div>
+            <h2 data-i18n="demo_title">More than a dashboard.<br>A living workspace.</h2>
+            <p class="section-sub" data-i18n="demo_sub">Agents don't just show status — they walk around, visit each other, hold meetings at tables, and wander to the lounge when idle.</p>
         </div>
         <div class="demo-grid">
             <div class="demo-card">
                 <div class="demo-visual">
                     <div class="demo-placeholder">
-                        <div class="placeholder-label">📸 Office Overview</div>
-                        <div class="placeholder-hint">Screenshot coming soon</div>
+                        <div class="placeholder-label" data-i18n="demo_placeholder_1">📸 Office Overview</div>
+                        <div class="placeholder-hint" data-i18n="demo_hint">Screenshot coming soon</div>
                     </div>
                 </div>
-                <h3>Your agents, visible</h3>
-                <p>15+ agents occupying desks, walking hallways, holding 1:1 meetings. Each with a unique 2D appearance.</p>
+                <h3 data-i18n="demo_card1_title">Your agents, visible</h3>
+                <p data-i18n="demo_card1_desc">15+ agents occupying desks, walking hallways, holding 1:1 meetings. Each with unique pixel-art appearance.</p>
             </div>
             <div class="demo-card">
                 <div class="demo-visual">
                     <div class="demo-placeholder">
-                        <div class="placeholder-label">✏️ Office Editor</div>
-                        <div class="placeholder-hint">Screenshot coming soon</div>
+                        <div class="placeholder-label" data-i18n="demo_placeholder_2">✏️ Office Editor</div>
+                        <div class="placeholder-hint" data-i18n="demo_hint_2">Screenshot coming soon</div>
                     </div>
                 </div>
-                <h3>Build your layout</h3>
-                <p>Drag-and-drop furniture, paint walls, create rooms and branches. Canvas expands as your team grows.</p>
+                <h3 data-i18n="demo_card2_title">Build your layout</h3>
+                <p data-i18n="demo_card2_desc">Drag-and-drop furniture, paint walls, create rooms and branches. Canvas expands as your team grows.</p>
             </div>
             <div class="demo-card">
                 <div class="demo-visual">
                     <div class="demo-placeholder">
-                        <div class="placeholder-label">🌐 Browser Panel</div>
-                        <div class="placeholder-hint">Screenshot coming soon</div>
+                        <div class="placeholder-label" data-i18n="demo_placeholder_3">🌐 Browser Panel</div>
+                        <div class="placeholder-hint" data-i18n="demo_hint_3">Screenshot coming soon</div>
                     </div>
                 </div>
-                <h3>Watch agents browse</h3>
-                <p>Live browser view with floating popup. See exactly what your agents see. Take control when needed.</p>
+                <h3 data-i18n="demo_card3_title">Watch agents browse</h3>
+                <p data-i18n="demo_card3_desc">Live browser view with floating popup. See exactly what your agents see. Take control when needed.</p>
             </div>
         </div>
     </div>
@@ -202,61 +214,61 @@
 <section id="pricing" class="pricing-section">
     <div class="section-inner">
         <div class="section-header">
-            <div class="section-badge">Pricing</div>
-            <h2>One price. No subscription.<br>Yours forever.</h2>
-            <p class="section-sub">Pay once, self-host forever. Free updates included.</p>
+            <div class="section-badge" data-i18n="pricing_badge">Pricing</div>
+            <h2 data-i18n="pricing_title">One price. No subscription.<br>Yours forever.</h2>
+            <p class="section-sub" data-i18n="pricing_sub">Pay once, self-host forever. Free updates included.</p>
         </div>
         <div class="pricing-grid">
             <div class="pricing-card">
-                <div class="price-tier">Free Demo</div>
+                <div class="price-tier" data-i18n="price_tier_free">Free Demo</div>
                 <div class="price-amount">$0</div>
-                <div class="price-period">forever</div>
+                <div class="price-period" data-i18n="price_period_forever">forever</div>
                 <ul class="price-features">
-                    <li class="included">Up to 3 agents</li>
-                    <li class="included">Live presence & chat</li>
-                    <li class="included">Office editor</li>
-                    <li class="included">Model manager</li>
-                    <li class="included">API usage tracking</li>
-                    <li class="excluded">Browser panel</li>
-                    <li class="excluded">SMS panel</li>
-                    <li class="excluded">Cron manager</li>
-                    <li class="excluded">Whisper (voice input)</li>
-                    <li class="excluded">Demo watermark</li>
+                    <li class="included" data-i18n="price_free_1">Up to 3 agents</li>
+                    <li class="included" data-i18n="price_free_2">Live presence & chat</li>
+                    <li class="included" data-i18n="price_free_3">Office editor</li>
+                    <li class="included" data-i18n="price_free_4">Model manager</li>
+                    <li class="included" data-i18n="price_free_5">API usage tracking</li>
+                    <li class="excluded" data-i18n="price_free_6">Browser panel</li>
+                    <li class="excluded" data-i18n="price_free_7">SMS panel</li>
+                    <li class="excluded" data-i18n="price_free_8">Cron manager</li>
+                    <li class="excluded" data-i18n="price_free_9">Whisper (voice input)</li>
+                    <li class="excluded" data-i18n="price_free_10">Demo watermark</li>
                 </ul>
-                <a href="https://github.com/eliautobot/my-virtual-office" class="btn btn-ghost btn-full" target="_blank">Download Free</a>
+                <a href="https://github.com/yourvirtualoffice/app" class="btn btn-ghost btn-full" target="_blank" data-i18n="price_btn_free">Download Free</a>
             </div>
             <div class="pricing-card featured">
-                <div class="price-badge">🔥 EARLY BIRD — LIMITED</div>
-                <div class="price-tier">Full License</div>
+                <div class="price-badge" data-i18n="price_early_bird_badge">🔥 EARLY BIRD — LIMITED</div>
+                <div class="price-tier" data-i18n="price_tier_early">Full License</div>
                 <div class="price-amount"><span class="price-strike">$35.99</span> $9.99</div>
-                <div class="price-period">one-time payment</div>
+                <div class="price-period" data-i18n="price_period_onetime">one-time payment</div>
                 <ul class="price-features">
-                    <li class="included"><strong>Unlimited agents</strong></li>
-                    <li class="included">Live presence & chat</li>
-                    <li class="included">Office editor</li>
-                    <li class="included">Model manager</li>
-                    <li class="included">API usage tracking</li>
-                    <li class="included"><strong>Browser panel</strong></li>
-                    <li class="included"><strong>SMS panel</strong></li>
-                    <li class="included"><strong>Cron manager</strong></li>
-                    <li class="included"><strong>Whisper (voice input)</strong></li>
-                    <li class="included"><strong>No watermark</strong></li>
+                    <li class="included" data-i18n="price_early_1"><strong>Unlimited agents</strong></li>
+                    <li class="included" data-i18n="price_early_2">Live presence & chat</li>
+                    <li class="included" data-i18n="price_early_3">Office editor</li>
+                    <li class="included" data-i18n="price_early_4">Model manager</li>
+                    <li class="included" data-i18n="price_early_5">API usage tracking</li>
+                    <li class="included" data-i18n="price_early_6"><strong>Browser panel</strong></li>
+                    <li class="included" data-i18n="price_early_7"><strong>SMS panel</strong></li>
+                    <li class="included" data-i18n="price_early_8"><strong>Cron manager</strong></li>
+                    <li class="included" data-i18n="price_early_9"><strong>Whisper (voice input)</strong></li>
+                    <li class="included" data-i18n="price_early_10"><strong>No watermark</strong></li>
                 </ul>
-                <a href="#" class="btn btn-primary btn-full" id="buy-btn">Get License Key — $9.99</a>
-                <div class="price-note">Instant delivery. Enter key in setup wizard.</div>
+                <a href="#" class="btn btn-primary btn-full" id="buy-btn" data-i18n="price_btn_early">Get License Key — $9.99</a>
+                <div class="price-note" data-i18n="price_note_early">Instant delivery. Enter key in setup wizard.</div>
             </div>
             <div class="pricing-card">
-                <div class="price-tier">Full Price</div>
+                <div class="price-tier" data-i18n="price_tier_full">Full Price</div>
                 <div class="price-amount">$35.99</div>
-                <div class="price-period">one-time payment</div>
+                <div class="price-period" data-i18n="price_period_onetime_2">one-time payment</div>
                 <ul class="price-features">
-                    <li class="included"><strong>Unlimited agents</strong></li>
-                    <li class="included">Everything in Early Bird</li>
-                    <li class="included">Same features, same updates</li>
-                    <li class="included">Support the project at full price</li>
+                    <li class="included" data-i18n="price_full_1"><strong>Unlimited agents</strong></li>
+                    <li class="included" data-i18n="price_full_2">Everything in Early Bird</li>
+                    <li class="included" data-i18n="price_full_3">Same features, same updates</li>
+                    <li class="included" data-i18n="price_full_4">Support the project at full price</li>
                 </ul>
-                <a href="#" class="btn btn-ghost btn-full" id="buy-full-btn">Get License Key — $35.99</a>
-                <div class="price-note">Same product. For those who want to pay full.</div>
+                <a href="#" class="btn btn-ghost btn-full" id="buy-full-btn" data-i18n="price_btn_full">Get License Key — $35.99</a>
+                <div class="price-note" data-i18n="price_note_full">Same product. For those who want to pay full.</div>
             </div>
         </div>
     </div>
@@ -266,15 +278,15 @@
 <section id="setup" class="setup-section">
     <div class="section-inner">
         <div class="section-header">
-            <div class="section-badge">Get Started</div>
-            <h2>Up and running in 60 seconds.</h2>
+            <div class="section-badge" data-i18n="setup_badge">Get Started</div>
+            <h2 data-i18n="setup_title">Up and running in 60 seconds.</h2>
         </div>
         <div class="setup-grid">
             <div class="setup-steps">
                 <div class="setup-step">
                     <div class="step-num">1</div>
                     <div class="step-content">
-                        <h3>Run the Docker command</h3>
+                        <h3 data-i18n="setup_step1_title">Run the Docker command</h3>
                         <div class="code-block">
                             <code>docker run -d --name virtual-office \
   --network host \
@@ -287,42 +299,42 @@
                 <div class="setup-step">
                     <div class="step-num">2</div>
                     <div class="step-content">
-                        <h3>Open in your browser</h3>
-                        <p>Go to <code>http://localhost:8090</code> — the setup wizard walks you through connecting to OpenClaw and detecting your agents.</p>
+                        <h3 data-i18n="setup_step2_title">Open in your browser</h3>
+                        <p data-i18n="setup_step2_desc">Go to <code>http://localhost:8090</code> — the setup wizard walks you through connecting to OpenClaw and detecting your agents.</p>
                     </div>
                 </div>
                 <div class="setup-step">
                     <div class="step-num">3</div>
                     <div class="step-content">
-                        <h3>Enter your license key</h3>
-                        <p>Paste your key in the setup wizard to unlock all features. Or skip and use the free demo with 3 agents.</p>
+                        <h3 data-i18n="setup_step3_title">Enter your license key</h3>
+                        <p data-i18n="setup_step3_desc">Paste your key in the setup wizard to unlock all features. Or skip and use the free demo with 3 agents.</p>
                     </div>
                 </div>
                 <div class="setup-step">
                     <div class="step-num">4</div>
                     <div class="step-content">
-                        <h3>Build your office</h3>
-                        <p>Place furniture, assign desks, customize agent appearances, paint walls. Make it yours.</p>
+                        <h3 data-i18n="setup_step4_title">Build your office</h3>
+                        <p data-i18n="setup_step4_desc">Place furniture, assign desks, customize agent appearances, paint walls. Make it yours.</p>
                     </div>
                 </div>
             </div>
             <div class="setup-terminal">
                 <div class="terminal-bar">
                     <span></span><span></span><span></span>
-                    <div class="terminal-title">Terminal</div>
+                    <div class="terminal-title" data-i18n="terminal_title">Terminal</div>
                 </div>
                 <div class="terminal-body">
                     <div class="term-line"><span class="term-prompt">$</span> docker run -d --name virtual-office \</div>
                     <div class="term-line dim">    --network host \</div>
                     <div class="term-line dim">    -v ~/.openclaw:/openclaw \</div>
                     <div class="term-line dim">    -v vo-data:/data \</div>
-                    <div class="term-line dim">    ghcr.io/eliautobot/my-virtual-office:latest</div>
-                    <div class="term-line"><span class="term-out">→</span> Container started</div>
+                    <div class="term-line dim">    ghcr.io/yourvirtualoffice/app:latest</div>
+                    <div class="term-line"><span class="term-out">→</span> <span data-i18n="term_started">Container started</span></div>
                     <div class="term-line">&nbsp;</div>
                     <div class="term-line"><span class="term-prompt">$</span> open http://localhost:8090</div>
-                    <div class="term-line"><span class="term-out">🏢</span> Your Virtual Office is ready!</div>
-                    <div class="term-line"><span class="term-out">⚡</span> 12 agents detected</div>
-                    <div class="term-line"><span class="term-out">✅</span> Setup wizard loaded</div>
+                    <div class="term-line"><span class="term-out">🏢</span> <span data-i18n="term_ready">Your Virtual Office is ready!</span></div>
+                    <div class="term-line"><span class="term-out">⚡</span> <span data-i18n="term_agents">12 agents detected</span></div>
+                    <div class="term-line"><span class="term-out">✅</span> <span data-i18n="term_setup">Setup wizard loaded</span></div>
                 </div>
             </div>
         </div>
@@ -333,32 +345,32 @@
 <section class="faq-section">
     <div class="section-inner">
         <div class="section-header">
-            <h2>FAQ</h2>
+            <h2 data-i18n="faq_title">FAQ</h2>
         </div>
         <div class="faq-grid">
             <div class="faq-item">
-                <h3>What do I need to run this?</h3>
-                <p>Docker and an OpenClaw installation. That's it. Works on Linux, Mac, and Windows (WSL).</p>
+                <h3 data-i18n="faq_q1">What do I need to run this?</h3>
+                <p data-i18n="faq_a1">Docker and an OpenClaw installation. That's it. Works on Linux, Mac, and Windows (WSL).</p>
             </div>
             <div class="faq-item">
-                <h3>Is this a SaaS?</h3>
-                <p>No. It's self-hosted software you run on your own machine. Your data never leaves your server. No accounts, no telemetry.</p>
+                <h3 data-i18n="faq_q2">Is this a SaaS?</h3>
+                <p data-i18n="faq_a2">No. It's self-hosted software you run on your own machine. Your data never leaves your server. No accounts, no telemetry.</p>
             </div>
             <div class="faq-item">
-                <h3>How do updates work?</h3>
-                <p><code>docker pull</code> and restart. Your config and customizations are stored in a mounted volume — updates don't touch them.</p>
+                <h3 data-i18n="faq_q3">How do updates work?</h3>
+                <p data-i18n="faq_a3"><code>docker pull</code> and restart. Your config and customizations are stored in a mounted volume — updates don't touch them.</p>
             </div>
             <div class="faq-item">
-                <h3>Can I try before buying?</h3>
-                <p>Yes. The free demo includes 3 agents, chat, presence, the editor, and the model manager. No key required.</p>
+                <h3 data-i18n="faq_q4">Can I try before buying?</h3>
+                <p data-i18n="faq_a4">Yes. The free demo includes 3 agents, chat, presence, the editor, and the model manager. No key required.</p>
             </div>
             <div class="faq-item">
-                <h3>What's the difference between Early Bird and Full?</h3>
-                <p>Nothing — same product, same features, same updates. Early Bird is just a limited-time launch discount. Get it while it lasts.</p>
+                <h3 data-i18n="faq_q5">What's the difference between Early Bird and Full?</h3>
+                <p data-i18n="faq_a5">Nothing — same product, same features, same updates. Early Bird is just a limited-time launch discount. Get it while it lasts.</p>
             </div>
             <div class="faq-item">
-                <h3>What is OpenClaw?</h3>
-                <p>OpenClaw is an open-source AI agent framework. Virtual Office is a visual layer that runs on top of it. <a href="https://github.com/openclaw/openclaw" target="_blank">Learn more →</a></p>
+                <h3 data-i18n="faq_q6">What is OpenClaw?</h3>
+                <p data-i18n="faq_a6">OpenClaw is an open-source AI agent framework. Virtual Office is a visual layer that runs on top of it. <a href="https://github.com/openclaw/openclaw" target="_blank" data-i18n="faq_learn_more">Learn more →</a></p>
             </div>
         </div>
     </div>
@@ -369,14 +381,14 @@
     <div class="footer-inner">
         <div class="footer-brand">
             <span class="logo-mark">⚡</span>
-            <span>Your Virtual Office</span>
+            <span data-i18n="footer_brand">Your Virtual Office</span>
         </div>
         <div class="footer-links">
-            <a href="https://github.com/eliautobot/my-virtual-office" target="_blank">Source</a>
-            <a href="https://discord.com/invite/clawd" target="_blank">Discord</a>
-            <a href="mailto:support@yourvirtualoffice.com">Support</a>
+            <a href="https://github.com/yourvirtualoffice/app" target="_blank" data-i18n="footer_github">GitHub</a>
+            <a href="https://discord.com/invite/clawd" target="_blank" data-i18n="footer_discord">Discord</a>
+            <a href="mailto:support@yourvirtualoffice.com" data-i18n="footer_support">Support</a>
         </div>
-        <div class="footer-copy">© 2026 Your Virtual Office. Open source under AGPL-3.0-or-later.</div>
+        <div class="footer-copy" data-i18n="footer_copy">© 2026 Your Virtual Office. MIT License.</div>
     </div>
 </footer>
 

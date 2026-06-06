@@ -105,13 +105,13 @@ var W = _officeConfig.canvasWidth;
 var H = _officeConfig.canvasHeight;
 
 const DEFAULT_BRANCHES = [
-    { id: 'HQ', name: 'Office Manager', emoji: '⚡', theme: 'branch-gold' },
-    { id: 'PQ', name: 'Pro Quality Plumbing', emoji: '🔧', theme: 'branch-blue' },
-    { id: 'ENG', name: 'Caltran Engineering', emoji: '🏗️', theme: 'branch-orange' },
-    { id: 'GEN', name: 'General Office', emoji: '🌐', theme: 'branch-cyan' },
-    { id: 'BIZ', name: 'Business', emoji: '🔥', theme: 'branch-red' }
+    { id: 'HQ', name: typeof i18n !== 'undefined' ? i18n.t('branch_hq') : 'Office Manager', emoji: '⚡', theme: 'branch-gold' },
+    { id: 'PQ', name: typeof i18n !== 'undefined' ? i18n.t('branch_pq') : 'Pro Quality Plumbing', emoji: '🔧', theme: 'branch-blue' },
+    { id: 'ENG', name: typeof i18n !== 'undefined' ? i18n.t('branch_eng') : 'Caltran Engineering', emoji: '🏗️', theme: 'branch-orange' },
+    { id: 'GEN', name: typeof i18n !== 'undefined' ? i18n.t('branch_gen') : 'General Office', emoji: '🌐', theme: 'branch-cyan' },
+    { id: 'BIZ', name: typeof i18n !== 'undefined' ? i18n.t('branch_biz') : 'Business', emoji: '🔥', theme: 'branch-red' }
 ];
-const UNASSIGNED_BRANCH = { id: 'UNASSIGNED', name: 'Unassigned', emoji: '❓', theme: 'branch-gray' };
+const UNASSIGNED_BRANCH = { id: 'UNASSIGNED', name: typeof i18n !== 'undefined' ? i18n.t('branch_unassigned') : 'Unassigned', emoji: '❓', theme: 'branch-gray' };
 
 var _branchListCache = null;
 var _branchMapCache = null;
@@ -1318,13 +1318,13 @@ function cycleTimeOverride() {
     if (mode === null) {
         _timeOverride = null;
         _timeLapse = false;
-        if (btn) { btn.textContent = '☀️'; btn.title = 'Time: Real time'; }
+        if (btn) { btn.textContent = '☀️'; btn.title = typeof i18n !== 'undefined' ? i18n.t('time_real') : 'Time: Real time'; }
         console.log('Time override OFF — real time');
     } else if (mode === 'lapse') {
         _timeOverride = null;
         _timeLapse = true;
         _timeLapseStart = Date.now();
-        if (btn) { btn.textContent = '⏩'; btn.title = 'Time: Lapse (24h in 60s)'; }
+        if (btn) { btn.textContent = '⏩'; btn.title = typeof i18n !== 'undefined' ? i18n.t('time_lapse') : 'Time: Lapse (24h in 60s)'; }
         console.log('Time-lapse ON — 24h in 60s');
     } else {
         _timeOverride = mode;
@@ -4610,7 +4610,7 @@ function processMeetings(meetingsData) {
                 });
             }
             activeMeetings[m.id] = { agents: meetingAgents, topic, purpose, type, organizer: m.organizer || participantKeys[0] || '', kind: m.kind || 'discussion', rules: m.rules || null, slotAssignments };
-            addGlobalLog(`📊 Meeting: ${meetingAgents.map(a => a.name).join(', ')} — ${topic}`);
+            addGlobalLog(`📊 ` + (typeof i18n !== 'undefined' ? i18n.t('meeting_prefix') : 'Meeting') + `: ${meetingAgents.map(a => a.name).join(', ')} — ${topic}`);
         }
     }
 }
@@ -4624,7 +4624,7 @@ function endMeeting(meetingId) {
         }
     });
     delete activeMeetings[meetingId];
-    addGlobalLog(`✅ Meeting ended: ${meeting.topic}`);
+    addGlobalLog(`✅ ` + (typeof i18n !== 'undefined' ? i18n.t('meeting_ended') : 'Meeting ended') + `: ${meeting.topic}`);
 }
 
 // --- STATUS POLLING ---
@@ -4693,7 +4693,7 @@ async function pollStatus() {
             if (entry.notify) {
                 if (!agent.notify && !dismissedNotify.has(agent.statusKey)) {
                     agent.notify = true;
-                    addGlobalLog(`🔔 ${agent.name} has a response!`);
+                    addGlobalLog(`🔔 ${agent.name} ` + (typeof i18n !== 'undefined' ? i18n.t('has_response') : 'has a response') + `!`);
                 }
             } else {
                 // Server confirmed cleared — remove from dismissed set
@@ -4810,11 +4810,11 @@ function updateSidebar() {
         if (branch.id !== 'UNASSIGNED') {
             const editBtn = document.createElement('button');
             editBtn.textContent = '✏️';
-            editBtn.title = 'Edit branch';
+            editBtn.title = typeof i18n !== 'undefined' ? i18n.t('edit_branch') : 'Edit branch';
             editBtn.onclick = function(e) { e.stopPropagation(); branchEditPrompt(branch.id); };
             const delBtn = document.createElement('button');
             delBtn.textContent = '🗑️';
-            delBtn.title = 'Delete branch';
+            delBtn.title = typeof i18n !== 'undefined' ? i18n.t('delete_branch') : 'Delete branch';
             delBtn.onclick = function(e) { e.stopPropagation(); branchDeletePrompt(branch.id); };
             actions.appendChild(editBtn);
             actions.appendChild(delBtn);
@@ -4832,7 +4832,7 @@ function updateSidebar() {
         if (branch.id === 'UNASSIGNED') {
             const note = document.createElement('div');
             note.className = 'branch-unassigned-note';
-            note.textContent = 'Deleting a branch moves agents here.';
+            note.textContent = typeof i18n !== 'undefined' ? i18n.t('delete_branch_note') : 'Deleting a branch moves agents here.';
             body.appendChild(note);
         }
         section.appendChild(body);
@@ -4847,9 +4847,9 @@ function updateSidebar() {
 setInterval(updateSidebar, 1000);
 
 function branchCreatePrompt() {
-    var name = prompt('New branch name:');
+    var name = prompt(typeof i18n !== 'undefined' ? i18n.t('new_branch_name_prompt') : 'New branch name:');
     if (!name) return;
-    var emoji = prompt('Branch emoji:', '🏢') || '🏢';
+    var emoji = prompt(typeof i18n !== 'undefined' ? i18n.t('branch_emoji_prompt') : 'Branch emoji:', '🏢') || '🏢';
     var idBase = name.toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 24) || 'BRANCH';
     var id = idBase;
     var n = 2;
@@ -4878,12 +4878,12 @@ function branchEditPrompt(branchId) {
     // Get the current branch color
     var currentColor = branch.color || _getThemeColor(branch.theme) || '#888888';
 
-    popup.innerHTML = '<div style="font-size:14px;font-weight:bold;color:#ffd700;margin-bottom:14px;">✏️ Edit Branch: ' + (branch.emoji || '') + ' ' + branch.name + '</div>' +
-        '<label style="font-size:12px;color:#aaa;">Branch Name</label>' +
+    popup.innerHTML = '<div style="font-size:14px;font-weight:bold;color:#ffd700;margin-bottom:14px;">✏️ ' + (typeof i18n !== 'undefined' ? i18n.t('edit_branch_title_prefix') : 'Edit Branch') + ': ' + (branch.emoji || '') + ' ' + branch.name + '</div>' +
+        '<label style="font-size:12px;color:#aaa;">' + (typeof i18n !== 'undefined' ? i18n.t('branch_name_label') : 'Branch Name') + '</label>' +
         '<input id="be-name" type="text" value="' + (branch.name || '') + '" style="width:100%;padding:8px;background:#0d0d1e;border:1px solid #2a2a4e;border-radius:6px;color:#e0e0e0;font-size:14px;margin:4px 0 10px;">' +
-        '<label style="font-size:12px;color:#aaa;">Emoji</label>' +
+        '<label style="font-size:12px;color:#aaa;">' + (typeof i18n !== 'undefined' ? i18n.t('emoji_label') : 'Emoji') + '</label>' +
         '<input id="be-emoji" type="text" value="' + (branch.emoji || '🏢') + '" style="width:60px;padding:8px;background:#0d0d1e;border:1px solid #2a2a4e;border-radius:6px;color:#e0e0e0;font-size:14px;margin:4px 0 10px;">' +
-        '<label style="font-size:12px;color:#aaa;">Branch Color</label>' +
+        '<label style="font-size:12px;color:#aaa;">' + (typeof i18n !== 'undefined' ? i18n.t('branch_color_label') : 'Branch Color') + '</label>' +
         '<div style="display:flex;align-items:center;gap:8px;margin:4px 0 12px;">' +
         '<input id="be-color" type="color" value="' + currentColor + '" style="width:40px;height:32px;border:none;background:none;cursor:pointer;">' +
         '<span id="be-color-hex" style="font-size:12px;color:#888;">' + currentColor + '</span>' +
@@ -6200,23 +6200,23 @@ function _showTextLabelEditor(item) {
     popup.id = 'text-label-editor';
     popup.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:99999;background:#1a1a2e;border:2px solid #ffd700;border-radius:12px;padding:20px;min-width:280px;box-shadow:0 8px 40px rgba(0,0,0,0.6);font-family:Arial,sans-serif;color:#e0e0e0;';
 
-    popup.innerHTML = '<div style="font-size:14px;font-weight:bold;color:#ffd700;margin-bottom:14px;">✏️ Edit Text Label</div>' +
-        '<label style="font-size:12px;color:#aaa;">Text</label>' +
-        '<input id="tl-text" type="text" value="' + (item.text || 'Label').replace(/"/g, '&quot;') + '" style="width:100%;padding:8px;background:#0d0d1e;border:1px solid #2a2a4e;border-radius:6px;color:#e0e0e0;font-size:14px;margin:4px 0 10px;">' +
-        '<label style="font-size:12px;color:#aaa;">Text Color</label>' +
+    popup.innerHTML = '<div style="font-size:14px;font-weight:bold;color:#ffd700;margin-bottom:14px;">✏️ ' + (typeof i18n !== 'undefined' ? i18n.t('edit_text_label') : 'Edit Text Label') + '</div>' +
+        '<label style="font-size:12px;color:#aaa;">' + (typeof i18n !== 'undefined' ? i18n.t('text_label') : 'Text') + '</label>' +
+        '<input id="tl-text" type="text" value="' + (item.text || (typeof i18n !== 'undefined' ? i18n.t('label_default') : 'Label')).replace(/"/g, '&quot;') + '" style="width:100%;padding:8px;background:#0d0d1e;border:1px solid #2a2a4e;border-radius:6px;color:#e0e0e0;font-size:14px;margin:4px 0 10px;">' +
+        '<label style="font-size:12px;color:#aaa;">' + (typeof i18n !== 'undefined' ? i18n.t('text_color_label') : 'Text Color') + '</label>' +
         '<div style="display:flex;align-items:center;gap:8px;margin:4px 0 10px;">' +
         '<input id="tl-color" type="color" value="' + (item.labelColor || '#ffffff') + '" style="width:40px;height:32px;border:none;background:none;cursor:pointer;">' +
         '<span id="tl-color-hex" style="font-size:12px;color:#888;">' + (item.labelColor || '#ffffff') + '</span>' +
         '</div>' +
-        '<label style="font-size:12px;color:#aaa;">Font Size</label>' +
+        '<label style="font-size:12px;color:#aaa;">' + (typeof i18n !== 'undefined' ? i18n.t('font_size_label') : 'Font Size') + '</label>' +
         '<div style="display:flex;align-items:center;gap:8px;margin:4px 0 12px;">' +
         '<input id="tl-size" type="range" min="8" max="32" value="' + (item.fontSize || 12) + '" style="flex:1;">' +
         '<span id="tl-size-val" style="font-size:12px;color:#888;min-width:28px;">' + (item.fontSize || 12) + 'px</span>' +
         '</div>' +
         '<div id="tl-preview" style="padding:10px;background:#0d0d1e;border:1px solid #2a2a4e;border-radius:6px;margin-bottom:12px;text-align:center;"></div>' +
         '<div style="display:flex;gap:8px;justify-content:flex-end;">' +
-        '<button id="tl-cancel" style="padding:6px 16px;background:#333;border:1px solid #555;border-radius:6px;color:#ccc;cursor:pointer;font-size:12px;">Cancel</button>' +
-        '<button id="tl-save" style="padding:6px 16px;background:#ffd700;border:none;border-radius:6px;color:#000;font-weight:bold;cursor:pointer;font-size:12px;">Save</button>' +
+        '<button id="tl-cancel" style="padding:6px 16px;background:#333;border:1px solid #555;border-radius:6px;color:#ccc;cursor:pointer;font-size:12px;">' + (typeof i18n !== 'undefined' ? i18n.t('cancel') : 'Cancel') + '</button>' +
+        '<button id="tl-save" style="padding:6px 16px;background:#ffd700;border:none;border-radius:6px;color:#000;font-weight:bold;cursor:pointer;font-size:12px;">' + (typeof i18n !== 'undefined' ? i18n.t('save') : 'Save') + '</button>' +
         '</div>';
 
     document.body.appendChild(popup);
@@ -6360,7 +6360,7 @@ function _showInteractiveWindowEditor(item) {
     var weatherChecked = item.weather !== false ? 'checked' : '';
     var sunChecked = item.showSun ? 'checked' : '';
 
-    popup.innerHTML = '<div style="font-size:14px;font-weight:bold;color:#ffd700;margin-bottom:14px;">🌤️ Weather Window Settings</div>' +
+    popup.innerHTML = '<div style="font-size:14px;font-weight:bold;color:#ffd700;margin-bottom:14px;">🌤️ ' + (typeof i18n !== 'undefined' ? i18n.t('weather_window_settings') : 'Weather Window Settings') + '</div>' +
         '<div style="margin-bottom:16px;">' +
         '<label style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:8px;background:#0d0d1e;border:1px solid #2a2a4e;border-radius:8px;margin-bottom:8px;">' +
         '<input id="iw-weather" type="checkbox" ' + weatherChecked + ' style="width:18px;height:18px;cursor:pointer;">' +
@@ -7468,7 +7468,7 @@ function _showAgentWorkspaceMenu(deskItem, clientX, clientY) {
     if (!menu || !btn) return false;
     _agentWorkspace.agent = agent;
     _agentWorkspace.desk = deskItem;
-    btn.textContent = 'Open ' + (agent.name || 'agent') + ' workspace';
+    btn.textContent = (typeof i18n !== 'undefined' ? i18n.t('open_workspace') : 'Open workspace') + ': ' + (agent.name || 'agent');
     var pos = _worldToScreen(deskItem.x, deskItem.y);
     var left = clientX || pos.x;
     var top = clientY || pos.y;
@@ -12423,10 +12423,10 @@ function _updateFloatingToolbarPosition() {
         var isDesk = selItem.type === 'desk' || selItem.type === 'bossDesk';
         assignBtn.style.display = isDesk ? '' : 'none';
         if (isDesk && selItem.assignedTo) {
-            assignBtn.title = 'Assigned to: ' + selItem.assignedTo + ' (click to change)';
+            assignBtn.title = (typeof i18n !== 'undefined' ? i18n.t('assigned_to') : 'Assigned to') + ': ' + selItem.assignedTo + ' (click to change)';
             assignBtn.textContent = '👤✓';
         } else if (isDesk) {
-            assignBtn.title = 'Assign agent to this desk';
+            assignBtn.title = typeof i18n !== 'undefined' ? i18n.t('assign_agent') : 'Assign agent to this desk';
             assignBtn.textContent = '👤';
         }
     }
@@ -12440,7 +12440,7 @@ function _updateFloatingToolbarPosition() {
             branchBtn.title = 'Branch: ' + _bInfo.name + ' (click to change)';
             branchBtn.textContent = '🏷️✓';
         } else if (isSign) {
-            branchBtn.title = 'Assign branch to this sign';
+            branchBtn.title = (typeof i18n !== 'undefined' ? i18n.t('assign_branch') : 'Assign branch to this sign');
             branchBtn.textContent = '🏷️';
         }
     }
@@ -12454,7 +12454,7 @@ function _updateFloatingToolbarPosition() {
         labelEditBtn = document.createElement('button');
         labelEditBtn.id = 'ftb-label-edit-btn';
         labelEditBtn.textContent = '✏️';
-        labelEditBtn.title = 'Edit label';
+        labelEditBtn.title = typeof i18n !== 'undefined' ? i18n.t('edit_label') : 'Edit label';
         labelEditBtn.style.cssText = 'padding:4px 6px;background:#2a2a4e;border:1px solid #3a3a5e;border-radius:4px;cursor:pointer;font-size:12px;';
         labelEditBtn.onclick = function() {
             if (!selectedItemId) return;
@@ -12472,7 +12472,7 @@ function _updateFloatingToolbarPosition() {
         iwSettingsBtn = document.createElement('button');
         iwSettingsBtn.id = 'ftb-iw-settings-btn';
         iwSettingsBtn.textContent = '⚙️';
-        iwSettingsBtn.title = 'Window settings (weather/sun)';
+        iwSettingsBtn.title = typeof i18n !== 'undefined' ? i18n.t('window_settings') : 'Window settings (weather/sun)';
         iwSettingsBtn.style.cssText = 'padding:4px 6px;background:#2a2a4e;border:1px solid #3a3a5e;border-radius:4px;cursor:pointer;font-size:12px;';
         iwSettingsBtn.onclick = function() {
             if (!selectedItemId) return;
@@ -12490,7 +12490,7 @@ function _updateFloatingToolbarPosition() {
         couchColorBtn = document.createElement('button');
         couchColorBtn.id = 'ftb-couch-color-btn';
         couchColorBtn.textContent = '🎨';
-        couchColorBtn.title = 'Change couch color';
+        couchColorBtn.title = typeof i18n !== 'undefined' ? i18n.t('change_couch_color') : 'Change couch color';
         couchColorBtn.style.cssText = 'padding:4px 6px;background:#2a2a4e;border:1px solid #3a3a5e;border-radius:4px;cursor:pointer;font-size:12px;';
         couchColorBtn.onclick = function() {
             if (!selectedItemId) return;
@@ -12508,7 +12508,7 @@ function _updateFloatingToolbarPosition() {
         rotateBtn = document.createElement('button');
         rotateBtn.id = 'ftb-rotate-btn';
         rotateBtn.textContent = '🔄';
-        rotateBtn.title = 'Rotate 90°';
+        rotateBtn.title = typeof i18n !== 'undefined' ? i18n.t('rotate_90') : 'Rotate 90°';
         rotateBtn.style.cssText = 'padding:4px 6px;background:#2a2a4e;border:1px solid #3a3a5e;border-radius:4px;cursor:pointer;font-size:12px;';
         rotateBtn.onclick = function() {
             if (!selectedItemId) return;
@@ -12624,7 +12624,7 @@ function toggleEditMode() {
     var saveBtn = document.getElementById('btn-save-edits');
     var undoBtn = document.getElementById('btn-undo-edit');
     if (editMode) {
-        btn.textContent = '✅ Done Editing';
+        btn.textContent = typeof i18n !== 'undefined' ? i18n.t('done_editing') : '✅ Done Editing';
         btn.classList.add('active-edit');
         if (saveBtn) saveBtn.style.display = '';
         if (undoBtn) undoBtn.style.display = '';
@@ -12633,7 +12633,7 @@ function toggleEditMode() {
         _hasUnsavedChanges = false;
         _updateSaveUndoButtons();
     } else {
-        btn.textContent = '✏️ Edit Office';
+        btn.textContent = typeof i18n !== 'undefined' ? i18n.t('edit_office') : '✏️ Edit Office';
         btn.classList.remove('active-edit');
         if (saveBtn) saveBtn.style.display = 'none';
         if (undoBtn) undoBtn.style.display = 'none';
@@ -13135,10 +13135,10 @@ function _buildAgentPanel() {
     header.className = 'agent-panel-header';
     var title = document.createElement('span');
     title.className = 'agent-panel-title';
-    title.textContent = '👤 AGENTS';
+    title.textContent = '👤 ' + (typeof i18n !== 'undefined' ? i18n.t('agents_title') : 'AGENTS');
     header.appendChild(title);
     var closeBtn = document.createElement('button');
-    closeBtn.textContent = '✕ Close';
+    closeBtn.textContent = '✕ ' + (typeof i18n !== 'undefined' ? i18n.t('close_btn') : 'Close');
     closeBtn.className = 'catalog-close-btn';
     closeBtn.onclick = toggleAgentPanel;
     header.appendChild(closeBtn);
@@ -13149,7 +13149,7 @@ function _buildAgentPanel() {
     body.className = 'agent-panel-body';
 
     var addBtn = document.createElement('button');
-    addBtn.textContent = '➕ New Agent';
+    addBtn.textContent = '➕ ' + (typeof i18n !== 'undefined' ? i18n.t('new_agent') : 'New Agent');
     addBtn.className = 'agent-add-btn';
     addBtn.onclick = _acpCreateNewAgent;
     body.appendChild(addBtn);

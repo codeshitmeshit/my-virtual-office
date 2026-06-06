@@ -1,5 +1,6 @@
 // API Usage Monitor — shows real quota data from API/OAuth providers
 (function() {
+    const _t = (key) => typeof i18n !== 'undefined' ? i18n.t(key) : key;
     const USAGE_URL = '/api-usage';
     const POLL_INTERVAL = 30000;
 
@@ -40,7 +41,7 @@
             if (data.error && !data.providers?.length) { setDot(false); renderEmpty(data.error); return; }
             setDot(true);
             render(data);
-        } catch(e) { setDot(false); renderEmpty('Connection error'); }
+        } catch(e) { setDot(false); renderEmpty(_t('api_usage_connection_error')); }
     }
 
     function setDot(ok) {
@@ -50,7 +51,7 @@
 
     function renderEmpty(msg) {
         const c = document.getElementById('api-usage-cards');
-        if (c) c.innerHTML = `<div class="pc-detail" style="text-align:center;padding:10px;opacity:0.5">${msg || 'No providers'}</div>`;
+        if (c) c.innerHTML = `<div class="pc-detail" style="text-align:center;padding:10px;opacity:0.5">${msg || _t('api_usage_no_providers')}</div>`;
     }
 
     function render(data) {
@@ -58,7 +59,7 @@
         if (!c) return;
 
         const providers = data.providers || [];
-        if (!providers.length) { renderEmpty('No API providers found'); return; }
+        if (!providers.length) { renderEmpty(_t('api_usage_no_providers_found')); return; }
 
         let html = '';
         for (const p of providers) {
@@ -69,10 +70,9 @@
             const hasError = !!p.error;
 
             // Determine auth type
-            let authLabel = p.plan || p.authType || p.type || '';
-            if (authLabel === 'oauth') authLabel = 'OAuth';
-            else if (authLabel === 'api_key') authLabel = 'API Key';
-            else if (authLabel === 'token') authLabel = 'Token';
+            let authLabel = p.plan || p.type || '';
+            if (authLabel === 'oauth') authLabel = _t('api_usage_oauth');
+            else if (authLabel === 'api_key') authLabel = _t('api_usage_api_key');
             let authColor = color;
 
             html += `<div class="pc-metric-row">`;
@@ -99,22 +99,22 @@
                 // Day/5h window
                 if (u.dailyPctLeft != null) {
                     const used = 100 - u.dailyPctLeft;
-                    html += buildBar(u.dailyWindow || 'DAY', u.dailyPctLeft, used, color);
-                    if (u.dailyTimeLeft) html += `<div class="pc-detail">${u.dailyTimeLeft} until reset</div>`;
+                    html += buildBar(u.dailyWindow || _t('api_usage_day'), u.dailyPctLeft, used, color);
+                    if (u.dailyTimeLeft) html += `<div class="pc-detail">${u.dailyTimeLeft} ${_t('api_usage_until_reset')}</div>`;
                 }
 
                 // Week window
                 if (u.weeklyPctLeft != null) {
                     const used = 100 - u.weeklyPctLeft;
-                    html += buildBar('WEEK', u.weeklyPctLeft, used, color);
-                    if (u.weeklyTimeLeft) html += `<div class="pc-detail">${u.weeklyTimeLeft} until reset</div>`;
+                    html += buildBar(_t('api_usage_week'), u.weeklyPctLeft, used, color);
+                    if (u.weeklyTimeLeft) html += `<div class="pc-detail">${u.weeklyTimeLeft} ${_t('api_usage_until_reset')}</div>`;
                 }
 
                 // Month window
                 if (u.monthlyPctLeft != null) {
                     const used = 100 - u.monthlyPctLeft;
-                    html += buildBar('MONTH', u.monthlyPctLeft, used, color);
-                    if (u.monthlyTimeLeft) html += `<div class="pc-detail">${u.monthlyTimeLeft} until reset</div>`;
+                    html += buildBar(_t('api_usage_month'), u.monthlyPctLeft, used, color);
+                    if (u.monthlyTimeLeft) html += `<div class="pc-detail">${u.monthlyTimeLeft} ${_t('api_usage_until_reset')}</div>`;
                 }
 
                 // Any other windows (generic)
@@ -125,18 +125,16 @@
                         const used = 100 - left;
                         const timeKey = key.replace('PctLeft','TimeLeft');
                         html += buildBar(label, left, used, color);
-                        if (u[timeKey]) html += `<div class="pc-detail">${u[timeKey]} until reset</div>`;
+                        if (u[timeKey]) html += `<div class="pc-detail">${u[timeKey]} ${_t('api_usage_until_reset')}</div>`;
                     }
                 }
 
                 // Exhaustion warnings
-                if (u.dailyPctLeft === 0) html += `<div class="api-warning exhausted">DAILY LIMIT REACHED</div>`;
-                if (u.weeklyPctLeft === 0) html += `<div class="api-warning exhausted">WEEKLY LIMIT REACHED</div>`;
+                if (u.dailyPctLeft === 0) html += `<div class="api-warning exhausted">${_t('api_usage_daily_limit_reached')}</div>`;
+                if (u.weeklyPctLeft === 0) html += `<div class="api-warning exhausted">${_t('api_usage_weekly_limit_reached')}</div>`;
             } else if (!hasError) {
-                const fallback = p.status === 'configured'
-                    ? 'Configured - no quota windows available'
-                    : 'No quota windows available';
-                html += `<div class="pc-detail" style="margin-top:4px;opacity:0.55">${fallback}</div>`;
+                // API key provider with no usage windows
+                html += `<div class="pc-detail" style="margin-top:4px;opacity:0.4">${_t('api_usage_configured_no_windows')}</div>`;
             }
 
             html += `</div>`;
@@ -146,21 +144,21 @@
         const age = data.ageSeconds;
         let freshLabel = '';
         if (age != null) {
-            if (age < 60) freshLabel = 'just now';
-            else if (age < 3600) freshLabel = Math.round(age / 60) + 'm ago';
-            else freshLabel = Math.round(age / 3600) + 'h ago';
+            if (age < 60) freshLabel = _t('just_now');
+            else if (age < 3600) freshLabel = Math.round(age / 60) + _t('m_ago');
+            else freshLabel = Math.round(age / 3600) + _t('h_ago');
         }
         if (freshLabel) {
-            html += `<div class="pc-detail" style="text-align:right;opacity:0.3;margin-top:6px;font-size:7px">Updated ${freshLabel}</div>`;
+            html += `<div class="pc-detail" style="text-align:right;opacity:0.3;margin-top:6px;font-size:7px">${_t('api_usage_updated')} ${freshLabel}</div>`;
         }
 
-        c.innerHTML = html || '<div class="pc-detail" style="text-align:center;padding:10px">No providers</div>';
+        c.innerHTML = html || `<div class="pc-detail" style="text-align:center;padding:10px">${_t('api_usage_no_providers')}</div>`;
     }
 
     function buildBar(label, pctLeft, usedPct, color) {
         let html = `<div class="pc-metric-header" style="margin-top:4px">
             <span class="pc-label">${label}</span>
-            <span class="pc-value" style="color:${getValColor(usedPct)}">${Math.round(pctLeft)}% left</span>
+            <span class="pc-value" style="color:${getValColor(usedPct)}">${Math.round(pctLeft)}${_t('api_usage_pct_left')}</span>
         </div>`;
         html += `<div class="pc-bar-track"><div class="pc-bar" style="width:${usedPct}%;background:${getBarGrad(usedPct, color)}"></div></div>`;
         return html;

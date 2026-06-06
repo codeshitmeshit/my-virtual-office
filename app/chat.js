@@ -128,7 +128,7 @@
       this.agentSelect?.addEventListener('change', () => {
         const opt = this.agentSelect.selectedOptions[0];
         if (!opt) return;
-        this.applySelection(opt, { markExplicit: true, systemPrefix: 'Switched to' });
+        this.applySelection(opt, { markExplicit: true, systemPrefix: typeof i18n !== 'undefined' ? i18n.t('chat_switched_to') : 'Switched to' });
       });
 
       this.sendBtn?.addEventListener('click', () => this.sendMessage());
@@ -277,14 +277,7 @@
       }
     }
 
-    saveSelection() {
-      saveChatSelection(this.slotId, {
-        selectedAgentKey: this.selectedAgentKey,
-        sessionKey: this.sessionKey
-      });
-    }
-
-    applySelection(opt, { markExplicit = false, systemPrefix = 'Switched to' } = {}) {
+    applySelection(opt, { markExplicit = false, systemPrefix = typeof i18n !== 'undefined' ? i18n.t('chat_switched_to') : 'Switched to' } = {}) {
       if (!opt) return;
       const newSessionKey = opt.dataset.sessionKey;
       const newAgentKey = opt.value;
@@ -658,7 +651,7 @@
         }
         return;
       }
-      if (!connected) { this.appendSystem('Not connected'); return; }
+      if (!connected) { this.appendSystem(typeof i18n !== 'undefined' ? i18n.t('chat_not_connected') : 'Not connected'); return; }
       try {
         const res = await rpc('sessions.reset', { key: this.sessionKey });
         if (res.ok) {
@@ -666,12 +659,12 @@
           this.streamingMsg = null;
           this.currentRunId = null;
           this.liveToolCards.clear();
-          this.appendSystem('New session started');
+          this.appendSystem(typeof i18n !== 'undefined' ? i18n.t('chat_new_session_started') : 'New session started');
         } else {
-          this.appendSystem('Reset failed: ' + JSON.stringify(res.error || res));
+          this.appendSystem((typeof i18n !== 'undefined' ? i18n.t('chat_reset_failed') : 'Reset failed') + ': ' + JSON.stringify(res.error || res));
         }
       } catch (e) {
-        this.appendSystem('Reset error: ' + e.message);
+        this.appendSystem((typeof i18n !== 'undefined' ? i18n.t('chat_reset_error') : 'Reset error') + ': ' + e.message);
       }
     }
 
@@ -787,7 +780,7 @@
             const parsed = parseDataUrl(url);
             if (parsed) imageAtts.push({ type: 'image', mimeType: parsed.mimeType, content: parsed.content });
           } else if (a.mimeType.startsWith('audio/') || /\.(mp3|wav|m4a|ogg|flac|webm|opus|aac)$/i.test(a.name)) {
-            this.appendSystem('🎤 Transcribing ' + a.name + '...');
+            this.appendSystem('🎤 ' + (typeof i18n !== 'undefined' ? i18n.t('chat_transcribing') : 'Transcribing') + ' ' + a.name + '...');
             try {
               const b64 = a.dataUrl.split(',')[1];
               const audioBytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
@@ -797,14 +790,29 @@
               const data = await resp.json();
               if (data.text && data.text.trim()) {
                 text = text ? text + '\n[Audio transcription: ' + data.text.trim() + ']' : '[Audio transcription: ' + data.text.trim() + ']';
-                this.appendSystem('✅ Transcription complete');
+                this.appendSystem('✅ ' + (typeof i18n !== 'undefined' ? i18n.t('chat_transcription_complete') : 'Transcription complete'));
               } else if (data.error) {
-                this.appendSystem('❌ Transcription error: ' + data.error);
+                this.appendSystem('❌ ' + (typeof i18n !== 'undefined' ? i18n.t('chat_transcription_error_label') : 'Transcription error') + ': ' + data.error);
               } else {
-                this.appendSystem('⚠️ No speech detected in audio');
+                this.appendSystem('⚠️ ' + (typeof i18n !== 'undefined' ? i18n.t('chat_no_speech_detected') : 'No speech detected in audio'));
               }
             } catch (e) {
-              this.appendSystem('❌ Transcription failed: ' + e.message);
+              this.appendSystem('❌ ' + (typeof i18n !== 'undefined' ? i18n.t('chat_transcription_error_label') : 'Transcription error') + ': ' + e.message);
+            }
+          } else {
+            try {
+              const b64 = a.dataUrl.split(',')[1];
+              const resp = await fetch(UPLOAD_URL, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ filename: a.name, content: b64 })
+              });
+              if (resp.ok) {
+                const result = await resp.json();
+                docPaths.push(result.path);
+              } else {
+                this.appendSystem((typeof i18n !== 'undefined' ? i18n.t('chat_upload_failed') : 'Upload failed for') + ' ' + a.name + ': ' + resp.statusText);
+              }
+            } catch (e) {
+              this.appendSystem((typeof i18n !== 'undefined' ? i18n.t('chat_upload_failed') : 'Upload failed for') + ' ' + a.name + ': ' + e.message);
             }
           }
         }
@@ -856,20 +864,12 @@
           this.finishHermesProgress(hermesProgress, true);
           await this.loadHistory({ recoverFinal: true, startedAt: hermesSendStartedAt });
           await this.pollHermesApproval().catch(() => {});
-          this.setStatus('Hermes ready', 'connected');
+          this.setStatus(typeof i18n !== 'undefined' ? i18n.t('chat_hermes_ready') : 'Hermes ready', 'connected');
         } catch (e) {
           this.closeHermesEventSource();
           this.removeTypingIndicator();
-          const recovered = await this.recoverHermesFinalFromHistory(hermesSendStartedAt).catch(() => false);
-          if (recovered) {
-            this.finishHermesProgress(hermesProgress, true);
-            await this.pollHermesApproval().catch(() => {});
-            this.setStatus('Hermes ready', 'connected');
-            return;
-          }
-          this.finishHermesProgress(hermesProgress, false, e.message);
-          this.appendSystem('Hermes send failed: ' + e.message);
-          this.setStatus('Hermes error', 'disconnected');
+          this.appendSystem((typeof i18n !== 'undefined' ? i18n.t('chat_hermes_send_failed') : 'Hermes send failed') + ': ' + e.message);
+          this.setStatus(typeof i18n !== 'undefined' ? i18n.t('chat_hermes_error') : 'Hermes error', 'disconnected');
         }
         return;
       }
@@ -975,7 +975,7 @@
           this.ensureRecoveryWatchdog();
           runOwners.set(res.payload.runId, { slotId: this.slotId, sessionKey: sendSessionKey });
         }
-      }).catch(e => this.appendSystem('Failed to send: ' + e.message));
+      }).catch(e => this.appendSystem((typeof i18n !== 'undefined' ? i18n.t('chat_failed_to_send') : 'Failed to send') + ': ' + e.message));
     }
 
     async sendStop() {
@@ -1030,9 +1030,9 @@
         if (res?.ok === false) throw new Error(res.error?.message || 'abort failed');
         this.clearActivityFeed();
         this.currentRunId = null;
-        this.appendSystem('🛑 Stop sent');
+        this.appendSystem('🛑 ' + (typeof i18n !== 'undefined' ? i18n.t('chat_stop_sent') : 'Stop sent'));
       } catch (e) {
-        this.appendSystem('Failed to stop: ' + e.message);
+        this.appendSystem((typeof i18n !== 'undefined' ? i18n.t('chat_failed_to_stop') : 'Failed to stop') + ': ' + e.message);
       }
     }
 
@@ -1053,7 +1053,7 @@
         this.micBtn.classList.add('recording');
         this.micBtn.innerHTML = '■';
       } catch (e) {
-        this.appendSystem('Microphone access denied');
+        this.appendSystem(typeof i18n !== 'undefined' ? i18n.t('chat_microphone_access_denied') : 'Microphone access denied');
       }
     }
 
@@ -1075,10 +1075,10 @@
           this.autoResizeInput();
           this.input.focus();
         } else if (data.error) {
-          this.appendSystem('Transcription error: ' + data.error);
+          this.appendSystem((typeof i18n !== 'undefined' ? i18n.t('chat_transcription_error_label') : 'Transcription error') + ': ' + data.error);
         }
       } catch (e) {
-        this.appendSystem('Transcription failed: ' + e.message);
+        this.appendSystem((typeof i18n !== 'undefined' ? i18n.t('chat_transcription_error_label') : 'Transcription error') + ': ' + e.message);
       }
       this.micBtn.innerHTML = '🎙️';
       this.micBtn.disabled = false;
@@ -1142,14 +1142,14 @@
         this.markLiveEvent();
         const tool = normalizeToolEvent(payload, phase === 'result' ? 'done' : 'running');
         const label = formatToolLabel(tool.name, coerceToolArgs(tool.arguments));
-        this.updateTypingIndicator((phase === 'result' || phase === 'end' || payload?.type === 'tool_end' || payload?.type === 'tool_result') ? 'Processing...' : label);
+        this.updateTypingIndicator((phase === 'result' || phase === 'end' || payload?.type === 'tool_end' || payload?.type === 'tool_result') ? (typeof i18n !== 'undefined' ? i18n.t('chat_processing') : 'Processing...') : label);
         this.queueToolEvent(payload);
         this.ensureRecoveryWatchdog();
         return;
       }
 
       if (payload?.type === 'thinking' || stream === 'lifecycle' && phase === 'start') {
-        this.updateTypingIndicator('Thinking...');
+        this.updateTypingIndicator(typeof i18n !== 'undefined' ? i18n.t('chat_thinking') + '...' : 'Thinking...');
       }
     }
 
@@ -1222,7 +1222,7 @@
       if (!notice) {
         notice = document.createElement('div');
         notice.className = 'chat-msg system chat-tool-pruned-notice';
-        notice.innerHTML = '<div class="chat-bubble system-bubble">Earlier live tool activity was collapsed to keep the chat responsive.</div>';
+        notice.innerHTML = '<div class="chat-bubble system-bubble">' + (typeof i18n !== 'undefined' ? i18n.t('chat_earlier_tools_collapsed') : 'Earlier live tool activity was collapsed to keep the chat responsive.') + '</div>';
         this.messages.prepend(notice);
       }
     }
@@ -2133,14 +2133,62 @@
       this.stopHermesProgressTimers();
       const runId = 'hermes-' + Date.now() + '-' + Math.random().toString(36).slice(2);
       this.currentRunId = runId;
-      this.setStatus('Hermes stream active...', 'connecting');
-      this.updateTypingIndicator(label + ' is running Hermes');
-      return { runId, label };
+      this.setStatus(typeof i18n !== 'undefined' ? i18n.t('chat_hermes_stream_active') : 'Hermes stream active...', 'connecting');
+      this.updateTypingIndicator(label + ' ' + (typeof i18n !== 'undefined' ? i18n.t('chat_hermes_is_running') : 'is running Hermes'));
+      this.appendActivity(label + ': ' + (typeof i18n !== 'undefined' ? i18n.t('chat_hermes_queued') : 'queued message'));
+      this.appendToolCall({
+        runId,
+        data: {
+          toolCallId: planId,
+          phase: 'start',
+          name: 'Hermes task breakdown',
+          args: { willDo: HERMES_PROGRESS_STEPS },
+          result: 'Queued in Virtual Office. Waiting for Hermes to start.'
+        }
+      });
+      HERMES_PROGRESS_STEPS.forEach((step, idx) => {
+        const timer = setTimeout(() => {
+          this.appendActivity(label + ': ' + step.toLowerCase());
+          this.updateToolCall({
+            runId,
+            data: {
+              toolCallId: planId,
+              phase: 'update',
+              name: 'Hermes task breakdown',
+              args: {
+                done: HERMES_PROGRESS_STEPS.slice(0, idx),
+                now: step,
+                next: HERMES_PROGRESS_STEPS.slice(idx + 1)
+              },
+              partialResult: 'Running step ' + (idx + 1) + ' of ' + HERMES_PROGRESS_STEPS.length + ': ' + step
+            }
+          });
+          this.updateTypingIndicator(label + ' ' + (typeof i18n !== 'undefined' ? i18n.t('chat_hermes_is_working') : 'is working') + ': ' + step.toLowerCase());
+        }, 250 + idx * 1400);
+        this.hermesProgressTimers.push(timer);
+      });
+      return { runId, planId, label };
     }
 
     finishHermesProgress(progress, ok, errorText = '') {
       if (!progress) return;
       this.stopHermesProgressTimers();
+      this.finishToolCall({
+        runId: progress.runId,
+        data: {
+          toolCallId: progress.planId,
+          phase: 'result',
+          name: 'Hermes task breakdown',
+          args: {
+            done: ok ? HERMES_PROGRESS_STEPS : HERMES_PROGRESS_STEPS.slice(0, 3),
+            next: ok ? [] : ['Review Hermes error in chat']
+          },
+          result: ok ? 'Hermes reply and session activity collected.' : (errorText || 'Hermes request failed.'),
+          isError: !ok
+        },
+        error: ok ? '' : errorText
+      });
+      this.appendActivity((progress.label || 'Hermes') + (ok ? ': ' + (typeof i18n !== 'undefined' ? i18n.t('chat_hermes_stream_complete') : 'stream complete') : ': ' + (typeof i18n !== 'undefined' ? i18n.t('chat_hermes_stream_failed') : 'stream failed')));
       if (this.currentRunId === progress.runId) this.currentRunId = null;
     }
 
@@ -2151,7 +2199,7 @@
       if (card) {
         card.classList.add('responding');
         const status = card.querySelector('.chat-approval-status');
-        if (status) status.textContent = choice === 'approve_once' ? 'Approving once...' : 'Denying...';
+        if (status) status.textContent = choice === 'approve_once' ? (typeof i18n !== 'undefined' ? i18n.t('chat_approving_once') : 'Approving once...') : (typeof i18n !== 'undefined' ? i18n.t('chat_denying') : 'Denying...');
       }
       try {
         const resp = await fetch('/api/hermes/approval/respond', {
@@ -2172,15 +2220,15 @@
           card.classList.remove('responding');
           card.classList.add(choice === 'approve_once' ? 'approved' : 'denied');
           const status = card.querySelector('.chat-approval-status');
-          if (status) status.textContent = choice === 'approve_once' ? 'approved once' : 'denied';
+          if (status) status.textContent = choice === 'approve_once' ? (typeof i18n !== 'undefined' ? i18n.t('chat_approved_once') : 'approved once') : (typeof i18n !== 'undefined' ? i18n.t('chat_denied_status') : 'denied');
         }
         if (choice === 'approve_once') {
           await this.pollHermesApproval().catch(() => {});
         } else if (choice === 'deny') {
-          this.appendSystem('Hermes approval denied.');
+          this.appendSystem(typeof i18n !== 'undefined' ? i18n.t('chat_hermes_approval_denied') : 'Hermes approval denied.');
           await this.pollHermesApproval().catch(() => {});
         }
-        this.setStatus(choice === 'approve_once' ? 'Hermes approval sent' : 'Hermes ready', 'connected');
+        this.setStatus(typeof i18n !== 'undefined' ? i18n.t('chat_hermes_ready') : 'Hermes ready', 'connected');
       } catch (e) {
         buttons.forEach(btn => btn.disabled = false);
         if (card) {
@@ -2188,8 +2236,8 @@
           const status = card.querySelector('.chat-approval-status');
           if (status) status.textContent = 'error';
         }
-        this.appendSystem('Hermes approval failed: ' + e.message);
-        this.setStatus('Hermes error', 'disconnected');
+        this.appendSystem((typeof i18n !== 'undefined' ? i18n.t('chat_hermes_error') : 'Hermes error') + ': ' + e.message);
+        this.setStatus(typeof i18n !== 'undefined' ? i18n.t('chat_hermes_error') : 'Hermes error', 'disconnected');
       }
     }
 
@@ -2523,7 +2571,7 @@
     if (!windowInstance || windowInstance.hasExplicitAgentSelection) return;
     const primaryOpt = primaryWindow.agentSelect?.selectedOptions?.[0];
     if (!primaryOpt) return;
-    windowInstance.applySelection(primaryOpt, { markExplicit: false, systemPrefix: 'Ready to chat with' });
+    windowInstance.applySelection(primaryOpt, { markExplicit: false, systemPrefix: typeof i18n !== 'undefined' ? i18n.t('chat_ready_to_chat_with') : 'Ready to chat with' });
   }
 
   function shouldUseSingleWindowMobileLayout() {
@@ -2617,7 +2665,7 @@
   function connectGateway() {
     if (ws) return;
     ws = new WebSocket(getGatewayUrl());
-    chatWindows.forEach(w => w.setStatus('Connecting...', 'connecting'));
+    chatWindows.forEach(w => w.setStatus(typeof i18n !== 'undefined' ? i18n.t('connecting') : 'Connecting...', 'connecting'));
     ws.onmessage = (evt) => {
       let msg;
       try { msg = JSON.parse(evt.data); } catch { return; }
@@ -2632,10 +2680,10 @@
     ws.onclose = (evt) => {
       connected = false;
       ws = null;
-      chatWindows.forEach(w => w.setStatus(`Disconnected (${evt.code})`, 'disconnected'));
+      chatWindows.forEach(w => w.setStatus((typeof i18n !== 'undefined' ? i18n.t('chat_disconnected_label') : 'Disconnected') + ` (${evt.code})`, 'disconnected'));
       if (chatWindows.some(w => w.root.classList.contains('open') || w.currentRunId || w.streamingMsg)) setTimeout(connectGateway, 3000);
     };
-    ws.onerror = () => chatWindows.forEach(w => w.setStatus('Connection error', 'disconnected'));
+    ws.onerror = () => chatWindows.forEach(w => w.setStatus(typeof i18n !== 'undefined' ? i18n.t('chat_connection_error') : 'Connection error', 'disconnected'));
   }
 
   function sendConnect() {
@@ -2653,7 +2701,7 @@
       if (res.ok) {
         connected = true;
         chatWindows.forEach(w => {
-          w.setStatus('Connected ⚡', 'connected');
+          w.setStatus((typeof i18n !== 'undefined' ? i18n.t('connected') : 'Connected') + ' ⚡', 'connected');
           if (w.isPrimary || w.root.classList.contains('open')) {
             w.fetchSessionInfo();
             w.loadHistory();
@@ -2661,7 +2709,7 @@
         });
         startModelBarRefresh();
       } else {
-        chatWindows.forEach(w => w.setStatus(`Auth failed: ${res.error?.message || 'unknown'}`, 'disconnected'));
+        chatWindows.forEach(w => w.setStatus((typeof i18n !== 'undefined' ? i18n.t('chat_auth_failed_label') : 'Auth failed') + `: ${res.error?.message || 'unknown'}`, 'disconnected'));
       }
     };
     ws.send(JSON.stringify(msg));
@@ -2746,7 +2794,7 @@
         out.label = getWindowAgentLabel(win);
         out.kind = out.kind || 'agent';
       } else if (role === 'user') {
-        out.label = 'You';
+        out.label = typeof i18n !== 'undefined' ? i18n.t('chat_you_label') : 'You';
         out.kind = out.kind || 'human';
       }
     }
@@ -2765,7 +2813,7 @@
     if (role === 'user' && prov?.kind === 'inter_session') {
       const sourceAgentId = parseAgentIdFromSessionKey(prov.sourceSessionKey || '');
       return {
-        label: agentLabelFromId(sourceAgentId) || 'Agent',
+        label: agentLabelFromId(sourceAgentId) || (typeof i18n !== 'undefined' ? i18n.t('chat_assistant_label') : 'Agent'),
         toLabel: targetLabel,
         kind: 'agent',
         isInterSession: true,
@@ -2778,7 +2826,7 @@
       return { label: envelope.label, toLabel: envelope.toLabel || targetLabel, kind: 'agent', isInterSession: true, sourceAgentId: envelope.fromId };
     }
 
-    return { label: 'You', kind: 'human' };
+    return { label: typeof i18n !== 'undefined' ? i18n.t('chat_you_label') : 'You', kind: 'human' };
   }
 
   function renderSenderHeader(meta, role) {
@@ -2905,14 +2953,14 @@
     toggle.textContent = '▶';
     const state = document.createElement('span');
     state.className = 'chat-tool-state';
-    state.textContent = tool.status === 'error' ? 'error' : tool.status === 'done' ? 'done' : 'running';
+    state.textContent = tool.status === 'error' ? (typeof i18n !== 'undefined' ? i18n.t('chat_error_label') : 'error') : tool.status === 'done' ? (typeof i18n !== 'undefined' ? i18n.t('chat_completed_label') : 'done') : (typeof i18n !== 'undefined' ? i18n.t('chat_running_label') : 'running');
     summary.append(dot, icon, name, preview, toggle, state);
     details.appendChild(summary);
 
     const body = document.createElement('div');
     body.className = 'chat-tool-body';
-    body.appendChild(renderToolSection('Input', formatToolPayload(tool.arguments || {})));
-    if (tool.result || tool.error) body.appendChild(renderToolSection(tool.error ? 'Error' : 'Result', formatToolPayload(tool.error || tool.result)));
+    body.appendChild(renderToolSection(typeof i18n !== 'undefined' ? i18n.t('chat_input_label') : 'Input', formatToolPayload(tool.arguments || {})));
+    if (tool.result || tool.error) body.appendChild(renderToolSection(tool.error ? (typeof i18n !== 'undefined' ? i18n.t('chat_error_label') : 'Error') : 'Result', formatToolPayload(tool.error || tool.result)));
     details.appendChild(body);
     return details;
   }
@@ -2932,7 +2980,7 @@
     const icon = card.querySelector('.chat-tool-icon');
     if (icon) icon.textContent = toolIcon(tool);
     const state = card.querySelector('.chat-tool-state');
-    if (state) state.textContent = tool.status === 'error' ? 'error' : tool.status === 'done' ? 'done' : 'running';
+    if (state) state.textContent = tool.status === 'error' ? (typeof i18n !== 'undefined' ? i18n.t('chat_error_label') : 'error') : tool.status === 'done' ? (typeof i18n !== 'undefined' ? i18n.t('chat_completed_label') : 'done') : (typeof i18n !== 'undefined' ? i18n.t('chat_running_label') : 'running');
     const name = card.querySelector('.chat-tool-name');
     if (name) name.textContent = formatToolName(tool.name);
     const preview = card.querySelector('.chat-tool-preview');
@@ -2940,8 +2988,8 @@
     const body = card.querySelector('.chat-tool-body');
     if (body) {
       body.innerHTML = '';
-      body.appendChild(renderToolSection('Input', formatToolPayload(tool.arguments || {})));
-      if (tool.result || tool.error) body.appendChild(renderToolSection(tool.error ? 'Error' : tool.status === 'running' ? 'Progress' : 'Result', formatToolPayload(tool.error || tool.result)));
+      body.appendChild(renderToolSection(typeof i18n !== 'undefined' ? i18n.t('chat_input_label') : 'Input', formatToolPayload(tool.arguments || {})));
+      if (tool.result || tool.error) body.appendChild(renderToolSection(tool.error ? (typeof i18n !== 'undefined' ? i18n.t('chat_error_label') : 'Error') : tool.status === 'running' ? (typeof i18n !== 'undefined' ? i18n.t('chat_progress_label') : 'Progress') : 'Result', formatToolPayload(tool.error || tool.result)));
     }
   }
 
@@ -2964,10 +3012,10 @@
     summary.className = 'chat-thinking-summary';
     const label = document.createElement('span');
     label.className = 'chat-thinking-title';
-    label.textContent = 'Thinking';
+    label.textContent = typeof i18n !== 'undefined' ? i18n.t('chat_thinking') : 'Thinking';
     const state = document.createElement('span');
     state.className = 'chat-tool-state';
-    state.textContent = 'trace';
+    state.textContent = typeof i18n !== 'undefined' ? i18n.t('chat_trace_label') : 'trace';
     const toggle = document.createElement('span');
     toggle.className = 'chat-tool-toggle';
     toggle.textContent = '▶';
@@ -2995,20 +3043,20 @@
     icon.textContent = (status.includes('denied') || status.includes('cancel')) ? '✕' : status.includes('approved') ? '✓' : '!';
     const title = document.createElement('span');
     title.className = 'chat-approval-title';
-    title.textContent = approval.title || (isCodex ? 'Codex approval required' : 'Hermes approval required');
+    title.textContent = approval.title || (typeof i18n !== 'undefined' ? i18n.t('chat_hermes_approval_required') : 'Hermes approval required');
     const state = document.createElement('span');
     state.className = 'chat-approval-status';
     const pendingCount = Number(approval.pending_count || approval.pendingCount || 0);
-    state.textContent = status === 'pending' && pendingCount > 1 ? `${pendingCount} pending` : (status === 'pending' ? 'pending' : status);
+    state.textContent = status === 'pending' && pendingCount > 1 ? `${pendingCount} ` + (typeof i18n !== 'undefined' ? i18n.t('chat_pending_count') : 'pending') : (status === 'pending' ? (typeof i18n !== 'undefined' ? i18n.t('chat_pending_label') : 'pending') : status);
     header.append(icon, title, state);
 
     const desc = document.createElement('div');
     desc.className = 'chat-approval-desc';
-    desc.textContent = approval.description || (isCodex ? 'Codex needs user approval before it can continue.' : 'Hermes needs user approval before it can continue.');
+    desc.textContent = approval.description || (typeof i18n !== 'undefined' ? i18n.t('chat_hermes_needs_approval') : 'Hermes needs user approval before it can continue.');
 
     const cmd = document.createElement('pre');
     cmd.className = 'chat-approval-command';
-    cmd.textContent = approval.command || (isCodex ? 'Approval-gated Codex action' : 'Approval-gated Hermes command');
+    cmd.textContent = approval.command || (typeof i18n !== 'undefined' ? i18n.t('chat_approval_gated_command') : 'Approval-gated Hermes command');
 
     card.append(header, desc, cmd);
     if (status === 'pending') {
@@ -3017,21 +3065,15 @@
       const allow = document.createElement('button');
       allow.type = 'button';
       allow.className = 'chat-approval-btn primary';
-      allow.textContent = isCodex ? 'Approve' : 'Allow once';
-      allow.title = isCodex ? 'Approve this Codex action for the active turn' : 'Retry this Hermes turn with one-time approval for this invocation only';
-      allow.addEventListener('click', () => {
-        if (isCodex) windowInstance?.respondCodexApproval(approval, 'approve', card);
-        else windowInstance?.respondHermesApproval(approval, 'approve_once', card);
-      });
+      allow.textContent = typeof i18n !== 'undefined' ? i18n.t('chat_allow_once') : 'Allow once';
+      allow.title = 'Retry this Hermes turn with approval bypass for this invocation only';
+      allow.addEventListener('click', () => windowInstance?.respondHermesApproval(approval, 'approve_once', card));
       const deny = document.createElement('button');
       deny.type = 'button';
       deny.className = 'chat-approval-btn';
-      deny.textContent = isCodex ? 'Cancel' : 'Deny';
-      deny.title = isCodex ? 'Cancel this Codex action' : 'Do not retry this blocked Hermes command';
-      deny.addEventListener('click', () => {
-        if (isCodex) windowInstance?.respondCodexApproval(approval, 'cancel', card);
-        else windowInstance?.respondHermesApproval(approval, 'deny', card);
-      });
+      deny.textContent = typeof i18n !== 'undefined' ? i18n.t('chat_deny') : 'Deny';
+      deny.title = 'Do not retry this blocked Hermes command';
+      deny.addEventListener('click', () => windowInstance?.respondHermesApproval(approval, 'deny', card));
       actions.append(allow, deny);
       card.appendChild(actions);
     }
@@ -3137,7 +3179,7 @@
       if (type.startsWith('image/') || type === 'image/*') {
         const img = document.createElement('img');
         img.src = item.url;
-        img.alt = item.name || 'image';
+        img.alt = item.name || (typeof i18n !== 'undefined' ? i18n.t('chat_image_alt') : 'image');
         img.className = 'chat-image-thumb chat-image-clickable';
         img.addEventListener('click', () => openImageLightbox(item.url));
         card.appendChild(img);
@@ -3161,7 +3203,7 @@
         link.target = '_blank';
         link.rel = 'noopener';
         link.className = 'chat-media-file';
-        link.textContent = '📎 ' + (item.name || 'Open attachment');
+        link.textContent = '📎 ' + (item.name || (typeof i18n !== 'undefined' ? i18n.t('chat_open_attachment') : 'Open attachment'));
         card.appendChild(link);
       }
       if (item.name && (type.startsWith('image/') || type.startsWith('video/') || type.startsWith('audio/') || type.endsWith('/*'))) {
@@ -3357,7 +3399,7 @@
         preview = pick('query', 'url', 'action', 'input', 'value');
     }
     if (!preview && result) preview = result;
-    if (!preview) preview = tool?.status === 'running' ? 'running...' : 'completed';
+    if (!preview) preview = tool?.status === 'running' ? (typeof i18n !== 'undefined' ? i18n.t('chat_running_dots') : 'running...') : (typeof i18n !== 'undefined' ? i18n.t('chat_completed_label') : 'completed');
     return preview.length > 90 ? preview.slice(0, 87) + '...' : preview;
   }
 
@@ -3394,7 +3436,7 @@
     assignments.forEach((opt, index) => {
       const windowInstance = windows[index];
       if (!windowInstance || !opt) return;
-      windowInstance.applySelection(opt, { markExplicit: false, systemPrefix: 'Loaded' });
+      windowInstance.applySelection(opt, { markExplicit: false, systemPrefix: typeof i18n !== 'undefined' ? i18n.t('chat_loaded') : 'Loaded' });
     });
   }
 

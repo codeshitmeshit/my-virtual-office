@@ -1,5 +1,6 @@
 // PC Performance Monitor — polls metrics from Windows PC
 (function() {
+    const _t = (key) => typeof i18n !== 'undefined' ? i18n.t(key) : key;
     const METRICS_URL = '/pc-metrics';
     const POLL_INTERVAL = 1000;
     const HISTORY_LEN = 60; // 60 data points (~3 min at 3s interval)
@@ -51,7 +52,7 @@
         const dot = document.getElementById('pc-status-dot');
         if (!dot) return;
         dot.className = 'pc-dot ' + (online ? 'online' : 'offline');
-        dot.title = online ? 'Connected' : 'Offline';
+        dot.title = online ? _t('pc_connected') : _t('pc_offline');
     }
 
     function pushHistory(arr, val) {
@@ -69,7 +70,7 @@
         document.getElementById('pc-cpu-bar').style.width = cpuPct + '%';
         setBarColor('pc-cpu-bar', cpuPct);
         document.getElementById('pc-cpu-detail').textContent =
-            `${data.cpu?.threads || '?'} threads / ${Math.round(data.cpu?.freqMHz || 0)} MHz`;
+            `${data.cpu?.threads || '?'} ${_t('pc_threads')} / ${Math.round(data.cpu?.freqMHz || 0)} ${_t('pc_mhz')}`;
         drawGraph('pc-cpu-graph', history.cpu, '#4fc3f7');
 
         // RAM
@@ -79,7 +80,7 @@
         document.getElementById('pc-ram-bar').style.width = ramPct + '%';
         setBarColor('pc-ram-bar', ramPct);
         document.getElementById('pc-ram-detail').textContent =
-            `${data.memory?.usedGB || '?'} / ${data.memory?.totalGB || '?'} GB`;
+            `${data.memory?.usedGB || '?'} / ${data.memory?.totalGB || '?'} ${_t('pc_gb')}`;
         drawGraph('pc-ram-graph', history.ram, '#ce93d8');
 
         // GPUs
@@ -120,8 +121,8 @@
             const vramUsed = (gpu.memoryUsedMB / 1024).toFixed(1);
             const vramTotal = (gpu.memoryTotalMB / 1024).toFixed(1);
             document.getElementById(`pc-gpu${i}-detail`).textContent =
-                `${gpu.name || 'GPU'} · ${vramUsed}/${vramTotal} GB`;
-            const powerStr = gpu.powerW > 0 ? ` · ${gpu.powerW}W / ${gpu.powerLimitW}W` : '';
+                `${gpu.name || 'GPU'} · ${vramUsed}/${vramTotal} ${_t('pc_gb')}`;
+            const powerStr = gpu.powerW > 0 ? ` · ${gpu.powerW} ${_t('pc_w')} / ${gpu.powerLimitW} ${_t('pc_w')}` : '';
             document.getElementById(`pc-gpu${i}-detail2`).textContent =
                 `${gpu.tempC || '?'}°C${powerStr}`;
             
@@ -143,7 +144,7 @@
             container.parentElement.appendChild(powerSummary);
         }
         if (powerSummary && totalPower > 0) {
-            powerSummary.textContent = `⚡ Total GPU Power: ${totalPower.toFixed(0)}W / ${totalLimit.toFixed(0)}W`;
+            powerSummary.textContent = `⚡ ${_t('pc_total_gpu_power')}: ${totalPower.toFixed(0)} ${_t('pc_w')} / ${totalLimit.toFixed(0)} ${_t('pc_w')}`;
         }
     }
 

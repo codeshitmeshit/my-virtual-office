@@ -28,77 +28,89 @@
         workflow: { active: false, autoMode: false, phase: 'idle', currentTaskId: null, pollTimer: null },
     };
 
+    const _t = (key) => typeof i18n !== 'undefined' ? i18n.t(key) : key;
+
     // ── DEFAULT TEMPLATES ─────────────────────────────────────────
     const DEFAULT_TEMPLATES = [
         {
             id: 'tpl-blank',
             title: 'Blank Project',
+            _titleKey: 'proj_blank_project',
             description: 'Start from scratch with 5 default columns',
+            _descKey: 'proj_blank_project_desc',
             columns: [
-                { title: 'Backlog', color: '#6c757d' },
-                { title: 'In Progress', color: '#ffc107' },
-                { title: 'Review', color: '#fd7e14' },
-                { title: 'Done', color: '#198754' },
+                { title: 'Backlog', color: '#6c757d', _titleKey: 'proj_col_backlog' },
+                { title: 'In Progress', color: '#ffc107', _titleKey: 'proj_col_in_progress' },
+                { title: 'Review', color: '#fd7e14', _titleKey: 'proj_col_review' },
+                { title: 'Done', color: '#198754', _titleKey: 'proj_col_done' },
             ],
             taskTemplates: [],
         },
         {
             id: 'tpl-software',
             title: 'Software Development',
+            _titleKey: 'proj_software_dev',
             description: 'Standard software development workflow with sprint planning',
+            _descKey: 'proj_software_dev_desc',
             columns: [
-                { title: 'Backlog', color: '#6c757d' },
-                { title: 'Sprint', color: '#0d6efd' },
-                { title: 'In Progress', color: '#ffc107' },
-                { title: 'Code Review', color: '#fd7e14' },
-                { title: 'QA', color: '#17a2b8' },
-                { title: 'Done', color: '#198754' },
+                { title: 'Backlog', color: '#6c757d', _titleKey: 'proj_col_backlog' },
+                { title: 'Sprint', color: '#0d6efd', _titleKey: 'proj_col_sprint' },
+                { title: 'In Progress', color: '#ffc107', _titleKey: 'proj_col_in_progress' },
+                { title: 'Code Review', color: '#fd7e14', _titleKey: 'proj_col_code_review' },
+                { title: 'QA', color: '#17a2b8', _titleKey: 'proj_col_qa' },
+                { title: 'Done', color: '#198754', _titleKey: 'proj_col_done' },
             ],
             taskTemplates: [
-                { title: 'Set up development environment', columnIndex: 0, priority: 'high' },
-                { title: 'Define acceptance criteria', columnIndex: 0, priority: 'medium' },
-                { title: 'Write unit tests', columnIndex: 0, priority: 'medium' },
+                { title: 'Set up development environment', _titleKey: 'proj_task_setup_dev_env', columnIndex: 0, priority: 'high' },
+                { title: 'Define acceptance criteria', _titleKey: 'proj_task_define_acceptance', columnIndex: 0, priority: 'medium' },
+                { title: 'Write unit tests', _titleKey: 'proj_task_write_unit_tests', columnIndex: 0, priority: 'medium' },
             ],
         },
         {
             id: 'tpl-marketing',
             title: 'Marketing Campaign',
+            _titleKey: 'proj_marketing_campaign',
             description: 'Plan and execute marketing campaigns',
+            _descKey: 'proj_marketing_campaign_desc',
             columns: [
-                { title: 'Ideas', color: '#6c757d' },
-                { title: 'Planning', color: '#0d6efd' },
-                { title: 'Creating', color: '#ffc107' },
-                { title: 'Review', color: '#fd7e14' },
-                { title: 'Published', color: '#198754' },
+                { title: 'Ideas', color: '#6c757d', _titleKey: 'proj_col_ideas' },
+                { title: 'Planning', color: '#0d6efd', _titleKey: 'proj_col_planning' },
+                { title: 'Creating', color: '#ffc107', _titleKey: 'proj_col_creating' },
+                { title: 'Review', color: '#fd7e14', _titleKey: 'proj_col_review' },
+                { title: 'Published', color: '#198754', _titleKey: 'proj_col_published' },
             ],
             taskTemplates: [
-                { title: 'Define target audience', columnIndex: 0, priority: 'high' },
-                { title: 'Create content calendar', columnIndex: 0, priority: 'medium' },
+                { title: 'Define target audience', _titleKey: 'proj_task_define_audience', columnIndex: 0, priority: 'high' },
+                { title: 'Create content calendar', _titleKey: 'proj_task_content_calendar', columnIndex: 0, priority: 'medium' },
             ],
         },
         {
             id: 'tpl-bugs',
             title: 'Bug Tracking',
+            _titleKey: 'proj_bug_tracking',
             description: 'Track and resolve bugs systematically',
+            _descKey: 'proj_bug_tracking_desc',
             columns: [
-                { title: 'Reported', color: '#dc3545' },
-                { title: 'Confirmed', color: '#fd7e14' },
-                { title: 'In Progress', color: '#ffc107' },
-                { title: 'Fixed', color: '#0d6efd' },
-                { title: 'Verified', color: '#198754' },
+                { title: 'Reported', color: '#dc3545', _titleKey: 'proj_col_reported' },
+                { title: 'Confirmed', color: '#fd7e14', _titleKey: 'proj_col_confirmed' },
+                { title: 'In Progress', color: '#ffc107', _titleKey: 'proj_col_in_progress' },
+                { title: 'Fixed', color: '#0d6efd', _titleKey: 'proj_col_fixed' },
+                { title: 'Verified', color: '#198754', _titleKey: 'proj_col_verified' },
             ],
             taskTemplates: [],
         },
         {
             id: 'tpl-content',
             title: 'Content Pipeline',
+            _titleKey: 'proj_content_pipeline',
             description: 'Manage content creation workflow',
+            _descKey: 'proj_content_pipeline_desc',
             columns: [
-                { title: 'Backlog', color: '#6c757d' },
-                { title: 'Research', color: '#17a2b8' },
-                { title: 'Writing', color: '#ffc107' },
-                { title: 'Editing', color: '#fd7e14' },
-                { title: 'Published', color: '#198754' },
+                { title: 'Backlog', color: '#6c757d', _titleKey: 'proj_col_backlog' },
+                { title: 'Research', color: '#17a2b8', _titleKey: 'proj_col_research' },
+                { title: 'Writing', color: '#ffc107', _titleKey: 'proj_col_writing' },
+                { title: 'Editing', color: '#fd7e14', _titleKey: 'proj_col_editing' },
+                { title: 'Published', color: '#198754', _titleKey: 'proj_col_published' },
             ],
             taskTemplates: [],
         },
@@ -283,9 +295,11 @@
                     const agentInfo = state.agentRoster.find(a => a.key === scoreResult.agent);
                     const name = agentInfo ? agentInfo.name : scoreResult.agent;
                     const emoji = agentInfo ? agentInfo.emoji : '🤖';
-                    toast(`${emoji} ${name} earned +${scoreResult.pointsAwarded} XP! ${scoreResult.streak > 1 ? '🔥 Streak x' + scoreResult.streak : ''}`, 'success');
+                    const streakText = scoreResult.streak > 1 ? '🔥 Streak x' + scoreResult.streak : '';
+                    const msg = _t('proj_xp_earned').replace('{emoji}', emoji).replace('{name}', name).replace('{points}', scoreResult.pointsAwarded).replace('{streak}', streakText);
+                    toast(msg, 'success');
                 } else {
-                    toast('✅ Task completed!', 'success');
+                    toast(_t('proj_task_completed'), 'success');
                 }
                 // Refresh leaderboard
                 refreshLeaderboard();
@@ -301,7 +315,7 @@
             const container = document.getElementById('sidebar-projects-lb');
             if (!container) return;
             if (lb.length === 0) {
-                container.innerHTML = '<div class="proj-lb-empty">No scores yet — complete tasks to earn XP!</div>';
+                container.innerHTML = `<div class="proj-lb-empty">${_t('proj_leaderboard_empty')}</div>`;
                 return;
             }
             const top5 = lb.slice(0, 5);
@@ -375,10 +389,10 @@
         if (!iso) return '';
         const diff = Date.now() - new Date(iso).getTime();
         const s = Math.floor(diff / 1000);
-        if (s < 60) return 'just now';
-        if (s < 3600) return Math.floor(s / 60) + 'm ago';
-        if (s < 86400) return Math.floor(s / 3600) + 'h ago';
-        return Math.floor(s / 86400) + 'd ago';
+        if (s < 60) return _t('just_now');
+        if (s < 3600) return Math.floor(s / 60) + _t('m_ago');
+        if (s < 86400) return Math.floor(s / 3600) + _t('h_ago');
+        return Math.floor(s / 86400) + _t('d_ago');
     }
     function escHtml(s) {
         if (!s) return '';
@@ -449,12 +463,12 @@
             bindListEvents();
             updateSidebar();
         } catch (e) {
-            mc.innerHTML = `<div class="proj-loading"><div>⚠️ Failed to load projects</div><div style="font-size:10px;color:#555">${escHtml(String(e))}</div></div>`;
+            mc.innerHTML = `<div class="proj-loading"><div>${_t('proj_failed_to_load')}</div><div style="font-size:10px;color:#555">${escHtml(String(e))}</div></div>`;
         }
     }
 
     function renderListSkeleton() {
-        return `<div class="proj-loading"><div class="proj-spinner"></div><div>Loading projects…</div></div>`;
+        return `<div class="proj-loading"><div class="proj-spinner"></div><div>${_t('proj_loading_projects')}</div></div>`;
     }
 
     function renderListView() {
@@ -488,36 +502,36 @@
 
         return `
         <div class="proj-toolbar">
-            <span class="proj-toolbar-title">📋 Projects</span>
-            <button class="proj-btn proj-btn-primary" onclick="ProjMgr.newProjectDialog()">➕ New Project</button>
-            <button class="proj-btn" onclick="ProjMgr.showTemplatesView()">📁 Templates</button>
-            <input class="proj-search" id="proj-search" type="text" placeholder="🔍 Search projects…" value="${escHtml(filters.search)}" oninput="ProjMgr.filterChange('search', this.value)">
+            <span class="proj-toolbar-title">${_t('proj_title')}</span>
+            <button class="proj-btn proj-btn-primary" onclick="ProjMgr.newProjectDialog()">${_t('proj_new_project')}</button>
+            <button class="proj-btn" onclick="ProjMgr.showTemplatesView()">${_t('proj_templates')}</button>
+            <input class="proj-search" id="proj-search" type="text" placeholder="${_t('proj_search_placeholder')}" value="${escHtml(filters.search)}" oninput="ProjMgr.filterChange('search', this.value)">
             <div class="proj-filter-row">
                 <select class="proj-select" onchange="ProjMgr.filterChange('status', this.value)">
-                    <option value="" ${!filters.status ? 'selected' : ''}>All Statuses</option>
-                    <option value="active" ${filters.status === 'active' ? 'selected' : ''}>Active</option>
-                    <option value="paused" ${filters.status === 'paused' ? 'selected' : ''}>Paused</option>
-                    <option value="completed" ${filters.status === 'completed' ? 'selected' : ''}>Completed</option>
-                    <option value="archived" ${filters.status === 'archived' ? 'selected' : ''}>Archived</option>
+                    <option value="" ${!filters.status ? 'selected' : ''}>${_t('proj_all_statuses')}</option>
+                    <option value="active" ${filters.status === 'active' ? 'selected' : ''}>${_t('proj_status_active')}</option>
+                    <option value="paused" ${filters.status === 'paused' ? 'selected' : ''}>${_t('proj_status_paused')}</option>
+                    <option value="completed" ${filters.status === 'completed' ? 'selected' : ''}>${_t('proj_status_completed')}</option>
+                    <option value="archived" ${filters.status === 'archived' ? 'selected' : ''}>${_t('proj_status_archived')}</option>
                 </select>
                 <select class="proj-select" onchange="ProjMgr.filterChange('priority', this.value)">
-                    <option value="" ${!filters.priority ? 'selected' : ''}>All Priorities</option>
-                    <option value="critical" ${filters.priority === 'critical' ? 'selected' : ''}>🔴 Critical</option>
-                    <option value="high" ${filters.priority === 'high' ? 'selected' : ''}>🟠 High</option>
-                    <option value="medium" ${filters.priority === 'medium' ? 'selected' : ''}>🔵 Medium</option>
-                    <option value="low" ${filters.priority === 'low' ? 'selected' : ''}>⚪ Low</option>
+                    <option value="" ${!filters.priority ? 'selected' : ''}>${_t('proj_all_priorities')}</option>
+                    <option value="critical" ${filters.priority === 'critical' ? 'selected' : ''}>${_t('proj_priority_critical')}</option>
+                    <option value="high" ${filters.priority === 'high' ? 'selected' : ''}>${_t('proj_priority_high')}</option>
+                    <option value="medium" ${filters.priority === 'medium' ? 'selected' : ''}>${_t('proj_priority_medium')}</option>
+                    <option value="low" ${filters.priority === 'low' ? 'selected' : ''}>${_t('proj_priority_low')}</option>
                 </select>
                 ${allTags.length ? `
                 <select class="proj-select" onchange="ProjMgr.filterChange('tag', this.value)">
-                    <option value="">All Tags</option>
+                    <option value="">${_t('proj_all_tags')}</option>
                     ${allTags.map(t => `<option value="${escHtml(t)}" ${filters.tag === t ? 'selected' : ''}>${escHtml(t)}</option>`).join('')}
                 </select>` : ''}
                 <select class="proj-select" onchange="ProjMgr.filterChange('sort', this.value)">
-                    <option value="updatedAt" ${filters.sort === 'updatedAt' ? 'selected' : ''}>Recently Updated</option>
-                    <option value="createdAt" ${filters.sort === 'createdAt' ? 'selected' : ''}>Date Created</option>
-                    <option value="dueDate" ${filters.sort === 'dueDate' ? 'selected' : ''}>Due Date</option>
-                    <option value="title" ${filters.sort === 'title' ? 'selected' : ''}>Name</option>
-                    <option value="priority" ${filters.sort === 'priority' ? 'selected' : ''}>Priority</option>
+                    <option value="updatedAt" ${filters.sort === 'updatedAt' ? 'selected' : ''}>${_t('proj_sort_recently_updated')}</option>
+                    <option value="createdAt" ${filters.sort === 'createdAt' ? 'selected' : ''}>${_t('proj_sort_date_created')}</option>
+                    <option value="dueDate" ${filters.sort === 'dueDate' ? 'selected' : ''}>${_t('proj_sort_due_date')}</option>
+                    <option value="title" ${filters.sort === 'title' ? 'selected' : ''}>${_t('proj_sort_name')}</option>
+                    <option value="priority" ${filters.sort === 'priority' ? 'selected' : ''}>${_t('proj_sort_priority')}</option>
                 </select>
             </div>
         </div>
@@ -532,10 +546,10 @@
         return `
         <div class="proj-empty">
             <div class="proj-empty-icon">📋</div>
-            <div class="proj-empty-title">No Projects Yet</div>
-            <div class="proj-empty-text">Create your first project to get started</div>
+            <div class="proj-empty-title">${_t('proj_no_projects_yet')}</div>
+            <div class="proj-empty-text">${_t('proj_no_projects_text')}</div>
             <br>
-            <button class="proj-btn proj-btn-primary" style="margin: 10px auto;display:inline-block" onclick="ProjMgr.newProjectDialog()">➕ Create Project</button>
+            <button class="proj-btn proj-btn-primary" style="margin: 10px auto;display:inline-block" onclick="ProjMgr.newProjectDialog()">${_t('proj_create_project')}</button>
         </div>`;
     }
 
@@ -549,15 +563,15 @@
             <div class="proj-card-header">
                 <div class="proj-card-title">${escHtml(p.title)}</div>
                 <div class="proj-card-actions" onclick="event.stopPropagation()">
-                    <button class="proj-btn proj-btn-sm proj-btn-icon" title="Report" onclick="ProjMgr.showReport('${p.id}')">📊</button>
-                    <button class="proj-btn proj-btn-sm proj-btn-icon" title="Archive" onclick="ProjMgr.archiveProject('${p.id}', event)">📁</button>
-                    <button class="proj-btn proj-btn-sm proj-btn-icon" title="Delete" onclick="ProjMgr.deleteProject('${p.id}', event)">🗑️</button>
+                    <button class="proj-btn proj-btn-sm proj-btn-icon" title="${_t('proj_report')}" onclick="ProjMgr.showReport('${p.id}')">📊</button>
+                    <button class="proj-btn proj-btn-sm proj-btn-icon" title="${_t('proj_archive')}" onclick="ProjMgr.archiveProject('${p.id}', event)">📁</button>
+                    <button class="proj-btn proj-btn-sm proj-btn-icon" title="${_t('proj_delete')}" onclick="ProjMgr.deleteProject('${p.id}', event)">🗑️</button>
                 </div>
             </div>
             ${p.description ? `<div class="proj-card-desc">${escHtml(p.description)}</div>` : ''}
             <div class="proj-card-meta">
-                <span class="proj-badge badge-${p.status || 'active'}">${p.status || 'active'}</span>
-                <span class="proj-badge badge-${p.priority || 'medium'}">${p.priority || 'medium'}</span>
+                <span class="proj-badge badge-${p.status || 'active'}">${p.status || _t('proj_status_active')}</span>
+                <span class="proj-badge badge-${p.priority || 'medium'}">${p.priority || _t('proj_priority_medium')}</span>
                 ${p.branch ? `<span class="proj-badge" style="background:rgba(255,215,0,0.1);border-color:#ffd700;color:#ffd700">🏢 ${escHtml(p.branch)}</span>` : ''}
                 ${(p.tags || []).slice(0, 2).map(t => `<span class="proj-tag">${escHtml(t)}</span>`).join('')}
             </div>
@@ -565,7 +579,7 @@
                 <div class="proj-progress-track"><div class="proj-progress-bar" style="width:${pct}%"></div></div>
                 <span class="proj-progress-label">${done}/${total}</span>
             </div>
-            ${p.dueDate ? `<div style="font-size:10px;color:${overdue ? '#f87171' : '#888'}">📅 ${overdue ? '⚠️ Overdue: ' : 'Due: '}${formatDate(p.dueDate)}</div>` : ''}
+            ${p.dueDate ? `<div style="font-size:10px;color:${overdue ? '#f87171' : '#888'}">📅 ${overdue ? '⚠️ ' + _t('proj_overdue') + ': ' : _t('proj_due') + ': '}${formatDate(p.dueDate)}</div>` : ''}
         </div>`;
     }
 
@@ -586,7 +600,7 @@
             populateBoardScoreboard();
             checkWorkflowOnOpen();
         } catch (e) {
-            mc.innerHTML = `<div class="proj-loading">⚠️ Failed to load project</div>`;
+            mc.innerHTML = `<div class="proj-loading">${_t('proj_failed_to_load_project')}</div>`;
         }
     }
 
@@ -598,30 +612,30 @@
 
         return `
         <div class="proj-toolbar">
-            <button class="proj-btn" onclick="ProjMgr.backToList()">← Back</button>
+            <button class="proj-btn" onclick="ProjMgr.backToList()">${_t('proj_back')}</button>
             <span class="proj-toolbar-title" style="font-size:8px;max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(p.title)}</span>
-            <span class="proj-badge badge-${p.status || 'active'}">${p.status || 'active'}</span>
-            <span class="proj-badge badge-${p.priority || 'medium'}">${p.priority || 'medium'}</span>
+            <span class="proj-badge badge-${p.status || 'active'}">${p.status || _t('proj_status_active')}</span>
+            <span class="proj-badge badge-${p.priority || 'medium'}">${p.priority || _t('proj_priority_medium')}</span>
             <div style="flex:1"></div>
             <div class="proj-workflow-controls" id="proj-wf-controls">
-                <button class="proj-btn proj-btn-sm proj-btn-start" id="wf-start-btn" onclick="ProjMgr.workflowStart()" title="Start workflow">▶ Start</button>
-                <button class="proj-btn proj-btn-sm proj-btn-stop hidden" id="wf-stop-btn" onclick="ProjMgr.workflowStop()" title="Stop workflow">⏹ Stop</button>
+                <button class="proj-btn proj-btn-sm proj-btn-start" id="wf-start-btn" onclick="ProjMgr.workflowStart()" title="${_t('proj_workflow_start')}">▶ ${_t('proj_workflow_start')}</button>
+                <button class="proj-btn proj-btn-sm proj-btn-stop hidden" id="wf-stop-btn" onclick="ProjMgr.workflowStop()" title="${_t('proj_workflow_stop')}">⏹ ${_t('proj_workflow_stop')}</button>
                 <div class="proj-auto-toggle" title="Auto Mode: automatically process next backlog task when current finishes">
                     <label class="proj-toggle-switch">
                         <input type="checkbox" id="wf-auto-toggle" ${p.autoMode ? 'checked' : ''} onchange="ProjMgr.toggleAutoMode(this.checked)">
                         <span class="proj-toggle-slider"></span>
                     </label>
-                    <span class="proj-toggle-label">Auto</span>
+                    <span class="proj-toggle-label">${_t('proj_workflow_auto')}</span>
                 </div>
                 <span class="proj-wf-status" id="wf-status-badge"></span>
             </div>
-            <button class="proj-btn proj-btn-sm" onclick="ProjMgr.editProjectDialog('${p.id}')">✏️ Edit</button>
-            <button class="proj-btn proj-btn-sm" onclick="ProjMgr.showReport('${p.id}')">📊 Report</button>
-            <button class="proj-btn proj-btn-sm" onclick="ProjMgr.saveAsTemplateDialog('${p.id}')">💾 Template</button>
+            <button class="proj-btn proj-btn-sm" onclick="ProjMgr.editProjectDialog('${p.id}')">${_t('proj_edit')}</button>
+            <button class="proj-btn proj-btn-sm" onclick="ProjMgr.showReport('${p.id}')">${_t('proj_report')}</button>
+            <button class="proj-btn proj-btn-sm" onclick="ProjMgr.saveAsTemplateDialog('${p.id}')">${_t('proj_template_btn')}</button>
         </div>
         ${p.description ? `
         <div class="proj-board-header">
-            <span class="proj-board-desc-toggle" onclick="this.nextElementSibling.classList.toggle('expanded');this.textContent=this.nextElementSibling.classList.contains('expanded')?'▲ Hide description':'▼ Show description'">▼ Show description</span>
+            <span class="proj-board-desc-toggle" onclick="this.nextElementSibling.classList.toggle('expanded');this.textContent=this.nextElementSibling.classList.contains('expanded')?'▲ ${_t('proj_hide_description')}:${_t('proj_description')}':'▼ ${_t('proj_show_description')}:${_t('proj_description')}'">▼ ${_t('proj_show_description')}</span>
             <div class="proj-board-desc">${escHtml(p.description)}</div>
         </div>` : ''}
         ${renderBoardScoreboard()}
@@ -629,11 +643,11 @@
             <div class="proj-col proj-chat-col" id="proj-wf-chat-col">
                 <div class="proj-col-header" style="border-bottom-color:#4caf50">
                     <div class="proj-col-dot" style="background:#4caf50"></div>
-                    <div class="proj-col-title">Chat</div>
+                    <div class="proj-col-title">${_t('proj_chat')}</div>
                     <span class="proj-wf-chat-live" id="proj-chat-live-dot"></span>
                 </div>
                 <div class="proj-chat-messages" id="proj-wf-chat-messages">
-                    <div class="proj-chat-empty">Workflow chat will appear here when a task is being worked on.</div>
+                    <div class="proj-chat-empty">${_t('proj_workflow_chat_empty')}</div>
                 </div>
             </div>
             ${cols.map(col => renderColumn(col, tasks)).join('')}
@@ -642,13 +656,14 @@
 
     function renderColumn(col, allTasks) {
         const tasks = allTasks.filter(t => t.columnId === col.id).slice().sort((a, b) => (a.order || 0) - (b.order || 0));
+        const colTitle = col._titleKey ? _t(col._titleKey) : col.title;
         return `
         <div class="proj-col" id="col-${col.id}" data-col-id="${col.id}" style="--col-color:${col.color || '#6c757d'}">
             <div class="proj-col-header">
                 <div class="proj-col-dot"></div>
-                <div class="proj-col-title" ondblclick="ProjMgr.renameColumn('${col.id}')">${escHtml(col.title)}</div>
+                <div class="proj-col-title" ondblclick="ProjMgr.renameColumn('${col.id}')">${escHtml(colTitle)}</div>
                 <span class="proj-col-count">${tasks.length}</span>
-                <button class="proj-col-add-btn" onclick="ProjMgr.showQuickAdd('${col.id}')" title="Add task">+</button>
+                <button class="proj-col-add-btn" onclick="ProjMgr.showQuickAdd('${col.id}')" title="${_t('proj_add')}">+</button>
             </div>
             <div class="proj-col-tasks" id="tasks-${col.id}"
                 ondragover="ProjMgr.onDragOver(event, '${col.id}')"
@@ -657,10 +672,10 @@
                 ${tasks.map(t => renderTaskCard(t)).join('')}
             </div>
             <div class="proj-quick-add hidden" id="quick-add-${col.id}">
-                <input class="proj-quick-add-input" id="quick-input-${col.id}" type="text" placeholder="Task title… (Enter to add)">
+                <input class="proj-quick-add-input" id="quick-input-${col.id}" type="text" placeholder="${_t('proj_task_title_placeholder')}">
                 <div class="proj-quick-add-actions">
-                    <button class="proj-btn proj-btn-sm proj-btn-primary" onclick="ProjMgr.submitQuickAdd('${col.id}')">Add</button>
-                    <button class="proj-btn proj-btn-sm" onclick="ProjMgr.hideQuickAdd('${col.id}')">Cancel</button>
+                    <button class="proj-btn proj-btn-sm proj-btn-primary" onclick="ProjMgr.submitQuickAdd('${col.id}')">${_t('proj_add')}</button>
+                    <button class="proj-btn proj-btn-sm" onclick="ProjMgr.hideQuickAdd('${col.id}')">${_t('proj_cancel')}</button>
                 </div>
             </div>
         </div>`;
@@ -675,6 +690,7 @@
         const hasCheck = checklist.length > 0;
         const comments = (task.comments || []).length;
         const assignee = task.assignee ? state.agentRoster.find(a => a.key === task.assignee || a.statusKey === task.assignee || a.agentId === task.assignee) : null;
+        const priorityLabel = task.priority !== 'medium' ? _t('proj_priority_' + task.priority) : '';
         return `
         <div class="proj-task-card" id="task-${task.id}" data-task-id="${task.id}"
             style="--pri-color:${pc}"
@@ -685,7 +701,7 @@
             onclick="ProjMgr.openTaskDetail('${task.id}')">
             <div class="proj-task-title">${escHtml(task.title)}</div>
             <div class="proj-task-meta">
-                ${task.priority !== 'medium' ? `<span class="proj-badge badge-${task.priority}" style="font-size:9px">${task.priority}</span>` : ''}
+                ${task.priority !== 'medium' ? `<span class="proj-badge badge-${task.priority}" style="font-size:9px">${priorityLabel}</span>` : ''}
                 ${assignee ? `<span class="proj-task-assignee" title="${escHtml(assignee.name)}">${escHtml(assignee.emoji || '👤')}</span>` : ''}
                 ${due ? `<span class="proj-task-due ${overdue ? 'overdue' : ''}" title="${formatDate(due)}">${overdue ? '⚠️' : '📅'} ${formatDate(due)}</span>` : ''}
                 ${(task.tags || []).slice(0, 2).map(t => `<span class="proj-tag" style="font-size:9px">${escHtml(t)}</span>`).join('')}
@@ -814,7 +830,7 @@
         }
         // Persist
         const updates = p.tasks.map(t => ({ id: t.id, columnId: t.columnId, order: t.order || 0 }));
-        api.reorderTasks(p.id, updates).catch(() => toast('Save failed', 'error'));
+        api.reorderTasks(p.id, updates).catch(() => toast(_t('proj_save_failed'), 'error'));
         // Also update task's columnId via task update for activity log
         if (oldColId !== colId) {
             api.updateTask(p.id, taskId, { columnId: colId, order: task.order }).then(result => {
@@ -952,17 +968,17 @@
                 const mc = getMainContent();
                 if (mc) { mc.innerHTML = renderBoardView(); bindBoardEvents(); }
                 animateTaskSpawn(d.task.id);
-                toast('Task added', 'success');
+                toast(_t('proj_task_added'), 'success');
                 populateBoardScoreboard();
             }
-        } catch (e) { toast('Failed to add task', 'error'); }
+        } catch (e) { toast(_t('proj_failed_add_task'), 'error'); }
     }
 
     // ── COLUMN MANAGEMENT ─────────────────────────────────────────
     async function addColumn() {
         const p = state.currentProject;
         if (!p) return;
-        const title = prompt('Column title:');
+        const title = prompt(_t('proj_column_title_prompt'));
         if (!title) return;
         const colors = ['#6c757d', '#0d6efd', '#ffc107', '#fd7e14', '#198754', '#17a2b8', '#dc3545'];
         const color = colors[p.columns.length % colors.length];
@@ -972,7 +988,7 @@
             await api.updateColumns(p.id, p.columns);
             const mc = getMainContent();
             if (mc) { mc.innerHTML = renderBoardView(); bindBoardEvents(); }
-        } catch (e) { toast('Failed to add column', 'error'); }
+        } catch (e) { toast(_t('proj_failed_add_column'), 'error'); }
     }
 
     function renameColumn(colId) {
@@ -1037,70 +1053,70 @@
 
         panel.innerHTML = `
         <div class="proj-detail-header">
-            <span style="font-size:11px;color:#888">Task Detail</span>
+            <span style="font-size:11px;color:#888">${_t('proj_task_detail')}</span>
             <div style="display:flex;gap:6px">
-                <button class="proj-btn proj-btn-sm proj-btn-danger" onclick="ProjMgr.deleteCurrentTask()">🗑️ Delete</button>
-                <button class="proj-btn proj-btn-sm" onclick="ProjMgr.duplicateTask('${task.id}')">📋 Duplicate</button>
+                <button class="proj-btn proj-btn-sm proj-btn-danger" onclick="ProjMgr.deleteCurrentTask()">${_t('proj_delete')}</button>
+                <button class="proj-btn proj-btn-sm" onclick="ProjMgr.duplicateTask('${task.id}')">${_t('proj_edit')}</button>
                 <button class="proj-detail-close" onclick="ProjMgr.closeDetailPanel()">✕</button>
             </div>
         </div>
         <div class="proj-detail-body">
-            <input class="proj-detail-title-input" id="detail-title" value="${escHtml(task.title)}" placeholder="Task title">
-            
+            <input class="proj-detail-title-input" id="detail-title" value="${escHtml(task.title)}" placeholder="${_t('proj_task_title_input')}">
+
             <div class="proj-section">
                 <div class="proj-field">
-                    <label class="proj-field-label">Column</label>
+                    <label class="proj-field-label">${_t('proj_column_title')}</label>
                     <select class="proj-detail-select" id="detail-col" onchange="ProjMgr.updateTaskField('columnId', this.value)">
-                        ${cols.map(c => `<option value="${c.id}" ${task.columnId === c.id ? 'selected' : ''}>${escHtml(c.title)}</option>`).join('')}
+                        ${cols.map(c => `<option value="${c.id}" ${task.columnId === c.id ? 'selected' : ''}>${escHtml(c._titleKey ? _t(c._titleKey) : c.title)}</option>`).join('')}
                     </select>
                 </div>
                 <div style="display:flex;gap:8px">
                     <div class="proj-field" style="flex:1">
-                        <label class="proj-field-label">Priority</label>
+                        <label class="proj-field-label">${_t('proj_priority_label')}</label>
                         <select class="proj-detail-select" id="detail-pri" onchange="ProjMgr.updateTaskField('priority', this.value)">
-                            <option value="critical" ${task.priority === 'critical' ? 'selected' : ''}>🔴 Critical</option>
-                            <option value="high" ${task.priority === 'high' ? 'selected' : ''}>🟠 High</option>
-                            <option value="medium" ${task.priority === 'medium' ? 'selected' : ''}>🔵 Medium</option>
-                            <option value="low" ${task.priority === 'low' ? 'selected' : ''}>⚪ Low</option>
+                            <option value="critical" ${task.priority === 'critical' ? 'selected' : ''}>${_t('proj_priority_critical')}</option>
+                            <option value="high" ${task.priority === 'high' ? 'selected' : ''}>${_t('proj_priority_high')}</option>
+                            <option value="medium" ${task.priority === 'medium' ? 'selected' : ''}>${_t('proj_priority_medium')}</option>
+                            <option value="low" ${task.priority === 'low' ? 'selected' : ''}>${_t('proj_priority_low')}</option>
                         </select>
                     </div>
                     <div class="proj-field" style="flex:1">
-                        <label class="proj-field-label">Due Date</label>
+                        <label class="proj-field-label">${_t('proj_due_date')}</label>
                         <input class="proj-detail-input" type="date" id="detail-due" value="${task.dueDate ? task.dueDate.split('T')[0] : ''}" onchange="ProjMgr.updateTaskField('dueDate', this.value ? new Date(this.value).toISOString() : null)">
                     </div>
                 </div>
                 <div class="proj-field">
-                    <label class="proj-field-label">Assignee</label>
+                    <label class="proj-field-label">${_t('proj_assignee')}</label>
                     <select class="proj-detail-select" id="detail-assignee" onchange="ProjMgr.updateTaskField('assignee', this.value || null)">
-                        <option value="">— Unassigned —</option>
+                        <option value="">— ${_t('proj_unassigned')} —</option>
                         ${agents.map(a => `<option value="${a.key || a.statusKey || a.id}" ${task.assignee === (a.key || a.statusKey || a.id) ? 'selected' : ''}>${escHtml((a.emoji || '👤') + ' ' + a.name)}</option>`).join('')}
                     </select>
                 </div>
                 <div class="proj-field">
-                    <label class="proj-field-label">Tags</label>
+                    <label class="proj-field-label">${_t('proj_tags')}</label>
                     <div class="proj-tag-input-wrap" id="detail-tags-wrap" onclick="document.getElementById('detail-tag-in').focus()">
                         ${(task.tags || []).map(t => `<span class="proj-tag">${escHtml(t)}<span class="tag-remove" onclick="ProjMgr.removeTag('${escHtml(t)}')">×</span></span>`).join('')}
-                        <input class="proj-tag-input" id="detail-tag-in" placeholder="Add tag…" onkeydown="ProjMgr.handleTagKey(event)">
+                        <input class="proj-tag-input" id="detail-tag-in" placeholder="${_t('proj_add_tag')}" onkeydown="ProjMgr.handleTagKey(event)">
                     </div>
                 </div>
             </div>
 
             <div class="proj-section">
-                <div class="proj-section-header"><span class="proj-section-title">📝 Description</span></div>
+                <div class="proj-section-header"><span class="proj-section-title">${_t('proj_description')}</span></div>
                 <div class="proj-desc-tabs">
-                    <button class="proj-desc-tab active" id="desc-tab-edit" onclick="ProjMgr.switchDescTab('edit')">Edit</button>
-                    <button class="proj-desc-tab" id="desc-tab-preview" onclick="ProjMgr.switchDescTab('preview')">Preview</button>
+                    <button class="proj-desc-tab active" id="desc-tab-edit" onclick="ProjMgr.switchDescTab('edit')">${_t('proj_edit_desc')}</button>
+                    <button class="proj-desc-tab" id="desc-tab-preview" onclick="ProjMgr.switchDescTab('preview')">${_t('proj_preview')}</button>
                 </div>
-                <textarea class="proj-detail-textarea" id="detail-desc" rows="4" placeholder="Task description (Markdown supported)">${escHtml(task.description || '')}</textarea>
+                <textarea class="proj-detail-textarea" id="detail-desc" rows="4" placeholder="${_t('proj_description')} (Markdown supported)">${escHtml(task.description || '')}</textarea>
                 <div class="proj-desc-preview hidden" id="detail-desc-preview">${simpleMarkdown(task.description || '')}</div>
                 <div style="text-align:right;margin-top:4px">
-                    <button class="proj-btn proj-btn-sm proj-btn-gold" onclick="ProjMgr.saveDescription()">💾 Save</button>
+                    <button class="proj-btn proj-btn-sm proj-btn-gold" onclick="ProjMgr.saveDescription()">${_t('proj_save')}</button>
                 </div>
             </div>
 
             <div class="proj-section">
                 <div class="proj-section-header">
-                    <span class="proj-section-title">✅ Checklist</span>
+                    <span class="proj-section-title">${_t('proj_checklist')}</span>
                     <span style="font-size:10px;color:#888">${checkDone}/${checklist.length}</span>
                 </div>
                 ${checklist.length ? `
@@ -1114,14 +1130,14 @@
                     ${checklist.map((c, i) => `
                     <li class="proj-checklist-item ${c.done ? 'done' : ''}">
                         <input type="checkbox" ${c.done ? 'checked' : ''} onchange="ProjMgr.toggleChecklistItem(${i}, this.checked)">
-                        <span class="proj-checklist-item-text" ondblclick="ProjMgr.editChecklistItem(${i})" title="Double-click to edit">${escHtml(c.text)}</span>
-                        <button class="proj-checklist-edit" onclick="ProjMgr.editChecklistItem(${i})" title="Edit">✏️</button>
+                        <span class="proj-checklist-item-text" ondblclick="ProjMgr.editChecklistItem(${i})" title="${_t('proj_edit')}">${escHtml(c.text)}</span>
+                        <button class="proj-checklist-edit" onclick="ProjMgr.editChecklistItem(${i})" title="${_t('proj_edit')}">✏️</button>
                         <button class="proj-checklist-delete" onclick="ProjMgr.deleteChecklistItem(${i})">×</button>
                     </li>`).join('')}
                 </ul>
                 <div style="display:flex;gap:6px;margin-top:6px">
-                    <input class="proj-detail-input" id="new-checklist-item" type="text" placeholder="Add checklist item…" onkeydown="if(event.key==='Enter')ProjMgr.addChecklistItem()" style="flex:1">
-                    <button class="proj-btn proj-btn-sm" onclick="ProjMgr.addChecklistItem()">Add</button>
+                    <input class="proj-detail-input" id="new-checklist-item" type="text" placeholder="${_t('proj_add_checklist_item')}" onkeydown="if(event.key==='Enter')ProjMgr.addChecklistItem()" style="flex:1">
+                    <button class="proj-btn proj-btn-sm" onclick="ProjMgr.addChecklistItem()">${_t('proj_add')}</button>
                 </div>
             </div>
 
@@ -1139,24 +1155,24 @@
                             <span class="proj-review-text">${escHtml(rc.text)}</span>
                             ${editable ? `
                             <select class="proj-review-select" onchange="ProjMgr.updateReviewItemStatus(${i}, this.value)">
-                                <option value="pass" ${rc.status === 'pass' ? 'selected' : ''}>✅ Pass</option>
-                                <option value="needs_more_work" ${rc.status === 'needs_more_work' ? 'selected' : ''}>⚠️ Needs More Work</option>
-                                <option value="did_not_pass" ${rc.status === 'did_not_pass' ? 'selected' : ''}>❌ Did Not Pass</option>
-                                <option value="requires_user_review" ${rc.status === 'requires_user_review' ? 'selected' : ''}>👤 Requires User Review</option>
-                            </select>` : `<span style="font-size:11px;color:#777">preserved from prior review</span>`}
+                                <option value="pass" ${rc.status === 'pass' ? 'selected' : ''}>${_t('proj_review_pass')}</option>
+                                <option value="needs_more_work" ${rc.status === 'needs_more_work' ? 'selected' : ''}>${_t('proj_review_needs_more_work')}</option>
+                                <option value="did_not_pass" ${rc.status === 'did_not_pass' ? 'selected' : ''}>${_t('proj_review_did_not_pass')}</option>
+                                <option value="requires_user_review" ${rc.status === 'requires_user_review' ? 'selected' : ''}>${_t('proj_review_requires_user')}</option>
+                            </select>` : `<span style="font-size:11px;color:#777">${_t('proj_preserved_prior_review')}</span>`}
                         </div>`;
                     }).join('')}
                 </div>
                 ${(task.reviewCheck && task.reviewCheck.length) ? `
                 <div style="text-align:right;margin-top:6px">
-                    <button class="proj-btn proj-btn-sm proj-btn-gold" onclick="ProjMgr.saveReviewCheck()">💾 Save Review</button>
+                    <button class="proj-btn proj-btn-sm proj-btn-gold" onclick="ProjMgr.saveReviewCheck()">${_t('proj_save_review')}</button>
                 </div>` : ''}
             </div>` : ''}
 
             <div class="proj-section">
-                <div class="proj-section-header"><span class="proj-section-title">💬 Comments</span></div>
+                <div class="proj-section-header"><span class="proj-section-title">${_t('proj_comments')}</span></div>
                 <div class="proj-comments-list" id="detail-comments">
-                    ${comments.length === 0 ? '<div style="font-size:11px;color:#555">No comments yet</div>' : ''}
+                    ${comments.length === 0 ? `<div style="font-size:11px;color:#555">${_t('proj_no_comments')}</div>` : ''}
                     ${comments.map(c => `
                     <div class="proj-comment">
                         <div class="proj-comment-header">
@@ -1166,15 +1182,15 @@
                         <div class="proj-comment-text">${simpleMarkdown(c.text)}</div>
                     </div>`).join('')}
                 </div>
-                <textarea class="proj-detail-textarea" id="detail-comment-input" rows="2" placeholder="Add a comment… (Markdown supported)"></textarea>
+                <textarea class="proj-detail-textarea" id="detail-comment-input" rows="2" placeholder="${_t('proj_add_comment_placeholder')}"></textarea>
                 <div style="text-align:right;margin-top:4px">
-                    <button class="proj-btn proj-btn-sm proj-btn-gold" onclick="ProjMgr.submitComment()">Post Comment</button>
+                    <button class="proj-btn proj-btn-sm proj-btn-gold" onclick="ProjMgr.submitComment()">${_t('proj_post_comment')}</button>
                 </div>
             </div>
 
             ${activity.length > 0 ? `
             <div class="proj-section">
-                <div class="proj-section-header"><span class="proj-section-title">📜 Activity</span></div>
+                <div class="proj-section-header"><span class="proj-section-title">${_t('proj_activity')}</span></div>
                 <div class="proj-activity-list">
                     ${activity.map(a => `
                     <div class="proj-activity-item">
@@ -1239,8 +1255,8 @@
 
     async function saveDescription() {
         const el = document.getElementById('detail-desc');
-        if (!el) { toast('Description field not found', 'error'); return; }
-        if (!state.currentTask || !state.currentProject) { toast('No task selected', 'error'); return; }
+        if (!el) { toast(_t('proj_description_not_found'), 'error'); return; }
+        if (!state.currentTask || !state.currentProject) { toast(_t('proj_no_task_selected'), 'error'); return; }
         const desc = el.value;
         // Ensure currentTask references the live project task (handles stale refs after poll refresh)
         const liveTask = state.currentProject.tasks.find(t => t.id === state.currentTask.id);
@@ -1253,7 +1269,7 @@
         task.description = desc;
         // Visual feedback: disable save button during save
         const saveBtn = el.parentElement && el.parentElement.querySelector('.proj-btn-gold');
-        if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = '⏳ Saving…'; }
+        if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = '⏳ ' + _t('proj_saving'); }
         try {
             await api.updateTask(projId, taskId, { description: desc });
             // Also update the card on the board
@@ -1264,12 +1280,12 @@
                 const rendered = newCard.firstElementChild;
                 if (rendered) cardEl.replaceWith(rendered);
             }
-            if (saveBtn) { saveBtn.textContent = '✅ Saved'; }
-            toast('Description saved', 'success');
-            setTimeout(() => { if (saveBtn) { saveBtn.textContent = '💾 Save'; saveBtn.disabled = false; } }, 1500);
+            if (saveBtn) { saveBtn.textContent = '✅ ' + _t('proj_saved'); }
+            toast(_t('proj_description_saved'), 'success');
+            setTimeout(() => { if (saveBtn) { saveBtn.textContent = '💾 ' + _t('proj_save'); saveBtn.disabled = false; } }, 1500);
         } catch (e) {
-            if (saveBtn) { saveBtn.textContent = '💾 Save'; saveBtn.disabled = false; }
-            toast('Failed to save description', 'error');
+            if (saveBtn) { saveBtn.textContent = '💾 ' + _t('proj_save'); saveBtn.disabled = false; }
+            toast(_t('proj_failed_save_desc'), 'error');
         }
     }
 
@@ -1294,7 +1310,7 @@
                 const rendered = newCard.firstElementChild;
                 if (rendered) cardEl.replaceWith(rendered);
             }
-        } catch (e) { toast('Save failed', 'error'); }
+        } catch (e) { toast(_t('proj_save_failed'), 'error'); }
     }
 
     async function updateTaskField(field, value) {
@@ -1416,9 +1432,9 @@
                 task.comments.push(d.comment);
                 if (inp) inp.value = '';
                 renderDetailPanel(task);
-                toast('Comment added', 'success');
+                toast(_t('proj_comment_added'), 'success');
             }
-        } catch (e) { toast('Failed to add comment', 'error'); }
+        } catch (e) { toast(_t('proj_failed_add_comment'), 'error'); }
     }
 
     // Delete / Duplicate task
@@ -1426,7 +1442,8 @@
         const task = state.currentTask;
         const p = state.currentProject;
         if (!task || !p) return;
-        if (!confirm(`Delete task "${task.title}"?`)) return;
+        const confirmMsg = _t('proj_delete_task_confirm').replace('{title}', task.title);
+        if (!confirm(confirmMsg)) return;
         try {
             closeDetailPanel();
             // Animate the deletion first
@@ -1435,9 +1452,9 @@
             p.tasks = p.tasks.filter(t => t.id !== task.id);
             const mc = getMainContent();
             if (mc) { mc.innerHTML = renderBoardView(); bindBoardEvents(); }
-            toast('Task deleted', 'success');
+            toast(_t('proj_task_deleted'), 'success');
             populateBoardScoreboard();
-        } catch (e) { toast('Failed to delete task', 'error'); }
+        } catch (e) { toast(_t('proj_failed_delete_task'), 'error'); }
     }
     async function duplicateTask(taskId) {
         const p = state.currentProject;
@@ -1447,8 +1464,8 @@
         const copy = { title: src.title + ' (copy)', description: src.description, columnId: src.columnId, priority: src.priority, tags: [...(src.tags || [])], checklist: (src.checklist || []).map(c => ({ ...c, id: genId(), done: false })) };
         try {
             const d = await api.createTask(p.id, copy);
-            if (d.task) { p.tasks.push(d.task); const mc = getMainContent(); if (mc) { mc.innerHTML = renderBoardView(); bindBoardEvents(); } toast('Task duplicated', 'success'); }
-        } catch (e) { toast('Failed to duplicate', 'error'); }
+            if (d.task) { p.tasks.push(d.task); const mc = getMainContent(); if (mc) { mc.innerHTML = renderBoardView(); bindBoardEvents(); } toast(_t('proj_task_duplicated'), 'success'); }
+        } catch (e) { toast(_t('proj_failed_duplicate'), 'error'); }
     }
 
     // ── NEW PROJECT DIALOG ────────────────────────────────────────
@@ -1471,47 +1488,47 @@
             overlay.innerHTML = `
             <div class="proj-form-modal" style="position:static;padding:0;background:transparent" onclick="event.stopPropagation()">
             <div class="proj-form-box">
-                <div class="proj-form-title">📋 NEW PROJECT</div>
+                <div class="proj-form-title">${_t('proj_new_project_title')}</div>
                 <div class="proj-form-group">
-                    <label class="proj-form-label">Title *</label>
-                    <input class="proj-form-input" id="pf-title" type="text" placeholder="Project title" autofocus>
+                    <label class="proj-form-label">${_t('proj_new_project_title_placeholder')} *</label>
+                    <input class="proj-form-input" id="pf-title" type="text" placeholder="${_t('proj_new_project_title_placeholder')}" autofocus>
                 </div>
                 <div class="proj-form-group">
-                    <label class="proj-form-label">Description</label>
-                    <textarea class="proj-form-textarea" id="pf-desc" placeholder="What is this project about?"></textarea>
+                    <label class="proj-form-label">${_t('proj_description')}</label>
+                    <textarea class="proj-form-textarea" id="pf-desc" placeholder="${_t('proj_new_project_desc_placeholder')}"></textarea>
                 </div>
                 <div class="proj-form-row">
                     <div class="proj-form-group">
-                        <label class="proj-form-label">Status</label>
+                        <label class="proj-form-label">${_t('proj_status_active')}</label>
                         <select class="proj-form-select" id="pf-status">
-                            <option value="active">Active</option>
-                            <option value="paused">Paused</option>
+                            <option value="active">${_t('proj_status_active')}</option>
+                            <option value="paused">${_t('proj_status_paused')}</option>
                         </select>
                     </div>
                     <div class="proj-form-group">
-                        <label class="proj-form-label">Priority</label>
+                        <label class="proj-form-label">${_t('proj_priority_label')}</label>
                         <select class="proj-form-select" id="pf-priority">
-                            <option value="critical">🔴 Critical</option>
-                            <option value="high">🟠 High</option>
-                            <option value="medium" selected>🔵 Medium</option>
-                            <option value="low">⚪ Low</option>
+                            <option value="critical">${_t('proj_priority_critical')}</option>
+                            <option value="high">${_t('proj_priority_high')}</option>
+                            <option value="medium" selected>${_t('proj_priority_medium')}</option>
+                            <option value="low">${_t('proj_priority_low')}</option>
                         </select>
                     </div>
                 </div>
                 <div class="proj-form-row">
                     <div class="proj-form-group">
-                        <label class="proj-form-label">Due Date</label>
+                        <label class="proj-form-label">${_t('proj_due_date')}</label>
                         <input class="proj-form-input" id="pf-due" type="date">
                     </div>
                     <div class="proj-form-group">
-                        <label class="proj-form-label">Tags (comma-sep)</label>
-                        <input class="proj-form-input" id="pf-tags" type="text" placeholder="tag1, tag2">
+                        <label class="proj-form-label">${_t('proj_tags')} (${_t('proj_sort_priority')}-sep)</label>
+                        <input class="proj-form-input" id="pf-tags" type="text" placeholder="${_t('proj_tags')}">
                     </div>
                 </div>
                 ${extra ? `<input type="hidden" id="pf-template-id" value="${escHtml(extra)}">` : ''}
                 <div class="proj-form-actions">
-                    <button class="proj-btn" onclick="ProjMgr.hideFormModal()">Cancel</button>
-                    <button class="proj-btn proj-btn-primary" onclick="ProjMgr.submitNewProject()">Create Project</button>
+                    <button class="proj-btn" onclick="ProjMgr.hideFormModal()">${_t('proj_cancel')}</button>
+                    <button class="proj-btn proj-btn-primary" onclick="ProjMgr.submitNewProject()">${_t('proj_create_project_btn')}</button>
                 </div>
             </div>
             </div>`;
@@ -1521,49 +1538,49 @@
             overlay.innerHTML = `
             <div class="proj-form-modal" style="position:static;padding:0;background:transparent" onclick="event.stopPropagation()">
             <div class="proj-form-box">
-                <div class="proj-form-title">✏️ EDIT PROJECT</div>
+                <div class="proj-form-title">${_t('proj_edit_project_title')}</div>
                 <div class="proj-form-group">
-                    <label class="proj-form-label">Title *</label>
+                    <label class="proj-form-label">${_t('proj_new_project_title_placeholder')} *</label>
                     <input class="proj-form-input" id="pf-title" type="text" value="${escHtml(data.title || '')}">
                 </div>
                 <div class="proj-form-group">
-                    <label class="proj-form-label">Description</label>
+                    <label class="proj-form-label">${_t('proj_description')}</label>
                     <textarea class="proj-form-textarea" id="pf-desc">${escHtml(data.description || '')}</textarea>
                 </div>
                 <div class="proj-form-row">
                     <div class="proj-form-group">
-                        <label class="proj-form-label">Status</label>
+                        <label class="proj-form-label">${_t('proj_status_active')}</label>
                         <select class="proj-form-select" id="pf-status">
-                            <option value="active" ${data.status === 'active' ? 'selected' : ''}>Active</option>
-                            <option value="paused" ${data.status === 'paused' ? 'selected' : ''}>Paused</option>
-                            <option value="completed" ${data.status === 'completed' ? 'selected' : ''}>Completed</option>
-                            <option value="archived" ${data.status === 'archived' ? 'selected' : ''}>Archived</option>
+                            <option value="active" ${data.status === 'active' ? 'selected' : ''}>${_t('proj_status_active')}</option>
+                            <option value="paused" ${data.status === 'paused' ? 'selected' : ''}>${_t('proj_status_paused')}</option>
+                            <option value="completed" ${data.status === 'completed' ? 'selected' : ''}>${_t('proj_status_completed')}</option>
+                            <option value="archived" ${data.status === 'archived' ? 'selected' : ''}>${_t('proj_status_archived')}</option>
                         </select>
                     </div>
                     <div class="proj-form-group">
-                        <label class="proj-form-label">Priority</label>
+                        <label class="proj-form-label">${_t('proj_priority_label')}</label>
                         <select class="proj-form-select" id="pf-priority">
-                            <option value="critical" ${data.priority === 'critical' ? 'selected' : ''}>🔴 Critical</option>
-                            <option value="high" ${data.priority === 'high' ? 'selected' : ''}>🟠 High</option>
-                            <option value="medium" ${data.priority === 'medium' ? 'selected' : ''}>🔵 Medium</option>
-                            <option value="low" ${data.priority === 'low' ? 'selected' : ''}>⚪ Low</option>
+                            <option value="critical" ${data.priority === 'critical' ? 'selected' : ''}>${_t('proj_priority_critical')}</option>
+                            <option value="high" ${data.priority === 'high' ? 'selected' : ''}>${_t('proj_priority_high')}</option>
+                            <option value="medium" ${data.priority === 'medium' ? 'selected' : ''}>${_t('proj_priority_medium')}</option>
+                            <option value="low" ${data.priority === 'low' ? 'selected' : ''}>${_t('proj_priority_low')}</option>
                         </select>
                     </div>
                 </div>
                 <div class="proj-form-row">
                     <div class="proj-form-group">
-                        <label class="proj-form-label">Due Date</label>
+                        <label class="proj-form-label">${_t('proj_due_date')}</label>
                         <input class="proj-form-input" id="pf-due" type="date" value="${data.dueDate ? data.dueDate.split('T')[0] : ''}">
                     </div>
                     <div class="proj-form-group">
-                        <label class="proj-form-label">Tags (comma-sep)</label>
+                        <label class="proj-form-label">${_t('proj_tags')} (${_t('proj_sort_priority')}-sep)</label>
                         <input class="proj-form-input" id="pf-tags" type="text" value="${escHtml((data.tags || []).join(', '))}">
                     </div>
                 </div>
                 <input type="hidden" id="pf-edit-id" value="${data.id || ''}">
                 <div class="proj-form-actions">
-                    <button class="proj-btn" onclick="ProjMgr.hideFormModal()">Cancel</button>
-                    <button class="proj-btn proj-btn-primary" onclick="ProjMgr.submitEditProject()">Save Changes</button>
+                    <button class="proj-btn" onclick="ProjMgr.hideFormModal()">${_t('proj_cancel')}</button>
+                    <button class="proj-btn proj-btn-primary" onclick="ProjMgr.submitEditProject()">${_t('proj_save_changes')}</button>
                 </div>
             </div>
             </div>`;
@@ -1572,19 +1589,19 @@
             overlay.innerHTML = `
             <div class="proj-form-modal" style="position:static;padding:0;background:transparent" onclick="event.stopPropagation()">
             <div class="proj-form-box" style="max-width:400px">
-                <div class="proj-form-title">💾 SAVE AS TEMPLATE</div>
+                <div class="proj-form-title">${_t('proj_save_as_template')}</div>
                 <div class="proj-form-group">
-                    <label class="proj-form-label">Template Name</label>
+                    <label class="proj-form-label">${_t('proj_template_name')}</label>
                     <input class="proj-form-input" id="pf-tpl-title" type="text" value="${escHtml(data.title + ' Template')}" autofocus>
                 </div>
                 <div class="proj-form-group">
-                    <label class="proj-form-label">Description</label>
-                    <textarea class="proj-form-textarea" id="pf-tpl-desc" placeholder="What is this template for?">${escHtml(data.description || '')}</textarea>
+                    <label class="proj-form-label">${_t('proj_description')}</label>
+                    <textarea class="proj-form-textarea" id="pf-tpl-desc" placeholder="${_t('proj_template_desc_placeholder')}">${escHtml(data.description || '')}</textarea>
                 </div>
                 <input type="hidden" id="pf-tpl-proj-id" value="${data.id || ''}">
                 <div class="proj-form-actions">
-                    <button class="proj-btn" onclick="ProjMgr.hideFormModal()">Cancel</button>
-                    <button class="proj-btn proj-btn-primary" onclick="ProjMgr.submitSaveTemplate()">Save Template</button>
+                    <button class="proj-btn" onclick="ProjMgr.hideFormModal()">${_t('proj_cancel')}</button>
+                    <button class="proj-btn proj-btn-primary" onclick="ProjMgr.submitSaveTemplate()">${_t('proj_save_template_btn')}</button>
                 </div>
             </div>
             </div>`;
@@ -1598,7 +1615,7 @@
 
     async function submitNewProject() {
         const title = (document.getElementById('pf-title') || {}).value.trim();
-        if (!title) { toast('Title is required', 'error'); return; }
+        if (!title) { toast(_t('proj_title_required'), 'error'); return; }
         const tplId = document.getElementById('pf-template-id');
         const body = {
             title,
@@ -1617,10 +1634,10 @@
             }
             hideFormModal();
             if (d.project) {
-                toast('Project created!', 'success');
+                toast(_t('proj_created'), 'success');
                 await openProject(d.project.id);
             }
-        } catch (e) { toast('Failed to create project', 'error'); }
+        } catch (e) { toast(_t('proj_failed_create'), 'error'); }
     }
 
     async function submitEditProject() {
@@ -1639,31 +1656,31 @@
             const d = await api.updateProject(id, body);
             hideFormModal();
             if (state.currentProject && state.currentProject.id === id) Object.assign(state.currentProject, body);
-            toast('Project updated!', 'success');
+            toast(_t('proj_updated'), 'success');
             if (state.view === 'board') { const mc = getMainContent(); if (mc) { mc.innerHTML = renderBoardView(); bindBoardEvents(); } }
             else { showListView(); }
-        } catch (e) { toast('Failed to update project', 'error'); }
+        } catch (e) { toast(_t('proj_failed_update'), 'error'); }
     }
 
     // ── PROJECT CRUD ──────────────────────────────────────────────
     async function archiveProject(id, e) {
         if (e) e.stopPropagation();
-        if (!confirm('Archive this project?')) return;
+        if (!confirm(_t('proj_archive_confirm'))) return;
         try {
             await api.updateProject(id, { status: 'archived' });
-            toast('Project archived', 'success');
+            toast(_t('proj_archived'), 'success');
             showListView();
-        } catch (e) { toast('Failed to archive', 'error'); }
+        } catch (e) { toast(_t('proj_failed_archive'), 'error'); }
     }
 
     async function deleteProject(id, e) {
         if (e) e.stopPropagation();
-        if (!confirm('Delete this project? This cannot be undone.')) return;
+        if (!confirm(_t('proj_delete_confirm'))) return;
         try {
             await api.deleteProject(id);
-            toast('Project deleted', 'success');
+            toast(_t('proj_deleted'), 'success');
             showListView();
-        } catch (e) { toast('Failed to delete', 'error'); }
+        } catch (e) { toast(_t('proj_failed_delete'), 'error'); }
     }
 
     function filterChange(key, value) {
@@ -1695,11 +1712,11 @@
         const all = [...DEFAULT_TEMPLATES, ...serverOnly];
         return `
         <div class="proj-toolbar">
-            <button class="proj-btn" onclick="ProjMgr.backToList()">← Back to Projects</button>
-            <span class="proj-toolbar-title">📁 Templates</span>
+            <button class="proj-btn" onclick="ProjMgr.backToList()">${_t('proj_back_to_projects')}</button>
+            <span class="proj-toolbar-title">${_t('proj_templates')}</span>
         </div>
         <div class="proj-list-body">
-            <div style="margin-bottom:16px;font-size:12px;color:#888">Choose a template to create a new project, or save your current project as a template.</div>
+            <div style="margin-bottom:16px;font-size:12px;color:#888">${_t('proj_template_choose')}</div>
             <div class="proj-tpl-grid">
                 ${all.map(tpl => renderTemplateCard(tpl)).join('')}
             </div>
@@ -1708,29 +1725,30 @@
 
     function renderTemplateCard(tpl) {
         const isBuiltin = DEFAULT_TEMPLATES.some(t => t.id === tpl.id);
+        const tplTitle = tpl._titleKey ? _t(tpl._titleKey) : tpl.title;
         return `
         <div class="proj-tpl-card">
-            <div class="proj-tpl-title">${escHtml(tpl.title)}</div>
-            <div class="proj-tpl-desc">${escHtml(tpl.description || '')}</div>
+            <div class="proj-tpl-title">${escHtml(tplTitle)}</div>
+            <div class="proj-tpl-desc">${escHtml(tpl._descKey ? _t(tpl._descKey) : (tpl.description || ''))}</div>
             <div class="proj-tpl-cols">
-                ${(tpl.columns || []).map(c => `<span class="proj-tpl-col-chip" style="background:${c.color}22;border-color:${c.color}55;color:${c.color}">${escHtml(c.title)}</span>`).join('')}
+                ${(tpl.columns || []).map(c => `<span class="proj-tpl-col-chip" style="background:${c.color}22;border-color:${c.color}55;color:${c.color}">${escHtml(c._titleKey ? _t(c._titleKey) : c.title)}</span>`).join('')}
             </div>
             <div class="proj-tpl-actions">
-                <button class="proj-btn proj-btn-sm proj-btn-primary" onclick="ProjMgr.newProjectDialog('${tpl.id}')">Use Template</button>
-                ${!isBuiltin ? `<button class="proj-btn proj-btn-sm proj-btn-danger" onclick="ProjMgr.deleteTemplate('${tpl.id}')">Delete</button>` : ''}
+                <button class="proj-btn proj-btn-sm proj-btn-primary" onclick="ProjMgr.newProjectDialog('${tpl.id}')">${_t('proj_use_template')}</button>
+                ${!isBuiltin ? `<button class="proj-btn proj-btn-sm proj-btn-danger" onclick="ProjMgr.deleteTemplate('${tpl.id}')">${_t('proj_delete')}</button>` : ''}
             </div>
         </div>`;
     }
 
     async function deleteTemplate(id) {
-        if (!confirm('Delete this template?')) return;
+        if (!confirm(_t('proj_delete_template_confirm'))) return;
         try {
             await api.deleteTemplate(id);
             state.templates = state.templates.filter(t => t.id !== id);
             const mc = getMainContent();
             if (mc) mc.innerHTML = renderTemplatesView();
-            toast('Template deleted', 'success');
-        } catch (e) { toast('Failed to delete template', 'error'); }
+            toast(_t('proj_template_deleted'), 'success');
+        } catch (e) { toast(_t('proj_failed_delete_template'), 'error'); }
     }
 
     function saveAsTemplateDialog(projectId) {
@@ -1747,8 +1765,8 @@
         try {
             await api.saveTemplate({ title, description: desc, projectId });
             hideFormModal();
-            toast('Template saved!', 'success');
-        } catch (e) { toast('Failed to save template', 'error'); }
+            toast(_t('proj_template_saved'), 'success');
+        } catch (e) { toast(_t('proj_failed_save_template'), 'error'); }
     }
 
     // ── REPORT VIEW ───────────────────────────────────────────────
@@ -1763,7 +1781,7 @@
             if (!d.report) throw new Error('No report');
             mc.innerHTML = renderReportView(d.report);
         } catch (e) {
-            mc.innerHTML = `<div class="proj-loading">⚠️ Failed to generate report</div>`;
+            mc.innerHTML = `<div class="proj-loading">${_t('proj_failed_to_load_project')}</div>`;
         }
     }
 
@@ -1774,55 +1792,58 @@
 
         return `
         <div class="proj-toolbar">
-            <button class="proj-btn" onclick="ProjMgr.backToList()">← Back</button>
-            <span class="proj-toolbar-title">📊 Report</span>
+            <button class="proj-btn" onclick="ProjMgr.backToList()">${_t('proj_back')}</button>
+            <span class="proj-toolbar-title">${_t('proj_report_title')}</span>
             <div style="flex:1"></div>
-            <button class="proj-btn proj-btn-sm" onclick="ProjMgr.exportReport()">📤 Export Markdown</button>
+            <button class="proj-btn proj-btn-sm" onclick="ProjMgr.exportReport()">${_t('proj_export_markdown')}</button>
         </div>
         <div class="proj-report-body">
             <div class="proj-report-header">
                 <div>
                     <div class="proj-report-title">${escHtml(title)}</div>
-                    <div class="proj-report-subtitle">Generated ${new Date(r.generatedAt).toLocaleString()}</div>
+                    <div class="proj-report-subtitle">${_t('proj_generated_at')} ${new Date(r.generatedAt).toLocaleString()}</div>
                 </div>
             </div>
 
             <div class="proj-stats-grid">
                 <div class="proj-stat-card">
                     <div class="proj-stat-value">${stats.total}</div>
-                    <div class="proj-stat-label">Total Tasks</div>
+                    <div class="proj-stat-label">${_t('proj_total_tasks')}</div>
                 </div>
                 <div class="proj-stat-card">
                     <div class="proj-stat-value" style="color:#4caf50">${stats.done}</div>
-                    <div class="proj-stat-label">Completed</div>
+                    <div class="proj-stat-label">${_t('proj_completed')}</div>
                 </div>
                 <div class="proj-stat-card">
                     <div class="proj-stat-value" style="color:#ffc107">${stats.inProgress}</div>
-                    <div class="proj-stat-label">In Progress</div>
+                    <div class="proj-stat-label">${_t('proj_in_progress')}</div>
                 </div>
                 <div class="proj-stat-card">
                     <div class="proj-stat-value" style="color:#f44336">${stats.overdue}</div>
-                    <div class="proj-stat-label">Overdue</div>
+                    <div class="proj-stat-label">${_t('proj_overdue_tasks')}</div>
                 </div>
             </div>
 
             <div class="proj-chart-section">
-                <div class="proj-chart-title">📊 Tasks by Column</div>
+                <div class="proj-chart-title">${_t('proj_tasks_by_column')}</div>
                 <div class="proj-bar-chart">
-                    ${columns.map(c => `
+                    ${columns.map(c => {
+                        const colTitle = c._titleKey ? _t(c._titleKey) : c.title;
+                        return `
                     <div class="proj-bar-row">
-                        <div class="proj-bar-label" title="${escHtml(c.title)}">${escHtml(c.title)}</div>
+                        <div class="proj-bar-label" title="${escHtml(colTitle)}">${escHtml(colTitle)}</div>
                         <div class="proj-bar-track">
                             <div class="proj-bar-fill" style="width:${Math.round(c.count/maxColCount*100)}%;background:${c.color}">${c.count}</div>
                         </div>
                         <div class="proj-bar-count">${c.count}</div>
-                    </div>`).join('')}
+                    </div>`;
+                    }).join('')}
                 </div>
             </div>
 
             ${Object.keys(agentWorkload || {}).length ? `
             <div class="proj-chart-section">
-                <div class="proj-chart-title">👥 Agent Workload</div>
+                <div class="proj-chart-title">${_t('proj_agent_workload')}</div>
                 <div class="proj-bar-chart">
                     ${Object.entries(agentWorkload).map(([agent, count]) => `
                     <div class="proj-bar-row">
@@ -1837,18 +1858,19 @@
 
             ${timeline.length ? `
             <div class="proj-chart-section">
-                <div class="proj-chart-title">📅 Timeline</div>
+                <div class="proj-chart-title">${_t('proj_timeline')}</div>
                 <div class="proj-timeline">
                     ${timeline.map(t => {
                         const over = t.dueDate && !t.completedAt && isOverdue(t.dueDate);
+                        const priorityLabel = _t('proj_priority_' + (t.priority || 'medium'));
                         return `
                         <div class="proj-tl-item ${t.completedAt ? 'completed' : over ? 'overdue' : ''}">
                             <div class="proj-tl-title">${escHtml(t.title)}</div>
                             <div class="proj-tl-meta">
                                 <span>📅 ${formatDate(t.dueDate)}</span>
                                 ${t.assignee ? `<span>👤 ${escHtml(t.assignee)}</span>` : ''}
-                                <span class="proj-badge badge-${t.priority || 'medium'}" style="font-size:9px">${t.priority || 'medium'}</span>
-                                ${t.completedAt ? `<span style="color:#4caf50">✅ Done</span>` : over ? `<span style="color:#f87171">⚠️ Overdue</span>` : ''}
+                                <span class="proj-badge badge-${t.priority || 'medium'}" style="font-size:9px">${priorityLabel}</span>
+                                ${t.completedAt ? `<span style="color:#4caf50">✅ ${_t('proj_done_label')}</span>` : over ? `<span style="color:#f87171">⚠️ ${_t('proj_overdue')}</span>` : ''}
                             </div>
                         </div>`;
                     }).join('')}
@@ -1872,7 +1894,7 @@
             if (val && lbl) md += `- **${lbl.textContent}:** ${val.textContent}\n`;
         });
         // Copy to clipboard
-        navigator.clipboard.writeText(md).then(() => toast('Report copied to clipboard!', 'success')).catch(() => {
+        navigator.clipboard.writeText(md).then(() => toast(_t('proj_report_copied'), 'success')).catch(() => {
             const ta = document.createElement('textarea');
             ta.value = md;
             document.body.appendChild(ta);
@@ -1889,7 +1911,7 @@
         if (!el) return;
         const active = state.projects.filter(p => p.status === 'active').slice(0, 5);
         if (active.length === 0) {
-            el.innerHTML = '<div style="font-size:10px;color:#555;padding:4px">No active projects</div>';
+            el.innerHTML = `<div style="font-size:10px;color:#555;padding:4px">${_t('proj_no_active_projects')}</div>`;
             return;
         }
         el.innerHTML = active.map(p => {
@@ -1934,12 +1956,12 @@
         try {
             const d = await api.workflowStart(p.id, isAuto);
             if (d.error) { toast(d.error, 'error'); return; }
-            toast('Workflow started!', 'success');
+            toast(_t('proj_workflow_started'), 'success');
             state.workflow.active = true;
             state.workflow.autoMode = isAuto;
             updateWorkflowUI();
             startWorkflowPolling();
-        } catch (e) { toast('Failed to start workflow', 'error'); }
+        } catch (e) { toast(_t('proj_failed_start_workflow'), 'error'); }
     }
 
     async function workflowStopAction() {
@@ -1947,12 +1969,12 @@
         if (!p) return;
         try {
             await api.workflowStop(p.id);
-            toast('Workflow stopped', 'info');
+            toast(_t('proj_workflow_stopped_msg'), 'info');
             state.workflow.active = false;
             state.workflow.phase = 'stopped';
             updateWorkflowUI();
             stopWorkflowPolling();
-        } catch (e) { toast('Failed to stop workflow', 'error'); }
+        } catch (e) { toast(_t('proj_failed_stop_workflow'), 'error'); }
     }
 
     async function toggleAutoModeAction(enabled) {
@@ -1962,8 +1984,8 @@
             await api.setAutoMode(p.id, enabled);
             state.workflow.autoMode = enabled;
             p.autoMode = enabled;
-            toast(`Auto Mode ${enabled ? 'ON' : 'OFF'}`, 'info');
-        } catch (e) { toast('Failed to toggle auto mode', 'error'); }
+            toast(enabled ? _t('proj_auto_mode_on') : _t('proj_auto_mode_off'), 'info');
+        } catch (e) { toast(_t('proj_failed_toggle_auto'), 'error'); }
     }
 
     function startWorkflowPolling() {
@@ -2061,7 +2083,7 @@
         }
 
         if (msgs.length === 0) {
-            container.innerHTML = '<div class="proj-chat-empty">Workflow chat will appear here when a task is being worked on.</div>';
+            container.innerHTML = `<div class="proj-chat-empty">${_t('proj_workflow_chat_empty')}</div>`;
             return;
         }
 
@@ -2152,16 +2174,16 @@
             const phase = state.workflow.phase || 'idle';
             const phaseLabels = {
                 'idle': '',
-                'starting': '🔄 Starting...',
-                'dispatching': '📤 Sending to agent...',
-                'in_progress': '⚙️ Agent working...',
-                'reviewing': '🔍 Reviewing...',
-                'reworking': '🔧 Reworking...',
-                'awaiting_user_review': '👤 Needs Your Review',
-                'task_done': '✅ Task Complete',
-                'stopped': '⏹ Stopped',
-                'stalled': '⚠️ Stalled — click Start to resume',
-                'error': '❌ Error',
+                'starting': _t('proj_workflow_starting'),
+                'dispatching': _t('proj_workflow_dispatching'),
+                'in_progress': _t('proj_workflow_in_progress'),
+                'reviewing': _t('proj_workflow_reviewing'),
+                'reworking': _t('proj_workflow_reworking'),
+                'awaiting_user_review': _t('proj_workflow_awaiting_user'),
+                'task_done': _t('proj_workflow_task_done'),
+                'stopped': _t('proj_workflow_stopped'),
+                'stalled': _t('proj_workflow_stalled'),
+                'error': _t('proj_workflow_error'),
             };
             badge.textContent = phaseLabels[phase] || phase;
             badge.className = 'proj-wf-status' + (state.workflow.active ? ' wf-active' : '') + (phase === 'awaiting_user_review' ? ' wf-attention' : '') + (phase === 'error' ? ' wf-error' : '');
@@ -2186,8 +2208,8 @@
         if (!task || !p || !task.reviewCheck) return;
         try {
             await api.updateReviewCheck(p.id, task.id, task.reviewCheck);
-            toast('Review check saved', 'success');
-        } catch (e) { toast('Failed to save review check', 'error'); }
+            toast(_t('proj_review_saved'), 'success');
+        } catch (e) { toast(_t('proj_failed_save_review'), 'error'); }
     }
 
     // Check workflow status when opening a board (handles page refresh)

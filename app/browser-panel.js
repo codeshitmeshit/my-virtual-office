@@ -1,6 +1,7 @@
 // Browser Panel — Bring Your Own Browser integration for Virtual Office
 // Floating, draggable, resizable, minimizable popup window
 (() => {
+  const _t = (key) => typeof i18n !== 'undefined' ? i18n.t(key) : key;
   let BROWSER_VIEW_URL = null; // loaded from config
   let _browserConfigured = false;
   let _agentNames = {}; // loaded dynamically from /api/agents
@@ -121,7 +122,7 @@
         const sep = BROWSER_VIEW_URL.includes('?') ? '&' : '?';
         browserFrame.src = `${BROWSER_VIEW_URL}${sep}resize=scale&autoconnect=1`;
       } else {
-        browserFrame.srcdoc = '<html><body style="background:#0a0a0f;color:#888;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;text-align:center"><div><h2 style="color:#ffd700">🌐 Browser Not Configured</h2><p>Set a Browser Viewer URL in<br>☰ Menu → Settings or /setup</p></div></body></html>';
+        browserFrame.srcdoc = `<html><body style="background:#0a0a0f;color:#888;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;text-align:center"><div><h2 style="color:#ffd700">${_t('browser_not_configured_title')}</h2><p>${_t('browser_not_configured_msg')}</p></div></body></html>`;
       }
     }
     pollCurrentUrl();
@@ -147,16 +148,16 @@
   function minimizePanel() {
     isMinimized = true;
     browserPanel.classList.add('minimized');
-    browserMinimize.title = 'Restore';
-    browserMinimize.textContent = '▲';
+    browserMinimize.title = _t('restore');
+    browserMinimize.textContent = _t('minimize_icon');
   }
 
   function restoreFromMinimize(updateButton = true) {
     isMinimized = false;
     browserPanel.classList.remove('minimized');
     if (updateButton) {
-      browserMinimize.title = 'Minimize';
-      browserMinimize.textContent = '—';
+      browserMinimize.title = _t('minimize_btn');
+      browserMinimize.textContent = _t('minimize_icon');
     }
   }
 
@@ -182,9 +183,9 @@
     if (isMinimized) restoreFromMinimize();
     isMaximized = true;
     browserPanel.classList.add('maximized');
-    browserMaximize.textContent = '❐';
+    browserMaximize.textContent = _t('restore_icon');
     browserMaximize.classList.add('is-maximized');
-    browserMaximize.title = 'Restore';
+    browserMaximize.title = _t('restore');
     // Hide snap buttons while maximized
     const snapGroup = document.querySelector('.browser-snap-group');
     if (snapGroup) snapGroup.style.display = 'none';
@@ -193,9 +194,9 @@
   function restoreFromMaximize() {
     isMaximized = false;
     browserPanel.classList.remove('maximized');
-    browserMaximize.textContent = '□';
+    browserMaximize.textContent = _t('maximize_icon');
     browserMaximize.classList.remove('is-maximized');
-    browserMaximize.title = 'Maximize';
+    browserMaximize.title = _t('maximize');
     // Show snap buttons again
     const snapGroup = document.querySelector('.browser-snap-group');
     if (snapGroup) snapGroup.style.display = '';
@@ -321,7 +322,7 @@
     userHasControl = true;
     browserTakeControl.style.display = 'none';
     browserRelease.style.display = 'inline-flex';
-    browserStatus.textContent = '🖱️ You have control';
+    browserStatus.textContent = _t('you_have_control');
     browserStatus.className = 'browser-status user-control';
     browserFrame.style.pointerEvents = 'auto';
     // Focus the iframe so keyboard events reach KasmVNC
@@ -365,13 +366,13 @@
 
   function onAgentBrowserActivity() {
     if (!browserOpen) openBrowserPanel();
-    browserStatus.textContent = '🤖 AI browsing...';
+    browserStatus.textContent = _t('ai_browsing');
     browserStatus.className = 'browser-status ai-active';
 
     clearTimeout(window._browserIdleTimer);
     window._browserIdleTimer = setTimeout(() => {
       if (!userHasControl) {
-        browserStatus.textContent = 'Idle';
+        browserStatus.textContent = _t('browser_idle');
         browserStatus.className = 'browser-status';
       }
     }, 15000);
@@ -431,7 +432,7 @@
 
       if (agentId) {
         const info = _getAgentInfo(agentId);
-        browserStatus.textContent = `${info.emoji} ${info.name} has control`;
+        browserStatus.textContent = `${info.emoji} ${info.name} ${_t('has_control')}`;
         browserStatus.className = 'browser-status ai-control';
 
         // Auto-open ONLY on fresh activity heartbeat, not on page refresh/load
@@ -448,7 +449,7 @@
         controllerInitialized = true;
       } else {
         currentController = '__idle';
-        browserStatus.textContent = 'Idle';
+        browserStatus.textContent = _t('browser_idle');
         browserStatus.className = 'browser-status';
         controllerInitialized = true;
       }
