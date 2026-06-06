@@ -56,11 +56,24 @@
         .note { background: #0d0d1e; border: 1px solid #2a2a4e; border-radius: 8px; padding: 16px; margin-top: 12px; font-size: 13px; color: #999; line-height: 1.6; }
         .note b { color: #ffd700; }
     </style>
+    <!-- i18n: inline locale data for immediate init -->
+    <script id="locale-en" type="application/json">{}</script>
+    <script id="locale-zh" type="application/json">{}</script>
+    <script src="i18n.js"></script>
+    <script>
+    (function(){
+        var lang='en';
+        try{var s=localStorage.getItem('vo-i18n-lang');if(s==='zh')lang='zh';else if(navigator.language&&navigator.language.toLowerCase().indexOf('zh')>=0)lang='zh';}catch(e){}
+        var eE=document.getElementById('locale-en'),eZ=document.getElementById('locale-zh');
+        function load(l,el){fetch('locales/'+l+'.json').then(function(r){return r.json()}).then(function(d){el.textContent=JSON.stringify(d)}).catch(function(){});}
+        load('en',eE);load('zh',eZ);
+    })();
+    </script>
 </head>
 <body>
     <div class="setup-card">
-        <h1>⚡ MY VIRTUAL OFFICE</h1>
-        <p class="subtitle">First-time setup</p>
+        <h1 data-i18n="setup_title">⚡ MY VIRTUAL OFFICE</h1>
+        <p class="subtitle" data-i18n="setup_subtitle">First-time setup</p>
 
         <div class="progress-dots">
             <div class="dot active" id="dot-0"></div>
@@ -74,13 +87,13 @@
 
         <!-- Step 0: License Key -->
         <div class="step active" id="step-0">
-            <div class="step-title">LICENSE KEY</div>
-            <div class="step-desc">Enter your license key to unlock all features, or continue with the free demo.</div>
-            <label>License Key</label>
-            <input type="text" id="s-license-key" placeholder="XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX" style="font-family:monospace;letter-spacing:1px;" autocomplete="off">
+            <div class="step-title" data-i18n="license_key">LICENSE KEY</div>
+            <div class="step-desc" data-i18n="license_key_desc">Enter your license key to unlock all features, or continue with the free demo.</div>
+            <label data-i18n="license_input">License Key</label>
+            <input type="text" id="s-license-key" placeholder="XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX" data-i18n-placeholder="license_input" style="font-family:monospace;letter-spacing:1px;" autocomplete="off">
             <div id="license-status" style="margin-top:12px;"></div>
             <div class="btn-row" style="margin-top:12px;">
-                <button onclick="activateLicense()" style="font-size:9px;padding:8px 16px;">🔑 ACTIVATE</button>
+                <button onclick="activateLicense()" style="font-size:9px;padding:8px 16px;" data-i18n="activate">🔑 ACTIVATE</button>
             </div>
             <div class="note" style="margin-top:20px;">
                 <b>Demo mode:</b> Free to use with up to 3 agents. Browser panel, SMS panel, model manager, cron manager, and whisper are locked.<br><br>
@@ -90,135 +103,135 @@
             </div>
             <div class="btn-row">
                 <span></span>
-                <button onclick="nextStep(1)">SKIP / CONTINUE →</button>
+                <button onclick="nextStep(1)" data-i18n="skip_continue">SKIP / CONTINUE →</button>
             </div>
         </div>
 
         <!-- Step 1: Office Name -->
         <div class="step" id="step-1">
-            <div class="step-title">1. NAME YOUR OFFICE</div>
-            <div class="step-desc">Give your virtual office a name. This appears in the sidebar and page title.</div>
-            <label>Office Name</label>
-            <input type="text" id="s-name" value="My Virtual Office" placeholder="e.g. Acme Corp HQ">
-            <label>Weather Location <span style="color:#666;font-size:12px">(optional)</span></label>
+            <div class="step-title" data-i18n="name_office">1. NAME YOUR OFFICE</div>
+            <div class="step-desc" data-i18n="name_office_desc">Give your virtual office a name. This appears in the sidebar and page title.</div>
+            <label data-i18n="office_name">Office Name</label>
+            <input type="text" id="s-name" value="My Virtual Office" placeholder="e.g. Acme Corp HQ" data-i18n-placeholder="office_name">
+            <label data-i18n="weather_location">Weather Location <span style="color:#666;font-size:12px" data-i18n="weather_optional">(optional)</span></label>
             <div style="display:flex;gap:8px">
-                <input type="text" id="s-weather-city" value="" placeholder="e.g. Miami" style="flex:2">
-                <input type="text" id="s-weather-state" value="" placeholder="e.g. FL" style="flex:1">
+                <input type="text" id="s-weather-city" value="" placeholder="e.g. Miami" data-i18n-placeholder="weather_location" style="flex:2">
+                <input type="text" id="s-weather-state" value="" placeholder="e.g. FL" data-i18n-placeholder="weather_optional" style="flex:1">
             </div>
             <div class="btn-row">
-                <button class="secondary" onclick="nextStep(0)">← BACK</button>
-                <button onclick="nextStep(2)">NEXT →</button>
+                <button class="secondary" onclick="nextStep(0)" data-i18n="back">← BACK</button>
+                <button onclick="nextStep(2)" data-i18n="next">NEXT →</button>
             </div>
         </div>
 
         <!-- Step 2: Connect Agent Providers -->
         <div class="step" id="step-2">
-            <div class="step-title">2. CONNECT AGENT PROVIDERS</div>
-            <div class="step-desc">Tell the Virtual Office where your agent runtimes live. OpenClaw and Hermes agents can appear together in the same office.</div>
+            <div class="step-title" data-i18n="connect_providers">2. CONNECT AGENT PROVIDERS</div>
+            <div class="step-desc" data-i18n="connect_providers_desc">Tell the Virtual Office where your agent runtimes live. OpenClaw and Hermes agents can appear together in the same office.</div>
 
-            <label>OpenClaw Home Directory</label>
-            <input type="text" id="s-ocpath" value="" placeholder="/home/youruser/.openclaw">
-            <div style="font-size:13px;color:#999;margin:6px 0 4px;line-height:1.5;">
+            <label data-i18n="oc_home_dir">OpenClaw Home Directory</label>
+            <input type="text" id="s-ocpath" value="" placeholder="/home/youruser/.openclaw" data-i18n-placeholder="oc_home_dir">
+            <div style="font-size:13px;color:#999;margin:6px 0 4px;line-height:1.5;" data-i18n="oc_home_hint">
                 This is the folder that contains your <code style="color:#90caf9;">openclaw.json</code> and <code style="color:#90caf9;">agents/</code> directory.
             </div>
 
             <div class="note" style="margin:12px 0;">
-                <b>📁 Where to find it:</b><br><br>
-                <b>Linux/Mac (most common):</b><br>
+                <b data-i18n="where_to_find">📁 Where to find it:</b><br><br>
+                <b data-i18n="linux_mac">Linux/Mac (most common):</b><br>
                 <code style="color:#90caf9;">/home/youruser/.openclaw</code><br><br>
-                <b>Running Virtual Office in Docker?</b><br>
+                <b data-i18n="docker_note">Running Virtual Office in Docker?</b><br>
                 Use the path you mounted with <code>-v</code>. For example:<br>
                 <code style="color:#90caf9;font-size:13px;">docker run -v /home/eli/.openclaw:/openclaw ...</code><br>
                 → enter <code style="color:#90caf9;">/openclaw</code><br><br>
-                <b>Not sure?</b> Run this in your terminal:<br>
+                <b data-i18n="not_sure">Not sure?</b> Run this in your terminal:<br>
                 <code style="color:#90caf9;font-size:13px;">ls ~/.openclaw/openclaw.json</code><br>
                 If it prints a path, use the folder part (e.g. <code style="color:#90caf9;">/home/youruser/.openclaw</code>).
             </div>
 
-            <button onclick="savePathAndDetect()" style="margin:8px 0 16px;padding:8px 16px;font-size:9px;">🔍 DETECT AGENTS</button>
+            <button onclick="savePathAndDetect()" style="margin:8px 0 16px;padding:8px 16px;font-size:9px;" data-i18n="detect_agents">🔍 DETECT AGENTS</button>
 
             <div id="agent-status"></div>
             <div class="agent-list-preview" id="agent-preview"></div>
 
             <div id="gateway-config-section" style="display:none;margin-top:16px;">
                 <div style="border-top:1px solid #333;padding-top:16px;margin-top:8px;">
-                    <div style="font-size:13px;color:#ffd700;font-weight:bold;margin-bottom:8px;">🔌 Gateway Connection</div>
-                    <div style="font-size:13px;color:#aaa;margin-bottom:12px;line-height:1.5;">
+                    <div style="font-size:13px;color:#ffd700;font-weight:bold;margin-bottom:8px;" data-i18n="gateway_token">🔌 Gateway Connection</div>
+                    <div style="font-size:13px;color:#aaa;margin-bottom:12px;line-height:1.5;" data-i18n="gateway_url_desc">
                         Configure the gateway to allow this browser to connect for live agent status and chat.
                     </div>
-                    <label style="font-size:11px;color:#999;display:block;margin-bottom:4px;">Gateway Token <span style="color:#666;font-size:9px">(auto-detected)</span></label>
-                    <input type="text" id="s-gateway-token" placeholder="Auto-detected from openclaw.json" style="width:100%;padding:8px;background:#1a1a2e;color:#ccc;border:1px solid #333;border-radius:4px;font-family:monospace;font-size:11px;margin-bottom:4px;box-sizing:border-box;">
-                    <div style="font-size:10px;color:#666;margin-bottom:12px;">Auth token for chat & live status. Auto-read from OpenClaw config. Override to connect to a different instance.</div>
-                    <button onclick="configureGateway()" style="margin:0 0 12px;padding:8px 16px;font-size:9px;">🔌 CONFIGURE GATEWAY CONNECTION</button>
+                    <label style="font-size:11px;color:#999;display:block;margin-bottom:4px;" data-i18n="gateway_token">Gateway Token <span style="color:#666;font-size:9px" data-i18n="gateway_token_hint">(auto-detected)</span></label>
+                    <input type="text" id="s-gateway-token" placeholder="Auto-detected from openclaw.json" data-i18n-placeholder="gateway_token" style="width:100%;padding:8px;background:#1a1a2e;color:#ccc;border:1px solid #333;border-radius:4px;font-family:monospace;font-size:11px;margin-bottom:4px;box-sizing:border-box;">
+                    <div style="font-size:10px;color:#666;margin-bottom:12px;" data-i18n="gateway_token_desc">Auth token for chat & live status. Auto-read from OpenClaw config. Override to connect to a different instance.</div>
+                    <button onclick="configureGateway()" style="margin:0 0 12px;padding:8px 16px;font-size:9px;" data-i18n="test_connection">🔌 CONFIGURE GATEWAY CONNECTION</button>
                     <div id="gateway-config-status"></div>
                 </div>
             </div>
 
             <div id="no-agents-help" style="display:none;">
                 <div class="note" style="border-color:#f4a236;">
-                    <b>🔧 No agents found? Here's what to check:</b><br><br>
-                    <b>1. Is the path correct?</b><br>
+                    <b data-i18n="no_agents_title">🔧 No agents found? Here's what to check:</b><br><br>
+                    <b data-i18n="no_agents_1">1. Is the path correct?</b>
                     The folder should contain <code>openclaw.json</code> and an <code>agents/</code> directory.<br><br>
-                    <b>2. Do you have agents configured?</b><br>
+                    <b data-i18n="no_agents_2">2. Do you have agents configured?</b>
                     Open your <code>openclaw.json</code> and look for <code>"agents"</code> → <code>"list"</code>. Each agent needs a workspace directory.<br><br>
-                    <b>3. Running in Docker?</b><br>
+                    <b data-i18n="no_agents_3">3. Running in Docker?</b>
                     Make sure you mounted your OpenClaw directory into the container:<br>
                     <code style="color:#90caf9;font-size:13px;">docker run -v /path/to/.openclaw:/openclaw ...</code><br><br>
-                    <b>4. Permissions?</b><br>
+                    <b data-i18n="no_agents_4">4. Permissions?</b>
                     The Virtual Office server needs read access to the agents/ folder.<br><br>
-                    <b>Still stuck?</b> You can skip this step and set the path later from ☰ Menu. The office will work — agents just won't appear until connected.
+                    <b data-i18n="no_agents_5">Still stuck?</b> You can skip this step and set the path later from ☰ Menu. The office will work — agents just won't appear until connected.
                 </div>
             </div>
 
             <div style="border-top:1px solid #333;padding-top:16px;margin-top:18px;">
-                <div style="font-size:13px;color:#ffd700;font-weight:bold;margin-bottom:8px;">⚕️ Hermes Agents</div>
+                <div style="font-size:13px;color:#ffd700;font-weight:bold;margin-bottom:8px;" data-i18n="hermes_agents">⚕️ Hermes Agents</div>
                 <label style="display:flex;align-items:center;gap:8px;margin-top:8px;">
-                    <input type="checkbox" id="s-hermes-enable" checked> Auto-detect local Hermes Agents
+                    <input type="checkbox" id="s-hermes-enable" checked> <span data-i18n="auto_detect_hermes_setup">Auto-detect local Hermes Agents</span>
                 </label>
-                <div style="font-size:13px;color:#999;margin:6px 0 10px;line-height:1.5;">
+                <div style="font-size:13px;color:#999;margin:6px 0 10px;line-height:1.5;" data-i18n="hermes_desc">
                     Virtual Office can also discover Hermes Agent profiles and show them beside OpenClaw agents. It uses the Hermes CLI/status surfaces and does not read Hermes secrets or private memory files.
                 </div>
                 <div id="hermes-fields" style="margin-top:10px;">
-                    <label>Hermes Home Directory</label>
-                    <input type="text" id="s-hermes-home" placeholder="/home/youruser/.hermes">
-                    <label>Hermes CLI Path</label>
-                    <input type="text" id="s-hermes-bin" placeholder="/home/youruser/.local/bin/hermes">
-                    <div style="font-size:12px;color:#666;margin:6px 0 12px;line-height:1.5;">Running in Docker? Mount the Hermes home/CLI into the container and enter the mounted paths.</div>
-                    <button onclick="testHermesConnection()" style="margin:0 0 12px;padding:8px 16px;font-size:9px;">🔍 TEST HERMES</button>
+                    <label data-i18n="hermes_home_dir">Hermes Home Directory</label>
+                    <input type="text" id="s-hermes-home" placeholder="/home/youruser/.hermes" data-i18n-placeholder="hermes_home_dir">
+                    <label data-i18n="hermes_cli_path">Hermes CLI Path</label>
+                    <input type="text" id="s-hermes-bin" placeholder="/home/youruser/.local/bin/hermes" data-i18n-placeholder="hermes_cli_path">
+                    <div style="font-size:12px;color:#666;margin:6px 0 12px;line-height:1.5;" data-i18n="hermes_docker_hint_setup">Running in Docker? Mount the Hermes home/CLI into the container and enter the mounted paths.</div>
+                    <button onclick="testHermesConnection()" style="margin:0 0 12px;padding:8px 16px;font-size:9px;" data-i18n="test_hermes_btn">🔍 TEST HERMES</button>
                     <div id="hermes-test-status"></div>
                 </div>
             </div>
 
             <div class="btn-row">
-                <button class="secondary" onclick="nextStep(1)">← BACK</button>
-                <button onclick="nextStep(3)">NEXT →</button>
+                <button class="secondary" onclick="nextStep(1)" data-i18n="back">← BACK</button>
+                <button onclick="nextStep(3)" data-i18n="next">NEXT →</button>
             </div>
         </div>
 
         <!-- Step 3: Browser -->
         <div class="step" id="step-3">
-            <div class="step-title">3. AGENT BROWSER (OPTIONAL)</div>
-            <div class="step-desc">Connect a browser so your agents can browse the web and you can watch live. You can skip this and set it up later.</div>
+            <div class="step-title" data-i18n="agent_browser_optional">3. AGENT BROWSER (OPTIONAL)</div>
+            <div class="step-desc" data-i18n="agent_browser_setup_desc">Connect a browser so your agents can browse the web and you can watch live. You can skip this and set it up later.</div>
 
             <label style="display:flex;align-items:center;gap:8px;margin-top:12px;">
-                <input type="checkbox" id="s-browser-enable"> Enable Agent Browser
+                <input type="checkbox" id="s-browser-enable"> <span data-i18n="enable_browser_setup">Enable Agent Browser</span>
             </label>
 
             <div id="browser-fields" style="display:none;margin-top:16px;">
-                <label>CDP URL <span style="color:#666;font-size:12px">(Chrome DevTools Protocol)</span></label>
-                <input type="text" id="s-cdp-url" placeholder="e.g. http://your-host:9222">
-                <div style="font-size:12px;color:#666;margin:4px 0 12px;">The address where Chrome/Chromium remote debugging is running.</div>
+                <label data-i18n="cdp_setup">CDP URL <span style="color:#666;font-size:12px" data-i18n="cdp_setup_hint">(Chrome DevTools Protocol)</span></label>
+                <input type="text" id="s-cdp-url" placeholder="e.g. http://your-host:9222" data-i18n-placeholder="cdp_setup">
+                <div style="font-size:12px;color:#666;margin:4px 0 12px;" data-i18n="cdp_setup_desc">The address where Chrome/Chromium remote debugging is running.</div>
 
-                <label>Browser Viewer URL <span style="color:#666;font-size:12px">(VNC / live view)</span></label>
-                <input type="text" id="s-viewer-url" placeholder="e.g. http://your-host:6902">
-                <div style="font-size:12px;color:#666;margin:4px 0 12px;">URL for the live browser view (KasmVNC, noVNC, etc.). This is what shows in the floating browser window so you can watch your agents browse in real time.</div>
+                <label data-i18n="viewer_setup">Browser Viewer URL <span style="color:#666;font-size:12px" data-i18n="viewer_setup_hint">(VNC / live view)</span></label>
+                <input type="text" id="s-viewer-url" placeholder="e.g. http://your-host:6902" data-i18n-placeholder="viewer_setup">
+                <div style="font-size:12px;color:#666;margin:4px 0 12px;" data-i18n="viewer_setup_desc">URL for the live browser view (KasmVNC, noVNC, etc.). This is what shows in the floating browser window so you can watch your agents browse in real time.</div>
 
-                <button onclick="testBrowserConnection()" style="margin:8px 0 16px;padding:8px 16px;font-size:9px;">🔍 TEST CONNECTION</button>
+                <button onclick="testBrowserConnection()" style="margin:8px 0 16px;padding:8px 16px;font-size:9px;" data-i18n="test_connection_btn">🔍 TEST CONNECTION</button>
                 <div id="browser-test-status"></div>
             </div>
 
             <div class="note">
-                <b>What is this?</b> The Agent Browser gives your AI agents a real web browser you can watch live. You need two things:<br><br>
+                <b data-i18n="what_is_browser">What is this?</b> The Agent Browser gives your AI agents a real web browser you can watch live. You need two things:<br><br>
                 <b>1. CDP (Chrome DevTools Protocol)</b> — how agents control the browser<br>
                 <b>2. VNC Viewer</b> — how you watch the browser live in the office<br><br>
                 <b>Easiest setup — one Docker command:</b><br>
@@ -233,41 +246,41 @@
             </div>
 
             <div class="btn-row">
-                <button class="secondary" onclick="nextStep(2)">← BACK</button>
-                <button onclick="nextStep(4)">NEXT →</button>
+                <button class="secondary" onclick="nextStep(2)" data-i18n="back">← BACK</button>
+                <button onclick="nextStep(4)" data-i18n="next">NEXT →</button>
             </div>
         </div>
 
         <!-- Step 4: SMS -->
         <div class="step" id="step-4">
-            <div class="step-title">4. SMS PANEL (OPTIONAL)</div>
-            <div class="step-desc">Let an AI agent send and receive SMS messages through your office. You can skip this and set it up later.</div>
+            <div class="step-title" data-i18n="sms_panel_optional">4. SMS PANEL (OPTIONAL)</div>
+            <div class="step-desc" data-i18n="sms_panel_desc">Let an AI agent send and receive SMS messages through your office. You can skip this and set it up later.</div>
 
             <label style="display:flex;align-items:center;gap:8px;margin-top:12px;">
-                <input type="checkbox" id="s-sms-enable"> Enable SMS Panel
+                <input type="checkbox" id="s-sms-enable"> <span data-i18n="enable_sms">Enable SMS Panel</span>
             </label>
 
             <div id="sms-fields" style="display:none;margin-top:16px;">
-                <label>SMS Owner Agent <span style="color:#666;font-size:12px">(which agent owns this inbox)</span></label>
+                <label data-i18n="sms_owner_agent">SMS Owner Agent <span style="color:#666;font-size:12px" data-i18n="sms_owner_hint">(which agent owns this inbox)</span></label>
                 <select id="s-sms-agent" style="width:100%;padding:10px 14px;background:#0d0d1e;border:1px solid #2a2a4e;border-radius:8px;color:#e8e8f0;font-size:14px;">
                     <option value="">Select an agent...</option>
                 </select>
-                <div style="font-size:12px;color:#666;margin:4px 0 12px;">This agent owns the Twilio inbox and is the default AI responder for every contact thread.</div>
+                <div style="font-size:12px;color:#666;margin:4px 0 12px;" data-i18n="sms_owner_desc">This agent owns the Twilio inbox and is the default AI responder for every contact thread.</div>
 
-                <label>Twilio Account SID</label>
-                <input type="text" id="s-twilio-sid" placeholder="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" autocomplete="off">
+                <label data-i18n="twilio_sid">Twilio Account SID</label>
+                <input type="text" id="s-twilio-sid" placeholder="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" data-i18n-placeholder="twilio_sid" autocomplete="off">
 
-                <label>Twilio Auth Token</label>
-                <input type="text" id="s-twilio-token" placeholder="Your Twilio auth token" autocomplete="off">
+                <label data-i18n="twilio_token">Twilio Auth Token</label>
+                <input type="text" id="s-twilio-token" placeholder="Your Twilio auth token" data-i18n-placeholder="twilio_token" autocomplete="off">
 
-                <label>Twilio Phone Number <span style="color:#666;font-size:12px">(your Twilio number)</span></label>
-                <input type="text" id="s-twilio-from" placeholder="+1XXXXXXXXXX" autocomplete="off">
+                <label data-i18n="twilio_phone">Twilio Phone Number <span style="color:#666;font-size:12px" data-i18n="twilio_phone_hint">(your Twilio number)</span></label>
+                <input type="text" id="s-twilio-from" placeholder="+1XXXXXXXXXX" data-i18n-placeholder="twilio_phone" autocomplete="off">
 
-                <div style="font-size:12px;color:#666;margin:8px 0 4px;">All three Twilio fields are required for sending SMS.</div>
+                <div style="font-size:12px;color:#666;margin:8px 0 4px;" data-i18n="twilio_required">All three Twilio fields are required for sending SMS.</div>
             </div>
 
             <div class="note">
-                <b>What is this?</b> The SMS Panel lets you send and receive text messages through an AI agent in your office.<br><br>
+                <b data-i18n="what_is_sms">What is this?</b> The SMS Panel lets you send and receive text messages through an AI agent in your office.<br><br>
                 <b>What you need:</b><br>
                 <b>1.</b> A <a href="https://www.twilio.com/try-twilio" style="color:#90caf9;" target="_blank">Twilio account</a> (free trial works)<br>
                 <b>2.</b> A Twilio phone number (you get one free with trial)<br>
@@ -285,32 +298,32 @@
             </div>
 
             <div class="btn-row">
-                <button class="secondary" onclick="nextStep(3)">← BACK</button>
-                <button onclick="nextStep(5)">NEXT →</button>
+                <button class="secondary" onclick="nextStep(3)" data-i18n="back">← BACK</button>
+                <button onclick="nextStep(5)" data-i18n="next">NEXT →</button>
             </div>
         </div>
 
-        
+
         <!-- Step 5: PC Performance -->
         <div class="step" id="step-5">
-            <div class="step-title">5. PC PERFORMANCE (OPTIONAL)</div>
-            <div class="step-desc">Monitor a PC's CPU, RAM, and GPU stats live in your office dashboard. You can skip this and set it up later.</div>
+            <div class="step-title" data-i18n="pc_performance_optional">5. PC PERFORMANCE (OPTIONAL)</div>
+            <div class="step-desc" data-i18n="pc_performance_desc">Monitor a PC's CPU, RAM, and GPU stats live in your office dashboard. You can skip this and set it up later.</div>
 
             <label style="display:flex;align-items:center;gap:8px;margin-top:12px;">
-                <input type="checkbox" id="s-pcmetrics-enable"> Enable PC Performance Monitor
+                <input type="checkbox" id="s-pcmetrics-enable"> <span data-i18n="enable_pc_metrics">Enable PC Performance Monitor</span>
             </label>
 
             <div id="pcmetrics-fields" style="display:none;margin-top:16px;">
-                <label>Metrics Server URL</label>
-                <input type="text" id="s-pcmetrics-url" placeholder="http://192.168.1.100:8099">
-                <div style="font-size:12px;color:#666;margin:4px 0 12px;">The address where the PC Metrics Server is running. This can be a local or remote machine.</div>
+                <label data-i18n="metrics_server_url">Metrics Server URL</label>
+                <input type="text" id="s-pcmetrics-url" placeholder="http://192.168.1.100:8099" data-i18n-placeholder="metrics_server_url">
+                <div style="font-size:12px;color:#666;margin:4px 0 12px;" data-i18n="metrics_url_desc">The address where the PC Metrics Server is running. This can be a local or remote machine.</div>
 
-                <button onclick="testPcMetrics()" style="margin:8px 0 16px;padding:8px 16px;font-size:9px;">🔍 TEST CONNECTION</button>
+                <button onclick="testPcMetrics()" style="margin:8px 0 16px;padding:8px 16px;font-size:9px;" data-i18n="test_pc_metrics">🔍 TEST CONNECTION</button>
                 <div id="pcmetrics-test-status"></div>
             </div>
 
             <div class="note">
-                <b>What is this?</b> The PC Performance panel shows live CPU, RAM, and GPU usage graphs in your office sidebar.<br><br>
+                <b data-i18n="what_is_browser">What is this?</b> The PC Performance panel shows live CPU, RAM, and GPU usage graphs in your office sidebar.<br><br>
                 <b>How it works:</b><br>
                 You run a small Python script on the PC you want to monitor. It exposes metrics on a port, and the Virtual Office reads from it.<br><br>
                 <b>Quick setup (on the target PC):</b><br>
@@ -327,17 +340,17 @@
             </div>
 
             <div class="btn-row">
-                <button class="secondary" onclick="nextStep(4)">← BACK</button>
-                <button onclick="nextStep(6)">NEXT →</button>
+                <button class="secondary" onclick="nextStep(4)" data-i18n="back">← BACK</button>
+                <button onclick="nextStep(6)" data-i18n="next">NEXT →</button>
             </div>
         </div>
 
         <!-- Step 6: Done -->
         <div class="step" id="step-6">
-            <div class="step-title">6. YOU'RE ALL SET!</div>
-            <div class="step-desc">Your Virtual Office is ready. You can always change settings later from the ☰ Menu button in the toolbar.</div>
+            <div class="step-title" data-i18n="youre_all_set">6. YOU'RE ALL SET!</div>
+            <div class="step-desc" data-i18n="youre_all_set_desc">Your Virtual Office is ready. You can always change settings later from the ☰ Menu button in the toolbar.</div>
             <div class="note">
-                <b>What you can do:</b>
+                <b data-i18n="what_you_can_do">What you can do:</b>
                 <br>• <b>✏️ Edit Office</b> — Place furniture, resize canvas, paint walls & floors
                 <br>• <b>👤 Agents</b> — Customize agent appearance, assign desks, set branches
                 <br>• <b>💬 Chat</b> — Talk to any agent through the chat panel
@@ -349,8 +362,8 @@
             </div>
             <div id="save-status"></div>
             <div class="btn-row">
-                <button class="secondary" onclick="nextStep(5)">← BACK</button>
-                <button onclick="finishSetup()">🚀 LAUNCH OFFICE</button>
+                <button class="secondary" onclick="nextStep(5)" data-i18n="back">← BACK</button>
+                <button onclick="finishSetup()" data-i18n="launch_office">🚀 LAUNCH OFFICE</button>
             </div>
         </div>
     </div>

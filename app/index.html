@@ -12,6 +12,19 @@
     <link rel="stylesheet" href="style.css?v=20260604-workspace-skill-workshop-queue">
     <link rel="stylesheet" href="projects.css?v=0">
     <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+    <!-- i18n: inline locale data for immediate init -->
+    <script id="locale-en" type="application/json">{}</script>
+    <script id="locale-zh" type="application/json">{}</script>
+    <script src="i18n.js"></script>
+    <script>
+    (function(){
+        var lang='en';
+        try{var s=localStorage.getItem('vo-i18n-lang');if(s==='zh')lang='zh';else if(navigator.language&&navigator.language.toLowerCase().indexOf('zh')>=0)lang='zh';}catch(e){}
+        var eE=document.getElementById('locale-en'),eZ=document.getElementById('locale-zh');
+        function load(l,el){fetch('locales/'+l+'.json').then(function(r){return r.json()}).then(function(d){el.textContent=JSON.stringify(d)}).catch(function(){});}
+        load('en',eE);load('zh',eZ);
+    })();
+    </script>
 </head>
 <body>
     <div class="main-container">
@@ -21,23 +34,23 @@
                 <!-- Main Settings Menu Panel -->
                 <div id="main-menu-panel" class="main-menu-panel">
                     <div class="main-menu-header">
-                        <span>☰ SETTINGS</span>
+                        <span data-i18n="settings">☰ SETTINGS</span>
                         <button class="catalog-close-btn" onclick="toggleMainMenu()">✕</button>
                     </div>
                     <div class="main-menu-body">
                         <!-- Connection -->
                         <div class="mm-section">
-                            <div class="mm-section-title">🔌 OpenClaw Connection</div>
-                            <label class="mm-label">OpenClaw Path <span style="color:#666;font-size:9px">(server-side)</span></label>
+                            <div class="mm-section-title" data-i18n="openclaw_connection">🔌 OpenClaw Connection</div>
+                            <label class="mm-label"><span data-i18n="openclaw_path">OpenClaw Path</span> <span style="color:#666;font-size:9px" data-i18n="openclaw_path_hint">(server-side)</span></label>
                             <input type="text" id="mm-oc-path" class="mm-input" placeholder="/home/user/.openclaw">
-                            <div style="font-size:9px;color:#666;margin:4px 0 8px;">Path to your OpenClaw installation on the server. Agents are discovered from this directory.</div>
-                            <label class="mm-label">Gateway URL <span style="color:#666;font-size:9px">(server-side)</span></label>
+                            <div style="font-size:9px;color:#666;margin:4px 0 8px;" data-i18n="openclaw_path_desc">Path to your OpenClaw installation on the server. Agents are discovered from this directory.</div>
+                            <label class="mm-label"><span data-i18n="gateway_url">Gateway URL</span> <span style="color:#666;font-size:9px" data-i18n="gateway_url_hint">(server-side)</span></label>
                             <input type="text" id="mm-gateway-url" class="mm-input" placeholder="ws://127.0.0.1:18789">
-                            <div style="font-size:9px;color:#666;margin:4px 0 8px;">How the server reaches OpenClaw. Default works for local installs.</div>
-                            <label class="mm-label">Gateway Token <span style="color:#666;font-size:9px">(auto-detected)</span></label>
+                            <div style="font-size:9px;color:#666;margin:4px 0 8px;" data-i18n="gateway_url_desc">How the server reaches OpenClaw. Default works for local installs.</div>
+                            <label class="mm-label"><span data-i18n="gateway_token">Gateway Token</span> <span style="color:#666;font-size:9px" data-i18n="gateway_token_hint">(auto-detected)</span></label>
                             <input type="text" id="mm-gateway-token" class="mm-input" placeholder="Auto-detected from openclaw.json" style="font-family:monospace;font-size:11px;">
-                            <div style="font-size:9px;color:#666;margin:4px 0 8px;">Auth token for chat & live status. Auto-read from OpenClaw config. Override to connect to a different instance.</div>
-                            <button class="mm-btn mm-btn-primary" onclick="mmTestConnection()">🔍 Test Connection</button>
+                            <div style="font-size:9px;color:#666;margin:4px 0 8px;" data-i18n="gateway_token_desc">Auth token for chat & live status. Auto-read from OpenClaw config. Override to connect to a different instance.</div>
+                            <button class="mm-btn mm-btn-primary" onclick="mmTestConnection()" data-i18n="test_connection">🔍 Test Connection</button>
                             <div id="mm-conn-status"></div>
                         </div>
                         <!-- Hermes Connection -->
@@ -79,6 +92,24 @@
                             <label class="mm-label" style="display:flex;align-items:center;gap:6px;">
                                 <input type="checkbox" id="mm-show-names" checked> Show agent names
                             </label>
+                            <label class="mm-label" style="margin-top:8px;">🌐 Language / 语言</label>
+                            <div style="display:flex;gap:8px;margin-top:4px;">
+                                <button class="mm-btn" id="lang-en-btn" onclick="i18n.setLanguage('en')" style="flex:1;font-size:11px;padding:6px 10px;">English</button>
+                                <button class="mm-btn" id="lang-zh-btn" onclick="i18n.setLanguage('zh')" style="flex:1;font-size:11px;padding:6px 10px;">中文</button>
+                            </div>
+                            <script>
+                            // Highlight active language button
+                            (function(){
+                                function updateLangBtns(){
+                                    var lang=i18n?i18n.getLanguage():'en';
+                                    var bE=document.getElementById('lang-en-btn'),bZ=document.getElementById('lang-zh-btn');
+                                    if(bE){bE.style.borderColor=lang==='en'?'#ffd700':'#444';bE.style.background=lang==='en'?'rgba(255,215,0,0.15)':'transparent';}
+                                    if(bZ){bZ.style.borderColor=lang==='zh'?'#ffd700':'#444';bZ.style.background=lang==='zh'?'rgba(255,215,0,0.15)':'transparent';}
+                                }
+                                if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',updateLangBtns);}else{setTimeout(updateLangBtns,100);}
+                                window.addEventListener('i18n:changed',updateLangBtns);
+                            })();
+                            </script>
                         </div>
                         <!-- API Usage -->
                         <div class="mm-section">
@@ -164,20 +195,20 @@
                 </div>
             </div>
             <div class="toolbar">
-                <button id="btn-main-menu" title="Settings & Help" onclick="toggleMainMenu()">☰ Menu</button>
-                <button id="btn-edit-office" title="Edit office layout — resize canvas, place furniture" onclick="toggleEditMode()">✏️ Edit Office</button>
-                <button id="btn-save-edits" title="Save changes" onclick="saveEdits()" style="display:none;opacity:0.4" disabled>💾 Save</button>
-                <button id="btn-undo-edit" title="Undo last change" onclick="undoEdit()" style="display:none;opacity:0.4" disabled>↩️ Undo</button>
-                <button id="btn-agent-settings" title="Create and customize agents" onclick="toggleAgentPanel()">👤 Agents</button>
+                <button id="btn-main-menu" title="Settings & Help" onclick="toggleMainMenu()" data-i18n="menu">☰ Menu</button>
+                <button id="btn-edit-office" title="Edit office layout" onclick="toggleEditMode()" data-i18n="edit_office">✏️ Edit Office</button>
+                <button id="btn-save-edits" title="Save changes" onclick="saveEdits()" style="display:none;opacity:0.4" disabled data-i18n="save">💾 Save</button>
+                <button id="btn-undo-edit" title="Undo last change" onclick="undoEdit()" style="display:none;opacity:0.4" disabled data-i18n="undo">↩️ Undo</button>
+                <button id="btn-agent-settings" title="Create and customize agents" onclick="toggleAgentPanel()" data-i18n="agents">👤 Agents</button>
                 <div class="toolbar-divider"></div>
-                <button id="btn-expand-all" title="Expand all bubbles" onclick="expandAllBubbles()">💬 Expand All</button>
-                <button id="btn-minimize-all" title="Minimize all bubbles" onclick="minimizeAllBubbles()">💬 Minimize All</button>
-                <a href="/models.html" style="text-decoration:none"><button title="Model & Provider Settings">⚙️ Models</button></a>
-                <a href="/cron.html" style="text-decoration:none"><button title="Cron Job Manager">⏰ Cron</button></a>
-                <button title="Project Manager" onclick="openProjectsManager()">📋 Projects</button>
-                <button title="Reset canvas zoom" onclick="resetCamera()">🔍 Reset</button>
-                <button id="sms-toggle" title="SMS/Phone Panel">📞 SMS</button>
-                <button id="browser-toggle" title="Agent Browser (Neko)" class="browser-toggle-btn">🌐 Browser</button>
+                <button id="btn-expand-all" title="Expand all bubbles" onclick="expandAllBubbles()" data-i18n="expand_all">💬 Expand All</button>
+                <button id="btn-minimize-all" title="Minimize all bubbles" onclick="minimizeAllBubbles()" data-i18n="minimize_all">💬 Minimize All</button>
+                <a href="/models.html" style="text-decoration:none"><button title="Model & Provider Settings" data-i18n="models">⚙️ Models</button></a>
+                <a href="/cron.html" style="text-decoration:none"><button title="Cron Job Manager" data-i18n="cron">⏰ Cron</button></a>
+                <button title="Project Manager" onclick="openProjectsManager()" data-i18n="projects">📋 Projects</button>
+                <button title="Reset canvas zoom" onclick="resetCamera()" data-i18n="reset_zoom">🔍 Reset</button>
+                <button id="sms-toggle" title="SMS/Phone Panel" data-i18n="sms">📞 SMS</button>
+                <button id="browser-toggle" title="Agent Browser" class="browser-toggle-btn" data-i18n="browser">🌐 Browser</button>
             </div>
         </div>
         <div class="sidebar-edge" id="sidebar-edge" onclick="toggleSidebar()" title="Toggle sidebar">
@@ -198,14 +229,14 @@
             </script>
 
             <div class="sidebar-bulk-actions">
-                <button class="sidebar-bulk-btn" onclick="sidebarExpandAll()" title="Expand all widgets">▼ Expand All</button>
-                <button class="sidebar-bulk-btn" onclick="sidebarCollapseAll()" title="Collapse all widgets">▲ Collapse All</button>
+                <button class="sidebar-bulk-btn" onclick="sidebarExpandAll()" title="Expand all widgets" data-i18n="sidebar_expand_all">▼ Expand All</button>
+                <button class="sidebar-bulk-btn" onclick="sidebarCollapseAll()" title="Collapse all widgets" data-i18n="sidebar_collapse_all">▲ Collapse All</button>
             </div>
 
             <div class="pc-monitor" id="pc-monitor">
                 <h4 class="pc-monitor-toggle" onclick="togglePcMonitor()">
-                    <span id="pc-toggle-arrow">▶</span> 🖥️ PC PERFORMANCE
-                    <span id="pc-status-dot" class="pc-dot offline" title="Offline"></span>
+                    <span id="pc-toggle-arrow">▶</span> <span data-i18n="pc_performance">🖥️ PC PERFORMANCE</span>
+                    <span id="pc-status-dot" class="pc-dot offline" data-i18n-title="offline" title="Offline"></span>
                 </h4>
                 <div id="pc-monitor-body" class="pc-monitor-body" style="display:none">
                     <div class="pc-metric-row">
@@ -236,8 +267,8 @@
 
             <div class="api-usage-monitor" id="api-usage-monitor">
                 <h4 class="api-usage-toggle" onclick="toggleApiUsage()">
-                    <span id="api-toggle-arrow">▶</span> ☁️ API USAGE
-                    <span id="api-status-dot" class="pc-dot offline" title="Loading..."></span>
+                    <span id="api-toggle-arrow">▶</span> <span data-i18n="api_usage">☁️ API USAGE</span>
+                    <span id="api-status-dot" class="pc-dot offline" data-i18n-title="loading" title="Loading..."></span>
                 </h4>
                 <div id="api-usage-body" class="api-usage-body" style="display:none">
                     <div id="api-usage-cards"></div>
@@ -245,59 +276,59 @@
             </div>
 
             <div class="branch-manager-panel collapsible">
-                <h4 onclick="toggleSection(this)"><span class="section-arrow">▶</span> 🏢 BRANCHES</h4>
+                <h4 onclick="toggleSection(this)"><span class="section-arrow">▶</span> <span data-i18n="branches">🏢 BRANCHES</span></h4>
                 <div class="section-body" style="display:none">
                     <div class="branch-manager-actions">
-                        <button onclick="branchCreatePrompt()">➕ Add Branch</button>
+                        <button onclick="branchCreatePrompt()" data-i18n="add_branch">➕ Add Branch</button>
                     </div>
                     <div id="branch-sections-container"></div>
                 </div>
             </div>
 
             <div class="projects-leaderboard collapsible">
-                <h4 onclick="toggleSection(this)"><span class="section-arrow">▶</span> 🏆 LEADERBOARD</h4>
+                <h4 onclick="toggleSection(this)"><span class="section-arrow">▶</span> <span data-i18n="leaderboard">🏆 LEADERBOARD</span></h4>
                 <div class="section-body" style="display:none">
                     <div id="sidebar-projects-lb" class="proj-leaderboard">
-                        <div class="proj-lb-empty">No scores yet — complete tasks to earn XP!</div>
+                        <div class="proj-lb-empty" data-i18n="no_scores">No scores yet — complete tasks to earn XP!</div>
                     </div>
                 </div>
             </div>
 
             <div class="meetings-sidebar collapsible">
-                <h4 onclick="toggleSection(this)"><span class="section-arrow">▶</span> 📊 MEETINGS</h4>
+                <h4 onclick="toggleSection(this)"><span class="section-arrow">▶</span> <span data-i18n="meetings">📊 MEETINGS</span></h4>
                 <div class="section-body" style="display:none">
                     <div id="sidebar-mtg-active" class="sidebar-mtg-list"></div>
-                    <button class="sidebar-mtg-btn" onclick="openMeetingsDashboard()">📊 Open Meetings</button>
+                    <button class="sidebar-mtg-btn" onclick="openMeetingsDashboard()" data-i18n="open_meetings">📊 Open Meetings</button>
                 </div>
             </div>
 
             <div class="projects-sidebar collapsible">
-                <h4 onclick="toggleSection(this)"><span class="section-arrow">▶</span> 📋 PROJECTS</h4>
+                <h4 onclick="toggleSection(this)"><span class="section-arrow">▶</span> <span data-i18n="projects">📋 PROJECTS</span></h4>
                 <div class="section-body" style="display:none">
                     <div id="sidebar-projects-list" class="sidebar-projects-list"></div>
-                    <button class="sidebar-mtg-btn" onclick="openProjectsManager()">📋 Open Projects</button>
+                    <button class="sidebar-mtg-btn" onclick="openProjectsManager()" data-i18n="open_projects">📋 Open Projects</button>
                 </div>
             </div>
 
             <div class="skills-library-sidebar collapsible">
-                <h4 onclick="toggleSection(this)"><span class="section-arrow">▶</span> 📚 SKILLS LIBRARY</h4>
+                <h4 onclick="toggleSection(this)"><span class="section-arrow">▶</span> <span data-i18n="skills_library">📚 SKILLS LIBRARY</span></h4>
                 <div class="section-body" style="display:none">
-                    <button class="sidebar-mtg-btn" onclick="openSkillsLibrary()">📚 Open Skills Library</button>
+                    <button class="sidebar-mtg-btn" onclick="openSkillsLibrary()" data-i18n="open_skills">📚 Open Skills Library</button>
                 </div>
             </div>
 
             <div class="status-panel">
-                <p>🔴 Working: <span id="count-working">0</span></p>
-                <p>🟢 Idle: <span id="count-idle">0</span></p>
-                <p>🔵 Meeting: <span id="count-meeting">0</span></p>
-                <p>☕ Break: <span id="count-break">0</span></p>
+                <p>🔴 <span data-i18n="working">Working</span>: <span id="count-working">0</span></p>
+                <p>🟢 <span data-i18n="idle">Idle</span>: <span id="count-idle">0</span></p>
+                <p>🔵 <span data-i18n="meeting">Meeting</span>: <span id="count-meeting">0</span></p>
+                <p>☕ <span data-i18n="break">Break</span>: <span id="count-break">0</span></p>
             </div>
 
             <div class="activity-feed collapsible">
-                <h4 onclick="toggleSection(this)"><span class="section-arrow">▶</span> > ACTIVITY LOG</h4>
+                <h4 onclick="toggleSection(this)"><span class="section-arrow">▶</span> > <span data-i18n="activity_log">ACTIVITY LOG</span></h4>
                 <div class="section-body" style="display:none">
                     <ul id="log-list">
-                        <li>System initialized...</li>
+                        <li data-i18n="system_initialized">System initialized...</li>
                     </ul>
                 </div>
             </div>
@@ -652,10 +683,10 @@
             <select id="chat-agent-select" class="chat-agent-select" title="Switch agent">
                 <option value="main" data-emoji="🤖" data-name="Main Agent" selected>🤖 Main Agent</option>
             </select>
-            <span id="chat-status" class="chat-status">Offline</span>
+            <span id="chat-status" class="chat-status" data-i18n="offline_status">Offline</span>
             <span style="flex:1"></span>
             <div class="chat-header-btns">
-                <button id="chat-new-session" class="chat-new-session" title="New Session">🔄</button>
+                <button id="chat-new-session" class="chat-new-session" data-i18n-title="new_session" title="New Session">🔄</button>
                 <button id="chat-move" class="chat-move-btn" title="Move/snap chat window">⇱</button>
                 <button id="chat-close" class="chat-close">&times;</button>
             </div>
@@ -669,7 +700,7 @@
         <div class="chat-input-row">
             <button id="chat-attach" class="chat-attach-btn" title="Attach file">📎</button>
             <input type="file" id="chat-file-input" class="chat-file-input" multiple accept="image/*,.pdf,.txt,.csv,.json,.md,.py,.js" style="display:none">
-            <textarea id="chat-input" class="chat-input" placeholder="Type a message..." rows="1"></textarea>
+            <textarea id="chat-input" class="chat-input" data-i18n-placeholder="type_message" placeholder="Type a message..." rows="1"></textarea>
             <button id="chat-mic" class="chat-mic-btn" title="Voice input (Whisper)">🎙️</button>
             <button id="chat-stop" class="chat-stop-btn" title="Stop current model response">⏹</button>
             <button id="chat-send" class="chat-send-btn">▶</button>
@@ -692,19 +723,19 @@
         <div class="browser-resize-handle bottom-left" data-resize="sw"></div>
         <div class="browser-resize-handle bottom-right" data-resize="se"></div>
         <div class="browser-header" id="browser-drag-handle">
-            <span class="browser-title">🌐 Agent Browser</span>
-            <span id="browser-status" class="browser-status">Idle</span>
+            <span class="browser-title" data-i18n="agent_browser_title">🌐 Agent Browser</span>
+            <span id="browser-status" class="browser-status" data-i18n="browser_idle">Idle</span>
             <div class="browser-controls">
-                <button id="browser-take-control" class="browser-ctrl-btn" title="Take manual control">🖱️ Take Control</button>
-                <button id="browser-release" class="browser-ctrl-btn browser-release-btn" title="Release control back to AI" style="display:none">🤖 Release to AI</button>
+                <button id="browser-take-control" class="browser-ctrl-btn" data-i18n-title="take_control" title="Take manual control">🖱️ Take Control</button>
+                <button id="browser-release" class="browser-ctrl-btn browser-release-btn" data-i18n-title="release_ai" title="Release control back to AI" style="display:none">🤖 Release to AI</button>
                 <div class="browser-snap-group">
-                    <button class="browser-snap-btn" data-zone="4" title="Snap top-left">4</button>
-                    <button class="browser-snap-btn" data-zone="3" title="Snap top-right">3</button>
-                    <button class="browser-snap-btn" data-zone="2" title="Snap bottom-left">2</button>
-                    <button class="browser-snap-btn active" data-zone="1" title="Snap bottom-right (default)">1</button>
+                    <button class="browser-snap-btn" data-zone="4" data-i18n-title="snap_zone_4" title="Snap top-left">4</button>
+                    <button class="browser-snap-btn" data-zone="3" data-i18n-title="snap_zone_3" title="Snap top-right">3</button>
+                    <button class="browser-snap-btn" data-zone="2" data-i18n-title="snap_zone_2" title="Snap bottom-left">2</button>
+                    <button class="browser-snap-btn active" data-zone="1" data-i18n-title="snap_zone_1" title="Snap bottom-right (default)">1</button>
                 </div>
-                <button id="browser-minimize" class="browser-minimize" title="Minimize">—</button>
-                <button id="browser-maximize" class="browser-maximize" title="Maximize">□</button>
+                <button id="browser-minimize" class="browser-minimize" data-i18n-title="minimize" title="Minimize">—</button>
+                <button id="browser-maximize" class="browser-maximize" data-i18n-title="maximize" title="Maximize">□</button>
                 <button id="browser-close" class="browser-close">&times;</button>
             </div>
         </div>
@@ -718,7 +749,7 @@
 
     <!-- Agent Workspace Window -->
     <div id="agent-workspace-menu" class="agent-workspace-menu hidden">
-        <button id="agent-workspace-open-btn" type="button">Open agent workspace</button>
+        <button id="agent-workspace-open-btn" type="button" data-i18n="open_workspace">Open agent workspace</button>
     </div>
     <div id="agent-workspace-panel" class="agent-workspace-panel hidden">
         <div class="agent-workspace-resize-handle" data-resize="se"></div>
@@ -726,24 +757,24 @@
             <div class="agent-workspace-title">
                 <span id="agent-workspace-emoji">🤖</span>
                 <div>
-                    <div id="agent-workspace-name">Agent Workspace</div>
-                    <div id="agent-workspace-subtitle">Workspace</div>
+                    <div id="agent-workspace-name" data-i18n="agent_workspace">Agent Workspace</div>
+                    <div id="agent-workspace-subtitle" data-i18n="workspace">Workspace</div>
                 </div>
             </div>
             <div class="agent-workspace-controls">
-                <button id="agent-workspace-refresh" type="button" title="Refresh">↻</button>
-                <button id="agent-workspace-maximize" type="button" title="Maximize">□</button>
-                <button id="agent-workspace-close" type="button" title="Close">&times;</button>
+                <button id="agent-workspace-refresh" type="button" data-i18n-title="refresh" title="Refresh">↻</button>
+                <button id="agent-workspace-maximize" type="button" data-i18n-title="maximize" title="Maximize">□</button>
+                <button id="agent-workspace-close" type="button" data-i18n-title="close" title="Close">&times;</button>
             </div>
         </div>
         <div class="agent-workspace-tabs">
-            <button class="active" data-aw-tab="overview" type="button">Overview</button>
-            <button data-aw-tab="bulletin" type="button">Bulletin</button>
-            <button data-aw-tab="tasks" type="button">Tasks</button>
-            <button data-aw-tab="files" type="button">Files</button>
-            <button data-aw-tab="skills" type="button">Skills</button>
-            <button data-aw-tab="notes" type="button">Notes</button>
-            <button data-aw-tab="settings" type="button">Settings</button>
+            <button class="active" data-aw-tab="overview" type="button" data-i18n="overview">Overview</button>
+            <button data-aw-tab="bulletin" type="button" data-i18n="bulletin">Bulletin</button>
+            <button data-aw-tab="tasks" type="button" data-i18n="tasks">Tasks</button>
+            <button data-aw-tab="files" type="button" data-i18n="files">Files</button>
+            <button data-aw-tab="skills" type="button" data-i18n="skills">Skills</button>
+            <button data-aw-tab="notes" type="button" data-i18n="notes">Notes</button>
+            <button data-aw-tab="settings" type="button" data-i18n="settings_tab">Settings</button>
         </div>
         <div id="agent-workspace-body" class="agent-workspace-body"></div>
     </div>

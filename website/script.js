@@ -1,3 +1,6 @@
+// i18n helper
+const _t = (key) => typeof i18n !== 'undefined' ? i18n.t(key) : key;
+
 // Smooth scroll for anchor links
 document.querySelectorAll('a[href^="#"]').forEach(anchor => {
     anchor.addEventListener('click', function(e) {

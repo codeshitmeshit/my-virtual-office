@@ -5,6 +5,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Model Settings — Virtual Office</title>
     <script>fetch('/vo-config').then(r=>r.json()).then(d=>{if(d.office&&d.office.name)document.title='Model Settings — '+d.office.name;}).catch(()=>{});</script>
+    <!-- i18n: inline locale data for immediate init -->
+    <script id="locale-en" type="application/json">{}</script>
+    <script id="locale-zh" type="application/json">{}</script>
+    <script src="i18n.js"></script>
+    <script>
+    (function(){
+        var lang='en';
+        try{var s=localStorage.getItem('vo-i18n-lang');if(s==='zh')lang='zh';else if(navigator.language&&navigator.language.toLowerCase().indexOf('zh')>=0)lang='zh';}catch(e){}
+        var eE=document.getElementById('locale-en'),eZ=document.getElementById('locale-zh');
+        function load(l,el){fetch('locales/'+l+'.json').then(function(r){return r.json()}).then(function(d){el.textContent=JSON.stringify(d)}).catch(function(){});}
+        load('en',eE);load('zh',eZ);
+    })();
+    </script>
     <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
     <style>
         :root {
@@ -113,49 +126,49 @@
     </style>
 </head>
 <body>
-    <a class="back-btn" href="/">← Back to Office</a>
-    <h1>⚙️ Model & Provider Settings</h1>
+    <a class="back-btn" href="/" data-i18n="back_to_office">← Back to Office</a>
+    <h1 data-i18n="model_settings_title">⚙️ Model & Provider Settings</h1>
 
     <div class="tabs">
-        <div class="tab active" onclick="showTab('cloud')">☁️ Cloud Providers</div>
-        <div class="tab" onclick="showTab('custom')">🔧 Custom Providers</div>
-        <div class="tab" onclick="showTab('ollama')">🦙 Ollama</div>
-        <div class="tab" onclick="showTab('lmstudio')">🖥️ LM Studio</div>
+        <div class="tab active" onclick="showTab('cloud')" data-i18n="cloud_providers">☁️ Cloud Providers</div>
+        <div class="tab" onclick="showTab('custom')" data-i18n="custom_providers">🔧 Custom Providers</div>
+        <div class="tab" onclick="showTab('ollama')" data-i18n="ollama">🦙 Ollama</div>
+        <div class="tab" onclick="showTab('lmstudio')" data-i18n="lmstudio">🖥️ LM Studio</div>
 
     </div>
 
     <!-- Cloud Providers Tab -->
     <div id="panel-cloud" class="panel active">
-        <div id="cloud-providers" class="loading">Loading providers...</div>
+        <div id="cloud-providers" class="loading" data-i18n="loading">Loading providers...</div>
     </div>
 
     <!-- Custom Providers Tab -->
     <div id="panel-custom" class="panel">
         <div id="custom-providers"></div>
         <div class="card" style="border-color: var(--gold);">
-            <h3>➕ Add Custom Provider</h3>
-            <div class="row"><label>Name:</label><input id="new-prov-name" placeholder="my-provider"></div>
-            <div class="row"><label>Base URL:</label><input id="new-prov-url" placeholder="http://host:port/v1"></div>
-            <div class="row"><label>API Type:</label>
+            <h3 data-i18n="add_custom_provider">➕ Add Custom Provider</h3>
+            <div class="row"><label data-i18n="provider_name">Name:</label><input id="new-prov-name" placeholder="my-provider"></div>
+            <div class="row"><label data-i18n="base_url">Base URL:</label><input id="new-prov-url" placeholder="http://host:port/v1"></div>
+            <div class="row"><label data-i18n="api_type">API Type:</label>
                 <select id="new-prov-api">
                     <option value="openai-completions">openai-completions</option>
                     <option value="openai-responses">openai-responses</option>
                     <option value="ollama">ollama</option>
                 </select>
             </div>
-            <button class="btn btn-gold" onclick="addCustomProvider()">Add Provider</button>
+            <button class="btn btn-gold" onclick="addCustomProvider()" data-i18n="add_provider_btn">Add Provider</button>
             <p id="new-prov-status" class="status-msg"></p>
         </div>
     </div>
 
     <!-- Ollama Tab -->
     <div id="panel-ollama" class="panel">
-        <div id="ollama-section" class="loading">Loading Ollama config...</div>
+        <div id="ollama-section" class="loading" data-i18n="loading">Loading Ollama config...</div>
     </div>
 
     <!-- LM Studio Tab -->
     <div id="panel-lmstudio" class="panel">
-        <div id="lmstudio-section" class="loading">Loading LM Studio config...</div>
+        <div id="lmstudio-section" class="loading" data-i18n="loading">Loading LM Studio config...</div>
     </div>
 
 
@@ -181,7 +194,7 @@ async function loadProviders() {
         renderOllama();
         renderLMStudio();
     } catch(e) {
-        document.getElementById('cloud-providers').innerHTML = '<p class="status-msg err">Error: ' + e.message + '</p>';
+        document.getElementById('cloud-providers').innerHTML = '<p class="status-msg err">' + i18n.t('failed_to_load') + ': ' + e.message + '</p>';
     }
 }
 
@@ -209,13 +222,13 @@ function renderCloudProviders() {
         const models = info.models || [];
         const isOAuth = !!info.isOAuth || prov.endsWith('-token') || prov.endsWith('-oauth');
         const authType = info.authType || (isOAuth ? 'subscription' : 'api_key');
-        const authLabel = isOAuth ? '🎫 ' : '🔑 ';
-        const placeholder = isOAuth ? 'Token / OAuth credential (managed)' : 'API key...';
+        const authLabel = isOAuth ? i18n.t('subscription') : i18n.t('api_key');
+        const placeholder = isOAuth ? i18n.t('token_placeholder') : i18n.t('api_key_placeholder');
 
         html += `<div class="card" id="prov-${prov}">
             <div class="provider-header">
                 <span class="provider-name">${prov.toUpperCase()}</span>
-                <span class="key-status ${hasKey ? 'has-key' : 'no-key'}">${hasKey ? authLabel + masked : '❌ No credential'}</span>
+                <span class="key-status ${hasKey ? 'has-key' : 'no-key'}">${hasKey ? authLabel + masked : i18n.t('no_credential')}</span>
             </div>
             <div class="row">
                 <input id="key-${prov}" type="password" placeholder="${placeholder}" value="" autocomplete="off" ${isOAuth ? 'disabled' : ''}>
@@ -250,16 +263,16 @@ function renderCloudProviders() {
             html += '<div class="model-list scrollable" style="max-height:300px">';
 
             if (!isSubscriptionProvider) {
-                html += `<div style="padding:5px 6px;color:var(--green);font-size:7px;border-bottom:1px solid var(--border);background:rgba(76,175,80,0.08)">🔑 API Key (${modelsToShow.length})</div>`;
+                html += `<div style="padding:5px 6px;color:var(--green);font-size:7px;border-bottom:1px solid var(--border);background:rgba(76,175,80,0.08)">${i18n.t('api_key')} (${modelsToShow.length})</div>`;
                 html += modelsToShow.map(m => `<div class="model-item"><span>${m}</span><span style="color:var(--green);font-size:6px">API</span></div>`).join('');
             } else {
-                html += `<div style="padding:5px 6px;color:var(--gold);font-size:7px;border-bottom:1px solid var(--border);background:rgba(255,215,0,0.08)">🎫 Subscription (${modelsToShow.length})</div>`;
+                html += `<div style="padding:5px 6px;color:var(--gold);font-size:7px;border-bottom:1px solid var(--border);background:rgba(255,215,0,0.08)">${i18n.t('subscription')} (${modelsToShow.length})</div>`;
                 html += modelsToShow.map(m => `<div class="model-item"><span>${m}</span><span style="color:var(--gold);font-size:6px">SUB</span></div>`).join('');
             }
 
             html += '</div>';
         } else if (hasKey) {
-            html += `<p class="status-msg" style="color:var(--text-dim)">No models loaded (refresh to fetch)</p>`;
+            html += `<p class="status-msg" style="color:var(--text-dim)">${i18n.t('no_models')}</p>`;
         }
         html += '</div>';
     }
@@ -300,8 +313,8 @@ function renderOllama() {
     const params = providersData.modelParams || {};
 
     if (!ollama) {
-        container.innerHTML = '<div class="card"><p>No Ollama provider configured.</p>' +
-            '<p style="margin-top:8px;color:var(--text-dim)">Add one in the Custom Providers tab with name "ollama"</p></div>';
+        container.innerHTML = '<div class="card"><p>' + i18n.t('no_ollama') + '</p>' +
+            '<p style="margin-top:8px;color:var(--text-dim)">' + i18n.t('add_in_custom') + '</p></div>';
         return;
     }
 
@@ -323,28 +336,28 @@ function renderOllama() {
                 <span style="font-size:6px;color:var(--text-dim)">ctx: ${m.contextWindow ? (m.contextWindow/1000)+'k' : '?'} | max: ${m.maxTokens || '?'}</span>
             </div>
             <div class="ollama-params" id="params-${m.id.replace(/[^a-zA-Z0-9]/g,'_')}">
-                <label>Temperature</label><input type="number" step="0.1" min="0" max="2" value="${mp.temperature ?? ''}" data-param="temperature" data-model="${fullId}">
-                <label>Top P</label><input type="number" step="0.1" min="0" max="1" value="${mp.top_p ?? ''}" data-param="top_p" data-model="${fullId}">
-                <label>Top K</label><input type="number" step="1" min="0" value="${mp.top_k ?? ''}" data-param="top_k" data-model="${fullId}">
-                <label>Repeat Penalty</label><input type="number" step="0.1" min="0" value="${mp.repeat_penalty ?? ''}" data-param="repeat_penalty" data-model="${fullId}">
-                <label>Num Predict</label><input type="number" step="1" value="${mp.num_predict ?? ''}" data-param="num_predict" data-model="${fullId}">
-                <label>Context Window</label><input type="number" step="1000" value="${m.contextWindow || ''}" data-field="contextWindow" data-model-id="${m.id}">
-                <label>Max Tokens</label><input type="number" step="1000" value="${m.maxTokens || ''}" data-field="maxTokens" data-model-id="${m.id}">
+                <label>${i18n.t('temperature')}</label><input type="number" step="0.1" min="0" max="2" value="${mp.temperature ?? ''}" data-param="temperature" data-model="${fullId}">
+                <label>${i18n.t('top_p')}</label><input type="number" step="0.1" min="0" max="1" value="${mp.top_p ?? ''}" data-param="top_p" data-model="${fullId}">
+                <label>${i18n.t('top_k')}</label><input type="number" step="1" min="0" value="${mp.top_k ?? ''}" data-param="top_k" data-model="${fullId}">
+                <label>${i18n.t('repeat_penalty')}</label><input type="number" step="0.1" min="0" value="${mp.repeat_penalty ?? ''}" data-param="repeat_penalty" data-model="${fullId}">
+                <label>${i18n.t('num_predict')}</label><input type="number" step="1" value="${mp.num_predict ?? ''}" data-param="num_predict" data-model="${fullId}">
+                <label>${i18n.t('context_window')}</label><input type="number" step="1000" value="${m.contextWindow || ''}" data-field="contextWindow" data-model-id="${m.id}">
+                <label>${i18n.t('max_tokens')}</label><input type="number" step="1000" value="${m.maxTokens || ''}" data-field="maxTokens" data-model-id="${m.id}">
             </div>
-            <button class="btn btn-gold" onclick="saveOllamaModel('${m.id.replace(/'/g,"\\'")}')">Save Parameters</button>
-            <button class="btn btn-red" onclick="removeOllamaModel('${m.id.replace(/'/g,"\\'")}')">Remove Model</button>
+            <button class="btn btn-gold" onclick="saveOllamaModel('${m.id.replace(/'/g,"\\'")}')" data-i18n="save_parameters">Save Parameters</button>
+            <button class="btn btn-red" onclick="removeOllamaModel('${m.id.replace(/'/g,"\\'")}')" data-i18n="remove_model">Remove Model</button>
             <p id="ollama-status-${m.id.replace(/[^a-zA-Z0-9]/g,'_')}" class="status-msg"></p>
         </div>`;
     }
 
     // Add model form
     html += `<div class="card" style="border-color:var(--gold)">
-        <h3>➕ Add Ollama Model</h3>
-        <div class="row"><label>Model ID:</label><input id="new-ollama-id" placeholder="model-name:tag"></div>
-        <div class="row"><label>Display Name:</label><input id="new-ollama-name" placeholder="Friendly name"></div>
-        <div class="row"><label>Context Window:</label><input id="new-ollama-ctx" type="number" value="100000"></div>
-        <div class="row"><label>Max Tokens:</label><input id="new-ollama-max" type="number" value="8192"></div>
-        <button class="btn btn-gold" onclick="addOllamaModel()">Add Model</button>
+        <h3 data-i18n="add_ollama_model">➕ Add Ollama Model</h3>
+        <div class="row"><label data-i18n="model_id">Model ID:</label><input id="new-ollama-id" placeholder="model-name:tag"></div>
+        <div class="row"><label data-i18n="display_name">Display Name:</label><input id="new-ollama-name" placeholder="Friendly name"></div>
+        <div class="row"><label data-i18n="context_window">Context Window:</label><input id="new-ollama-ctx" type="number" value="100000"></div>
+        <div class="row"><label data-i18n="max_tokens">Max Tokens:</label><input id="new-ollama-max" type="number" value="8192"></div>
+        <button class="btn btn-gold" onclick="addOllamaModel()" data-i18n="add_model_btn">Add Model</button>
         <p id="new-ollama-status" class="status-msg"></p>
     </div>`;
 
@@ -365,8 +378,8 @@ async function saveKey(provider) {
     const input = document.getElementById('key-' + provider);
     const status = document.getElementById('key-status-' + provider);
     const key = input.value.trim();
-    if (!key) { status.className = 'status-msg err'; status.textContent = 'Enter an API key'; return; }
-    status.textContent = 'Saving...';
+    if (!key) { status.className = 'status-msg err'; status.textContent = i18n.t('enter_api_key'); return; }
+    status.textContent = i18n.t('saving');
     try {
         const res = await fetch('/config/providers/save-key', {
             method: 'POST', headers: {'Content-Type': 'application/json'},
@@ -374,22 +387,22 @@ async function saveKey(provider) {
         });
         const data = await res.json();
         if (data.ok) {
-            status.className = 'status-msg ok'; status.textContent = '✅ Key saved';
+            status.className = 'status-msg ok'; status.textContent = i18n.t('key_saved');
             input.value = '';
             setTimeout(() => { providersData = null; loadProviders(); }, 1000);
         } else {
-            status.className = 'status-msg err'; status.textContent = '❌ ' + (data.error || 'Failed');
+            status.className = 'status-msg err'; status.textContent = i18n.t('failed') + (data.error || i18n.t('error'));
         }
     } catch(e) {
-        status.className = 'status-msg err'; status.textContent = '❌ ' + e.message;
+        status.className = 'status-msg err'; status.textContent = i18n.t('failed') + e.message;
     }
 }
 
 async function deleteKey(provider, profileId='') {
     const baseProvider = normalizeProvider(provider);
-    if (!confirm('Delete credential for ' + (profileId || baseProvider) + '?')) return;
+    if (!confirm(i18n.t('confirm_delete_key').replace('{provider}', profileId || baseProvider))) return;
     const status = document.getElementById('key-status-' + provider);
-    status.textContent = 'Deleting...';
+    status.textContent = i18n.t('deleting');
     try {
         const res = await fetch('/config/providers/delete-key', {
             method: 'POST', headers: {'Content-Type': 'application/json'},
@@ -397,13 +410,13 @@ async function deleteKey(provider, profileId='') {
         });
         const data = await res.json();
         if (data.ok) {
-            status.className = 'status-msg ok'; status.textContent = '✅ Key deleted';
+            status.className = 'status-msg ok'; status.textContent = i18n.t('key_deleted');
             setTimeout(() => { providersData = null; loadProviders(); }, 1000);
         } else {
-            status.className = 'status-msg err'; status.textContent = '❌ ' + (data.error || 'Failed');
+            status.className = 'status-msg err'; status.textContent = i18n.t('failed') + (data.error || i18n.t('error'));
         }
     } catch(e) {
-        status.className = 'status-msg err'; status.textContent = '❌ ' + e.message;
+        status.className = 'status-msg err'; status.textContent = i18n.t('failed') + e.message;
     }
 }
 
@@ -412,8 +425,8 @@ async function addCustomProvider() {
     const url = document.getElementById('new-prov-url').value.trim();
     const api = document.getElementById('new-prov-api').value;
     const status = document.getElementById('new-prov-status');
-    if (!name || !url) { status.className = 'status-msg err'; status.textContent = 'Name and URL required'; return; }
-    status.textContent = 'Saving...';
+    if (!name || !url) { status.className = 'status-msg err'; status.textContent = i18n.t('name_url_required'); return; }
+    status.textContent = i18n.t('saving');
     try {
         const res = await fetch('/config/providers/save-custom', {
             method: 'POST', headers: {'Content-Type': 'application/json'},
@@ -421,15 +434,15 @@ async function addCustomProvider() {
         });
         const data = await res.json();
         if (data.ok) {
-            status.className = 'status-msg ok'; status.textContent = '✅ Provider added';
+            status.className = 'status-msg ok'; status.textContent = i18n.t('provider_added');
             document.getElementById('new-prov-name').value = '';
             document.getElementById('new-prov-url').value = '';
             setTimeout(() => { providersData = null; loadProviders(); }, 1000);
         } else {
-            status.className = 'status-msg err'; status.textContent = '❌ ' + (data.error || 'Failed');
+            status.className = 'status-msg err'; status.textContent = i18n.t('failed') + (data.error || i18n.t('error'));
         }
     } catch(e) {
-        status.className = 'status-msg err'; status.textContent = '❌ ' + e.message;
+        status.className = 'status-msg err'; status.textContent = i18n.t('failed') + e.message;
     }
 }
 
@@ -451,7 +464,7 @@ async function saveOllamaModel(modelId) {
         }
         return m;
     });
-    status.textContent = 'Saving...';
+    status.textContent = i18n.t('saving');
     try {
         const res = await fetch('/config/providers/save-custom', {
             method: 'POST', headers: {'Content-Type': 'application/json'},
@@ -459,18 +472,18 @@ async function saveOllamaModel(modelId) {
         });
         const data = await res.json();
         if (data.ok) {
-            status.className = 'status-msg ok'; status.textContent = '✅ Saved';
+            status.className = 'status-msg ok'; status.textContent = i18n.t('saved');
             setTimeout(() => { providersData = null; loadProviders(); }, 1000);
         } else {
-            status.className = 'status-msg err'; status.textContent = '❌ ' + (data.error || 'Failed');
+            status.className = 'status-msg err'; status.textContent = i18n.t('failed') + (data.error || i18n.t('error'));
         }
     } catch(e) {
-        status.className = 'status-msg err'; status.textContent = '❌ ' + e.message;
+        status.className = 'status-msg err'; status.textContent = i18n.t('failed') + e.message;
     }
 }
 
 async function removeOllamaModel(modelId) {
-    if (!confirm('Remove ' + modelId + ' from Ollama config?')) return;
+    if (!confirm(i18n.t('confirm_remove_model').replace('{model}', modelId))) return;
     const ollama = providersData.customProviders.ollama;
     const models = (ollama.models || []).filter(m => m.id !== modelId);
     try {
@@ -482,7 +495,7 @@ async function removeOllamaModel(modelId) {
         if (data.ok) {
             providersData = null; loadProviders();
         }
-    } catch(e) { alert('Error: ' + e.message); }
+    } catch(e) { alert(i18n.t('error') + ': ' + e.message); }
 }
 
 async function addOllamaModel() {
@@ -491,14 +504,14 @@ async function addOllamaModel() {
     const ctx = parseInt(document.getElementById('new-ollama-ctx').value) || 100000;
     const max = parseInt(document.getElementById('new-ollama-max').value) || 8192;
     const status = document.getElementById('new-ollama-status');
-    if (!id) { status.className = 'status-msg err'; status.textContent = 'Model ID required'; return; }
+    if (!id) { status.className = 'status-msg err'; status.textContent = i18n.t('model_id_required'); return; }
 
     const ollama = providersData.customProviders.ollama;
     const models = [...(ollama.models || []), {
         id, name: name || id, contextWindow: ctx, maxTokens: max,
         reasoning: false, input: ["text"], cost: {input:0, output:0, cacheRead:0, cacheWrite:0}
     }];
-    status.textContent = 'Adding...';
+    status.textContent = i18n.t('adding');
     try {
         const res = await fetch('/config/providers/save-custom', {
             method: 'POST', headers: {'Content-Type': 'application/json'},
@@ -506,15 +519,15 @@ async function addOllamaModel() {
         });
         const data = await res.json();
         if (data.ok) {
-            status.className = 'status-msg ok'; status.textContent = '✅ Added';
+            status.className = 'status-msg ok'; status.textContent = i18n.t('model_added');
             document.getElementById('new-ollama-id').value = '';
             document.getElementById('new-ollama-name').value = '';
             setTimeout(() => { providersData = null; loadProviders(); }, 1000);
         } else {
-            status.className = 'status-msg err'; status.textContent = '❌ ' + (data.error || 'Failed');
+            status.className = 'status-msg err'; status.textContent = i18n.t('failed') + (data.error || i18n.t('error'));
         }
     } catch(e) {
-        status.className = 'status-msg err'; status.textContent = '❌ ' + e.message;
+        status.className = 'status-msg err'; status.textContent = i18n.t('failed') + e.message;
     }
 }
 
@@ -595,7 +608,7 @@ async function saveLMStudioModel(modelId) {
         }
         return m;
     });
-    status.textContent = 'Saving...';
+    status.textContent = i18n.t('saving');
     try {
         const res = await fetch('/config/providers/save-custom', {
             method: 'POST', headers: {'Content-Type': 'application/json'},
@@ -603,18 +616,18 @@ async function saveLMStudioModel(modelId) {
         });
         const data = await res.json();
         if (data.ok) {
-            status.className = 'status-msg ok'; status.textContent = '✅ Saved';
+            status.className = 'status-msg ok'; status.textContent = i18n.t('saved');
             setTimeout(() => { providersData = null; loadProviders(); }, 1000);
         } else {
-            status.className = 'status-msg err'; status.textContent = '❌ ' + (data.error || 'Failed');
+            status.className = 'status-msg err'; status.textContent = i18n.t('failed') + (data.error || i18n.t('error'));
         }
     } catch(e) {
-        status.className = 'status-msg err'; status.textContent = '❌ ' + e.message;
+        status.className = 'status-msg err'; status.textContent = i18n.t('failed') + e.message;
     }
 }
 
 async function removeLMStudioModel(modelId) {
-    if (!confirm('Remove ' + modelId + ' from LM Studio config?')) return;
+    if (!confirm(i18n.t('confirm_remove_model').replace('{model}', modelId))) return;
     const lms = providersData.customProviders.lmstudio;
     const models = (lms.models || []).filter(m => m.id !== modelId);
     try {
@@ -626,7 +639,7 @@ async function removeLMStudioModel(modelId) {
         if (data.ok) {
             providersData = null; loadProviders();
         }
-    } catch(e) { alert('Error: ' + e.message); }
+    } catch(e) { alert(i18n.t('error') + ': ' + e.message); }
 }
 
 async function addLMStudioModel() {
@@ -635,14 +648,14 @@ async function addLMStudioModel() {
     const ctx = parseInt(document.getElementById('new-lms-ctx').value) || 128000;
     const max = parseInt(document.getElementById('new-lms-max').value) || 20000;
     const status = document.getElementById('new-lms-status');
-    if (!id) { status.className = 'status-msg err'; status.textContent = 'Model ID required'; return; }
+    if (!id) { status.className = 'status-msg err'; status.textContent = i18n.t('model_id_required'); return; }
 
     const lms = providersData.customProviders.lmstudio;
     const models = [...(lms.models || []), {
         id, name: name || id, contextWindow: ctx, maxTokens: max,
         reasoning: false, input: ["text"], cost: {input:0, output:0, cacheRead:0, cacheWrite:0}
     }];
-    status.textContent = 'Adding...';
+    status.textContent = i18n.t('adding');
     try {
         const res = await fetch('/config/providers/save-custom', {
             method: 'POST', headers: {'Content-Type': 'application/json'},
@@ -650,15 +663,15 @@ async function addLMStudioModel() {
         });
         const data = await res.json();
         if (data.ok) {
-            status.className = 'status-msg ok'; status.textContent = '✅ Added';
+            status.className = 'status-msg ok'; status.textContent = i18n.t('model_added');
             document.getElementById('new-lms-id').value = '';
             document.getElementById('new-lms-name').value = '';
             setTimeout(() => { providersData = null; loadProviders(); }, 1000);
         } else {
-            status.className = 'status-msg err'; status.textContent = '❌ ' + (data.error || 'Failed');
+            status.className = 'status-msg err'; status.textContent = i18n.t('failed') + (data.error || i18n.t('error'));
         }
     } catch(e) {
-        status.className = 'status-msg err'; status.textContent = '❌ ' + e.message;
+        status.className = 'status-msg err'; status.textContent = i18n.t('failed') + e.message;
     }
 }
 
