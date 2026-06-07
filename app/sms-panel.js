@@ -48,23 +48,34 @@
     let snapZoneLeft = null;
     let snapZoneRight = null;
 
+    function setSmsAvailable(available, hint) {
+        toggle.classList.toggle('toolbar-feature-unavailable', !available);
+        toggle.setAttribute('aria-disabled', available ? 'false' : 'true');
+        toggle.title = available ? (_t('sms') || 'SMS') : (hint || _t('sms_unavailable_hint'));
+    }
+
     (async function checkSmsStatus() {
         try {
             const res = await fetch('/sms-status');
             const data = await res.json();
             if (!data.enabled) {
-                toggle.style.display = 'none';
+                setSmsAvailable(false, _t('sms_unavailable_hint'));
                 return;
             }
+            setSmsAvailable(true);
             ownerAgent = data.ownerAgent || null;
             renderOwnerBadge();
             startPolling();
         } catch (e) {
-            toggle.style.display = 'none';
+            setSmsAvailable(false, _t('sms_unavailable_hint'));
         }
     })();
 
     toggle.addEventListener('click', () => {
+        if (toggle.getAttribute('aria-disabled') === 'true') {
+            alert(toggle.title || _t('sms_unavailable_hint'));
+            return;
+        }
         isOpen = !isOpen;
         panel.classList.toggle('open', isOpen);
         if (isOpen) {
