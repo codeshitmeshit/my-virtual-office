@@ -154,8 +154,8 @@ setup_env() {
             cat > "$ENV_FILE" <<EOF
 # Virtual Office 环境配置
 VO_OPENCLAW_PATH=~/.openclaw
-VO_GATEWAY_URL=ws://host.docker.internal:18789
-VO_GATEWAY_HTTP=http://host.docker.internal:18789
+# VO_GATEWAY_URL=ws://host.docker.internal:18790
+# VO_GATEWAY_HTTP=http://host.docker.internal:18790
 VO_PORT=8090
 VO_WS_PORT=8091
 VO_OFFICE_NAME=Virtual Office
@@ -322,13 +322,27 @@ start_local() {
     fi
     echo -e "  ${GREEN}✓${NC} Python $(python3 --version 2>&1)"
 
-    # 检查 websockets 库
-    if ! python3 -c "import websockets" 2>/dev/null; then
-        echo -e "  ${YELLOW}⚠ websockets 库未安装，正在安装...${NC}"
-        pip3 install websockets 2>&1 | tail -1
-        if ! python3 -c "import websockets" 2>/dev/null; then
+    local python_bin="python3"
+    if [ -x "$SCRIPT_DIR/.venv/bin/python" ]; then
+        python_bin="$SCRIPT_DIR/.venv/bin/python"
+    fi
+
+    # 检查 websockets 库。server.py 需要 websockets.asyncio.client；
+    # 仅能 import websockets 的旧版本会在启动时失败。
+    if ! "$python_bin" -c "from websockets.asyncio.client import connect" 2>/dev/null; then
+        echo -e "  ${YELLOW}⚠ websockets 版本过旧或未安装，正在安装...${NC}"
+        if [ ! -x "$SCRIPT_DIR/.venv/bin/python" ]; then
+            python3 -m venv "$SCRIPT_DIR/.venv" || {
+                echo -e "${RED}✗ 创建 Python 虚拟环境失败${NC}"
+                echo "请安装 python3-venv，或手动创建 .venv 后安装: python -m pip install 'websockets>=13'"
+                exit 1
+            }
+        fi
+        python_bin="$SCRIPT_DIR/.venv/bin/python"
+        "$python_bin" -m pip install 'websockets>=13' 2>&1 | tail -1
+        if ! "$python_bin" -c "from websockets.asyncio.client import connect" 2>/dev/null; then
             echo -e "${RED}✗ websockets 安装失败${NC}"
-            echo "请手动运行: pip3 install websockets"
+            echo "请手动运行: $python_bin -m pip install 'websockets>=13'"
             exit 1
         fi
     fi
@@ -356,12 +370,29 @@ start_local() {
     export VO_PORT="${VO_PORT:-8090}"
     export VO_WS_PORT="${VO_WS_PORT:-8091}"
     export VO_OFFICE_NAME="${VO_OFFICE_NAME:-Virtual Office}"
-    export VO_GATEWAY_URL="${VO_GATEWAY_URL:-ws://localhost:18789}"
-    export VO_GATEWAY_HTTP="${VO_GATEWAY_HTTP:-http://localhost:18789}"
+    local gateway_port
+    gateway_port=$(python3 - "$VO_OPENCLAW_PATH" <<'PY' 2>/dev/null || true
+import json
+import os
+import sys
+
+cfg_path = os.path.join(os.path.expanduser(sys.argv[1]), "openclaw.json")
+try:
+    with open(cfg_path, "r") as f:
+        cfg = json.load(f)
+    port = (cfg.get("gateway") or {}).get("port")
+    if port:
+        print(port)
+except (OSError, json.JSONDecodeError, TypeError):
+    pass
+PY
+)
+    gateway_port="${gateway_port:-18789}"
+    export VO_GATEWAY_URL="${VO_GATEWAY_URL:-ws://localhost:${gateway_port}}"
+    export VO_GATEWAY_HTTP="${VO_GATEWAY_HTTP:-http://localhost:${gateway_port}}"
     export VO_BROWSER_PANEL="${VO_BROWSER_PANEL:-false}"
     export VO_CDP_URL="${VO_CDP_URL:-http://localhost:9222}"
     export VO_VIEWER_URL="${VO_VIEWER_URL:-http://localhost:6901}"
-    export _VO_INT=1
 
     echo -e "  ${GREEN}✓${NC} 环境已配置"
     echo ""
@@ -383,7 +414,7 @@ start_local() {
     echo ""
 
     cd "$SCRIPT_DIR/app"
-    exec python3 server.py
+    exec "$python_bin" server.py
 }
 
 # ── 清理数据 ──────────────────────────────────────────────────────────────

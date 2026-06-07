@@ -86,6 +86,8 @@ Claude Code configuration is product-neutral:
 
 Never hardcode host usernames, personal auth paths, or a developer's local container layout into Codex or Claude Code product support.
 
+Codex is an opt-in collaborator harness, not a created agent type. Enable it at startup with `VO_CODEX_ENABLED=1`; it appears as a visible office agent and receives messages through the same communication layer. `VO_CODEX_REPLY_TEXT=<text>` can be used for deterministic local regression until a live Codex bridge is configured.
+
 ### AgentPlatform-to-AgentPlatform Communications
 
 Use when agents need to talk across providers and the exchange should be visible in Virtual Office.
@@ -98,6 +100,12 @@ Events are stored in:
 - `VO_STATUS_DIR/agent-platform-communications.jsonl`
 
 These events are merged into `/agent-chat`, so chat bubbles can show cross-platform interactions.
+
+Supported routed targets today:
+
+- OpenClaw agents
+- Hermes profiles
+- Codex harness agent, when `VO_CODEX_ENABLED=1`
 
 ### Presence and status
 
@@ -161,5 +169,6 @@ Use these for durable work that belongs on a board.
 ## Current gaps
 
 - Provider-neutral browser action endpoint is not implemented yet.
+- Codex live bridge execution is not implemented yet; the current harness supports discovery, status, visible communication events, and deterministic demo replies.
 - File/upload tool skill is not yet added; add it only after the intended agent-facing file endpoints are finalized.
 - Calendar/scheduler skill is not yet added; add it only if Virtual Office owns those endpoints instead of delegating to OpenClaw/provider tools.

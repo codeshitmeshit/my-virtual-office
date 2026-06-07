@@ -786,24 +786,29 @@ Deliver:
 Success condition:
 - the office can host non-gateway agents as first-class office workers
 
-## Phase 5 - Claude Code adapter
+## Phase 5 - Codex live bridge
 
 Deliver:
-- Claude Code provider
+- live Codex bridge behind the Phase 4 Codex harness adapter
+- message forwarding from Virtual Office to a real Codex CLI/session
+- session lifecycle for a single Codex collaborator
+- final reply, error, timeout, and basic status propagation back to office events
+- clear boundary between single-message live execution and later project automation
+
+Success condition:
+- a user, OpenClaw agent, or Hermes agent can send one office-mediated message to Codex, Codex executes through a live bridge, and the office records the real response and status events
+
+## Phase 6 - Claude Code adapter and advanced Codex sessions
+
+Deliver:
+- Claude Code provider built on the same harness base
 - prompt pack injection
 - workspace and project binding
-- cross-provider messaging
+- streamed Codex status/tool events
+- cancellation, timeout, permission prompts, and longer task-session controls
 
 Success condition:
-- a Claude Code worker can participate in the office alongside OpenClaw and Hermes agents
-
-## Phase 6 - Codex adapter
-
-Deliver:
-- Codex provider built on the same harness base
-
-Success condition:
-- no new architecture required, only a new provider implementation
+- Claude Code can participate in the office alongside OpenClaw, Hermes, and Codex; Codex live sessions can be managed beyond a single final reply
 
 ## Phase 7 - Universal automations and projects
 

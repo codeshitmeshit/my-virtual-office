@@ -215,16 +215,18 @@ def _load_vo_config():
     sms_cfg = cfg.get("sms") or {}
     hermes_cfg = cfg.get("hermes") or {}
     codex_cfg = cfg.get("codex") or {}
-    claude_code_cfg = cfg.get("claudeCode") or cfg.get("claude_code") or {}
-
-    codex_workspace_root = _env_or(
-        "VO_CODEX_WORKSPACE_ROOT",
-        codex_cfg.get("workspaceRoot", os.path.join(_env_or("VO_STATUS_DIR", presence.get("statusDir", "/data")), "codex-agents")),
-    )
-    claude_code_workspace_root = _env_or(
-        "VO_CLAUDE_CODE_WORKSPACE_ROOT",
-        claude_code_cfg.get("workspaceRoot", os.path.join(_env_or("VO_STATUS_DIR", presence.get("statusDir", "/data")), "claude-code-agents")),
-    )
+    gateway_port = "18789"
+    try:
+        oc_cfg_path = os.path.join(os.path.expanduser(oc_home), "openclaw.json")
+        with open(oc_cfg_path, "r") as f:
+            oc_cfg = json.load(f)
+        configured_port = ((oc_cfg.get("gateway") or {}).get("port"))
+        if configured_port:
+            gateway_port = str(configured_port)
+    except (FileNotFoundError, json.JSONDecodeError, OSError, TypeError):
+        pass
+    default_gateway_url = f"ws://127.0.0.1:{gateway_port}"
+    default_gateway_http = f"http://127.0.0.1:{gateway_port}"
 
     return {
         "office": {
@@ -234,8 +236,8 @@ def _load_vo_config():
         },
         "openclaw": {
             "homePath": oc_home,
-            "gatewayUrl": _env_or("VO_GATEWAY_URL", openclaw.get("gatewayUrl", "ws://127.0.0.1:18789")),
-            "gatewayHttp": _env_or("VO_GATEWAY_HTTP", openclaw.get("gatewayHttp", "http://127.0.0.1:18789")),
+            "gatewayUrl": _env_or("VO_GATEWAY_URL", openclaw.get("gatewayUrl", default_gateway_url)),
+            "gatewayHttp": _env_or("VO_GATEWAY_HTTP", openclaw.get("gatewayHttp", default_gateway_http)),
             "gatewayToken": env_gateway_token or openclaw.get("gatewayToken", ""),
         },
         "presence": {
@@ -310,6 +312,15 @@ def _load_vo_config():
             "includeMain": str(_env_or("VO_CLAUDE_CODE_INCLUDE_MAIN", claude_code_cfg.get("includeMain", True))).lower() not in ("0", "false", "no", "off"),
             "includeNativeAgents": str(_env_or("VO_CLAUDE_CODE_INCLUDE_NATIVE_AGENTS", claude_code_cfg.get("includeNativeAgents", True))).lower() not in ("0", "false", "no", "off"),
             "registerNativeAgents": str(_env_or("VO_CLAUDE_CODE_REGISTER_NATIVE_AGENTS", claude_code_cfg.get("registerNativeAgents", True))).lower() not in ("0", "false", "no", "off"),
+        },
+        "codex": {
+            "enabled": _env_bool("VO_CODEX_ENABLED", codex_cfg.get("enabled", False)),
+            "workspace": _env_or("VO_CODEX_WORKSPACE", codex_cfg.get("workspace", os.path.dirname(os.path.dirname(__file__)))),
+            "name": _env_or("VO_CODEX_AGENT_NAME", codex_cfg.get("name", "Codex")),
+            "agentId": _env_or("VO_CODEX_AGENT_ID", codex_cfg.get("agentId", "local")),
+            "model": _env_or("VO_CODEX_MODEL", codex_cfg.get("model", os.environ.get("OPENAI_MODEL", ""))),
+            "replyText": _env_or("VO_CODEX_REPLY_TEXT", codex_cfg.get("replyText")),
+            "bridgeUrl": _env_or("VO_CODEX_BRIDGE_URL", codex_cfg.get("bridgeUrl")),
         },
     }
 
@@ -1612,9 +1623,8 @@ def _save_openclaw_api_key(provider, api_key, profile_id=""):
 
 # ─── DYNAMIC AGENT DISCOVERY ─────────────────────────────────
 from discovery import discover_all_agents, get_agent_workspace_dir, get_agent_session_id
+from providers.hermes import HermesProvider
 from providers.codex import CodexProvider
-from providers.claude_code import ClaudeCodeProvider
-from providers.hermes import HermesApiClient, HermesProvider
 from license import get_license_status, activate_license, deactivate_license, check_feature, get_agent_limit
 from project_store import MarkdownProjectStore
 
@@ -1669,7 +1679,7 @@ _WORKSPACE_FILE_LIMIT = 256 * 1024
 
 
 def _agent_workspace_abs_path(agent_key, agent):
-    if agent.get("providerKind") == "hermes":
+    if agent.get("providerKind", "openclaw") != "openclaw":
         return None
     if agent.get("providerKind") in {"codex", "claude-code"}:
         ws = agent.get("workspace") or agent.get("home") or AGENT_WORKSPACES.get(agent_key) or AGENT_WORKSPACES.get(agent.get("statusKey"))
@@ -1766,6 +1776,8 @@ def _workspace_file_summaries(agent_key, agent):
                 "modified": datetime.fromtimestamp(os.path.getmtime(hist_path), timezone.utc).isoformat(),
             })
         return files
+    if provider_kind != "openclaw":
+        return []
 
     ws_path = _agent_workspace_abs_path(agent_key, agent)
     if not ws_path:
@@ -1809,7 +1821,7 @@ def _workspace_file_summaries(agent_key, agent):
 
 
 def _agent_skill_summaries(agent_key, agent):
-    if agent.get("providerKind") != "openclaw" and agent.get("providerKind"):
+    if agent.get("providerKind", "openclaw") != "openclaw":
         return []
     result = _handle_skill_list(agent_key)
     return [
@@ -1856,11 +1868,11 @@ def _agent_recent_activity(agent_key, agent):
         profile = agent.get("profile") or agent.get("providerAgentId") or "default"
         messages = _load_hermes_history(profile)[-80:]
     elif agent.get("providerKind") == "codex":
-        profile = agent.get("profile") or agent.get("providerAgentId") or "default"
-        messages = _load_codex_history(profile)[-80:]
-    elif agent.get("providerKind") == "claude-code":
-        profile = agent.get("profile") or agent.get("providerAgentId") or "main"
-        messages = _load_claude_code_history(profile)[-80:]
+        messages = []
+        for event in _load_comm_history(limit=160, agent_id=agent_key):
+            msg = _comm_event_to_chat_message(event, agent_key)
+            if msg:
+                messages.append(msg)
     else:
         messages = get_agent_messages(agent_key, max_messages=80)
     return messages[-80:] if isinstance(messages, list) else []
@@ -1952,8 +1964,7 @@ def _get_agent_workspace_payload(agent_key):
         "lastActiveAt": agent.get("lastActiveAt", 0),
     }
     heartbeat = ""
-    provider_kind = agent.get("providerKind", "openclaw")
-    if provider_kind == "openclaw":
+    if agent.get("providerKind", "openclaw") == "openclaw":
         hb = _resolve_workspace_file(key, agent, "HEARTBEAT.md", allow_new=True)[0]
         if hb and os.path.isfile(hb):
             try:
@@ -1974,12 +1985,12 @@ def _get_agent_workspace_payload(agent_key):
         "score": _agent_score_info(key),
         "settings": {
             "heartbeatContent": heartbeat,
-            "heartbeatApplicable": provider_kind == "openclaw",
-            "cronApplicable": provider_kind == "openclaw",
-            "filesApplicable": provider_kind != "hermes",
-            "agentSkillsApplicable": provider_kind == "openclaw",
+            "heartbeatApplicable": agent.get("providerKind", "openclaw") == "openclaw",
+            "cronApplicable": agent.get("providerKind", "openclaw") == "openclaw",
+            "filesApplicable": agent.get("providerKind", "openclaw") == "openclaw",
+            "agentSkillsApplicable": agent.get("providerKind", "openclaw") == "openclaw",
             "skillLibraryApplicable": True,
-            "modelEditable": provider_kind == "openclaw",
+            "modelEditable": agent.get("providerKind", "openclaw") == "openclaw",
         },
     }
 
@@ -2144,8 +2155,8 @@ def _handle_agent_workspace_update(agent_key, body):
         if not result.get("ok"):
             return result
     elif action == "saveAgentSkill":
-        if payload["agent"].get("providerKind") == "hermes":
-            return {"error": "Hermes skills are not edited through OpenClaw workspace skills", "_status": 400}
+        if payload["agent"].get("providerKind") != "openclaw":
+            return {"error": "Workspace skills are OpenClaw-only for this platform", "_status": 400}
         name = (body.get("name") or "").strip()
         content = str(body.get("content") or "")
         if not content:
@@ -2154,8 +2165,8 @@ def _handle_agent_workspace_update(agent_key, body):
         if not result.get("ok"):
             return result
     elif action == "deleteAgentSkill":
-        if payload["agent"].get("providerKind") == "hermes":
-            return {"error": "Hermes skills are not edited through OpenClaw workspace skills", "_status": 400}
+        if payload["agent"].get("providerKind") != "openclaw":
+            return {"error": "Workspace skills are OpenClaw-only for this platform", "_status": 400}
         result = _handle_skill_delete(key, (body.get("name") or "").strip())
         if not result.get("ok"):
             return result
@@ -2168,8 +2179,8 @@ def _handle_agent_workspace_update(agent_key, body):
         if not result.get("ok"):
             return result
     elif action == "applyLibrarySkill":
-        if payload["agent"].get("providerKind") == "hermes":
-            return {"error": "Hermes skills are not edited through OpenClaw workspace skills", "_status": 400}
+        if payload["agent"].get("providerKind") != "openclaw":
+            return {"error": "Workspace skills are OpenClaw-only for this platform", "_status": 400}
         result = _handle_skills_library_apply({
             "skill": (body.get("name") or "").strip(),
             "agentId": key,
@@ -2178,8 +2189,8 @@ def _handle_agent_workspace_update(agent_key, body):
         if not result.get("ok") and not result.get("exists"):
             return result
     elif action == "saveAgentSkillToLibrary":
-        if payload["agent"].get("providerKind") == "hermes":
-            return {"error": "Hermes skills are not edited through OpenClaw workspace skills", "_status": 400}
+        if payload["agent"].get("providerKind") != "openclaw":
+            return {"error": "Workspace skills are OpenClaw-only for this platform", "_status": 400}
         result = _handle_skills_library_save_from_agent({
             "skill": (body.get("name") or "").strip(),
             "agentId": key,
@@ -2201,8 +2212,8 @@ def _handle_agent_workspace_update(agent_key, body):
             except Exception:
                 pass
         if "heartbeatContent" in body:
-            if payload["agent"].get("providerKind") == "hermes":
-                return {"error": "Heartbeats are OpenClaw-only for now; Hermes agents do not use HEARTBEAT.md", "_status": 400}
+            if payload["agent"].get("providerKind") != "openclaw":
+                return {"error": "Heartbeats are OpenClaw-only for this platform", "_status": 400}
             result = _save_workspace_text_file(key, _find_agent_record(key), "HEARTBEAT.md", body.get("heartbeatContent") or "", create=True)
             if not result.get("ok"):
                 return result
@@ -2491,36 +2502,12 @@ def _ensure_builtin_communication_skill():
 def _discover_roster():
     hermes = VO_CONFIG.get("hermes", {})
     codex = VO_CONFIG.get("codex", {})
-    claude_code = VO_CONFIG.get("claudeCode", {})
     return discover_all_agents(
         WORKSPACE_BASE,
         hermes_home=hermes.get("homePath"),
         hermes_bin=hermes.get("binary"),
         hermes_enabled=hermes.get("enabled", True),
-        codex_home=codex.get("homePath"),
-        codex_bin=codex.get("binary"),
-        codex_workspace_root=codex.get("workspaceRoot"),
-        codex_enabled=codex.get("enabled", True),
-        codex_model=codex.get("model") or "",
-        codex_sandbox=codex.get("sandbox") or "workspace-write",
-        codex_approval_policy=codex.get("approvalPolicy") or "never",
-        codex_prefer_app_server=codex.get("preferAppServer", True),
-        codex_timeout_sec=int(codex.get("timeoutSec") or 900),
-        codex_main_workspace=codex.get("mainWorkspace"),
-        codex_include_main=codex.get("includeMain", True),
-        codex_include_native_agents=codex.get("includeNativeAgents", True),
-        codex_register_native_agents=codex.get("registerNativeAgents", True),
-        claude_home=claude_code.get("homePath"),
-        claude_bin=claude_code.get("binary"),
-        claude_workspace_root=claude_code.get("workspaceRoot"),
-        claude_enabled=claude_code.get("enabled", True),
-        claude_model=claude_code.get("model") or "",
-        claude_permission_mode=claude_code.get("permissionMode") or "acceptEdits",
-        claude_timeout_sec=int(claude_code.get("timeoutSec") or 900),
-        claude_main_workspace=claude_code.get("mainWorkspace"),
-        claude_include_main=claude_code.get("includeMain", True),
-        claude_include_native_agents=claude_code.get("includeNativeAgents", True),
-        claude_register_native_agents=claude_code.get("registerNativeAgents", True),
+        codex=codex,
     )
 
 _discovered_roster = _discover_roster()
@@ -2588,13 +2575,14 @@ def _build_agent_info():
 def _build_agent_workspaces():
     result = {}
     for a in get_roster():
-        if a.get("providerKind") in {"hermes", "codex", "claude-code"}:
+        if a.get("providerKind", "openclaw") != "openclaw":
             result[a["statusKey"]] = a.get("home") or a.get("workspace") or ""
         else:
-            result[a["statusKey"]] = get_agent_workspace_dir(WORKSPACE_BASE, a["id"]).replace(WORKSPACE_BASE + "/", "") if a["workspace"].startswith(WORKSPACE_BASE) else os.path.basename(a["workspace"])
+            workspace = a.get("workspace", "")
+            result[a["statusKey"]] = get_agent_workspace_dir(WORKSPACE_BASE, a["id"]).replace(WORKSPACE_BASE + "/", "") if workspace.startswith(WORKSPACE_BASE) else os.path.basename(workspace)
     return result
 def _build_agent_session_ids():
-    return {a["statusKey"]: (a.get("providerAgentId") if a.get("providerKind") in {"hermes", "codex", "claude-code"} else get_agent_session_id(a["id"])) for a in get_roster()}
+    return {a["statusKey"]: (a.get("providerAgentId") if a.get("providerKind", "openclaw") != "openclaw" else get_agent_session_id(a["id"])) for a in get_roster()}
 
 # Compatibility properties (lazily rebuilt)
 @property
@@ -2693,6 +2681,22 @@ def _is_hermes_agent(agent_id_or_key):
         if needle in (a.get("id"), a.get("statusKey"), a.get("providerAgentId")):
             return a.get("providerKind") == "hermes"
     return needle.startswith("hermes:") or needle.startswith("hermes-")
+
+
+def _is_codex_agent(agent_id_or_key):
+    needle = str(agent_id_or_key or "")
+    for a in get_roster():
+        if needle in (a.get("id"), a.get("statusKey"), a.get("providerAgentId")):
+            return a.get("providerKind") == "codex"
+    return needle.startswith("codex:")
+
+
+def _get_codex_agent(agent_id_or_key=None):
+    needle = str(agent_id_or_key or "")
+    for a in get_roster():
+        if a.get("providerKind") == "codex" and (not needle or needle in (a.get("id"), a.get("statusKey"), a.get("providerAgentId"))):
+            return a
+    return None
 
 
 def _parse_iso_epoch_ms(value):
@@ -5694,6 +5698,48 @@ def _handle_hermes_test(body=None):
     result["profileApis"] = profile_apis
     return result
 
+
+def _codex_provider_from_config():
+    cfg = VO_CONFIG.get("codex", {})
+    return CodexProvider(
+        enabled=cfg.get("enabled", False),
+        workspace=cfg.get("workspace"),
+        name=cfg.get("name"),
+        agent_id=cfg.get("agentId"),
+        model=cfg.get("model"),
+        reply_text=cfg.get("replyText"),
+        bridge_url=cfg.get("bridgeUrl"),
+    )
+
+
+def _handle_codex_chat(body):
+    """Send one office-mediated message to the Codex harness adapter."""
+    message = (body.get("message") or "").strip()
+    agent_key = body.get("agentId") or body.get("key") or body.get("sessionKey") or "codex-local"
+    if not message:
+        return {"ok": False, "error": "message is required", "_status": 400}
+    agent = _get_codex_agent(agent_key)
+    if not agent:
+        return {"ok": False, "error": f"Codex agent '{agent_key}' not found", "_status": 404}
+    provider = _codex_provider_from_config()
+    result = provider.send_message(
+        message,
+        conversation_id=str(body.get("conversationId") or body.get("threadId") or ""),
+        timeout_sec=int(body.get("timeoutSec") or 600),
+    )
+    return {
+        "ok": bool(result.get("ok")),
+        "reply": result.get("reply") or "",
+        "error": result.get("error"),
+        "mode": result.get("mode", ""),
+        "agent": {"id": agent.get("id"), "name": agent.get("name"), "providerKind": "codex", "profile": agent.get("profile", "")},
+    }
+
+
+def _handle_codex_test(body=None):
+    """Test the configured Codex harness without requiring OpenClaw/Hermes."""
+    return _codex_provider_from_config().test()
+
 def _handle_agent_platforms():
     """Return agent platforms available to the New Agent workflow."""
     hermes_cfg = VO_CONFIG.get("hermes", {})
@@ -5702,12 +5748,7 @@ def _handle_agent_platforms():
         binary=hermes_cfg.get("binary"),
         enabled=hermes_cfg.get("enabled", True),
     ).test()
-    codex_cfg = VO_CONFIG.get("codex", {})
-    codex_status = _codex_provider().test()
-    codex_home = codex_status.get("homePath") or codex_cfg.get("homePath") or ""
-    claude_cfg = VO_CONFIG.get("claudeCode", {})
-    claude_status = _claude_code_provider().test()
-    claude_home = claude_status.get("homePath") or claude_cfg.get("homePath") or ""
+    codex_status = _handle_codex_test()
     return {
         "ok": True,
         "platforms": [
@@ -5733,38 +5774,11 @@ def _handle_agent_platforms():
             {
                 "id": "codex",
                 "label": "Codex",
-                "description": "Native Codex app-server workspace agent",
-                "providerType": "harness",
+                "description": "Local Codex collaborator harness",
                 "available": bool(codex_status.get("ok")),
-                "create": bool(codex_status.get("ok")),
-                "delete": bool(codex_status.get("ok")),
-                "error": "" if codex_status.get("ok") else codex_status.get("error", "Codex is not available"),
-                "codex": {
-                    "homePath": codex_home,
-                    "nativeAgentsDir": os.path.join(codex_home, "agents") if codex_home else "",
-                    "workspaceRoot": codex_status.get("workspaceRoot") or codex_cfg.get("workspaceRoot") or "",
-                    "mainWorkspace": codex_status.get("mainWorkspace") or codex_cfg.get("mainWorkspace") or "",
-                    "defaultCreationMode": "standard",
-                    "registerNativeAgents": bool(codex_cfg.get("registerNativeAgents", True)),
-                },
-            },
-            {
-                "id": "claude-code",
-                "label": "Claude Code",
-                "description": "Native Claude Code CLI workspace agent",
-                "providerType": "harness",
-                "available": bool(claude_status.get("ok")),
-                "create": bool(claude_status.get("ok")),
-                "delete": bool(claude_status.get("ok")),
-                "error": "" if claude_status.get("ok") else claude_status.get("error", "Claude Code is not available"),
-                "claudeCode": {
-                    "homePath": claude_home,
-                    "nativeAgentsDir": os.path.join(claude_home, "agents") if claude_home else "",
-                    "workspaceRoot": claude_status.get("workspaceRoot") or claude_cfg.get("workspaceRoot") or "",
-                    "mainWorkspace": claude_status.get("mainWorkspace") or claude_cfg.get("mainWorkspace") or "",
-                    "defaultCreationMode": "standard",
-                    "registerNativeAgents": bool(claude_cfg.get("registerNativeAgents", True)),
-                },
+                "create": False,
+                "delete": False,
+                "error": "" if codex_status.get("ok") else codex_status.get("error", "Codex harness is disabled"),
             },
         ],
     }
@@ -6029,7 +6043,6 @@ def _handle_agent_platform_comm_send(body):
         "openclaw": "OpenClaw",
         "hermes": "Hermes",
         "codex": "Codex",
-        "claude-code": "Claude Code",
     }
     if is_human_source:
         sender_label = from_ref.get("name") or "User"
@@ -6800,7 +6813,7 @@ def _skill_workshop_agent_targets(agent_id=""):
             continue
         if agent_id and key != agent_id and agent.get("id") != agent_id:
             continue
-        if agent.get("providerKind") == "hermes":
+        if agent.get("providerKind", "openclaw") != "openclaw":
             continue
         targets.append({
             "id": key,
@@ -8184,6 +8197,9 @@ def _wf_extract_session_activity(agent_id, project_id, task_id):
         profile = agent.get("profile") or agent.get("providerAgentId") or "default"
         messages = _load_hermes_history(profile)[-12:]
         return [{"type": "message", "summary": (m.get("text") or "")[:300], "ts": m.get("ts", 0)} for m in messages if m.get("text")]
+    if _is_codex_agent(agent_id):
+        messages = _load_comm_history(limit=24, conversation_id=task_id)
+        return [{"type": "message", "summary": (m.get("text") or "")[:300], "ts": m.get("ts", 0)} for m in messages if m.get("text")]
 
     """Extract file activity and tool usage from a workflow task's session JSONL.
 
@@ -8588,15 +8604,11 @@ def _wf_call_agent(agent_id, message, timeout=600, project_id=None, task_id=None
             return result.get("reply", "")
         return f"[ERROR] Hermes agent failed: {result.get('error') or result.get('reply') or result}"
     if _is_codex_agent(agent_id):
-        result = _handle_codex_chat({"agentId": agent_id, "message": message, "timeoutSec": timeout})
+        result = _handle_codex_chat({"agentId": agent_id, "message": message, "timeoutSec": timeout, "conversationId": task_id or ""})
+        reply = result.get("reply", "")
         if result.get("ok"):
-            return result.get("reply", "")
-        return f"[ERROR] Codex agent failed: {result.get('error') or result.get('reply') or result}"
-    if _is_claude_code_agent(agent_id):
-        result = _handle_claude_code_chat({"agentId": agent_id, "message": message, "timeoutSec": timeout})
-        if result.get("ok"):
-            return result.get("reply", "")
-        return f"[ERROR] Claude Code agent failed: {result.get('error') or result.get('reply') or result}"
+            return reply
+        return f"[ERROR] Codex agent failed: {result.get('error') or reply or result}"
 
     # Use a stable session key per task — reused across all calls for this task
     session_key = None
@@ -9738,6 +9750,13 @@ def _wf_get_task_session_messages(agent_id, project_id, task_id, max_messages=50
         agent = _get_hermes_agent(agent_id) or {}
         profile = agent.get("profile") or agent.get("providerAgentId") or "default"
         return _load_hermes_history(profile)[-max_messages:]
+    if _is_codex_agent(agent_id):
+        messages = []
+        for event in _load_comm_history(limit=max_messages, conversation_id=task_id):
+            msg = _comm_event_to_chat_message(event, agent_id)
+            if msg:
+                messages.append(msg)
+        return messages[-max_messages:]
 
     """Read messages from the task-specific workflow session JSONL only."""
     session_key = _wf_task_session_key(agent_id, project_id, task_id)
@@ -9847,11 +9866,8 @@ def _wf_get_task_session_messages(agent_id, project_id, task_id, max_messages=50
 
 
 def _wf_is_task_session_active(agent_id, project_id, task_id):
-    if _is_hermes_agent(agent_id):
-        agent = _get_hermes_agent(agent_id) or {}
-        key = agent.get("statusKey") or agent.get("id") or agent_id
-        presence = _get_normalized_presence_state().get(key, {})
-        return presence.get("state") in {"working", "finishing"} and str(presence.get("source") or "").startswith("hermes")
+    if _is_hermes_agent(agent_id) or _is_codex_agent(agent_id):
+        return False
 
     """Check if the task-specific workflow session is still actively running."""
     session_key = _wf_task_session_key(agent_id, project_id, task_id)
@@ -10088,6 +10104,8 @@ def _handle_agent_delete(body):
     try:
         agent = _office_agent_lookup(agent_id)
         provider_kind = (agent or {}).get("providerKind", "openclaw")
+        if provider_kind == "codex" or agent_id.startswith("codex-"):
+            return {"error": "Codex collaborator is configured by VO_CODEX_* startup settings and cannot be deleted here", "_status": 403}
         if provider_kind == "hermes" or agent_id.startswith("hermes-"):
             profile = (agent or {}).get("providerAgentId") or agent_id.replace("hermes-", "", 1)
             provider = HermesProvider(
@@ -11004,8 +11022,6 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                     session_key = f"hermes:{a.get('profile', a['id'])}"
                 elif provider_kind == "codex":
                     session_key = f"codex:{a.get('profile') or a.get('providerAgentId') or a['id']}"
-                elif provider_kind == "claude-code":
-                    session_key = f"claude-code:{a.get('profile') or a.get('providerAgentId') or a['id']}"
                 else:
                     session_key = f"agent:{a['id']}:main"
                 # Prefer office-config name/emoji over IDENTITY.md
@@ -11014,7 +11030,7 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                 branch_id = oc.get("branch", "")
                 branch_name = _oc_branches.get(branch_id, "") if branch_id else ""
                 if not branch_name:
-                    branch_name = "Hermes" if provider_kind == "hermes" else ("Codex" if provider_kind == "codex" else ("Claude Code" if provider_kind == "claude-code" else "Unassigned"))
+                    branch_name = provider_kind.title() if provider_kind != "openclaw" else "Unassigned"
                 agents.append({
                     "key": a["statusKey"],
                     "agentId": a["id"],
@@ -11069,13 +11085,7 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                     profile = agent.get("profile") or agent.get("providerAgentId") or "default"
                     msgs = _load_hermes_history(profile)[-500:]
                 elif _is_codex_agent(agent_key):
-                    agent = _get_codex_agent(agent_key) or {}
-                    profile = agent.get("profile") or agent.get("providerAgentId") or "default"
-                    msgs = get_codex_agent_messages(profile, max_messages=500)
-                elif _is_claude_code_agent(agent_key):
-                    agent = _get_claude_code_agent(agent_key) or {}
-                    profile = agent.get("profile") or agent.get("providerAgentId") or "main"
-                    msgs = get_claude_code_agent_messages(profile, max_messages=500)
+                    msgs = []
                 else:
                     msgs = get_agent_messages(agent_key, max_messages=500)
                 if msgs:
@@ -11549,13 +11559,6 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             self.wfile.write(json.dumps(result).encode())
         elif self.path == "/api/codex/test":
             result = _handle_codex_test()
-            self.send_response(200 if result.get("ok") else 503)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.end_headers()
-            self.wfile.write(json.dumps(result).encode())
-        elif self.path == "/api/claude-code/test":
-            result = _handle_claude_code_test()
             self.send_response(200 if result.get("ok") else 503)
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
@@ -12210,13 +12213,19 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
         except Exception:
             return {}
 
-    def _default_config_model(self, cfg):
-        cfg = cfg if isinstance(cfg, dict) else {}
-        default_model = cfg.get("agents", {}).get("defaults", {}).get("model", {}).get("primary", "")
-        for a in cfg.get("agents", {}).get("list", []):
-            if a.get("default") and a.get("model"):
-                return a["model"]
-        return default_model or "unknown"
+        When agent_id is provided, resolves that agent's configured model
+        (per-agent override or default). Otherwise returns the main/default agent model.
+        """
+        if agent_id and _is_hermes_agent(agent_id):
+            agent = _get_hermes_agent(agent_id) or {}
+            model = agent.get("model") or "Hermes"
+            provider = agent.get("provider") or "Hermes"
+            return {"model": model, "provider": provider, "providerKind": "hermes", "contextWindow": 0}
+        if agent_id and _is_codex_agent(agent_id):
+            agent = _get_codex_agent(agent_id) or {}
+            model = agent.get("model") or "Codex"
+            provider = agent.get("provider") or "OpenAI Codex"
+            return {"model": model, "provider": provider, "providerKind": "codex", "contextWindow": 0}
 
     def _context_window_for_model(self, model, cfg):
         model = str(model or "")
@@ -13463,16 +13472,6 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             length = int(self.headers.get('Content-Length', 0))
             body = json.loads(self.rfile.read(length)) if length else {}
             result = _handle_codex_test(body)
-            self.send_response(200 if result.get("ok") else 503)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.end_headers()
-            self.wfile.write(json.dumps(result).encode())
-            return
-        elif self.path == "/api/claude-code/test":
-            length = int(self.headers.get('Content-Length', 0))
-            body = json.loads(self.rfile.read(length)) if length else {}
-            result = _handle_claude_code_test(body)
             self.send_response(200 if result.get("ok") else 503)
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
