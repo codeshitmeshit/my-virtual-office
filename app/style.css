@@ -661,20 +661,65 @@ html, body {
 /* Toolbar - always visible below canvas */
 .toolbar {
     display: flex;
-    justify-content: space-around;
+    justify-content: flex-start;
+    align-items: center;
     padding: 10px 8px;
     background: #151520;
     border-top: 2px solid var(--ui-border);
     gap: 4px;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     flex-shrink: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: thin;
+    scrollbar-color: #3a3a5e #151520;
+}
+
+.toolbar::-webkit-scrollbar {
+    height: 8px;
+}
+
+.toolbar::-webkit-scrollbar-track {
+    background: #151520;
+}
+
+.toolbar::-webkit-scrollbar-thumb {
+    background: #3a3a5e;
+    border-radius: 4px;
+}
+
+.toolbar > button,
+.toolbar > a {
+    flex: 0 0 auto;
+}
+
+.toolbar button {
+    white-space: nowrap;
+}
+
+.toolbar button.toolbar-feature-unavailable {
+    opacity: 0.55;
+    cursor: not-allowed;
+    filter: grayscale(0.8);
+}
+
+.toolbar button.toolbar-feature-unavailable:hover {
+    border-color: #3a3a4e;
+    color: var(--ui-text);
+}
+
+.toolbar > a {
+    display: flex;
+    text-decoration: none;
 }
 
 .toolbar-divider {
     width: 1px;
+    min-width: 1px;
     background: #3a3a5e;
     align-self: stretch;
     margin: 2px 4px;
+    flex: 0 0 auto;
 }
 
 .toolbar button.active-edit {
@@ -1252,8 +1297,6 @@ button:active { transform: translateY(3px); box-shadow: none; }
     .toolbar button {
         font-size: 7px;
         padding: 6px 8px;
-        flex: 1 1 auto;
-        min-width: 0;
     }
 
     .modal-content {
@@ -3491,6 +3534,12 @@ button:active { transform: translateY(3px); box-shadow: none; }
 .browser-toggle-btn.active {
   background: linear-gradient(135deg, #43a047, #66bb6a) !important;
   box-shadow: 0 0 12px rgba(76,175,80,0.5);
+}
+
+.browser-toggle-btn.toolbar-feature-unavailable {
+  background: linear-gradient(180deg, #2a2a3e, #1a1a2e) !important;
+  border-color: #3a3a4e !important;
+  box-shadow: 0 3px 0 #0a0a0f !important;
 }
 
 .browser-panel {

@@ -139,6 +139,13 @@ def _env_or(key, fallback):
     val = os.environ.get(key)
     return val if val else fallback
 
+def _env_bool(key, fallback):
+    """Return boolean env var override if set, else fallback."""
+    val = os.environ.get(key)
+    if val is None or str(val).strip() == "":
+        return fallback
+    return str(val).strip().lower() in ("1", "true", "yes", "on", "enabled")
+
 def _resolve_config_path():
     """Return path to vo-config.json — prefers /data/ (persistent volume) over /app/ (container layer)."""
     if os.environ.get("VO_CONFIG"):
@@ -239,7 +246,7 @@ def _load_vo_config():
         "features": {
             "pcMetrics": features.get("pcMetrics", False),
             "smsPanel": features.get("smsPanel", False),
-            "browserPanel": features.get("browserPanel", False),
+            "browserPanel": _env_bool("VO_BROWSER_PANEL", features.get("browserPanel", False)),
             "whisper": features.get("whisper", False),
             "apiUsage": features.get("apiUsage", True),
         },

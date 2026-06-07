@@ -95,7 +95,20 @@
   }
 
   // ─── Open / Close ─────────────────────────────────────────────────────────
-  browserBtn.addEventListener('click', () => { toggleBrowserPanel(); });
+  function setBrowserAvailable(available, hint) {
+    if (!browserBtn) return;
+    browserBtn.classList.toggle('toolbar-feature-unavailable', !available);
+    browserBtn.setAttribute('aria-disabled', available ? 'false' : 'true');
+    browserBtn.title = available ? (_t('browser') || 'Agent Browser') : (hint || _t('browser_unavailable_hint'));
+  }
+
+  browserBtn.addEventListener('click', () => {
+    if (browserBtn.getAttribute('aria-disabled') === 'true') {
+      alert(browserBtn.title || _t('browser_unavailable_hint'));
+      return;
+    }
+    toggleBrowserPanel();
+  });
   browserClose.addEventListener('click', () => { closeBrowserPanel(); });
 
   function toggleBrowserPanel() {
@@ -468,13 +481,13 @@
       if (status.viewerUrl) {
         BROWSER_VIEW_URL = status.viewerUrl;
       }
-      // Hide browser button if not configured
       if (!status.enabled) {
-        if (browserBtn) browserBtn.style.display = 'none';
+        setBrowserAvailable(false, _t('browser_unavailable_hint'));
+      } else {
+        setBrowserAvailable(true);
       }
     } catch (e) {
-      // Browser feature unavailable
-      if (browserBtn) browserBtn.style.display = 'none';
+      setBrowserAvailable(false, _t('browser_unavailable_hint'));
     }
     // Load agent names dynamically
     _loadAgentNames();

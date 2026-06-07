@@ -8,6 +8,7 @@
 #       ./start.sh --update     拉取最新镜像后重启
 #       ./start.sh --logs       查看日志
 #       ./start.sh --status     查看状态
+#       ./start.sh --browser    启用浏览器面板启动配置
 # =============================================================================
 
 set -euo pipefail
@@ -24,6 +25,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_FILE="$SCRIPT_DIR/.env"
 ENV_EXAMPLE="$SCRIPT_DIR/.env.example"
 COMPOSE_FILE="$SCRIPT_DIR/docker-compose.yml"
+ENABLE_BROWSER=0
+BROWSER_CDP_URL=""
+BROWSER_VIEWER_URL=""
+POSITIONAL_ARGS=()
 
 # ── 帮助信息 ──────────────────────────────────────────────────────────────
 usage() {
@@ -40,12 +45,70 @@ ${CYAN}My Virtual Office — 一键部署${NC}
   --update      拉取最新镜像并重启
   --logs        查看服务日志
   --status      查看服务状态
+  --browser     启用浏览器面板，并写入 .env
+  --browser-cdp URL
+               浏览器 CDP 地址（默认: http://host.docker.internal:9222）
+  --browser-viewer URL
+               浏览器查看器地址（默认: https://localhost:6901）
   --clean       停止 Docker 服务并删除数据卷（⚠️ 会丢失所有数据）
   --help        显示此帮助信息
 
 ${CYAN}启动后访问: http://localhost:8090/setup${NC}
 EOF
     exit 0
+}
+
+# ── 参数解析 ──────────────────────────────────────────────────────────────
+parse_args() {
+    POSITIONAL_ARGS=()
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --browser)
+                ENABLE_BROWSER=1
+                ;;
+            --browser-cdp)
+                if [ $# -lt 2 ]; then
+                    echo -e "${RED}--browser-cdp 需要 URL 参数${NC}"
+                    exit 1
+                fi
+                BROWSER_CDP_URL="$2"
+                shift
+                ;;
+            --browser-viewer)
+                if [ $# -lt 2 ]; then
+                    echo -e "${RED}--browser-viewer 需要 URL 参数${NC}"
+                    exit 1
+                fi
+                BROWSER_VIEWER_URL="$2"
+                shift
+                ;;
+            *)
+                POSITIONAL_ARGS+=("$1")
+                ;;
+        esac
+        shift
+    done
+}
+
+set_env_var() {
+    local key="$1"
+    local value="$2"
+    local tmp_file="${ENV_FILE}.tmp"
+    if grep -q "^${key}=" "$ENV_FILE"; then
+        awk -v k="$key" -v v="$value" 'BEGIN { FS=OFS="=" } $1 == k { $0 = k "=" v } { print }' "$ENV_FILE" > "$tmp_file"
+        mv "$tmp_file" "$ENV_FILE"
+    else
+        echo "${key}=${value}" >> "$ENV_FILE"
+    fi
+}
+
+apply_start_options() {
+    if [ "$ENABLE_BROWSER" -eq 1 ]; then
+        set_env_var "VO_BROWSER_PANEL" "true"
+        set_env_var "VO_CDP_URL" "${BROWSER_CDP_URL:-http://host.docker.internal:9222}"
+        set_env_var "VO_VIEWER_URL" "${BROWSER_VIEWER_URL:-https://localhost:6901}"
+        echo -e "  ${GREEN}✓${NC} 已启用浏览器面板启动配置"
+    fi
 }
 
 # ── 前置检查 ──────────────────────────────────────────────────────────────
@@ -97,12 +160,33 @@ VO_PORT=8090
 VO_WS_PORT=8091
 VO_OFFICE_NAME=Virtual Office
 VO_WEATHER_LOCATION=
+VO_BROWSER_PANEL=false
+VO_CDP_URL=http://host.docker.internal:9222
+VO_VIEWER_URL=https://localhost:6901
 EOF
             echo -e "  ${GREEN}✓${NC} 已创建默认 .env"
         fi
     else
         echo -e "  ${GREEN}✓${NC} .env 已存在"
     fi
+
+    # 补齐新版本新增的可选配置，避免旧 .env 缺少启动开关。
+    if ! grep -q '^VO_BROWSER_PANEL=' "$ENV_FILE"; then
+        {
+            echo ""
+            echo "# Agent Browser panel (optional)"
+            echo "VO_BROWSER_PANEL=false"
+        } >> "$ENV_FILE"
+        echo -e "  ${GREEN}✓${NC} 已补充浏览器面板启动配置到 .env"
+    fi
+    if ! grep -q '^VO_CDP_URL=' "$ENV_FILE"; then
+        echo "VO_CDP_URL=http://host.docker.internal:9222" >> "$ENV_FILE"
+    fi
+    if ! grep -q '^VO_VIEWER_URL=' "$ENV_FILE"; then
+        echo "VO_VIEWER_URL=https://localhost:6901" >> "$ENV_FILE"
+    fi
+
+    apply_start_options
 
     # 检查 OpenClaw 路径是否存在
     VO_PATH=$(grep '^VO_OPENCLAW_PATH=' "$ENV_FILE" | cut -d'=' -f2- | sed "s#^~#$HOME#")
@@ -274,6 +358,9 @@ start_local() {
     export VO_OFFICE_NAME="${VO_OFFICE_NAME:-Virtual Office}"
     export VO_GATEWAY_URL="${VO_GATEWAY_URL:-ws://localhost:18789}"
     export VO_GATEWAY_HTTP="${VO_GATEWAY_HTTP:-http://localhost:18789}"
+    export VO_BROWSER_PANEL="${VO_BROWSER_PANEL:-false}"
+    export VO_CDP_URL="${VO_CDP_URL:-http://localhost:9222}"
+    export VO_VIEWER_URL="${VO_VIEWER_URL:-http://localhost:6901}"
     export _VO_INT=1
 
     echo -e "  ${GREEN}✓${NC} 环境已配置"
@@ -315,7 +402,9 @@ clean_data() {
 
 # ── 主逻辑 ────────────────────────────────────────────────────────────────
 main() {
-    case "${1:-}" in
+    parse_args "$@"
+    local cmd="${POSITIONAL_ARGS[0]:-}"
+    case "$cmd" in
         --help|-h)   usage ;;
         --docker)    check_prerequisites && setup_env && start_service && show_access_info ;;
         --stop)      stop_service ;;
@@ -328,7 +417,7 @@ main() {
             start_local
             ;;
         *)
-            echo -e "${RED}未知选项: $1${NC}"
+            echo -e "${RED}未知选项: $cmd${NC}"
             usage
             ;;
     esac
