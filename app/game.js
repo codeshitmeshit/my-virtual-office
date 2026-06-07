@@ -7052,14 +7052,16 @@ function openModal(agent) {
 
     var providerLabel = agent.providerKind === 'hermes'
         ? ('Hermes Agent' + (agent.providerAgentId ? ' · profile: ' + agent.providerAgentId : '') + (agent.provider ? ' · ' + agent.provider : ''))
-        : 'OpenClaw Agent';
+        : (agent.providerKind === 'codex'
+            ? ('Codex Collaborator' + (agent.providerAgentId ? ' · profile: ' + agent.providerAgentId : '') + (agent.provider ? ' · ' + agent.provider : ''))
+            : 'OpenClaw Agent');
     var roleEl = document.getElementById('modal-role');
     if (roleEl) roleEl.textContent = (agent.role || '') + (agent.role ? ' · ' : '') + providerLabel;
 
-    var isHermes = agent.providerKind === 'hermes';
+    var isOpenClaw = (agent.providerKind || 'openclaw') === 'openclaw';
     var modelSection = document.querySelector('#modal-model-select')?.closest('.modal-section');
-    if (modelSection) modelSection.style.display = isHermes ? 'none' : '';
-    document.querySelectorAll('.bio-section').forEach(function(el) { el.style.display = isHermes ? 'none' : ''; });
+    if (modelSection) modelSection.style.display = isOpenClaw ? '' : 'none';
+    document.querySelectorAll('.bio-section').forEach(function(el) { el.style.display = isOpenClaw ? '' : 'none'; });
 
     // Task I/O
     const inputBox = document.getElementById('modal-input');
@@ -7092,10 +7094,8 @@ function openModal(agent) {
     });
     logBox.scrollTop = logBox.scrollHeight;
 
-    // Load OpenClaw-only editable files/skills for OpenClaw agents. Hermes
-    // agents are connected through their public CLI surfaces; VO should not
-    // expose or edit Hermes config, memories, or private files here.
-    if (!isHermes) loadAgentSkills(agent.statusKey || agent.id);
+    // Load OpenClaw-only editable files/skills for OpenClaw agents.
+    if (isOpenClaw) loadAgentSkills(agent.statusKey || agent.id);
 
     document.getElementById('agentModal').classList.remove('hidden');
 }
@@ -7324,7 +7324,7 @@ function _renderAgentWorkspaceFiles(data) {
             '<input name="search" data-aw-file-search value="' + escAttr(search) + '" placeholder="Search files">' +
             '<input name="path" placeholder="notes/new-note.md">' +
             '<button type="submit">Create</button>' +
-        '</form>' : '<div class="agent-workspace-empty">This platform does not expose editable workspace files through Virtual Office. Hermes profile internals stay private; use Notes and Tasks for durable dashboard data.</div>';
+        '</form>' : '<div class="agent-workspace-empty">This platform does not expose editable workspace files through Virtual Office. Use Notes and Tasks for durable dashboard data.</div>';
     if (canEdit) {
         html += _agentWorkspaceItemList(files, 'No matching workspace files', function(f) {
             return '<div class="agent-workspace-item agent-workspace-file-row">' +
@@ -7362,7 +7362,7 @@ function _renderAgentWorkspaceSkills(data) {
                     '<div class="agent-workspace-meta">' + escHtml(s.type || 'skill') + (s.description ? ' · ' + escHtml(s.description) : '') + '</div>' +
                     '<div class="agent-workspace-actions"><button type="button" data-aw-skill-edit="' + escAttr(s.name) + '">Open</button><button type="button" data-aw-action="saveAgentSkillToLibrary" data-aw-id="' + escAttr(s.name) + '">Save to Skill Library</button><button type="button" data-aw-action="deleteAgentSkill" data-aw-id="' + escAttr(s.name) + '">Delete</button></div>' +
                 '</div>';
-            }) : '<div class="agent-workspace-empty">Hermes does not use OpenClaw workspace skills. You can still create and edit reusable skills in the library.</div>') +
+            }) : '<div class="agent-workspace-empty">This platform does not use OpenClaw workspace skills. You can still create and edit reusable skills in the library.</div>') +
         '</div>' +
         '<div class="agent-workspace-skill-column">' +
             '<div class="agent-workspace-panel-heading"><span>Skill Library</span><button type="button" data-aw-action="newLibrarySkill">New</button></div>' +
@@ -7425,7 +7425,7 @@ function _renderAgentWorkspaceNotes(data) {
 
 function _renderAgentWorkspaceSettings(data) {
     var agent = data.agent || {};
-    var provider = agent.providerKind === 'hermes' ? 'Hermes' : 'OpenClaw';
+    var provider = agent.providerKind === 'hermes' ? 'Hermes' : (agent.providerKind === 'codex' ? 'Codex' : 'OpenClaw');
     var workspace = data.workspace || {};
     var settings = workspace.settings || {};
     var score = data.score || {};
@@ -7444,13 +7444,13 @@ function _renderAgentWorkspaceSettings(data) {
         '</section>' +
         '<section class="agent-workspace-settings-section"><h3>Runtime</h3>' +
             '<div class="agent-workspace-settings-grid">' +
-                (modelEditable ? '<label class="agent-workspace-settings-span">Model<select name="model" id="agent-workspace-model-select"><option value="">Loading models...</option></select></label>' : '<label class="agent-workspace-settings-span">Model<input name="model" value="' + escAttr(agent.model || agent.provider || 'Hermes managed') + '" readonly></label>') +
+                (modelEditable ? '<label class="agent-workspace-settings-span">Model<select name="model" id="agent-workspace-model-select"><option value="">Loading models...</option></select></label>' : '<label class="agent-workspace-settings-span">Model<input name="model" value="' + escAttr(agent.model || agent.provider || (provider + ' managed')) + '" readonly></label>') +
                 '<label class="agent-workspace-checkbox"><input type="checkbox" name="cronEnabled"' + (settings.cronEnabled ? ' checked' : '') + (data.settings && data.settings.cronApplicable ? '' : ' disabled') + '> Cron enabled</label>' +
             '</div>' +
             '<div class="agent-workspace-meta">' + escHtml(provider) + ' · current ' + escHtml(agent.model || agent.provider || 'default') + ' · ' + (data.settings && data.settings.cronApplicable ? 'OpenClaw cron supported' : 'Cron not surfaced for this platform') + '</div>' +
         '</section>' +
         '<section class="agent-workspace-settings-section"><h3>Heartbeat</h3>' +
-            (data.settings && data.settings.heartbeatApplicable ? '<textarea name="heartbeatContent" spellcheck="false">' + escTextarea(data.settings.heartbeatContent || '') + '</textarea>' : '<div class="agent-workspace-item">Not applicable<div class="agent-workspace-meta">Hermes does not use OpenClaw HEARTBEAT.md.</div></div>') +
+            (data.settings && data.settings.heartbeatApplicable ? '<textarea name="heartbeatContent" spellcheck="false">' + escTextarea(data.settings.heartbeatContent || '') + '</textarea>' : '<div class="agent-workspace-item">Not applicable<div class="agent-workspace-meta">This platform does not use OpenClaw HEARTBEAT.md.</div></div>') +
         '</section>' +
         '<div class="agent-workspace-settings-footer"><button class="agent-workspace-action" type="submit">Save Settings</button><span id="agent-workspace-settings-status" class="agent-workspace-meta"></span></div>' +
     '</form>';
@@ -7595,7 +7595,8 @@ function _openAgentWorkspace(agent, deskItem) {
     _agentWorkspace.desk = deskItem || null;
     document.getElementById('agent-workspace-emoji').textContent = agent.emoji || '🤖';
     document.getElementById('agent-workspace-name').textContent = agent.name || 'Agent Workspace';
-    document.getElementById('agent-workspace-subtitle').textContent = (agent.providerKind === 'hermes' ? 'Hermes' : 'OpenClaw') + ' · ' + (agent.role || agent.statusKey || agent.id || 'Workspace');
+    var provider = agent.providerKind === 'hermes' ? 'Hermes' : (agent.providerKind === 'codex' ? 'Codex' : 'OpenClaw');
+    document.getElementById('agent-workspace-subtitle').textContent = provider + ' · ' + (agent.role || agent.statusKey || agent.id || 'Workspace');
     panel.classList.remove('hidden');
     if (!panel.style.left && !panel.style.right) {
         panel.style.right = '24px';
@@ -13527,7 +13528,7 @@ function _acpDeleteAgent(agentId) {
     var agentCfg = (officeConfig.agents || []).find(function(a) { return a.id === agentId; });
     if (agentCfg) agentName = agentCfg.name || agentId;
 
-    var providerKind = (agentCfg && agentCfg.providerKind) || (agentId.indexOf('hermes-') === 0 ? 'hermes' : 'OpenClaw');
+    var providerKind = (agentCfg && agentCfg.providerKind) || (agentId.indexOf('hermes-') === 0 ? 'Hermes' : (agentId.indexOf('codex-') === 0 ? 'Codex' : 'OpenClaw'));
     if (!confirm('Delete agent "' + agentName + '"?\n\nThis will permanently remove the agent from ' + providerKind + ', including its workspace/profile files, memory, and session history.\n\nThis cannot be undone.')) return;
 
     // Call server to delete from the backing agent platform.

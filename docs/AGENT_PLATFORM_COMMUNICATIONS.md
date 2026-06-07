@@ -6,7 +6,7 @@ Status: first working implementation
 
 Give My Virtual Office a built-in communication layer that agent platforms can use to talk to each other through the office instead of through offscreen private CLI calls.
 
-This is the foundation for visible cross-platform conversations between OpenClaw, Hermes, and future provider adapters.
+This is the foundation for visible cross-platform conversations between OpenClaw, Hermes, Codex, and future provider adapters.
 
 ## Built-in skill
 
@@ -81,6 +81,7 @@ The communication layer routes through the server-side agent-call abstraction:
 
 - OpenClaw targets use existing OpenClaw workflow/gateway/CLI path.
 - Hermes targets use the Hermes provider adapter.
+- Codex targets use the optional Codex harness adapter when `VO_CODEX_ENABLED=1`.
 - Future providers should implement the provider adapter interface and then can be called through the same layer.
 
 ## Visibility
@@ -98,3 +99,9 @@ Product instance tests passed:
 - history endpoint returns request + reply
 - Hermes presence switches to working during the call and idle after
 - `/agent-chat` shows request/reply events under both participating agents
+
+Current-environment Codex regression:
+
+- `VO_CODEX_ENABLED=1` discovers `codex-local` without requiring OpenClaw/Hermes
+- `VO_CODEX_REPLY_TEXT=<text>` provides deterministic demo replies for communication tests
+- without a live bridge or demo reply, Codex requests are logged visibly and return a clear bridge-not-configured error

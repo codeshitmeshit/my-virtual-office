@@ -1,0 +1,38 @@
+{
+  "name": "Phase4-Codex-Harness-MVP",
+  "stage": "regression_verified",
+  "waiting_for_user": false,
+  "updated_at": "2026-06-08T01:57:01+08:00",
+  "confirmed": {
+    "checklist": true,
+    "tested": true,
+    "done": false
+  },
+  "confirmations": {
+    "checklist": {
+      "confirmed_at": "2026-06-07T23:32:14+08:00",
+      "summary": "用户确认 checklist 没问题，可以进入 todolist 生成阶段。"
+    },
+    "tested": {
+      "confirmed_at": "2026-06-08T00:46:00+08:00",
+      "summary": "Phase4 current-environment, installed-provider, Chrome E2E, and fixed-provider HTTP regression executed. Codex MVP path passed. OpenClaw execution passed after Node v22.22.3 and gateway port 18790 fixes. Hermes real chat passed after default model was changed to deepseek/deepseek-v4-flash."
+    },
+    "done": null
+  },
+  "files": {
+    "requirement": "requirement.md",
+    "review": "review.md",
+    "checklist": "checklist.md",
+    "todolist": "todolist.md"
+  },
+  "notes": [
+    "Product clarification completed: target user=A, core value=A, scope=B, success=B; MVP target=A, trace level=B, office identity=B, non-goal=A.",
+    "Checklist generated and awaiting user confirmation. Do not create todolist.md before checklist confirmation.",
+    "Checklist confirmed by user at 2026-06-07T23:32:14+08:00.",
+    "Todolist generated from confirmed checklist.",
+    "Testing split agreed at 2026-06-07T23:48:08+08:00: Codex/current-environment checks can run first; OpenClaw/Hermes regression checks require user to install/provide environments when regression testing starts.",
+    "2026-06-08 regression: discovered OpenClaw main, Hermes default, and Codex local through server APIs. Fixed OpenClaw providerKind default regression in workspace capability checks. Codex communication/history/chat passed. OpenClaw communication failed first because openclaw CLI was not in PATH; Chrome E2E with Node 22 path found OpenClaw but it requires Node.js v22.19+ while available Node is v22.17.1. Gateway 18789 is still not a valid WebSocket/HTTP target. Hermes communication reached CLI/session but failed because configured model anthropic/claude-opus-4.6 is rejected by the active backend, which supports deepseek-v4-pro/deepseek-v4-flash.",
+    "2026-06-08 Chrome E2E: page loaded in Chrome at http://127.0.0.1:8097/. Browser-side fetch verified agents/status/platforms/workspace/communication/history/agent-chat. Result saved at /tmp/chrome-e2e-result.json and screenshot at /tmp/virtual-office-chrome-e2e.png.",
+    "2026-06-08 fixed-provider regression: removed _VO_INT from start.sh to avoid demo/internal mode display. Switched local Node default to v22.22.3 for OpenClaw 2026.6.1. Moved OpenClaw gateway from 18789 to 18790 because 18789 was occupied by Cursor NodeService, reinstalled/restarted the gateway, and verified connectivity. Set Hermes default model to deepseek/deepseek-v4-flash. Final VO HTTP regression passed for Codex, OpenClaw, and Hermes communication/history/agent-chat paths."
+  ]
+}
