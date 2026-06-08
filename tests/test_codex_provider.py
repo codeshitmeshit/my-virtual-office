@@ -43,6 +43,7 @@ def test_enabled_provider_discovers_collaborator_and_demo_reply():
         result = provider.send_message("please review", conversation_id="conv-1")
         assert result["ok"] is True
         assert result["reply"] == "ack from codex"
+        assert result["threadId"] == "demo-conv-1"
 
 
 def test_discovery_aggregates_codex_without_openclaw_home():

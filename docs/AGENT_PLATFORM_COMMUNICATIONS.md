@@ -100,8 +100,11 @@ Product instance tests passed:
 - Hermes presence switches to working during the call and idle after
 - `/agent-chat` shows request/reply events under both participating agents
 
-Current-environment Codex regression:
+Codex live bridge:
 
 - `VO_CODEX_ENABLED=1` discovers `codex-local` without requiring OpenClaw/Hermes
 - `VO_CODEX_REPLY_TEXT=<text>` provides deterministic demo replies for communication tests
-- without a live bridge or demo reply, Codex requests are logged visibly and return a clear bridge-not-configured error
+- without `VO_CODEX_BRIDGE_URL`, Virtual Office uses a local `codex app-server` bridge
+- Codex events persist thread, turn, terminal-status, modified-file, and intervention metadata
+- office conversations resume their mapped Codex thread across refreshes and service restarts
+- Codex context can be compacted or reset through dedicated endpoints

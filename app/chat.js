@@ -60,6 +60,7 @@
       this.hermesProgressTimers = [];
       this.hermesApprovalPollTimer = null;
       this.hermesApprovalLastId = '';
+      this.codexBusy = false;
       this.sessionModel = '—';
       this.contextWindow = 0;
       this.contextUsed = 0;
@@ -81,6 +82,7 @@
       this.attachmentsPreview = root.querySelector('.chat-attachments-preview');
       this.micBtn = root.querySelector('.chat-mic-btn');
       this.newSessionBtn = root.querySelector('.chat-new-session');
+      this.compactContextBtn = root.querySelector('.chat-compact-context');
       this.closeBtn = root.querySelector('.chat-close, .chat-secondary-close');
 
       this.messages.addEventListener('click', (e) => {
@@ -110,6 +112,7 @@
       this.fileInput?.addEventListener('change', () => this.handleFiles());
       this.micBtn?.addEventListener('click', () => this.toggleRecording());
       this.newSessionBtn?.addEventListener('click', () => this.newSession());
+      this.compactContextBtn?.addEventListener('click', () => this.compactCodexContext());
       this.closeBtn?.addEventListener('click', () => {
         if (this.isPrimary) {
           const chatPanel = document.getElementById('chat-panel');
@@ -225,9 +228,10 @@
       this.streamingMsg = null;
       this.syncAgentSelect();
       this.resetConversation(`${systemPrefix} ${opt.textContent.trim()}`);
+      this.updateProviderControls();
       if (this.isHermesSelected()) this.startHermesApprovalPolling();
       else this.stopHermesApprovalPolling();
-      if (connected) {
+      if (connected || this.isHermesSelected() || this.isCodexSelected()) {
         this.loadHistory();
         this.fetchSessionInfo();
       }
@@ -261,6 +265,7 @@
           this.agentSelect.appendChild(group);
         }
         this.syncAgentSelect();
+        this.updateProviderControls();
       } catch (e) {
         console.warn('[chat] Failed to load agent list:', e);
       }
@@ -272,7 +277,7 @@
 
     async fetchContextUsage() {
       if (!this.isVisibleForPolling()) return;
-      if (this.isHermesSelected()) return;
+      if (this.isHermesSelected() || this.isCodexSelected()) return;
       try {
         // Avoid broad sessions.list polling. Describe only the selected session.
         const res = await rpc('sessions.describe', { key: this.sessionKey });
@@ -301,6 +306,35 @@
 
     isHermesSelected() {
       return this.getSelectedProviderKind() === 'hermes' || String(this.sessionKey || '').startsWith('hermes:');
+    }
+
+    isCodexSelected() {
+      return this.getSelectedProviderKind() === 'codex' || String(this.sessionKey || '').startsWith('codex:');
+    }
+
+    updateProviderControls() {
+      if (this.compactContextBtn) this.compactContextBtn.style.display = this.isCodexSelected() ? '' : 'none';
+      if (this.stopBtn) this.stopBtn.style.display = this.isCodexSelected() ? 'none' : '';
+    }
+
+    codexConversationStorageKey() {
+      return `vo-codex-conversation:${this.slotId}:${this.selectedAgentKey}`;
+    }
+
+    getCodexConversationId() {
+      const key = this.codexConversationStorageKey();
+      let value = localStorage.getItem(key);
+      if (!value) {
+        value = `codex-${this.slotId}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        localStorage.setItem(key, value);
+      }
+      return value;
+    }
+
+    rotateCodexConversationId() {
+      const value = `codex-${this.slotId}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      localStorage.setItem(this.codexConversationStorageKey(), value);
+      return value;
     }
 
     startHermesApprovalPolling() {
@@ -361,7 +395,7 @@
       let gatewayContext = 0;
       try {
         // Targeted lookup avoids rebuilding the full sessions.list index.
-        if (!this.isHermesSelected()) {
+        if (!this.isHermesSelected() && !this.isCodexSelected()) {
           const res = await rpc('sessions.describe', { key: this.sessionKey });
           const s = res?.payload?.session;
           if (res.ok && s) {
@@ -393,6 +427,31 @@
 
     async loadHistory(opts = {}) {
       try {
+        if (this.isCodexSelected()) {
+          const conversationId = this.getCodexConversationId();
+          const agentId = this.getSelectedAgentId() || this.selectedAgentKey;
+          const res = await fetch('/api/codex/history?agentId=' + encodeURIComponent(agentId) + '&conversationId=' + encodeURIComponent(conversationId));
+          const data = await res.json();
+          if (data.ok && Array.isArray(data.events)) {
+            this.messages.innerHTML = '';
+            for (const event of data.events) {
+              if (!event.text) continue;
+              const fromId = event.from?.id || '';
+              const role = fromId === agentId ? 'assistant' : (fromId === 'user' ? 'user' : (event.direction === 'reply' ? 'assistant' : 'user'));
+              const codexMeta = event.metadata?.codex || event.metadata || {};
+              let text = event.text || '';
+              if (role === 'assistant' && Array.isArray(codexMeta.modifiedFiles) && codexMeta.modifiedFiles.length) {
+                text += '\n\nModified files:\n' + codexMeta.modifiedFiles.map(path => '- ' + path).join('\n');
+              }
+              this.appendMessage(role, text, event.ts || Date.now(), [], role === 'assistant'
+                ? { label: this.agentSelect.selectedOptions[0]?.textContent.trim() || 'Codex', kind: 'agent' }
+                : { label: event.from?.name || 'You', kind: 'human' });
+            }
+            this.scrollBottom();
+            this.setStatus('Codex ready', 'connected');
+          }
+          return;
+        }
         if (this.isHermesSelected()) {
           this.startHermesApprovalPolling();
           const res = await fetch('/api/hermes/history?agentId=' + encodeURIComponent(this.getSelectedAgentId() || this.selectedAgentKey));
@@ -474,6 +533,23 @@
     async newSession() {
       const agentName = this.agentSelect.selectedOptions[0]?.textContent.trim() || 'this agent';
       if (!confirm(`Start a new session for ${agentName}? This clears the conversation history.`)) return;
+      if (this.isCodexSelected()) {
+        const oldConversationId = this.getCodexConversationId();
+        try {
+          const res = await fetch('/api/codex/reset', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ agentId: this.getSelectedAgentId() || this.selectedAgentKey, conversationId: oldConversationId })
+          });
+          const data = await res.json();
+          if (!res.ok || !data.ok) throw new Error(data.error || 'reset failed');
+          this.rotateCodexConversationId();
+          this.resetConversation('New Codex session started');
+        } catch (e) {
+          this.appendSystem('Reset error: ' + e.message);
+        }
+        return;
+      }
       if (this.isHermesSelected()) {
         try {
           const res = await fetch('/api/hermes/history/clear', {
@@ -568,7 +644,7 @@
     async sendMessage() {
       let text = this.input.value.trim();
       const hasAttachments = this.pendingAttachments.length > 0;
-      if ((!text && !hasAttachments) || (!connected && !this.isHermesSelected())) return;
+      if ((!text && !hasAttachments) || (!connected && !this.isHermesSelected() && !this.isCodexSelected()) || this.codexBusy) return;
 
       this.input.value = '';
       this.input.style.height = 'auto';
@@ -655,6 +731,49 @@
       const params = { sessionKey: this.sessionKey, message: text || '(attached files)', idempotencyKey: `office-${Date.now()}-${Math.random().toString(36).slice(2)}` };
       if (attachments?.length) params.attachments = attachments;
 
+      if (this.isCodexSelected()) {
+        const label = this.agentSelect.selectedOptions[0]?.textContent.trim() || 'Codex';
+        this.codexBusy = true;
+        this.sendBtn.disabled = true;
+        this.setStatus('Codex working...', 'connecting');
+        this.updateTypingIndicator(label + ' is working');
+        try {
+          const resp = await fetch('/api/codex/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              agentId: this.getSelectedAgentId() || this.selectedAgentKey,
+              message: text || '(attached files)',
+              conversationId: this.getCodexConversationId(),
+              fromType: 'human',
+              fromDisplayName: 'User',
+              sourceApp: 'virtual-office',
+              sourceSurface: 'chat-window',
+              sourceLabel: 'Virtual Office Chat'
+            })
+          });
+          const data = await resp.json();
+          this.removeTypingIndicator();
+          let reply = data.reply || data.error || '';
+          if (Array.isArray(data.modifiedFiles) && data.modifiedFiles.length) {
+            reply += '\n\nModified files:\n' + data.modifiedFiles.map(path => '- ' + path).join('\n');
+          }
+          if (data.needsHumanIntervention) reply += '\n\nHuman intervention required.';
+          if (reply) this.appendMessage('assistant', reply, Date.now(), [], { label, kind: 'agent' });
+          if (!resp.ok || data.ok === false) throw new Error(data.error || data.status || resp.statusText);
+          this.setStatus('Codex ready', 'connected');
+        } catch (e) {
+          this.removeTypingIndicator();
+          this.appendSystem('Codex send failed: ' + e.message);
+          this.setStatus('Codex error', 'disconnected');
+        } finally {
+          this.codexBusy = false;
+          this.sendBtn.disabled = false;
+          this.scrollBottom();
+        }
+        return;
+      }
+
       if (this.isHermesSelected()) {
         const hermesLabel = this.agentSelect.selectedOptions[0]?.textContent.trim() || 'Hermes';
         const hermesProgress = this.startHermesProgress(hermesLabel);
@@ -710,6 +829,36 @@
           runOwners.set(res.payload.runId, { slotId: this.slotId, sessionKey: sendSessionKey });
         }
       }).catch(e => this.appendSystem((typeof i18n !== 'undefined' ? i18n.t('chat_failed_to_send') : 'Failed to send') + ': ' + e.message));
+    }
+
+    async compactCodexContext() {
+      if (!this.isCodexSelected() || this.codexBusy) return;
+      if (!confirm('Compress the current Codex context? Visible chat history will be kept.')) return;
+      this.codexBusy = true;
+      this.sendBtn.disabled = true;
+      this.compactContextBtn.disabled = true;
+      this.setStatus('Compressing Codex context...', 'connecting');
+      try {
+        const res = await fetch('/api/codex/compact', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            agentId: this.getSelectedAgentId() || this.selectedAgentKey,
+            conversationId: this.getCodexConversationId()
+          })
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || 'compression failed');
+        this.appendSystem(data.reply || 'Codex context compressed.');
+        this.setStatus('Codex ready', 'connected');
+      } catch (e) {
+        this.appendSystem('Codex compression failed: ' + e.message);
+        this.setStatus('Codex error', 'disconnected');
+      } finally {
+        this.codexBusy = false;
+        this.sendBtn.disabled = false;
+        this.compactContextBtn.disabled = false;
+      }
     }
 
     async sendStop() {
@@ -1502,7 +1651,7 @@
     if (shouldOpen) {
       panel.dataset.hiddenByUser = 'false';
       windowInstance?.scrollBottom();
-      if (connected) {
+      if (connected || windowInstance?.isHermesSelected() || windowInstance?.isCodexSelected()) {
         windowInstance?.loadHistory();
         windowInstance?.fetchSessionInfo();
       }
@@ -1559,7 +1708,9 @@
   function connectGateway() {
     if (ws) return;
     ws = new WebSocket(getGatewayUrl());
-    chatWindows.forEach(w => w.setStatus(typeof i18n !== 'undefined' ? i18n.t('connecting') : 'Connecting...', 'connecting'));
+    chatWindows.forEach(w => {
+      if (!w.isHermesSelected() && !w.isCodexSelected()) w.setStatus(typeof i18n !== 'undefined' ? i18n.t('connecting') : 'Connecting...', 'connecting');
+    });
     ws.onmessage = (evt) => {
       let msg;
       try { msg = JSON.parse(evt.data); } catch { return; }
@@ -1574,10 +1725,14 @@
     ws.onclose = (evt) => {
       connected = false;
       ws = null;
-      chatWindows.forEach(w => w.setStatus((typeof i18n !== 'undefined' ? i18n.t('chat_disconnected_label') : 'Disconnected') + ` (${evt.code})`, 'disconnected'));
+      chatWindows.forEach(w => {
+        if (!w.isHermesSelected() && !w.isCodexSelected()) w.setStatus((typeof i18n !== 'undefined' ? i18n.t('chat_disconnected_label') : 'Disconnected') + ` (${evt.code})`, 'disconnected');
+      });
       if (chatWindows.some(w => w.root.classList.contains('open') || w.currentRunId || w.streamingMsg)) setTimeout(connectGateway, 3000);
     };
-    ws.onerror = () => chatWindows.forEach(w => w.setStatus(typeof i18n !== 'undefined' ? i18n.t('chat_connection_error') : 'Connection error', 'disconnected'));
+    ws.onerror = () => chatWindows.forEach(w => {
+      if (!w.isHermesSelected() && !w.isCodexSelected()) w.setStatus(typeof i18n !== 'undefined' ? i18n.t('chat_connection_error') : 'Connection error', 'disconnected');
+    });
   }
 
   function sendConnect() {
@@ -1595,7 +1750,7 @@
       if (res.ok) {
         connected = true;
         chatWindows.forEach(w => {
-          w.setStatus((typeof i18n !== 'undefined' ? i18n.t('connected') : 'Connected') + ' ⚡', 'connected');
+          if (!w.isHermesSelected() && !w.isCodexSelected()) w.setStatus((typeof i18n !== 'undefined' ? i18n.t('connected') : 'Connected') + ' ⚡', 'connected');
           if (w.isPrimary || w.root.classList.contains('open')) {
             w.fetchSessionInfo();
             w.loadHistory();
@@ -1603,7 +1758,9 @@
         });
         startModelBarRefresh();
       } else {
-        chatWindows.forEach(w => w.setStatus((typeof i18n !== 'undefined' ? i18n.t('chat_auth_failed_label') : 'Auth failed') + `: ${res.error?.message || 'unknown'}`, 'disconnected'));
+        chatWindows.forEach(w => {
+          if (!w.isHermesSelected() && !w.isCodexSelected()) w.setStatus((typeof i18n !== 'undefined' ? i18n.t('chat_auth_failed_label') : 'Auth failed') + `: ${res.error?.message || 'unknown'}`, 'disconnected');
+        });
       }
     };
     ws.send(JSON.stringify(msg));
@@ -2356,7 +2513,10 @@
     if (shouldOpen) {
       primaryWindow.input.focus();
       primaryWindow.scrollBottom();
-      if (connected) { primaryWindow.loadHistory(); primaryWindow.fetchSessionInfo(); }
+      if (connected || primaryWindow.isHermesSelected() || primaryWindow.isCodexSelected()) {
+        primaryWindow.loadHistory();
+        primaryWindow.fetchSessionInfo();
+      }
     } else {
       closeAllSecondaryPanels();
     }

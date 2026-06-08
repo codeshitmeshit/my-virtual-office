@@ -2160,6 +2160,93 @@ def _codex_provider_from_config():
     )
 
 
+_CODEX_OPERATION_LOCKS = {}
+_CODEX_OPERATION_LOCKS_GUARD = threading.Lock()
+_CODEX_THREAD_STATE_LOCK = threading.Lock()
+
+
+def _codex_thread_state_path():
+    return os.path.join(STATUS_DIR, "codex-conversation-threads.json")
+
+
+def _load_codex_thread_state():
+    try:
+        with open(_codex_thread_state_path(), "r") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return {}
+
+
+def _save_codex_thread_state(state):
+    path = _codex_thread_state_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(state, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, path)
+
+
+def _codex_thread_key(agent_id, conversation_id):
+    return f"{agent_id}::{conversation_id}"
+
+
+def _get_codex_thread_id(agent_id, conversation_id):
+    if not conversation_id:
+        return ""
+    with _CODEX_THREAD_STATE_LOCK:
+        item = _load_codex_thread_state().get(_codex_thread_key(agent_id, conversation_id)) or {}
+    return str(item.get("threadId") or "")
+
+
+def _set_codex_thread_id(agent_id, conversation_id, thread_id):
+    if not conversation_id or not thread_id:
+        return
+    with _CODEX_THREAD_STATE_LOCK:
+        state = _load_codex_thread_state()
+        state[_codex_thread_key(agent_id, conversation_id)] = {
+            "agentId": agent_id,
+            "conversationId": conversation_id,
+            "threadId": thread_id,
+            "updatedAt": int(time.time() * 1000),
+        }
+        _save_codex_thread_state(state)
+
+
+def _reset_codex_thread_id(agent_id, conversation_id):
+    with _CODEX_THREAD_STATE_LOCK:
+        state = _load_codex_thread_state()
+        removed = state.pop(_codex_thread_key(agent_id, conversation_id), None)
+        _save_codex_thread_state(state)
+    return bool(removed)
+
+
+def _codex_operation_lock(agent_id):
+    with _CODEX_OPERATION_LOCKS_GUARD:
+        return _CODEX_OPERATION_LOCKS.setdefault(agent_id, threading.Lock())
+
+
+def _codex_git_paths(workspace):
+    try:
+        result = subprocess.run(
+            ["git", "status", "--porcelain", "--untracked-files=all"],
+            cwd=workspace,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        paths = set()
+        for line in (result.stdout or "").splitlines():
+            raw = line[3:].strip() if len(line) > 3 else ""
+            if " -> " in raw:
+                raw = raw.split(" -> ", 1)[1]
+            if raw:
+                paths.add(raw.strip('"'))
+        return paths
+    except Exception:
+        return set()
+
+
 def _handle_codex_chat(body):
     """Send one office-mediated message to the Codex harness adapter."""
     message = (body.get("message") or "").strip()
@@ -2169,19 +2256,107 @@ def _handle_codex_chat(body):
     agent = _get_codex_agent(agent_key)
     if not agent:
         return {"ok": False, "error": f"Codex agent '{agent_key}' not found", "_status": 404}
+    conversation_id = str(body.get("conversationId") or body.get("threadId") or "").strip()
+    if not conversation_id:
+        return {"ok": False, "status": "invalid_request", "error": "conversationId is required", "_status": 400}
+    agent_id = agent.get("id") or agent_key
+    operation_lock = _codex_operation_lock(agent_id)
+    if not operation_lock.acquire(blocking=False):
+        return {
+            "ok": False,
+            "status": "busy",
+            "error": "Codex is already working. Wait for the current operation to finish.",
+            "reply": "Codex is already working. Please wait.",
+            "conversationId": conversation_id,
+            "_status": 409,
+        }
     provider = _codex_provider_from_config()
-    result = provider.send_message(
-        message,
-        conversation_id=str(body.get("conversationId") or body.get("threadId") or ""),
-        timeout_sec=int(body.get("timeoutSec") or 600),
-    )
+    before_paths = _codex_git_paths(provider.workspace)
+    try:
+        result = provider.send_message(
+            message,
+            conversation_id=conversation_id,
+            timeout_sec=int(body.get("timeoutSec") or 600),
+            thread_id=_get_codex_thread_id(agent_id, conversation_id),
+        )
+    finally:
+        operation_lock.release()
+    thread_id = str(result.get("threadId") or "")
+    if thread_id:
+        _set_codex_thread_id(agent_id, conversation_id, thread_id)
+    after_paths = _codex_git_paths(provider.workspace)
+    modified_files = set(result.get("modifiedFiles") or []) | (after_paths - before_paths)
     return {
         "ok": bool(result.get("ok")),
         "reply": result.get("reply") or "",
         "error": result.get("error"),
+        "errorCode": result.get("errorCode"),
+        "status": result.get("status", "completed" if result.get("ok") else "execution_failed"),
         "mode": result.get("mode", ""),
+        "conversationId": conversation_id,
+        "threadId": thread_id,
+        "turnId": result.get("turnId", ""),
+        "modifiedFiles": sorted(modified_files),
+        "needsHumanIntervention": bool(result.get("needsHumanIntervention")),
+        "durationMs": result.get("durationMs"),
         "agent": {"id": agent.get("id"), "name": agent.get("name"), "providerKind": "codex", "profile": agent.get("profile", "")},
+        "_status": 200 if result.get("ok") else (408 if result.get("status") == "timeout" else 503 if result.get("status") == "bridge_unavailable" else 409 if result.get("status") == "needs_human_intervention" else 500),
     }
+
+
+def _handle_codex_reset(body):
+    agent_key = body.get("agentId") or body.get("key") or "codex-local"
+    conversation_id = str(body.get("conversationId") or "").strip()
+    agent = _get_codex_agent(agent_key)
+    if not agent:
+        return {"ok": False, "error": f"Codex agent '{agent_key}' not found", "_status": 404}
+    if not conversation_id:
+        return {"ok": False, "error": "conversationId is required", "_status": 400}
+    agent_id = agent.get("id") or agent_key
+    if _codex_operation_lock(agent_id).locked():
+        return {"ok": False, "status": "busy", "error": "Codex is already working", "_status": 409}
+    removed = _reset_codex_thread_id(agent_id, conversation_id)
+    return {"ok": True, "reset": removed, "conversationId": conversation_id}
+
+
+def _handle_codex_compact(body):
+    agent_key = body.get("agentId") or body.get("key") or "codex-local"
+    conversation_id = str(body.get("conversationId") or "").strip()
+    agent = _get_codex_agent(agent_key)
+    if not agent:
+        return {"ok": False, "error": f"Codex agent '{agent_key}' not found", "_status": 404}
+    if not conversation_id:
+        return {"ok": False, "error": "conversationId is required", "_status": 400}
+    agent_id = agent.get("id") or agent_key
+    thread_id = _get_codex_thread_id(agent_id, conversation_id)
+    if not thread_id:
+        return {"ok": False, "status": "not_found", "error": "No Codex context exists for this conversation", "_status": 404}
+    operation_lock = _codex_operation_lock(agent_id)
+    if not operation_lock.acquire(blocking=False):
+        return {"ok": False, "status": "busy", "error": "Codex is already working", "_status": 409}
+    gateway_presence.set_manual_override(agent_id, "working", "Compressing Codex context")
+    try:
+        result = _codex_provider_from_config().compact_context(thread_id, int(body.get("timeoutSec") or 120))
+    finally:
+        gateway_presence.set_manual_override(agent_id, "idle", "")
+        operation_lock.release()
+    event = _append_comm_event({
+        "type": "operation",
+        "operation": "context_compaction",
+        "direction": "system",
+        "conversationId": conversation_id,
+        "from": _office_agent_ref(agent_id),
+        "to": {"id": "user", "providerKind": "human", "name": "User"},
+        "text": result.get("reply") or result.get("error") or "Codex context compression finished",
+        "metadata": {
+            "status": result.get("status"),
+            "threadId": thread_id,
+            "durationMs": result.get("durationMs"),
+        },
+        "visibleInOffice": True,
+        "ok": bool(result.get("ok")),
+    })
+    return {**result, "conversationId": conversation_id, "eventId": event.get("id"), "_status": 200 if result.get("ok") else 500}
 
 
 def _handle_codex_test(body=None):
@@ -2507,15 +2682,37 @@ def _handle_agent_platform_comm_send(body):
     )
 
     gateway_presence.set_manual_override(to_ref["id"], "working", f"Replying to {sender_label}")
+    provider_result = None
     try:
-        reply = _wf_call_agent(to_ref["id"], target_prompt, timeout=timeout, project_id="agent-platform-communications", task_id=conversation_id)
-        ok = not str(reply or "").startswith("[ERROR]")
+        if str(to_ref.get("providerKind") or "").lower() == "codex":
+            provider_result = _handle_codex_chat({
+                "agentId": to_ref["id"],
+                "message": target_prompt,
+                "timeoutSec": timeout,
+                "conversationId": conversation_id,
+            })
+            reply = provider_result.get("reply") or provider_result.get("error") or ""
+            ok = bool(provider_result.get("ok"))
+        else:
+            reply = _wf_call_agent(to_ref["id"], target_prompt, timeout=timeout, project_id="agent-platform-communications", task_id=conversation_id)
+            ok = not str(reply or "").startswith("[ERROR]")
     except Exception as e:
         reply = f"[ERROR] {e}"
         ok = False
     finally:
         gateway_presence.set_manual_override(to_ref["id"], "idle", "")
 
+    outbound_metadata = dict(metadata)
+    if provider_result:
+        outbound_metadata["codex"] = {
+            "status": provider_result.get("status"),
+            "errorCode": provider_result.get("errorCode"),
+            "threadId": provider_result.get("threadId"),
+            "turnId": provider_result.get("turnId"),
+            "modifiedFiles": provider_result.get("modifiedFiles") or [],
+            "needsHumanIntervention": bool(provider_result.get("needsHumanIntervention")),
+            "durationMs": provider_result.get("durationMs"),
+        }
     outbound = _append_comm_event({
         "type": "message",
         "direction": "reply",
@@ -2524,7 +2721,7 @@ def _handle_agent_platform_comm_send(body):
         "to": from_ref,
         "text": reply,
         "inReplyTo": inbound["id"],
-        "metadata": metadata,
+        "metadata": outbound_metadata,
         "visibleInOffice": True,
         "ok": ok,
     })
@@ -2537,6 +2734,9 @@ def _handle_agent_platform_comm_send(body):
         "from": from_ref,
         "to": to_ref,
         "reply": reply,
+        "status": provider_result.get("status") if provider_result else ("completed" if ok else "execution_failed"),
+        "modifiedFiles": provider_result.get("modifiedFiles") if provider_result else [],
+        "needsHumanIntervention": bool(provider_result and provider_result.get("needsHumanIntervention")),
     }
 
 
@@ -7701,6 +7901,16 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(json.dumps(result).encode())
+        elif self.path == "/api/codex/history" or self.path.startswith("/api/codex/history?"):
+            qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            conversation_id = (qs.get("conversationId") or [""])[0]
+            agent_id = (qs.get("agentId") or ["codex-local"])[0]
+            events = _load_comm_history(limit=500, conversation_id=conversation_id, agent_id=agent_id)
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps({"ok": True, "events": events}).encode())
         elif self.path == "/api/agent-platform-communications/skill":
             self.send_response(200)
             self.send_header("Content-Type", "text/markdown; charset=utf-8")
@@ -9365,6 +9575,41 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             body = json.loads(self.rfile.read(length)) if length else {}
             result = _handle_codex_test(body)
             self.send_response(200 if result.get("ok") else 503)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps(result).encode())
+            return
+        elif self.path == "/api/codex/chat":
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            body.setdefault("fromType", "human")
+            body.setdefault("fromDisplayName", "User")
+            body.setdefault("fromId", "user")
+            body.setdefault("toAgentId", body.get("agentId") or "codex-local")
+            result = _handle_agent_platform_comm_send(body)
+            self.send_response(result.get("_status", 200) if "_status" in result else (200 if result.get("ok") else 409 if result.get("status") in {"busy", "needs_human_intervention"} else 500))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            result.pop("_status", None)
+            self.wfile.write(json.dumps(result).encode())
+            return
+        elif self.path == "/api/codex/reset":
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            result = _handle_codex_reset(body)
+            self.send_response(result.pop("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps(result).encode())
+            return
+        elif self.path == "/api/codex/compact":
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            result = _handle_codex_compact(body)
+            self.send_response(result.pop("_status", 200))
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
