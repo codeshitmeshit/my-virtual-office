@@ -183,3 +183,13 @@
 - CHK-014：空消息返回 HTTP 400；未知 Codex agent 返回 HTTP 404。
 - CHK-009/CHK-017/CHK-018：补充回归完成后 OpenClaw、Hermes、Codex presence 均为 `idle`；history 包含 conversation/thread/turn、duration、status 和 intervention 元数据。
 - 更新结论：此前 OpenClaw/Hermes 与 post-reset 实机阻塞均已解除。未逐项实机复现的协议故障和越界授权分支仍由 focused automated tests 覆盖。
+
+## 测试与交付确认记录
+
+- 确认项：Phase 5 Codex Live Bridge checklist 测试结果
+- 确认时间：2026-06-09T06:17:39+08:00
+- 用户确认摘要：用户表示“我phase5验收好了”，确认 Phase 5 验收通过。
+
+- 确认项：Phase 5 Codex Live Bridge 最终交付
+- 确认时间：2026-06-09T06:17:39+08:00
+- 用户确认摘要：用户要求标记需求状态，确认 Phase 5 可以完成闭环。

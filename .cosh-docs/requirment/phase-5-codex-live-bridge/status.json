@@ -1,12 +1,12 @@
 {
   "name": "phase-5-codex-live-bridge",
-  "stage": "implementation_done",
-  "waiting_for_user": true,
-  "updated_at": "2026-06-09T05:35:15+08:00",
+  "stage": "done",
+  "waiting_for_user": false,
+  "updated_at": "2026-06-09T06:17:39+08:00",
   "confirmed": {
     "checklist": true,
-    "tested": false,
-    "done": false
+    "tested": true,
+    "done": true
   },
   "confirmations": {
     "checklist": {
@@ -14,8 +14,16 @@
       "confirmed_at": "2026-06-09T00:57:33+08:00",
       "summary": "User confirmed the checklist without changes and requested continuation."
     },
-    "tested": null,
-    "done": null
+    "tested": {
+      "item": "Phase 5 Codex Live Bridge checklist test results",
+      "confirmed_at": "2026-06-09T06:17:39+08:00",
+      "summary": "User stated that Phase 5 acceptance was complete and confirmed the test results."
+    },
+    "done": {
+      "item": "Phase 5 Codex Live Bridge final delivery",
+      "confirmed_at": "2026-06-09T06:17:39+08:00",
+      "summary": "User requested the requirement status be marked complete after acceptance."
+    }
   },
   "files": {
     "requirement": "requirement.md",
@@ -36,6 +44,6 @@
     "OpenClaw and Hermes non-Codex regression routes passed with real replies.",
     "OpenClaw-to-Codex and Hermes-to-Codex live communication routes passed with real Codex replies.",
     "Real conversation isolation and post-reset context clearing passed; history recorded distinct thread IDs before and after reset.",
-    "Implementation remains awaiting user confirmation before confirmed.tested can be set true."
+    "User confirmed Phase 5 acceptance on 2026-06-09; checklist testing and final delivery are now confirmed complete."
   ]
 }
