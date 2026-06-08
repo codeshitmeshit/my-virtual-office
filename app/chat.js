@@ -400,7 +400,15 @@
                 const meta = msg.role === 'assistant'
                   ? { ...resolveMessageSender(msg, this), thinking: msg.thinking || '', reasoningTokens: msg.reasoningTokens || 0, approval: msg.approval || null }
                   : { label: 'You', kind: 'human' };
-                this.appendMessage(msg.role, msg.text || '', msg.ts || Date.now(), [], meta, normalizeHermesTools(msg.tools || [], msg.ephemeral !== 'hermes-progress'));
+                const tools = normalizeHermesTools(msg.tools || [], msg.ephemeral !== 'hermes-progress');
+                const splitToolsFromFinalReply = msg.role === 'assistant' && msg.ephemeral !== 'hermes-progress' && msg.text && tools.length;
+                if (splitToolsFromFinalReply) {
+                  const toolMeta = resolveMessageSender(msg, this);
+                  tools.forEach((tool, idx) => {
+                    this.appendMessage('assistant', '', (msg.ts || Date.now()) + idx, [], toolMeta, [tool]);
+                  });
+                }
+                this.appendMessage(msg.role, msg.text || '', msg.ts || Date.now(), [], meta, splitToolsFromFinalReply ? [] : tools);
               }
             }
             this.scrollBottomAfterLayout();
@@ -1238,7 +1246,7 @@
               reasoningTokens: data.reasoningTokens || 0,
               approval: data.approval || null
             },
-            normalizeHermesTools(data.tools || [])
+            []
           );
           await this.pollHermesApproval().catch(() => {});
         } else if (choice === 'deny') {

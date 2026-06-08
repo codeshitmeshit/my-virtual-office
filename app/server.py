@@ -1765,6 +1765,34 @@ def _remove_hermes_progress_messages(messages):
     return [m for m in messages if not (isinstance(m, dict) and m.get("ephemeral") == "hermes-progress")]
 
 
+def _hermes_tool_activity_messages(tools, agent_id="", run_id="", base_ts=None, coerce_complete=False):
+    """Store Hermes tools like OpenClaw recovered activity: one tool-only message per card."""
+    if not isinstance(tools, list) or not tools:
+        return []
+    start_ts = int(base_ts if base_ts is not None else time.time() * 1000)
+    messages = []
+    for idx, tool in enumerate(tools):
+        if not isinstance(tool, dict):
+            continue
+        item = dict(tool)
+        item["runId"] = item.get("runId") or run_id or ""
+        status = str(item.get("status") or "").lower()
+        if coerce_complete and status == "running":
+            item["status"] = "done"
+            if not item.get("result") or str(item.get("result")).strip().lower() == "running":
+                item["result"] = "Completed"
+        messages.append({
+            "role": "assistant",
+            "text": "",
+            "ts": start_ts + idx,
+            "agentId": agent_id,
+            "runId": item.get("runId") or run_id or "",
+            "tools": [item],
+            "source": "hermes-tool-activity",
+        })
+    return messages
+
+
 def _hermes_approval_key(agent_id="", profile="", session_id=""):
     if session_id:
         return f"session:{session_id}"
@@ -2214,15 +2242,23 @@ def _handle_hermes_chat(body):
                 session_id=active_session_id or "",
             )
         history = _remove_hermes_progress_messages(_load_hermes_history(profile))
+        final_ts = int(time.time() * 1000)
+        history.extend(_hermes_tool_activity_messages(
+            visible_tools,
+            agent_id=agent.get("id"),
+            run_id=result.get("runId") or "",
+            base_ts=final_ts,
+            coerce_complete=bool(result.get("ok")) and not approval,
+        ))
         history.append({
             "role": "assistant",
             "text": reply,
-            "ts": int(time.time() * 1000),
+            "ts": final_ts + len(visible_tools),
             "agentId": agent.get("id"),
             "exitCode": exit_code,
             "sessionId": active_session_id,
             "runId": result.get("runId"),
-            "tools": visible_tools,
+            "tools": [],
             "thinking": activity.get("thinking") or "",
             "reasoningTokens": activity.get("reasoningTokens") or 0,
             "approval": approval,
@@ -2303,19 +2339,28 @@ def _handle_hermes_approval_respond(body):
             status_name = str(status.get("status") or "").lower()
             ok = status_name == "completed"
             reply = str(status.get("output") or "")
+            result_tools = [_hermes_task_breakdown_tool("done" if ok else "error", "Hermes native API approval flow completed." if ok else (status.get("error") or "Hermes native API approval flow failed."))]
+            final_ts = int(time.time() * 1000)
             result_msg = {
                 "role": "assistant",
                 "text": reply,
-                "ts": int(time.time() * 1000),
+                "ts": final_ts + len(result_tools),
                 "agentId": agent.get("id"),
                 "exitCode": 0 if ok else 1,
                 "sessionId": approval.get("session_id") or "",
                 "runId": run_id,
-                "tools": [_hermes_task_breakdown_tool("done" if ok else "error", "Hermes native API approval flow completed." if ok else (status.get("error") or "Hermes native API approval flow failed."))],
+                "tools": [],
                 "thinking": "",
                 "reasoningTokens": 0,
             }
             history = _load_hermes_history(profile)
+            history.extend(_hermes_tool_activity_messages(
+                result_tools,
+                agent_id=agent.get("id"),
+                run_id=run_id,
+                base_ts=final_ts,
+                coerce_complete=ok,
+            ))
             history.append(result_msg)
             _save_hermes_history(profile, history)
             gateway_presence.set_provider_event(agent.get("statusKey") or agent.get("id"), "hermes", {"event": "run.completed" if ok else "run.failed", "run_id": run_id, "error": status.get("error")})
@@ -2326,7 +2371,7 @@ def _handle_hermes_approval_respond(body):
                 "providerPath": "api",
                 "runId": run_id,
                 "sessionId": approval.get("session_id") or "",
-                "tools": result_msg["tools"],
+                "tools": result_tools,
                 "error": None if ok else (status.get("error") or "Hermes run did not complete after approval."),
             }
         except Exception as exc:
