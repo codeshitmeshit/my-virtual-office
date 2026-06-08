@@ -1,29 +1,47 @@
 # Codex Provider Adapter
 
-Status: Phase 4 MVP; live execution planned for Phase 5
+Status: Phase 5 live bridge
 
-The Codex adapter exposes a local Codex collaborator as a first-class Virtual Office agent without requiring OpenClaw or Hermes to be installed.
+The Codex adapter exposes one local Codex collaborator as a first-class Virtual Office agent without requiring OpenClaw or Hermes.
 
 ## Startup flags
 
 - `VO_CODEX_ENABLED=1` enables the Codex harness.
 - `VO_CODEX_AGENT_ID=local` sets the stable provider id. The office id becomes `codex-local`.
 - `VO_CODEX_AGENT_NAME=Codex` sets the display name.
-- `VO_CODEX_WORKSPACE=/path/to/repo` sets the workspace shown in metadata.
-- `VO_CODEX_MODEL=<model>` sets display metadata.
-- `VO_CODEX_REPLY_TEXT=<text>` returns deterministic replies for local/demo regression.
-- `VO_CODEX_BRIDGE_URL=<url>` is reserved for the Phase 5 live bridge.
+- `VO_CODEX_WORKSPACE=/path/to/repo` sets the readable and writable workspace.
+- `VO_CODEX_MODEL=<model>` optionally overrides the Codex model.
+- `VO_CODEX_BIN=codex` selects the local Codex CLI used by the default bridge.
+- `VO_CODEX_REPLY_TEXT=<text>` enables deterministic regression replies.
+- `VO_CODEX_BRIDGE_URL=<url>` overrides the local bridge with an externally managed HTTP bridge.
 
-## Current behavior
+## Live bridge behavior
 
-- Discovery returns one normalized agent with `providerKind: "codex"` and `providerType: "harness"`.
-- Presence defaults to idle from provider discovery and switches to working during office-mediated sends.
-- `/api/agent-platform-communications/send` routes messages to the Codex adapter.
-- `/agent-chat` shows request/reply communication events for the Codex agent.
-- OpenClaw-only workspace files, HEARTBEAT, cron, model editing, and workspace skills are hidden for Codex.
+- Discovery returns one normalized `providerKind: "codex"` agent.
+- Virtual Office starts and reuses a local `codex app-server` process by default.
+- `/api/agent-platform-communications/send` supports human and agent senders.
+- `/api/codex/chat` is the human chat-window route.
+- Office `conversationId` values are durably mapped to Codex thread IDs under `VO_STATUS_DIR`.
+- The same office conversation resumes the same Codex thread across refreshes and service restarts.
+- One turn or context-compaction operation may run at a time; later requests return `busy` rather than queueing.
+- Approval and user-input requests fail closed as `needs_human_intervention`.
+- Results include terminal status, Codex thread/turn IDs, duration, and modified file paths.
+- `/api/codex/compact` compresses the current thread without clearing visible office history.
+- `/api/codex/reset` invalidates the mapping so the next message starts a new thread.
+- `/api/codex/history` reads the office-owned communication history for a conversation.
 
-## Boundary
+## Security boundary
 
-The Phase 4 MVP does not execute a live Codex CLI session. If no live bridge or `VO_CODEX_REPLY_TEXT` is configured, messages are still logged visibly and the reply explains that the bridge is not configured.
+- Turns use `workspace-write`, the configured workspace as the writable root, and network access disabled.
+- Phase 5 never auto-approves Codex approval requests.
+- The default app-server transport is local stdio. Do not expose an unauthenticated listener on a non-loopback interface.
 
-Phase 5 should connect this adapter to a live Codex bridge: Virtual Office sends a message to Codex, Codex runs in a real CLI/session, and the final reply, status, timeout, and error events are returned to the same office communication/history surfaces. Project automation, long-running task orchestration, cancellation, permission prompts, and streamed tool/file events remain follow-up scope unless Phase 5 is explicitly expanded.
+## External bridge contract
+
+When `VO_CODEX_BRIDGE_URL` is set, Virtual Office posts JSON to `<url>/execute` and `<url>/compact`. The bridge returns the normalized fields `ok`, `status`, `reply`, `threadId`, `turnId`, `modifiedFiles`, `needsHumanIntervention`, and optional error/timing fields.
+
+## Compatibility and scope
+
+`VO_CODEX_REPLY_TEXT` simulates a stable demo thread so chat, history, reset, and compaction can be tested without Codex authentication.
+
+Project automation, long-running orchestration, cancellation controls, interactive permission prompts, and streamed tool/file UI remain Phase 6 or later scope.

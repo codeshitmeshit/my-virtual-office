@@ -10,9 +10,12 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import time
 from dataclasses import dataclass
 from typing import Any
+
+from providers.codex_bridge import get_codex_bridge
 
 
 def _env_bool(key: str, fallback: bool = False) -> bool:
@@ -90,7 +93,7 @@ class CodexProvider:
             "home": self.workspace,
             "lastActiveAt": self._last_active(self.workspace),
             "capabilities": ["chat", "status", "collaboration", "event-stream"],
-            "bridgeConfigured": bool(self.bridge_url or self.reply_text),
+            "bridgeConfigured": bool(self.bridge_url or self.reply_text or shutil.which(os.environ.get("VO_CODEX_BIN") or "codex")),
         }]
 
     def test(self) -> dict[str, Any]:
@@ -99,30 +102,46 @@ class CodexProvider:
         return {
             "ok": True,
             "workspace": self.workspace,
-            "bridgeConfigured": bool(self.bridge_url or self.reply_text),
+            "bridgeConfigured": bool(self.bridge_url or self.reply_text or shutil.which(os.environ.get("VO_CODEX_BIN") or "codex")),
             "agents": self.discover_agents(),
         }
 
-    def send_message(self, message: str, conversation_id: str = "", timeout_sec: int | None = None) -> dict[str, Any]:
+    def send_message(self, message: str, conversation_id: str = "", timeout_sec: int | None = None, thread_id: str = "") -> dict[str, Any]:
         text = str(message or "").strip()
         if not self.enabled:
             return {"ok": False, "error": "Codex harness is disabled", "reply": ""}
         if not text:
             return {"ok": False, "error": "message is required", "reply": ""}
         if self.reply_text:
+            demo_thread_id = thread_id or f"demo-{_safe_suffix(conversation_id or 'conversation')}"
             return {
                 "ok": True,
                 "reply": self.reply_text,
                 "conversationId": conversation_id,
                 "mode": "replyText",
+                "status": "completed",
+                "threadId": demo_thread_id,
+                "turnId": "",
+                "modifiedFiles": [],
+                "needsHumanIntervention": False,
             }
-        return {
-            "ok": False,
-            "error": "Codex harness is enabled but no live Codex bridge is configured",
-            "reply": "Codex request recorded in Virtual Office. Configure VO_CODEX_REPLY_TEXT for demo replies or VO_CODEX_BRIDGE_URL when a live bridge is available.",
-            "conversationId": conversation_id,
-            "mode": "manual",
-        }
+        result = get_codex_bridge(self.workspace or os.getcwd(), self.model or "", self.bridge_url or "").execute(
+            text,
+            thread_id=thread_id,
+            timeout_sec=int(timeout_sec or 600),
+        )
+        result["conversationId"] = conversation_id
+        result["mode"] = "externalBridge" if self.bridge_url else "appServer"
+        return result
+
+    def compact_context(self, thread_id: str, timeout_sec: int = 120) -> dict[str, Any]:
+        if not self.enabled:
+            return {"ok": False, "status": "disabled", "error": "Codex harness is disabled", "reply": ""}
+        if self.reply_text:
+            return {"ok": True, "status": "compacted", "reply": "Codex demo context compressed.", "threadId": thread_id, "modifiedFiles": []}
+        result = get_codex_bridge(self.workspace or os.getcwd(), self.model or "", self.bridge_url or "").compact(thread_id, timeout_sec=timeout_sec)
+        result["mode"] = "externalBridge" if self.bridge_url else "appServer"
+        return result
 
     def _last_active(self, path: str | None) -> int:
         if not path or not os.path.isdir(path):

@@ -1,0 +1,41 @@
+{
+  "name": "phase-5-codex-live-bridge",
+  "stage": "implementation_done",
+  "waiting_for_user": true,
+  "updated_at": "2026-06-09T05:35:15+08:00",
+  "confirmed": {
+    "checklist": true,
+    "tested": false,
+    "done": false
+  },
+  "confirmations": {
+    "checklist": {
+      "item": "Phase 5 Codex Live Bridge test checklist",
+      "confirmed_at": "2026-06-09T00:57:33+08:00",
+      "summary": "User confirmed the checklist without changes and requested continuation."
+    },
+    "tested": null,
+    "done": null
+  },
+  "files": {
+    "requirement": "requirement.md",
+    "review": "review.md",
+    "checklist": "checklist.md",
+    "todolist": "todolist.md"
+  },
+  "notes": [
+    "Product clarification completed before archival.",
+    "TQ-001 through TQ-004 confirmed as option A on 2026-06-09.",
+    "Conversation reset keeps option A and adds an explicit Codex context compaction action.",
+    "Checklist confirmed by the user on 2026-06-09.",
+    "Todolist created with TODO-001 through TODO-012.",
+    "Execution plan created with six steps traceable to TODO-001 through TODO-012.",
+    "Phase 5 implementation completed with live Codex app-server, durable conversation mapping, busy guard, reset/compact APIs, UI integration, focused tests, and operator documentation.",
+    "Core tests and browser acceptance ran with _VO_INT=1 and demo=false.",
+    "Supplemental host-level verification confirmed OpenClaw gateway 2026.6.1 is healthy on port 18790; the earlier unavailable result came from the intentionally isolated test configuration and sandbox networking.",
+    "OpenClaw and Hermes non-Codex regression routes passed with real replies.",
+    "OpenClaw-to-Codex and Hermes-to-Codex live communication routes passed with real Codex replies.",
+    "Real conversation isolation and post-reset context clearing passed; history recorded distinct thread IDs before and after reset.",
+    "Implementation remains awaiting user confirmation before confirmed.tested can be set true."
+  ]
+}
