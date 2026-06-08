@@ -183,7 +183,11 @@
                     <input type="text" id="s-hermes-home" placeholder="/home/youruser/.hermes">
                     <label>Hermes CLI Path</label>
                     <input type="text" id="s-hermes-bin" placeholder="/home/youruser/.local/bin/hermes">
-                    <div style="font-size:12px;color:#666;margin:6px 0 12px;line-height:1.5;">Running in Docker? Mount the Hermes home/CLI into the container and enter the mounted paths.</div>
+                    <label>Hermes API URL</label>
+                    <input type="text" id="s-hermes-api-url" placeholder="http://127.0.0.1:8642">
+                    <label>Hermes API Key</label>
+                    <input type="password" id="s-hermes-api-key" placeholder="API_SERVER_KEY">
+                    <div style="font-size:12px;color:#666;margin:6px 0 12px;line-height:1.5;">Running in Docker? Mount the Hermes home/CLI into the container and enter the mounted paths. Native live presence uses the Hermes API Server when available, with CLI fallback.</div>
                     <button onclick="testHermesConnection()" style="margin:0 0 12px;padding:8px 16px;font-size:9px;">🔍 TEST HERMES</button>
                     <div id="hermes-test-status"></div>
                 </div>
@@ -432,9 +436,13 @@
             var hEnable = document.getElementById('s-hermes-enable');
             var hHome = document.getElementById('s-hermes-home');
             var hBin = document.getElementById('s-hermes-bin');
+            var hApiUrl = document.getElementById('s-hermes-api-url');
+            var hApiKey = document.getElementById('s-hermes-api-key');
             if (hEnable) hEnable.checked = h.enabled !== false;
             if (hHome && h.homePath) hHome.value = h.homePath;
             if (hBin && h.binary) hBin.value = h.binary;
+            if (hApiUrl && h.apiUrl) hApiUrl.value = h.apiUrl;
+            if (hApiKey && h.apiKeyConfigured) hApiKey.placeholder = 'Configured - leave blank to keep';
             var hFields = document.getElementById('hermes-fields');
             if (hFields && hEnable) hFields.style.display = hEnable.checked ? 'block' : 'none';
         }).catch(function(){});
@@ -474,16 +482,20 @@
             var enabled = document.getElementById('s-hermes-enable').checked;
             var homePath = document.getElementById('s-hermes-home').value.trim();
             var binary = document.getElementById('s-hermes-bin').value.trim();
+            var apiUrl = document.getElementById('s-hermes-api-url').value.trim();
+            var apiKey = document.getElementById('s-hermes-api-key').value.trim();
             var statusEl = document.getElementById('hermes-test-status');
             if (!enabled) {
                 statusEl.innerHTML = '<div class="status-box info">Hermes auto-detect is disabled.</div>';
                 return;
             }
             statusEl.innerHTML = '<div class="status-box info">Saving and testing Hermes...</div>';
+            var hermesPayload = { enabled: enabled, homePath: homePath || null, binary: binary || null, apiUrl: apiUrl || null, preferApi: true };
+            if (apiKey) hermesPayload.apiKey = apiKey;
             fetch('/setup/save', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ hermes: { enabled: enabled, homePath: homePath || null, binary: binary || null } })
+                body: JSON.stringify({ hermes: hermesPayload })
             }).then(function() {
                 return fetch('/api/hermes/test', {
                     method: 'POST',
@@ -493,7 +505,8 @@
             }).then(function(r) { return r.json(); }).then(function(d) {
                 if (d.ok) {
                     var agents = d.agents || [];
-                    var html = '<div class="status-box success">✅ Hermes connected — found ' + agents.length + ' profile' + (agents.length === 1 ? '' : 's') + '</div>';
+                    var api = d.api || {};
+                    var html = '<div class="status-box success">✅ Hermes connected — found ' + agents.length + ' profile' + (agents.length === 1 ? '' : 's') + '<br>Native API: ' + (api.ok ? 'connected' : 'unavailable') + '</div>';
                     if (agents.length) {
                         html += '<div class="agent-list-preview">';
                         agents.slice(0, 10).forEach(function(a) {
@@ -702,11 +715,18 @@
                 pcMetrics: pcMetricsEnabled ? {
                     url: document.getElementById('s-pcmetrics-url').value.trim() || null
                 } : {},
-                hermes: {
-                    enabled: hermesEnabled,
-                    homePath: document.getElementById('s-hermes-home').value.trim() || null,
-                    binary: document.getElementById('s-hermes-bin').value.trim() || null
-                },
+                hermes: (function() {
+                    var h = {
+                        enabled: hermesEnabled,
+                        homePath: document.getElementById('s-hermes-home').value.trim() || null,
+                        binary: document.getElementById('s-hermes-bin').value.trim() || null,
+                        apiUrl: document.getElementById('s-hermes-api-url').value.trim() || null,
+                        preferApi: true
+                    };
+                    var apiKey = document.getElementById('s-hermes-api-key').value.trim();
+                    if (apiKey) h.apiKey = apiKey;
+                    return h;
+                })(),
                 _setupComplete: true
             };
 

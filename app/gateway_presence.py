@@ -114,6 +114,72 @@ def set_manual_override(agent_id, state, task=""):
         })
 
 
+def set_provider_event(agent_id, provider, event):
+    """Apply a normalized non-OpenClaw provider event to presence state.
+
+    Provider adapters use this for native runtime activity such as Hermes API
+    Server run events. It intentionally bypasses manual override TTL because
+    these are live lifecycle events, not legacy status pings.
+    """
+    if not agent_id or not isinstance(event, dict):
+        return
+    provider = str(provider or "provider").strip().lower() or "provider"
+    event_name = str(event.get("event") or event.get("type") or event.get("status") or "").strip().lower()
+    run_id = str(event.get("run_id") or event.get("runId") or event.get("id") or "")
+    source = f"{provider}-event"
+
+    if event_name in ("run.started", "run.queued", "run.running"):
+        _set_working(agent_id, "Working", source, run_id)
+    elif event_name == "tool.started":
+        tool = event.get("tool") or event.get("name") or event.get("tool_name") or ""
+        preview = event.get("preview") or ""
+        task = str(preview or (f"Using {tool}" if tool else "Using tool"))
+        tool_id = event.get("toolCallId") or event.get("tool_call_id") or f"{run_id}:{tool}" if (run_id or tool) else ""
+        if tool_id:
+            _mark_tool_active(agent_id, tool_id)
+        _set_working(agent_id, task, f"{provider}-tool", run_id)
+    elif event_name in ("tool.completed", "tool.failed"):
+        tool = event.get("tool") or event.get("name") or event.get("tool_name") or ""
+        tool_id = event.get("toolCallId") or event.get("tool_call_id") or f"{run_id}:{tool}" if (run_id or tool) else ""
+        if tool_id:
+            _mark_tool_inactive(agent_id, tool_id)
+        if _agent_has_active_activity(agent_id):
+            _set_working(agent_id, _last_event_task.get(agent_id) or "Processing", f"{provider}-tool", run_id)
+        else:
+            _set_finishing(agent_id, f"{provider}-tool", run_id)
+    elif event_name in ("message.delta", "assistant.delta"):
+        _set_working(agent_id, "Responding...", source, run_id)
+    elif event_name == "reasoning.available":
+        _set_working(agent_id, "Reasoning", source, run_id)
+    elif event_name == "approval.request":
+        _set_working(agent_id, "Waiting for approval", f"{provider}-approval", run_id)
+    elif event_name in ("approval.responded",):
+        _set_working(agent_id, "Processing approval", f"{provider}-approval", run_id)
+    elif event_name in ("run.completed", "run.cancelled", "run.canceled"):
+        # Provider streams should emit tool.completed, but a terminal run event
+        # is authoritative. Clear provider tool state so one missed terminal
+        # tool event cannot leave the avatar working forever.
+        for tool_id in list(_active_tools_by_agent.get(agent_id, set())):
+            _mark_tool_inactive(agent_id, tool_id)
+        _set_finishing(agent_id, source, run_id)
+    elif event_name == "run.failed":
+        _mark_run_inactive(agent_id, run_id)
+        for tool_id in list(_active_tools_by_agent.get(agent_id, set())):
+            _mark_tool_inactive(agent_id, tool_id)
+        now = int(time.time())
+        _ensure_agent(agent_id, source)
+        with _state_lock:
+            _state[agent_id].update({
+                "state": "offline",
+                "task": str(event.get("error") or "Provider run failed")[:200],
+                "updated": now,
+                "source": source,
+                **({"runId": run_id} if run_id else {})
+            })
+    else:
+        _set_working(agent_id, "Working", source, run_id)
+
+
 def set_meetings(meetings_list):
     """Replace meetings list (from office.py --meet/--end-meet)."""
     with _meetings_lock:

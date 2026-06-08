@@ -2248,6 +2248,37 @@ function _drawHeldItem(ctx, item, isMoving) {
     }
 }
 
+function _drawAgentWaterCup(ctx, x, y, fillRatio) {
+    const w = 10;
+    const h = 12;
+    const ratio = Math.max(0, Math.min(1, fillRatio == null ? 1 : fillRatio));
+    const waterTop = y + 1 + Math.round((1 - ratio) * (h - 2));
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + w - 1, y);
+    ctx.lineTo(x + w - 2, y + h - 1);
+    ctx.lineTo(x + 1, y + h - 1);
+    ctx.closePath();
+    ctx.clip();
+
+    ctx.fillStyle = 'rgba(33,150,243,0.95)';
+    ctx.fillRect(x, waterTop, w, y + h - waterTop);
+    ctx.fillStyle = 'rgba(2,136,209,0.9)';
+    ctx.fillRect(x, waterTop, w, 1);
+    ctx.fillStyle = 'rgba(255,255,255,0.28)';
+    ctx.fillRect(x + 2, y + 2, 2, h - 4);
+    ctx.restore();
+
+    ctx.fillStyle = 'rgba(230,245,255,0.55)';
+    ctx.fillRect(x, y, w, 1);
+    ctx.fillStyle = 'rgba(180,210,230,0.4)';
+    ctx.fillRect(x, y + 1, 1, h - 2);
+    ctx.fillRect(x + w - 1, y + 1, 1, h - 2);
+    ctx.fillRect(x + 1, y + h - 1, w - 2, 1);
+}
+
 // --- FACIAL HAIR DRAWING ---
 function _drawFacialHair(ctx, facialHair, facialHairColor) {
     if (!facialHair) return;
@@ -3429,10 +3460,9 @@ class Agent {
                     ctx.fillRect(24, -1 + Math.sin(this.tick * 0.1) * 1, 2, 3);
                     ctx.fillRect(27, -2 + Math.cos(this.tick * 0.08) * 1, 2, 3);
                 } else if (this.carryItem === 'water') {
-                    ctx.fillStyle = 'rgba(220,240,255,0.9)'; ctx.fillRect(22, 3, 6, 9);
-                    ctx.fillStyle = 'rgba(33,150,243,0.5)'; ctx.fillRect(23, 6, 4, 5);
+                    _drawAgentWaterCup(ctx, 21, 2, 1);
                     if (Math.floor(this.tick / 120) % 3 === 0) {
-                        ctx.fillStyle = 'rgba(33,150,243,0.3)'; ctx.fillRect(22, 10, 2, 2);
+                        ctx.fillStyle = 'rgba(33,150,243,0.35)'; ctx.fillRect(22, 11, 2, 2);
                     }
                 } else if (this.carryItem === 'snack') {
                     this._drawSnack(ctx, 22, 4);
@@ -3602,10 +3632,8 @@ class Agent {
             }
             if (this.idleAction === 'get_water' && this.interactTimer > 40) {
                 // Holding cup under spigot
-                ctx.fillStyle = '#fff'; ctx.fillRect(12, -10, 5, 6);
-                ctx.fillStyle = 'rgba(33,150,243,0.5)';
-                const fillH = Math.min(4, Math.floor((this.interactTimer - 40) / 30));
-                ctx.fillRect(13, -10 + (4 - fillH), 3, fillH);
+                const fillRatio = Math.min(1, (this.interactTimer - 40) / 120);
+                _drawAgentWaterCup(ctx, 10, -16, fillRatio);
             }
             if (this.idleAction === 'get_snack' && this.interactTimer > 80) {
                 // Snack dropping from machine
@@ -3765,7 +3793,10 @@ class Agent {
         _drawGlasses(ctx, _appearance.glasses, _appearance.glassesColor, eyeShift);
 
         // --- HELD ITEM (data-driven) ---
-        _drawHeldItem(ctx, _appearance.heldItem, isMoving);
+        // Hide cosmetic held items while temporary break items are being fetched,
+        // carried, or consumed so they do not visually replace the water cup.
+        const showProfileHeldItem = !this.carryItem && !['get_snack', 'make_coffee', 'get_water', 'make_food'].includes(this.idleAction);
+        if (showProfileHeldItem) _drawHeldItem(ctx, _appearance.heldItem, isMoving);
 
         // Identity accessories are now data-driven via the Agent Editor.
         // No hardcoded per-agent accessories.
@@ -3788,8 +3819,7 @@ class Agent {
                 ctx.fillRect(itemX + 2, -22 + Math.sin(this.tick * 0.15) * 1, 2, 3);
                 ctx.fillRect(itemX + 5, -23 + Math.cos(this.tick * 0.15) * 1, 2, 3);
             } else if (this.carryItem === 'water') {
-                ctx.fillStyle = 'rgba(220,240,255,0.9)'; ctx.fillRect(itemX, -18, 6, 9);
-                ctx.fillStyle = 'rgba(33,150,243,0.5)'; ctx.fillRect(itemX + 1, -15, 4, 5);
+                _drawAgentWaterCup(ctx, itemX - 1, -20, 1);
             } else if (this.carryItem === 'snack') {
                 this._drawSnack(ctx, itemX, -16);
             } else if (this.carryItem === 'food') {
@@ -3873,8 +3903,7 @@ class Agent {
                         ctx.fillRect(itemX + 4, itemY - 3 + Math.cos(this.tick * 0.08) * 1, 2, 3);
                     }
                 } else if (this.carryItem === 'water') {
-                    ctx.fillStyle = 'rgba(220,240,255,0.9)'; ctx.fillRect(itemX - 1, itemY + 2, 6, 9);
-                    ctx.fillStyle = 'rgba(33,150,243,0.5)'; ctx.fillRect(itemX, itemY + 5, 4, 5);
+                    _drawAgentWaterCup(ctx, itemX - 2, itemY + 1, 1);
                 } else if (this.carryItem === 'snack') {
                     this._drawSnack(ctx, itemX - 1, itemY + 2);
                     // Crumbs during bite phase
@@ -12374,6 +12403,8 @@ function _mmLoadCurrentSettings() {
         var hermesFields = document.getElementById('mm-hermes-fields');
         var hermesHome = document.getElementById('mm-hermes-home');
         var hermesBin = document.getElementById('mm-hermes-bin');
+        var hermesApiUrl = document.getElementById('mm-hermes-api-url');
+        var hermesApiKey = document.getElementById('mm-hermes-api-key');
         if (gwInput) gwInput.value = (cfg.openclaw || {}).gatewayUrl || '';
         if (nameInput) nameInput.value = (cfg.office || {}).name || '';
         // Parse "City,State" or "City+Name,State" back into separate fields
@@ -12388,6 +12419,8 @@ function _mmLoadCurrentSettings() {
         if (hermesFields) hermesFields.style.display = hermesEnabled ? 'block' : 'none';
         if (hermesHome) hermesHome.value = hermesCfg.homePath || '';
         if (hermesBin) hermesBin.value = hermesCfg.binary || '';
+        if (hermesApiUrl) hermesApiUrl.value = hermesCfg.apiUrl || '';
+        if (hermesApiKey && hermesCfg.apiKeyConfigured) hermesApiKey.placeholder = 'Configured - leave blank to keep';
         // Auto-populate token from /gateway-info (shows current effective token)
         if (tokenInput) {
             fetch('/gateway-info').then(function(r) { return r.json(); }).then(function(gi) {
@@ -12463,15 +12496,19 @@ function mmTestHermes() {
     var enabled = !!(document.getElementById('mm-hermes-enable') || {}).checked;
     var homePath = (document.getElementById('mm-hermes-home') || {}).value || '';
     var binary = (document.getElementById('mm-hermes-bin') || {}).value || '';
+    var apiUrl = (document.getElementById('mm-hermes-api-url') || {}).value || '';
+    var apiKey = ((document.getElementById('mm-hermes-api-key') || {}).value || '').trim();
     if (!enabled) {
         statusEl.innerHTML = '<div class="mm-status info">Hermes auto-detect is disabled.</div>';
         return;
     }
     statusEl.innerHTML = '<div class="mm-status info">Saving and testing Hermes...</div>';
+    var hermesPayload = { enabled: enabled, homePath: homePath || null, binary: binary || null, apiUrl: apiUrl || null, preferApi: true };
+    if (apiKey) hermesPayload.apiKey = apiKey;
     fetch('/setup/save', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ hermes: { enabled: enabled, homePath: homePath || null, binary: binary || null } })
+        body: JSON.stringify({ hermes: hermesPayload })
     }).then(function() {
         return fetch('/api/hermes/test', {
             method: 'POST',
@@ -12482,7 +12519,9 @@ function mmTestHermes() {
         if (d.ok) {
             var count = (d.agents || []).length;
             var names = (d.agents || []).slice(0, 5).map(function(a){ return (a.emoji || '⚕️') + ' ' + a.name + (a.model ? ' · ' + a.model : ''); }).join('<br>');
-            statusEl.innerHTML = '<div class="mm-status ok">✅ Hermes connected — ' + count + ' profile' + (count === 1 ? '' : 's') + ' found' + (names ? '<br>' + names : '') + '</div>';
+            var api = d.api || {};
+            var apiLine = api.ok ? '<br>Native API: connected' : '<br>Native API: unavailable' + (api.error ? ' — ' + api.error : '');
+            statusEl.innerHTML = '<div class="mm-status ok">✅ Hermes connected — ' + count + ' profile' + (count === 1 ? '' : 's') + ' found' + apiLine + (names ? '<br>' + names : '') + '</div>';
         } else {
             statusEl.innerHTML = '<div class="mm-status err">❌ Hermes not reachable: ' + (d.error || 'unknown error') + '</div>';
         }
@@ -12656,12 +12695,19 @@ function mmSaveSettings() {
     var _hCb = document.getElementById('mm-hermes-enable');
     var _hHome = document.getElementById('mm-hermes-home');
     var _hBin = document.getElementById('mm-hermes-bin');
+    var _hApiUrl = document.getElementById('mm-hermes-api-url');
+    var _hApiKey = document.getElementById('mm-hermes-api-key');
     if (_hCb) {
-        config.hermes = {
+        var hermesSettings = {
             enabled: _hCb.checked,
             homePath: (_hHome ? _hHome.value.trim() : '') || null,
-            binary: (_hBin ? _hBin.value.trim() : '') || null
+            binary: (_hBin ? _hBin.value.trim() : '') || null,
+            apiUrl: (_hApiUrl ? _hApiUrl.value.trim() : '') || null,
+            preferApi: true
         };
+        var hermesApiKey = (_hApiKey ? _hApiKey.value.trim() : '');
+        if (hermesApiKey) hermesSettings.apiKey = hermesApiKey;
+        config.hermes = hermesSettings;
     }
     config.office = { name: officeName || 'Virtual Office' };
     config.weather = { location: weather || null };

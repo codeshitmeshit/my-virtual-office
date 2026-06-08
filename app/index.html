@@ -9,7 +9,7 @@
     <link rel="apple-touch-icon" href="icon-192.png">
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#1a1a2e">
-    <link rel="stylesheet" href="style.css?v=20260604-workspace-skill-workshop-queue">
+    <link rel="stylesheet" href="style.css?v=20260608-chat-scroll-old-behavior">
     <link rel="stylesheet" href="projects.css?v=0">
     <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
 </head>
@@ -54,7 +54,11 @@
                                 <input type="text" id="mm-hermes-home" class="mm-input" placeholder="/home/user/.hermes">
                                 <label class="mm-label">Hermes CLI <span style="color:#666;font-size:9px">server-side</span></label>
                                 <input type="text" id="mm-hermes-bin" class="mm-input" placeholder="/home/user/.local/bin/hermes">
-                                <div style="font-size:9px;color:#666;margin:4px 0 8px;">For Docker, mount the Hermes home/CLI into the container and use the mounted paths here.</div>
+                                <label class="mm-label">Hermes API URL <span style="color:#666;font-size:9px">native presence</span></label>
+                                <input type="text" id="mm-hermes-api-url" class="mm-input" placeholder="http://127.0.0.1:8642">
+                                <label class="mm-label">Hermes API Key <span style="color:#666;font-size:9px">server-side</span></label>
+                                <input type="password" id="mm-hermes-api-key" class="mm-input" placeholder="API_SERVER_KEY">
+                                <div style="font-size:9px;color:#666;margin:4px 0 8px;">For Docker, mount Hermes home/CLI into the container. Native live presence uses the Hermes API Server when available, with CLI fallback.</div>
                                 <button class="mm-btn mm-btn-primary" onclick="mmTestHermes()">🔍 Test Hermes</button>
                                 <div id="mm-hermes-status"></div>
                             </div>
@@ -795,7 +799,7 @@
         setTimeout(resizeCanvas, 320);
     }
     </script>
-    <script src="game.js?v=20260605-bubble-tool-preview-plain"></script>
+    <script src="game.js?v=20260608-water-cup-hide-cosmetic-held-item"></script>
     <script src="browser-panel.js?v=0"></script>
     <script src="projects.js?v=0"></script>
     <script>
@@ -1041,7 +1045,7 @@
     </script>
     <!-- marked.js v15.0.12 - bundled locally for airgapped/offline use -->
     <script src="marked.min.js"></script>
-    <script src="chat.js?v=20260605-trajectory-progress-backfill"></script>
+    <script src="chat.js?v=20260608-hermes-response-tools-dedupe"></script>
     <script src="sms-panel.js?v=7"></script>
     <script src="pc-monitor.js?v=0"></script>
     <script src="api-usage.js?v=0"></script>
