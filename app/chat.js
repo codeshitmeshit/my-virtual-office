@@ -100,6 +100,7 @@
       this.codexActivityTimer = null;
       this.codexLastSequence = 0;
       this.codexInteractionCards = new Map();
+      this.codexReasoningCards = new Map();
       this.sessionModel = '—';
       this.contextWindow = 0;
       this.contextUsed = 0;
@@ -199,6 +200,10 @@
       this.closeCodexEventSource();
       this.closeClaudeCodeEventSource();
       this.pendingToolEvents.clear();
+      this.liveToolCards.clear();
+      this.codexInteractionCards.clear();
+      this.codexReasoningCards.clear();
+      this.codexLastSequence = 0;
       this.currentRunId = null;
       this.sessionModel = '—';
       this.contextWindow = 0;
@@ -565,6 +570,9 @@
           const data = await res.json();
           if (data.ok && Array.isArray(data.events)) {
             this.messages.innerHTML = '';
+            this.liveToolCards.clear();
+            this.codexInteractionCards.clear();
+            this.codexReasoningCards.clear();
             for (const event of data.events) {
               if (!event.text) continue;
               const fromId = event.from?.id || '';
@@ -1198,7 +1206,9 @@
     }
 
     renderCodexActivity(event) {
-      if (event.type === 'activity') {
+      if (event.type === 'reasoning') {
+        this.renderCodexReasoning(event);
+      } else if (event.type === 'activity') {
         const payload = {
           itemId: event.itemId || event.id,
           runId: event.turnId || event.threadId,
@@ -1239,6 +1249,31 @@
           });
         }
       }
+    }
+
+    renderCodexReasoning(event) {
+      const key = `${event.operationId || event.turnId || event.threadId || 'turn'}:${event.itemId || 'reasoning'}`;
+      let state = this.codexReasoningCards.get(key);
+      if (!state) {
+        state = { ...CodexReasoning.createState(), wrap: null };
+        this.codexReasoningCards.set(key, state);
+      }
+      CodexReasoning.applyEvent(state, event);
+
+      if (!state.text.trim()) return;
+      if (!state.wrap) {
+        const wrap = document.createElement('div');
+        wrap.className = 'chat-msg assistant chat-reasoning-msg';
+        wrap.dataset.reasoningKey = key;
+        wrap.appendChild(renderThinkingCard(state.text, { codex: true, status: event.status }));
+        const indicator = this.messages.querySelector('.typing-indicator');
+        if (indicator) this.messages.insertBefore(wrap, indicator);
+        else this.messages.appendChild(wrap);
+        state.wrap = wrap;
+      } else {
+        updateThinkingCard(state.wrap.querySelector('.chat-thinking-card'), state.text, event.status);
+      }
+      this.scrollBottom();
     }
 
     renderCodexInteraction(event) {
@@ -3318,17 +3353,21 @@
     return section;
   }
 
-  function renderThinkingCard(text) {
+  function renderThinkingCard(text, options = {}) {
     const details = document.createElement('details');
     details.className = 'chat-thinking-card';
+    if (options.codex) {
+      details.classList.add('codex-reasoning-card');
+      details.title = 'Codex-provided reasoning summary, available only when emitted by the runtime.';
+    }
     const summary = document.createElement('summary');
     summary.className = 'chat-thinking-summary';
     const label = document.createElement('span');
     label.className = 'chat-thinking-title';
-    label.textContent = typeof i18n !== 'undefined' ? i18n.t('chat_thinking') : 'Thinking';
+    label.textContent = options.codex ? 'Reasoning summary' : (typeof i18n !== 'undefined' ? i18n.t('chat_thinking') : 'Thinking');
     const state = document.createElement('span');
     state.className = 'chat-tool-state';
-    state.textContent = typeof i18n !== 'undefined' ? i18n.t('chat_trace_label') : 'trace';
+    state.textContent = options.codex ? (options.status === 'done' ? 'complete' : 'live') : (typeof i18n !== 'undefined' ? i18n.t('chat_trace_label') : 'trace');
     const toggle = document.createElement('span');
     toggle.className = 'chat-tool-toggle';
     toggle.textContent = '▶';
@@ -3340,6 +3379,15 @@
     body.appendChild(pre);
     details.append(summary, body);
     return details;
+  }
+
+  function updateThinkingCard(card, text, status = 'running') {
+    if (!card) return;
+    const pre = card.querySelector('.chat-thinking-body pre');
+    if (pre) pre.textContent = String(text || '').trim();
+    const state = card.querySelector('.chat-tool-state');
+    if (state && card.classList.contains('codex-reasoning-card')) state.textContent = status === 'done' ? 'complete' : 'live';
+    card.classList.toggle('done', status === 'done');
   }
 
   function renderHermesApprovalCard(approval, windowInstance) {

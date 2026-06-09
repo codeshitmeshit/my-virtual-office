@@ -113,6 +113,12 @@ def run():
             }))
             assert any(event.get("itemId") == "cmd_1" and event.get("status") == "running" for event in activity["events"])
             assert any(event.get("itemId") == "cmd_1" and event.get("status") == "done" for event in activity["events"])
+            reasoning = [event for event in activity["events"] if event.get("type") == "reasoning" and event.get("itemId") == "reason_1"]
+            assert len([event for event in reasoning if str(event.get("text") or "").startswith("part-")]) == 20
+            assert len([event for event in reasoning if event.get("boundary")]) == 2
+            assert any(event.get("deltaKind") == "raw" for event in reasoning)
+            assert reasoning[-1]["status"] == "done"
+            assert reasoning[-1]["text"] == "first section\n\nsecond section\n\nthird section"
 
             approval_result = {}
             worker = threading.Thread(target=lambda: approval_result.update(dict(zip(

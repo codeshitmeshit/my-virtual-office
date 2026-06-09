@@ -40,6 +40,9 @@ for raw in sys.stdin:
     elif method == "thread/resume":
         send({"id": request_id, "result": {"thread": {"id": params["threadId"]}}})
     elif method == "turn/start":
+        if params.get("summary") != "concise":
+            send({"id": request_id, "error": {"message": "reasoning summary was not requested"}})
+            continue
         prompt = params["input"][0]["text"]
         if "hang forever" in prompt:
             send({"id": request_id, "result": {"turn": {"id": "turn_hang"}}})
@@ -53,6 +56,18 @@ for raw in sys.stdin:
         elif "question" in prompt:
             send({"id": 901, "method": "item/tool/requestUserInput", "params": {"threadId": params["threadId"], "turnId": turn_id, "itemId": "question_1", "questions": [{"id": "name", "label": "Name"}]}})
         else:
+            reasoning = {"id": "reason_1", "type": "reasoning", "status": "inProgress"}
+            send({"method": "item/started", "params": {"threadId": params["threadId"], "turnId": turn_id, "item": reasoning}})
+            delta_index = 0
+            for section_index, section_size in enumerate((7, 7, 6)):
+                if section_index:
+                    send({"method": "item/reasoning/summaryPartAdded", "params": {"threadId": params["threadId"], "turnId": turn_id, "itemId": "reason_1", "summaryIndex": section_index}})
+                for _ in range(section_size):
+                    send({"method": "item/reasoning/summaryTextDelta", "params": {"threadId": params["threadId"], "turnId": turn_id, "itemId": "reason_1", "summaryIndex": section_index, "delta": "part-%s " % delta_index}})
+                    delta_index += 1
+            send({"method": "item/reasoning/textDelta", "params": {"threadId": params["threadId"], "turnId": turn_id, "itemId": "reason_1", "delta": "raw-supported "}})
+            reasoning.update({"status": "completed", "summary": ["first section", "second section", "third section"]})
+            send({"method": "item/completed", "params": {"threadId": params["threadId"], "turnId": turn_id, "item": reasoning}})
             command = {"id": "cmd_1", "type": "commandExecution", "status": "inProgress", "command": "printf test"}
             send({"method": "item/started", "params": {"threadId": params["threadId"], "turnId": turn_id, "item": command}})
             send({"method": "item/commandExecution/outputDelta", "params": {"threadId": params["threadId"], "turnId": turn_id, "itemId": "cmd_1", "delta": "test"}})
@@ -163,6 +178,28 @@ def test_activity_events_are_incremental_and_correlated():
             client.close()
 
 
+def test_reasoning_events_are_distinct_and_sectioned():
+    with tempfile.TemporaryDirectory() as tmp:
+        events = []
+        client = CodexAppServerClient(tmp, binary=make_fake_codex(tmp))
+        try:
+            result = client.execute("reason about one file", timeout_sec=5, event_callback=events.append)
+            assert result["ok"] is True
+            reasoning = [event for event in events if event["type"] == "reasoning"]
+            deltas = [event for event in reasoning if event.get("text", "").startswith("part-")]
+            boundaries = [event for event in reasoning if event.get("boundary")]
+            raw = [event for event in reasoning if event.get("deltaKind") == "raw"]
+            assert len(deltas) == 20
+            assert len(boundaries) == 2
+            assert len(raw) == 1
+            assert reasoning[-1]["status"] == "done"
+            assert reasoning[-1]["replace"] is True
+            assert reasoning[-1]["text"] == "first section\n\nsecond section\n\nthird section"
+            assert not any(event.get("name") == "reasoning" for event in events if event["type"] == "activity")
+        finally:
+            client.close()
+
+
 def test_interactive_approval_continues_original_turn():
     with tempfile.TemporaryDirectory() as tmp:
         events = []
@@ -218,6 +255,7 @@ if __name__ == "__main__":
     test_manual_compaction_keeps_thread()
     test_timeout_returns_terminal_result()
     test_activity_events_are_incremental_and_correlated()
+    test_reasoning_events_are_distinct_and_sectioned()
     test_interactive_approval_continues_original_turn()
     test_interactive_user_input_continues_original_turn()
     print("ok")

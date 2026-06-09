@@ -133,11 +133,20 @@ def test_activity_persists_redacted_and_reports_active_conversation():
             assert "abc" not in payload
             assert "[REDACTED]" in payload
             server._append_codex_activity("codex-local", "conv-activity", {
+                "id": "reasoning-sensitive", "sequence": 2, "type": "reasoning", "status": "running",
+                "itemId": "reason-1", "text": "Authorization: Bearer private-token " + ("x" * 13000),
+            })
+            result = server._handle_codex_activity({"agentId": ["codex-local"], "conversationId": ["conv-activity"]})
+            reasoning = next(event for event in result["events"] if event.get("type") == "reasoning")
+            assert "private-token" not in reasoning["text"]
+            assert "[REDACTED]" in reasoning["text"]
+            assert reasoning["text"].endswith("[TRUNCATED]")
+            server._append_codex_activity("codex-local", "conv-activity", {
                 "id": "evt-2", "sequence": 1, "type": "turn", "status": "running",
             })
             result = server._handle_codex_activity({"agentId": ["codex-local"], "conversationId": ["conv-activity"]})
-            assert [event["sequence"] for event in result["events"]] == [1, 2]
-            assert result["events"][1]["providerSequence"] == 1
+            assert [event["sequence"] for event in result["events"]] == [1, 2, 3]
+            assert result["events"][2]["providerSequence"] == 1
             server._append_codex_activity("codex-local", "conv-orphan", {
                 "id": "pending", "sequence": 1, "type": "interaction", "status": "pending",
                 "operationId": "old-operation", "interactionId": "10",
