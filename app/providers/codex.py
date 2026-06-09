@@ -106,7 +106,15 @@ class CodexProvider:
             "agents": self.discover_agents(),
         }
 
-    def send_message(self, message: str, conversation_id: str = "", timeout_sec: int | None = None, thread_id: str = "") -> dict[str, Any]:
+    def send_message(
+        self,
+        message: str,
+        conversation_id: str = "",
+        timeout_sec: int | None = None,
+        thread_id: str = "",
+        event_callback: Any = None,
+        allow_interaction: bool = False,
+    ) -> dict[str, Any]:
         text = str(message or "").strip()
         if not self.enabled:
             return {"ok": False, "error": "Codex harness is disabled", "reply": ""}
@@ -129,10 +137,20 @@ class CodexProvider:
             text,
             thread_id=thread_id,
             timeout_sec=int(timeout_sec or 600),
+            event_callback=event_callback,
+            allow_interaction=allow_interaction,
         )
         result["conversationId"] = conversation_id
         result["mode"] = "externalBridge" if self.bridge_url else "appServer"
         return result
+
+    def respond(self, thread_id: str, interaction_id: str, action: str, answers: dict[str, Any] | None = None) -> bool:
+        bridge = get_codex_bridge(self.workspace or os.getcwd(), self.model or "", self.bridge_url or "")
+        return bool(hasattr(bridge, "respond") and bridge.respond(thread_id, interaction_id, action, answers))
+
+    def cancel(self, thread_id: str) -> bool:
+        bridge = get_codex_bridge(self.workspace or os.getcwd(), self.model or "", self.bridge_url or "")
+        return bool(hasattr(bridge, "cancel") and bridge.cancel(thread_id))
 
     def compact_context(self, thread_id: str, timeout_sec: int = 120) -> dict[str, Any]:
         if not self.enabled:

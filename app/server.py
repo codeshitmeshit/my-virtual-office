@@ -2182,6 +2182,94 @@ def _codex_provider_from_config():
 _CODEX_OPERATION_LOCKS = {}
 _CODEX_OPERATION_LOCKS_GUARD = threading.Lock()
 _CODEX_THREAD_STATE_LOCK = threading.Lock()
+_CODEX_ACTIVITY_LOCK = threading.Lock()
+_CODEX_ACTIVE_LOCK = threading.Lock()
+_CODEX_ACTIVE_OPERATIONS = {}
+
+_CODEX_SECRET_KEYS = {"authorization", "cookie", "token", "api_key", "apikey", "password", "secret", "access_token", "refresh_token"}
+_CODEX_MAX_EVENT_TEXT = 12000
+
+
+def _codex_activity_path():
+    return os.path.join(STATUS_DIR, "codex-activity.json")
+
+
+def _sanitize_codex_value(value, key=""):
+    key_lower = str(key or "").lower().replace("-", "_")
+    if any(secret in key_lower for secret in _CODEX_SECRET_KEYS):
+        return "[REDACTED]"
+    if isinstance(value, dict):
+        return {str(k): _sanitize_codex_value(v, k) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_sanitize_codex_value(item) for item in value[:200]]
+    if isinstance(value, str):
+        text = re.sub(r"(?i)(bearer\s+)[a-z0-9._~+/=-]+", r"\1[REDACTED]", value)
+        text = re.sub(r"(?i)(https?://[^\s/:]+:)[^@\s]+@", r"\1[REDACTED]@", text)
+        if len(text) > _CODEX_MAX_EVENT_TEXT:
+            return text[:_CODEX_MAX_EVENT_TEXT] + "\n[TRUNCATED]"
+        return text
+    return value
+
+
+def _load_codex_activity():
+    try:
+        with open(_codex_activity_path(), "r") as f:
+            data = json.load(f)
+        return data if isinstance(data, list) else []
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return []
+
+
+def _save_codex_activity(events):
+    path = _codex_activity_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(events[-5000:], f, ensure_ascii=False, indent=2)
+    os.replace(tmp, path)
+
+
+def _append_codex_activity(agent_id, conversation_id, event):
+    with _CODEX_ACTIVITY_LOCK:
+        events = _load_codex_activity()
+        last_sequence = max(
+            (int(item.get("sequence") or 0) for item in events if item.get("agentId") == agent_id and item.get("conversationId") == conversation_id),
+            default=0,
+        )
+        record = _sanitize_codex_value({
+            **event,
+            "providerSequence": int(event.get("sequence") or 0),
+            "sequence": last_sequence + 1,
+            "agentId": agent_id,
+            "conversationId": conversation_id,
+        })
+        events.append(record)
+        _save_codex_activity(events)
+    with _CODEX_ACTIVE_LOCK:
+        active = _CODEX_ACTIVE_OPERATIONS.get(agent_id)
+        if active and active.get("conversationId") == conversation_id:
+            active["threadId"] = record.get("threadId") or active.get("threadId", "")
+            active["turnId"] = record.get("turnId") or active.get("turnId", "")
+            active["status"] = record.get("status") or active.get("status", "running")
+            active["updatedAt"] = record.get("ts") or int(time.time() * 1000)
+            if record.get("type") == "interaction":
+                if record.get("status") == "pending":
+                    active["pending"] = record
+                elif active.get("pending", {}).get("interactionId") == record.get("interactionId"):
+                    active["pending"] = None
+    return record
+
+
+def _get_codex_activity(agent_id, conversation_id, after=0):
+    with _CODEX_ACTIVITY_LOCK:
+        events = _load_codex_activity()
+    return [event for event in events if event.get("agentId") == agent_id and event.get("conversationId") == conversation_id and int(event.get("sequence") or 0) > int(after or 0)]
+
+
+def _get_codex_active(agent_id):
+    with _CODEX_ACTIVE_LOCK:
+        active = _CODEX_ACTIVE_OPERATIONS.get(agent_id)
+        return dict(active) if active else None
 
 
 def _codex_thread_state_path():
@@ -2281,22 +2369,42 @@ def _handle_codex_chat(body):
     agent_id = agent.get("id") or agent_key
     operation_lock = _codex_operation_lock(agent_id)
     if not operation_lock.acquire(blocking=False):
+        active = _get_codex_active(agent_id) or {}
         return {
             "ok": False,
             "status": "busy",
             "error": "Codex is already working. Wait for the current operation to finish.",
             "reply": "Codex is already working. Please wait.",
             "conversationId": conversation_id,
+            "activeConversationId": active.get("conversationId", ""),
+            "activeStatus": active.get("status", "running"),
             "_status": 409,
         }
     provider = _codex_provider_from_config()
     before_paths = _codex_git_paths(provider.workspace)
+    allow_interaction = str(body.get("fromType") or "agent").lower() in {"human", "user", "chat", "ui"}
+    with _CODEX_ACTIVE_LOCK:
+        _CODEX_ACTIVE_OPERATIONS[agent_id] = {
+            "agentId": agent_id,
+            "conversationId": conversation_id,
+            "threadId": _get_codex_thread_id(agent_id, conversation_id),
+            "turnId": "",
+            "status": "running",
+            "pending": None,
+            "startedAt": int(time.time() * 1000),
+        }
+
+    def on_event(event):
+        _append_codex_activity(agent_id, conversation_id, event)
+
     try:
         result = provider.send_message(
             message,
             conversation_id=conversation_id,
             timeout_sec=int(body.get("timeoutSec") or 600),
             thread_id=_get_codex_thread_id(agent_id, conversation_id),
+            event_callback=on_event,
+            allow_interaction=allow_interaction,
         )
     finally:
         operation_lock.release()
@@ -2305,6 +2413,8 @@ def _handle_codex_chat(body):
         _set_codex_thread_id(agent_id, conversation_id, thread_id)
     after_paths = _codex_git_paths(provider.workspace)
     modified_files = set(result.get("modifiedFiles") or []) | (after_paths - before_paths)
+    with _CODEX_ACTIVE_LOCK:
+        _CODEX_ACTIVE_OPERATIONS.pop(agent_id, None)
     return {
         "ok": bool(result.get("ok")),
         "reply": result.get("reply") or "",
@@ -2319,8 +2429,68 @@ def _handle_codex_chat(body):
         "needsHumanIntervention": bool(result.get("needsHumanIntervention")),
         "durationMs": result.get("durationMs"),
         "agent": {"id": agent.get("id"), "name": agent.get("name"), "providerKind": "codex", "profile": agent.get("profile", "")},
-        "_status": 200 if result.get("ok") else (408 if result.get("status") == "timeout" else 503 if result.get("status") == "bridge_unavailable" else 409 if result.get("status") == "needs_human_intervention" else 500),
+        "_status": 200 if result.get("ok") or result.get("status") == "cancelled" else (408 if result.get("status") == "timeout" else 503 if result.get("status") == "bridge_unavailable" else 409 if result.get("status") == "needs_human_intervention" else 500),
     }
+
+
+def _handle_codex_activity(query):
+    agent_id = str((query.get("agentId") or ["codex-local"])[0])
+    conversation_id = str((query.get("conversationId") or [""])[0])
+    after = int((query.get("after") or [0])[0] or 0)
+    if not conversation_id:
+        return {"ok": False, "error": "conversationId is required", "_status": 400}
+    active = _get_codex_active(agent_id)
+    events = _get_codex_activity(agent_id, conversation_id, after)
+    if not active or active.get("conversationId") != conversation_id:
+        resolved = {
+            (event.get("operationId"), event.get("interactionId"))
+            for event in _get_codex_activity(agent_id, conversation_id, 0)
+            if event.get("type") == "interaction" and event.get("status") == "resolved"
+        }
+        events = [
+            {
+                **event,
+                "status": "unavailable",
+                "error": "The original Codex process is no longer available; this interaction cannot be resumed.",
+            }
+            if event.get("type") == "interaction"
+            and event.get("status") == "pending"
+            and (event.get("operationId"), event.get("interactionId")) not in resolved
+            else event
+            for event in events
+        ]
+    return {
+        "ok": True,
+        "events": events,
+        "active": active if active and active.get("conversationId") == conversation_id else None,
+        "activeConversationId": (active or {}).get("conversationId", ""),
+    }
+
+
+def _handle_codex_interaction(body):
+    agent_id = str(body.get("agentId") or "codex-local")
+    conversation_id = str(body.get("conversationId") or "")
+    interaction_id = str(body.get("interactionId") or "")
+    action = str(body.get("action") or "")
+    active = _get_codex_active(agent_id)
+    if not active or active.get("conversationId") != conversation_id:
+        return {"ok": False, "error": "No matching active Codex operation", "_status": 404}
+    if not interaction_id or action not in {"accept", "acceptForSession", "decline", "cancel", "answer"}:
+        return {"ok": False, "error": "Invalid interaction response", "_status": 400}
+    provider = _codex_provider_from_config()
+    protocol_action = "accept" if action == "answer" else action
+    ok = provider.respond(active.get("threadId", ""), interaction_id, protocol_action, body.get("answers") or {})
+    return {"ok": ok, "status": "submitted" if ok else "stale", "_status": 200 if ok else 409}
+
+
+def _handle_codex_cancel(body):
+    agent_id = str(body.get("agentId") or "codex-local")
+    conversation_id = str(body.get("conversationId") or "")
+    active = _get_codex_active(agent_id)
+    if not active or (conversation_id and active.get("conversationId") != conversation_id):
+        return {"ok": False, "error": "No matching active Codex operation", "_status": 404}
+    ok = _codex_provider_from_config().cancel(active.get("threadId", ""))
+    return {"ok": ok, "status": "cancelling" if ok else "stale", "_status": 200 if ok else 409}
 
 
 def _handle_codex_reset(body):
@@ -2709,6 +2879,7 @@ def _handle_agent_platform_comm_send(body):
                 "message": target_prompt,
                 "timeoutSec": timeout,
                 "conversationId": conversation_id,
+                "fromType": "human" if is_human_source else "agent",
             })
             reply = provider_result.get("reply") or provider_result.get("error") or ""
             ok = bool(provider_result.get("ok"))
@@ -2756,6 +2927,8 @@ def _handle_agent_platform_comm_send(body):
         "status": provider_result.get("status") if provider_result else ("completed" if ok else "execution_failed"),
         "modifiedFiles": provider_result.get("modifiedFiles") if provider_result else [],
         "needsHumanIntervention": bool(provider_result and provider_result.get("needsHumanIntervention")),
+        "activeConversationId": provider_result.get("activeConversationId", "") if provider_result else "",
+        "activeStatus": provider_result.get("activeStatus", "") if provider_result else "",
     }
 
 
@@ -7931,6 +8104,14 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(json.dumps({"ok": True, "events": events}).encode())
+        elif self.path == "/api/codex/activity" or self.path.startswith("/api/codex/activity?"):
+            qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            result = _handle_codex_activity(qs)
+            self.send_response(result.pop("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps(result).encode())
         elif self.path == "/api/agent-platform-communications/skill":
             self.send_response(200)
             self.send_header("Content-Type", "text/markdown; charset=utf-8")
@@ -9608,7 +9789,7 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             body.setdefault("fromId", "user")
             body.setdefault("toAgentId", body.get("agentId") or "codex-local")
             result = _handle_agent_platform_comm_send(body)
-            self.send_response(result.get("_status", 200) if "_status" in result else (200 if result.get("ok") else 409 if result.get("status") in {"busy", "needs_human_intervention"} else 500))
+            self.send_response(result.get("_status", 200) if "_status" in result else (200 if result.get("ok") or result.get("status") == "cancelled" else 409 if result.get("status") in {"busy", "needs_human_intervention"} else 500))
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
@@ -9629,6 +9810,26 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             length = int(self.headers.get('Content-Length', 0))
             body = json.loads(self.rfile.read(length)) if length else {}
             result = _handle_codex_compact(body)
+            self.send_response(result.pop("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps(result).encode())
+            return
+        elif self.path == "/api/codex/interaction":
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            result = _handle_codex_interaction(body)
+            self.send_response(result.pop("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps(result).encode())
+            return
+        elif self.path == "/api/codex/cancel":
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            result = _handle_codex_cancel(body)
             self.send_response(result.pop("_status", 200))
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
