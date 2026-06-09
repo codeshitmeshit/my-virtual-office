@@ -2793,6 +2793,11 @@ button:active { transform: translateY(3px); box-shadow: none; }
     overflow: hidden;
     animation: hermes-card-in 220ms cubic-bezier(.2,.7,.2,1) both;
 }
+.chat-reasoning-msg { justify-content: flex-start; }
+.chat-reasoning-msg .chat-thinking-card { width: 88%; max-width: 88%; }
+.codex-reasoning-card { border-left: 3px solid #ffd54f; }
+.codex-reasoning-card.done { border-left-color: #81c784; }
+.codex-reasoning-card.done .chat-tool-state { color: #81c784; }
 .chat-thinking-summary {
     display: flex;
     align-items: center;

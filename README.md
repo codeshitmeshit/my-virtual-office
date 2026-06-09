@@ -93,26 +93,37 @@ It connects to your OpenClaw gateway and visualizes everything your agents are d
 
 ## Quick Start
 
-### Docker Compose (recommended)
+### Local Start with `start.sh` (recommended)
+
+For local development and normal desktop use, start the project through the repository script instead of invoking `app/server.py` directly. The script prepares the local environment, checks the required Python WebSocket dependency, loads configuration, and starts the service with the expected paths and ports.
 
 ```bash
 git clone https://github.com/eliautobot/my-virtual-office.git
 cd my-virtual-office
-docker compose up -d
+chmod +x start.sh
+./start.sh
 ```
 
 Then open `http://localhost:8090/setup` to run the setup wizard.
 
+Use `./start.sh --help` to view the available local options.
+
+### Docker Support
+
+This customized fork does **not** support starting the application directly through Docker or Docker Compose. Its local provider integrations, scripts, paths, and runtime assumptions are designed for host execution through `./start.sh`.
+
+The Docker files inherited from the upstream project may remain in the repository for reference, but they are not a supported startup or deployment path for this fork.
+
 ### Docker Image / Platform Support
 
-The published Docker image is available at:
+The upstream project publishes a Docker image at:
 - `ghcr.io/eliautobot/my-virtual-office:latest`
 
 Multi-arch images are published for:
 - `linux/amd64`
 - `linux/arm64`
 
-That means the same image tag works on standard x86_64 machines and ARM64 devices like a Raspberry Pi 5.
+Those images describe upstream platform support only. They do not include or guarantee the behavior of this customized fork.
 
 ### First Run
 
@@ -191,7 +202,7 @@ All settings live in `vo-config.json`. Environment variables override config val
 | `VO_HERMES_HOME` | ~/.hermes | Path to the Hermes home/profile root directory |
 | `VO_HERMES_BIN` | ~/.local/bin/hermes | Hermes CLI binary used for discovery and safe request/response chat calls |
 | `VO_HERMES_TIMEOUT_SEC` | 600 | Timeout for Hermes CLI chat calls |
-| `VO_STATUS_DIR` | /data | Directory for presence/status data inside the container. By default this is backed by the `vo-data` Docker volume. |
+| `VO_STATUS_DIR` | `./data` when using `start.sh` | Directory for local presence and status data. |
 | `VO_WEATHER_LOCATION` | *(none)* | Weather location for window display |
 
 ### Hermes Agent compatibility
@@ -204,23 +215,16 @@ Virtual Office can now discover local Hermes Agent profiles as first-class offic
 - local Virtual Office history is stored under `VO_STATUS_DIR`
 - Hermes secrets/config/memories/raw logs are not read or exposed by default
 
-For Docker deployments, mount or otherwise expose the Hermes home and CLI path to the container, then set `VO_HERMES_HOME` and `VO_HERMES_BIN` accordingly.
+This fork expects Hermes and other local providers to be available on the host. Start Virtual Office with `./start.sh` so the configured home and CLI paths resolve correctly.
 
 ## Updating
 
 ```bash
-docker compose down
-docker compose pull
-docker compose up -d
+git pull
+./start.sh
 ```
 
-Or pull the image directly:
-
-```bash
-docker pull ghcr.io/eliautobot/my-virtual-office:latest
-```
-
-Your license key, office layout, and all settings persist across updates — they're stored in the `vo-data` volume.
+Stop the currently running local process before restarting when necessary. Local state remains under the configured `VO_STATUS_DIR` (the startup script defaults to the repository `data` directory).
 
 ## Roadmap
 

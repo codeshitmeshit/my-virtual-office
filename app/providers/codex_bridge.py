@@ -40,6 +40,27 @@ def _error_result(code: str, message: str, **extra: Any) -> dict[str, Any]:
     }
 
 
+def _reasoning_item_text(item: dict[str, Any]) -> str:
+    for key in ("text", "summaryText", "content"):
+        value = item.get(key)
+        if isinstance(value, str) and value.strip():
+            return value
+    summary = item.get("summary")
+    if isinstance(summary, str):
+        return summary
+    if isinstance(summary, list):
+        parts = []
+        for part in summary:
+            if isinstance(part, str):
+                parts.append(part)
+            elif isinstance(part, dict):
+                text = part.get("text") or part.get("content")
+                if isinstance(text, str):
+                    parts.append(text)
+        return "\n\n".join(part for part in parts if part.strip())
+    return ""
+
+
 @dataclass
 class _Operation:
     thread_id: str
@@ -81,6 +102,8 @@ class CodexAppServerClient:
         self.workspace = os.path.abspath(workspace)
         self.model = model or ""
         self.binary = binary or os.environ.get("VO_CODEX_BIN") or shutil.which("codex") or "codex"
+        summary = str(os.environ.get("VO_CODEX_REASONING_SUMMARY") or "concise").strip().lower()
+        self.reasoning_summary = summary if summary in {"auto", "concise", "detailed", "none"} else "concise"
         self._proc: subprocess.Popen[str] | None = None
         self._write_lock = threading.Lock()
         self._start_lock = threading.Lock()
@@ -257,7 +280,15 @@ class CodexAppServerClient:
             operation.emit("turn", status="running")
         elif method in {"item/started", "item/updated"}:
             item = params.get("item") or {}
-            if item.get("type") not in {"agentMessage", "userMessage"}:
+            if item.get("type") == "reasoning":
+                operation.emit(
+                    "reasoning",
+                    status="running",
+                    itemId=str(item.get("id") or params.get("itemId") or ""),
+                    text=_reasoning_item_text(item),
+                    replace=True,
+                )
+            elif item.get("type") not in {"agentMessage", "userMessage"}:
                 operation.emit(
                     "activity",
                     status="running",
@@ -266,10 +297,23 @@ class CodexAppServerClient:
                     input=item,
                 )
         elif method in {
+            "item/reasoning/summaryTextDelta",
+            "item/reasoning/summaryPartAdded",
+            "item/reasoning/textDelta",
+        }:
+            operation.emit(
+                "reasoning",
+                status="running",
+                itemId=str(params.get("itemId") or ""),
+                text=str(params.get("delta") or params.get("text") or ""),
+                sectionIndex=params.get("summaryIndex"),
+                boundary=method == "item/reasoning/summaryPartAdded",
+                deltaKind="raw" if method.endswith("/textDelta") else "summary",
+            )
+        elif method in {
             "item/commandExecution/outputDelta",
             "item/fileChange/outputDelta",
             "item/mcpToolCall/progress",
-            "item/reasoning/summaryTextDelta",
         }:
             operation.emit(
                 "activity",
@@ -286,7 +330,15 @@ class CodexAppServerClient:
                 for change in item.get("changes") or []:
                     if change.get("path"):
                         operation.modified_files.add(str(change["path"]))
-            if item.get("type") not in {"agentMessage", "userMessage"}:
+            if item.get("type") == "reasoning":
+                operation.emit(
+                    "reasoning",
+                    status="done",
+                    itemId=str(item.get("id") or ""),
+                    text=_reasoning_item_text(item),
+                    replace=True,
+                )
+            elif item.get("type") not in {"agentMessage", "userMessage"}:
                 operation.emit(
                     "activity",
                     status="error" if item.get("status") in {"failed", "error"} else "done",
@@ -407,6 +459,7 @@ class CodexAppServerClient:
             turn_result = self._request("turn/start", {
                 "threadId": active_thread_id,
                 "input": [{"type": "text", "text": message}],
+                "summary": self.reasoning_summary,
                 "cwd": self.workspace,
                 "approvalPolicy": "on-request",
                 "sandboxPolicy": {

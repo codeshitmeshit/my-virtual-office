@@ -1,0 +1,35 @@
+{
+  "name": "phase-6-reasoning-summary-visibility",
+  "stage": "implementation_done",
+  "waiting_for_user": true,
+  "updated_at": "2026-06-09T23:39:00+08:00",
+  "confirmed": {
+    "checklist": true,
+    "tested": false,
+    "done": false
+  },
+  "confirmations": {
+    "checklist": {
+      "confirmed_at": "2026-06-09T23:30:28+08:00",
+      "summary": "User requested continuation and confirmed the 10-item supplemental checklist."
+    },
+    "tested": null,
+    "done": null
+  },
+  "files": {
+    "requirement": "requirement.md",
+    "review": "review.md",
+    "checklist": "checklist.md",
+    "todolist": "todolist.md"
+  },
+  "notes": [
+    "Created from Phase 6 browser acceptance feedback.",
+    "Current bridge treats summaryTextDelta as generic activity and does not handle summaryPartAdded or textDelta.",
+    "The target is runtime-provided readable reasoning summaries, not hidden chain-of-thought.",
+    "Checklist contains 10 supplemental checks and was confirmed by the user.",
+    "Todolist created for protocol normalization, persistence, browser rendering, regression coverage, and live acceptance.",
+    "Implementation and automated regression completed.",
+    "Real Codex validation with summary=concise emitted readable summary deltas and a final summary with no modified files.",
+    "Waiting for user browser acceptance before confirmed.tested and done can advance."
+  ]
+}
