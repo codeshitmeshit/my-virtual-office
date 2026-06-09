@@ -96,6 +96,10 @@
       this.hermesApprovalPollTimer = null;
       this.hermesApprovalLastId = '';
       this.codexBusy = false;
+      this.codexRequestInFlight = false;
+      this.codexActivityTimer = null;
+      this.codexLastSequence = 0;
+      this.codexInteractionCards = new Map();
       this.sessionModel = '—';
       this.contextWindow = 0;
       this.contextUsed = 0;
@@ -386,7 +390,7 @@
 
     updateProviderControls() {
       if (this.compactContextBtn) this.compactContextBtn.style.display = this.isCodexSelected() ? '' : 'none';
-      if (this.stopBtn) this.stopBtn.style.display = this.isCodexSelected() ? 'none' : '';
+      if (this.stopBtn) this.stopBtn.style.display = '';
     }
 
     codexConversationStorageKey() {
@@ -577,6 +581,8 @@
             this.scrollBottom();
             this.setStatus('Codex ready', 'connected');
           }
+          this.codexLastSequence = 0;
+          await this.pollCodexActivity(true);
           return;
         }
         if (this.isHermesSelected()) {
@@ -886,9 +892,11 @@
       if (this.isCodexSelected()) {
         const label = this.agentSelect.selectedOptions[0]?.textContent.trim() || 'Codex';
         this.codexBusy = true;
+        this.codexRequestInFlight = true;
         this.sendBtn.disabled = true;
         this.setStatus('Codex working...', 'connecting');
         this.updateTypingIndicator(label + ' is working');
+        this.startCodexActivityPolling();
         try {
           const resp = await fetch('/api/codex/chat', {
             method: 'POST',
@@ -912,7 +920,10 @@
           }
           if (data.needsHumanIntervention) reply += '\n\nHuman intervention required.';
           if (reply) this.appendMessage('assistant', reply, Date.now(), [], { label, kind: 'agent' });
-          if (!resp.ok || data.ok === false) throw new Error(data.error || data.status || resp.statusText);
+          if (data.status === 'busy' && data.activeConversationId) {
+            this.appendCodexActiveConversationNotice(data.activeConversationId, data.activeStatus);
+          }
+          if (data.status !== 'cancelled' && (!resp.ok || data.ok === false)) throw new Error(data.error || data.status || resp.statusText);
           this.setStatus('Codex ready', 'connected');
         } catch (e) {
           this.removeTypingIndicator();
@@ -920,7 +931,10 @@
           this.setStatus('Codex error', 'disconnected');
         } finally {
           this.codexBusy = false;
+          this.codexRequestInFlight = false;
           this.sendBtn.disabled = false;
+          await this.pollCodexActivity().catch(() => {});
+          this.stopCodexActivityPolling();
           this.scrollBottom();
         }
         return;
@@ -1106,44 +1120,19 @@
 
     async sendStop() {
       try {
-        if (this.isHermesSelected()) {
-          const resp = await fetch('/api/hermes/interrupt', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ agentId: this.getSelectedAgentId() || this.selectedAgentKey, runId: this.currentRunId || '' })
-          });
-          const data = await resp.json().catch(() => ({}));
-          if (!resp.ok || data.ok === false) throw new Error(data.error || resp.statusText);
-          this.appendSystem('Stop sent');
-          this.setStatus('Hermes stopping...', 'connecting');
-          return;
-        }
         if (this.isCodexSelected()) {
-          const resp = await fetch('/api/codex/interrupt', {
+          const res = await fetch('/api/codex/cancel', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ agentId: this.getSelectedAgentId() || this.selectedAgentKey })
+            body: JSON.stringify({
+              agentId: this.getSelectedAgentId() || this.selectedAgentKey,
+              conversationId: this.getCodexConversationId()
+            })
           });
-          const data = await resp.json().catch(() => ({}));
-          if (!resp.ok || data.ok === false) throw new Error(data.error || resp.statusText);
-          this.removeTypingIndicator();
-          await this.loadHistory({ recoverFinal: true }).catch(() => {});
-          this.appendSystem('Stop sent');
-          this.setStatus('Codex stopping...', 'connecting');
-          return;
-        }
-        if (this.isClaudeCodeSelected()) {
-          const resp = await fetch('/api/claude-code/interrupt', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ agentId: this.getSelectedAgentId() || this.selectedAgentKey, runId: this.currentRunId || '' })
-          });
-          const data = await resp.json().catch(() => ({}));
-          if (!resp.ok || data.ok === false) throw new Error(data.error || resp.statusText);
-          this.removeTypingIndicator();
-          await this.loadHistory({ recoverFinal: true }).catch(() => {});
-          this.appendSystem('Stop sent');
-          this.setStatus('Claude Code stopping...', 'connecting');
+          const data = await res.json();
+          if (!res.ok || !data.ok) throw new Error(data.error || 'cancel failed');
+          this.setStatus('Codex cancelling...', 'connecting');
+          this.appendSystem('Stop sent. Existing file changes are not rolled back.');
           return;
         }
         if (this.streamingMsg) {
@@ -1160,6 +1149,196 @@
       } catch (e) {
         this.appendSystem((typeof i18n !== 'undefined' ? i18n.t('chat_failed_to_stop') : 'Failed to stop') + ': ' + e.message);
       }
+    }
+
+    startCodexActivityPolling() {
+      if (!this.isCodexSelected() || this.codexActivityTimer) return;
+      this.pollCodexActivity().catch(() => {});
+      this.codexActivityTimer = setInterval(() => this.pollCodexActivity().catch(() => {}), 500);
+    }
+
+    stopCodexActivityPolling() {
+      if (this.codexActivityTimer) clearInterval(this.codexActivityTimer);
+      this.codexActivityTimer = null;
+    }
+
+    async pollCodexActivity(includeHistory = false) {
+      if (!this.isCodexSelected()) return;
+      const agentId = this.getSelectedAgentId() || this.selectedAgentKey;
+      const conversationId = this.getCodexConversationId();
+      const after = includeHistory ? 0 : this.codexLastSequence;
+      const res = await fetch('/api/codex/activity?agentId=' + encodeURIComponent(agentId) + '&conversationId=' + encodeURIComponent(conversationId) + '&after=' + after);
+      const data = await res.json();
+      if (!res.ok || !data.ok) return;
+      for (const event of data.events || []) {
+        this.codexLastSequence = Math.max(this.codexLastSequence, Number(event.sequence || 0));
+        this.renderCodexActivity(event);
+      }
+      if (data.active) {
+        this.codexBusy = true;
+        this.sendBtn.disabled = true;
+        const waiting = data.active.pending ? 'Codex waiting for you' : 'Codex working...';
+        this.setStatus(waiting, 'connecting');
+        this.startCodexActivityPolling();
+      } else if (this.codexRequestInFlight) {
+        this.codexBusy = true;
+        this.sendBtn.disabled = true;
+        this.setStatus('Codex working...', 'connecting');
+        this.startCodexActivityPolling();
+      } else {
+        const wasBusy = this.codexBusy;
+        this.codexBusy = false;
+        this.sendBtn.disabled = false;
+        if (wasBusy) {
+          this.removeTypingIndicator();
+          this.setStatus('Codex ready', 'connected');
+        }
+        this.stopCodexActivityPolling();
+      }
+    }
+
+    renderCodexActivity(event) {
+      if (event.type === 'activity') {
+        const payload = {
+          itemId: event.itemId || event.id,
+          runId: event.turnId || event.threadId,
+          status: event.status === 'done' ? 'done' : event.status === 'error' ? 'error' : 'running',
+          name: event.name || 'Codex tool',
+          input: event.input || {},
+          output: event.output || '',
+          error: event.error || ''
+        };
+        if (payload.status === 'running') this.updateToolCall(payload);
+        else {
+          this.updateToolCall(payload);
+          this.finishToolCall(payload);
+        }
+      } else if (event.type === 'interaction' && event.status === 'pending') {
+        this.renderCodexInteraction(event);
+      } else if (event.type === 'interaction' && event.status === 'resolved') {
+        const card = this.codexInteractionCards.get(this.codexInteractionKey(event));
+        if (card) {
+          card.classList.add('resolved');
+          card.querySelectorAll('button').forEach(btn => { btn.disabled = true; });
+          const status = card.querySelector('.chat-codex-interaction-status');
+          if (status) status.textContent = event.output?.action || 'resolved';
+        }
+      } else if (event.type === 'interaction' && event.status === 'unavailable') {
+        this.appendSystem(event.error || 'This Codex interaction can no longer be resumed.');
+      } else if (event.type === 'turn' && event.status === 'cancelling') {
+        this.setStatus('Codex cancelling...', 'connecting');
+      } else if (event.type === 'turn' && ['completed', 'failed', 'cancelled', 'execution_failed'].includes(event.status)) {
+        const reply = event.output?.reply || event.error || '';
+        if (!this.codexRequestInFlight && reply && !this.messages.innerText.includes(reply)) {
+          let text = reply;
+          const files = event.output?.modifiedFiles || [];
+          if (files.length) text += '\n\nModified files:\n' + files.map(path => '- ' + path).join('\n');
+          this.appendMessage('assistant', text, event.ts || Date.now(), [], {
+            label: this.agentSelect.selectedOptions[0]?.textContent.trim() || 'Codex',
+            kind: 'agent'
+          });
+        }
+      }
+    }
+
+    renderCodexInteraction(event) {
+      const interactionKey = this.codexInteractionKey(event);
+      if (this.codexInteractionCards.has(interactionKey)) return;
+      const wrap = document.createElement('div');
+      wrap.className = 'chat-msg assistant chat-codex-interaction';
+      wrap.dataset.interactionId = event.interactionId;
+      const card = document.createElement('div');
+      card.className = 'chat-bubble codex-interaction-card';
+      const title = document.createElement('strong');
+      title.textContent = event.interactionType === 'input' ? 'Codex needs information' : 'Codex requests approval';
+      const detail = document.createElement('pre');
+      detail.textContent = formatToolPayload(event.input || {});
+      const actions = document.createElement('div');
+      actions.className = 'chat-codex-interaction-actions';
+      if (event.interactionType === 'input') {
+        actions.appendChild(this.makeCodexInteractionButton('Answer', 'answer', event));
+      } else {
+        actions.appendChild(this.makeCodexInteractionButton('Allow once', 'accept', event));
+        actions.appendChild(this.makeCodexInteractionButton('Allow for Codex session', 'acceptForSession', event));
+        actions.appendChild(this.makeCodexInteractionButton('Reject', 'decline', event));
+      }
+      const note = document.createElement('div');
+      note.className = 'chat-codex-interaction-note';
+      note.textContent = event.interactionType === 'approval' ? 'Session approval scope and lifetime are controlled by the Codex runtime.' : '';
+      const status = document.createElement('span');
+      status.className = 'chat-codex-interaction-status';
+      status.textContent = 'pending';
+      card.append(title, detail, actions, note, status);
+      wrap.appendChild(card);
+      this.messages.appendChild(wrap);
+      this.codexInteractionCards.set(interactionKey, card);
+      this.scrollBottom();
+    }
+
+    codexInteractionKey(event) {
+      return `${event.operationId || event.turnId || event.threadId || 'turn'}:${event.interactionId || event.id}`;
+    }
+
+    makeCodexInteractionButton(label, action, event) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = label;
+      button.dataset.action = action;
+      button.addEventListener('click', async () => {
+        let answers = {};
+        if (action === 'answer') {
+          const value = prompt('Answer Codex:');
+          if (value === null) return;
+          const questions = event.input?.questions || [];
+          if (questions.length) {
+            for (const question of questions) answers[question.id || question.name || 'answer'] = value;
+          } else answers.answer = value;
+        }
+        const card = button.closest('.codex-interaction-card');
+        card?.querySelectorAll('button').forEach(btn => { btn.disabled = true; });
+        try {
+          const res = await fetch('/api/codex/interaction', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              agentId: this.getSelectedAgentId() || this.selectedAgentKey,
+              conversationId: this.getCodexConversationId(),
+              interactionId: event.interactionId,
+              action,
+              answers
+            })
+          });
+          const data = await res.json();
+          if (!res.ok || !data.ok) throw new Error(data.error || data.status || 'interaction failed');
+          const status = card?.querySelector('.chat-codex-interaction-status');
+          if (status) status.textContent = 'submitted';
+        } catch (error) {
+          card?.querySelectorAll('button').forEach(btn => { btn.disabled = false; });
+          this.appendSystem('Codex interaction failed: ' + error.message);
+        }
+      });
+      return button;
+    }
+
+    appendCodexActiveConversationNotice(conversationId, status) {
+      const wrap = document.createElement('div');
+      wrap.className = 'chat-msg system';
+      const bubble = document.createElement('div');
+      bubble.className = 'chat-bubble system-bubble';
+      bubble.append(document.createTextNode(`Codex is ${status || 'busy'} in another conversation. `));
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'chat-inline-action';
+      button.textContent = 'Open active conversation';
+      button.addEventListener('click', () => {
+        localStorage.setItem(this.codexConversationStorageKey(), conversationId);
+        this.resetConversation('Opened active Codex conversation');
+        this.loadHistory();
+      });
+      bubble.appendChild(button);
+      wrap.appendChild(bubble);
+      this.messages.appendChild(wrap);
+      this.scrollBottom();
     }
 
     async toggleRecording() {

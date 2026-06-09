@@ -2738,6 +2738,15 @@ button:active { transform: translateY(3px); box-shadow: none; }
     padding: 4px 10px;
     border-radius: 8px;
 }
+.chat-inline-action {
+    margin-left: 5px;
+    border: 1px solid currentColor;
+    border-radius: 5px;
+    background: transparent;
+    color: inherit;
+    padding: 3px 6px;
+    cursor: pointer;
+}
 
 .chat-tool-msg { justify-content: flex-start; }
 .chat-tool-call {
@@ -2771,6 +2780,32 @@ button:active { transform: translateY(3px); box-shadow: none; }
 }
 .chat-tool-call.done { border-left-color: #81c784; }
 .chat-tool-call.error { border-left-color: #ef9a9a; border-color: rgba(244,67,54,0.36); }
+.codex-interaction-card {
+    border: 1px solid rgba(255, 213, 79, 0.45) !important;
+    border-left: 3px solid #ffd54f !important;
+    max-width: 92% !important;
+}
+.codex-interaction-card pre {
+    max-height: 180px;
+    overflow: auto;
+    white-space: pre-wrap;
+    font-size: 11px;
+    color: rgba(255,255,255,0.72);
+}
+.chat-codex-interaction-actions { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+.chat-codex-interaction-actions button {
+    border: 1px solid rgba(255,255,255,0.2);
+    border-radius: 6px;
+    background: rgba(255,255,255,0.1);
+    color: var(--ui-text);
+    padding: 5px 8px;
+    cursor: pointer;
+}
+.chat-codex-interaction-actions button:hover { background: rgba(255,213,79,0.18); }
+.chat-codex-interaction-actions button:disabled { opacity: 0.5; cursor: default; }
+.chat-codex-interaction-note { font-size: 10px; color: rgba(255,255,255,0.55); }
+.chat-codex-interaction-status { display: inline-block; margin-top: 5px; font-size: 10px; color: #ffd54f; }
+.codex-interaction-card.resolved { border-left-color: #81c784 !important; opacity: 0.82; }
 .chat-tool-call.status-changed { animation: hermes-card-settle 700ms cubic-bezier(.2,.7,.2,1) both; }
 .chat-tool-summary {
     display: flex;

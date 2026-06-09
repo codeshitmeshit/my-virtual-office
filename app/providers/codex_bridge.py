@@ -11,6 +11,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -42,6 +43,7 @@ def _error_result(code: str, message: str, **extra: Any) -> dict[str, Any]:
 @dataclass
 class _Operation:
     thread_id: str
+    operation_id: str = field(default_factory=lambda: uuid.uuid4().hex)
     kind: str = "turn"
     turn_id: str = ""
     reply: str = ""
@@ -50,6 +52,26 @@ class _Operation:
     human_reason: str = ""
     completed: threading.Event = field(default_factory=threading.Event)
     result: dict[str, Any] | None = None
+    event_callback: Any = None
+    allow_interaction: bool = False
+    sequence: int = 0
+    pending_requests: dict[str, dict[str, Any]] = field(default_factory=dict)
+    cancel_requested: bool = False
+
+    def emit(self, event_type: str, **data: Any) -> None:
+        self.sequence += 1
+        event = {
+            "id": f"codex-{uuid.uuid4().hex}",
+            "sequence": self.sequence,
+            "type": event_type,
+            "operationId": self.operation_id,
+            "threadId": self.thread_id,
+            "turnId": self.turn_id,
+            "ts": int(time.time() * 1000),
+            **data,
+        }
+        if self.event_callback:
+            self.event_callback(event)
 
 
 class CodexAppServerClient:
@@ -175,6 +197,25 @@ class CodexAppServerClient:
         with self._operations_lock:
             operation = self._operations.get(thread_id)
         if method in APPROVAL_METHODS:
+            if operation and operation.allow_interaction and method != "item/permissions/requestApproval":
+                request_key = str(message["id"])
+                interaction_type = "input" if method in {"item/tool/requestUserInput", "mcpServer/elicitation/request"} else "approval"
+                operation.pending_requests[request_key] = {
+                    "id": message["id"],
+                    "method": method,
+                    "params": params,
+                    "type": interaction_type,
+                }
+                operation.emit(
+                    "interaction",
+                    status="pending",
+                    interactionId=request_key,
+                    interactionType=interaction_type,
+                    method=method,
+                    itemId=str(params.get("itemId") or ""),
+                    input=params,
+                )
+                return
             if operation:
                 operation.needs_human = True
                 operation.human_reason = f"Codex requested approval: {method}"
@@ -213,6 +254,30 @@ class CodexAppServerClient:
         if method == "turn/started":
             turn = params.get("turn") or {}
             operation.turn_id = str(turn.get("id") or params.get("turnId") or operation.turn_id)
+            operation.emit("turn", status="running")
+        elif method in {"item/started", "item/updated"}:
+            item = params.get("item") or {}
+            if item.get("type") not in {"agentMessage", "userMessage"}:
+                operation.emit(
+                    "activity",
+                    status="running",
+                    itemId=str(item.get("id") or params.get("itemId") or ""),
+                    name=str(item.get("type") or method.split("/")[0] or "tool"),
+                    input=item,
+                )
+        elif method in {
+            "item/commandExecution/outputDelta",
+            "item/fileChange/outputDelta",
+            "item/mcpToolCall/progress",
+            "item/reasoning/summaryTextDelta",
+        }:
+            operation.emit(
+                "activity",
+                status="running",
+                itemId=str(params.get("itemId") or ""),
+                name=method.split("/")[1] if "/" in method else method,
+                output=params.get("delta") or params.get("message") or params,
+            )
         elif method == "item/completed":
             item = params.get("item") or {}
             if item.get("type") == "agentMessage" and item.get("text"):
@@ -221,6 +286,16 @@ class CodexAppServerClient:
                 for change in item.get("changes") or []:
                     if change.get("path"):
                         operation.modified_files.add(str(change["path"]))
+            if item.get("type") not in {"agentMessage", "userMessage"}:
+                operation.emit(
+                    "activity",
+                    status="error" if item.get("status") in {"failed", "error"} else "done",
+                    itemId=str(item.get("id") or ""),
+                    name=str(item.get("type") or "tool"),
+                    input=item,
+                    output=item.get("output") or item.get("aggregatedOutput") or item.get("text") or item.get("changes") or "",
+                    error=item.get("error"),
+                )
         elif method == "turn/completed":
             turn = params.get("turn") or {}
             operation.turn_id = str(turn.get("id") or operation.turn_id)
@@ -248,6 +323,13 @@ class CodexAppServerClient:
                     threadId=thread_id,
                     turnId=operation.turn_id,
                 )
+            elif operation.cancel_requested:
+                operation.result = _error_result(
+                    "cancelled",
+                    "Codex turn cancelled",
+                    threadId=thread_id,
+                    turnId=operation.turn_id,
+                )
             elif turn.get("status") == "completed":
                 operation.result = {
                     "ok": True,
@@ -266,6 +348,12 @@ class CodexAppServerClient:
                     threadId=thread_id,
                     turnId=operation.turn_id,
                 )
+            operation.emit(
+                "turn",
+                status=operation.result.get("status") if operation.result else str(turn.get("status") or "failed"),
+                output={"reply": operation.reply, "modifiedFiles": sorted(operation.modified_files)},
+                error=(operation.result or {}).get("error"),
+            )
             operation.completed.set()
         elif method == "thread/compacted":
             operation.result = {
@@ -290,7 +378,14 @@ class CodexAppServerClient:
             params["model"] = self.model
         return params
 
-    def execute(self, message: str, thread_id: str = "", timeout_sec: int = 600) -> dict[str, Any]:
+    def execute(
+        self,
+        message: str,
+        thread_id: str = "",
+        timeout_sec: int = 600,
+        event_callback: Any = None,
+        allow_interaction: bool = False,
+    ) -> dict[str, Any]:
         started = time.monotonic()
         try:
             self._ensure_started()
@@ -302,7 +397,11 @@ class CodexAppServerClient:
             active_thread_id = str(thread.get("id") or thread_id)
             if not active_thread_id:
                 return _error_result("protocol_error", "Codex did not return a thread id")
-            operation = _Operation(thread_id=active_thread_id)
+            operation = _Operation(
+                thread_id=active_thread_id,
+                event_callback=event_callback,
+                allow_interaction=allow_interaction,
+            )
             with self._operations_lock:
                 self._operations[active_thread_id] = operation
             turn_result = self._request("turn/start", {
@@ -336,6 +435,65 @@ class CodexAppServerClient:
             if 'active_thread_id' in locals():
                 with self._operations_lock:
                     self._operations.pop(active_thread_id, None)
+
+    def respond(self, thread_id: str, interaction_id: str, action: str, answers: dict[str, Any] | None = None) -> bool:
+        with self._operations_lock:
+            operation = self._operations.get(thread_id)
+        if not operation:
+            return False
+        pending = operation.pending_requests.pop(str(interaction_id), None)
+        if not pending:
+            return False
+        method = pending["method"]
+        if method == "item/tool/requestUserInput":
+            normalized_answers = {}
+            for key, value in (answers or {}).items():
+                if isinstance(value, dict) and isinstance(value.get("answers"), list):
+                    normalized_answers[str(key)] = value
+                elif isinstance(value, list):
+                    normalized_answers[str(key)] = {"answers": [str(item) for item in value]}
+                else:
+                    normalized_answers[str(key)] = {"answers": [str(value)]}
+            result = {"answers": normalized_answers}
+        elif method == "mcpServer/elicitation/request":
+            result = {"action": "accept" if action == "accept" else "decline", "content": answers or {}}
+        elif method == "item/permissions/requestApproval":
+            result = {"permissions": (answers or {}).get("permissions", {}), "scope": "turn"}
+        else:
+            decisions = {"accept": "accept", "acceptForSession": "acceptForSession", "decline": "decline", "cancel": "cancel"}
+            result = {"decision": decisions.get(action, "decline")}
+        self._send({"id": pending["id"], "result": result})
+        operation.emit(
+            "interaction",
+            status="resolved",
+            interactionId=str(interaction_id),
+            interactionType=pending["type"],
+            method=method,
+            output={"action": action},
+        )
+        return True
+
+    def cancel(self, thread_id: str) -> bool:
+        with self._operations_lock:
+            operation = self._operations.get(thread_id)
+        if not operation:
+            return False
+        operation.cancel_requested = True
+        for interaction_id, pending in list(operation.pending_requests.items()):
+            method = pending["method"]
+            if method == "item/tool/requestUserInput":
+                result = {"answers": {}}
+            elif method == "mcpServer/elicitation/request":
+                result = {"action": "decline"}
+            else:
+                result = {"decision": "cancel"}
+            self._send({"id": pending["id"], "result": result})
+            operation.pending_requests.pop(interaction_id, None)
+        if operation.turn_id:
+            request_id = self._allocate_id()
+            self._send({"id": request_id, "method": "turn/interrupt", "params": {"threadId": thread_id, "turnId": operation.turn_id}})
+        operation.emit("turn", status="cancelling")
+        return True
 
     def compact(self, thread_id: str, timeout_sec: int = 120) -> dict[str, Any]:
         if not thread_id:

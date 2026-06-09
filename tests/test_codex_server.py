@@ -35,8 +35,15 @@ class BlockingProvider:
         self.started = started
         self.release = release
 
-    def send_message(self, message, conversation_id="", timeout_sec=None, thread_id=""):
+    def send_message(self, message, conversation_id="", timeout_sec=None, thread_id="", event_callback=None, allow_interaction=False):
         self.started.set()
+        if event_callback:
+            event_callback({
+                "id": "event-1", "sequence": 1, "type": "activity", "status": "running",
+                "threadId": thread_id or "thr-server-test", "turnId": "turn-server-test",
+                "itemId": "cmd-1", "name": "commandExecution", "input": {"token": "secret-value"},
+                "ts": 1,
+            })
         self.release.wait(5)
         return {
             "ok": True,
@@ -110,7 +117,39 @@ def test_thread_mapping_persists_and_resets():
             server.STATUS_DIR = old_status_dir
 
 
+def test_activity_persists_redacted_and_reports_active_conversation():
+    old_status_dir = server.STATUS_DIR
+    with tempfile.TemporaryDirectory() as status_dir:
+        server.STATUS_DIR = status_dir
+        try:
+            server._append_codex_activity("codex-local", "conv-activity", {
+                "id": "evt", "sequence": 1, "type": "activity", "status": "running",
+                "input": {"Authorization": "Bearer top-secret", "nested": {"api_key": "abc"}},
+            })
+            result = server._handle_codex_activity({"agentId": ["codex-local"], "conversationId": ["conv-activity"]})
+            assert result["ok"] is True
+            payload = str(result["events"])
+            assert "top-secret" not in payload
+            assert "abc" not in payload
+            assert "[REDACTED]" in payload
+            server._append_codex_activity("codex-local", "conv-activity", {
+                "id": "evt-2", "sequence": 1, "type": "turn", "status": "running",
+            })
+            result = server._handle_codex_activity({"agentId": ["codex-local"], "conversationId": ["conv-activity"]})
+            assert [event["sequence"] for event in result["events"]] == [1, 2]
+            assert result["events"][1]["providerSequence"] == 1
+            server._append_codex_activity("codex-local", "conv-orphan", {
+                "id": "pending", "sequence": 1, "type": "interaction", "status": "pending",
+                "operationId": "old-operation", "interactionId": "10",
+            })
+            orphan = server._handle_codex_activity({"agentId": ["codex-local"], "conversationId": ["conv-orphan"]})
+            assert orphan["events"][0]["status"] == "unavailable"
+        finally:
+            server.STATUS_DIR = old_status_dir
+
+
 if __name__ == "__main__":
     test_busy_rejects_second_request_and_releases_lock()
     test_thread_mapping_persists_and_resets()
+    test_activity_persists_redacted_and_reports_active_conversation()
     print("ok")
