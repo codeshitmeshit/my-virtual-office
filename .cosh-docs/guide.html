@@ -3,60 +3,526 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Virtual Office 运维文档</title>
+  <title>My Virtual Office — 项目逆向拆解教程</title>
   <style>
-    :root { --text:#1f2937; --muted:#64748b; --primary:#2563eb; --border:#e2e8f0; --card:#fff; }
-    * { box-sizing:border-box; }
-    body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif; background:#f4f7fb; color:var(--text); line-height:1.75; }
-    a { color:inherit; text-decoration:none; }
-    main { max-width:1080px; margin:0 auto; padding:44px 24px 72px; }
-    .hero,.card,.route { background:var(--card); border:1px solid var(--border); border-radius:16px; box-shadow:0 14px 36px rgba(15,23,42,.07); }
-    .hero { padding:36px; }
-    .eyebrow,.tag { display:inline-flex; padding:5px 10px; border-radius:999px; background:#dbeafe; color:#1d4ed8; font-size:13px; font-weight:700; }
-    h1 { margin:14px 0 12px; font-size:44px; line-height:1.15; }
-    h2 { margin:34px 0 14px; font-size:25px; }
-    h3 { margin:0 0 8px; font-size:21px; }
-    p { margin:0; color:var(--muted); }
-    .grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:18px; }
-    .card { padding:24px; transition:transform .2s ease,border-color .2s ease; }
-    .card:hover { transform:translateY(-2px); border-color:#93c5fd; }
-    .tags { display:flex; gap:8px; flex-wrap:wrap; margin-top:18px; }
-    .tag { background:#f1f5f9; color:#475569; font-size:12px; }
-    .cta { display:inline-flex; margin-top:22px; padding:9px 14px; border-radius:10px; background:var(--primary); color:#fff; font-weight:700; }
-    .route { margin-top:18px; padding:24px; }
-    .route-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin-top:16px; }
-    .route-item { padding:15px; border:1px solid var(--border); border-radius:12px; background:#f8fafc; }
-    .route-item strong { display:block; margin-bottom:4px; }
-    .route-item span { color:var(--muted); font-size:13px; }
-    @media(max-width:760px){ .grid,.route-grid{grid-template-columns:1fr;} h1{font-size:34px;} main{padding:26px 16px 48px;} .hero{padding:24px;} }
+    :root {
+      --card: #ffffff;
+      --text: #1f2937;
+      --muted: #64748b;
+      --primary: #2563eb;
+      --primary-soft: #dbeafe;
+      --teal: #0f766e;
+      --amber: #b45309;
+      --border: #e2e8f0;
+      --shadow: 0 18px 45px rgba(15, 23, 42, 0.08);
+      --radius: 20px;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+      background:
+        radial-gradient(circle at top left, rgba(37, 99, 235, 0.14), transparent 30%),
+        linear-gradient(180deg, #f8fbff 0%, #eef2f7 100%);
+      color: var(--text);
+      line-height: 1.8;
+    }
+    a { color: inherit; text-decoration: none; }
+
+    .container {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 44px 24px 72px;
+    }
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1.4fr) minmax(280px, 0.8fr);
+      gap: 28px;
+      align-items: stretch;
+      margin-bottom: 28px;
+    }
+    .hero-main,
+    .hero-side,
+    .guide-card,
+    .roadmap {
+      background: rgba(255, 255, 255, 0.9);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+    .hero-main { padding: 38px; }
+    .hero-side { padding: 28px; }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 18px;
+      padding: 6px 12px;
+      border-radius: 999px;
+      background: var(--primary-soft);
+      color: #1d4ed8;
+      font-size: 13px;
+      font-weight: 700;
+    }
+    h1 {
+      margin: 0 0 16px;
+      font-size: clamp(34px, 5vw, 58px);
+      line-height: 1.08;
+      letter-spacing: 0;
+    }
+    h2 {
+      margin: 0 0 18px;
+      font-size: 24px;
+      line-height: 1.35;
+    }
+    h3 {
+      margin: 0 0 8px;
+      font-size: 21px;
+      line-height: 1.35;
+    }
+    p { margin: 0; color: var(--muted); }
+    .hero-text {
+      max-width: 700px;
+      font-size: 17px;
+    }
+
+    .stats {
+      display: grid;
+      gap: 14px;
+      margin-top: 28px;
+    }
+    .stat {
+      padding: 16px;
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      background: #f8fafc;
+    }
+    .stat strong {
+      display: block;
+      color: var(--text);
+      font-size: 24px;
+      line-height: 1.2;
+    }
+
+    .section-title {
+      margin: 38px 0 16px;
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 16px;
+    }
+    .section-title p { max-width: 620px; }
+    .guide-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 18px;
+    }
+    .guide-card {
+      display: flex;
+      min-height: 260px;
+      padding: 24px;
+      flex-direction: column;
+      justify-content: space-between;
+      transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+    }
+    .guide-card:hover {
+      transform: translateY(-3px);
+      border-color: rgba(37, 99, 235, 0.42);
+      box-shadow: 0 22px 54px rgba(37, 99, 235, 0.12);
+    }
+    .card-top {
+      display: flex;
+      gap: 16px;
+      align-items: flex-start;
+    }
+    .number {
+      width: 46px;
+      height: 46px;
+      flex: 0 0 46px;
+      display: grid;
+      place-items: center;
+      border-radius: 14px;
+      background: #eff6ff;
+      color: var(--primary);
+      font-weight: 800;
+    }
+    .tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 18px;
+    }
+    .tag {
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: #f1f5f9;
+      color: #475569;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .tag.structure { background: #dbeafe; color: #1d4ed8; }
+    .tag.flow { background: #dcfce7; color: #15803d; }
+    .tag.history { background: #fef3c7; color: #b45309; }
+    .tag.overview { background: #f3e8ff; color: #7c3aed; }
+    .cta {
+      display: inline-flex;
+      align-items: center;
+      width: fit-content;
+      margin-top: 22px;
+      padding: 9px 14px;
+      border-radius: 12px;
+      background: var(--primary);
+      color: #ffffff;
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    .roadmap {
+      margin-top: 18px;
+      padding: 26px;
+    }
+    .roadmap-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .roadmap-item {
+      padding: 16px;
+      border-radius: 16px;
+      background: #f8fafc;
+      border: 1px solid var(--border);
+    }
+    .roadmap-item strong {
+      display: block;
+      margin-bottom: 6px;
+      color: var(--text);
+    }
+    .roadmap-item span {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .risk-callout {
+      margin-top: 28px;
+      padding: 22px;
+      border-radius: 18px;
+      border: 1px solid #fecaca;
+      background: #fff1f2;
+    }
+    .risk-callout strong {
+      display: block;
+      margin-bottom: 6px;
+      color: #b91c1c;
+      font-size: 15px;
+    }
+    .risk-callout p {
+      color: #7f1d1d;
+      font-size: 14px;
+    }
+    .risk-callout ul {
+      margin: 10px 0 0;
+      padding-left: 20px;
+      color: #7f1d1d;
+      font-size: 14px;
+    }
+
+    @media (max-width: 860px) {
+      .hero,
+      .guide-grid,
+      .roadmap-grid { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 560px) {
+      .container { padding: 28px 16px 52px; }
+      .hero-main,
+      .hero-side,
+      .guide-card,
+      .roadmap { padding: 22px; border-radius: 18px; }
+      .card-top { flex-direction: column; }
+    }
   </style>
 </head>
 <body>
-  <main>
+  <main class="container">
     <section class="hero">
-      <span class="eyebrow">DEPLOYMENT &amp; OPERATIONS</span>
-      <h1>Virtual Office 运维文档</h1>
-      <p>记录经过实际环境验证的反向代理、WebSocket、KasmVNC Viewer 与启动验收配置。</p>
-    </section>
-
-    <h2>部署与排错</h2>
-    <section class="grid">
-      <a class="card" href="./nginx-kasmvnc-reverse-proxy.html">
-        <h3>Nginx 与 KasmVNC 反向代理</h3>
-        <p>脱敏的推荐配置，涵盖 Office HTTP、Office WebSocket、KasmVNC 静态资源和 Viewer WebSocket。</p>
-        <div class="tags"><span class="tag">Nginx</span><span class="tag">KasmVNC</span><span class="tag">WebSocket</span></div>
-        <span class="cta">查看配置</span>
-      </a>
-    </section>
-
-    <section class="route">
-      <h3>推荐验收顺序</h3>
-      <div class="route-grid">
-        <div class="route-item"><strong>HTTP</strong><span>/health 返回 running</span></div>
-        <div class="route-item"><strong>Office WS</strong><span>/ws 完成 Upgrade</span></div>
-        <div class="route-item"><strong>CDP</strong><span>/browser-status 可用</span></div>
-        <div class="route-item"><strong>Kasm WS</strong><span>/browser/websockify 完成握手</span></div>
+      <div class="hero-main">
+        <span class="eyebrow">项目逆向拆解教程</span>
+        <h1>My Virtual Office</h1>
+        <p class="hero-text">一个自托管的像素风 AI Agent 可视化工作空间。将 OpenClaw/Hermes Agent 的后台运行转化为可视化的办公室场景，支持实时 presence、聊天、办公室编辑、Agent Browser 等功能。本教程通过 70% 现状静态拆解 + 30% 真实 Git 历史演进，帮助你快速读懂这个约 100 个文件、10,000+ 行核心代码的开源项目。</p>
       </div>
+      <aside class="hero-side">
+        <h2>教程规模</h2>
+        <p>基于真实代码与 Git 证据生成</p>
+        <div class="stats">
+          <div class="stat"><strong>12 页</strong><span>独立教程页面</span></div>
+          <div class="stat"><strong>3 类</strong><span>结构 / 链路 / 历史</span></div>
+          <div class="stat"><strong>74 天</strong><span>项目演进历史</span></div>
+          <div class="stat"><strong>10,483 行</strong><span>server.py 核心代码</span></div>
+        </div>
+      </aside>
+    </section>
+
+    <section>
+      <div class="section-title">
+        <div>
+          <h2>教程目录</h2>
+          <p>从总览开始，按结构 → 链路 → 历史的顺序阅读，或跳转到你感兴趣的主题。</p>
+        </div>
+      </div>
+      <div class="guide-grid">
+        <!-- 01 总览 -->
+        <a class="guide-card" href="./overview.html">
+          <div>
+            <div class="card-top">
+              <div class="number">01</div>
+              <div>
+                <h3>30 分钟快速总览</h3>
+                <p>项目一句话定位、技术栈、核心目录地图、最重要的 Happy Path、必须先理解的核心抽象、最值得注意的复杂设计。</p>
+              </div>
+            </div>
+            <div class="tags">
+              <span class="tag overview">总览</span>
+              <span class="tag">入门必读</span>
+            </div>
+          </div>
+          <span class="cta">开始阅读</span>
+        </a>
+
+        <!-- 02 项目全景 -->
+        <a class="guide-card" href="./project-overview.html">
+          <div>
+            <div class="card-top">
+              <div class="number">02</div>
+              <div>
+                <h3>项目全景概览</h3>
+                <p>这是什么项目？解决什么问题？技术栈是什么？商业模式如何？</p>
+              </div>
+            </div>
+            <div class="tags">
+              <span class="tag structure">结构分析</span>
+              <span class="tag">定位</span>
+            </div>
+          </div>
+          <span class="cta">开始阅读</span>
+        </a>
+
+        <!-- 03 目录地图 -->
+        <a class="guide-card" href="./directory-map.html">
+          <div>
+            <div class="card-top">
+              <div class="number">03</div>
+              <div>
+                <h3>目录结构与模块职责</h3>
+                <p>完整的项目目录树解析，每个目录和文件的职责说明与模块边界。</p>
+              </div>
+            </div>
+            <div class="tags">
+              <span class="tag structure">结构分析</span>
+              <span class="tag">目录</span>
+            </div>
+          </div>
+          <span class="cta">开始阅读</span>
+        </a>
+
+        <!-- 04 整体架构 -->
+        <a class="guide-card" href="./architecture.html">
+          <div>
+            <div class="card-top">
+              <div class="number">04</div>
+              <div>
+                <h3>整体架构与依赖关系</h3>
+                <p>从部署架构、模块通信、数据流三个维度分析系统如何运转。</p>
+              </div>
+            </div>
+            <div class="tags">
+              <span class="tag structure">结构分析</span>
+              <span class="tag">架构</span>
+            </div>
+          </div>
+          <span class="cta">开始阅读</span>
+        </a>
+
+        <!-- 05 服务器启动 -->
+        <a class="guide-card" href="./server-startup.html">
+          <div>
+            <div class="card-top">
+              <div class="number">05</div>
+              <div>
+                <h3>服务器启动：三线并行</h3>
+                <p>从 if __name__ == "__main__" 出发，理解 HTTP、WebSocket、Gateway Presence 三条线程如何协同启动。</p>
+              </div>
+            </div>
+            <div class="tags">
+              <span class="tag flow">主流程链路</span>
+              <span class="tag">启动</span>
+            </div>
+          </div>
+          <span class="cta">开始阅读</span>
+        </a>
+
+        <!-- 06 代理发现 -->
+        <a class="guide-card" href="./agent-discovery.html">
+          <div>
+            <div class="card-top">
+              <div class="number">06</div>
+              <div>
+                <h3>代理发现：双提供者架构</h3>
+                <p>系统如何发现并注册 OpenClaw + Hermes 两种 AI 代理？</p>
+              </div>
+            </div>
+            <div class="tags">
+              <span class="tag flow">主流程链路</span>
+              <span class="tag">发现</span>
+            </div>
+          </div>
+          <span class="cta">开始阅读</span>
+        </a>
+
+        <!-- 07 Gateway Presence -->
+        <a class="guide-card" href="./gateway-presence.html">
+          <div>
+            <div class="card-top">
+              <div class="number">07</div>
+              <div>
+                <h3>Gateway Presence：实时状态感知</h3>
+                <p>代理的"工作状态"是如何通过 WebSocket 事件流实时感知和更新的？</p>
+              </div>
+            </div>
+            <div class="tags">
+              <span class="tag flow">主流程链路</span>
+              <span class="tag">状态机</span>
+            </div>
+          </div>
+          <span class="cta">开始阅读</span>
+        </a>
+
+        <!-- 08 项目管理工作流 -->
+        <a class="guide-card" href="./projects-workflow.html">
+          <div>
+            <div class="card-top">
+              <div class="number">08</div>
+              <div>
+                <h3>项目管理与自动工作流</h3>
+                <p>Markdown 存储、自动工作流管道、任务分派与审查循环。</p>
+              </div>
+            </div>
+            <div class="tags">
+              <span class="tag flow">主流程链路</span>
+              <span class="tag">工作流</span>
+            </div>
+          </div>
+          <span class="cta">开始阅读</span>
+        </a>
+
+        <!-- 09 历史时间线 -->
+        <a class="guide-card" href="./history-timeline.html">
+          <div>
+            <div class="card-top">
+              <div class="number">09</div>
+              <div>
+                <h3>项目演进时间线</h3>
+                <p>从 1591 行到 10483 行的 74 天：5 个发展阶段的真实 Git 证据。</p>
+              </div>
+            </div>
+            <div class="tags">
+              <span class="tag history">Git 历史</span>
+              <span class="tag">时间线</span>
+            </div>
+          </div>
+          <span class="cta">开始阅读</span>
+        </a>
+
+        <!-- 10 Presence 架构演进 -->
+        <a class="guide-card" href="./presence-history.html">
+          <div>
+            <div class="card-top">
+              <div class="number">10</div>
+              <div>
+                <h3>Presence 架构的诞生与演进</h3>
+                <p>为什么放弃 office.py 手动状态、改用 WebSocket 只读观察者？</p>
+              </div>
+            </div>
+            <div class="tags">
+              <span class="tag history">Git 历史</span>
+              <span class="tag">架构决策</span>
+            </div>
+          </div>
+          <span class="cta">开始阅读</span>
+        </a>
+
+        <!-- 11 server.py 增长密码 -->
+        <a class="guide-card" href="./server-growth.html">
+          <div>
+            <div class="card-top">
+              <div class="number">11</div>
+              <div>
+                <h3>server.py 的增长密码</h3>
+                <p>从 1.5K 到 10.5K 行：三次大规模膨胀的真实 commit 证据。</p>
+              </div>
+            </div>
+            <div class="tags">
+              <span class="tag history">Git 历史</span>
+              <span class="tag">代码演进</span>
+            </div>
+          </div>
+          <span class="cta">开始阅读</span>
+        </a>
+
+        <!-- 12 部署与运维 -->
+        <a class="guide-card" href="./nginx-kasmvnc-reverse-proxy.html">
+          <div>
+            <div class="card-top">
+              <div class="number">12</div>
+              <div>
+                <h3>Nginx 与 KasmVNC 反向代理</h3>
+                <p>经过实际环境验证的 Office HTTP、WebSocket、KasmVNC 静态资源和 Viewer WebSocket 配置。</p>
+              </div>
+            </div>
+            <div class="tags">
+              <span class="tag flow">部署运维</span>
+              <span class="tag">Nginx</span>
+              <span class="tag">KasmVNC</span>
+            </div>
+          </div>
+          <span class="cta">查看配置</span>
+        </a>
+      </div>
+    </section>
+
+    <section class="roadmap">
+      <h2>阅读路径建议</h2>
+      <div class="roadmap-grid">
+        <div class="roadmap-item">
+          <strong>第一步：30 分钟总览</strong>
+          <span>快速了解项目定位、技术栈和核心 Happy Path，建立全局认知。</span>
+        </div>
+        <div class="roadmap-item">
+          <strong>第二步：结构分析</strong>
+          <span>阅读项目全景、目录地图和整体架构，理解"这个项目由什么组成"。</span>
+        </div>
+        <div class="roadmap-item">
+          <strong>第三步：主流程链路</strong>
+          <span>从启动入口出发，追踪代理发现、状态感知、聊天、工作流的核心链路。</span>
+        </div>
+        <div class="roadmap-item">
+          <strong>第四步：Git 历史溯源</strong>
+          <span>基于真实 commit 理解复杂设计的来源，回答"为什么会变成现在这样"。</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="risk-callout">
+      <strong>风险声明与分析边界</strong>
+      <p>本次逆向分析基于静态代码阅读和 Git 历史，以下事项需要注意：</p>
+      <ul>
+        <li><strong>未运行测试</strong>：tests/ 目录存在但未在本分析中执行，无法确认测试覆盖率与通过状态。</li>
+        <li><strong>game.js 后半部分（559-15696 行）</strong>：渲染循环和 A* 路径寻找的完整实现未逐行验证，仅从常量和函数签名推断。</li>
+        <li><strong>chat.js 后半部分（100-2925 行）</strong>：多窗口管理器的完整实现细节未完全验证。</li>
+        <li><strong>Git 初始提交前史</strong>：2b7b6ae 是仓库第一个提交（52 文件/27445 行），无法验证 pre-history。</li>
+        <li><strong>Elix 与 eliautobot 的关系</strong>：Git 历史显示两个不同作者，但无法验证 eliautobot 是 AI agent 还是人类使用自动化别名。</li>
+        <li><strong>架构图为推断图</strong>：所有架构图和调用链图基于代码证据推断生成，不是项目官方文档。</li>
+      </ul>
     </section>
   </main>
 </body>
