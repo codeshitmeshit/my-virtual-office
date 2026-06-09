@@ -298,6 +298,7 @@ a:hover { text-decoration: underline; }
 let GATEWAY_TOKEN = '';
 let AGENTS = [];
 let _cronWsPort = 0; // 0 = not yet loaded
+let _cronWsPath = '/ws';
 
 // Load gateway token, WS port, and agents dynamically
 (async function() {
@@ -306,6 +307,7 @@ let _cronWsPort = 0; // 0 = not yet loaded
     const info = await infoRes.json();
     if (info.token) GATEWAY_TOKEN = info.token;
     if (info.wsPort) _cronWsPort = info.wsPort;
+    if (info.wsPath && info.wsPath.startsWith('/')) _cronWsPath = info.wsPath;
   } catch(e) {
     console.warn('Failed to fetch /gateway-info:', e);
   }
@@ -332,8 +334,7 @@ function getWsUrl() {
   const host = window.location.hostname || '127.0.0.1';
   // If accessed via HTTPS, use wss through the reverse-proxy path (same origin)
   if (window.location.protocol === 'https:') {
-    const port = window.location.port ? ':' + window.location.port : '';
-    return `wss://${host}${port}/ws-gateway`;
+    return `wss://${window.location.host}${_cronWsPath}`;
   }
   // Use the WS proxy port from /gateway-info (falls back to same-origin port + 1)
   const port = _cronWsPort || (parseInt(window.location.port || '8090') + 1);

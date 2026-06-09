@@ -24,6 +24,8 @@
   "weather_location": "天气位置",
   "display_section": "🖥️ 显示",
   "show_chat_bubbles": "显示聊天气泡",
+  "internal_bubble_timeout": "Internal 气泡自动收起（秒）",
+  "internal_bubble_timeout_hint": "设为 0 可禁用自动收起。",
   "show_agent_names": "显示代理名称",
   "api_usage_section": "☁️ API 用量",
   "show_api_usage": "显示 API 用量面板",

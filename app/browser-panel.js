@@ -132,8 +132,10 @@
     // Load browser viewer
     if (!browserFrame.src || browserFrame.src === 'about:blank') {
       if (BROWSER_VIEW_URL) {
-        const sep = BROWSER_VIEW_URL.includes('?') ? '&' : '?';
-        browserFrame.src = `${BROWSER_VIEW_URL}${sep}resize=scale&autoconnect=1`;
+        browserFrame.src = window.buildBrowserViewerUrl(
+          BROWSER_VIEW_URL,
+          window.location.href
+        );
       } else {
         browserFrame.srcdoc = `<html><body style="background:#0a0a0f;color:#888;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;text-align:center"><div><h2 style="color:#ffd700">${_t('browser_not_configured_title')}</h2><p>${_t('browser_not_configured_msg')}</p></div></body></html>`;
       }

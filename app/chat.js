@@ -6,6 +6,7 @@
   let connected = false;
   let pendingCallbacks = {};
   let _chatWsPort = 8091;
+  let _chatWsPath = '/ws';
   let GATEWAY_CLIENT_VERSION = 'unknown';
   let _modelBarInterval = null;
   let _sessionsListCache = { at: 0, promise: null, payload: null };
@@ -2772,7 +2773,7 @@
 
   function getGatewayUrl() {
     const host = window.location.hostname || '127.0.0.1';
-    if (window.location.protocol === 'https:') return `wss://${host}:8443/ws-gateway`;
+    if (window.location.protocol === 'https:') return `wss://${window.location.host}${_chatWsPath}`;
     return `ws://${host}:${_chatWsPort}`;
   }
 
@@ -3633,6 +3634,7 @@
 
   fetch('/gateway-info').then(r => r.json()).then(d => {
     if (d.wsPort) _chatWsPort = d.wsPort;
+    if (d.wsPath && d.wsPath.startsWith('/')) _chatWsPath = d.wsPath;
     if (d.token) GATEWAY_TOKEN = d.token;
     if (d.openclawVersion) GATEWAY_CLIENT_VERSION = d.openclawVersion;
   }).catch(() => {});

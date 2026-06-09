@@ -669,8 +669,16 @@ function releaseObjectServiceQueueForAgent(agent, reason) {
 // REAL WEATHER SYSTEM — fetches weather for configured location, renders on windows
 // ============================================================
 var weatherData = { condition: 'clear', code: 113, temp: 0, wind: 0, humidity: 0, feelsLike: 0, uvIndex: 0, visibility: 0, precipMM: 0, cloudcover: 0 };
-var _displayPrefs = { showWeather: true };
-try { var _dp = JSON.parse(localStorage.getItem("vo-display-prefs") || "{}"); if (_dp.showWeather !== undefined) _displayPrefs.showWeather = _dp.showWeather; } catch(e) {}
+var _displayPrefs = { showBubbles: true, showWeather: true, showNames: true, internalBubbleTimeoutSec: 60 };
+try {
+    var _dp = JSON.parse(localStorage.getItem("vo-display-prefs") || "{}");
+    if (_dp.showBubbles !== undefined) _displayPrefs.showBubbles = _dp.showBubbles;
+    if (_dp.showWeather !== undefined) _displayPrefs.showWeather = _dp.showWeather;
+    if (_dp.showNames !== undefined) _displayPrefs.showNames = _dp.showNames;
+    if (typeof InternalBubbleSettings !== 'undefined') {
+        _displayPrefs.internalBubbleTimeoutSec = InternalBubbleSettings.normalizeTimeoutSec(_dp.internalBubbleTimeoutSec);
+    }
+} catch(e) {}
 var lastWeatherPoll = 0;
 var weatherParticles = []; // rain/snow particles
 var _weatherTick = 0;
@@ -2607,6 +2615,7 @@ class Agent {
         this.thoughtChars = 0;
         this.speechChars = 0;
         this.thoughtAge = 0;
+        this.thoughtUpdatedAt = 0;
         this.speechAge = 0;
         this.lastThought = '';
         this.lastSpeech = '';
@@ -4251,6 +4260,7 @@ function darken(hex, amt) {
 const BUBBLE_W = 170, BUBBLE_LINE_H = 11, BUBBLE_PAD = 8, BUBBLE_MAX_LINES = 8;
 const BUBBLE_HEADER_H = 16; // height for name banner
 const BUBBLE_CLOSE_SIZE = 10; // close button size
+const THOUGHT_BUBBLE_W = 132, THOUGHT_BUBBLE_LINE_H = 10, THOUGHT_BUBBLE_PAD = 6, THOUGHT_BUBBLE_MAX_LINES = 6;
 
 // Per-agent bubble minimize state: { agentKey: { thought: bool, speech: bool } }
 const bubbleMinimized = {};
@@ -4271,6 +4281,34 @@ function wrapText(text, maxW) {
     return lines.slice(0, BUBBLE_MAX_LINES);
 }
 
+function wrapThoughtText(text) {
+    ctx.font = '7px "Press Start 2P", monospace';
+    const maxTextW = THOUGHT_BUBBLE_W - THOUGHT_BUBBLE_PAD * 2;
+    const lines = [];
+    let line = '';
+    for (const char of String(text)) {
+        const test = line + char;
+        if (line && ctx.measureText(test).width > maxTextW) {
+            lines.push(line.trimEnd());
+            line = char === ' ' ? '' : char;
+            if (lines.length >= THOUGHT_BUBBLE_MAX_LINES) break;
+        } else {
+            line = test;
+        }
+    }
+    if (line && lines.length < THOUGHT_BUBBLE_MAX_LINES) lines.push(line.trimEnd());
+    return lines;
+}
+
+function fitBubbleHeader(text, maxW) {
+    ctx.font = 'bold 7px "Press Start 2P", monospace';
+    const available = maxW - BUBBLE_CLOSE_SIZE - 10;
+    let result = String(text || '');
+    if (ctx.measureText(result).width <= available) return result;
+    while (result.length > 1 && ctx.measureText(result + '...').width > available) result = result.slice(0, -1);
+    return result + '...';
+}
+
 function getBubbleMinState(agent) {
     if (!bubbleMinimized[agent.statusKey]) bubbleMinimized[agent.statusKey] = { thought: false, speech: false };
     return bubbleMinimized[agent.statusKey];
@@ -4287,6 +4325,10 @@ function collectBubbles() {
         const hasThought = agent.thought || agent.lastThought;
         if (hasThought) {
             const text = agent.thought || agent.lastThought;
+            if (!minState.thought && typeof InternalBubbleSettings !== 'undefined' &&
+                InternalBubbleSettings.shouldAutoCollapse(agent.thoughtUpdatedAt, _displayPrefs.internalBubbleTimeoutSec)) {
+                minState.thought = true;
+            }
             if (minState.thought) {
                 // Minimized icon
                 renderedIcons.push({ type: 'thought', agent, x: headX - 32, y: headY - 20, w: 14, h: 14 });
@@ -4294,11 +4336,11 @@ function collectBubbles() {
                 agent.thoughtChars = Math.min(agent.thoughtChars + 0.4, text.length);
                 const vis = text.substring(0, Math.floor(agent.thoughtChars));
                 if (vis.length > 0) {
-                    const headerText = `${agent.name} Internal`;
-                    const lines = wrapText(vis, BUBBLE_W);
-                    const h = BUBBLE_HEADER_H + lines.length * BUBBLE_LINE_H + BUBBLE_PAD * 2;
-                    bubbles.push({ type: 'thought', agent, lines, w: BUBBLE_W, h, 
-                        x: headX - BUBBLE_W - 20, y: headY - h - 10, 
+                    const headerText = fitBubbleHeader(`${agent.name} Internal`, THOUGHT_BUBBLE_W);
+                    const lines = wrapThoughtText(vis);
+                    const h = BUBBLE_HEADER_H + lines.length * THOUGHT_BUBBLE_LINE_H + THOUGHT_BUBBLE_PAD * 2;
+                    bubbles.push({ type: 'thought', agent, lines, w: THOUGHT_BUBBLE_W, h,
+                        x: headX - THOUGHT_BUBBLE_W - 20, y: headY - h - 10,
                         anchorX: headX, anchorY: headY, headerText });
                 }
             }
@@ -4429,7 +4471,7 @@ function drawAllBubbles() {
         // Header text
         ctx.font = 'bold 7px "Press Start 2P", monospace';
         ctx.fillStyle = '#fff'; ctx.textAlign = 'left';
-        ctx.fillText(b.headerText || '', b.x + BUBBLE_PAD, b.y + 11);
+        ctx.fillText(b.headerText || '', b.x + (isThought ? THOUGHT_BUBBLE_PAD : BUBBLE_PAD), b.y + 11);
 
         // Close (minimize) button - "−" on the right side of header
         const closeX = b.x + b.w - BUBBLE_CLOSE_SIZE - 3;
@@ -4447,7 +4489,9 @@ function drawAllBubbles() {
         });
 
         // Target label (speech only)
-        let textStartY = b.y + BUBBLE_HEADER_H + BUBBLE_PAD;
+        const bodyPad = isThought ? THOUGHT_BUBBLE_PAD : BUBBLE_PAD;
+        const bodyLineH = isThought ? THOUGHT_BUBBLE_LINE_H : BUBBLE_LINE_H;
+        let textStartY = b.y + BUBBLE_HEADER_H + bodyPad;
         if (!isThought && b.targetLabel) {
             ctx.font = '6px "Press Start 2P", monospace';
             ctx.fillStyle = '#b8860b'; ctx.textAlign = 'left';
@@ -4458,7 +4502,7 @@ function drawAllBubbles() {
         // Body text
         ctx.font = '7px "Press Start 2P", monospace';
         ctx.fillStyle = isThought ? '#444' : '#222'; ctx.textAlign = 'left';
-        b.lines.forEach((line, i) => ctx.fillText(line, b.x + BUBBLE_PAD, textStartY + 8 + i * BUBBLE_LINE_H));
+        b.lines.forEach((line, i) => ctx.fillText(line, b.x + bodyPad, textStartY + 8 + i * bodyLineH));
 
         ctx.restore();
     }
@@ -4487,6 +4531,7 @@ function handleBubbleClick(canvasX, canvasY) {
                 if (!icon.agent.thought && icon.agent.lastThought) icon.agent.thought = icon.agent.lastThought;
                 icon.agent.thoughtAge = 0;
                 icon.agent.thoughtChars = 0;
+                icon.agent.thoughtUpdatedAt = Date.now();
             } else {
                 if (!icon.agent.speech && icon.agent.lastSpeech) icon.agent.speech = icon.agent.lastSpeech;
                 if (icon.agent.lastSpeechTarget) icon.agent.speechTarget = icon.agent.lastSpeechTarget;
@@ -4658,11 +4703,12 @@ async function pollStatus() {
 
             // Thought bubble
             const newThought = entry.thought || '';
-            if (newThought && newThought !== agent.thought) {
+            if (newThought && newThought !== agent.lastThought) {
                 agent.thought = newThought;
                 agent.lastThought = newThought;
                 agent.thoughtChars = 0;
                 agent.thoughtAge = 0;
+                agent.thoughtUpdatedAt = Date.now();
                 // Auto-expand if minimized
                 getBubbleMinState(agent).thought = false;
                 addGlobalLog(`💭 ${agent.name} thinking: ${newThought.substring(0, 40)}...`);
@@ -8213,6 +8259,7 @@ function expandAllBubbles() {
         ms.speech = false;
         a.thoughtChars = 0;
         a.speechChars = 0;
+        if (a.thought || a.lastThought) a.thoughtUpdatedAt = Date.now();
     });
     addGlobalLog('💬 All bubbles expanded');
     expandAllChat();
@@ -8237,6 +8284,8 @@ function triggerBubble(type) {
         selectedAgent.lastThought = text;
         selectedAgent.thoughtChars = 0;
         selectedAgent.thoughtAge = 0;
+        selectedAgent.thoughtUpdatedAt = Date.now();
+        getBubbleMinState(selectedAgent).thought = false;
         addGlobalLog(`💭 ${selectedAgent.name} thinking: ${text.substring(0, 40)}...`);
     } else {
         const target = prompt('→ To whom? (leave blank for general)') || '';
@@ -12744,9 +12793,15 @@ function _mmLoadCurrentSettings() {
     var cb1 = document.getElementById('mm-show-bubbles');
     var cb2 = document.getElementById('mm-show-weather');
     var cb3 = document.getElementById('mm-show-names');
+    var timeoutInput = document.getElementById('mm-internal-bubble-timeout');
     if (cb1) cb1.checked = prefs.showBubbles !== false;
     if (cb2) cb2.checked = prefs.showWeather !== false;
     if (cb3) cb3.checked = prefs.showNames !== false;
+    if (timeoutInput) {
+        timeoutInput.value = typeof InternalBubbleSettings !== 'undefined'
+            ? InternalBubbleSettings.normalizeTimeoutSec(prefs.internalBubbleTimeoutSec)
+            : 60;
+    }
 }
 
 
@@ -12960,10 +13015,14 @@ function mmSaveSettings() {
     var _elBubbles = document.getElementById('mm-show-bubbles');
     var _elWeather = document.getElementById('mm-show-weather');
     var _elNames = document.getElementById('mm-show-names');
+    var _elInternalTimeout = document.getElementById('mm-internal-bubble-timeout');
     var displayPrefs = {
         showBubbles: _elBubbles ? _elBubbles.checked : true,
         showWeather: _elWeather ? _elWeather.checked : true,
         showNames: _elNames ? _elNames.checked : true,
+        internalBubbleTimeoutSec: typeof InternalBubbleSettings !== 'undefined'
+            ? InternalBubbleSettings.normalizeTimeoutSec(_elInternalTimeout ? _elInternalTimeout.value : 60)
+            : 60,
     };
     localStorage.setItem('vo-display-prefs', JSON.stringify(displayPrefs));
     _displayPrefs = displayPrefs;

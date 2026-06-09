@@ -1,0 +1,34 @@
+{
+  "name": "internal-bubble-auto-collapse",
+  "stage": "implementation_done",
+  "waiting_for_user": true,
+  "updated_at": "2026-06-09T14:43:35+08:00",
+  "confirmed": {
+    "checklist": true,
+    "tested": false,
+    "done": false
+  },
+  "confirmations": {
+    "checklist": {
+      "confirmed_at": "2026-06-09T00:10:38+08:00",
+      "summary": "User confirmed the checklist with: pass"
+    },
+    "tested": null,
+    "done": null
+  },
+  "files": {
+    "requirement": "requirement.md",
+    "review": "review.md",
+    "checklist": "checklist.md",
+    "todolist": "todolist.md"
+  },
+  "notes": [
+    "Product clarification completed before review.",
+    "Checklist confirmed by the user.",
+    "Todolist created from the confirmed checklist.",
+    "Execution plan created and implementation started.",
+    "2026-06-09 shared Chrome test failed: the running page does not load the Internal bubble helper, expose the timeout setting, track per-agent inactivity, auto-collapse bubbles, or use compact Internal-only geometry. Existing manual minimize/restore still works. Requirement remains open.",
+    "2026-06-09 implementation completed: helper and settings are integrated, timeout is persisted, per-agent inactivity is tracked, Internal layout is compact, and existing speech behavior is preserved.",
+    "2026-06-09 shared Chrome retest passed CHK-001 through CHK-018 on desktop and narrow viewports. Waiting for user confirmation of the test results before marking tested."
+  ]
+}
