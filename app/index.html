@@ -963,7 +963,7 @@
 
             // Provider display order and labels
             const provLabels = {
-                'anthropic': 'ANTHROPIC 🎫 OAuth',
+                'anthropic': 'ANTHROPIC 🔑 API',
                 'anthropic-token': 'ANTHROPIC 🎫 OAuth',
                 'anthropic-oauth': 'ANTHROPIC 🎫 OAuth',
                 'openai': 'OPENAI 🔑 API',
@@ -974,8 +974,6 @@
                 'google': 'GOOGLE'
             };
 
-            // If OAuth/token variant exists, hide API group to avoid duplicate lists
-            if (groups['anthropic-token']) delete groups['anthropic'];
             if (groups['openai-codex-oauth']) delete groups['openai-codex'];
 
             // Merge duplicate provider groups (token/oauth variants → base oauth name)
