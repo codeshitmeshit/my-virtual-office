@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Nginx 与 KasmVNC 反向代理配置</title>
+  <style>
+    :root { --text:#1f2937; --muted:#64748b; --primary:#2563eb; --border:#e2e8f0; --card:#fff; --blue:#1d4ed8; --green:#15803d; --red:#b91c1c; }
+    * { box-sizing:border-box; }
+    html { scroll-behavior:smooth; }
+    body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif; background:#f4f7fb; color:var(--text); line-height:1.8; }
+    main { max-width:1080px; margin:0 auto; padding:34px 24px 72px; }
+    a { color:inherit; }
+    .back { display:inline-flex; margin-bottom:18px; padding:8px 12px; border:1px solid var(--border); border-radius:10px; background:#fff; text-decoration:none; font-weight:700; }
+    .hero,.card,.toc { background:var(--card); border:1px solid var(--border); border-radius:16px; box-shadow:0 14px 36px rgba(15,23,42,.07); }
+    .hero,.card { padding:30px; }
+    .card,.toc { margin-top:20px; }
+    .toc { padding:18px 22px; }
+    .toc a { display:inline-flex; margin:5px 8px 5px 0; padding:6px 10px; border-radius:8px; background:#f1f5f9; text-decoration:none; font-size:14px; font-weight:700; }
+    .eyebrow,.tag { display:inline-flex; padding:5px 10px; border-radius:999px; background:#dbeafe; color:var(--primary); font-size:12px; font-weight:800; }
+    h1 { margin:14px 0; font-size:42px; line-height:1.15; }
+    h2 { margin:0 0 14px; font-size:26px; }
+    h3 { margin:22px 0 8px; font-size:19px; }
+    p { margin:0; color:var(--muted); }
+    .meta { display:flex; flex-wrap:wrap; gap:8px; margin-top:20px; }
+    .tag { background:#f1f5f9; color:#475569; }
+    pre { overflow:auto; margin:16px 0 0; padding:20px; border-radius:12px; background:#0f172a; color:#e5e7eb; font-size:13px; line-height:1.65; }
+    code { font-family:Consolas,"Liberation Mono",monospace; }
+    .callout { margin-top:16px; padding:16px; border:1px solid #bfdbfe; border-radius:12px; background:#eff6ff; }
+    .callout strong { display:block; color:var(--blue); }
+    .callout.success { border-color:#bbf7d0; background:#f0fdf4; }
+    .callout.success strong { color:var(--green); }
+    .callout.risk { border-color:#fecaca; background:#fff1f2; }
+    .callout.risk strong { color:var(--red); }
+    table { width:100%; margin-top:16px; border-collapse:collapse; }
+    th,td { padding:13px; border:1px solid var(--border); text-align:left; vertical-align:top; }
+    th { background:#f8fafc; }
+    ul { margin:14px 0 0; padding-left:22px; }
+    li { margin:7px 0; color:#475569; }
+    @media(max-width:620px){ main{padding:24px 14px 48px;} .hero,.card{padding:22px;} h1{font-size:32px;} }
+  </style>
+</head>
+<body>
+  <main>
+    <a class="back" href="./guide.html">返回教程目录</a>
+
+    <section class="hero">
+      <span class="eyebrow">已验证配置 · 脱敏版</span>
+      <h1>Nginx 与 KasmVNC 反向代理</h1>
+      <p>适用于 Virtual Office 运行在本机 7243/7244，KasmVNC 运行在本机 6901，并通过同一 HTTPS 域名的 <code>/browser/</code> 子路径访问的部署方式。</p>
+      <div class="meta"><span class="tag">Nginx</span><span class="tag">TLS</span><span class="tag">WebSocket</span><span class="tag">KasmVNC</span></div>
+    </section>
+
+    <nav class="toc">
+      <a href="#topology">端口与路径</a>
+      <a href="#config">推荐配置</a>
+      <a href="#secret">认证片段</a>
+      <a href="#viewer">Viewer URL</a>
+      <a href="#verify">验收方法</a>
+      <a href="#pitfalls">关键注意事项</a>
+    </nav>
+
+    <section id="topology" class="card">
+      <h2>端口与路径</h2>
+      <table>
+        <thead><tr><th>公网路径</th><th>上游</th><th>用途</th></tr></thead>
+        <tbody>
+          <tr><td><code>/</code></td><td><code>http://127.0.0.1:7243</code></td><td>Virtual Office HTTP/API/静态资源</td></tr>
+          <tr><td><code>/ws</code></td><td><code>http://127.0.0.1:7244</code></td><td>Virtual Office WebSocket</td></tr>
+          <tr><td><code>/browser/</code></td><td><code>https://127.0.0.1:6901/</code></td><td>KasmVNC 页面、资源和 Viewer WebSocket</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="config" class="card">
+      <h2>推荐 Nginx 配置</h2>
+      <p>以下配置由当前可用配置脱敏整理。替换域名和证书路径即可使用，Kasm 凭据通过单独的受限文件引入。</p>
+      <pre><code>server {
+    listen 443 ssl;
+    server_name office.example.com;
+
+    ssl_certificate     /etc/nginx/certs/office.example.com/fullchain.pem;
+    ssl_certificate_key /etc/nginx/certs/office.example.com/private.key;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_session_timeout 5m;
+
+    location / {
+        proxy_pass http://127.0.0.1:7243;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 86400s;
+        proxy_send_timeout 86400s;
+    }
+
+    location = /ws {
+        proxy_pass http://127.0.0.1:7244;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 86400s;
+        proxy_send_timeout 86400s;
+    }
+
+    location = /browser {
+        return 301 /browser/;
+    }
+
+    location /browser/ {
+        proxy_pass https://127.0.0.1:6901/;
+        proxy_ssl_verify off;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host 127.0.0.1:6901;
+        include /etc/nginx/snippets/kasm-upstream-auth.conf;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 86400s;
+        proxy_send_timeout 86400s;
+        proxy_buffering off;
+    }
+}
+
+server {
+    listen 80;
+    server_name office.example.com;
+    return 301 https://$host$request_uri;
+}</code></pre>
+      <div class="callout success">
+        <strong>为什么可以按当前配置复制</strong>
+        <p>HTTP、Office WebSocket、KasmVNC 静态资源与 <code>wss://office.example.com/browser/websockify</code> 已分别验证。复制时只应替换域名、证书和认证信息。</p>
+      </div>
+    </section>
+
+    <section id="secret" class="card">
+      <h2>Kasm 上游认证片段</h2>
+      <p>不要把真实用户名密码或 Base64 值写进仓库中的 Nginx 示例。生成认证值后放到仅 root 可读的文件。</p>
+      <pre><code># 生成值，输出内容不要提交到 Git
+printf '%s' '&lt;KASM_USERNAME&gt;:&lt;KASM_PASSWORD&gt;' | base64 -w0
+
+# /etc/nginx/snippets/kasm-upstream-auth.conf
+proxy_set_header Authorization "Basic &lt;BASE64_KASM_CREDENTIALS&gt;";
+
+sudo chown root:root /etc/nginx/snippets/kasm-upstream-auth.conf
+sudo chmod 600 /etc/nginx/snippets/kasm-upstream-auth.conf</code></pre>
+      <div class="callout risk">
+        <strong>不要复制当前生产凭据</strong>
+        <p>Base64 只是编码，不是加密。文档、日志、截图和代码仓库中都不应出现真实认证值。</p>
+      </div>
+    </section>
+
+    <section id="viewer" class="card">
+      <h2>Viewer URL 与 WebSocket 路径</h2>
+      <p>环境变量可以只保存 Viewer 页面地址，Virtual Office 前端会自动补充正确的 Kasm WebSocket 子路径。</p>
+      <pre><code>VO_VIEWER_URL=https://office.example.com/browser/
+
+# 实际 iframe URL 会包含：
+https://office.example.com/browser/?path=browser/websockify&amp;resize=scale&amp;autoconnect=1
+
+# 最终 WebSocket：
+wss://office.example.com/browser/websockify</code></pre>
+      <div class="callout">
+        <strong>本次 lastActiveAt 报错的原因</strong>
+        <p>缺少 <code>path=browser/websockify</code> 时，KasmVNC 会尝试连接站点根路径 <code>/websockify</code>。连接失败后，KasmVNC 4.0 的空闲定时器继续访问已释放的 RFB 对象，于是显示 <code>lastActiveAt</code> 异常。</p>
+      </div>
+    </section>
+
+    <section id="verify" class="card">
+      <h2>配置与启动验收</h2>
+      <pre><code>sudo nginx -t
+sudo nginx -s reload
+
+curl -fsS https://office.example.com/health
+
+# 项目启动后检查：
+cat data/startup-health.json</code></pre>
+      <p style="margin-top:14px">启动报告至少应包含 <code>http: true</code>、<code>websocket: true</code>、<code>browser.cdpAvailable: true</code> 和 <code>viewerWebsocket.ok: true</code>。</p>
+    </section>
+
+    <section id="pitfalls" class="card">
+      <h2>关键注意事项</h2>
+      <ul>
+        <li><strong>保留尾部斜杠：</strong><code>location /browser/</code> 与 <code>proxy_pass https://127.0.0.1:6901/;</code> 的尾部斜杠决定 URI 重写结果。</li>
+        <li><strong>必须转发 Upgrade：</strong>Kasm 页面和 WebSocket 共用 <code>/browser/</code> location，不能只按普通静态页面代理。</li>
+        <li><strong>不要只检查 CDP：</strong>CDP 9224 可用不代表 Kasm Viewer WebSocket 可用，必须检查 <code>viewerWebsocket.ok</code>。</li>
+        <li><strong>避免缓存旧 iframe：</strong>修改 Viewer URL 构造逻辑后，浏览器需强制刷新一次。</li>
+        <li><strong>限制 6901 暴露范围：</strong>推荐仅绑定回环地址或通过防火墙限制，不直接公开 KasmVNC 上游端口。</li>
+      </ul>
+    </section>
+  </main>
+</body>
+</html>

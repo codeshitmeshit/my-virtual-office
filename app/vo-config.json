@@ -3,7 +3,8 @@
   "office": {
     "name": "Virtual Office",
     "port": 8090,
-    "wsPort": 8091
+    "wsPort": 8091,
+    "wsPath": "/ws"
   },
   "openclaw": {
     "gatewayUrl": "ws://127.0.0.1:18789",

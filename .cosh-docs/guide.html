@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Virtual Office 运维文档</title>
+  <style>
+    :root { --text:#1f2937; --muted:#64748b; --primary:#2563eb; --border:#e2e8f0; --card:#fff; }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif; background:#f4f7fb; color:var(--text); line-height:1.75; }
+    a { color:inherit; text-decoration:none; }
+    main { max-width:1080px; margin:0 auto; padding:44px 24px 72px; }
+    .hero,.card,.route { background:var(--card); border:1px solid var(--border); border-radius:16px; box-shadow:0 14px 36px rgba(15,23,42,.07); }
+    .hero { padding:36px; }
+    .eyebrow,.tag { display:inline-flex; padding:5px 10px; border-radius:999px; background:#dbeafe; color:#1d4ed8; font-size:13px; font-weight:700; }
+    h1 { margin:14px 0 12px; font-size:44px; line-height:1.15; }
+    h2 { margin:34px 0 14px; font-size:25px; }
+    h3 { margin:0 0 8px; font-size:21px; }
+    p { margin:0; color:var(--muted); }
+    .grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:18px; }
+    .card { padding:24px; transition:transform .2s ease,border-color .2s ease; }
+    .card:hover { transform:translateY(-2px); border-color:#93c5fd; }
+    .tags { display:flex; gap:8px; flex-wrap:wrap; margin-top:18px; }
+    .tag { background:#f1f5f9; color:#475569; font-size:12px; }
+    .cta { display:inline-flex; margin-top:22px; padding:9px 14px; border-radius:10px; background:var(--primary); color:#fff; font-weight:700; }
+    .route { margin-top:18px; padding:24px; }
+    .route-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin-top:16px; }
+    .route-item { padding:15px; border:1px solid var(--border); border-radius:12px; background:#f8fafc; }
+    .route-item strong { display:block; margin-bottom:4px; }
+    .route-item span { color:var(--muted); font-size:13px; }
+    @media(max-width:760px){ .grid,.route-grid{grid-template-columns:1fr;} h1{font-size:34px;} main{padding:26px 16px 48px;} .hero{padding:24px;} }
+  </style>
+</head>
+<body>
+  <main>
+    <section class="hero">
+      <span class="eyebrow">DEPLOYMENT &amp; OPERATIONS</span>
+      <h1>Virtual Office 运维文档</h1>
+      <p>记录经过实际环境验证的反向代理、WebSocket、KasmVNC Viewer 与启动验收配置。</p>
+    </section>
+
+    <h2>部署与排错</h2>
+    <section class="grid">
+      <a class="card" href="./nginx-kasmvnc-reverse-proxy.html">
+        <h3>Nginx 与 KasmVNC 反向代理</h3>
+        <p>脱敏的推荐配置，涵盖 Office HTTP、Office WebSocket、KasmVNC 静态资源和 Viewer WebSocket。</p>
+        <div class="tags"><span class="tag">Nginx</span><span class="tag">KasmVNC</span><span class="tag">WebSocket</span></div>
+        <span class="cta">查看配置</span>
+      </a>
+    </section>
+
+    <section class="route">
+      <h3>推荐验收顺序</h3>
+      <div class="route-grid">
+        <div class="route-item"><strong>HTTP</strong><span>/health 返回 running</span></div>
+        <div class="route-item"><strong>Office WS</strong><span>/ws 完成 Upgrade</span></div>
+        <div class="route-item"><strong>CDP</strong><span>/browser-status 可用</span></div>
+        <div class="route-item"><strong>Kasm WS</strong><span>/browser/websockify 完成握手</span></div>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

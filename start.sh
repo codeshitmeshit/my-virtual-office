@@ -366,10 +366,15 @@ start_local() {
     set +a
 
     export VO_STATUS_DIR="${VO_STATUS_DIR:-$status_dir}"
+    VO_STATUS_DIR=$(python3 -c 'import os,sys; print(os.path.abspath(os.path.expanduser(sys.argv[1])))' "$VO_STATUS_DIR")
+    export VO_STATUS_DIR
+    mkdir -p "$VO_STATUS_DIR"
     export VO_OPENCLAW_PATH="${VO_OPENCLAW_PATH:-$data_dir}"
     export VO_PORT="${VO_PORT:-8090}"
     export VO_WS_PORT="${VO_WS_PORT:-8091}"
+    export VO_WS_PATH="${VO_WS_PATH:-/ws}"
     export VO_OFFICE_NAME="${VO_OFFICE_NAME:-Virtual Office}"
+    export _VO_INT=1
     local gateway_port
     gateway_port=$(python3 - "$VO_OPENCLAW_PATH" <<'PY' 2>/dev/null || true
 import json
@@ -394,7 +399,27 @@ PY
     export VO_CDP_URL="${VO_CDP_URL:-http://localhost:9222}"
     export VO_VIEWER_URL="${VO_VIEWER_URL:-http://localhost:6901}"
 
+    for port_name in VO_PORT VO_WS_PORT; do
+        local port="${!port_name}"
+        if "$python_bin" - "$port" <<'PY'
+import socket
+import sys
+
+try:
+    with socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=0.5):
+        pass
+except OSError:
+    raise SystemExit(1)
+PY
+        then
+            echo -e "${RED}✗ ${port_name}=${port} 已被占用，请先停止旧服务${NC}"
+            exit 1
+        fi
+    done
+
     echo -e "  ${GREEN}✓${NC} 环境已配置"
+    echo -e "  ${GREEN}✓${NC} 状态目录: $VO_STATUS_DIR"
+    echo -e "  ${GREEN}✓${NC} HTTP/WS 端口可用: ${VO_PORT}/${VO_WS_PORT}"
     echo ""
 
     # Cache-busting
@@ -402,19 +427,126 @@ PY
     cache_v=$(date +%s)
     sed -i "s/?v=[0-9]*/?v=${cache_v}/g" "$SCRIPT_DIR/app/index.html" 2>/dev/null || true
 
-    echo -e "${GREEN}╔══════════════════════════════════════════════════╗${NC}"
-    echo -e "${GREEN}║      My Virtual Office 本地运行中! 🎉           ║${NC}"
-    echo -e "${GREEN}╠══════════════════════════════════════════════════╣${NC}"
-    echo -e "${GREEN}║${NC}"
-    echo -e "${GREEN}║  🌐 办公室:    http://localhost:${VO_PORT}           ${NC}"
-    echo -e "${GREEN}║  🧙 设置向导:  http://localhost:${VO_PORT}/setup     ${NC}"
-    echo -e "${GREEN}║${NC}"
-    echo -e "${GREEN}║  按 Ctrl+C 停止服务                                ${NC}"
-    echo -e "${GREEN}╚══════════════════════════════════════════════════╝${NC}"
+    cd "$SCRIPT_DIR/app"
+    "$python_bin" server.py &
+    local server_pid=$!
+    trap 'kill "$server_pid" 2>/dev/null || true' INT TERM EXIT
+
+    local ready=false
+    for _ in $(seq 1 60); do
+        if ! kill -0 "$server_pid" 2>/dev/null; then
+            echo -e "${RED}✗ 服务进程提前退出${NC}"
+            wait "$server_pid"
+            exit $?
+        fi
+        if "$python_bin" - "$VO_PORT" <<'PY' 2>/dev/null
+import sys
+import urllib.request
+
+with urllib.request.urlopen(f"http://127.0.0.1:{sys.argv[1]}/health", timeout=1) as response:
+    raise SystemExit(0 if response.status == 200 else 1)
+PY
+        then
+            ready=true
+            break
+        fi
+        sleep 0.5
+    done
+
+    if [ "$ready" != true ]; then
+        echo -e "${RED}✗ HTTP 健康检查超时，服务未就绪${NC}"
+        kill "$server_pid" 2>/dev/null || true
+        wait "$server_pid" 2>/dev/null || true
+        exit 1
+    fi
+
+    if ! "$python_bin" - "$VO_WS_PORT" <<'PY'
+import asyncio
+import sys
+from websockets.asyncio.client import connect
+
+async def check():
+    async with connect(f"ws://127.0.0.1:{sys.argv[1]}", open_timeout=2):
+        pass
+
+asyncio.run(check())
+PY
+    then
+        echo -e "${RED}✗ WebSocket 端口 ${VO_WS_PORT} 未监听${NC}"
+        kill "$server_pid" 2>/dev/null || true
+        wait "$server_pid" 2>/dev/null || true
+        exit 1
+    fi
+
+    "$python_bin" - "$VO_PORT" "$VO_STATUS_DIR/startup-health.json" "$VO_VIEWER_URL" <<'PY'
+import asyncio
+import json
+import ssl
+import sys
+import time
+import urllib.request
+import urllib.parse
+from websockets.asyncio.client import connect
+
+port, output, viewer_url = sys.argv[1:]
+base = f"http://127.0.0.1:{port}"
+report = {"checkedAt": int(time.time()), "http": True, "websocket": True}
+for name, path in (
+    ("gateway", "/api/gateway/test"),
+    ("browser", "/browser-status"),
+    ("license", "/api/license"),
+):
+    try:
+        with urllib.request.urlopen(base + path, timeout=3) as response:
+            report[name] = json.load(response)
+    except Exception as exc:
+        report[name] = {"ok": False, "error": str(exc)}
+
+async def check_viewer_websocket():
+    parsed = urllib.parse.urlsplit(viewer_url)
+    query = urllib.parse.parse_qs(parsed.query)
+    path = query.get("path", [None])[0]
+    if not path:
+        base_path = parsed.path.strip("/")
+        path = f"{base_path}/websockify" if base_path else "websockify"
+    ws_scheme = "wss" if parsed.scheme == "https" else "ws"
+    ws_url = urllib.parse.urlunsplit((ws_scheme, parsed.netloc, "/" + path.lstrip("/"), "", ""))
+    ssl_context = None
+    if ws_scheme == "wss":
+        ssl_context = ssl.create_default_context()
+        ssl_context.check_hostname = False
+        ssl_context.verify_mode = ssl.CERT_NONE
+    async with connect(
+        ws_url,
+        ssl=ssl_context,
+        subprotocols=["binary"],
+        origin=f"{parsed.scheme}://{parsed.netloc}",
+        open_timeout=5,
+    ):
+        return ws_url
+
+try:
+    viewer_ws_url = asyncio.run(check_viewer_websocket())
+    report["viewerWebsocket"] = {"ok": True, "url": viewer_ws_url}
+except Exception as exc:
+    report["viewerWebsocket"] = {"ok": False, "error": str(exc)}
+
+with open(output, "w") as f:
+    json.dump(report, f, indent=2)
+print(json.dumps(report, ensure_ascii=False))
+PY
+
+    echo ""
+    echo -e "${GREEN}✓ HTTP 已就绪: http://localhost:${VO_PORT}${NC}"
+    echo -e "${GREEN}✓ WebSocket 已监听: 127.0.0.1:${VO_WS_PORT}${NC}"
+    echo -e "  启动报告: $VO_STATUS_DIR/startup-health.json"
+    echo -e "  按 Ctrl+C 停止服务"
     echo ""
 
-    cd "$SCRIPT_DIR/app"
-    exec "$python_bin" server.py
+    wait "$server_pid"
+    local exit_code=$?
+    trap - INT TERM EXIT
+    exit "$exit_code"
 }
 
 # ── 清理数据 ──────────────────────────────────────────────────────────────

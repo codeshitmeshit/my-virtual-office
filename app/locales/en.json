@@ -24,6 +24,8 @@
   "weather_location": "Weather Location",
   "display_section": "🖥️ Display",
   "show_chat_bubbles": "Show chat bubbles",
+  "internal_bubble_timeout": "Internal bubble auto-collapse (seconds)",
+  "internal_bubble_timeout_hint": "Use 0 to keep Internal bubbles expanded.",
   "show_agent_names": "Show agent names",
   "api_usage_section": "☁️ API Usage",
   "show_api_usage": "Show API Usage Panel",

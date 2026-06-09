@@ -35,16 +35,31 @@ Agent keys are now dynamic — any agent ID is accepted.
 import json, sys, time, uuid, os
 from datetime import datetime, timezone, timedelta
 
-# Load status dir from vo-config.json or env, with fallback
-def _get_status_file():
+def _local_status_dir():
+    return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data"))
+
+def _get_status_dir():
+    """Return one canonical status directory for local and container runs."""
+    env_status_dir = os.environ.get("VO_STATUS_DIR")
+    if env_status_dir:
+        return os.path.abspath(os.path.expanduser(env_status_dir))
+
     cfg_path = os.environ.get("VO_CONFIG", os.path.join(os.path.dirname(os.path.abspath(__file__)), "vo-config.json"))
-    status_dir = os.environ.get("VO_STATUS_DIR", "/data")
+    status_dir = None
     try:
         with open(cfg_path, "r") as f:
             cfg = json.load(f)
-        status_dir = cfg.get("presence", {}).get("statusDir", status_dir)
+        status_dir = cfg.get("presence", {}).get("statusDir")
     except (FileNotFoundError, json.JSONDecodeError):
         pass
+
+    if not status_dir or (status_dir == "/data" and not os.access("/data", os.W_OK)):
+        status_dir = _local_status_dir()
+    return os.path.abspath(os.path.expanduser(status_dir))
+
+# Load status dir from vo-config.json or env, with fallback
+def _get_status_file():
+    status_dir = _get_status_dir()
     os.makedirs(status_dir, exist_ok=True)
     return os.path.join(status_dir, "virtual-office-status.json")
 
@@ -99,18 +114,6 @@ def show(data):
     print()
 
 # ─── PROJECT MANAGEMENT ──────────────────────────────────────────────────────
-
-def _get_status_dir():
-    """Return the status directory path."""
-    cfg_path = os.environ.get("VO_CONFIG", os.path.join(os.path.dirname(os.path.abspath(__file__)), "vo-config.json"))
-    status_dir = os.environ.get("VO_STATUS_DIR", "/data")
-    try:
-        with open(cfg_path, "r") as f:
-            cfg = json.load(f)
-        status_dir = cfg.get("presence", {}).get("statusDir", status_dir)
-    except (FileNotFoundError, json.JSONDecodeError):
-        pass
-    return status_dir
 
 def _proj_file():
     return os.path.join(_get_status_dir(), "projects.json")

@@ -108,6 +108,24 @@ def _normalize_presence_map(data):
 def _get_normalized_presence_state():
     gateway_presence._sync_meetings_from_file()
     state = _normalize_presence_map(gateway_presence.get_state())
+    # Bubble commands still write to virtual-office-status.json. Presence owns
+    # state/task, but these display-only fields must remain available to the UI.
+    try:
+        with open(STATUS_FILE, "r") as f:
+            legacy_status = json.load(f)
+        for key, entry in legacy_status.items():
+            if key.startswith("_") or not isinstance(entry, dict):
+                continue
+            target = state.setdefault(key, {
+                "state": "idle",
+                "task": "",
+                "updated": int(entry.get("updated") or time.time()),
+                "source": "status-file",
+            })
+            for field in ("thought", "speech", "speechTarget"):
+                target[field] = entry.get(field, "")
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        pass
     # Provider adapters such as Hermes do not emit OpenClaw gateway events.
     # Keep them visible as idle/offline-capable office citizens unless a
     # manual/process override (working, idle, error) has more current data.
@@ -227,6 +245,7 @@ def _load_vo_config():
             "name": _env_or("VO_OFFICE_NAME", office.get("name", "Virtual Office")),
             "port": int(_env_or("VO_PORT", office.get("port", 8090))),
             "wsPort": int(_env_or("VO_WS_PORT", office.get("wsPort", 8091))),
+            "wsPath": _env_or("VO_WS_PATH", office.get("wsPath", "/ws")),
         },
         "openclaw": {
             "homePath": oc_home,
@@ -7456,6 +7475,7 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(json.dumps({
                 "wsPort": WS_PORT,
+                "wsPath": VO_CONFIG["office"].get("wsPath", "/ws"),
                 "token": _get_gateway_token(),
                 "openclawVersion": _get_openclaw_version(),
             }).encode())
