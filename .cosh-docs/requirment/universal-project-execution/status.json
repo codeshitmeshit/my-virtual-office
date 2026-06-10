@@ -1,0 +1,69 @@
+{
+  "name": "universal-project-execution",
+  "stage": "implementation_done",
+  "waiting_for_user": true,
+  "updated_at": "2026-06-11T01:30:28+08:00",
+  "confirmed": {
+    "checklist": true,
+    "tested": false,
+    "done": false
+  },
+  "confirmations": {
+    "checklist": {
+      "confirmed_at": "2026-06-10T00:55:54+08:00",
+      "summary": "用户确认 执行底座/独立审查 分阶段 checklist，并要求生成 todolist。"
+    },
+    "tested": null,
+    "done": null
+  },
+  "stages": {
+    "execution_foundation": {
+      "name": "universal-project-execution-foundation",
+      "tested": false,
+      "confirmation": null,
+      "implementation": "completed",
+      "automated_tests": "passed_phase_a_expanded_2026-06-11",
+      "browser_acceptance_by_codex": "passed_phase_a_smoke_2026-06-11",
+      "waiting_for": "user_manual_acceptance"
+    },
+    "independent_review": {
+      "name": "independent-review-and-final-acceptance",
+      "tested": false,
+      "confirmation": null,
+      "implementation": "completed",
+      "automated_tests": "passed_phase_b_expanded_2026-06-11",
+      "browser_acceptance_by_codex": "passed_phase_b_smoke_2026-06-11",
+      "waiting_for": "user_manual_acceptance"
+    }
+  },
+  "files": {
+    "requirement": "requirement.md",
+    "review": "review.md",
+    "checklist": "checklist.md",
+    "todolist": "todolist.md"
+  },
+  "notes": [
+    "通用项目执行 was corrected from the original universal projects/automations roadmap to universal project execution because the implemented Codex live activity controls focused on Codex live controls rather than Claude Code and general project binding.",
+    "OpenClaw, Hermes, and Codex are the 通用项目执行 provider set; Claude Code is deferred.",
+    "Every task requires an independent reviewer pass and explicit user acceptance before Done.",
+    "Per-project concurrency with isolated worktrees and universal automations are explicitly deferred to later phases.",
+    "通用项目执行 is split into independently accepted 执行底座 universal project execution foundation and 独立审查与最终验收 independent review/final acceptance.",
+    "执行底座 successful execution stops at execution_complete and cannot use legacy self-review or enter Done.",
+    "Checklist contains 38 stable acceptance checks with separate 执行底座 and 独立审查与最终验收 gates.",
+    "User confirmed the checklist on 2026-06-10 and requested todolist generation.",
+    "Todolist contains 18 traceable tasks; 执行底座 user acceptance gates the start of 独立审查与最终验收.",
+    "执行底座 implementation and automated tests completed on 2026-06-10.",
+    "Codex browser acceptance completed on 2026-06-10: start.sh launched successfully with _VO_INT=1, non-demo developer mode was verified, OpenClaw/Hermes/Codex agents were visible, project workspace binding and execution evidence rendered in Chromium, dirty worktree confirmation and single-use fingerprint behavior passed, Done bypass guards returned 409, and invalid workspace creation returned 400 without persistence.",
+    "Local acceptance service is running on http://localhost:8090.",
+    "Independent review implementation completed on 2026-06-10: reviewer handoff, structured pass/needs_more_work/blocked parsing, current-attempt user acceptance, reject-and-rework invalidation, mark-blocked feedback, Done guards, and legacy review-check blocking are covered by tests/test_project_execution.py.",
+    "Naming cleanup completed on 2026-06-10: runtime code and tests use Project Execution / independent review naming instead of phasex variables or routes; active API routes use /project-execution/...",
+    "Chromium acceptance completed on 2026-06-10: start.sh launched with _VO_INT=1 and demo:false, Project Execution project/workspace/task were created via browser fetch, /project-execution/start completed to execution_complete, evidence rendered in the task detail panel, and direct Done update returned 409 before final acceptance.",
+    "Phase A expanded automated coverage completed on 2026-06-11: added assertions for workspace file/root/symlink rejection, task role overrides, OpenClaw/Hermes/Codex execution routing with workspace context, provider references, Done reorder guard, failed execution evidence redaction/truncation, cancellation evidence, and stale active execution reconciliation.",
+    "Phase A regression tests passed on 2026-06-11: .venv/bin/python tests/test_project_execution.py, tests/test_codex_bridge.py, tests/test_codex_provider.py, tests/test_codex_server.py, tests/test_websocket_route_contract.py, tests/test_review_parser.py, tests/test_codex_live_activity_e2e.py, node tests/test_browser_viewer_url.js, node tests/test_codex_reasoning.js, node tests/test_internal_bubble.js, and NO_PROXY local HTTP tests/test_crud_projects.sh against http://127.0.0.1:8147.",
+    "Phase A browser smoke passed on 2026-06-11 against http://127.0.0.1:8147: created a Project Execution project bound to /tmp/vo-phase7a-browser-workspace, created a task, opened the project board, verified workspace/status display, and verified the task detail Project Execution start panel renders.",
+    "Phase B expanded implementation completed on 2026-06-11: malformed Reviewer output is blocked instead of passing, Reviewer needs_more_work now dispatches automatic rework through the original executor, successful rework automatically starts a fresh independent review, and the fourth needs_more_work after three rework cycles blocks without a fourth automatic rework.",
+    "Phase B expanded automated coverage completed on 2026-06-11: added assertions for OpenClaw/Hermes/Codex Reviewer routing, read-only evidence packet shape, schema-invalid Reviewer pass blocking, automatic rework and re-review to awaiting_user_acceptance, three-cycle rework cap, stale acceptance rejection, feedback-required rejection/blocking, and legacy review-check blocking.",
+    "Phase B regression tests passed on 2026-06-11: .venv/bin/python tests/test_project_execution.py, tests/test_codex_bridge.py, tests/test_codex_provider.py, tests/test_codex_server.py, tests/test_codex_live_activity_e2e.py, tests/test_websocket_route_contract.py, tests/test_review_parser.py, node tests/test_browser_viewer_url.js, node tests/test_codex_reasoning.js, node tests/test_internal_bubble.js, and NO_PROXY local HTTP tests/test_crud_projects.sh against http://127.0.0.1:8157.",
+    "Phase B browser smoke passed on 2026-06-11 against http://127.0.0.1:8157: Virtual Office loaded, Project Manager opened, ProjMgr was present, and no new frontend JavaScript errors were observed beyond an existing 404 resource request."
+  ]
+}

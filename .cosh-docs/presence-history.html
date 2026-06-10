@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Presence 架构的诞生与演进 — My Virtual Office 教程</title>
+  <style>
+    :root {
+      --card: #ffffff; --text: #1f2937; --muted: #64748b; --primary: #2563eb;
+      --soft: #dbeafe; --border: #e2e8f0; --shadow: 0 18px 45px rgba(15, 23, 42, 0.08);
+      --radius: 20px; --green: #15803d; --blue: #1d4ed8; --red: #b91c1c;
+    }
+    * { box-sizing: border-box; } html { scroll-behavior: smooth; }
+    body {
+      margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+      background: radial-gradient(circle at top left, rgba(37, 99, 235, 0.14), transparent 31%),
+        linear-gradient(180deg, #f8fbff 0%, #eef2f7 100%);
+      color: var(--text); line-height: 1.8;
+    }
+    a { color: inherit; }
+    .container { max-width: 1080px; margin: 0 auto; padding: 34px 24px 72px; }
+    .back {
+      display: inline-flex; align-items: center; margin-bottom: 18px; padding: 8px 12px;
+      border: 1px solid var(--border); border-radius: 999px; background: rgba(255,255,255,0.75);
+      color: #334155; text-decoration: none; font-size: 14px; font-weight: 700;
+    }
+    .hero, .card, .toc {
+      background: rgba(255,255,255,0.92); border: 1px solid var(--border);
+      border-radius: var(--radius); box-shadow: var(--shadow);
+    }
+    .hero { padding: 38px; margin-bottom: 22px; }
+    .eyebrow {
+      display: inline-flex; margin-bottom: 16px; padding: 6px 12px; border-radius: 999px;
+      background: var(--soft); color: var(--primary); font-size: 13px; font-weight: 800;
+    }
+    h1 { margin: 0 0 16px; font-size: clamp(32px, 5vw, 54px); line-height: 1.1; }
+    h2 { margin: 0 0 18px; font-size: 26px; line-height: 1.35; }
+    h3 { margin: 0 0 8px; font-size: 19px; line-height: 1.4; }
+    p { margin: 0; color: var(--muted); } .hero p { max-width: 830px; font-size: 17px; }
+    .meta, .toc-links { display: flex; flex-wrap: wrap; gap: 10px; } .meta { margin-top: 24px; }
+    .tag { padding: 5px 11px; border-radius: 999px; background: #f1f5f9; color: #475569; font-size: 12px; font-weight: 800; }
+    .toc { padding: 20px 24px; margin: 22px 0; } .toc strong { display: block; margin-bottom: 10px; }
+    .toc a { padding: 7px 11px; border-radius: 10px; background: #f8fafc; color: #334155; text-decoration: none; font-size: 14px; font-weight: 700; }
+    .card { padding: 30px; margin-top: 22px; }
+    pre { overflow-x: auto; margin: 18px 0 0; padding: 20px; border-radius: 16px; background: #0f172a; color: #e5e7eb; font-size: 14px; line-height: 1.7; }
+    code { font-family: "JetBrains Mono", "Fira Code", Consolas, monospace; }
+    .inline-code { padding: 2px 6px; border-radius: 7px; background: #eef2ff; color: #3730a3; font-size: 0.92em; }
+    .callout { margin-top: 18px; padding: 18px; border-radius: 16px; border: 1px solid #bfdbfe; background: #eff6ff; }
+    .callout strong { display: block; margin-bottom: 5px; color: var(--blue); }
+    .callout.success { border-color: #bbf7d0; background: #f0fdf4; } .callout.success strong { color: var(--green); }
+    .callout.risk { border-color: #fecaca; background: #fff1f2; } .callout.risk strong { color: var(--red); }
+    .table-wrap { overflow-x: auto; margin-top: 18px; border: 1px solid var(--border); border-radius: 16px; background: #ffffff; }
+    table { width: 100%; border-collapse: collapse; min-width: 720px; }
+    th, td { padding: 15px 16px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+    th { background: #f8fafc; color: #334155; font-size: 14px; }
+    tr:last-child td { border-bottom: 0; }
+    @media (max-width: 820px) { .hero, .card, .toc { border-radius: 18px; } }
+    @media (max-width: 560px) { .container { padding: 24px 16px 48px; } .hero, .card { padding: 22px; } .toc-links { display: grid; } }
+  </style>
+</head>
+<body>
+  <main class="container">
+    <a class="back" href="./guide.html">返回教程目录</a>
+
+    <section class="hero">
+      <span class="eyebrow">Git 历史溯源</span>
+      <h1>Presence 架构的诞生与演进</h1>
+      <p>为什么放弃 office.py 手动状态、改用 WebSocket 只读观察者？基于 commit <code>cd65ffd</code> 到 2026-06-05 的 16 次修改的真实证据。</p>
+      <div class="meta">
+        <span class="tag">Git 历史</span><span class="tag">架构决策</span><span class="tag">gateway-first</span>
+      </div>
+      <div class="callout success">
+        <strong>前置知识</strong>
+        <p>建议先阅读<a href="./gateway-presence.html">Gateway Presence：实时状态感知</a>，了解当前 Presence 机制的工作原理。</p>
+      </div>
+    </section>
+
+    <nav class="toc" aria-label="本页目录">
+      <strong>本页内容</strong>
+      <div class="toc-links">
+        <a href="#before">Before：office.py 手动模式</a>
+        <a href="#commit">关键 Commit：cd65ffd</a>
+        <a href="#design">设计亮点</a>
+        <a href="#evolution">后续演进</a>
+      </div>
+    </nav>
+
+    <section id="before" class="card">
+      <h2>Before：office.py 手动模式</h2>
+      <p>在 Gateway Presence 引入之前，Agent 状态更新依赖 <code class="inline-code">office.py</code> CLI 工具手动操作：</p>
+      <ul style="margin:12px 0 0;padding-left:22px;color:var(--muted);">
+        <li>用户需要手动运行 CLI 命令来更新 Agent 状态</li>
+        <li>状态更新不是实时的，需要手动触发</li>
+        <li>无法自动感知 Agent 的实际活动（工具调用、消息处理等）</li>
+      </ul>
+      <div class="callout risk" style="margin-top:14px;">
+        <strong>问题</strong>
+        <p>手动模式无法反映 Agent 的真实工作状态，用户体验差，且容易因为忘记更新状态而产生误导。</p>
+      </div>
+    </section>
+
+    <section id="commit" class="card">
+      <h2>关键 Commit：cd65ffd</h2>
+      <p><strong>日期：</strong>2026-03-24 04:33:39（初始发布同一天）</p>
+      <p><strong>作者：</strong>Elix &lt;elix@local&gt;</p>
+      <p><strong>变更：</strong>创建全新的 <code class="inline-code">gateway_presence.py</code>（629 行新文件）</p>
+      <pre><code># commit cd65ffd -- app/gateway_presence.py
+# "Replaces the old office.py manual status updates with automatic detection"</code></pre>
+      <p style="margin-top:14px;">blame 证据：<code class="inline-code">git blame app/gateway_presence.py | head -30</code> 显示前 30 行均来自 cd65ffd（Elix），仅第 9 行注释在 56cadb5 被 eliautobot 更新。</p>
+    </section>
+
+    <section id="design" class="card">
+      <h2>设计亮点</h2>
+      <div class="table-wrap">
+        <table>
+          <tr><th>设计选择</th><th>实现</th><th>原因</th></tr>
+          <tr><td><strong>只读观察者</strong></td><td>不向 Gateway 发送任何命令</td><td>不干扰 Agent 正常运行，即使 Presence 崩溃 Agent 仍工作</td></tr>
+          <tr><td><strong>asyncio.Queue 单读者</strong></td><td>事件通过 Queue 传递给单一消费者</td><td>保证并发安全，避免多线程竞争</td></tr>
+          <tr><td><strong>sessions.list 轮询</strong></td><td>每 10 秒轮询一次</td><td>补充实时事件，确保不遗漏状态变化</td></tr>
+          <tr><td><strong>手动 override TTL</strong></td><td>30 秒自动过期</td><td>允许短暂手动设置，但不会永久覆盖自动推导</td></tr>
+          <tr><td><strong>磁盘快照</strong></td><td>每 30 秒保存状态</td><td>崩溃恢复，防止内存状态丢失</td></tr>
+        </table>
+      </div>
+    </section>
+
+    <section id="evolution" class="card">
+      <h2>后续演进</h2>
+      <p>从 cd65ffd 到 2026-06-05，gateway_presence.py 经历了 16 次修改：</p>
+      <ul style="margin:12px 0 0;padding-left:22px;color:var(--muted);">
+        <li><strong>状态机细化</strong>：从简单的 working/idle 演变为 working/finishing/idle 三态，增加 grace period</li>
+        <li><strong>Run/Tool 精确追踪</strong>：引入 <code class="inline-code">runId</code> 和 <code class="inline-code">toolCallId</code> 追踪，避免误判</li>
+        <li><strong>超时保护</strong>：IDLE_TIMEOUT_SEC = 120s，FINISHING_GRACE_SEC = 12s，ACTIVE_RUN_STALE_SEC = 6h</li>
+        <li><strong>断线重连</strong>：指数退避（5s → 60s），确保 Gateway 断开后自动恢复</li>
+      </ul>
+      <div class="callout success" style="margin-top:14px;">
+        <strong>结论</strong>
+        <p>Gateway-first Presence 架构是项目最核心的设计决策之一，由 Elix 在初始发布当天亲自引入。它将状态更新从"手动推"转变为"自动拉"，大幅提升了用户体验和系统可靠性。</p>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

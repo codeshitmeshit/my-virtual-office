@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 700 420" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">
+  <rect width="100%" height="100%" fill="#f8fafc"/>
+  <text x="350" y="36" text-anchor="middle" font-size="18" font-weight="700" fill="#1f2937">Gateway Presence 连接流程</text>
+  
+  <defs>
+    <marker id="df" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#64748b"/>
+    </marker>
+  </defs>
+  
+  <!-- Steps -->
+  <rect x="200" y="60" width="300" height="44" rx="10" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+  <text x="350" y="88" text-anchor="middle" font-size="12" font-weight="700" fill="#1d4ed8">1. ws_connect(gateway_url)</text>
+  
+  <line x1="350" y1="104" x2="350" y2="130" stroke="#64748b" stroke-width="1.5" marker-end="url(#df)"/>
+  
+  <rect x="200" y="135" width="300" height="44" rx="10" fill="#eff6ff" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="350" y="163" text-anchor="middle" font-size="12" font-weight="600" fill="#1d4ed8">2. 等待 connect.challenge → 发送认证</text>
+  
+  <line x1="350" y1="179" x2="350" y2="205" stroke="#64748b" stroke-width="1.5" marker-end="url(#df)"/>
+  
+  <rect x="200" y="210" width="300" height="44" rx="10" fill="#eff6ff" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="350" y="238" text-anchor="middle" font-size="12" font-weight="600" fill="#1d4ed8">3. subscribe: agent, session.tool, session.message</text>
+  
+  <line x1="350" y1="254" x2="350" y2="280" stroke="#64748b" stroke-width="1.5" marker-end="url(#df)"/>
+  
+  <!-- Event loop -->
+  <rect x="140" y="285" width="420" height="70" rx="14" fill="#f0fdf4" stroke="#15803d" stroke-width="2"/>
+  <text x="350" y="312" text-anchor="middle" font-size="12" font-weight="700" fill="#15803d">4. 事件循环: while True: msg = await ws.recv()</text>
+  <text x="350" y="334" text-anchor="middle" font-size="10" fill="#64748b">_process_event() → _set_working() / _set_finishing() / _set_idle()</text>
+  
+  <!-- Loop arrow -->
+  <path d="M 560 320 Q 600 320 600 285 Q 600 250 560 250" fill="none" stroke="#15803d" stroke-width="1.5" marker-end="url(#df)"/>
+  <text x="610" y="290" font-size="9" fill="#15803d">循环</text>
+  
+  <!-- Reconnect -->
+  <rect x="200" y="380" width="300" height="36" rx="10" fill="#fff1f2" stroke="#b91c1c" stroke-width="1.5"/>
+  <text x="350" y="403" text-anchor="middle" font-size="11" font-weight="600" fill="#b91c1c">断线重连: 指数退避 (5s → 60s)</text>
+  
+  <line x1="350" y1="355" x2="350" y2="380" stroke="#b91c1c" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#df)"/>
+</svg>
