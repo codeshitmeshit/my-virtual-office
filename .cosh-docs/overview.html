@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>30 分钟快速总览 — My Virtual Office 教程</title>
+  <style>
+    :root {
+      --card: #ffffff; --text: #1f2937; --muted: #64748b; --primary: #2563eb;
+      --soft: #dbeafe; --border: #e2e8f0; --shadow: 0 18px 45px rgba(15, 23, 42, 0.08);
+      --radius: 20px; --green: #15803d; --blue: #1d4ed8; --red: #b91c1c;
+    }
+    * { box-sizing: border-box; } html { scroll-behavior: smooth; }
+    body {
+      margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+      background: radial-gradient(circle at top left, rgba(37, 99, 235, 0.14), transparent 31%),
+        linear-gradient(180deg, #f8fbff 0%, #eef2f7 100%);
+      color: var(--text); line-height: 1.8;
+    }
+    a { color: inherit; }
+    .container { max-width: 1080px; margin: 0 auto; padding: 34px 24px 72px; }
+    .back {
+      display: inline-flex; align-items: center; margin-bottom: 18px; padding: 8px 12px;
+      border: 1px solid var(--border); border-radius: 999px; background: rgba(255,255,255,0.75);
+      color: #334155; text-decoration: none; font-size: 14px; font-weight: 700;
+    }
+    .hero, .card, .toc {
+      background: rgba(255,255,255,0.92); border: 1px solid var(--border);
+      border-radius: var(--radius); box-shadow: var(--shadow);
+    }
+    .hero { padding: 38px; margin-bottom: 22px; }
+    .eyebrow {
+      display: inline-flex; margin-bottom: 16px; padding: 6px 12px; border-radius: 999px;
+      background: var(--soft); color: var(--primary); font-size: 13px; font-weight: 800;
+    }
+    h1 { margin: 0 0 16px; font-size: clamp(32px, 5vw, 54px); line-height: 1.1; }
+    h2 { margin: 0 0 18px; font-size: 26px; line-height: 1.35; }
+    h3 { margin: 0 0 8px; font-size: 19px; line-height: 1.4; }
+    p { margin: 0; color: var(--muted); } .hero p { max-width: 830px; font-size: 17px; }
+    .meta, .toc-links { display: flex; flex-wrap: wrap; gap: 10px; } .meta { margin-top: 24px; }
+    .tag { padding: 5px 11px; border-radius: 999px; background: #f1f5f9; color: #475569; font-size: 12px; font-weight: 800; }
+    .toc { padding: 20px 24px; margin: 22px 0; } .toc strong { display: block; margin-bottom: 10px; }
+    .toc a { padding: 7px 11px; border-radius: 10px; background: #f8fafc; color: #334155; text-decoration: none; font-size: 14px; font-weight: 700; }
+    .card { padding: 30px; margin-top: 22px; }
+    pre { overflow-x: auto; margin: 18px 0 0; padding: 20px; border-radius: 16px; background: #0f172a; color: #e5e7eb; font-size: 14px; line-height: 1.7; }
+    code { font-family: "JetBrains Mono", "Fira Code", Consolas, monospace; }
+    .inline-code { padding: 2px 6px; border-radius: 7px; background: #eef2ff; color: #3730a3; font-size: 0.92em; }
+    .callout { margin-top: 18px; padding: 18px; border-radius: 16px; border: 1px solid #bfdbfe; background: #eff6ff; }
+    .callout strong { display: block; margin-bottom: 5px; color: var(--blue); }
+    .callout.success { border-color: #bbf7d0; background: #f0fdf4; } .callout.success strong { color: var(--green); }
+    .callout.risk { border-color: #fecaca; background: #fff1f2; } .callout.risk strong { color: var(--red); }
+    .table-wrap { overflow-x: auto; margin-top: 18px; border: 1px solid var(--border); border-radius: 16px; background: #ffffff; }
+    table { width: 100%; border-collapse: collapse; min-width: 720px; }
+    th, td { padding: 15px 16px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+    th { background: #f8fafc; color: #334155; font-size: 14px; }
+    tr:last-child td { border-bottom: 0; }
+    .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-top: 18px; }
+    .mini-card { padding: 18px; border: 1px solid var(--border); border-radius: 16px; background: #f8fafc; }
+    .mini-card strong { display: block; margin-bottom: 6px; color: var(--text); }
+    .mini-card span { color: var(--muted); font-size: 14px; }
+    .diagram { margin-top: 18px; padding: 16px; background: #ffffff; }
+    .diagram img { display: block; width: 100%; border-radius: 18px; border: 1px solid var(--border); }
+    .caption { margin-top: 10px; font-size: 14px; text-align: center; }
+    @media (max-width: 820px) { .grid { grid-template-columns: 1fr; } .hero, .card, .toc { border-radius: 18px; } }
+    @media (max-width: 560px) { .container { padding: 24px 16px 48px; } .hero, .card { padding: 22px; } .toc-links { display: grid; } }
+  </style>
+</head>
+<body>
+  <main class="container">
+    <a class="back" href="./guide.html">返回教程目录</a>
+
+    <section class="hero">
+      <span class="eyebrow">30 分钟快速总览</span>
+      <h1>My Virtual Office 一句话读懂</h1>
+      <p>一个自托管的像素风 AI Agent 可视化工作空间——把 OpenClaw/Hermes Agent 的"黑盒"运行转化为看得见的办公室场景，支持实时 presence、聊天、办公室编辑、Agent Browser 和自动项目工作流。</p>
+      <div class="meta">
+        <span class="tag">总览</span><span class="tag">入门必读</span><span class="tag">来自三个 Subagent 的综合结论</span>
+      </div>
+      <div class="callout success">
+        <strong>这是教程入口</strong>
+        <p>建议按 结构分析 → 主流程链路 → Git 历史 的顺序阅读，或跳转到你感兴趣的主题。本页只给最关键的摘要。</p>
+      </div>
+    </section>
+
+    <nav class="toc" aria-label="本页目录">
+      <strong>本页内容</strong>
+      <div class="toc-links">
+        <a href="#tech-stack">技术栈与启动入口</a>
+        <a href="#directory">核心目录地图</a>
+        <a href="#happy-path">最重要的 Happy Path</a>
+        <a href="#abstractions">3 个核心抽象</a>
+        <a href="#complexity">最值得注意的复杂设计</a>
+        <a href="#next">后续深入路径</a>
+      </div>
+    </nav>
+
+    <section id="tech-stack" class="card">
+      <h2>技术栈与启动入口</h2>
+      <div class="grid">
+        <div class="mini-card">
+          <strong>后端</strong>
+          <span>Python 3.12 + <code>websockets</code> + <code>http.server</code>（标准库）</span>
+        </div>
+        <div class="mini-card">
+          <strong>前端</strong>
+          <span>Vanilla JS（零框架）+ HTML5 Canvas + CSS3</span>
+        </div>
+        <div class="mini-card">
+          <strong>部署</strong>
+          <span>Docker Compose + 多架构镜像（amd64/arm64）+ GHCR</span>
+        </div>
+      </div>
+      <p style="margin-top:14px;"><strong>启动入口：</strong><code class="inline-code">app/server.py</code> 第 10469 行，<code class="inline-code">if __name__ == "__main__"</code> 启动三线程（HTTP + WS 代理 + 工作流恢复）。详见 <a href="./server-startup.html">服务器启动：三线并行</a>（主流程链路 Subagent）。</p>
+    </section>
+
+    <section id="directory" class="card">
+      <h2>核心目录地图</h2>
+      <div class="table-wrap">
+        <table>
+          <tr><th>目录</th><th>职责</th><th>关键文件</th></tr>
+          <tr><td><code>app/</code></td><td>主应用核心</td><td>server.py (10K+), game.js (15K+), chat.js (2.9K+)</td></tr>
+          <tr><td><code>website/</code></td><td>营销落地页</td><td>Nginx 独立容器</td></tr>
+          <tr><td><code>docs/</code></td><td>架构文档</td><td>多窗口聊天、Hermes Provider、跨平台通信</td></tr>
+          <tr><td><code>kasm-browser-config/</code></td><td>Agent Browser 配置</td><td>KasmVNC + Chromium CDP 脚本</td></tr>
+        </table>
+      </div>
+      <p style="margin-top:14px;">详见 <a href="./directory-map.html">目录结构与模块职责</a>（结构分析 Subagent）。</p>
+    </section>
+
+    <section id="happy-path" class="card">
+      <h2>最重要的 Happy Path</h2>
+      <p>用户最核心使用路径：</p>
+      <div class="steps" style="display:grid;gap:12px;margin-top:14px;">
+        <div style="padding:16px;border:1px solid var(--border);border-radius:14px;background:#f8fafc;">
+          <strong>1. 启动</strong> <span style="color:var(--muted);">→ Docker Compose 启动 → server.py 三线程初始化 → Gateway Presence 连接</span>
+        </div>
+        <div style="padding:16px;border:1px solid var(--border);border-radius:14px;background:#f8fafc;">
+          <strong>2. 发现</strong> <span style="color:var(--muted);">→ get_roster() → 双 Provider 发现（OpenClaw + Hermes）→ 构建统一花名册</span>
+        </div>
+        <div style="padding:16px;border:1px solid var(--border);border-radius:14px;background:#f8fafc;">
+          <strong>3. 状态</strong> <span style="color:var(--muted);">→ Gateway WS 事件流 → Presence 状态机推导 working/idle/finishing</span>
+        </div>
+        <div style="padding:16px;border:1px solid var(--border);border-radius:14px;background:#f8fafc;">
+          <strong>4. 渲染</strong> <span style="color:var(--muted);">→ 前端 Canvas 渲染办公室 → Agent 在工位间走动</span>
+        </div>
+        <div style="padding:16px;border:1px solid var(--border);border-radius:14px;background:#f8fafc;">
+          <strong>5. 聊天</strong> <span style="color:var(--muted);">→ 用户打开聊天窗口 → WS 直连 Gateway → 流式响应 + 工具调用展示</span>
+        </div>
+      </div>
+    </section>
+
+    <section id="abstractions" class="card">
+      <h2>3 个必须先理解的核心抽象</h2>
+      <div class="grid">
+        <div class="mini-card">
+          <strong>1. Gateway Presence 状态机</strong>
+          <span>只读观察者模式，通过 WS 事件推导 Agent 状态（working/idle/finishing），取代旧的 office.py 手动更新。详见 <a href="./gateway-presence.html">Gateway Presence</a>。</span>
+        </div>
+        <div class="mini-card">
+          <strong>2. 双 Provider 架构</strong>
+          <span>OpenClaw（主路径，文件读取）+ Hermes（适配器，CLI 调用），设计为可扩展 Provider 接口。详见 <a href="./agent-discovery.html">代理发现</a>。</span>
+        </div>
+        <div class="mini-card">
+          <strong>3. 三线程启动架构</strong>
+          <span>HTTP 主服务器 + WS 代理 + 工作流自动恢复，全部基于 Python 标准库 threading。详见 <a href="./server-startup.html">服务器启动</a>。</span>
+        </div>
+      </div>
+    </section>
+
+    <section id="complexity" class="card">
+      <h2>最值得注意的复杂设计</h2>
+      <div class="table-wrap">
+        <table>
+          <tr><th>复杂设计</th><th>来源</th><th>详见</th></tr>
+          <tr><td><strong>server.py 10,483 行单文件</strong></td><td>三次大规模膨胀：workflow engine (+2691)、多平台通信 (+1044)、Agent Desk (+666)</td><td><a href="./server-growth.html">server.py 的增长密码</a></td></tr>
+          <tr><td><strong>ChatWindow 类架构</strong></td><td>从 1,194 行单体重构为 class ChatWindow，支持多窗口平铺</td><td><a href="./agent-chat.html">聊天系统</a></td></tr>
+          <tr><td><strong>Workflow Review 循环</strong></td><td>最多 5 轮 self-review，需要工具调用证据，纯文本 PASS 被拒绝</td><td><a href="./projects-workflow.html">项目管理</a></td></tr>
+        </table>
+      </div>
+    </section>
+
+    <section id="next" class="card">
+      <h2>后续深入阅读路径</h2>
+      <div class="callout">
+        <strong>结构分析（回答"这个项目由什么组成"）</strong>
+        <p><a href="./project-overview.html">项目全景概览</a> → <a href="./directory-map.html">目录结构与模块职责</a> → <a href="./architecture.html">整体架构与依赖关系</a></p>
+      </div>
+      <div class="callout success" style="margin-top:12px;">
+        <strong>主流程链路（回答"项目最核心的功能是怎么跑起来的"）</strong>
+        <p><a href="./server-startup.html">服务器启动</a> → <a href="./agent-discovery.html">代理发现</a> → <a href="./gateway-presence.html">Gateway Presence</a> → <a href="./agent-chat.html">聊天系统</a> → <a href="./projects-workflow.html">项目管理</a></p>
+      </div>
+      <div class="callout risk" style="margin-top:12px;">
+        <strong>Git 历史溯源（回答"当前复杂设计为什么会变成现在这样"）</strong>
+        <p><a href="./history-timeline.html">项目演进时间线</a> → <a href="./presence-history.html">Presence 架构演进</a> → <a href="./server-growth.html">server.py 增长密码</a></p>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

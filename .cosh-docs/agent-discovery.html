@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>代理发现：双提供者架构 — My Virtual Office 教程</title>
+  <style>
+    :root {
+      --card: #ffffff; --text: #1f2937; --muted: #64748b; --primary: #2563eb;
+      --soft: #dbeafe; --border: #e2e8f0; --shadow: 0 18px 45px rgba(15, 23, 42, 0.08);
+      --radius: 20px; --green: #15803d; --blue: #1d4ed8; --red: #b91c1c;
+    }
+    * { box-sizing: border-box; } html { scroll-behavior: smooth; }
+    body {
+      margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+      background: radial-gradient(circle at top left, rgba(37, 99, 235, 0.14), transparent 31%),
+        linear-gradient(180deg, #f8fbff 0%, #eef2f7 100%);
+      color: var(--text); line-height: 1.8;
+    }
+    a { color: inherit; }
+    .container { max-width: 1080px; margin: 0 auto; padding: 34px 24px 72px; }
+    .back {
+      display: inline-flex; align-items: center; margin-bottom: 18px; padding: 8px 12px;
+      border: 1px solid var(--border); border-radius: 999px; background: rgba(255,255,255,0.75);
+      color: #334155; text-decoration: none; font-size: 14px; font-weight: 700;
+    }
+    .hero, .card, .toc {
+      background: rgba(255,255,255,0.92); border: 1px solid var(--border);
+      border-radius: var(--radius); box-shadow: var(--shadow);
+    }
+    .hero { padding: 38px; margin-bottom: 22px; }
+    .eyebrow {
+      display: inline-flex; margin-bottom: 16px; padding: 6px 12px; border-radius: 999px;
+      background: var(--soft); color: var(--primary); font-size: 13px; font-weight: 800;
+    }
+    h1 { margin: 0 0 16px; font-size: clamp(32px, 5vw, 54px); line-height: 1.1; }
+    h2 { margin: 0 0 18px; font-size: 26px; line-height: 1.35; }
+    h3 { margin: 0 0 8px; font-size: 19px; line-height: 1.4; }
+    p { margin: 0; color: var(--muted); } .hero p { max-width: 830px; font-size: 17px; }
+    .meta, .toc-links { display: flex; flex-wrap: wrap; gap: 10px; } .meta { margin-top: 24px; }
+    .tag { padding: 5px 11px; border-radius: 999px; background: #f1f5f9; color: #475569; font-size: 12px; font-weight: 800; }
+    .toc { padding: 20px 24px; margin: 22px 0; } .toc strong { display: block; margin-bottom: 10px; }
+    .toc a { padding: 7px 11px; border-radius: 10px; background: #f8fafc; color: #334155; text-decoration: none; font-size: 14px; font-weight: 700; }
+    .card { padding: 30px; margin-top: 22px; }
+    .steps { display: grid; gap: 14px; margin-top: 18px; }
+    .step { display: flex; gap: 18px; padding: 20px; box-shadow: none; background: #ffffff; border: 1px solid var(--border); border-radius: 16px; }
+    .step-number { width: 48px; height: 48px; flex: 0 0 48px; display: grid; place-items: center; border-radius: 14px; background: var(--soft); color: var(--primary); font-weight: 900; }
+    pre { overflow-x: auto; margin: 18px 0 0; padding: 20px; border-radius: 16px; background: #0f172a; color: #e5e7eb; font-size: 14px; line-height: 1.7; }
+    code { font-family: "JetBrains Mono", "Fira Code", Consolas, monospace; }
+    .inline-code { padding: 2px 6px; border-radius: 7px; background: #eef2ff; color: #3730a3; font-size: 0.92em; }
+    .callout { margin-top: 18px; padding: 18px; border-radius: 16px; border: 1px solid #bfdbfe; background: #eff6ff; }
+    .callout strong { display: block; margin-bottom: 5px; color: var(--blue); }
+    .callout.success { border-color: #bbf7d0; background: #f0fdf4; } .callout.success strong { color: var(--green); }
+    .table-wrap { overflow-x: auto; margin-top: 18px; border: 1px solid var(--border); border-radius: 16px; background: #ffffff; }
+    table { width: 100%; border-collapse: collapse; min-width: 720px; }
+    th, td { padding: 15px 16px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+    th { background: #f8fafc; color: #334155; font-size: 14px; }
+    tr:last-child td { border-bottom: 0; }
+    .diagram { margin-top: 18px; padding: 16px; background: #ffffff; }
+    .diagram img { display: block; width: 100%; border-radius: 18px; border: 1px solid var(--border); }
+    .caption { margin-top: 10px; font-size: 14px; text-align: center; }
+    .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 18px; }
+    .mini-card { padding: 18px; border: 1px solid var(--border); border-radius: 16px; background: #f8fafc; }
+    .mini-card strong { display: block; margin-bottom: 6px; color: var(--text); }
+    .mini-card span { color: var(--muted); font-size: 14px; }
+    @media (max-width: 820px) { .grid { grid-template-columns: 1fr; } .hero, .card, .toc { border-radius: 18px; } }
+    @media (max-width: 560px) { .container { padding: 24px 16px 48px; } .hero, .card { padding: 22px; } .step { flex-direction: column; } .toc-links { display: grid; } }
+  </style>
+</head>
+<body>
+  <main class="container">
+    <a class="back" href="./guide.html">返回教程目录</a>
+
+    <section class="hero">
+      <span class="eyebrow">主流程链路</span>
+      <h1>代理发现：双提供者架构</h1>
+      <p>Virtual Office 支持两种 AI 代理来源：OpenClaw（主力）和 Hermes（可选）。发现机制通过读取配置文件和 CLI 命令，构建统一的代理花名册。</p>
+      <div class="meta">
+        <span class="tag">主流程链路</span><span class="tag">发现</span><span class="tag">Provider</span>
+      </div>
+      <div class="callout success">
+        <strong>前置知识</strong>
+        <p>了解 JSON 配置文件和 CLI 命令的基本概念。建议先阅读<a href="./server-startup.html">服务器启动</a>，了解 <code class="inline-code">get_roster()</code> 的调用时机。</p>
+      </div>
+    </section>
+
+    <nav class="toc" aria-label="本页目录">
+      <strong>本页内容</strong>
+      <div class="toc-links">
+        <a href="#overview">发现流程概览</a>
+        <a href="#openclaw">OpenClaw 发现</a>
+        <a href="#hermes">Hermes 发现</a>
+        <a href="#unified">统一花名册</a>
+        <a href="#identity">身份文件协议</a>
+      </div>
+    </nav>
+
+    <section id="overview" class="card">
+      <h2>发现流程概览</h2>
+      <div class="diagram">
+        <img src="./asset/agent-discovery.svg" alt="代理发现流程图" />
+        <p class="caption">图：双 Provider 发现流程。左边 OpenClaw（文件读取），右边 Hermes（CLI 调用），最终汇合到统一花名册。</p>
+      </div>
+      <p style="margin-top:14px;">调用链：<code class="inline-code">start_http_server()</code> → <code class="inline-code">get_roster()</code> → <code class="inline-code">_refresh_discovery()</code> → <code class="inline-code">discover_all_agents()</code></p>
+    </section>
+
+    <section id="openclaw" class="card">
+      <h2>OpenClaw 代理发现</h2>
+      <p>OpenClaw 是主要的 Agent 来源，通过文件系统读取发现：</p>
+      <div class="steps">
+        <div class="step">
+          <div class="step-number">1</div>
+          <div><h3>读取 openclaw.json</h3><p>从 <code class="inline-code">openclaw.json</code> 的 <code class="inline-code">agents.list</code> 获取配置的代理列表</p></div>
+        </div>
+        <div class="step">
+          <div class="step-number">2</div>
+          <div><h3>备选：扫描 agents/ 目录</h3><p>如果 JSON 中没有列表，扫描 <code class="inline-code">agents/</code> 目录作为 fallback</p></div>
+        </div>
+        <div class="step">
+          <div class="step-number">3</div>
+          <div><h3>丰富元数据</h3><p>对每个代理：确定 workspace 路径、解析 <code class="inline-code">IDENTITY.md</code> 获取名称/emoji/角色、查询最后活跃时间、生成确定性 emoji</p></div>
+        </div>
+      </div>
+      <pre style="margin-top:14px;"><code># discovery.py:31-85
+def discover_agents(oc_home):
+    # Step 1: Read agents from openclaw.json
+    config_agents = cfg.get("agents", {}).get("list", [])
+    # Step 2: Fallback to scanning agents/ directory
+    # Step 3: Enrich each agent with workspace metadata
+    name, emoji, role = _parse_identity(workspace)</code></pre>
+    </section>
+
+    <section id="hermes" class="card">
+      <h2>Hermes 代理发现</h2>
+      <p>Hermes 是可选的 Agent 来源，通过 CLI 子进程调用发现：</p>
+      <div class="steps">
+        <div class="step">
+          <div class="step-number">1</div>
+          <div><h3>HermesProvider 初始化</h3><p><code class="inline-code">HermesProvider(home_path, binary, enabled)</code> 封装 Hermes CLI 交互</p></div>
+        </div>
+        <div class="step">
+          <div class="step-number">2</div>
+          <div><h3>执行 CLI 命令</h3><p>运行 <code class="inline-code">hermes profile list</code>，解析输出构建代理列表</p></div>
+        </div>
+      </div>
+      <div class="callout" style="margin-top:14px;">
+        <strong>安全边界设计</strong>
+        <p>Hermes 适配器的设计原则是"保守" — 只使用安全的 CLI 表面（<code class="inline-code">profile list</code>, <code class="inline-code">status</code>），不读取 secrets/config/memory 文件。这是一种安全边界设计。</p>
+      </div>
+    </section>
+
+    <section id="unified" class="card">
+      <h2>统一花名册</h2>
+      <p>两个 Provider 的结果合并为统一的代理花名册：</p>
+      <div class="grid">
+        <div class="mini-card">
+          <strong>状态键（statusKey）</strong>
+          <span>每个代理的唯一标识。OpenClaw 用 <code class="inline-code">agent_id</code>，Hermes 用 <code class="inline-code">hermes:profile</code></span>
+        </div>
+        <div class="mini-card">
+          <strong>Provider 模式</strong>
+          <span><code class="inline-code">HermesProvider</code> 类封装 Hermes 的 CLI 交互，OpenClaw 是默认提供者</span>
+        </div>
+      </div>
+    </section>
+
+    <section id="identity" class="card">
+      <h2>身份文件协议</h2>
+      <p><code class="inline-code">IDENTITY.md</code> 中的 markdown 键值对被解析为代理显示元数据：</p>
+      <pre><code># 示例 IDENTITY.md
+- **Name:** Moe
+- **Emoji:** 🐱
+- **Role:** Backend Engineer</code></pre>
+      <p style="margin-top:14px;"><code class="inline-code">_parse_identity()</code> 函数（discovery.py:127）解析这些键值对，提取 name、emoji、role 字段。</p>
+    </section>
+  </main>
+</body>
+</html>

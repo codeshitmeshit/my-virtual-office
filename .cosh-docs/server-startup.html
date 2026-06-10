@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>服务器启动：三线并行 — My Virtual Office 教程</title>
+  <style>
+    :root {
+      --card: #ffffff; --text: #1f2937; --muted: #64748b; --primary: #2563eb;
+      --soft: #dbeafe; --border: #e2e8f0; --shadow: 0 18px 45px rgba(15, 23, 42, 0.08);
+      --radius: 20px; --green: #15803d; --blue: #1d4ed8; --red: #b91c1c;
+    }
+    * { box-sizing: border-box; } html { scroll-behavior: smooth; }
+    body {
+      margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+      background: radial-gradient(circle at top left, rgba(37, 99, 235, 0.14), transparent 31%),
+        linear-gradient(180deg, #f8fbff 0%, #eef2f7 100%);
+      color: var(--text); line-height: 1.8;
+    }
+    a { color: inherit; }
+    .container { max-width: 1080px; margin: 0 auto; padding: 34px 24px 72px; }
+    .back {
+      display: inline-flex; align-items: center; margin-bottom: 18px; padding: 8px 12px;
+      border: 1px solid var(--border); border-radius: 999px; background: rgba(255,255,255,0.75);
+      color: #334155; text-decoration: none; font-size: 14px; font-weight: 700;
+    }
+    .hero, .card, .toc {
+      background: rgba(255,255,255,0.92); border: 1px solid var(--border);
+      border-radius: var(--radius); box-shadow: var(--shadow);
+    }
+    .hero { padding: 38px; margin-bottom: 22px; }
+    .eyebrow {
+      display: inline-flex; margin-bottom: 16px; padding: 6px 12px; border-radius: 999px;
+      background: var(--soft); color: var(--primary); font-size: 13px; font-weight: 800;
+    }
+    h1 { margin: 0 0 16px; font-size: clamp(32px, 5vw, 54px); line-height: 1.1; }
+    h2 { margin: 0 0 18px; font-size: 26px; line-height: 1.35; }
+    h3 { margin: 0 0 8px; font-size: 19px; line-height: 1.4; }
+    p { margin: 0; color: var(--muted); } .hero p { max-width: 830px; font-size: 17px; }
+    .meta, .toc-links { display: flex; flex-wrap: wrap; gap: 10px; } .meta { margin-top: 24px; }
+    .tag { padding: 5px 11px; border-radius: 999px; background: #f1f5f9; color: #475569; font-size: 12px; font-weight: 800; }
+    .toc { padding: 20px 24px; margin: 22px 0; } .toc strong { display: block; margin-bottom: 10px; }
+    .toc a { padding: 7px 11px; border-radius: 10px; background: #f8fafc; color: #334155; text-decoration: none; font-size: 14px; font-weight: 700; }
+    .card { padding: 30px; margin-top: 22px; }
+    .steps { display: grid; gap: 14px; margin-top: 18px; }
+    .step { display: flex; gap: 18px; padding: 20px; box-shadow: none; background: #ffffff; border: 1px solid var(--border); border-radius: 16px; }
+    .step-number { width: 48px; height: 48px; flex: 0 0 48px; display: grid; place-items: center; border-radius: 14px; background: var(--soft); color: var(--primary); font-weight: 900; }
+    pre { overflow-x: auto; margin: 18px 0 0; padding: 20px; border-radius: 16px; background: #0f172a; color: #e5e7eb; font-size: 14px; line-height: 1.7; }
+    code { font-family: "JetBrains Mono", "Fira Code", Consolas, monospace; }
+    .inline-code { padding: 2px 6px; border-radius: 7px; background: #eef2ff; color: #3730a3; font-size: 0.92em; }
+    .callout { margin-top: 18px; padding: 18px; border-radius: 16px; border: 1px solid #bfdbfe; background: #eff6ff; }
+    .callout strong { display: block; margin-bottom: 5px; color: var(--blue); }
+    .callout.success { border-color: #bbf7d0; background: #f0fdf4; } .callout.success strong { color: var(--green); }
+    .table-wrap { overflow-x: auto; margin-top: 18px; border: 1px solid var(--border); border-radius: 16px; background: #ffffff; }
+    table { width: 100%; border-collapse: collapse; min-width: 720px; }
+    th, td { padding: 15px 16px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+    th { background: #f8fafc; color: #334155; font-size: 14px; }
+    tr:last-child td { border-bottom: 0; }
+    .diagram { margin-top: 18px; padding: 16px; background: #ffffff; }
+    .diagram img { display: block; width: 100%; border-radius: 18px; border: 1px solid var(--border); }
+    .caption { margin-top: 10px; font-size: 14px; text-align: center; }
+    @media (max-width: 820px) { .hero, .card, .toc { border-radius: 18px; } }
+    @media (max-width: 560px) { .container { padding: 24px 16px 48px; } .hero, .card { padding: 22px; } .step { flex-direction: column; } .toc-links { display: grid; } }
+  </style>
+</head>
+<body>
+  <main class="container">
+    <a class="back" href="./guide.html">返回教程目录</a>
+
+    <section class="hero">
+      <span class="eyebrow">主流程链路</span>
+      <h1>服务器启动：三线并行</h1>
+      <p>Virtual Office 的 Python 后端采用简洁的三线程架构：HTTP 主服务器、WebSocket 代理、Gateway Presence 监听器。从 <code class="inline-code">if __name__ == "__main__"</code> 出发，理解各组件如何协同启动。</p>
+      <div class="meta">
+        <span class="tag">主流程链路</span><span class="tag">启动</span><span class="tag">server.py</span>
+      </div>
+      <div class="callout success">
+        <strong>前置知识</strong>
+        <p>了解 Python 基本语法和 threading 模块即可。建议先阅读<a href="./architecture.html">整体架构与依赖关系</a>。</p>
+      </div>
+    </section>
+
+    <nav class="toc" aria-label="本页目录">
+      <strong>本页内容</strong>
+      <div class="toc-links">
+        <a href="#entry">启动入口</a>
+        <a href="#threads">三条线程</a>
+        <a href="#init">初始化流程</a>
+        <a href="#config">配置系统</a>
+        <a href="#why">设计选择</a>
+      </div>
+    </nav>
+
+    <section id="entry" class="card">
+      <h2>启动入口</h2>
+      <p>启动入口位于 <code class="inline-code">app/server.py</code> 第 10469 行。Docker 容器通过 <code class="inline-code">entrypoint.sh</code> 执行 <code class="inline-code">python3 server.py</code>。</p>
+      <pre><code># server.py:10469-10484
+if __name__ == "__main__":
+    _api_usage_collector.start()
+    ws_thread = threading.Thread(target=start_ws_server, daemon=True)
+    ws_thread.start()
+    resume_thread = threading.Thread(target=_wf_auto_resume_on_startup, daemon=True)
+    resume_thread.start()
+    start_http_server()  # 阻塞主线程</code></pre>
+    </section>
+
+    <section id="threads" class="card">
+      <h2>三条线程</h2>
+      <div class="diagram">
+        <img src="./asset/startup-threads.svg" alt="启动线程图" />
+        <p class="caption">图：三线程启动流程。主线程阻塞在 HTTP serve_forever()，两个 daemon 线程分别处理 WS 代理和工作流自动恢复。</p>
+      </div>
+      <div class="steps" style="margin-top:22px;">
+        <div class="step">
+          <div class="step-number">1</div>
+          <div>
+            <h3>API 用量收集器</h3>
+            <p>后台线程，定期轮询 API 用量数据。非核心功能，启动即运行。</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-number">2</div>
+          <div>
+            <h3>WebSocket 代理线程（daemon）</h3>
+            <p>监听 <code class="inline-code">VO_WS_PORT</code>（默认 8091），将浏览器 WebSocket 连接转发到 OpenClaw Gateway。设为 daemon 线程，主进程退出时自动清理。</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-number">3</div>
+          <div>
+            <h3>工作流自动恢复线程（daemon）</h3>
+            <p>等待 3 秒后扫描 projects.json 中卡住的任务，调用 <code class="inline-code">_wf_run_pipeline</code> 恢复执行。</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-number">4</div>
+          <div>
+            <h3>HTTP 主服务器（主线程阻塞）</h3>
+            <p>调用 <code class="inline-code">start_http_server()</code>，执行完整的初始化流程后进入 <code class="inline-code">serve_forever()</code> 阻塞等待请求。</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="init" class="card">
+      <h2>HTTP 服务器初始化流程</h2>
+      <p><code class="inline-code">start_http_server()</code> 是核心初始化函数，执行以下步骤：</p>
+      <div class="steps">
+        <div class="step">
+          <div class="step-number">1</div>
+          <div><h3>获取代理花名册</h3><p><code class="inline-code">get_roster()</code> 触发双 Provider 发现（OpenClaw + Hermes）</p></div>
+        </div>
+        <div class="step">
+          <div class="step-number">2</div>
+          <div><h3>初始化 Gateway Presence</h3><p><code class="inline-code">gateway_presence.init_agents()</code> 初始化状态，<code class="inline-code">set_meetings_file()</code> 设置会议文件</p></div>
+        </div>
+        <div class="step">
+          <div class="step-number">3</div>
+          <div><h3>加载持久化快照</h3><p><code class="inline-code">gateway_presence.load_snapshot()</code> 从磁盘恢复上次状态，防止崩溃后丢失</p></div>
+        </div>
+        <div class="step">
+          <div class="step-number">4</div>
+          <div><h3>自动配置 Gateway 源</h3><p><code class="inline-code">_auto_configure_gateway_origin()</code> 确保 Gateway 连接地址正确</p></div>
+        </div>
+        <div class="step">
+          <div class="step-number">5</div>
+          <div><h3>启动 Gateway 监听</h3><p><code class="inline-code">gateway_presence.start()</code> 连接 Gateway WebSocket，开始接收事件</p></div>
+        </div>
+        <div class="step">
+          <div class="step-number">6</div>
+          <div><h3>启动快照保存线程</h3><p>每 30 秒将内存中的 presence 状态保存到磁盘</p></div>
+        </div>
+        <div class="step">
+          <div class="step-number">7</div>
+          <div><h3>进入 serve_forever()</h3><p><code class="inline-code">ThreadingHTTPServer</code> 开始处理 HTTP 请求</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="config" class="card">
+      <h2>配置系统：三层优先级</h2>
+      <div class="table-wrap">
+        <table>
+          <tr><th>优先级</th><th>来源</th><th>说明</th></tr>
+          <tr><td><strong>1（最高）</strong></td><td>环境变量</td><td><code class="inline-code">VO_*</code> 前缀，覆盖所有其他配置</td></tr>
+          <tr><td><strong>2</strong></td><td><code>/data/vo-config.json</code></td><td>Docker Volume 持久化配置，容器重启后保留</td></tr>
+          <tr><td><strong>3（最低）</strong></td><td><code>/app/vo-config.json</code></td><td>容器层默认配置，随镜像更新</td></tr>
+        </table>
+      </div>
+      <p style="margin-top:14px;"><strong>关键环境变量：</strong></p>
+      <div class="table-wrap" style="margin-top:10px;">
+        <table>
+          <tr><th>变量</th><th>默认值</th><th>用途</th></tr>
+          <tr><td><code>VO_PORT</code></td><td>8090</td><td>HTTP 端口</td></tr>
+          <tr><td><code>VO_WS_PORT</code></td><td>8091</td><td>WebSocket 代理端口</td></tr>
+          <tr><td><code>VO_GATEWAY_URL</code></td><td>ws://127.0.0.1:18789</td><td>OpenClaw Gateway WS 地址</td></tr>
+          <tr><td><code>VO_OPENCLAW_PATH</code></td><td>~/.openclaw</td><td>OpenClaw 家目录</td></tr>
+          <tr><td><code>VO_STATUS_DIR</code></td><td>/data</td><td>状态数据持久化目录</td></tr>
+        </table>
+      </div>
+    </section>
+
+    <section id="why" class="card">
+      <h2>为什么选择 threading 而非 asyncio？</h2>
+      <div class="callout">
+        <strong>设计选择</strong>
+        <p>项目选择 <code class="inline-code">http.server</code> + <code class="inline-code">threading</code> 而非 ASGI/asyncio 框架，原因是它需要同时管理 HTTP、WebSocket 代理和 Gateway 监听。标准库的 <code class="inline-code">http.server</code> + <code class="inline-code">threading</code> 足以满足需求且减少了依赖，符合"自托管、轻量"的产品定位。</p>
+      </div>
+      <p style="margin-top:14px;">Daemon 线程的设计确保主线程退出时所有后台线程自动清理，避免了孤儿进程问题。</p>
+    </section>
+  </main>
+</body>
+</html>

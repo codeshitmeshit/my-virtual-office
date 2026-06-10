@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>项目管理与自动工作流 — My Virtual Office 教程</title>
+  <style>
+    :root {
+      --card: #ffffff; --text: #1f2937; --muted: #64748b; --primary: #2563eb;
+      --soft: #dbeafe; --border: #e2e8f0; --shadow: 0 18px 45px rgba(15, 23, 42, 0.08);
+      --radius: 20px; --green: #15803d; --blue: #1d4ed8; --red: #b91c1c;
+    }
+    * { box-sizing: border-box; } html { scroll-behavior: smooth; }
+    body {
+      margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+      background: radial-gradient(circle at top left, rgba(37, 99, 235, 0.14), transparent 31%),
+        linear-gradient(180deg, #f8fbff 0%, #eef2f7 100%);
+      color: var(--text); line-height: 1.8;
+    }
+    a { color: inherit; }
+    .container { max-width: 1080px; margin: 0 auto; padding: 34px 24px 72px; }
+    .back {
+      display: inline-flex; align-items: center; margin-bottom: 18px; padding: 8px 12px;
+      border: 1px solid var(--border); border-radius: 999px; background: rgba(255,255,255,0.75);
+      color: #334155; text-decoration: none; font-size: 14px; font-weight: 700;
+    }
+    .hero, .card, .toc {
+      background: rgba(255,255,255,0.92); border: 1px solid var(--border);
+      border-radius: var(--radius); box-shadow: var(--shadow);
+    }
+    .hero { padding: 38px; margin-bottom: 22px; }
+    .eyebrow {
+      display: inline-flex; margin-bottom: 16px; padding: 6px 12px; border-radius: 999px;
+      background: var(--soft); color: var(--primary); font-size: 13px; font-weight: 800;
+    }
+    h1 { margin: 0 0 16px; font-size: clamp(32px, 5vw, 54px); line-height: 1.1; }
+    h2 { margin: 0 0 18px; font-size: 26px; line-height: 1.35; }
+    h3 { margin: 0 0 8px; font-size: 19px; line-height: 1.4; }
+    p { margin: 0; color: var(--muted); } .hero p { max-width: 830px; font-size: 17px; }
+    .meta, .toc-links { display: flex; flex-wrap: wrap; gap: 10px; } .meta { margin-top: 24px; }
+    .tag { padding: 5px 11px; border-radius: 999px; background: #f1f5f9; color: #475569; font-size: 12px; font-weight: 800; }
+    .toc { padding: 20px 24px; margin: 22px 0; } .toc strong { display: block; margin-bottom: 10px; }
+    .toc a { padding: 7px 11px; border-radius: 10px; background: #f8fafc; color: #334155; text-decoration: none; font-size: 14px; font-weight: 700; }
+    .card { padding: 30px; margin-top: 22px; }
+    pre { overflow-x: auto; margin: 18px 0 0; padding: 20px; border-radius: 16px; background: #0f172a; color: #e5e7eb; font-size: 14px; line-height: 1.7; }
+    code { font-family: "JetBrains Mono", "Fira Code", Consolas, monospace; }
+    .inline-code { padding: 2px 6px; border-radius: 7px; background: #eef2ff; color: #3730a3; font-size: 0.92em; }
+    .callout { margin-top: 18px; padding: 18px; border-radius: 16px; border: 1px solid #bfdbfe; background: #eff6ff; }
+    .callout strong { display: block; margin-bottom: 5px; color: var(--blue); }
+    .callout.success { border-color: #bbf7d0; background: #f0fdf4; } .callout.success strong { color: var(--green); }
+    .callout.risk { border-color: #fecaca; background: #fff1f2; } .callout.risk strong { color: var(--red); }
+    .table-wrap { overflow-x: auto; margin-top: 18px; border: 1px solid var(--border); border-radius: 16px; background: #ffffff; }
+    table { width: 100%; border-collapse: collapse; min-width: 720px; }
+    th, td { padding: 15px 16px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+    th { background: #f8fafc; color: #334155; font-size: 14px; }
+    tr:last-child td { border-bottom: 0; }
+    .steps { display: grid; gap: 14px; margin-top: 18px; }
+    .step { display: flex; gap: 18px; padding: 20px; box-shadow: none; background: #ffffff; border: 1px solid var(--border); border-radius: 16px; }
+    .step-number { width: 48px; height: 48px; flex: 0 0 48px; display: grid; place-items: center; border-radius: 14px; background: var(--soft); color: var(--primary); font-weight: 900; }
+    @media (max-width: 820px) { .hero, .card, .toc { border-radius: 18px; } }
+    @media (max-width: 560px) { .container { padding: 24px 16px 48px; } .hero, .card { padding: 22px; } .step { flex-direction: column; } .toc-links { display: grid; } }
+  </style>
+</head>
+<body>
+  <main class="container">
+    <a class="back" href="./guide.html">返回教程目录</a>
+
+    <section class="hero">
+      <span class="eyebrow">主流程链路</span>
+      <h1>项目管理与自动工作流</h1>
+      <p>Virtual Office 内置了完整的项目管理系统，使用 Markdown 文件存储项目和任务数据，支持自动工作流管道（任务自动分派给代理执行）。</p>
+      <div class="meta">
+        <span class="tag">主流程链路</span><span class="tag">工作流</span><span class="tag">Markdown 存储</span>
+      </div>
+      <div class="callout success">
+        <strong>前置知识</strong>
+        <p>了解 YAML frontmatter 和 Markdown 格式。建议先阅读<a href="./server-startup.html">服务器启动</a>，了解工作流自动恢复机制。</p>
+      </div>
+    </section>
+
+    <nav class="toc" aria-label="本页目录">
+      <strong>本页内容</strong>
+      <div class="toc-links">
+        <a href="#storage">Markdown 存储</a>
+        <a href="#pipeline">工作流管道</a>
+        <a href="#review">审查循环</a>
+        <a href="#resume">自动恢复</a>
+        <a href="#api">API 端点</a>
+      </div>
+    </nav>
+
+    <section id="storage" class="card">
+      <h2>Markdown 存储</h2>
+      <p><code class="inline-code">MarkdownProjectStore</code>（project_store.py:64）将项目/任务存储为 Markdown 文件：</p>
+      <pre><code>{STATUS_DIR}/
+  projects-md/
+    {slug}--{project_id}/
+      project.md          # 项目元数据 (frontmatter) + 描述 + 活动日志
+      tasks/
+        {slug}--{task_id}.md  # 任务元数据 + 描述 + 评论 + 附件</code></pre>
+      <p style="margin-top:14px;"><strong>Markdown 格式示例：</strong></p>
+      <pre><code>---
+id: abc123
+title: Website Redesign
+status: active
+priority: high
+columns_json: [{"id":"c1","title":"To Do"}]
+---
+# Project
+Redesign the company website
+## Activity
+- [2026-06-01T10:00:00Z] (user) Created project</code></pre>
+      <div class="callout" style="margin-top:14px;">
+        <strong>为什么用 Markdown 而非 JSON？</strong>
+        <p>相比纯 JSON，Markdown + frontmatter 格式让人类可以直接编辑文件，同时保持了结构化数据的能力。复杂字段（columns、tags）序列化为 JSON 存储在 frontmatter 中。</p>
+      </div>
+    </section>
+
+    <section id="pipeline" class="card">
+      <h2>工作流管道</h2>
+      <p><code class="inline-code">_wf_run_pipeline()</code> 函数实现自动任务分派：</p>
+      <div class="steps">
+        <div class="step">
+          <div class="step-number">1</div>
+          <div><h3>读取配置</h3><p>读取项目任务和列配置</p></div>
+        </div>
+        <div class="step">
+          <div class="step-number">2</div>
+          <div><h3>找到待处理任务</h3><p>找到 "To Do" 列中的任务</p></div>
+        </div>
+        <div class="step">
+          <div class="step-number">3</div>
+          <div><h3>分派给代理</h3><p>根据 assignee 分发给代理，通过 workflow session 发送任务</p></div>
+        </div>
+        <div class="step">
+          <div class="step-number">4</div>
+          <div><h3>监听完成</h3><p>监听代理完成状态，如果有 review 列，进入审查循环</p></div>
+        </div>
+        <div class="step">
+          <div class="step-number">5</div>
+          <div><h3>自动模式</h3><p>autoMode 下持续处理下一个任务</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="review" class="card">
+      <h2>审查循环</h2>
+      <p>工作流引入了复杂的 self-review 机制：</p>
+      <ul style="margin:12px 0 0;padding-left:22px;color:var(--muted);">
+        <li>最多 <strong>5 轮</strong> self-review 迭代循环</li>
+        <li>Review 需要<strong>工具调用证据</strong>（read/exec/browser），纯文本 PASS 会被拒绝</li>
+        <li>四阶段管道：<strong>Backlog → In Progress → Review → Done</strong></li>
+      </ul>
+      <div class="callout risk" style="margin-top:14px;">
+        <strong>历史 Bug</strong>
+        <p>commit <code class="inline-code">eaa3986</code> 修复了 review 解析器的无限循环问题（sentiment fallback + cycle safety net）。详见<a href="./server-growth.html">server.py 的增长密码</a>。</p>
+      </div>
+    </section>
+
+    <section id="resume" class="card">
+      <h2>自动恢复机制</h2>
+      <p><code class="inline-code">_wf_auto_resume_on_startup()</code> 在服务器启动时恢复卡住的任务：</p>
+      <pre><code>_wf_auto_resume_on_startup()
+  |
+  +-- sleep(3) 等待服务器就绪
+  +-- 扫描 projects.json 中卡在 "In Progress"/"Review" 的任务
+  +-- 检查是否有对应的 workflow session
+  +-- 如果 session 状态为 done/running/failed，恢复管道</code></pre>
+    </section>
+
+    <section id="api" class="card">
+      <h2>API 端点</h2>
+      <div class="table-wrap">
+        <table>
+          <tr><th>端点</th><th>方法</th><th>用途</th></tr>
+          <tr><td><code>/api/projects</code></td><td>GET</td><td>列出所有项目</td></tr>
+          <tr><td><code>/api/projects</code></td><td>POST</td><td>创建项目</td></tr>
+          <tr><td><code>/api/projects/{id}</code></td><td>GET</td><td>获取项目详情</td></tr>
+          <tr><td><code>/api/projects/{id}/tasks</code></td><td>POST</td><td>添加任务</td></tr>
+          <tr><td><code>/api/projects/{id}/workflow/start</code></td><td>POST</td><td>启动工作流</td></tr>
+          <tr><td><code>/api/projects/{id}/workflow/stop</code></td><td>POST</td><td>停止工作流</td></tr>
+          <tr><td><code>/api/projects/{id}/workflow/auto-mode</code></td><td>POST</td><td>切换自动模式</td></tr>
+        </table>
+      </div>
+    </section>
+  </main>
+</body>
+</html>
