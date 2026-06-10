@@ -16,7 +16,7 @@
     "inferenceIdleTimeoutSec": 300
   },
   "weather": {
-    "location": null
+    "location": "Beijing"
   },
   "features": {
     "pcMetrics": false,

@@ -5933,6 +5933,9 @@ def _handle_codex_chat(body):
             "_status": 409,
         }
     provider = _codex_provider_from_config()
+    requested_workspace = str(body.get("workspace") or "").strip()
+    if requested_workspace:
+        provider.workspace = os.path.realpath(os.path.expanduser(requested_workspace))
     before_paths = _codex_git_paths(provider.workspace)
     allow_interaction = str(body.get("fromType") or "agent").lower() in {"human", "user", "chat", "ui"}
     with _CODEX_ACTIVE_LOCK:
@@ -6041,7 +6044,11 @@ def _handle_codex_cancel(body):
     active = _get_codex_active(agent_id)
     if not active or (conversation_id and active.get("conversationId") != conversation_id):
         return {"ok": False, "error": "No matching active Codex operation", "_status": 404}
-    ok = _codex_provider_from_config().cancel(active.get("threadId", ""))
+    provider = _codex_provider_from_config()
+    requested_workspace = str(body.get("workspace") or "").strip()
+    if requested_workspace:
+        provider.workspace = os.path.realpath(os.path.expanduser(requested_workspace))
+    ok = provider.cancel(active.get("threadId", ""))
     return {"ok": ok, "status": "cancelling" if ok else "stale", "_status": 200 if ok else 409}
 
 
@@ -7802,6 +7809,12 @@ def _handle_projects_list(query_string=""):
             "createdBy": p.get("createdBy", ""),
             "tags": p.get("tags", []),
             "branch": p.get("branch", ""),
+            "projectExecutionEnabled": p.get("projectExecutionEnabled", False),
+            "workspacePath": p.get("workspacePath"),
+            "workspaceKind": p.get("workspaceKind"),
+            "workspaceStatus": p.get("workspaceStatus", {}),
+            "defaultExecutorAgentId": p.get("defaultExecutorAgentId"),
+            "defaultReviewerAgentId": p.get("defaultReviewerAgentId"),
             "columns": p.get("columns", []),
             "taskCount": total,
             "taskDone": done,
@@ -7884,6 +7897,15 @@ def _handle_project_create(body):
         return {"error": "Project title is required", "_status": 400}
     created_by = (body.get("createdBy") or body.get("author") or "user").strip()
     now = _proj_now()
+    workspace_path = body.get("workspacePath")
+    workspace_kind = body.get("workspaceKind")
+    workspace_status = body.get("workspaceStatus", {})
+    if body.get("projectExecutionEnabled"):
+        workspace_status = _project_execution_validate_workspace(workspace_path)
+        if not workspace_status.get("ok"):
+            return {**workspace_status, "_status": 400}
+        workspace_path = workspace_status.get("path")
+        workspace_kind = workspace_status.get("kind")
     # Default columns
     default_cols = [
         {"id": _proj_uuid(), "title": "Backlog", "color": "#6c757d", "order": 0},
@@ -7904,6 +7926,14 @@ def _handle_project_create(body):
         "createdBy": created_by,
         "tags": body.get("tags", []),
         "branch": body.get("branch", ""),
+        "projectExecutionEnabled": bool(body.get("projectExecutionEnabled")),
+        "workspacePath": workspace_path,
+        "workspaceKind": workspace_kind,
+        "workspaceStatus": workspace_status,
+        "defaultExecutorAgentId": body.get("defaultExecutorAgentId"),
+        "defaultReviewerAgentId": body.get("defaultReviewerAgentId"),
+        "executionPolicy": {"maxActiveTasks": 1},
+        "executionDirtyConfirmations": [],
         "columns": cols,
         "tasks": [],
         "activity": [],
@@ -7941,6 +7971,14 @@ def _handle_task_create(project_id, body):
         "priority": body.get("priority", "medium"),
         "assignee": body.get("assignee"),
         "assigneeBranch": body.get("assigneeBranch"),
+        "executorAgentId": body.get("executorAgentId") or body.get("assignee"),
+        "reviewerAgentId": body.get("reviewerAgentId"),
+        "executionState": "backlog",
+        "activeAttemptId": None,
+        "attempts": [],
+        "evidence": {},
+        "blockedReason": None,
+        "lastError": None,
         "dueDate": body.get("dueDate"),
         "tags": body.get("tags", []),
         "checklist": body.get("checklist", []),
@@ -8024,6 +8062,14 @@ def _handle_project_from_template(body):
                 "priority": tt.get("priority", "medium"),
                 "assignee": None,
                 "assigneeBranch": None,
+                "executorAgentId": None,
+                "reviewerAgentId": None,
+                "executionState": "backlog",
+                "activeAttemptId": None,
+                "attempts": [],
+                "evidence": {},
+                "blockedReason": None,
+                "lastError": None,
                 "dueDate": None,
                 "tags": tt.get("tags", []),
                 "checklist": [],
@@ -8034,6 +8080,15 @@ def _handle_project_from_template(body):
                 "completedAt": None,
             })
     created_by = (body.get("createdBy") or "user").strip()
+    workspace_path = body.get("workspacePath")
+    workspace_kind = body.get("workspaceKind")
+    workspace_status = body.get("workspaceStatus", {})
+    if body.get("projectExecutionEnabled"):
+        workspace_status = _project_execution_validate_workspace(workspace_path)
+        if not workspace_status.get("ok"):
+            return {**workspace_status, "_status": 400}
+        workspace_path = workspace_status.get("path")
+        workspace_kind = workspace_status.get("kind")
     project = {
         "id": _proj_uuid(),
         "title": title,
@@ -8046,6 +8101,14 @@ def _handle_project_from_template(body):
         "createdBy": created_by,
         "tags": body.get("tags", []),
         "branch": body.get("branch", ""),
+        "projectExecutionEnabled": bool(body.get("projectExecutionEnabled")),
+        "workspacePath": workspace_path,
+        "workspaceKind": workspace_kind,
+        "workspaceStatus": workspace_status,
+        "defaultExecutorAgentId": body.get("defaultExecutorAgentId"),
+        "defaultReviewerAgentId": body.get("defaultReviewerAgentId"),
+        "executionPolicy": {"maxActiveTasks": 1},
+        "executionDirtyConfirmations": [],
         "columns": new_cols,
         "tasks": new_tasks,
         "activity": [],
@@ -8101,7 +8164,19 @@ def _handle_project_update(project_id, body):
     if not p:
         return {"error": "Project not found", "_status": 404}
     by = body.get("by", "user")
-    updatable = ["title", "description", "status", "priority", "dueDate", "tags", "branch"]
+    if body.get("projectExecutionEnabled") or (_project_execution_enabled(p) and "workspacePath" in body):
+        workspace_status = _project_execution_validate_workspace(body.get("workspacePath") or p.get("workspacePath"))
+        if not workspace_status.get("ok"):
+            return {**workspace_status, "_status": 400}
+        body["projectExecutionEnabled"] = True
+        body["workspacePath"] = workspace_status.get("path")
+        body["workspaceKind"] = workspace_status.get("kind")
+        body["workspaceStatus"] = workspace_status
+    updatable = [
+        "title", "description", "status", "priority", "dueDate", "tags", "branch",
+        "projectExecutionEnabled", "workspacePath", "workspaceKind", "workspaceStatus",
+        "defaultExecutorAgentId", "defaultReviewerAgentId", "executionPolicy",
+    ]
     for field in updatable:
         if field in body:
             old = p.get(field)
@@ -8124,6 +8199,10 @@ def _handle_task_update(project_id, task_id, body):
         return {"error": "Task not found", "_status": 404}
     by = body.get("by", "user")
     now = _proj_now()
+    if _project_execution_enabled(p) and "columnId" in body:
+        done_cols = {c["id"] for c in p.get("columns", []) if c.get("title", "").lower() in ("done", "completed", "verified", "published", "fixed", "closed")}
+        if body.get("columnId") in done_cols and task.get("executionState") != "done":
+            return {"error": "Project Execution tasks require final user acceptance before Done", "_status": 409}
     # Track column move
     if "columnId" in body and body["columnId"] != task.get("columnId"):
         old_col = next((c["title"] for c in p.get("columns", []) if c["id"] == task.get("columnId")), task.get("columnId"))
@@ -8164,7 +8243,11 @@ def _handle_task_update(project_id, task_id, body):
     # Track assignee change
     if "assignee" in body and body["assignee"] != task.get("assignee"):
         _log_activity(p, "task_assigned", by, f"Assigned to {body['assignee']}", task_id)
-    updatable = ["title", "description", "columnId", "order", "priority", "assignee", "assigneeBranch", "dueDate", "tags", "checklist", "completedAt"]
+    updatable = [
+        "title", "description", "columnId", "order", "priority", "assignee",
+        "assigneeBranch", "executorAgentId", "reviewerAgentId", "dueDate", "tags",
+        "checklist", "completedAt",
+    ]
     # Track which fields changed for md file update
     changed_fields = []
     for field in updatable:
@@ -8233,6 +8316,8 @@ def _handle_tasks_reorder(project_id, body):
         if tid in task_map:
             task = task_map[tid]
             new_col = u.get("columnId")
+            if _project_execution_enabled(p) and new_col in done_cols and task.get("executionState") != "done":
+                return {"error": "Project Execution tasks require final user acceptance before Done", "_status": 409}
             if new_col and new_col != task.get("columnId"):
                 # Auto-set/clear completedAt on done column moves
                 if new_col in done_cols and not task.get("completedAt"):
@@ -8273,6 +8358,581 @@ def _handle_task_delete(project_id, task_id):
     p["updatedAt"] = _proj_now()
     _save_projects(data)
     return {"ok": True, "id": task_id}
+
+
+# ─── PHASE 7A UNIVERSAL PROJECT EXECUTION ────────────────────────────────────
+
+_PROJECT_EXECUTION_LOCK = threading.Lock()
+_PROJECT_EXECUTION_CANCEL_FLAGS = {}
+_PROJECT_EXECUTION_REVIEW_FLAGS = set()
+_PROJECT_EXECUTION_MAX_TEXT = 12000
+_PROJECT_EXECUTION_SECRET_RE = re.compile(
+    r"(?i)(authorization|api[_-]?key|access[_-]?token|refresh[_-]?token|password|secret)\s*[:=]\s*([^\s,;]+)"
+)
+
+
+def _project_execution_enabled(project):
+    return bool((project or {}).get("projectExecutionEnabled"))
+
+
+def _project_execution_redact(value):
+    text = _PROJECT_EXECUTION_SECRET_RE.sub(lambda m: f"{m.group(1)}=[REDACTED]", str(value or ""))
+    return text if len(text) <= _PROJECT_EXECUTION_MAX_TEXT else text[:_PROJECT_EXECUTION_MAX_TEXT] + "\n...[truncated]"
+
+
+def _project_execution_allowed_roots():
+    raw = str(os.environ.get("VO_PROJECT_ROOTS") or "").strip()
+    roots = []
+    for item in raw.split(os.pathsep) if raw else []:
+        candidate = os.path.realpath(os.path.expanduser(item.strip()))
+        if candidate and os.path.isdir(candidate):
+            roots.append(candidate)
+    return roots
+
+
+def _project_execution_validate_workspace(raw_path):
+    if not str(raw_path or "").strip():
+        return {"ok": False, "error": "Project workspace is required", "code": "workspace_required"}
+    path = os.path.realpath(os.path.expanduser(str(raw_path).strip()))
+    if not os.path.exists(path):
+        return {"ok": False, "error": "Project workspace does not exist", "code": "workspace_missing"}
+    if not os.path.isdir(path):
+        return {"ok": False, "error": "Project workspace must be a directory", "code": "workspace_not_directory"}
+    if not os.access(path, os.R_OK | os.X_OK):
+        return {"ok": False, "error": "Project workspace is not accessible", "code": "workspace_inaccessible"}
+    roots = _project_execution_allowed_roots()
+    if roots and not any(path == root or path.startswith(root + os.sep) for root in roots):
+        return {"ok": False, "error": "Project workspace is outside the configured project roots", "code": "workspace_outside_roots"}
+    return {"ok": True, "path": path, "kind": "git" if os.path.isdir(os.path.join(path, ".git")) else "directory", "checkedAt": _proj_now()}
+
+
+def _project_execution_git_snapshot(workspace):
+    if not workspace or not os.path.isdir(os.path.join(workspace, ".git")):
+        return {"kind": "directory", "dirty": False, "fingerprint": "", "files": []}
+    try:
+        result = subprocess.run(["git", "status", "--porcelain=v1", "--untracked-files=all"], cwd=workspace, capture_output=True, text=True, timeout=15)
+        lines = [line for line in (result.stdout or "").splitlines() if line.strip()]
+        files = []
+        for line in lines[:200]:
+            raw = line[3:].strip() if len(line) > 3 else line.strip()
+            if " -> " in raw:
+                raw = raw.split(" -> ", 1)[1]
+            files.append(raw.strip('"'))
+        fingerprint_parts = list(lines)
+        for relpath in files:
+            try:
+                stat = os.stat(os.path.join(workspace, relpath))
+                fingerprint_parts.append(f"{relpath}:{stat.st_size}:{stat.st_mtime_ns}")
+            except OSError:
+                fingerprint_parts.append(f"{relpath}:missing")
+        return {"kind": "git", "dirty": bool(lines), "fingerprint": hashlib.sha256("\n".join(fingerprint_parts).encode()).hexdigest(), "files": files, "truncated": len(lines) > 200}
+    except Exception as exc:
+        return {"kind": "git", "dirty": False, "fingerprint": "", "files": [], "error": str(exc)}
+
+
+def _project_execution_resolve_roles(project, task):
+    executor_id = task.get("executorAgentId") or task.get("assignee") or project.get("defaultExecutorAgentId")
+    reviewer_id = task.get("reviewerAgentId") or project.get("defaultReviewerAgentId")
+    if not executor_id or not _office_agent_lookup(executor_id):
+        return {"ok": False, "error": "A valid executor agent is required", "code": "executor_required"}
+    if not reviewer_id or not _office_agent_lookup(reviewer_id):
+        return {"ok": False, "error": "A valid reviewer agent is required", "code": "reviewer_required"}
+    executor = _office_agent_ref(executor_id)
+    reviewer = _office_agent_ref(reviewer_id)
+    if executor.get("id") == reviewer.get("id"):
+        return {"ok": False, "error": "Executor and reviewer must be different agents", "code": "reviewer_not_independent"}
+    return {"ok": True, "executor": executor, "reviewer": reviewer}
+
+
+def _project_execution_find(project_id, task_id=None):
+    data = _load_projects()
+    project = next((p for p in data.get("projects", []) if p.get("id") == project_id), None)
+    task = next((t for t in project.get("tasks", []) if t.get("id") == task_id), None) if project and task_id else None
+    return data, project, task
+
+
+def _project_execution_attempt(task, attempt_id):
+    return next((item for item in task.get("attempts", []) if item.get("id") == attempt_id), None)
+
+
+def _project_execution_active_task(project):
+    active_states = {"validating", "executing", "reviewing", "reworking"}
+    return next((t for t in project.get("tasks", []) if t.get("executionState") in active_states), None)
+
+
+def _project_execution_transition(project, task, next_state, actor, reason, attempt_id=None):
+    previous = task.get("executionState") or ("done" if task.get("completedAt") else "backlog")
+    task["executionState"] = next_state
+    task["updatedAt"] = _proj_now()
+    if next_state != "done":
+        task["completedAt"] = None
+    project["updatedAt"] = _proj_now()
+    _log_activity(project, "project_execution_state_changed", actor, f"Project Execution task '{task.get('title', '')}' changed from {previous} to {next_state}: {reason}", task.get("id"))
+    task.setdefault("stateHistory", []).append({"attemptId": attempt_id, "actor": actor, "from": previous, "to": next_state, "reason": _project_execution_redact(reason), "at": _proj_now()})
+    task["stateHistory"] = task["stateHistory"][-100:]
+
+
+def _handle_project_execution_workspace_validate(project_id, body):
+    data, project, _ = _project_execution_find(project_id)
+    if not project:
+        return {"error": "Project not found", "_status": 404}
+    result = _project_execution_validate_workspace(body.get("workspacePath") or project.get("workspacePath"))
+    if not result.get("ok"):
+        project["projectExecutionEnabled"] = True
+        project["workspacePath"] = body.get("workspacePath") or project.get("workspacePath")
+        project["workspaceStatus"] = result
+        project["updatedAt"] = _proj_now()
+        _save_projects(data)
+        return {**result, "_status": 400}
+    project.update({"projectExecutionEnabled": True, "workspacePath": result["path"], "workspaceKind": result["kind"], "workspaceStatus": result, "updatedAt": _proj_now()})
+    _save_projects(data)
+    return {"ok": True, "workspace": result}
+
+
+def _project_execution_build_prompt(project, task, attempt, workspace):
+    checklist = task.get("checklist", [])
+    checklist_text = "\n".join(f"- [{'x' if item.get('done') else ' '}] {item.get('text', '')}" for item in checklist) or "- No checklist supplied"
+    rework_feedback = task.get("reworkFeedback") or attempt.get("reworkFeedback") or ""
+    return (
+        "You are the execution agent for a Virtual Office project task.\n"
+        f"WORKSPACE: {workspace}\nWork only inside this workspace. Do not review or mark the task complete.\n"
+        "Return a concise execution summary including tests run and remaining risks.\n\n"
+        f"PROJECT: {project.get('title', '')}\nPROJECT DESCRIPTION: {project.get('description', '')}\n"
+        f"TASK: {task.get('title', '')}\nTASK DESCRIPTION: {task.get('description', '')}\nATTEMPT: {attempt.get('id')}\n"
+        f"REWORK FEEDBACK: {rework_feedback}\nCHECKLIST:\n{checklist_text}\n"
+    )
+
+
+def _project_execution_test_evidence(result):
+    explicit = result.get("tests")
+    if isinstance(explicit, list):
+        return [_project_execution_redact(item) for item in explicit[:50]]
+    lines = []
+    for line in str(result.get("reply") or "").splitlines():
+        if re.search(r"(?i)\b(test|pytest|npm test|unittest|passed|failed)\b", line):
+            lines.append(_project_execution_redact(line.strip()))
+    return lines[:50]
+
+
+def _project_execution_call_executor(executor, prompt, workspace, attempt_id, project_id=None, task_id=None, timeout=600):
+    agent_id = executor.get("id")
+    provider_kind = executor.get("providerKind")
+    if provider_kind == "codex":
+        return _handle_codex_chat({"agentId": agent_id, "message": prompt, "conversationId": attempt_id, "timeoutSec": timeout, "workspace": workspace, "fromType": "agent"})
+    if provider_kind == "hermes":
+        return _handle_hermes_chat({"agentId": agent_id, "message": prompt, "timeoutSec": timeout, "fromType": "agent"})
+    reply = _wf_call_agent(agent_id, prompt, timeout=timeout, project_id=project_id, task_id=task_id)
+    ok = not str(reply).startswith("[ERROR]")
+    return {"ok": ok, "reply": reply, "error": None if ok else reply, "status": "completed" if ok else "execution_failed"}
+
+
+def _project_execution_latest_attempt(task):
+    attempts = task.get("attempts") or []
+    evidence_attempt = (task.get("evidence") or {}).get("attemptId")
+    if evidence_attempt:
+        found = _project_execution_attempt(task, evidence_attempt)
+        if found:
+            return found
+    return attempts[-1] if attempts else None
+
+
+def _project_execution_build_review_prompt(project, task, attempt):
+    evidence = attempt.get("evidence") or task.get("evidence") or {}
+    checklist = task.get("checklist", [])
+    checklist_text = "\n".join(f"- [{'x' if item.get('done') else ' '}] {item.get('text', '')}" for item in checklist) or "- No checklist supplied"
+    changed = "\n".join(f"- {name}" for name in (evidence.get("changedFiles") or [])[:100]) or "- No changed files reported"
+    tests = "\n".join(f"- {line}" for line in (evidence.get("testResults") or [])[:50]) or "- No test evidence reported"
+    feedback = task.get("reworkFeedback") or ""
+    return (
+        "You are the independent read-only reviewer for a Virtual Office Project Execution task.\n"
+        "Review only the evidence below. Do not modify files, run tools that write files, or mark the task done.\n"
+        "Return one JSON object with fields: status, summary, rationale, items.\n"
+        "status must be one of: pass, needs_more_work, blocked.\n\n"
+        f"PROJECT: {project.get('title', '')}\nPROJECT DESCRIPTION: {project.get('description', '')}\n"
+        f"TASK: {task.get('title', '')}\nTASK DESCRIPTION: {task.get('description', '')}\n"
+        f"ATTEMPT: {attempt.get('id')}\nPRIOR USER FEEDBACK: {feedback}\nCHECKLIST:\n{checklist_text}\n\n"
+        f"EXECUTOR SUMMARY:\n{_project_execution_redact(evidence.get('executorSummary') or '')}\n\n"
+        f"CHANGED FILES:\n{changed}\n\nTEST EVIDENCE:\n{tests}\n\n"
+        f"PROVIDER STATUS: {evidence.get('providerStatus') or ''}\nERROR: {_project_execution_redact(evidence.get('error') or '')}\n"
+    )
+
+
+def _project_execution_call_reviewer(reviewer, prompt, review_id, project_id=None, task_id=None, timeout=600):
+    agent_id = reviewer.get("id")
+    provider_kind = reviewer.get("providerKind")
+    if provider_kind == "codex":
+        return _handle_codex_chat({"agentId": agent_id, "message": prompt, "conversationId": review_id, "timeoutSec": timeout, "fromType": "agent"})
+    if provider_kind == "hermes":
+        return _handle_hermes_chat({"agentId": agent_id, "message": prompt, "timeoutSec": timeout, "fromType": "agent"})
+    reply = _wf_call_agent(agent_id, prompt, timeout=timeout, project_id=project_id, task_id=task_id)
+    ok = not str(reply).startswith("[ERROR]")
+    return {"ok": ok, "reply": reply, "error": None if ok else reply, "status": "completed" if ok else "review_failed"}
+
+
+def _project_execution_review_feedback(review):
+    parts = [review.get("summary") or "", review.get("rationale") or ""]
+    for item in review.get("items") or []:
+        if isinstance(item, str):
+            parts.append(item)
+        elif isinstance(item, dict):
+            parts.append(item.get("text") or item.get("summary") or json.dumps(item, ensure_ascii=False))
+    return _project_execution_redact("\n".join(part for part in parts if part).strip() or "Reviewer requested more work.")
+
+
+def _project_execution_extract_json(text):
+    raw = str(text or "").strip()
+    if not raw:
+        return None
+    try:
+        return json.loads(raw)
+    except Exception:
+        pass
+    match = re.search(r"\{.*\}", raw, re.S)
+    if match:
+        try:
+            return json.loads(match.group(0))
+        except Exception:
+            return None
+    return None
+
+
+def _project_execution_normalize_review(result, reviewer, attempt_id, review_id):
+    explicit = result.get("review") if isinstance(result, dict) else None
+    parsed = explicit if isinstance(explicit, dict) else _project_execution_extract_json(result.get("reply") if isinstance(result, dict) else "")
+    if not isinstance(parsed, dict):
+        parsed = {}
+    status = str(parsed.get("status") or "").strip().lower()
+    schema_ok = all(key in parsed for key in ("status", "summary", "rationale", "items")) and isinstance(parsed.get("items"), list)
+    if status not in {"pass", "needs_more_work", "blocked"}:
+        status = "blocked"
+    if not schema_ok:
+        status = "blocked"
+    items = parsed.get("items") if isinstance(parsed.get("items"), list) else []
+    return {
+        "id": review_id,
+        "attemptId": attempt_id,
+        "status": status,
+        "summary": _project_execution_redact(parsed.get("summary") or result.get("reply") or ""),
+        "rationale": _project_execution_redact(parsed.get("rationale") or result.get("error") or ""),
+        "items": items[:50],
+        "reviewer": {"providerKind": reviewer.get("providerKind"), "agentId": reviewer.get("id")},
+        "providerStatus": result.get("status") or ("completed" if result.get("ok") else "review_failed"),
+        "raw": _project_execution_redact(result.get("reply") or ""),
+        "reviewedAt": _proj_now(),
+    }
+
+
+def _project_execution_run_review(project_id, task_id, attempt_id, review_id):
+    try:
+        data, project, task = _project_execution_find(project_id, task_id)
+        if not project or not task:
+            return
+        attempt = _project_execution_attempt(task, attempt_id)
+        if not attempt or task.get("activeAttemptId") != review_id:
+            return
+        reviewer = attempt.get("reviewer") or {}
+        result = _project_execution_call_reviewer(reviewer, _project_execution_build_review_prompt(project, task, attempt), review_id, project_id=project_id, task_id=task_id)
+        data, project, task = _project_execution_find(project_id, task_id)
+        if not project or not task:
+            return
+        attempt = _project_execution_attempt(task, attempt_id)
+        if not attempt or task.get("activeAttemptId") != review_id:
+            return
+        review = _project_execution_normalize_review(result, reviewer, attempt_id, review_id)
+        attempt["review"] = review
+        attempt["reviewedAt"] = review["reviewedAt"]
+        task.setdefault("reviewHistory", []).append(review)
+        task["reviewHistory"] = task["reviewHistory"][-50:]
+        task["reviewResult"] = review
+        task["activeAttemptId"] = None
+        project.update({"workflowActive": False, "activeTaskId": None, "activeAgent": None})
+        if review["status"] == "pass":
+            task.update({"blockedReason": None, "lastError": None})
+            attempt["status"] = "review_passed"
+            _project_execution_transition(project, task, "awaiting_user_acceptance", reviewer.get("id") or "reviewer", "Reviewer passed; waiting for explicit user acceptance.", attempt_id)
+        elif review["status"] == "needs_more_work":
+            attempt["status"] = "review_needs_more_work"
+            prior_reworks = int(task.get("reworkCount") or 0)
+            feedback = _project_execution_review_feedback(review)
+            if prior_reworks >= 3:
+                task["blockedReason"] = "Reviewer still requested more work after three rework cycles."
+                task["reworkFeedback"] = feedback
+                _project_execution_transition(project, task, "blocked", reviewer.get("id") or "reviewer", task["blockedReason"], attempt_id)
+            else:
+                task["reworkCount"] = prior_reworks + 1
+                task["blockedReason"] = None
+                task["lastError"] = None
+                task["reworkFeedback"] = feedback
+                roles = _project_execution_resolve_roles(project, task)
+                workspace = _project_execution_validate_workspace(project.get("workspacePath"))
+                if not roles.get("ok") or not workspace.get("ok"):
+                    task["blockedReason"] = roles.get("error") if not roles.get("ok") else workspace.get("error")
+                    _project_execution_transition(project, task, "blocked", "system", task["blockedReason"], attempt_id)
+                else:
+                    rework_attempt_id = str(uuid.uuid4())
+                    rework_attempt = {
+                        "id": rework_attempt_id,
+                        "status": "reworking",
+                        "startedAt": _proj_now(),
+                        "workspacePath": workspace["path"],
+                        "workspaceKind": workspace["kind"],
+                        "dirtyConfirmed": False,
+                        "dirtyFingerprint": "",
+                        "executor": roles["executor"],
+                        "reviewer": roles["reviewer"],
+                        "baseline": _project_execution_git_snapshot(workspace["path"]),
+                        "rework": True,
+                        "reworkCycle": task["reworkCount"],
+                        "reworkFromAttemptId": attempt_id,
+                        "reworkFromReviewId": review_id,
+                        "reworkFeedback": feedback,
+                        "autoReviewAfterExecution": True,
+                    }
+                    task.setdefault("attempts", []).append(rework_attempt)
+                    task["attempts"] = task["attempts"][-20:]
+                    task.update({"activeAttemptId": rework_attempt_id, "executorAgentId": roles["executor"]["id"], "reviewerAgentId": roles["reviewer"]["id"]})
+                    project.update({"workflowActive": True, "workflowPhase": "reworking", "activeTaskId": task_id, "activeAgent": roles["executor"]["id"]})
+                    _project_execution_transition(project, task, "reworking", reviewer.get("id") or "reviewer", feedback, rework_attempt_id)
+                    cancel_flag = threading.Event()
+                    with _PROJECT_EXECUTION_LOCK:
+                        _PROJECT_EXECUTION_CANCEL_FLAGS[rework_attempt_id] = cancel_flag
+                    project["workflowPhase"] = task["executionState"]
+                    _save_projects(data)
+                    threading.Thread(target=_project_execution_run_attempt, args=(project_id, task_id, rework_attempt_id, cancel_flag), daemon=True).start()
+                    return
+        else:
+            attempt["status"] = "review_blocked"
+            task["blockedReason"] = review["summary"] or "Reviewer marked the task blocked."
+            _project_execution_transition(project, task, "blocked", reviewer.get("id") or "reviewer", task["blockedReason"], attempt_id)
+        project["workflowPhase"] = task["executionState"]
+        _save_projects(data)
+    finally:
+        with _PROJECT_EXECUTION_LOCK:
+            _PROJECT_EXECUTION_REVIEW_FLAGS.discard(review_id)
+
+
+def _project_execution_run_attempt(project_id, task_id, attempt_id, cancel_flag):
+    data, project, task = _project_execution_find(project_id, task_id)
+    if not project or not task:
+        return
+    attempt = _project_execution_attempt(task, attempt_id)
+    if not attempt:
+        return
+    workspace = attempt.get("workspacePath")
+    executor = attempt.get("executor") or {}
+    started = time.time()
+    result = _project_execution_call_executor(executor, _project_execution_build_prompt(project, task, attempt, workspace), workspace, attempt_id, project_id=project_id, task_id=task_id)
+    final_snapshot = _project_execution_git_snapshot(workspace)
+    data, project, task = _project_execution_find(project_id, task_id)
+    if not project or not task:
+        return
+    attempt = _project_execution_attempt(task, attempt_id)
+    if not attempt or task.get("activeAttemptId") != attempt_id:
+        return
+    cancelled = cancel_flag.is_set() or result.get("status") == "cancelled"
+    evidence = {
+        "attemptId": attempt_id,
+        "executorSummary": _project_execution_redact(result.get("reply") or ""),
+        "changedFiles": sorted(set(final_snapshot.get("files", [])) | set(result.get("modifiedFiles") or []))[:200],
+        "workspaceBefore": attempt.get("baseline", {}), "workspaceAfter": final_snapshot,
+        "checklist": task.get("checklist", []),
+        "providerStatus": result.get("status") or ("completed" if result.get("ok") else "execution_failed"),
+        "error": _project_execution_redact(result.get("error") or ""), "durationMs": int((time.time() - started) * 1000), "capturedAt": _proj_now(),
+        "testResults": _project_execution_test_evidence(result),
+        "providerRef": {"providerKind": executor.get("providerKind"), "agentId": executor.get("id"), "attemptId": attempt_id},
+    }
+    attempt.update({"evidence": evidence, "finishedAt": _proj_now()})
+    task.update({"evidence": evidence, "activeAttemptId": None})
+    project.update({"workflowActive": False, "activeTaskId": None, "activeAgent": None})
+    if cancelled:
+        attempt["status"] = "cancelled"
+        task["blockedReason"] = "Execution was cancelled. Existing workspace changes were not rolled back."
+        _project_execution_transition(project, task, "blocked", "user", task["blockedReason"], attempt_id)
+    elif result.get("ok"):
+        attempt["status"] = "execution_complete"
+        task.update({"blockedReason": None, "lastError": None})
+        _project_execution_transition(project, task, "execution_complete", executor.get("id") or "executor", "Execution completed; Independent review has not started.", attempt_id)
+    else:
+        attempt["status"] = "blocked"
+        task["lastError"] = evidence["error"] or "Executor failed"
+        task["blockedReason"] = task["lastError"]
+        _project_execution_transition(project, task, "blocked", executor.get("id") or "executor", task["blockedReason"], attempt_id)
+    project["workflowPhase"] = task["executionState"]
+    _save_projects(data)
+    with _PROJECT_EXECUTION_LOCK:
+        _PROJECT_EXECUTION_CANCEL_FLAGS.pop(attempt_id, None)
+    if result.get("ok") and attempt.get("autoReviewAfterExecution"):
+        _handle_project_execution_review_start(project_id, task_id, {"attemptId": attempt_id})
+
+
+def _handle_project_execution_start(project_id, task_id, body):
+    data, project, task = _project_execution_find(project_id, task_id)
+    if not project or not task:
+        return {"error": "Project or task not found", "_status": 404}
+    if not _project_execution_enabled(project):
+        return {"error": "Project Execution is not enabled for this project", "_status": 409}
+    workspace = _project_execution_validate_workspace(project.get("workspacePath"))
+    if not workspace.get("ok"):
+        project["workspaceStatus"] = workspace
+        _save_projects(data)
+        return {**workspace, "_status": 409}
+    roles = _project_execution_resolve_roles(project, task)
+    if not roles.get("ok"):
+        return {**roles, "_status": 409}
+    active = _project_execution_active_task(project)
+    if active:
+        return {"error": "Another task is already active for this project", "activeTaskId": active.get("id"), "_status": 409}
+    snapshot = _project_execution_git_snapshot(workspace["path"])
+    if snapshot.get("dirty") and str(body.get("dirtyFingerprint") or "") != snapshot.get("fingerprint"):
+        return {"ok": False, "confirmationRequired": True, "code": "dirty_worktree_confirmation_required", "dirtyFingerprint": snapshot.get("fingerprint"), "dirtyFiles": snapshot.get("files", [])[:50], "truncated": snapshot.get("truncated", False), "_status": 409}
+    if snapshot.get("dirty"):
+        used_confirmations = set(project.get("executionDirtyConfirmations") or [])
+        if snapshot.get("fingerprint") in used_confirmations:
+            return {"ok": False, "confirmationRequired": True, "code": "dirty_worktree_confirmation_already_used", "dirtyFingerprint": snapshot.get("fingerprint"), "dirtyFiles": snapshot.get("files", [])[:50], "truncated": snapshot.get("truncated", False), "_status": 409}
+        project.setdefault("executionDirtyConfirmations", []).append(snapshot.get("fingerprint"))
+        project["executionDirtyConfirmations"] = project["executionDirtyConfirmations"][-100:]
+    attempt_id = str(uuid.uuid4())
+    attempt = {"id": attempt_id, "status": "executing", "startedAt": _proj_now(), "workspacePath": workspace["path"], "workspaceKind": workspace["kind"], "dirtyConfirmed": bool(snapshot.get("dirty")), "dirtyFingerprint": snapshot.get("fingerprint") if snapshot.get("dirty") else "", "executor": roles["executor"], "reviewer": roles["reviewer"], "baseline": snapshot}
+    task.setdefault("attempts", []).append(attempt)
+    task["attempts"] = task["attempts"][-20:]
+    task.update({"activeAttemptId": attempt_id, "executorAgentId": roles["executor"]["id"], "reviewerAgentId": roles["reviewer"]["id"], "blockedReason": None, "lastError": None})
+    project.update({"workspaceStatus": workspace, "workflowActive": True, "workflowPhase": "executing", "activeTaskId": task_id, "activeAgent": roles["executor"]["id"]})
+    _project_execution_transition(project, task, "executing", "user", "Project Execution task started", attempt_id)
+    _save_projects(data)
+    cancel_flag = threading.Event()
+    with _PROJECT_EXECUTION_LOCK:
+        _PROJECT_EXECUTION_CANCEL_FLAGS[attempt_id] = cancel_flag
+    threading.Thread(target=_project_execution_run_attempt, args=(project_id, task_id, attempt_id, cancel_flag), daemon=True).start()
+    return {"ok": True, "status": "started", "taskId": task_id, "attemptId": attempt_id}
+
+
+def _handle_project_execution_status(project_id, task_id=None):
+    data, project, task = _project_execution_find(project_id, task_id)
+    if not project or (task_id and not task):
+        return {"error": "Project or task not found", "_status": 404}
+    targets = [task] if task else project.get("tasks", [])
+    changed = False
+    for item in targets:
+        if item and item.get("executionState") in {"validating", "executing", "reviewing", "reworking"}:
+            attempt_id = item.get("activeAttemptId")
+            with _PROJECT_EXECUTION_LOCK:
+                live = bool(attempt_id and (attempt_id in _PROJECT_EXECUTION_CANCEL_FLAGS or attempt_id in _PROJECT_EXECUTION_REVIEW_FLAGS))
+            if not live:
+                item["activeAttemptId"] = None
+                item["blockedReason"] = "The previous execution could not be resumed after service restart."
+                _project_execution_transition(project, item, "blocked", "system", item["blockedReason"], attempt_id)
+                changed = True
+    if changed:
+        project.update({"workflowActive": False, "activeTaskId": None, "activeAgent": None, "workflowPhase": "blocked"})
+        _save_projects(data)
+    return {"ok": True, "active": bool(project.get("workflowActive")), "phase": project.get("workflowPhase") or "idle", "currentTaskId": project.get("activeTaskId"), "task": task}
+
+
+def _handle_project_execution_cancel(project_id, task_id, body=None):
+    _, project, task = _project_execution_find(project_id, task_id)
+    if not project or not task:
+        return {"error": "Task not found", "_status": 404}
+    attempt_id = str((body or {}).get("attemptId") or task.get("activeAttemptId") or "")
+    if not attempt_id or task.get("activeAttemptId") != attempt_id:
+        return {"error": "No matching active attempt", "_status": 409}
+    with _PROJECT_EXECUTION_LOCK:
+        flag = _PROJECT_EXECUTION_CANCEL_FLAGS.get(attempt_id)
+        if flag:
+            flag.set()
+    attempt = _project_execution_attempt(task, attempt_id) or {}
+    executor = attempt.get("executor") or {}
+    if executor.get("providerKind") == "codex":
+        _handle_codex_cancel({"agentId": executor.get("id"), "conversationId": attempt_id, "workspace": attempt.get("workspacePath")})
+    elif executor.get("providerKind") == "openclaw":
+        _wf_abort_task_session(_wf_task_session_key(executor.get("id"), project_id, task_id))
+    return {"ok": True, "status": "cancelling", "attemptId": attempt_id}
+
+
+def _handle_project_execution_review_start(project_id, task_id, body=None):
+    data, project, task = _project_execution_find(project_id, task_id)
+    if not project or not task:
+        return {"error": "Project or task not found", "_status": 404}
+    if not _project_execution_enabled(project):
+        return {"error": "Project Execution is not enabled for this project", "_status": 409}
+    if task.get("executionState") != "execution_complete":
+        return {"error": "Task must be execution_complete before reviewer handoff", "_status": 409}
+    attempt = _project_execution_latest_attempt(task)
+    if not attempt or not (attempt.get("evidence") or task.get("evidence")):
+        return {"error": "Execution evidence is required before review", "_status": 409}
+    requested_attempt = str((body or {}).get("attemptId") or attempt.get("id"))
+    if requested_attempt != attempt.get("id"):
+        return {"error": "Stale or mismatched attempt cannot be reviewed", "_status": 409}
+    roles = _project_execution_resolve_roles(project, task)
+    if not roles.get("ok"):
+        return {**roles, "_status": 409}
+    active = _project_execution_active_task(project)
+    if active:
+        return {"error": "Another task is already active for this project", "activeTaskId": active.get("id"), "_status": 409}
+    review_id = str(uuid.uuid4())
+    attempt["reviewer"] = roles["reviewer"]
+    attempt["reviewStartedAt"] = _proj_now()
+    task.update({"activeAttemptId": review_id, "reviewerAgentId": roles["reviewer"]["id"], "reviewResult": {}, "blockedReason": None, "lastError": None})
+    project.update({"workflowActive": True, "workflowPhase": "reviewing", "activeTaskId": task_id, "activeAgent": roles["reviewer"]["id"]})
+    _project_execution_transition(project, task, "reviewing", "user", "Independent reviewer handoff started", attempt.get("id"))
+    _save_projects(data)
+    with _PROJECT_EXECUTION_LOCK:
+        _PROJECT_EXECUTION_REVIEW_FLAGS.add(review_id)
+    threading.Thread(target=_project_execution_run_review, args=(project_id, task_id, attempt.get("id"), review_id), daemon=True).start()
+    return {"ok": True, "status": "reviewing", "taskId": task_id, "attemptId": attempt.get("id"), "reviewId": review_id}
+
+
+def _handle_project_execution_acceptance(project_id, task_id, body=None):
+    body = body or {}
+    data, project, task = _project_execution_find(project_id, task_id)
+    if not project or not task:
+        return {"error": "Project or task not found", "_status": 404}
+    if not _project_execution_enabled(project):
+        return {"error": "Project Execution is not enabled for this project", "_status": 409}
+    action = str(body.get("action") or "").strip()
+    if action not in {"accept", "reject_and_rework", "mark_blocked"}:
+        return {"error": "Invalid acceptance action", "_status": 400}
+    review = task.get("reviewResult") or {}
+    attempt_id = str(body.get("attemptId") or "")
+    if action == "accept":
+        if task.get("executionState") != "awaiting_user_acceptance" or review.get("status") != "pass":
+            return {"error": "Reviewer pass is required before user acceptance", "_status": 409}
+        if not attempt_id or attempt_id != review.get("attemptId"):
+            return {"error": "Stale or mismatched acceptance attempt", "_status": 409}
+        done_col = _wf_get_done_col(project)
+        if not done_col:
+            return {"error": "Done column not found", "_status": 409}
+        _project_execution_transition(project, task, "done", "user", "User accepted reviewer pass", attempt_id)
+        task["completedAt"] = _proj_now()
+        task["columnId"] = done_col.get("id")
+        task.setdefault("acceptanceHistory", []).append({"action": "accept", "attemptId": attempt_id, "at": _proj_now(), "by": "user"})
+        task["acceptanceHistory"] = task["acceptanceHistory"][-50:]
+        project.update({"workflowActive": False, "workflowPhase": "done", "activeTaskId": None, "activeAgent": None, "updatedAt": _proj_now()})
+        _log_activity(project, "project_execution_user_accepted", "user", f"User accepted Project Execution task '{task.get('title', '')}'", task_id)
+        _save_projects(data)
+        return {"ok": True, "status": "done", "task": task}
+    feedback = str(body.get("feedback") or "").strip()
+    if not feedback:
+        return {"error": "Feedback is required", "_status": 400}
+    if task.get("executionState") != "awaiting_user_acceptance" or review.get("status") != "pass":
+        return {"error": "A current reviewer pass is required before this acceptance action", "_status": 409}
+    if attempt_id and attempt_id != review.get("attemptId"):
+        return {"error": "Stale or mismatched acceptance attempt", "_status": 409}
+    task.setdefault("acceptanceHistory", []).append({"action": action, "attemptId": review.get("attemptId"), "feedback": _project_execution_redact(feedback), "at": _proj_now(), "by": "user"})
+    task["acceptanceHistory"] = task["acceptanceHistory"][-50:]
+    task["reviewResult"] = {}
+    task["reworkFeedback"] = _project_execution_redact(feedback)
+    if action == "reject_and_rework":
+        task["reworkCount"] = int(task.get("reworkCount") or 0) + 1
+        task["blockedReason"] = None
+        _project_execution_transition(project, task, "backlog", "user", f"User rejected reviewer pass: {feedback}", review.get("attemptId"))
+        project.update({"workflowActive": False, "workflowPhase": "backlog", "activeTaskId": None, "activeAgent": None, "updatedAt": _proj_now()})
+        _save_projects(data)
+        return {"ok": True, "status": "backlog", "task": task}
+    task["blockedReason"] = _project_execution_redact(feedback)
+    _project_execution_transition(project, task, "blocked", "user", feedback, review.get("attemptId"))
+    project.update({"workflowActive": False, "workflowPhase": "blocked", "activeTaskId": None, "activeAgent": None, "updatedAt": _proj_now()})
+    _save_projects(data)
+    return {"ok": True, "status": "blocked", "task": task}
 
 
 # ─── PROJECT WORKFLOW ENGINE ──────────────────────────────────────────────────
@@ -10458,6 +11118,8 @@ def _handle_review_check_update(project_id, task_id, body):
     task = next((t for t in p["tasks"] if t["id"] == task_id), None)
     if not task:
         return {"error": "Task not found", "_status": 404}
+    if _project_execution_enabled(p):
+        return {"error": "Project Execution review results must be produced by the Independent reviewer flow", "_status": 409}
 
     review_check = body.get("reviewCheck", [])
     task["reviewCheck"] = review_check
@@ -12268,6 +12930,26 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
         elif self.path.startswith("/api/projects/") and self.path.endswith("/workflow/status"):
             proj_id = self.path.split("/api/projects/")[1].rsplit("/workflow/status", 1)[0]
             result = _handle_workflow_status(proj_id)
+            self.send_response(result.get("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            result.pop("_status", None)
+            self.wfile.write(json.dumps(result).encode())
+        elif self.path.startswith("/api/projects/") and "/tasks/" not in self.path and self.path.endswith("/project-execution/status"):
+            proj_id = self.path.split("/api/projects/")[1].rsplit("/project-execution/status", 1)[0]
+            result = _handle_project_execution_status(proj_id)
+            self.send_response(result.get("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            result.pop("_status", None)
+            self.wfile.write(json.dumps(result).encode())
+        elif self.path.startswith("/api/projects/") and "/tasks/" in self.path and self.path.endswith("/project-execution/status"):
+            rest = self.path.split("/api/projects/")[1]
+            proj_id, task_rest = rest.split("/tasks/", 1)
+            task_id = task_rest.rsplit("/project-execution/status", 1)[0]
+            result = _handle_project_execution_status(proj_id, task_id)
             self.send_response(result.get("_status", 200))
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
@@ -14367,6 +15049,69 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             length = int(self.headers.get('Content-Length', 0))
             body = json.loads(self.rfile.read(length)) if length else {}
             result = _handle_workflow_start(proj_id, body)
+            self.send_response(result.get("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            result.pop("_status", None)
+            self.wfile.write(json.dumps(result).encode())
+        elif self.path.startswith("/api/projects/") and self.path.endswith("/project-execution/workspace/validate"):
+            proj_id = self.path.split("/api/projects/")[1].rsplit("/project-execution/workspace/validate", 1)[0]
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            result = _handle_project_execution_workspace_validate(proj_id, body)
+            self.send_response(result.get("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            result.pop("_status", None)
+            self.wfile.write(json.dumps(result).encode())
+        elif self.path.startswith("/api/projects/") and "/tasks/" in self.path and self.path.endswith("/project-execution/start"):
+            rest = self.path.split("/api/projects/")[1]
+            proj_id, task_rest = rest.split("/tasks/", 1)
+            task_id = task_rest.rsplit("/project-execution/start", 1)[0]
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            result = _handle_project_execution_start(proj_id, task_id, body)
+            self.send_response(result.get("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            result.pop("_status", None)
+            self.wfile.write(json.dumps(result).encode())
+        elif self.path.startswith("/api/projects/") and "/tasks/" in self.path and self.path.endswith("/project-execution/cancel"):
+            rest = self.path.split("/api/projects/")[1]
+            proj_id, task_rest = rest.split("/tasks/", 1)
+            task_id = task_rest.rsplit("/project-execution/cancel", 1)[0]
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            result = _handle_project_execution_cancel(proj_id, task_id, body)
+            self.send_response(result.get("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            result.pop("_status", None)
+            self.wfile.write(json.dumps(result).encode())
+        elif self.path.startswith("/api/projects/") and "/tasks/" in self.path and self.path.endswith("/project-execution/review/start"):
+            rest = self.path.split("/api/projects/")[1]
+            proj_id, task_rest = rest.split("/tasks/", 1)
+            task_id = task_rest.rsplit("/project-execution/review/start", 1)[0]
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            result = _handle_project_execution_review_start(proj_id, task_id, body)
+            self.send_response(result.get("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            result.pop("_status", None)
+            self.wfile.write(json.dumps(result).encode())
+        elif self.path.startswith("/api/projects/") and "/tasks/" in self.path and self.path.endswith("/project-execution/accept"):
+            rest = self.path.split("/api/projects/")[1]
+            proj_id, task_rest = rest.split("/tasks/", 1)
+            task_id = task_rest.rsplit("/project-execution/accept", 1)[0]
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            result = _handle_project_execution_acceptance(proj_id, task_id, body)
             self.send_response(result.get("_status", 200))
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
