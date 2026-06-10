@@ -398,6 +398,8 @@ PY
     export VO_BROWSER_PANEL="${VO_BROWSER_PANEL:-false}"
     export VO_CDP_URL="${VO_CDP_URL:-http://localhost:9222}"
     export VO_VIEWER_URL="${VO_VIEWER_URL:-http://localhost:6901}"
+    export NO_PROXY="127.0.0.1,localhost,${NO_PROXY:-}"
+    export no_proxy="127.0.0.1,localhost,${no_proxy:-}"
 
     for port_name in VO_PORT VO_WS_PORT; do
         local port="${!port_name}"
@@ -430,7 +432,7 @@ PY
     cd "$SCRIPT_DIR/app"
     "$python_bin" server.py &
     local server_pid=$!
-    trap 'kill "$server_pid" 2>/dev/null || true' INT TERM EXIT
+    trap 'kill "${server_pid:-}" 2>/dev/null || true' INT TERM EXIT
 
     local ready=false
     for _ in $(seq 1 60); do
@@ -440,11 +442,13 @@ PY
             exit $?
         fi
         if "$python_bin" - "$VO_PORT" <<'PY' 2>/dev/null
+import http.client
 import sys
-import urllib.request
 
-with urllib.request.urlopen(f"http://127.0.0.1:{sys.argv[1]}/health", timeout=1) as response:
-    raise SystemExit(0 if response.status == 200 else 1)
+conn = http.client.HTTPConnection("127.0.0.1", int(sys.argv[1]), timeout=1)
+conn.request("GET", "/health")
+response = conn.getresponse()
+raise SystemExit(0 if response.status == 200 else 1)
 PY
         then
             ready=true
@@ -480,11 +484,11 @@ PY
 
     "$python_bin" - "$VO_PORT" "$VO_STATUS_DIR/startup-health.json" "$VO_VIEWER_URL" <<'PY'
 import asyncio
+import http.client
 import json
 import ssl
 import sys
 import time
-import urllib.request
 import urllib.parse
 from websockets.asyncio.client import connect
 
@@ -497,8 +501,11 @@ for name, path in (
     ("license", "/api/license"),
 ):
     try:
-        with urllib.request.urlopen(base + path, timeout=3) as response:
-            report[name] = json.load(response)
+        conn = http.client.HTTPConnection("127.0.0.1", int(port), timeout=3)
+        conn.request("GET", path)
+        response = conn.getresponse()
+        report[name] = json.loads(response.read().decode("utf-8"))
+        conn.close()
     except Exception as exc:
         report[name] = {"ok": False, "error": str(exc)}
 

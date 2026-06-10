@@ -20,7 +20,7 @@ services:
       - VO_PORT=${VO_PORT:-8090}
       - VO_WS_PORT=${VO_WS_PORT:-8091}
       - VO_OFFICE_NAME=${VO_OFFICE_NAME:-Virtual Office}
-      - VO_WEATHER_LOCATION=${VO_WEATHER_LOCATION:-}
+      - VO_WEATHER_LOCATION=${VO_WEATHER_LOCATION:-Beijing}
       - VO_BROWSER_PANEL=${VO_BROWSER_PANEL:-false}
       - VO_CDP_URL=${VO_CDP_URL:-}
       - VO_VIEWER_URL=${VO_VIEWER_URL:-}

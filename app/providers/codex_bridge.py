@@ -148,7 +148,7 @@ class CodexAppServerClient:
                 "clientInfo": {
                     "name": "my_virtual_office",
                     "title": "My Virtual Office",
-                    "version": "phase-5",
+                    "version": "codex-live-bridge",
                 }
             }, timeout=15)
             self._send({"method": "initialized", "params": {}})

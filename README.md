@@ -203,7 +203,7 @@ All settings live in `vo-config.json`. Environment variables override config val
 | `VO_HERMES_BIN` | ~/.local/bin/hermes | Hermes CLI binary used for discovery and safe request/response chat calls |
 | `VO_HERMES_TIMEOUT_SEC` | 600 | Timeout for Hermes CLI chat calls |
 | `VO_STATUS_DIR` | `./data` when using `start.sh` | Directory for local presence and status data. |
-| `VO_WEATHER_LOCATION` | *(none)* | Weather location for window display |
+| `VO_WEATHER_LOCATION` | Beijing | Weather location for window display |
 
 ### Hermes Agent compatibility
 

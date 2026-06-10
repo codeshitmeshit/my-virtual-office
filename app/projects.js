@@ -216,6 +216,31 @@
             const r = await fetch(`/api/projects/${projectId}/workflow/chat`);
             return r.json();
         },
+        async projectExecutionValidateWorkspace(projectId, workspacePath) {
+            const r = await fetch(`/api/projects/${projectId}/project-execution/workspace/validate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ workspacePath }) });
+            return r.json();
+        },
+        async projectExecutionStart(projectId, taskId, dirtyFingerprint) {
+            const r = await fetch(`/api/projects/${projectId}/tasks/${taskId}/project-execution/start`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dirtyFingerprint: dirtyFingerprint || '' }) });
+            return r.json();
+        },
+        async projectExecutionCancel(projectId, taskId, attemptId) {
+            const r = await fetch(`/api/projects/${projectId}/tasks/${taskId}/project-execution/cancel`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ attemptId }) });
+            return r.json();
+        },
+        async projectExecutionReviewStart(projectId, taskId, attemptId) {
+            const r = await fetch(`/api/projects/${projectId}/tasks/${taskId}/project-execution/review/start`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ attemptId }) });
+            return r.json();
+        },
+        async projectExecutionAccept(projectId, taskId, action, attemptId, feedback) {
+            const r = await fetch(`/api/projects/${projectId}/tasks/${taskId}/project-execution/accept`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, attemptId, feedback: feedback || '' }) });
+            return r.json();
+        },
+        async projectExecutionStatus(projectId, taskId) {
+            const suffix = taskId ? `/tasks/${taskId}` : '';
+            const r = await fetch(`/api/projects/${projectId}${suffix}/project-execution/status`);
+            return r.json();
+        },
     };
 
     // ── GAMIFICATION ENGINE ───────────────────────────────────────
@@ -617,7 +642,10 @@
             <span class="proj-badge badge-${p.status || 'active'}">${p.status || _t('proj_status_active')}</span>
             <span class="proj-badge badge-${p.priority || 'medium'}">${p.priority || _t('proj_priority_medium')}</span>
             <div style="flex:1"></div>
-            <div class="proj-workflow-controls" id="proj-wf-controls">
+            ${p.projectExecutionEnabled ? `<div class="proj-exec-project-state">
+                <span class="proj-wf-status ${p.workflowActive ? 'wf-active' : ''}" id="wf-status-badge">${escHtml(p.workflowPhase || '')}</span>
+                <span class="proj-exec-workspace" title="${escHtml(p.workspacePath || '')}">${p.workspaceKind === 'git' ? 'Git' : 'DIR'} · ${escHtml(p.workspacePath || '未配置工作区')}</span>
+            </div>` : `<div class="proj-workflow-controls" id="proj-wf-controls">
                 <button class="proj-btn proj-btn-sm proj-btn-start" id="wf-start-btn" onclick="ProjMgr.workflowStart()" title="${_t('proj_workflow_start')}">▶ ${_t('proj_workflow_start')}</button>
                 <button class="proj-btn proj-btn-sm proj-btn-stop hidden" id="wf-stop-btn" onclick="ProjMgr.workflowStop()" title="${_t('proj_workflow_stop')}">⏹ ${_t('proj_workflow_stop')}</button>
                 <div class="proj-auto-toggle" title="Auto Mode: automatically process next backlog task when current finishes">
@@ -628,7 +656,7 @@
                     <span class="proj-toggle-label">${_t('proj_workflow_auto')}</span>
                 </div>
                 <span class="proj-wf-status" id="wf-status-badge"></span>
-            </div>
+            </div>`}
             <button class="proj-btn proj-btn-sm" onclick="ProjMgr.editProjectDialog('${p.id}')">${_t('proj_edit')}</button>
             <button class="proj-btn proj-btn-sm" onclick="ProjMgr.showReport('${p.id}')">${_t('proj_report')}</button>
             <button class="proj-btn proj-btn-sm" onclick="ProjMgr.saveAsTemplateDialog('${p.id}')">${_t('proj_template_btn')}</button>
@@ -691,6 +719,7 @@
         const comments = (task.comments || []).length;
         const assignee = task.assignee ? state.agentRoster.find(a => a.key === task.assignee || a.statusKey === task.assignee || a.agentId === task.assignee) : null;
         const priorityLabel = task.priority !== 'medium' ? _t('proj_priority_' + task.priority) : '';
+        const projectExecutionState = task.executionState && task.executionState !== 'backlog' ? `<span class="proj-exec-state state-${escHtml(task.executionState)}">${escHtml(task.executionState)}</span>` : '';
         return `
         <div class="proj-task-card" id="task-${task.id}" data-task-id="${task.id}"
             style="--pri-color:${pc}"
@@ -706,6 +735,7 @@
                 ${due ? `<span class="proj-task-due ${overdue ? 'overdue' : ''}" title="${formatDate(due)}">${overdue ? '⚠️' : '📅'} ${formatDate(due)}</span>` : ''}
                 ${(task.tags || []).slice(0, 2).map(t => `<span class="proj-tag" style="font-size:9px">${escHtml(t)}</span>`).join('')}
                 ${comments > 0 ? `<span class="proj-task-comment-icon">💬 ${comments}</span>` : ''}
+                ${projectExecutionState}
             </div>
             ${hasCheck ? `
             <div class="proj-checklist-mini">
@@ -1050,6 +1080,30 @@
         const reviewItems = (task.reviewCheck && task.reviewCheck.length) ? task.reviewCheck : (task.lastReviewCheck || []);
         const reviewTitle = (task.reviewCheck && task.reviewCheck.length) ? '🔍 Review Check' : ((task.lastReviewCheck && task.lastReviewCheck.length) ? '🕘 Last Failed Review' : '🔍 Review Check');
         const activity = (p && p.activity || []).filter(a => a.taskId === task.id).slice().reverse().slice(0, 20);
+        const projectExecution = !!(p && p.projectExecutionEnabled);
+        const evidence = task.evidence || {};
+        const reviewResult = task.reviewResult || {};
+        const attemptId = task.activeAttemptId || (task.attempts && task.attempts.length ? task.attempts[task.attempts.length - 1].id : '');
+        const evidenceAttemptId = evidence.attemptId || attemptId;
+        const projectExecutionReviewHtml = reviewResult.status ? `
+            <div class="proj-exec-review state-${escHtml(reviewResult.status)}">
+                <div><strong>Reviewer</strong> ${escHtml(reviewResult.status)}</div>
+                ${reviewResult.summary ? `<div class="proj-exec-summary">${escHtml(reviewResult.summary)}</div>` : ''}
+                ${reviewResult.rationale ? `<div class="proj-exec-meta">${escHtml(reviewResult.rationale)}</div>` : ''}
+                ${(reviewResult.items || []).slice(0, 12).map(item => `<code>${escHtml(typeof item === 'string' ? item : (item.text || item.summary || JSON.stringify(item)))}</code>`).join('')}
+            </div>` : '';
+        const projectExecutionActionsHtml = (() => {
+            if (task.executionState === 'executing' || task.executionState === 'reworking') return `<button class="proj-btn proj-btn-sm proj-btn-stop" onclick="ProjMgr.projectExecutionCancel('${task.id}', '${escHtml(attemptId)}')">停止执行</button>`;
+            if (task.executionState === 'reviewing') return `<button class="proj-btn proj-btn-sm" disabled>审查中</button>`;
+            if (task.executionState === 'execution_complete') return `
+                <button class="proj-btn proj-btn-sm proj-btn-start" onclick="ProjMgr.projectExecutionReviewStart('${task.id}', '${escHtml(evidenceAttemptId)}')">启动审查</button>
+                <button class="proj-btn proj-btn-sm" onclick="ProjMgr.projectExecutionStart('${task.id}')">重新执行</button>`;
+            if (task.executionState === 'awaiting_user_acceptance') return `
+                <button class="proj-btn proj-btn-sm proj-btn-start" onclick="ProjMgr.projectExecutionAccept('${task.id}', 'accept', '${escHtml(reviewResult.attemptId || evidenceAttemptId)}')">验收通过</button>
+                <button class="proj-btn proj-btn-sm" onclick="ProjMgr.projectExecutionAccept('${task.id}', 'reject_and_rework', '${escHtml(reviewResult.attemptId || evidenceAttemptId)}')">拒绝返工</button>
+                <button class="proj-btn proj-btn-sm proj-btn-stop" onclick="ProjMgr.projectExecutionAccept('${task.id}', 'mark_blocked', '${escHtml(reviewResult.attemptId || evidenceAttemptId)}')">标记阻塞</button>`;
+            return `<button class="proj-btn proj-btn-sm proj-btn-start" onclick="ProjMgr.projectExecutionStart('${task.id}')">启动此任务</button>`;
+        })();
 
         panel.innerHTML = `
         <div class="proj-detail-header">
@@ -1092,6 +1146,16 @@
                         ${agents.map(a => `<option value="${a.key || a.statusKey || a.id}" ${task.assignee === (a.key || a.statusKey || a.id) ? 'selected' : ''}>${escHtml((a.emoji || '👤') + ' ' + a.name)}</option>`).join('')}
                     </select>
                 </div>
+                ${projectExecution ? `<div style="display:flex;gap:8px">
+                    <div class="proj-field" style="flex:1">
+                        <label class="proj-field-label">执行 Agent</label>
+                        <select class="proj-detail-select" onchange="ProjMgr.updateTaskField('executorAgentId', this.value || null)">${projectExecutionAgentOptions(task.executorAgentId || task.assignee || '')}</select>
+                    </div>
+                    <div class="proj-field" style="flex:1">
+                        <label class="proj-field-label">Reviewer</label>
+                        <select class="proj-detail-select" onchange="ProjMgr.updateTaskField('reviewerAgentId', this.value || null)">${projectExecutionAgentOptions(task.reviewerAgentId || '')}</select>
+                    </div>
+                </div>` : ''}
                 <div class="proj-field">
                     <label class="proj-field-label">${_t('proj_tags')}</label>
                     <div class="proj-tag-input-wrap" id="detail-tags-wrap" onclick="document.getElementById('detail-tag-in').focus()">
@@ -1100,6 +1164,23 @@
                     </div>
                 </div>
             </div>
+
+            ${projectExecution ? `<div class="proj-section proj-exec-panel">
+                <div class="proj-section-header"><span class="proj-section-title">Project Execution 执行与审查</span><span class="proj-exec-state state-${escHtml(task.executionState || 'backlog')}">${escHtml(task.executionState || 'backlog')}</span></div>
+                <div class="proj-exec-actions">
+                    ${projectExecutionActionsHtml}
+                </div>
+                ${task.blockedReason ? `<div class="proj-exec-warning">${escHtml(task.blockedReason)}</div>` : ''}
+                ${evidence.capturedAt ? `<div class="proj-exec-evidence">
+                    <div><strong>执行总结</strong></div><div class="proj-exec-summary">${escHtml(evidence.executorSummary || '无')}</div>
+                    <div><strong>修改文件</strong> ${(evidence.changedFiles || []).length}</div>
+                    ${(evidence.changedFiles || []).slice(0, 20).map(f => `<code>${escHtml(f)}</code>`).join('')}
+                    ${(evidence.testResults || []).length ? `<div><strong>测试结果</strong></div>${evidence.testResults.slice(0, 20).map(t => `<code>${escHtml(t)}</code>`).join('')}` : ''}
+                    <div class="proj-exec-meta">耗时 ${Math.round((evidence.durationMs || 0) / 1000)}s · ${escHtml(evidence.providerStatus || '')}</div>
+                </div>` : '<div class="proj-exec-meta">执行证据将在任务结束后显示。执行完成后需要独立审查和用户验收。</div>'}
+                ${projectExecutionReviewHtml}
+                ${task.reworkFeedback ? `<div class="proj-exec-meta">返工反馈：${escHtml(task.reworkFeedback)}</div>` : ''}
+            </div>` : ''}
 
             <div class="proj-section">
                 <div class="proj-section-header"><span class="proj-section-title">${_t('proj_description')}</span></div>
@@ -1479,6 +1560,13 @@
         showFormModal('edit-project', p);
     }
 
+    function projectExecutionAgentOptions(selected) {
+        return `<option value="">— 请选择 —</option>` + state.agentRoster.map(a => {
+            const id = a.key || a.statusKey || a.id;
+            return `<option value="${escHtml(id)}" ${selected === id ? 'selected' : ''}>${escHtml((a.emoji || 'Agent') + ' ' + a.name)}</option>`;
+        }).join('');
+    }
+
     function showFormModal(type, data, extra) {
         const overlay = document.getElementById('proj-form-overlay');
         if (!overlay) return;
@@ -1514,6 +1602,14 @@
                             <option value="low">${_t('proj_priority_low')}</option>
                         </select>
                     </div>
+                </div>
+                <div class="proj-form-group">
+                    <label class="proj-form-label">Project Execution 工作区路径</label>
+                    <input class="proj-form-input" id="pf-workspace" type="text" placeholder="/path/to/project">
+                </div>
+                <div class="proj-form-row">
+                    <div class="proj-form-group"><label class="proj-form-label">默认执行 Agent</label><select class="proj-form-select" id="pf-executor">${projectExecutionAgentOptions('')}</select></div>
+                    <div class="proj-form-group"><label class="proj-form-label">默认 Reviewer</label><select class="proj-form-select" id="pf-reviewer">${projectExecutionAgentOptions('')}</select></div>
                 </div>
                 <div class="proj-form-row">
                     <div class="proj-form-group">
@@ -1577,6 +1673,14 @@
                         <input class="proj-form-input" id="pf-tags" type="text" value="${escHtml((data.tags || []).join(', '))}">
                     </div>
                 </div>
+                <div class="proj-form-group">
+                    <label class="proj-form-label">Project Execution 工作区路径</label>
+                    <input class="proj-form-input" id="pf-workspace" type="text" value="${escHtml(data.workspacePath || '')}" placeholder="/path/to/project">
+                </div>
+                <div class="proj-form-row">
+                    <div class="proj-form-group"><label class="proj-form-label">默认执行 Agent</label><select class="proj-form-select" id="pf-executor">${projectExecutionAgentOptions(data.defaultExecutorAgentId || '')}</select></div>
+                    <div class="proj-form-group"><label class="proj-form-label">默认 Reviewer</label><select class="proj-form-select" id="pf-reviewer">${projectExecutionAgentOptions(data.defaultReviewerAgentId || '')}</select></div>
+                </div>
                 <input type="hidden" id="pf-edit-id" value="${data.id || ''}">
                 <div class="proj-form-actions">
                     <button class="proj-btn" onclick="ProjMgr.hideFormModal()">${_t('proj_cancel')}</button>
@@ -1624,6 +1728,10 @@
             priority: (document.getElementById('pf-priority') || {}).value || 'medium',
             dueDate: (document.getElementById('pf-due') || {}).value ? new Date(document.getElementById('pf-due').value).toISOString() : null,
             tags: ((document.getElementById('pf-tags') || {}).value || '').split(',').map(t => t.trim()).filter(Boolean),
+            projectExecutionEnabled: !!((document.getElementById('pf-workspace') || {}).value || '').trim(),
+            workspacePath: ((document.getElementById('pf-workspace') || {}).value || '').trim() || null,
+            defaultExecutorAgentId: (document.getElementById('pf-executor') || {}).value || null,
+            defaultReviewerAgentId: (document.getElementById('pf-reviewer') || {}).value || null,
         };
         try {
             let d;
@@ -1632,8 +1740,13 @@
             } else {
                 d = await api.createProject(body);
             }
+            if (d.error) { toast(d.error, 'error'); return; }
             hideFormModal();
             if (d.project) {
+                if (body.projectExecutionEnabled) {
+                    const validation = await api.projectExecutionValidateWorkspace(d.project.id, body.workspacePath);
+                    if (validation.error) { toast(validation.error, 'error'); return; }
+                }
                 toast(_t('proj_created'), 'success');
                 await openProject(d.project.id);
             }
@@ -1651,9 +1764,20 @@
             priority: (document.getElementById('pf-priority') || {}).value || 'medium',
             dueDate: (document.getElementById('pf-due') || {}).value ? new Date(document.getElementById('pf-due').value).toISOString() : null,
             tags: ((document.getElementById('pf-tags') || {}).value || '').split(',').map(t => t.trim()).filter(Boolean),
+            projectExecutionEnabled: !!((document.getElementById('pf-workspace') || {}).value || '').trim(),
+            workspacePath: ((document.getElementById('pf-workspace') || {}).value || '').trim() || null,
+            defaultExecutorAgentId: (document.getElementById('pf-executor') || {}).value || null,
+            defaultReviewerAgentId: (document.getElementById('pf-reviewer') || {}).value || null,
         };
         try {
             const d = await api.updateProject(id, body);
+            if (d.error) { toast(d.error, 'error'); return; }
+            if (body.projectExecutionEnabled) {
+                const validation = await api.projectExecutionValidateWorkspace(id, body.workspacePath);
+                if (validation.error) { toast(validation.error, 'error'); return; }
+                body.workspaceKind = validation.workspace.kind;
+                body.workspaceStatus = validation.workspace;
+            }
             hideFormModal();
             if (state.currentProject && state.currentProject.id === id) Object.assign(state.currentProject, body);
             toast(_t('proj_updated'), 'success');
@@ -1948,6 +2072,100 @@
 
     // ── WORKFLOW CONTROLS ──────────────────────────────────────────
 
+    async function projectExecutionStartAction(taskId, dirtyFingerprint) {
+        const p = state.currentProject;
+        if (!p) return;
+        try {
+            const d = await api.projectExecutionStart(p.id, taskId, dirtyFingerprint);
+            if (d.confirmationRequired) {
+                const files = (d.dirtyFiles || []).slice(0, 12).join('\n');
+                if (confirm(`工作区存在未提交修改。继续执行不会自动回滚这些修改。\n\n${files}${d.truncated ? '\n...' : ''}`)) {
+                    return projectExecutionStartAction(taskId, d.dirtyFingerprint);
+                }
+                return;
+            }
+            if (d.error) { toast(d.error, 'error'); return; }
+            toast('项目任务执行已启动', 'success');
+            state.workflow.active = true;
+            state.workflow.phase = 'executing';
+            state.workflow.currentTaskId = taskId;
+            startProjectExecutionPolling();
+            await refreshProjectExecutionProject(taskId);
+        } catch (e) { toast('启动任务失败', 'error'); }
+    }
+
+    async function projectExecutionCancelAction(taskId, attemptId) {
+        const p = state.currentProject;
+        if (!p) return;
+        try {
+            const d = await api.projectExecutionCancel(p.id, taskId, attemptId);
+            if (d.error) { toast(d.error, 'error'); return; }
+            toast('正在停止任务，已有文件修改会保留', 'info');
+        } catch (e) { toast('停止任务失败', 'error'); }
+    }
+
+    async function projectExecutionReviewStartAction(taskId, attemptId) {
+        const p = state.currentProject;
+        if (!p) return;
+        try {
+            const d = await api.projectExecutionReviewStart(p.id, taskId, attemptId);
+            if (d.error) { toast(d.error, 'error'); return; }
+            toast('独立审查已启动', 'success');
+            state.workflow.active = true;
+            state.workflow.phase = 'reviewing';
+            state.workflow.currentTaskId = taskId;
+            startProjectExecutionPolling();
+            await refreshProjectExecutionProject(taskId);
+        } catch (e) { toast('启动审查失败', 'error'); }
+    }
+
+    async function projectExecutionAcceptAction(taskId, action, attemptId) {
+        const p = state.currentProject;
+        if (!p) return;
+        let feedback = '';
+        if (action !== 'accept') {
+            feedback = prompt(action === 'reject_and_rework' ? '请输入返工反馈' : '请输入阻塞原因') || '';
+            if (!feedback.trim()) { toast('需要填写反馈', 'error'); return; }
+        } else if (!confirm('确认验收通过并移动到 Done？')) {
+            return;
+        }
+        try {
+            const d = await api.projectExecutionAccept(p.id, taskId, action, attemptId, feedback);
+            if (d.error) { toast(d.error, 'error'); return; }
+            toast(action === 'accept' ? '任务已验收完成' : '验收状态已更新', 'success');
+            await refreshProjectExecutionProject(taskId);
+        } catch (e) { toast('提交验收动作失败', 'error'); }
+    }
+
+    async function refreshProjectExecutionProject(selectedTaskId) {
+        const p = state.currentProject;
+        if (!p) return;
+        const fresh = await api.getProject(p.id);
+        if (!fresh.project) return;
+        state.currentProject = fresh.project;
+        const taskId = selectedTaskId || (state.currentTask && state.currentTask.id);
+        if (taskId) state.currentTask = fresh.project.tasks.find(t => t.id === taskId) || null;
+        const mc = getMainContent();
+        if (mc && state.view === 'board') { mc.innerHTML = renderBoardView(); bindBoardEvents(); populateBoardScoreboard(); }
+        if (state.currentTask) renderDetailPanel(state.currentTask);
+    }
+
+    function startProjectExecutionPolling() {
+        stopWorkflowPolling();
+        state.workflow.pollTimer = setInterval(async () => {
+            const p = state.currentProject;
+            if (!p) return stopWorkflowPolling();
+            try {
+                const d = await api.projectExecutionStatus(p.id);
+                state.workflow.active = d.active;
+                state.workflow.phase = d.phase || 'idle';
+                state.workflow.currentTaskId = d.currentTaskId;
+                await refreshProjectExecutionProject(d.currentTaskId);
+                if (!d.active) stopWorkflowPolling();
+            } catch (e) { /* keep the last visible state */ }
+        }, 2500);
+    }
+
     async function workflowStartAction() {
         const p = state.currentProject;
         if (!p) return;
@@ -2216,6 +2434,16 @@
     async function checkWorkflowOnOpen() {
         const p = state.currentProject;
         if (!p) return;
+        if (p.projectExecutionEnabled) {
+            try {
+                const d = await api.projectExecutionStatus(p.id);
+                state.workflow.active = d.active;
+                state.workflow.phase = d.phase || 'idle';
+                state.workflow.currentTaskId = d.currentTaskId;
+                if (d.active) startProjectExecutionPolling();
+            } catch (e) { /* non-fatal */ }
+            return;
+        }
         try {
             const d = await api.workflowStatus(p.id);
             state.workflow.active = d.active;
@@ -2300,6 +2528,10 @@
         toggleAutoMode: toggleAutoModeAction,
         updateReviewItemStatus: updateReviewItemStatusAction,
         saveReviewCheck: saveReviewCheckAction,
+        projectExecutionStart: projectExecutionStartAction,
+        projectExecutionCancel: projectExecutionCancelAction,
+        projectExecutionReviewStart: projectExecutionReviewStartAction,
+        projectExecutionAccept: projectExecutionAcceptAction,
     };
 
 })();

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Focused tests for the Phase 5 Codex app-server bridge."""
+"""Focused tests for the Codex app-server bridge."""
 
 import os
 import stat
