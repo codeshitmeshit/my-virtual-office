@@ -20,6 +20,7 @@
   const ACTIVE_RUN_RECOVERY_MS = 15000;
   const HERMES_APPROVAL_POLL_MS = 1500;
   const HERMES_HISTORY_POLL_MS = 250;
+  const CHAT_SELECTION_STORAGE_KEY = 'vo-chat-selection-v1';
   const secondarySlotButtons = Array.from(document.querySelectorAll('[data-chat-slot-toggle]'));
   let activeSecondarySlot = null;
   const secondaryPanelPlaceholders = {
@@ -29,6 +30,36 @@
   };
   let secondaryChatPanels = {};
 
+  function readSavedChatSelections() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(CHAT_SELECTION_STORAGE_KEY) || '{}');
+      return saved && typeof saved === 'object' ? saved : {};
+    } catch (e) {
+      return {};
+    }
+  }
+
+  function getSavedChatSelection(slotId) {
+    const saved = readSavedChatSelections()[slotId];
+    if (!saved || typeof saved !== 'object') return null;
+    if (!saved.selectedAgentKey || !saved.sessionKey) return null;
+    return saved;
+  }
+
+  function saveChatSelection(slotId, selection) {
+    if (!slotId || !selection?.selectedAgentKey || !selection?.sessionKey) return;
+    try {
+      const saved = readSavedChatSelections();
+      saved[slotId] = {
+        selectedAgentKey: selection.selectedAgentKey,
+        sessionKey: selection.sessionKey
+      };
+      localStorage.setItem(CHAT_SELECTION_STORAGE_KEY, JSON.stringify(saved));
+    } catch (e) {
+      console.warn('[chat] Failed to save chat selection:', e);
+    }
+  }
+
   class ChatWindow {
     constructor(root, options = {}) {
       this.root = root;
@@ -36,10 +67,11 @@
       this.slot = options.slot || null;
       this.slotId = this.isPrimary ? 'primary' : `secondary-${this.slot}`;
       this.root.dataset.chatSlot = this.slotId;
+      const savedSelection = getSavedChatSelection(this.slotId);
       this.agentList = [];
-      this.selectedAgentKey = options.selectedAgentKey || 'main';
-      this.sessionKey = options.sessionKey || 'agent:main:main';
-      this.hasExplicitAgentSelection = false;
+      this.selectedAgentKey = options.selectedAgentKey || savedSelection?.selectedAgentKey || 'main';
+      this.sessionKey = options.sessionKey || savedSelection?.sessionKey || 'agent:main:main';
+      this.hasExplicitAgentSelection = !!savedSelection;
       this.currentRunId = null;
       this.streamingMsg = null;
       this.liveToolCards = new Map();
@@ -204,18 +236,33 @@
           fallback.selected = true;
           this.selectedAgentKey = fallback.value;
           this.sessionKey = fallback.dataset.sessionKey || this.sessionKey;
+          this.saveSelection();
         }
       }
+    }
+
+    saveSelection() {
+      saveChatSelection(this.slotId, {
+        selectedAgentKey: this.selectedAgentKey,
+        sessionKey: this.sessionKey
+      });
     }
 
     applySelection(opt, { markExplicit = false, systemPrefix = 'Switched to' } = {}) {
       if (!opt) return;
       const newSessionKey = opt.dataset.sessionKey;
       const newAgentKey = opt.value;
-      if (newSessionKey === this.sessionKey && newAgentKey === this.selectedAgentKey) return;
+      if (newSessionKey === this.sessionKey && newAgentKey === this.selectedAgentKey) {
+        if (markExplicit) {
+          this.hasExplicitAgentSelection = true;
+          this.saveSelection();
+        }
+        return;
+      }
       this.selectedAgentKey = newAgentKey;
       this.sessionKey = newSessionKey;
       if (markExplicit) this.hasExplicitAgentSelection = true;
+      this.saveSelection();
       this.currentRunId = null;
       this.streamingMsg = null;
       this.syncAgentSelect();
