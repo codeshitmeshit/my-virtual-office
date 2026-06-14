@@ -204,9 +204,10 @@ start_service() {
     echo -e "${CYAN}[3/5] 拉取最新镜像...${NC}"
     cd "$SCRIPT_DIR"
     docker compose pull virtual-office 2>&1 | grep -v "^$" || true
+    docker compose build agent-browser
 
     echo -e "${CYAN}[4/5] 启动服务...${NC}"
-    docker compose up -d virtual-office
+    docker compose up -d agent-browser virtual-office
 
     echo -e "${CYAN}[5/5] 等待服务就绪...${NC}"
     local max_wait=30
@@ -268,7 +269,8 @@ update_service() {
     echo -e "${YELLOW}拉取最新镜像并重启...${NC}"
     cd "$SCRIPT_DIR"
     docker compose pull virtual-office
-    docker compose up -d --force-recreate virtual-office
+    docker compose build agent-browser
+    docker compose up -d --force-recreate agent-browser virtual-office
     echo -e "${GREEN}✓ 已更新并重启${NC}"
     show_access_info
 }

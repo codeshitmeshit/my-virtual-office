@@ -10,6 +10,18 @@ if [ ! -f "$CHROME_BIN" ]; then
     exit 1
 fi
 
+# Chrome uses the same persistent profile volume as the base Kasm image.
+if [ ! -L "$HOME/.config/google-chrome" ]; then
+    rm -rf "$HOME/.config/google-chrome" 2>/dev/null
+    ln -s "$HOME/.config/chromium" "$HOME/.config/google-chrome"
+fi
+
+# The published Docker port targets container port 9223, while Chrome only
+# listens on loopback port 9222. Ensure the bridge survives browser restarts.
+if [ ! -f /tmp/no-cdp ] && ! pgrep -f "/opt/agent-browser/cdp-proxy.py" > /dev/null; then
+    nohup python3 /opt/agent-browser/cdp-proxy.py > /tmp/cdp-proxy.log 2>&1 &
+fi
+
 BROWSER="$CHROME_BIN"
 PROFILE_DIR="$HOME/.config/google-chrome"
 echo "Launching Google Chrome"
