@@ -1,0 +1,55 @@
+{
+  "name": "meeting-for-ai-phase-1-3",
+  "parent": "meeting-for-ai",
+  "stage": "todolist_created",
+  "waiting_for_user": false,
+  "updated_at": "2026-06-15T05:09:51+08:00",
+  "confirmed": {
+    "checklist": true,
+    "tested": false,
+    "done": false
+  },
+  "confirmations": {
+    "checklist": {
+      "confirmed_at": "2026-06-15T05:09:51+08:00",
+      "summary": "User requested a Phase-based todolist for the combined Meeting for AI Phase 1-3 child requirement to support independent self-testing."
+    },
+    "tested": null,
+    "done": null
+  },
+  "phases": {
+    "phase_1": {
+      "name": "durable-meeting-foundation",
+      "status": "planned",
+      "tested": false,
+      "checklist": "CHK-P1-001..CHK-P1-009",
+      "gate_task": "TODO-P1-010"
+    },
+    "phase_2": {
+      "name": "user-started-sequential-ai-meeting",
+      "status": "planned",
+      "tested": false,
+      "checklist": "CHK-P2-001..CHK-P2-010",
+      "gate_task": "TODO-P2-010"
+    },
+    "phase_3": {
+      "name": "user-control-and-arbitration",
+      "status": "planned",
+      "tested": false,
+      "checklist": "CHK-P3-001..CHK-P3-011",
+      "gate_task": "TODO-P3-011"
+    }
+  },
+  "files": {
+    "requirement": "requirement.md",
+    "review": "review.md",
+    "checklist": "checklist.md",
+    "todolist": "todolist.md"
+  },
+  "notes": [
+    "Child requirement created from meeting-for-ai Phase 1, Phase 2, and Phase 3.",
+    "Checklist confirmation inferred from the user's explicit request to generate the Phase-based todolist.",
+    "Each Phase has an independent automated and manual self-test gate.",
+    "Phase 4 AI requests/context discovery, Phase 5 task pause/resume, and Phase 6 task creation remain out of scope."
+  ]
+}
