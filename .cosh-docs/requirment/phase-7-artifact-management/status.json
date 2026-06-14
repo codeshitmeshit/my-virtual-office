@@ -1,0 +1,53 @@
+{
+  "name": "phase-7-artifact-management",
+  "stage": "implementation_done",
+  "waiting_for_user": true,
+  "updated_at": "2026-06-15T05:18:00+08:00",
+  "confirmed": {
+    "checklist": true,
+    "tested": false,
+    "done": false
+  },
+  "confirmations": {
+    "checklist": {
+      "item": "checklist",
+      "confirmed_at": "2026-06-11T05:37:14+08:00",
+      "summary": "用户回复 “pass”，确认包含通用产物核心、通用 UI 组件、Phase 7 项目适配层和未来会议复用约束的新版 checklist。",
+      "previous_confirmation": {
+        "confirmed_at": "2026-06-11T05:23:29+08:00",
+        "summary": "用户确认可以生成 todolist，表示当时 checklist 草稿可作为执行依据。",
+        "superseded_at": "2026-06-11T05:25:57+08:00",
+        "superseded_reason": "新增通用产物管理核心和通用 UI 组件要求，Phase 7 项目作为首个适配场景，后续会议功能可复用。"
+      }
+    },
+    "tested": null,
+    "done": null
+  },
+  "files": {
+    "requirement": "requirement.md",
+    "review": "review.md",
+    "checklist": "checklist.md",
+    "todolist": "todolist.md"
+  },
+  "notes": [
+    "Product clarification completed: Phase 7 artifact management is read-only, project-level, Markdown-only, with preview/source viewing and best-effort task association.",
+    "Review found no blocking product or technical questions.",
+    "Checklist draft generated and waiting for user confirmation before todolist creation.",
+    "Updated before checklist confirmation: artifact source must show evidence-backed source task, executor agent, provider kind, attempt ID, and timestamp when available; unassociated artifacts must be clearly marked.",
+    "Checklist confirmed by user and todolist created.",
+    "Checklist-confirmed plan changed before implementation: artifact management must be a reusable core and UI component with a Phase 7 project adapter, so checklist was reset to draft and the old todolist was marked stale.",
+    "User confirmed the revised checklist with pass; stale todolist was replaced with a new componentized todolist.",
+    "2026-06-15 implementation completed for reusable Markdown artifact core, Project Execution adapter, project-scoped artifact APIs, generic Artifact Manager view, Phase 7 project entry point, safe preview/source reading, source records, and focused backend coverage.",
+    "2026-06-15 automated checks passed: .venv/bin/python tests/test_project_execution.py, node --check app/projects.js, and git diff --check. tests/test_project_execution.py emitted a non-fatal gateway abort permission warning but exited ok.",
+    "Waiting for browser/manual acceptance before setting confirmed.tested or done.",
+    "2026-06-15 sandbox-external service acceptance passed on http://127.0.0.1:8090 with DEV license demo=false: project creation, artifact list, Markdown read, non-Markdown 415 rejection, traversal rejection, and disabled-project 409 rejection were verified through real HTTP API calls.",
+    "2026-06-15 browser acceptance could not be completed because /browser-status reported enabled=false and cdpAvailable=false for the VO shared Kasm browser. Per browser-control rules, no local Chrome/Playwright replacement was used.",
+    "2026-06-15 supplemental Chrome MCP E2E passed at user request: Project Manager opened, Artifact API Acceptance project opened, project-level artifact entry rendered, Markdown artifact list showed docs/accepted.md with unassociated source state, Preview displayed content, Source displayed raw Markdown, Back returned to the project board, and artifact list/read network requests returned HTTP 200. Console showed only pre-existing/general warnings and perf logs, with no artifact workflow error.",
+    "2026-06-15 added and passed a realistic acceptance-review scenario test in tests/test_project_execution.py: a Project Execution workspace contains agent-generated acceptance notes, a rework handoff markdown document, an unassociated manual note, dependency README noise, and a non-Markdown report. The test verifies Markdown-only listing, noise filtering, evidence-backed source task/agent/provider/attempt/time records, Reviewer not being misidentified as generator, unassociated labeling, and safe raw Markdown read.",
+    "2026-06-15 real AI artifact acceptance passed with Codex executor codex-local: project 890735db-445e-4f2e-8bca-60a8fa3e9d22 ran task 7796733e-c4a0-41ba-ab9f-49292bb9afe0, attempt 0fc0e054-85a4-4df7-9d20-c3604d547c48, reached execution_complete, and generated ai-output/real-ai-artifact.md containing REAL_AI_ARTIFACT_OK.",
+    "2026-06-15 real AI acceptance found two implementation bugs before final verification: absolute changedFiles paths from Codex evidence were not matched to workspace-relative artifact paths, and duplicate task/attempt evidence could produce duplicate source records. Both were fixed in app/server.py and covered by tests/test_project_execution.py.",
+    "2026-06-15 post-fix local service verification on http://127.0.0.1:8090 confirmed ai-output/real-ai-artifact.md is listed with unassociated=false and exactly one source record for agentId=codex-local, providerKind=codex, attemptId=0fc0e054-85a4-4df7-9d20-c3604d547c48.",
+    "2026-06-15 sandbox-external rerun of .venv/bin/python tests/test_project_execution.py passed with ok. The previous Operation not permitted gateway abort warning disappeared outside the sandbox; the remaining non-fatal abort warning is a connection failure to 127.0.0.1:18789, indicating no gateway session service was listening in this test environment rather than an artifact management failure.",
+    "2026-06-15 clarified empty artifact behavior: a Project Execution project with a valid workspace but no generated Markdown artifacts may still show the artifact button; clicking it should render an empty Markdown artifact list rather than hiding the entry point or treating the project as an error. This is now covered by tests/test_project_execution.py."
+  ]
+}

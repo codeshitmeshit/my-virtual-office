@@ -8489,6 +8489,225 @@ def _handle_project_execution_workspace_validate(project_id, body):
     return {"ok": True, "workspace": result}
 
 
+_ARTIFACT_EXCLUDE_DIRS = {
+    ".git", ".hg", ".svn", "node_modules", ".venv", "venv", "__pycache__",
+    ".pytest_cache", ".mypy_cache", ".ruff_cache", ".cache", "dist", "build",
+    "dist-packages",
+}
+_ARTIFACT_MARKDOWN_EXTENSIONS = {".md", ".markdown"}
+_ARTIFACT_MAX_ITEMS = 500
+_ARTIFACT_MAX_READ_BYTES = 512 * 1024
+
+
+def _artifact_normalize_relpath(path):
+    rel = urllib.parse.unquote(str(path or "")).replace("\\", "/").lstrip("/")
+    parts = [part for part in rel.split("/") if part not in ("", ".")]
+    if any(part == ".." for part in parts):
+        return ""
+    return "/".join(parts)
+
+
+def _artifact_safe_path(root, rel_path):
+    root = os.path.realpath(root)
+    rel = _artifact_normalize_relpath(rel_path)
+    if not rel:
+        return None, ""
+    full_path = os.path.realpath(os.path.join(root, rel))
+    if not (full_path == root or full_path.startswith(root + os.sep)):
+        return None, rel
+    return full_path, rel
+
+
+def _artifact_source_relpath(root, path):
+    raw = urllib.parse.unquote(str(path or "")).replace("\\", "/")
+    if os.path.isabs(raw):
+        root_real = os.path.realpath(root or "")
+        full_path = os.path.realpath(raw)
+        if root_real and (full_path == root_real or full_path.startswith(root_real + os.sep)):
+            return os.path.relpath(full_path, root_real).replace(os.sep, "/")
+        return ""
+    return _artifact_normalize_relpath(raw)
+
+
+def _artifact_context_list(context):
+    root = os.path.realpath(context.get("root") or "")
+    if not root or not os.path.isdir(root):
+        return {"error": "Artifact root is not accessible", "_status": 409}
+    sources_by_path = context.get("sourcesByPath") or {}
+    artifacts = []
+    truncated = False
+    try:
+        for current_root, dirs, files in os.walk(root):
+            dirs[:] = [
+                d for d in dirs
+                if d not in _ARTIFACT_EXCLUDE_DIRS and not d.startswith(".git")
+            ]
+            rel_dir = os.path.relpath(current_root, root)
+            depth = 0 if rel_dir == "." else rel_dir.count(os.sep) + 1
+            if depth > 8:
+                dirs[:] = []
+                continue
+            for name in files:
+                ext = os.path.splitext(name)[1].lower()
+                if ext not in _ARTIFACT_MARKDOWN_EXTENSIONS:
+                    continue
+                full_path = os.path.realpath(os.path.join(current_root, name))
+                if not (full_path == root or full_path.startswith(root + os.sep)):
+                    continue
+                try:
+                    stat = os.stat(full_path)
+                except OSError:
+                    continue
+                rel_path = os.path.relpath(full_path, root).replace(os.sep, "/")
+                source_records = sources_by_path.get(rel_path, [])
+                artifacts.append({
+                    "path": rel_path,
+                    "name": name,
+                    "kind": "markdown",
+                    "extension": ext,
+                    "size": stat.st_size,
+                    "modifiedAt": datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(),
+                    "sources": source_records[:10],
+                    "unassociated": not bool(source_records),
+                })
+                if len(artifacts) >= _ARTIFACT_MAX_ITEMS:
+                    truncated = True
+                    break
+            if truncated:
+                break
+    except OSError as exc:
+        return {"error": f"Unable to scan artifacts: {exc}", "_status": 500}
+    artifacts.sort(key=lambda item: (item.get("modifiedAt") or "", item.get("path") or ""), reverse=True)
+    return {"ok": True, "artifacts": artifacts, "truncated": truncated}
+
+
+def _artifact_context_read(context, rel_path):
+    root = os.path.realpath(context.get("root") or "")
+    if not root or not os.path.isdir(root):
+        return {"error": "Artifact root is not accessible", "_status": 409}
+    full_path, rel = _artifact_safe_path(root, rel_path)
+    if not rel:
+        return {"error": "Artifact path is required", "_status": 400}
+    if not full_path:
+        return {"error": "Artifact path is outside the artifact root", "_status": 403}
+    ext = os.path.splitext(rel)[1].lower()
+    if ext not in _ARTIFACT_MARKDOWN_EXTENSIONS:
+        return {"error": "Only Markdown artifacts can be read inline", "_status": 415}
+    if not os.path.isfile(full_path):
+        return {"error": "Artifact not found", "_status": 404}
+    try:
+        size = os.path.getsize(full_path)
+        with open(full_path, "rb") as f:
+            raw = f.read(_ARTIFACT_MAX_READ_BYTES + 1)
+        truncated = len(raw) > _ARTIFACT_MAX_READ_BYTES
+        if truncated:
+            raw = raw[:_ARTIFACT_MAX_READ_BYTES]
+        content = raw.decode("utf-8", errors="replace")
+    except OSError as exc:
+        return {"error": f"Unable to read artifact: {exc}", "_status": 500}
+    return {"ok": True, "artifact": {"path": rel, "kind": "markdown", "size": size, "truncated": truncated, "content": content}}
+
+
+def _project_artifact_source_records(project):
+    sources_by_path = {}
+    workspace_root = project.get("workspacePath") or ""
+
+    def add_sources(task, evidence, attempt=None):
+        changed_files = evidence.get("changedFiles") if isinstance(evidence, dict) else []
+        if not isinstance(changed_files, list):
+            return
+        provider_ref = evidence.get("providerRef") or {}
+        executor = (attempt or {}).get("executor") or {}
+        attempt_id = evidence.get("attemptId") or (attempt or {}).get("id") or ""
+        captured_at = evidence.get("capturedAt") or (attempt or {}).get("finishedAt") or (attempt or {}).get("startedAt") or ""
+        agent_id = provider_ref.get("agentId") or executor.get("id") or task.get("executorAgentId") or task.get("assignee") or ""
+        provider_kind = provider_ref.get("providerKind") or executor.get("providerKind") or ""
+        for path in changed_files:
+            rel = _artifact_source_relpath(workspace_root, path)
+            if os.path.splitext(rel)[1].lower() not in _ARTIFACT_MARKDOWN_EXTENSIONS:
+                continue
+            record = {
+                "sourceType": "project_execution",
+                "contextType": "project",
+                "taskId": task.get("id"),
+                "taskTitle": task.get("title", ""),
+                "attemptId": attempt_id,
+                "agentId": agent_id,
+                "providerKind": provider_kind,
+                "capturedAt": captured_at,
+            }
+            records = sources_by_path.setdefault(rel, [])
+            identity = (record["taskId"], record["attemptId"], record["agentId"], record["providerKind"], record["capturedAt"])
+            if not any((item.get("taskId"), item.get("attemptId"), item.get("agentId"), item.get("providerKind"), item.get("capturedAt")) == identity for item in records):
+                records.append(record)
+
+    for task in project.get("tasks", []):
+        evidence = task.get("evidence") or {}
+        if isinstance(evidence, dict):
+            add_sources(task, evidence)
+        for attempt in task.get("attempts") or []:
+            attempt_evidence = attempt.get("evidence") or {}
+            if isinstance(attempt_evidence, dict):
+                add_sources(task, attempt_evidence, attempt)
+    for rel, records in sources_by_path.items():
+        records.sort(key=lambda item: item.get("capturedAt") or "", reverse=True)
+        sources_by_path[rel] = records[:20]
+    return sources_by_path
+
+
+def _project_artifact_context(project):
+    if not _project_execution_enabled(project):
+        return {"ok": False, "error": "Project Execution workspace is required for artifacts", "_status": 409}
+    workspace = _project_execution_validate_workspace(project.get("workspacePath"))
+    if not workspace.get("ok"):
+        return {**workspace, "_status": 409}
+    return {
+        "ok": True,
+        "contextType": "project",
+        "contextId": project.get("id"),
+        "contextTitle": project.get("title", ""),
+        "root": workspace["path"],
+        "rootKind": workspace.get("kind"),
+        "sourcesByPath": _project_artifact_source_records(project),
+    }
+
+
+def _handle_project_artifacts_list(project_id):
+    _, project, _ = _project_execution_find(project_id)
+    if not project:
+        return {"error": "Project not found", "_status": 404}
+    context = _project_artifact_context(project)
+    if not context.get("ok"):
+        return context
+    result = _artifact_context_list(context)
+    if not result.get("ok"):
+        return result
+    return {
+        "ok": True,
+        "context": {
+            "type": context.get("contextType"),
+            "id": context.get("contextId"),
+            "title": context.get("contextTitle"),
+            "root": context.get("root"),
+            "rootKind": context.get("rootKind"),
+        },
+        "artifacts": result.get("artifacts", []),
+        "truncated": result.get("truncated", False),
+    }
+
+
+def _handle_project_artifact_read(project_id, query_string=""):
+    _, project, _ = _project_execution_find(project_id)
+    if not project:
+        return {"error": "Project not found", "_status": 404}
+    context = _project_artifact_context(project)
+    if not context.get("ok"):
+        return context
+    params = urllib.parse.parse_qs(query_string or "")
+    rel_path = (params.get("path") or [""])[0]
+    return _artifact_context_read(context, rel_path)
+
+
 def _project_execution_build_prompt(project, task, attempt, workspace):
     checklist = task.get("checklist", [])
     checklist_text = "\n".join(f"- [{'x' if item.get('done') else ' '}] {item.get('text', '')}" for item in checklist) or "- No checklist supplied"
@@ -12930,6 +13149,25 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
         elif self.path.startswith("/api/projects/") and self.path.endswith("/workflow/status"):
             proj_id = self.path.split("/api/projects/")[1].rsplit("/workflow/status", 1)[0]
             result = _handle_workflow_status(proj_id)
+            self.send_response(result.get("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            result.pop("_status", None)
+            self.wfile.write(json.dumps(result).encode())
+        elif urllib.parse.urlparse(self.path).path.startswith("/api/projects/") and urllib.parse.urlparse(self.path).path.endswith("/artifacts/read"):
+            parsed = urllib.parse.urlparse(self.path)
+            proj_id = parsed.path.split("/api/projects/")[1].rsplit("/artifacts/read", 1)[0]
+            result = _handle_project_artifact_read(proj_id, parsed.query)
+            self.send_response(result.get("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            result.pop("_status", None)
+            self.wfile.write(json.dumps(result).encode())
+        elif self.path.startswith("/api/projects/") and self.path.endswith("/artifacts"):
+            proj_id = self.path.split("/api/projects/")[1].rsplit("/artifacts", 1)[0]
+            result = _handle_project_artifacts_list(proj_id)
             self.send_response(result.get("_status", 200))
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")

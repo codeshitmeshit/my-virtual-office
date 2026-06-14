@@ -125,6 +125,209 @@ def test_workspace_validation_rejects_files_and_outside_allowed_roots():
         os.environ["VO_PROJECT_ROOTS"] = old_roots
 
 
+def test_artifact_core_lists_markdown_only_and_reads_safely():
+    with tempfile.TemporaryDirectory() as workspace:
+        os.makedirs(os.path.join(workspace, "docs"), exist_ok=True)
+        os.makedirs(os.path.join(workspace, "node_modules", "pkg"), exist_ok=True)
+        with open(os.path.join(workspace, "docs", "guide.md"), "w", encoding="utf-8") as f:
+            f.write("# Guide\n\nhello")
+        with open(os.path.join(workspace, "docs", "data.json"), "w", encoding="utf-8") as f:
+            f.write("{}")
+        with open(os.path.join(workspace, "docs", "large.markdown"), "w", encoding="utf-8") as f:
+            f.write("x" * (server._ARTIFACT_MAX_READ_BYTES + 20))
+        with open(os.path.join(workspace, "node_modules", "pkg", "README.md"), "w", encoding="utf-8") as f:
+            f.write("# Dependency")
+
+        context = {"root": workspace, "sourcesByPath": {}}
+        listed = server._artifact_context_list(context)
+        assert listed["ok"] is True
+        assert {a["path"] for a in listed["artifacts"]} == {"docs/guide.md", "docs/large.markdown"}
+        assert all(a["unassociated"] is True for a in listed["artifacts"])
+
+        read = server._artifact_context_read(context, "docs/guide.md")
+        assert read["ok"] is True
+        assert read["artifact"]["content"].startswith("# Guide")
+        large = server._artifact_context_read(context, "docs/large.markdown")
+        assert large["ok"] is True
+        assert large["artifact"]["truncated"] is True
+        assert len(large["artifact"]["content"]) == server._ARTIFACT_MAX_READ_BYTES
+        assert server._artifact_context_read(context, "docs/data.json")["_status"] == 415
+        assert server._artifact_context_read(context, "../outside.md")["_status"] == 400
+
+        outside = tempfile.NamedTemporaryFile(delete=False, suffix=".md")
+        outside.close()
+        try:
+            os.symlink(outside.name, os.path.join(workspace, "docs", "escape.md"))
+            assert server._artifact_context_read(context, "docs/escape.md")["_status"] == 403
+        finally:
+            os.unlink(outside.name)
+
+
+def test_project_artifacts_include_phase7_source_records():
+    with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as workspace:
+        old = with_store(status_dir)
+        try:
+            os.makedirs(os.path.join(workspace, "docs"), exist_ok=True)
+            os.makedirs(os.path.join(workspace, "other"), exist_ok=True)
+            with open(os.path.join(workspace, "docs", "artifact.md"), "w", encoding="utf-8") as f:
+                f.write("# Artifact")
+            with open(os.path.join(workspace, "docs", "manual.md"), "w", encoding="utf-8") as f:
+                f.write("# Manual")
+            with open(os.path.join(workspace, "other", "artifact.md"), "w", encoding="utf-8") as f:
+                f.write("# Other")
+            project, task = create_project_execution_project(workspace)
+            data = server._load_projects()
+            project = data["projects"][0]
+            task = project["tasks"][0]
+            later_task = server._handle_task_create(project["id"], {"title": "Refresh fixture", "columnId": project["columns"][0]["id"]})["task"]
+            data = server._load_projects()
+            project = data["projects"][0]
+            task = project["tasks"][0]
+            later_task = project["tasks"][1]
+            task["evidence"] = {
+                "attemptId": "attempt-1",
+                "changedFiles": ["docs/artifact.md", "docs/not-shown.json"],
+                "capturedAt": "2026-06-11T00:00:00+00:00",
+                "providerRef": {"providerKind": "codex", "agentId": "codex-executor"},
+            }
+            task["attempts"] = [{
+                "id": "attempt-1",
+                "executor": {"id": "codex-executor", "providerKind": "codex"},
+                "evidence": task["evidence"],
+            }]
+            later_task["evidence"] = {
+                "attemptId": "attempt-2",
+                "changedFiles": ["docs/artifact.md"],
+                "capturedAt": "2026-06-12T00:00:00+00:00",
+                "providerRef": {"providerKind": "hermes", "agentId": "hermes-executor"},
+            }
+            server._save_projects(data)
+
+            listed = server._handle_project_artifacts_list(project["id"])
+            assert listed["ok"] is True
+            by_path = {a["path"]: a for a in listed["artifacts"]}
+            assert set(by_path) == {"docs/artifact.md", "docs/manual.md", "other/artifact.md"}
+            source = by_path["docs/artifact.md"]["sources"][0]
+            assert source["taskId"] == later_task["id"]
+            assert source["taskTitle"] == later_task["title"]
+            assert source["agentId"] == "hermes-executor"
+            assert source["providerKind"] == "hermes"
+            assert source["attemptId"] == "attempt-2"
+            assert by_path["docs/artifact.md"]["sources"][1]["taskId"] == task["id"]
+            assert len(by_path["docs/artifact.md"]["sources"]) == 2
+            assert by_path["docs/manual.md"]["unassociated"] is True
+            assert by_path["other/artifact.md"]["unassociated"] is True
+
+            read = server._handle_project_artifact_read(project["id"], "path=docs%2Fartifact.md")
+            assert read["ok"] is True
+            assert read["artifact"]["content"] == "# Artifact"
+        finally:
+            restore_store(old)
+
+
+def test_project_artifacts_reject_disabled_or_missing_workspace_projects():
+    with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as workspace:
+        old = with_store(status_dir)
+        try:
+            project, _ = create_project_execution_project(workspace)
+            listed = server._handle_project_artifacts_list(project["id"])
+            assert listed["ok"] is True
+            assert listed["artifacts"] == []
+            assert listed["truncated"] is False
+
+            project = server._handle_project_create({"title": "Plain Project"})["project"]
+            listed = server._handle_project_artifacts_list(project["id"])
+            assert listed["_status"] == 409
+            assert "Project Execution workspace" in listed["error"]
+        finally:
+            restore_store(old)
+
+
+def test_project_artifacts_real_acceptance_review_scenario():
+    with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as workspace:
+        old = with_store(status_dir)
+        try:
+            for rel in ["requirements", "docs", "node_modules/pkg", "reports"]:
+                os.makedirs(os.path.join(workspace, rel), exist_ok=True)
+            with open(os.path.join(workspace, "requirements", "acceptance.md"), "w", encoding="utf-8") as f:
+                f.write("# Acceptance Notes\n\n- CHK-001 pass\n- CHK-017 source visible\n\n<script>alert('x')</script>\n")
+            with open(os.path.join(workspace, "docs", "handoff.markdown"), "w", encoding="utf-8") as f:
+                f.write("# Handoff\n\nReviewer requested one follow-up and it was fixed.\n")
+            with open(os.path.join(workspace, "docs", "manual.md"), "w", encoding="utf-8") as f:
+                f.write("# Manual Note\n\nCreated outside Project Execution evidence.\n")
+            with open(os.path.join(workspace, "node_modules", "pkg", "README.md"), "w", encoding="utf-8") as f:
+                f.write("# Dependency README")
+            with open(os.path.join(workspace, "reports", "raw-result.json"), "w", encoding="utf-8") as f:
+                f.write("{}")
+
+            project, acceptance_task = create_project_execution_project(workspace)
+            acceptance_task_id = acceptance_task["id"]
+            handoff_task = server._handle_task_create(project["id"], {"title": "Address review feedback", "columnId": project["columns"][0]["id"]})["task"]
+            handoff_task_id = handoff_task["id"]
+            data = server._load_projects()
+            project = data["projects"][0]
+            acceptance_task = next(task for task in project["tasks"] if task["id"] == acceptance_task_id)
+            handoff_task = next(task for task in project["tasks"] if task["id"] == handoff_task_id)
+            acceptance_task["title"] = "Write acceptance notes"
+            acceptance_task["evidence"] = {
+                "attemptId": "attempt-acceptance",
+                "changedFiles": [os.path.join(workspace, "requirements", "acceptance.md"), "reports/raw-result.json"],
+                "capturedAt": "2026-06-15T02:00:00+00:00",
+                "providerRef": {"providerKind": "openclaw", "agentId": "executor"},
+            }
+            acceptance_task["attempts"] = [{
+                "id": "attempt-acceptance",
+                "executor": {"id": "executor", "providerKind": "openclaw"},
+                "evidence": acceptance_task["evidence"],
+            }]
+            acceptance_task["reviewResult"] = {
+                "status": "pass",
+                "changedFiles": ["requirements/acceptance.md"],
+                "reviewerAgentId": "reviewer",
+                "providerKind": "openclaw",
+            }
+            handoff_task["evidence"] = {
+                "attemptId": "attempt-handoff",
+                "changedFiles": ["docs/handoff.markdown"],
+                "capturedAt": "2026-06-15T03:00:00+00:00",
+                "providerRef": {"providerKind": "codex", "agentId": "codex-executor"},
+            }
+            handoff_task["attempts"] = [{
+                "id": "attempt-handoff",
+                "executor": {"id": "codex-executor", "providerKind": "codex"},
+                "evidence": handoff_task["evidence"],
+            }]
+            server._save_projects(data)
+
+            listed = server._handle_project_artifacts_list(project["id"])
+            assert listed["ok"] is True
+            by_path = {a["path"]: a for a in listed["artifacts"]}
+            assert set(by_path) == {"requirements/acceptance.md", "docs/handoff.markdown", "docs/manual.md"}
+            assert "node_modules/pkg/README.md" not in by_path
+            assert "reports/raw-result.json" not in by_path
+
+            acceptance_source = by_path["requirements/acceptance.md"]["sources"][0]
+            assert acceptance_source["taskTitle"] == "Write acceptance notes"
+            assert acceptance_source["agentId"] == "executor"
+            assert acceptance_source["providerKind"] == "openclaw"
+            assert acceptance_source["attemptId"] == "attempt-acceptance"
+            assert acceptance_source["capturedAt"] == "2026-06-15T02:00:00+00:00"
+            assert acceptance_source["agentId"] != "reviewer"
+
+            handoff_source = by_path["docs/handoff.markdown"]["sources"][0]
+            assert handoff_source["taskTitle"] == "Address review feedback"
+            assert handoff_source["agentId"] == "codex-executor"
+            assert handoff_source["providerKind"] == "codex"
+            assert by_path["docs/manual.md"]["unassociated"] is True
+
+            read = server._handle_project_artifact_read(project["id"], "path=requirements%2Facceptance.md")
+            assert read["ok"] is True
+            assert read["artifact"]["content"].startswith("# Acceptance Notes")
+            assert "<script>alert('x')</script>" in read["artifact"]["content"]
+        finally:
+            restore_store(old)
+
+
 def test_project_execution_project_create_rejects_invalid_workspace():
     with tempfile.TemporaryDirectory() as status_dir:
         old = with_store(status_dir)
@@ -685,6 +888,10 @@ if __name__ == "__main__":
     test_project_store_round_trip_and_legacy_defaults()
     test_workspace_validation_and_dirty_fingerprint()
     test_workspace_validation_rejects_files_and_outside_allowed_roots()
+    test_artifact_core_lists_markdown_only_and_reads_safely()
+    test_project_artifacts_include_phase7_source_records()
+    test_project_artifacts_reject_disabled_or_missing_workspace_projects()
+    test_project_artifacts_real_acceptance_review_scenario()
     test_project_execution_project_create_rejects_invalid_workspace()
     test_roles_must_be_independent()
     test_task_role_overrides_project_defaults()

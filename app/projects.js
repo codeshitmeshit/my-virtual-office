@@ -241,6 +241,14 @@
             const r = await fetch(`/api/projects/${projectId}${suffix}/project-execution/status`);
             return r.json();
         },
+        async listArtifacts(projectId) {
+            const r = await fetch(`/api/projects/${projectId}/artifacts`);
+            return r.json();
+        },
+        async readArtifact(projectId, path) {
+            const r = await fetch(`/api/projects/${projectId}/artifacts/read?path=${encodeURIComponent(path)}`);
+            return r.json();
+        },
     };
 
     // ── GAMIFICATION ENGINE ───────────────────────────────────────
@@ -658,6 +666,7 @@
                 <span class="proj-wf-status" id="wf-status-badge"></span>
             </div>`}
             <button class="proj-btn proj-btn-sm" onclick="ProjMgr.editProjectDialog('${p.id}')">${_t('proj_edit')}</button>
+            ${p.projectExecutionEnabled ? `<button class="proj-btn proj-btn-sm" onclick="ProjMgr.showArtifacts('${p.id}')">产物</button>` : ''}
             <button class="proj-btn proj-btn-sm" onclick="ProjMgr.showReport('${p.id}')">${_t('proj_report')}</button>
             <button class="proj-btn proj-btn-sm" onclick="ProjMgr.saveAsTemplateDialog('${p.id}')">${_t('proj_template_btn')}</button>
         </div>
@@ -1893,6 +1902,150 @@
         } catch (e) { toast(_t('proj_failed_save_template'), 'error'); }
     }
 
+    // ── ARTIFACT VIEW ─────────────────────────────────────────────
+    async function showArtifacts(id) {
+        const mc = getMainContent();
+        if (!mc) return;
+        state.view = 'artifacts';
+        closeDetailPanel();
+        mc.innerHTML = renderListSkeleton();
+        try {
+            const d = await api.listArtifacts(id);
+            if (d.error) throw new Error(d.error);
+            state._artifactModel = {
+                projectId: id,
+                context: d.context || {},
+                artifacts: d.artifacts || [],
+                truncated: !!d.truncated,
+                selected: null,
+                selectedContent: '',
+                sourceMode: 'preview',
+            };
+            mc.innerHTML = renderArtifactManager(state._artifactModel);
+        } catch (e) {
+            mc.innerHTML = renderArtifactManager({
+                projectId: id,
+                context: { title: state.currentProject && state.currentProject.title },
+                artifacts: [],
+                error: String(e.message || e),
+            });
+        }
+    }
+
+    function formatBytes(bytes) {
+        const n = Number(bytes || 0);
+        if (n < 1024) return `${n} B`;
+        if (n < 1024 * 1024) return `${Math.round(n / 102.4) / 10} KB`;
+        return `${Math.round(n / 1024 / 102.4) / 10} MB`;
+    }
+
+    function formatArtifactTime(value) {
+        if (!value) return '';
+        const d = new Date(value);
+        return Number.isNaN(d.getTime()) ? String(value) : d.toLocaleString();
+    }
+
+    function renderSourceRecords(artifact, labels = {}) {
+        const sources = artifact.sources || [];
+        if (!sources.length) return `<div class="proj-artifact-source unassociated">${escHtml(labels.unassociated || '未关联到来源记录')}</div>`;
+        return sources.slice(0, 3).map(src => `
+            <div class="proj-artifact-source">
+                <strong>${escHtml(src.taskTitle || src.title || src.taskId || src.sourceId || '来源')}</strong>
+                ${src.taskId ? `<code title="taskId">${escHtml(src.taskId)}</code>` : ''}
+                ${src.agentId ? `<span>${escHtml(src.agentId)}</span>` : ''}
+                ${src.providerKind ? `<span>${escHtml(src.providerKind)}</span>` : ''}
+                ${src.attemptId ? `<code>${escHtml(String(src.attemptId).slice(0, 8))}</code>` : ''}
+                ${src.capturedAt || src.generatedAt ? `<time>${escHtml(formatArtifactTime(src.capturedAt || src.generatedAt))}</time>` : ''}
+            </div>`).join('');
+    }
+
+    function renderMarkdownPreview(content) {
+        return simpleMarkdown(content || '');
+    }
+
+    function renderArtifactManager(model) {
+        const artifacts = model.artifacts || [];
+        const context = model.context || {};
+        const selected = model.selected;
+        const sourceMode = model.sourceMode || 'preview';
+        const content = model.selectedContent || '';
+        const labels = model.labels || {};
+        const title = context.title || labels.contextFallback || 'Project';
+        const itemLabel = labels.itemPlural || 'Markdown 产物';
+        return `
+        <div class="proj-toolbar">
+            <button class="proj-btn" onclick="ProjMgr.openProject('${model.projectId}')">${_t('proj_back')}</button>
+            <span class="proj-toolbar-title">${escHtml(labels.title || '产物')} · ${escHtml(title)}</span>
+            <div style="flex:1"></div>
+            ${context.root ? `<span class="proj-artifact-root" title="${escHtml(context.root)}">${escHtml(context.rootKind || 'dir')} · ${escHtml(context.root)}</span>` : ''}
+        </div>
+        <div class="proj-artifacts-body">
+            ${model.error ? `<div class="proj-artifact-error">${escHtml(model.error)}</div>` : ''}
+            <div class="proj-artifacts-list">
+                <div class="proj-chart-title">${escHtml(itemLabel)} ${model.truncated ? '<span class="proj-artifact-warn">已截断</span>' : ''}</div>
+                ${!model.error && artifacts.length === 0 ? `<div class="proj-artifact-empty">${escHtml(labels.empty || '当前上下文没有 Markdown 产物。')}</div>` : ''}
+                ${artifacts.map(a => `
+                    <button class="proj-artifact-row ${selected && selected.path === a.path ? 'active' : ''}" onclick="ProjMgr.openArtifact('${model.projectId}', decodeURIComponent('${encodeURIComponent(a.path)}'))">
+                        <div class="proj-artifact-name">${escHtml(a.name || a.path)}</div>
+                        <div class="proj-artifact-path">${escHtml(a.path)}</div>
+                        <div class="proj-artifact-meta">
+                            <span>${formatBytes(a.size)}</span>
+                            <span>${a.modifiedAt ? new Date(a.modifiedAt).toLocaleString() : ''}</span>
+                        </div>
+                        ${renderSourceRecords(a, labels)}
+                    </button>`).join('')}
+            </div>
+            <div class="proj-artifact-viewer">
+                ${selected ? `
+                    <div class="proj-artifact-viewer-head">
+                        <div>
+                            <div class="proj-artifact-name">${escHtml(selected.path)}</div>
+                            ${selected.truncated ? `<div class="proj-artifact-warn">文件较大，内容已截断。</div>` : ''}
+                        </div>
+                        <div class="proj-desc-tabs">
+                            <button class="proj-desc-tab ${sourceMode === 'preview' ? 'active' : ''}" onclick="ProjMgr.switchArtifactMode('preview')">Preview</button>
+                            <button class="proj-desc-tab ${sourceMode === 'source' ? 'active' : ''}" onclick="ProjMgr.switchArtifactMode('source')">Source</button>
+                        </div>
+                    </div>
+                    <div class="proj-artifact-content ${sourceMode === 'source' ? 'source' : ''}">
+                        ${sourceMode === 'source' ? `<pre>${escHtml(content)}</pre>` : renderMarkdownPreview(content)}
+                    </div>
+                ` : `<div class="proj-artifact-empty">${escHtml(labels.selectPrompt || '选择一个 Markdown 产物查看内容。')}</div>`}
+            </div>
+        </div>`;
+    }
+
+    async function openArtifact(projectId, path) {
+        const mc = getMainContent();
+        if (!mc) return;
+        try {
+            const list = await api.listArtifacts(projectId);
+            const d = await api.readArtifact(projectId, path);
+            if (d.error) throw new Error(d.error);
+            const artifact = d.artifact || {};
+            const selected = (list.artifacts || []).find(a => a.path === artifact.path) || artifact;
+            state._artifactModel = {
+                projectId,
+                context: list.context || {},
+                artifacts: list.artifacts || [],
+                truncated: !!list.truncated,
+                selected: { ...selected, truncated: artifact.truncated },
+                selectedContent: artifact.content || '',
+                sourceMode: 'preview',
+            };
+            mc.innerHTML = renderArtifactManager(state._artifactModel);
+        } catch (e) {
+            toast(String(e.message || e), 'error');
+        }
+    }
+
+    function switchArtifactMode(mode) {
+        const mc = getMainContent();
+        if (!mc || !state._artifactModel) return;
+        state._artifactModel.sourceMode = mode === 'source' ? 'source' : 'preview';
+        mc.innerHTML = renderArtifactManager(state._artifactModel);
+    }
+
     // ── REPORT VIEW ───────────────────────────────────────────────
     async function showReport(id) {
         const mc = getMainContent();
@@ -2486,6 +2639,9 @@
         filterChange,
         showTemplatesView,
         showReport,
+        showArtifacts,
+        openArtifact,
+        switchArtifactMode,
         exportReport,
         saveAsTemplateDialog,
         submitSaveTemplate,

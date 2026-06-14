@@ -998,6 +998,142 @@
 .proj-tl-title { color: #e8e8f0; font-weight: 600; margin-bottom: 4px; }
 .proj-tl-meta { color: #888; display: flex; gap: 12px; flex-wrap: wrap; }
 
+/* ── ARTIFACT VIEW ───────────────────────────────────────────── */
+.proj-artifacts-body {
+    flex: 1;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: minmax(260px, 360px) minmax(0, 1fr);
+    gap: 14px;
+    padding: 16px;
+    overflow: hidden;
+}
+.proj-artifacts-list,
+.proj-artifact-viewer {
+    min-height: 0;
+    overflow: auto;
+    background: #12122a;
+    border: 1px solid #2a2a4e;
+    border-radius: 8px;
+    padding: 12px;
+}
+.proj-artifact-root {
+    max-width: 360px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 10px;
+    color: #888;
+}
+.proj-artifact-row {
+    width: 100%;
+    display: block;
+    text-align: left;
+    border: 1px solid #2a2a4e;
+    background: #0d0d20;
+    color: #e8e8f0;
+    border-radius: 8px;
+    padding: 10px;
+    margin-bottom: 10px;
+    cursor: pointer;
+}
+.proj-artifact-row:hover,
+.proj-artifact-row.active {
+    border-color: #ffd700;
+    background: #181832;
+}
+.proj-artifact-name {
+    font-size: 12px;
+    font-weight: 700;
+    color: #e8e8f0;
+    overflow-wrap: anywhere;
+}
+.proj-artifact-path {
+    margin-top: 3px;
+    font-size: 10px;
+    color: #888;
+    overflow-wrap: anywhere;
+}
+.proj-artifact-meta {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 6px;
+    font-size: 10px;
+    color: #777;
+}
+.proj-artifact-source {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-top: 7px;
+    font-size: 10px;
+    color: #a7f3d0;
+}
+.proj-artifact-source.unassociated { color: #9ca3af; }
+.proj-artifact-source code {
+    color: #ffd700;
+    background: rgba(255, 215, 0, 0.08);
+    padding: 1px 4px;
+    border-radius: 4px;
+}
+.proj-artifact-source time {
+    color: #8f96a8;
+    overflow-wrap: anywhere;
+}
+.proj-artifact-viewer-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #2a2a4e;
+    margin-bottom: 12px;
+}
+.proj-artifact-content {
+    font-size: 12px;
+    line-height: 1.6;
+    color: #e8e8f0;
+    overflow-wrap: anywhere;
+}
+.proj-artifact-content.source pre {
+    margin: 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    color: #e8e8f0;
+    font-family: 'SFMono-Regular', Consolas, monospace;
+    font-size: 11px;
+}
+.proj-artifact-empty,
+.proj-artifact-error {
+    color: #888;
+    font-size: 12px;
+    padding: 14px;
+}
+.proj-artifact-error { color: #fca5a5; }
+.proj-artifact-warn {
+    color: #fbbf24;
+    font-size: 10px;
+}
+@media (max-width: 720px) {
+    .proj-artifacts-body {
+        grid-template-columns: 1fr;
+        overflow: auto;
+    }
+    .proj-artifacts-list,
+    .proj-artifact-viewer {
+        max-height: none;
+    }
+    .proj-artifact-root {
+        max-width: 65vw;
+    }
+    .proj-artifact-viewer-head {
+        flex-direction: column;
+        align-items: stretch;
+    }
+}
+
 /* ── FORMS / MODALS ─────────────────────────────────────────── */
 .proj-form-modal {
     position: fixed;
