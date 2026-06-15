@@ -2691,6 +2691,9 @@ def _agent_id_from_session_key(session_key):
     if not session_key:
         return ""
     m = re.match(r"^agent:([^:]+):", str(session_key))
+    if m:
+        return m.group(1)
+    m = re.match(r"^agent-([^-:]+)-openai-", str(session_key))
     return m.group(1) if m else ""
 
 
@@ -7432,6 +7435,1023 @@ def _save_meetings_file(data):
         pass
 
 
+_EXEC_MEETING_LOCK = threading.RLock()
+_EXEC_MEETING_TERMINAL = {"completed", "cancelled", "failed"}
+_EXEC_MEETING_PHASES = {
+    "draft", "preparing", "active_opening", "active_discussion", "paused",
+    "awaiting_user_decision", "summarizing", "completed", "cancelled", "failed",
+}
+_EXEC_MEETING_TRANSITIONS = {
+    "draft": {"preparing", "cancelled"},
+    "preparing": {"active_opening", "paused", "cancelled", "failed"},
+    "active_opening": {"active_discussion", "paused", "summarizing", "cancelled", "failed"},
+    "active_discussion": {"awaiting_user_decision", "summarizing", "paused", "cancelled", "failed"},
+    "paused": {"preparing", "active_opening", "active_discussion", "awaiting_user_decision", "cancelled", "failed"},
+    "awaiting_user_decision": {"active_discussion", "summarizing", "cancelled", "failed"},
+    "summarizing": {"completed", "cancelled", "failed"},
+    "completed": set(),
+    "cancelled": set(),
+    "failed": set(),
+}
+_MEETING_CONTEXT_MODES = {"incremental", "summary", "full"}
+_MEETING_DEFAULT_CONTEXT_BUDGET = {
+    "maxPromptChars": 12000,
+    "maxInitialContextChars": 4000,
+    "maxSummaryChars": 3000,
+    "maxRecentEvents": 6,
+}
+
+
+def _exec_meeting_now():
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _exec_meetings_file():
+    return os.path.join(STATUS_DIR, "executable-meetings.json")
+
+
+def _exec_meeting_empty_store():
+    return {"meetings": {}, "events": {}, "occupancy": {}, "idempotency": {}, "updatedAt": ""}
+
+
+def _load_exec_meeting_store():
+    try:
+        with open(_exec_meetings_file(), "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            return _exec_meeting_empty_store()
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return _exec_meeting_empty_store()
+    data.setdefault("meetings", {})
+    data.setdefault("events", {})
+    data.setdefault("occupancy", {})
+    data.setdefault("idempotency", {})
+    data.setdefault("updatedAt", "")
+    if not isinstance(data["meetings"], dict):
+        data["meetings"] = {}
+    if not isinstance(data["events"], dict):
+        data["events"] = {}
+    if not isinstance(data["occupancy"], dict):
+        data["occupancy"] = {}
+    if not isinstance(data["idempotency"], dict):
+        data["idempotency"] = {}
+    return data
+
+
+def _save_exec_meeting_store(data):
+    data["updatedAt"] = _exec_meeting_now()
+    path = _exec_meetings_file()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = f"{path}.tmp-{os.getpid()}-{threading.get_ident()}"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, sort_keys=True)
+    os.replace(tmp, path)
+    try:
+        os.chmod(path, 0o666)
+    except Exception:
+        pass
+
+
+def _exec_meeting_clean_participants(raw):
+    if not isinstance(raw, list):
+        return []
+    result = []
+    seen = set()
+    for item in raw:
+        participant = str(item or "").strip()
+        if participant and participant not in seen:
+            seen.add(participant)
+            result.append(participant)
+    return result
+
+
+def _meeting_context_mode(raw):
+    mode = str(raw or "incremental").strip().lower()
+    return mode if mode in _MEETING_CONTEXT_MODES else "incremental"
+
+
+def _meeting_context_budget(raw):
+    budget = dict(_MEETING_DEFAULT_CONTEXT_BUDGET)
+    if isinstance(raw, dict):
+        for key in budget:
+            try:
+                value = int(raw.get(key))
+            except (TypeError, ValueError):
+                continue
+            if value > 0:
+                budget[key] = min(value, 50000)
+    return budget
+
+
+def _meeting_truncate_text(value, limit):
+    text = str(value or "")
+    limit = max(0, int(limit or 0))
+    if limit and len(text) > limit:
+        return text[:limit] + "\n[truncated]"
+    return text
+
+
+def _exec_meeting_next_seq(store, meeting_id):
+    events = store.setdefault("events", {}).setdefault(meeting_id, [])
+    return (events[-1].get("sequence") or 0) + 1 if events else 1
+
+
+def _append_exec_meeting_event(store, meeting, event_type, actor=None, payload=None, idempotency_key=None):
+    meeting_id = meeting["id"]
+    seq = _exec_meeting_next_seq(store, meeting_id)
+    event = {
+        "id": str(uuid.uuid4()),
+        "meetingId": meeting_id,
+        "sequence": seq,
+        "version": meeting.get("version", 0) + 1,
+        "type": event_type,
+        "actor": actor or {"type": "system", "id": "system"},
+        "stage": meeting.get("stage"),
+        "round": meeting.get("round", 0),
+        "payload": payload or {},
+        "idempotencyKey": idempotency_key or "",
+        "createdAt": _exec_meeting_now(),
+    }
+    store.setdefault("events", {}).setdefault(meeting_id, []).append(event)
+    meeting["version"] = event["version"]
+    meeting["lastEventSequence"] = seq
+    meeting["updatedAt"] = event["createdAt"]
+    return event
+
+
+def _rebuild_exec_meeting_occupancy(store):
+    occupancy = {}
+    for meeting in store.get("meetings", {}).values():
+        if meeting.get("stage") in _EXEC_MEETING_TERMINAL:
+            continue
+        for participant in meeting.get("participants", []):
+            occupancy[participant] = meeting.get("id")
+    store["occupancy"] = occupancy
+    return occupancy
+
+
+def _exec_meeting_pending_calls_projection(events):
+    pending = {}
+    for event in events or []:
+        event_type = event.get("type")
+        payload = event.get("payload") or {}
+        if event_type == "provider_call_started":
+            sequence = event.get("sequence")
+            pending[sequence] = {
+                "sequence": sequence,
+                "stage": payload.get("stage") or event.get("stage") or "",
+                "round": int(payload.get("round") or event.get("round") or 0),
+                "speaker": payload.get("speaker") or (event.get("actor") or {}).get("id") or "",
+                "promptChars": int(payload.get("promptChars") or 0),
+                "contextMode": payload.get("contextMode") or "",
+                "createdAt": event.get("createdAt") or "",
+            }
+        elif event_type == "participant_turn":
+            in_reply_to = payload.get("inReplyToSequence")
+            if in_reply_to in pending:
+                pending.pop(in_reply_to, None)
+    return list(pending.values())
+
+
+def _exec_meeting_project_active(meeting, events=None):
+    participants = meeting.get("participants", [])
+    return {
+        "id": meeting.get("id"),
+        "topic": meeting.get("topic", "Untitled Meeting"),
+        "purpose": meeting.get("purpose", ""),
+        "kind": meeting.get("meetingType", meeting.get("kind", "discussion")),
+        "type": "group" if len(participants) > 2 else "1on1",
+        "organizer": meeting.get("organizer", ""),
+        "status": "active",
+        "participants": participants,
+        "agents": participants,
+        "executableMeeting": True,
+        "executionStage": meeting.get("stage"),
+        "executionPreviousStage": meeting.get("previousStage", ""),
+        "executionVersion": meeting.get("version", 0),
+        "currentRound": meeting.get("round", 0),
+        "maxRounds": meeting.get("maxRounds", 0),
+        "moderator": meeting.get("moderator"),
+        "contextMode": meeting.get("contextMode", "incremental"),
+        "currentSpeaker": meeting.get("currentSpeaker", ""),
+        "result": meeting.get("result", {}),
+        "lastEventSequence": meeting.get("lastEventSequence", 0),
+        "transcript": _exec_meeting_transcript_projection(events or []),
+        "pendingCalls": _exec_meeting_pending_calls_projection(events or []),
+    }
+
+
+def _exec_meeting_transcript_projection(events):
+    transcript = []
+    for event in events or []:
+        payload = event.get("payload") or {}
+        if event.get("type") == "participant_turn":
+            transcript.append({
+                "type": "participant_turn",
+                "sequence": event.get("sequence"),
+                "stage": payload.get("stage") or event.get("stage") or "",
+                "round": int(payload.get("round") or event.get("round") or 0),
+                "speaker": payload.get("speaker") or (event.get("actor") or {}).get("id") or "",
+                "text": payload.get("text") or "",
+                "rawText": payload.get("rawText") or payload.get("text") or "",
+                "structured": payload.get("structured") or {},
+                "parseError": payload.get("parseError") or "",
+                "ok": bool(payload.get("ok")),
+                "durationMs": int(payload.get("durationMs") or 0),
+                "providerRef": payload.get("providerRef") or {},
+                "createdAt": event.get("createdAt") or "",
+            })
+        elif event.get("type") == "user_intervention":
+            transcript.append({
+                "type": "user_intervention",
+                "sequence": event.get("sequence"),
+                "stage": payload.get("stage") or event.get("stage") or "",
+                "round": int(payload.get("round") or event.get("round") or 0),
+                "speaker": payload.get("actorId") or (event.get("actor") or {}).get("id") or "user",
+                "actorType": "user",
+                "text": payload.get("text") or "",
+                "context": payload.get("context") or "",
+                "ok": True,
+                "durationMs": 0,
+                "providerRef": {},
+                "createdAt": event.get("createdAt") or "",
+            })
+    return transcript
+
+
+def _exec_meeting_project_history(meeting, events=None):
+    projected = _exec_meeting_project_active(meeting, events or [])
+    projected["status"] = "completed" if meeting.get("stage") == "completed" else meeting.get("stage")
+    projected["summary"] = (meeting.get("result") or {}).get("summary", "")
+    projected["resolution"] = (meeting.get("result") or {}).get("decision", "")
+    projected["actionItems"] = (meeting.get("result") or {}).get("actionItems", [])
+    projected["transcript"] = _exec_meeting_transcript_projection(events or [])
+    projected["endedAt"] = int(datetime.fromisoformat(meeting.get("updatedAt").replace("Z", "+00:00")).timestamp()) if meeting.get("updatedAt") else int(time.time())
+    return projected
+
+
+def _meeting_active_projection():
+    data = _load_meetings_file()
+    active = data.get("_meetings", [])
+    if not isinstance(active, list):
+        active = []
+    with _EXEC_MEETING_LOCK:
+        store = _load_exec_meeting_store()
+        exec_active = [
+            _exec_meeting_project_active(m, store.get("events", {}).get(m.get("id"), []))
+            for m in store.get("meetings", {}).values()
+            if m.get("stage") not in _EXEC_MEETING_TERMINAL
+        ]
+    return active + exec_active
+
+
+def _meeting_history_projection():
+    data = _load_meetings_file()
+    history = data.get("_meetingHistory", [])
+    if not isinstance(history, list):
+        history = []
+    with _EXEC_MEETING_LOCK:
+        store = _load_exec_meeting_store()
+        exec_history = [
+            _exec_meeting_project_history(m, store.get("events", {}).get(m.get("id"), []))
+            for m in store.get("meetings", {}).values()
+            if m.get("stage") in _EXEC_MEETING_TERMINAL
+        ]
+    return history + exec_history
+
+
+def _handle_executable_meeting_create(body):
+    topic = str(body.get("topic") or "").strip()
+    participants = _exec_meeting_clean_participants(body.get("participants") or body.get("agents") or [])
+    if not topic:
+        return {"error": "Meeting topic is required", "_status": 400}
+    if len(participants) < 2:
+        return {"error": "Executable meeting requires at least 2 participants", "_status": 400}
+    moderator = str(body.get("moderator") or body.get("moderatorId") or participants[0]).strip()
+    if moderator not in participants:
+        return {"error": "Moderator must be one of the participants", "_status": 400}
+    meeting_type = str(body.get("meetingType") or body.get("kind") or "discussion").strip() or "discussion"
+    if meeting_type not in {"information", "discussion", "task"}:
+        meeting_type = "discussion"
+    try:
+        max_rounds = max(1, min(20, int(body.get("maxRounds") or 2)))
+    except (TypeError, ValueError):
+        max_rounds = 2
+    now = _exec_meeting_now()
+    meeting_id = str(body.get("id") or uuid.uuid4())
+    actor = {"type": "user", "id": str(body.get("createdBy") or body.get("organizer") or "user")}
+    idempotency_key = str(body.get("idempotencyKey") or "").strip()
+    with _EXEC_MEETING_LOCK:
+        store = _load_exec_meeting_store()
+        if idempotency_key and idempotency_key in store.get("idempotency", {}):
+            existing_id = store["idempotency"][idempotency_key].get("meetingId")
+            existing = store.get("meetings", {}).get(existing_id)
+            if existing:
+                return {"ok": True, "meeting": existing, "idempotent": True}
+        _rebuild_exec_meeting_occupancy(store)
+        conflicts = {p: store.get("occupancy", {}).get(p) for p in participants if store.get("occupancy", {}).get(p)}
+        if conflicts:
+            return {"error": "One or more participants are already in an executable meeting", "conflicts": conflicts, "_status": 409}
+        meeting = {
+            "id": meeting_id,
+            "executableMeeting": True,
+            "topic": topic,
+            "purpose": str(body.get("purpose") or "").strip(),
+            "meetingType": meeting_type,
+            "organizer": str(body.get("organizer") or participants[0]).strip(),
+            "moderator": moderator,
+            "participants": participants,
+            "stage": "preparing",
+            "previousStage": "",
+            "round": 0,
+            "maxRounds": max_rounds,
+            "currentSpeaker": "",
+            "speakerQueue": list(participants),
+        "context": str(body.get("context") or body.get("initialContext") or "").strip(),
+            "contextMode": _meeting_context_mode(body.get("contextMode")),
+            "contextBudget": _meeting_context_budget(body.get("contextBudget")),
+            "rollingSummary": "",
+            "participantLastSeen": {},
+            "participantState": {p: {"status": "reserved", "joinedAt": now} for p in participants},
+            "result": {},
+            "version": 0,
+            "lastEventSequence": 0,
+            "createdAt": now,
+            "updatedAt": now,
+        }
+        store.setdefault("meetings", {})[meeting_id] = meeting
+        _append_exec_meeting_event(store, meeting, "meeting_created", actor=actor, payload={"stage": "preparing"}, idempotency_key=idempotency_key)
+        store.setdefault("occupancy", {}).update({p: meeting_id for p in participants})
+        if idempotency_key:
+            store.setdefault("idempotency", {})[idempotency_key] = {"meetingId": meeting_id, "sequence": meeting["lastEventSequence"]}
+        _save_exec_meeting_store(store)
+        return {"ok": True, "meeting": meeting}
+
+
+def _handle_executable_meeting_detail(meeting_id):
+    with _EXEC_MEETING_LOCK:
+        store = _load_exec_meeting_store()
+        meeting = store.get("meetings", {}).get(meeting_id)
+        if not meeting:
+            return {"error": "Executable meeting not found", "_status": 404}
+        return {"ok": True, "meeting": meeting, "events": store.get("events", {}).get(meeting_id, [])}
+
+
+def _handle_executable_meeting_events(meeting_id, query_string=""):
+    qs = urllib.parse.parse_qs(query_string or "")
+    try:
+        after = int((qs.get("after") or ["0"])[0] or 0)
+    except (TypeError, ValueError):
+        after = 0
+    with _EXEC_MEETING_LOCK:
+        store = _load_exec_meeting_store()
+        if meeting_id not in store.get("meetings", {}):
+            return {"error": "Executable meeting not found", "_status": 404}
+        events = [e for e in store.get("events", {}).get(meeting_id, []) if int(e.get("sequence") or 0) > after]
+        return {"ok": True, "meetingId": meeting_id, "after": after, "events": events}
+
+
+def _handle_executable_meeting_transition(meeting_id, body):
+    target = str(body.get("stage") or body.get("to") or body.get("action") or "").strip()
+    aliases = {
+        "start": "active_opening",
+        "opening": "active_opening",
+        "discussion": "active_discussion",
+        "pause": "paused",
+        "resume_preparing": "preparing",
+        "resume_opening": "active_opening",
+        "resume_discussion": "active_discussion",
+        "await_decision": "awaiting_user_decision",
+        "summarize": "summarizing",
+        "complete": "completed",
+        "cancel": "cancelled",
+        "fail": "failed",
+    }
+    target = aliases.get(target, target)
+    if target not in _EXEC_MEETING_PHASES:
+        return {"error": "Invalid meeting stage", "_status": 400}
+    expected = body.get("expectedVersion")
+    idempotency_key = str(body.get("idempotencyKey") or "").strip()
+    actor = {"type": str(body.get("actorType") or "user"), "id": str(body.get("actorId") or "user")}
+    with _EXEC_MEETING_LOCK:
+        store = _load_exec_meeting_store()
+        idem_key = f"{meeting_id}:transition:{idempotency_key}" if idempotency_key else ""
+        if idem_key and idem_key in store.get("idempotency", {}):
+            meeting = store.get("meetings", {}).get(meeting_id)
+            return {"ok": True, "meeting": meeting, "idempotent": True}
+        meeting = store.get("meetings", {}).get(meeting_id)
+        if not meeting:
+            return {"error": "Executable meeting not found", "_status": 404}
+        if expected is not None and int(expected) != int(meeting.get("version", 0)):
+            return {"error": "Meeting version conflict", "currentVersion": meeting.get("version", 0), "_status": 409}
+        current = meeting.get("stage")
+        if target not in _EXEC_MEETING_TRANSITIONS.get(current, set()):
+            return {"error": f"Illegal transition from {current} to {target}", "stage": current, "_status": 409}
+        meeting["previousStage"] = current
+        meeting["stage"] = target
+        if target in {"active_opening", "active_discussion"}:
+            meeting["currentSpeaker"] = (meeting.get("speakerQueue") or [""])[0]
+        if target == "active_discussion":
+            meeting["round"] = max(1, int(meeting.get("round") or 0))
+        if target in _EXEC_MEETING_TERMINAL:
+            meeting["currentSpeaker"] = ""
+            for participant in meeting.get("participants", []):
+                store.get("occupancy", {}).pop(participant, None)
+            if target == "completed":
+                result = body.get("result") if isinstance(body.get("result"), dict) else {}
+                if body.get("summary"):
+                    result.setdefault("summary", str(body.get("summary") or ""))
+                meeting["result"] = {**meeting.get("result", {}), **result}
+        event = _append_exec_meeting_event(store, meeting, "meeting_transitioned", actor=actor, payload={"from": current, "to": target, "reason": body.get("reason") or ""}, idempotency_key=idempotency_key)
+        if idem_key:
+            store.setdefault("idempotency", {})[idem_key] = {"meetingId": meeting_id, "sequence": event["sequence"]}
+        _save_exec_meeting_store(store)
+        return {"ok": True, "meeting": meeting, "event": event}
+
+
+def _handle_executable_meeting_intervention(meeting_id, body):
+    text = str(body.get("text") or body.get("message") or "").strip()
+    context = str(body.get("context") or body.get("additionalContext") or "").strip()
+    if not text and not context:
+        return {"error": "User intervention requires text or context", "_status": 400}
+    expected = body.get("expectedVersion")
+    idempotency_key = str(body.get("idempotencyKey") or "").strip()
+    actor_id = str(body.get("actorId") or "user").strip() or "user"
+    actor = {"type": "user", "id": actor_id}
+    with _EXEC_MEETING_LOCK:
+        store = _load_exec_meeting_store()
+        idem_key = f"{meeting_id}:intervention:{idempotency_key}" if idempotency_key else ""
+        meeting = store.get("meetings", {}).get(meeting_id)
+        if not meeting:
+            return {"error": "Executable meeting not found", "_status": 404}
+        if idem_key and idem_key in store.get("idempotency", {}):
+            seq = store["idempotency"][idem_key].get("sequence")
+            event = next((e for e in store.get("events", {}).get(meeting_id, []) if e.get("sequence") == seq), None)
+            return {"ok": True, "meeting": meeting, "event": event, "idempotent": True}
+        if meeting.get("stage") in _EXEC_MEETING_TERMINAL:
+            return {"error": "Cannot add context to a terminal meeting", "stage": meeting.get("stage"), "_status": 409}
+        if expected is not None:
+            try:
+                expected_version = int(expected)
+            except (TypeError, ValueError):
+                return {"error": "Invalid expectedVersion", "_status": 400}
+            if expected_version != int(meeting.get("version", 0)):
+                return {"error": "Meeting version conflict", "currentVersion": meeting.get("version", 0), "_status": 409}
+        if text and context:
+            kind = "statement_context"
+        elif context:
+            kind = "context"
+        else:
+            kind = "statement"
+        payload = {
+            "kind": kind,
+            "text": text,
+            "context": context,
+            "actorId": actor_id,
+            "stage": meeting.get("stage"),
+            "round": meeting.get("round", 0),
+            "appliesFromSequence": meeting.get("lastEventSequence", 0),
+        }
+        event = _append_exec_meeting_event(store, meeting, "user_intervention", actor=actor, payload=payload, idempotency_key=idempotency_key)
+        if idem_key:
+            store.setdefault("idempotency", {})[idem_key] = {"meetingId": meeting_id, "sequence": event["sequence"]}
+        _save_exec_meeting_store(store)
+        return {"ok": True, "meeting": meeting, "event": event}
+
+
+def _meeting_events_text(events):
+    lines = []
+    for event in events:
+        payload = event.get("payload") or {}
+        if event.get("type") == "participant_turn":
+            lines.append(f"- seq {event.get('sequence')} {payload.get('speaker')}: {payload.get('text') or payload.get('reply') or ''}")
+        elif event.get("type") == "user_intervention":
+            parts = []
+            if payload.get("text"):
+                parts.append(f"user said: {payload.get('text')}")
+            if payload.get("context"):
+                parts.append(f"user added context: {payload.get('context')}")
+            lines.append(f"- seq {event.get('sequence')} " + " | ".join(parts))
+    return "\n".join(lines)
+
+
+def _meeting_update_rolling_summary(meeting, speaker, text):
+    current = str(meeting.get("rollingSummary") or "")
+    addition = f"{speaker}: {str(text or '').strip()[:500]}"
+    combined = (current + "\n" + addition).strip()
+    meeting["rollingSummary"] = _meeting_truncate_text(combined, (meeting.get("contextBudget") or {}).get("maxSummaryChars", 3000))
+
+
+_MEETING_STRUCTURED_KEYS = {
+    "position": "position",
+    "reasoning": "reasoning",
+    "disagreements": "disagreements",
+    "questions": "questions",
+    "suggestedNextStep": "suggestedNextStep",
+    "suggested_next_step": "suggestedNextStep",
+    "confidence": "confidence",
+}
+
+
+def _meeting_strip_json_fence(text):
+    raw = str(text or "").strip()
+    if raw.startswith("```"):
+        lines = raw.splitlines()
+        if lines and lines[0].strip().startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip().startswith("```"):
+            lines = lines[:-1]
+        raw = "\n".join(lines).strip()
+    return raw
+
+
+def _meeting_parse_json_object(text):
+    raw = _meeting_strip_json_fence(text)
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw)
+        return parsed if isinstance(parsed, dict) else None
+    except (TypeError, json.JSONDecodeError):
+        pass
+    for marker in ("{",):
+        idx = raw.find(marker)
+        while idx >= 0:
+            try:
+                parsed, _ = json.JSONDecoder().raw_decode(raw[idx:])
+                return parsed if isinstance(parsed, dict) else None
+            except json.JSONDecodeError:
+                idx = raw.find(marker, idx + 1)
+    return None
+
+
+def _meeting_coerce_list(value):
+    if value is None or value == "":
+        return []
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    return [str(value).strip()]
+
+
+def _meeting_structured_display_text(structured):
+    if not structured:
+        return ""
+    parts = []
+    labels = [
+        ("position", "Position"),
+        ("reasoning", "Reasoning"),
+        ("disagreements", "Disagreements"),
+        ("questions", "Questions"),
+        ("suggestedNextStep", "Suggested next step"),
+        ("confidence", "Confidence"),
+    ]
+    for key, label in labels:
+        value = structured.get(key)
+        if isinstance(value, list):
+            value = "; ".join([str(item) for item in value if str(item).strip()])
+        if value:
+            parts.append(f"{label}: {value}")
+    return "\n".join(parts)
+
+
+def _meeting_parse_structured_turn(text):
+    parsed = _meeting_parse_json_object(text)
+    if not parsed:
+        return {}, "structured_json_not_found"
+    structured = {}
+    for raw_key, value in parsed.items():
+        key = _MEETING_STRUCTURED_KEYS.get(str(raw_key))
+        if not key:
+            continue
+        if key in {"disagreements", "questions"}:
+            structured[key] = _meeting_coerce_list(value)
+        else:
+            structured[key] = str(value or "").strip()
+    if not any(structured.values()):
+        return {}, "structured_fields_missing"
+    structured.setdefault("disagreements", [])
+    structured.setdefault("questions", [])
+    structured.setdefault("confidence", "")
+    return structured, ""
+
+
+def _meeting_extract_payload_text(obj):
+    if not isinstance(obj, dict):
+        return ""
+    result = obj.get("result")
+    candidates = []
+    if isinstance(result, dict):
+        payload = result.get("payload")
+        if isinstance(payload, list):
+            for item in payload:
+                if isinstance(item, dict):
+                    candidates.append(item.get("text") or item.get("content") or item.get("message") or "")
+                else:
+                    candidates.append(item)
+        elif isinstance(payload, dict):
+            candidates.append(payload.get("text") or payload.get("content") or payload.get("message") or "")
+        elif isinstance(payload, str):
+            candidates.append(payload)
+        for key in ("text", "reply", "message", "content"):
+            if result.get(key):
+                candidates.append(result.get(key))
+    for key in ("text", "reply", "message", "content"):
+        if obj.get(key):
+            candidates.append(obj.get(key))
+    return "\n".join([str(item).strip() for item in candidates if str(item or "").strip()]).strip()
+
+
+def _meeting_provider_raw_summary(raw):
+    if raw is None:
+        return None
+    try:
+        encoded = json.dumps(raw, ensure_ascii=False, sort_keys=True)
+    except (TypeError, ValueError):
+        encoded = str(raw)
+    return _meeting_truncate_text(encoded, 8000)
+
+
+def _meeting_normalize_provider_reply(reply):
+    raw_text = str(reply or "")
+    provider_raw = None
+    speaker_text = raw_text.strip()
+    parsed = _meeting_parse_json_object(raw_text)
+    if parsed and any(key in parsed for key in ("status", "result", "payload", "meta")):
+        extracted = _meeting_extract_payload_text(parsed)
+        if extracted:
+            provider_raw = parsed
+            speaker_text = extracted
+    structured, parse_error = _meeting_parse_structured_turn(speaker_text)
+    display_text = _meeting_structured_display_text(structured) if structured else speaker_text
+    normalized = {
+        "text": display_text,
+        "rawText": speaker_text,
+        "structured": structured,
+        "parseError": parse_error,
+    }
+    raw_summary = _meeting_provider_raw_summary(provider_raw)
+    if raw_summary:
+        normalized["providerRaw"] = raw_summary
+    return normalized
+
+
+def _meeting_build_result_prompt(meeting, events):
+    transcript = _meeting_events_text(events)
+    return _meeting_truncate_text(
+        "You are the meeting moderator. Summarize and close this meeting based only on the transcript below.\n"
+        f"Meeting topic: {meeting.get('topic') or 'Untitled Meeting'}\n"
+        f"Purpose: {meeting.get('purpose') or ''}\n"
+        f"Type: {meeting.get('meetingType') or 'discussion'}\n"
+        f"Participants: {', '.join(meeting.get('participants') or [])}\n\n"
+        f"Transcript:\n{transcript or '(no participant turns yet)'}\n\n"
+        "Return exactly one JSON object and no surrounding prose or Markdown fences. "
+        "Use this schema: {\"summary\":\"...\",\"decision\":\"...\",\"unresolvedQuestions\":[\"...\"],"
+        "\"disagreements\":[\"...\"],\"actionItems\":[{\"owner\":\"...\",\"item\":\"...\"}]}.\n",
+        (meeting.get("contextBudget") or {}).get("maxPromptChars", 12000),
+    )
+
+
+def _meeting_coerce_action_items(value):
+    if not value:
+        return []
+    if not isinstance(value, list):
+        value = [value]
+    items = []
+    for item in value:
+        if isinstance(item, dict):
+            owner = str(item.get("owner") or item.get("agent") or item.get("assignee") or "").strip()
+            text = str(item.get("item") or item.get("text") or item.get("task") or item.get("action") or "").strip()
+            if owner or text:
+                items.append({"owner": owner, "item": text})
+        else:
+            text = str(item or "").strip()
+            if text:
+                items.append({"item": text})
+    return items
+
+
+def _meeting_parse_result(raw_text):
+    parsed = _meeting_parse_json_object(raw_text)
+    if not parsed:
+        return {
+            "summary": _meeting_truncate_text(raw_text or "", 2000),
+            "decision": "Meeting ended by user. Review transcript for final decision.",
+            "unresolvedQuestions": [],
+            "disagreements": [],
+            "actionItems": [],
+            "parseError": "result_json_not_found",
+        }
+    return {
+        "summary": _meeting_truncate_text(str(parsed.get("summary") or ""), 2000),
+        "decision": str(parsed.get("decision") or "").strip(),
+        "unresolvedQuestions": _meeting_coerce_list(parsed.get("unresolvedQuestions") or parsed.get("unresolved_questions")),
+        "disagreements": _meeting_coerce_list(parsed.get("disagreements")),
+        "actionItems": _meeting_coerce_action_items(parsed.get("actionItems") or parsed.get("action_items")),
+    }
+
+
+def _meeting_fallback_result(meeting, events):
+    turns = [e for e in events if e.get("type") == "participant_turn"]
+    contributions = {}
+    for turn in turns:
+        payload = turn.get("payload") or {}
+        speaker = payload.get("speaker")
+        contributions.setdefault(speaker, [])
+        contributions[speaker].append(payload.get("text") or "")
+    return {
+        "summary": _meeting_truncate_text(meeting.get("rollingSummary") or "", 2000),
+        "decision": "Meeting completed. Review transcript for final decision.",
+        "unresolvedQuestions": [],
+        "disagreements": [],
+        "contributions": {k: _meeting_truncate_text("\n".join(v), 1200) for k, v in contributions.items()},
+        "actionItems": [],
+    }
+
+
+def _handle_executable_meeting_end_with_moderator(meeting_id, body=None):
+    body = body or {}
+    actor = {"type": str(body.get("actorType") or "user"), "id": str(body.get("actorId") or "user")}
+    with _EXEC_MEETING_LOCK:
+        store = _load_exec_meeting_store()
+        meeting = store.get("meetings", {}).get(meeting_id)
+        if not meeting:
+            return {"error": "Executable meeting not found", "_status": 404}
+        if meeting.get("stage") in _EXEC_MEETING_TERMINAL:
+            return {"ok": True, "meeting": meeting, "alreadyTerminal": True}
+        previous = meeting.get("stage")
+        if "summarizing" not in _EXEC_MEETING_TRANSITIONS.get(previous, set()) and previous != "summarizing":
+            return {"error": f"Cannot summarize meeting from {previous}", "stage": previous, "_status": 409}
+        if previous != "summarizing":
+            meeting["previousStage"] = previous
+            meeting["stage"] = "summarizing"
+            meeting["currentSpeaker"] = meeting.get("moderator") or (meeting.get("participants") or [""])[0]
+            _append_exec_meeting_event(store, meeting, "meeting_transitioned", actor=actor, payload={"from": previous, "to": "summarizing", "reason": "user_end"})
+            _save_exec_meeting_store(store)
+
+    with _EXEC_MEETING_LOCK:
+        store = _load_exec_meeting_store()
+        meeting = store["meetings"][meeting_id]
+        events = list(store.get("events", {}).get(meeting_id, []))
+        moderator = meeting.get("moderator") or (meeting.get("participants") or [""])[0]
+        prompt = _meeting_build_result_prompt(meeting, events)
+        pending = _append_exec_meeting_event(store, meeting, "provider_call_started", actor={"type": "agent", "id": moderator}, payload={"speaker": moderator, "stage": "summarizing", "round": meeting.get("round"), "contextMode": meeting.get("contextMode"), "promptChars": len(prompt), "purpose": "meeting_result"})
+        _save_exec_meeting_store(store)
+
+    result = _meeting_call_provider(meeting, moderator, prompt)
+
+    with _EXEC_MEETING_LOCK:
+        store = _load_exec_meeting_store()
+        meeting = store["meetings"][meeting_id]
+        normalized = _meeting_normalize_provider_reply(result.get("reply") or "")
+        moderator_payload = {
+            "speaker": moderator,
+            "text": normalized.get("text") or "",
+            "rawText": normalized.get("rawText") or "",
+            "structured": normalized.get("structured") or {},
+            "parseError": normalized.get("parseError") or "",
+            "ok": bool(result.get("ok")),
+            "stage": "summarizing",
+            "round": meeting.get("round"),
+            "providerRef": result.get("providerRef") or _meeting_provider_ref(moderator),
+            "conversationId": result.get("conversationId") or "",
+            "durationMs": result.get("durationMs") or 0,
+            "inReplyToSequence": pending.get("sequence"),
+            "purpose": "meeting_result",
+        }
+        if normalized.get("providerRaw"):
+            moderator_payload["providerRaw"] = normalized.get("providerRaw")
+        _append_exec_meeting_event(store, meeting, "participant_turn", actor={"type": "agent", "id": moderator}, payload=moderator_payload)
+        events = list(store.get("events", {}).get(meeting_id, []))
+        parsed_result = _meeting_parse_result(normalized.get("rawText") or normalized.get("text") or "")
+        fallback = _meeting_fallback_result(meeting, events)
+        final_result = {
+            **fallback,
+            **{k: v for k, v in parsed_result.items() if v not in ("", [], {})},
+            "moderator": moderator,
+            "moderatorProviderRef": moderator_payload.get("providerRef") or {},
+        }
+        meeting["result"] = final_result
+        meeting["currentSpeaker"] = ""
+        _append_exec_meeting_event(store, meeting, "meeting_result", actor={"type": "agent", "id": moderator}, payload=final_result)
+        previous = meeting.get("stage")
+        meeting["previousStage"] = previous
+        meeting["stage"] = "completed"
+        for participant in meeting.get("participants", []):
+            store.get("occupancy", {}).pop(participant, None)
+        _append_exec_meeting_event(store, meeting, "meeting_transitioned", actor=actor, payload={"from": previous, "to": "completed", "reason": "moderator_summary_complete"})
+        _save_exec_meeting_store(store)
+        return {"ok": True, "meeting": meeting, "events": store.get("events", {}).get(meeting_id, [])}
+
+
+def _meeting_build_prompt(meeting, speaker, stage, events):
+    budget = _meeting_context_budget(meeting.get("contextBudget"))
+    mode = _meeting_context_mode(meeting.get("contextMode"))
+    speaker_seen = int((meeting.get("participantLastSeen") or {}).get(speaker) or 0)
+    topic = meeting.get("topic") or "Untitled Meeting"
+    fixed = (
+        f"Meeting topic: {topic}\n"
+        f"Purpose: {meeting.get('purpose') or ''}\n"
+        f"Type: {meeting.get('meetingType') or 'discussion'}\n"
+        f"Stage: {stage}\n"
+        f"Round: {meeting.get('round') or 0} of {meeting.get('maxRounds') or 0}\n"
+        f"You are: {speaker}\n"
+        f"Moderator: {meeting.get('moderator') or ''}\n"
+    )
+    initial = _meeting_truncate_text(meeting.get("context") or "", budget["maxInitialContextChars"])
+    all_events = _meeting_events_text(events)
+    unseen_events = _meeting_events_text([e for e in events if int(e.get("sequence") or 0) > speaker_seen])
+    recent_events = _meeting_events_text(events[-budget["maxRecentEvents"]:])
+    summary = _meeting_truncate_text(meeting.get("rollingSummary") or "", budget["maxSummaryChars"])
+    if mode == "full":
+        body = f"{fixed}\nConfirmed context:\n{initial}\n\nFull transcript:\n{all_events}\n"
+    elif mode == "summary":
+        body = f"{fixed}\nConfirmed context:\n{initial}\n\nRolling summary:\n{summary}\n\nRelevant recent statements:\n{recent_events}\n"
+    else:
+        if speaker_seen <= 0:
+            body = f"{fixed}\nConfirmed context:\n{initial}\n\nPrior meeting events:\n{recent_events}\n"
+        else:
+            body = f"{fixed}\nNew events since your last turn:\n{unseen_events or '(none)'}\n"
+    instruction = (
+        "\nInstruction:\n"
+        "Contribute to the meeting. Avoid repeating previous points. "
+        "Return exactly one JSON object and no surrounding prose or Markdown fences. "
+        "Use this schema: {\"position\":\"...\",\"reasoning\":\"...\",\"disagreements\":[\"...\"],"
+        "\"questions\":[\"...\"],\"suggestedNextStep\":\"...\",\"confidence\":\"high|medium|low\"}.\n"
+    )
+    prompt = body + instruction
+    return _meeting_truncate_text(prompt, budget["maxPromptChars"])
+
+
+def _meeting_provider_ref(agent_id):
+    agent = _office_agent_lookup(agent_id) or {}
+    return {
+        "providerKind": agent.get("providerKind", "openclaw"),
+        "agentId": agent.get("id") or agent_id,
+        "providerAgentId": agent.get("providerAgentId") or agent.get("id") or agent_id,
+    }
+
+
+def _meeting_provider_timeout():
+    raw = os.environ.get("VO_MEETING_PROVIDER_TIMEOUT_SEC") or "120"
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        value = 120
+    return max(5, min(value, 600))
+
+
+def _meeting_call_provider(meeting, speaker, prompt):
+    if os.environ.get("VO_MEETING_FAKE_PROVIDER"):
+        return {
+            "ok": True,
+            "reply": json.dumps({
+                "position": f"fake contribution from {speaker}",
+                "reasoning": "deterministic Phase 2 fixture",
+                "disagreements": [],
+                "questions": [],
+                "suggestedNextStep": "continue",
+                "confidence": "high",
+            }),
+            "providerRef": {"providerKind": "fake", "agentId": speaker},
+            "durationMs": 0,
+            "conversationId": f"meeting:{meeting.get('id')}:participant:{speaker}",
+        }
+    conversation_id = f"meeting:{meeting.get('id')}:participant:{speaker}"
+    started = time.time()
+    agent = _office_agent_lookup(speaker) or {}
+    provider_kind = agent.get("providerKind", "openclaw")
+    timeout = _meeting_provider_timeout()
+    try:
+        if provider_kind == "codex":
+            result = _handle_codex_chat({"agentId": speaker, "message": prompt, "conversationId": conversation_id, "timeoutSec": timeout, "fromType": "agent"})
+            reply = result.get("reply") or result.get("error") or ""
+            ok = bool(result.get("ok"))
+            provider_ref = {"providerKind": "codex", "agentId": speaker, "conversationId": conversation_id, "threadId": result.get("threadId"), "turnId": result.get("turnId")}
+        elif provider_kind == "hermes":
+            result = _handle_hermes_chat({"agentId": speaker, "message": prompt, "timeoutSec": timeout, "fromType": "agent"})
+            reply = result.get("reply") or result.get("error") or ""
+            ok = bool(result.get("ok"))
+            provider_ref = {"providerKind": "hermes", "agentId": speaker, "conversationId": conversation_id, "sessionId": result.get("sessionId")}
+        else:
+            reply = _wf_call_agent(speaker, prompt, timeout=timeout, project_id="meeting-for-ai", task_id=conversation_id)
+            ok = not str(reply or "").startswith("[ERROR]")
+            provider_ref = {"providerKind": provider_kind, "agentId": speaker, "conversationId": conversation_id}
+    except Exception as exc:
+        ok = False
+        reply = f"[ERROR] provider call failed for {speaker}: {exc}"
+        provider_ref = {"providerKind": provider_kind, "agentId": speaker, "conversationId": conversation_id}
+    return {"ok": ok, "reply": reply, "providerRef": provider_ref, "durationMs": int((time.time() - started) * 1000), "conversationId": conversation_id}
+
+
+def _handle_executable_meeting_run(meeting_id, body=None):
+    body = body or {}
+    with _EXEC_MEETING_LOCK:
+        store = _load_exec_meeting_store()
+        meeting = store.get("meetings", {}).get(meeting_id)
+        if not meeting:
+            return {"error": "Executable meeting not found", "_status": 404}
+        if meeting.get("stage") in _EXEC_MEETING_TERMINAL:
+            return {"ok": True, "meeting": meeting, "alreadyTerminal": True}
+        if meeting.get("stage") == "preparing":
+            meeting["previousStage"] = "preparing"
+            meeting["stage"] = "active_opening"
+            _append_exec_meeting_event(store, meeting, "meeting_transitioned", payload={"from": "preparing", "to": "active_opening", "reason": "run"})
+            _save_exec_meeting_store(store)
+
+    participants = list(meeting.get("participants") or [])
+    max_rounds = max(1, int(meeting.get("maxRounds") or 1))
+    for stage, rounds in (("active_opening", 1), ("active_discussion", max_rounds)):
+        for round_index in range(1, rounds + 1):
+            with _EXEC_MEETING_LOCK:
+                store = _load_exec_meeting_store()
+                meeting = store["meetings"][meeting_id]
+                if meeting.get("stage") in _EXEC_MEETING_TERMINAL or meeting.get("stage") == "paused":
+                    _save_exec_meeting_store(store)
+                    return {"ok": True, "meeting": meeting, "pausedOrTerminal": True}
+                if stage == "active_discussion" and meeting.get("stage") == "active_opening":
+                    meeting["previousStage"] = "active_opening"
+                    meeting["stage"] = "active_discussion"
+                    meeting["round"] = round_index
+                    _append_exec_meeting_event(store, meeting, "meeting_transitioned", payload={"from": "active_opening", "to": "active_discussion", "reason": "opening_complete"})
+                elif stage == "active_discussion":
+                    meeting["round"] = round_index
+                events = list(store.get("events", {}).get(meeting_id, []))
+                _save_exec_meeting_store(store)
+            for speaker in participants:
+                with _EXEC_MEETING_LOCK:
+                    store = _load_exec_meeting_store()
+                    meeting = store["meetings"][meeting_id]
+                    meeting["currentSpeaker"] = speaker
+                    prompt = _meeting_build_prompt(meeting, speaker, stage, store.get("events", {}).get(meeting_id, []))
+                    pending = _append_exec_meeting_event(store, meeting, "provider_call_started", actor={"type": "agent", "id": speaker}, payload={"speaker": speaker, "stage": stage, "round": meeting.get("round"), "contextMode": meeting.get("contextMode"), "promptChars": len(prompt)})
+                    _save_exec_meeting_store(store)
+                result = _meeting_call_provider(meeting, speaker, prompt)
+                with _EXEC_MEETING_LOCK:
+                    store = _load_exec_meeting_store()
+                    meeting = store["meetings"][meeting_id]
+                    normalized = _meeting_normalize_provider_reply(result.get("reply") or "")
+                    payload = {
+                        "speaker": speaker,
+                        "text": normalized.get("text") or "",
+                        "rawText": normalized.get("rawText") or "",
+                        "structured": normalized.get("structured") or {},
+                        "parseError": normalized.get("parseError") or "",
+                        "ok": bool(result.get("ok")),
+                        "stage": stage,
+                        "round": meeting.get("round"),
+                        "providerRef": result.get("providerRef") or _meeting_provider_ref(speaker),
+                        "conversationId": result.get("conversationId") or "",
+                        "durationMs": result.get("durationMs") or 0,
+                        "inReplyToSequence": pending.get("sequence"),
+                    }
+                    if normalized.get("providerRaw"):
+                        payload["providerRaw"] = normalized.get("providerRaw")
+                    event = _append_exec_meeting_event(store, meeting, "participant_turn", actor={"type": "agent", "id": speaker}, payload=payload)
+                    meeting.setdefault("participantLastSeen", {})[speaker] = event["sequence"]
+                    _meeting_update_rolling_summary(meeting, speaker, payload["text"])
+                    _save_exec_meeting_store(store)
+    with _EXEC_MEETING_LOCK:
+        store = _load_exec_meeting_store()
+        meeting = store["meetings"][meeting_id]
+        events = store.get("events", {}).get(meeting_id, [])
+        meeting["currentSpeaker"] = ""
+        meeting["previousStage"] = meeting.get("stage")
+        meeting["stage"] = "summarizing"
+        _append_exec_meeting_event(store, meeting, "meeting_transitioned", payload={"from": "active_discussion", "to": "summarizing", "reason": "rounds_complete"})
+        turns = [e for e in events if e.get("type") == "participant_turn"]
+        contributions = {}
+        for turn in turns:
+            speaker = (turn.get("payload") or {}).get("speaker")
+            contributions.setdefault(speaker, [])
+            contributions[speaker].append((turn.get("payload") or {}).get("text") or "")
+        result = {
+            "summary": _meeting_truncate_text(meeting.get("rollingSummary") or "", 2000),
+            "decision": "Meeting completed. Review transcript for final decision.",
+            "unresolvedQuestions": [],
+            "disagreements": [],
+            "contributions": {k: _meeting_truncate_text("\n".join(v), 1200) for k, v in contributions.items()},
+            "actionItems": [],
+        }
+        meeting["result"] = result
+        _append_exec_meeting_event(store, meeting, "meeting_result", payload=result)
+        previous = meeting.get("stage")
+        meeting["stage"] = "completed"
+        for participant in meeting.get("participants", []):
+            store.get("occupancy", {}).pop(participant, None)
+        _append_exec_meeting_event(store, meeting, "meeting_transitioned", payload={"from": previous, "to": "completed", "reason": "run_complete"})
+        _save_exec_meeting_store(store)
+        return {"ok": True, "meeting": meeting, "events": store.get("events", {}).get(meeting_id, [])}
+
+
+def _handle_executable_meeting_reconcile():
+    with _EXEC_MEETING_LOCK:
+        store = _load_exec_meeting_store()
+        occupancy = _rebuild_exec_meeting_occupancy(store)
+        non_terminal = [m for m in store.get("meetings", {}).values() if m.get("stage") not in _EXEC_MEETING_TERMINAL]
+        _save_exec_meeting_store(store)
+        return {"ok": True, "activeMeetings": len(non_terminal), "occupancy": occupancy}
+
+
 def _handle_meeting_create(body):
     """Create/update a meeting in the canonical server-side status file."""
     topic = (body.get("topic") or "").strip()
@@ -7499,9 +8519,6 @@ def _handle_meeting_end(body):
     action_items = body.get("actionItems") or []
     responses = body.get("responses") or {}  # {agentKey: "what they said"}
 
-    if not summary:
-        return {"error": "A meeting summary is required to end the meeting", "_status": 400}
-
     data = _load_meetings_file()
     meetings = data.get("_meetings", [])
     if not isinstance(meetings, list):
@@ -7515,7 +8532,21 @@ def _handle_meeting_end(body):
             break
 
     if not ended_meeting:
+        detail = _handle_executable_meeting_detail(meet_id)
+        if detail.get("ok"):
+            if summary:
+                return _handle_executable_meeting_transition(meet_id, {
+                    "stage": "completed",
+                    "summary": summary,
+                    "result": {"summary": summary, "decision": resolution, "actionItems": action_items if isinstance(action_items, list) else []},
+                    "actorId": ended_by or "user",
+                    "actorType": "user",
+                })
+            return _handle_executable_meeting_end_with_moderator(meet_id, {"actorId": ended_by or "user", "actorType": "user"})
         return {"error": f"Meeting '{meet_id}' not found", "_status": 404}
+
+    if not summary:
+        return {"error": "A meeting summary is required to end the meeting", "_status": 400}
 
     # Build completed meeting record
     completed = dict(ended_meeting)
@@ -9409,6 +10440,12 @@ def _wf_read_task_file(project_id, task_id):
 
 
 # Track workflow sessions for cleanup: { project_id: { task_id: set(session_keys) } }
+def _wf_safe_session_part(value, fallback="task", max_len=8):
+    text = re.sub(r"[^a-zA-Z0-9_-]+", "-", str(value or "").strip()).strip("-")
+    text = (text or fallback)[:max_len].strip("-")
+    return text or fallback[:max_len]
+
+
 def _wf_task_session_key(agent_id, project_id, task_id):
     """Return a stable session key for a workflow task.
 
@@ -9416,7 +10453,10 @@ def _wf_task_session_key(agent_id, project_id, task_id):
     This means the agent keeps context across the full task lifecycle,
     prompt caching kicks in, and only ONE session is created per task.
     """
-    return f"agent:{agent_id}:openai:wf-{project_id[:8]}-{task_id[:8]}"
+    agent_part = _wf_safe_session_part(agent_id, "agent", max_len=24)
+    project_part = _wf_safe_session_part(project_id, "project")
+    task_part = _wf_safe_session_part(task_id, "task")
+    return f"agent-{agent_part}-openai-wf-{project_part}-{task_part}"
 
 
 def _wf_browser_exec_action_desc(command):
@@ -12912,8 +13952,7 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             self.wfile.write(json.dumps(result).encode())
         elif self.path == "/api/meetings" or self.path == "/api/meetings/active":
             # Return active meetings
-            data = _load_meetings_file()
-            active = data.get("_meetings", [])
+            active = _meeting_active_projection()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
@@ -12921,13 +13960,34 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             self.wfile.write(json.dumps({"ok": True, "meetings": active}).encode())
         elif self.path == "/api/meetings/history":
             # Return meeting history
-            data = _load_meetings_file()
-            history = data.get("_meetingHistory", [])
+            history = _meeting_history_projection()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(json.dumps({"ok": True, "history": history}).encode())
+        elif self.path == "/api/meetings/executable/reconcile":
+            result = _handle_executable_meeting_reconcile()
+            self.send_response(result.get("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            result.pop("_status", None)
+            self.wfile.write(json.dumps(result).encode())
+        elif self.path.startswith("/api/meetings/executable/"):
+            parsed = urllib.parse.urlparse(self.path)
+            rest = parsed.path.split("/api/meetings/executable/", 1)[1].strip("/")
+            if rest.endswith("/events"):
+                meeting_id = urllib.parse.unquote(rest.rsplit("/events", 1)[0].strip("/"))
+                result = _handle_executable_meeting_events(meeting_id, parsed.query)
+            else:
+                result = _handle_executable_meeting_detail(urllib.parse.unquote(rest))
+            self.send_response(result.get("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            result.pop("_status", None)
+            self.wfile.write(json.dumps(result).encode())
         elif self.path == "/api/presence" or self.path.startswith("/api/presence/"):
             # Presence API — read from gateway_presence in-memory state
             if self.path == "/api/presence":
@@ -14526,6 +15586,53 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             self.wfile.write(json.dumps(result).encode())
             return
         # --- MEETINGS API ---
+        elif self.path == "/api/meetings/executable/create":
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            result = _handle_executable_meeting_create(body)
+            self.send_response(result.get("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            result.pop("_status", None)
+            self.wfile.write(json.dumps(result).encode())
+            return
+        elif self.path.startswith("/api/meetings/executable/") and self.path.endswith("/transition"):
+            meeting_id = urllib.parse.unquote(self.path.split("/api/meetings/executable/", 1)[1].rsplit("/transition", 1)[0].strip("/"))
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            result = _handle_executable_meeting_transition(meeting_id, body)
+            self.send_response(result.get("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            result.pop("_status", None)
+            self.wfile.write(json.dumps(result).encode())
+            return
+        elif self.path.startswith("/api/meetings/executable/") and self.path.endswith("/intervention"):
+            meeting_id = urllib.parse.unquote(self.path.split("/api/meetings/executable/", 1)[1].rsplit("/intervention", 1)[0].strip("/"))
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            result = _handle_executable_meeting_intervention(meeting_id, body)
+            self.send_response(result.get("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            result.pop("_status", None)
+            self.wfile.write(json.dumps(result).encode())
+            return
+        elif self.path.startswith("/api/meetings/executable/") and self.path.endswith("/run"):
+            meeting_id = urllib.parse.unquote(self.path.split("/api/meetings/executable/", 1)[1].rsplit("/run", 1)[0].strip("/"))
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            result = _handle_executable_meeting_run(meeting_id, body)
+            self.send_response(result.get("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            result.pop("_status", None)
+            self.wfile.write(json.dumps(result).encode())
+            return
         elif self.path == "/api/meetings/create":
             length = int(self.headers.get('Content-Length', 0))
             body = json.loads(self.rfile.read(length)) if length else {}

@@ -1,9 +1,9 @@
 {
   "name": "meeting-for-ai-phase-1-3",
   "parent": "meeting-for-ai",
-  "stage": "todolist_created",
+  "stage": "phase_3_partial_controls_done",
   "waiting_for_user": false,
-  "updated_at": "2026-06-15T05:09:51+08:00",
+  "updated_at": "2026-06-16T04:57:00+08:00",
   "confirmed": {
     "checklist": true,
     "tested": false,
@@ -20,23 +20,23 @@
   "phases": {
     "phase_1": {
       "name": "durable-meeting-foundation",
-      "status": "planned",
-      "tested": false,
+      "status": "self_test_passed",
+      "tested": true,
       "checklist": "CHK-P1-001..CHK-P1-009",
       "gate_task": "TODO-P1-010"
     },
     "phase_2": {
       "name": "user-started-sequential-ai-meeting",
-      "status": "planned",
+      "status": "implementation_self_test_passed_real_gate_blocked_by_provider_quota",
       "tested": false,
       "checklist": "CHK-P2-001..CHK-P2-010",
       "gate_task": "TODO-P2-010"
     },
     "phase_3": {
       "name": "user-control-and-arbitration",
-      "status": "planned",
+      "status": "partial_live_discussion_user_context_structured_turns_ai_end_history_ui_and_controls_done",
       "tested": false,
-      "checklist": "CHK-P3-001..CHK-P3-011",
+      "checklist": "CHK-P3-001..CHK-P3-012",
       "gate_task": "TODO-P3-011"
     }
   },
@@ -50,6 +50,26 @@
     "Child requirement created from meeting-for-ai Phase 1, Phase 2, and Phase 3.",
     "Checklist confirmation inferred from the user's explicit request to generate the Phase-based todolist.",
     "Each Phase has an independent automated and manual self-test gate.",
-    "Phase 4 AI requests/context discovery, Phase 5 task pause/resume, and Phase 6 task creation remain out of scope."
+    "Phase 4 AI requests/context discovery, Phase 5 task pause/resume, and Phase 6 task creation remain out of scope.",
+    "2026-06-15 Phase 1 implementation completed: executable meeting store, ordered event stream, state transition validation, participant occupancy, detail/events/transition/reconcile APIs, legacy active/history projection, executable meeting end support, and meeting center status rendering.",
+    "2026-06-15 Phase 1 self-test gate passed: tests/test_meeting_for_ai_phase1.py, tests/test_project_execution.py, tests/test_feishu_sync.py, node --check app/game.js, node --check app/projects.js, and git diff --check passed. Project Execution test kept the known non-fatal gateway connection warning.",
+    "2026-06-15 Phase 1 local HTTP acceptance passed on http://127.0.0.1:8090 using isolated VO_STATUS_DIR=/tmp/vo-meeting-phase1-e2e: create, active projection, detail, events after sequence, occupancy conflict, transition to active_opening, and reconcile were verified.",
+    "2026-06-15 Phase 1 Chrome MCP E2E passed: Meetings dashboard displayed the executable meeting Phase 1 Browser Acceptance with Executable badge, active_opening stage, version 2, round 0/2, moderator main, and three participants. Screenshot saved at /tmp/meeting-phase1-e2e.png.",
+    "2026-06-15 Phase 1 UI localization follow-up completed: executable meeting labels now use locale keys for Executable, Stage, Version, Round, and Moderator, with Chinese translations in app/locales/zh.json.",
+    "2026-06-15 Phase 2 checklist and todolist updated before implementation: Meetings dashboard must include a new meeting button/form, the form must include contextMode incremental/summary/full, prompt tests must verify context transmission behavior, and the Phase 2 gate requires at least one real AI/provider E2E meeting rather than fake-provider-only validation.",
+    "2026-06-15 Phase 2 implementation completed for user-started sequential meetings: new meeting UI, contextMode selector, provider adapter, sequential opening/discussion runner, rolling summary, structured result, live/history UI projection, configurable provider timeout, and OpenClaw-safe workflow session IDs.",
+    "2026-06-15 Phase 2 automated/fake-provider tests passed: tests/test_meeting_for_ai_phase1.py, node --check app/game.js, app locale JSON validation, tests/test_project_execution.py, tests/test_feishu_sync.py, node --check app/projects.js, and git diff --check.",
+    "2026-06-15 Phase 2 Chrome MCP fake-provider UI E2E passed: created a meeting from the Meetings dashboard with contextMode=incremental, completed it, and verified Chinese UI labels, executable completed state, context mode, and key contributions.",
+    "2026-06-15 Phase 2 real-provider E2E executed on http://127.0.0.1:8090 with meeting cf2ed2cd-3f6a-4799-a765-7ed311c4a7c6, participants main/hermes-default/codex-local, contextMode=incremental, maxRounds=1. The meeting completed with 18 events, 6 provider calls, 6 participant_turn events, and 4 successful real AI turns from Hermes/Codex. OpenClaw reached the real provider path but failed with upstream token-plan quota exhausted. Screenshot saved at /tmp/meeting-phase2-real-e2e-expanded.png.",
+    "2026-06-15 Phase 2 gate is not marked fully passed because CHK-P2-010 requires a three-Agent real provider happy path; the remaining blocker is external OpenClaw provider quota rather than meeting orchestration or UI persistence.",
+    "2026-06-15 Phase 3 scope updated: active meetings must support viewing real-time discussion before/during user intervention, including incremental round transcript, current speaker/provider-call state, refresh recovery, and per-AI content visibility.",
+    "2026-06-15 Phase 3 partial implementation completed: active executable meetings now project live transcript and pending provider calls, and the Meetings UI polls /api/meetings/executable/<id>/events?after=<seq> while open to render live discussion. Chrome MCP verified meeting b9873601-b888-404f-b7c4-6a14d1e848eb showing 实时讨论, 开场轮, 当前发言者, provider failure, and 正在调用. Screenshot saved at /tmp/phase3-live-active-check.png.",
+    "2026-06-15 Phase 3 user intervention/context partial implementation completed: /api/meetings/executable/<id>/intervention persists ordered user_intervention events with idempotency and terminal-state rejection; transcript projection and incremental prompts include user statements and supplemental context; active meeting UI can submit and display 用户插话/补充上下文 in live discussion. Automated tests passed, and Chrome MCP verified local meeting phase3-ui-intervention-20260615-2155 with page/API agreement. Screenshot saved at /tmp/phase3-user-intervention-check.png; assertion output saved at /tmp/phase3-user-intervention-check.json.",
+    "2026-06-16 Phase 3 scope updated: add TODO-P3-002A and CHK-P3-012 for fixed structured meeting turn output, provider envelope normalization, OpenClaw-style JSON unwrap, raw provider debug retention, parse fallback, and frontend structured transcript rendering.",
+    "2026-06-16 Phase 3 structured turn implementation completed: meeting prompts now request one JSON object; provider replies are normalized before participant_turn persistence; OpenClaw-style envelope text is unwrapped; structured/rawText/parseError are stored; providerRaw is retained for debug but excluded from transcript projection; frontend renders structured fields. Automated tests passed. Chrome MCP real-AI validation used meeting phase3-structured-real-20260616-0125 with OpenClaw/Hermes/Codex under normal provider config: 5 successful real structured turns were rendered, one real Codex timeout was preserved as fallback text, and rawEnvelopeVisible=false. Screenshot saved at /tmp/phase3-real-structured-mcp-check.png; assertion output saved at /tmp/phase3-real-structured-mcp-check.json. Fake-provider meeting phase3-structured-ui-20260616-0119 is retained only as deterministic regression evidence.",
+    "2026-06-16 Phase 3 AI moderator ending implementation completed: active executable meeting end no longer opens the manual summary form; /api/meetings/end without summary now asks the moderator AI to generate structured summary, decision, unresolvedQuestions, disagreements, and actionItems, while legacy meetings still require manual summary. Automated tests passed. Chrome MCP real-AI validation used active meeting phase3-ai-end-content-real-20260616-0140 with real OpenClaw moderator main and user-provided meeting content; modalBefore=false, modalAfter=false, providerKind=openclaw, result.summary/result.decision/2 actionItems were generated from the transcript, and the meeting completed. Flow assertion output saved at /tmp/phase3-ai-end-content-real-mcp-check.json; expanded UI screenshot saved at /tmp/phase3-ai-end-content-real-ui-expanded-check.png; expanded UI assertion saved at /tmp/phase3-ai-end-content-real-ui-expanded-check.json. Empty-transcript meeting phase3-ai-end-real-20260616-0130 is retained only as a flow-trigger sample, not the main acceptance evidence.",
+    "2026-06-16 Phase 3 history UI implementation completed: meeting history is sorted by endedAt/updatedAt descending, supports keyword search across topic/purpose/summary/resolution/participants/turns/contributions/action items, and opens read-only meeting details in a dedicated modal. Chrome MCP validation on http://127.0.0.1:8090 confirmed historyCount=10, sortedDesc=true, visible localized search placeholder, Phase 3 keyword filtering, and a detail modal showing summary/action-item content. Screenshot saved at /tmp/meeting-history-search-detail-mcp-check.png; assertion output saved at /tmp/meeting-history-search-detail-mcp-check.json.",
+    "2026-06-16 requirement supplement added from user feedback: active executable Meeting for AI sessions must also drive the main office canvas, showing participants at the meeting table for group meetings or desk-visit behavior for 1:1 meetings. Added CHK-P3-013 and TODO-P3-009A; implementation remains pending.",
+    "2026-06-16 Phase 3 pause/resume/cancel controls completed: active executable meeting cards now expose pause, resume, and cancel controls; active projection includes executionPreviousStage; resume restores the previous active stage; cancel moves the meeting to cancelled history and terminal intervention is rejected. Automated tests passed. Chrome MCP was attempted but the tool transport stayed closed, so equivalent sandbox-external Chrome DevTools Protocol E2E was run against the real local service at http://127.0.0.1:8090. Assertion output saved at /tmp/phase3-pause-resume-cancel-browser-check.json and screenshot saved at /tmp/phase3-pause-resume-cancel-browser-check.png."
   ]
 }

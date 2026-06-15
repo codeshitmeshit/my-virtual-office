@@ -9,14 +9,15 @@
     <link rel="apple-touch-icon" href="icon-192.png">
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#1a1a2e">
-    <link rel="stylesheet" href="style.css?v=1781544433-reasoning-summary">
-    <link rel="stylesheet" href="projects.css?v=1781544433-project-execution">
-    <link rel="stylesheet" href="fonts.css?v=1781544433.05.07">
+    <link rel="stylesheet" href="style.css?v=1781556283-reasoning-summary">
+    <link rel="stylesheet" href="projects.css?v=1781556283-project-execution">
+    <link rel="stylesheet" href="fonts.css?v=1781556283.05.07">
     <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
     <!-- i18n: inline locale data for immediate init -->
     <script id="locale-en" type="application/json">{}</script>
     <script id="locale-zh" type="application/json">{}</script>
     <script src="i18n.js"></script>
+    <script src="font-scale.js?v=1781556283-font-scale"></script>
     <script>
     (function(){
         var lang='en';
@@ -96,6 +97,15 @@
                             <label class="mm-label" for="mm-internal-bubble-timeout" style="margin-top:8px;" data-i18n="internal_bubble_timeout">Internal bubble auto-collapse (seconds)</label>
                             <input type="number" id="mm-internal-bubble-timeout" class="mm-input" min="0" step="1" value="60">
                             <div style="font-size:9px;color:#666;margin:4px 0 8px;" data-i18n="internal_bubble_timeout_hint">Use 0 to keep Internal bubbles expanded.</div>
+                            <label class="mm-label" for="mm-font-scale" style="margin-top:8px;" data-i18n="ui_font_size">UI font size</label>
+                            <select id="mm-font-scale" class="mm-input" onchange="mmApplyFontScaleSetting(this.value)">
+                                <option value="1">100%</option>
+                                <option value="1.1">110%</option>
+                                <option value="1.2">120%</option>
+                                <option value="1.3">130%</option>
+                                <option value="1.5">150%</option>
+                            </select>
+                            <div style="font-size:9px;color:#666;margin:4px 0 8px;" data-i18n="ui_font_size_hint">Scales interface panels only. Canvas labels stay unchanged.</div>
                             <label class="mm-label" style="margin-top:8px;">🌐 Language / 语言</label>
                             <div style="display:flex;gap:8px;margin-top:4px;">
                                 <button class="mm-btn" id="lang-en-btn" onclick="i18n.setLanguage('en')" style="flex:1;font-size:11px;padding:6px 10px;">English</button>
@@ -193,14 +203,14 @@
             </div>
             <div class="toolbar">
                 <button id="btn-main-menu" title="Settings & Help" onclick="toggleMainMenu()" data-i18n="menu" data-i18n-title="settings">☰ Menu</button>
-                <button id="btn-edit-office" title="Edit office layout" onclick="toggleEditMode()" data-i18n="edit_office_toolbar" data-i18n-title="edit_office">✏️ Edit Office</button>
-                <button id="btn-save-edits" title="Save changes" onclick="saveEdits()" style="display:none;opacity:0.4" disabled data-i18n="save_toolbar" data-i18n-title="save_changes">💾 Save</button>
+                <button id="btn-edit-office" title="Edit office layout" onclick="toggleEditMode()" data-i18n="edit_office" data-i18n-title="edit_office">✏️ Edit Office</button>
+                <button id="btn-save-edits" title="Save changes" onclick="saveEdits()" style="display:none;opacity:0.4" disabled data-i18n="save" data-i18n-title="save_changes">💾 Save</button>
                 <button id="btn-undo-edit" title="Undo last change" onclick="undoEdit()" style="display:none;opacity:0.4" disabled data-i18n="undo" data-i18n-title="undo">↩️ Undo</button>
                 <button id="btn-agent-settings" title="Create and customize agents" onclick="toggleAgentPanel()" data-i18n="agents" data-i18n-title="agents">👤 Agents</button>
                 <div class="toolbar-divider"></div>
                 <button id="btn-expand-all" title="Expand all bubbles" onclick="expandAllBubbles()" data-i18n="expand_all" data-i18n-title="expand_all">💬 Expand All</button>
                 <button id="btn-minimize-all" title="Minimize all bubbles" onclick="minimizeAllBubbles()" data-i18n="minimize_all" data-i18n-title="minimize_all">💬 Minimize All</button>
-                <a href="/models.html" style="text-decoration:none"><button title="Model & Provider Settings" data-i18n="models_toolbar" data-i18n-title="model_settings_title">⚙️ Models</button></a>
+                <a href="/models.html" style="text-decoration:none"><button title="Model & Provider Settings" data-i18n="models" data-i18n-title="model_settings_title">⚙️ Models</button></a>
                 <a href="/cron.html" style="text-decoration:none"><button title="Cron Job Manager" data-i18n="cron" data-i18n-title="cron_manager_title">⏰ Cron</button></a>
                 <button title="Project Manager" onclick="openProjectsManager()" data-i18n="projects" data-i18n-title="projects_title">📋 Projects</button>
                 <button title="Reset canvas zoom" onclick="resetCamera()" data-i18n="reset_zoom" data-i18n-title="reset_zoom">🔍 Reset</button>
@@ -502,10 +512,38 @@
                 <button class="mtg-tab" data-tab="completed" onclick="switchMtgTab('completed')" data-i18n="history">History</button>
             </div>
             <div class="mtg-bulk-actions">
+                <button class="mtg-btn" onclick="toggleNewMeetingForm()">➕ <span id="new-mtg-btn-label" data-i18n="new_meeting">New Meeting</span></button>
                 <button class="mtg-btn" onclick="mtgExpandAll()" data-i18n="sidebar_expand_all">▼ Expand All</button>
                 <button class="mtg-btn" onclick="mtgCollapseAll()" data-i18n="sidebar_collapse_all">▲ Collapse All</button>
             </div>
+            <div id="mtg-history-tools" class="mtg-history-tools hidden">
+                <input id="mtg-history-search" class="mtg-search-input" type="search" oninput="setMeetingHistorySearch(this.value)" data-i18n-placeholder="meeting_history_search_placeholder" placeholder="Search meeting history">
+            </div>
             <div id="mtg-cards" class="mtg-cards"></div>
+        </div>
+    </div>
+
+    <!-- Meeting Detail Modal -->
+    <div id="meetingDetailModal" class="modal hidden">
+        <div class="modal-content meeting-detail-modal-content">
+            <div class="modal-header">
+                <span class="modal-emoji">📋</span>
+                <h2 id="meeting-detail-title" data-i18n="meeting_detail_title">Meeting Detail</h2>
+                <span class="close-btn" onclick="closeMeetingDetailModal()">&times;</span>
+            </div>
+            <div id="meeting-detail-body" class="meeting-detail-body"></div>
+        </div>
+    </div>
+
+    <!-- New Meeting Modal -->
+    <div id="newMeetingModal" class="modal hidden">
+        <div class="modal-content new-meeting-modal-content">
+            <div class="modal-header">
+                <span class="modal-emoji">➕</span>
+                <h2 id="new-meeting-modal-title">New Meeting</h2>
+                <span class="close-btn" onclick="toggleNewMeetingForm(false)">&times;</span>
+            </div>
+            <div id="new-meeting-panel" class="mtg-form"></div>
         </div>
     </div>
 
@@ -747,7 +785,7 @@
 
     <!-- Agent Workspace Window -->
     <div id="agent-workspace-menu" class="agent-workspace-menu hidden">
-        <button id="agent-workspace-open-btn" type="button" data-i18n="open_agent_workspace">Open agent workspace</button>
+        <button id="agent-workspace-open-btn" type="button" data-i18n="open_workspace">Open agent workspace</button>
     </div>
     <div id="agent-workspace-panel" class="agent-workspace-panel hidden">
         <div class="agent-workspace-resize-handle" data-resize="se"></div>
@@ -824,11 +862,11 @@
         setTimeout(resizeCanvas, 320);
     }
     </script>
-    <script src="internal-bubble.js?v=1781544433"></script>
-    <script src="game.js?v=1781544433-internal-bubble-auto-collapse"></script>
-    <script src="browser-viewer-url.js?v=1781544433"></script>
-    <script src="browser-panel.js?v=1781544433"></script>
-    <script src="projects.js?v=1781544433-project-execution"></script>
+    <script src="internal-bubble.js?v=1781556283"></script>
+    <script src="game.js?v=1781556283-internal-bubble-auto-collapse"></script>
+    <script src="browser-viewer-url.js?v=1781556283"></script>
+    <script src="browser-panel.js?v=1781556283"></script>
+    <script src="projects.js?v=1781556283-project-execution"></script>
     <script>
     // Bio sections for agent modal
     let _bioCache = {};
@@ -1052,11 +1090,11 @@
     </script>
     <!-- marked.js v15.0.12 - bundled locally for airgapped/offline use -->
     <script src="marked.min.js"></script>
-    <script src="codex-reasoning.js?v=1781544433"></script>
-    <script src="chat.js?v=1781544433-reasoning-summary"></script>
-    <script src="sms-panel.js?v=1781544433"></script>
-    <script src="pc-monitor.js?v=1781544433"></script>
-    <script src="api-usage.js?v=1781544433"></script>
+    <script src="codex-reasoning.js?v=1781556283"></script>
+    <script src="chat.js?v=1781556283-reasoning-summary"></script>
+    <script src="sms-panel.js?v=1781556283"></script>
+    <script src="pc-monitor.js?v=1781556283"></script>
+    <script src="api-usage.js?v=1781556283"></script>
     <script>
     // License check — demo watermark + feature gates
     (function() {

@@ -163,6 +163,7 @@ All mutating calls require an expected meeting version or idempotency key.
 - Executable meetings project into the current active/history UI model.
 - Existing record-only clients continue to create or display legacy meetings unless they explicitly request executable behavior.
 - Existing office animation continues to consume active participant IDs.
+- The main office canvas should consume the same executable active projection as the Meetings center, or an equivalent canonical server projection, so active executable meetings move participants into the existing meeting-table/1:1 visual behaviors without relying on the Meetings modal being open.
 
 ## Security and Permissions
 
@@ -213,6 +214,8 @@ Each Phase has:
    - Keep migration/projection explicit and test old fixtures.
 6. **User intervention ordering**
    - Serialize through the persisted event queue rather than direct thread mutation.
+7. **Meeting center and canvas drift**
+   - Make `/status` or its replacement include active executable meeting projection used by the canvas, and cover both legacy and executable meetings in regression tests.
 
 ## Review Conclusion
 

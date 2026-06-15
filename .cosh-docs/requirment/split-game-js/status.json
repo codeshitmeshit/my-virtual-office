@@ -1,0 +1,23 @@
+{
+  "name": "split-game-js",
+  "stage": "checklist_draft",
+  "waiting_for_user": true,
+  "updated_at": "",
+  "confirmed": {
+    "checklist": false,
+    "tested": false,
+    "done": false
+  },
+  "confirmations": {
+    "checklist": null,
+    "tested": null,
+    "done": null
+  },
+  "files": {
+    "requirement": "requirement.md",
+    "review": "review.md",
+    "checklist": "checklist.md",
+    "todolist": null
+  },
+  "notes": []
+}

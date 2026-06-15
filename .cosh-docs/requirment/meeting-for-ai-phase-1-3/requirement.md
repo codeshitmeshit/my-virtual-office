@@ -119,6 +119,7 @@ The user can safely control an active meeting at any stage, and unresolved disag
 - A participant may belong to only one non-terminal executable meeting.
 - Provider failures are represented as participant or moderator state, not hidden.
 - Original transcript text and structured summaries remain traceable to event IDs.
+- While an executable meeting is non-terminal, the main office canvas must show participating AI agents as being in a meeting: group meetings gather around the meeting table when one exists, and 1:1 meetings use the existing desk-visit behavior. This visual presence is derived from the canonical server meeting state, not browser-only memory.
 
 ## Out of Scope
 
@@ -136,6 +137,7 @@ The user can safely control an active meeting at any stage, and unresolved disag
 - Phase 1, Phase 2, and Phase 3 each pass their independent automated and manual gate.
 - A full user-started three-agent meeting passes end to end.
 - Browser refresh and service restart do not lose canonical meeting state.
+- Active executable meetings are visible both in the Meetings center and on the main office canvas as AI agents meeting at the table or in a 1:1 visit.
 - Paused meetings produce no new speaker calls.
 - User interventions affect later turns and remain auditable.
 - No-consensus meetings wait for explicit user action.
