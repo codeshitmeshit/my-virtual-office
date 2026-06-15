@@ -1073,6 +1073,99 @@ button:active { transform: translateY(3px); box-shadow: none; }
 .modal-controls button { font-size: 7px; padding: 6px 8px; }
 .modal-controls-sep { color: #555; margin: 0 4px; font-size: 12px; }
 
+.agent-create-modal {
+    width: 460px;
+}
+.agent-create-form {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding-top: 14px;
+}
+.agent-create-form label {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    color: var(--gold);
+    font-size: 9px;
+    text-transform: uppercase;
+}
+.agent-create-form input,
+.agent-create-form select,
+.agent-create-form textarea {
+    width: 100%;
+    box-sizing: border-box;
+    background: #0b1020;
+    border: 1px solid #344664;
+    color: #e8e8f0;
+    border-radius: 4px;
+    padding: 9px 10px;
+    font-family: inherit;
+    font-size: 11px;
+    line-height: 1.4;
+    outline: none;
+}
+.agent-create-form input:focus,
+.agent-create-form select:focus,
+.agent-create-form textarea:focus {
+    border-color: var(--gold);
+    box-shadow: 0 0 0 2px rgba(255, 215, 0, 0.12);
+}
+.agent-create-form textarea {
+    min-height: 120px;
+    resize: vertical;
+}
+.agent-create-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 84px;
+    gap: 10px;
+}
+.agent-create-platform-note {
+    min-height: 18px;
+    color: #9da8bd;
+    font-size: 11px;
+    line-height: 1.4;
+    margin-top: -4px;
+}
+.agent-create-error {
+    min-height: 16px;
+    color: #ff8a80;
+    font-size: 11px;
+}
+.agent-create-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+.agent-create-actions button {
+    border: 1px solid #3a3a5e;
+    background: #1f2a44;
+    color: #e8e8f0;
+    border-radius: 4px;
+    padding: 8px 12px;
+    font-size: 10px;
+}
+.agent-create-actions button[type="submit"] {
+    border-color: rgba(255, 215, 0, 0.7);
+    background: #3a3215;
+    color: var(--gold);
+}
+.agent-create-actions button:hover {
+    border-color: var(--gold);
+}
+@media (max-width: 520px) {
+    .agent-create-row {
+        grid-template-columns: 1fr;
+    }
+    .agent-create-actions {
+        justify-content: stretch;
+    }
+    .agent-create-actions button {
+        flex: 1;
+    }
+}
+
 /* --- RESPONSIVE: Sidebar below canvas on narrow screens --- */
 @media (max-width: 900px) {
     html, body { overflow: auto; }

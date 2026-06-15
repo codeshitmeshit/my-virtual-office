@@ -26,6 +26,12 @@ Virtual Office can discover local Hermes Agent profiles as first-class office ag
 
 For Docker deployments, mount or otherwise expose the Hermes home directory and CLI path to the container, then set `VO_HERMES_HOME` and `VO_HERMES_BIN` accordingly. Hermes secrets, private memory files, raw logs, and config internals are not read or exposed by default.
 
+### Codex
+
+Virtual Office can create Codex-backed office agents when the Codex CLI is available to the app. Chat uses Codex's native `codex app-server` JSON-RPC protocol for thread start/resume, live progress, and interrupt support. `codex exec` is retained only as an explicit compatibility fallback.
+
+For Docker deployments, install Codex inside the container image or set `VO_CODEX_BIN` to a Codex executable path available inside the container. Set `VO_CODEX_HOME` to a deployment-specific Codex home so auth and config stay out of the repo and are not tied to any developer's machine. Useful variables: `VO_CODEX_BIN`, `VO_CODEX_HOME`, `VO_CODEX_WORKSPACE_ROOT`, `VO_CODEX_PREFER_APP_SERVER`, and `VO_CODEX_APPROVAL_POLICY`.
+
 ## Features
 
 ### 🏢 Live Office Canvas

@@ -40,5 +40,16 @@
     "twilioAccountSid": null,
     "twilioAuthToken": null,
     "fromNumber": null
+  },
+  "codex": {
+    "enabled": true,
+    "homePath": "~/.codex",
+    "binary": "codex",
+    "workspaceRoot": "/data/codex-agents",
+    "timeoutSec": 900,
+    "model": "",
+    "sandbox": "workspace-write",
+    "approvalPolicy": "never",
+    "preferAppServer": true
   }
 }

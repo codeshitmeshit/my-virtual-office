@@ -13744,6 +13744,129 @@ function _isCustomAgent(agentId) {
     return !AGENT_DEFS.find(function(d){ return d.id === agentId; });
 }
 
+function _acpAgentPlatformDefaults(platformId) {
+    if (platformId === 'hermes') {
+        return {
+            role: 'Hermes Agent',
+            emoji: '⚕️',
+            prompt: 'You are a Hermes-backed Virtual Office agent. Reply clearly and stay focused on the assigned role.'
+        };
+    }
+    if (platformId === 'codex') {
+        return {
+            role: 'Codex Agent',
+            emoji: '🤖',
+            prompt: 'You are a Codex-backed Virtual Office agent. Help with software tasks, keep changes scoped, and explain results clearly.'
+        };
+    }
+    return {
+        role: 'AI assistant',
+        emoji: '🤖',
+        prompt: 'You are a helpful Virtual Office agent. Stay organized, concise, and focused on your assigned role.'
+    };
+}
+
+function _acpShowCreateAgentDialog(platforms) {
+    return new Promise(function(resolve) {
+        var existing = document.getElementById('agent-create-dialog');
+        if (existing) existing.remove();
+        var modal = document.createElement('div');
+        modal.id = 'agent-create-dialog';
+        modal.className = 'modal';
+        var optionsHtml = platforms.map(function(p) {
+            return '<option value="' + escAttr(p.id) + '">' + escHtml(p.label || p.id) + '</option>';
+        }).join('');
+        var first = platforms[0] || { id: 'openclaw', label: 'OpenClaw' };
+        var defaults = _acpAgentPlatformDefaults(first.id);
+        var lastDefaults = defaults;
+        modal.innerHTML =
+            '<div class="modal-content agent-create-modal">' +
+                '<div class="modal-header">' +
+                    '<span class="modal-emoji">➕</span>' +
+                    '<h2>Create Agent</h2>' +
+                    '<span class="close-btn" data-agent-create-cancel>&times;</span>' +
+                '</div>' +
+                '<form class="agent-create-form">' +
+                    '<label>Agent Platform<select name="platform">' + optionsHtml + '</select></label>' +
+                    '<div class="agent-create-platform-note"></div>' +
+                    '<label>Name<input name="name" maxlength="80" placeholder="New Agent" autocomplete="off"></label>' +
+                    '<div class="agent-create-row">' +
+                        '<label>Role<input name="role" maxlength="160" value="' + escAttr(defaults.role) + '"></label>' +
+                        '<label>Emoji<input name="emoji" maxlength="8" value="' + escAttr(defaults.emoji) + '"></label>' +
+                    '</div>' +
+                    '<label>Standing Prompt<textarea name="prompt" maxlength="5000">' + escTextarea(defaults.prompt) + '</textarea></label>' +
+                    '<div class="agent-create-error" aria-live="polite"></div>' +
+                    '<div class="agent-create-actions">' +
+                        '<button type="submit">Create Agent</button>' +
+                        '<button type="button" data-agent-create-cancel>Cancel</button>' +
+                    '</div>' +
+                '</form>' +
+            '</div>';
+
+        function selectedPlatform() {
+            var value = modal.querySelector('select[name="platform"]').value;
+            return platforms.find(function(p) { return p.id === value; }) || first;
+        }
+        function updatePlatformDefaults() {
+            var p = selectedPlatform();
+            var next = _acpAgentPlatformDefaults(p.id);
+            var role = modal.querySelector('input[name="role"]');
+            var emoji = modal.querySelector('input[name="emoji"]');
+            var prompt = modal.querySelector('textarea[name="prompt"]');
+            var note = modal.querySelector('.agent-create-platform-note');
+            if (!role.value.trim() || role.value === lastDefaults.role) role.value = next.role;
+            if (!emoji.value.trim() || emoji.value === lastDefaults.emoji) emoji.value = next.emoji;
+            if (!prompt.value.trim() || prompt.value === lastDefaults.prompt) prompt.value = next.prompt;
+            note.textContent = p.description || '';
+            lastDefaults = next;
+        }
+        function close(value) {
+            document.removeEventListener('keydown', onKeyDown);
+            modal.remove();
+            resolve(value || null);
+        }
+        function onKeyDown(e) {
+            if (e.key === 'Escape') close(null);
+        }
+
+        modal.addEventListener('click', function(e) {
+            if (e.target === modal || e.target.closest('[data-agent-create-cancel]')) {
+                close(null);
+            }
+        });
+        modal.querySelector('select[name="platform"]').addEventListener('change', updatePlatformDefaults);
+        modal.querySelector('form').addEventListener('submit', function(e) {
+            e.preventDefault();
+            var error = modal.querySelector('.agent-create-error');
+            var name = modal.querySelector('input[name="name"]').value.trim();
+            var role = modal.querySelector('input[name="role"]').value.trim();
+            var emoji = modal.querySelector('input[name="emoji"]').value.trim();
+            var prompt = modal.querySelector('textarea[name="prompt"]').value.trim();
+            if (!name) {
+                error.textContent = 'Agent name is required.';
+                modal.querySelector('input[name="name"]').focus();
+                return;
+            }
+            var p = selectedPlatform();
+            var fallback = _acpAgentPlatformDefaults(p.id);
+            close({
+                selectedPlatform: p,
+                agentName: name,
+                agentRole: role || fallback.role,
+                agentEmoji: emoji || fallback.emoji,
+                agentPrompt: prompt || role || fallback.prompt
+            });
+        });
+        document.addEventListener('keydown', onKeyDown);
+        document.body.appendChild(modal);
+        updatePlatformDefaults();
+        setTimeout(function() {
+            var nameInput = modal.querySelector('input[name="name"]');
+            if (nameInput) nameInput.focus();
+        }, 0);
+    });
+}
+
 function _acpCreateNewAgent() {
     fetch('/api/agent-platforms').then(function(res) {
         return res.json();
@@ -13755,37 +13878,22 @@ function _acpCreateNewAgent() {
             alert('No agent platforms are available.');
             return null;
         }
-        var platformPrompt = 'Agent Platform:\n' + platforms.map(function(p, i){
-            return (i + 1) + '. ' + p.label;
-        }).join('\n');
-        var platformChoice = prompt(platformPrompt, platforms[0].label);
-        if (platformChoice === null) return null;
-        platformChoice = platformChoice.trim().toLowerCase();
-        var selectedPlatform = platforms.find(function(p, i){
-            return platformChoice === p.id.toLowerCase() ||
-                   platformChoice === p.label.toLowerCase() ||
-                   platformChoice === String(i + 1);
-        }) || platforms[0];
-
-        var agentName = prompt('Agent name:', 'New Agent');
-        if (!agentName || !agentName.trim()) return null;
-        agentName = agentName.trim();
-
-        var agentRole = prompt('Role (e.g., "Email specialist", "QA engineer"):', selectedPlatform.id === 'hermes' ? 'Hermes Agent' : 'AI assistant');
-        if (agentRole === null) return null;
-        agentRole = agentRole.trim() || (selectedPlatform.id === 'hermes' ? 'Hermes Agent' : 'AI assistant');
-
-        var agentEmoji = prompt('Emoji:', selectedPlatform.id === 'hermes' ? '⚕️' : '🤖');
-        if (agentEmoji === null) return null;
-        agentEmoji = agentEmoji.trim() || (selectedPlatform.id === 'hermes' ? '⚕️' : '🤖');
+        return _acpShowCreateAgentDialog(platforms);
+    }).then(function(form) {
+        if (!form) return null;
+        var selectedPlatform = form.selectedPlatform;
+        var agentName = form.agentName;
+        var agentRole = form.agentRole;
+        var agentEmoji = form.agentEmoji;
+        var agentPrompt = form.agentPrompt;
 
         _acpShowToast('Creating agent in ' + selectedPlatform.label + '...');
         return fetch('/api/agent/create', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ platform: selectedPlatform.id, name: agentName, role: agentRole, emoji: agentEmoji })
+            body: JSON.stringify({ platform: selectedPlatform.id, name: agentName, role: agentRole, emoji: agentEmoji, prompt: agentPrompt })
         }).then(function(res) { return res.json(); }).then(function(data) {
-            return { data: data, platform: selectedPlatform, name: agentName, role: agentRole, emoji: agentEmoji };
+            return { data: data, platform: selectedPlatform, name: agentName, role: agentRole, emoji: agentEmoji, prompt: agentPrompt };
         });
     }).then(function(result) {
         if (!result) return;
@@ -13804,6 +13912,7 @@ function _acpCreateNewAgent() {
             color: '#607d8b',
             statusKey: newId,
             providerKind: data.providerKind || result.platform.id || 'openclaw',
+            providerType: data.providerType || result.platform.providerType || 'runtime',
             providerAgentId: data.providerAgentId || data.profile || newId,
             branch: 'UNASSIGNED',
             deskType: 'center',

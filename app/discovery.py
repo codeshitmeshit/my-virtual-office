@@ -12,6 +12,7 @@ import os
 import re
 import glob
 import time
+from providers.codex import CodexProvider
 from providers.hermes import HermesProvider
 
 def discover_agents(oc_home):
@@ -104,10 +105,36 @@ def discover_hermes_agents(hermes_home=None, hermes_bin=None, enabled=True):
     return HermesProvider(home_path=hermes_home, binary=hermes_bin, enabled=enabled).discover_agents()
 
 
-def discover_all_agents(oc_home, hermes_home=None, hermes_bin=None, hermes_enabled=True):
-    """Discover OpenClaw agents plus optional local Hermes agents."""
+def discover_codex_agents(codex_home=None, codex_bin=None, workspace_root=None, enabled=True, model="", sandbox="workspace-write", approval_policy="never", prefer_app_server=True, timeout_sec=900):
+    """Discover local Codex CLI-backed Virtual Office agents."""
+    return CodexProvider(
+        home_path=codex_home,
+        binary=codex_bin,
+        workspace_root=workspace_root,
+        enabled=enabled,
+        model=model or "",
+        sandbox=sandbox or "workspace-write",
+        approval_policy=approval_policy or "never",
+        prefer_app_server=prefer_app_server,
+        timeout_sec=timeout_sec,
+    ).discover_agents()
+
+
+def discover_all_agents(oc_home, hermes_home=None, hermes_bin=None, hermes_enabled=True, codex_home=None, codex_bin=None, codex_workspace_root=None, codex_enabled=True, codex_model="", codex_sandbox="workspace-write", codex_approval_policy="never", codex_prefer_app_server=True, codex_timeout_sec=900):
+    """Discover OpenClaw agents plus optional local Hermes and Codex agents."""
     agents = discover_agents(oc_home)
     agents.extend(discover_hermes_agents(hermes_home=hermes_home, hermes_bin=hermes_bin, enabled=hermes_enabled))
+    agents.extend(discover_codex_agents(
+        codex_home=codex_home,
+        codex_bin=codex_bin,
+        workspace_root=codex_workspace_root,
+        enabled=codex_enabled,
+        model=codex_model,
+        sandbox=codex_sandbox,
+        approval_policy=codex_approval_policy,
+        prefer_app_server=codex_prefer_app_server,
+        timeout_sec=codex_timeout_sec,
+    ))
     return agents
 
 

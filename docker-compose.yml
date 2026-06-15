@@ -21,6 +21,14 @@ services:
       - VO_WS_PORT=${VO_WS_PORT:-8091}
       - VO_OFFICE_NAME=${VO_OFFICE_NAME:-Virtual Office}
       - VO_WEATHER_LOCATION=${VO_WEATHER_LOCATION:-}
+      # Optional native Codex support. Install codex in the image/container PATH
+      # or set VO_CODEX_BIN to an absolute path available inside the container.
+      - CODEX_HOME=${VO_CODEX_HOME:-/data/codex-home}
+      - VO_CODEX_HOME=${VO_CODEX_HOME:-/data/codex-home}
+      - VO_CODEX_BIN=${VO_CODEX_BIN:-codex}
+      - VO_CODEX_WORKSPACE_ROOT=${VO_CODEX_WORKSPACE_ROOT:-/data/codex-agents}
+      - VO_CODEX_PREFER_APP_SERVER=${VO_CODEX_PREFER_APP_SERVER:-1}
+      - VO_CODEX_APPROVAL_POLICY=${VO_CODEX_APPROVAL_POLICY:-never}
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:${VO_PORT:-8090}/health')"]

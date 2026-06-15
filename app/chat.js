@@ -85,6 +85,8 @@
       this.hermesProgressTimers = [];
       this.hermesHistoryPollTimer = null;
       this.hermesCompletedToolKeys = new Set();
+      this.codexHistoryPollTimer = null;
+      this.codexCompletedToolKeys = new Set();
       this.hermesApprovalPollTimer = null;
       this.hermesApprovalLastId = '';
       this.sessionModel = '—';
@@ -270,7 +272,7 @@
       const isHermes = this.isHermesSelected();
       if (isHermes) this.startHermesApprovalPolling();
       else this.stopHermesApprovalPolling();
-      if (connected || isHermes) {
+      if (connected || isHermes || this.isCodexSelected()) {
         this.loadHistory();
         this.fetchSessionInfo();
       }
@@ -298,6 +300,7 @@
             opt.dataset.sessionKey = a.sessionKey;
             opt.dataset.agentId = a.agentId;
             opt.dataset.providerKind = a.providerKind || 'openclaw';
+            opt.dataset.providerType = a.providerType || 'runtime';
             opt.dataset.providerAgentId = a.providerAgentId || a.agentId;
             group.appendChild(opt);
           }
@@ -315,7 +318,7 @@
 
     async fetchContextUsage() {
       if (!this.isVisibleForPolling()) return;
-      if (this.isHermesSelected()) return;
+      if (this.isHermesSelected() || this.isCodexSelected()) return;
       try {
         // Avoid broad sessions.list polling. Describe only the selected session.
         const res = await rpc('sessions.describe', { key: this.sessionKey });
@@ -344,6 +347,10 @@
 
     isHermesSelected() {
       return this.getSelectedProviderKind() === 'hermes' || String(this.sessionKey || '').startsWith('hermes:');
+    }
+
+    isCodexSelected() {
+      return this.getSelectedProviderKind() === 'codex' || String(this.sessionKey || '').startsWith('codex:');
     }
 
     startHermesApprovalPolling() {
@@ -404,7 +411,7 @@
       let gatewayContext = 0;
       try {
         // Targeted lookup avoids rebuilding the full sessions.list index.
-        if (!this.isHermesSelected()) {
+        if (!this.isHermesSelected() && !this.isCodexSelected()) {
           const res = await rpc('sessions.describe', { key: this.sessionKey });
           const s = res?.payload?.session;
           if (res.ok && s) {
@@ -436,9 +443,12 @@
 
     async loadHistory(opts = {}) {
       try {
-        if (this.isHermesSelected()) {
-          this.startHermesApprovalPolling();
-          const res = await fetch('/api/hermes/history?agentId=' + encodeURIComponent(this.getSelectedAgentId() || this.selectedAgentKey));
+        if (this.isHermesSelected() || this.isCodexSelected()) {
+          const isHermes = this.isHermesSelected();
+          const providerPath = isHermes ? 'hermes' : 'codex';
+          const progressMarker = isHermes ? 'hermes-progress' : 'codex-progress';
+          if (isHermes) this.startHermesApprovalPolling();
+          const res = await fetch('/api/' + providerPath + '/history?agentId=' + encodeURIComponent(this.getSelectedAgentId() || this.selectedAgentKey));
           const data = await res.json();
           if (data.ok && Array.isArray(data.messages)) {
             this.messages.innerHTML = '';
@@ -448,8 +458,8 @@
                   ? { ...resolveMessageSender(msg, this), thinking: msg.thinking || '', reasoningTokens: msg.reasoningTokens || 0, approval: msg.approval || null }
                   : { label: 'You', kind: 'human' };
                 const media = normalizeChatMedia(msg.attachments || []);
-                const tools = normalizeHermesTools(msg.tools || [], msg.ephemeral !== 'hermes-progress');
-                const splitToolsFromFinalReply = msg.role === 'assistant' && msg.ephemeral !== 'hermes-progress' && msg.text && tools.length;
+                const tools = normalizeHermesTools(msg.tools || [], msg.ephemeral !== progressMarker);
+                const splitToolsFromFinalReply = msg.role === 'assistant' && msg.ephemeral !== progressMarker && msg.text && tools.length;
                 if (splitToolsFromFinalReply) {
                   const toolMeta = resolveMessageSender(msg, this);
                   tools.forEach((tool, idx) => {
@@ -461,7 +471,7 @@
             }
             this.scrollBottomAfterLayout();
           }
-          await this.pollHermesApproval().catch(() => {});
+          if (isHermes) await this.pollHermesApproval().catch(() => {});
           return;
         }
         const res = await rpc('chat.history', { sessionKey: this.sessionKey, limit: 500 });
@@ -526,16 +536,18 @@
     async newSession() {
       const agentName = this.agentSelect.selectedOptions[0]?.textContent.trim() || 'this agent';
       if (!confirm(`Start a new session for ${agentName}? This clears the conversation history.`)) return;
-      if (this.isHermesSelected()) {
+      if (this.isHermesSelected() || this.isCodexSelected()) {
+        const providerName = this.isCodexSelected() ? 'Codex' : 'Hermes';
+        const providerPath = this.isCodexSelected() ? 'codex' : 'hermes';
         try {
-          const res = await fetch('/api/hermes/history/clear', {
+          const res = await fetch('/api/' + providerPath + '/history/clear', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ agentId: this.getSelectedAgentId() || this.selectedAgentKey })
           });
           const data = await res.json();
           if (!data.ok) throw new Error(data.error || 'clear failed');
-          this.resetConversation('New Hermes session started');
+          this.resetConversation('New ' + providerName + ' session started');
         } catch (e) {
           this.appendSystem('Reset error: ' + e.message);
         }
@@ -620,7 +632,7 @@
     async sendMessage() {
       let text = this.input.value.trim();
       const hasAttachments = this.pendingAttachments.length > 0;
-      if ((!text && !hasAttachments) || (!connected && !this.isHermesSelected())) return;
+      if ((!text && !hasAttachments) || (!connected && !this.isHermesSelected() && !this.isCodexSelected())) return;
 
       this.input.value = '';
       this.input.style.height = 'auto';
@@ -757,6 +769,43 @@
         return;
       }
 
+      if (this.isCodexSelected()) {
+        const codexLabel = this.agentSelect.selectedOptions[0]?.textContent.trim() || 'Codex';
+        const codexSendStartedAt = Date.now();
+        this.updateTypingIndicator(codexLabel + ' is running Codex');
+        this.setStatus('Codex running...', 'connecting');
+        this.startCodexHistoryPolling();
+        try {
+          const resp = await fetch('/api/codex/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              agentId: this.getSelectedAgentId() || this.selectedAgentKey,
+              message: text || '(attached files)',
+              fromType: 'human',
+              fromDisplayName: 'User',
+              sourceApp: 'virtual-office',
+              sourceSurface: 'chat-window',
+              sourceLabel: 'Virtual Office Chat',
+              attachments: uploadedFiles
+            })
+          });
+          const data = await resp.json();
+          this.stopCodexHistoryPolling();
+          this.removeTypingIndicator();
+          if (!resp.ok || data.ok === false) throw new Error(data.error || data.reply || resp.statusText);
+          await this.loadHistory({ recoverFinal: true, startedAt: codexSendStartedAt });
+          this.setStatus('Codex ready', 'connected');
+        } catch (e) {
+          this.stopCodexHistoryPolling();
+          this.removeTypingIndicator();
+          await this.loadHistory({ recoverFinal: true, startedAt: codexSendStartedAt }).catch(() => {});
+          this.appendSystem('Codex send failed: ' + e.message);
+          this.setStatus('Codex error', 'disconnected');
+        }
+        return;
+      }
+
       const sendSessionKey = this.sessionKey;
       rpc('chat.send', params).then(res => {
         if (res.ok && res.payload?.runId) {
@@ -770,6 +819,20 @@
 
     async sendStop() {
       try {
+        if (this.isCodexSelected()) {
+          const resp = await fetch('/api/codex/interrupt', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ agentId: this.getSelectedAgentId() || this.selectedAgentKey })
+          });
+          const data = await resp.json().catch(() => ({}));
+          if (!resp.ok || data.ok === false) throw new Error(data.error || resp.statusText);
+          this.removeTypingIndicator();
+          await this.loadHistory({ recoverFinal: true }).catch(() => {});
+          this.appendSystem('Stop sent');
+          this.setStatus('Codex stopping...', 'connecting');
+          return;
+        }
         if (this.streamingMsg) {
           this.finalizeStreamingMessage(this.streamingMsg.content || '');
           this.streamingMsg = null;
@@ -1149,6 +1212,74 @@
     stopHermesHistoryPolling() {
       if (this.hermesHistoryPollTimer) clearInterval(this.hermesHistoryPollTimer);
       this.hermesHistoryPollTimer = null;
+    }
+
+    startCodexHistoryPolling() {
+      this.stopCodexHistoryPolling();
+      this.codexCompletedToolKeys = new Set();
+      this.pollCodexLiveActivity().catch(() => {});
+      this.codexHistoryPollTimer = setInterval(() => {
+        if (this.isCodexSelected()) this.pollCodexLiveActivity().catch(() => {});
+      }, HERMES_HISTORY_POLL_MS);
+    }
+
+    stopCodexHistoryPolling() {
+      if (this.codexHistoryPollTimer) clearInterval(this.codexHistoryPollTimer);
+      this.codexHistoryPollTimer = null;
+    }
+
+    async pollCodexLiveActivity() {
+      if (!this.isCodexSelected()) return;
+      const agentId = this.getSelectedAgentId() || this.selectedAgentKey;
+      const res = await fetch('/api/codex/history?agentId=' + encodeURIComponent(agentId));
+      const data = await res.json();
+      if (!data.ok || !Array.isArray(data.messages)) return;
+      const progress = [...data.messages].reverse().find(msg =>
+        msg && msg.role === 'assistant' && msg.ephemeral === 'codex-progress'
+      );
+      if (!progress) return;
+
+      const runId = progress.runId || progress.progressId || this.currentRunId || '';
+      if (runId) this.currentRunId = runId;
+
+      if (progress.text) {
+        if (!this.streamingMsg || this.streamingMsg.id !== runId) {
+          this.streamingMsg = { id: runId, role: 'assistant', content: '' };
+          this.pendingStreamContent = '';
+          this.appendStreamingMessage();
+        }
+        this.pendingStreamContent = progress.text;
+        this.scheduleStreamingRender();
+      }
+
+      const tools = normalizeHermesTools(progress.tools || []);
+      tools.forEach((tool, idx) => {
+        const toolId = tool.id || `${idx}:${tool.name}:${JSON.stringify(tool.arguments || {}).slice(0, 80)}`;
+        const key = `${runId}:${toolId}`;
+        const isDone = ['done', 'error', 'failed'].includes(String(tool.status || '').toLowerCase());
+        if (isDone && this.codexCompletedToolKeys.has(key)) return;
+        const payload = {
+          runId,
+          data: {
+            toolCallId: toolId,
+            phase: isDone ? 'result' : 'update',
+            name: tool.name,
+            args: tool.arguments || {},
+            result: tool.result || '',
+            isError: tool.status === 'error' || !!tool.error,
+            error: tool.error || ''
+          }
+        };
+        if (isDone) {
+          if (!this.liveToolCards.has(this.toolKey(payload))) {
+            this.appendToolCall({ ...payload, data: { ...payload.data, phase: 'start' } });
+          }
+          this.finishToolCall(payload);
+          this.codexCompletedToolKeys.add(key);
+        } else {
+          this.updateToolCall(payload);
+        }
+      });
     }
 
     async pollHermesLiveActivity() {
@@ -1613,7 +1744,7 @@
     if (shouldOpen) {
       panel.dataset.hiddenByUser = 'false';
       windowInstance?.scrollBottom();
-      if (connected) {
+      if (connected || windowInstance?.isHermesSelected?.() || windowInstance?.isCodexSelected?.()) {
         windowInstance?.loadHistory();
         windowInstance?.fetchSessionInfo();
       }
@@ -2475,7 +2606,10 @@
     if (shouldOpen) {
       primaryWindow.input.focus();
       primaryWindow.scrollBottom();
-      if (connected) { primaryWindow.loadHistory(); primaryWindow.fetchSessionInfo(); }
+      if (connected || primaryWindow.isHermesSelected() || primaryWindow.isCodexSelected()) {
+        primaryWindow.loadHistory();
+        primaryWindow.fetchSessionInfo();
+      }
     } else {
       closeAllSecondaryPanels();
     }

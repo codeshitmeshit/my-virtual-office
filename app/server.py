@@ -206,6 +206,7 @@ def _load_vo_config():
     weather_cfg = cfg.get("weather") or {}
     sms_cfg = cfg.get("sms") or {}
     hermes_cfg = cfg.get("hermes") or {}
+    codex_cfg = cfg.get("codex") or {}
 
     return {
         "office": {
@@ -259,6 +260,17 @@ def _load_vo_config():
             "apiUrl": _env_or("VO_HERMES_API_URL", hermes_cfg.get("apiUrl", "http://127.0.0.1:8642")),
             "apiKey": _env_or("VO_HERMES_API_KEY", hermes_cfg.get("apiKey", "")),
             "preferApi": str(_env_or("VO_HERMES_PREFER_API", hermes_cfg.get("preferApi", True))).lower() not in ("0", "false", "no", "off"),
+        },
+        "codex": {
+            "enabled": str(_env_or("VO_CODEX_ENABLED", codex_cfg.get("enabled", True))).lower() not in ("0", "false", "no", "off"),
+            "homePath": _env_or("VO_CODEX_HOME", codex_cfg.get("homePath", os.path.expanduser("~/.codex"))),
+            "binary": _env_or("VO_CODEX_BIN", codex_cfg.get("binary", "")),
+            "workspaceRoot": _env_or("VO_CODEX_WORKSPACE_ROOT", codex_cfg.get("workspaceRoot", os.path.join(_env_or("VO_STATUS_DIR", presence.get("statusDir", "/data")), "codex-agents"))),
+            "timeoutSec": int(_env_or("VO_CODEX_TIMEOUT_SEC", codex_cfg.get("timeoutSec", 900))),
+            "model": _env_or("VO_CODEX_MODEL", codex_cfg.get("model", "")),
+            "sandbox": _env_or("VO_CODEX_SANDBOX", codex_cfg.get("sandbox", "workspace-write")),
+            "approvalPolicy": _env_or("VO_CODEX_APPROVAL_POLICY", codex_cfg.get("approvalPolicy", "never")),
+            "preferAppServer": str(_env_or("VO_CODEX_PREFER_APP_SERVER", codex_cfg.get("preferAppServer", True))).lower() not in ("0", "false", "no", "off"),
         },
     }
 
@@ -1158,6 +1170,7 @@ def _save_openclaw_api_key(provider, api_key, profile_id=""):
 
 # ─── DYNAMIC AGENT DISCOVERY ─────────────────────────────────
 from discovery import discover_all_agents, get_agent_workspace_dir, get_agent_session_id
+from providers.codex import CodexProvider
 from providers.hermes import HermesApiClient, HermesProvider
 from license import get_license_status, activate_license, deactivate_license, check_feature, get_agent_limit
 from project_store import MarkdownProjectStore
@@ -1215,6 +1228,9 @@ _WORKSPACE_FILE_LIMIT = 256 * 1024
 def _agent_workspace_abs_path(agent_key, agent):
     if agent.get("providerKind") == "hermes":
         return None
+    if agent.get("providerKind") == "codex":
+        ws = agent.get("workspace") or agent.get("home") or AGENT_WORKSPACES.get(agent_key) or AGENT_WORKSPACES.get(agent.get("statusKey"))
+        return os.path.abspath(ws) if ws else None
     ws_dir = AGENT_WORKSPACES.get(agent_key) or AGENT_WORKSPACES.get(agent.get("statusKey"))
     if not ws_dir:
         return None
@@ -1350,7 +1366,7 @@ def _workspace_file_summaries(agent_key, agent):
 
 
 def _agent_skill_summaries(agent_key, agent):
-    if agent.get("providerKind") == "hermes":
+    if agent.get("providerKind") != "openclaw" and agent.get("providerKind"):
         return []
     result = _handle_skill_list(agent_key)
     return [
@@ -1396,6 +1412,9 @@ def _agent_recent_activity(agent_key, agent):
     if agent.get("providerKind") == "hermes":
         profile = agent.get("profile") or agent.get("providerAgentId") or "default"
         messages = _load_hermes_history(profile)[-80:]
+    elif agent.get("providerKind") == "codex":
+        profile = agent.get("profile") or agent.get("providerAgentId") or "default"
+        messages = _load_codex_history(profile)[-80:]
     else:
         messages = get_agent_messages(agent_key, max_messages=80)
     return messages[-80:] if isinstance(messages, list) else []
@@ -1487,7 +1506,8 @@ def _get_agent_workspace_payload(agent_key):
         "lastActiveAt": agent.get("lastActiveAt", 0),
     }
     heartbeat = ""
-    if agent.get("providerKind") != "hermes":
+    provider_kind = agent.get("providerKind", "openclaw")
+    if provider_kind == "openclaw":
         hb = _resolve_workspace_file(key, agent, "HEARTBEAT.md", allow_new=True)[0]
         if hb and os.path.isfile(hb):
             try:
@@ -1508,12 +1528,12 @@ def _get_agent_workspace_payload(agent_key):
         "score": _agent_score_info(key),
         "settings": {
             "heartbeatContent": heartbeat,
-            "heartbeatApplicable": agent.get("providerKind") != "hermes",
-            "cronApplicable": agent.get("providerKind") != "hermes",
-            "filesApplicable": agent.get("providerKind") != "hermes",
-            "agentSkillsApplicable": agent.get("providerKind") != "hermes",
+            "heartbeatApplicable": provider_kind == "openclaw",
+            "cronApplicable": provider_kind == "openclaw",
+            "filesApplicable": provider_kind != "hermes",
+            "agentSkillsApplicable": provider_kind == "openclaw",
             "skillLibraryApplicable": True,
-            "modelEditable": agent.get("providerKind") != "hermes",
+            "modelEditable": provider_kind == "openclaw",
         },
     }
 
@@ -2024,11 +2044,21 @@ def _ensure_builtin_communication_skill():
 
 def _discover_roster():
     hermes = VO_CONFIG.get("hermes", {})
+    codex = VO_CONFIG.get("codex", {})
     return discover_all_agents(
         WORKSPACE_BASE,
         hermes_home=hermes.get("homePath"),
         hermes_bin=hermes.get("binary"),
         hermes_enabled=hermes.get("enabled", True),
+        codex_home=codex.get("homePath"),
+        codex_bin=codex.get("binary"),
+        codex_workspace_root=codex.get("workspaceRoot"),
+        codex_enabled=codex.get("enabled", True),
+        codex_model=codex.get("model") or "",
+        codex_sandbox=codex.get("sandbox") or "workspace-write",
+        codex_approval_policy=codex.get("approvalPolicy") or "never",
+        codex_prefer_app_server=codex.get("preferAppServer", True),
+        codex_timeout_sec=int(codex.get("timeoutSec") or 900),
     )
 
 _discovered_roster = _discover_roster()
@@ -2096,13 +2126,13 @@ def _build_agent_info():
 def _build_agent_workspaces():
     result = {}
     for a in get_roster():
-        if a.get("providerKind") == "hermes":
+        if a.get("providerKind") in {"hermes", "codex"}:
             result[a["statusKey"]] = a.get("home") or a.get("workspace") or ""
         else:
             result[a["statusKey"]] = get_agent_workspace_dir(WORKSPACE_BASE, a["id"]).replace(WORKSPACE_BASE + "/", "") if a["workspace"].startswith(WORKSPACE_BASE) else os.path.basename(a["workspace"])
     return result
 def _build_agent_session_ids():
-    return {a["statusKey"]: (a.get("providerAgentId") if a.get("providerKind") == "hermes" else get_agent_session_id(a["id"])) for a in get_roster()}
+    return {a["statusKey"]: (a.get("providerAgentId") if a.get("providerKind") in {"hermes", "codex"} else get_agent_session_id(a["id"])) for a in get_roster()}
 
 # Compatibility properties (lazily rebuilt)
 @property
@@ -2393,6 +2423,148 @@ def _get_hermes_agent(agent_id_or_key=None):
         if a.get("providerKind") == "hermes" and (not needle or needle in (a.get("id"), a.get("statusKey"), a.get("providerAgentId"))):
             return a
     return None
+
+
+def _get_codex_agent(agent_id_or_key=None):
+    needle = str(agent_id_or_key or "")
+    for a in get_roster():
+        if a.get("providerKind") == "codex" and (not needle or needle in (a.get("id"), a.get("statusKey"), a.get("providerAgentId"), a.get("profile"))):
+            return a
+    return None
+
+
+def _is_codex_agent(agent_id_or_key):
+    needle = str(agent_id_or_key or "")
+    for a in get_roster():
+        if needle in (a.get("id"), a.get("statusKey"), a.get("providerAgentId"), a.get("profile")):
+            return a.get("providerKind") == "codex"
+    return needle.startswith("codex:") or needle.startswith("codex-")
+
+
+def _codex_provider():
+    codex_cfg = VO_CONFIG.get("codex", {})
+    return CodexProvider(
+        home_path=codex_cfg.get("homePath"),
+        binary=codex_cfg.get("binary"),
+        workspace_root=codex_cfg.get("workspaceRoot"),
+        enabled=codex_cfg.get("enabled", True),
+        timeout_sec=int(codex_cfg.get("timeoutSec") or 900),
+        model=codex_cfg.get("model") or "",
+        sandbox=codex_cfg.get("sandbox") or "workspace-write",
+        approval_policy=codex_cfg.get("approvalPolicy") or "never",
+        prefer_app_server=codex_cfg.get("preferAppServer", True),
+    )
+
+
+def _codex_history_path(profile="default"):
+    safe_profile = re.sub(r"[^a-zA-Z0-9_.-]+", "-", profile or "default")[:80] or "default"
+    return os.path.join(STATUS_DIR, f"codex-chat-{safe_profile}.json")
+
+
+def _load_codex_history(profile="default"):
+    path = _codex_history_path(profile)
+    try:
+        with open(path, "r") as f:
+            data = json.load(f)
+        messages = data.get("messages", []) if isinstance(data, dict) else []
+        return messages if isinstance(messages, list) else []
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return []
+
+
+def _load_codex_state(profile="default"):
+    path = _codex_history_path(profile)
+    try:
+        with open(path, "r") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {"messages": []}
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return {"messages": []}
+
+
+def _save_codex_history(profile, messages):
+    path = _codex_history_path(profile)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    state = _load_codex_state(profile)
+    state["messages"] = messages
+    state["updatedAt"] = int(time.time() * 1000)
+    with open(path, "w") as f:
+        json.dump(state, f, indent=2)
+    try:
+        os.chmod(path, 0o666)
+    except OSError:
+        pass
+
+
+def _get_codex_session_id(profile="default"):
+    state = _load_codex_state(profile)
+    return str(state.get("sessionId") or "")
+
+
+def _set_codex_session_id(profile="default", session_id=""):
+    path = _codex_history_path(profile)
+    state = _load_codex_state(profile)
+    state["sessionId"] = session_id or ""
+    state.setdefault("messages", [])
+    state["updatedAt"] = int(time.time() * 1000)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        json.dump(state, f, indent=2)
+    try:
+        os.chmod(path, 0o666)
+    except OSError:
+        pass
+
+
+def _set_codex_active_run(profile="default", session_id="", run_id=""):
+    path = _codex_history_path(profile)
+    state = _load_codex_state(profile)
+    state["sessionId"] = session_id or state.get("sessionId") or ""
+    state["runId"] = run_id or ""
+    state.setdefault("messages", [])
+    state["updatedAt"] = int(time.time() * 1000)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        json.dump(state, f, indent=2)
+    try:
+        os.chmod(path, 0o666)
+    except OSError:
+        pass
+
+
+def _publish_codex_progress(profile, agent_id, progress_id, run_state):
+    """Publish in-flight Codex app-server state to the visible chat history."""
+    if not progress_id:
+        return
+    run_state = run_state if isinstance(run_state, dict) else {}
+    history = _load_codex_history(profile)
+    history = [
+        msg for msg in history
+        if not (isinstance(msg, dict) and msg.get("ephemeral") == "codex-progress" and msg.get("progressId") == progress_id)
+    ]
+    session_id = run_state.get("threadId") or _get_codex_session_id(profile) or ""
+    run_id = run_state.get("runId") or run_state.get("turnId") or ""
+    history.append({
+        "role": "assistant",
+        "text": run_state.get("reply") or "",
+        "ts": int(time.time() * 1000),
+        "agentId": agent_id,
+        "ephemeral": "codex-progress",
+        "progressId": progress_id,
+        "sessionId": session_id,
+        "runId": run_id,
+        "tools": run_state.get("tools") or [],
+        "thinking": run_state.get("thinking") or "Waiting for Codex app-server events.",
+        "reasoningTokens": 0,
+        "error": run_state.get("error") or None,
+    })
+    _save_codex_history(profile, history)
+    if session_id or run_id:
+        _set_codex_active_run(profile, session_id, run_id)
+
+
+def _remove_codex_progress_messages(messages):
+    return [m for m in messages if not (isinstance(m, dict) and m.get("ephemeral") == "codex-progress")]
 
 
 def _hermes_history_path(profile="default"):
@@ -3300,6 +3472,200 @@ def _handle_hermes_chat(body):
         return {"ok": False, "error": str(e), "_status": 500}
 
 
+def _handle_codex_chat(body):
+    """Send one message to a local Codex app-server-backed agent."""
+    message = (body.get("message") or "").strip()
+    agent_key = body.get("agentId") or body.get("key") or body.get("sessionKey") or "codex-default"
+    if not message:
+        return {"ok": False, "error": "message is required", "_status": 400}
+
+    agent = _get_codex_agent(agent_key)
+    if not agent:
+        return {"ok": False, "error": f"Codex agent '{agent_key}' not found", "_status": 404}
+
+    codex_cfg = VO_CONFIG.get("codex", {})
+    timeout = int(body.get("timeoutSec") or codex_cfg.get("timeoutSec") or 900)
+    profile = agent.get("profile") or agent.get("providerAgentId") or "default"
+    from_type = str(body.get("fromType") or body.get("senderType") or "").strip().lower()
+    is_human_source = from_type in {"human", "user", "chat", "ui"}
+    attachments = body.get("attachments") if isinstance(body.get("attachments"), list) else []
+    sender_name = str(body.get("fromDisplayName") or body.get("displayName") or body.get("fromName") or "User").strip() or "User"
+
+    delivery_message = message
+    if is_human_source:
+        delivery_message = (
+            f"Message from {sender_name} via Virtual Office Chat.\n\n"
+            f"{message}\n\n"
+            "Reply directly to the user. Do not assume the user's name unless they identify themselves."
+        )
+    if attachments:
+        file_lines = []
+        for item in attachments:
+            if isinstance(item, dict):
+                file_lines.append(f"- {item.get('name') or 'attachment'}: {item.get('path') or item.get('url') or ''}".strip())
+        if file_lines:
+            delivery_message += "\n\nAttached files uploaded through Virtual Office:\n" + "\n".join(file_lines)
+
+    now_ms = int(time.time() * 1000)
+    history = _load_codex_history(profile)
+    history.append({
+        "role": "user",
+        "text": message,
+        "ts": now_ms,
+        "agentId": agent.get("id"),
+        "from": sender_name if is_human_source else "You",
+        "fromType": from_type or "",
+        "attachments": attachments,
+    })
+    progress_id = f"codex-progress-{now_ms}"
+    history.append({
+        "role": "assistant",
+        "text": "",
+        "ts": int(time.time() * 1000),
+        "agentId": agent.get("id"),
+        "ephemeral": "codex-progress",
+        "progressId": progress_id,
+        "tools": [],
+        "thinking": "Starting Codex app-server.",
+        "reasoningTokens": 0,
+    })
+    _save_codex_history(profile, history)
+
+    try:
+        provider = _codex_provider()
+        provider.model = agent.get("model") or provider.model or ""
+        session_id = _get_codex_session_id(profile)
+        status_key = agent.get("statusKey") or agent.get("id")
+        gateway_presence.set_manual_override(status_key, "working", "Codex task")
+
+        def on_progress(run_state):
+            gateway_presence.set_provider_event(status_key, "codex", {
+                "event": "turn.progress",
+                "thread_id": run_state.get("threadId") or "",
+                "turn_id": run_state.get("turnId") or run_state.get("runId") or "",
+                "status": run_state.get("status") or "",
+            })
+            _publish_codex_progress(profile, agent.get("id"), progress_id, run_state)
+
+        result = provider.send_chat_message(profile, delivery_message, session_id=session_id, timeout_sec=timeout, on_progress=on_progress)
+        active_session_id = result.get("sessionId") or session_id
+        if active_session_id:
+            _set_codex_session_id(profile, active_session_id)
+        if result.get("runId"):
+            _set_codex_active_run(profile, active_session_id, result.get("runId"))
+
+        reply = result.get("reply", "")
+        stderr = result.get("stderr", "")
+        exit_code = result.get("exitCode")
+        history = _remove_codex_progress_messages(_load_codex_history(profile))
+        final_ts = int(time.time() * 1000)
+        tools = result.get("tools") or []
+        if tools:
+            history.append({
+                "role": "assistant",
+                "text": "",
+                "ts": final_ts,
+                "agentId": agent.get("id"),
+                "source": "codex-tool-activity",
+                "tools": tools,
+            })
+        history.append({
+            "role": "assistant",
+            "text": reply,
+            "ts": final_ts + (1 if tools else 0),
+            "agentId": agent.get("id"),
+            "exitCode": exit_code,
+            "sessionId": active_session_id,
+            "runId": result.get("runId"),
+            "tools": [],
+            "thinking": result.get("thinking") or "",
+            "reasoningTokens": 0,
+            "error": result.get("error") or None,
+            "interrupted": bool(result.get("interrupted")),
+        })
+        _save_codex_history(profile, history)
+        gateway_presence.set_manual_override(agent.get("statusKey") or agent.get("id"), "idle" if result.get("ok") else "offline", "")
+        return {
+            "ok": bool(result.get("ok")),
+            "reply": reply,
+            "stderr": stderr[:2000],
+            "exitCode": exit_code,
+            "sessionId": active_session_id,
+            "runId": result.get("runId"),
+            "providerPath": result.get("providerPath") or "app-server",
+            "tools": tools,
+            "thinking": result.get("thinking") or "",
+            "reasoningTokens": 0,
+            "interrupted": bool(result.get("interrupted")),
+            "error": result.get("error"),
+            "agent": {"id": agent.get("id"), "name": agent.get("name"), "providerKind": "codex", "profile": profile},
+        }
+    except Exception as e:
+        history = _remove_codex_progress_messages(_load_codex_history(profile))
+        history.append({
+            "role": "assistant",
+            "text": "",
+            "ts": int(time.time() * 1000),
+            "agentId": agent.get("id"),
+            "tools": [{"id": "codex-error", "name": "codex", "status": "error", "arguments": {}, "error": str(e)}],
+            "thinking": "",
+            "reasoningTokens": 0,
+        })
+        _save_codex_history(profile, history)
+        gateway_presence.set_manual_override(agent.get("statusKey") or agent.get("id"), "offline", "Codex error")
+        return {"ok": False, "error": str(e), "_status": 500}
+
+
+def _handle_codex_interrupt(body):
+    agent_key = body.get("agentId") or body.get("key") or body.get("sessionKey") or "codex-default"
+    agent = _get_codex_agent(agent_key)
+    if not agent:
+        return {"ok": False, "error": f"Codex agent '{agent_key}' not found", "_status": 404}
+    profile = agent.get("profile") or agent.get("providerAgentId") or "default"
+    result = _codex_provider().interrupt(profile)
+    if result.get("ok"):
+        history = _load_codex_history(profile)
+        history.append({
+            "role": "assistant",
+            "text": "",
+            "ts": int(time.time() * 1000),
+            "agentId": agent.get("id"),
+            "ephemeral": "codex-progress",
+            "progressId": f"codex-interrupt-{int(time.time() * 1000)}",
+            "sessionId": result.get("threadId") or _get_codex_session_id(profile),
+            "runId": result.get("turnId") or "",
+            "tools": [],
+            "thinking": "Stop requested. Waiting for Codex to interrupt the active turn.",
+            "reasoningTokens": 0,
+        })
+        _save_codex_history(profile, history)
+    else:
+        result["_status"] = 409
+    return result
+
+
+def msg_matches_ephemeral(msg, marker):
+    return isinstance(msg, dict) and msg.get("ephemeral") == marker
+
+
+def _handle_codex_test(body=None):
+    cfg = dict(VO_CONFIG.get("codex", {}))
+    if isinstance(body, dict):
+        cfg.update({k: v for k, v in body.items() if v is not None})
+    result = CodexProvider(
+        home_path=cfg.get("homePath"),
+        binary=cfg.get("binary"),
+        workspace_root=cfg.get("workspaceRoot"),
+        enabled=cfg.get("enabled", True),
+        timeout_sec=int(cfg.get("timeoutSec") or 900),
+        model=cfg.get("model") or "",
+        sandbox=cfg.get("sandbox") or "workspace-write",
+        approval_policy=cfg.get("approvalPolicy") or "never",
+        prefer_app_server=cfg.get("preferAppServer", True),
+    ).test()
+    return result
+
+
 def _handle_hermes_approval_respond(body):
     approval = body.get("approval") if isinstance(body.get("approval"), dict) else {}
     choice = _normalize_hermes_approval_choice(body.get("choice") or body.get("action") or "")
@@ -3420,6 +3786,7 @@ def _handle_agent_platforms():
         binary=hermes_cfg.get("binary"),
         enabled=hermes_cfg.get("enabled", True),
     ).test()
+    codex_status = _codex_provider().test()
     return {
         "ok": True,
         "platforms": [
@@ -3427,6 +3794,7 @@ def _handle_agent_platforms():
                 "id": "openclaw",
                 "label": "OpenClaw",
                 "description": "Native OpenClaw workspace agent",
+                "providerType": "runtime",
                 "available": True,
                 "create": True,
                 "delete": True,
@@ -3435,10 +3803,21 @@ def _handle_agent_platforms():
                 "id": "hermes",
                 "label": "Hermes",
                 "description": "Hermes profile-backed agent",
+                "providerType": "runtime",
                 "available": bool(hermes_status.get("ok")),
                 "create": bool(hermes_status.get("ok")),
                 "delete": bool(hermes_status.get("ok")),
                 "error": "" if hermes_status.get("ok") else hermes_status.get("error", "Hermes is not available"),
+            },
+            {
+                "id": "codex",
+                "label": "Codex",
+                "description": "Native Codex app-server workspace agent",
+                "providerType": "harness",
+                "available": bool(codex_status.get("ok")),
+                "create": bool(codex_status.get("ok")),
+                "delete": bool(codex_status.get("ok")),
+                "error": "" if codex_status.get("ok") else codex_status.get("error", "Codex is not available"),
             },
         ],
     }
@@ -3969,6 +4348,8 @@ def _handle_agent_create(body):
     platform = (body.get("agentPlatform") or body.get("platform") or body.get("providerKind") or "openclaw").strip().lower()
     if platform in {"hermes", "hermes-agent"}:
         return _handle_hermes_agent_create(body, name)
+    if platform in {"codex", "codex-cli", "codex-agent"}:
+        return _handle_codex_agent_create(body, name)
     if platform not in {"openclaw", "openclaw-agent"}:
         return {"error": f"Unsupported agent platform '{platform}'", "_status": 400}
 
@@ -4037,6 +4418,32 @@ def _handle_hermes_agent_create(body, name):
         "name": name,
         "workspace": result.get("workspace"),
         "message": result.get("message", f"Hermes agent '{name}' created successfully"),
+    }
+
+
+def _handle_codex_agent_create(body, name):
+    emoji = body.get("emoji", "🤖")
+    role = body.get("role", "Codex Agent")
+    prompt = body.get("prompt") or body.get("systemPrompt") or body.get("instructions") or role
+    model = body.get("model") or VO_CONFIG.get("codex", {}).get("model", "")
+    profile = body.get("id") or body.get("profile") or _sanitize_agent_id(name)
+    provider = _codex_provider()
+    result = provider.create_agent(name=name, role=role, model=model, emoji=emoji, profile=profile, prompt=prompt)
+    if not result.get("ok"):
+        return {"error": result.get("error", "Codex agent creation failed"), "_status": 500}
+    global _discovered_at
+    _discovered_at = 0
+    refresh_agent_maps()
+    return {
+        "ok": True,
+        "agentId": result.get("agentId"),
+        "providerKind": "codex",
+        "providerType": "harness",
+        "providerAgentId": result.get("profile"),
+        "profile": result.get("profile"),
+        "name": name,
+        "workspace": result.get("workspace"),
+        "message": result.get("message", f"Codex agent '{name}' created successfully"),
     }
 
 
@@ -7684,6 +8091,17 @@ def _handle_agent_delete(body):
                 pass
             except OSError as e:
                 print(f"[HERMES] Failed to remove VO history for deleted profile {profile}: {e}")
+        elif provider_kind == "codex" or agent_id.startswith("codex-"):
+            profile = (agent or {}).get("providerAgentId") or agent_id.replace("codex-", "", 1)
+            result = _codex_provider().delete_agent(profile)
+            if not result.get("ok"):
+                return {"error": result.get("error", "Codex agent delete failed"), "_status": 500}
+            try:
+                os.remove(_codex_history_path(profile))
+            except FileNotFoundError:
+                pass
+            except OSError as e:
+                print(f"[CODEX] Failed to remove VO history for deleted profile {profile}: {e}")
         else:
             result = _gateway_rpc_call("agents.delete", {"agentId": agent_id, "deleteFiles": True}, timeout=30)
             if not result.get("ok"):
@@ -8486,14 +8904,19 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             agents = []
             for a in get_roster():
                 provider_kind = a.get("providerKind", "openclaw")
-                session_key = f"hermes:{a.get('profile', a['id'])}" if provider_kind == "hermes" else f"agent:{a['id']}:main"
+                if provider_kind == "hermes":
+                    session_key = f"hermes:{a.get('profile', a['id'])}"
+                elif provider_kind == "codex":
+                    session_key = f"codex:{a.get('profile') or a.get('providerAgentId') or a['id']}"
+                else:
+                    session_key = f"agent:{a['id']}:main"
                 # Prefer office-config name/emoji over IDENTITY.md
                 oc = _oc_overrides.get(a["statusKey"], {})
                 # Resolve branch ID to display name
                 branch_id = oc.get("branch", "")
                 branch_name = _oc_branches.get(branch_id, "") if branch_id else ""
                 if not branch_name:
-                    branch_name = "Hermes" if provider_kind == "hermes" else "Unassigned"
+                    branch_name = "Hermes" if provider_kind == "hermes" else ("Codex" if provider_kind == "codex" else "Unassigned")
                 agents.append({
                     "key": a["statusKey"],
                     "agentId": a["id"],
@@ -8934,6 +9357,16 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(json.dumps({"ok": True, "messages": _load_hermes_history(profile)}).encode())
+        elif self.path == "/api/codex/history" or self.path.startswith("/api/codex/history?"):
+            qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            agent_key = (qs.get("agentId") or qs.get("key") or ["codex-default"])[0]
+            agent = _get_codex_agent(agent_key)
+            profile = (agent or {}).get("profile") or (agent or {}).get("providerAgentId") or "default"
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps({"ok": True, "messages": _load_codex_history(profile), "sessionId": _get_codex_session_id(profile)}).encode())
         elif request_path == "/api/hermes/approval/pending":
             agent_key = (query_params.get("agentId") or query_params.get("key") or ["hermes-default"])[0]
             session_id = (query_params.get("session_id") or query_params.get("sessionId") or [""])[0]
@@ -8957,6 +9390,13 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             self.wfile.write(f"event: {event_name}\ndata: {payload}\n\n".encode("utf-8"))
         elif self.path == "/api/hermes/test":
             result = _handle_hermes_test()
+            self.send_response(200 if result.get("ok") else 503)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps(result).encode())
+        elif self.path == "/api/codex/test":
+            result = _handle_codex_test()
             self.send_response(200 if result.get("ok") else 503)
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
@@ -9587,6 +10027,11 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             model = agent.get("model") or "Hermes"
             provider = agent.get("provider") or "Hermes"
             return {"model": model, "provider": provider, "providerKind": "hermes", "contextWindow": 0}
+        if agent_id and _is_codex_agent(agent_id):
+            agent = _get_codex_agent(agent_id) or {}
+            model = agent.get("model") or VO_CONFIG.get("codex", {}).get("model") or "Codex default"
+            provider = agent.get("provider") or "Codex CLI"
+            return {"model": model, "provider": provider, "providerKind": "codex", "contextWindow": 200000 if str(model).startswith("gpt-5") else 0}
 
         # Known context windows — keyed by full provider/model AND by model name alone.
         # The model-name-only keys act as fallbacks for alternative providers
@@ -10466,10 +10911,9 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                 WORKSPACE_BASE = VO_CONFIG["openclaw"]["homePath"]
                 # Always reload gateway globals (URL, host header, config path)
                 _reload_gateway_globals()
-                if WORKSPACE_BASE != old_path:
-                    _discovered_roster = _discover_roster()
-                    _discovered_at = time.time()
-                    refresh_agent_maps()
+                _discovered_roster = _discover_roster()
+                _discovered_at = time.time()
+                refresh_agent_maps()
                 # Restart gateway presence listener only when gateway settings actually changed
                 new_token = _get_gateway_token()
                 gateway_changed = GATEWAY_URL != old_gw
@@ -10614,6 +11058,28 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             result.pop("_status", None)
             self.wfile.write(json.dumps(result).encode())
             return
+        elif self.path == "/api/codex/chat":
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            result = _handle_codex_chat(body)
+            self.send_response(result.get("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            result.pop("_status", None)
+            self.wfile.write(json.dumps(result).encode())
+            return
+        elif self.path == "/api/codex/interrupt":
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            result = _handle_codex_interrupt(body)
+            self.send_response(result.get("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            result.pop("_status", None)
+            self.wfile.write(json.dumps(result).encode())
+            return
         elif self.path == "/api/hermes/approval/respond":
             length = int(self.headers.get('Content-Length', 0))
             body = json.loads(self.rfile.read(length)) if length else {}
@@ -10661,10 +11127,34 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(json.dumps({"ok": True, "deletedHermesSession": bool(delete_result.get("deleted")), "sessionId": session_id}).encode())
             return
+        elif self.path == "/api/codex/history/clear":
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            agent = _get_codex_agent(body.get("agentId") or body.get("key") or "codex-default") or {}
+            profile = agent.get("profile") or agent.get("providerAgentId") or "default"
+            session_id = _get_codex_session_id(profile)
+            _save_codex_history(profile, [])
+            _set_codex_session_id(profile, "")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps({"ok": True, "clearedCodexSession": bool(session_id), "sessionId": session_id}).encode())
+            return
         elif self.path == "/api/hermes/test":
             length = int(self.headers.get('Content-Length', 0))
             body = json.loads(self.rfile.read(length)) if length else {}
             result = _handle_hermes_test(body)
+            self.send_response(200 if result.get("ok") else 503)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps(result).encode())
+            return
+        elif self.path == "/api/codex/test":
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            result = _handle_codex_test(body)
             self.send_response(200 if result.get("ok") else 503)
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
