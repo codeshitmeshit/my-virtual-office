@@ -3906,7 +3906,7 @@ button:active { transform: translateY(3px); box-shadow: none; }
   cursor: pointer;
   color: #bbb;
   font-family: 'Press Start 2P', cursive;
-  font-size: 6px;
+  font-size: 8px;
   line-height: 1.4;
   border-left: 3px solid transparent;
   transition: background 0.1s, border-color 0.1s, color 0.1s;

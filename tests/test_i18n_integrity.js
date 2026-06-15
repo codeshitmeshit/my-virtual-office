@@ -3,8 +3,18 @@ const path = require('path');
 
 const root = path.resolve(__dirname, '..');
 const localeDir = path.join(root, 'app', 'locales');
-const en = JSON.parse(fs.readFileSync(path.join(localeDir, 'en.json'), 'utf8'));
-const zh = JSON.parse(fs.readFileSync(path.join(localeDir, 'zh.json'), 'utf8'));
+function readLocale(filename) {
+  const source = fs.readFileSync(path.join(localeDir, filename), 'utf8');
+  const keys = [...source.matchAll(/^\s*,?\s*"([^"]+)"\s*:/gm)].map((match) => match[1]);
+  const duplicates = [...new Set(keys.filter((key, index) => keys.indexOf(key) !== index))];
+  if (duplicates.length) {
+    throw new Error(`${filename} contains duplicate keys: ${duplicates.join(', ')}`);
+  }
+  return JSON.parse(source);
+}
+
+const en = readLocale('en.json');
+const zh = readLocale('zh.json');
 
 const enKeys = Object.keys(en).sort();
 const zhKeys = Object.keys(zh).sort();

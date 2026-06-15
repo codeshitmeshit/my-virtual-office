@@ -1,0 +1,53 @@
+@font-face {
+    font-family: 'Fusion Pixel 12px Proportional SC';
+    src: url('/assets/fonts/fusion-pixel-font/fusion-pixel-12px-proportional-zh_hans.otf.woff2') format('woff2');
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+}
+
+:root {
+    --vo-pixel-ui-font: 'Press Start 2P', cursive;
+    --vo-technical-font: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+html[lang="zh"] {
+    --vo-pixel-ui-font: 'Fusion Pixel 12px Proportional SC', 'WenQuanYi Zen Hei', 'Microsoft YaHei', sans-serif;
+}
+
+html[lang="zh"] body,
+html[lang="zh"] body * {
+    font-family: var(--vo-pixel-ui-font) !important;
+}
+
+html[lang="zh"] body :where(
+    code,
+    pre,
+    kbd,
+    samp,
+    [style*="monospace"],
+    [style*="Courier"],
+    [class*="code"],
+    [class*="command"],
+    [class*="json"],
+    [class*="monospace"],
+    [class*="path"],
+    [class*="schedule"],
+    [class*="terminal"],
+    [id*="-bin"],
+    [id*="-cron"],
+    [id*="-key"],
+    [id*="-path"],
+    [id*="-token"],
+    [id*="-url"],
+    [id^="key-"],
+    [id$="-id"],
+    #mm-hermes-home,
+    #s-hermes-home,
+    #s-ocpath,
+    .job-agent,
+    .job-card div[style*="font-style"],
+    .skl-textarea
+) {
+    font-family: var(--vo-technical-font) !important;
+}

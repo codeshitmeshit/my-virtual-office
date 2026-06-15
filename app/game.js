@@ -4716,7 +4716,7 @@ async function pollStatus() {
                 agent.thoughtUpdatedAt = Date.now();
                 // Auto-expand if minimized
                 getBubbleMinState(agent).thought = false;
-                addGlobalLog(`💭 ${agent.name} thinking: ${newThought.substring(0, 40)}...`);
+                addGlobalLog(`💭 ${agent.name} ${(typeof i18n !== 'undefined' ? i18n.t('chat_thinking') : 'Thinking')}: ${newThought.substring(0, 40)}...`);
             } else if (!newThought && agent.thought) {
                 agent.thought = '';
             }
@@ -4793,6 +4793,36 @@ function addGlobalLog(msg) {
 }
 
 // --- SIDEBAR ---
+function _agentStateLabel(state) {
+    var key = {
+        moving: 'agent_state_moving',
+        meeting: 'agent_state_meeting',
+        lounge: 'agent_state_lounge',
+        break: 'agent_state_break',
+        chatting: 'agent_state_chatting',
+        stretching: 'agent_state_stretching',
+        walking: 'agent_state_walking',
+        lounging: 'agent_state_lounging',
+        reading: 'agent_state_reading',
+        gazing: 'agent_state_gazing',
+        browsing: 'agent_state_browsing',
+        snacking: 'agent_state_snacking',
+        cooking: 'agent_state_cooking',
+        socializing: 'agent_state_socializing',
+        playing_darts: 'agent_state_playing_darts',
+        playing_ping_pong: 'agent_state_playing_ping_pong',
+        at_ping_pong: 'agent_state_at_ping_pong',
+        watching_ping_pong: 'agent_state_watching_ping_pong',
+        coffee_break: 'agent_state_coffee_break',
+        hydrating: 'agent_state_hydrating',
+        watching_tv: 'agent_state_watching_tv',
+        sipping: 'agent_state_sipping',
+        eating: 'agent_state_eating'
+    }[state];
+    if (typeof i18n === 'undefined') return state;
+    return key ? i18n.t(key) : i18n.t('agent_state_unknown', { state: state });
+}
+
 function updateSidebar() {
     const container = document.getElementById('branch-sections-container');
     if (!container) return;
@@ -4820,14 +4850,14 @@ function updateSidebar() {
         if (agent.idleAction === 'get_snack') displayState = 'snacking';
         if (agent.idleAction === 'make_food') displayState = 'cooking';
         if (agent.idleAction === 'gathering') displayState = 'socializing';
-        if (agent.idleAction === 'darts') displayState = 'playing darts 🎯';
-        if (agent.idleAction === 'pong') displayState = 'playing ping pong 🏓';
-        if (agent.idleAction === 'pong_wait') displayState = 'at ping pong table 🏓';
-        if (agent.idleAction === 'pong_spectator') displayState = 'watching ping pong 👀';
-        if (agent.idleAction === 'make_coffee') displayState = 'coffee break';
+        if (agent.idleAction === 'darts') displayState = 'playing_darts';
+        if (agent.idleAction === 'pong') displayState = 'playing_ping_pong';
+        if (agent.idleAction === 'pong_wait') displayState = 'at_ping_pong';
+        if (agent.idleAction === 'pong_spectator') displayState = 'watching_ping_pong';
+        if (agent.idleAction === 'make_coffee') displayState = 'coffee_break';
         if (agent.idleAction === 'get_water') displayState = 'hydrating';
-        if (agent.idleAction === 'watch_tv') displayState = 'watching TV';
-        if (agent.carryItem && !agent.idleAction) displayState = agent.carryItem === 'coffee' ? 'sipping ☕' : agent.carryItem === 'water' ? 'hydrating 💧' : agent.carryItem === 'food' ? 'eating 🍕' : 'snacking 🍫';
+        if (agent.idleAction === 'watch_tv') displayState = 'watching_tv';
+        if (agent.carryItem && !agent.idleAction) displayState = agent.carryItem === 'coffee' ? 'sipping' : agent.carryItem === 'water' ? 'hydrating' : agent.carryItem === 'food' ? 'eating' : 'snacking';
 
         if (agent.state === 'meeting' || agent.state === 'visiting') counts.meeting++;
         else if (agent.state === 'working') counts.working++;
@@ -4837,7 +4867,7 @@ function updateSidebar() {
 
         const div = document.createElement('div');
         div.className = 'agent-entry';
-        div.innerHTML = `<span class="dot ${displayState}"></span><span class="name">${agent.emoji} ${agent.name}</span><span class="state">${displayState}</span>`;
+        div.innerHTML = `<span class="dot ${displayState}"></span><span class="name">${agent.emoji} ${agent.name}</span><span class="state">${_agentStateLabel(displayState)}</span>`;
         div.onclick = () => openModal(agent);
         const branchId = byBranch[agent.branch] ? agent.branch : 'UNASSIGNED';
         byBranch[branchId].push(div);
@@ -8291,7 +8321,7 @@ function triggerBubble(type) {
         selectedAgent.thoughtAge = 0;
         selectedAgent.thoughtUpdatedAt = Date.now();
         getBubbleMinState(selectedAgent).thought = false;
-        addGlobalLog(`💭 ${selectedAgent.name} thinking: ${text.substring(0, 40)}...`);
+        addGlobalLog(`💭 ${selectedAgent.name} ${(typeof i18n !== 'undefined' ? i18n.t('chat_thinking') : 'Thinking')}: ${text.substring(0, 40)}...`);
     } else {
     const target = prompt(_tr('message_target_prompt')) || '';
         selectedAgent.speech = text;
@@ -15721,7 +15751,7 @@ function _mtgRender() {
         if (m.type) html += '<div class="mtg-meta-item">📋 ' + _escMtg(m.type) + '</div>';
         if (m.endedAt) {
             var d = new Date(m.endedAt * 1000);
-            html += '<div class="mtg-meta-item mtg-timestamp">🕐 ' + d.toLocaleString() + '</div>';
+            html += '<div class="mtg-meta-item mtg-timestamp">🕐 ' + d.toLocaleString(typeof i18n !== 'undefined' && i18n.getLanguage() === 'zh' ? 'zh-CN' : 'en-US') + '</div>';
         }
         html += '</div>';
 
@@ -15964,7 +15994,7 @@ function _updateSidebarMeetings() {
             return info ? info.emoji + ' ' + info.name : k;
         }).join(', ');
         return '<div class="sidebar-mtg-item" onclick="openMeetingsDashboard()">' +
-            '<div class="sidebar-mtg-item-title"><span class="sidebar-mtg-item-dot"></span>' + _escMtg(m.topic || 'Meeting') + '</div>' +
+            '<div class="sidebar-mtg-item-title"><span class="sidebar-mtg-item-dot"></span>' + _escMtg(m.topic || _tr('untitled_meeting')) + '</div>' +
             '<div class="sidebar-mtg-item-meta">' + pNames + '</div>' +
             '</div>';
     }).join('');

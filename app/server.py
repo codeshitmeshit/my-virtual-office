@@ -12227,6 +12227,11 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=APP_DIR, **kwargs)
 
+    def end_headers(self):
+        if urllib.parse.urlparse(self.path).path.endswith(".woff2"):
+            self.send_header("Cache-Control", "public, max-age=31536000, immutable")
+        super().end_headers()
+
     def _serve_website_asset(self, request_path):
         website_dir = os.path.realpath(os.path.join(APP_DIR, "..", "website"))
         relative_path = request_path[len("/website/"):].lstrip("/") or "index.html"

@@ -9,8 +9,9 @@
     <link rel="apple-touch-icon" href="icon-192.png">
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#1a1a2e">
-    <link rel="stylesheet" href="style.css?v=1781525717-reasoning-summary">
-    <link rel="stylesheet" href="projects.css?v=1781525717-project-execution">
+    <link rel="stylesheet" href="style.css?v=1781544433-reasoning-summary">
+    <link rel="stylesheet" href="projects.css?v=1781544433-project-execution">
+    <link rel="stylesheet" href="fonts.css?v=1781544433.05.07">
     <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
     <!-- i18n: inline locale data for immediate init -->
     <script id="locale-en" type="application/json">{}</script>
@@ -192,14 +193,14 @@
             </div>
             <div class="toolbar">
                 <button id="btn-main-menu" title="Settings & Help" onclick="toggleMainMenu()" data-i18n="menu" data-i18n-title="settings">☰ Menu</button>
-                <button id="btn-edit-office" title="Edit office layout" onclick="toggleEditMode()" data-i18n="edit_office" data-i18n-title="edit_office">✏️ Edit Office</button>
-                <button id="btn-save-edits" title="Save changes" onclick="saveEdits()" style="display:none;opacity:0.4" disabled data-i18n="save" data-i18n-title="save_changes">💾 Save</button>
+                <button id="btn-edit-office" title="Edit office layout" onclick="toggleEditMode()" data-i18n="edit_office_toolbar" data-i18n-title="edit_office">✏️ Edit Office</button>
+                <button id="btn-save-edits" title="Save changes" onclick="saveEdits()" style="display:none;opacity:0.4" disabled data-i18n="save_toolbar" data-i18n-title="save_changes">💾 Save</button>
                 <button id="btn-undo-edit" title="Undo last change" onclick="undoEdit()" style="display:none;opacity:0.4" disabled data-i18n="undo" data-i18n-title="undo">↩️ Undo</button>
                 <button id="btn-agent-settings" title="Create and customize agents" onclick="toggleAgentPanel()" data-i18n="agents" data-i18n-title="agents">👤 Agents</button>
                 <div class="toolbar-divider"></div>
                 <button id="btn-expand-all" title="Expand all bubbles" onclick="expandAllBubbles()" data-i18n="expand_all" data-i18n-title="expand_all">💬 Expand All</button>
                 <button id="btn-minimize-all" title="Minimize all bubbles" onclick="minimizeAllBubbles()" data-i18n="minimize_all" data-i18n-title="minimize_all">💬 Minimize All</button>
-                <a href="/models.html" style="text-decoration:none"><button title="Model & Provider Settings" data-i18n="models" data-i18n-title="model_settings_title">⚙️ Models</button></a>
+                <a href="/models.html" style="text-decoration:none"><button title="Model & Provider Settings" data-i18n="models_toolbar" data-i18n-title="model_settings_title">⚙️ Models</button></a>
                 <a href="/cron.html" style="text-decoration:none"><button title="Cron Job Manager" data-i18n="cron" data-i18n-title="cron_manager_title">⏰ Cron</button></a>
                 <button title="Project Manager" onclick="openProjectsManager()" data-i18n="projects" data-i18n-title="projects_title">📋 Projects</button>
                 <button title="Reset canvas zoom" onclick="resetCamera()" data-i18n="reset_zoom" data-i18n-title="reset_zoom">🔍 Reset</button>
@@ -746,7 +747,7 @@
 
     <!-- Agent Workspace Window -->
     <div id="agent-workspace-menu" class="agent-workspace-menu hidden">
-        <button id="agent-workspace-open-btn" type="button" data-i18n="open_workspace">Open agent workspace</button>
+        <button id="agent-workspace-open-btn" type="button" data-i18n="open_agent_workspace">Open agent workspace</button>
     </div>
     <div id="agent-workspace-panel" class="agent-workspace-panel hidden">
         <div class="agent-workspace-resize-handle" data-resize="se"></div>
@@ -823,11 +824,11 @@
         setTimeout(resizeCanvas, 320);
     }
     </script>
-    <script src="internal-bubble.js?v=1781525717"></script>
-    <script src="game.js?v=1781525717-internal-bubble-auto-collapse"></script>
-    <script src="browser-viewer-url.js?v=1781525717"></script>
-    <script src="browser-panel.js?v=1781525717"></script>
-    <script src="projects.js?v=1781525717-project-execution"></script>
+    <script src="internal-bubble.js?v=1781544433"></script>
+    <script src="game.js?v=1781544433-internal-bubble-auto-collapse"></script>
+    <script src="browser-viewer-url.js?v=1781544433"></script>
+    <script src="browser-panel.js?v=1781544433"></script>
+    <script src="projects.js?v=1781544433-project-execution"></script>
     <script>
     // Bio sections for agent modal
     let _bioCache = {};
@@ -1051,11 +1052,11 @@
     </script>
     <!-- marked.js v15.0.12 - bundled locally for airgapped/offline use -->
     <script src="marked.min.js"></script>
-    <script src="codex-reasoning.js?v=1781525717"></script>
-    <script src="chat.js?v=1781525717-reasoning-summary"></script>
-    <script src="sms-panel.js?v=1781525717"></script>
-    <script src="pc-monitor.js?v=1781525717"></script>
-    <script src="api-usage.js?v=1781525717"></script>
+    <script src="codex-reasoning.js?v=1781544433"></script>
+    <script src="chat.js?v=1781544433-reasoning-summary"></script>
+    <script src="sms-panel.js?v=1781544433"></script>
+    <script src="pc-monitor.js?v=1781544433"></script>
+    <script src="api-usage.js?v=1781544433"></script>
     <script>
     // License check — demo watermark + feature gates
     (function() {

@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Virtual Office — Setup</title>
     <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="fonts.css?v=2026.05.07">
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
@@ -62,6 +63,11 @@
     <script src="i18n.js"></script>
     <script>
         function _t(key, params) { return typeof i18n !== 'undefined' ? i18n.t(key, params) : key; }
+        function updateSetupPageTitle() {
+            document.title = _t('setup_page_title');
+        }
+        window.addEventListener('i18n:ready', updateSetupPageTitle);
+        window.addEventListener('i18n:changed', updateSetupPageTitle);
         function _esc(value) {
             return String(value == null ? '' : value)
                 .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')

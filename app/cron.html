@@ -4,8 +4,21 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Cron Manager — Virtual Office</title>
-<script>fetch('/vo-config').then(r=>r.json()).then(d=>{if(d.office&&d.office.name)document.title=(typeof i18n!=='undefined'?i18n.t('cron_manager_title'):'Cron Manager')+' — '+d.office.name;}).catch(()=>{});</script>
+<script>
+let cronOfficeName = 'Virtual Office';
+function updateCronPageTitle() {
+  const title = typeof i18n !== 'undefined' ? i18n.t('cron_manager_title') : 'Cron Manager';
+  document.title = title + ' — ' + cronOfficeName;
+}
+fetch('/vo-config').then(r=>r.json()).then(d=>{
+  if(d.office&&d.office.name) cronOfficeName=d.office.name;
+  updateCronPageTitle();
+}).catch(updateCronPageTitle);
+window.addEventListener('i18n:ready', updateCronPageTitle);
+window.addEventListener('i18n:changed', updateCronPageTitle);
+</script>
 <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="fonts.css?v=2026.05.07">
 <style>
 :root {
   --bg: #0a0a1a; --surface: #141428; --surface2: #1c1c3a;
@@ -482,7 +495,7 @@ function renderJobs() {
     const state = j.state || {};
     const lastStatus = state.lastStatus || 'pending';
     const schedText = formatSchedule(j.schedule);
-    const nextRun = state.nextRunAtMs ? new Date(state.nextRunAtMs).toLocaleString() : '—';
+    const nextRun = state.nextRunAtMs ? localizedDateTime(state.nextRunAtMs) : '—';
     const lastRun = state.lastRunAtMs ? timeAgo(state.lastRunAtMs) : i18n.t('never');
     const duration = state.lastDurationMs ? (state.lastDurationMs/1000).toFixed(1)+'s' : '—';
     const payload = j.payload || {};
@@ -538,8 +551,12 @@ function formatSchedule(s) {
     return s.expr;
   }
   if (s.kind === 'every') return `${i18n.t('every')} ${(s.everyMs/60000).toFixed(0)} ${i18n.t('min')}`;
-  if (s.kind === 'at') return `${i18n.t('once_label')}: ${new Date(s.at).toLocaleString()}`;
+  if (s.kind === 'at') return `${i18n.t('once_label')}: ${localizedDateTime(s.at)}`;
   return JSON.stringify(s);
+}
+
+function localizedDateTime(value) {
+  return new Date(value).toLocaleString(i18n.getLanguage() === 'zh' ? 'zh-CN' : 'en-US');
 }
 
 function timeAgo(ms) {

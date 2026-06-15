@@ -4,7 +4,19 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Model Settings — Virtual Office</title>
-<script>fetch('/vo-config').then(r=>r.json()).then(d=>{if(d.office&&d.office.name)document.title=(typeof i18n!=='undefined'?i18n.t('model_settings_title'):'Model Settings')+' — '+d.office.name;}).catch(()=>{});</script>
+<script>
+let modelSettingsOfficeName = 'Virtual Office';
+function updateModelSettingsTitle() {
+  const title = typeof i18n !== 'undefined' ? i18n.t('model_settings_title') : 'Model Settings';
+  document.title = title + ' — ' + modelSettingsOfficeName;
+}
+fetch('/vo-config').then(r=>r.json()).then(d=>{
+  if (d.office&&d.office.name) modelSettingsOfficeName=d.office.name;
+  updateModelSettingsTitle();
+}).catch(updateModelSettingsTitle);
+window.addEventListener('i18n:ready', updateModelSettingsTitle);
+window.addEventListener('i18n:changed', updateModelSettingsTitle);
+</script>
     <!-- i18n: inline locale data for immediate init -->
     <script id="locale-en" type="application/json">{}</script>
     <script id="locale-zh" type="application/json">{}</script>
@@ -19,6 +31,7 @@
     })();
     </script>
     <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="fonts.css?v=2026.05.07">
     <style>
         :root { --bg:#0d0d1a; --surface:#141428; --border:#2a2a4a; --gold:#ffd700; --text:#d8d8e8; --text-dim:#8f91aa; --green:#4caf50; --red:#f44336; --blue:#2196f3; --purple:#8b5cf6; }
         * { box-sizing:border-box; margin:0; padding:0; }
