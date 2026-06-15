@@ -12,6 +12,10 @@ const COLOR_FAVORITES_KEY = 'vo-product-color-favorites';
 const MIN_TILES_X = 10;
 const MIN_TILES_Y = 10;
 
+function _tr(key, params) {
+    return typeof i18n !== 'undefined' ? i18n.t(key, params) : key;
+}
+
 // Load office config: server first, then localStorage fallback
 function loadOfficeConfig() {
     // Try localStorage first for immediate startup (sync)
@@ -136,6 +140,7 @@ function getBranchById(branchId) {
     return (_branchMapCache && _branchMapCache[branchId]) || UNASSIGNED_BRANCH;
 }
 function getBranchDisplayName(branchId) {
+    if (branchId === 'UNASSIGNED') return _tr('branch_unassigned');
     return getBranchById(branchId).name;
 }
 function getBranchTheme(branchId) {
@@ -206,11 +211,11 @@ var _multiDragStart = null; // {x, y}
 // 4 quadrants + center. Items snap to zone centers, staying INSIDE the tile.
 var activeSnapZone = 'center'; // 'center' | 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
 const SNAP_ZONES = {
-    'center':       { ox: 0.50, oy: 0.50, label: '⊙ Center' },
-    'top-left':     { ox: 0.25, oy: 0.25, label: '↖ Top-Left' },
-    'top-right':    { ox: 0.75, oy: 0.25, label: '↗ Top-Right' },
-    'bottom-left':  { ox: 0.25, oy: 0.75, label: '↙ Bottom-Left' },
-    'bottom-right': { ox: 0.75, oy: 0.75, label: '↘ Bottom-Right' },
+    'center':       { ox: 0.50, oy: 0.50, key: 'snap_center' },
+    'top-left':     { ox: 0.25, oy: 0.25, key: 'snap_top_left' },
+    'top-right':    { ox: 0.75, oy: 0.25, key: 'snap_top_right' },
+    'bottom-left':  { ox: 0.25, oy: 0.75, key: 'snap_bottom_left' },
+    'bottom-right': { ox: 0.75, oy: 0.75, key: 'snap_bottom_right' },
 };
 
 // --- UNDO / SAVE SYSTEM ---
@@ -303,48 +308,48 @@ const FURNITURE_BOUNDS = {
 };
 
 const CATALOG_CATEGORIES = [
-    { name: 'Office', items: [
-        { type: 'desk',          label: 'Desk',           icon: '🖥️' },
-        { type: 'bossDesk',      label: 'Boss Desk',      icon: '💼' },
-        { type: 'trashCan',      label: 'Trash Can',      icon: '🗑️' },
-        { type: 'filingCabinet', label: 'Filing Cabinet', icon: '🗂️' },
-        { type: 'whiteboard',    label: 'Whiteboard',     icon: '📋' },
+    { key: 'catalog_office', items: [
+        { type: 'desk',          key: 'furniture_desk',           icon: '🖥️' },
+        { type: 'bossDesk',      key: 'furniture_boss_desk',      icon: '💼' },
+        { type: 'trashCan',      key: 'furniture_trash_can',      icon: '🗑️' },
+        { type: 'filingCabinet', key: 'furniture_filing_cabinet', icon: '🗂️' },
+        { type: 'whiteboard',    key: 'furniture_whiteboard',     icon: '📋' },
     ]},
-    { name: 'Comfort', items: [
-        { type: 'couch',      label: 'L-Couch',        icon: '🛋️' },
-        { type: 'engLounge',  label: 'Straight Couch', icon: '🪑' },
-        { type: 'coffeeTable',label: 'Coffee Table',   icon: '☕' },
-        { type: 'tv',        label: 'TV',               icon: '📺' },
-        { type: 'bookshelf', label: 'Bookshelf',        icon: '📚' },
-        { type: 'plant',     label: 'Plant',            icon: '🪴' },
-        { type: 'tallPlant', label: 'Tall Plant',       icon: '🌿' },
-        { type: 'endTable',  label: 'End Table + Plant', icon: '🪴' },
+    { key: 'catalog_comfort', items: [
+        { type: 'couch',      key: 'furniture_l_couch',         icon: '🛋️' },
+        { type: 'engLounge',  key: 'furniture_straight_couch',  icon: '🪑' },
+        { type: 'coffeeTable',key: 'furniture_coffee_table',    icon: '☕' },
+        { type: 'tv',         key: 'furniture_tv',              icon: '📺' },
+        { type: 'bookshelf',  key: 'furniture_bookshelf',       icon: '📚' },
+        { type: 'plant',      key: 'furniture_plant',           icon: '🪴' },
+        { type: 'tallPlant',  key: 'furniture_tall_plant',      icon: '🌿' },
+        { type: 'endTable',   key: 'furniture_end_table_plant', icon: '🪴' },
     ]},
-    { name: 'Kitchen', items: [
-        { type: 'kitchenCounter',label: 'Kitchen Counter', icon: '🏪' },
-        { type: 'coffeeMaker',   label: 'Coffee Maker',    icon: '☕' },
-        { type: 'vendingMachine',label: 'Vending Machine', icon: '🥤' },
-        { type: 'waterCooler',   label: 'Water Cooler',    icon: '💧' },
-        { type: 'microwave',     label: 'Microwave',       icon: '📦' },
-        { type: 'toaster',       label: 'Toaster',         icon: '🍞' },
+    { key: 'catalog_kitchen', items: [
+        { type: 'kitchenCounter',key: 'furniture_kitchen_counter', icon: '🏪' },
+        { type: 'coffeeMaker',   key: 'furniture_coffee_maker',    icon: '☕' },
+        { type: 'vendingMachine',key: 'furniture_vending_machine', icon: '🥤' },
+        { type: 'waterCooler',   key: 'furniture_water_cooler',    icon: '💧' },
+        { type: 'microwave',     key: 'furniture_microwave',       icon: '📦' },
+        { type: 'toaster',       key: 'furniture_toaster',         icon: '🍞' },
     ]},
-    { name: 'Fun', items: [
-        { type: 'pingPongTable', label: 'Ping Pong Table', icon: '🏓' },
-        { type: 'dartBoard',     label: 'Dart Board',      icon: '🎯' },
+    { key: 'catalog_fun', items: [
+        { type: 'pingPongTable', key: 'furniture_ping_pong_table', icon: '🏓' },
+        { type: 'dartBoard',     key: 'furniture_dart_board',      icon: '🎯' },
     ]},
-    { name: 'Structure', items: [
-        { type: 'meetingTable', label: 'Meeting Table', icon: '📊' },
-        { type: 'window',       label: 'Window',        icon: '🪟' },
-        { type: 'interactiveWindow', label: 'Weather Window', icon: '🌤️' },
-        { type: 'clock',        label: 'Clock',         icon: '🕐' },
-        { type: 'floorLamp',    label: 'Floor Lamp',    icon: '💡' },
+    { key: 'catalog_structure', items: [
+        { type: 'meetingTable',      key: 'furniture_meeting_table',  icon: '📊' },
+        { type: 'window',            key: 'furniture_window',         icon: '🪟' },
+        { type: 'interactiveWindow', key: 'furniture_weather_window', icon: '🌤️' },
+        { type: 'clock',             key: 'furniture_clock',          icon: '🕐' },
+        { type: 'floorLamp',         key: 'furniture_floor_lamp',     icon: '💡' },
     ]},
-    { name: 'Labels', items: [
-        { type: 'textLabel',    label: 'Custom Text',   icon: '✏️' },
+    { key: 'catalog_labels', items: [
+        { type: 'textLabel', key: 'furniture_custom_text', icon: '✏️' },
     ]},
-    { name: 'Walls', items: [
-        { type: 'wall', label: 'Wall Segment', icon: '🧱' },
-        { type: 'door', label: 'Door/Opening', icon: '🚪' },
+    { key: 'catalog_walls', items: [
+        { type: 'wall', key: 'furniture_wall_segment', icon: '🧱' },
+        { type: 'door', key: 'furniture_door_opening', icon: '🚪' },
     ]},
 ];
 
@@ -5010,7 +5015,7 @@ function _getThemeColor(theme) {
 function branchDeletePrompt(branchId) {
     var branch = officeConfig.branches.find(function(b){ return b.id === branchId; });
     if (!branch) return;
-    if (!confirm('Delete branch "' + branch.name + '"? Agents will be moved to Unassigned.')) return;
+    if (!confirm(_tr('delete_branch_confirm', { name: branch.name }))) return;
     officeConfig.branches = officeConfig.branches.filter(function(b){ return b.id !== branchId; });
     _invalidateBranchCache();
     agents.forEach(function(a){ if (a.branch === branchId) a.branch = 'UNASSIGNED'; });
@@ -7422,16 +7427,16 @@ function openModal(agent) {
     // Task I/O
     const inputBox = document.getElementById('modal-input');
     if (agent.lastInput) {
-        inputBox.innerHTML = `<div class="io-from">📥 From: <strong>${agent.lastInput.from || 'Unknown'}</strong></div><div class="io-text">${escHtml(agent.lastInput.text || '—')}</div>`;
+        inputBox.innerHTML = `<div class="io-from">📥 ${escHtml(_tr('from_label'))}: <strong>${escHtml(agent.lastInput.from || _tr('unknown'))}</strong></div><div class="io-text">${escHtml(agent.lastInput.text || '—')}</div>`;
     } else {
-        inputBox.innerHTML = '<div class="io-text">No recent request</div>';
+        inputBox.innerHTML = '<div class="io-text">' + escHtml(_tr('no_recent_request')) + '</div>';
     }
 
     const outputBox = document.getElementById('modal-output');
     if (agent.lastOutput) {
         outputBox.innerHTML = `<div class="io-text">${escHtml(agent.lastOutput.text || '—')}</div>`;
     } else {
-        outputBox.innerHTML = '<div class="io-text">No recent response</div>';
+        outputBox.innerHTML = '<div class="io-text">' + escHtml(_tr('no_recent_response')) + '</div>';
     }
 
     const planBox = document.getElementById('modal-plan');
@@ -7820,11 +7825,11 @@ function _renderAgentWorkspace() {
         btn.classList.toggle('active', btn.dataset.awTab === _agentWorkspace.activeTab);
     });
     if (_agentWorkspace.loading) {
-        body.innerHTML = '<div class="agent-workspace-empty">Loading workspace...</div>';
+    body.innerHTML = '<div class="agent-workspace-empty">' + escHtml(_tr('loading_workspace')) + '</div>';
         return;
     }
     if (!data || !data.ok) {
-        body.innerHTML = '<div class="agent-workspace-empty">' + escHtml((data && data.error) || 'Workspace unavailable') + '</div>';
+            body.innerHTML = '<div class="agent-workspace-empty">' + escHtml((data && data.error) || _tr('workspace_unavailable')) + '</div>';
         return;
     }
     if (_agentWorkspace.activeTab === 'bulletin') body.innerHTML = _renderAgentWorkspaceBulletin(data);
@@ -7885,7 +7890,7 @@ async function _populateAgentWorkspaceModels(data) {
         select.value = current || '';
         select.dataset.loaded = '1';
     } catch (e) {
-        select.innerHTML = '<option value="">Model list unavailable</option>';
+        select.innerHTML = '<option value="">' + escHtml(_tr('model_list_unavailable')) + '</option>';
     }
 }
 
@@ -8087,9 +8092,9 @@ function _initAgentWorkspaceUI() {
             if (editTask) {
                 var task = _findWorkspaceTask(editTask.dataset.awEditTask);
                 if (!task) return;
-                var text = prompt('Task title:', task.text || '');
+    var text = prompt(_tr('task_title_prompt'), task.text || '');
                 if (text == null) return;
-                var detail = prompt('Task details:', task.detail || '');
+    var detail = prompt(_tr('task_details_prompt'), task.detail || '');
                 if (detail == null) return;
                 _agentWorkspacePost('updateTask', { id: task.id, text: text, detail: detail, due: task.due || '', priority: task.priority || 'normal' });
                 return;
@@ -8097,9 +8102,9 @@ function _initAgentWorkspaceUI() {
             if (editNote) {
                 var note = _findWorkspaceNote(editNote.dataset.awEditNote);
                 if (!note) return;
-                var title = prompt('Note title:', note.title || '');
+    var title = prompt(_tr('note_title_prompt'), note.title || '');
                 if (title == null) return;
-                var content = prompt('Note content:', note.content || '');
+    var content = prompt(_tr('note_content_prompt'), note.content || '');
                 if (content == null) return;
                 _agentWorkspacePost('updateNote', { id: note.id, title: title, content: content, folder: note.folder || 'General', kind: note.kind || 'note', tags: note.tags || [] });
                 return;
@@ -8119,7 +8124,7 @@ function _initAgentWorkspaceUI() {
                 });
             }
             if (action === 'deleteFile') {
-                if (confirm('Delete ' + target.dataset.awPath + '?')) _agentWorkspacePost('deleteFile', { path: target.dataset.awPath });
+    if (confirm(_tr('delete_path_confirm', { path: target.dataset.awPath }))) _agentWorkspacePost('deleteFile', { path: target.dataset.awPath });
             }
             if (action === 'closeFile') {
                 if (_agentWorkspace.data) delete _agentWorkspace.data.fileEditor;
@@ -8144,7 +8149,7 @@ function _initAgentWorkspaceUI() {
                 _renderAgentWorkspace();
             }
             if (action === 'deleteAgentSkill') {
-                if (confirm('Delete skill ' + id + '?')) _agentWorkspacePost('deleteAgentSkill', { name: id });
+    if (confirm(_tr('delete_skill_confirm', { name: id }))) _agentWorkspacePost('deleteAgentSkill', { name: id });
             }
             if (action === 'applyLibrarySkill') {
                 _agentWorkspacePost('applyLibrarySkill', { name: id, overwrite: true });
@@ -8288,7 +8293,7 @@ function triggerBubble(type) {
         getBubbleMinState(selectedAgent).thought = false;
         addGlobalLog(`💭 ${selectedAgent.name} thinking: ${text.substring(0, 40)}...`);
     } else {
-        const target = prompt('→ To whom? (leave blank for general)') || '';
+    const target = prompt(_tr('message_target_prompt')) || '';
         selectedAgent.speech = text;
         selectedAgent.speechTarget = target;
         selectedAgent.lastSpeech = text;
@@ -12272,7 +12277,7 @@ function handleEditClick(worldX, worldY, screenX, screenY, event) {
         var newItem = { id: _generateFurnitureId(), type: placingType, x: sx, y: sy };
         // Custom text label — prompt for text on placement
         if (placingType === 'textLabel') {
-            var labelText = prompt('Enter label text:', 'Label');
+    var labelText = prompt(_tr('enter_label_text'), _tr('label_default'));
             if (!labelText) return true; // cancelled
             newItem.text = labelText;
             newItem.labelColor = '#ffffff';
@@ -12490,7 +12495,7 @@ function _updateFloatingToolbarPosition() {
         branchBtn.style.display = isSign ? '' : 'none';
         if (isSign && selItem.branchId) {
             var _bInfo = getBranchById(selItem.branchId);
-            branchBtn.title = 'Branch: ' + _bInfo.name + ' (click to change)';
+            branchBtn.title = _tr('branch_change_title', { name: _bInfo.name });
             branchBtn.textContent = '🏷️✓';
         } else if (isSign) {
             branchBtn.title = (typeof i18n !== 'undefined' ? i18n.t('assign_branch') : 'Assign branch to this sign');
@@ -12669,7 +12674,7 @@ canvas.addEventListener('mousemove', function(e) {
 // --- EDIT MODE TOGGLE (called from toolbar button) ---
 function toggleEditMode() {
     if (window._voLicense && window._voLicense.demo) {
-        alert('Edit Office is a premium feature. Get a license key at myvirtualoffice.ai to unlock.');
+        alert(_tr('premium_edit_office'));
         return;
     }
     editMode = !editMode;
@@ -12840,12 +12845,10 @@ function mmTestHermes() {
     var apiUrl = (document.getElementById('mm-hermes-api-url') || {}).value || '';
     var apiKey = ((document.getElementById('mm-hermes-api-key') || {}).value || '').trim();
     if (!enabled) {
-        statusEl.innerHTML = '<div class="mm-status info">Hermes auto-detect is disabled.</div>';
+        statusEl.innerHTML = '<div class="mm-status info">' + _tr('hermes_disabled') + '</div>';
         return;
     }
-    statusEl.innerHTML = '<div class="mm-status info">Saving and testing Hermes...</div>';
-    var hermesPayload = { enabled: enabled, homePath: homePath || null, binary: binary || null, apiUrl: apiUrl || null, preferApi: true };
-    if (apiKey) hermesPayload.apiKey = apiKey;
+    statusEl.innerHTML = '<div class="mm-status info">' + _tr('testing_hermes') + '</div>';
     fetch('/setup/save', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -12860,14 +12863,12 @@ function mmTestHermes() {
         if (d.ok) {
             var count = (d.agents || []).length;
             var names = (d.agents || []).slice(0, 5).map(function(a){ return (a.emoji || '⚕️') + ' ' + a.name + (a.model ? ' · ' + a.model : ''); }).join('<br>');
-            var api = d.api || {};
-            var apiLine = api.ok ? '<br>Native API: connected' : '<br>Native API: unavailable' + (api.error ? ' — ' + api.error : '');
-            statusEl.innerHTML = '<div class="mm-status ok">✅ Hermes connected — ' + count + ' profile' + (count === 1 ? '' : 's') + ' found' + apiLine + (names ? '<br>' + names : '') + '</div>';
+            statusEl.innerHTML = '<div class="mm-status ok">' + _tr('hermes_connected_profiles', { count: count }) + (names ? '<br>' + names : '') + '</div>';
         } else {
-            statusEl.innerHTML = '<div class="mm-status err">❌ Hermes not reachable: ' + (d.error || 'unknown error') + '</div>';
+            statusEl.innerHTML = '<div class="mm-status err">❌ ' + _tr('hermes_not_reachable') + ': ' + escHtml(d.error || _tr('unknown')) + '</div>';
         }
     }).catch(function(e) {
-        statusEl.innerHTML = '<div class="mm-status err">❌ Hermes test failed: ' + e.message + '</div>';
+        statusEl.innerHTML = '<div class="mm-status err">❌ ' + _tr('hermes_test_failed') + ': ' + escHtml(e.message) + '</div>';
     });
 }
 
@@ -12875,8 +12876,8 @@ function mmTestCdp() {
     var cdpUrl = document.getElementById('mm-cdp-url').value.trim();
     var viewerUrl = document.getElementById('mm-viewer-url').value.trim();
     var statusEl = document.getElementById('mm-cdp-status');
-    if (!cdpUrl) { statusEl.innerHTML = '<div class="mm-status err">Enter a CDP URL first</div>'; return; }
-    statusEl.innerHTML = '<div class="mm-status">Saving & testing...</div>';
+    if (!cdpUrl) { statusEl.innerHTML = '<div class="mm-status err">' + _tr('enter_cdp_first') + '</div>'; return; }
+    statusEl.innerHTML = '<div class="mm-status">' + _tr('saving_testing') + '</div>';
     // Save first, then test
     fetch('/setup/save', {
         method: 'POST',
@@ -12891,15 +12892,15 @@ function mmTestCdp() {
         if (status.cdpAvailable) {
             fetch('/browser-tabs').then(function(r) { return r.json(); }).then(function(tabs) {
                 var count = Array.isArray(tabs) ? tabs.length : 0;
-                statusEl.innerHTML = '<div class="mm-status ok">\u2705 CDP connected! ' + count + ' tab(s) open</div>';
+                statusEl.innerHTML = '<div class="mm-status ok">' + _tr('cdp_connected_tabs', { count: count }) + '</div>';
             }).catch(function() {
-                statusEl.innerHTML = '<div class="mm-status ok">\u2705 CDP reachable</div>';
+                statusEl.innerHTML = '<div class="mm-status ok">' + _tr('cdp_reachable') + '</div>';
             });
         } else {
-            statusEl.innerHTML = '<div class="mm-status err">\u274c CDP not reachable. Check the URL and make sure the browser container is running.</div>';
+            statusEl.innerHTML = '<div class="mm-status err">\u274c ' + _tr('cdp_check_hint') + '</div>';
         }
     }).catch(function(e) {
-        statusEl.innerHTML = '<div class="mm-status err">\u274c Error: ' + e.message + '</div>';
+        statusEl.innerHTML = '<div class="mm-status err">\u274c ' + _tr('error') + ': ' + escHtml(e.message) + '</div>';
     });
 }
 
@@ -12907,8 +12908,8 @@ function mmTestViewer() {
     var cdpUrl = document.getElementById('mm-cdp-url').value.trim();
     var viewerUrl = document.getElementById('mm-viewer-url').value.trim();
     var statusEl = document.getElementById('mm-viewer-status');
-    if (!viewerUrl) { statusEl.innerHTML = '<div class="mm-status err">Enter a Viewer URL first</div>'; return; }
-    statusEl.innerHTML = '<div class="mm-status">Saving & testing...</div>';
+    if (!viewerUrl) { statusEl.innerHTML = '<div class="mm-status err">' + _tr('enter_viewer_first') + '</div>'; return; }
+    statusEl.innerHTML = '<div class="mm-status">' + _tr('saving_testing') + '</div>';
     // Save first, then test
     fetch('/setup/save', {
         method: 'POST',
@@ -12920,17 +12921,17 @@ function mmTestViewer() {
     }).then(function() {
         return fetch(viewerUrl.replace(/\/$/, ''), { mode: 'no-cors', cache: 'no-store' });
     }).then(function() {
-        statusEl.innerHTML = '<div class="mm-status ok">\u2705 Viewer reachable. Open the browser panel to see the live view.</div>';
+            statusEl.innerHTML = '<div class="mm-status ok">' + _tr('viewer_reachable') + '</div>';
     }).catch(function(e) {
-        statusEl.innerHTML = '<div class="mm-status err">\u274c Viewer not reachable from your browser. Make sure the URL is accessible from this device. Error: ' + e.message + '</div>';
+            statusEl.innerHTML = '<div class="mm-status err">\u274c ' + _tr('viewer_not_reachable') + ': ' + escHtml(e.message) + '</div>';
     });
 }
 
 function mmTestPcMetrics() {
     var url = document.getElementById('mm-pcmetrics-url').value.trim();
     var statusEl = document.getElementById('mm-pcmetrics-status');
-    if (!url) { statusEl.innerHTML = '<div class="mm-status err">Enter a Metrics Server URL</div>'; return; }
-    statusEl.innerHTML = '<div class="mm-status info">Saving and testing...</div>';
+    if (!url) { statusEl.innerHTML = '<div class="mm-status err">' + _tr('enter_metrics_url') + '</div>'; return; }
+    statusEl.innerHTML = '<div class="mm-status info">' + _tr('saving_testing') + '</div>';
     fetch('/setup/save', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -12944,9 +12945,9 @@ function mmTestPcMetrics() {
             var info = 'CPU: ' + (data.cpu.percent||0).toFixed(0) + '% (' + (data.cpu.threads||'?') + ' threads)';
             info += ' · RAM: ' + (data.memory.percent||0).toFixed(0) + '%';
             if (data.gpus && data.gpus.length > 0) info += ' · GPU: ' + data.gpus[0].name;
-            statusEl.innerHTML = '<div class="mm-status ok">✅ Connected!<br>' + info + '</div>';
+            statusEl.innerHTML = '<div class="mm-status ok">' + _tr('connected_label') + '<br>' + info + '</div>';
         } else {
-            statusEl.innerHTML = '<div class="mm-status err">❌ Unexpected response format</div>';
+            statusEl.innerHTML = '<div class="mm-status err">❌ ' + _tr('unexpected_response_format') + '</div>';
         }
     }).catch(function(e) {
         statusEl.innerHTML = '<div class="mm-status err">❌ ' + e.message + '</div>';
@@ -12955,7 +12956,7 @@ function mmTestPcMetrics() {
 
 function mmTestConnection() {
     var statusEl = document.getElementById('mm-conn-status');
-    statusEl.innerHTML = '<div class="mm-status info">Testing...</div>';
+    statusEl.innerHTML = '<div class="mm-status info">' + _tr('testing') + '</div>';
     // Save current settings first so the server tests with the new values
     var gwUrl = document.getElementById('mm-gateway-url').value;
     var ocPath = document.getElementById('mm-oc-path').value;
@@ -12992,7 +12993,7 @@ function mmTestConnection() {
             statusEl.innerHTML = '<div class="mm-status ' + (allOk ? 'ok' : 'err') + '">' + lines.join('<br>') + '</div>';
         });
     }).catch(function(e) {
-        statusEl.innerHTML = '<div class="mm-status err">❌ Failed: ' + e.message + '</div>';
+        statusEl.innerHTML = '<div class="mm-status err">❌ ' + _tr('failed') + escHtml(e.message) + '</div>';
     });
 }
 
@@ -13126,7 +13127,7 @@ function mmImportConfig() {
                     _acpShowToast('❌ Invalid config file');
                     return;
                 }
-                if (!confirm('Import this config? This will replace your current office layout.')) return;
+    if (!confirm(_tr('import_config_confirm'))) return;
                 // Merge imported config
                 if (imported.canvasWidth) { W = imported.canvasWidth; officeConfig.canvasWidth = W; }
                 if (imported.canvasHeight) { H = imported.canvasHeight; officeConfig.canvasHeight = H; }
@@ -13152,9 +13153,9 @@ function mmImportConfig() {
 }
 
 function mmFullReset() {
-    if (!confirm('⚠️ FULL RESET\n\nThis will delete ALL your office customizations:\n• Furniture layout\n• Agent appearances\n• Branch definitions\n• Wall configurations\n\nAre you sure?')) return;
-    if (!confirm('This cannot be undone. Type "RESET" in the next prompt to confirm.')) return;
-    var input = prompt('Type RESET to confirm:');
+    if (!confirm('⚠️ ' + _tr('full_reset_confirm'))) return;
+    if (!confirm(_tr('reset_type_confirm'))) return;
+    var input = prompt(_tr('type_reset'));
     if (input !== 'RESET') { _acpShowToast('Reset cancelled'); return; }
 
     // Clear everything
@@ -13171,7 +13172,7 @@ function mmFullReset() {
 
 function toggleAgentPanel() {
     if (window._voLicense && window._voLicense.demo) {
-        alert('Agent Editor is a premium feature. Get a license key at myvirtualoffice.ai to unlock.');
+        alert(_tr('premium_agent_editor'));
         return;
     }
     if (!_agentPanel) _buildAgentPanel();
@@ -13292,7 +13293,7 @@ function _acpBuildEditor(agent) {
     previewInfo.innerHTML =
         '<div class="agent-preview-name" id="acp-preview-name">' + es.name + '</div>' +
         '<div class="agent-preview-role" id="acp-preview-role">' + es.role + '</div>' +
-        '<div class="agent-preview-role" id="acp-preview-branch">Branch: ' + getBranchDisplayName(es.branch) + '</div>' +
+        '<div class="agent-preview-role" id="acp-preview-branch">' + _tr('branch_field') + ': ' + getBranchDisplayName(es.branch) + '</div>' +
         '<div class="agent-preview-emoji" id="acp-preview-emoji">' + es.emoji + '</div>';
     previewWrap.appendChild(previewInfo);
     col.appendChild(previewWrap);
@@ -13301,7 +13302,7 @@ function _acpBuildEditor(agent) {
     var editBar = document.createElement('div');
     editBar.style.cssText = 'display:flex;gap:6px;padding:4px 8px;justify-content:center;';
     var agentSaveBtn = document.createElement('button');
-    agentSaveBtn.textContent = '💾 Save';
+    agentSaveBtn.textContent = _tr('save_btn');
     agentSaveBtn.id = 'acp-save-btn';
     agentSaveBtn.style.cssText = 'padding:4px 12px;background:#1b5e20;color:#66bb6a;border:1px solid #66bb6a;border-radius:4px;cursor:pointer;font-size:11px;';
     agentSaveBtn.addEventListener('click', function() {
@@ -13310,7 +13311,7 @@ function _acpBuildEditor(agent) {
         _acpShowToast('💾 Agent saved!');
     });
     var agentUndoBtn = document.createElement('button');
-    agentUndoBtn.textContent = '↩️ Undo';
+    agentUndoBtn.textContent = _tr('undo');
     agentUndoBtn.id = 'acp-undo-btn';
     agentUndoBtn.style.cssText = 'padding:4px 12px;background:#b71c1c;color:#ef5350;border:1px solid #ef5350;border-radius:4px;cursor:pointer;font-size:11px;';
     agentUndoBtn.addEventListener('click', function() {
@@ -13348,80 +13349,80 @@ function _acpBuildEditor(agent) {
     }
 
     // --- Identity ---
-    var idSec = makeSection('Identity');
-    idSec.appendChild(makeField('Name', _acpText(es.name, function(v){ es.name=v; _acpUpdatePreviewInfo(); _acpAutoSave(); })));
-    idSec.appendChild(makeField('Role', _acpText(es.role, function(v){ es.role=v; _acpUpdatePreviewInfo(); _acpAutoSave(); })));
-    idSec.appendChild(makeField('Emoji', _acpText(es.emoji, function(v){ es.emoji=v; _acpUpdatePreviewInfo(); _acpAutoSave(); })));
-    idSec.appendChild(makeField('Gender', _acpToggle(['M','F'], es.gender, function(v){
+    var idSec = makeSection(_tr('agent_identity'));
+    idSec.appendChild(makeField(_tr('agent_name'), _acpText(es.name, function(v){ es.name=v; _acpUpdatePreviewInfo(); _acpAutoSave(); })));
+    idSec.appendChild(makeField(_tr('agent_role'), _acpText(es.role, function(v){ es.role=v; _acpUpdatePreviewInfo(); _acpAutoSave(); })));
+    idSec.appendChild(makeField(_tr('agent_emoji'), _acpText(es.emoji, function(v){ es.emoji=v; _acpUpdatePreviewInfo(); _acpAutoSave(); })));
+    idSec.appendChild(makeField(_tr('agent_gender'), _acpToggle(['M','F'], es.gender, function(v){
         es.gender=v; _acpAutoSave(); _acpBuildEditor(agent);
     })));
     sectionsWrap.appendChild(idSec);
 
     // --- Colors ---
-    var clrSec = makeSection('Colors');
-    clrSec.appendChild(makeField('Shirt', _acpColor(es.color, function(v){ es.color=v; _acpAutoSave(); })));
+    var clrSec = makeSection(_tr('agent_colors'));
+    clrSec.appendChild(makeField(_tr('agent_shirt'), _acpColor(es.color, function(v){ es.color=v; _acpAutoSave(); })));
     var skinPresets = ['#fddcb5','#ffcc80','#e8b88a','#d4a574','#c68642','#8d5524'];
-    clrSec.appendChild(makeField('Skin', _acpSwatchRow(skinPresets, es.appearance.skinTone, function(v){ es.appearance.skinTone=v; _acpAutoSave(); }, true)));
+    clrSec.appendChild(makeField(_tr('agent_skin'), _acpSwatchRow(skinPresets, es.appearance.skinTone, function(v){ es.appearance.skinTone=v; _acpAutoSave(); }, true)));
     sectionsWrap.appendChild(clrSec);
 
     // --- Hair ---
-    var hairSec = makeSection('Hair');
+    var hairSec = makeSection(_tr('agent_hair'));
     var hairStyles = ['bald','buzz','short','medium','long','curly','wavy','spiky','bun','ponytail','mohawk'];
-    hairSec.appendChild(makeField('Style', _acpGridSelect(hairStyles, es.appearance.hairStyle, function(v){ es.appearance.hairStyle=v; _acpAutoSave(); })));
+    hairSec.appendChild(makeField(_tr('agent_style'), _acpGridSelect(hairStyles, es.appearance.hairStyle, function(v){ es.appearance.hairStyle=v; _acpAutoSave(); })));
     var hairColorPresets = ['#1a1a1a','#3e2723','#5d4037','#8d6e63','#dcc282','#bf360c','#616161','#e0e0e0'];
-    hairSec.appendChild(makeField('Color', _acpSwatchRow(hairColorPresets, es.appearance.hairColor, function(v){ es.appearance.hairColor=v; _acpAutoSave(); }, true)));
-    hairSec.appendChild(makeField('Highlight', _acpColorNullable(es.appearance.hairHighlight, function(v){ es.appearance.hairHighlight=v; _acpAutoSave(); })));
+    hairSec.appendChild(makeField(_tr('color_field'), _acpSwatchRow(hairColorPresets, es.appearance.hairColor, function(v){ es.appearance.hairColor=v; _acpAutoSave(); }, true)));
+    hairSec.appendChild(makeField(_tr('agent_highlight'), _acpColorNullable(es.appearance.hairHighlight, function(v){ es.appearance.hairHighlight=v; _acpAutoSave(); })));
     sectionsWrap.appendChild(hairSec);
 
     // --- Face ---
-    var faceSec = makeSection('Face');
+    var faceSec = makeSection(_tr('agent_face'));
     var ebStyles = ['thin','thick','angular','arched'];
-    faceSec.appendChild(makeField('Eyebrows', _acpGridSelect(ebStyles, es.appearance.eyebrowStyle, function(v){ es.appearance.eyebrowStyle=v; _acpAutoSave(); })));
+    faceSec.appendChild(makeField(_tr('agent_eyebrows'), _acpGridSelect(ebStyles, es.appearance.eyebrowStyle, function(v){ es.appearance.eyebrowStyle=v; _acpAutoSave(); })));
     var eyePresets = ['#212121','#1565c0','#2e7d32','#5d4037','#6a1b9a','#37474f'];
-    faceSec.appendChild(makeField('Eye Color', _acpSwatchRow(eyePresets, es.appearance.eyeColor, function(v){ es.appearance.eyeColor=v; _acpAutoSave(); }, true)));
+    faceSec.appendChild(makeField(_tr('agent_eye_color'), _acpSwatchRow(eyePresets, es.appearance.eyeColor, function(v){ es.appearance.eyeColor=v; _acpAutoSave(); }, true)));
     if (es.gender === 'M') {
         var fhStyles = ['none','stubble','beard','goatee','mustache'];
-        faceSec.appendChild(makeField('Facial Hair', _acpGridSelect(fhStyles, es.appearance.facialHair || 'none', function(v){ es.appearance.facialHair=v==='none'?null:v; _acpAutoSave(); })));
-        faceSec.appendChild(makeField('Beard Color', _acpColorNullable(es.appearance.facialHairColor, function(v){ es.appearance.facialHairColor=v; _acpAutoSave(); })));
+        faceSec.appendChild(makeField(_tr('agent_facial_hair'), _acpGridSelect(fhStyles, es.appearance.facialHair || 'none', function(v){ es.appearance.facialHair=v==='none'?null:v; _acpAutoSave(); })));
+        faceSec.appendChild(makeField(_tr('agent_beard_color'), _acpColorNullable(es.appearance.facialHairColor, function(v){ es.appearance.facialHairColor=v; _acpAutoSave(); })));
     }
     sectionsWrap.appendChild(faceSec);
 
     // --- Costumes ---
-    var costSec = makeSection('Costumes');
+    var costSec = makeSection(_tr('agent_costumes'));
     var costumeTypes = ['none','lobster','chicken'];
-    costSec.appendChild(makeField('Costume', _acpGridSelect(costumeTypes, es.appearance.costume||'none', function(v){ es.appearance.costume=v==='none'?null:v; if(v!=='none') { es.appearance.headwear=null; } _costumeCache={}; _acpAutoSave(); })));
+    costSec.appendChild(makeField(_tr('agent_costume'), _acpGridSelect(costumeTypes, es.appearance.costume||'none', function(v){ es.appearance.costume=v==='none'?null:v; if(v!=='none') { es.appearance.headwear=null; } _costumeCache={}; _acpAutoSave(); })));
     var costumeNote = document.createElement('div');
     costumeNote.style.cssText = 'font-size:10px;color:#888;margin-top:4px;padding:0 2px;';
-    costumeNote.textContent = 'Costumes replace headwear. 🦞 Lobster  🐔 Chicken';
+    costumeNote.textContent = _tr('costume_note') + ' 🦞 ' + _tr('option_lobster') + '  🐔 ' + _tr('option_chicken');
     costSec.appendChild(costumeNote);
     sectionsWrap.appendChild(costSec);
 
     // --- Accessories ---
-    var accSec = makeSection('Accessories');
+    var accSec = makeSection(_tr('agent_accessories'));
     var hwTypes = ['none','hardhat','cap','crown','tiara','headband','goggles','headset','beanie'];
-    accSec.appendChild(makeField('Headwear', _acpGridSelect(hwTypes, es.appearance.headwear||'none', function(v){ es.appearance.headwear=v==='none'?null:v; _acpAutoSave(); })));
-    accSec.appendChild(makeField('Hat Color', _acpColor(es.appearance.headwearColor||'#888888', function(v){ es.appearance.headwearColor=v; _acpAutoSave(); })));
+    accSec.appendChild(makeField(_tr('agent_headwear'), _acpGridSelect(hwTypes, es.appearance.headwear||'none', function(v){ es.appearance.headwear=v==='none'?null:v; _acpAutoSave(); })));
+    accSec.appendChild(makeField(_tr('agent_hat_color'), _acpColor(es.appearance.headwearColor||'#888888', function(v){ es.appearance.headwearColor=v; _acpAutoSave(); })));
     var glTypes = ['none','round','square','sunglasses'];
-    accSec.appendChild(makeField('Glasses', _acpGridSelect(glTypes, es.appearance.glasses||'none', function(v){ es.appearance.glasses=v==='none'?null:v; _acpAutoSave(); })));
-    accSec.appendChild(makeField('Lens Color', _acpColor(es.appearance.glassesColor||'#333333', function(v){ es.appearance.glassesColor=v; _acpAutoSave(); })));
+    accSec.appendChild(makeField(_tr('agent_glasses'), _acpGridSelect(glTypes, es.appearance.glasses||'none', function(v){ es.appearance.glasses=v==='none'?null:v; _acpAutoSave(); })));
+    accSec.appendChild(makeField(_tr('agent_lens_color'), _acpColor(es.appearance.glassesColor||'#333333', function(v){ es.appearance.glassesColor=v; _acpAutoSave(); })));
     sectionsWrap.appendChild(accSec);
 
     // --- Items ---
-    var itemSec = makeSection('Items');
+    var itemSec = makeSection(_tr('agent_items'));
     var heldItems = ['none','tablet','wrench','coffee','clipboard','pen','hammer','testTube','book'];
-    itemSec.appendChild(makeField('Held Item', _acpGridSelect(heldItems, es.appearance.heldItem||'none', function(v){ es.appearance.heldItem=v==='none'?null:v; _acpAutoSave(); })));
+    itemSec.appendChild(makeField(_tr('agent_held_item'), _acpGridSelect(heldItems, es.appearance.heldItem||'none', function(v){ es.appearance.heldItem=v==='none'?null:v; _acpAutoSave(); })));
     var deskItems = ['none','anvil','trophy','calendar','envelope','money','ruler','marker','chart','plans','checklist','microscope','shield','phone','files'];
-    itemSec.appendChild(makeField('Desk Item', _acpGridSelect(deskItems, es.appearance.deskItem||'none', function(v){ es.appearance.deskItem=v==='none'?null:v; _acpAutoSave(); })));
+    itemSec.appendChild(makeField(_tr('agent_desk_item'), _acpGridSelect(deskItems, es.appearance.deskItem||'none', function(v){ es.appearance.deskItem=v==='none'?null:v; _acpAutoSave(); })));
     sectionsWrap.appendChild(itemSec);
 
     // --- Assignment ---
-    var asnSec = makeSection('Assignment');
+    var asnSec = makeSection(_tr('agent_assignment'));
     var branchSelect = document.createElement('select');
     branchSelect.style.cssText = 'width:100%;padding:4px 6px;background:#2a2a4e;color:#ccc;border:1px solid #3a3a5e;border-radius:4px;font-size:12px;margin-top:4px;';
     getBranchList().forEach(function(branch) {
         var opt = document.createElement('option');
         opt.value = branch.id;
-        opt.textContent = branch.emoji + ' ' + branch.name;
+        opt.textContent = branch.emoji + ' ' + getBranchDisplayName(branch.id);
         branchSelect.appendChild(opt);
     });
     branchSelect.value = es.branch || 'UNASSIGNED';
@@ -13430,18 +13431,18 @@ function _acpBuildEditor(agent) {
         _acpUpdatePreviewInfo();
         _acpAutoSave();
     });
-    asnSec.appendChild(makeField('Branch', branchSelect));
+    asnSec.appendChild(makeField(_tr('branch_field'), branchSelect));
     var ocSelect = document.createElement('select');
     ocSelect.style.cssText = 'width:100%;padding:4px 6px;background:#2a2a4e;color:#ccc;border:1px solid #3a3a5e;border-radius:4px;font-size:12px;margin-top:4px;';
     // Default option
     var defOpt = document.createElement('option');
     defOpt.value = '';
-    defOpt.textContent = '— None —';
+    defOpt.textContent = _tr('none');
     ocSelect.appendChild(defOpt);
     // Loading placeholder
     var loadOpt = document.createElement('option');
     loadOpt.value = '_loading';
-    loadOpt.textContent = 'Loading agents...';
+    loadOpt.textContent = _tr('loading_agents');
     loadOpt.disabled = true;
     ocSelect.appendChild(loadOpt);
     ocSelect.value = es.statusKey || '';
@@ -13458,14 +13459,14 @@ function _acpBuildEditor(agent) {
             var opt = document.createElement('option');
             opt.value = oc.key;
             var label = (oc.emoji || '') + ' ' + oc.name + ' (' + oc.agentId + ')';
-            if (assignedIds[oc.key]) label += ' — assigned to ' + assignedIds[oc.key];
+            if (assignedIds[oc.key]) label += ' — ' + _tr('assigned_to_agent', { name: assignedIds[oc.key] });
             opt.textContent = label;
             if (assignedIds[oc.key]) { opt.style.color = '#666'; }
             ocSelect.appendChild(opt);
         });
         ocSelect.value = es.statusKey || '';
     }).catch(function() {
-        if (loadOpt.parentNode) { loadOpt.textContent = 'Failed to load'; }
+            if (loadOpt.parentNode) { loadOpt.textContent = _tr('failed_to_load'); }
     });
     ocSelect.addEventListener('change', function() {
         es.statusKey = ocSelect.value;
@@ -13473,7 +13474,7 @@ function _acpBuildEditor(agent) {
         agent.statusKey = ocSelect.value;
         _acpAutoSave();
     });
-    asnSec.appendChild(makeField('OpenClaw Agent', ocSelect));
+    asnSec.appendChild(makeField(_tr('openclaw_agent'), ocSelect));
     sectionsWrap.appendChild(asnSec);
 
     col.appendChild(sectionsWrap);
@@ -13483,7 +13484,7 @@ function _acpBuildEditor(agent) {
         var delWrap = document.createElement('div');
         delWrap.className = 'agent-delete-wrap';
         var delBtn = document.createElement('button');
-        delBtn.innerHTML = '🗑️ Delete Agent';
+    delBtn.innerHTML = _tr('delete_agent');
         delBtn.className = 'agent-delete-btn';
         delBtn.onclick = function() { _acpDeleteAgent(agent.id); };
         delWrap.appendChild(delBtn);
@@ -13546,7 +13547,7 @@ function _acpToggle(options, value, onChange) {
     wrap.style.cssText = 'display:flex;gap:4px';
     options.forEach(function(opt) {
         var btn = document.createElement('button');
-        btn.textContent = opt;
+        btn.textContent = (opt === 'M' || opt === 'F') ? opt : _tr('option_' + opt);
         var active = opt === value;
         btn.style.cssText = 'padding:3px 10px;border:1px solid ' + (active ? '#ffd600' : '#2a2a4e') + ';background:' + (active ? '#3a3a10' : '#1a1a3e') + ';color:' + (active ? '#ffd600' : '#aaa') + ';cursor:pointer;font-size:11px;border-radius:2px';
         btn.onclick = function(){
@@ -13579,7 +13580,7 @@ function _acpSwatchRow(presets, value, onChange, allowCustom) {
         var inp = document.createElement('input');
         inp.type = 'color';
         inp.value = value || '#888888';
-        inp.title = 'Custom color';
+            inp.title = _tr('custom_color');
         inp.style.cssText = 'width:22px;height:22px;border:1px solid #444;background:none;cursor:pointer;padding:1px';
         inp.oninput = function(){
             wrap.querySelectorAll('.swatch').forEach(function(s){ s.classList.remove('selected'); });
@@ -13595,7 +13596,7 @@ function _acpGridSelect(options, value, onChange) {
     wrap.style.cssText = 'display:flex;flex-wrap:wrap;gap:3px';
     options.forEach(function(opt) {
         var btn = document.createElement('button');
-        btn.textContent = opt;
+        btn.textContent = _tr('option_' + opt);
         btn.className = 'option-btn' + (opt === (value || 'none') ? ' selected' : '');
         btn.onclick = function(){
             wrap.querySelectorAll('.option-btn').forEach(function(b){ b.classList.remove('selected'); });
@@ -13616,7 +13617,7 @@ function _acpUpdatePreviewInfo() {
     var emojiEl = document.getElementById('acp-preview-emoji');
     if (nameEl) nameEl.textContent = es.name;
     if (roleEl) roleEl.textContent = es.role;
-    if (branchEl) branchEl.textContent = 'Branch: ' + getBranchDisplayName(es.branch);
+    if (branchEl) branchEl.textContent = _tr('branch_field') + ': ' + getBranchDisplayName(es.branch);
     if (emojiEl) emojiEl.textContent = es.emoji;
     _acpUpdatePreview();
 }
@@ -14006,31 +14007,38 @@ function _acpCreateNewAgent() {
     fetch('/api/agent-platforms').then(function(res) {
         return res.json();
     }).catch(function() {
-        return { platforms: [{ id: 'openclaw', label: 'OpenClaw', available: true }] };
+        return { platforms: [{ id: 'openclaw', label: 'OpenClaw', available: true, create: true }] };
     }).then(function(platformData) {
         var platforms = (platformData.platforms || []).filter(function(p){ return p.available && p.create; });
         if (!platforms.length) {
-            alert('No agent platforms are available.');
+        alert(_tr('no_agent_platforms'));
             return null;
         }
-        return _acpShowCreateAgentDialog(platforms);
-    }).then(function(form) {
-        if (!form) return null;
-        var selectedPlatform = form.selectedPlatform;
-        var agentName = form.agentName;
-        var agentRole = form.agentRole;
-        var agentEmoji = form.agentEmoji;
-        var agentPrompt = form.agentPrompt;
-        var createPayload = { platform: selectedPlatform.id, name: agentName, role: agentRole, emoji: agentEmoji, prompt: agentPrompt };
-        if (selectedPlatform.id === 'codex') {
-            createPayload.codexCreationMode = form.codexCreationMode || 'standard';
-            createPayload.codexCustomDirectory = form.codexCustomDirectory || '';
-        } else if (selectedPlatform.id === 'claude-code') {
-            createPayload.claudeCodeCreationMode = form.codexCreationMode || 'standard';
-            createPayload.claudeCodeCustomDirectory = form.codexCustomDirectory || '';
-        }
+        var platformPrompt = _tr('agent_platform_prompt') + '\n' + platforms.map(function(p, i){
+            return (i + 1) + '. ' + p.label;
+        }).join('\n');
+        var platformChoice = prompt(platformPrompt, platforms[0].label);
+        if (platformChoice === null) return null;
+        platformChoice = platformChoice.trim().toLowerCase();
+        var selectedPlatform = platforms.find(function(p, i){
+            return platformChoice === p.id.toLowerCase() ||
+                   platformChoice === p.label.toLowerCase() ||
+                   platformChoice === String(i + 1);
+        }) || platforms[0];
 
-        _acpShowToast('Creating agent in ' + selectedPlatform.label + '...');
+    var agentName = prompt(_tr('agent_name_prompt'), _tr('new_agent_default'));
+        if (!agentName || !agentName.trim()) return null;
+        agentName = agentName.trim();
+
+    var agentRole = prompt(_tr('agent_role_prompt'), selectedPlatform.id === 'hermes' ? 'Hermes Agent' : _tr('ai_assistant'));
+        if (agentRole === null) return null;
+        agentRole = agentRole.trim() || (selectedPlatform.id === 'hermes' ? 'Hermes Agent' : _tr('ai_assistant'));
+
+    var agentEmoji = prompt(_tr('emoji_prompt'), selectedPlatform.id === 'hermes' ? '⚕️' : '🤖');
+        if (agentEmoji === null) return null;
+        agentEmoji = agentEmoji.trim() || (selectedPlatform.id === 'hermes' ? '⚕️' : '🤖');
+
+        _acpShowToast(_tr('creating_agent_platform', { platform: selectedPlatform.label }));
         return fetch('/api/agent/create', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -14042,7 +14050,7 @@ function _acpCreateNewAgent() {
         if (!result) return;
         var data = result.data;
         if (data.error) {
-            alert('Failed to create agent: ' + data.error);
+        alert(_tr('failed_create_agent') + ': ' + data.error);
             return;
         }
         var newId = data.agentId;
@@ -14079,9 +14087,9 @@ function _acpCreateNewAgent() {
         saveOfficeConfig();
         _acpRefreshList();
         _acpSelectAgent(newId);
-        _acpShowToast('✅ Agent "' + result.name + '" created in ' + result.platform.label + '!');
+        _acpShowToast('✅ ' + _tr('agent_created_platform', { name: result.name, platform: result.platform.label }));
     }).catch(function(e) {
-        alert('Error creating agent: ' + e.message);
+        alert(_tr('error_create_agent') + ': ' + e.message);
     });
 }
 
@@ -14091,7 +14099,7 @@ function _acpDeleteAgent(agentId) {
     if (agentCfg) agentName = agentCfg.name || agentId;
 
     var providerKind = (agentCfg && agentCfg.providerKind) || (agentId.indexOf('hermes-') === 0 ? 'Hermes' : (agentId.indexOf('codex-') === 0 ? 'Codex' : 'OpenClaw'));
-    if (!confirm('Delete agent "' + agentName + '"?\n\nThis will permanently remove the agent from ' + providerKind + ', including its workspace/profile files, memory, and session history.\n\nThis cannot be undone.')) return;
+    if (!confirm(_tr('delete_agent_confirm', { name: agentName, provider: providerKind }))) return;
 
     // Call server to delete from the backing agent platform.
     fetch('/api/agent/delete', {
@@ -14100,7 +14108,7 @@ function _acpDeleteAgent(agentId) {
         body: JSON.stringify({ id: agentId })
     }).then(function(res) { return res.json(); }).then(function(data) {
         if (data.error) {
-            alert('Failed to delete agent: ' + data.error);
+        alert(_tr('failed_delete_agent') + ': ' + data.error);
             return;
         }
 
@@ -14121,12 +14129,12 @@ function _acpDeleteAgent(agentId) {
             _acpSelectAgent(agents[0].id);
         } else {
             var col = document.getElementById('acp-editor-col');
-            if (col) col.innerHTML = '<div style="padding:20px;color:#666;font-size:11px">No agents. Click ➕ New Agent to create one.</div>';
+        if (col) col.innerHTML = '<div style="padding:20px;color:#666;font-size:11px">' + escHtml(_tr('no_agents_create')) + '</div>';
         }
 
-        _acpShowToast('🗑️ Agent "' + agentName + '" deleted');
+        _acpShowToast('🗑️ ' + _tr('agent_deleted', { name: agentName }));
     }).catch(function(e) {
-        alert('Error deleting agent: ' + e.message);
+        alert(_tr('error_delete_agent') + ': ' + e.message);
     });
 }
 
@@ -14327,6 +14335,31 @@ document.addEventListener('keydown', function(e) {
     }
 });
 
+window.addEventListener('i18n:changed', function() {
+    if (_catalogPanel) {
+        _catalogPanel.remove();
+        _catalogPanel = null;
+        if (editMode) _showCatalogPanel();
+    }
+    if (_colorPickerEl) {
+        _colorPickerEl.remove();
+        _colorPickerEl = null;
+        _colorPickerTarget = null;
+    }
+    if (_agentPanel) {
+        var wasAgentPanelOpen = _agentPanel.classList.contains('visible');
+        _agentPanel.remove();
+        _agentPanel = null;
+        if (wasAgentPanelOpen) toggleAgentPanel();
+    }
+    if (typeof _mtgRender === 'function' && !document.getElementById('meetingsModal').classList.contains('hidden')) {
+        _mtgRender();
+    }
+    if (typeof renderSkillCards === 'function' && !document.getElementById('skillsLibraryModal').classList.contains('hidden')) {
+        renderSkillCards();
+    }
+});
+
 // ─── CATALOG PANEL ────────────────────────────────────────────
 
 function _createCatalogPanel() {
@@ -14340,11 +14373,11 @@ function _createCatalogPanel() {
     var header = document.createElement('div');
     header.className = 'catalog-header';
     var titleSpan = document.createElement('span');
-    titleSpan.textContent = '🪑 FURNITURE';
+    titleSpan.textContent = _tr('furniture');
     var closeBtn = document.createElement('button');
     closeBtn.className = 'catalog-close-btn';
     closeBtn.textContent = '✕';
-    closeBtn.title = 'Close panel';
+    closeBtn.title = _tr('close_panel');
     closeBtn.addEventListener('click', function(e) { e.stopPropagation(); toggleEditMode(); });
     header.appendChild(titleSpan);
     header.appendChild(closeBtn);
@@ -14364,7 +14397,7 @@ function _createCatalogPanel() {
         arrow.className = 'cat-arrow';
         arrow.textContent = '▼';
         catHeader.appendChild(arrow);
-        catHeader.appendChild(document.createTextNode(' ' + cat.name));
+        catHeader.appendChild(document.createTextNode(' ' + _tr(cat.key)));
         catHeader.addEventListener('click', function() {
             var itemsDiv = section.querySelector('.catalog-items');
             var collapsed = itemsDiv.style.display === 'none';
@@ -14387,7 +14420,7 @@ function _createCatalogPanel() {
 
             var labelSpan = document.createElement('span');
             labelSpan.className = 'catalog-label';
-            labelSpan.textContent = item.label;
+            labelSpan.textContent = _tr(item.key);
 
             btn.appendChild(iconSpan);
             btn.appendChild(labelSpan);
@@ -14406,7 +14439,7 @@ function _createCatalogPanel() {
     snapSection.className = 'catalog-snap-section';
     var snapLabel = document.createElement('div');
     snapLabel.className = 'catalog-cat-header';
-    snapLabel.textContent = '📍 SNAP ZONE';
+    snapLabel.textContent = _tr('snap_zone');
     snapSection.appendChild(snapLabel);
     var snapSelect = document.createElement('select');
     snapSelect.id = 'snap-zone-select';
@@ -14414,7 +14447,7 @@ function _createCatalogPanel() {
     for (var _zKey in SNAP_ZONES) {
         var opt = document.createElement('option');
         opt.value = _zKey;
-        opt.textContent = SNAP_ZONES[_zKey].label;
+        opt.textContent = _tr(SNAP_ZONES[_zKey].key);
         if (_zKey === activeSnapZone) opt.selected = true;
         snapSelect.appendChild(opt);
     }
@@ -14428,12 +14461,12 @@ function _createCatalogPanel() {
     var floorBtn = document.createElement('button');
     floorBtn.id = 'floor-edit-btn';
     floorBtn.style.cssText = 'width:100%;padding:6px 8px;background:#2a2a4e;color:#ccc;border:1px solid #3a3a5e;border-radius:4px;cursor:pointer;font-size:7px;font-family:"Press Start 2P",cursive;';
-    floorBtn.textContent = '🎨 Edit Floor Tiles';
+    floorBtn.textContent = _tr('edit_floor_tiles');
     floorBtn.addEventListener('click', function() {
         _floorEditMode = !_floorEditMode;
         floorBtn.style.borderColor = _floorEditMode ? '#ffd700' : '#3a3a5e';
         floorBtn.style.color = _floorEditMode ? '#ffd700' : '#ccc';
-        floorBtn.textContent = _floorEditMode ? '✅ Done Floor Edit' : '🎨 Edit Floor Tiles';
+        floorBtn.textContent = _floorEditMode ? _tr('done_floor_edit') : _tr('edit_floor_tiles');
     });
     floorSection.appendChild(floorBtn);
     panel.appendChild(floorSection);
@@ -14443,7 +14476,7 @@ function _createCatalogPanel() {
     petSection.className = 'catalog-snap-section';
     var petHeader = document.createElement('div');
     petHeader.className = 'catalog-cat-header';
-    petHeader.textContent = '🐾 Office Pet';
+    petHeader.textContent = _tr('office_pet');
     petSection.appendChild(petHeader);
 
     var petCfg = officeConfig.pet || { enabled: false, species: 'cat', name: '' };
@@ -14457,7 +14490,7 @@ function _createCatalogPanel() {
     petCheck.id = 'pet-enable-check';
     var petCheckLabel = document.createElement('label');
     petCheckLabel.htmlFor = 'pet-enable-check';
-    petCheckLabel.textContent = 'Enable pet';
+    petCheckLabel.textContent = _tr('enable_pet');
     petCheckLabel.style.cssText = 'color:#ccc;font-size:11px;cursor:pointer;';
     petEnableRow.appendChild(petCheck);
     petEnableRow.appendChild(petCheckLabel);
@@ -14467,11 +14500,11 @@ function _createCatalogPanel() {
     var petSpeciesRow = document.createElement('div');
     petSpeciesRow.style.cssText = 'display:flex;align-items:center;gap:6px;margin:4px 0;';
     var petSpeciesLabel = document.createElement('span');
-    petSpeciesLabel.textContent = 'Type:';
+    petSpeciesLabel.textContent = _tr('type_label');
     petSpeciesLabel.style.cssText = 'color:#aaa;font-size:11px;';
     var petSpeciesSelect = document.createElement('select');
     petSpeciesSelect.style.cssText = 'background:#2a2a4e;color:#ccc;border:1px solid #3a3a5e;border-radius:4px;padding:2px 4px;font-size:11px;';
-    [{ v: 'cat', l: '🐱 Cat' }, { v: 'pug', l: '🐶 Pug' }, { v: 'lobster', l: '🦞 Lobster' }].forEach(function(opt) {
+    [{ v: 'cat', l: _tr('pet_cat') }, { v: 'pug', l: _tr('pet_pug') }, { v: 'lobster', l: _tr('pet_lobster') }].forEach(function(opt) {
         var o = document.createElement('option');
         o.value = opt.v; o.textContent = opt.l;
         if (petCfg.species === opt.v) o.selected = true;
@@ -14485,7 +14518,7 @@ function _createCatalogPanel() {
     var petNameRow = document.createElement('div');
     petNameRow.style.cssText = 'display:flex;align-items:center;gap:6px;margin:4px 0;';
     var petNameLabel = document.createElement('span');
-    petNameLabel.textContent = 'Name:';
+    petNameLabel.textContent = _tr('name_label');
     petNameLabel.style.cssText = 'color:#aaa;font-size:11px;';
     var petNameInput = document.createElement('input');
     petNameInput.type = 'text';
@@ -14519,7 +14552,7 @@ function _createCatalogPanel() {
     var instr = document.createElement('div');
     instr.className = 'catalog-instructions';
     instr.id = 'catalog-instr';
-    instr.innerHTML = 'Click item to place<br>Right-click / Esc to cancel';
+    instr.innerHTML = _tr('place_item_hint');
     panel.appendChild(instr);
 
     var wrapper = document.querySelector('.game-wrapper');
@@ -14539,7 +14572,7 @@ function _createFloatingToolbar() {
 
     var delBtn = document.createElement('button');
     delBtn.className = 'ftb-btn delete-btn';
-    delBtn.title = 'Delete (Del)';
+    delBtn.title = _tr('delete_shortcut');
     delBtn.textContent = '🗑️';
     delBtn.addEventListener('click', function() {
         if (selectedWallIdx !== null) _deleteSelectedWall();
@@ -14548,14 +14581,14 @@ function _createFloatingToolbar() {
 
     var deselectBtn = document.createElement('button');
     deselectBtn.className = 'ftb-btn';
-    deselectBtn.title = 'Deselect (Esc)';
+    deselectBtn.title = _tr('deselect_shortcut');
     deselectBtn.textContent = '✕';
     deselectBtn.addEventListener('click', function() { _deselectItem(); });
 
     var colorBtn = document.createElement('button');
     colorBtn.className = 'ftb-btn';
     colorBtn.id = 'ftb-color-btn';
-    colorBtn.title = 'Edit wall color';
+    colorBtn.title = _tr('edit_wall_color');
     colorBtn.textContent = '🎨';
     colorBtn.style.display = 'none';
     colorBtn.addEventListener('click', function() {
@@ -14567,14 +14600,14 @@ function _createFloatingToolbar() {
     var assignBtn = document.createElement('button');
     assignBtn.className = 'ftb-btn assign-btn';
     assignBtn.id = 'ftb-assign-btn';
-    assignBtn.title = 'Assign agent to this desk';
+    assignBtn.title = _tr('assign_agent');
     assignBtn.textContent = '👤';
     assignBtn.addEventListener('click', function() { _showDeskAssignMenu(); });
 
     var branchBtn = document.createElement('button');
     branchBtn.className = 'ftb-btn';
     branchBtn.id = 'ftb-branch-btn';
-    branchBtn.title = 'Assign branch to this sign';
+    branchBtn.title = _tr('assign_branch');
     branchBtn.textContent = '🏷️';
     branchBtn.style.display = 'none';
     branchBtn.addEventListener('click', function() { _showBranchAssignMenu(); });
@@ -14613,7 +14646,7 @@ function _selectCatalogItem(type) {
     if (_floatingToolbar) _floatingToolbar.style.display = 'none';
     _updateCatalogSelection();
     var instr = document.getElementById('catalog-instr');
-    if (instr) instr.innerHTML = 'Click canvas to place<br>Right-click / Esc to cancel';
+    if (instr) instr.innerHTML = _tr('place_canvas_hint');
 }
 
 function _cancelPlacement() {
@@ -14623,7 +14656,7 @@ function _cancelPlacement() {
     _ghostPos = null;
     _updateCatalogSelection();
     var instr = document.getElementById('catalog-instr');
-    if (instr) instr.innerHTML = 'Click item to place<br>Right-click / Esc to cancel';
+    if (instr) instr.innerHTML = _tr('place_item_hint');
 }
 
 function _deselectItem() {
@@ -14664,7 +14697,7 @@ function _showBranchAssignMenu() {
 
     var title = document.createElement('div');
     title.style.cssText = 'color:#ffd600;font-size:10px;font-family:"Press Start 2P",monospace;margin-bottom:6px;text-align:center;';
-    title.textContent = 'ASSIGN BRANCH';
+    title.textContent = _tr('assign_branch_title');
     menu.appendChild(title);
 
     var branches = getBranchList();
@@ -14737,13 +14770,13 @@ function _showDeskAssignMenu() {
 
     var title = document.createElement('div');
     title.style.cssText = 'color:#ffd600;font-size:10px;font-family:"Press Start 2P",monospace;margin-bottom:6px;text-align:center;';
-    title.textContent = 'ASSIGN DESK';
+    title.textContent = _tr('assign_desk_title');
     menu.appendChild(title);
 
     // Unassign option
     var unBtn = document.createElement('button');
     unBtn.style.cssText = 'display:block;width:100%;padding:4px 8px;margin:2px 0;background:#2a2a4e;color:#aaa;border:1px solid #3a3a5e;border-radius:4px;cursor:pointer;font-size:11px;text-align:left;';
-    unBtn.textContent = '— None —';
+    unBtn.textContent = _tr('none');
     if (!selItem.assignedTo) { unBtn.style.borderColor = '#ffd600'; unBtn.style.color = '#ffd600'; }
     unBtn.addEventListener('click', function() {
         _pushUndo();
@@ -14759,7 +14792,7 @@ function _showDeskAssignMenu() {
         var isCurrent = selItem.assignedTo === name;
         btn.style.cssText = 'display:block;width:100%;padding:4px 8px;margin:2px 0;background:#2a2a4e;color:' + (isAssigned ? '#555' : '#ccc') + ';border:1px solid ' + (isCurrent ? '#ffd600' : '#3a3a5e') + ';border-radius:4px;cursor:' + (isAssigned ? 'default' : 'pointer') + ';font-size:11px;text-align:left;';
         var agent = AGENT_DEFS.find(function(a) { return a.name === name; });
-        btn.textContent = (agent ? agent.emoji + ' ' : '') + name + (isAssigned ? ' (assigned)' : '') + (isCurrent ? ' ✓' : '');
+        btn.textContent = (agent ? agent.emoji + ' ' : '') + name + (isAssigned ? ' (' + _tr('assigned_suffix') + ')' : '') + (isCurrent ? ' ✓' : '');
         if (!isAssigned) {
             btn.addEventListener('mouseenter', function() { if (!isCurrent) btn.style.background = '#3a3a5e'; });
             btn.addEventListener('mouseleave', function() { btn.style.background = '#2a2a4e'; });
@@ -14837,7 +14870,7 @@ function _ensureColorPicker() {
     var titleEl = document.createElement('span');
     titleEl.id = 'edit-cp-title';
     titleEl.style.color = '#ffd600';
-    titleEl.textContent = 'COLOR';
+    titleEl.textContent = _tr('color_title');
     var closeBtn = document.createElement('button');
     closeBtn.textContent = '✕';
     closeBtn.style.cssText = 'background:none;border:1px solid #444;color:#aaa;cursor:pointer;padding:2px 6px;border-radius:3px;font-family:inherit;';
@@ -14851,7 +14884,7 @@ function _ensureColorPicker() {
     row1.style.cssText = 'display:flex;align-items:center;gap:8px;';
     var lbl1 = document.createElement('span');
     lbl1.id = 'edit-cp-lbl1';
-    lbl1.textContent = 'Main:';
+    lbl1.textContent = _tr('main_color');
     var inp1 = document.createElement('input');
     inp1.type = 'color'; inp1.id = 'edit-cp-color1';
     inp1.style.cssText = 'width:40px;height:28px;cursor:pointer;border:none;padding:0;border-radius:3px;';
@@ -14866,7 +14899,7 @@ function _ensureColorPicker() {
     row2.style.cssText = 'display:flex;align-items:center;gap:8px;';
     var lbl2 = document.createElement('span');
     lbl2.id = 'edit-cp-lbl2';
-    lbl2.textContent = 'Accent:';
+    lbl2.textContent = _tr('accent_color');
     var inp2 = document.createElement('input');
     inp2.type = 'color'; inp2.id = 'edit-cp-color2';
     inp2.style.cssText = 'width:40px;height:28px;cursor:pointer;border:none;padding:0;border-radius:3px;';
@@ -14882,7 +14915,7 @@ function _ensureColorPicker() {
     row3.style.cssText = 'display:none;align-items:center;gap:8px;';
     var lbl3 = document.createElement('span');
     lbl3.id = 'edit-cp-lbl3';
-    lbl3.textContent = 'Trim 2:';
+    lbl3.textContent = _tr('trim_2_color');
     var inp3 = document.createElement('input');
     inp3.type = 'color'; inp3.id = 'edit-cp-color3';
     inp3.style.cssText = 'width:40px;height:28px;cursor:pointer;border:none;padding:0;border-radius:3px;';
@@ -14896,11 +14929,11 @@ function _ensureColorPicker() {
     var favHeader = document.createElement('div');
     favHeader.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-top:4px;gap:8px;';
     var favTitle = document.createElement('span');
-    favTitle.textContent = 'Favorites';
+    favTitle.textContent = _tr('favorites');
     favTitle.style.cssText = 'color:#bbb;font-size:11px;';
     var favSaveBtn = document.createElement('button');
     favSaveBtn.id = 'edit-cp-save-favorite';
-    favSaveBtn.textContent = '★ Save Current';
+    favSaveBtn.textContent = _tr('save_current');
     favSaveBtn.style.cssText = 'background:#2a2a4e;border:1px solid #555;color:#ddd;cursor:pointer;padding:3px 6px;border-radius:3px;font-family:inherit;font-size:10px;';
     favSaveBtn.addEventListener('click', function() { _saveCurrentColorFavorite(); });
     favHeader.appendChild(favTitle);
@@ -14971,10 +15004,10 @@ function _showWallColorPicker(wallIdx, sx, sy) {
     _ensureColorPicker();
     _colorPickerTarget = { type: 'interior-wall', idx: wallIdx };
     var wall = (officeConfig.walls.interior || [])[wallIdx] || {};
-    document.getElementById('edit-cp-title').textContent = 'WALL COLOR';
-    document.getElementById('edit-cp-lbl1').textContent = 'Main:';
-    document.getElementById('edit-cp-lbl2').textContent = 'Trim:';
-    document.getElementById('edit-cp-lbl3').textContent = 'Trim 2:';
+    document.getElementById('edit-cp-title').textContent = _tr('wall_color');
+    document.getElementById('edit-cp-lbl1').textContent = _tr('main_color');
+    document.getElementById('edit-cp-lbl2').textContent = _tr('trim_color');
+    document.getElementById('edit-cp-lbl3').textContent = _tr('trim_2_color');
     document.getElementById('edit-cp-color1').value = _wallMainColor(wall);
     document.getElementById('edit-cp-color2').value = _wallTrimColor(wall);
     document.getElementById('edit-cp-color3').value = _wallTrim2Color(wall);
@@ -14989,9 +15022,9 @@ function _showTopWallColorPicker(sx, sy) {
     _ensureColorPicker();
     _colorPickerTarget = { type: 'top-wall' };
     var wall = getTopWallConfig();
-    document.getElementById('edit-cp-title').textContent = 'TOP WALL COLOR';
-    document.getElementById('edit-cp-lbl1').textContent = 'Main:';
-    document.getElementById('edit-cp-lbl2').textContent = 'Trim:';
+    document.getElementById('edit-cp-title').textContent = _tr('top_wall_color');
+    document.getElementById('edit-cp-lbl1').textContent = _tr('main_color');
+    document.getElementById('edit-cp-lbl2').textContent = _tr('trim_color');
     document.getElementById('edit-cp-color1').value = wall.color;
     document.getElementById('edit-cp-color2').value = wall.trimColor || wall.accentColor;
     document.getElementById('edit-cp-color2').parentElement.style.display = 'flex';
@@ -15004,9 +15037,9 @@ function _showTopWallColorPicker(sx, sy) {
 function _showFloorColorPicker(sx, sy) {
     _ensureColorPicker();
     _colorPickerTarget = { type: 'floor' };
-    document.getElementById('edit-cp-title').textContent = 'FLOOR COLOR';
-    document.getElementById('edit-cp-lbl1').textContent = 'Tile A:';
-    document.getElementById('edit-cp-lbl2').textContent = 'Tile B:';
+    document.getElementById('edit-cp-title').textContent = _tr('floor_color');
+    document.getElementById('edit-cp-lbl1').textContent = _tr('tile_a_color');
+    document.getElementById('edit-cp-lbl2').textContent = _tr('tile_b_color');
     document.getElementById('edit-cp-color1').value = officeConfig.floor.color1;
     document.getElementById('edit-cp-color2').value = officeConfig.floor.color2;
     document.getElementById('edit-cp-color2').parentElement.style.display = 'flex';
@@ -15068,8 +15101,8 @@ function _applyColorPicker() {
 function _showCouchColorEditor(item) {
     _ensureColorPicker();
     _colorPickerTarget = { type: 'couch', itemId: item.id };
-    document.getElementById('edit-cp-title').textContent = 'COUCH COLOR';
-    document.getElementById('edit-cp-lbl1').textContent = 'Color:';
+    document.getElementById('edit-cp-title').textContent = _tr('couch_color');
+    document.getElementById('edit-cp-lbl1').textContent = _tr('color_label');
     document.getElementById('edit-cp-color1').value = item.couchColor || '#3f51b5';
     document.getElementById('edit-cp-color2').parentElement.style.display = 'none';
     document.getElementById('edit-cp-row3').style.display = 'none';
@@ -15142,7 +15175,7 @@ async function saveAgentSkillToLibrary(agentId, skillName, onDone) {
         var data = await requestSave(false);
         if (data.ok) {
             if (data.status === 'identical') {
-                alert('Skill already exists in the Skill Library.');
+        alert(_tr('skill_exists_library'));
             } else {
                 _acpShowToast('✅ ' + (data.status === 'updated' ? 'Updated' : 'Saved') + ' "' + skillName + '" in Skill Library');
             }
@@ -15404,13 +15437,13 @@ function loadAgentSkills(agentKey) {
     _currentSkillAgent = agentKey;
     var listEl = document.getElementById('skills-list');
     if (!listEl) return;
-    listEl.innerHTML = '<span style="color:#666;font-size:11px;">Loading skills...</span>';
+    listEl.innerHTML = '<span style="color:#666;font-size:11px;">' + escHtml(_tr('loading_skills')) + '</span>';
     fetch('/api/agent/' + encodeURIComponent(agentKey) + '/skills')
         .then(function(r) { return r.json(); })
         .then(function(data) {
             listEl.innerHTML = '';
             if (!data.skills || data.skills.length === 0) {
-                listEl.innerHTML = '<span style="color:#666;font-size:11px;">No skills configured</span>';
+            listEl.innerHTML = '<span style="color:#666;font-size:11px;">' + escHtml(_tr('no_skills_configured')) + '</span>';
                 return;
             }
             data.skills.forEach(function(skill) {
@@ -15424,17 +15457,17 @@ function loadAgentSkills(agentKey) {
                 btns.className = 'skill-row-btns';
                 var editBtn = document.createElement('button');
                 editBtn.textContent = '✏️';
-                editBtn.title = 'Edit skill';
+            editBtn.title = _tr('edit_skill_title');
                 editBtn.onclick = (function(sName) { return function() { editSkill(sName); }; })(skill.name);
                 var libraryBtn = document.createElement('button');
-                libraryBtn.textContent = 'Save to Skill Library';
-                libraryBtn.title = 'Save this agent skill to the shared Skill Library';
+            libraryBtn.textContent = _tr('save_skill_library');
+            libraryBtn.title = _tr('save_skill_library_hint');
                 libraryBtn.onclick = (function(sName) {
                     return function() { saveAgentSkillToLibrary(_currentSkillAgent, sName, function() { loadAgentSkills(_currentSkillAgent); }); };
                 })(skill.name);
                 var delBtn = document.createElement('button');
                 delBtn.textContent = '🗑️';
-                delBtn.title = 'Remove skill';
+            delBtn.title = _tr('remove_skill');
                 delBtn.onclick = (function(sName) { return function() { deleteSkill(sName); }; })(skill.name);
                 btns.appendChild(editBtn);
                 btns.appendChild(libraryBtn);
@@ -15445,7 +15478,7 @@ function loadAgentSkills(agentKey) {
             });
         })
         .catch(function(e) {
-            listEl.innerHTML = '<span style="color:#f44336;font-size:11px;">Error loading skills</span>';
+        listEl.innerHTML = '<span style="color:#f44336;font-size:11px;">' + escHtml(_tr('error_loading_skills')) + '</span>';
         });
     refreshSkillWorkshopQueue();
 }
@@ -15468,13 +15501,13 @@ async function showLibraryPicker() {
     document.getElementById('skill-add-form').style.display = 'none';
     document.getElementById('skill-edit-form').style.display = 'none';
     picker.style.display = 'block';
-    select.innerHTML = '<option value="">Loading...</option>';
+    select.innerHTML = '<option value="">' + escHtml(_tr('loading')) + '</option>';
     try {
         var res = await fetch('/api/skills-library');
         var data = await res.json();
         var skills = Array.isArray(data) ? data : (data.skills || []);
         if (skills.length === 0) {
-            select.innerHTML = '<option value="">No skills in library</option>';
+            select.innerHTML = '<option value="">' + escHtml(_tr('no_skills_in_library')) + '</option>';
             return;
         }
         skills.sort(function(a, b) { return (a.name || '').localeCompare(b.name || ''); });
@@ -15482,7 +15515,7 @@ async function showLibraryPicker() {
             return '<option value="' + escHtml(s.name) + '">' + escHtml(s.name) + (s.description ? ' — ' + escHtml(s.description).substring(0, 50) : '') + '</option>';
         }).join('');
     } catch (e) {
-        select.innerHTML = '<option value="">Failed to load library</option>';
+        select.innerHTML = '<option value="">' + escHtml(_tr('failed_load_library')) + '</option>';
     }
 }
 
@@ -15507,7 +15540,7 @@ async function applyLibrarySkill() {
             hideLibraryPicker();
             loadAgentSkills(_currentSkillAgent);
         } else if (data.exists) {
-            if (confirm('"' + skillName + '" already exists on this agent. Overwrite?')) {
+        if (confirm(_tr('overwrite_skill_confirm', { name: skillName }))) {
                 var res2 = await fetch('/api/skills-library/apply', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -15532,17 +15565,17 @@ function saveNewSkill() {
     if (!_currentSkillAgent) return;
     var name = document.getElementById('skill-new-name').value.trim();
     var content = document.getElementById('skill-new-content').value;
-    if (!name) { alert('Skill name is required'); return; }
+    if (!name) { alert(_tr('skill_name_required')); return; }
     fetch('/api/agent/' + encodeURIComponent(_currentSkillAgent) + '/skills', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: name, content: content })
     }).then(function(r) { return r.json(); }).then(function(data) {
-        if (data.error) { alert('Error: ' + data.error); return; }
+    if (data.error) { alert(_tr('error') + ': ' + data.error); return; }
         hideAddSkillForm();
         loadAgentSkills(_currentSkillAgent);
         _acpShowToast('✅ Skill "' + name + '" added');
-    }).catch(function(e) { alert('Error saving skill: ' + e.message); });
+    }).catch(function(e) { alert(_tr('error_saving_skill') + ': ' + e.message); });
 }
 
 function editSkill(skillName) {
@@ -15550,7 +15583,7 @@ function editSkill(skillName) {
     _editingSkillName = skillName;
     document.getElementById('skill-add-form').style.display = 'none';
     document.getElementById('skill-edit-form').style.display = 'block';
-    document.getElementById('skill-edit-title').textContent = '✏️ Editing: ' + skillName;
+    document.getElementById('skill-edit-title').textContent = _tr('editing_skill', { name: skillName });
     document.getElementById('skill-edit-content').value = 'Loading...';
     // Fetch skills list which includes content
     fetch('/api/agent/' + encodeURIComponent(_currentSkillAgent) + '/skills')
@@ -15577,23 +15610,23 @@ function saveEditedSkill() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: _editingSkillName, content: content })
     }).then(function(r) { return r.json(); }).then(function(data) {
-        if (data.error) { alert('Error: ' + data.error); return; }
+    if (data.error) { alert(_tr('error') + ': ' + data.error); return; }
         hideEditSkillForm();
         loadAgentSkills(_currentSkillAgent);
         _acpShowToast('✅ Skill "' + _editingSkillName + '" updated');
-    }).catch(function(e) { alert('Error saving skill: ' + e.message); });
+    }).catch(function(e) { alert(_tr('error_saving_skill') + ': ' + e.message); });
 }
 
 function deleteSkill(skillName) {
     if (!_currentSkillAgent) return;
-    if (!confirm('Remove skill "' + skillName + '" from this agent?')) return;
+    if (!confirm(_tr('remove_agent_skill_confirm', { name: skillName }))) return;
     fetch('/api/agent/' + encodeURIComponent(_currentSkillAgent) + '/skills/' + encodeURIComponent(skillName), {
         method: 'DELETE'
     }).then(function(r) { return r.json(); }).then(function(data) {
-        if (data.error) { alert('Error: ' + data.error); return; }
+    if (data.error) { alert(_tr('error') + ': ' + data.error); return; }
         loadAgentSkills(_currentSkillAgent);
         _acpShowToast('🗑️ Skill "' + skillName + '" removed');
-    }).catch(function(e) { alert('Error deleting skill: ' + e.message); });
+    }).catch(function(e) { alert(_tr('error_deleting_skill') + ': ' + e.message); });
 }
 
 // ─── MEETINGS DASHBOARD ──────────────────────────────────────────
@@ -15653,7 +15686,7 @@ function _mtgRender() {
     else meetings = _mtgData.active.concat(_mtgData.history);
 
     if (!meetings.length) {
-        container.innerHTML = '<div class="mtg-empty">No ' + _mtgCurrentTab + ' meetings</div>';
+        container.innerHTML = '<div class="mtg-empty">' + _escMtg(_tr('meeting_empty', { status: _tr(_mtgCurrentTab === 'completed' ? 'completed' : 'active') })) + '</div>';
         return;
     }
 
@@ -15667,13 +15700,13 @@ function _mtgRender() {
         // Header (clickable to toggle)
         var html = '<div class="mtg-card">';
         html += '<div class="mtg-card-header" onclick="toggleMtgCard(\'' + _escMtg(m.id) + '\')">';
-        html += '<div><div class="mtg-card-title"><span class="mtg-card-toggle' + (isOpen ? ' open' : '') + '" id="mtg-toggle-' + _escMtg(m.id) + '">▶</span>' + _escMtg(m.topic || 'Untitled Meeting') + '</div>';
+        html += '<div><div class="mtg-card-title"><span class="mtg-card-toggle' + (isOpen ? ' open' : '') + '" id="mtg-toggle-' + _escMtg(m.id) + '">▶</span>' + _escMtg(m.topic || _tr('untitled_meeting')) + '</div>';
         if (m.purpose && m.purpose !== m.topic) {
             html += '<div class="mtg-card-purpose">' + _escMtg(m.purpose) + '</div>';
         }
         html += '</div>';
         html += '<div>';
-        html += '<span class="mtg-badge ' + (isActive ? 'mtg-badge-active' : 'mtg-badge-completed') + '">' + (isActive ? '● Active' : '✓ Completed') + '</span>';
+        html += '<span class="mtg-badge ' + (isActive ? 'mtg-badge-active' : 'mtg-badge-completed') + '">' + (isActive ? '● ' + _escMtg(_tr('active')) : '✓ ' + _escMtg(_tr('completed'))) + '</span>';
         if (m.kind) html += '<span class="mtg-badge mtg-badge-kind">' + _escMtg(m.kind) + '</span>';
         html += '</div></div>';
 
@@ -15684,7 +15717,7 @@ function _mtgRender() {
         html += '<div class="mtg-meta">';
         var orgInfo = _mtgAgentMap[m.organizer] || { emoji: '🤖', name: m.organizer || 'Unknown' };
         html += '<div class="mtg-meta-item">👑 ' + orgInfo.emoji + ' ' + _escMtg(orgInfo.name) + '</div>';
-        html += '<div class="mtg-meta-item">👥 ' + participants.length + ' participants</div>';
+        html += '<div class="mtg-meta-item">👥 ' + _escMtg(_tr('participants_count', { count: participants.length })) + '</div>';
         if (m.type) html += '<div class="mtg-meta-item">📋 ' + _escMtg(m.type) + '</div>';
         if (m.endedAt) {
             var d = new Date(m.endedAt * 1000);
@@ -15718,7 +15751,7 @@ function _mtgRender() {
         // Per-agent responses
         var responses = m.responses || {};
         if (!isActive && Object.keys(responses).length > 0) {
-            html += '<div class="mtg-section"><div class="mtg-section-title">Agent Responses</div>';
+            html += '<div class="mtg-section"><div class="mtg-section-title">' + _escMtg(_tr('agent_responses')) + '</div>';
             html += '<div class="mtg-responses">';
             participants.forEach(function(pKey) {
                 var info = _mtgAgentMap[pKey] || { emoji: '🤖', name: pKey, role: '' };
@@ -15732,9 +15765,9 @@ function _mtgRender() {
                 if (resp) {
                     var respId = 'mtg-resp-' + _escMtg(m.id) + '-' + _escMtg(pKey);
                     html += '<div class="mtg-response-text" id="' + respId + '">' + _escMtg(resp) + '</div>';
-                    html += '<span class="mtg-response-expand" onclick="toggleMtgResponse(\'' + respId + '\', this)">▼ expand</span>';
+                    html += '<span class="mtg-response-expand" onclick="toggleMtgResponse(\'' + respId + '\', this)">' + _escMtg(_tr('expand')) + '</span>';
                 } else {
-                    html += '<div class="mtg-response-none">No response recorded</div>';
+                    html += '<div class="mtg-response-none">' + _escMtg(_tr('no_response_recorded')) + '</div>';
                 }
                 html += '</div>';
             });
@@ -15744,20 +15777,20 @@ function _mtgRender() {
         // Completed details
         if (!isActive) {
             if (m.summary) {
-                html += '<div class="mtg-section"><div class="mtg-section-title">Summary</div>';
+                html += '<div class="mtg-section"><div class="mtg-section-title">' + _escMtg(_tr('summary')) + '</div>';
                 html += '<div class="mtg-section-text">' + _escMtg(m.summary) + '</div></div>';
             }
             if (m.resolution) {
-                html += '<div class="mtg-section"><div class="mtg-section-title">Resolution</div>';
+                html += '<div class="mtg-section"><div class="mtg-section-title">' + _escMtg(_tr('resolution')) + '</div>';
                 html += '<div class="mtg-section-text">' + _escMtg(m.resolution) + '</div></div>';
             }
             if (m.actionItems && m.actionItems.length) {
-                html += '<div class="mtg-section"><div class="mtg-section-title">Action Items</div>';
+                html += '<div class="mtg-section"><div class="mtg-section-title">' + _escMtg(_tr('action_items')) + '</div>';
                 html += '<div class="mtg-section-text">' + m.actionItems.map(function(a) { return '• ' + _escMtg(_mtgActionText(a)); }).join('\n') + '</div></div>';
             }
             if (m.endedBy) {
                 var endInfo = _mtgAgentMap[m.endedBy] || { emoji: '🤖', name: m.endedBy };
-                html += '<div class="mtg-section"><div class="mtg-section-title">Ended By</div>';
+                html += '<div class="mtg-section"><div class="mtg-section-title">' + _escMtg(_tr('ended_by')) + '</div>';
                 html += '<div class="mtg-section-text">' + endInfo.emoji + ' ' + _escMtg(endInfo.name) + '</div></div>';
             }
         }
@@ -15765,9 +15798,9 @@ function _mtgRender() {
         // Actions bar
         html += '<div class="mtg-actions-bar">';
         if (isActive) {
-            html += '<button class="mtg-btn mtg-btn-end" onclick="openEndMeetingForm(\'' + _escMtg(m.id) + '\')">✅ End Meeting</button>';
+            html += '<button class="mtg-btn mtg-btn-end" onclick="openEndMeetingForm(\'' + _escMtg(m.id) + '\')">✅ ' + _escMtg(_tr('end_meeting')) + '</button>';
         } else {
-            html += '<button class="mtg-btn mtg-btn-delete" onclick="deleteMeetingHistory(\'' + _escMtg(m.id) + '\')">🗑️ Delete</button>';
+            html += '<button class="mtg-btn mtg-btn-delete" onclick="deleteMeetingHistory(\'' + _escMtg(m.id) + '\')">' + _escMtg(_tr('delete')) + '</button>';
         }
         html += '</div>';
 
@@ -15820,9 +15853,9 @@ function toggleMtgResponse(respId, btn) {
     if (!el) return;
     el.classList.toggle('expanded');
     if (el.classList.contains('expanded')) {
-        btn.textContent = '▲ collapse';
+        btn.textContent = _tr('collapse');
     } else {
-        btn.textContent = '▼ expand';
+        btn.textContent = _tr('expand');
     }
 }
 
@@ -15840,13 +15873,13 @@ function openEndMeetingForm(meetingId) {
     if (meeting) {
         var participants = meeting.participants || meeting.agents || [];
         if (participants.length) {
-            respSection.innerHTML = '<label class="mtg-label" style="margin-top:6px">Agent Responses <span style="color:#666;font-size:9px">(what each agent said)</span></label>';
+            respSection.innerHTML = '<label class="mtg-label" style="margin-top:6px">' + _escMtg(_tr('agent_responses')) + '</label>';
             participants.forEach(function(pKey) {
                 var info = _mtgAgentMap[pKey] || { emoji: '🤖', name: pKey };
                 var div = document.createElement('div');
                 div.style.cssText = 'margin-bottom:6px;';
                 div.innerHTML = '<div style="font-size:9px;color:#ccc;margin-bottom:2px;">' + info.emoji + ' ' + _escMtg(info.name) + '</div>' +
-                    '<textarea class="mtg-textarea end-mtg-resp" data-agent="' + _escMtg(pKey) + '" rows="2" placeholder="What did ' + _escMtg(info.name) + ' contribute?"></textarea>';
+                    '<textarea class="mtg-textarea end-mtg-resp" data-agent="' + _escMtg(pKey) + '" rows="2" placeholder="' + _escMtg(_tr('contribution_placeholder', { name: info.name })) + '"></textarea>';
                 respSection.appendChild(div);
             });
         }
@@ -15876,7 +15909,7 @@ async function submitEndMeeting() {
 
     if (!summary) {
         var errEl = document.getElementById('end-mtg-error');
-        errEl.textContent = 'Summary is required to end the meeting.';
+        errEl.textContent = _tr('summary_required');
         errEl.style.display = 'block';
         return;
     }
@@ -15893,25 +15926,25 @@ async function submitEndMeeting() {
             _mtgRefresh();
         } else {
             var errEl = document.getElementById('end-mtg-error');
-            errEl.textContent = data.error || 'Failed to end meeting';
+            errEl.textContent = data.error || _tr('failed_end_meeting');
             errEl.style.display = 'block';
         }
     } catch (e) {
         var errEl = document.getElementById('end-mtg-error');
-        errEl.textContent = 'Error: ' + e.message;
+        errEl.textContent = _tr('error') + ': ' + e.message;
         errEl.style.display = 'block';
     }
 }
 
 async function deleteMeetingHistory(meetingId) {
-    if (!confirm('Delete this meeting from history?')) return;
+    if (!confirm(_tr('delete_meeting_confirm'))) return;
     try {
         var res = await fetch('/api/meetings/history/' + meetingId, { method: 'DELETE' });
         var data = await res.json();
         if (data.ok) _mtgRefresh();
-        else alert(data.error || 'Failed to delete');
+        else alert(data.error || _tr('failed_delete'));
     } catch (e) {
-        alert('Error: ' + e.message);
+        alert(_tr('error') + ': ' + e.message);
     }
 }
 
@@ -15921,7 +15954,7 @@ function _updateSidebarMeetings() {
     if (!container) return;
     var active = _mtgData.active || [];
     if (!active.length) {
-        container.innerHTML = '<div class="sidebar-mtg-none">No active meetings</div>';
+        container.innerHTML = '<div class="sidebar-mtg-none">' + _escMtg(_tr('no_active_meetings')) + '</div>';
         return;
     }
     container.innerHTML = active.map(function(m) {
@@ -16036,7 +16069,7 @@ function renderSkillCards() {
     if (!container) return;
 
     if (!_sklSkills.length) {
-        container.innerHTML = '<div style="color:#666;font-size:11px;padding:20px;text-align:center;">No skills in library. Click ➕ Add Skill to create one.</div>';
+        container.innerHTML = '<div style="color:#666;font-size:11px;padding:20px;text-align:center;">' + _sklEsc(_tr('no_skills_library')) + '</div>';
         return;
     }
 
@@ -16048,9 +16081,9 @@ function renderSkillCards() {
             '<div class="skl-card-top">' +
                 '<div class="skl-card-name">' + safeName + '</div>' +
                 '<div class="skl-card-actions">' +
-                    '<button onclick="toggleSkillApply(\'' + safeName + '\')" title="Apply to agent">📋</button>' +
-                    '<button onclick="openSkillEditor(\'' + safeName + '\')" title="Edit">✏️</button>' +
-                    '<button onclick="deleteLibrarySkill(\'' + safeName + '\')" title="Delete">🗑️</button>' +
+                    '<button onclick="toggleSkillApply(\'' + safeName + '\')" title="' + _sklEsc(_tr('apply_to_agent')) + '">📋</button>' +
+                    '<button onclick="openSkillEditor(\'' + safeName + '\')" title="' + _sklEsc(_tr('edit')) + '">✏️</button>' +
+                    '<button onclick="deleteLibrarySkill(\'' + safeName + '\')" title="' + _sklEsc(_tr('delete')) + '">🗑️</button>' +
                 '</div>' +
             '</div>' +
             '<div class="skl-apply-dropdown" id="skl-apply-' + safeName + '" style="display:none"></div>' +
@@ -16086,10 +16119,10 @@ async function toggleSkillApply(skillName) {
 
         dropdown.innerHTML =
             '<select id="skl-agent-select-' + skillName + '">' + options + '</select>' +
-            '<button onclick="applySkillToAgent(\'' + _sklEsc(skillName) + '\')">Apply</button>';
+            '<button onclick="applySkillToAgent(\'' + _sklEsc(skillName) + '\')">' + _sklEsc(_tr('apply')) + '</button>';
         dropdown.style.display = 'flex';
     } catch (e) {
-        _acpShowToast('❌ Failed to load agent list');
+        _acpShowToast('❌ ' + _tr('failed_to_load'));
     }
 }
 
@@ -16110,13 +16143,13 @@ async function applySkillToAgent(skillName) {
             if (data.warning) {
                 _acpShowToast('⚠️ ' + data.warning);
             } else {
-                _acpShowToast('✅ Applied ' + skillName + ' to ' + agentId);
+                _acpShowToast('✅ ' + _tr('skill_applied', { skill: skillName, agent: agentId }));
             }
         } else {
-            _acpShowToast('❌ ' + (data.error || 'Apply failed'));
+            _acpShowToast('❌ ' + _tr('apply_failed') + ': ' + (data.error || _tr('unknown')));
         }
     } catch (e) {
-        _acpShowToast('❌ Apply failed: ' + e.message);
+        _acpShowToast('❌ ' + _tr('apply_failed') + ': ' + e.message);
     }
 
     // Hide dropdown after apply
@@ -16132,7 +16165,7 @@ async function openSkillEditor(skillName) {
 
     if (skillName) {
         // Edit existing: fetch content
-        titleEl.textContent = 'Edit Skill';
+        titleEl.textContent = _tr('edit_skill');
         nameInput.value = skillName;
         nameInput.disabled = true;
         try {
@@ -16141,11 +16174,11 @@ async function openSkillEditor(skillName) {
             contentArea.value = data.content || '';
         } catch (e) {
             contentArea.value = '';
-            _acpShowToast('❌ Failed to load skill');
+            _acpShowToast('❌ ' + _tr('failed_load_skill') + ': ' + e.message);
         }
     } else {
         // New skill
-        titleEl.textContent = 'Add Skill';
+        titleEl.textContent = _tr('add_skill_title');
         nameInput.value = '';
         nameInput.disabled = false;
         contentArea.value = '---\nname: \ndescription: \n---\n\n# Skill Title\n\nInstructions here...\n';
@@ -16166,7 +16199,7 @@ async function saveSkill() {
     var content = contentArea.value || '';
 
     if (!name) {
-        _acpShowToast('❌ Skill name is required');
+        _acpShowToast('❌ ' + _tr('skill_name_required'));
         return;
     }
 
@@ -16178,31 +16211,31 @@ async function saveSkill() {
         });
         var data = await res.json();
         if (res.ok) {
-            _acpShowToast('✅ Skill "' + name + '" saved');
+            _acpShowToast('✅ ' + _tr('skill_saved', { name: name }));
             closeSkillEditor();
             refreshSkillsList();
         } else {
-            _acpShowToast('❌ ' + (data.error || 'Save failed'));
+            _acpShowToast('❌ ' + _tr('save_failed') + ': ' + (data.error || _tr('unknown')));
         }
     } catch (e) {
-        _acpShowToast('❌ Save failed: ' + e.message);
+        _acpShowToast('❌ ' + _tr('save_failed') + ': ' + e.message);
     }
 }
 
 async function deleteLibrarySkill(skillName) {
-    if (!confirm('Delete skill "' + skillName + '" from the library?\n\nThis removes the master copy. Agent copies are not affected.')) return;
+    if (!confirm(_tr('delete_library_skill_confirm', { name: skillName }))) return;
 
     try {
         var res = await fetch('/api/skills-library/' + encodeURIComponent(skillName), { method: 'DELETE' });
         if (res.ok) {
-            _acpShowToast('🗑️ Skill "' + skillName + '" deleted');
+            _acpShowToast('🗑️ ' + _tr('skill_deleted', { name: skillName }));
             refreshSkillsList();
         } else {
             var data = await res.json().catch(function() { return {}; });
-            _acpShowToast('❌ ' + (data.error || 'Delete failed'));
+            _acpShowToast('❌ ' + _tr('failed_delete') + ': ' + (data.error || _tr('unknown')));
         }
     } catch (e) {
-        _acpShowToast('❌ Delete failed: ' + e.message);
+        _acpShowToast('❌ ' + _tr('failed_delete') + ': ' + e.message);
     }
 }
 
@@ -16219,14 +16252,14 @@ async function handleSkillUpload(input) {
             body: JSON.stringify({ name: name, content: text })
         });
         if (res.ok) {
-            _acpShowToast('✅ Uploaded "' + name + '"');
+            _acpShowToast('✅ ' + _tr('uploaded', { name: name }));
             refreshSkillsList();
         } else {
             var data = await res.json().catch(function() { return {}; });
-            _acpShowToast('❌ ' + (data.error || 'Upload failed'));
+            _acpShowToast('❌ ' + _tr('upload_failed') + ': ' + (data.error || _tr('unknown')));
         }
     } catch (e) {
-        _acpShowToast('❌ Upload failed: ' + e.message);
+        _acpShowToast('❌ ' + _tr('upload_failed') + ': ' + e.message);
     }
 
     // Reset input so same file can be re-uploaded

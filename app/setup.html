@@ -61,6 +61,12 @@
     <script id="locale-zh" type="application/json">{}</script>
     <script src="i18n.js"></script>
     <script>
+        function _t(key, params) { return typeof i18n !== 'undefined' ? i18n.t(key, params) : key; }
+        function _esc(value) {
+            return String(value == null ? '' : value)
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+        }
     (function(){
         var lang='en';
         try{var s=localStorage.getItem('vo-i18n-lang');if(s==='zh')lang='zh';else if(navigator.language&&navigator.language.toLowerCase().indexOf('zh')>=0)lang='zh';}catch(e){}
@@ -95,7 +101,7 @@
             <div class="btn-row" style="margin-top:12px;">
                 <button onclick="activateLicense()" style="font-size:9px;padding:8px 16px;" data-i18n="activate">🔑 ACTIVATE</button>
             </div>
-            <div class="note" style="margin-top:20px;">
+            <div class="note" style="margin-top:20px;" data-i18n-html="setup_license_note">
                 <b>Demo mode:</b> Free to use with up to 3 agents. Browser panel, SMS panel, model manager, cron manager, and whisper are locked.<br><br>
                 <b>Full license ($35.99):</b> Unlimited agents, all features unlocked.<br>
                 <b>Early bird ($9.99):</b> Same as full — limited-time launch price.<br><br>
@@ -135,7 +141,7 @@
                 This is the folder that contains your <code style="color:#90caf9;">openclaw.json</code> and <code style="color:#90caf9;">agents/</code> directory.
             </div>
 
-            <div class="note" style="margin:12px 0;">
+            <div class="note" style="margin:12px 0;" data-i18n-html="setup_openclaw_path_note">
                 <b data-i18n="where_to_find">📁 Where to find it:</b><br><br>
                 <b data-i18n="linux_mac">Linux/Mac (most common):</b><br>
                 <code style="color:#90caf9;">/home/youruser/.openclaw</code><br><br>
@@ -168,7 +174,7 @@
             </div>
 
             <div id="no-agents-help" style="display:none;">
-                <div class="note" style="border-color:#f4a236;">
+                <div class="note" style="border-color:#f4a236;" data-i18n-html="setup_no_agents_note">
                     <b data-i18n="no_agents_title">🔧 No agents found? Here's what to check:</b><br><br>
                     <b data-i18n="no_agents_1">1. Is the path correct?</b>
                     The folder should contain <code>openclaw.json</code> and an <code>agents/</code> directory.<br><br>
@@ -312,7 +318,7 @@
                 <div id="browser-test-status"></div>
             </div>
 
-            <div class="note">
+            <div class="note" data-i18n-html="setup_browser_note">
                 <b data-i18n="what_is_browser">What is this?</b> The Agent Browser gives your AI agents a real web browser you can watch live. You need two things:<br><br>
                 <b>1. CDP (Chrome DevTools Protocol)</b> — how agents control the browser<br>
                 <b>2. VNC Viewer</b> — how you watch the browser live in the office<br><br>
@@ -345,7 +351,7 @@
             <div id="sms-fields" style="display:none;margin-top:16px;">
                 <label data-i18n="sms_owner_agent">SMS Owner Agent <span style="color:#666;font-size:12px" data-i18n="sms_owner_hint">(which agent owns this inbox)</span></label>
                 <select id="s-sms-agent" style="width:100%;padding:10px 14px;background:#0d0d1e;border:1px solid #2a2a4e;border-radius:8px;color:#e8e8f0;font-size:14px;">
-                    <option value="">Select an agent...</option>
+                    <option value="" data-i18n="select_agent">Select an agent...</option>
                 </select>
                 <div style="font-size:12px;color:#666;margin:4px 0 12px;" data-i18n="sms_owner_desc">This agent owns the Twilio inbox and is the default AI responder for every contact thread.</div>
 
@@ -361,7 +367,7 @@
                 <div style="font-size:12px;color:#666;margin:8px 0 4px;" data-i18n="twilio_required">All three Twilio fields are required for sending SMS.</div>
             </div>
 
-            <div class="note">
+            <div class="note" data-i18n-html="setup_sms_note">
                 <b data-i18n="what_is_sms">What is this?</b> The SMS Panel lets you send and receive text messages through an AI agent in your office.<br><br>
                 <b>What you need:</b><br>
                 <b>1.</b> A <a href="https://www.twilio.com/try-twilio" style="color:#90caf9;" target="_blank">Twilio account</a> (free trial works)<br>
@@ -404,7 +410,7 @@
                 <div id="pcmetrics-test-status"></div>
             </div>
 
-            <div class="note">
+            <div class="note" data-i18n-html="setup_metrics_note">
                 <b data-i18n="what_is_browser">What is this?</b> The PC Performance panel shows live CPU, RAM, and GPU usage graphs in your office sidebar.<br><br>
                 <b>How it works:</b><br>
                 You run a small Python script on the PC you want to monitor. It exposes metrics on a port, and the Virtual Office reads from it.<br><br>
@@ -431,7 +437,7 @@
         <div class="step" id="step-6">
             <div class="step-title" data-i18n="youre_all_set">6. YOU'RE ALL SET!</div>
             <div class="step-desc" data-i18n="youre_all_set_desc">Your Virtual Office is ready. You can always change settings later from the ☰ Menu button in the toolbar.</div>
-            <div class="note">
+            <div class="note" data-i18n-html="setup_done_note">
                 <b data-i18n="what_you_can_do">What you can do:</b>
                 <br>• <b>✏️ Edit Office</b> — Place furniture, resize canvas, paint walls & floors
                 <br>• <b>👤 Agents</b> — Customize agent appearance, assign desks, set branches
@@ -477,22 +483,22 @@
             var key = document.getElementById('s-license-key').value.trim();
             var statusEl = document.getElementById('license-status');
             if (!key) {
-                statusEl.innerHTML = '<div class="status-box error">Please enter a license key</div>';
+                statusEl.innerHTML = '<div class="status-box error">' + _t('setup_enter_license') + '</div>';
                 return;
             }
-            statusEl.innerHTML = '<div class="status-box info">Validating...</div>';
+            statusEl.innerHTML = '<div class="status-box info">' + _t('validating') + '</div>';
             fetch('/api/license/activate', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ key: key })
             }).then(function(r) { return r.json(); }).then(function(d) {
                 if (d.ok) {
-                    statusEl.innerHTML = '<div class="status-box success">✅ ' + d.tierName + ' license activated! All features unlocked.</div>';
+                    statusEl.innerHTML = '<div class="status-box success">' + _t('license_activated', { tier: d.tierName }) + '</div>';
                 } else {
-                    statusEl.innerHTML = '<div class="status-box error">❌ ' + (d.error || 'Invalid key') + '</div>';
+                    statusEl.innerHTML = '<div class="status-box error">❌ ' + (d.error || _t('invalid_key')) + '</div>';
                 }
             }).catch(function(e) {
-                statusEl.innerHTML = '<div class="status-box error">Error: ' + e.message + '</div>';
+                statusEl.innerHTML = '<div class="status-box error">' + _t('error') + ': ' + e.message + '</div>';
             });
         }
 
@@ -500,11 +506,13 @@
             fetch('/api/license').then(function(r) { return r.json(); }).then(function(d) {
                 if (d.licensed) {
                     document.getElementById('license-status').innerHTML =
-                        '<div class="status-box success">✅ ' + d.tierName + ' license active</div>';
+                        '<div class="status-box success">' + _esc(_t('license_active', { tier: d.tierName })) + '</div>';
                 }
             }).catch(function(){});
         }
         checkExistingLicense();
+        window.addEventListener('i18n:ready', checkExistingLicense);
+        window.addEventListener('i18n:changed', checkExistingLicense);
 
         // Browser enable toggle
         document.getElementById('s-browser-enable').addEventListener('change', function() {
@@ -603,10 +611,10 @@
             var url = document.getElementById('s-pcmetrics-url').value.trim();
             var statusEl = document.getElementById('pcmetrics-test-status');
             if (!url) {
-                statusEl.innerHTML = '<div class="status-box error">Please enter a Metrics Server URL</div>';
+                statusEl.innerHTML = '<div class="status-box error">' + _t('enter_metrics_url') + '</div>';
                 return;
             }
-            statusEl.innerHTML = '<div class="status-box info">Saving and testing...</div>';
+            statusEl.innerHTML = '<div class="status-box info">' + _t('saving_testing') + '</div>';
             // Save config so server can proxy
             fetch('/setup/save', {
                 method: 'POST',
@@ -616,17 +624,17 @@
                 return fetch('/pc-metrics');
             }).then(function(r) { return r.json(); }).then(function(data) {
                 if (data.error) {
-                    statusEl.innerHTML = '<div class="status-box error">❌ ' + data.error + '<br>Make sure pc-metrics-server.py is running on the target PC.</div>';
+                    statusEl.innerHTML = '<div class="status-box error">❌ ' + data.error + '</div>';
                 } else if (data.cpu) {
                     var info = 'CPU: ' + (data.cpu.percent || 0).toFixed(0) + '% (' + (data.cpu.threads || '?') + ' threads)';
                     info += ' · RAM: ' + (data.memory.percent || 0).toFixed(0) + '%';
-                    if (data.gpus && data.gpus.length > 0) info += ' · GPU: ' + data.gpus[0].name;
-                    statusEl.innerHTML = '<div class="status-box success">✅ Connected!<br>' + info + '</div>';
+                    if (data.gpus && data.gpus.length > 0) info += ' · GPU: ' + _esc(data.gpus[0].name);
+                    statusEl.innerHTML = '<div class="status-box success">' + _t('connected_label') + '<br>' + info + '</div>';
                 } else {
-                    statusEl.innerHTML = '<div class="status-box error">❌ Unexpected response. Make sure pc-metrics-server.py is running.</div>';
+                    statusEl.innerHTML = '<div class="status-box error">❌ ' + _t('unexpected_response') + '</div>';
                 }
             }).catch(function(e) {
-                statusEl.innerHTML = '<div class="status-box error">Error: ' + e.message + '</div>';
+                statusEl.innerHTML = '<div class="status-box error">' + _t('error') + ': ' + e.message + '</div>';
             });
         }
 
@@ -638,12 +646,10 @@
             var apiKey = document.getElementById('s-hermes-api-key').value.trim();
             var statusEl = document.getElementById('hermes-test-status');
             if (!enabled) {
-                statusEl.innerHTML = '<div class="status-box info">Hermes auto-detect is disabled.</div>';
+                statusEl.innerHTML = '<div class="status-box info">' + _t('hermes_disabled') + '</div>';
                 return;
             }
-            statusEl.innerHTML = '<div class="status-box info">Saving and testing Hermes...</div>';
-            var hermesPayload = { enabled: enabled, homePath: homePath || null, binary: binary || null, apiUrl: apiUrl || null, preferApi: true };
-            if (apiKey) hermesPayload.apiKey = apiKey;
+            statusEl.innerHTML = '<div class="status-box info">' + _t('testing_hermes') + '</div>';
             fetch('/setup/save', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -657,126 +663,20 @@
             }).then(function(r) { return r.json(); }).then(function(d) {
                 if (d.ok) {
                     var agents = d.agents || [];
-                    var api = d.api || {};
-                    var html = '<div class="status-box success">✅ Hermes connected — found ' + agents.length + ' profile' + (agents.length === 1 ? '' : 's') + '<br>Native API: ' + (api.ok ? 'connected' : 'unavailable') + '</div>';
+                    var html = '<div class="status-box success">' + _t('hermes_connected_profiles', { count: agents.length }) + '</div>';
                     if (agents.length) {
                         html += '<div class="agent-list-preview">';
                         agents.slice(0, 10).forEach(function(a) {
-                            html += '<div class="agent-row"><span class="emoji">' + escapeHtml(a.emoji || '⚕️') + '</span><span class="name">' + escapeHtml(a.name) + '</span><span class="role">' + escapeHtml(a.model || a.providerAgentId || 'Hermes') + '</span></div>';
+                            html += '<div class="agent-row"><span class="emoji">' + _esc(a.emoji || '⚕️') + '</span><span class="name">' + _esc(a.name) + '</span><span class="role">' + _esc(a.model || a.providerAgentId || 'Hermes') + '</span></div>';
                         });
                         html += '</div>';
                     }
                     statusEl.innerHTML = html;
                 } else {
-                    statusEl.innerHTML = '<div class="status-box error">❌ Hermes not reachable: ' + escapeHtml(d.error || 'unknown error') + '</div>';
+                    statusEl.innerHTML = '<div class="status-box error">❌ ' + _t('hermes_not_reachable') + ': ' + (d.error || _t('unknown')) + '</div>';
                 }
             }).catch(function(e) {
-                statusEl.innerHTML = '<div class="status-box error">Error: ' + escapeHtml(e.message) + '</div>';
-            });
-        }
-
-        function codexPayloadFromSetup() {
-            return {
-                enabled: document.getElementById('s-codex-enable').checked,
-                homePath: document.getElementById('s-codex-home').value.trim() || null,
-                binary: document.getElementById('s-codex-bin').value.trim() || null,
-                workspaceRoot: document.getElementById('s-codex-workspace').value.trim() || null,
-                mainWorkspace: document.getElementById('s-codex-main-workspace').value.trim() || null,
-                model: document.getElementById('s-codex-model').value.trim() || '',
-                sandbox: document.getElementById('s-codex-sandbox').value || 'workspace-write',
-                approvalPolicy: document.getElementById('s-codex-approval').value || 'never',
-                preferAppServer: document.getElementById('s-codex-appserver').checked
-            };
-        }
-
-        function claudeCodePayloadFromSetup() {
-            return {
-                enabled: document.getElementById('s-claude-enable').checked,
-                homePath: document.getElementById('s-claude-home').value.trim() || null,
-                binary: document.getElementById('s-claude-bin').value.trim() || null,
-                workspaceRoot: document.getElementById('s-claude-workspace').value.trim() || null,
-                mainWorkspace: document.getElementById('s-claude-main-workspace').value.trim() || null,
-                model: document.getElementById('s-claude-model').value.trim() || '',
-                permissionMode: document.getElementById('s-claude-permission').value || 'acceptEdits',
-                includeMain: document.getElementById('s-claude-main').checked,
-                includeNativeAgents: document.getElementById('s-claude-native').checked,
-                registerNativeAgents: document.getElementById('s-claude-register').checked
-            };
-        }
-
-        function testCodexConnection() {
-            var payload = codexPayloadFromSetup();
-            var statusEl = document.getElementById('codex-test-status');
-            if (!payload.enabled) {
-                statusEl.innerHTML = '<div class="status-box info">Codex auto-detect is disabled.</div>';
-                return;
-            }
-            statusEl.innerHTML = '<div class="status-box info">Saving and testing Codex...</div>';
-            fetch('/setup/save', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ codex: payload })
-            }).then(function() {
-                return fetch('/api/codex/test', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-            }).then(function(r) { return r.json(); }).then(function(d) {
-                if (d.ok) {
-                    var agents = d.agents || [];
-                    var html = '<div class="status-box success">✅ Codex connected — ' + escapeHtml(d.protocol || 'codex') + ' · found ' + agents.length + ' agent' + (agents.length === 1 ? '' : 's') + '</div>';
-                    if (agents.length) {
-                        html += '<div class="agent-list-preview">';
-                        agents.slice(0, 10).forEach(function(a) {
-                            html += '<div class="agent-row"><span class="emoji">' + escapeHtml(a.emoji || '🤖') + '</span><span class="name">' + escapeHtml(a.name) + '</span><span class="role">' + escapeHtml(a.model || a.providerAgentId || 'Codex') + '</span></div>';
-                        });
-                        html += '</div>';
-                    }
-                    statusEl.innerHTML = html;
-                } else {
-                    statusEl.innerHTML = '<div class="status-box error">❌ Codex not reachable: ' + escapeHtml(d.error || 'unknown error') + '</div>';
-                }
-            }).catch(function(e) {
-                statusEl.innerHTML = '<div class="status-box error">Error: ' + escapeHtml(e.message) + '</div>';
-            });
-        }
-
-        function testClaudeCodeConnection() {
-            var payload = claudeCodePayloadFromSetup();
-            var statusEl = document.getElementById('claude-test-status');
-            if (!payload.enabled) {
-                statusEl.innerHTML = '<div class="status-box info">Claude Code auto-detect is disabled.</div>';
-                return;
-            }
-            statusEl.innerHTML = '<div class="status-box info">Saving and testing Claude Code...</div>';
-            fetch('/setup/save', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ claudeCode: payload })
-            }).then(function() {
-                return fetch('/api/claude-code/test', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-            }).then(function(r) { return r.json(); }).then(function(d) {
-                if (d.ok) {
-                    var agents = d.agents || [];
-                    var html = '<div class="status-box success">✅ Claude Code connected — found ' + agents.length + ' agent' + (agents.length === 1 ? '' : 's') + '</div>';
-                    if (agents.length) {
-                        html += '<div class="agent-list-preview">';
-                        agents.slice(0, 10).forEach(function(a) {
-                            html += '<div class="agent-row"><span class="emoji">' + escapeHtml(a.emoji || '🤖') + '</span><span class="name">' + escapeHtml(a.name) + '</span><span class="role">' + escapeHtml(a.model || a.providerAgentId || 'Claude Code') + '</span></div>';
-                        });
-                        html += '</div>';
-                    }
-                    statusEl.innerHTML = html;
-                } else {
-                    statusEl.innerHTML = '<div class="status-box error">❌ Claude Code not reachable: ' + escapeHtml(d.error || 'unknown error') + '</div>';
-                }
-            }).catch(function(e) {
-                statusEl.innerHTML = '<div class="status-box error">Error: ' + escapeHtml(e.message) + '</div>';
+                statusEl.innerHTML = '<div class="status-box error">' + _t('error') + ': ' + e.message + '</div>';
             });
         }
 
@@ -798,14 +698,14 @@
             var viewerUrl = document.getElementById('s-viewer-url').value.trim();
             var statusEl = document.getElementById('browser-test-status');
             if (!cdpUrl) {
-                statusEl.innerHTML = '<div class="status-box error">Please enter a CDP URL</div>';
+                statusEl.innerHTML = '<div class="status-box error">' + _t('enter_cdp_url') + '</div>';
                 return;
             }
             if (!viewerUrl) {
-                statusEl.innerHTML = '<div class="status-box error">Please enter a Browser Viewer URL — this is needed so you can watch the browser live</div>';
+                statusEl.innerHTML = '<div class="status-box error">' + _t('enter_viewer_url') + '</div>';
                 return;
             }
-            statusEl.innerHTML = '<div class="status-box info">Saving and testing...</div>';
+            statusEl.innerHTML = '<div class="status-box info">' + _t('saving_testing') + '</div>';
             // Save browser config first so server can test it
             fetch('/setup/save', {
                 method: 'POST',
@@ -818,22 +718,22 @@
                 return fetch('/browser-status');
             }).then(function(r) { return r.json(); }).then(function(data) {
                 if (data.cdpAvailable) {
-                    statusEl.innerHTML = '<div class="status-box success">✅ Connected! CDP is reachable' + (viewerUrl ? ' and viewer URL is set.' : '.') + '</div>';
+                    statusEl.innerHTML = '<div class="status-box success">' + _t('cdp_connected') + '</div>';
                 } else {
-                    statusEl.innerHTML = '<div class="status-box error">❌ Could not reach CDP at ' + cdpUrl + '<br>Make sure the browser is running with remote debugging enabled.</div>';
+                    statusEl.innerHTML = '<div class="status-box error">❌ ' + _t('cdp_not_reachable') + ': ' + cdpUrl + '</div>';
                 }
             }).catch(function(e) {
-                statusEl.innerHTML = '<div class="status-box error">Error: ' + e.message + '</div>';
+                statusEl.innerHTML = '<div class="status-box error">' + _t('error') + ': ' + e.message + '</div>';
             });
         }
 
         function savePathAndDetect() {
             var path = document.getElementById('s-ocpath').value.trim();
             if (!path) {
-                document.getElementById('agent-status').innerHTML = '<div class="status-box error">Please enter a path</div>';
+                document.getElementById('agent-status').innerHTML = '<div class="status-box error">' + _t('enter_path') + '</div>';
                 return;
             }
-            document.getElementById('agent-status').innerHTML = '<div class="status-box info">Saving path and detecting...</div>';
+            document.getElementById('agent-status').innerHTML = '<div class="status-box info">' + _t('saving_detecting') + '</div>';
             fetch('/setup/save', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -842,7 +742,7 @@
                 // Now re-detect with the new path
                 discoverAgents();
             }).catch(function(e) {
-                document.getElementById('agent-status').innerHTML = '<div class="status-box error">Failed: ' + e.message + '</div>';
+                document.getElementById('agent-status').innerHTML = '<div class="status-box error">' + _t('save_failed') + ': ' + _esc(e.message) + '</div>';
             });
         }
 
@@ -860,14 +760,14 @@
                 }
             }).catch(function(){});
 
-            statusEl.innerHTML = '<div class="status-box info">🔍 Looking for agents...</div>';
+            statusEl.innerHTML = '<div class="status-box info">' + _t('looking_for_agents') + '</div>';
             helpEl.style.display = 'none';
             if (gwSection) gwSection.style.display = 'none';
 
             fetch('/api/agents').then(function(r) { return r.json(); }).then(function(d) {
                 var agents = d.agents || [];
                 if (agents.length > 0) {
-                    statusEl.innerHTML = '<div class="status-box success">✅ Found ' + agents.length + ' agent' + (agents.length === 1 ? '' : 's') + '!</div>';
+                    statusEl.innerHTML = '<div class="status-box success">' + _t('agents_found', { count: agents.length }) + '</div>';
                     helpEl.style.display = 'none';
                     if (gwSection) gwSection.style.display = 'block';
                     // Auto-populate gateway token
@@ -876,20 +776,20 @@
                         if (tokenInput && !tokenInput.value && gi.token) tokenInput.value = gi.token;
                     }).catch(function(){});
                 } else {
-                    statusEl.innerHTML = '<div class="status-box error" style="border-color:#f4a236;background:rgba(244,162,54,0.1);color:#f4c36a;">⚠️ No agents found at this path. Check the troubleshooting tips below, or enter a different path and try again.</div>';
+                    statusEl.innerHTML = '<div class="status-box error" style="border-color:#f4a236;background:rgba(244,162,54,0.1);color:#f4c36a;">⚠️ ' + _t('no_agents_path') + '</div>';
                     helpEl.style.display = 'block';
                 }
                 previewEl.innerHTML = '';
                 agents.forEach(function(a) {
                     var row = document.createElement('div');
                     row.className = 'agent-row';
-                    row.innerHTML = '<span class="emoji">' + (a.emoji || '🤖') + '</span>' +
-                        '<span class="name">' + a.name + '</span>' +
-                        '<span class="role">' + (a.role || a.id) + '</span>';
+                    row.innerHTML = '<span class="emoji">' + _esc(a.emoji || '🤖') + '</span>' +
+                        '<span class="name">' + _esc(a.name) + '</span>' +
+                        '<span class="role">' + _esc(a.role || a.id) + '</span>';
                     previewEl.appendChild(row);
                 });
             }).catch(function(e) {
-                statusEl.innerHTML = '<div class="status-box error">Could not reach the server: ' + e.message + '</div>';
+                statusEl.innerHTML = '<div class="status-box error">' + _t('server_unreachable') + ': ' + e.message + '</div>';
                 helpEl.style.display = 'block';
             });
         }
@@ -897,7 +797,7 @@
         function configureGateway() {
             var statusEl = document.getElementById('gateway-config-status');
             var origin = location.protocol + '//' + location.hostname + (location.port ? ':' + location.port : '');
-            statusEl.innerHTML = '<div class="status-box info">⏳ Configuring gateway...</div>';
+            statusEl.innerHTML = '<div class="status-box info">' + _t('configuring_gateway') + '</div>';
 
             fetch('/api/gateway/configure', {
                 method: 'POST',
@@ -905,33 +805,33 @@
                 body: JSON.stringify({ origin: origin })
             }).then(function(r) { return r.json(); }).then(function(d) {
                 if (!d.ok) {
-                    statusEl.innerHTML = '<div class="status-box error">❌ Configure failed: ' + (d.error || 'unknown error') + '</div>';
+                    statusEl.innerHTML = '<div class="status-box error">❌ ' + _t('configure_failed') + ': ' + (d.error || _t('unknown')) + '</div>';
                     return;
                 }
-                var addedMsg = d.added ? 'Origin added to allowed list.' : 'Origin already allowed.';
-                statusEl.innerHTML = '<div class="status-box info">✅ ' + addedMsg + ' Testing connection...</div>';
+                var addedMsg = d.added ? _t('gateway_origin_added') : _t('gateway_origin_exists');
+                statusEl.innerHTML = '<div class="status-box info">✅ ' + addedMsg + ' ' + _t('testing_connection') + '</div>';
 
                 return fetch('/api/gateway/test').then(function(r) { return r.json(); }).then(function(t) {
                     var lines = [];
                     if (t.gateway === 'reachable') {
-                        lines.push('✅ Gateway: reachable');
+                        lines.push('✅ ' + _t('gateway_reachable'));
                     } else {
-                        lines.push('❌ Gateway: ' + (t.gateway || 'unreachable'));
-                        lines.push('<div class="note" style="margin-top:10px;border-color:#f4a236;">Make sure OpenClaw gateway is running. The Virtual Office needs a WebSocket connection to show live agent status and enable the chat panel.</div>');
+                        lines.push('❌ ' + _t('gateway_unreachable') + ': ' + _esc(t.gateway || 'unreachable'));
+                        lines.push('<div class="note" style="margin-top:10px;border-color:#f4a236;">' + _t('gateway_running_hint') + '</div>');
                     }
                     if (t.token === true) {
-                        lines.push('✅ Token: found');
+                        lines.push('✅ ' + _t('gateway_token_found'));
                     } else if (t.gateway === 'reachable') {
-                        lines.push('❌ Token: ' + (t.error || 'auth failed'));
+                        lines.push('❌ ' + _t('gateway_token_failed') + ': ' + _esc(t.error || 'auth failed'));
                     }
                     if (typeof t.agents === 'number') {
-                        lines.push((t.agents > 0 ? '✅' : '⚠️') + ' Agents connected: ' + t.agents);
+                        lines.push((t.agents > 0 ? '✅ ' : '⚠️ ') + _t('gateway_agents_connected', { count: t.agents }));
                     }
                     var boxClass = (t.gateway === 'reachable' && t.token) ? 'success' : 'error';
                     statusEl.innerHTML = '<div class="status-box ' + boxClass + '">' + lines.join('<br>') + '</div>';
                 });
             }).catch(function(e) {
-                statusEl.innerHTML = '<div class="status-box error">Error: ' + e.message + '</div>';
+                statusEl.innerHTML = '<div class="status-box error">' + _t('error') + ': ' + e.message + '</div>';
             });
         }
 
@@ -990,7 +890,7 @@
             };
 
             var statusEl = document.getElementById('save-status');
-            statusEl.innerHTML = '<div class="status-box info">Saving...</div>';
+            statusEl.innerHTML = '<div class="status-box info">' + _t('saving') + '</div>';
 
             fetch('/setup/save', {
                 method: 'POST',
@@ -998,13 +898,13 @@
                 body: JSON.stringify(config)
             }).then(function(r) { return r.json(); }).then(function(d) {
                 if (d.ok) {
-                    statusEl.innerHTML = '<div class="status-box success">✅ Launching your office...</div>';
+                    statusEl.innerHTML = '<div class="status-box success">' + _t('launching_office') + '</div>';
                     setTimeout(function() { window.location.href = '/'; }, 1000);
                 } else {
-                    statusEl.innerHTML = '<div class="status-box error">Save failed</div>';
+                    statusEl.innerHTML = '<div class="status-box error">' + _t('save_failed') + '</div>';
                 }
             }).catch(function(e) {
-                statusEl.innerHTML = '<div class="status-box error">Error: ' + e.message + '</div>';
+                statusEl.innerHTML = '<div class="status-box error">' + _t('error') + ': ' + e.message + '</div>';
             });
         }
     </script>

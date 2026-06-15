@@ -9,8 +9,8 @@
     <link rel="apple-touch-icon" href="icon-192.png">
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#1a1a2e">
-    <link rel="stylesheet" href="style.css?v=1781114012-reasoning-summary">
-    <link rel="stylesheet" href="projects.css?v=1781114012-project-execution">
+    <link rel="stylesheet" href="style.css?v=1781525717-reasoning-summary">
+    <link rel="stylesheet" href="projects.css?v=1781525717-project-execution">
     <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
     <!-- i18n: inline locale data for immediate init -->
     <script id="locale-en" type="application/json">{}</script>
@@ -55,33 +55,29 @@
                         </div>
                         <!-- Hermes Connection -->
                         <div class="mm-section">
-                            <div class="mm-section-title">⚕️ Hermes Agent Connection</div>
+                            <div class="mm-section-title" data-i18n="hermes_connection">⚕️ Hermes Agent Connection</div>
                             <label class="mm-label" style="display:flex;align-items:center;gap:6px;">
-                                <input type="checkbox" id="mm-hermes-enable" checked> Auto-detect Hermes Agents
+                                <input type="checkbox" id="mm-hermes-enable" checked> <span data-i18n="auto_detect_hermes">Auto-detect Hermes Agents</span>
                             </label>
-                            <div style="font-size:9px;color:#666;margin:4px 0 8px;line-height:1.4;">
+                            <div style="font-size:9px;color:#666;margin:4px 0 8px;line-height:1.4;" data-i18n="hermes_connection_desc">
                                 Connects local Hermes Agent profiles as first-class office agents. Virtual Office uses the Hermes CLI and safe status/session surfaces — not raw secrets or private memory files.
                             </div>
                             <div id="mm-hermes-fields" style="margin-top:8px;">
-                                <label class="mm-label">Hermes Home <span style="color:#666;font-size:9px">server-side</span></label>
+                                <label class="mm-label"><span data-i18n="hermes_home">Hermes Home</span> <span style="color:#666;font-size:9px" data-i18n="hermes_home_hint">server-side</span></label>
                                 <input type="text" id="mm-hermes-home" class="mm-input" placeholder="/home/user/.hermes">
-                                <label class="mm-label">Hermes CLI <span style="color:#666;font-size:9px">server-side</span></label>
+                                <label class="mm-label"><span data-i18n="hermes_cli">Hermes CLI</span> <span style="color:#666;font-size:9px" data-i18n="hermes_cli_hint">server-side</span></label>
                                 <input type="text" id="mm-hermes-bin" class="mm-input" placeholder="/home/user/.local/bin/hermes">
-                                <label class="mm-label">Hermes API URL <span style="color:#666;font-size:9px">native presence</span></label>
-                                <input type="text" id="mm-hermes-api-url" class="mm-input" placeholder="http://127.0.0.1:8642">
-                                <label class="mm-label">Hermes API Key <span style="color:#666;font-size:9px">server-side</span></label>
-                                <input type="password" id="mm-hermes-api-key" class="mm-input" placeholder="API_SERVER_KEY">
-                                <div style="font-size:9px;color:#666;margin:4px 0 8px;">For Docker, mount Hermes home/CLI into the container. Native live presence uses the Hermes API Server when available, with CLI fallback.</div>
-                                <button class="mm-btn mm-btn-primary" onclick="mmTestHermes()">🔍 Test Hermes</button>
+                                <div style="font-size:9px;color:#666;margin:4px 0 8px;" data-i18n="hermes_docker_hint">For Docker, mount the Hermes home/CLI into the container and use the mounted paths here.</div>
+                                <button class="mm-btn mm-btn-primary" onclick="mmTestHermes()" data-i18n="test_hermes">🔍 Test Hermes</button>
                                 <div id="mm-hermes-status"></div>
                             </div>
                         </div>
                         <!-- Office Settings -->
                         <div class="mm-section">
-                            <div class="mm-section-title">🏢 Office</div>
-                            <label class="mm-label">Office Name</label>
+                            <div class="mm-section-title" data-i18n="office_section">🏢 Office</div>
+                            <label class="mm-label" data-i18n="office_name">Office Name</label>
                             <input type="text" id="mm-office-name" class="mm-input" placeholder="My Virtual Office">
-                            <label class="mm-label">Weather Location</label>
+                            <label class="mm-label" data-i18n="weather_location">Weather Location</label>
                             <div style="display:flex;gap:8px">
                                 <input type="text" id="mm-weather-city" class="mm-input" placeholder="e.g. Miami" style="flex:2">
                                 <input type="text" id="mm-weather-state" class="mm-input" placeholder="e.g. FL" style="flex:1">
@@ -89,12 +85,12 @@
                         </div>
                         <!-- Display -->
                         <div class="mm-section">
-                            <div class="mm-section-title">🖥️ Display</div>
+                            <div class="mm-section-title" data-i18n="display_section">🖥️ Display</div>
                             <label class="mm-label" style="display:flex;align-items:center;gap:6px;">
-                                <input type="checkbox" id="mm-show-bubbles" checked> Show chat bubbles
+                                <input type="checkbox" id="mm-show-bubbles" checked> <span data-i18n="show_chat_bubbles">Show chat bubbles</span>
                             </label>
                             <label class="mm-label" style="display:flex;align-items:center;gap:6px;">
-                                <input type="checkbox" id="mm-show-names" checked> Show agent names
+                                <input type="checkbox" id="mm-show-names" checked> <span data-i18n="show_agent_names">Show agent names</span>
                             </label>
                             <label class="mm-label" for="mm-internal-bubble-timeout" style="margin-top:8px;" data-i18n="internal_bubble_timeout">Internal bubble auto-collapse (seconds)</label>
                             <input type="number" id="mm-internal-bubble-timeout" class="mm-input" min="0" step="1" value="60">
@@ -120,102 +116,95 @@
                         </div>
                         <!-- API Usage -->
                         <div class="mm-section">
-                            <div class="mm-section-title">☁️ API Usage</div>
+                            <div class="mm-section-title" data-i18n="api_usage_section">☁️ API Usage</div>
                             <label class="mm-label" style="display:flex;align-items:center;gap:6px;">
-                                <input type="checkbox" id="mm-apiusage-enable" checked> Show API Usage Panel
+                                <input type="checkbox" id="mm-apiusage-enable" checked> <span data-i18n="show_api_usage">Show API Usage Panel</span>
                             </label>
-                            <div style="font-size:9px;color:#666;margin:4px 0 8px;">
-                                Auto-detects providers from your OpenClaw config (Anthropic, OpenAI, Google, etc.).<br>
-                                Shows live usage quotas, API key health, and token expiry. No extra setup needed.
-                            </div>
+                            <div style="font-size:9px;color:#666;margin:4px 0 8px;" data-i18n="api_usage_desc">Auto-detects providers from your OpenClaw config. Shows live usage quotas and credential health.</div>
                             <div id="mm-apiusage-status"></div>
                         </div>
                         <!-- PC Performance -->
                         <div class="mm-section">
-                            <div class="mm-section-title">🖥️ PC Performance</div>
+                            <div class="mm-section-title" data-i18n="pc_performance_section">🖥️ PC Performance</div>
                             <label class="mm-label" style="display:flex;align-items:center;gap:6px;">
-                                <input type="checkbox" id="mm-pcmetrics-enable"> Enable PC Performance Monitor
+                                <input type="checkbox" id="mm-pcmetrics-enable"> <span data-i18n="enable_pc_monitor">Enable PC Performance Monitor</span>
                             </label>
                             <div id="mm-pcmetrics-fields" style="display:none;margin-top:8px;">
-                                <label class="mm-label">Metrics Server URL</label>
+                                <label class="mm-label" data-i18n="metrics_server_url">Metrics Server URL</label>
                                 <input type="text" id="mm-pcmetrics-url" class="mm-input" placeholder="http://192.168.1.100:8099">
-                                <div style="font-size:9px;color:#666;margin:4px 0 8px;">URL of the PC running pc-metrics-server.py. Can be local or remote.</div>
-                                <button class="mm-btn mm-btn-primary" onclick="mmTestPcMetrics()">🔍 Test Connection</button>
+                                <div style="font-size:9px;color:#666;margin:4px 0 8px;" data-i18n="metrics_url_desc">URL of the PC running pc-metrics-server.py. Can be local or remote.</div>
+                                <button class="mm-btn mm-btn-primary" onclick="mmTestPcMetrics()" data-i18n="test_pc_metrics">🔍 Test Connection</button>
                                 <div id="mm-pcmetrics-status"></div>
                             </div>
                         </div>
                         <div class="mm-section">
-                            <div class="mm-section-title">&#x1F310; Agent Browser</div>
-                            <div style="font-size:11px;color:#888;margin-bottom:8px;line-height:1.4;">
-                                Give your AI agents a real web browser they can control. You can watch them browse in real time through a live viewer panel.<br><br>
-                                <b>How it works:</b> Your agents use <b>CDP</b> (Chrome DevTools Protocol) to navigate, click, and read pages. The <b>Viewer</b> is a live screen you see in the office — like watching over their shoulder.<br><br>
-                                <b>Compatible with:</b> KasmVNC, headless Chromium, browserless.io, Playwright, or any setup that exposes CDP. The viewer can be any VNC/noVNC/web viewer.
-                            </div>
+                            <div class="mm-section-title" data-i18n="agent_browser_section">&#x1F310; Agent Browser</div>
+                            <div style="font-size:11px;color:#888;margin-bottom:8px;line-height:1.4;" data-i18n="agent_browser_desc">Give your AI agents a real web browser they can control.</div>
                             <label class="mm-label" style="display:flex;align-items:center;gap:6px;">
-                                <input type="checkbox" id="mm-browser-enable"> Enable Agent Browser
+                                <input type="checkbox" id="mm-browser-enable"> <span data-i18n="enable_agent_browser">Enable Agent Browser</span>
                             </label>
                             <div id="mm-browser-fields" style="display:none;margin-top:8px;">
-                                <label class="mm-label">CDP URL <span style="color:#666;font-size:9px">(how agents control the browser)</span></label>
+                                <label class="mm-label"><span data-i18n="cdp_url">CDP URL</span> <span style="color:#666;font-size:9px" data-i18n="cdp_url_hint">(how agents control the browser)</span></label>
                                 <input type="text" id="mm-cdp-url" class="mm-input" placeholder="e.g. http://127.0.0.1:9222">
-                                <div style="font-size:10px;color:#666;margin:2px 0 6px;">The Chrome DevTools Protocol endpoint. Usually runs on the same machine as Virtual Office. Use 127.0.0.1 if the browser container is local.</div>
-                                <button class="mm-btn" onclick="mmTestCdp()" style="font-size:9px;padding:4px 10px;">&#x1F50D; Test CDP</button>
+                                <div style="font-size:10px;color:#666;margin:2px 0 6px;" data-i18n="cdp_url_desc">The Chrome DevTools Protocol endpoint.</div>
+                                <button class="mm-btn" onclick="mmTestCdp()" style="font-size:9px;padding:4px 10px;" data-i18n="test_cdp">&#x1F50D; Test CDP</button>
                                 <div id="mm-cdp-status" style="margin:4px 0 10px;"></div>
                                 
-                                <label class="mm-label">Browser Viewer URL <span style="color:#666;font-size:9px">(live view you watch)</span></label>
+                                <label class="mm-label"><span data-i18n="browser_viewer_url">Browser Viewer URL</span> <span style="color:#666;font-size:9px" data-i18n="viewer_url_hint">(live view you watch)</span></label>
                                 <input type="text" id="mm-viewer-url" class="mm-input" placeholder="e.g. http://192.168.1.100:6902">
-                                <div style="font-size:10px;color:#666;margin:2px 0 6px;">The URL that loads in the floating browser window. Must be reachable from your browser (not localhost if you're accessing remotely). Use HTTP to avoid certificate issues.</div>
-                                <button class="mm-btn" onclick="mmTestViewer()" style="font-size:9px;padding:4px 10px;">&#x1F50D; Test Viewer</button>
+                                <div style="font-size:10px;color:#666;margin:2px 0 6px;" data-i18n="viewer_url_desc">The URL that loads in the floating browser window.</div>
+                                <button class="mm-btn" onclick="mmTestViewer()" style="font-size:9px;padding:4px 10px;" data-i18n="test_viewer">&#x1F50D; Test Viewer</button>
                                 <div id="mm-viewer-status" style="margin:4px 0;"></div>
                             </div>
                         </div>
                         <div class="mm-section">
-                            <div class="mm-section-title">🌤️ Weather</div>
+                            <div class="mm-section-title" data-i18n="weather_section">🌤️ Weather</div>
                             <label class="mm-label">
-                                <input type="checkbox" id="mm-show-weather" checked> Show weather effects
+                                <input type="checkbox" id="mm-show-weather" checked> <span data-i18n="show_weather">Show weather effects</span>
                             </label>
                         </div>
                         <!-- Actions -->
                         <div class="mm-section">
-                            <div class="mm-section-title">⚡ Actions</div>
-                            <button class="mm-btn" onclick="mmExportConfig()">📤 Export Office Config</button>
-                            <button class="mm-btn" onclick="mmImportConfig()">📥 Import Office Config</button>
+                            <div class="mm-section-title" data-i18n="actions_section">⚡ Actions</div>
+                            <button class="mm-btn" onclick="mmExportConfig()" data-i18n="export_config">📤 Export Office Config</button>
+                            <button class="mm-btn" onclick="mmImportConfig()" data-i18n="import_config">📥 Import Office Config</button>
                             <input type="file" id="mm-import-file" accept=".json" style="display:none">
-                            <button class="mm-btn mm-btn-danger" onclick="mmFullReset()">🗑️ Full Reset</button>
-                            <div class="mm-warning">Resets all furniture, agents, and branches to defaults.</div>
+                            <button class="mm-btn mm-btn-danger" onclick="mmFullReset()" data-i18n="full_reset">🗑️ Full Reset</button>
+                            <div class="mm-warning" data-i18n="reset_warning">Resets all furniture, agents, and branches to defaults.</div>
                         </div>
                         <!-- Help -->
                         <div class="mm-section">
-                            <div class="mm-section-title">❓ Help</div>
+                            <div class="mm-section-title" data-i18n="help_section">❓ Help</div>
                             <div class="mm-help">
-                                <p><b>Navigation:</b> Scroll to zoom, click+drag to pan</p>
-                                <p><b>Edit Office:</b> Place/move furniture, walls, floor colors</p>
-                                <p><b>Agents:</b> Customize appearance, assign desks, set branches</p>
-                                <p><b>Multi-select:</b> Double-click empty space → drag to select area. Or Ctrl+click items one by one.</p>
-                                <p><b>Move group:</b> After multi-selecting, click+hold any selected item to drag them all together.</p>
-                                <p><b>Shortcuts:</b> Del = delete selected, Esc = cancel, click empty = deselect all</p>
+                                <p data-i18n="help_navigation">Navigation: Scroll to zoom, click+drag to pan</p>
+                                <p data-i18n="help_edit_office">Edit Office: Place/move furniture, walls, floor colors</p>
+                                <p data-i18n="help_agents">Agents: Customize appearance, assign desks, set branches</p>
+                                <p data-i18n="help_multi_select">Multi-select: Double-click empty space → drag to select area.</p>
+                                <p data-i18n="help_move_group">Move group: Drag selected items together.</p>
+                                <p data-i18n="help_shortcuts">Shortcuts: Del = delete, Esc = cancel.</p>
                             </div>
-                            <a href="/setup" class="mm-btn" style="text-align:center;display:block;text-decoration:none">🧙 Run Setup Wizard</a>
+                            <a href="/setup" class="mm-btn" style="text-align:center;display:block;text-decoration:none" data-i18n="setup_wizard">🧙 Run Setup Wizard</a>
                         </div>
                         <!-- Save -->
-                        <button class="mm-btn mm-btn-primary mm-save-all" onclick="mmSaveSettings()">💾 Save Settings</button>
+                        <button class="mm-btn mm-btn-primary mm-save-all" onclick="mmSaveSettings()" data-i18n="save_settings">💾 Save Settings</button>
                     </div>
                 </div>
             </div>
             <div class="toolbar">
-                <button id="btn-main-menu" title="Settings & Help" onclick="toggleMainMenu()" data-i18n="menu">☰ Menu</button>
-                <button id="btn-edit-office" title="Edit office layout" onclick="toggleEditMode()" data-i18n="edit_office">✏️ Edit Office</button>
-                <button id="btn-save-edits" title="Save changes" onclick="saveEdits()" style="display:none;opacity:0.4" disabled data-i18n="save">💾 Save</button>
-                <button id="btn-undo-edit" title="Undo last change" onclick="undoEdit()" style="display:none;opacity:0.4" disabled data-i18n="undo">↩️ Undo</button>
-                <button id="btn-agent-settings" title="Create and customize agents" onclick="toggleAgentPanel()" data-i18n="agents">👤 Agents</button>
+                <button id="btn-main-menu" title="Settings & Help" onclick="toggleMainMenu()" data-i18n="menu" data-i18n-title="settings">☰ Menu</button>
+                <button id="btn-edit-office" title="Edit office layout" onclick="toggleEditMode()" data-i18n="edit_office" data-i18n-title="edit_office">✏️ Edit Office</button>
+                <button id="btn-save-edits" title="Save changes" onclick="saveEdits()" style="display:none;opacity:0.4" disabled data-i18n="save" data-i18n-title="save_changes">💾 Save</button>
+                <button id="btn-undo-edit" title="Undo last change" onclick="undoEdit()" style="display:none;opacity:0.4" disabled data-i18n="undo" data-i18n-title="undo">↩️ Undo</button>
+                <button id="btn-agent-settings" title="Create and customize agents" onclick="toggleAgentPanel()" data-i18n="agents" data-i18n-title="agents">👤 Agents</button>
                 <div class="toolbar-divider"></div>
-                <button id="btn-expand-all" title="Expand all bubbles" onclick="expandAllBubbles()" data-i18n="expand_all">💬 Expand All</button>
-                <button id="btn-minimize-all" title="Minimize all bubbles" onclick="minimizeAllBubbles()" data-i18n="minimize_all">💬 Minimize All</button>
-                <a href="/models.html" style="text-decoration:none"><button title="Model & Provider Settings" data-i18n="models">⚙️ Models</button></a>
-                <a href="/cron.html" style="text-decoration:none"><button title="Cron Job Manager" data-i18n="cron">⏰ Cron</button></a>
-                <button title="Project Manager" onclick="openProjectsManager()" data-i18n="projects">📋 Projects</button>
-                <button title="Reset canvas zoom" onclick="resetCamera()" data-i18n="reset_zoom">🔍 Reset</button>
-                <button id="sms-toggle" title="SMS/Phone Panel" data-i18n="sms">📞 SMS</button>
-                <button id="browser-toggle" title="Agent Browser" class="browser-toggle-btn" data-i18n="browser">🌐 Browser</button>
+                <button id="btn-expand-all" title="Expand all bubbles" onclick="expandAllBubbles()" data-i18n="expand_all" data-i18n-title="expand_all">💬 Expand All</button>
+                <button id="btn-minimize-all" title="Minimize all bubbles" onclick="minimizeAllBubbles()" data-i18n="minimize_all" data-i18n-title="minimize_all">💬 Minimize All</button>
+                <a href="/models.html" style="text-decoration:none"><button title="Model & Provider Settings" data-i18n="models" data-i18n-title="model_settings_title">⚙️ Models</button></a>
+                <a href="/cron.html" style="text-decoration:none"><button title="Cron Job Manager" data-i18n="cron" data-i18n-title="cron_manager_title">⏰ Cron</button></a>
+                <button title="Project Manager" onclick="openProjectsManager()" data-i18n="projects" data-i18n-title="projects_title">📋 Projects</button>
+                <button title="Reset canvas zoom" onclick="resetCamera()" data-i18n="reset_zoom" data-i18n-title="reset_zoom">🔍 Reset</button>
+                <button id="sms-toggle" title="SMS/Phone Panel" data-i18n="sms" data-i18n-title="sms_phone_panel">📞 SMS</button>
+                <button id="browser-toggle" title="Agent Browser" class="browser-toggle-btn" data-i18n="browser" data-i18n-title="agent_browser_title">🌐 Browser</button>
             </div>
         </div>
         <div class="sidebar-edge" id="sidebar-edge" onclick="toggleSidebar()" title="Toggle sidebar">
@@ -223,8 +212,8 @@
         </div>
         <div class="sidebar" id="sidebar">
             <div class="brand">
-                <h2 id="brand-title">VIRTUAL</h2>
-                <h3>⚡ DASHBOARD ⚡</h3>
+                <h2 id="brand-title" data-i18n="virtual">VIRTUAL</h2>
+                <h3 data-i18n="dashboard">⚡ DASHBOARD ⚡</h3>
             </div>
             <script>
             // Load office name from config
@@ -249,7 +238,7 @@
                     <div class="pc-metric-row">
                         <div class="pc-metric">
                             <div class="pc-metric-header">
-                                <span class="pc-label">CPU</span>
+                                <span class="pc-label" data-i18n="cpu_label">CPU</span>
                                 <span class="pc-value" id="pc-cpu-val">--%</span>
                             </div>
                             <div class="pc-bar-track"><div class="pc-bar cpu" id="pc-cpu-bar" style="width:0%"></div></div>
@@ -260,7 +249,7 @@
                     <div class="pc-metric-row">
                         <div class="pc-metric">
                             <div class="pc-metric-header">
-                                <span class="pc-label">RAM</span>
+                                <span class="pc-label" data-i18n="ram_label">RAM</span>
                                 <span class="pc-value" id="pc-ram-val">--%</span>
                             </div>
                             <div class="pc-bar-track"><div class="pc-bar ram" id="pc-ram-bar" style="width:0%"></div></div>
@@ -347,154 +336,154 @@
         <div class="modal-content">
             <div class="modal-header">
                 <span id="modal-emoji" class="modal-emoji"></span>
-                <h2 id="modal-name">Agent Name</h2>
+                <h2 id="modal-name" data-i18n="agent_name">Agent Name</h2>
                 <span class="close-btn" onclick="closeModal()">&times;</span>
             </div>
             <p id="modal-role" class="modal-role"></p>
             <div class="modal-grid">
                 <div class="modal-section">
-                    <h3>STATUS</h3>
-                    <p id="modal-status">Online</p>
-                    <p>Task: <span id="modal-task">—</span></p>
+                    <h3 data-i18n="status">STATUS</h3>
+                    <p id="modal-status" data-i18n="online">Online</p>
+                    <p><span data-i18n="task">Task</span>: <span id="modal-task">—</span></p>
                 </div>
                 <div class="modal-section">
-                    <h3>BRANCH</h3>
+                    <h3 data-i18n="branch">BRANCH</h3>
                     <p id="modal-branch">—</p>
-                    <p>Updated: <span id="modal-updated">—</span></p>
+                    <p><span data-i18n="updated">Updated</span>: <span id="modal-updated">—</span></p>
                 </div>
                 <div class="modal-section full-width">
-                    <h3>⚡ MODEL</h3>
+                    <h3 data-i18n="model">⚡ MODEL</h3>
                     <div class="model-settings-row">
                         <select id="modal-model-select"></select>
-                        <button id="modal-model-apply" onclick="applyModelChange()">Apply</button>
+                        <button id="modal-model-apply" onclick="applyModelChange()" data-i18n="apply">Apply</button>
                     </div>
                     <p id="modal-model-status" class="model-status-msg"></p>
                 </div>
                 <div class="modal-section full-width io-section">
-                    <h3>📥 LAST REQUEST</h3>
+                    <h3 data-i18n="last_request">📥 LAST REQUEST</h3>
                     <div id="modal-input" class="scroll-box io-box"></div>
                 </div>
                 <div class="modal-section full-width io-section">
-                    <h3>📤 RESPONSE</h3>
+                    <h3 data-i18n="response">📤 RESPONSE</h3>
                     <div id="modal-output" class="scroll-box io-box"></div>
                 </div>
             <div class="modal-section full-width bio-section">
-                <h3 class="bio-toggle" onclick="toggleBio('agents')">▶ AGENTS.md</h3>
+                <h3 class="bio-toggle" onclick="toggleBio('agents')" data-i18n="agents_md">▶ AGENTS.md</h3>
                 <div id="modal-bio-agents" class="bio-content" style="display:none">
                     <textarea id="bio-edit-agents" class="bio-editor" spellcheck="false" readonly></textarea>
                     <div class="bio-btn-row">
-                        <button class="bio-edit-btn" onclick="enableBioEdit('agents')">✏️ Edit</button>
-                        <button class="bio-save-btn" onclick="saveBioFile('AGENTS.md', 'bio-edit-agents')" style="display:none" id="bio-save-agents">💾 Save</button>
+                        <button class="bio-edit-btn" onclick="enableBioEdit('agents')" data-i18n="edit">✏️ Edit</button>
+                        <button class="bio-save-btn" onclick="saveBioFile('AGENTS.md', 'bio-edit-agents')" style="display:none" id="bio-save-agents" data-i18n="save_btn">💾 Save</button>
                     </div>
                 </div>
             </div>
             <div class="modal-section full-width bio-section">
-                <h3 class="bio-toggle" onclick="toggleBio('soul')">▶ SOUL.md</h3>
+                <h3 class="bio-toggle" onclick="toggleBio('soul')" data-i18n="soul_md">▶ SOUL.md</h3>
                 <div id="modal-bio-soul" class="bio-content" style="display:none">
                     <textarea id="bio-edit-soul" class="bio-editor" spellcheck="false" readonly></textarea>
                     <div class="bio-btn-row">
-                        <button class="bio-edit-btn" onclick="enableBioEdit('soul')">✏️ Edit</button>
-                        <button class="bio-save-btn" onclick="saveBioFile('SOUL.md', 'bio-edit-soul')" style="display:none" id="bio-save-soul">💾 Save</button>
+                        <button class="bio-edit-btn" onclick="enableBioEdit('soul')" data-i18n="edit">✏️ Edit</button>
+                        <button class="bio-save-btn" onclick="saveBioFile('SOUL.md', 'bio-edit-soul')" style="display:none" id="bio-save-soul" data-i18n="save_btn">💾 Save</button>
                     </div>
                 </div>
             </div>
             <div class="modal-section full-width bio-section">
-                <h3 class="bio-toggle" onclick="toggleBio('memory')">▶ MEMORY.md</h3>
+                <h3 class="bio-toggle" onclick="toggleBio('memory')" data-i18n="memory_md">▶ MEMORY.md</h3>
                 <div id="modal-bio-memory" class="bio-content" style="display:none">
                     <textarea id="bio-edit-memory" class="bio-editor" spellcheck="false" readonly></textarea>
                     <div class="bio-btn-row">
-                        <button class="bio-edit-btn" onclick="enableBioEdit('memory')">✏️ Edit</button>
-                        <button class="bio-save-btn" onclick="saveBioFile('MEMORY.md', 'bio-edit-memory')" style="display:none" id="bio-save-memory">💾 Save</button>
+                        <button class="bio-edit-btn" onclick="enableBioEdit('memory')" data-i18n="edit">✏️ Edit</button>
+                        <button class="bio-save-btn" onclick="saveBioFile('MEMORY.md', 'bio-edit-memory')" style="display:none" id="bio-save-memory" data-i18n="save_btn">💾 Save</button>
                     </div>
                 </div>
             </div>
             <div class="modal-section full-width bio-section">
-                <h3 class="bio-toggle" onclick="toggleBio('tools')">▶ TOOLS.md</h3>
+                <h3 class="bio-toggle" onclick="toggleBio('tools')" data-i18n="tools_md">▶ TOOLS.md</h3>
                 <div id="modal-bio-tools" class="bio-content" style="display:none">
                     <textarea id="bio-edit-tools" class="bio-editor" spellcheck="false" readonly></textarea>
                     <div class="bio-btn-row">
-                        <button class="bio-edit-btn" onclick="enableBioEdit('tools')">✏️ Edit</button>
-                        <button class="bio-save-btn" onclick="saveBioFile('TOOLS.md', 'bio-edit-tools')" style="display:none" id="bio-save-tools">💾 Save</button>
+                        <button class="bio-edit-btn" onclick="enableBioEdit('tools')" data-i18n="edit">✏️ Edit</button>
+                        <button class="bio-save-btn" onclick="saveBioFile('TOOLS.md', 'bio-edit-tools')" style="display:none" id="bio-save-tools" data-i18n="save_btn">💾 Save</button>
                     </div>
                 </div>
             </div>
             <div class="modal-section full-width bio-section">
-                <h3 class="bio-toggle" onclick="toggleBio('identity')">▶ IDENTITY.md</h3>
+                <h3 class="bio-toggle" onclick="toggleBio('identity')" data-i18n="identity_md">▶ IDENTITY.md</h3>
                 <div id="modal-bio-identity" class="bio-content" style="display:none">
                     <textarea id="bio-edit-identity" class="bio-editor" spellcheck="false" readonly></textarea>
                     <div class="bio-btn-row">
-                        <button class="bio-edit-btn" onclick="enableBioEdit('identity')">✏️ Edit</button>
-                        <button class="bio-save-btn" onclick="saveBioFile('IDENTITY.md', 'bio-edit-identity')" style="display:none" id="bio-save-identity">💾 Save</button>
+                        <button class="bio-edit-btn" onclick="enableBioEdit('identity')" data-i18n="edit">✏️ Edit</button>
+                        <button class="bio-save-btn" onclick="saveBioFile('IDENTITY.md', 'bio-edit-identity')" style="display:none" id="bio-save-identity" data-i18n="save_btn">💾 Save</button>
                     </div>
                 </div>
             </div>
             <div class="modal-section full-width bio-section">
-                <h3 class="bio-toggle" onclick="toggleBio('daily')">▶ DAILY NOTES</h3>
+                <h3 class="bio-toggle" onclick="toggleBio('daily')" data-i18n="daily_notes">▶ DAILY NOTES</h3>
                 <div id="modal-bio-daily" class="bio-content" style="display:none">
                     <textarea id="bio-edit-daily" class="bio-editor" spellcheck="false" readonly></textarea>
-                    <span style="color:#666;font-size:10px;">Daily notes are read-only</span>
+                    <span style="color:#666;font-size:10px;" data-i18n="daily_notes_readonly">Daily notes are read-only</span>
                 </div>
             </div>
             <div class="modal-section full-width bio-section">
-                <h3 class="bio-toggle" onclick="toggleBio('skills')">▶ SKILLS</h3>
+                <h3 class="bio-toggle" onclick="toggleBio('skills')" data-i18n="skills">▶ SKILLS</h3>
                 <div id="modal-bio-skills" class="bio-content" style="display:none">
                     <div id="skills-list"></div>
                     <div class="skill-workshop-panel">
                         <div class="skill-workshop-heading">
-                            <span>Skill Workshop</span>
-                            <button type="button" onclick="refreshSkillWorkshopQueue()">Refresh</button>
+                            <span data-i18n="skill_workshop">Skill Workshop</span>
+                            <button type="button" onclick="refreshSkillWorkshopQueue()" data-i18n="refresh">Refresh</button>
                         </div>
                         <div id="skill-workshop-list" class="skill-workshop-list">
-                            <span style="color:#666;font-size:11px;">Loading proposals...</span>
+                            <span style="color:#666;font-size:11px;" data-i18n="loading_proposals">Loading proposals...</span>
                         </div>
                     </div>
                     <div class="bio-btn-row">
-                        <button class="bio-edit-btn" onclick="showAddSkillForm()">➕ Add Skill</button>
-                        <button class="bio-edit-btn" onclick="showLibraryPicker()">📚 Add from Library</button>
+                        <button class="bio-edit-btn" onclick="showAddSkillForm()" data-i18n="add_skill">➕ Add Skill</button>
+                        <button class="bio-edit-btn" onclick="showLibraryPicker()" data-i18n="add_from_library">📚 Add from Library</button>
                     </div>
                     <div id="skill-library-picker" style="display:none;">
                         <select id="skill-library-select" class="skill-form-input" style="margin-bottom:4px;"></select>
                         <div class="bio-btn-row">
-                            <button class="bio-save-btn" style="display:inline-flex" onclick="applyLibrarySkill()">📋 Apply</button>
-                            <button class="bio-edit-btn" onclick="hideLibraryPicker()">Cancel</button>
+                            <button class="bio-save-btn" style="display:inline-flex" onclick="applyLibrarySkill()" data-i18n="apply_btn">📋 Apply</button>
+                            <button class="bio-edit-btn" onclick="hideLibraryPicker()" data-i18n="cancel">Cancel</button>
                         </div>
                     </div>
                     <div id="skill-add-form" style="display:none;">
-                        <input id="skill-new-name" type="text" placeholder="Skill name" class="skill-form-input">
-                        <textarea id="skill-new-content" placeholder="Paste SKILL.md content here..." class="skill-form-textarea"></textarea>
+                        <input id="skill-new-name" type="text" placeholder="Skill name" class="skill-form-input" data-i18n-placeholder="skill_name_placeholder">
+                        <textarea id="skill-new-content" placeholder="Paste SKILL.md content here..." class="skill-form-textarea" data-i18n-placeholder="skill_content_placeholder"></textarea>
                         <div class="bio-btn-row">
-                            <button class="bio-save-btn" style="display:inline-flex" onclick="saveNewSkill()">💾 Save Skill</button>
-                            <button class="bio-edit-btn" onclick="hideAddSkillForm()">Cancel</button>
+                            <button class="bio-save-btn" style="display:inline-flex" onclick="saveNewSkill()" data-i18n="save_skill">💾 Save Skill</button>
+                            <button class="bio-edit-btn" onclick="hideAddSkillForm()" data-i18n="cancel">Cancel</button>
                         </div>
                     </div>
                     <div id="skill-edit-form" style="display:none;">
                         <h4 id="skill-edit-title" style="color:#ffd700;font-size:12px;margin:0 0 4px 0;"></h4>
                         <textarea id="skill-edit-content" class="skill-form-textarea" style="min-height:180px;"></textarea>
                         <div class="bio-btn-row">
-                            <button class="bio-save-btn" style="display:inline-flex" onclick="saveEditedSkill()">💾 Save</button>
-                            <button class="bio-edit-btn" onclick="hideEditSkillForm()">Cancel</button>
+                            <button class="bio-save-btn" style="display:inline-flex" onclick="saveEditedSkill()" data-i18n="save_btn">💾 Save</button>
+                            <button class="bio-edit-btn" onclick="hideEditSkillForm()" data-i18n="cancel">Cancel</button>
                         </div>
                     </div>
                 </div>
             </div>
                 <div class="modal-section full-width">
-                    <h3>INTENT HISTORY</h3>
+                    <h3 data-i18n="intent_history">INTENT HISTORY</h3>
                     <div id="modal-plan" class="scroll-box"></div>
                 </div>
                 <div class="modal-section full-width">
-                    <h3>SYSTEM LOGS</h3>
+                    <h3 data-i18n="system_logs">SYSTEM LOGS</h3>
                     <div id="modal-logs" class="scroll-box"></div>
                 </div>
             </div>
             <div class="modal-controls">
-                <button onclick="overrideAgent('working')">🖥️ Work</button>
-                <button onclick="overrideAgent('meeting')">📊 Meet</button>
-                <button onclick="overrideAgent('break')">💧 Break</button>
-                <button onclick="overrideAgent('lounge')">🛋️ Lounge</button>
+                <button onclick="overrideAgent('working')" data-i18n="work">🖥️ Work</button>
+                <button onclick="overrideAgent('meeting')" data-i18n="meet">📊 Meet</button>
+                <button onclick="overrideAgent('break')" data-i18n="break_btn">💧 Break</button>
+                <button onclick="overrideAgent('lounge')" data-i18n="lounge">🛋️ Lounge</button>
                 <span class="modal-controls-sep">|</span>
-                <button id="btn-trigger-thought">💭 Think</button>
-                <button id="btn-trigger-speech">💬 Say</button>
-                <button id="btn-clear-bubbles">🧹 Clear</button>
+                <button id="btn-trigger-thought" data-i18n="think">💭 Think</button>
+                <button id="btn-trigger-speech" data-i18n="say">💬 Say</button>
+                <button id="btn-clear-bubbles" data-i18n="clear_bubbles">🧹 Clear</button>
             </div>
         </div>
     </div>
@@ -504,16 +493,16 @@
         <div class="modal-content meetings-modal-content">
             <div class="modal-header">
                 <span class="modal-emoji">📊</span>
-                <h2>Meetings</h2>
+                <h2 data-i18n="meetings_title">Meetings</h2>
                 <span class="close-btn" onclick="closeMeetingsModal()">&times;</span>
             </div>
             <div class="mtg-tabs">
-                <button class="mtg-tab active" data-tab="active" onclick="switchMtgTab('active')">Active</button>
-                <button class="mtg-tab" data-tab="completed" onclick="switchMtgTab('completed')">History</button>
+                <button class="mtg-tab active" data-tab="active" onclick="switchMtgTab('active')" data-i18n="active">Active</button>
+                <button class="mtg-tab" data-tab="completed" onclick="switchMtgTab('completed')" data-i18n="history">History</button>
             </div>
             <div class="mtg-bulk-actions">
-                <button class="mtg-btn" onclick="mtgExpandAll()">▼ Expand All</button>
-                <button class="mtg-btn" onclick="mtgCollapseAll()">▲ Collapse All</button>
+                <button class="mtg-btn" onclick="mtgExpandAll()" data-i18n="sidebar_expand_all">▼ Expand All</button>
+                <button class="mtg-btn" onclick="mtgCollapseAll()" data-i18n="sidebar_collapse_all">▲ Collapse All</button>
             </div>
             <div id="mtg-cards" class="mtg-cards"></div>
         </div>
@@ -524,12 +513,12 @@
         <div class="modal-content skills-library-modal">
             <div class="modal-header">
                 <span class="modal-emoji">📚</span>
-                <h2>Skills Library</h2>
+                <h2 data-i18n="skills_library_title">Skills Library</h2>
                 <span class="close-btn" onclick="closeSkillsLibrary()">&times;</span>
             </div>
             <div class="skl-topbar">
-                <button class="mtg-btn" onclick="openSkillEditor(null)">➕ Add Skill</button>
-                <label class="mtg-btn skl-upload-label">📎 Upload
+                <button class="mtg-btn" onclick="openSkillEditor(null)" data-i18n="add_skill">➕ Add Skill</button>
+                <label class="mtg-btn skl-upload-label"><span data-i18n="upload">📎 Upload</span>
                     <input type="file" accept=".md" id="skl-upload-input" style="display:none" onchange="handleSkillUpload(this)">
                 </label>
             </div>
@@ -542,17 +531,17 @@
         <div class="modal-content" style="max-width:640px;">
             <div class="modal-header">
                 <span class="modal-emoji">✏️</span>
-                <h2 id="skl-editor-title">Add Skill</h2>
+                <h2 id="skl-editor-title" data-i18n="add_skill">Add Skill</h2>
                 <span class="close-btn" onclick="closeSkillEditor()">&times;</span>
             </div>
             <div class="skl-editor-body">
-                <label class="skl-field-label">Skill Name</label>
+                <label class="skl-field-label" data-i18n="skill_name_placeholder">Skill Name</label>
                 <input type="text" id="skl-editor-name" class="skl-input" placeholder="my-skill-name">
-                <label class="skl-field-label">SKILL.md Content</label>
+                <label class="skl-field-label" data-i18n="skill_content_label">SKILL.md Content</label>
                 <textarea id="skl-editor-content" class="skl-textarea" placeholder="---&#10;name: skill-name&#10;description: What this skill does&#10;---&#10;&#10;# Skill Title&#10;&#10;Instructions..."></textarea>
                 <div class="skl-editor-actions">
-                    <button class="mtg-btn" onclick="saveSkill()">💾 Save</button>
-                    <button class="mtg-btn" onclick="closeSkillEditor()">Cancel</button>
+                    <button class="mtg-btn" onclick="saveSkill()" data-i18n="save_btn">💾 Save</button>
+                    <button class="mtg-btn" onclick="closeSkillEditor()" data-i18n="cancel">Cancel</button>
                 </div>
             </div>
         </div>
@@ -563,7 +552,7 @@
         <div class="modal-content projects-modal-content">
             <div class="modal-header" style="flex-shrink:0;padding:10px 16px;background:#0d0d1e;border-bottom:2px solid #ffd700">
                 <span class="modal-emoji">📋</span>
-                <h2 style="font-size:16px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif">Projects</h2>
+                <h2 style="font-size:16px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif" data-i18n="projects_title">Projects</h2>
                 <span class="close-btn" onclick="closeProjectsModal()">&times;</span>
             </div>
             <div id="proj-main-content" style="flex:1;display:flex;flex-direction:column;overflow:hidden">
@@ -584,20 +573,20 @@
         <div class="modal-content" style="max-width:480px;">
             <div class="modal-header">
                 <span class="modal-emoji">✅</span>
-                <h2>End Meeting</h2>
+                <h2 data-i18n="end_meeting">End Meeting</h2>
                 <span class="close-btn" onclick="closeEndMeetingModal()">&times;</span>
             </div>
             <input type="hidden" id="end-mtg-id">
             <div class="mtg-form">
-                <label class="mtg-label">Summary <span style="color:#e74c3c">*</span></label>
+                <label class="mtg-label"><span data-i18n="summary">Summary</span> <span style="color:#e74c3c">*</span></label>
                 <textarea id="end-mtg-summary" class="mtg-textarea" rows="3" placeholder="What happened in this meeting?"></textarea>
-                <label class="mtg-label">Resolution</label>
+                <label class="mtg-label" data-i18n="resolution">Resolution</label>
                 <textarea id="end-mtg-resolution" class="mtg-textarea" rows="2" placeholder="Outcome / decisions made (optional)"></textarea>
-                <label class="mtg-label">Action Items <span style="color:#666;font-size:9px">(one per line)</span></label>
+                <label class="mtg-label"><span data-i18n="action_items">Action Items</span> <span style="color:#666;font-size:9px" data-i18n="one_per_line">(one per line)</span></label>
                 <textarea id="end-mtg-actions" class="mtg-textarea" rows="3" placeholder="e.g. Cody: implement auth module&#10;Usy: update login UI"></textarea>
                 <div id="end-mtg-responses-section"></div>
                 <div id="end-mtg-error" style="color:#e74c3c;font-size:10px;margin:6px 0;display:none;"></div>
-                <button class="mtg-btn mtg-btn-end" onclick="submitEndMeeting()">End Meeting</button>
+                <button class="mtg-btn mtg-btn-end" onclick="submitEndMeeting()" data-i18n="submit_end_meeting">End Meeting</button>
             </div>
         </div>
     </div>
@@ -613,48 +602,48 @@
         <div class="sms-resize-handle bottom-left"></div>
         <div class="sms-resize-handle left"></div>
         <div class="sms-header">
-            <span>📞 SMS Inbox</span>
+            <span data-i18n="sms_inbox">📞 SMS Inbox</span>
             <span id="sms-count" class="sms-count">0</span>
             <span style="flex:1"></span>
             <div class="sms-header-btns">
-                <button id="sms-move" class="sms-move-btn" title="Move/snap SMS window">⇱</button>
+                <button id="sms-move" class="sms-move-btn" title="Move/snap SMS window" data-i18n-title="sms_move_title">⇱</button>
                 <button id="sms-close" class="sms-close">&times;</button>
             </div>
         </div>
         <div class="sms-owner-strip">
-            <span id="sms-owner-badge" class="sms-owner-badge">Owner agent not assigned</span>
+            <span id="sms-owner-badge" class="sms-owner-badge" data-i18n="owner_not_assigned">Owner agent not assigned</span>
         </div>
         <div class="sms-layout">
             <div class="sms-sidebar">
                 <div class="sms-thread-picker">
                     <select id="sms-recipient" class="sms-recipient">
-                        <option value="">Select contact...</option>
+                        <option value="" data-i18n="select_contact">Select contact...</option>
                     </select>
                     <input type="text" id="sms-phone-manual" class="sms-phone-manual" placeholder="+1XXXXXXXXXX" style="display:none">
-                    <button id="sms-toggle-manual" class="sms-toggle-manual" title="Type number manually">✏️</button>
-                    <button id="sms-open-thread" class="sms-open-thread" title="Open thread">Open</button>
+                    <button id="sms-toggle-manual" class="sms-toggle-manual" title="Type number manually" data-i18n-title="type_number_manually">✏️</button>
+                    <button id="sms-open-thread" class="sms-open-thread" title="Open thread" data-i18n-title="open_thread" data-i18n="open_thread">Open</button>
                 </div>
                 <div id="sms-threads" class="sms-threads"></div>
             </div>
             <div class="sms-conversation">
                 <div class="sms-thread-header">
-                    <button id="sms-back-to-inbox" class="sms-back-to-inbox" type="button">← Inbox</button>
+                    <button id="sms-back-to-inbox" class="sms-back-to-inbox" type="button" data-i18n="back_to_inbox">← Inbox</button>
                     <div class="sms-thread-header-main">
-                        <div id="sms-thread-title" class="sms-thread-title">Select a contact</div>
-                        <div id="sms-thread-subtitle" class="sms-thread-subtitle">Choose a thread to view the conversation.</div>
+                        <div id="sms-thread-title" class="sms-thread-title" data-i18n="select_a_contact">Select a contact</div>
+                        <div id="sms-thread-subtitle" class="sms-thread-subtitle" data-i18n="choose_thread">Choose a thread to view the conversation.</div>
                     </div>
                     <div class="sms-mode-toggle">
-                        <span id="sms-mode-label" class="sms-mode-label">Agent</span>
+                        <span id="sms-mode-label" class="sms-mode-label" data-i18n="agent_mode">Agent</span>
                         <label class="sms-switch">
                             <input type="checkbox" id="sms-mode-check">
                             <span class="sms-slider"></span>
                         </label>
                     </div>
                 </div>
-                <div id="sms-empty-state" class="sms-empty-state">Select a contact thread on the left, or open a number to start a new one.</div>
+                <div id="sms-empty-state" class="sms-empty-state" data-i18n="select_contact_thread">Select a contact thread on the left, or open a number to start a new one.</div>
                 <div id="sms-messages" class="sms-messages"></div>
                 <div class="sms-input-row sms-compose-row">
-                    <textarea id="sms-input" class="sms-input" placeholder="Switch this thread to User to reply manually..." rows="2"></textarea>
+                    <textarea id="sms-input" class="sms-input" placeholder="Switch this thread to User to reply manually..." rows="2" data-i18n-placeholder="sms_input_placeholder"></textarea>
                     <button id="sms-send" class="sms-send-btn">▶</button>
                 </div>
             </div>
@@ -663,7 +652,7 @@
 
     <!-- Chat Panel -->
     <button id="chat-toggle" class="chat-toggle-btn">💬</button>
-    <div id="chat-exterior-tabs" class="chat-exterior-tabs" title="Chat windows">
+    <div id="chat-exterior-tabs" class="chat-exterior-tabs" title="Chat windows" data-i18n-title="chat_windows">
         <button type="button" class="chat-slot-tab state-hidden" data-chat-slot-toggle="1" data-chat-slot-state="hidden" aria-pressed="false" title="Open chat window 1">
             <span class="chat-slot-tab-label">1</span>
         </button>
@@ -687,15 +676,15 @@
         <div id="chat-resize-handle-bottom-left"   class="chat-resize-handle bottom-left"></div>
         <div id="chat-resize-handle-left"          class="chat-resize-handle left"></div>
         <div class="chat-header">
-            <select id="chat-agent-select" class="chat-agent-select" title="Switch agent">
+            <select id="chat-agent-select" class="chat-agent-select" title="Switch agent" data-i18n-title="switch_agent">
                 <option value="main" data-emoji="🤖" data-name="Main Agent" selected>🤖 Main Agent</option>
             </select>
             <span id="chat-status" class="chat-status" data-i18n="offline_status">Offline</span>
             <span style="flex:1"></span>
             <div class="chat-header-btns">
-                <button id="chat-compact-context" class="chat-compact-context" title="Compress Codex context" style="display:none">🗜</button>
+                <button id="chat-compact-context" class="chat-compact-context" title="Compress Codex context" style="display:none" data-i18n-title="compress_codex_context">🗜</button>
                 <button id="chat-new-session" class="chat-new-session" data-i18n-title="new_session" title="New Session">🔄</button>
-                <button id="chat-move" class="chat-move-btn" title="Move/snap chat window">⇱</button>
+                <button id="chat-move" class="chat-move-btn" title="Move/snap chat window" data-i18n-title="move_chat_window">⇱</button>
                 <button id="chat-close" class="chat-close">&times;</button>
             </div>
         </div>
@@ -706,11 +695,11 @@
         <div id="chat-messages" class="chat-messages"></div>
         <div id="chat-attachments-preview" class="chat-attachments-preview"></div>
         <div class="chat-input-row">
-            <button id="chat-attach" class="chat-attach-btn" title="Attach file">📎</button>
+            <button id="chat-attach" class="chat-attach-btn" title="Attach file" data-i18n-title="attach_file">📎</button>
             <input type="file" id="chat-file-input" class="chat-file-input" multiple accept="image/*,.pdf,.txt,.csv,.json,.md,.py,.js" style="display:none">
             <textarea id="chat-input" class="chat-input" data-i18n-placeholder="type_message" placeholder="Type a message..." rows="1"></textarea>
-            <button id="chat-mic" class="chat-mic-btn" title="Voice input (Whisper)">🎙️</button>
-            <button id="chat-stop" class="chat-stop-btn" title="Stop current model response">⏹</button>
+            <button id="chat-mic" class="chat-mic-btn" title="Voice input (Whisper)" data-i18n-title="voice_input">🎙️</button>
+            <button id="chat-stop" class="chat-stop-btn" title="Stop current model response" data-i18n-title="stop_model_response">⏹</button>
             <button id="chat-send" class="chat-send-btn">▶</button>
         </div>
     </div>
@@ -834,11 +823,11 @@
         setTimeout(resizeCanvas, 320);
     }
     </script>
-    <script src="internal-bubble.js?v=1781114012"></script>
-    <script src="game.js?v=1781114012-internal-bubble-auto-collapse"></script>
-    <script src="browser-viewer-url.js?v=1781114012"></script>
-    <script src="browser-panel.js?v=1781114012"></script>
-    <script src="projects.js?v=1781114012-project-execution"></script>
+    <script src="internal-bubble.js?v=1781525717"></script>
+    <script src="game.js?v=1781525717-internal-bubble-auto-collapse"></script>
+    <script src="browser-viewer-url.js?v=1781525717"></script>
+    <script src="browser-panel.js?v=1781525717"></script>
+    <script src="projects.js?v=1781525717-project-execution"></script>
     <script>
     // Bio sections for agent modal
     let _bioCache = {};
@@ -915,7 +904,7 @@
         const btn = bioContent ? bioContent.querySelector('.bio-save-btn') : null;
         if (!btn) return;
         const origText = btn.textContent;
-        btn.textContent = '⏳ Saving...';
+        btn.textContent = '⏳ ' + i18n.t('saving');
         btn.disabled = true;
         try {
             const res = await fetch('/agent-bio-save/' + agent.statusKey, {
@@ -925,7 +914,7 @@
             });
             const data = await res.json();
             if (data.ok) {
-                btn.textContent = '✅ Saved!';
+                btn.textContent = '✅ ' + i18n.t('saved');
                 btn.classList.add('saved');
                 // Reset to read-only after save
                 textarea.readOnly = true;
@@ -942,7 +931,7 @@
                     if (editBtn) editBtn.style.display = 'inline-block';
                 }, 2000);
             } else {
-                btn.textContent = '❌ Error: ' + (data.error || 'unknown');
+                btn.textContent = '❌ ' + i18n.t('error') + ': ' + (data.error || i18n.t('unknown'));
                 setTimeout(() => { btn.textContent = origText; btn.disabled = false; }, 3000);
             }
         } catch(e) {
@@ -975,7 +964,7 @@
     async function loadModelSelect(agent) {
         const sel = document.getElementById('modal-model-select');
         const status = document.getElementById('modal-model-status');
-        sel.innerHTML = '<option>Loading...</option>';
+        sel.innerHTML = '<option>' + i18n.t('loading') + '</option>';
         status.textContent = '';
         try {
             if (!_modelsCache) {
@@ -988,7 +977,7 @@
             sel.innerHTML = '';
             const defOpt = document.createElement('option');
             defOpt.value = '';
-            defOpt.textContent = '(default: ' + (data.defaultModel || '?') + ')';
+            defOpt.textContent = i18n.t('default_model', { model: data.defaultModel || '?' });
             sel.appendChild(defOpt);
 
             // Group models by provider
@@ -1029,10 +1018,10 @@
                 sel.appendChild(grp);
             }
             if (currentModel) {
-                status.textContent = 'Current: ' + currentModel;
+                status.textContent = i18n.t('current_model', { model: currentModel });
             }
         } catch(e) {
-            sel.innerHTML = '<option>Error loading models</option>';
+            sel.innerHTML = '<option>' + i18n.t('failed_to_load') + '</option>';
         }
     }
     async function applyModelChange() {
@@ -1041,7 +1030,7 @@
         const agent = window.selectedAgent;
         if (!agent) return;
         const model = sel.value;
-        status.textContent = 'Applying...';
+        status.textContent = i18n.t('applying');
         try {
             const res = await fetch('/api/native-models/openclaw/agent-model', {
                 method: 'POST',
@@ -1050,10 +1039,10 @@
             });
             const data = await res.json();
             if (data.ok) {
-                status.textContent = '✅ ' + (model || 'default');
+                status.textContent = '✅ ' + (model || i18n.t('default'));
                 _modelsCache = null; // invalidate
             } else {
-                status.textContent = '❌ ' + (data.error || 'Failed');
+                status.textContent = '❌ ' + (data.error || i18n.t('failed'));
             }
         } catch(e) {
             status.textContent = '❌ ' + e.message;
@@ -1062,11 +1051,11 @@
     </script>
     <!-- marked.js v15.0.12 - bundled locally for airgapped/offline use -->
     <script src="marked.min.js"></script>
-    <script src="codex-reasoning.js?v=1781114012"></script>
-    <script src="chat.js?v=1781114012-reasoning-summary"></script>
-    <script src="sms-panel.js?v=1781114012"></script>
-    <script src="pc-monitor.js?v=1781114012"></script>
-    <script src="api-usage.js?v=1781114012"></script>
+    <script src="codex-reasoning.js?v=1781525717"></script>
+    <script src="chat.js?v=1781525717-reasoning-summary"></script>
+    <script src="sms-panel.js?v=1781525717"></script>
+    <script src="pc-monitor.js?v=1781525717"></script>
+    <script src="api-usage.js?v=1781525717"></script>
     <script>
     // License check — demo watermark + feature gates
     (function() {
@@ -1077,7 +1066,7 @@
                 var banner = document.createElement('div');
                 banner.id = 'demo-banner';
                 banner.style.cssText = 'width:100%;background:linear-gradient(90deg,#ff6b00,#ff9500);color:#000;text-align:center;padding:5px 12px;font-size:11px;font-weight:bold;cursor:pointer;flex-shrink:0;';
-                banner.innerHTML = '⚡ DEMO — 3 agents max, some features locked. <u>Get a license key</u>';
+                banner.innerHTML = i18n.t('demo_banner');
                 banner.onclick = function() { window.open('/setup','_blank'); };
                 // Insert above the toolbar
                 var toolbar = document.querySelector('.toolbar');

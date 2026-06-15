@@ -3,21 +3,21 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Your Virtual Office — A Visual Workspace for AI Agents</title>
-    <meta name="description" content="Turn your AI agents into a living, breathing office. 2D AI workspace with live presence, chat, browser control, and more. Self-hosted with Docker.">
+    <title data-i18n="website_title">Your Virtual Office — A Visual Workspace for AI Agents</title>
+    <meta name="description" content="Turn your AI agents into a living, breathing office. Pixel-art workspace with live presence, chat, browser control, and more. Self-hosted with Docker.">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Press+Start+2P&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="styles.css">
     <script id="locale-en" type="application/json">{}</script>
     <script id="locale-zh" type="application/json">{}</script>
-    <script src="../app/i18n.js"></script>
+    <script src="/i18n.js"></script>
     <script>
     (function(){
         var lang='en';
         try{var s=localStorage.getItem('vo-i18n-lang');if(s==='zh')lang='zh';else if(navigator.language&&navigator.language.toLowerCase().indexOf('zh')>=0)lang='zh';}catch(e){}
         var eE=document.getElementById('locale-en'),eZ=document.getElementById('locale-zh');
-        function load(l,el){fetch('../app/locales/'+l+'.json').then(function(r){return r.json()}).then(function(d){el.textContent=JSON.stringify(d)}).catch(function(){});}
+        function load(l,el){fetch('/locales/'+l+'.json').then(function(r){return r.json()}).then(function(d){el.textContent=JSON.stringify(d)}).catch(function(){});}
         load('en',eE);load('zh',eZ);
     })();
     </script>
@@ -45,7 +45,7 @@
 <section class="hero">
     <div class="hero-inner">
         <div class="hero-badge" data-i18n="hero_bad">Built for OpenClaw</div>
-        <h1 data-i18n="hero_title">Your AI agents deserve<br>an <span class="gradient-text">office</span>.</h1>
+        <h1 data-i18n-html="hero_title">Your AI agents deserve<br>an <span class="gradient-text">office</span>.</h1>
         <p class="hero-sub" data-i18n="hero_sub">A live pixel-art workspace where your AI agents walk, work, and talk. Watch them in real time. Chat with them. Customize everything. Self-hosted with Docker.</p>
         <div class="hero-buttons">
             <a href="#pricing" class="btn btn-primary btn-lg" data-i18n="hero_cta_primary">Get Early Access — $9.99</a>
@@ -95,7 +95,7 @@
                 </div>
                 <!-- Chat bubble -->
                 <div class="p-chat" style="left:32%;top:20%">
-                    <strong>Moe:</strong> Mike, check the inbox for the SR 985 submittal...
+                    <span data-i18n="preview_chat_message">Moe: Mike, check the inbox for the SR 985 submittal...</span>
                 </div>
                 <!-- Sidebar mockup -->
                 <div class="p-sidebar">
@@ -115,7 +115,7 @@
     <div class="section-inner">
         <div class="section-header">
             <div class="section-badge" data-i18n="features_badge">Features</div>
-            <h2 data-i18n="features_title">Everything your AI team needs.<br>In one place.</h2>
+            <h2 data-i18n-html="features_title">Everything your AI team needs.<br>In one place.</h2>
         </div>
         <div class="feature-grid">
             <div class="feature-card">
@@ -172,7 +172,7 @@
     <div class="section-inner">
         <div class="section-header">
             <div class="section-badge" data-i18n="demo_badge">See It Live</div>
-            <h2 data-i18n="demo_title">More than a dashboard.<br>A living workspace.</h2>
+            <h2 data-i18n-html="demo_title">More than a dashboard.<br>A living workspace.</h2>
             <p class="section-sub" data-i18n="demo_sub">Agents don't just show status — they walk around, visit each other, hold meetings at tables, and wander to the lounge when idle.</p>
         </div>
         <div class="demo-grid">
@@ -215,7 +215,7 @@
     <div class="section-inner">
         <div class="section-header">
             <div class="section-badge" data-i18n="pricing_badge">Pricing</div>
-            <h2 data-i18n="pricing_title">One price. No subscription.<br>Yours forever.</h2>
+            <h2 data-i18n-html="pricing_title">One price. No subscription.<br>Yours forever.</h2>
             <p class="section-sub" data-i18n="pricing_sub">Pay once, self-host forever. Free updates included.</p>
         </div>
         <div class="pricing-grid">
@@ -243,16 +243,16 @@
                 <div class="price-amount"><span class="price-strike">$35.99</span> $9.99</div>
                 <div class="price-period" data-i18n="price_period_onetime">one-time payment</div>
                 <ul class="price-features">
-                    <li class="included" data-i18n="price_early_1"><strong>Unlimited agents</strong></li>
+                    <li class="included" data-i18n-html="price_early_1"><strong>Unlimited agents</strong></li>
                     <li class="included" data-i18n="price_early_2">Live presence & chat</li>
                     <li class="included" data-i18n="price_early_3">Office editor</li>
                     <li class="included" data-i18n="price_early_4">Model manager</li>
                     <li class="included" data-i18n="price_early_5">API usage tracking</li>
-                    <li class="included" data-i18n="price_early_6"><strong>Browser panel</strong></li>
-                    <li class="included" data-i18n="price_early_7"><strong>SMS panel</strong></li>
-                    <li class="included" data-i18n="price_early_8"><strong>Cron manager</strong></li>
-                    <li class="included" data-i18n="price_early_9"><strong>Whisper (voice input)</strong></li>
-                    <li class="included" data-i18n="price_early_10"><strong>No watermark</strong></li>
+                    <li class="included" data-i18n-html="price_early_6"><strong>Browser panel</strong></li>
+                    <li class="included" data-i18n-html="price_early_7"><strong>SMS panel</strong></li>
+                    <li class="included" data-i18n-html="price_early_8"><strong>Cron manager</strong></li>
+                    <li class="included" data-i18n-html="price_early_9"><strong>Whisper (voice input)</strong></li>
+                    <li class="included" data-i18n-html="price_early_10"><strong>No watermark</strong></li>
                 </ul>
                 <a href="#" class="btn btn-primary btn-full" id="buy-btn" data-i18n="price_btn_early">Get License Key — $9.99</a>
                 <div class="price-note" data-i18n="price_note_early">Instant delivery. Enter key in setup wizard.</div>
@@ -262,7 +262,7 @@
                 <div class="price-amount">$35.99</div>
                 <div class="price-period" data-i18n="price_period_onetime_2">one-time payment</div>
                 <ul class="price-features">
-                    <li class="included" data-i18n="price_full_1"><strong>Unlimited agents</strong></li>
+                    <li class="included" data-i18n-html="price_full_1"><strong>Unlimited agents</strong></li>
                     <li class="included" data-i18n="price_full_2">Everything in Early Bird</li>
                     <li class="included" data-i18n="price_full_3">Same features, same updates</li>
                     <li class="included" data-i18n="price_full_4">Support the project at full price</li>
@@ -300,7 +300,7 @@
                     <div class="step-num">2</div>
                     <div class="step-content">
                         <h3 data-i18n="setup_step2_title">Open in your browser</h3>
-                        <p data-i18n="setup_step2_desc">Go to <code>http://localhost:8090</code> — the setup wizard walks you through connecting to OpenClaw and detecting your agents.</p>
+                        <p data-i18n-html="setup_step2_desc">Go to <code>http://localhost:8090</code> — the setup wizard walks you through connecting to OpenClaw and detecting your agents.</p>
                     </div>
                 </div>
                 <div class="setup-step">
@@ -358,7 +358,7 @@
             </div>
             <div class="faq-item">
                 <h3 data-i18n="faq_q3">How do updates work?</h3>
-                <p data-i18n="faq_a3"><code>docker pull</code> and restart. Your config and customizations are stored in a mounted volume — updates don't touch them.</p>
+                <p data-i18n-html="faq_a3"><code>docker pull</code> and restart. Your config and customizations are stored in a mounted volume — updates don't touch them.</p>
             </div>
             <div class="faq-item">
                 <h3 data-i18n="faq_q4">Can I try before buying?</h3>
@@ -370,7 +370,7 @@
             </div>
             <div class="faq-item">
                 <h3 data-i18n="faq_q6">What is OpenClaw?</h3>
-                <p data-i18n="faq_a6">OpenClaw is an open-source AI agent framework. Virtual Office is a visual layer that runs on top of it. <a href="https://github.com/openclaw/openclaw" target="_blank" data-i18n="faq_learn_more">Learn more →</a></p>
+                <p data-i18n-html="faq_a6">OpenClaw is an open-source AI agent framework. Virtual Office is a visual layer that runs on top of it. <a href="https://github.com/openclaw/openclaw" target="_blank">Learn more →</a></p>
             </div>
         </div>
     </div>

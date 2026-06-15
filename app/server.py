@@ -12227,10 +12227,34 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=APP_DIR, **kwargs)
 
+    def _serve_website_asset(self, request_path):
+        website_dir = os.path.realpath(os.path.join(APP_DIR, "..", "website"))
+        relative_path = request_path[len("/website/"):].lstrip("/") or "index.html"
+        target_path = os.path.realpath(os.path.join(website_dir, relative_path))
+        if not target_path.startswith(website_dir + os.sep) or not os.path.isfile(target_path):
+            self.send_error(404, "Website asset not found")
+            return
+        content_type = self.guess_type(target_path)
+        with open(target_path, "rb") as asset:
+            content = asset.read()
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(content)))
+        self.end_headers()
+        self.wfile.write(content)
+
     def do_GET(self):
         parsed_url = urllib.parse.urlparse(self.path)
         request_path = parsed_url.path
         query_params = urllib.parse.parse_qs(parsed_url.query)
+        if request_path == "/website":
+            self.send_response(301)
+            self.send_header("Location", "/website/")
+            self.end_headers()
+            return
+        if request_path.startswith("/website/"):
+            self._serve_website_asset(request_path)
+            return
         # Setup wizard page
         if self.path == "/setup":
             setup_path = os.path.join(os.path.dirname(__file__), "setup.html")

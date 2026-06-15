@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Model Settings — Virtual Office</title>
-    <script>fetch('/vo-config').then(r=>r.json()).then(d=>{if(d.office&&d.office.name)document.title='Model Settings — '+d.office.name;}).catch(()=>{});</script>
+<script>fetch('/vo-config').then(r=>r.json()).then(d=>{if(d.office&&d.office.name)document.title=(typeof i18n!=='undefined'?i18n.t('model_settings_title'):'Model Settings')+' — '+d.office.name;}).catch(()=>{});</script>
     <!-- i18n: inline locale data for immediate init -->
     <script id="locale-en" type="application/json">{}</script>
     <script id="locale-zh" type="application/json">{}</script>
@@ -216,8 +216,8 @@ function codexSetupPayload() {
             </div>
             <div class="row">
                 <input id="key-${prov}" type="password" placeholder="${placeholder}" value="" autocomplete="off" ${isOAuth ? 'disabled' : ''}>
-                ${isOAuth ? '' : `<button class="btn btn-green" onclick="saveKey('${prov}')">Save</button>`}
-                ${hasKey ? `<button class="btn btn-red" onclick="deleteKey('${prov}', '${info.profileId || ''}')">Delete</button>` : ''}
+                ${isOAuth ? '' : `<button class="btn btn-green" onclick="saveKey('${prov}')">${i18n.t('save')}</button>`}
+                ${hasKey ? `<button class="btn btn-red" onclick="deleteKey('${prov}', '${info.profileId || ''}')">${i18n.t('proj_delete')}</button>` : ''}
             </div>
             <p id="key-status-${prov}" class="status-msg"></p>`;
 
@@ -292,7 +292,7 @@ async function saveClaudeCodeSetup() {
     </div>`;
 
     // Models
-    html += '<h2>Models</h2>';
+    html += '<h2>' + i18n.t('models') + '</h2>';
     for (const m of (ollama.models || [])) {
         const fullId = 'ollama/' + m.id;
         const mp = params[fullId] || {};
@@ -498,9 +498,64 @@ async function addOllamaModel() {
     }
 }
 
-async function deleteOpenClawProvider() {
-    const provider = val('oc-delete-provider');
-    return deleteOpenClawProviderById(provider, 'oc-delete-status');
+// --- LM Studio ---
+function renderLMStudio() {
+    const container = document.getElementById('lmstudio-section');
+    const cp = providersData.customProviders || {};
+    const lms = cp.lmstudio;
+    const params = providersData.modelParams || {};
+
+    if (!lms) {
+        container.innerHTML = '<div class="card"><p>' + i18n.t('lmstudio_not_configured') + '</p>' +
+            '<p style="margin-top:8px;color:var(--text-dim)">' + i18n.t('lmstudio_add_hint') + '</p></div>';
+        return;
+    }
+
+    let html = `<div class="card">
+        <div class="provider-header">
+            <span class="provider-name">🖥️ LM STUDIO</span>
+            <span style="font-size:6px;color:var(--text-dim)">${lms.baseUrl} · api: ${lms.api || 'openai-completions'} · key: ${lms.apiKeyConfigured ? 'set' : 'missing'} · timeout: ${lms.timeoutSeconds || 300}s</span>
+        </div>
+    </div>`;
+
+    // Models
+    html += '<h2>' + i18n.t('models') + '</h2>';
+    for (const m of (lms.models || [])) {
+        const fullId = 'lmstudio/' + m.id;
+        const mp = params[fullId] || {};
+        const safeId = m.id.replace(/[^a-zA-Z0-9]/g, '_');
+        html += `<div class="card">
+            <div class="provider-header">
+                <span class="provider-name">${m.name || m.id}</span>
+                <span style="font-size:6px;color:var(--text-dim)">ctx: ${m.contextWindow ? (m.contextWindow/1000)+'k' : '?'} | max: ${m.maxTokens || '?'}</span>
+            </div>
+            <div class="ollama-params" id="lms-params-${safeId}">
+                <label>${i18n.t('temperature')}</label><input type="number" step="0.1" min="0" max="2" value="${mp.temperature ?? ''}" data-param="temperature" data-model="${fullId}">
+                <label>${i18n.t('top_p')}</label><input type="number" step="0.1" min="0" max="1" value="${mp.top_p ?? ''}" data-param="top_p" data-model="${fullId}">
+                <label>${i18n.t('top_k')}</label><input type="number" step="1" min="0" value="${mp.top_k ?? ''}" data-param="top_k" data-model="${fullId}">
+                <label>${i18n.t('repeat_penalty')}</label><input type="number" step="0.1" min="0" value="${mp.repeat_penalty ?? ''}" data-param="repeat_penalty" data-model="${fullId}">
+                <label>${i18n.t('num_predict')}</label><input type="number" step="1" value="${mp.num_predict ?? ''}" data-param="num_predict" data-model="${fullId}">
+                <label>${i18n.t('context_window')}</label><input type="number" step="1000" value="${m.contextWindow || ''}" data-field="contextWindow" data-model-id="${m.id}">
+                <label>${i18n.t('max_tokens')}</label><input type="number" step="1000" value="${m.maxTokens || ''}" data-field="maxTokens" data-model-id="${m.id}">
+            </div>
+            <button class="btn btn-gold" onclick="saveLMStudioModel('${m.id.replace(/'/g,"\\'")}')">${i18n.t('save_parameters')}</button>
+            <button class="btn btn-red" onclick="removeLMStudioModel('${m.id.replace(/'/g,"\\'")}')">${i18n.t('remove_model')}</button>
+            <p id="lms-status-${safeId}" class="status-msg"></p>
+        </div>`;
+    }
+
+    // Add model form
+    html += `<div class="card" style="border-color:var(--gold)">
+        <h3>➕ Add LM Studio Model</h3>
+        <div class="row"><label>${i18n.t('model_id')}</label><input id="new-lms-id" placeholder="model-name"></div>
+        <div class="row"><label>${i18n.t('display_name')}</label><input id="new-lms-name" placeholder="Friendly name"></div>
+        <div class="row"><label>${i18n.t('context_window')}:</label><input id="new-lms-ctx" type="number" value="128000"></div>
+        <div class="row"><label>${i18n.t('max_tokens')}:</label><input id="new-lms-max" type="number" value="20000"></div>
+        <button class="btn btn-gold" onclick="addLMStudioModel()">${i18n.t('add_model_btn')}</button>
+        <p id="new-lms-status" class="status-msg"></p>
+    </div>`;
+
+    container.innerHTML = html;
 }
 
 async function deleteOpenClawProviderById(provider, statusId = 'oc-delete-status') {
@@ -652,6 +707,10 @@ async function addLMStudioModel() {
 
 // --- Init ---
 loadProviders();
+window.addEventListener('i18n:changed', function() {
+    providersData = null;
+    loadProviders();
+});
 
 
 </script>

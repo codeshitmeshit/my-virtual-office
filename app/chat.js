@@ -11,6 +11,7 @@
   let _modelBarInterval = null;
   let _sessionsListCache = { at: 0, promise: null, payload: null };
   const runOwners = new Map();
+  const _ct = (key, params) => typeof i18n !== 'undefined' ? i18n.t(key, params) : key;
 
   const MAX_INPUT_LINES = 15;
   const CHAT_STACK_GAP = 12;
@@ -20,8 +21,14 @@
   const MAX_TOOL_PAYLOAD_CHARS = 6000;
   const ACTIVE_RUN_RECOVERY_MS = 15000;
   const HERMES_APPROVAL_POLL_MS = 1500;
-  const HERMES_HISTORY_POLL_MS = 250;
-  const CHAT_SELECTION_STORAGE_KEY = 'vo-chat-selection-v1';
+  const getHermesProgressSteps = () => [
+    _ct('hermes_step_receive'),
+    _ct('hermes_step_load_profile'),
+    _ct('hermes_step_run_loop'),
+    _ct('hermes_step_wait_updates'),
+    _ct('hermes_step_export_activity'),
+    _ct('hermes_step_render_reply')
+  ];
   const secondarySlotButtons = Array.from(document.querySelectorAll('[data-chat-slot-toggle]'));
   let activeSecondarySlot = null;
   const secondaryPanelPlaceholders = {
@@ -580,14 +587,14 @@
               const codexMeta = event.metadata?.codex || event.metadata || {};
               let text = event.text || '';
               if (role === 'assistant' && Array.isArray(codexMeta.modifiedFiles) && codexMeta.modifiedFiles.length) {
-                text += '\n\nModified files:\n' + codexMeta.modifiedFiles.map(path => '- ' + path).join('\n');
+                text += '\n\n' + _ct('modified_files') + ':\n' + codexMeta.modifiedFiles.map(path => '- ' + path).join('\n');
               }
               this.appendMessage(role, text, event.ts || Date.now(), [], role === 'assistant'
                 ? { label: this.agentSelect.selectedOptions[0]?.textContent.trim() || 'Codex', kind: 'agent' }
-                : { label: event.from?.name || 'You', kind: 'human' });
+                : { label: event.from?.name || _ct('chat_you_label'), kind: 'human' });
             }
             this.scrollBottom();
-            this.setStatus('Codex ready', 'connected');
+            this.setStatus(_ct('codex_ready'), 'connected');
           }
           this.codexLastSequence = 0;
           await this.pollCodexActivity(true);
@@ -604,17 +611,8 @@
               if (msg.text || msg.thinking || msg.approval || (Array.isArray(msg.tools) && msg.tools.length)) {
                 const meta = msg.role === 'assistant'
                   ? { ...resolveMessageSender(msg, this), thinking: msg.thinking || '', reasoningTokens: msg.reasoningTokens || 0, approval: msg.approval || null }
-                  : { label: 'You', kind: 'human' };
-                const media = normalizeChatMedia(msg.attachments || []);
-                const tools = normalizeHermesTools(msg.tools || [], msg.ephemeral !== progressMarker);
-                const splitToolsFromFinalReply = msg.role === 'assistant' && msg.ephemeral !== progressMarker && msg.text && tools.length;
-                if (splitToolsFromFinalReply) {
-                  const toolMeta = resolveMessageSender(msg, this);
-                  tools.forEach((tool, idx) => {
-                    this.appendMessage('assistant', '', (msg.ts || Date.now()) + idx, [], toolMeta, [tool]);
-                  });
-                }
-                this.appendMessage(msg.role, msg.text || '', msg.ts || Date.now(), media, meta, splitToolsFromFinalReply ? [] : tools);
+                  : { label: _ct('chat_you_label'), kind: 'human' };
+                this.appendMessage(msg.role, msg.text || '', msg.ts || Date.now(), [], meta, normalizeHermesTools(msg.tools || []));
               }
             }
             this.scrollBottomAfterLayout();
@@ -684,7 +682,7 @@
 
     async newSession() {
       const agentName = this.agentSelect.selectedOptions[0]?.textContent.trim() || 'this agent';
-      if (!confirm(`Start a new session for ${agentName}? This clears the conversation history.`)) return;
+      if (!confirm(_ct('new_session_confirm', { agent: agentName }))) return;
       if (this.isCodexSelected()) {
         const oldConversationId = this.getCodexConversationId();
         try {
@@ -696,9 +694,9 @@
           const data = await res.json();
           if (!res.ok || !data.ok) throw new Error(data.error || 'reset failed');
           this.rotateCodexConversationId();
-          this.resetConversation('New Codex session started');
+          this.resetConversation(_ct('new_codex_session'));
         } catch (e) {
-          this.appendSystem('Reset error: ' + e.message);
+          this.appendSystem(_ct('chat_reset_error') + ': ' + e.message);
         }
         return;
       }
@@ -711,10 +709,9 @@
           });
           const data = await res.json();
           if (!data.ok) throw new Error(data.error || 'clear failed');
-          this.resetConversation('New ' + providerName + ' session started');
-          await this.fetchSessionInfo();
+          this.resetConversation(_ct('new_hermes_session'));
         } catch (e) {
-          this.appendSystem('Reset error: ' + e.message);
+          this.appendSystem(_ct('chat_reset_error') + ': ' + e.message);
         }
         return;
       }
@@ -807,7 +804,7 @@
       const imageDataUrls = this.pendingAttachments.filter(a => a.mimeType.startsWith('image/')).map(a => a.dataUrl);
       const nonImageNames = this.pendingAttachments.filter(a => !a.mimeType.startsWith('image/')).map(a => a.name);
       if (nonImageNames.length) displayText += (displayText ? '\n' : '') + '📎 ' + nonImageNames.join(', ');
-      this.appendMessage('user', displayText, Date.now(), imageDataUrls, { label: 'You', kind: 'human' });
+      this.appendMessage('user', displayText, Date.now(), imageDataUrls, { label: _ct('chat_you_label'), kind: 'human' });
       this.scrollBottom();
 
       let attachments;
@@ -902,8 +899,8 @@
         this.codexBusy = true;
         this.codexRequestInFlight = true;
         this.sendBtn.disabled = true;
-        this.setStatus('Codex working...', 'connecting');
-        this.updateTypingIndicator(label + ' is working');
+        this.setStatus(_ct('codex_working'), 'connecting');
+        this.updateTypingIndicator(label + ' ' + _ct('working'));
         this.startCodexActivityPolling();
         try {
           const resp = await fetch('/api/codex/chat', {
@@ -924,19 +921,19 @@
           this.removeTypingIndicator();
           let reply = data.reply || data.error || '';
           if (Array.isArray(data.modifiedFiles) && data.modifiedFiles.length) {
-            reply += '\n\nModified files:\n' + data.modifiedFiles.map(path => '- ' + path).join('\n');
+            reply += '\n\n' + _ct('modified_files') + ':\n' + data.modifiedFiles.map(path => '- ' + path).join('\n');
           }
-          if (data.needsHumanIntervention) reply += '\n\nHuman intervention required.';
+          if (data.needsHumanIntervention) reply += '\n\n' + _ct('human_intervention_required');
           if (reply) this.appendMessage('assistant', reply, Date.now(), [], { label, kind: 'agent' });
           if (data.status === 'busy' && data.activeConversationId) {
             this.appendCodexActiveConversationNotice(data.activeConversationId, data.activeStatus);
           }
           if (data.status !== 'cancelled' && (!resp.ok || data.ok === false)) throw new Error(data.error || data.status || resp.statusText);
-          this.setStatus('Codex ready', 'connected');
+          this.setStatus(_ct('codex_ready'), 'connected');
         } catch (e) {
           this.removeTypingIndicator();
-          this.appendSystem('Codex send failed: ' + e.message);
-          this.setStatus('Codex error', 'disconnected');
+          this.appendSystem(_ct('chat_failed_to_send') + ': ' + e.message);
+          this.setStatus(_ct('codex_error'), 'disconnected');
         } finally {
           this.codexBusy = false;
           this.codexRequestInFlight = false;
@@ -1098,11 +1095,11 @@
 
     async compactCodexContext() {
       if (!this.isCodexSelected() || this.codexBusy) return;
-      if (!confirm('Compress the current Codex context? Visible chat history will be kept.')) return;
+      if (!confirm(_ct('compress_context_confirm'))) return;
       this.codexBusy = true;
       this.sendBtn.disabled = true;
       this.compactContextBtn.disabled = true;
-      this.setStatus('Compressing Codex context...', 'connecting');
+      this.setStatus(_ct('compressing_codex_context'), 'connecting');
       try {
         const res = await fetch('/api/codex/compact', {
           method: 'POST',
@@ -1113,12 +1110,12 @@
           })
         });
         const data = await res.json();
-        if (!res.ok || !data.ok) throw new Error(data.error || 'compression failed');
-        this.appendSystem(data.reply || 'Codex context compressed.');
-        this.setStatus('Codex ready', 'connected');
+        if (!res.ok || !data.ok) throw new Error(data.error || _ct('compression_failed_detail'));
+        this.appendSystem(data.reply || _ct('codex_context_compressed'));
+        this.setStatus(_ct('codex_ready'), 'connected');
       } catch (e) {
-        this.appendSystem('Codex compression failed: ' + e.message);
-        this.setStatus('Codex error', 'disconnected');
+        this.appendSystem(_ct('codex_compression_failed') + ': ' + e.message);
+        this.setStatus(_ct('codex_error'), 'disconnected');
       } finally {
         this.codexBusy = false;
         this.sendBtn.disabled = false;
@@ -1138,9 +1135,9 @@
             })
           });
           const data = await res.json();
-          if (!res.ok || !data.ok) throw new Error(data.error || 'cancel failed');
-          this.setStatus('Codex cancelling...', 'connecting');
-          this.appendSystem('Stop sent. Existing file changes are not rolled back.');
+          if (!res.ok || !data.ok) throw new Error(data.error || _ct('cancel_failed_detail'));
+          this.setStatus(_ct('codex_cancelling'), 'connecting');
+          this.appendSystem(_ct('stop_preserves_changes'));
           return;
         }
         if (this.streamingMsg) {
@@ -1185,13 +1182,13 @@
       if (data.active) {
         this.codexBusy = true;
         this.sendBtn.disabled = true;
-        const waiting = data.active.pending ? 'Codex waiting for you' : 'Codex working...';
+        const waiting = data.active.pending ? _ct('codex_waiting') : _ct('codex_working');
         this.setStatus(waiting, 'connecting');
         this.startCodexActivityPolling();
       } else if (this.codexRequestInFlight) {
         this.codexBusy = true;
         this.sendBtn.disabled = true;
-        this.setStatus('Codex working...', 'connecting');
+        this.setStatus(_ct('codex_working'), 'connecting');
         this.startCodexActivityPolling();
       } else {
         const wasBusy = this.codexBusy;
@@ -1199,7 +1196,7 @@
         this.sendBtn.disabled = false;
         if (wasBusy) {
           this.removeTypingIndicator();
-          this.setStatus('Codex ready', 'connected');
+          this.setStatus(_ct('codex_ready'), 'connected');
         }
         this.stopCodexActivityPolling();
       }
@@ -1231,18 +1228,18 @@
           card.classList.add('resolved');
           card.querySelectorAll('button').forEach(btn => { btn.disabled = true; });
           const status = card.querySelector('.chat-codex-interaction-status');
-          if (status) status.textContent = event.output?.action || 'resolved';
+        if (status) status.textContent = event.output?.action || _ct('resolved');
         }
       } else if (event.type === 'interaction' && event.status === 'unavailable') {
-        this.appendSystem(event.error || 'This Codex interaction can no longer be resumed.');
+        this.appendSystem(event.error || _ct('codex_interaction_unavailable'));
       } else if (event.type === 'turn' && event.status === 'cancelling') {
-        this.setStatus('Codex cancelling...', 'connecting');
+        this.setStatus(_ct('codex_cancelling'), 'connecting');
       } else if (event.type === 'turn' && ['completed', 'failed', 'cancelled', 'execution_failed'].includes(event.status)) {
         const reply = event.output?.reply || event.error || '';
         if (!this.codexRequestInFlight && reply && !this.messages.innerText.includes(reply)) {
           let text = reply;
           const files = event.output?.modifiedFiles || [];
-          if (files.length) text += '\n\nModified files:\n' + files.map(path => '- ' + path).join('\n');
+          if (files.length) text += '\n\n' + _ct('modified_files') + ':\n' + files.map(path => '- ' + path).join('\n');
           this.appendMessage('assistant', text, event.ts || Date.now(), [], {
             label: this.agentSelect.selectedOptions[0]?.textContent.trim() || 'Codex',
             kind: 'agent'
@@ -1285,24 +1282,24 @@
       const card = document.createElement('div');
       card.className = 'chat-bubble codex-interaction-card';
       const title = document.createElement('strong');
-      title.textContent = event.interactionType === 'input' ? 'Codex needs information' : 'Codex requests approval';
+      title.textContent = event.interactionType === 'input' ? _ct('codex_needs_information') : _ct('codex_requests_approval');
       const detail = document.createElement('pre');
       detail.textContent = formatToolPayload(event.input || {});
       const actions = document.createElement('div');
       actions.className = 'chat-codex-interaction-actions';
       if (event.interactionType === 'input') {
-        actions.appendChild(this.makeCodexInteractionButton('Answer', 'answer', event));
+        actions.appendChild(this.makeCodexInteractionButton(_ct('answer'), 'answer', event));
       } else {
-        actions.appendChild(this.makeCodexInteractionButton('Allow once', 'accept', event));
-        actions.appendChild(this.makeCodexInteractionButton('Allow for Codex session', 'acceptForSession', event));
-        actions.appendChild(this.makeCodexInteractionButton('Reject', 'decline', event));
+        actions.appendChild(this.makeCodexInteractionButton(_ct('chat_allow_once'), 'accept', event));
+        actions.appendChild(this.makeCodexInteractionButton(_ct('allow_codex_session'), 'acceptForSession', event));
+        actions.appendChild(this.makeCodexInteractionButton(_ct('reject'), 'decline', event));
       }
       const note = document.createElement('div');
       note.className = 'chat-codex-interaction-note';
-      note.textContent = event.interactionType === 'approval' ? 'Session approval scope and lifetime are controlled by the Codex runtime.' : '';
+      note.textContent = event.interactionType === 'approval' ? _ct('codex_session_scope_hint') : '';
       const status = document.createElement('span');
       status.className = 'chat-codex-interaction-status';
-      status.textContent = 'pending';
+      status.textContent = _ct('pending');
       card.append(title, detail, actions, note, status);
       wrap.appendChild(card);
       this.messages.appendChild(wrap);
@@ -1322,7 +1319,7 @@
       button.addEventListener('click', async () => {
         let answers = {};
         if (action === 'answer') {
-          const value = prompt('Answer Codex:');
+          const value = prompt(_ct('answer_codex'));
           if (value === null) return;
           const questions = event.input?.questions || [];
           if (questions.length) {
@@ -1344,12 +1341,12 @@
             })
           });
           const data = await res.json();
-          if (!res.ok || !data.ok) throw new Error(data.error || data.status || 'interaction failed');
+          if (!res.ok || !data.ok) throw new Error(data.error || data.status || _ct('interaction_failed_detail'));
           const status = card?.querySelector('.chat-codex-interaction-status');
-          if (status) status.textContent = 'submitted';
+          if (status) status.textContent = _ct('submitted');
         } catch (error) {
           card?.querySelectorAll('button').forEach(btn => { btn.disabled = false; });
-          this.appendSystem('Codex interaction failed: ' + error.message);
+          this.appendSystem(_ct('codex_interaction_failed') + ': ' + error.message);
         }
       });
       return button;
@@ -1360,14 +1357,14 @@
       wrap.className = 'chat-msg system';
       const bubble = document.createElement('div');
       bubble.className = 'chat-bubble system-bubble';
-      bubble.append(document.createTextNode(`Codex is ${status || 'busy'} in another conversation. `));
+      bubble.append(document.createTextNode(_ct('codex_busy_other_conversation', { status: status || _ct('busy') }) + ' '));
       const button = document.createElement('button');
       button.type = 'button';
       button.className = 'chat-inline-action';
-      button.textContent = 'Open active conversation';
+      button.textContent = _ct('open_active_conversation');
       button.addEventListener('click', () => {
         localStorage.setItem(this.codexConversationStorageKey(), conversationId);
-        this.resetConversation('Opened active Codex conversation');
+        this.resetConversation(_ct('opened_active_codex_conversation'));
         this.loadHistory();
       });
       bubble.appendChild(button);
@@ -2476,17 +2473,18 @@
       this.setStatus(typeof i18n !== 'undefined' ? i18n.t('chat_hermes_stream_active') : 'Hermes stream active...', 'connecting');
       this.updateTypingIndicator(label + ' ' + (typeof i18n !== 'undefined' ? i18n.t('chat_hermes_is_running') : 'is running Hermes'));
       this.appendActivity(label + ': ' + (typeof i18n !== 'undefined' ? i18n.t('chat_hermes_queued') : 'queued message'));
+      const progressSteps = getHermesProgressSteps();
       this.appendToolCall({
         runId,
         data: {
           toolCallId: planId,
           phase: 'start',
           name: 'Hermes task breakdown',
-          args: { willDo: HERMES_PROGRESS_STEPS },
-          result: 'Queued in Virtual Office. Waiting for Hermes to start.'
+          args: { willDo: progressSteps },
+          result: _ct('hermes_queued_waiting')
         }
       });
-      HERMES_PROGRESS_STEPS.forEach((step, idx) => {
+      progressSteps.forEach((step, idx) => {
         const timer = setTimeout(() => {
           this.appendActivity(label + ': ' + step.toLowerCase());
           this.updateToolCall({
@@ -2496,11 +2494,11 @@
               phase: 'update',
               name: 'Hermes task breakdown',
               args: {
-                done: HERMES_PROGRESS_STEPS.slice(0, idx),
+                done: progressSteps.slice(0, idx),
                 now: step,
-                next: HERMES_PROGRESS_STEPS.slice(idx + 1)
+                next: progressSteps.slice(idx + 1)
               },
-              partialResult: 'Running step ' + (idx + 1) + ' of ' + HERMES_PROGRESS_STEPS.length + ': ' + step
+              partialResult: _ct('hermes_running_step', { current: idx + 1, total: progressSteps.length, step })
             }
           });
           this.updateTypingIndicator(label + ' ' + (typeof i18n !== 'undefined' ? i18n.t('chat_hermes_is_working') : 'is working') + ': ' + step.toLowerCase());
@@ -2513,6 +2511,7 @@
     finishHermesProgress(progress, ok, errorText = '') {
       if (!progress) return;
       this.stopHermesProgressTimers();
+      const progressSteps = getHermesProgressSteps();
       this.finishToolCall({
         runId: progress.runId,
         data: {
@@ -2520,10 +2519,10 @@
           phase: 'result',
           name: 'Hermes task breakdown',
           args: {
-            done: ok ? HERMES_PROGRESS_STEPS : HERMES_PROGRESS_STEPS.slice(0, 3),
-            next: ok ? [] : ['Review Hermes error in chat']
+            done: ok ? progressSteps : progressSteps.slice(0, 3),
+            next: ok ? [] : [_ct('hermes_review_error')]
           },
-          result: ok ? 'Hermes reply and session activity collected.' : (errorText || 'Hermes request failed.'),
+          result: ok ? _ct('hermes_reply_collected') : (errorText || _ct('hermes_request_failed')),
           isError: !ok
         },
         error: ok ? '' : errorText
@@ -2574,7 +2573,7 @@
         if (card) {
           card.classList.remove('responding');
           const status = card.querySelector('.chat-approval-status');
-          if (status) status.textContent = 'error';
+        if (status) status.textContent = _ct('error');
         }
         this.appendSystem((typeof i18n !== 'undefined' ? i18n.t('chat_hermes_error') : 'Hermes error') + ': ' + e.message);
         this.setStatus(typeof i18n !== 'undefined' ? i18n.t('chat_hermes_error') : 'Hermes error', 'disconnected');
@@ -2758,7 +2757,7 @@
     if (closeBtn) {
       closeBtn.classList.add('chat-secondary-close');
       closeBtn.dataset.chatSlotClose = String(slotNum);
-      closeBtn.title = `Hide secondary chat window ${slotNum}`;
+      closeBtn.title = _ct('hide_secondary_chat', { slot: slotNum });
     }
     placeholder.replaceWith(panel);
     return panel;
@@ -3358,16 +3357,16 @@
     details.className = 'chat-thinking-card';
     if (options.codex) {
       details.classList.add('codex-reasoning-card');
-      details.title = 'Codex-provided reasoning summary, available only when emitted by the runtime.';
+      details.title = _ct('reasoning_summary_hint');
     }
     const summary = document.createElement('summary');
     summary.className = 'chat-thinking-summary';
     const label = document.createElement('span');
     label.className = 'chat-thinking-title';
-    label.textContent = options.codex ? 'Reasoning summary' : (typeof i18n !== 'undefined' ? i18n.t('chat_thinking') : 'Thinking');
+    label.textContent = options.codex ? _ct('reasoning_summary') : _ct('chat_thinking');
     const state = document.createElement('span');
     state.className = 'chat-tool-state';
-    state.textContent = options.codex ? (options.status === 'done' ? 'complete' : 'live') : (typeof i18n !== 'undefined' ? i18n.t('chat_trace_label') : 'trace');
+    state.textContent = options.codex ? (options.status === 'done' ? _ct('complete') : _ct('live')) : _ct('chat_trace_label');
     const toggle = document.createElement('span');
     toggle.className = 'chat-tool-toggle';
     toggle.textContent = '▶';
@@ -3427,13 +3426,13 @@
       allow.type = 'button';
       allow.className = 'chat-approval-btn primary';
       allow.textContent = typeof i18n !== 'undefined' ? i18n.t('chat_allow_once') : 'Allow once';
-      allow.title = 'Retry this Hermes turn with approval bypass for this invocation only';
+      allow.title = _ct('retry_hermes_allow_hint');
       allow.addEventListener('click', () => windowInstance?.respondHermesApproval(approval, 'approve_once', card));
       const deny = document.createElement('button');
       deny.type = 'button';
       deny.className = 'chat-approval-btn';
       deny.textContent = typeof i18n !== 'undefined' ? i18n.t('chat_deny') : 'Deny';
-      deny.title = 'Do not retry this blocked Hermes command';
+      deny.title = _ct('retry_hermes_deny_hint');
       deny.addEventListener('click', () => windowInstance?.respondHermesApproval(approval, 'deny', card));
       actions.append(allow, deny);
       card.appendChild(actions);
@@ -3709,7 +3708,7 @@
   function formatToolName(name) {
     const raw = String(name || 'tool');
     if (raw === 'Command') return 'command';
-    if (raw === 'Hermes task breakdown') return 'task plan';
+    if (raw === 'Hermes task breakdown') return _ct('hermes_task_plan');
     return raw.replace(/^functions\./, '');
   }
 
@@ -3754,7 +3753,7 @@
         preview = args.todos ? `${args.todos.length} task updates` : pick('content', 'id');
         break;
       case 'Hermes task breakdown':
-        preview = args.now || (Array.isArray(args.done) ? `${args.done.length} steps complete` : 'receive · run · export · render');
+        preview = args.now || (Array.isArray(args.done) ? _ct('hermes_steps_complete', { count: args.done.length }) : _ct('hermes_plan_preview'));
         break;
       default:
         preview = pick('query', 'url', 'action', 'input', 'value');

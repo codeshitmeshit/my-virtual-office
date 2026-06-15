@@ -12,6 +12,7 @@
   "gateway_token_desc": "Auth token for chat & live status. Auto-read from OpenClaw config. Override to connect to a different instance.",
   "test_connection": "🔍 Test Connection",
   "hermes_connection": "⚕️ Hermes Agent Connection",
+  "hermes_connection_desc": "Connects local Hermes Agent profiles as first-class office agents. Virtual Office uses the Hermes CLI and safe status/session surfaces, not raw secrets or private memory files.",
   "auto_detect_hermes": "Auto-detect Hermes Agents",
   "hermes_home": "Hermes Home",
   "hermes_home_hint": "server-side",
@@ -886,5 +887,396 @@
   "footer_github": "GitHub",
   "footer_discord": "Discord",
   "footer_support": "Support",
-  "footer_copy": "© 2026 Your Virtual Office. MIT License."
+  "footer_copy": "© 2026 Your Virtual Office. MIT License.",
+  "skill_content_label": "SKILL.md Content",
+  "one_per_line": "(one per line)",
+  "save_failed": "Save failed",
+  "unknown": "unknown",
+  "current_model": "Current: {{model}}",
+  "default_model": "(default: {{model}})",
+  "applying": "Applying...",
+  "demo_banner": "⚡ DEMO — 3 agents max, some features locked. <u>Get a license key</u>",
+  "sms_move_title": "Move/snap SMS window",
+  "type_number_manually": "Type number manually",
+  "chat_windows": "Chat windows",
+  "open_chat_window": "Open chat window {{slot}}",
+  "reset_chat_windows": "Reset all chat windows to equal size",
+  "switch_agent": "Switch agent",
+  "compress_codex_context": "Compress Codex context",
+  "move_chat_window": "Move/snap chat window",
+  "attach_file": "Attach file",
+  "voice_input": "Voice input (Whisper)",
+  "stop_model_response": "Stop current model response",
+  "furniture": "🪑 FURNITURE",
+  "close_panel": "Close panel",
+  "snap_zone": "📍 SNAP ZONE",
+  "edit_floor_tiles": "🎨 Edit Floor Tiles",
+  "done_floor_edit": "✅ Done Floor Edit",
+  "office_pet": "🐾 Office Pet",
+  "enable_pet": "Enable pet",
+  "type_label": "Type:",
+  "name_label": "Name:",
+  "pet_cat": "🐱 Cat",
+  "pet_pug": "🐶 Pug",
+  "pet_lobster": "🦞 Lobster",
+  "place_item_hint": "Click item to place<br>Right-click / Esc to cancel",
+  "place_canvas_hint": "Click canvas to place<br>Right-click / Esc to cancel",
+  "delete_shortcut": "Delete (Del)",
+  "deselect_shortcut": "Deselect (Esc)",
+  "edit_wall_color": "Edit wall color",
+  "assign_branch_title": "ASSIGN BRANCH",
+  "assign_desk_title": "ASSIGN DESK",
+  "none": "— None —",
+  "assigned_suffix": "assigned",
+  "color_title": "COLOR",
+  "main_color": "Main:",
+  "accent_color": "Accent:",
+  "trim_color": "Trim:",
+  "trim_2_color": "Trim 2:",
+  "tile_a_color": "Tile A:",
+  "tile_b_color": "Tile B:",
+  "color_label": "Color:",
+  "favorites": "Favorites",
+  "save_current": "★ Save Current",
+  "wall_color": "WALL COLOR",
+  "top_wall_color": "TOP WALL COLOR",
+  "floor_color": "FLOOR COLOR",
+  "couch_color": "COUCH COLOR",
+  "no_recent_request": "No recent request",
+  "no_recent_response": "No recent response",
+  "from_label": "From",
+  "loading_workspace": "Loading workspace...",
+  "workspace_unavailable": "Workspace unavailable",
+  "model_list_unavailable": "Model list unavailable",
+  "task_title_prompt": "Task title:",
+  "task_details_prompt": "Task details:",
+  "note_title_prompt": "Note title:",
+  "note_content_prompt": "Note content:",
+  "delete_path_confirm": "Delete {{path}}?",
+  "delete_skill_confirm": "Delete skill {{name}}?",
+  "meeting_empty": "No {{status}} meetings",
+  "untitled_meeting": "Untitled Meeting",
+  "completed": "Completed",
+  "participants_count": "{{count}} participants",
+  "agent_responses": "Agent Responses",
+  "no_response_recorded": "No response recorded",
+  "expand": "▼ expand",
+  "collapse": "▲ collapse",
+  "ended_by": "Ended By",
+  "delete": "🗑️ Delete",
+  "contribution_placeholder": "What did {{name}} contribute?",
+  "summary_required": "Summary is required to end the meeting.",
+  "failed_end_meeting": "Failed to end meeting",
+  "delete_meeting_confirm": "Delete this meeting from history?",
+  "failed_delete": "Failed to delete",
+  "no_active_meetings": "No active meetings",
+  "no_skills_library": "No skills in library. Click ➕ Add Skill to create one.",
+  "apply_to_agent": "Apply to agent",
+  "edit_skill": "Edit Skill",
+  "add_skill_title": "Add Skill",
+  "skill_name_required": "Skill name is required",
+  "skill_saved": "Skill \"{{name}}\" saved",
+  "delete_library_skill_confirm": "Delete skill \"{{name}}\" from the library? Agent copies are not affected.",
+  "skill_deleted": "Skill \"{{name}}\" deleted",
+  "uploaded": "Uploaded \"{{name}}\"",
+  "codex_ready": "Codex ready",
+  "codex_working": "Codex working...",
+  "codex_waiting": "Codex waiting for you",
+  "codex_error": "Codex error",
+  "new_session_confirm": "Start a new session for {{agent}}? This clears the conversation history.",
+  "new_codex_session": "New Codex session started",
+  "new_hermes_session": "New Hermes session started",
+  "compress_context_confirm": "Compress the current Codex context? Visible chat history will be kept.",
+  "compressing_codex_context": "Compressing Codex context...",
+  "codex_compression_failed": "Codex compression failed",
+  "codex_cancelling": "Codex cancelling...",
+  "stop_preserves_changes": "Stop sent. Existing file changes are not rolled back.",
+  "answer_codex": "Answer Codex:",
+  "submitted": "submitted",
+  "codex_interaction_failed": "Codex interaction failed",
+  "open_active_conversation": "Open active conversation",
+  "reasoning_summary": "Reasoning summary",
+  "reasoning_summary_hint": "Codex-provided reasoning summary, available only when emitted by the runtime.",
+  "codex_needs_information": "Codex needs information",
+  "codex_requests_approval": "Codex requests approval",
+  "answer": "Answer",
+  "allow_codex_session": "Allow for Codex session",
+  "reject": "Reject",
+  "codex_session_scope_hint": "Session approval scope and lifetime are controlled by the Codex runtime.",
+  "complete": "complete",
+  "live": "live",
+  "setup_enter_license": "Please enter a license key",
+  "validating": "Validating...",
+  "license_activated": "✅ {{tier}} license activated! All features unlocked.",
+  "invalid_key": "Invalid key",
+  "enter_metrics_url": "Please enter a Metrics Server URL",
+  "saving_testing": "Saving and testing...",
+  "unexpected_response": "Unexpected response",
+  "hermes_disabled": "Hermes auto-detect is disabled.",
+  "testing_hermes": "Saving and testing Hermes...",
+  "hermes_connected_profiles": "✅ Hermes connected — found {{count}} profiles",
+  "hermes_not_reachable": "Hermes not reachable",
+  "enter_cdp_url": "Please enter a CDP URL",
+  "enter_viewer_url": "Please enter a Browser Viewer URL",
+  "cdp_connected": "✅ Connected! CDP is reachable and viewer URL is set.",
+  "cdp_not_reachable": "Could not reach CDP",
+  "enter_path": "Please enter a path",
+  "saving_detecting": "Saving path and detecting...",
+  "looking_for_agents": "🔍 Looking for agents...",
+  "agents_found": "✅ Found {{count}} agents!",
+  "no_agents_path": "No agents found at this path. Check the troubleshooting tips or try another path.",
+  "server_unreachable": "Could not reach the server",
+  "configuring_gateway": "⏳ Configuring gateway...",
+  "configure_failed": "Configure failed",
+  "testing_connection": "Testing connection...",
+  "launching_office": "✅ Launching your office...",
+  "lmstudio_not_configured": "No LM Studio provider configured.",
+  "lmstudio_add_hint": "Add one in the Custom Providers tab with name \"lmstudio\"",
+  "wss_failed": "WSS failed — check certificate",
+  "wss_failed_hint": "WebSocket over HTTPS failed. Check whether the browser trusts the TLS certificate.",
+  "back_office_short": "← Office",
+  "website_title": "Your Virtual Office — A Visual Workspace for AI Agents",
+  "preview_chat_message": "Moe: Mike, check the inbox for the SR 985 submittal...",
+  "hermes_test_failed": "Hermes test failed",
+  "enter_cdp_first": "Enter a CDP URL first",
+  "cdp_connected_tabs": "✅ CDP connected! {{count}} tabs open",
+  "cdp_reachable": "✅ CDP reachable",
+  "cdp_check_hint": "CDP not reachable. Check the URL and browser container.",
+  "enter_viewer_first": "Enter a Viewer URL first",
+  "viewer_reachable": "✅ Viewer reachable. Open the browser panel to see the live view.",
+  "viewer_not_reachable": "Viewer not reachable from this browser",
+  "connected_label": "✅ Connected!",
+  "unexpected_response_format": "Unexpected response format",
+  "testing": "Testing...",
+  "import_config_confirm": "Import this config? This will replace your current office layout.",
+  "full_reset_confirm": "FULL RESET: Delete all office customizations?",
+  "reset_type_confirm": "This cannot be undone. Type RESET in the next prompt to confirm.",
+  "type_reset": "Type RESET to confirm:",
+  "premium_edit_office": "Edit Office is a premium feature. Get a license key to unlock it.",
+  "premium_agent_editor": "Agent Editor is a premium feature. Get a license key to unlock it.",
+  "costume_note": "Costumes replace headwear.",
+  "loading_agents": "Loading agents...",
+  "delete_agent": "🗑️ Delete Agent",
+  "custom_color": "Custom color",
+  "no_agent_platforms": "No agent platforms are available.",
+  "agent_name_prompt": "Agent name:",
+  "new_agent_default": "New Agent",
+  "agent_role_prompt": "Role (for example, Email specialist or QA engineer):",
+  "ai_assistant": "AI assistant",
+  "emoji_prompt": "Emoji:",
+  "failed_create_agent": "Failed to create agent",
+  "error_create_agent": "Error creating agent",
+  "delete_agent_confirm": "Delete agent \"{{name}}\" from {{provider}}? Workspace files, memory, and session history will be permanently removed.",
+  "failed_delete_agent": "Failed to delete agent",
+  "error_delete_agent": "Error deleting agent",
+  "no_agents_create": "No agents. Click ➕ New Agent to create one.",
+  "skill_exists_library": "Skill already exists in the Skill Library.",
+  "loading_skills": "Loading skills...",
+  "no_skills_configured": "No skills configured",
+  "edit_skill_title": "Edit skill",
+  "save_skill_library": "Save to Skill Library",
+  "save_skill_library_hint": "Save this agent skill to the shared Skill Library",
+  "remove_skill": "Remove skill",
+  "error_loading_skills": "Error loading skills",
+  "no_skills_in_library": "No skills in library",
+  "failed_load_library": "Failed to load library",
+  "overwrite_skill_confirm": "\"{{name}}\" already exists on this agent. Overwrite?",
+  "editing_skill": "✏️ Editing: {{name}}",
+  "remove_agent_skill_confirm": "Remove skill \"{{name}}\" from this agent?",
+  "error_saving_skill": "Error saving skill",
+  "error_deleting_skill": "Error deleting skill",
+  "hide_secondary_chat": "Hide secondary chat window {{slot}}",
+  "retry_hermes_allow_hint": "Retry this Hermes turn with approval bypass for this invocation only",
+  "retry_hermes_deny_hint": "Do not retry this blocked Hermes command"
+  ,"proj_dirty_workspace_confirm": "The workspace has uncommitted changes. Continuing will not roll them back.\n\n{{files}}"
+  ,"proj_task_execution_started": "Project task execution started"
+  ,"proj_start_task_failed": "Failed to start task"
+  ,"proj_stopping_task": "Stopping task; existing file changes will be kept"
+  ,"proj_stop_task_failed": "Failed to stop task"
+  ,"proj_review_started": "Independent review started"
+  ,"proj_start_review_failed": "Failed to start review"
+  ,"proj_feedback_required": "Feedback is required"
+  ,"proj_accept_confirm": "Accept and move to Done?"
+  ,"proj_accept_action_failed": "Failed to submit acceptance action"
+  ,"setup_license_note": "<b>Demo mode:</b> Free for up to 3 agents; some features are locked.<br><br><b>Full license:</b> Unlimited agents and all features.<br><b>Early bird:</b> Same features at a limited-time launch price.<br><br>Get your key at <a href=\"https://myvirtualoffice.ai\" target=\"_blank\">myvirtualoffice.ai</a>"
+  ,"setup_browser_note": "<b>What is this?</b> Agent Browser provides a live browser controlled through CDP and viewed through VNC.<br><br><b>Docker setup:</b><br><code>docker run -d --name vo-browser -p 9222:9222 -p 6902:6902 kasmweb/chromium:1.17.0</code><br><br>CDP: <code>http://127.0.0.1:9222</code><br>Viewer: <code>http://127.0.0.1:6902</code><br><br>You can skip this and configure it later."
+  ,"setup_sms_note": "<b>What you need:</b> A Twilio account, phone number, Account SID, and Auth Token.<br><br>Incoming MMS can display when credentials are configured. Outgoing attachments require a public HTTPS media URL that Twilio can access. Text-only SMS works without one.<br><br>You can skip this and configure it later."
+  ,"setup_metrics_note": "<b>How it works:</b> Run the included metrics server on the computer to monitor.<br><br><code>pip install psutil</code><br><code>python pc-metrics-server.py 8099</code><br><br>Use <code>http://127.0.0.1:8099</code> locally or the computer's LAN/Tailscale address remotely. NVIDIA GPU monitoring also requires <code>pynvml</code>."
+  ,"setup_done_note": "<b>What you can do:</b><br>• Edit the office layout and colors<br>• Customize agents and assign desks<br>• Chat with agents<br>• Change connection settings and export/import configuration<br><br><b>Live presence:</b> Long-running agent work remains visible until it finishes.<br><br><b>API usage:</b> Provider usage and credential health are detected from OpenClaw automatically."
+  ,"select_agent": "Select an agent..."
+  ,"delete_branch_confirm": "Delete branch \"{{name}}\"? Agents will be moved to Unassigned."
+  ,"message_target_prompt": "→ To whom? (leave blank for general)"
+  ,"enter_label_text": "Enter label text:"
+  ,"branch_change_title": "Branch: {{name}} (click to change)"
+  ,"catalog_office": "Office"
+  ,"catalog_comfort": "Comfort"
+  ,"catalog_kitchen": "Kitchen"
+  ,"catalog_fun": "Fun"
+  ,"catalog_structure": "Structure"
+  ,"catalog_labels": "Labels"
+  ,"catalog_walls": "Walls"
+  ,"furniture_desk": "Desk"
+  ,"furniture_boss_desk": "Boss Desk"
+  ,"furniture_trash_can": "Trash Can"
+  ,"furniture_filing_cabinet": "Filing Cabinet"
+  ,"furniture_whiteboard": "Whiteboard"
+  ,"furniture_l_couch": "L-Couch"
+  ,"furniture_straight_couch": "Straight Couch"
+  ,"furniture_coffee_table": "Coffee Table"
+  ,"furniture_tv": "TV"
+  ,"furniture_bookshelf": "Bookshelf"
+  ,"furniture_plant": "Plant"
+  ,"furniture_tall_plant": "Tall Plant"
+  ,"furniture_end_table_plant": "End Table + Plant"
+  ,"furniture_kitchen_counter": "Kitchen Counter"
+  ,"furniture_coffee_maker": "Coffee Maker"
+  ,"furniture_vending_machine": "Vending Machine"
+  ,"furniture_water_cooler": "Water Cooler"
+  ,"furniture_microwave": "Microwave"
+  ,"furniture_toaster": "Toaster"
+  ,"furniture_ping_pong_table": "Ping Pong Table"
+  ,"furniture_dart_board": "Dart Board"
+  ,"furniture_meeting_table": "Meeting Table"
+  ,"furniture_window": "Window"
+  ,"furniture_weather_window": "Weather Window"
+  ,"furniture_clock": "Clock"
+  ,"furniture_floor_lamp": "Floor Lamp"
+  ,"furniture_custom_text": "Custom Text"
+  ,"furniture_wall_segment": "Wall Segment"
+  ,"furniture_door_opening": "Door/Opening"
+  ,"agent_identity": "Identity"
+  ,"agent_role": "Role"
+  ,"agent_emoji": "Emoji"
+  ,"agent_gender": "Gender"
+  ,"agent_colors": "Colors"
+  ,"agent_shirt": "Shirt"
+  ,"agent_skin": "Skin"
+  ,"agent_hair": "Hair"
+  ,"agent_style": "Style"
+  ,"color_field": "Color"
+  ,"agent_highlight": "Highlight"
+  ,"agent_face": "Face"
+  ,"agent_eyebrows": "Eyebrows"
+  ,"agent_eye_color": "Eye Color"
+  ,"agent_facial_hair": "Facial Hair"
+  ,"agent_beard_color": "Beard Color"
+  ,"agent_costumes": "Costumes"
+  ,"agent_costume": "Costume"
+  ,"agent_accessories": "Accessories"
+  ,"agent_headwear": "Headwear"
+  ,"agent_hat_color": "Hat Color"
+  ,"agent_glasses": "Glasses"
+  ,"agent_lens_color": "Lens Color"
+  ,"agent_items": "Items"
+  ,"agent_held_item": "Held Item"
+  ,"agent_desk_item": "Desk Item"
+  ,"agent_assignment": "Assignment"
+  ,"branch_field": "Branch"
+  ,"openclaw_agent": "OpenClaw Agent"
+  ,"assigned_to_agent": "assigned to {{name}}"
+  ,"option_none": "none"
+  ,"option_bald": "bald"
+  ,"option_buzz": "buzz"
+  ,"option_short": "short"
+  ,"option_medium": "medium"
+  ,"option_long": "long"
+  ,"option_curly": "curly"
+  ,"option_wavy": "wavy"
+  ,"option_spiky": "spiky"
+  ,"option_bun": "bun"
+  ,"option_ponytail": "ponytail"
+  ,"option_mohawk": "mohawk"
+  ,"option_thin": "thin"
+  ,"option_thick": "thick"
+  ,"option_angular": "angular"
+  ,"option_arched": "arched"
+  ,"option_stubble": "stubble"
+  ,"option_beard": "beard"
+  ,"option_goatee": "goatee"
+  ,"option_mustache": "mustache"
+  ,"option_lobster": "lobster"
+  ,"option_chicken": "chicken"
+  ,"option_hardhat": "hardhat"
+  ,"option_cap": "cap"
+  ,"option_crown": "crown"
+  ,"option_tiara": "tiara"
+  ,"option_headband": "headband"
+  ,"option_goggles": "goggles"
+  ,"option_headset": "headset"
+  ,"option_beanie": "beanie"
+  ,"option_round": "round"
+  ,"option_square": "square"
+  ,"option_sunglasses": "sunglasses"
+  ,"option_tablet": "tablet"
+  ,"option_wrench": "wrench"
+  ,"option_coffee": "coffee"
+  ,"option_clipboard": "clipboard"
+  ,"option_pen": "pen"
+  ,"option_hammer": "hammer"
+  ,"option_testTube": "test tube"
+  ,"option_book": "book"
+  ,"option_anvil": "anvil"
+  ,"option_trophy": "trophy"
+  ,"option_calendar": "calendar"
+  ,"option_envelope": "envelope"
+  ,"option_money": "money"
+  ,"option_ruler": "ruler"
+  ,"option_marker": "marker"
+  ,"option_chart": "chart"
+  ,"option_plans": "plans"
+  ,"option_checklist": "checklist"
+  ,"option_microscope": "microscope"
+  ,"option_shield": "shield"
+  ,"option_phone": "phone"
+  ,"option_files": "files"
+  ,"snap_center": "⊙ Center"
+  ,"snap_top_left": "↖ Top-Left"
+  ,"snap_top_right": "↗ Top-Right"
+  ,"snap_bottom_left": "↙ Bottom-Left"
+  ,"snap_bottom_right": "↘ Bottom-Right"
+  ,"setup_openclaw_path_note": "<b>📁 Where to find it:</b><br><br><b>Linux/Mac (most common):</b><br><code>/home/youruser/.openclaw</code><br><br><b>Running Virtual Office in Docker?</b><br>Use the path mounted with <code>-v</code>. Example:<br><code>docker run -v /home/eli/.openclaw:/openclaw ...</code><br>Enter <code>/openclaw</code>.<br><br><b>Not sure?</b> Run <code>ls ~/.openclaw/openclaw.json</code>. If it prints a path, use its folder."
+  ,"setup_no_agents_note": "<b>🔧 No agents found? Check the following:</b><br><br><b>1. Is the path correct?</b> The folder should contain <code>openclaw.json</code> and an <code>agents/</code> directory.<br><br><b>2. Are agents configured?</b> Open <code>openclaw.json</code> and check <code>agents → list</code>. Each agent needs a workspace directory.<br><br><b>3. Running in Docker?</b> Mount the OpenClaw directory into the container:<br><code>docker run -v /path/to/.openclaw:/openclaw ...</code><br><br><b>4. Permissions?</b> The server needs read access to the <code>agents/</code> folder.<br><br><b>Still stuck?</b> Skip this step and configure the path later from ☰ Menu."
+  ,"skill_applied": "Applied {{skill}} to {{agent}}"
+  ,"apply_failed": "Apply failed"
+  ,"failed_load_skill": "Failed to load skill"
+  ,"upload_failed": "Upload failed"
+  ,"license_active": "✅ {{tier}} license active"
+  ,"gateway_origin_added": "Origin added to the allowed list."
+  ,"gateway_origin_exists": "Origin is already allowed."
+  ,"gateway_reachable": "Gateway reachable"
+  ,"gateway_unreachable": "Gateway unreachable"
+  ,"gateway_running_hint": "Make sure the OpenClaw Gateway is running. Virtual Office needs its WebSocket connection for live agent status and chat."
+  ,"gateway_token_found": "Gateway token found"
+  ,"gateway_token_failed": "Gateway token authentication failed"
+  ,"gateway_agents_connected": "{{count}} agents connected"
+  ,"agent_platform_prompt": "Agent platform:"
+  ,"creating_agent_platform": "Creating agent in {{platform}}..."
+  ,"agent_created_platform": "Agent \"{{name}}\" created in {{platform}}."
+  ,"agent_deleted": "Agent \"{{name}}\" deleted"
+  ,"compression_failed_detail": "compression failed"
+  ,"codex_context_compressed": "Codex context compressed."
+  ,"cancel_failed_detail": "cancel failed"
+  ,"resolved": "resolved"
+  ,"codex_interaction_unavailable": "This Codex interaction can no longer be resumed."
+  ,"modified_files": "Modified files"
+  ,"interaction_failed_detail": "interaction failed"
+  ,"busy": "busy"
+  ,"codex_busy_other_conversation": "Codex is {{status}} in another conversation."
+  ,"opened_active_codex_conversation": "Opened active Codex conversation"
+  ,"hermes_step_receive": "Receive message from Virtual Office"
+  ,"hermes_step_load_profile": "Load Hermes profile and current session"
+  ,"hermes_step_run_loop": "Run Hermes CLI agent loop"
+  ,"hermes_step_wait_updates": "Wait for model, tools, and task updates"
+  ,"hermes_step_export_activity": "Export public session activity"
+  ,"hermes_step_render_reply": "Render reply, tool calls, and task summary"
+  ,"hermes_task_breakdown": "Hermes task breakdown"
+  ,"hermes_queued_waiting": "Queued in Virtual Office. Waiting for Hermes to start."
+  ,"hermes_running_step": "Running step {{current}} of {{total}}: {{step}}"
+  ,"hermes_review_error": "Review the Hermes error in chat"
+  ,"hermes_reply_collected": "Hermes reply and session activity collected."
+  ,"hermes_request_failed": "Hermes request failed."
+  ,"human_intervention_required": "Human intervention required."
+  ,"hermes_task_plan": "task plan"
+  ,"hermes_steps_complete": "{{count}} steps complete"
+  ,"hermes_plan_preview": "receive · run · export · render"
 }

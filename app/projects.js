@@ -2178,7 +2178,7 @@
             ta.select();
             document.execCommand('copy');
             ta.remove();
-            toast('Report copied!', 'success');
+        toast(_t('proj_report_copied'), 'success');
         });
     }
 
@@ -2232,19 +2232,19 @@
             const d = await api.projectExecutionStart(p.id, taskId, dirtyFingerprint);
             if (d.confirmationRequired) {
                 const files = (d.dirtyFiles || []).slice(0, 12).join('\n');
-                if (confirm(`工作区存在未提交修改。继续执行不会自动回滚这些修改。\n\n${files}${d.truncated ? '\n...' : ''}`)) {
+            if (confirm(_t('proj_dirty_workspace_confirm', { files: files + (d.truncated ? '\n...' : '') }))) {
                     return projectExecutionStartAction(taskId, d.dirtyFingerprint);
                 }
                 return;
             }
             if (d.error) { toast(d.error, 'error'); return; }
-            toast('项目任务执行已启动', 'success');
+        toast(_t('proj_task_execution_started'), 'success');
             state.workflow.active = true;
             state.workflow.phase = 'executing';
             state.workflow.currentTaskId = taskId;
             startProjectExecutionPolling();
             await refreshProjectExecutionProject(taskId);
-        } catch (e) { toast('启动任务失败', 'error'); }
+    } catch (e) { toast(_t('proj_start_task_failed'), 'error'); }
     }
 
     async function projectExecutionCancelAction(taskId, attemptId) {
@@ -2253,8 +2253,8 @@
         try {
             const d = await api.projectExecutionCancel(p.id, taskId, attemptId);
             if (d.error) { toast(d.error, 'error'); return; }
-            toast('正在停止任务，已有文件修改会保留', 'info');
-        } catch (e) { toast('停止任务失败', 'error'); }
+        toast(_t('proj_stopping_task'), 'info');
+    } catch (e) { toast(_t('proj_stop_task_failed'), 'error'); }
     }
 
     async function projectExecutionReviewStartAction(taskId, attemptId) {
@@ -2263,13 +2263,13 @@
         try {
             const d = await api.projectExecutionReviewStart(p.id, taskId, attemptId);
             if (d.error) { toast(d.error, 'error'); return; }
-            toast('独立审查已启动', 'success');
+        toast(_t('proj_review_started'), 'success');
             state.workflow.active = true;
             state.workflow.phase = 'reviewing';
             state.workflow.currentTaskId = taskId;
             startProjectExecutionPolling();
             await refreshProjectExecutionProject(taskId);
-        } catch (e) { toast('启动审查失败', 'error'); }
+    } catch (e) { toast(_t('proj_start_review_failed'), 'error'); }
     }
 
     async function projectExecutionAcceptAction(taskId, action, attemptId) {
@@ -2278,8 +2278,8 @@
         let feedback = '';
         if (action !== 'accept') {
             feedback = prompt(action === 'reject_and_rework' ? '请输入返工反馈' : '请输入阻塞原因') || '';
-            if (!feedback.trim()) { toast('需要填写反馈', 'error'); return; }
-        } else if (!confirm('确认验收通过并移动到 Done？')) {
+        if (!feedback.trim()) { toast(_t('proj_feedback_required'), 'error'); return; }
+    } else if (!confirm(_t('proj_accept_confirm'))) {
             return;
         }
         try {
@@ -2287,7 +2287,7 @@
             if (d.error) { toast(d.error, 'error'); return; }
             toast(action === 'accept' ? '任务已验收完成' : '验收状态已更新', 'success');
             await refreshProjectExecutionProject(taskId);
-        } catch (e) { toast('提交验收动作失败', 'error'); }
+    } catch (e) { toast(_t('proj_accept_action_failed'), 'error'); }
     }
 
     async function refreshProjectExecutionProject(selectedTaskId) {

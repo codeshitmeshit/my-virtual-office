@@ -27,15 +27,20 @@
         var el = document.getElementById('locale-' + lang);
         if (el) {
             try {
-                locales[lang] = JSON.parse(el.textContent);
-                callback(null, locales[lang]);
+                var inlineLocale = JSON.parse(el.textContent);
+                if (inlineLocale && Object.keys(inlineLocale).length > 0) {
+                    locales[lang] = inlineLocale;
+                    callback(null, locales[lang]);
+                    return;
+                }
             } catch (e) {
-                callback(e, null);
+                // Fall through to the locale file when inline data is not ready.
             }
-            return;
         }
         // Fallback: fetch from locales/ directory
-        var url = 'locales/' + lang + '.json';
+        var script = document.querySelector('script[src$="i18n.js"]');
+        var base = script && script.src ? script.src : window.location.href;
+        var url = new URL('locales/' + lang + '.json', base).toString();
         fetch(url).then(function (r) {
             if (!r.ok) throw new Error('Failed to load ' + url);
             return r.json();
@@ -78,6 +83,18 @@
         loadLocale(currentLang, function (err) {
             if (err) {
                 console.warn('[i18n] Failed to load locale:', err);
+                if (currentLang !== DEFAULT_LANG) {
+                    currentLang = DEFAULT_LANG;
+                    document.documentElement.lang = DEFAULT_LANG;
+                    loadLocale(DEFAULT_LANG, function (fallbackErr) {
+                        if (fallbackErr) {
+                            console.warn('[i18n] Failed to load fallback locale:', fallbackErr);
+                            return;
+                        }
+                        applyTranslations();
+                        window.dispatchEvent(new CustomEvent('i18n:ready', { detail: { lang: currentLang, fallback: true } }));
+                    });
+                }
                 return;
             }
             applyTranslations();
@@ -193,6 +210,7 @@
         t: t,
         setLanguage: setLanguage,
         getLanguage: getLanguage,
-        initLanguage: initLanguage
+        initLanguage: initLanguage,
+        applyTranslations: applyTranslations
     };
 })();

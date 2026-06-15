@@ -12,6 +12,7 @@
   "gateway_token_desc": "聊天和实时状态的认证令牌。自动从 OpenClaw 配置读取。覆盖可连接不同实例。",
   "test_connection": "🔍 测试连接",
   "hermes_connection": "⚕️ Hermes 代理连接",
+  "hermes_connection_desc": "将本地 Hermes 代理配置作为办公室代理接入。Virtual Office 仅使用 Hermes CLI 及安全的状态和会话接口，不读取原始密钥或私有记忆文件。",
   "auto_detect_hermes": "自动检测 Hermes 代理",
   "hermes_home": "Hermes 主目录",
   "hermes_home_hint": "服务端",
@@ -24,8 +25,8 @@
   "weather_location": "天气位置",
   "display_section": "🖥️ 显示",
   "show_chat_bubbles": "显示聊天气泡",
-  "internal_bubble_timeout": "Internal 气泡自动收起（秒）",
-  "internal_bubble_timeout_hint": "设为 0 可禁用自动收起。",
+  "internal_bubble_timeout": "内部状态气泡自动收起（秒）",
+  "internal_bubble_timeout_hint": "设为 0 可保持内部状态气泡展开。",
   "show_agent_names": "显示代理名称",
   "api_usage_section": "☁️ API 用量",
   "show_api_usage": "显示 API 用量面板",
@@ -506,7 +507,7 @@
   "chat_hermes_approval_denied": "Hermes 审批已拒绝。",
   "branch_hq": "办公室管理",
   "branch_pq": "专业质量管道",
-  "branch_eng": "卡尔tran工程",
+  "branch_eng": "Caltran 工程",
   "branch_gen": "综合办公室",
   "branch_biz": "商务",
   "branch_unassigned": "未分配",
@@ -801,7 +802,7 @@
   "feat_api_usage": "API 用量追踪",
   "feat_api_usage_desc": "监控所有提供商的令牌消耗和费用。查看哪些代理消耗最多资源。",
   "demo_badge": "实时演示",
-  "demo_title": "不只是仪表盘。<br>是一个鲜活的workspace。",
+  "demo_title": "不只是仪表盘。<br>更是鲜活的工作空间。",
   "demo_sub": "代理不只是显示状态——他们会走动、互相串门、在桌边开会、空闲时去休息室。",
   "demo_placeholder_1": "📸 办公室总览",
   "demo_hint": "截图即将上线",
@@ -886,5 +887,396 @@
   "footer_github": "GitHub",
   "footer_discord": "Discord",
   "footer_support": "技术支持",
-  "footer_copy": "© 2026 你的虚拟办公室。MIT 许可证。"
+  "footer_copy": "© 2026 你的虚拟办公室。MIT 许可证。",
+  "skill_content_label": "SKILL.md 内容",
+  "one_per_line": "（每行一项）",
+  "save_failed": "保存失败",
+  "unknown": "未知",
+  "current_model": "当前：{{model}}",
+  "default_model": "（默认：{{model}}）",
+  "applying": "应用中...",
+  "demo_banner": "⚡ 演示版 — 最多 3 个代理，部分功能受限。<u>获取许可证密钥</u>",
+  "sms_move_title": "移动或吸附短信窗口",
+  "type_number_manually": "手动输入号码",
+  "chat_windows": "聊天窗口",
+  "open_chat_window": "打开聊天窗口 {{slot}}",
+  "reset_chat_windows": "将所有聊天窗口恢复为等宽",
+  "switch_agent": "切换代理",
+  "compress_codex_context": "压缩 Codex 上下文",
+  "move_chat_window": "移动或吸附聊天窗口",
+  "attach_file": "添加附件",
+  "voice_input": "语音输入（Whisper）",
+  "stop_model_response": "停止当前模型响应",
+  "furniture": "🪑 家具",
+  "close_panel": "关闭面板",
+  "snap_zone": "📍 吸附区域",
+  "edit_floor_tiles": "🎨 编辑地板砖",
+  "done_floor_edit": "✅ 完成地板编辑",
+  "office_pet": "🐾 办公室宠物",
+  "enable_pet": "启用宠物",
+  "type_label": "类型：",
+  "name_label": "名称：",
+  "pet_cat": "🐱 猫",
+  "pet_pug": "🐶 巴哥犬",
+  "pet_lobster": "🦞 龙虾",
+  "place_item_hint": "点击物品后放置<br>右键或 Esc 取消",
+  "place_canvas_hint": "点击画布放置<br>右键或 Esc 取消",
+  "delete_shortcut": "删除（Del）",
+  "deselect_shortcut": "取消选择（Esc）",
+  "edit_wall_color": "编辑墙壁颜色",
+  "assign_branch_title": "分配分支",
+  "assign_desk_title": "分配工位",
+  "none": "— 无 —",
+  "assigned_suffix": "已分配",
+  "color_title": "颜色",
+  "main_color": "主色：",
+  "accent_color": "强调色：",
+  "trim_color": "饰边：",
+  "trim_2_color": "饰边 2：",
+  "tile_a_color": "地砖 A：",
+  "tile_b_color": "地砖 B：",
+  "color_label": "颜色：",
+  "favorites": "收藏",
+  "save_current": "★ 收藏当前颜色",
+  "wall_color": "墙壁颜色",
+  "top_wall_color": "顶部墙壁颜色",
+  "floor_color": "地板颜色",
+  "couch_color": "沙发颜色",
+  "no_recent_request": "暂无最近请求",
+  "no_recent_response": "暂无最近响应",
+  "from_label": "来源",
+  "loading_workspace": "正在加载工作区...",
+  "workspace_unavailable": "工作区不可用",
+  "model_list_unavailable": "模型列表不可用",
+  "task_title_prompt": "任务标题：",
+  "task_details_prompt": "任务详情：",
+  "note_title_prompt": "笔记标题：",
+  "note_content_prompt": "笔记内容：",
+  "delete_path_confirm": "删除 {{path}}？",
+  "delete_skill_confirm": "删除技能 {{name}}？",
+  "meeting_empty": "暂无{{status}}会议",
+  "untitled_meeting": "未命名会议",
+  "completed": "已完成",
+  "participants_count": "{{count}} 位参与者",
+  "agent_responses": "代理回复",
+  "no_response_recorded": "未记录回复",
+  "expand": "▼ 展开",
+  "collapse": "▲ 收起",
+  "ended_by": "结束人",
+  "delete": "🗑️ 删除",
+  "contribution_placeholder": "{{name}} 有什么贡献？",
+  "summary_required": "结束会议前必须填写摘要。",
+  "failed_end_meeting": "结束会议失败",
+  "delete_meeting_confirm": "从历史记录中删除此会议？",
+  "failed_delete": "删除失败",
+  "no_active_meetings": "暂无进行中的会议",
+  "no_skills_library": "技能库为空。点击“➕ 添加技能”创建。",
+  "apply_to_agent": "应用到代理",
+  "edit_skill": "编辑技能",
+  "add_skill_title": "添加技能",
+  "skill_name_required": "必须填写技能名称",
+  "skill_saved": "技能“{{name}}”已保存",
+  "delete_library_skill_confirm": "从技能库删除“{{name}}”？代理副本不会受影响。",
+  "skill_deleted": "技能“{{name}}”已删除",
+  "uploaded": "已上传“{{name}}”",
+  "codex_ready": "Codex 已就绪",
+  "codex_working": "Codex 工作中...",
+  "codex_waiting": "Codex 正在等待你的操作",
+  "codex_error": "Codex 错误",
+  "new_session_confirm": "为 {{agent}} 开始新会话？这会清除对话历史。",
+  "new_codex_session": "新的 Codex 会话已开始",
+  "new_hermes_session": "新的 Hermes 会话已开始",
+  "compress_context_confirm": "压缩当前 Codex 上下文？可见聊天记录将保留。",
+  "compressing_codex_context": "正在压缩 Codex 上下文...",
+  "codex_compression_failed": "Codex 上下文压缩失败",
+  "codex_cancelling": "正在取消 Codex 任务...",
+  "stop_preserves_changes": "已发送停止指令。现有文件修改不会自动回滚。",
+  "answer_codex": "回答 Codex：",
+  "submitted": "已提交",
+  "codex_interaction_failed": "Codex 交互失败",
+  "open_active_conversation": "打开进行中的会话",
+  "reasoning_summary": "推理摘要",
+  "reasoning_summary_hint": "仅当 Codex 运行时提供时显示该推理摘要。",
+  "codex_needs_information": "Codex 需要补充信息",
+  "codex_requests_approval": "Codex 请求审批",
+  "answer": "回答",
+  "allow_codex_session": "在本次 Codex 会话中允许",
+  "reject": "拒绝",
+  "codex_session_scope_hint": "会话授权的范围和有效期由 Codex 运行时控制。",
+  "complete": "已完成",
+  "live": "实时",
+  "setup_enter_license": "请输入许可证密钥",
+  "validating": "验证中...",
+  "license_activated": "✅ {{tier}} 许可证已激活！所有功能已解锁。",
+  "invalid_key": "无效密钥",
+  "enter_metrics_url": "请输入指标服务器地址",
+  "saving_testing": "正在保存并测试...",
+  "unexpected_response": "响应格式异常",
+  "hermes_disabled": "Hermes 自动检测已禁用。",
+  "testing_hermes": "正在保存并测试 Hermes...",
+  "hermes_connected_profiles": "✅ Hermes 已连接，共发现 {{count}} 个配置",
+  "hermes_not_reachable": "无法连接 Hermes",
+  "enter_cdp_url": "请输入 CDP 地址",
+  "enter_viewer_url": "请输入浏览器查看器地址",
+  "cdp_connected": "✅ 已连接！CDP 可访问且查看器地址已设置。",
+  "cdp_not_reachable": "无法访问 CDP",
+  "enter_path": "请输入路径",
+  "saving_detecting": "正在保存路径并检测...",
+  "looking_for_agents": "🔍 正在查找代理...",
+  "agents_found": "✅ 找到 {{count}} 个代理！",
+  "no_agents_path": "此路径下未找到代理。请检查排障提示或尝试其他路径。",
+  "server_unreachable": "无法访问服务器",
+  "configuring_gateway": "⏳ 正在配置 Gateway...",
+  "configure_failed": "配置失败",
+  "testing_connection": "正在测试连接...",
+  "launching_office": "✅ 正在启动办公室...",
+  "lmstudio_not_configured": "未配置 LM Studio 提供商。",
+  "lmstudio_add_hint": "请在自定义提供商选项卡中添加名称为“lmstudio”的提供商",
+  "wss_failed": "WSS 失败 — 请检查证书",
+  "wss_failed_hint": "通过 HTTPS 建立 WebSocket 失败。请检查浏览器是否信任 TLS 证书。",
+  "back_office_short": "← 办公室",
+  "website_title": "你的虚拟办公室 — AI 代理可视化工作空间",
+  "preview_chat_message": "Moe：Mike，请检查收件箱中的 SR 985 提交文件...",
+  "hermes_test_failed": "Hermes 测试失败",
+  "enter_cdp_first": "请先输入 CDP 地址",
+  "cdp_connected_tabs": "✅ CDP 已连接！当前打开 {{count}} 个标签页",
+  "cdp_reachable": "✅ CDP 可访问",
+  "cdp_check_hint": "无法访问 CDP。请检查地址和浏览器容器。",
+  "enter_viewer_first": "请先输入查看器地址",
+  "viewer_reachable": "✅ 查看器可访问。打开浏览器面板即可查看实时画面。",
+  "viewer_not_reachable": "当前浏览器无法访问查看器",
+  "connected_label": "✅ 已连接！",
+  "unexpected_response_format": "响应格式异常",
+  "testing": "测试中...",
+  "import_config_confirm": "导入此配置？当前办公室布局将被替换。",
+  "full_reset_confirm": "完全重置：删除所有办公室自定义内容？",
+  "reset_type_confirm": "此操作无法撤销。请在下一个输入框中输入 RESET 确认。",
+  "type_reset": "输入 RESET 确认：",
+  "premium_edit_office": "编辑办公室是高级功能。获取许可证密钥后即可解锁。",
+  "premium_agent_editor": "代理编辑器是高级功能。获取许可证密钥后即可解锁。",
+  "costume_note": "服装会替换头饰。",
+  "loading_agents": "正在加载代理...",
+  "delete_agent": "🗑️ 删除代理",
+  "custom_color": "自定义颜色",
+  "no_agent_platforms": "没有可用的代理平台。",
+  "agent_name_prompt": "代理名称：",
+  "new_agent_default": "新代理",
+  "agent_role_prompt": "角色（例如邮件专家或 QA 工程师）：",
+  "ai_assistant": "AI 助手",
+  "emoji_prompt": "表情：",
+  "failed_create_agent": "创建代理失败",
+  "error_create_agent": "创建代理时出错",
+  "delete_agent_confirm": "从 {{provider}} 删除代理“{{name}}”？其工作区文件、记忆和会话历史将永久删除。",
+  "failed_delete_agent": "删除代理失败",
+  "error_delete_agent": "删除代理时出错",
+  "no_agents_create": "暂无代理。点击“➕ 新建代理”创建。",
+  "skill_exists_library": "技能库中已存在该技能。",
+  "loading_skills": "正在加载技能...",
+  "no_skills_configured": "未配置技能",
+  "edit_skill_title": "编辑技能",
+  "save_skill_library": "保存到技能库",
+  "save_skill_library_hint": "将此代理技能保存到共享技能库",
+  "remove_skill": "移除技能",
+  "error_loading_skills": "加载技能失败",
+  "no_skills_in_library": "技能库为空",
+  "failed_load_library": "加载技能库失败",
+  "overwrite_skill_confirm": "此代理已存在“{{name}}”。是否覆盖？",
+  "editing_skill": "✏️ 正在编辑：{{name}}",
+  "remove_agent_skill_confirm": "从此代理移除技能“{{name}}”？",
+  "error_saving_skill": "保存技能时出错",
+  "error_deleting_skill": "删除技能时出错",
+  "hide_secondary_chat": "隐藏辅助聊天窗口 {{slot}}",
+  "retry_hermes_allow_hint": "仅本次调用绕过审批并重试 Hermes 操作",
+  "retry_hermes_deny_hint": "不重试被阻止的 Hermes 命令"
+  ,"proj_dirty_workspace_confirm": "工作区存在未提交修改。继续执行不会自动回滚这些修改。\n\n{{files}}"
+  ,"proj_task_execution_started": "项目任务执行已启动"
+  ,"proj_start_task_failed": "启动任务失败"
+  ,"proj_stopping_task": "正在停止任务，已有文件修改会保留"
+  ,"proj_stop_task_failed": "停止任务失败"
+  ,"proj_review_started": "独立审查已启动"
+  ,"proj_start_review_failed": "启动审查失败"
+  ,"proj_feedback_required": "需要填写反馈"
+  ,"proj_accept_confirm": "确认验收通过并移动到 Done？"
+  ,"proj_accept_action_failed": "提交验收动作失败"
+  ,"setup_license_note": "<b>演示模式：</b>最多可免费使用 3 个代理，部分功能受限。<br><br><b>完整许可证：</b>无限代理并解锁全部功能。<br><b>早鸟版：</b>功能相同，享受限时首发价格。<br><br>前往 <a href=\"https://myvirtualoffice.ai\" target=\"_blank\">myvirtualoffice.ai</a> 获取密钥"
+  ,"setup_browser_note": "<b>这是什么？</b>代理浏览器通过 CDP 控制浏览器，并通过 VNC 显示实时画面。<br><br><b>Docker 配置：</b><br><code>docker run -d --name vo-browser -p 9222:9222 -p 6902:6902 kasmweb/chromium:1.17.0</code><br><br>CDP：<code>http://127.0.0.1:9222</code><br>查看器：<code>http://127.0.0.1:6902</code><br><br>可以跳过此步骤，稍后再配置。"
+  ,"setup_sms_note": "<b>所需内容：</b>Twilio 账户、电话号码、Account SID 和 Auth Token。<br><br>配置凭据后可以显示收到的 MMS。发送附件需要 Twilio 能访问的公开 HTTPS 媒体地址；纯文本短信不需要该地址。<br><br>可以跳过此步骤，稍后再配置。"
+  ,"setup_metrics_note": "<b>工作原理：</b>在需要监控的电脑上运行项目自带的指标服务器。<br><br><code>pip install psutil</code><br><code>python pc-metrics-server.py 8099</code><br><br>本机使用 <code>http://127.0.0.1:8099</code>，远程电脑使用其局域网或 Tailscale 地址。NVIDIA 显卡监控还需要安装 <code>pynvml</code>。"
+  ,"setup_done_note": "<b>你可以：</b><br>• 编辑办公室布局和颜色<br>• 自定义代理并分配工位<br>• 与代理聊天<br>• 修改连接设置并导入或导出配置<br><br><b>实时状态：</b>长时间运行的代理工作会持续显示到完成。<br><br><b>API 用量：</b>系统会自动从 OpenClaw 检测提供商用量和凭据状态。"
+  ,"select_agent": "选择代理..."
+  ,"delete_branch_confirm": "删除分支“{{name}}”？代理将移到未分配分支。"
+  ,"message_target_prompt": "→ 发送给谁？（留空表示所有人）"
+  ,"enter_label_text": "输入标签文字："
+  ,"branch_change_title": "分支：{{name}}（点击更改）"
+  ,"catalog_office": "办公"
+  ,"catalog_comfort": "休闲"
+  ,"catalog_kitchen": "茶水间"
+  ,"catalog_fun": "娱乐"
+  ,"catalog_structure": "建筑"
+  ,"catalog_labels": "标签"
+  ,"catalog_walls": "墙体"
+  ,"furniture_desk": "办公桌"
+  ,"furniture_boss_desk": "主管桌"
+  ,"furniture_trash_can": "垃圾桶"
+  ,"furniture_filing_cabinet": "文件柜"
+  ,"furniture_whiteboard": "白板"
+  ,"furniture_l_couch": "L 形沙发"
+  ,"furniture_straight_couch": "直排沙发"
+  ,"furniture_coffee_table": "茶几"
+  ,"furniture_tv": "电视"
+  ,"furniture_bookshelf": "书架"
+  ,"furniture_plant": "绿植"
+  ,"furniture_tall_plant": "高株绿植"
+  ,"furniture_end_table_plant": "边桌和绿植"
+  ,"furniture_kitchen_counter": "茶水台"
+  ,"furniture_coffee_maker": "咖啡机"
+  ,"furniture_vending_machine": "自动售货机"
+  ,"furniture_water_cooler": "饮水机"
+  ,"furniture_microwave": "微波炉"
+  ,"furniture_toaster": "烤面包机"
+  ,"furniture_ping_pong_table": "乒乓球桌"
+  ,"furniture_dart_board": "飞镖盘"
+  ,"furniture_meeting_table": "会议桌"
+  ,"furniture_window": "窗户"
+  ,"furniture_weather_window": "天气窗户"
+  ,"furniture_clock": "时钟"
+  ,"furniture_floor_lamp": "落地灯"
+  ,"furniture_custom_text": "自定义文字"
+  ,"furniture_wall_segment": "墙段"
+  ,"furniture_door_opening": "门或开口"
+  ,"agent_identity": "身份"
+  ,"agent_role": "角色"
+  ,"agent_emoji": "表情"
+  ,"agent_gender": "性别"
+  ,"agent_colors": "颜色"
+  ,"agent_shirt": "上衣"
+  ,"agent_skin": "肤色"
+  ,"agent_hair": "发型"
+  ,"agent_style": "样式"
+  ,"color_field": "颜色"
+  ,"agent_highlight": "挑染"
+  ,"agent_face": "面部"
+  ,"agent_eyebrows": "眉毛"
+  ,"agent_eye_color": "眼睛颜色"
+  ,"agent_facial_hair": "胡须"
+  ,"agent_beard_color": "胡须颜色"
+  ,"agent_costumes": "服装"
+  ,"agent_costume": "服装"
+  ,"agent_accessories": "配饰"
+  ,"agent_headwear": "头饰"
+  ,"agent_hat_color": "帽子颜色"
+  ,"agent_glasses": "眼镜"
+  ,"agent_lens_color": "镜片颜色"
+  ,"agent_items": "物品"
+  ,"agent_held_item": "手持物品"
+  ,"agent_desk_item": "桌面物品"
+  ,"agent_assignment": "分配"
+  ,"branch_field": "分支"
+  ,"openclaw_agent": "OpenClaw 代理"
+  ,"assigned_to_agent": "已分配给 {{name}}"
+  ,"option_none": "无"
+  ,"option_bald": "光头"
+  ,"option_buzz": "寸头"
+  ,"option_short": "短发"
+  ,"option_medium": "中发"
+  ,"option_long": "长发"
+  ,"option_curly": "卷发"
+  ,"option_wavy": "波浪发"
+  ,"option_spiky": "刺猬头"
+  ,"option_bun": "发髻"
+  ,"option_ponytail": "马尾"
+  ,"option_mohawk": "莫西干"
+  ,"option_thin": "细眉"
+  ,"option_thick": "浓眉"
+  ,"option_angular": "棱角眉"
+  ,"option_arched": "弯眉"
+  ,"option_stubble": "胡茬"
+  ,"option_beard": "络腮胡"
+  ,"option_goatee": "山羊胡"
+  ,"option_mustache": "八字胡"
+  ,"option_lobster": "龙虾"
+  ,"option_chicken": "小鸡"
+  ,"option_hardhat": "安全帽"
+  ,"option_cap": "鸭舌帽"
+  ,"option_crown": "皇冠"
+  ,"option_tiara": "头冠"
+  ,"option_headband": "发带"
+  ,"option_goggles": "护目镜"
+  ,"option_headset": "耳机"
+  ,"option_beanie": "针织帽"
+  ,"option_round": "圆框"
+  ,"option_square": "方框"
+  ,"option_sunglasses": "太阳镜"
+  ,"option_tablet": "平板电脑"
+  ,"option_wrench": "扳手"
+  ,"option_coffee": "咖啡"
+  ,"option_clipboard": "写字板"
+  ,"option_pen": "钢笔"
+  ,"option_hammer": "锤子"
+  ,"option_testTube": "试管"
+  ,"option_book": "书"
+  ,"option_anvil": "铁砧"
+  ,"option_trophy": "奖杯"
+  ,"option_calendar": "日历"
+  ,"option_envelope": "信封"
+  ,"option_money": "现金"
+  ,"option_ruler": "尺子"
+  ,"option_marker": "记号笔"
+  ,"option_chart": "图表"
+  ,"option_plans": "规划图"
+  ,"option_checklist": "检查清单"
+  ,"option_microscope": "显微镜"
+  ,"option_shield": "盾牌"
+  ,"option_phone": "电话"
+  ,"option_files": "文件"
+  ,"snap_center": "⊙ 居中"
+  ,"snap_top_left": "↖ 左上"
+  ,"snap_top_right": "↗ 右上"
+  ,"snap_bottom_left": "↙ 左下"
+  ,"snap_bottom_right": "↘ 右下"
+  ,"setup_openclaw_path_note": "<b>📁 在哪里找到它：</b><br><br><b>Linux/Mac（最常见）：</b><br><code>/home/youruser/.openclaw</code><br><br><b>在 Docker 中运行 Virtual Office？</b><br>使用通过 <code>-v</code> 挂载的路径。例如：<br><code>docker run -v /home/eli/.openclaw:/openclaw ...</code><br>此时填写 <code>/openclaw</code>。<br><br><b>不确定？</b>运行 <code>ls ~/.openclaw/openclaw.json</code>。如果输出路径，请填写其所在文件夹。"
+  ,"setup_no_agents_note": "<b>🔧 未找到代理？请检查以下内容：</b><br><br><b>1. 路径是否正确？</b>文件夹应包含 <code>openclaw.json</code> 和 <code>agents/</code> 目录。<br><br><b>2. 是否已配置代理？</b>打开 <code>openclaw.json</code> 并检查 <code>agents → list</code>。每个代理都需要工作区目录。<br><br><b>3. 在 Docker 中运行？</b>请将 OpenClaw 目录挂载到容器：<br><code>docker run -v /path/to/.openclaw:/openclaw ...</code><br><br><b>4. 权限问题？</b>服务器需要拥有 <code>agents/</code> 文件夹的读取权限。<br><br><b>仍未解决？</b>可以跳过此步骤，稍后从 ☰ 菜单配置路径。"
+  ,"skill_applied": "已将 {{skill}} 应用到 {{agent}}"
+  ,"apply_failed": "应用失败"
+  ,"failed_load_skill": "加载技能失败"
+  ,"upload_failed": "上传失败"
+  ,"license_active": "✅ {{tier}} 许可证已激活"
+  ,"gateway_origin_added": "已将当前来源加入允许列表。"
+  ,"gateway_origin_exists": "当前来源已在允许列表中。"
+  ,"gateway_reachable": "Gateway 可访问"
+  ,"gateway_unreachable": "Gateway 不可访问"
+  ,"gateway_running_hint": "请确认 OpenClaw Gateway 正在运行。Virtual Office 需要通过其 WebSocket 连接显示代理实时状态并启用聊天。"
+  ,"gateway_token_found": "已找到 Gateway 令牌"
+  ,"gateway_token_failed": "Gateway 令牌认证失败"
+  ,"gateway_agents_connected": "已连接 {{count}} 个代理"
+  ,"agent_platform_prompt": "代理平台："
+  ,"creating_agent_platform": "正在 {{platform}} 中创建代理..."
+  ,"agent_created_platform": "已在 {{platform}} 中创建代理“{{name}}”。"
+  ,"agent_deleted": "已删除代理“{{name}}”"
+  ,"compression_failed_detail": "压缩失败"
+  ,"codex_context_compressed": "Codex 上下文已压缩。"
+  ,"cancel_failed_detail": "取消失败"
+  ,"resolved": "已处理"
+  ,"codex_interaction_unavailable": "此 Codex 交互已无法继续。"
+  ,"modified_files": "已修改文件"
+  ,"interaction_failed_detail": "交互失败"
+  ,"busy": "忙碌"
+  ,"codex_busy_other_conversation": "Codex 正在另一个会话中处于{{status}}状态。"
+  ,"opened_active_codex_conversation": "已打开进行中的 Codex 会话"
+  ,"hermes_step_receive": "接收 Virtual Office 消息"
+  ,"hermes_step_load_profile": "加载 Hermes 配置和当前会话"
+  ,"hermes_step_run_loop": "运行 Hermes CLI 代理循环"
+  ,"hermes_step_wait_updates": "等待模型、工具和任务更新"
+  ,"hermes_step_export_activity": "导出公开会话活动"
+  ,"hermes_step_render_reply": "渲染回复、工具调用和任务摘要"
+  ,"hermes_task_breakdown": "Hermes 任务分解"
+  ,"hermes_queued_waiting": "已在 Virtual Office 排队，等待 Hermes 启动。"
+  ,"hermes_running_step": "正在执行第 {{current}}/{{total}} 步：{{step}}"
+  ,"hermes_review_error": "在聊天中查看 Hermes 错误"
+  ,"hermes_reply_collected": "已收集 Hermes 回复和会话活动。"
+  ,"hermes_request_failed": "Hermes 请求失败。"
+  ,"human_intervention_required": "需要人工介入。"
+  ,"hermes_task_plan": "任务计划"
+  ,"hermes_steps_complete": "已完成 {{count}} 步"
+  ,"hermes_plan_preview": "接收 · 运行 · 导出 · 渲染"
 }

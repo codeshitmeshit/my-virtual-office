@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Cron Manager — Virtual Office</title>
-<script>fetch('/vo-config').then(r=>r.json()).then(d=>{if(d.office&&d.office.name)document.title='Cron Manager — '+d.office.name;}).catch(()=>{});</script>
+<script>fetch('/vo-config').then(r=>r.json()).then(d=>{if(d.office&&d.office.name)document.title=(typeof i18n!=='undefined'?i18n.t('cron_manager_title'):'Cron Manager')+' — '+d.office.name;}).catch(()=>{});</script>
 <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
 <style>
 :root {
@@ -123,7 +123,7 @@ a:hover { text-decoration: underline; }
 <body>
 
 <div class="header">
-  <a href="/" class="back">← Office</a>
+  <a href="/" class="back" data-i18n="back_office_short">← Office</a>
   <h1 data-i18n="cron_manager_title">⏰ CRON MANAGER</h1>
   <span id="ws-status" class="status connecting" data-i18n="connecting_status">Connecting...</span>
 </div>
@@ -351,7 +351,7 @@ function connectGateway() {
   try {
     ws = new WebSocket(url);
   } catch(e) {
-    statusEl.textContent = 'WS Error';
+      statusEl.textContent = i18n.t('ws_error');
     statusEl.className = 'status offline';
     console.error('WebSocket create failed:', e);
     return;
@@ -378,9 +378,9 @@ function connectGateway() {
     _wsRetryCount++;
     const isHttps = window.location.protocol === 'https:';
     if (_wsRetryCount > 3 && isHttps) {
-      statusEl.textContent = 'WSS Failed — check cert';
+      statusEl.textContent = i18n.t('wss_failed');
       statusEl.className = 'status offline';
-      statusEl.title = 'WebSocket over HTTPS failed. Your browser may not trust the TLS certificate. Try accessing via HTTP instead, or accept the certificate.';
+      statusEl.title = i18n.t('wss_failed_hint');
     } else {
       statusEl.textContent = i18n.t('disconnected');
       statusEl.className = 'status offline';
@@ -808,6 +808,9 @@ try {
   if (tz) document.getElementById('f-cron-tz').value = tz;
 } catch(e) {}
 initAgentDropdowns();
+window.addEventListener('i18n:changed', function() {
+  renderJobs();
+});
 // connectGateway() is called after /gateway-info loads (see async IIFE above)
 </script>
 </body>
