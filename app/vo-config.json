@@ -19,21 +19,21 @@
     "location": "Beijing"
   },
   "features": {
-    "pcMetrics": false,
+    "pcMetrics": true,
     "smsPanel": false,
-    "browserPanel": false,
+    "browserPanel": true,
     "whisper": false,
-    "apiUsage": true
+    "apiUsage": false
   },
   "pcMetrics": {
-    "url": null
+    "url": "http://127.0.0.1:8099"
   },
   "whisper": {
     "url": "http://127.0.0.1:8087"
   },
   "browser": {
-    "cdpUrl": null,
-    "viewerUrl": null
+    "cdpUrl": "http://127.0.0.1:9224",
+    "viewerUrl": "https://localhost:6901"
   },
   "sms": {
     "ownerAgentId": null,

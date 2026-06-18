@@ -1,0 +1,38 @@
+{
+  "name": "project-scheduled-tasks-phase-4-history-alerts",
+  "stage": "done",
+  "waiting_for_user": false,
+  "updated_at": "2026-06-19T00:55:00+08:00",
+  "confirmed": {
+    "checklist": true,
+    "tested": true,
+    "done": true
+  },
+  "confirmations": {
+    "checklist": {
+      "confirmed_at": "2026-06-18T22:11:20+08:00",
+      "summary": "用户回复 “continue”，确认 Phase 4 checklist，可以生成 todolist。"
+    },
+    "tested": {
+      "confirmed_at": "2026-06-19T00:55:00+08:00",
+      "summary": "用户回复“先将phase4归档吧”，确认 Phase 4 测试和验收通过。"
+    },
+    "done": {
+      "confirmed_at": "2026-06-19T00:55:00+08:00",
+      "summary": "用户要求归档 Phase 4，确认项目定时任务执行历史、控制面板异常提示和诊断日志子需求完成。"
+    }
+  },
+  "files": {
+    "requirement": "requirement.md",
+    "review": "review.md",
+    "checklist": "checklist.md",
+    "todolist": "todolist.md"
+  },
+  "notes": [
+    "这是父需求 project-scheduled-tasks 的 Phase 4 子需求。",
+    "范围聚焦项目定时任务执行历史、控制面板异常提示和调度诊断。",
+    "Phase 1 与 Phase 2+3 已完成并归档，Phase 4 不改变既有创建、编辑、派发和重复触发语义。",
+    "用户已确认 checklist，todolist.md 已创建。",
+    "Phase 4 实现已完成并通过自动化测试、Phase 2+3 回归和 8090 live API 验收；用户已确认验收通过并归档。"
+  ]
+}

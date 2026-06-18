@@ -9,6 +9,8 @@ This document is the organized index for tools that agents can use through My Vi
 
 The companion architecture document is `docs/UNIVERSAL-AGENT-HARNESS-SPEC.md`.
 
+For a detailed agent operating manual with examples, parameters, and safety rules, see `docs/VO_AGENT_USAGE_GUIDE.md`.
+
 ## Built-in skills
 
 Virtual Office seeds these skills into the Skills Library so agents can learn how to use office tools without custom platform code:
@@ -144,6 +146,39 @@ Important: agents should not use raw Kasm/CDP credentials directly. A provider-n
 
 Meetings should always end with a summary/resolution/action items.
 
+Executable Meeting for AI routes:
+
+- `POST /api/meetings/executable/create`
+- `GET /api/meetings/executable/<meetingId>`
+- `GET /api/meetings/executable/<meetingId>/events?afterSeq=<seq>`
+- `POST /api/meetings/executable/<meetingId>/run`
+- `POST /api/meetings/executable/<meetingId>/transition`
+- `POST /api/meetings/executable/<meetingId>/intervention`
+- `POST /api/meetings/executable/<meetingId>/agenda-change`
+- `POST /api/meetings/executable/<meetingId>/targeted-question`
+- `POST /api/meetings/executable/<meetingId>/arbitration`
+- `POST /api/meetings/executable/<meetingId>/moderator-takeover`
+- `POST /api/meetings/executable/<meetingId>/conflict`
+- `POST /api/meetings/executable/<meetingId>/action-items/<actionItemId>`
+- `GET /api/meetings/executable/reconcile`
+
+Supported meeting types are information gathering, decision discussion, and task collaboration. Executable meetings persist participants, stage, round state, transcript events, selected context snapshots, structured results, conflict state, and action-item drafts under the office meeting store.
+
+AI-originated meeting request routes:
+
+- `GET /api/meetings/requests`
+- `GET /api/meetings/requests/<requestId>`
+- `POST /api/meetings/requests/<requestId>/confirm`
+- `POST /api/meetings/requests/<requestId>/reject`
+- `GET /api/projects/<projectId>/tasks/<taskId>/meeting-requests`
+- `POST /api/projects/<projectId>/tasks/<taskId>/meeting-requests`
+
+Meeting requests are for project-task collaboration blockers. A valid request must explain the meeting goal, expected outcome, why the requester cannot complete alone, suggested participants, and suggested meeting type. Pending requests never reserve participants or call meeting providers; only user-confirmed requests become executable meetings.
+
+Conflict handling uses `POST /api/meetings/executable/<meetingId>/conflict` with actions such as `wait`, `reserve`, `replace`, `force_join`, `cancel_conflict`, and `refresh`. Medium/high-risk conflicts can include a busy-agent advisory recommendation, estimated availability, interruption risk, and resume notes. Advisory output is read-only; the user or caller must still choose a resolution.
+
+Task-collaboration meeting results can expose action-item drafts. `POST /api/meetings/executable/<meetingId>/action-items/<actionItemId>` supports user-controlled draft update, rejection, meeting-only retention, and confirmation into a project task. Confirmation is idempotent and stores source meeting/action-item metadata on the created task.
+
 ### Projects and tasks
 
 - `GET /api/projects`
@@ -158,6 +193,49 @@ Meetings should always end with a summary/resolution/action items.
 
 Use these for durable work that belongs on a board.
 
+Project execution endpoints are available for assigning board work to provider-backed agents and tracking review/acceptance state:
+
+- `POST /api/projects/<projectId>/project-execution/workspace/validate`
+- `POST /api/projects/<projectId>/project-execution/start`
+- `GET /api/projects/<projectId>/project-execution/status`
+- `POST /api/projects/<projectId>/tasks/<taskId>/project-execution/start`
+- `POST /api/projects/<projectId>/tasks/<taskId>/project-execution/cancel`
+- `GET /api/projects/<projectId>/tasks/<taskId>/project-execution/status`
+- `POST /api/projects/<projectId>/tasks/<taskId>/project-execution/review/start`
+- `POST /api/projects/<projectId>/tasks/<taskId>/project-execution/accept`
+- `GET /api/projects/<projectId>/artifacts`
+- `GET /api/projects/<projectId>/artifacts/read?path=<relativePath>`
+
+Project execution currently supports OpenClaw, Hermes, and Codex provider refs, independent reviewer routing, dirty-workspace confirmation, reviewer-skip confirmation, cancellation, acceptance/rejection/blocking, and markdown artifact discovery.
+
+Project-bound scheduled cron endpoints connect the Gateway cron scheduler to project execution:
+
+- `GET /api/projects/scheduled-cron`
+- `GET /api/projects/<projectId>/scheduled-cron`
+- `POST /api/projects/<projectId>/scheduled-cron`
+- `PUT /api/projects/<projectId>/scheduled-cron/<cronId>`
+- `DELETE /api/projects/<projectId>/scheduled-cron/<cronId>`
+- `POST /api/projects/<projectId>/scheduled-cron/<cronId>/run`
+
+Virtual Office owns the project binding metadata in `VO_STATUS_DIR/project-cron-bindings.json`; the OpenClaw Gateway owns the underlying cron job. Supported targets are `projectWorkflow` and `projectTask`. Supported schedules are `cron`, `every`, and one-shot `at`.
+
+Dispatch may skip instead of starting execution when a project is archived, project cron is paused, another task is active, a target task is missing, a completed task has not enabled scheduled repeat, or a dirty workspace / missing reviewer confirmation is required. These outcomes are recorded in project scheduled-cron history and surfaced as project alerts when human intervention is needed.
+
+### Codex harness
+
+When `VO_CODEX_ENABLED=1`, the Codex harness is exposed as an office agent and can be used through both chat and project execution.
+
+- `GET /api/codex/test`
+- `POST /api/codex/chat`
+- `GET /api/codex/activity`
+- `GET /api/codex/history`
+- `POST /api/codex/interaction`
+- `POST /api/codex/cancel`
+- `POST /api/codex/compact`
+- `POST /api/codex/reset`
+
+The live bridge uses local `codex app-server` by default, or an external bridge when `VO_CODEX_BRIDGE_URL` is configured. `VO_CODEX_REPLY_TEXT=<text>` remains available for deterministic local regression tests.
+
 ## Organization rules
 
 - Use this file as the canonical index.
@@ -169,6 +247,5 @@ Use these for durable work that belongs on a board.
 ## Current gaps
 
 - Provider-neutral browser action endpoint is not implemented yet.
-- Codex live bridge execution is not implemented yet; the current harness supports discovery, status, visible communication events, and deterministic demo replies.
 - File/upload tool skill is not yet added; add it only after the intended agent-facing file endpoints are finalized.
 - Calendar/scheduler skill is not yet added; add it only if Virtual Office owns those endpoints instead of delegating to OpenClaw/provider tools.

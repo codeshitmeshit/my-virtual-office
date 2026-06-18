@@ -1,20 +1,26 @@
 {
   "name": "phase-6-codex-live-activity-controls",
-  "stage": "implementation_done",
-  "waiting_for_user": true,
-  "updated_at": "2026-06-09T15:04:57+08:00",
+  "stage": "done",
+  "waiting_for_user": false,
+  "updated_at": "2026-06-17T03:01:16+08:00",
   "confirmed": {
     "checklist": true,
-    "tested": false,
-    "done": false
+    "tested": true,
+    "done": true
   },
   "confirmations": {
     "checklist": {
       "confirmed_at": "2026-06-09T06:54:09+08:00",
       "summary": "User confirmed the 26-item Phase 6 checklist and requested todolist generation."
     },
-    "tested": null,
-    "done": null
+    "tested": {
+      "confirmed_at": "2026-06-17T03:01:16+08:00",
+      "summary": "User confirmed acceptance passed for Phase 6 Codex live activity controls."
+    },
+    "done": {
+      "confirmed_at": "2026-06-17T03:01:16+08:00",
+      "summary": "User requested archival after confirming acceptance passed."
+    }
   },
   "files": {
     "requirement": "requirement.md",
@@ -44,6 +50,7 @@
     "Browser E2E passed for activity cards, approval continuation, runtime-session approval labeling, refresh recovery, and cancellation messaging.",
     "Real Codex read-only regression passed with _VO_INT=1 and demo=false; thread, turn, command progress, terminal state, and final reply were observed with no modified files.",
     "Review parser regressions passed 16/16 and 85/85; project CRUD regression passed 5/5.",
-    "confirmed.tested remains false pending user acceptance and live OpenClaw/Hermes regression in an available gateway environment."
+    "confirmed.tested remains false pending user acceptance and live OpenClaw/Hermes regression in an available gateway environment.",
+    "2026-06-17 user confirmed acceptance passed and requested archival; confirmed.tested and confirmed.done were set true and stage advanced to done."
   ]
 }

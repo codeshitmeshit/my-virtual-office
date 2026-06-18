@@ -1,17 +1,25 @@
 {
   "name": "meeting-for-ai",
-  "stage": "checklist_draft",
-  "waiting_for_user": true,
-  "updated_at": "2026-06-15T05:09:51+08:00",
+  "stage": "done",
+  "waiting_for_user": false,
+  "updated_at": "2026-06-19T02:46:22+08:00",
   "confirmed": {
     "checklist": false,
-    "tested": false,
-    "done": false
+    "tested": true,
+    "done": true
   },
   "confirmations": {
     "checklist": null,
-    "tested": null,
-    "done": null
+    "tested": {
+      "confirmed_at": "2026-06-19T02:38:06+08:00",
+      "confirmed_by": "codex",
+      "note": "Phase 7 total regression executed with automation, real 8040 data, and chrome-devtools MCP. Awaiting user final acceptance before marking main requirement done."
+    },
+    "done": {
+      "confirmed_at": "2026-06-19T02:46:22+08:00",
+      "confirmed_by": "user",
+      "summary": "用户确认 Meeting for AI 主需求可归档；Phase 1-7 已完成阶段验收与总测试记录，主需求闭环。"
+    }
   },
   "files": {
     "requirement": "requirement.md",
@@ -23,6 +31,16 @@
     "Product clarification completed in conversation.",
     "Current meeting implementation is metadata and visualization only; executable orchestration is in scope.",
     "Requirement split into seven independently testable delivery phases before checklist confirmation.",
-    "Child requirement meeting-for-ai-phase-1-3 created for combined implementation of Phase 1-3 with independent Phase gates."
+    "Child requirement meeting-for-ai-phase-1-3 created for combined implementation of Phase 1-3 with independent Phase gates.",
+    "2026-06-17T04:34:19+08:00 用户确认 Phase 3 已验收完成；子需求 meeting-for-ai-phase-1-3 已标记 done。父需求 meeting-for-ai 仍保留 Phase 4-7 后续范围，未整体标记 done。",
+    "2026-06-17T23:46:48+08:00 用户确认 Phase 4 已验收完成；子需求 meeting-for-ai-phase-4 已标记 done。父需求 meeting-for-ai 同步记录 Phase 4 完成，仍保留 Phase 5-7 后续范围，未整体标记 done。",
+    "2026-06-18T00:13:45+08:00 Created child requirement meeting-for-ai-phase-5 for Phase 5 scope: busy Agent conflicts, advisory recommendations, lightweight scheduling, task pause/resume, meeting concurrency, and regression checks. Child checklist is in checklist_draft and awaiting user confirmation.",
+    "2026-06-18T03:57:48+08:00 用户确认 Meeting for AI Phase 5 已完成验收并可以归档。子需求 meeting-for-ai-phase-5 已标记 done；父需求 meeting-for-ai 同步记录 Phase 5 完成，后续仍保留 Phase 6-7 范围，未整体标记 done。",
+    "2026-06-18T04:07:41+08:00 Created child requirement meeting-for-ai-phase-6 for Phase 6 scope: meeting-project binding, action item drafts, user confirmation, formal project task creation, idempotency, audit records, and regression checks. Child checklist is in checklist_draft and awaiting user confirmation.",
+    "2026-06-18T04:11:42+08:00 User confirmed meeting-for-ai-phase-6 checklist with `continuee`; child todolist was created and Phase 6 is ready for execution planning.",
+    "2026-06-18T04:50:00+08:00 Phase 6 child requirement meeting-for-ai-phase-6 has reached tested state after implementation and chrome-devtools MCP acceptance. Parent requirement remains open and waiting for user acceptance of Phase 6; Phase 7 remains in scope.",
+    "2026-06-19T02:25:45+08:00 用户要求正式归档 Phase 6 并直接执行 Phase 7 总测试。子需求 meeting-for-ai-phase-6 已标记 done；父需求同步记录 Phase 6 完成，主需求仍保留 Phase 7 系统级异常、恢复、安全、观测和总回归范围。",
+    "2026-06-19T02:38:06+08:00 Phase 7 总测试完成并进入 tested。自动化主体通过；chrome-devtools MCP 在真实 8040 服务验证真实会议、真实项目、真实 agent_advisory_turn 记录。保留两个需用户验收/后续决策的残留项：live advisory 自动化依赖本地 gateway 18789 可用性；历史测试会议仍有 active/conflict 记录，建议后续补测试会议清理/取消入口。",
+    "2026-06-19T02:46:22+08:00 用户确认 Meeting for AI 主需求也可以归档；主需求 stage 更新为 done，waiting_for_user=false。"
   ]
 }

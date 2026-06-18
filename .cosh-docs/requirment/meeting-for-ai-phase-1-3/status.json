@@ -1,21 +1,27 @@
 {
   "name": "meeting-for-ai-phase-1-3",
   "parent": "meeting-for-ai",
-  "stage": "phase_3_partial_controls_done",
+  "stage": "done",
   "waiting_for_user": false,
-  "updated_at": "2026-06-16T04:57:00+08:00",
+  "updated_at": "2026-06-17T04:34:19+08:00",
   "confirmed": {
     "checklist": true,
-    "tested": false,
-    "done": false
+    "tested": true,
+    "done": true
   },
   "confirmations": {
     "checklist": {
       "confirmed_at": "2026-06-15T05:09:51+08:00",
       "summary": "User requested a Phase-based todolist for the combined Meeting for AI Phase 1-3 child requirement to support independent self-testing."
     },
-    "tested": null,
-    "done": null
+    "tested": {
+      "confirmed_at": "2026-06-17T02:25:10+08:00",
+      "summary": "Phase 3 automated regression and Chrome MCP real three-AI gate passed on meeting phase3-total-real-mcp-20260617."
+    },
+    "done": {
+      "confirmed_at": "2026-06-17T04:34:19+08:00",
+      "summary": "用户确认 Meeting for AI Phase 3 已验收完成，请求在 meeting-for-ai 和 meeting-for-ai-phase-1-3 中做对应完成标记。"
+    }
   },
   "phases": {
     "phase_1": {
@@ -27,15 +33,15 @@
     },
     "phase_2": {
       "name": "user-started-sequential-ai-meeting",
-      "status": "implementation_self_test_passed_real_gate_blocked_by_provider_quota",
-      "tested": false,
+      "status": "accepted_via_phase_3_real_three_ai_gate",
+      "tested": true,
       "checklist": "CHK-P2-001..CHK-P2-010",
       "gate_task": "TODO-P2-010"
     },
     "phase_3": {
       "name": "user-control-and-arbitration",
-      "status": "partial_live_discussion_user_context_structured_turns_ai_end_history_ui_and_controls_done",
-      "tested": false,
+      "status": "user_accepted_done",
+      "tested": true,
       "checklist": "CHK-P3-001..CHK-P3-012",
       "gate_task": "TODO-P3-011"
     }
@@ -70,6 +76,18 @@
     "2026-06-16 Phase 3 AI moderator ending implementation completed: active executable meeting end no longer opens the manual summary form; /api/meetings/end without summary now asks the moderator AI to generate structured summary, decision, unresolvedQuestions, disagreements, and actionItems, while legacy meetings still require manual summary. Automated tests passed. Chrome MCP real-AI validation used active meeting phase3-ai-end-content-real-20260616-0140 with real OpenClaw moderator main and user-provided meeting content; modalBefore=false, modalAfter=false, providerKind=openclaw, result.summary/result.decision/2 actionItems were generated from the transcript, and the meeting completed. Flow assertion output saved at /tmp/phase3-ai-end-content-real-mcp-check.json; expanded UI screenshot saved at /tmp/phase3-ai-end-content-real-ui-expanded-check.png; expanded UI assertion saved at /tmp/phase3-ai-end-content-real-ui-expanded-check.json. Empty-transcript meeting phase3-ai-end-real-20260616-0130 is retained only as a flow-trigger sample, not the main acceptance evidence.",
     "2026-06-16 Phase 3 history UI implementation completed: meeting history is sorted by endedAt/updatedAt descending, supports keyword search across topic/purpose/summary/resolution/participants/turns/contributions/action items, and opens read-only meeting details in a dedicated modal. Chrome MCP validation on http://127.0.0.1:8090 confirmed historyCount=10, sortedDesc=true, visible localized search placeholder, Phase 3 keyword filtering, and a detail modal showing summary/action-item content. Screenshot saved at /tmp/meeting-history-search-detail-mcp-check.png; assertion output saved at /tmp/meeting-history-search-detail-mcp-check.json.",
     "2026-06-16 requirement supplement added from user feedback: active executable Meeting for AI sessions must also drive the main office canvas, showing participants at the meeting table for group meetings or desk-visit behavior for 1:1 meetings. Added CHK-P3-013 and TODO-P3-009A; implementation remains pending.",
-    "2026-06-16 Phase 3 pause/resume/cancel controls completed: active executable meeting cards now expose pause, resume, and cancel controls; active projection includes executionPreviousStage; resume restores the previous active stage; cancel moves the meeting to cancelled history and terminal intervention is rejected. Automated tests passed. Chrome MCP was attempted but the tool transport stayed closed, so equivalent sandbox-external Chrome DevTools Protocol E2E was run against the real local service at http://127.0.0.1:8090. Assertion output saved at /tmp/phase3-pause-resume-cancel-browser-check.json and screenshot saved at /tmp/phase3-pause-resume-cancel-browser-check.png."
+    "2026-06-16 Phase 3 pause/resume/cancel controls completed: active executable meeting cards now expose pause, resume, and cancel controls; active projection includes executionPreviousStage; resume restores the previous active stage; cancel moves the meeting to cancelled history and terminal intervention is rejected. Automated tests passed. Chrome MCP was attempted but the tool transport stayed closed, so equivalent sandbox-external Chrome DevTools Protocol E2E was run against the real local service at http://127.0.0.1:8090. Assertion output saved at /tmp/phase3-pause-resume-cancel-browser-check.json and screenshot saved at /tmp/phase3-pause-resume-cancel-browser-check.png.",
+    "2026-06-16 Phase 3 canvas projection completed: /status._meetings now includes non-terminal executable meeting projection, and the frontend rebinds active meetings to current Agent objects after roster refresh so the main office canvas shows executable meeting participants at the meeting table or 1:1 visit state. Automated tests passed. Chrome MCP was attempted but the tool transport stayed closed, so equivalent sandbox-external Chrome DevTools Protocol E2E was run against http://127.0.0.1:8138 with real meeting 1bae4cbd-2929-4689-9fc1-511ff7bce617. Assertion output saved at /tmp/phase3-canvas-meeting-projection-check.json and screenshot saved at /tmp/phase3-canvas-meeting-projection-check.png.",
+    "2026-06-16 Phase 3 checklist/todolist updated for targeted speaking semantics: targeted responses happen inside a configurable round-end user decision window, are recorded against the current stage/round, do not advance round or consume maxRounds, do not alter the original speaker queue, and the window timeout defaults to 20 seconds with a supported range of 10-120 seconds.",
+    "2026-06-16 Phase 3 targeted speaking and round-end decision window completed: formal round completion now enters awaiting_user_decision with VO_MEETING_DECISION_WINDOW_SEC default 20 and clamp 10-120; /targeted-question records targeted_question and participant_turn.kind=targeted_response at the current stage/round without advancing round or consuming maxRounds; frontend shows round decision window controls and transcript markers. Automated tests passed. Chrome MCP was attempted but transport stayed closed, so equivalent sandbox-external Chrome DevTools Protocol E2E used app ports 8038/8039 and Chrome CDP 8040. Real AI validation used meeting b95ca5c5-f6e1-4db3-9fea-2bf41f18e5c2 with OpenClaw main and Hermes hermes-default, no fake provider; Hermes returned a real targeted_response at active_opening round 0 and the meeting remained awaiting_user_decision. Assertion output saved at /tmp/phase3-targeted-real-ui-cdp-check.json and screenshot saved at /tmp/phase3-targeted-real-ui-cdp-check.png.",
+    "2026-06-17 Phase 3 no-consensus arbitration completed: discussion round exhaustion now creates a no_consensus arbitration snapshot with positions/disagreements/moderator suggestion; /arbitration supports decide, continue_discussion, and end_no_consensus; no-consensus windows do not auto-timeout into summary; per-meeting decisionWindowSec persists across continue. Automated tests passed. Chrome MCP real-AI validation used app ports 8038/8039 and meeting phase3-arbitration-mcp-20260617e without fake provider; real AI positions/disagreements were visible in the arbitration panel, frontend submitted a decision, the meeting moved from awaiting_user_decision to completed, result.arbitration.action=decide, and exactly one arbitration_decision event was recorded.",
+    "2026-06-17 Phase 3 moderator failure takeover completed: moderator summary failures now leave the meeting in awaiting_user_decision with moderatorFailure exposed; /moderator-takeover supports user_takeover and replace_moderator; active UI renders the takeover panel. Automated tests passed, and Chrome MCP validated meeting phase3-moderator-takeover-mcp-20260617b on http://127.0.0.1:8038: the panel was visible, user takeover completed the meeting, result.moderatorTakeover.action=user_takeover, and exactly one moderator_takeover event was recorded.",
+    "2026-06-17 Phase 3 late provider response race handling completed: formal turns and targeted responses now re-check meeting state before persistence; if the meeting is paused, terminal, or moved to another stage/round, the completion is stored as provider_call_ignored instead of participant_turn. Automated tests cover cancel-during-provider-call and continue-during-targeted-call. Chrome MCP validated meeting phase3-ignored-late-response-mcp-20260617 on http://127.0.0.1:8038: provider_call_ignored was persisted and late response text did not appear in live transcript.",
+    "2026-06-17 Phase 3 total gate passed: real three-AI meeting phase3-total-real-mcp-20260617 on http://127.0.0.1:8038 used OpenClaw, Hermes, and Codex; completed opening, user intervention/context, targeted Hermes response, discussion, no-consensus arbitration, and user decision to completed. Detail API recorded 27 events, 7 participant_turn events, providerKinds openclaw/hermes/codex, one user_intervention, one targeted_question, one targeted_response, one arbitration_decision, and zero failed turns. Chrome MCP verified the completed meeting detail shows the user intervention, supplemental context, and arbitration decision.",
+    "2026-06-17 Phase 3 summary countdown close regression fixed: no-consensus arbitration windows now show waiting for arbitration without auto-continue, non-substantive disagreements such as 无/none no longer keep new meetings in no-consensus, final-round timeout without substantive disagreement runs moderator summary and completes, and run() re-entry during summarizing no longer creates fallback duplicate completion. Automated tests, Chrome MCP UI check on real AI meeting 05baddfd-423c-4778-bcdf-217e5060a412, JS/i18n checks, and git diff --check passed.",
+    "2026-06-17 Phase 3 resolution policy implemented: meetings now support resolutionPolicy=user_decision (default) or moderator_decision. Moderator decision policy keeps disagreement evidence in decision_window_opened payload but auto-summarizes/closes instead of entering user arbitration, and moderator result schema now includes fixed outcome enum approved/rejected/no_consensus/needs_user_decision plus rationale. Chrome MCP verified the new UI policy selector on http://127.0.0.1:8038; automated tests and JS/i18n/diff checks passed.",
+    "2026-06-17 Phase 3 structured meeting result rendering implemented: meeting detail now renders a Meeting result panel with outcome badge, summary, decision, rationale, unresolved questions, disagreements, and action items instead of only plain summary/resolution text. Chrome MCP verified the renderer on http://127.0.0.1:8038 with a structured rejected result sample; automated meeting tests and JS/i18n/diff checks passed.",
+    "2026-06-17 Phase 3 active meeting detail UX changed from expandable cards to modal detail: active meeting cards now show only a compact summary and open Meeting Detail modal on click; the modal contains live discussion, user intervention, agenda change, decision window, targeted questions, moderator takeover, and pause/resume/end/cancel controls. Chrome MCP verified active cards have no mtg-card-body/open expansion and the modal shows live discussion and controls for meeting ad9d8d37-49d5-4bb4-8cee-d88ac0c6acde on http://127.0.0.1:8038. Automated tests and JS/i18n/diff checks passed.",
+    "2026-06-17T04:34:19+08:00 用户确认 Phase 3 已验收完成；meeting-for-ai-phase-1-3 子需求标记为 done。Phase 2 真实 provider gate 由后续 Phase 3 real three-AI 总 gate 覆盖通过。"
   ]
 }

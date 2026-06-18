@@ -208,4 +208,4 @@ MCP 证据：
 - 使用能力：`navigate_page`、`new_page`、`select_page`、`take_snapshot`、`evaluate_script`、`list_console_messages`、`list_network_requests`、`take_screenshot`。
 - 中文主页面截图：`/tmp/localization-main-zh.png`。
 - 中文官网全页截图：`/tmp/localization-website-zh.png`。
-- 当前结论：本期汉化业务 checklist 已通过；等待用户人工确认测试结果。环境缺失的 pytest/Puppeteer 依赖不影响 MCP 验证结论，但保留为测试环境限制。
+- 当前结论：本期汉化业务 checklist 已通过；用户已于 2026-06-17T02:40:45+08:00 确认完成。环境缺失的 pytest/Puppeteer 依赖不影响 MCP 验证结论，但保留为测试环境限制。

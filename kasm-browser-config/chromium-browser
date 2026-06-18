@@ -1,30 +1,25 @@
 #!/usr/bin/env bash
 # Wrapper that replaces Kasm's default Chromium launcher.
-# Launches Google Chrome exclusively. Run post-boot.sh to install Chrome first.
+# Adds Virtual Office CDP flags while using Kasm's bundled Chromium.
 
-CHROME_BIN="/opt/google/chrome/google-chrome"
-
-if [ ! -f "$CHROME_BIN" ]; then
-    echo "ERROR: Google Chrome is not installed."
-    echo "Run: docker exec --user root <container> bash /tmp/post-boot.sh"
+CHROMIUM_BIN="/usr/bin/chromium-orig"
+if [ ! -x "$CHROMIUM_BIN" ]; then
+    echo "ERROR: Kasm Chromium launcher not found: $CHROMIUM_BIN"
     exit 1
 fi
 
-# Chrome uses the same persistent profile volume as the base Kasm image.
-if [ ! -L "$HOME/.config/google-chrome" ]; then
-    rm -rf "$HOME/.config/google-chrome" 2>/dev/null
-    ln -s "$HOME/.config/chromium" "$HOME/.config/google-chrome"
-fi
-
-# The published Docker port targets container port 9223, while Chrome only
-# listens on loopback port 9222. Ensure the bridge survives browser restarts.
+# The published Docker port targets container port 9223, while Chromium listens
+# on port 9222. Ensure the bridge survives browser restarts.
 if [ ! -f /tmp/no-cdp ] && ! pgrep -f "/opt/agent-browser/cdp-proxy.py" > /dev/null; then
     nohup python3 /opt/agent-browser/cdp-proxy.py > /tmp/cdp-proxy.log 2>&1 &
 fi
 
-BROWSER="$CHROME_BIN"
-PROFILE_DIR="$HOME/.config/google-chrome"
-echo "Launching Google Chrome"
+BROWSER="$CHROMIUM_BIN"
+PROFILE_DIR="/tmp/vo-chromium-profile"
+CRASH_DIR="/tmp/vo-chromium-crashes"
+echo "Launching Kasm Chromium"
+
+mkdir -p "$PROFILE_DIR" "$CRASH_DIR" 2>/dev/null || true
 
 # Clean up stale locks
 if ! pgrep -f "$BROWSER" > /dev/null; then
@@ -46,7 +41,7 @@ fi
 
 RENDER_FLAGS="--use-gl=swiftshader --disable-smooth-scrolling"
 WINDOW_FLAGS="--start-maximized --window-position=0,0 --window-size=1600,900"
-SUPPRESS_FLAGS="--disable-notifications --disable-infobars --no-default-browser-check"
+SUPPRESS_FLAGS="--disable-notifications --disable-infobars --no-default-browser-check --disable-crash-reporter --disable-breakpad --crash-dumps-dir=$CRASH_DIR"
 
 # Stealth flags - anti-bot-detection
 STEALTH_FLAGS="--disable-blink-features=AutomationControlled"

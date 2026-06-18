@@ -805,6 +805,238 @@
     margin-bottom: 8px;
 }
 
+.proj-scheduled-cron-panel {
+    margin: 10px 16px 14px;
+    padding: 12px;
+    border: 1px solid #2f3550;
+    background: #111526;
+    border-radius: 8px;
+}
+.proj-scheduled-cron-subtitle {
+    color: #8f96a8;
+    font-size: 11px;
+    line-height: 1.4;
+}
+.proj-scheduled-cron-actions,
+.proj-scheduled-cron-buttons,
+.proj-scheduled-cron-meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+.proj-scheduled-cron-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.proj-scheduled-cron-item {
+    display: grid;
+    grid-template-columns: minmax(180px, 1fr) auto auto;
+    gap: 10px;
+    align-items: center;
+    padding: 9px;
+    border: 1px solid #2a2f46;
+    border-radius: 6px;
+    background: #151a2b;
+}
+.proj-scheduled-cron-item.is-disabled {
+    opacity: .58;
+}
+.proj-scheduled-cron-main {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+.proj-scheduled-cron-main strong {
+    color: #e6e9f2;
+    font-size: 12px;
+    overflow-wrap: anywhere;
+}
+.proj-scheduled-cron-main span,
+.proj-scheduled-cron-meta span {
+    color: #a8afc0;
+    font-size: 10px;
+}
+.proj-scheduled-cron-main .proj-scheduled-repeat-gate {
+    display: inline-flex;
+    align-items: center;
+    width: fit-content;
+    max-width: 100%;
+    min-height: 20px;
+    padding: 2px 7px;
+    border: 1px solid #343a56;
+    border-radius: 4px;
+    background: #101426;
+    color: #c8cedd;
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 1.25;
+    overflow-wrap: anywhere;
+}
+.proj-scheduled-repeat-gate.is-enabled {
+    border-color: #2f7d46;
+    background: #102015;
+    color: #8be09d;
+}
+.proj-scheduled-repeat-gate.is-blocked {
+    border-color: #8a3c3c;
+    background: #251313;
+    color: #ff9b9b;
+}
+.proj-scheduled-repeat-gate.is-open {
+    border-color: #2f587d;
+    background: #101c2c;
+    color: #9fc6ff;
+}
+.proj-scheduled-repeat-gate.is-missing {
+    border-color: #76662c;
+    background: #211d10;
+    color: #f0d66c;
+}
+.proj-scheduled-cron-main code {
+    color: #9fc6ff;
+    background: #0c1020;
+    border: 1px solid #26304b;
+    border-radius: 4px;
+    padding: 2px 5px;
+    width: fit-content;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+}
+.proj-scheduled-cron-empty {
+    padding: 10px;
+    border: 1px dashed #343a56;
+    border-radius: 6px;
+    color: #7f8799;
+    font-size: 11px;
+}
+.proj-scheduled-cron-recommendation {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 10px;
+    padding: 10px;
+    border: 1px solid #3f5d89;
+    border-radius: 6px;
+    background: #101c2c;
+}
+.proj-scheduled-cron-recommendation div {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+}
+.proj-scheduled-cron-recommendation strong {
+    color: #d9e7ff;
+    font-size: 12px;
+}
+.proj-scheduled-cron-recommendation span {
+    color: #9fb6d8;
+    font-size: 10px;
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+}
+
+.proj-scheduled-history-panel {
+    margin: 0 16px 14px;
+    padding: 12px;
+    border: 1px solid #2f3550;
+    background: #101422;
+    border-radius: 8px;
+}
+.proj-scheduled-history-list {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+}
+.proj-scheduled-history-item {
+    display: grid;
+    grid-template-columns: minmax(210px, 1fr) minmax(160px, 1.1fr) auto;
+    gap: 10px;
+    align-items: center;
+    padding: 8px 9px;
+    border: 1px solid #283047;
+    border-radius: 6px;
+    background: #141929;
+}
+.proj-scheduled-history-main {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    min-width: 0;
+    flex-wrap: wrap;
+}
+.proj-scheduled-history-main strong {
+    color: #e6e9f2;
+    font-size: 12px;
+    overflow-wrap: anywhere;
+}
+.proj-scheduled-history-main span,
+.proj-scheduled-history-reason,
+.proj-scheduled-history-time {
+    color: #a8afc0;
+    font-size: 10px;
+    overflow-wrap: anywhere;
+}
+.proj-scheduled-history-badge {
+    display: inline-flex;
+    align-items: center;
+    min-height: 20px;
+    padding: 2px 7px;
+    border-radius: 4px;
+    border: 1px solid #39415e;
+    background: #0d1120;
+    color: #cfd5e5 !important;
+    font-weight: 700;
+}
+.proj-scheduled-history-item.status-started .proj-scheduled-history-badge {
+    border-color: #2f7d46;
+    color: #8be09d !important;
+}
+.proj-scheduled-history-item.status-failed .proj-scheduled-history-badge,
+.proj-scheduled-history-item.status-intervention_required .proj-scheduled-history-badge {
+    border-color: #8a3c3c;
+    color: #ff9b9b !important;
+}
+.proj-scheduled-history-item.status-paused .proj-scheduled-history-badge,
+.proj-scheduled-history-item.status-skipped .proj-scheduled-history-badge {
+    border-color: #76662c;
+    color: #f0d66c !important;
+}
+.sidebar-proj-cron-alert {
+    margin-left: auto;
+    padding: 1px 5px;
+    border: 1px solid #8a3c3c;
+    border-radius: 4px;
+    color: #ff9b9b;
+    background: #251313;
+    font-size: 9px;
+    font-weight: 700;
+    line-height: 1.4;
+    white-space: nowrap;
+}
+
+@media (max-width: 780px) {
+    .proj-scheduled-cron-item {
+        grid-template-columns: 1fr;
+        align-items: stretch;
+    }
+    .proj-scheduled-history-item {
+        grid-template-columns: 1fr;
+        align-items: stretch;
+    }
+    .proj-scheduled-cron-actions {
+        width: 100%;
+    }
+    .proj-scheduled-cron-recommendation {
+        align-items: stretch;
+        flex-direction: column;
+    }
+}
+
 /* ── TEMPLATES VIEW ─────────────────────────────────────────── */
 .proj-tpl-grid {
     display: grid;
@@ -1199,6 +1431,20 @@
 .proj-form-textarea { resize: vertical; min-height: 80px; }
 .proj-form-row { display: flex; gap: 10px; }
 .proj-form-row .proj-form-group { flex: 1; }
+.proj-cron-days {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    padding: 8px 0 2px;
+}
+.proj-cron-day {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: #e8e8f0;
+    font-size: 12px;
+    white-space: nowrap;
+}
 .proj-form-actions {
     display: flex;
     gap: 8px;
@@ -1797,6 +2043,14 @@
 .proj-exec-review code { display:block; padding:3px 5px; background:#0d111b; color:#d2d8e6; overflow-wrap:anywhere; }
 .proj-exec-summary { max-height:140px; overflow:auto; white-space:pre-wrap; line-height:1.5; }
 .proj-exec-meta { color:#777f92; font-size:9px; line-height:1.5; }
+.proj-task-mtg-request { color:#ffd479; }
+.proj-meeting-requests { display:flex; flex-direction:column; gap:8px; }
+.proj-meeting-request { padding:8px; border:1px solid #343a4d; border-radius:6px; background:#121622; }
+.proj-meeting-request.state-pending { border-color:#9d7d28; background:rgba(255,215,0,.06); }
+.proj-meeting-request.state-confirmed { border-color:#348f69; }
+.proj-meeting-request.state-rejected { border-color:#8a4a4a; }
+.proj-meeting-request-head { display:flex; align-items:flex-start; justify-content:space-between; gap:8px; margin-bottom:5px; }
+.proj-meeting-request-head strong { color:#d9deea; font-size:11px; line-height:1.35; }
 
 @media (max-width: 720px) {
     .proj-exec-project-state { width:100%; order:3; }

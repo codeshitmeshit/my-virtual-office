@@ -1,0 +1,32 @@
+{
+  "name": "project-scheduled-tasks",
+  "stage": "todolist_created",
+  "waiting_for_user": false,
+  "updated_at": "2026-06-18T00:00:00+08:00",
+  "confirmed": {
+    "checklist": true,
+    "tested": false,
+    "done": false
+  },
+  "confirmations": {
+    "checklist": {
+      "confirmed_at": "2026-06-18T00:00:00+08:00",
+      "summary": "用户确认当前中文 checklist 可以继续，并要求生成 todolist。"
+    },
+    "tested": null,
+    "done": null
+  },
+  "files": {
+    "requirement": "requirement.md",
+    "review": "review.md",
+    "checklist": "checklist.md",
+    "todolist": "todolist.md"
+  },
+  "notes": [
+    "已按用户要求将 checklist 拆分为五个 phase。",
+    "已按用户要求将需求归档正文改为中文。",
+    "已修正 Phase 1：不是重做 scheduler，而是扩展现有 Cron 支持项目绑定。",
+    "用户已确认 checklist，已生成 todolist.md。",
+    "根据用户验收反馈，Phase 2 增加全局定时任务页展示项目绑定 cron 的要求。"
+  ]
+}

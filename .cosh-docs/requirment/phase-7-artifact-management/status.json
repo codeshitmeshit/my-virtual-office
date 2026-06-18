@@ -1,12 +1,12 @@
 {
   "name": "phase-7-artifact-management",
-  "stage": "implementation_done",
-  "waiting_for_user": true,
-  "updated_at": "2026-06-15T05:18:00+08:00",
+  "stage": "done",
+  "waiting_for_user": false,
+  "updated_at": "2026-06-17T03:01:16+08:00",
   "confirmed": {
     "checklist": true,
-    "tested": false,
-    "done": false
+    "tested": true,
+    "done": true
   },
   "confirmations": {
     "checklist": {
@@ -20,8 +20,14 @@
         "superseded_reason": "新增通用产物管理核心和通用 UI 组件要求，Phase 7 项目作为首个适配场景，后续会议功能可复用。"
       }
     },
-    "tested": null,
-    "done": null
+    "tested": {
+      "confirmed_at": "2026-06-17T03:01:16+08:00",
+      "summary": "User confirmed acceptance passed for Phase 7 artifact management."
+    },
+    "done": {
+      "confirmed_at": "2026-06-17T03:01:16+08:00",
+      "summary": "User requested archival after confirming acceptance passed."
+    }
   },
   "files": {
     "requirement": "requirement.md",
@@ -48,6 +54,7 @@
     "2026-06-15 real AI acceptance found two implementation bugs before final verification: absolute changedFiles paths from Codex evidence were not matched to workspace-relative artifact paths, and duplicate task/attempt evidence could produce duplicate source records. Both were fixed in app/server.py and covered by tests/test_project_execution.py.",
     "2026-06-15 post-fix local service verification on http://127.0.0.1:8090 confirmed ai-output/real-ai-artifact.md is listed with unassociated=false and exactly one source record for agentId=codex-local, providerKind=codex, attemptId=0fc0e054-85a4-4df7-9d20-c3604d547c48.",
     "2026-06-15 sandbox-external rerun of .venv/bin/python tests/test_project_execution.py passed with ok. The previous Operation not permitted gateway abort warning disappeared outside the sandbox; the remaining non-fatal abort warning is a connection failure to 127.0.0.1:18789, indicating no gateway session service was listening in this test environment rather than an artifact management failure.",
-    "2026-06-15 clarified empty artifact behavior: a Project Execution project with a valid workspace but no generated Markdown artifacts may still show the artifact button; clicking it should render an empty Markdown artifact list rather than hiding the entry point or treating the project as an error. This is now covered by tests/test_project_execution.py."
+    "2026-06-15 clarified empty artifact behavior: a Project Execution project with a valid workspace but no generated Markdown artifacts may still show the artifact button; clicking it should render an empty Markdown artifact list rather than hiding the entry point or treating the project as an error. This is now covered by tests/test_project_execution.py.",
+    "2026-06-17 user confirmed acceptance passed and requested archival; confirmed.tested and confirmed.done were set true and stage advanced to done."
   ]
 }

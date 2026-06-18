@@ -19,8 +19,7 @@ log() {
 }
 
 is_browser_running() {
-    # Match Google Chrome process specifically
-    pgrep -f "google-chrome" > /dev/null 2>&1
+    pgrep -f "(chromium|chromium-orig)" > /dev/null 2>&1
 }
 
 is_cdp_healthy() {
@@ -52,7 +51,7 @@ launch_browser() {
     sleep 5
 
     if is_browser_running; then
-        log "Browser launched successfully (PID: $(pgrep -f '(chromium|google-chrome)' | head -1))"
+        log "Browser launched successfully (PID: $(pgrep -f '(chromium|chromium-orig)' | head -1))"
         restart_times+=("$(date +%s)")
         return 0
     else
@@ -102,7 +101,7 @@ while true; do
         sleep "$CHECK_INTERVAL"
         if is_browser_running && ! is_cdp_healthy; then
             log "CDP still unresponsive after retry — killing browser for restart"
-            pkill -f "(chromium|google-chrome)" 2>/dev/null
+            pkill -f "(chromium|chromium-orig)" 2>/dev/null
             sleep "$RESTART_DELAY"
             launch_browser
         fi

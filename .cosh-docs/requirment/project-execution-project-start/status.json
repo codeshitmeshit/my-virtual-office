@@ -1,0 +1,43 @@
+{
+  "name": "project-execution-project-start",
+  "stage": "done",
+  "waiting_for_user": false,
+  "updated_at": "2026-06-17T03:05:27+08:00",
+  "confirmed": {
+    "checklist": true,
+    "tested": true,
+    "done": true
+  },
+  "confirmations": {
+    "checklist": {
+      "confirmed_at": "2026-06-16T16:07:31+08:00",
+      "summary": "User replied 'pass' to confirm the updated checklist."
+    },
+    "tested": {
+      "confirmed_at": "2026-06-17T03:05:27+08:00",
+      "summary": "User confirmed acceptance passed for Project Execution project start."
+    },
+    "done": {
+      "confirmed_at": "2026-06-17T03:05:27+08:00",
+      "summary": "User requested archival after confirming acceptance passed."
+    }
+  },
+  "files": {
+    "requirement": "requirement.md",
+    "review": "review.md",
+    "checklist": "checklist.md",
+    "todolist": "todolist.md"
+  },
+  "notes": [
+    "Requirement created from user feedback: default Project Execution projects no longer show a project-level start button, which makes users feel unable to start the project.",
+    "Review conclusion: add a Project Execution-specific project-level start coordinator that selects the next eligible task and delegates to existing task-level Project Execution start.",
+    "Checklist draft generated and waiting for user confirmation before todolist creation.",
+    "Product clarification added: project toolbar needs a start-mode radio control, default continuous task flow, and task-level manual acceptance configuration. Checklist was updated and remains unconfirmed.",
+    "Checklist confirmed by user reply: pass.",
+    "Todolist generated from confirmed checklist.",
+    "Implementation completed and verification commands passed. Waiting for user confirmation of tested state.",
+    "Chrome-devtools real browser validation passed against the sandbox-external start.sh service on port 8090.",
+    "Follow-up UX fix added: missing reviewer now prompts for explicit skip-review confirmation and persists the confirmation-required toolbar state.",
+    "2026-06-17 user confirmed acceptance passed and requested archival; confirmed.tested and confirmed.done were set true and stage advanced to done."
+  ]
+}

@@ -1,12 +1,12 @@
 {
   "name": "app-font-size-scaling",
-  "stage": "implementation_done",
-  "waiting_for_user": true,
-  "updated_at": "2026-06-16T04:33:19+08:00",
+  "stage": "done",
+  "waiting_for_user": false,
+  "updated_at": "2026-06-17T02:40:45+08:00",
   "confirmed": {
     "checklist": true,
-    "tested": false,
-    "done": false
+    "tested": true,
+    "done": true
   },
   "confirmations": {
     "checklist": {
@@ -14,8 +14,16 @@
       "confirmed_at": "2026-06-16T04:23:20+08:00",
       "summary": "User confirmed implementation could proceed, then requested adding 150 percent as the maximum font scale. Checklist was updated to include 150 percent and implementation continued."
     },
-    "tested": null,
-    "done": null
+    "tested": {
+      "item": "tested",
+      "confirmed_at": "2026-06-17T02:40:45+08:00",
+      "summary": "User confirmed app-font-size-scaling can be marked completed."
+    },
+    "done": {
+      "item": "done",
+      "confirmed_at": "2026-06-17T02:40:45+08:00",
+      "summary": "User confirmed app-font-size-scaling can be marked completed."
+    }
   },
   "files": {
     "requirement": "requirement.md",
@@ -29,6 +37,7 @@
     "Checklist refined to require final MCP browser-tool validation on the real page.",
     "Checklist confirmed by user and todolist created.",
     "Scope changed after implementation started: user requested adding 150 percent as the maximum font scale. Checklist updated accordingly.",
-    "Implementation completed and validated with automated tests plus MCP browser checks. Waiting for user confirmation of tested status."
+    "Implementation completed and validated with automated tests plus MCP browser checks.",
+    "2026-06-17T02:40:45+08:00 user confirmed this requirement can be marked completed."
   ]
 }

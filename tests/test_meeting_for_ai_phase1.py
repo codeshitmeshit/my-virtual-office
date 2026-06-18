@@ -202,6 +202,600 @@ def test_phase3_pause_resume_cancel_controls_project_previous_stage_and_history(
             restore_meeting_store(old)
 
 
+def test_phase3_active_executable_meeting_projects_to_status_canvas_meetings():
+    with tempfile.TemporaryDirectory() as status_dir:
+        old = with_meeting_store(status_dir)
+        try:
+            created = create_meeting(
+                participants=["main", "hermes-default", "codex-local"],
+                idempotencyKey="phase3-canvas",
+            )
+            meeting_id = created["meeting"]["id"]
+            server._handle_executable_meeting_transition(meeting_id, {
+                "action": "start",
+                "expectedVersion": 1,
+            })
+
+            projected = server._status_meeting_projection([])
+            canvas_meeting = [m for m in projected if m.get("id") == meeting_id][0]
+            assert canvas_meeting["executableMeeting"] is True
+            assert canvas_meeting["status"] == "active"
+            assert canvas_meeting["executionStage"] == "active_opening"
+            assert canvas_meeting["participants"] == ["main", "hermes-default", "codex-local"]
+            assert canvas_meeting["agents"] == ["main", "hermes-default", "codex-local"]
+            assert canvas_meeting["type"] == "group"
+
+            legacy = {"id": "legacy-canvas", "topic": "Legacy Canvas", "participants": ["main", "hermes-default"], "status": "active"}
+            mixed = server._status_meeting_projection([legacy])
+            mixed_ids = {m.get("id") for m in mixed}
+            assert {"legacy-canvas", meeting_id}.issubset(mixed_ids)
+
+            server._handle_executable_meeting_transition(meeting_id, {
+                "action": "cancel",
+                "expectedVersion": 2,
+            })
+            after_cancel = server._status_meeting_projection([])
+            assert meeting_id not in {m.get("id") for m in after_cancel}
+        finally:
+            restore_meeting_store(old)
+
+
+def test_phase3_decision_window_timeout_setting_defaults_and_clamps():
+    old = os.environ.pop("VO_MEETING_DECISION_WINDOW_SEC", None)
+    try:
+        assert server._meeting_decision_window_sec() == 20
+        os.environ["VO_MEETING_DECISION_WINDOW_SEC"] = "5"
+        assert server._meeting_decision_window_sec() == 10
+        os.environ["VO_MEETING_DECISION_WINDOW_SEC"] = "130"
+        assert server._meeting_decision_window_sec() == 120
+        os.environ["VO_MEETING_DECISION_WINDOW_SEC"] = "bad"
+        assert server._meeting_decision_window_sec() == 20
+    finally:
+        if old is None:
+            os.environ.pop("VO_MEETING_DECISION_WINDOW_SEC", None)
+        else:
+            os.environ["VO_MEETING_DECISION_WINDOW_SEC"] = old
+
+
+def test_phase3_decision_window_can_be_configured_per_meeting():
+    with tempfile.TemporaryDirectory() as status_dir:
+        old_store = with_meeting_store(status_dir)
+        old_fake = os.environ.get("VO_MEETING_FAKE_PROVIDER")
+        os.environ["VO_MEETING_FAKE_PROVIDER"] = "1"
+        try:
+            created = create_meeting(
+                participants=["main", "hermes-default"],
+                moderator="main",
+                maxRounds=1,
+                decisionWindowSec=120,
+                idempotencyKey="phase3-window-per-meeting",
+            )
+            meeting_id = created["meeting"]["id"]
+            opened = server._handle_executable_meeting_run(meeting_id, {})
+            assert opened["meeting"]["stage"] == "awaiting_user_decision"
+            assert opened["meeting"]["decisionWindowSec"] == 120
+            event = [e for e in server._handle_executable_meeting_detail(meeting_id)["events"] if e["type"] == "decision_window_opened"][-1]
+            assert event["payload"]["timeoutSec"] == 120
+
+            continued = server._handle_executable_meeting_run(meeting_id, {"action": "continue"})
+            assert continued["meeting"]["stage"] == "awaiting_user_decision"
+            assert continued["meeting"]["decisionWindowSec"] == 120
+            assert continued["meeting"]["decisionNextStage"] == "summarizing"
+            assert not continued["meeting"].get("arbitration")
+            summary_event = [e for e in server._handle_executable_meeting_detail(meeting_id)["events"] if e["type"] == "decision_window_opened"][-1]
+            assert summary_event["payload"]["reason"] == "round_complete"
+            assert summary_event["payload"]["timeoutSec"] == 120
+
+            timed_out = server._handle_executable_meeting_run(meeting_id, {"action": "timeout"})
+            assert timed_out["meeting"]["stage"] == "completed"
+
+            created_clamped = create_meeting(
+                participants=["window-low-a", "window-low-b"],
+                moderator="window-low-a",
+                decisionWindowSec=5,
+                idempotencyKey="phase3-window-clamped",
+            )
+            assert created_clamped["meeting"]["decisionWindowSec"] == 10
+        finally:
+            restore_meeting_store(old_store)
+            if old_fake is None:
+                os.environ.pop("VO_MEETING_FAKE_PROVIDER", None)
+            else:
+                os.environ["VO_MEETING_FAKE_PROVIDER"] = old_fake
+
+
+def test_phase3_targeted_question_in_decision_window_does_not_advance_round():
+    with tempfile.TemporaryDirectory() as status_dir:
+        old_store = with_meeting_store(status_dir)
+        old_fake = os.environ.get("VO_MEETING_FAKE_PROVIDER")
+        old_window = os.environ.get("VO_MEETING_DECISION_WINDOW_SEC")
+        os.environ["VO_MEETING_FAKE_PROVIDER"] = "1"
+        os.environ["VO_MEETING_DECISION_WINDOW_SEC"] = "20"
+        try:
+            created = create_meeting(
+                participants=["main", "hermes-default"],
+                moderator="main",
+                maxRounds=1,
+                idempotencyKey="phase3-targeted",
+            )
+            meeting_id = created["meeting"]["id"]
+
+            opened = server._handle_executable_meeting_run(meeting_id, {})
+            assert opened["awaitingUserDecision"] is True
+            meeting = opened["meeting"]
+            assert meeting["stage"] == "awaiting_user_decision"
+            assert meeting["decisionForStage"] == "active_opening"
+            assert meeting["decisionForRound"] == 0
+            assert meeting["decisionNextStage"] == "active_discussion"
+            assert meeting["decisionNextRound"] == 1
+            assert meeting["decisionWindowSec"] == 20
+
+            events = server._handle_executable_meeting_detail(meeting_id)["events"]
+            formal_opening = [
+                e for e in events
+                if e["type"] == "participant_turn"
+                and (e.get("payload") or {}).get("stage") == "active_opening"
+                and not (e.get("payload") or {}).get("kind")
+            ]
+            assert len(formal_opening) == 2
+
+            targeted = server._handle_executable_meeting_targeted_question(meeting_id, {
+                "target": "hermes-default",
+                "question": "请补充你对风险的判断。",
+                "idempotencyKey": "risk-followup",
+            })
+            assert targeted["ok"] is True
+            assert targeted["meeting"]["stage"] == "awaiting_user_decision"
+            assert targeted["meeting"]["round"] == 0
+            assert targeted["questionEvent"]["type"] == "targeted_question"
+            assert targeted["event"]["payload"]["kind"] == "targeted_response"
+            assert targeted["event"]["payload"]["stage"] == "active_opening"
+            assert targeted["event"]["payload"]["round"] == 0
+
+            repeated = server._handle_executable_meeting_targeted_question(meeting_id, {
+                "target": "hermes-default",
+                "question": "请补充你对风险的判断。",
+                "idempotencyKey": "risk-followup",
+            })
+            assert repeated["idempotent"] is True
+            events_after_repeat = server._handle_executable_meeting_detail(meeting_id)["events"]
+            assert len([e for e in events_after_repeat if e["type"] == "targeted_question"]) == 1
+            assert len([e for e in events_after_repeat if (e.get("payload") or {}).get("kind") == "targeted_response"]) == 1
+
+            rejected = server._handle_executable_meeting_targeted_question(meeting_id, {
+                "target": "missing-agent",
+                "question": "hello",
+            })
+            assert rejected["_status"] == 400
+
+            continued = server._handle_executable_meeting_transition(meeting_id, {"action": "continue"})
+            assert continued["meeting"]["stage"] == "active_discussion"
+            assert continued["meeting"]["round"] == 1
+
+            rejected_after_continue = server._handle_executable_meeting_targeted_question(meeting_id, {
+                "target": "hermes-default",
+                "question": "too late",
+            })
+            assert rejected_after_continue["_status"] == 409
+        finally:
+            restore_meeting_store(old_store)
+            if old_fake is None:
+                os.environ.pop("VO_MEETING_FAKE_PROVIDER", None)
+            else:
+                os.environ["VO_MEETING_FAKE_PROVIDER"] = old_fake
+            if old_window is None:
+                os.environ.pop("VO_MEETING_DECISION_WINDOW_SEC", None)
+            else:
+                os.environ["VO_MEETING_DECISION_WINDOW_SEC"] = old_window
+
+
+def test_phase3_late_formal_provider_response_is_ignored_after_cancel():
+    with tempfile.TemporaryDirectory() as status_dir:
+        old_store = with_meeting_store(status_dir)
+        old_call = server._meeting_call_provider
+
+        def fake_call(meeting, speaker, prompt):
+            with server._EXEC_MEETING_LOCK:
+                store = server._load_exec_meeting_store()
+                live = store["meetings"][meeting["id"]]
+                previous = live.get("stage")
+                live["previousStage"] = previous
+                live["stage"] = "cancelled"
+                live["currentSpeaker"] = ""
+                for participant in live.get("participants", []):
+                    store.get("occupancy", {}).pop(participant, None)
+                server._append_exec_meeting_event(store, live, "meeting_transitioned", payload={"from": previous, "to": "cancelled", "reason": "cancel_during_provider_call"})
+                server._save_exec_meeting_store(store)
+            return {
+                "ok": True,
+                "reply": json.dumps({"position": "late response", "rationale": "should be ignored"}),
+                "providerRef": {"providerKind": "fake", "agentId": speaker},
+                "durationMs": 1,
+                "conversationId": f"meeting:{meeting['id']}:participant:{speaker}",
+            }
+
+        server._meeting_call_provider = fake_call
+        try:
+            created = create_meeting(
+                participants=["main", "hermes-default"],
+                moderator="main",
+                idempotencyKey="phase3-late-formal-cancel",
+            )
+            meeting_id = created["meeting"]["id"]
+            ran = server._handle_executable_meeting_run(meeting_id, {})
+            assert ran["ignoredProviderCompletion"] is True
+            assert ran["meeting"]["stage"] == "cancelled"
+            detail = server._handle_executable_meeting_detail(meeting_id)
+            events = detail["events"]
+            assert any(e["type"] == "provider_call_started" for e in events)
+            ignored = [e for e in events if e["type"] == "provider_call_ignored"]
+            assert len(ignored) == 1
+            assert ignored[0]["payload"]["currentStage"] == "cancelled"
+            formal_turns = [
+                e for e in events
+                if e["type"] == "participant_turn"
+                and not (e.get("payload") or {}).get("kind")
+                and (e.get("payload") or {}).get("purpose") != "meeting_result"
+            ]
+            assert formal_turns == []
+        finally:
+            server._meeting_call_provider = old_call
+            restore_meeting_store(old_store)
+
+
+def test_phase3_late_targeted_provider_response_is_ignored_after_continue():
+    with tempfile.TemporaryDirectory() as status_dir:
+        old_store = with_meeting_store(status_dir)
+        old_fake = os.environ.get("VO_MEETING_FAKE_PROVIDER")
+        old_call = server._meeting_call_provider
+        os.environ["VO_MEETING_FAKE_PROVIDER"] = "1"
+        try:
+            created = create_meeting(
+                participants=["main", "hermes-default"],
+                moderator="main",
+                maxRounds=1,
+                idempotencyKey="phase3-late-targeted-continue",
+            )
+            meeting_id = created["meeting"]["id"]
+            opened = server._handle_executable_meeting_run(meeting_id, {})
+            assert opened["meeting"]["stage"] == "awaiting_user_decision"
+
+            def fake_targeted_call(meeting, speaker, prompt):
+                continued = server._handle_executable_meeting_transition(meeting["id"], {
+                    "action": "continue",
+                    "reason": "continue_during_targeted_provider_call",
+                })
+                assert continued["meeting"]["stage"] == "active_discussion"
+                return {
+                    "ok": True,
+                    "reply": json.dumps({"position": "late targeted answer", "rationale": "should be ignored"}),
+                    "providerRef": {"providerKind": "fake", "agentId": speaker},
+                    "durationMs": 1,
+                    "conversationId": f"meeting:{meeting['id']}:participant:{speaker}",
+                }
+
+            server._meeting_call_provider = fake_targeted_call
+            targeted = server._handle_executable_meeting_targeted_question(meeting_id, {
+                "target": "hermes-default",
+                "question": "请补充风险。",
+                "idempotencyKey": "late-targeted",
+            })
+            assert targeted["meeting"]["stage"] == "active_discussion"
+            assert targeted["ignored"]["type"] == "provider_call_ignored"
+            detail = server._handle_executable_meeting_detail(meeting_id)
+            events = detail["events"]
+            assert len([e for e in events if e["type"] == "targeted_question"]) == 1
+            assert len([e for e in events if e["type"] == "provider_call_ignored" and (e.get("payload") or {}).get("kind") == "targeted_response"]) == 1
+            assert len([e for e in events if e["type"] == "participant_turn" and (e.get("payload") or {}).get("kind") == "targeted_response"]) == 0
+        finally:
+            server._meeting_call_provider = old_call
+            restore_meeting_store(old_store)
+            if old_fake is None:
+                os.environ.pop("VO_MEETING_FAKE_PROVIDER", None)
+            else:
+                os.environ["VO_MEETING_FAKE_PROVIDER"] = old_fake
+
+
+def test_phase3_no_consensus_arbitration_decide_end_and_continue():
+    with tempfile.TemporaryDirectory() as status_dir:
+        old_store = with_meeting_store(status_dir)
+        old_fake = os.environ.get("VO_MEETING_FAKE_PROVIDER")
+        old_call = server._meeting_call_provider
+
+        def disagreement_call(meeting, speaker, prompt):
+            return {
+                "ok": True,
+                "reply": json.dumps({
+                    "position": f"{speaker} keeps a distinct option",
+                    "reasoning": "deterministic disagreement fixture",
+                    "disagreements": [f"{speaker} disagrees with the other option"],
+                    "questions": [],
+                    "suggestedNextStep": "ask user to arbitrate",
+                    "confidence": "high",
+                }),
+                "providerRef": {"providerKind": "fake", "agentId": speaker},
+                "durationMs": 0,
+                "conversationId": f"meeting:{meeting.get('id')}:participant:{speaker}",
+            }
+
+        summary_prompts = []
+
+        def summary_call(meeting, speaker, prompt):
+            summary_prompts.append({"speaker": speaker, "prompt": prompt})
+            return {
+                "ok": True,
+                "reply": json.dumps({
+                    "outcome": "approved",
+                    "summary": "Moderator summarized the user-confirmed consensus.",
+                    "decision": "AI positions are aligned; close with the shared conclusion.",
+                    "rationale": "The user confirmed that the remaining differences are non-substantive.",
+                    "unresolvedQuestions": [],
+                    "disagreements": [],
+                    "actionItems": [],
+                }),
+                "providerRef": {"providerKind": "fake", "agentId": speaker},
+                "durationMs": 0,
+                "conversationId": f"meeting:{meeting.get('id')}:participant:{speaker}",
+            }
+
+        os.environ.pop("VO_MEETING_FAKE_PROVIDER", None)
+        server._meeting_call_provider = disagreement_call
+        try:
+            created = create_meeting(
+                participants=["main", "hermes-default"],
+                moderator="main",
+                maxRounds=1,
+                idempotencyKey="phase3-arbitration-decide",
+            )
+            meeting_id = created["meeting"]["id"]
+            opened = server._handle_executable_meeting_run(meeting_id, {})
+            assert opened["meeting"]["stage"] == "awaiting_user_decision"
+            assert not opened["meeting"].get("arbitration")
+            discussion = server._handle_executable_meeting_run(meeting_id, {"action": "continue"})
+            assert discussion["meeting"]["stage"] == "awaiting_user_decision"
+            assert discussion["meeting"]["decisionNextStage"] == "summarizing"
+            assert discussion["meeting"]["arbitration"]["reason"] == "no_consensus"
+            assert discussion["meeting"]["arbitration"]["positions"]
+
+            decided = server._handle_executable_meeting_arbitration(meeting_id, {
+                "action": "decide",
+                "decision": "采纳 main 的方案。",
+                "rationale": "风险更低。",
+                "idempotencyKey": "arb-decide",
+            })
+            assert decided["ok"] is True
+            assert decided["meeting"]["stage"] == "completed"
+            assert decided["event"]["type"] == "arbitration_decision"
+            assert decided["meeting"]["result"]["decision"] == "采纳 main 的方案。"
+            assert decided["meeting"]["result"]["arbitration"]["action"] == "decide"
+
+            repeated = server._handle_executable_meeting_arbitration(meeting_id, {
+                "action": "decide",
+                "decision": "采纳 main 的方案。",
+                "idempotencyKey": "arb-decide",
+            })
+            assert repeated["_status"] == 409
+
+            created_end = create_meeting(
+                participants=["arb-end-a", "arb-end-b"],
+                moderator="arb-end-a",
+                maxRounds=1,
+                idempotencyKey="phase3-arbitration-end",
+            )
+            end_id = created_end["meeting"]["id"]
+            server._handle_executable_meeting_run(end_id, {})
+            server._handle_executable_meeting_run(end_id, {"action": "continue"})
+            ended = server._handle_executable_meeting_arbitration(end_id, {
+                "action": "end_no_consensus",
+                "rationale": "双方仍保留互斥判断。",
+                "idempotencyKey": "arb-end",
+            })
+            assert ended["meeting"]["stage"] == "completed"
+            assert ended["meeting"]["result"]["decision"].startswith("No consensus")
+            assert ended["meeting"]["result"]["disagreements"]
+
+            created_continue = create_meeting(
+                participants=["arb-cont-a", "arb-cont-b"],
+                moderator="arb-cont-a",
+                maxRounds=1,
+                idempotencyKey="phase3-arbitration-continue",
+            )
+            continue_id = created_continue["meeting"]["id"]
+            server._handle_executable_meeting_run(continue_id, {})
+            server._handle_executable_meeting_run(continue_id, {"action": "continue"})
+            continued = server._handle_executable_meeting_arbitration(continue_id, {
+                "action": "continue_discussion",
+                "rationale": "再给一轮收敛分歧。",
+                "idempotencyKey": "arb-continue",
+            })
+            assert continued["meeting"]["stage"] == "active_discussion"
+            assert continued["meeting"]["round"] == 2
+            assert continued["meeting"]["maxRounds"] >= 2
+            continued_run = server._handle_executable_meeting_run(continue_id, {"action": "continue"})
+            assert continued_run["meeting"]["stage"] == "awaiting_user_decision"
+            detail = server._handle_executable_meeting_detail(continue_id)
+            assert len([e for e in detail["events"] if e["type"] == "arbitration_decision"]) == 1
+            assert any(e["type"] == "provider_call_started" and e["payload"]["round"] == 2 for e in detail["events"])
+            assert any(e["type"] == "participant_turn" and e["payload"]["round"] == 2 for e in detail["events"])
+
+            created_consensus = create_meeting(
+                participants=["arb-sum-a", "arb-sum-b"],
+                moderator="arb-sum-a",
+                maxRounds=1,
+                idempotencyKey="phase3-arbitration-consensus-summary",
+            )
+            consensus_id = created_consensus["meeting"]["id"]
+            server._meeting_call_provider = disagreement_call
+            server._handle_executable_meeting_run(consensus_id, {})
+            server._handle_executable_meeting_run(consensus_id, {"action": "continue"})
+            server._meeting_call_provider = summary_call
+            summarized = server._handle_executable_meeting_arbitration(consensus_id, {
+                "action": "consensus_summary",
+                "rationale": "用户确认这些差异不是实质分歧。",
+                "idempotencyKey": "arb-consensus-summary",
+            })
+            assert summarized["ok"] is True
+            assert summarized["meeting"]["stage"] == "completed"
+            assert summarized["event"]["type"] == "arbitration_decision"
+            assert summarized["event"]["payload"]["action"] == "consensus_summary"
+            assert summarized["meeting"]["result"]["summary"] == "Moderator summarized the user-confirmed consensus."
+            assert summary_prompts and summary_prompts[-1]["speaker"] == "arb-sum-a"
+            consensus_detail = server._handle_executable_meeting_detail(consensus_id)
+            assert any(e["type"] == "decision_window_closed" and (e["payload"] or {}).get("reason") == "arbitration_consensus_summary" for e in consensus_detail["events"])
+            assert any(e["type"] == "provider_call_started" and (e["payload"] or {}).get("purpose") == "meeting_result" for e in consensus_detail["events"])
+            assert any(e["type"] == "meeting_result" and (e["payload"] or {}).get("outcome") == "approved" for e in consensus_detail["events"])
+        finally:
+            server._meeting_call_provider = old_call
+            restore_meeting_store(old_store)
+            if old_fake is None:
+                os.environ.pop("VO_MEETING_FAKE_PROVIDER", None)
+            else:
+                os.environ["VO_MEETING_FAKE_PROVIDER"] = old_fake
+
+
+def test_phase3_final_round_without_disagreement_auto_summarizes_on_timeout():
+    with tempfile.TemporaryDirectory() as status_dir:
+        old_store = with_meeting_store(status_dir)
+        old_fake = os.environ.get("VO_MEETING_FAKE_PROVIDER")
+        old_call = server._meeting_call_provider
+        os.environ["VO_MEETING_FAKE_PROVIDER"] = "1"
+
+        reentrant_results = []
+
+        def summary_call(meeting, speaker, prompt):
+            reentrant_results.append(server._handle_executable_meeting_run(meeting["id"], {}))
+            return {
+                "ok": True,
+                "reply": json.dumps({
+                    "summary": "Final summary after timeout.",
+                    "decision": "Close the meeting automatically.",
+                    "unresolvedQuestions": [],
+                    "disagreements": [],
+                    "actionItems": [],
+                }),
+                "providerRef": {"providerKind": "fake", "agentId": speaker},
+                "durationMs": 0,
+                "conversationId": f"meeting:{meeting.get('id')}:participant:{speaker}",
+            }
+
+        try:
+            created = create_meeting(
+                participants=["main", "hermes-default"],
+                moderator="main",
+                maxRounds=1,
+                idempotencyKey="phase3-final-timeout-summary",
+            )
+            meeting_id = created["meeting"]["id"]
+            opened = server._handle_executable_meeting_run(meeting_id, {})
+            assert opened["meeting"]["stage"] == "awaiting_user_decision"
+            assert not opened["meeting"].get("arbitration")
+
+            discussion = server._handle_executable_meeting_run(meeting_id, {"action": "continue"})
+            assert discussion["meeting"]["stage"] == "awaiting_user_decision"
+            assert discussion["meeting"]["decisionNextStage"] == "summarizing"
+            assert not discussion["meeting"].get("arbitration")
+
+            server._meeting_call_provider = summary_call
+            timed_out = server._handle_executable_meeting_run(meeting_id, {"action": "timeout"})
+            assert timed_out["ok"] is True
+            assert timed_out["meeting"]["stage"] == "completed"
+            assert timed_out["meeting"]["result"]["summary"] == "Final summary after timeout."
+            assert reentrant_results
+            assert reentrant_results[0]["meeting"]["stage"] == "summarizing"
+            assert reentrant_results[0]["summarizing"] is True
+            detail = server._handle_executable_meeting_detail(meeting_id)
+            assert any(e["type"] == "decision_window_closed" and (e.get("payload") or {}).get("to") == "summarizing" for e in detail["events"])
+            assert len([e for e in detail["events"] if e["type"] == "meeting_result"]) == 1
+            assert not any(e["type"] == "meeting_transitioned" and (e.get("payload") or {}).get("from") == "completed" for e in detail["events"])
+        finally:
+            server._meeting_call_provider = old_call
+            restore_meeting_store(old_store)
+            if old_fake is None:
+                os.environ.pop("VO_MEETING_FAKE_PROVIDER", None)
+            else:
+                os.environ["VO_MEETING_FAKE_PROVIDER"] = old_fake
+
+
+def test_phase3_moderator_resolution_policy_auto_closes_disagreement():
+    with tempfile.TemporaryDirectory() as status_dir:
+        old_store = with_meeting_store(status_dir)
+        old_fake = os.environ.get("VO_MEETING_FAKE_PROVIDER")
+        old_call = server._meeting_call_provider
+        os.environ.pop("VO_MEETING_FAKE_PROVIDER", None)
+
+        def disagreement_call(meeting, speaker, prompt):
+            return {
+                "ok": True,
+                "reply": json.dumps({
+                    "position": f"{speaker} recommends a different path",
+                    "reasoning": "policy fixture disagreement",
+                    "disagreements": [f"{speaker} disagrees with the other path"],
+                    "questions": [],
+                    "suggestedNextStep": "moderator should decide",
+                    "confidence": "high",
+                }),
+                "providerRef": {"providerKind": "fake", "agentId": speaker},
+                "durationMs": 0,
+                "conversationId": f"meeting:{meeting.get('id')}:participant:{speaker}",
+            }
+
+        def moderator_decision_call(meeting, speaker, prompt):
+            assert "Resolution policy: moderator_decision" in prompt
+            assert "approved|rejected|no_consensus|needs_user_decision" in prompt
+            return {
+                "ok": True,
+                "reply": json.dumps({
+                    "outcome": "rejected",
+                    "summary": "Moderator closed the disagreement.",
+                    "decision": "不通过当前方案。",
+                    "rationale": "The risks are still unresolved.",
+                    "unresolvedQuestions": [],
+                    "disagreements": ["Path A and Path B remain incompatible."],
+                    "actionItems": [],
+                }),
+                "providerRef": {"providerKind": "fake", "agentId": speaker},
+                "durationMs": 0,
+                "conversationId": f"meeting:{meeting.get('id')}:participant:{speaker}",
+            }
+
+        server._meeting_call_provider = disagreement_call
+        try:
+            created = create_meeting(
+                participants=["policy-a", "policy-b"],
+                moderator="policy-a",
+                maxRounds=1,
+                resolutionPolicy="moderator_decision",
+                idempotencyKey="phase3-moderator-resolution-policy",
+            )
+            meeting_id = created["meeting"]["id"]
+            assert created["meeting"]["resolutionPolicy"] == "moderator_decision"
+            opened = server._handle_executable_meeting_run(meeting_id, {})
+            assert opened["meeting"]["stage"] == "awaiting_user_decision"
+            discussion = server._handle_executable_meeting_run(meeting_id, {"action": "continue"})
+            assert discussion["meeting"]["stage"] == "awaiting_user_decision"
+            assert discussion["meeting"]["decisionNextStage"] == "summarizing"
+            assert not discussion["meeting"].get("arbitration")
+
+            detail_before = server._handle_executable_meeting_detail(meeting_id)
+            opened_events = [e for e in detail_before["events"] if e["type"] == "decision_window_opened"]
+            assert opened_events[-1]["payload"]["resolutionPolicy"] == "moderator_decision"
+            assert opened_events[-1]["payload"]["arbitration"]["reason"] == "no_consensus"
+
+            server._meeting_call_provider = moderator_decision_call
+            timed_out = server._handle_executable_meeting_run(meeting_id, {"action": "timeout"})
+            assert timed_out["meeting"]["stage"] == "completed"
+            assert timed_out["meeting"]["result"]["outcome"] == "rejected"
+            assert timed_out["meeting"]["result"]["decision"] == "不通过当前方案。"
+            assert timed_out["meeting"]["result"]["rationale"] == "The risks are still unresolved."
+        finally:
+            server._meeting_call_provider = old_call
+            restore_meeting_store(old_store)
+            if old_fake is None:
+                os.environ.pop("VO_MEETING_FAKE_PROVIDER", None)
+            else:
+                os.environ["VO_MEETING_FAKE_PROVIDER"] = old_fake
+
+
 def test_executable_meeting_events_after_and_reconcile():
     with tempfile.TemporaryDirectory() as status_dir:
         old = with_meeting_store(status_dir)
@@ -249,19 +843,27 @@ def test_phase2_fake_provider_runs_incremental_meeting_to_completion():
             meeting_id = created["meeting"]["id"]
             ran = server._handle_executable_meeting_run(meeting_id)
             assert ran["ok"] is True
+            assert ran["meeting"]["stage"] == "awaiting_user_decision"
+            ran = server._handle_executable_meeting_run(meeting_id, {"action": "continue"})
+            assert ran["ok"] is True
+            assert ran["meeting"]["stage"] == "awaiting_user_decision"
+            ran = server._handle_executable_meeting_run(meeting_id, {"action": "continue"})
+            assert ran["ok"] is True
             assert ran["meeting"]["stage"] == "completed"
             events = ran["events"]
             turns = [e for e in events if e["type"] == "participant_turn"]
-            assert len(turns) == 6
+            formal_turns = [e for e in turns if not (e.get("payload") or {}).get("kind") and (e.get("payload") or {}).get("purpose") != "meeting_result"]
+            assert len(formal_turns) == 6
             assert ran["meeting"]["result"]["summary"]
             assert set(ran["meeting"]["result"]["contributions"]) == {"main", "hermes-default", "codex-local"}
             projected = server._exec_meeting_project_history(ran["meeting"], events)
-            assert len(projected["transcript"]) == 6
+            formal_projected = [t for t in projected["transcript"] if t.get("stage") != "summarizing" and not t.get("kind")]
+            assert len(formal_projected) == 6
             assert projected["transcript"][0]["stage"] == "active_opening"
             assert projected["transcript"][0]["speaker"] == "main"
-            assert projected["transcript"][-1]["round"] == 1
+            assert formal_projected[-1]["round"] == 1
 
-            main_prompts = [p["prompt"] for p in prompts if p["speaker"] == "main"]
+            main_prompts = [p["prompt"] for p in prompts if p["speaker"] == "main" and "Summarize and close this meeting" not in p["prompt"]]
             assert len(main_prompts) == 2
             assert "Confirmed context" in main_prompts[0]
             assert "This initial context should only appear" in main_prompts[0]
@@ -473,6 +1075,64 @@ def test_phase3_user_intervention_is_projected_and_passed_to_incremental_prompt(
             restore_meeting_store(old)
 
 
+def test_phase3_agenda_change_updates_future_prompt_and_projection():
+    with tempfile.TemporaryDirectory() as status_dir:
+        old = with_meeting_store(status_dir)
+        try:
+            created = create_meeting(idempotencyKey="phase3-agenda")
+            meeting_id = created["meeting"]["id"]
+            server._handle_executable_meeting_transition(meeting_id, {"action": "start", "expectedVersion": 1})
+
+            changed = server._handle_executable_meeting_agenda_change(meeting_id, {
+                "agenda": "改为先评估上线风险和回滚方案",
+                "reason": "用户临时调整优先级",
+                "actorId": "user",
+                "idempotencyKey": "agenda-1",
+            })
+            assert changed["ok"] is True
+            assert changed["event"]["type"] == "agenda_change"
+            assert changed["meeting"]["topic"] != changed["meeting"]["agenda"]
+            assert changed["meeting"]["agenda"] == "改为先评估上线风险和回滚方案"
+            assert changed["event"]["payload"]["previousAgenda"] == changed["meeting"]["topic"]
+
+            repeated = server._handle_executable_meeting_agenda_change(meeting_id, {
+                "agenda": "改为先评估上线风险和回滚方案",
+                "reason": "用户临时调整优先级",
+                "actorId": "user",
+                "idempotencyKey": "agenda-1",
+            })
+            assert repeated["ok"] is True
+            assert repeated["idempotent"] is True
+            assert repeated["event"]["sequence"] == changed["event"]["sequence"]
+
+            active = [m for m in server._meeting_active_projection() if m.get("id") == meeting_id][0]
+            assert active["agenda"] == "改为先评估上线风险和回滚方案"
+            agenda_rows = [t for t in active["transcript"] if t.get("type") == "agenda_change"]
+            assert len(agenda_rows) == 1
+            assert agenda_rows[0]["text"] == "改为先评估上线风险和回滚方案"
+            assert agenda_rows[0]["reason"] == "用户临时调整优先级"
+
+            with server._EXEC_MEETING_LOCK:
+                store = server._load_exec_meeting_store()
+                meeting = store["meetings"][meeting_id]
+                meeting["contextMode"] = "incremental"
+                meeting.setdefault("participantLastSeen", {})["hermes-default"] = changed["event"]["sequence"] - 1
+                prompt = server._meeting_build_prompt(meeting, "hermes-default", "active_opening", store["events"][meeting_id])
+            assert "Current agenda: 改为先评估上线风险和回滚方案" in prompt
+            assert "user changed agenda to: 改为先评估上线风险和回滚方案" in prompt
+            assert "reason: 用户临时调整优先级" in prompt
+
+            events_after = server._handle_executable_meeting_events(meeting_id, f"after={changed['event']['sequence'] - 1}")
+            assert events_after["events"][0]["type"] == "agenda_change"
+
+            cancelled = server._handle_executable_meeting_transition(meeting_id, {"action": "cancel"})
+            assert cancelled["meeting"]["stage"] == "cancelled"
+            rejected = server._handle_executable_meeting_agenda_change(meeting_id, {"agenda": "too late"})
+            assert rejected["_status"] == 409
+        finally:
+            restore_meeting_store(old)
+
+
 def test_phase3_provider_envelope_is_unwrapped_and_structured_turn_is_projected():
     envelope = {
         "runId": "r1",
@@ -535,7 +1195,9 @@ def test_phase3_structured_provider_output_is_saved_without_raw_envelope_in_tran
             meeting_id = created["meeting"]["id"]
             ran = server._handle_executable_meeting_run(meeting_id)
             assert ran["ok"] is True
-            turns = [e for e in ran["events"] if e["type"] == "participant_turn"]
+            detail = server._handle_executable_meeting_detail(meeting_id)
+            events = detail["events"]
+            turns = [e for e in events if e["type"] == "participant_turn"]
             assert turns
             first_payload = turns[0]["payload"]
             assert first_payload["structured"]["position"] == "main supports the plan"
@@ -543,7 +1205,7 @@ def test_phase3_structured_provider_output_is_saved_without_raw_envelope_in_tran
             assert "run-main" in first_payload["providerRaw"]
             assert "run-main" not in first_payload["text"]
 
-            projected = server._exec_meeting_project_history(ran["meeting"], ran["events"])
+            projected = server._exec_meeting_project_history(detail["meeting"], events)
             first_turn = projected["transcript"][0]
             assert first_turn["structured"]["suggestedNextStep"] == "Proceed with structured rendering."
             assert "run-main" not in first_turn["text"]
@@ -597,6 +1259,95 @@ def test_phase3_executable_end_uses_moderator_summary_without_manual_summary():
             restore_meeting_store(old)
 
 
+def test_phase3_moderator_failure_user_takeover_and_replacement():
+    with tempfile.TemporaryDirectory() as status_dir:
+        old = with_meeting_store(status_dir)
+        old_call = server._meeting_call_provider
+        calls = []
+
+        def fake_call(meeting, speaker, prompt):
+            calls.append(speaker)
+            if speaker == "main":
+                return {
+                    "ok": False,
+                    "reply": "[ERROR] moderator quota exhausted",
+                    "providerRef": {"providerKind": "fake", "agentId": speaker},
+                    "durationMs": 1,
+                    "conversationId": f"meeting:{meeting['id']}:participant:{speaker}",
+                }
+            return {
+                "ok": True,
+                "reply": json.dumps({
+                    "summary": f"Replacement summary by {speaker}.",
+                    "decision": "Replacement moderator closed the meeting.",
+                    "unresolvedQuestions": [],
+                    "disagreements": [],
+                    "actionItems": [],
+                }),
+                "providerRef": {"providerKind": "fake", "agentId": speaker},
+                "durationMs": 2,
+                "conversationId": f"meeting:{meeting['id']}:participant:{speaker}",
+            }
+
+        server._meeting_call_provider = fake_call
+        try:
+            created = create_meeting(
+                topic="Moderator Failure",
+                participants=["main", "hermes-default"],
+                moderator="main",
+                idempotencyKey="phase3-moderator-failure-user",
+            )
+            meeting_id = created["meeting"]["id"]
+            server._handle_executable_meeting_transition(meeting_id, {"action": "start", "expectedVersion": 1})
+            failed = server._handle_meeting_end({"id": meeting_id, "endedBy": "user"})
+            assert failed["ok"] is False
+            assert failed["meeting"]["stage"] == "awaiting_user_decision"
+            assert failed["meeting"]["moderatorFailure"]["reason"] == "moderator_failed"
+            assert failed["meeting"]["moderatorFailure"]["moderator"] == "main"
+            active = [m for m in server._meeting_active_projection() if m.get("id") == meeting_id][0]
+            assert active["moderatorFailure"]["reason"] == "moderator_failed"
+
+            takeover = server._handle_executable_meeting_moderator_takeover(meeting_id, {
+                "action": "user_takeover",
+                "summary": "User closed after moderator failure.",
+                "decision": "Ship with manual summary.",
+            })
+            assert takeover["ok"] is True
+            assert takeover["meeting"]["stage"] == "completed"
+            assert takeover["meeting"]["result"]["summary"] == "User closed after moderator failure."
+            assert takeover["meeting"]["result"]["moderatorTakeover"]["action"] == "user_takeover"
+            assert any(e["type"] == "moderator_takeover" for e in takeover["events"])
+
+            created_replace = create_meeting(
+                topic="Moderator Replacement",
+                participants=["main", "hermes-default"],
+                moderator="main",
+                idempotencyKey="phase3-moderator-failure-replace",
+            )
+            replace_id = created_replace["meeting"]["id"]
+            server._handle_executable_meeting_transition(replace_id, {"action": "start", "expectedVersion": 1})
+            failed_replace = server._handle_meeting_end({"id": replace_id, "endedBy": "user"})
+            assert failed_replace["meeting"]["stage"] == "awaiting_user_decision"
+            replaced = server._handle_executable_meeting_moderator_takeover(replace_id, {
+                "action": "replace_moderator",
+                "moderator": "hermes-default",
+            })
+            assert replaced["ok"] is True
+            assert replaced["meeting"]["stage"] == "completed"
+            assert replaced["meeting"]["moderator"] == "hermes-default"
+            assert replaced["meeting"]["result"]["summary"] == "Replacement summary by hermes-default."
+            assert "hermes-default" in calls
+
+            terminal_reject = server._handle_executable_meeting_moderator_takeover(replace_id, {
+                "action": "user_takeover",
+                "summary": "too late",
+            })
+            assert terminal_reject["_status"] == 409
+        finally:
+            server._meeting_call_provider = old_call
+            restore_meeting_store(old)
+
+
 def test_legacy_meeting_end_still_requires_manual_summary():
     with tempfile.TemporaryDirectory() as status_dir:
         old = with_meeting_store(status_dir)
@@ -619,15 +1370,27 @@ def test_phase2_openclaw_workflow_session_key_is_safe_for_meeting_ids():
 if __name__ == "__main__":
     test_executable_meeting_create_persists_events_and_projects_active()
     test_executable_meeting_occupancy_transition_and_history_projection()
+    test_phase3_pause_resume_cancel_controls_project_previous_stage_and_history()
+    test_phase3_active_executable_meeting_projects_to_status_canvas_meetings()
+    test_phase3_decision_window_timeout_setting_defaults_and_clamps()
+    test_phase3_decision_window_can_be_configured_per_meeting()
+    test_phase3_targeted_question_in_decision_window_does_not_advance_round()
+    test_phase3_late_formal_provider_response_is_ignored_after_cancel()
+    test_phase3_late_targeted_provider_response_is_ignored_after_continue()
+    test_phase3_no_consensus_arbitration_decide_end_and_continue()
+    test_phase3_final_round_without_disagreement_auto_summarizes_on_timeout()
+    test_phase3_moderator_resolution_policy_auto_closes_disagreement()
     test_executable_meeting_events_after_and_reconcile()
     test_phase2_fake_provider_runs_incremental_meeting_to_completion()
     test_phase2_prompt_context_modes()
     test_phase2_provider_timeout_is_configurable_for_real_calls()
     test_phase3_active_projection_includes_live_transcript_and_pending_calls()
     test_phase3_user_intervention_is_projected_and_passed_to_incremental_prompt()
+    test_phase3_agenda_change_updates_future_prompt_and_projection()
     test_phase3_provider_envelope_is_unwrapped_and_structured_turn_is_projected()
     test_phase3_structured_provider_output_is_saved_without_raw_envelope_in_transcript()
     test_phase3_executable_end_uses_moderator_summary_without_manual_summary()
+    test_phase3_moderator_failure_user_takeover_and_replacement()
     test_legacy_meeting_end_still_requires_manual_summary()
     test_phase2_openclaw_workflow_session_key_is_safe_for_meeting_ids()
     print("ok")

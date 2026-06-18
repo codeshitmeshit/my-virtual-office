@@ -4,6 +4,7 @@ Serves static files, status JSON, and proxies WebSocket to the OpenClaw gateway.
 """
 import asyncio
 import base64
+import copy
 import http.server
 import json
 import os
@@ -114,6 +115,7 @@ def _normalize_presence_map(data):
 def _get_normalized_presence_state():
     gateway_presence._sync_meetings_from_file()
     state = _normalize_presence_map(gateway_presence.get_state())
+    state["_meetings"] = _status_meeting_projection(state.get("_meetings", []))
     # Bubble commands still write to virtual-office-status.json. Presence owns
     # state/task, but these display-only fields must remain available to the UI.
     try:
@@ -149,6 +151,17 @@ def _get_normalized_presence_state():
             "providerKind": provider_kind,
         }
     return state
+
+
+def _status_meeting_projection(legacy_meetings):
+    """Return the meeting list consumed by the office canvas."""
+    meetings = legacy_meetings if isinstance(legacy_meetings, list) else []
+    by_id = {m.get("id"): dict(m) for m in meetings if isinstance(m, dict) and m.get("id")}
+    for meeting in _meeting_active_projection():
+        meeting_id = meeting.get("id")
+        if meeting_id:
+            by_id[meeting_id] = meeting
+    return list(by_id.values())
 
 
 # ─── CONFIGURATION ───────────────────────────────────────────────
@@ -265,11 +278,11 @@ def _load_vo_config():
             "inferenceIdleTimeoutSec": presence.get("inferenceIdleTimeoutSec", 300),
         },
         "features": {
-            "pcMetrics": features.get("pcMetrics", False),
+            "pcMetrics": _env_bool("VO_PC_METRICS_ENABLED", features.get("pcMetrics", False)),
             "smsPanel": features.get("smsPanel", False),
             "browserPanel": _env_bool("VO_BROWSER_PANEL", features.get("browserPanel", False)),
             "whisper": features.get("whisper", False),
-            "apiUsage": features.get("apiUsage", True),
+            "apiUsage": _env_bool("VO_API_USAGE", features.get("apiUsage", True)),
         },
         "pcMetrics": {
             "url": _env_or("VO_PC_METRICS_URL", pc_metrics.get("url")),
@@ -356,6 +369,7 @@ WORKSPACE_BASE = VO_CONFIG["openclaw"]["homePath"]
 STATUS_DIR = VO_CONFIG["presence"]["statusDir"]
 os.makedirs(STATUS_DIR, exist_ok=True)
 STATUS_FILE = os.path.join(STATUS_DIR, "virtual-office-status.json")
+PROJECT_CRON_BINDINGS_FILE = os.path.join(STATUS_DIR, "project-cron-bindings.json")
 
 _OPENCLAW_VERSION_CACHE = None
 
@@ -7438,11 +7452,12 @@ def _save_meetings_file(data):
 _EXEC_MEETING_LOCK = threading.RLock()
 _EXEC_MEETING_TERMINAL = {"completed", "cancelled", "failed"}
 _EXEC_MEETING_PHASES = {
-    "draft", "preparing", "active_opening", "active_discussion", "paused",
+    "draft", "conflict", "preparing", "active_opening", "active_discussion", "paused",
     "awaiting_user_decision", "summarizing", "completed", "cancelled", "failed",
 }
 _EXEC_MEETING_TRANSITIONS = {
     "draft": {"preparing", "cancelled"},
+    "conflict": {"preparing", "cancelled", "failed"},
     "preparing": {"active_opening", "paused", "cancelled", "failed"},
     "active_opening": {"active_discussion", "paused", "summarizing", "cancelled", "failed"},
     "active_discussion": {"awaiting_user_decision", "summarizing", "paused", "cancelled", "failed"},
@@ -7512,6 +7527,421 @@ def _save_exec_meeting_store(data):
         pass
 
 
+_MEETING_REQUEST_LOCK = threading.RLock()
+_MEETING_REQUEST_STATUSES = {"pending", "rejected", "confirmed"}
+
+
+def _meeting_requests_file():
+    return os.path.join(STATUS_DIR, "meeting-requests.json")
+
+
+def _meeting_request_empty_store():
+    return {"requests": {}, "idempotency": {}, "updatedAt": ""}
+
+
+def _load_meeting_request_store():
+    try:
+        with open(_meeting_requests_file(), "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            return _meeting_request_empty_store()
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return _meeting_request_empty_store()
+    data.setdefault("requests", {})
+    data.setdefault("idempotency", {})
+    data.setdefault("updatedAt", "")
+    if not isinstance(data["requests"], dict):
+        data["requests"] = {}
+    if not isinstance(data["idempotency"], dict):
+        data["idempotency"] = {}
+    return data
+
+
+def _save_meeting_request_store(data):
+    data["updatedAt"] = _exec_meeting_now()
+    path = _meeting_requests_file()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = f"{path}.tmp-{os.getpid()}-{threading.get_ident()}"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, sort_keys=True)
+    os.replace(tmp, path)
+    try:
+        os.chmod(path, 0o666)
+    except Exception:
+        pass
+
+
+def _meeting_request_clean_type(raw):
+    value = str(raw or "discussion").strip()
+    return value if value in {"information", "discussion", "task"} else "discussion"
+
+
+def _meeting_request_find_project_task(project_id, task_id):
+    project = _handle_project_get(project_id).get("project")
+    if not project:
+        return None, None
+    task = next((t for t in project.get("tasks", []) if t.get("id") == task_id), None)
+    return project, task
+
+
+def _meeting_request_summary(value, limit=500):
+    text = re.sub(r"\s+", " ", str(value or "").strip())
+    return _meeting_truncate_text(text, limit)
+
+
+def _meeting_request_context_candidates(project, task):
+    candidates = []
+    project_id = project.get("id") or ""
+    task_id = task.get("id") or ""
+    candidates.append({
+        "id": f"project:{project_id}",
+        "sourceKind": "project",
+        "title": project.get("title", "Project"),
+        "summary": _meeting_request_summary(project.get("description") or project.get("title") or "", 800),
+        "sourceRef": {"projectId": project_id},
+        "selected": False,
+    })
+    candidates.append({
+        "id": f"task:{task_id}",
+        "sourceKind": "task",
+        "title": task.get("title", "Task"),
+        "summary": _meeting_request_summary(task.get("description") or task.get("title") or "", 1000),
+        "sourceRef": {"projectId": project_id, "taskId": task_id},
+        "selected": False,
+    })
+    related = []
+    for item in project.get("tasks", []):
+        if item.get("id") == task_id:
+            continue
+        if len(related) >= 5:
+            break
+        related.append({
+            "id": f"related-task:{item.get('id')}",
+            "sourceKind": "related_task",
+            "title": item.get("title", "Task"),
+            "summary": _meeting_request_summary(item.get("description") or item.get("title") or "", 600),
+            "sourceRef": {"projectId": project_id, "taskId": item.get("id")},
+            "selected": False,
+        })
+    candidates.extend(related)
+    project_title = str(project.get("title") or "").strip().lower()
+    for meeting in _meeting_history_projection():
+        if len([c for c in candidates if c.get("sourceKind") == "meeting"]) >= 5:
+            break
+        source = meeting.get("source") or {}
+        same_project = source.get("projectId") == project_id
+        text = " ".join(str(meeting.get(k) or "") for k in ("topic", "purpose", "summary", "resolution")).lower()
+        if not same_project and project_title and project_title not in text:
+            continue
+        candidates.append({
+            "id": f"meeting:{meeting.get('id')}",
+            "sourceKind": "meeting",
+            "title": meeting.get("topic") or meeting.get("id") or "Meeting",
+            "summary": _meeting_request_summary(meeting.get("summary") or meeting.get("resolution") or meeting.get("purpose") or "", 800),
+            "sourceRef": {"projectId": project_id, "meetingId": meeting.get("id")},
+            "selected": False,
+        })
+    return candidates
+
+
+def _meeting_request_public(req):
+    result = dict(req or {})
+    result["contextCandidates"] = [dict(c, selected=False) for c in result.get("contextCandidates", [])]
+    return result
+
+
+def _meeting_request_error(message, status=400, code="bad_request"):
+    return {"ok": False, "error": message, "code": code, "_status": status}
+
+
+def _meeting_request_urgency(raw):
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        value = 3
+    return max(1, min(5, value))
+
+
+def _handle_meeting_request_create(project_id, task_id, body):
+    project, task = _meeting_request_find_project_task(project_id, task_id)
+    if not project:
+        return _meeting_request_error("Project not found", 404, "project_not_found")
+    if not task:
+        return _meeting_request_error("Task not found", 404, "task_not_found")
+    source_type = str(body.get("sourceType") or "project_task").strip()
+    if source_type != "project_task":
+        return _meeting_request_error("Only project_task meeting requests are supported in this phase", 400, "unsupported_source")
+    goal = str(body.get("goal") or body.get("meetingGoal") or "").strip()
+    expected = str(body.get("expectedOutcome") or "").strip()
+    reason = str(body.get("reason") or body.get("cannotCompleteAloneReason") or "").strip()
+    if not goal:
+        return _meeting_request_error("Meeting goal is required", 400, "goal_required")
+    if not expected:
+        return _meeting_request_error("Expected outcome is required", 400, "expected_outcome_required")
+    if not reason:
+        return _meeting_request_error("Reason why the AI cannot complete alone is required", 400, "reason_required")
+    requester = str(body.get("requestingAgentId") or body.get("agentId") or task.get("executorAgentId") or task.get("assignee") or "").strip()
+    if not requester:
+        return _meeting_request_error("Requesting agent is required", 400, "requesting_agent_required")
+    urgency = _meeting_request_urgency(body.get("urgency") or body.get("urgencyScore") or body.get("priority"))
+    participants = _exec_meeting_clean_participants(body.get("suggestedParticipants") or body.get("participants") or [])
+    if requester and requester not in participants:
+        participants.insert(0, requester)
+    suggested_moderator = str(body.get("suggestedModerator") or body.get("moderator") or (participants[0] if participants else requester)).strip()
+    now = _exec_meeting_now()
+    request_id = str(body.get("id") or uuid.uuid4())
+    idempotency_key = str(body.get("idempotencyKey") or "").strip()
+    with _MEETING_REQUEST_LOCK:
+        store = _load_meeting_request_store()
+        if idempotency_key and idempotency_key in store.get("idempotency", {}):
+            existing = store.get("requests", {}).get(store["idempotency"][idempotency_key].get("requestId"))
+            if existing:
+                return {"ok": True, "request": _meeting_request_public(existing), "idempotent": True}
+        request = {
+            "id": request_id,
+            "status": "pending",
+            "sourceType": "project_task",
+            "source": {"projectId": project_id, "taskId": task_id, "projectTitle": project.get("title", ""), "taskTitle": task.get("title", "")},
+            "requestingAgentId": requester,
+            "originalProposal": {
+                "topic": str(body.get("topic") or task.get("title") or goal).strip(),
+                "purpose": str(body.get("purpose") or goal).strip(),
+                "meetingType": _meeting_request_clean_type(body.get("meetingType")),
+                "goal": goal,
+                "expectedOutcome": expected,
+                "cannotCompleteAloneReason": reason,
+                "suggestedParticipants": participants,
+                "suggestedModerator": suggested_moderator,
+                "maxRounds": body.get("maxRounds") or 2,
+                "urgency": urgency,
+            },
+            "urgency": urgency,
+            "contextCandidates": _meeting_request_context_candidates(project, task),
+            "review": {},
+            "conversion": {},
+            "idempotencyKey": idempotency_key,
+            "createdAt": now,
+            "updatedAt": now,
+        }
+        store.setdefault("requests", {})[request_id] = request
+        if idempotency_key:
+            store.setdefault("idempotency", {})[idempotency_key] = {"requestId": request_id}
+        _save_meeting_request_store(store)
+    if urgency >= 4:
+        auto = _handle_meeting_request_confirm(request_id, {
+            "confirmedBy": f"agent:{requester}",
+            "autoConfirmed": True,
+            "autoConfirmReason": "urgency",
+            "idempotencyKey": f"meeting-request-auto:{request_id}",
+        })
+        if auto.get("ok"):
+            auto["autoConfirmed"] = True
+            return auto
+        return {"ok": True, "request": _meeting_request_public(request), "autoConfirmError": auto}
+    return {"ok": True, "request": _meeting_request_public(request)}
+
+
+def _meeting_request_list_filtered(query_string=""):
+    parsed = urllib.parse.parse_qs(query_string or "")
+    status_filter = (parsed.get("status") or [""])[0]
+    project_id = (parsed.get("projectId") or [""])[0]
+    task_id = (parsed.get("taskId") or [""])[0]
+    with _MEETING_REQUEST_LOCK:
+        store = _load_meeting_request_store()
+        requests = list(store.get("requests", {}).values())
+    if status_filter:
+        requests = [r for r in requests if r.get("status") == status_filter]
+    if project_id:
+        requests = [r for r in requests if (r.get("source") or {}).get("projectId") == project_id]
+    if task_id:
+        requests = [r for r in requests if (r.get("source") or {}).get("taskId") == task_id]
+    requests.sort(key=lambda r: r.get("updatedAt") or r.get("createdAt") or "", reverse=True)
+    return {"ok": True, "requests": [_meeting_request_public(r) for r in requests], "pendingCount": sum(1 for r in requests if r.get("status") == "pending")}
+
+
+def _handle_meeting_request_detail(request_id):
+    with _MEETING_REQUEST_LOCK:
+        req = _load_meeting_request_store().get("requests", {}).get(request_id)
+    if not req:
+        return _meeting_request_error("Meeting request not found", 404, "request_not_found")
+    return {"ok": True, "request": _meeting_request_public(req)}
+
+
+def _meeting_request_selected_context(req, selected_ids, supplemental_context):
+    selected = set(str(x) for x in (selected_ids or []))
+    pieces = []
+    selected_candidates = []
+    for candidate in req.get("contextCandidates", []):
+        if str(candidate.get("id")) not in selected:
+            continue
+        item = dict(candidate)
+        item["selected"] = True
+        selected_candidates.append(item)
+        title = item.get("title") or item.get("sourceKind") or "Context"
+        summary = item.get("summary") or ""
+        pieces.append(f"[{item.get('sourceKind')}] {title}\n{summary}".strip())
+    supplemental = str(supplemental_context or "").strip()
+    if supplemental:
+        pieces.append("[supplemental]\n" + supplemental)
+    return "\n\n".join([p for p in pieces if p]), selected_candidates
+
+
+def _meeting_project_ref(project_id):
+    project_id = str(project_id or "").strip()
+    if not project_id:
+        return {"ok": True, "projectId": "", "projectTitle": ""}
+    data = _load_projects()
+    project = next((p for p in data.get("projects", []) if p.get("id") == project_id), None)
+    if not project:
+        return {"ok": False, "error": "Project not found", "code": "project_not_found", "_status": 404}
+    return {"ok": True, "projectId": project_id, "projectTitle": project.get("title", "")}
+
+
+def _handle_meeting_request_confirm(request_id, body):
+    idempotency_key = str(body.get("idempotencyKey") or "").strip()
+    with _MEETING_REQUEST_LOCK:
+        store = _load_meeting_request_store()
+        req = store.get("requests", {}).get(request_id)
+        if not req:
+            return _meeting_request_error("Meeting request not found", 404, "request_not_found")
+        if req.get("status") == "rejected":
+            return _meeting_request_error("Rejected meeting request cannot be confirmed", 409, "request_rejected")
+        if req.get("status") == "confirmed" and (req.get("conversion") or {}).get("meetingId"):
+            return {"ok": True, "request": _meeting_request_public(req), "meetingId": req["conversion"]["meetingId"], "idempotent": True}
+        proposal = req.get("originalProposal") or {}
+        selected_ids = body.get("selectedContextIds") or body.get("contextIds") or []
+        context, selected_candidates = _meeting_request_selected_context(req, selected_ids, body.get("supplementalContext"))
+        final_config = {
+            "topic": str(body.get("topic") or proposal.get("topic") or "").strip(),
+            "purpose": str(body.get("purpose") or proposal.get("purpose") or proposal.get("goal") or "").strip(),
+            "meetingType": _meeting_request_clean_type(body.get("meetingType") or proposal.get("meetingType")),
+            "participants": _exec_meeting_clean_participants(body.get("participants") or proposal.get("suggestedParticipants") or []),
+            "moderator": str(body.get("moderator") or proposal.get("suggestedModerator") or "").strip(),
+            "maxRounds": body.get("maxRounds") or proposal.get("maxRounds") or 2,
+            "contextMode": body.get("contextMode") or "incremental",
+            "resolutionPolicy": body.get("resolutionPolicy") or "moderator_decision",
+            "context": context,
+            "selectedContextIds": list(selected_ids),
+            "selectedContextSnapshot": selected_candidates,
+            "supplementalContext": str(body.get("supplementalContext") or "").strip(),
+            "projectId": str(body.get("projectId") or (req.get("source") or {}).get("projectId") or "").strip(),
+        }
+        project_ref = _meeting_project_ref(final_config["projectId"])
+        if not project_ref.get("ok"):
+            return _meeting_request_error(project_ref.get("error") or "Project not found", project_ref.get("_status", 404), project_ref.get("code", "project_not_found"))
+        final_config["projectId"], final_config["projectTitle"] = project_ref["projectId"], project_ref["projectTitle"]
+        if final_config["moderator"] and final_config["moderator"] not in final_config["participants"]:
+            final_config["participants"].insert(0, final_config["moderator"])
+        edit_summary = []
+        for key in ("topic", "purpose", "meetingType", "moderator", "maxRounds"):
+            original = proposal.get(key if key != "moderator" else "suggestedModerator")
+            if str(final_config.get(key) or "") != str(original or ""):
+                edit_summary.append(key)
+        req["review"] = {
+            "finalConfig": final_config,
+            "selectedContextIds": list(selected_ids),
+            "supplementalContext": final_config["supplementalContext"],
+            "editSummary": ", ".join(edit_summary) if edit_summary else "No configuration edits",
+            "confirmedBy": str(body.get("confirmedBy") or "user"),
+            "confirmedAt": _exec_meeting_now(),
+            "autoConfirmed": bool(body.get("autoConfirmed")),
+            "autoConfirmReason": str(body.get("autoConfirmReason") or ""),
+        }
+        # Save review before conversion so a failure can be inspected/retried.
+        req["updatedAt"] = req["review"]["confirmedAt"]
+        _save_meeting_request_store(store)
+    meeting_body = {
+        "topic": final_config["topic"],
+        "purpose": final_config["purpose"],
+        "meetingType": final_config["meetingType"],
+        "participants": final_config["participants"],
+        "moderator": final_config["moderator"] or (final_config["participants"][0] if final_config["participants"] else ""),
+        "maxRounds": final_config["maxRounds"],
+        "context": final_config["context"],
+        "contextMode": final_config["contextMode"],
+        "resolutionPolicy": final_config["resolutionPolicy"],
+        "organizer": req.get("requestingAgentId") or "ai",
+        "createdBy": req.get("requestingAgentId") if body.get("autoConfirmed") else "user",
+        "createdByType": "agent" if body.get("autoConfirmed") else "user",
+        "createdByAgentId": req.get("requestingAgentId") if body.get("autoConfirmed") else "",
+        "idempotencyKey": idempotency_key or f"meeting-request-confirm:{request_id}",
+        "source": {"meetingRequestId": request_id, "requestingAgentId": req.get("requestingAgentId"), "urgency": req.get("urgency"), **(req.get("source") or {})},
+        "projectId": final_config.get("projectId") or "",
+    }
+    created = _handle_executable_meeting_create(meeting_body)
+    if not created.get("ok"):
+        return created
+    converted_at = _exec_meeting_now()
+    with _MEETING_REQUEST_LOCK:
+        store = _load_meeting_request_store()
+        req = store.get("requests", {}).get(request_id)
+        if req:
+            req["status"] = "confirmed"
+            req["conversion"] = {"meetingId": created["meeting"]["id"], "convertedAt": converted_at}
+            req["updatedAt"] = converted_at
+            _save_meeting_request_store(store)
+    auto_run_result = None
+    auto_run_summary = {}
+    if body.get("autoConfirmed"):
+        auto_run_result = _handle_executable_meeting_run(created["meeting"]["id"], {
+            "action": "auto_start",
+            "actorId": req.get("requestingAgentId") or "agent",
+            "actorType": "agent",
+        })
+        auto_run_summary = {
+            "attempted": True,
+            "startedAt": _exec_meeting_now(),
+            "ok": bool(auto_run_result.get("ok")) if isinstance(auto_run_result, dict) else False,
+            "stage": ((auto_run_result or {}).get("meeting") or {}).get("stage") if isinstance(auto_run_result, dict) else "",
+            "error": (auto_run_result or {}).get("error") if isinstance(auto_run_result, dict) else "Auto run failed",
+        }
+        if isinstance(auto_run_result, dict) and auto_run_result.get("meeting"):
+            created["meeting"] = auto_run_result["meeting"]
+    with _MEETING_REQUEST_LOCK:
+        store = _load_meeting_request_store()
+        req = store.get("requests", {}).get(request_id)
+        if req:
+            req["conversion"] = req.get("conversion") or {"meetingId": created["meeting"]["id"], "convertedAt": converted_at}
+            if auto_run_summary:
+                req["conversion"]["autoRun"] = auto_run_summary
+            req["updatedAt"] = _exec_meeting_now()
+            _save_meeting_request_store(store)
+            result = {"ok": True, "request": _meeting_request_public(req), "meeting": created["meeting"], "meetingId": created["meeting"]["id"], "idempotent": bool(created.get("idempotent"))}
+            if auto_run_summary:
+                result["autoRun"] = auto_run_summary
+            return result
+    result = {"ok": True, "meeting": created["meeting"], "meetingId": created["meeting"]["id"]}
+    if auto_run_summary:
+        result["autoRun"] = auto_run_summary
+    return result
+
+
+def _handle_meeting_request_reject(request_id, body):
+    reason = str(body.get("reason") or "").strip()
+    if not reason:
+        return _meeting_request_error("Rejection reason is required", 400, "reason_required")
+    with _MEETING_REQUEST_LOCK:
+        store = _load_meeting_request_store()
+        req = store.get("requests", {}).get(request_id)
+        if not req:
+            return _meeting_request_error("Meeting request not found", 404, "request_not_found")
+        if req.get("status") == "confirmed":
+            return _meeting_request_error("Confirmed meeting request cannot be rejected", 409, "request_confirmed")
+        if req.get("status") == "rejected":
+            return {"ok": True, "request": _meeting_request_public(req), "idempotent": True}
+        now = _exec_meeting_now()
+        req["status"] = "rejected"
+        req["review"] = {"rejectedBy": str(body.get("rejectedBy") or "user"), "rejectedAt": now, "rejectionReason": reason}
+        req["updatedAt"] = now
+        _save_meeting_request_store(store)
+    source = req.get("source") or {}
+    _handle_task_comment(source.get("projectId", ""), source.get("taskId", ""), {
+        "author": "meeting-request",
+        "text": f"AI meeting request rejected: {reason}",
+    })
+    return {"ok": True, "request": _meeting_request_public(req)}
+
+
 def _exec_meeting_clean_participants(raw):
     if not isinstance(raw, list):
         return []
@@ -7530,6 +7960,23 @@ def _meeting_context_mode(raw):
     return mode if mode in _MEETING_CONTEXT_MODES else "incremental"
 
 
+def _meeting_resolution_policy(raw):
+    policy = str(raw or "user_decision").strip().lower().replace("-", "_")
+    aliases = {
+        "user": "user_decision",
+        "manual": "user_decision",
+        "user_arbitration": "user_decision",
+        "strict_user": "user_decision",
+        "moderator": "moderator_decision",
+        "ai": "moderator_decision",
+        "auto": "moderator_decision",
+        "auto_close": "moderator_decision",
+        "moderator_arbitration": "moderator_decision",
+    }
+    policy = aliases.get(policy, policy)
+    return policy if policy in {"user_decision", "moderator_decision"} else "user_decision"
+
+
 def _meeting_context_budget(raw):
     budget = dict(_MEETING_DEFAULT_CONTEXT_BUDGET)
     if isinstance(raw, dict):
@@ -7541,6 +7988,18 @@ def _meeting_context_budget(raw):
             if value > 0:
                 budget[key] = min(value, 50000)
     return budget
+
+
+def _meeting_decision_window_sec():
+    return _meeting_clamped_decision_window_sec(os.environ.get("VO_MEETING_DECISION_WINDOW_SEC") or "20")
+
+
+def _meeting_clamped_decision_window_sec(raw):
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        value = 20
+    return max(10, min(value, 120))
 
 
 def _meeting_truncate_text(value, limit):
@@ -7579,6 +8038,507 @@ def _append_exec_meeting_event(store, meeting, event_type, actor=None, payload=N
     return event
 
 
+def _meeting_formal_turn_exists(events, stage, round_value, speaker):
+    for event in events or []:
+        if event.get("type") != "participant_turn":
+            continue
+        payload = event.get("payload") or {}
+        if payload.get("kind") in {"targeted_response", "meeting_result"} or payload.get("purpose") == "meeting_result":
+            continue
+        if payload.get("stage") == stage and int(payload.get("round") or 0) == int(round_value or 0) and payload.get("speaker") == speaker:
+            return True
+    return False
+
+
+def _meeting_provider_completion_should_be_ignored(meeting, expected_stage, expected_round):
+    current_stage = meeting.get("stage")
+    if current_stage in _EXEC_MEETING_TERMINAL or current_stage == "paused":
+        return True
+    if expected_stage and current_stage not in {expected_stage, "awaiting_user_decision"}:
+        return True
+    if expected_round is not None and int(meeting.get("round") or 0) != int(expected_round or 0):
+        return True
+    return False
+
+
+def _meeting_project_work_map():
+    active_phases = {"in_progress", "dispatching", "reviewing", "rework"}
+    work = {}
+    with _WORKFLOW_LOCK:
+        for project_id, wf in _WORKFLOW_STATE.items():
+            if not wf.get("active") or wf.get("phase") not in active_phases:
+                continue
+            agent_id = str(wf.get("currentAssignee") or "").strip()
+            if not agent_id:
+                continue
+            work[agent_id] = {
+                "kind": "project_task",
+                "projectId": project_id,
+                "taskId": wf.get("currentTaskId") or "",
+                "taskTitle": wf.get("currentTaskTitle") or "Project task",
+                "phase": wf.get("phase") or "",
+                "riskLevel": "high" if wf.get("phase") in {"dispatching", "reviewing", "rework"} else "medium",
+                "pauseCapability": "logical",
+                "summary": wf.get("currentTaskTitle") or "Project task",
+            }
+    try:
+        if os.path.isfile(WORKFLOW_STATE_FILE):
+            with open(WORKFLOW_STATE_FILE, "r", encoding="utf-8") as f:
+                persisted = json.load(f)
+            for project_id, wf in (persisted or {}).items():
+                if not isinstance(wf, dict) or not wf.get("active") or wf.get("phase") not in active_phases:
+                    continue
+                agent_id = str(wf.get("currentAssignee") or "").strip()
+                if agent_id and agent_id not in work:
+                    work[agent_id] = {
+                        "kind": "project_task",
+                        "projectId": project_id,
+                        "taskId": wf.get("currentTaskId") or "",
+                        "taskTitle": wf.get("currentTaskTitle") or "Project task",
+                        "phase": wf.get("phase") or "",
+                        "riskLevel": "high" if wf.get("phase") in {"dispatching", "reviewing", "rework"} else "medium",
+                        "pauseCapability": "logical",
+                        "summary": wf.get("currentTaskTitle") or "Project task",
+                    }
+    except Exception:
+        pass
+    return work
+
+
+def _meeting_pending_provider_agents(store):
+    pending = {}
+    for meeting_id, events in store.get("events", {}).items():
+        meeting = store.get("meetings", {}).get(meeting_id) or {}
+        if meeting.get("stage") in _EXEC_MEETING_TERMINAL:
+            continue
+        for call in _exec_meeting_pending_calls_projection(events):
+            speaker = call.get("speaker") or ""
+            if speaker:
+                pending[speaker] = {"kind": "provider_call", "meetingId": meeting_id, "riskLevel": "high", "summary": "Provider call in progress"}
+    return pending
+
+
+def _meeting_busy_context_for_agent(store, agent_id, exclude_meeting_id=""):
+    agent_id = str(agent_id or "").strip()
+    if not agent_id:
+        return {"agentId": agent_id, "busy": False, "riskLevel": "idle", "reason": "idle"}
+    occupied_by = (store.get("occupancy") or {}).get(agent_id)
+    if occupied_by and occupied_by != exclude_meeting_id:
+        meeting = (store.get("meetings") or {}).get(occupied_by) or {}
+        return {
+            "agentId": agent_id,
+            "busy": True,
+            "riskLevel": "high",
+            "reason": "meeting_occupied",
+            "busyKind": "meeting",
+            "meetingId": occupied_by,
+            "summary": f"Already in meeting: {meeting.get('topic') or occupied_by}",
+            "pauseCapability": "unavailable",
+        }
+    pending = _meeting_pending_provider_agents(store).get(agent_id)
+    if pending:
+        return {
+            "agentId": agent_id,
+            "busy": True,
+            "riskLevel": "high",
+            "reason": "provider_call",
+            "busyKind": "provider_call",
+            "meetingId": pending.get("meetingId"),
+            "summary": pending.get("summary") or "Provider call in progress",
+            "pauseCapability": "unavailable",
+        }
+    work = _meeting_project_work_map().get(agent_id)
+    if work:
+        return {
+            "agentId": agent_id,
+            "busy": True,
+            "riskLevel": work.get("riskLevel") or "medium",
+            "reason": "project_task",
+            "busyKind": "project_task",
+            "projectId": work.get("projectId") or "",
+            "taskId": work.get("taskId") or "",
+            "taskTitle": work.get("taskTitle") or "",
+            "phase": work.get("phase") or "",
+            "summary": work.get("summary") or work.get("taskTitle") or "Project task",
+            "estimatedAvailability": "unknown",
+            "pauseCapability": work.get("pauseCapability") or "logical",
+        }
+    return {"agentId": agent_id, "busy": False, "riskLevel": "idle", "reason": "idle", "summary": "Idle", "pauseCapability": "none"}
+
+
+def _meeting_conflict_advisory(conflict):
+    agent_id = conflict.get("agentId") or ""
+    reason = conflict.get("reason") or "busy"
+    summary = conflict.get("summary") or "The agent is busy."
+    pause = conflict.get("pauseCapability") or "logical"
+    if reason == "meeting_occupied":
+        recommendation = "replace"
+        risk = "Agent is already in another active meeting. Do not force join unless the existing meeting is cancelled."
+        resume = "No original task can be resumed from this meeting conflict."
+    elif reason == "provider_call":
+        recommendation = "wait"
+        risk = "A provider call is in progress. Interrupting can lose an in-flight response."
+        resume = "Wait for the provider call to finish, then retry conflict handling."
+    elif pause == "logical":
+        recommendation = "wait"
+        risk = "The current task can only be logically paused; the provider process may not stop immediately."
+        resume = "Save current task context and resume from the recorded task state after the meeting."
+    else:
+        recommendation = "wait"
+        risk = "Pause safety is uncertain."
+        resume = "Recheck the agent state before forcing a meeting."
+    return {
+        "status": "completed",
+        "agentId": agent_id,
+        "recommendation": recommendation,
+        "busyReason": summary,
+        "estimatedAvailability": conflict.get("estimatedAvailability") or "unknown",
+        "interruptionRisk": risk,
+        "resumeNotes": resume,
+        "source": "local_fallback",
+        "createdAt": _exec_meeting_now(),
+    }
+
+
+def _meeting_advisory_timeout():
+    raw = os.environ.get("VO_MEETING_ADVISORY_TIMEOUT_SEC") or "45"
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        value = 45
+    return max(5, min(value, 180))
+
+
+def _meeting_live_advisory_prompt(meeting, conflict):
+    source = conflict.get("source") if isinstance(conflict.get("source"), dict) else {}
+    occupied_meeting = ""
+    if source.get("meetingId"):
+        occupied_meeting = str(source.get("meetingId") or "")
+    return (
+        "你是 Virtual Office 的 busy-agent subagent advisory turn。"
+        "现在有人想邀请你参加另一场 AI 会议，但系统检测到你正在忙。"
+        "请只评估你自己的可用性和打断风险，不要替用户执行等待、更换或强制加入。\n\n"
+        f"待加入会议: {meeting.get('topic') or meeting.get('agenda') or meeting.get('id')}\n"
+        f"当前冲突原因: {conflict.get('reason') or conflict.get('busyKind')}\n"
+        f"当前忙碌摘要: {conflict.get('summary') or ''}\n"
+        f"已占用会议ID: {occupied_meeting}\n"
+        f"暂停能力: {conflict.get('pauseCapability') or 'unknown'}\n"
+        f"风险级别: {conflict.get('riskLevel') or 'medium'}\n\n"
+        "返回且只返回一个 JSON 对象，不要 Markdown，不要额外说明。"
+        "Schema: {"
+        "\"recommendation\":\"wait|reserve|replace|force_join\","
+        "\"estimatedAvailability\":\"例如 2-5 分钟、当前会议结束后、unknown\","
+        "\"busyReason\":\"用中文简述你为什么忙\","
+        "\"interruptionRisk\":\"用中文说明打断风险\","
+        "\"resumeNotes\":\"用中文说明如果被打断如何恢复或为什么不能恢复\","
+        "\"confidence\":\"high|medium|low\""
+        "}。"
+    )
+
+
+def _meeting_call_advisory_provider(meeting, conflict):
+    agent_id = conflict.get("agentId") or ""
+    prompt = _meeting_live_advisory_prompt(meeting, conflict)
+    pseudo_meeting = {
+        "id": f"{meeting.get('id')}:advisory:{agent_id}",
+        "contextBudget": {"maxPromptChars": 6000},
+    }
+    old_timeout = os.environ.get("VO_MEETING_PROVIDER_TIMEOUT_SEC")
+    os.environ["VO_MEETING_PROVIDER_TIMEOUT_SEC"] = str(_meeting_advisory_timeout())
+    try:
+        return _meeting_call_provider(pseudo_meeting, agent_id, prompt)
+    finally:
+        if old_timeout is None:
+            os.environ.pop("VO_MEETING_PROVIDER_TIMEOUT_SEC", None)
+        else:
+            os.environ["VO_MEETING_PROVIDER_TIMEOUT_SEC"] = old_timeout
+
+
+def _meeting_normalize_advisory_reply(conflict, result):
+    fallback = _meeting_conflict_advisory(conflict)
+    fallback["source"] = "local_fallback_after_provider_failure"
+    fallback["providerRef"] = result.get("providerRef") or {}
+    fallback["durationMs"] = result.get("durationMs") or 0
+    if not result.get("ok"):
+        fallback["status"] = "failed"
+        fallback["error"] = result.get("reply") or "advisory provider call failed"
+        return fallback
+    parsed = _meeting_parse_json_object(result.get("reply") or "")
+    if not parsed:
+        fallback["status"] = "failed"
+        fallback["error"] = "advisory provider did not return JSON"
+        fallback["rawText"] = _meeting_truncate_text(result.get("reply") or "", 1200)
+        return fallback
+    recommendation = str(parsed.get("recommendation") or fallback.get("recommendation") or "wait").strip().lower()
+    if recommendation not in {"wait", "reserve", "replace", "force_join"}:
+        recommendation = fallback.get("recommendation") or "wait"
+    return {
+        "status": "completed",
+        "agentId": conflict.get("agentId") or "",
+        "recommendation": recommendation,
+        "busyReason": str(parsed.get("busyReason") or parsed.get("busy_reason") or fallback.get("busyReason") or "").strip(),
+        "estimatedAvailability": str(parsed.get("estimatedAvailability") or parsed.get("estimated_availability") or fallback.get("estimatedAvailability") or "unknown").strip() or "unknown",
+        "interruptionRisk": str(parsed.get("interruptionRisk") or parsed.get("interruption_risk") or fallback.get("interruptionRisk") or "").strip(),
+        "resumeNotes": str(parsed.get("resumeNotes") or parsed.get("resume_notes") or fallback.get("resumeNotes") or "").strip(),
+        "confidence": str(parsed.get("confidence") or "").strip(),
+        "source": "agent_advisory_turn",
+        "providerRef": result.get("providerRef") or {},
+        "durationMs": result.get("durationMs") or 0,
+        "createdAt": _exec_meeting_now(),
+    }
+
+
+def _meeting_complete_live_advisories(meeting_id):
+    if os.environ.get("VO_MEETING_DISABLE_LIVE_ADVISORY"):
+        return None
+    with _EXEC_MEETING_LOCK:
+        store = _load_exec_meeting_store()
+        meeting = store.get("meetings", {}).get(meeting_id)
+        if not meeting:
+            return None
+        pending = [
+            dict(conflict)
+            for conflict in (meeting.get("conflicts") or [])
+            if conflict.get("riskLevel") in {"medium", "high"} and conflict.get("status") in {"open", "waiting", "reserved"}
+        ]
+    if not pending:
+        return None
+    for snapshot in pending:
+        result = _meeting_call_advisory_provider(meeting, snapshot)
+        advisory = _meeting_normalize_advisory_reply(snapshot, result)
+        with _EXEC_MEETING_LOCK:
+            store = _load_exec_meeting_store()
+            meeting = store.get("meetings", {}).get(meeting_id)
+            if not meeting or meeting.get("stage") in _EXEC_MEETING_TERMINAL:
+                continue
+            for conflict in meeting.get("conflicts") or []:
+                if conflict.get("id") == snapshot.get("id"):
+                    conflict["advisory"] = advisory
+                    if advisory.get("estimatedAvailability"):
+                        conflict["estimatedAvailability"] = advisory.get("estimatedAvailability")
+                    if advisory.get("busyReason"):
+                        conflict["summary"] = advisory.get("busyReason")
+                    conflict["updatedAt"] = _exec_meeting_now()
+                    _append_exec_meeting_event(store, meeting, "meeting_conflict_advisory", actor={"type": "agent", "id": conflict.get("agentId") or ""}, payload={"conflictId": conflict.get("id"), "agentId": conflict.get("agentId"), "advisory": advisory})
+                    break
+            _save_exec_meeting_store(store)
+    with _EXEC_MEETING_LOCK:
+        store = _load_exec_meeting_store()
+        return store.get("meetings", {}).get(meeting_id)
+
+
+def _meeting_build_conflicts(store, participants, exclude_meeting_id=""):
+    conflicts = []
+    for participant in participants:
+        ctx = _meeting_busy_context_for_agent(store, participant, exclude_meeting_id=exclude_meeting_id)
+        if not ctx.get("busy"):
+            continue
+        now = _exec_meeting_now()
+        conflict = {
+            "id": str(uuid.uuid4()),
+            "agentId": participant,
+            "status": "open",
+            "reason": ctx.get("reason") or "busy",
+            "busyKind": ctx.get("busyKind") or ctx.get("reason") or "busy",
+            "riskLevel": ctx.get("riskLevel") or "medium",
+            "summary": ctx.get("summary") or "",
+            "estimatedAvailability": ctx.get("estimatedAvailability") or "unknown",
+            "pauseCapability": ctx.get("pauseCapability") or "logical",
+            "source": {k: v for k, v in ctx.items() if k in {"meetingId", "projectId", "taskId", "taskTitle", "phase"}},
+            "createdAt": now,
+            "updatedAt": now,
+        }
+        if conflict["riskLevel"] in {"medium", "high"}:
+            conflict["advisory"] = _meeting_conflict_advisory(conflict)
+        conflicts.append(conflict)
+    return conflicts
+
+
+def _meeting_has_open_conflicts(meeting):
+    return any((c or {}).get("status") in {"open", "waiting", "reserved"} for c in meeting.get("conflicts") or [])
+
+
+def _meeting_original_work_snapshot(conflict, action):
+    pause_capability = conflict.get("pauseCapability") or "logical"
+    return {
+        "agentId": conflict.get("agentId") or "",
+        "busyKind": conflict.get("busyKind") or conflict.get("reason") or "",
+        "reason": conflict.get("reason") or "",
+        "riskLevel": conflict.get("riskLevel") or "",
+        "summary": conflict.get("summary") or "",
+        "source": conflict.get("source") or {},
+        "pauseCapability": pause_capability,
+        "pauseState": "logical_paused" if pause_capability == "logical" else "pause_unavailable" if pause_capability == "unavailable" else "true_paused",
+        "resolutionAction": action,
+        "resumeToken": str(uuid.uuid4()),
+        "resumeStatus": "pending",
+        "capturedAt": _exec_meeting_now(),
+        "resumeNotes": ((conflict.get("advisory") or {}).get("resumeNotes") or ""),
+    }
+
+
+def _meeting_resume_original_work(store, meeting, reason):
+    snapshots = meeting.get("originalWork") or {}
+    if not isinstance(snapshots, dict):
+        snapshots = {}
+    changed = False
+    for agent_id, snap in snapshots.items():
+        if not isinstance(snap, dict) or snap.get("resumeStatus") in {"resumed", "manual_required"}:
+            continue
+        if snap.get("pauseState") == "pause_unavailable":
+            snap["resumeStatus"] = "manual_required"
+            snap["resumeFailureReason"] = "Original work could not be paused reliably; manual recovery required."
+            event_type = "original_work_resume_failed"
+        else:
+            snap["resumeStatus"] = "resumed"
+            snap["resumedAt"] = _exec_meeting_now()
+            event_type = "original_work_resumed"
+        changed = True
+        _append_exec_meeting_event(store, meeting, event_type, payload={"agentId": agent_id, "reason": reason, "snapshot": snap})
+    if changed:
+        meeting["originalWork"] = snapshots
+    return changed
+
+
+def _append_ignored_provider_completion(store, meeting, speaker, result, normalized, pending, reason, expected_stage, expected_round, kind=""):
+    payload = {
+        "speaker": speaker,
+        "kind": kind,
+        "reason": reason,
+        "expectedStage": expected_stage,
+        "expectedRound": expected_round,
+        "currentStage": meeting.get("stage"),
+        "currentRound": meeting.get("round"),
+        "text": normalized.get("text") or "",
+        "rawText": normalized.get("rawText") or "",
+        "structured": normalized.get("structured") or {},
+        "parseError": normalized.get("parseError") or "",
+        "ok": bool(result.get("ok")),
+        "providerRef": result.get("providerRef") or _meeting_provider_ref(speaker),
+        "conversationId": result.get("conversationId") or "",
+        "durationMs": result.get("durationMs") or 0,
+        "inReplyToSequence": pending.get("sequence") if pending else None,
+    }
+    if normalized.get("providerRaw"):
+        payload["providerRaw"] = normalized.get("providerRaw")
+    return _append_exec_meeting_event(store, meeting, "provider_call_ignored", actor={"type": "agent", "id": speaker}, payload=payload)
+
+
+def _meeting_formal_round_complete(events, stage, round_value, participants):
+    return all(_meeting_formal_turn_exists(events, stage, round_value, speaker) for speaker in (participants or []))
+
+
+def _meeting_has_substantive_disagreement(value):
+    text = str(value or "").strip()
+    if not text:
+        return False
+    normalized = re.sub(r"[\s。.!！?？,，;；:：、\"'`]+", "", text.lower())
+    if normalized in {"无", "没有", "暂无", "无分歧", "没有分歧", "无争议", "没有争议", "none", "no", "na", "n/a", "nil"}:
+        return False
+    false_prefixes = ("无新", "没有新", "暂无新", "nonew", "noadditional", "nofurther")
+    if any(normalized.startswith(prefix) for prefix in false_prefixes):
+        return False
+    if normalized.startswith("无") and not any(marker in normalized for marker in ("不同意", "反对", "冲突", "争议", "分歧")):
+        return False
+    return True
+
+
+def _meeting_arbitration_snapshot(meeting, events):
+    positions = []
+    disagreements = []
+    latest_turns = {}
+    for event in events or []:
+        if event.get("type") != "participant_turn":
+            continue
+        payload = event.get("payload") or {}
+        if payload.get("kind") == "targeted_response" or payload.get("purpose") == "meeting_result":
+            continue
+        speaker = payload.get("speaker") or (event.get("actor") or {}).get("id") or ""
+        if speaker:
+            latest_turns[speaker] = payload
+    participant_order = list(meeting.get("participants") or [])
+    ordered_payloads = []
+    for speaker in participant_order:
+        if speaker in latest_turns:
+            ordered_payloads.append((speaker, latest_turns[speaker]))
+    for speaker, payload in ordered_payloads:
+        structured = payload.get("structured") or {}
+        position = structured.get("position") or payload.get("text") or ""
+        if speaker and position:
+            positions.append({"speaker": speaker, "position": _meeting_truncate_text(position, 500)})
+        for item in _meeting_coerce_list(structured.get("disagreements")):
+            if _meeting_has_substantive_disagreement(item):
+                disagreements.append(f"{speaker}: {item}" if speaker else item)
+    suggestion = "用户裁决后结束，或继续一轮收敛分歧。"
+    if not disagreements:
+        return {}
+    return {
+        "reason": "no_consensus",
+        "positions": positions[-len(meeting.get("participants") or []):],
+        "disagreements": disagreements[-10:],
+        "moderatorSuggestion": suggestion,
+    }
+
+
+def _meeting_open_decision_window(store, meeting, completed_stage, completed_round, next_stage, next_round, reason):
+    timeout_sec = _meeting_clamped_decision_window_sec(meeting.get("decisionWindowConfiguredSec") or meeting.get("decisionWindowSec") or _meeting_decision_window_sec())
+    now = time.time()
+    events = list(store.get("events", {}).get(meeting.get("id"), []))
+    arbitration = _meeting_arbitration_snapshot(meeting, events) if reason == "no_consensus" else {}
+    if reason == "no_consensus" and not arbitration:
+        reason = "round_complete"
+    if reason == "no_consensus" and _meeting_resolution_policy(meeting.get("resolutionPolicy")) == "moderator_decision":
+        reason = "round_complete"
+    meeting["previousStage"] = completed_stage
+    meeting["stage"] = "awaiting_user_decision"
+    meeting["currentSpeaker"] = ""
+    meeting["decisionForStage"] = completed_stage
+    meeting["decisionForRound"] = int(completed_round or 0)
+    meeting["decisionNextStage"] = next_stage
+    meeting["decisionNextRound"] = int(next_round or 0)
+    meeting["decisionWindowSec"] = timeout_sec
+    meeting["decisionDeadlineAt"] = datetime.fromtimestamp(now + timeout_sec, timezone.utc).isoformat()
+    if arbitration and reason == "no_consensus":
+        meeting["arbitration"] = arbitration
+    else:
+        meeting.pop("arbitration", None)
+    _append_exec_meeting_event(
+        store,
+        meeting,
+        "decision_window_opened",
+        payload={
+            "completedStage": completed_stage,
+            "completedRound": int(completed_round or 0),
+            "nextStage": next_stage,
+            "nextRound": int(next_round or 0),
+            "timeoutSec": timeout_sec,
+            "deadlineAt": meeting["decisionDeadlineAt"],
+            "reason": reason,
+            "arbitration": arbitration,
+            "resolutionPolicy": _meeting_resolution_policy(meeting.get("resolutionPolicy")),
+        },
+    )
+    _append_exec_meeting_event(store, meeting, "meeting_transitioned", payload={"from": completed_stage, "to": "awaiting_user_decision", "reason": reason})
+
+
+def _meeting_continue_from_decision_window(store, meeting, actor=None, reason="continue"):
+    if meeting.get("stage") != "awaiting_user_decision":
+        return meeting.get("stage")
+    previous = meeting.get("stage")
+    next_stage = meeting.get("decisionNextStage") or "active_discussion"
+    next_round = int(meeting.get("decisionNextRound") or meeting.get("round") or 0)
+    meeting["previousStage"] = previous
+    meeting["stage"] = next_stage
+    if next_stage == "active_discussion" and next_round:
+        meeting["round"] = next_round
+    meeting["currentSpeaker"] = (meeting.get("speakerQueue") or [""])[0] if next_stage in {"active_opening", "active_discussion"} else ""
+    for key in ("decisionForStage", "decisionForRound", "decisionNextStage", "decisionNextRound", "decisionDeadlineAt", "arbitration"):
+        meeting.pop(key, None)
+    _append_exec_meeting_event(store, meeting, "decision_window_closed", actor=actor, payload={"to": next_stage, "round": next_round, "reason": reason})
+    _append_exec_meeting_event(store, meeting, "meeting_transitioned", actor=actor, payload={"from": previous, "to": next_stage, "reason": reason})
+    return next_stage
+
+
 def _rebuild_exec_meeting_occupancy(store):
     occupancy = {}
     for meeting in store.get("meetings", {}).values():
@@ -7602,6 +8562,7 @@ def _exec_meeting_pending_calls_projection(events):
                 "stage": payload.get("stage") or event.get("stage") or "",
                 "round": int(payload.get("round") or event.get("round") or 0),
                 "speaker": payload.get("speaker") or (event.get("actor") or {}).get("id") or "",
+                "purpose": payload.get("purpose") or "",
                 "promptChars": int(payload.get("promptChars") or 0),
                 "contextMode": payload.get("contextMode") or "",
                 "createdAt": event.get("createdAt") or "",
@@ -7613,15 +8574,73 @@ def _exec_meeting_pending_calls_projection(events):
     return list(pending.values())
 
 
+def _meeting_normalize_action_item(raw, index, meeting):
+    if isinstance(raw, dict):
+        title = str(raw.get("title") or raw.get("item") or raw.get("text") or raw.get("task") or raw.get("action") or "").strip()
+        description = str(raw.get("description") or raw.get("details") or raw.get("note") or "").strip()
+        owner = str(raw.get("owner") or raw.get("assignee") or raw.get("responsible") or "").strip()
+        status = str(raw.get("status") or raw.get("nextStatus") or "todo").strip() or "todo"
+        source_text = str(raw.get("sourceText") or raw.get("source") or "").strip()
+        priority = str(raw.get("priority") or "medium").strip() or "medium"
+    else:
+        title = str(raw or "").strip()
+        description = ""
+        owner = ""
+        status = "todo"
+        source_text = ""
+        priority = "medium"
+    if not title:
+        title = f"Action item {index + 1}"
+    return {
+        "id": f"ai-{index + 1}",
+        "title": title,
+        "description": description,
+        "suggestedOwner": owner,
+        "assignee": owner,
+        "suggestedStatus": status,
+        "priority": priority,
+        "sourceMeetingId": meeting.get("id"),
+        "sourceText": source_text or title,
+        "targetProjectId": meeting.get("projectId") or "",
+        "status": "draft",
+        "createdAt": _exec_meeting_now(),
+        "updatedAt": _exec_meeting_now(),
+        "audit": [],
+    }
+
+
+def _meeting_ensure_action_item_drafts(store, meeting):
+    if not isinstance(meeting, dict):
+        return []
+    result = meeting.get("result") if isinstance(meeting.get("result"), dict) else {}
+    raw_items = result.get("actionItems") if isinstance(result.get("actionItems"), list) else []
+    existing = meeting.get("actionItemDrafts")
+    if isinstance(existing, list) and existing:
+        return existing
+    drafts = [_meeting_normalize_action_item(item, idx, meeting) for idx, item in enumerate(raw_items)]
+    meeting["actionItemDrafts"] = drafts
+    if drafts:
+        _append_exec_meeting_event(store, meeting, "action_item_drafts_created", actor={"type": "system", "id": "system"}, payload={"count": len(drafts), "projectId": meeting.get("projectId") or ""})
+    return drafts
+
+
 def _exec_meeting_project_active(meeting, events=None):
     participants = meeting.get("participants", [])
     return {
         "id": meeting.get("id"),
         "topic": meeting.get("topic", "Untitled Meeting"),
+        "agenda": meeting.get("agenda") or meeting.get("topic", "Untitled Meeting"),
         "purpose": meeting.get("purpose", ""),
         "kind": meeting.get("meetingType", meeting.get("kind", "discussion")),
         "type": "group" if len(participants) > 2 else "1on1",
         "organizer": meeting.get("organizer", ""),
+        "createdBy": meeting.get("createdBy", ""),
+        "createdByType": meeting.get("createdByType", ""),
+        "createdByAgentId": meeting.get("createdByAgentId", ""),
+        "projectId": meeting.get("projectId", ""),
+        "projectTitle": meeting.get("projectTitle", ""),
+        "source": meeting.get("source") or {},
+        "urgency": (meeting.get("source") or {}).get("urgency") or meeting.get("urgency"),
         "status": "active",
         "participants": participants,
         "agents": participants,
@@ -7633,11 +8652,25 @@ def _exec_meeting_project_active(meeting, events=None):
         "maxRounds": meeting.get("maxRounds", 0),
         "moderator": meeting.get("moderator"),
         "contextMode": meeting.get("contextMode", "incremental"),
+        "resolutionPolicy": _meeting_resolution_policy(meeting.get("resolutionPolicy")),
         "currentSpeaker": meeting.get("currentSpeaker", ""),
+        "decisionForStage": meeting.get("decisionForStage", ""),
+        "decisionForRound": meeting.get("decisionForRound", 0),
+        "decisionNextStage": meeting.get("decisionNextStage", ""),
+        "decisionNextRound": meeting.get("decisionNextRound", 0),
+        "decisionWindowSec": meeting.get("decisionWindowSec", 0),
+        "decisionDeadlineAt": meeting.get("decisionDeadlineAt", ""),
+        "arbitration": meeting.get("arbitration") or {},
+        "moderatorFailure": meeting.get("moderatorFailure") or {},
         "result": meeting.get("result", {}),
+        "actionItemDrafts": meeting.get("actionItemDrafts") or [],
         "lastEventSequence": meeting.get("lastEventSequence", 0),
         "transcript": _exec_meeting_transcript_projection(events or []),
         "pendingCalls": _exec_meeting_pending_calls_projection(events or []),
+        "conflicts": meeting.get("conflicts") or [],
+        "reservation": meeting.get("reservation") or {},
+        "originalWork": meeting.get("originalWork") or {},
+        "participantState": meeting.get("participantState") or {},
     }
 
 
@@ -7652,6 +8685,8 @@ def _exec_meeting_transcript_projection(events):
                 "stage": payload.get("stage") or event.get("stage") or "",
                 "round": int(payload.get("round") or event.get("round") or 0),
                 "speaker": payload.get("speaker") or (event.get("actor") or {}).get("id") or "",
+                "kind": payload.get("kind") or "",
+                "targetQuestion": payload.get("targetQuestion") or "",
                 "text": payload.get("text") or "",
                 "rawText": payload.get("rawText") or payload.get("text") or "",
                 "structured": payload.get("structured") or {},
@@ -7676,6 +8711,52 @@ def _exec_meeting_transcript_projection(events):
                 "providerRef": {},
                 "createdAt": event.get("createdAt") or "",
             })
+        elif event.get("type") == "targeted_question":
+            transcript.append({
+                "type": "targeted_question",
+                "sequence": event.get("sequence"),
+                "stage": payload.get("stage") or event.get("stage") or "",
+                "round": int(payload.get("round") or event.get("round") or 0),
+                "speaker": payload.get("actorId") or (event.get("actor") or {}).get("id") or "user",
+                "target": payload.get("target") or "",
+                "text": payload.get("question") or "",
+                "ok": True,
+                "durationMs": 0,
+                "providerRef": {},
+                "createdAt": event.get("createdAt") or "",
+            })
+        elif event.get("type") == "agenda_change":
+            transcript.append({
+                "type": "agenda_change",
+                "sequence": event.get("sequence"),
+                "stage": payload.get("stage") or event.get("stage") or "",
+                "round": int(payload.get("round") or event.get("round") or 0),
+                "speaker": payload.get("actorId") or (event.get("actor") or {}).get("id") or "user",
+                "actorType": "user",
+                "text": payload.get("agenda") or "",
+                "previousAgenda": payload.get("previousAgenda") or "",
+                "reason": payload.get("reason") or "",
+                "ok": True,
+                "durationMs": 0,
+                "providerRef": {},
+                "createdAt": event.get("createdAt") or "",
+            })
+        elif event.get("type") == "arbitration_decision":
+            transcript.append({
+                "type": "arbitration_decision",
+                "sequence": event.get("sequence"),
+                "stage": payload.get("stage") or event.get("stage") or "",
+                "round": int(payload.get("round") or event.get("round") or 0),
+                "speaker": payload.get("actorId") or (event.get("actor") or {}).get("id") or "user",
+                "actorType": "user",
+                "text": payload.get("decision") or payload.get("action") or "",
+                "action": payload.get("action") or "",
+                "rationale": payload.get("rationale") or "",
+                "ok": True,
+                "durationMs": 0,
+                "providerRef": {},
+                "createdAt": event.get("createdAt") or "",
+            })
     return transcript
 
 
@@ -7685,6 +8766,7 @@ def _exec_meeting_project_history(meeting, events=None):
     projected["summary"] = (meeting.get("result") or {}).get("summary", "")
     projected["resolution"] = (meeting.get("result") or {}).get("decision", "")
     projected["actionItems"] = (meeting.get("result") or {}).get("actionItems", [])
+    projected["actionItemDrafts"] = meeting.get("actionItemDrafts") or []
     projected["transcript"] = _exec_meeting_transcript_projection(events or [])
     projected["endedAt"] = int(datetime.fromisoformat(meeting.get("updatedAt").replace("Z", "+00:00")).timestamp()) if meeting.get("updatedAt") else int(time.time())
     return projected
@@ -7720,6 +8802,141 @@ def _meeting_history_projection():
     return history + exec_history
 
 
+def _meeting_find_action_draft(meeting, action_item_id):
+    drafts = meeting.setdefault("actionItemDrafts", [])
+    for draft in drafts:
+        if str(draft.get("id") or "") == str(action_item_id or ""):
+            return draft
+    return None
+
+
+def _meeting_audit_action_item(draft, action, actor_id, before=None, extra=None):
+    draft.setdefault("audit", []).append({
+        "action": action,
+        "actorId": actor_id or "user",
+        "at": _exec_meeting_now(),
+        "before": before or {},
+        "after": {k: draft.get(k) for k in ("title", "description", "assignee", "targetProjectId", "priority", "status", "taskId")},
+        **(extra or {}),
+    })
+
+
+def _meeting_action_item_snapshot(draft):
+    return {k: copy.deepcopy(v) for k, v in (draft or {}).items() if k != "audit"}
+
+
+def _handle_executable_meeting_action_item(meeting_id, action_item_id, body):
+    action = str(body.get("action") or "").strip()
+    if action not in {"update", "reject", "keep", "confirm"}:
+        return {"error": "Invalid action item action", "_status": 400}
+    actor_id = str(body.get("actorId") or body.get("by") or "user").strip() or "user"
+    idempotency_key = str(body.get("idempotencyKey") or "").strip()
+    with _EXEC_MEETING_LOCK:
+        store = _load_exec_meeting_store()
+        meeting = store.get("meetings", {}).get(meeting_id)
+        if not meeting:
+            return {"error": "Executable meeting not found", "_status": 404}
+        _meeting_ensure_action_item_drafts(store, meeting)
+        draft = _meeting_find_action_draft(meeting, action_item_id)
+        if not draft:
+            return {"error": "Action item draft not found", "_status": 404}
+        idem_key = f"{meeting_id}:action-item:{action_item_id}:{action}:{idempotency_key}" if idempotency_key else ""
+        if idem_key and idem_key in store.get("idempotency", {}):
+            return {"ok": True, "meeting": meeting, "actionItem": draft, "taskId": draft.get("taskId"), "idempotent": True}
+        before = _meeting_action_item_snapshot(draft)
+        if action == "update":
+            if draft.get("status") == "confirmed":
+                return {"error": "Confirmed action items cannot be edited", "_status": 409}
+            for key in ("title", "description", "assignee", "targetProjectId", "priority"):
+                if key in body:
+                    draft[key] = str(body.get(key) or "").strip()
+            if not draft.get("targetProjectId") and body.get("projectId"):
+                draft["targetProjectId"] = str(body.get("projectId") or "").strip()
+            draft["updatedAt"] = _exec_meeting_now()
+            _meeting_audit_action_item(draft, "update", actor_id, before)
+        elif action == "reject":
+            if draft.get("status") == "confirmed":
+                return {"error": "Confirmed action items cannot be rejected", "_status": 409}
+            draft["status"] = "rejected"
+            draft["rejectionReason"] = str(body.get("reason") or body.get("rejectionReason") or "").strip()
+            draft["updatedAt"] = _exec_meeting_now()
+            _meeting_audit_action_item(draft, "reject", actor_id, before)
+        elif action == "keep":
+            if draft.get("status") == "confirmed":
+                return {"error": "Confirmed action items cannot be changed to meeting-only", "_status": 409}
+            draft["status"] = "kept_as_meeting_item"
+            draft["updatedAt"] = _exec_meeting_now()
+            _meeting_audit_action_item(draft, "keep", actor_id, before)
+        elif action == "confirm":
+            if draft.get("status") == "confirmed" and draft.get("taskId"):
+                if idem_key:
+                    store.setdefault("idempotency", {})[idem_key] = {"meetingId": meeting_id, "taskId": draft.get("taskId")}
+                    _save_exec_meeting_store(store)
+                return {"ok": True, "meeting": meeting, "actionItem": draft, "taskId": draft.get("taskId"), "idempotent": True}
+            target_project_id = str(body.get("targetProjectId") or body.get("projectId") or draft.get("targetProjectId") or meeting.get("projectId") or "").strip()
+            if not target_project_id:
+                return {"error": "Target project is required before confirming this action item", "code": "target_project_required", "_status": 400}
+            data, project = _project_find(target_project_id)
+            if not project:
+                return {"error": "Project not found", "_status": 404}
+            if project.get("status") == "archived":
+                return {"error": "Archived projects cannot receive meeting action items", "_status": 400}
+            if draft.get("taskId"):
+                return {"ok": True, "meeting": meeting, "actionItem": draft, "taskId": draft.get("taskId"), "idempotent": True}
+            _save_exec_meeting_store(store)
+        if action != "confirm":
+            event = _append_exec_meeting_event(store, meeting, "action_item_updated", actor={"type": "user", "id": actor_id}, payload={"action": action, "actionItemId": action_item_id, "before": before, "after": draft}, idempotency_key=idempotency_key)
+            if idem_key:
+                store.setdefault("idempotency", {})[idem_key] = {"meetingId": meeting_id, "sequence": event["sequence"]}
+            _save_exec_meeting_store(store)
+            return {"ok": True, "meeting": meeting, "actionItem": draft}
+
+    task_body = {
+        "title": body.get("title") or draft.get("title"),
+        "description": body.get("description") or draft.get("description") or draft.get("sourceText") or "",
+        "priority": body.get("priority") or draft.get("priority") or "medium",
+        "assignee": body.get("assignee") or draft.get("assignee") or draft.get("suggestedOwner"),
+        "by": actor_id,
+        "source": {
+            "kind": "meeting_action_item",
+            "meetingId": meeting_id,
+            "actionItemId": action_item_id,
+            "meetingTopic": meeting.get("topic") or "",
+                "originalActionItem": before,
+            "confirmedBy": actor_id,
+            "confirmedAt": _exec_meeting_now(),
+        },
+    }
+    created = _handle_task_create(target_project_id, task_body)
+    if not created.get("ok"):
+        return created
+    task = created["task"]
+    with _EXEC_MEETING_LOCK:
+        store = _load_exec_meeting_store()
+        meeting = store.get("meetings", {}).get(meeting_id)
+        if not meeting:
+            return {"ok": True, "task": task, "taskId": task.get("id")}
+        _meeting_ensure_action_item_drafts(store, meeting)
+        draft = _meeting_find_action_draft(meeting, action_item_id)
+        if draft:
+            before2 = _meeting_action_item_snapshot(draft)
+            confirmed_at = task_body["source"]["confirmedAt"]
+            draft.update({
+                "status": "confirmed",
+                "targetProjectId": target_project_id,
+                "taskId": task.get("id"),
+                "confirmedBy": actor_id,
+                "confirmedAt": confirmed_at,
+                "updatedAt": _exec_meeting_now(),
+            })
+            _meeting_audit_action_item(draft, "confirm", actor_id, before2, {"taskId": task.get("id"), "projectId": target_project_id})
+            event = _append_exec_meeting_event(store, meeting, "action_item_confirmed", actor={"type": "user", "id": actor_id}, payload={"actionItemId": action_item_id, "projectId": target_project_id, "taskId": task.get("id")}, idempotency_key=idempotency_key)
+            if idem_key:
+                store.setdefault("idempotency", {})[idem_key] = {"meetingId": meeting_id, "taskId": task.get("id"), "sequence": event["sequence"]}
+        _save_exec_meeting_store(store)
+        return {"ok": True, "meeting": meeting, "actionItem": draft, "task": task, "taskId": task.get("id")}
+
+
 def _handle_executable_meeting_create(body):
     topic = str(body.get("topic") or "").strip()
     participants = _exec_meeting_clean_participants(body.get("participants") or body.get("agents") or [])
@@ -7741,6 +8958,11 @@ def _handle_executable_meeting_create(body):
     meeting_id = str(body.get("id") or uuid.uuid4())
     actor = {"type": "user", "id": str(body.get("createdBy") or body.get("organizer") or "user")}
     idempotency_key = str(body.get("idempotencyKey") or "").strip()
+    raw_project_id = body.get("projectId") or ((body.get("source") or {}) if isinstance(body.get("source"), dict) else {}).get("projectId")
+    project_ref = _meeting_project_ref(raw_project_id)
+    if not project_ref.get("ok"):
+        return {"error": project_ref.get("error") or "Project not found", "code": project_ref.get("code", "project_not_found"), "_status": project_ref.get("_status", 404)}
+    project_id, project_title = project_ref["projectId"], project_ref["projectTitle"]
     with _EXEC_MEETING_LOCK:
         store = _load_exec_meeting_store()
         if idempotency_key and idempotency_key in store.get("idempotency", {}):
@@ -7749,22 +8971,36 @@ def _handle_executable_meeting_create(body):
             if existing:
                 return {"ok": True, "meeting": existing, "idempotent": True}
         _rebuild_exec_meeting_occupancy(store)
-        conflicts = {p: store.get("occupancy", {}).get(p) for p in participants if store.get("occupancy", {}).get(p)}
-        if conflicts:
-            return {"error": "One or more participants are already in an executable meeting", "conflicts": conflicts, "_status": 409}
+        conflicts = _meeting_build_conflicts(store, participants)
+        occupied_conflicts = {c.get("agentId"): (c.get("source") or {}).get("meetingId") for c in conflicts if c.get("reason") == "meeting_occupied"}
+        allow_conflicts = bool(body.get("allowConflicts") or body.get("conflictAware"))
+        if conflicts and not allow_conflicts:
+            if occupied_conflicts:
+                return {"error": "One or more participants are already in an executable meeting", "conflicts": occupied_conflicts, "_status": 409}
+            return {"error": "One or more participants are busy", "conflicts": conflicts, "_status": 409}
+        meeting_stage = "conflict" if conflicts else "preparing"
         meeting = {
             "id": meeting_id,
             "executableMeeting": True,
             "topic": topic,
+            "agenda": str(body.get("agenda") or topic).strip(),
             "purpose": str(body.get("purpose") or "").strip(),
             "meetingType": meeting_type,
             "organizer": str(body.get("organizer") or participants[0]).strip(),
+            "createdBy": str(body.get("createdBy") or body.get("organizer") or "user").strip(),
+            "createdByType": str(body.get("createdByType") or ("agent" if body.get("createdByAgentId") else "user")).strip(),
+            "createdByAgentId": str(body.get("createdByAgentId") or "").strip(),
+            "projectId": project_id,
+            "projectTitle": project_title,
             "moderator": moderator,
             "participants": participants,
-            "stage": "preparing",
+            "stage": meeting_stage,
             "previousStage": "",
             "round": 0,
             "maxRounds": max_rounds,
+            "decisionWindowSec": _meeting_clamped_decision_window_sec(body.get("decisionWindowSec") or body.get("decisionWindowSeconds") or _meeting_decision_window_sec()),
+            "decisionWindowConfiguredSec": _meeting_clamped_decision_window_sec(body.get("decisionWindowSec") or body.get("decisionWindowSeconds") or _meeting_decision_window_sec()),
+            "resolutionPolicy": _meeting_resolution_policy(body.get("resolutionPolicy") or body.get("arbitrationPolicy")),
             "currentSpeaker": "",
             "speakerQueue": list(participants),
         "context": str(body.get("context") or body.get("initialContext") or "").strip(),
@@ -7772,20 +9008,29 @@ def _handle_executable_meeting_create(body):
             "contextBudget": _meeting_context_budget(body.get("contextBudget")),
             "rollingSummary": "",
             "participantLastSeen": {},
-            "participantState": {p: {"status": "reserved", "joinedAt": now} for p in participants},
+            "participantState": {p: {"status": "conflict" if any(c.get("agentId") == p and c.get("status") in {"open", "waiting", "reserved"} for c in conflicts) else "reserved", "joinedAt": now} for p in participants},
+            "conflicts": conflicts,
+            "originalWork": {},
+            "reservation": {},
             "result": {},
+            "source": body.get("source") if isinstance(body.get("source"), dict) else {},
             "version": 0,
             "lastEventSequence": 0,
             "createdAt": now,
             "updatedAt": now,
         }
         store.setdefault("meetings", {})[meeting_id] = meeting
-        _append_exec_meeting_event(store, meeting, "meeting_created", actor=actor, payload={"stage": "preparing"}, idempotency_key=idempotency_key)
-        store.setdefault("occupancy", {}).update({p: meeting_id for p in participants})
+        _append_exec_meeting_event(store, meeting, "meeting_created", actor=actor, payload={"stage": meeting_stage, "conflicts": conflicts}, idempotency_key=idempotency_key)
+        if not conflicts:
+            store.setdefault("occupancy", {}).update({p: meeting_id for p in participants})
         if idempotency_key:
             store.setdefault("idempotency", {})[idempotency_key] = {"meetingId": meeting_id, "sequence": meeting["lastEventSequence"]}
         _save_exec_meeting_store(store)
-        return {"ok": True, "meeting": meeting}
+    if conflicts:
+        live_meeting = _meeting_complete_live_advisories(meeting_id)
+        if live_meeting:
+            meeting = live_meeting
+    return {"ok": True, "meeting": meeting}
 
 
 def _handle_executable_meeting_detail(meeting_id):
@@ -7794,6 +9039,9 @@ def _handle_executable_meeting_detail(meeting_id):
         meeting = store.get("meetings", {}).get(meeting_id)
         if not meeting:
             return {"error": "Executable meeting not found", "_status": 404}
+        if meeting.get("stage") == "completed":
+            _meeting_ensure_action_item_drafts(store, meeting)
+            _save_exec_meeting_store(store)
         return {"ok": True, "meeting": meeting, "events": store.get("events", {}).get(meeting_id, [])}
 
 
@@ -7811,6 +9059,136 @@ def _handle_executable_meeting_events(meeting_id, query_string=""):
         return {"ok": True, "meetingId": meeting_id, "after": after, "events": events}
 
 
+def _handle_executable_meeting_conflict_action(meeting_id, body):
+    action = str(body.get("action") or "").strip()
+    if action not in {"wait", "reserve", "replace", "force_join", "cancel_conflict", "refresh"}:
+        return {"error": "Invalid conflict action", "_status": 400}
+    agent_id = str(body.get("agentId") or "").strip()
+    actor = {"type": str(body.get("actorType") or "user"), "id": str(body.get("actorId") or "user")}
+    idempotency_key = str(body.get("idempotencyKey") or "").strip()
+    with _EXEC_MEETING_LOCK:
+        store = _load_exec_meeting_store()
+        idem_key = f"{meeting_id}:conflict:{action}:{idempotency_key}" if idempotency_key else ""
+        meeting = store.get("meetings", {}).get(meeting_id)
+        if not meeting:
+            return {"error": "Executable meeting not found", "_status": 404}
+        if idem_key and idem_key in store.get("idempotency", {}):
+            seq = store["idempotency"][idem_key].get("sequence")
+            event = next((e for e in store.get("events", {}).get(meeting_id, []) if e.get("sequence") == seq), None)
+            return {"ok": True, "meeting": meeting, "event": event, "idempotent": True}
+        if meeting.get("stage") in _EXEC_MEETING_TERMINAL:
+            return {"error": "Cannot resolve conflicts on a terminal meeting", "stage": meeting.get("stage"), "_status": 409}
+        conflicts = meeting.get("conflicts") if isinstance(meeting.get("conflicts"), list) else []
+        if action == "refresh":
+            refreshed = _meeting_build_conflicts(store, meeting.get("participants") or [], exclude_meeting_id=meeting_id)
+            meeting["conflicts"] = refreshed
+            meeting["stage"] = "conflict" if refreshed else "preparing"
+            if not refreshed:
+                store.setdefault("occupancy", {}).update({p: meeting_id for p in meeting.get("participants") or []})
+                for p in meeting.get("participants") or []:
+                    meeting.setdefault("participantState", {}).setdefault(p, {})["status"] = "reserved"
+            event = _append_exec_meeting_event(store, meeting, "meeting_conflict_refreshed", actor=actor, payload={"conflicts": refreshed}, idempotency_key=idempotency_key)
+            if idem_key:
+                store.setdefault("idempotency", {})[idem_key] = {"meetingId": meeting_id, "sequence": event["sequence"]}
+            _save_exec_meeting_store(store)
+            if refreshed:
+                live_meeting = _meeting_complete_live_advisories(meeting_id)
+                if live_meeting:
+                    meeting = live_meeting
+            return {"ok": True, "meeting": meeting, "event": event}
+        conflict = next((c for c in conflicts if c.get("agentId") == agent_id and c.get("status") in {"open", "waiting", "reserved"}), None)
+        if not conflict:
+            return {"error": "Open conflict not found for agent", "agentId": agent_id, "_status": 404}
+        now = _exec_meeting_now()
+        payload = {"action": action, "agentId": agent_id, "previous": dict(conflict)}
+        if action == "wait":
+            conflict["status"] = "waiting"
+            conflict["resolution"] = {"action": "wait", "decidedAt": now, "decidedBy": actor["id"]}
+        elif action == "reserve":
+            conflict["status"] = "reserved"
+            reservation = {
+                "agentId": agent_id,
+                "status": "scheduled",
+                "mode": str(body.get("mode") or "try_later"),
+                "targetAt": str(body.get("targetAt") or body.get("remindAt") or "").strip(),
+                "note": str(body.get("note") or "Try again later; this is not a hard reservation.").strip(),
+                "createdAt": now,
+                "createdBy": actor["id"],
+            }
+            meeting.setdefault("reservation", {})[agent_id] = reservation
+            conflict["reservation"] = reservation
+            conflict["resolution"] = {"action": "reserve", "decidedAt": now, "decidedBy": actor["id"]}
+        elif action == "replace":
+            replacement = str(body.get("replacement") or body.get("replacementAgentId") or "").strip()
+            if not replacement:
+                return {"error": "Replacement agent is required", "_status": 400}
+            if replacement in (meeting.get("participants") or []):
+                return {"error": "Replacement agent is already a participant", "_status": 400}
+            replacement_ctx = _meeting_busy_context_for_agent(store, replacement, exclude_meeting_id=meeting_id)
+            if replacement_ctx.get("busy"):
+                return {"error": "Replacement agent is busy", "conflict": replacement_ctx, "_status": 409}
+            participants = [replacement if p == agent_id else p for p in meeting.get("participants") or []]
+            meeting["participants"] = participants
+            if meeting.get("moderator") == agent_id:
+                meeting["moderator"] = replacement
+            meeting["speakerQueue"] = [replacement if p == agent_id else p for p in meeting.get("speakerQueue") or []]
+            meeting.setdefault("participantState", {}).pop(agent_id, None)
+            meeting.setdefault("participantState", {})[replacement] = {"status": "reserved", "joinedAt": now, "replacedAgentId": agent_id}
+            conflict["status"] = "resolved"
+            conflict["resolution"] = {"action": "replace", "replacement": replacement, "decidedAt": now, "decidedBy": actor["id"]}
+            payload["replacement"] = replacement
+        elif action == "force_join":
+            if not body.get("confirmForce"):
+                return {"error": "Force join requires second confirmation", "advisory": conflict.get("advisory") or {}, "_status": 409}
+            if not conflict.get("advisory"):
+                conflict["advisory"] = _meeting_conflict_advisory(conflict)
+            snapshot = _meeting_original_work_snapshot(conflict, "force_join")
+            meeting.setdefault("originalWork", {})[agent_id] = snapshot
+            meeting.setdefault("participantState", {}).setdefault(agent_id, {})["status"] = "reserved"
+            meeting["participantState"][agent_id]["pauseState"] = snapshot["pauseState"]
+            meeting["participantState"][agent_id]["forcedJoin"] = True
+            conflict["status"] = "resolved"
+            conflict["resolution"] = {"action": "force_join", "decidedAt": now, "decidedBy": actor["id"], "confirmForce": True}
+            payload["snapshot"] = snapshot
+        elif action == "cancel_conflict":
+            conflict["status"] = "cancelled"
+            conflict["resolution"] = {"action": "cancel_conflict", "decidedAt": now, "decidedBy": actor["id"]}
+        conflict["updatedAt"] = now
+        if not _meeting_has_open_conflicts(meeting):
+            meeting["previousStage"] = meeting.get("stage")
+            meeting["stage"] = "preparing"
+            for p in meeting.get("participants") or []:
+                meeting.setdefault("participantState", {}).setdefault(p, {})["status"] = "reserved"
+            _rebuild_exec_meeting_occupancy(store)
+            occupied = {p: store.get("occupancy", {}).get(p) for p in meeting.get("participants") or [] if store.get("occupancy", {}).get(p) and store.get("occupancy", {}).get(p) != meeting_id}
+            if occupied:
+                meeting["stage"] = "conflict"
+                for p, occupied_by in occupied.items():
+                    new_conflict = {
+                        "id": str(uuid.uuid4()),
+                        "agentId": p,
+                        "status": "open",
+                        "reason": "meeting_occupied",
+                        "busyKind": "meeting",
+                        "riskLevel": "high",
+                        "summary": f"Already in meeting: {occupied_by}",
+                        "estimatedAvailability": "unknown",
+                        "pauseCapability": "unavailable",
+                        "source": {"meetingId": occupied_by},
+                        "createdAt": now,
+                        "updatedAt": now,
+                    }
+                    new_conflict["advisory"] = _meeting_conflict_advisory(new_conflict)
+                    meeting.setdefault("conflicts", []).append(new_conflict)
+            else:
+                store.setdefault("occupancy", {}).update({p: meeting_id for p in meeting.get("participants") or []})
+        event = _append_exec_meeting_event(store, meeting, "meeting_conflict_resolved", actor=actor, payload=payload, idempotency_key=idempotency_key)
+        if idem_key:
+            store.setdefault("idempotency", {})[idem_key] = {"meetingId": meeting_id, "sequence": event["sequence"]}
+        _save_exec_meeting_store(store)
+        return {"ok": True, "meeting": meeting, "event": event}
+
+
 def _handle_executable_meeting_transition(meeting_id, body):
     target = str(body.get("stage") or body.get("to") or body.get("action") or "").strip()
     aliases = {
@@ -7821,6 +9199,8 @@ def _handle_executable_meeting_transition(meeting_id, body):
         "resume_preparing": "preparing",
         "resume_opening": "active_opening",
         "resume_discussion": "active_discussion",
+        "continue": "active_discussion",
+        "continue_decision": "active_discussion",
         "await_decision": "awaiting_user_decision",
         "summarize": "summarizing",
         "complete": "completed",
@@ -7842,9 +9222,14 @@ def _handle_executable_meeting_transition(meeting_id, body):
         meeting = store.get("meetings", {}).get(meeting_id)
         if not meeting:
             return {"error": "Executable meeting not found", "_status": 404}
+        current = meeting.get("stage")
+        if current == "awaiting_user_decision" and str(body.get("action") or "").strip() in {"continue", "continue_decision"}:
+            _meeting_continue_from_decision_window(store, meeting, actor=actor, reason=body.get("reason") or "user_continue")
+            event = store.get("events", {}).get(meeting_id, [])[-1]
+            _save_exec_meeting_store(store)
+            return {"ok": True, "meeting": meeting, "event": event}
         if expected is not None and int(expected) != int(meeting.get("version", 0)):
             return {"error": "Meeting version conflict", "currentVersion": meeting.get("version", 0), "_status": 409}
-        current = meeting.get("stage")
         if target not in _EXEC_MEETING_TRANSITIONS.get(current, set()):
             return {"error": f"Illegal transition from {current} to {target}", "stage": current, "_status": 409}
         meeting["previousStage"] = current
@@ -7857,11 +9242,13 @@ def _handle_executable_meeting_transition(meeting_id, body):
             meeting["currentSpeaker"] = ""
             for participant in meeting.get("participants", []):
                 store.get("occupancy", {}).pop(participant, None)
+            _meeting_resume_original_work(store, meeting, target)
             if target == "completed":
                 result = body.get("result") if isinstance(body.get("result"), dict) else {}
                 if body.get("summary"):
                     result.setdefault("summary", str(body.get("summary") or ""))
                 meeting["result"] = {**meeting.get("result", {}), **result}
+                _meeting_ensure_action_item_drafts(store, meeting)
         event = _append_exec_meeting_event(store, meeting, "meeting_transitioned", actor=actor, payload={"from": current, "to": target, "reason": body.get("reason") or ""}, idempotency_key=idempotency_key)
         if idem_key:
             store.setdefault("idempotency", {})[idem_key] = {"meetingId": meeting_id, "sequence": event["sequence"]}
@@ -7919,6 +9306,319 @@ def _handle_executable_meeting_intervention(meeting_id, body):
         return {"ok": True, "meeting": meeting, "event": event}
 
 
+def _handle_executable_meeting_agenda_change(meeting_id, body):
+    agenda = str(body.get("agenda") or body.get("topic") or body.get("newAgenda") or "").strip()
+    reason = str(body.get("reason") or "").strip()
+    if not agenda:
+        return {"error": "Agenda change requires agenda", "_status": 400}
+    expected = body.get("expectedVersion")
+    idempotency_key = str(body.get("idempotencyKey") or "").strip()
+    actor_id = str(body.get("actorId") or "user").strip() or "user"
+    actor = {"type": "user", "id": actor_id}
+    with _EXEC_MEETING_LOCK:
+        store = _load_exec_meeting_store()
+        idem_key = f"{meeting_id}:agenda:{idempotency_key}" if idempotency_key else ""
+        meeting = store.get("meetings", {}).get(meeting_id)
+        if not meeting:
+            return {"error": "Executable meeting not found", "_status": 404}
+        if idem_key and idem_key in store.get("idempotency", {}):
+            seq = store["idempotency"][idem_key].get("sequence")
+            event = next((e for e in store.get("events", {}).get(meeting_id, []) if e.get("sequence") == seq), None)
+            return {"ok": True, "meeting": meeting, "event": event, "idempotent": True}
+        if meeting.get("stage") in _EXEC_MEETING_TERMINAL:
+            return {"error": "Cannot change agenda for a terminal meeting", "stage": meeting.get("stage"), "_status": 409}
+        if expected is not None:
+            try:
+                expected_version = int(expected)
+            except (TypeError, ValueError):
+                return {"error": "Invalid expectedVersion", "_status": 400}
+            if expected_version != int(meeting.get("version", 0)):
+                return {"error": "Meeting version conflict", "currentVersion": meeting.get("version", 0), "_status": 409}
+        previous = meeting.get("agenda") or meeting.get("topic") or ""
+        payload = {
+            "agenda": agenda,
+            "previousAgenda": previous,
+            "reason": reason,
+            "actorId": actor_id,
+            "stage": meeting.get("stage"),
+            "round": meeting.get("round", 0),
+            "appliesFromSequence": meeting.get("lastEventSequence", 0),
+        }
+        meeting["agenda"] = agenda
+        event = _append_exec_meeting_event(store, meeting, "agenda_change", actor=actor, payload=payload, idempotency_key=idempotency_key)
+        if idem_key:
+            store.setdefault("idempotency", {})[idem_key] = {"meetingId": meeting_id, "sequence": event["sequence"]}
+        _save_exec_meeting_store(store)
+        return {"ok": True, "meeting": meeting, "event": event}
+
+
+def _handle_executable_meeting_arbitration(meeting_id, body):
+    action = str(body.get("action") or body.get("decisionAction") or "").strip() or "decide"
+    if action not in {"decide", "end_no_consensus", "continue_discussion", "consensus_summary"}:
+        return {"error": "Unsupported arbitration action", "_status": 400}
+    decision = str(body.get("decision") or body.get("resolution") or "").strip()
+    rationale = str(body.get("rationale") or body.get("reason") or "").strip()
+    if action == "decide" and not decision:
+        return {"error": "Arbitration decision is required", "_status": 400}
+    idempotency_key = str(body.get("idempotencyKey") or "").strip()
+    actor_id = str(body.get("actorId") or "user").strip() or "user"
+    actor = {"type": "user", "id": actor_id}
+    with _EXEC_MEETING_LOCK:
+        store = _load_exec_meeting_store()
+        meeting = store.get("meetings", {}).get(meeting_id)
+        if not meeting:
+            return {"error": "Executable meeting not found", "_status": 404}
+        if meeting.get("stage") in _EXEC_MEETING_TERMINAL:
+            return {"error": "Cannot arbitrate a terminal meeting", "stage": meeting.get("stage"), "_status": 409}
+        if meeting.get("stage") != "awaiting_user_decision":
+            return {"error": "Arbitration is only allowed during the user decision window", "stage": meeting.get("stage"), "_status": 409}
+        idem_key = f"{meeting_id}:arbitration:{idempotency_key}" if idempotency_key else ""
+        if idem_key and idem_key in store.get("idempotency", {}):
+            seq = store["idempotency"][idem_key].get("sequence")
+            event = next((e for e in store.get("events", {}).get(meeting_id, []) if e.get("sequence") == seq), None)
+            return {"ok": True, "meeting": meeting, "event": event, "idempotent": True}
+        payload = {
+            "action": action,
+            "decision": decision,
+            "rationale": rationale,
+            "actorId": actor_id,
+            "stage": meeting.get("decisionForStage") or meeting.get("stage"),
+            "round": int(meeting.get("decisionForRound") or meeting.get("round") or 0),
+            "arbitration": meeting.get("arbitration") or {},
+        }
+        event = _append_exec_meeting_event(store, meeting, "arbitration_decision", actor=actor, payload=payload, idempotency_key=idempotency_key)
+        if action == "continue_discussion":
+            meeting["maxRounds"] = max(int(meeting.get("maxRounds") or 1), int(meeting.get("round") or 0) + 1)
+            meeting["decisionNextStage"] = "active_discussion"
+            meeting["decisionNextRound"] = int(meeting.get("round") or 0) + 1
+            _meeting_continue_from_decision_window(store, meeting, actor=actor, reason="arbitration_continue")
+        elif action == "consensus_summary":
+            previous = meeting.get("stage")
+            meeting["previousStage"] = previous
+            meeting["stage"] = "summarizing"
+            meeting["currentSpeaker"] = meeting.get("moderator") or (meeting.get("participants") or [""])[0]
+            for key in ("decisionForStage", "decisionForRound", "decisionNextStage", "decisionNextRound", "decisionWindowSec", "decisionDeadlineAt", "arbitration"):
+                meeting.pop(key, None)
+            _append_exec_meeting_event(store, meeting, "decision_window_closed", actor=actor, payload={"to": "summarizing", "round": int(meeting.get("round") or 0), "reason": "arbitration_consensus_summary"})
+            _append_exec_meeting_event(store, meeting, "meeting_transitioned", actor=actor, payload={"from": previous, "to": "summarizing", "reason": "arbitration_consensus_summary"})
+        else:
+            events = list(store.get("events", {}).get(meeting_id, []))
+            fallback = _meeting_fallback_result(meeting, events)
+            arbitration = payload.get("arbitration") or {}
+            final_decision = decision if action == "decide" else "No consensus. Meeting ended with unresolved disagreement."
+            summary_suffix = rationale or arbitration.get("moderatorSuggestion") or ""
+            result = {
+                **fallback,
+                "summary": _meeting_truncate_text((fallback.get("summary") or "") + ("\n" + summary_suffix if summary_suffix else ""), 2000),
+                "decision": final_decision,
+                "unresolvedQuestions": arbitration.get("disagreements") or fallback.get("unresolvedQuestions") or [],
+                "disagreements": arbitration.get("disagreements") or fallback.get("disagreements") or [],
+                "arbitration": {"action": action, "decision": decision, "rationale": rationale, "actorId": actor_id},
+            }
+            meeting["result"] = result
+            _meeting_ensure_action_item_drafts(store, meeting)
+            previous = meeting.get("stage")
+            meeting["previousStage"] = previous
+            meeting["stage"] = "completed"
+            meeting["currentSpeaker"] = ""
+            for key in ("decisionForStage", "decisionForRound", "decisionNextStage", "decisionNextRound", "decisionWindowSec", "decisionDeadlineAt", "arbitration"):
+                meeting.pop(key, None)
+            for participant in meeting.get("participants", []):
+                store.get("occupancy", {}).pop(participant, None)
+            _meeting_resume_original_work(store, meeting, "arbitration")
+            _append_exec_meeting_event(store, meeting, "meeting_result", actor=actor, payload=result)
+            _append_exec_meeting_event(store, meeting, "meeting_transitioned", actor=actor, payload={"from": previous, "to": "completed", "reason": action})
+        if idem_key:
+            store.setdefault("idempotency", {})[idem_key] = {"meetingId": meeting_id, "sequence": event["sequence"]}
+        _save_exec_meeting_store(store)
+    if action == "consensus_summary":
+        summarized = _handle_executable_meeting_end_with_moderator(meeting_id, {"actorId": actor_id, "actorType": "user"})
+        if isinstance(summarized, dict):
+            summarized["event"] = event
+        return summarized
+    return {"ok": True, "meeting": meeting, "event": event}
+
+
+def _handle_executable_meeting_moderator_takeover(meeting_id, body):
+    action = str(body.get("action") or "").strip()
+    actor = {"type": str(body.get("actorType") or "user"), "id": str(body.get("actorId") or "user")}
+    if action not in {"user_takeover", "replace_moderator"}:
+        return {"error": "Invalid moderator takeover action", "_status": 400}
+    with _EXEC_MEETING_LOCK:
+        store = _load_exec_meeting_store()
+        meeting = store.get("meetings", {}).get(meeting_id)
+        if not meeting:
+            return {"error": "Executable meeting not found", "_status": 404}
+        if meeting.get("stage") in _EXEC_MEETING_TERMINAL:
+            return {"error": "Meeting already ended", "_status": 409}
+        if meeting.get("stage") != "awaiting_user_decision" or (meeting.get("moderatorFailure") or {}).get("reason") != "moderator_failed":
+            return {"error": "Meeting is not waiting for moderator takeover", "stage": meeting.get("stage"), "_status": 409}
+        failure = dict(meeting.get("moderatorFailure") or {})
+        if action == "replace_moderator":
+            replacement = str(body.get("moderator") or body.get("newModerator") or "").strip()
+            if replacement not in (meeting.get("participants") or []):
+                return {"error": "Replacement moderator must be a participant", "_status": 400}
+            previous_moderator = meeting.get("moderator") or ""
+            meeting["moderator"] = replacement
+            meeting["moderatorFailure"] = {**failure, "resolvedBy": "replace_moderator", "replacement": replacement}
+            previous = meeting.get("stage")
+            meeting["previousStage"] = previous
+            meeting["stage"] = "summarizing"
+            meeting["currentSpeaker"] = replacement
+            for key in ("decisionForStage", "decisionForRound", "decisionNextStage", "decisionNextRound", "decisionDeadlineAt"):
+                meeting.pop(key, None)
+            event = _append_exec_meeting_event(store, meeting, "moderator_takeover", actor=actor, payload={
+                "action": "replace_moderator",
+                "previousModerator": previous_moderator,
+                "moderator": replacement,
+                "failure": failure,
+            })
+            _append_exec_meeting_event(store, meeting, "meeting_transitioned", actor=actor, payload={"from": previous, "to": "summarizing", "reason": "moderator_replaced"})
+            _save_exec_meeting_store(store)
+        result = None
+    if action == "replace_moderator":
+        result = _handle_executable_meeting_end_with_moderator(meeting_id, {"actorId": actor["id"], "actorType": actor["type"]})
+        if result.get("ok"):
+            result["takeoverEvent"] = event
+        return result
+
+    with _EXEC_MEETING_LOCK:
+        store = _load_exec_meeting_store()
+        meeting = store.get("meetings", {}).get(meeting_id)
+        if not meeting:
+            return {"error": "Executable meeting not found", "_status": 404}
+        summary = str(body.get("summary") or "").strip()
+        decision = str(body.get("decision") or body.get("resolution") or "").strip()
+        if not summary:
+            return {"error": "Summary is required for user takeover", "_status": 400}
+        action_items = body.get("actionItems") if isinstance(body.get("actionItems"), list) else []
+        events = list(store.get("events", {}).get(meeting_id, []))
+        failure = dict(meeting.get("moderatorFailure") or {})
+        fallback = _meeting_fallback_result(meeting, events)
+        final_result = {
+            **fallback,
+            "summary": summary,
+            "decision": decision or "Meeting closed by user after moderator failure.",
+            "actionItems": action_items,
+            "moderatorFailure": failure,
+            "moderatorTakeover": {"action": "user_takeover", "actorId": actor["id"]},
+        }
+        meeting["result"] = final_result
+        meeting["currentSpeaker"] = ""
+        previous = meeting.get("stage")
+        event = _append_exec_meeting_event(store, meeting, "moderator_takeover", actor=actor, payload={
+            "action": "user_takeover",
+            "summary": summary,
+            "decision": final_result["decision"],
+            "failure": failure,
+        })
+        _append_exec_meeting_event(store, meeting, "meeting_result", actor=actor, payload=final_result)
+        meeting["previousStage"] = previous
+        meeting["stage"] = "completed"
+        for participant in meeting.get("participants", []):
+            store.get("occupancy", {}).pop(participant, None)
+        _meeting_resume_original_work(store, meeting, "moderator_takeover")
+        _append_exec_meeting_event(store, meeting, "meeting_transitioned", actor=actor, payload={"from": previous, "to": "completed", "reason": "user_moderator_takeover"})
+        _save_exec_meeting_store(store)
+        return {"ok": True, "meeting": meeting, "event": event, "events": store.get("events", {}).get(meeting_id, [])}
+
+
+def _meeting_build_targeted_prompt(meeting, speaker, question, events):
+    base = _meeting_build_prompt(meeting, speaker, meeting.get("decisionForStage") or meeting.get("stage"), events)
+    instruction = (
+        "\nTargeted question from the user:\n"
+        f"{_meeting_truncate_text(question, 2000)}\n\n"
+        "Answer this targeted question once. Keep the same JSON schema. "
+        "Do not treat this as a formal round turn.\n"
+    )
+    budget = _meeting_context_budget(meeting.get("contextBudget"))
+    return _meeting_truncate_text(base + instruction, budget["maxPromptChars"])
+
+
+def _handle_executable_meeting_targeted_question(meeting_id, body):
+    question = str(body.get("question") or body.get("text") or body.get("message") or "").strip()
+    target = str(body.get("target") or body.get("targetParticipant") or body.get("speaker") or "").strip()
+    if not question:
+        return {"error": "Targeted question requires text", "_status": 400}
+    if not target:
+        return {"error": "Target participant is required", "_status": 400}
+    idempotency_key = str(body.get("idempotencyKey") or "").strip()
+    actor_id = str(body.get("actorId") or "user").strip() or "user"
+    actor = {"type": "user", "id": actor_id}
+    with _EXEC_MEETING_LOCK:
+        store = _load_exec_meeting_store()
+        meeting = store.get("meetings", {}).get(meeting_id)
+        if not meeting:
+            return {"error": "Executable meeting not found", "_status": 404}
+        if meeting.get("stage") in _EXEC_MEETING_TERMINAL:
+            return {"error": "Cannot target a terminal meeting", "stage": meeting.get("stage"), "_status": 409}
+        if meeting.get("stage") != "awaiting_user_decision":
+            return {"error": "Targeted questions are only allowed during the user decision window", "stage": meeting.get("stage"), "_status": 409}
+        if target not in (meeting.get("participants") or []):
+            return {"error": "Target participant is not in this meeting", "target": target, "_status": 400}
+        idem_key = f"{meeting_id}:targeted:{idempotency_key}" if idempotency_key else ""
+        if idem_key and idem_key in store.get("idempotency", {}):
+            seq = store["idempotency"][idem_key].get("sequence")
+            event = next((e for e in store.get("events", {}).get(meeting_id, []) if e.get("sequence") == seq), None)
+            return {"ok": True, "meeting": meeting, "event": event, "idempotent": True}
+        target_stage = meeting.get("decisionForStage") or meeting.get("previousStage") or meeting.get("stage")
+        target_round = int(meeting.get("decisionForRound") or meeting.get("round") or 0)
+        question_event = _append_exec_meeting_event(
+            store,
+            meeting,
+            "targeted_question",
+            actor=actor,
+            payload={"target": target, "question": question, "actorId": actor_id, "stage": target_stage, "round": target_round},
+            idempotency_key=idempotency_key,
+        )
+        prompt = _meeting_build_targeted_prompt(meeting, target, question, store.get("events", {}).get(meeting_id, []))
+        pending = _append_exec_meeting_event(
+            store,
+            meeting,
+            "provider_call_started",
+            actor={"type": "agent", "id": target},
+            payload={"speaker": target, "stage": target_stage, "round": target_round, "contextMode": meeting.get("contextMode"), "promptChars": len(prompt), "purpose": "targeted_response", "inReplyToSequence": question_event.get("sequence")},
+        )
+        if idem_key:
+            store.setdefault("idempotency", {})[idem_key] = {"meetingId": meeting_id, "sequence": question_event["sequence"]}
+        _save_exec_meeting_store(store)
+
+    result = _meeting_call_provider(meeting, target, prompt)
+
+    with _EXEC_MEETING_LOCK:
+        store = _load_exec_meeting_store()
+        meeting = store["meetings"][meeting_id]
+        normalized = _meeting_normalize_provider_reply(result.get("reply") or "")
+        if _meeting_provider_completion_should_be_ignored(meeting, target_stage, target_round):
+            ignored = _append_ignored_provider_completion(store, meeting, target, result, normalized, pending, "meeting_state_changed", target_stage, target_round, kind="targeted_response")
+            _save_exec_meeting_store(store)
+            return {"ok": True, "meeting": meeting, "questionEvent": question_event, "ignored": ignored, "pending": pending}
+        payload = {
+            "kind": "targeted_response",
+            "speaker": target,
+            "targetQuestion": question,
+            "text": normalized.get("text") or "",
+            "rawText": normalized.get("rawText") or "",
+            "structured": normalized.get("structured") or {},
+            "parseError": normalized.get("parseError") or "",
+            "ok": bool(result.get("ok")),
+            "stage": target_stage,
+            "round": target_round,
+            "providerRef": result.get("providerRef") or _meeting_provider_ref(target),
+            "conversationId": result.get("conversationId") or "",
+            "durationMs": result.get("durationMs") or 0,
+            "inReplyToSequence": pending.get("sequence"),
+            "questionSequence": question_event.get("sequence"),
+        }
+        if normalized.get("providerRaw"):
+            payload["providerRaw"] = normalized.get("providerRaw")
+        turn = _append_exec_meeting_event(store, meeting, "participant_turn", actor={"type": "agent", "id": target}, payload=payload)
+        meeting.setdefault("participantLastSeen", {})[target] = turn["sequence"]
+        _meeting_update_rolling_summary(meeting, target, payload["text"])
+        _save_exec_meeting_store(store)
+        return {"ok": True, "meeting": meeting, "questionEvent": question_event, "event": turn, "pending": pending}
+
+
 def _meeting_events_text(events):
     lines = []
     for event in events:
@@ -7932,6 +9632,13 @@ def _meeting_events_text(events):
             if payload.get("context"):
                 parts.append(f"user added context: {payload.get('context')}")
             lines.append(f"- seq {event.get('sequence')} " + " | ".join(parts))
+        elif event.get("type") == "targeted_question":
+            lines.append(f"- seq {event.get('sequence')} user asked {payload.get('target')}: {payload.get('question') or ''}")
+        elif event.get("type") == "agenda_change":
+            reason = f" reason: {payload.get('reason')}" if payload.get("reason") else ""
+            lines.append(f"- seq {event.get('sequence')} user changed agenda to: {payload.get('agenda') or ''}{reason}")
+        elif event.get("type") == "arbitration_decision":
+            lines.append(f"- seq {event.get('sequence')} user arbitration {payload.get('action')}: {payload.get('decision') or ''} {payload.get('rationale') or ''}".strip())
     return "\n".join(lines)
 
 
@@ -8097,18 +9804,52 @@ def _meeting_normalize_provider_reply(reply):
 
 def _meeting_build_result_prompt(meeting, events):
     transcript = _meeting_events_text(events)
+    policy = _meeting_resolution_policy(meeting.get("resolutionPolicy"))
+    outcome_instruction = (
+        "Outcome must be one of: approved, rejected, no_consensus, needs_user_decision. "
+        "Use approved when the proposal or answer can be accepted, rejected when it should not pass, "
+        "no_consensus when unresolved disagreements remain, and needs_user_decision only when a human decision is required. "
+    )
+    if policy == "moderator_decision":
+        outcome_instruction += "This meeting uses moderator_decision policy, so choose approved, rejected, or no_consensus; do not use needs_user_decision unless essential.\n"
+    else:
+        outcome_instruction += "This meeting uses user_decision policy, so use needs_user_decision if the transcript still requires human arbitration.\n"
     return _meeting_truncate_text(
         "You are the meeting moderator. Summarize and close this meeting based only on the transcript below.\n"
         f"Meeting topic: {meeting.get('topic') or 'Untitled Meeting'}\n"
         f"Purpose: {meeting.get('purpose') or ''}\n"
         f"Type: {meeting.get('meetingType') or 'discussion'}\n"
+        f"Resolution policy: {policy}\n"
         f"Participants: {', '.join(meeting.get('participants') or [])}\n\n"
         f"Transcript:\n{transcript or '(no participant turns yet)'}\n\n"
         "Return exactly one JSON object and no surrounding prose or Markdown fences. "
-        "Use this schema: {\"summary\":\"...\",\"decision\":\"...\",\"unresolvedQuestions\":[\"...\"],"
+        + outcome_instruction +
+        "Use this schema: {\"outcome\":\"approved|rejected|no_consensus|needs_user_decision\",\"summary\":\"...\",\"decision\":\"...\",\"rationale\":\"...\",\"unresolvedQuestions\":[\"...\"],"
         "\"disagreements\":[\"...\"],\"actionItems\":[{\"owner\":\"...\",\"item\":\"...\"}]}.\n",
         (meeting.get("contextBudget") or {}).get("maxPromptChars", 12000),
     )
+
+
+def _meeting_result_outcome(raw):
+    outcome = str(raw or "").strip().lower().replace("-", "_").replace(" ", "_")
+    aliases = {
+        "pass": "approved",
+        "passed": "approved",
+        "approve": "approved",
+        "通过": "approved",
+        "不通过": "rejected",
+        "fail": "rejected",
+        "failed": "rejected",
+        "reject": "rejected",
+        "rejected": "rejected",
+        "无共识": "no_consensus",
+        "no_consensus": "no_consensus",
+        "needs_human": "needs_user_decision",
+        "needs_user": "needs_user_decision",
+        "user_decision": "needs_user_decision",
+    }
+    outcome = aliases.get(outcome, outcome)
+    return outcome if outcome in {"approved", "rejected", "no_consensus", "needs_user_decision"} else ""
 
 
 def _meeting_coerce_action_items(value):
@@ -8134,16 +9875,20 @@ def _meeting_parse_result(raw_text):
     parsed = _meeting_parse_json_object(raw_text)
     if not parsed:
         return {
+            "outcome": "",
             "summary": _meeting_truncate_text(raw_text or "", 2000),
             "decision": "Meeting ended by user. Review transcript for final decision.",
+            "rationale": "",
             "unresolvedQuestions": [],
             "disagreements": [],
             "actionItems": [],
             "parseError": "result_json_not_found",
         }
     return {
+        "outcome": _meeting_result_outcome(parsed.get("outcome") or parsed.get("status") or parsed.get("result")),
         "summary": _meeting_truncate_text(str(parsed.get("summary") or ""), 2000),
         "decision": str(parsed.get("decision") or "").strip(),
+        "rationale": str(parsed.get("rationale") or parsed.get("reasoning") or "").strip(),
         "unresolvedQuestions": _meeting_coerce_list(parsed.get("unresolvedQuestions") or parsed.get("unresolved_questions")),
         "disagreements": _meeting_coerce_list(parsed.get("disagreements")),
         "actionItems": _meeting_coerce_action_items(parsed.get("actionItems") or parsed.get("action_items")),
@@ -8159,8 +9904,10 @@ def _meeting_fallback_result(meeting, events):
         contributions.setdefault(speaker, [])
         contributions[speaker].append(payload.get("text") or "")
     return {
+        "outcome": "approved",
         "summary": _meeting_truncate_text(meeting.get("rollingSummary") or "", 2000),
         "decision": "Meeting completed. Review transcript for final decision.",
+        "rationale": "",
         "unresolvedQuestions": [],
         "disagreements": [],
         "contributions": {k: _meeting_truncate_text("\n".join(v), 1200) for k, v in contributions.items()},
@@ -8203,6 +9950,22 @@ def _handle_executable_meeting_end_with_moderator(meeting_id, body=None):
         store = _load_exec_meeting_store()
         meeting = store["meetings"][meeting_id]
         normalized = _meeting_normalize_provider_reply(result.get("reply") or "")
+        if meeting.get("stage") in _EXEC_MEETING_TERMINAL:
+            pending_payload = pending.get("payload") if isinstance(pending.get("payload"), dict) else {}
+            ignored = _append_ignored_provider_completion(
+                store,
+                meeting,
+                moderator,
+                result,
+                normalized,
+                pending,
+                "meeting_state_changed",
+                "summarizing",
+                pending_payload.get("round", meeting.get("round")),
+                kind="meeting_result",
+            )
+            _save_exec_meeting_store(store)
+            return {"ok": True, "meeting": meeting, "ignored": ignored, "alreadyTerminal": True}
         moderator_payload = {
             "speaker": moderator,
             "text": normalized.get("text") or "",
@@ -8221,6 +9984,27 @@ def _handle_executable_meeting_end_with_moderator(meeting_id, body=None):
         if normalized.get("providerRaw"):
             moderator_payload["providerRaw"] = normalized.get("providerRaw")
         _append_exec_meeting_event(store, meeting, "participant_turn", actor={"type": "agent", "id": moderator}, payload=moderator_payload)
+        if not result.get("ok"):
+            previous = meeting.get("stage")
+            meeting["previousStage"] = previous
+            meeting["stage"] = "awaiting_user_decision"
+            meeting["currentSpeaker"] = ""
+            meeting["moderatorFailure"] = {
+                "reason": "moderator_failed",
+                "moderator": moderator,
+                "error": _meeting_truncate_text(normalized.get("text") or normalized.get("rawText") or result.get("reply") or "Moderator failed", 1000),
+                "providerRef": moderator_payload.get("providerRef") or {},
+                "failedAtSequence": meeting.get("lastEventSequence"),
+            }
+            meeting["decisionForStage"] = previous
+            meeting["decisionForRound"] = int(meeting.get("round") or 0)
+            meeting["decisionNextStage"] = "summarizing"
+            meeting["decisionNextRound"] = int(meeting.get("round") or 0)
+            meeting["decisionWindowSec"] = meeting.get("decisionWindowSec") or _meeting_decision_window_sec()
+            _append_exec_meeting_event(store, meeting, "moderator_failure", actor={"type": "agent", "id": moderator}, payload=meeting["moderatorFailure"])
+            _append_exec_meeting_event(store, meeting, "meeting_transitioned", actor={"type": "agent", "id": moderator}, payload={"from": previous, "to": "awaiting_user_decision", "reason": "moderator_failed"})
+            _save_exec_meeting_store(store)
+            return {"ok": False, "meeting": meeting, "events": store.get("events", {}).get(meeting_id, []), "moderatorFailure": meeting["moderatorFailure"]}
         events = list(store.get("events", {}).get(meeting_id, []))
         parsed_result = _meeting_parse_result(normalized.get("rawText") or normalized.get("text") or "")
         fallback = _meeting_fallback_result(meeting, events)
@@ -8238,6 +10022,7 @@ def _handle_executable_meeting_end_with_moderator(meeting_id, body=None):
         meeting["stage"] = "completed"
         for participant in meeting.get("participants", []):
             store.get("occupancy", {}).pop(participant, None)
+        _meeting_resume_original_work(store, meeting, "moderator_summary_complete")
         _append_exec_meeting_event(store, meeting, "meeting_transitioned", actor=actor, payload={"from": previous, "to": "completed", "reason": "moderator_summary_complete"})
         _save_exec_meeting_store(store)
         return {"ok": True, "meeting": meeting, "events": store.get("events", {}).get(meeting_id, [])}
@@ -8248,8 +10033,10 @@ def _meeting_build_prompt(meeting, speaker, stage, events):
     mode = _meeting_context_mode(meeting.get("contextMode"))
     speaker_seen = int((meeting.get("participantLastSeen") or {}).get(speaker) or 0)
     topic = meeting.get("topic") or "Untitled Meeting"
+    agenda = meeting.get("agenda") or topic
     fixed = (
         f"Meeting topic: {topic}\n"
+        f"Current agenda: {agenda}\n"
         f"Purpose: {meeting.get('purpose') or ''}\n"
         f"Type: {meeting.get('meetingType') or 'discussion'}\n"
         f"Stage: {stage}\n"
@@ -8345,6 +10132,7 @@ def _meeting_call_provider(meeting, speaker, prompt):
 
 def _handle_executable_meeting_run(meeting_id, body=None):
     body = body or {}
+    summarize_after_decision_window = False
     with _EXEC_MEETING_LOCK:
         store = _load_exec_meeting_store()
         meeting = store.get("meetings", {}).get(meeting_id)
@@ -8352,11 +10140,41 @@ def _handle_executable_meeting_run(meeting_id, body=None):
             return {"error": "Executable meeting not found", "_status": 404}
         if meeting.get("stage") in _EXEC_MEETING_TERMINAL:
             return {"ok": True, "meeting": meeting, "alreadyTerminal": True}
-        if meeting.get("stage") == "preparing":
+        if meeting.get("stage") == "conflict" or _meeting_has_open_conflicts(meeting):
+            return {"error": "Meeting has unresolved participant conflicts", "conflicts": meeting.get("conflicts") or [], "_status": 409}
+        if meeting.get("stage") == "summarizing":
+            return {"ok": True, "meeting": meeting, "summarizing": True}
+        if meeting.get("stage") == "awaiting_user_decision":
+            deadline_raw = meeting.get("decisionDeadlineAt") or ""
+            try:
+                deadline_ts = datetime.fromisoformat(deadline_raw.replace("Z", "+00:00")).timestamp() if deadline_raw else 0
+            except (TypeError, ValueError):
+                deadline_ts = 0
+            action = str(body.get("action") or "").strip()
+            no_consensus_arbitration = (meeting.get("arbitration") or {}).get("reason") == "no_consensus"
+            if no_consensus_arbitration and action == "timeout":
+                _save_exec_meeting_store(store)
+                return {"ok": True, "meeting": meeting, "awaitingUserDecision": True}
+            should_auto_advance = action in {"continue", "timeout"} or (deadline_ts and time.time() >= deadline_ts)
+            should_summarize_after_window = should_auto_advance and (meeting.get("decisionNextStage") == "summarizing")
+            if action in {"continue", "timeout"} or (deadline_ts and time.time() >= deadline_ts):
+                if no_consensus_arbitration and deadline_ts and time.time() >= deadline_ts and action != "continue":
+                    _save_exec_meeting_store(store)
+                    return {"ok": True, "meeting": meeting, "awaitingUserDecision": True}
+                _meeting_continue_from_decision_window(store, meeting, reason="decision_timeout" if action == "timeout" or (deadline_ts and time.time() >= deadline_ts) else "user_continue")
+                _save_exec_meeting_store(store)
+                if should_summarize_after_window:
+                    summarize_after_decision_window = True
+            else:
+                _save_exec_meeting_store(store)
+                return {"ok": True, "meeting": meeting, "awaitingUserDecision": True}
+        if not summarize_after_decision_window and meeting.get("stage") == "preparing":
             meeting["previousStage"] = "preparing"
             meeting["stage"] = "active_opening"
             _append_exec_meeting_event(store, meeting, "meeting_transitioned", payload={"from": "preparing", "to": "active_opening", "reason": "run"})
             _save_exec_meeting_store(store)
+    if summarize_after_decision_window:
+        return _handle_executable_meeting_end_with_moderator(meeting_id, {"actorId": "system", "actorType": "system"})
 
     participants = list(meeting.get("participants") or [])
     max_rounds = max(1, int(meeting.get("maxRounds") or 1))
@@ -8368,6 +10186,13 @@ def _handle_executable_meeting_run(meeting_id, body=None):
                 if meeting.get("stage") in _EXEC_MEETING_TERMINAL or meeting.get("stage") == "paused":
                     _save_exec_meeting_store(store)
                     return {"ok": True, "meeting": meeting, "pausedOrTerminal": True}
+                if meeting.get("stage") == "awaiting_user_decision":
+                    _save_exec_meeting_store(store)
+                    return {"ok": True, "meeting": meeting, "awaitingUserDecision": True}
+                if stage == "active_opening" and meeting.get("stage") not in {"active_opening"}:
+                    continue
+                if stage == "active_discussion" and meeting.get("stage") not in {"active_opening", "active_discussion"}:
+                    continue
                 if stage == "active_discussion" and meeting.get("stage") == "active_opening":
                     meeting["previousStage"] = "active_opening"
                     meeting["stage"] = "active_discussion"
@@ -8376,11 +10201,17 @@ def _handle_executable_meeting_run(meeting_id, body=None):
                 elif stage == "active_discussion":
                     meeting["round"] = round_index
                 events = list(store.get("events", {}).get(meeting_id, []))
+                if _meeting_formal_round_complete(events, stage, meeting.get("round"), participants):
+                    _save_exec_meeting_store(store)
+                    continue
                 _save_exec_meeting_store(store)
             for speaker in participants:
                 with _EXEC_MEETING_LOCK:
                     store = _load_exec_meeting_store()
                     meeting = store["meetings"][meeting_id]
+                    events = list(store.get("events", {}).get(meeting_id, []))
+                    if _meeting_formal_turn_exists(events, stage, meeting.get("round"), speaker):
+                        continue
                     meeting["currentSpeaker"] = speaker
                     prompt = _meeting_build_prompt(meeting, speaker, stage, store.get("events", {}).get(meeting_id, []))
                     pending = _append_exec_meeting_event(store, meeting, "provider_call_started", actor={"type": "agent", "id": speaker}, payload={"speaker": speaker, "stage": stage, "round": meeting.get("round"), "contextMode": meeting.get("contextMode"), "promptChars": len(prompt)})
@@ -8390,6 +10221,12 @@ def _handle_executable_meeting_run(meeting_id, body=None):
                     store = _load_exec_meeting_store()
                     meeting = store["meetings"][meeting_id]
                     normalized = _meeting_normalize_provider_reply(result.get("reply") or "")
+                    pending_payload = pending.get("payload") if isinstance(pending.get("payload"), dict) else {}
+                    expected_round = pending_payload.get("round", meeting.get("round"))
+                    if _meeting_provider_completion_should_be_ignored(meeting, stage, expected_round):
+                        _append_ignored_provider_completion(store, meeting, speaker, result, normalized, pending, "meeting_state_changed", stage, expected_round)
+                        _save_exec_meeting_store(store)
+                        return {"ok": True, "meeting": meeting, "ignoredProviderCompletion": True}
                     payload = {
                         "speaker": speaker,
                         "text": normalized.get("text") or "",
@@ -8410,6 +10247,27 @@ def _handle_executable_meeting_run(meeting_id, body=None):
                     meeting.setdefault("participantLastSeen", {})[speaker] = event["sequence"]
                     _meeting_update_rolling_summary(meeting, speaker, payload["text"])
                     _save_exec_meeting_store(store)
+            with _EXEC_MEETING_LOCK:
+                store = _load_exec_meeting_store()
+                meeting = store["meetings"][meeting_id]
+                if meeting.get("stage") in _EXEC_MEETING_TERMINAL or meeting.get("stage") == "paused":
+                    _save_exec_meeting_store(store)
+                    return {"ok": True, "meeting": meeting, "pausedOrTerminal": True}
+                next_stage = "active_discussion"
+                next_round = 1
+                if stage == "active_discussion":
+                    if round_index < max_rounds:
+                        next_round = round_index + 1
+                        window_reason = "round_complete"
+                    else:
+                        next_stage = "summarizing"
+                        next_round = round_index
+                        window_reason = "no_consensus"
+                else:
+                    window_reason = "round_complete"
+                _meeting_open_decision_window(store, meeting, stage, meeting.get("round"), next_stage, next_round, window_reason)
+                _save_exec_meeting_store(store)
+                return {"ok": True, "meeting": meeting, "awaitingUserDecision": True}
     with _EXEC_MEETING_LOCK:
         store = _load_exec_meeting_store()
         meeting = store["meetings"][meeting_id]
@@ -8436,8 +10294,10 @@ def _handle_executable_meeting_run(meeting_id, body=None):
         _append_exec_meeting_event(store, meeting, "meeting_result", payload=result)
         previous = meeting.get("stage")
         meeting["stage"] = "completed"
+        _meeting_ensure_action_item_drafts(store, meeting)
         for participant in meeting.get("participants", []):
             store.get("occupancy", {}).pop(participant, None)
+        _meeting_resume_original_work(store, meeting, "run_complete")
         _append_exec_meeting_event(store, meeting, "meeting_transitioned", payload={"from": previous, "to": "completed", "reason": "run_complete"})
         _save_exec_meeting_store(store)
         return {"ok": True, "meeting": meeting, "events": store.get("events", {}).get(meeting_id, [])}
@@ -8706,6 +10566,9 @@ SCORE_CHECKLIST_BONUS = 2       # Per checklist item completed
 ##############################################################################
 
 _PROJECTS_FILE_LOCK = threading.Lock()
+_PROJECT_CRON_BINDINGS_LOCK = threading.Lock()
+_PROJECT_CRON_HISTORY_LIMIT = 200
+_PROJECT_CRON_ALERT_STATUSES = {"failed", "intervention_required"}
 
 def _load_projects():
     """Load projects from the markdown-backed store."""
@@ -8714,6 +10577,18 @@ def _load_projects():
 
 def _save_projects(data):
     """Persist projects to the markdown-backed store."""
+    try:
+        existing = PROJECT_STORE.load_all()
+        existing_by_id = {p.get("id"): p for p in existing.get("projects", []) if isinstance(p, dict)}
+        for project in data.get("projects", []) if isinstance(data, dict) else []:
+            if not isinstance(project, dict):
+                continue
+            current_history = project.get("scheduledCronHistory")
+            previous_history = (existing_by_id.get(project.get("id")) or {}).get("scheduledCronHistory")
+            if (not current_history) and previous_history:
+                project["scheduledCronHistory"] = previous_history
+    except Exception:
+        pass
     PROJECT_STORE.save_all(data)
 
 
@@ -8738,6 +10613,637 @@ def _log_activity(project, type_, by, detail, task_id=None):
     # Cap at 200
     if len(project["activity"]) > 200:
         project["activity"] = project["activity"][-200:]
+
+
+def _project_cron_bindings_file():
+    return os.path.join(STATUS_DIR, "project-cron-bindings.json")
+
+
+def _load_project_cron_bindings():
+    path = _project_cron_bindings_file()
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    bindings = data.get("bindings")
+    if not isinstance(bindings, dict):
+        bindings = {}
+    # Drop malformed entries at read time so older/bad files cannot break API responses.
+    clean = {}
+    for cron_id, binding in bindings.items():
+        if isinstance(binding, dict) and binding.get("projectId") and binding.get("targetType"):
+            clean[str(cron_id)] = binding
+    return {"version": 1, "bindings": clean}
+
+
+def _save_project_cron_bindings(data):
+    path = _project_cron_bindings_file()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    payload = {
+        "version": 1,
+        "bindings": data.get("bindings", {}) if isinstance(data, dict) else {},
+    }
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+        f.write("\n")
+    os.replace(tmp, path)
+
+
+def _project_find(project_id):
+    data = _load_projects()
+    project = next((p for p in data.get("projects", []) if p.get("id") == project_id), None)
+    return data, project
+
+
+def _project_cron_reason_label(reason, error=None):
+    labels = {
+        "project_archived": "项目已归档，本次定时任务已跳过。",
+        "project_cron_paused": "项目定时任务已暂停。",
+        "project_active": "项目已有任务正在运行，本次定时任务已跳过。",
+        "task_missing": "绑定的目标任务不存在。",
+        "task_completed_repeat_disabled": "目标任务已完成，且未开启允许重复触发。",
+        "confirmation_required": "需要人工确认后才能继续执行。",
+        "reviewer_skip_confirmation_required": "当前任务需要确认是否跳过独立审查。",
+        "dirty_workspace_confirmation_required": "工作区存在未确认变更，需要人工确认。",
+        "dispatch_failed": "派发项目定时任务失败。",
+    }
+    if reason in labels:
+        return labels[reason]
+    if error:
+        return str(error)
+    if reason:
+        return str(reason)
+    return ""
+
+
+def _project_cron_target_snapshot(project, binding):
+    target_type = (binding or {}).get("targetType") or "projectWorkflow"
+    task_id = (binding or {}).get("taskId")
+    task = None
+    if target_type == "projectTask":
+        task = next((t for t in project.get("tasks", []) or [] if t.get("id") == task_id), None)
+    return {
+        "targetType": target_type,
+        "taskId": task_id,
+        "taskTitle": (task or {}).get("title") or (binding or {}).get("taskTitle") or "",
+    }
+
+
+def _project_cron_normalize_history_status(status, reason=None, result=None):
+    if status == "failed":
+        return "failed"
+    if status == "paused":
+        return "paused"
+    if reason in {"confirmation_required", "reviewer_skip_confirmation_required", "dirty_workspace_confirmation_required"}:
+        return "intervention_required"
+    if isinstance(result, dict) and result.get("confirmationRequired"):
+        return "intervention_required"
+    if status == "started":
+        return "started"
+    return "skipped"
+
+
+def _project_cron_append_history(project_id, cron_id, binding, status, reason=None, error=None, result=None, source="manual", duration_ms=None):
+    data, project = _project_find(project_id)
+    if not project:
+        return None
+    binding = binding or {}
+    now = _proj_now()
+    history_status = _project_cron_normalize_history_status(status, reason, result)
+    target = _project_cron_target_snapshot(project, binding)
+    message = _project_cron_reason_label(reason, error)
+    entry = {
+        "id": _proj_uuid(),
+        "cronId": str(cron_id),
+        "cronName": binding.get("name") or binding.get("cronName") or str(cron_id),
+        "projectId": project_id,
+        "projectName": project.get("title", ""),
+        "targetType": target["targetType"],
+        "taskId": target["taskId"],
+        "taskTitle": target["taskTitle"],
+        "status": history_status,
+        "reason": reason or "",
+        "message": message,
+        "error": error or "",
+        "source": source,
+        "createdAt": now,
+    }
+    if duration_ms is not None:
+        entry["durationMs"] = duration_ms
+    if isinstance(result, dict):
+        entry["resultStatus"] = result.get("status") or result.get("code") or ""
+        if result.get("_status"):
+            entry["httpStatus"] = result.get("_status")
+    history = project.get("scheduledCronHistory")
+    if not isinstance(history, list):
+        history = []
+    history.append(entry)
+    project["scheduledCronHistory"] = history[-_PROJECT_CRON_HISTORY_LIMIT:]
+    if history_status in _PROJECT_CRON_ALERT_STATUSES:
+        detail = f"Project scheduled cron '{entry['cronName']}' requires attention"
+        if message:
+            detail += f": {message}"
+        _log_activity(project, "project_cron_alert", "project-cron", detail, target["taskId"])
+    project["updatedAt"] = now
+    _save_projects(data)
+    print(json.dumps({
+        "type": "project_cron_dispatch",
+        "projectId": project_id,
+        "cronId": str(cron_id),
+        "targetType": target["targetType"],
+        "taskId": target["taskId"],
+        "decision": history_status,
+        "reason": reason or "",
+        "error": error or "",
+        "timestamp": now,
+    }, ensure_ascii=False), flush=True)
+    return entry
+
+
+def _project_cron_alerts(project, limit=5):
+    history = project.get("scheduledCronHistory", [])
+    if not isinstance(history, list):
+        return []
+    alerts = [h for h in history if isinstance(h, dict) and h.get("status") in _PROJECT_CRON_ALERT_STATUSES]
+    alerts.sort(key=lambda h: h.get("createdAt", ""), reverse=True)
+    return alerts[:limit]
+
+
+def _project_agent_fields(project):
+    if not isinstance(project, dict):
+        return []
+    values = [
+        project.get("owner"),
+        project.get("ownerId"),
+        project.get("createdBy"),
+        project.get("defaultExecutorAgentId"),
+        project.get("defaultReviewerAgentId"),
+    ]
+    for task in project.get("tasks", []) or []:
+        if isinstance(task, dict):
+            values.extend([
+                task.get("assignee"),
+                task.get("executorAgentId"),
+                task.get("reviewerAgentId"),
+            ])
+    return [str(v).strip() for v in values if str(v or "").strip()]
+
+
+def _project_cron_validate_project(project_id):
+    _, project = _project_find(project_id)
+    if not project:
+        return None, {"error": "Project not found", "_status": 404}
+    if project.get("status") == "archived":
+        return None, {"error": "Archived projects cannot use scheduled cron", "_status": 400}
+    if not _project_agent_fields(project):
+        return None, {"error": "Project scheduled cron requires a project owner or bound agent", "_status": 400}
+    return project, None
+
+
+def _project_cron_validate_schedule(schedule):
+    if not isinstance(schedule, dict):
+        return "Schedule is required"
+    kind = schedule.get("kind")
+    if kind == "cron":
+        expr = str(schedule.get("expr") or "").strip()
+        if len(expr.split()) < 5:
+            return "Cron schedule requires a valid expr"
+        return None
+    if kind == "every":
+        try:
+            every_ms = int(schedule.get("everyMs") or 0)
+        except (TypeError, ValueError):
+            every_ms = 0
+        if every_ms < 60000:
+            return "Recurring schedule everyMs must be at least 60000"
+        return None
+    if kind == "at":
+        at = str(schedule.get("at") or "").strip()
+        if not at:
+            return "One-shot schedule requires at"
+        try:
+            datetime.fromisoformat(at.replace("Z", "+00:00"))
+        except ValueError:
+            return "One-shot schedule at must be an ISO datetime"
+        return None
+    return "Unsupported schedule kind"
+
+
+def _project_cron_validate_target(project, target_type, task_id=None):
+    if target_type == "projectWorkflow":
+        return None
+    if target_type == "projectTask":
+        if not task_id:
+            return "taskId is required for projectTask target"
+        if not any(t.get("id") == task_id for t in project.get("tasks", []) or [] if isinstance(t, dict)):
+            return "Task not found in project"
+        return None
+    return "targetType must be projectWorkflow or projectTask"
+
+
+def _project_cron_default_agent(project, task_id=None):
+    if task_id:
+        task = next((t for t in project.get("tasks", []) or [] if t.get("id") == task_id), None)
+        if task:
+            for field in ("executorAgentId", "assignee", "reviewerAgentId"):
+                if task.get(field):
+                    return task.get(field)
+    for field in ("defaultExecutorAgentId", "defaultReviewerAgentId", "ownerId", "createdBy"):
+        if project.get(field):
+            return project.get(field)
+    agents = _project_agent_fields(project)
+    return agents[0] if agents else "main"
+
+
+def _project_cron_gateway_job_from_body(project, body, existing=None):
+    target_type = body.get("targetType") or (existing or {}).get("targetType") or "projectWorkflow"
+    task_id = body.get("taskId") if "taskId" in body else (existing or {}).get("taskId")
+    if target_type == "projectWorkflow":
+        task_id = None
+    schedule = body.get("schedule") if "schedule" in body else (existing or {}).get("schedule")
+    name = (body.get("name") if "name" in body else (existing or {}).get("name")) or f"{project.get('title', 'Project')} scheduled task"
+    enabled = body.get("enabled") if "enabled" in body else (existing or {}).get("enabled", True)
+    agent_id = (body.get("agentId") if "agentId" in body else (existing or {}).get("agentId")) or _project_cron_default_agent(project, task_id)
+    message = (body.get("message") if "message" in body else (existing or {}).get("message")) or (
+        f"Scheduled project task for project '{project.get('title', project.get('id'))}'. "
+        "Project execution dispatch will be handled by Virtual Office in a later phase."
+    )
+    timeout = body.get("timeoutSeconds") if "timeoutSeconds" in body else (existing or {}).get("timeoutSeconds", 300)
+    try:
+        timeout = max(10, int(timeout))
+    except (TypeError, ValueError):
+        timeout = 300
+    session_target = body.get("sessionTarget") if "sessionTarget" in body else (existing or {}).get("sessionTarget", "isolated")
+    if session_target == "main":
+        payload = {"kind": "systemEvent", "text": message}
+    else:
+        payload = {"kind": "agentTurn", "message": message, "timeoutSeconds": timeout}
+        session_target = "isolated"
+    job = {
+        "name": name,
+        "schedule": schedule,
+        "payload": payload,
+        "sessionTarget": session_target,
+        "enabled": bool(enabled),
+        "agentId": agent_id,
+    }
+    if "delivery" in body:
+        job["delivery"] = body.get("delivery")
+    elif existing and "delivery" in existing:
+        job["delivery"] = existing.get("delivery")
+    else:
+        job["delivery"] = {"mode": "none"}
+    binding = {
+        "projectId": project.get("id"),
+        "targetType": target_type,
+        "taskId": task_id,
+        "agentId": agent_id,
+        "name": name,
+        "schedule": schedule,
+        "enabled": bool(enabled),
+        "message": message,
+        "timeoutSeconds": timeout,
+        "sessionTarget": session_target,
+        "updatedAt": _proj_now(),
+    }
+    return job, binding
+
+
+def _project_cron_extract_jobs(result):
+    if not isinstance(result, dict):
+        return []
+    for key in ("jobs", "items"):
+        if isinstance(result.get(key), list):
+            return result.get(key)
+    payload = result.get("payload")
+    if isinstance(payload, dict):
+        for key in ("jobs", "items"):
+            if isinstance(payload.get(key), list):
+                return payload.get(key)
+    return []
+
+
+def _project_cron_extract_job_id(result):
+    if not isinstance(result, dict):
+        return ""
+    candidates = [
+        result.get("id"),
+        (result.get("job") or {}).get("id") if isinstance(result.get("job"), dict) else None,
+        (result.get("cron") or {}).get("id") if isinstance(result.get("cron"), dict) else None,
+    ]
+    payload = result.get("payload")
+    if isinstance(payload, dict):
+        candidates.extend([
+            payload.get("id"),
+            (payload.get("job") or {}).get("id") if isinstance(payload.get("job"), dict) else None,
+            (payload.get("cron") or {}).get("id") if isinstance(payload.get("cron"), dict) else None,
+        ])
+    for candidate in candidates:
+        if candidate:
+            return str(candidate)
+    return ""
+
+
+def _project_cron_task_title(project, task_id):
+    if not task_id:
+        return ""
+    task = next((t for t in project.get("tasks", []) or [] if isinstance(t, dict) and t.get("id") == task_id), None)
+    return task.get("title", "") if task else ""
+
+
+def _project_cron_job_state(job, binding):
+    state = {}
+    if isinstance(job, dict) and isinstance(job.get("state"), dict):
+        state.update(job.get("state") or {})
+    for key in ("lastRunAt", "lastStatus", "lastError", "nextRunAt", "lastRunAtMs", "nextRunAtMs", "lastDurationMs"):
+        if binding.get(key) is not None:
+            state[key] = binding.get(key)
+    return state
+
+
+def _project_cron_enrich_item(cron_id, binding, job, project=None):
+    project = project or {}
+    merged = dict(job or {})
+    merged.update({
+        "id": str(cron_id),
+        "kind": "project",
+        "projectBinding": binding,
+        "projectId": binding.get("projectId"),
+        "projectName": project.get("title") or binding.get("projectName") or binding.get("projectId"),
+        "projectStatus": project.get("status") or "missing",
+        "projectCronPaused": bool(project.get("scheduledCronPaused")),
+        "targetType": binding.get("targetType"),
+        "taskId": binding.get("taskId"),
+        "taskTitle": _project_cron_task_title(project, binding.get("taskId")) if project else "",
+        "state": _project_cron_job_state(job or {}, binding),
+    })
+    for key in ("name", "schedule", "enabled", "agentId", "message", "timeoutSeconds", "sessionTarget"):
+        if merged.get(key) is None and binding.get(key) is not None:
+            merged[key] = binding[key]
+    return merged
+
+
+def _handle_project_scheduled_cron_list(project_id):
+    project, error = _project_cron_validate_project(project_id)
+    if error:
+        return error
+    cron_result = _gateway_rpc_call("cron.list", {"includeDisabled": True}, timeout=20)
+    if not cron_result.get("ok"):
+        return {"error": cron_result.get("error", "Failed to list cron jobs"), "_status": 502}
+    jobs_by_id = {str(j.get("id")): j for j in _project_cron_extract_jobs(cron_result) if isinstance(j, dict) and j.get("id")}
+    with _PROJECT_CRON_BINDINGS_LOCK:
+        bindings = _load_project_cron_bindings().get("bindings", {})
+    items = []
+    for cron_id, binding in bindings.items():
+        if binding.get("projectId") != project_id:
+            continue
+        items.append(_project_cron_enrich_item(cron_id, binding, jobs_by_id.get(str(cron_id), {}), project))
+    return {"ok": True, "projectId": project_id, "jobs": items, "cronOwner": "gateway", "bindingOwner": "virtual-office"}
+
+
+def _handle_project_scheduled_cron_all():
+    cron_result = _gateway_rpc_call("cron.list", {"includeDisabled": True}, timeout=20)
+    if not cron_result.get("ok"):
+        return {"error": cron_result.get("error", "Failed to list cron jobs"), "_status": 502}
+    jobs_by_id = {str(j.get("id")): j for j in _project_cron_extract_jobs(cron_result) if isinstance(j, dict) and j.get("id")}
+    with _PROJECT_CRON_BINDINGS_LOCK:
+        bindings = _load_project_cron_bindings().get("bindings", {})
+    data = _load_projects()
+    projects_by_id = {p.get("id"): p for p in data.get("projects", []) if isinstance(p, dict)}
+    items = []
+    for cron_id, binding in bindings.items():
+        project = projects_by_id.get(binding.get("projectId"), {})
+        items.append(_project_cron_enrich_item(cron_id, binding, jobs_by_id.get(str(cron_id), {}), project))
+    return {
+        "ok": True,
+        "jobs": items,
+        "projects": [
+            {"id": p.get("id"), "title": p.get("title", ""), "status": p.get("status", "active"), "scheduledCronPaused": bool(p.get("scheduledCronPaused"))}
+            for p in data.get("projects", []) if isinstance(p, dict)
+        ],
+        "cronOwner": "gateway",
+        "bindingOwner": "virtual-office",
+    }
+
+
+def _handle_project_scheduled_cron_create(project_id, body):
+    project, error = _project_cron_validate_project(project_id)
+    if error:
+        return error
+    target_type = body.get("targetType") or "projectWorkflow"
+    task_id = body.get("taskId")
+    target_error = _project_cron_validate_target(project, target_type, task_id)
+    if target_error:
+        return {"error": target_error, "_status": 400}
+    schedule_error = _project_cron_validate_schedule(body.get("schedule"))
+    if schedule_error:
+        return {"error": schedule_error, "_status": 400}
+    job, binding = _project_cron_gateway_job_from_body(project, body)
+    cron_result = _gateway_rpc_call("cron.add", job, timeout=30)
+    if not cron_result.get("ok"):
+        return {"error": cron_result.get("error", "Failed to create cron job"), "_status": 502}
+    cron_id = _project_cron_extract_job_id(cron_result)
+    if not cron_id:
+        return {"error": "Cron job was created but no id was returned", "_status": 502}
+    binding["cronJobId"] = cron_id
+    binding["createdAt"] = _proj_now()
+    with _PROJECT_CRON_BINDINGS_LOCK:
+        data = _load_project_cron_bindings()
+        data.setdefault("bindings", {})[cron_id] = binding
+        _save_project_cron_bindings(data)
+    return {"ok": True, "projectId": project_id, "id": cron_id, "job": {**job, "id": cron_id}, "binding": binding}
+
+
+def _handle_project_scheduled_cron_update(project_id, cron_id, body):
+    project, error = _project_cron_validate_project(project_id)
+    if error:
+        return error
+    with _PROJECT_CRON_BINDINGS_LOCK:
+        data = _load_project_cron_bindings()
+        existing = data.get("bindings", {}).get(cron_id)
+    if not existing or existing.get("projectId") != project_id:
+        return {"error": "Project scheduled cron not found", "_status": 404}
+    target_type = body.get("targetType") if "targetType" in body else existing.get("targetType")
+    task_id = body.get("taskId") if "taskId" in body else existing.get("taskId")
+    target_error = _project_cron_validate_target(project, target_type, task_id)
+    if target_error:
+        return {"error": target_error, "_status": 400}
+    schedule = body.get("schedule") if "schedule" in body else existing.get("schedule")
+    schedule_error = _project_cron_validate_schedule(schedule)
+    if schedule_error:
+        return {"error": schedule_error, "_status": 400}
+    job, binding = _project_cron_gateway_job_from_body(project, {**body, "targetType": target_type, "taskId": task_id, "schedule": schedule}, existing=existing)
+    patch = dict(job)
+    cron_result = _gateway_rpc_call("cron.update", {"id": cron_id, "patch": patch}, timeout=30)
+    if not cron_result.get("ok"):
+        return {"error": cron_result.get("error", "Failed to update cron job"), "_status": 502}
+    binding["cronJobId"] = cron_id
+    binding["createdAt"] = existing.get("createdAt") or _proj_now()
+    with _PROJECT_CRON_BINDINGS_LOCK:
+        data = _load_project_cron_bindings()
+        data.setdefault("bindings", {})[cron_id] = binding
+        _save_project_cron_bindings(data)
+    return {"ok": True, "projectId": project_id, "id": cron_id, "binding": binding}
+
+
+def _handle_project_scheduled_cron_delete(project_id, cron_id):
+    with _PROJECT_CRON_BINDINGS_LOCK:
+        data = _load_project_cron_bindings()
+        existing = data.get("bindings", {}).get(cron_id)
+    if not existing or existing.get("projectId") != project_id:
+        return {"error": "Project scheduled cron not found", "_status": 404}
+    cron_result = _gateway_rpc_call("cron.remove", {"id": cron_id}, timeout=30)
+    if not cron_result.get("ok"):
+        return {"error": cron_result.get("error", "Failed to delete cron job"), "_status": 502}
+    with _PROJECT_CRON_BINDINGS_LOCK:
+        data = _load_project_cron_bindings()
+        data.setdefault("bindings", {}).pop(cron_id, None)
+        _save_project_cron_bindings(data)
+    return {"ok": True, "projectId": project_id, "id": cron_id}
+
+
+def _project_cron_update_binding_status(cron_id, status, error=None, extra=None):
+    now = _proj_now()
+    with _PROJECT_CRON_BINDINGS_LOCK:
+        data = _load_project_cron_bindings()
+        binding = data.setdefault("bindings", {}).get(str(cron_id))
+        if not binding:
+            return
+        binding["lastRunAt"] = now
+        binding["lastStatus"] = status
+        binding["lastError"] = error or None
+        binding["updatedAt"] = now
+        if isinstance(extra, dict):
+            binding.update(extra)
+        _save_project_cron_bindings(data)
+
+
+def _project_cron_reopen_completed_task(project, task, actor="project-cron"):
+    if not task or not task.get("completedAt"):
+        return False
+    done_cols = _project_execution_done_column_ids(project)
+    target_col = _wf_get_backlog_col(project)
+    if not target_col:
+        for col in project.get("columns", []) or []:
+            if col.get("id") not in done_cols:
+                target_col = col
+                break
+    previous_col = task.get("columnId")
+    task["completedAt"] = None
+    task["executionState"] = "backlog" if _project_execution_enabled(project) else "backlog"
+    if target_col:
+        task["columnId"] = target_col.get("id")
+        col_tasks = [t for t in project.get("tasks", []) if t.get("columnId") == target_col.get("id") and t.get("id") != task.get("id")]
+        task["order"] = max((t.get("order", 0) for t in col_tasks), default=-1) + 1
+    task["updatedAt"] = _proj_now()
+    task.setdefault("comments", []).append({
+        "id": _proj_uuid(),
+        "author": "project-cron",
+        "text": "Reopened completed task for scheduled repeat execution.",
+        "createdAt": _proj_now(),
+    })
+    _log_activity(project, "project_cron_task_reopened", actor, f"Reopened completed task '{task.get('title', '')}' for scheduled repeat execution", task.get("id"))
+    task.setdefault("stateHistory", []).append({
+        "actor": actor,
+        "from": "done",
+        "to": "backlog",
+        "reason": "scheduled repeat execution",
+        "previousColumnId": previous_col,
+        "at": _proj_now(),
+    })
+    task["stateHistory"] = task["stateHistory"][-100:]
+    project["updatedAt"] = _proj_now()
+    return True
+
+
+def _handle_project_scheduled_cron_dispatch(project_id, cron_id, source="manual"):
+    started_at = time.time()
+
+    def record(status, reason=None, error=None, result=None):
+        duration_ms = int((time.time() - started_at) * 1000)
+        return _project_cron_append_history(project_id, cron_id, binding, status, reason=reason, error=error, result=result, source=source, duration_ms=duration_ms)
+
+    with _PROJECT_CRON_BINDINGS_LOCK:
+        binding = _load_project_cron_bindings().get("bindings", {}).get(str(cron_id))
+    if not binding or binding.get("projectId") != project_id:
+        return {"error": "Project scheduled cron not found", "_status": 404}
+    data, project = _project_find(project_id)
+    if not project:
+        _project_cron_update_binding_status(cron_id, "missing_project", "Project not found")
+        return {"error": "Project not found", "_status": 404, "status": "missing_project"}
+    if project.get("status") == "archived":
+        _project_cron_update_binding_status(cron_id, "skipped_archived", "Project is archived")
+        record("skipped", "project_archived")
+        return {"ok": True, "status": "skipped", "reason": "project_archived", "projectId": project_id, "id": cron_id}
+    if project.get("scheduledCronPaused"):
+        _project_cron_update_binding_status(cron_id, "paused", "Project scheduled cron is paused")
+        record("paused", "project_cron_paused")
+        return {"ok": True, "status": "paused", "reason": "project_cron_paused", "projectId": project_id, "id": cron_id}
+    target_type = binding.get("targetType") or "projectWorkflow"
+    task_id = binding.get("taskId")
+    active = _project_execution_active_task(project) if _project_execution_enabled(project) else None
+    if active:
+        _project_cron_update_binding_status(cron_id, "skipped", "Another task is already active for this project", {"activeTaskId": active.get("id")})
+        record("skipped", "project_active")
+        return {"ok": True, "status": "skipped", "reason": "project_active", "activeTaskId": active.get("id"), "projectId": project_id, "id": cron_id}
+    if target_type == "projectTask":
+        task = next((t for t in project.get("tasks", []) or [] if t.get("id") == task_id), None)
+        if not task:
+            _project_cron_update_binding_status(cron_id, "missing_target", "Task not found")
+            record("skipped", "task_missing")
+            return {"ok": True, "status": "skipped", "reason": "task_missing", "projectId": project_id, "id": cron_id}
+        if task.get("completedAt") and task.get("scheduledRepeatEnabled") is not True:
+            _project_cron_update_binding_status(cron_id, "skipped_completed_task", "Task is completed and scheduled repeat is not enabled")
+            record("skipped", "task_completed_repeat_disabled")
+            return {"ok": True, "status": "skipped", "reason": "task_completed_repeat_disabled", "projectId": project_id, "id": cron_id, "taskId": task_id}
+        reopened = _project_cron_reopen_completed_task(project, task)
+        if reopened:
+            data["projects"] = [project if p.get("id") == project_id else p for p in data.get("projects", [])]
+            _save_projects(data)
+        if _project_execution_enabled(project):
+            result = _handle_project_execution_start(project_id, task_id, {"by": "project-cron", "source": source, "skipReviewConfirmed": True})
+        else:
+            result = _handle_workflow_start(project_id, {"autoMode": False})
+        if reopened and isinstance(result, dict):
+            result["reopenedCompletedTask"] = True
+    else:
+        if _project_execution_enabled(project):
+            result = _handle_project_execution_project_start(project_id, {"mode": project.get("projectExecutionStartMode") or "continuous", "by": "project-cron", "source": source, "skipReviewConfirmed": True})
+        else:
+            result = _handle_workflow_start(project_id, {"autoMode": True})
+    if result.get("ok"):
+        _project_cron_update_binding_status(cron_id, "started", None, {"lastDispatchResult": result})
+        record("started", None, result=result)
+        return {"ok": True, "status": "started", "projectId": project_id, "id": cron_id, "result": result}
+    if result.get("confirmationRequired"):
+        _project_cron_update_binding_status(cron_id, "skipped_confirmation_required", result.get("code") or "confirmation required", {"lastDispatchResult": result})
+        record("skipped", result.get("code") or "confirmation_required", error=result.get("error"), result=result)
+        return {"ok": True, "status": "skipped", "reason": result.get("code") or "confirmation_required", "projectId": project_id, "id": cron_id, "result": result}
+    status = "failed"
+    if result.get("_status") == 409:
+        status = "skipped"
+    _project_cron_update_binding_status(cron_id, status, result.get("error") or result.get("code") or "dispatch failed", {"lastDispatchResult": result})
+    if status == "skipped":
+        record("skipped", result.get("code") or result.get("error"), error=result.get("error"), result=result)
+        return {"ok": True, "status": "skipped", "reason": result.get("code") or result.get("error"), "projectId": project_id, "id": cron_id, "result": result}
+    record("failed", result.get("code") or "dispatch_failed", error=result.get("error"), result=result)
+    return {**result, "projectId": project_id, "id": cron_id}
+
+
+def _handle_project_scheduled_cron_run(project_id, cron_id):
+    with _PROJECT_CRON_BINDINGS_LOCK:
+        binding = _load_project_cron_bindings().get("bindings", {}).get(cron_id)
+    if not binding or binding.get("projectId") != project_id:
+        return {"error": "Project scheduled cron not found", "_status": 404}
+    cron_result = _gateway_rpc_call("cron.run", {"id": cron_id}, timeout=30)
+    if not cron_result.get("ok"):
+        return {"error": cron_result.get("error", "Failed to run cron job"), "_status": 502}
+    dispatch = _handle_project_scheduled_cron_dispatch(project_id, cron_id, source="run-now")
+    return {"ok": True, "projectId": project_id, "id": cron_id, "result": cron_result, "dispatch": dispatch}
 
 
 # ── Built-in templates ────────────────────────────────────────────────────────
@@ -8840,15 +11346,20 @@ def _handle_projects_list(query_string=""):
             "createdBy": p.get("createdBy", ""),
             "tags": p.get("tags", []),
             "branch": p.get("branch", ""),
+            "longTermProject": bool(p.get("longTermProject", False)),
             "projectExecutionEnabled": p.get("projectExecutionEnabled", False),
             "workspacePath": p.get("workspacePath"),
             "workspaceKind": p.get("workspaceKind"),
             "workspaceStatus": p.get("workspaceStatus", {}),
+            "workspaceManagedBy": p.get("workspaceManagedBy"),
+            "workspaceCreatedAt": p.get("workspaceCreatedAt"),
             "defaultExecutorAgentId": p.get("defaultExecutorAgentId"),
             "defaultReviewerAgentId": p.get("defaultReviewerAgentId"),
             "columns": p.get("columns", []),
             "taskCount": total,
             "taskDone": done,
+            "scheduledCronAlertCount": len(_project_cron_alerts(p, limit=1000)),
+            "scheduledCronAlerts": _project_cron_alerts(p, limit=3),
             "template": p.get("template", False),
         })
     return {"ok": True, "projects": summaries}
@@ -8921,6 +11432,84 @@ def _handle_project_report(project_id):
 
 # ── POST handlers ─────────────────────────────────────────────────────────────
 
+def _project_workspace_slug(value):
+    slug = re.sub(r"[^a-zA-Z0-9]+", "-", str(value or "").strip().lower()).strip("-")
+    return slug or "project"
+
+
+def _project_auto_workspace_root():
+    configured = str(os.environ.get("VO_AUTO_PROJECT_WORKSPACE_ROOT") or "").strip()
+    if configured:
+        return os.path.realpath(os.path.expanduser(configured))
+    return os.path.join(STATUS_DIR, "project-workspaces")
+
+
+def _project_create_auto_workspace(title, now=None):
+    root = _project_auto_workspace_root()
+    try:
+        os.makedirs(root, exist_ok=True)
+    except OSError as exc:
+        return {"ok": False, "error": f"Unable to create project workspace root: {exc}", "code": "workspace_root_create_failed"}
+    try:
+        dt = datetime.fromisoformat(str(now or _proj_now()).replace("Z", "+00:00"))
+        timestamp = dt.strftime("%Y%m%d%H%M%S")
+    except Exception:
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+    base = f"{_project_workspace_slug(title)}-{timestamp}"
+    path = os.path.join(root, base)
+    if os.path.exists(path):
+        path = os.path.join(root, f"{base}-{str(uuid.uuid4())[:8]}")
+    try:
+        os.makedirs(path, exist_ok=False)
+    except OSError as exc:
+        return {"ok": False, "error": f"Unable to create project workspace: {exc}", "code": "workspace_create_failed"}
+    return {"ok": True, "path": os.path.realpath(path), "createdAt": now or _proj_now()}
+
+
+def _project_prepare_workspace(title, body, now):
+    enabled = bool(body.get("projectExecutionEnabled"))
+    workspace_path = body.get("workspacePath")
+    workspace_kind = body.get("workspaceKind")
+    workspace_status = body.get("workspaceStatus", {})
+    workspace_managed_by = body.get("workspaceManagedBy")
+    workspace_created_at = body.get("workspaceCreatedAt")
+    if not enabled:
+        return {
+            "ok": True,
+            "projectExecutionEnabled": False,
+            "workspacePath": workspace_path if workspace_path else None,
+            "workspaceKind": workspace_kind if workspace_path else None,
+            "workspaceStatus": workspace_status if workspace_path else {},
+            "workspaceManagedBy": workspace_managed_by if workspace_path else None,
+            "workspaceCreatedAt": workspace_created_at if workspace_path else None,
+        }
+    auto_created = False
+    if not str(workspace_path or "").strip():
+        created = _project_create_auto_workspace(title, now)
+        if not created.get("ok"):
+            return {**created, "_status": 400}
+        workspace_path = created["path"]
+        workspace_managed_by = "system"
+        workspace_created_at = created.get("createdAt")
+        auto_created = True
+    else:
+        workspace_managed_by = workspace_managed_by or "user"
+    workspace_status = _project_execution_validate_workspace(workspace_path)
+    if not workspace_status.get("ok"):
+        if auto_created:
+            shutil.rmtree(workspace_path, ignore_errors=True)
+        return {**workspace_status, "_status": 400}
+    return {
+        "ok": True,
+        "projectExecutionEnabled": True,
+        "workspacePath": workspace_status.get("path"),
+        "workspaceKind": workspace_status.get("kind"),
+        "workspaceStatus": workspace_status,
+        "workspaceManagedBy": workspace_managed_by,
+        "workspaceCreatedAt": workspace_created_at,
+    }
+
+
 def _handle_project_create(body):
     """POST /api/projects — create a new project."""
     title = (body.get("title") or "").strip()
@@ -8928,15 +11517,9 @@ def _handle_project_create(body):
         return {"error": "Project title is required", "_status": 400}
     created_by = (body.get("createdBy") or body.get("author") or "user").strip()
     now = _proj_now()
-    workspace_path = body.get("workspacePath")
-    workspace_kind = body.get("workspaceKind")
-    workspace_status = body.get("workspaceStatus", {})
-    if body.get("projectExecutionEnabled"):
-        workspace_status = _project_execution_validate_workspace(workspace_path)
-        if not workspace_status.get("ok"):
-            return {**workspace_status, "_status": 400}
-        workspace_path = workspace_status.get("path")
-        workspace_kind = workspace_status.get("kind")
+    workspace = _project_prepare_workspace(title, body, now)
+    if not workspace.get("ok"):
+        return workspace
     # Default columns
     default_cols = [
         {"id": _proj_uuid(), "title": "Backlog", "color": "#6c757d", "order": 0},
@@ -8957,12 +11540,19 @@ def _handle_project_create(body):
         "createdBy": created_by,
         "tags": body.get("tags", []),
         "branch": body.get("branch", ""),
-        "projectExecutionEnabled": bool(body.get("projectExecutionEnabled")),
-        "workspacePath": workspace_path,
-        "workspaceKind": workspace_kind,
-        "workspaceStatus": workspace_status,
+        "longTermProject": bool(body.get("longTermProject", False)),
+        "projectExecutionEnabled": workspace["projectExecutionEnabled"],
+        "workspacePath": workspace["workspacePath"],
+        "workspaceKind": workspace["workspaceKind"],
+        "workspaceStatus": workspace["workspaceStatus"],
+        "workspaceManagedBy": workspace.get("workspaceManagedBy"),
+        "workspaceCreatedAt": workspace.get("workspaceCreatedAt"),
         "defaultExecutorAgentId": body.get("defaultExecutorAgentId"),
         "defaultReviewerAgentId": body.get("defaultReviewerAgentId"),
+        "projectExecutionStartMode": body.get("projectExecutionStartMode") or "continuous",
+        "projectExecutionFlowActive": False,
+        "projectExecutionFlowStopReason": None,
+        "scheduledCronPaused": bool(body.get("scheduledCronPaused", False)),
         "executionPolicy": {"maxActiveTasks": 1},
         "executionDirtyConfirmations": [],
         "columns": cols,
@@ -9004,6 +11594,8 @@ def _handle_task_create(project_id, body):
         "assigneeBranch": body.get("assigneeBranch"),
         "executorAgentId": body.get("executorAgentId") or body.get("assignee"),
         "reviewerAgentId": body.get("reviewerAgentId"),
+        "requiresUserAcceptance": body.get("requiresUserAcceptance", True) is not False,
+        "scheduledRepeatEnabled": body.get("scheduledRepeatEnabled", False) is True,
         "executionState": "backlog",
         "activeAttemptId": None,
         "attempts": [],
@@ -9013,6 +11605,7 @@ def _handle_task_create(project_id, body):
         "dueDate": body.get("dueDate"),
         "tags": body.get("tags", []),
         "checklist": body.get("checklist", []),
+        "source": body.get("source") if isinstance(body.get("source"), dict) else {},
         "comments": [],
         "attachments": [],
         "createdAt": now,
@@ -9095,6 +11688,8 @@ def _handle_project_from_template(body):
                 "assigneeBranch": None,
                 "executorAgentId": None,
                 "reviewerAgentId": None,
+                "requiresUserAcceptance": tt.get("requiresUserAcceptance", True) is not False,
+                "scheduledRepeatEnabled": tt.get("scheduledRepeatEnabled", False) is True,
                 "executionState": "backlog",
                 "activeAttemptId": None,
                 "attempts": [],
@@ -9111,15 +11706,9 @@ def _handle_project_from_template(body):
                 "completedAt": None,
             })
     created_by = (body.get("createdBy") or "user").strip()
-    workspace_path = body.get("workspacePath")
-    workspace_kind = body.get("workspaceKind")
-    workspace_status = body.get("workspaceStatus", {})
-    if body.get("projectExecutionEnabled"):
-        workspace_status = _project_execution_validate_workspace(workspace_path)
-        if not workspace_status.get("ok"):
-            return {**workspace_status, "_status": 400}
-        workspace_path = workspace_status.get("path")
-        workspace_kind = workspace_status.get("kind")
+    workspace = _project_prepare_workspace(title, body, now)
+    if not workspace.get("ok"):
+        return workspace
     project = {
         "id": _proj_uuid(),
         "title": title,
@@ -9132,12 +11721,19 @@ def _handle_project_from_template(body):
         "createdBy": created_by,
         "tags": body.get("tags", []),
         "branch": body.get("branch", ""),
-        "projectExecutionEnabled": bool(body.get("projectExecutionEnabled")),
-        "workspacePath": workspace_path,
-        "workspaceKind": workspace_kind,
-        "workspaceStatus": workspace_status,
+        "longTermProject": bool(body.get("longTermProject", False)),
+        "projectExecutionEnabled": workspace["projectExecutionEnabled"],
+        "workspacePath": workspace["workspacePath"],
+        "workspaceKind": workspace["workspaceKind"],
+        "workspaceStatus": workspace["workspaceStatus"],
+        "workspaceManagedBy": workspace.get("workspaceManagedBy"),
+        "workspaceCreatedAt": workspace.get("workspaceCreatedAt"),
         "defaultExecutorAgentId": body.get("defaultExecutorAgentId"),
         "defaultReviewerAgentId": body.get("defaultReviewerAgentId"),
+        "projectExecutionStartMode": body.get("projectExecutionStartMode") or "continuous",
+        "projectExecutionFlowActive": False,
+        "projectExecutionFlowStopReason": None,
+        "scheduledCronPaused": bool(body.get("scheduledCronPaused", False)),
         "executionPolicy": {"maxActiveTasks": 1},
         "executionDirtyConfirmations": [],
         "columns": new_cols,
@@ -9205,8 +11801,12 @@ def _handle_project_update(project_id, body):
         body["workspaceStatus"] = workspace_status
     updatable = [
         "title", "description", "status", "priority", "dueDate", "tags", "branch",
+        "longTermProject",
         "projectExecutionEnabled", "workspacePath", "workspaceKind", "workspaceStatus",
-        "defaultExecutorAgentId", "defaultReviewerAgentId", "executionPolicy",
+        "workspaceManagedBy", "workspaceCreatedAt",
+        "defaultExecutorAgentId", "defaultReviewerAgentId", "projectExecutionStartMode",
+        "projectExecutionFlowActive", "projectExecutionFlowStopReason", "executionPolicy",
+        "scheduledCronPaused",
     ]
     for field in updatable:
         if field in body:
@@ -9277,7 +11877,7 @@ def _handle_task_update(project_id, task_id, body):
     updatable = [
         "title", "description", "columnId", "order", "priority", "assignee",
         "assigneeBranch", "executorAgentId", "reviewerAgentId", "dueDate", "tags",
-        "checklist", "completedAt",
+        "checklist", "completedAt", "requiresUserAcceptance", "scheduledRepeatEnabled",
     ]
     # Track which fields changed for md file update
     changed_fields = []
@@ -9366,14 +11966,31 @@ def _handle_tasks_reorder(project_id, body):
 
 # ── DELETE handlers ───────────────────────────────────────────────────────────
 
-def _handle_project_delete(project_id):
+def _handle_project_delete(project_id, delete_workspace=False):
     """DELETE /api/projects/{id}."""
+    data = _load_projects()
+    project = next((p for p in data.get("projects", []) if p.get("id") == project_id), None)
+    workspace_path = project.get("workspacePath") if project else None
+    workspace_managed_by = project.get("workspaceManagedBy") if project else None
+    workspace_delete_error = None
+    if delete_workspace and project and workspace_managed_by == "system" and workspace_path:
+        try:
+            shutil.rmtree(workspace_path)
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            workspace_delete_error = str(exc)
+    elif delete_workspace and project and workspace_managed_by != "system":
+        workspace_delete_error = "Workspace was not automatically created by this project"
     # Delete through the store so both markdown-backed projects and legacy
     # JSON-only projects are removed correctly.
     deleted = PROJECT_STORE.delete_project(project_id)
     if not deleted:
         return {"error": "Project not found", "_status": 404}
-    return {"ok": True, "id": project_id}
+    result = {"ok": True, "id": project_id, "workspaceDeleted": bool(delete_workspace and workspace_managed_by == "system" and not workspace_delete_error)}
+    if workspace_delete_error:
+        result["workspaceDeleteError"] = workspace_delete_error
+    return result
 
 
 def _handle_task_delete(project_id, task_id):
@@ -9475,6 +12092,22 @@ def _project_execution_resolve_roles(project, task):
     return {"ok": True, "executor": executor, "reviewer": reviewer}
 
 
+def _project_execution_resolve_start_roles(project, task, allow_skip_reviewer=False):
+    executor_id = task.get("executorAgentId") or task.get("assignee") or project.get("defaultExecutorAgentId")
+    reviewer_id = task.get("reviewerAgentId") or project.get("defaultReviewerAgentId")
+    if not executor_id or not _office_agent_lookup(executor_id):
+        return {"ok": False, "error": "A valid executor agent is required", "code": "executor_required"}
+    executor = _office_agent_ref(executor_id)
+    if not reviewer_id or not _office_agent_lookup(reviewer_id):
+        if allow_skip_reviewer:
+            return {"ok": True, "executor": executor, "reviewer": None, "skipReview": True, "skipReviewReason": "reviewer_missing"}
+        return {"ok": False, "confirmationRequired": True, "code": "reviewer_skip_confirmation_required", "error": "No reviewer is configured. Confirm to run without independent review.", "missingRole": "reviewer"}
+    reviewer = _office_agent_ref(reviewer_id)
+    if executor.get("id") == reviewer.get("id"):
+        return {"ok": False, "error": "Executor and reviewer must be different agents", "code": "reviewer_not_independent"}
+    return {"ok": True, "executor": executor, "reviewer": reviewer, "skipReview": False}
+
+
 def _project_execution_find(project_id, task_id=None):
     data = _load_projects()
     project = next((p for p in data.get("projects", []) if p.get("id") == project_id), None)
@@ -9489,6 +12122,54 @@ def _project_execution_attempt(task, attempt_id):
 def _project_execution_active_task(project):
     active_states = {"validating", "executing", "reviewing", "reworking"}
     return next((t for t in project.get("tasks", []) if t.get("executionState") in active_states), None)
+
+
+def _project_execution_done_column_ids(project):
+    return {c.get("id") for c in project.get("columns", []) if c.get("title", "").lower() in ("done", "completed", "verified", "published", "fixed", "closed")}
+
+
+def _project_execution_requires_user_acceptance(task):
+    return task.get("requiresUserAcceptance", True) is not False
+
+
+def _project_execution_start_mode(project, body=None):
+    if body and body.get("projectStart") is False:
+        return "single"
+    raw = str((body or {}).get("mode") or (body or {}).get("startMode") or project.get("projectExecutionStartMode") or "continuous").strip().lower()
+    if raw in ("single", "next", "next_task", "next-task"):
+        return "single"
+    if raw in ("continuous", "flow", "auto", "continuous_task_flow", "continuous-task-flow"):
+        return "continuous"
+    return "continuous"
+
+
+def _project_execution_is_startable_task(task):
+    state = task.get("executionState") or ("done" if task.get("completedAt") else "backlog")
+    return state in ("", "backlog", "blocked")
+
+
+def _project_execution_next_task(project):
+    done_cols = _project_execution_done_column_ids(project)
+    col_order = {c.get("id"): idx for idx, c in enumerate(sorted(project.get("columns", []), key=lambda c: c.get("order", 0)))}
+    candidates = []
+    for idx, task in enumerate(project.get("tasks", [])):
+        if task.get("columnId") in done_cols:
+            continue
+        if not _project_execution_is_startable_task(task):
+            continue
+        candidates.append((col_order.get(task.get("columnId"), 9999), task.get("order", idx), idx, task))
+    candidates.sort(key=lambda item: (item[0], item[1], item[2]))
+    return candidates[0][3] if candidates else None
+
+
+def _project_execution_mark_done(project, task, actor, reason, attempt_id=None):
+    done_col = _wf_get_done_col(project)
+    if not done_col:
+        return {"error": "Done column not found", "_status": 409}
+    _project_execution_transition(project, task, "done", actor, reason, attempt_id)
+    task["completedAt"] = _proj_now()
+    task["columnId"] = done_col.get("id")
+    return {"ok": True}
 
 
 def _project_execution_transition(project, task, next_state, actor, reason, attempt_id=None):
@@ -9551,6 +12232,8 @@ def _artifact_safe_path(root, rel_path):
 
 def _artifact_source_relpath(root, path):
     raw = urllib.parse.unquote(str(path or "")).replace("\\", "/")
+    if len(raw) > 2 and raw[:2] in ("a/", "b/") and (raw[2:3] == "/" or raw[3:4] == ":"):
+        raw = raw[2:]
     if os.path.isabs(raw):
         root_real = os.path.realpath(root or "")
         full_path = os.path.realpath(raw)
@@ -9643,9 +12326,26 @@ def _project_artifact_source_records(project):
     sources_by_path = {}
     workspace_root = project.get("workspacePath") or ""
 
-    def add_sources(task, evidence, attempt=None):
+    def markdown_paths_from_evidence(evidence):
+        paths = []
         changed_files = evidence.get("changedFiles") if isinstance(evidence, dict) else []
-        if not isinstance(changed_files, list):
+        if isinstance(changed_files, list):
+            paths.extend(changed_files)
+        text_parts = []
+        if isinstance(evidence, dict):
+            for key in ("executorSummary", "summary", "reply"):
+                value = evidence.get(key)
+                if value:
+                    text_parts.append(str(value))
+        if text_parts:
+            text = "\n".join(text_parts)
+            pattern = r"(?:(?:[A-Za-z]:)?[/~][^\s`'\"<>|]+|[A-Za-z0-9_.-][^\s`'\"<>|]*)\.(?:md|markdown)"
+            paths.extend(match.group(0).strip(").,;:") for match in re.finditer(pattern, text, flags=re.IGNORECASE))
+        return paths
+
+    def add_sources(task, evidence, attempt=None):
+        candidate_paths = markdown_paths_from_evidence(evidence)
+        if not candidate_paths:
             return
         provider_ref = evidence.get("providerRef") or {}
         executor = (attempt or {}).get("executor") or {}
@@ -9653,10 +12353,18 @@ def _project_artifact_source_records(project):
         captured_at = evidence.get("capturedAt") or (attempt or {}).get("finishedAt") or (attempt or {}).get("startedAt") or ""
         agent_id = provider_ref.get("agentId") or executor.get("id") or task.get("executorAgentId") or task.get("assignee") or ""
         provider_kind = provider_ref.get("providerKind") or executor.get("providerKind") or ""
-        for path in changed_files:
+        seen_rels = set()
+        for path in candidate_paths:
             rel = _artifact_source_relpath(workspace_root, path)
             if os.path.splitext(rel)[1].lower() not in _ARTIFACT_MARKDOWN_EXTENSIONS:
                 continue
+            full_path, safe_rel = _artifact_safe_path(workspace_root, rel)
+            if not full_path or not os.path.isfile(full_path):
+                continue
+            rel = safe_rel
+            if rel in seen_rels:
+                continue
+            seen_rels.add(rel)
             record = {
                 "sourceType": "project_execution",
                 "contextType": "project",
@@ -9899,7 +12607,19 @@ def _project_execution_run_review(project_id, task_id, attempt_id, review_id):
         if review["status"] == "pass":
             task.update({"blockedReason": None, "lastError": None})
             attempt["status"] = "review_passed"
-            _project_execution_transition(project, task, "awaiting_user_acceptance", reviewer.get("id") or "reviewer", "Reviewer passed; waiting for explicit user acceptance.", attempt_id)
+            if _project_execution_requires_user_acceptance(task):
+                project["projectExecutionFlowActive"] = False
+                project["projectExecutionFlowStopReason"] = "awaiting_user_acceptance"
+                _project_execution_transition(project, task, "awaiting_user_acceptance", reviewer.get("id") or "reviewer", "Reviewer passed; waiting for explicit user acceptance.", attempt_id)
+            else:
+                done_result = _project_execution_mark_done(project, task, reviewer.get("id") or "reviewer", "Reviewer passed; task does not require user acceptance.", attempt_id)
+                if not done_result.get("ok"):
+                    task["blockedReason"] = done_result.get("error")
+                    _project_execution_transition(project, task, "blocked", "system", task["blockedReason"], attempt_id)
+                elif attempt.get("projectFlow") or project.get("projectExecutionFlowActive"):
+                    project["projectExecutionFlowActive"] = True
+                    project["projectExecutionFlowStopReason"] = None
+                    _project_execution_schedule_continue(project_id, "review_passed")
         elif review["status"] == "needs_more_work":
             attempt["status"] = "review_needs_more_work"
             prior_reworks = int(task.get("reworkCount") or 0)
@@ -10001,7 +12721,34 @@ def _project_execution_run_attempt(project_id, task_id, attempt_id, cancel_flag)
     elif result.get("ok"):
         attempt["status"] = "execution_complete"
         task.update({"blockedReason": None, "lastError": None})
-        _project_execution_transition(project, task, "execution_complete", executor.get("id") or "executor", "Execution completed; Independent review has not started.", attempt_id)
+        if attempt.get("skipReview"):
+            task["reviewResult"] = {
+                "id": f"skipped-{attempt_id}",
+                "attemptId": attempt_id,
+                "status": "skipped",
+                "summary": "Independent review skipped after user confirmation because no reviewer was configured.",
+                "rationale": attempt.get("skipReviewReason") or "reviewer_missing",
+                "items": [],
+                "reviewedAt": _proj_now(),
+            }
+            task.setdefault("reviewHistory", []).append(task["reviewResult"])
+            task["reviewHistory"] = task["reviewHistory"][-50:]
+            if _project_execution_requires_user_acceptance(task):
+                attempt["status"] = "review_skipped_waiting_acceptance"
+                project["projectExecutionFlowActive"] = False
+                project["projectExecutionFlowStopReason"] = "awaiting_user_acceptance"
+                _project_execution_transition(project, task, "awaiting_user_acceptance", "system", "Review skipped by user confirmation; waiting for user acceptance.", attempt_id)
+            else:
+                done_result = _project_execution_mark_done(project, task, "system", "Review skipped by user confirmation; task does not require user acceptance.", attempt_id)
+                if not done_result.get("ok"):
+                    task["blockedReason"] = done_result.get("error")
+                    _project_execution_transition(project, task, "blocked", "system", task["blockedReason"], attempt_id)
+                elif attempt.get("projectFlow") or project.get("projectExecutionFlowActive"):
+                    project["projectExecutionFlowActive"] = True
+                    project["projectExecutionFlowStopReason"] = None
+                    _project_execution_schedule_continue(project_id, "review_skipped")
+        else:
+            _project_execution_transition(project, task, "execution_complete", executor.get("id") or "executor", "Execution completed; Independent review has not started.", attempt_id)
     else:
         attempt["status"] = "blocked"
         task["lastError"] = evidence["error"] or "Executor failed"
@@ -10016,6 +12763,7 @@ def _project_execution_run_attempt(project_id, task_id, attempt_id, cancel_flag)
 
 
 def _handle_project_execution_start(project_id, task_id, body):
+    body = body or {}
     data, project, task = _project_execution_find(project_id, task_id)
     if not project or not task:
         return {"error": "Project or task not found", "_status": 404}
@@ -10026,26 +12774,35 @@ def _handle_project_execution_start(project_id, task_id, body):
         project["workspaceStatus"] = workspace
         _save_projects(data)
         return {**workspace, "_status": 409}
-    roles = _project_execution_resolve_roles(project, task)
+    roles = _project_execution_resolve_start_roles(project, task, allow_skip_reviewer=bool(body.get("skipReviewConfirmed")))
     if not roles.get("ok"):
-        return {**roles, "_status": 409}
+        payload = {**roles, "_status": 409}
+        if roles.get("confirmationRequired"):
+            payload.update({
+                "taskId": task_id,
+                "startMode": _project_execution_start_mode(project, body) if body.get("projectStart") else "single",
+                "requiresUserAcceptance": _project_execution_requires_user_acceptance(task),
+            })
+        return payload
     active = _project_execution_active_task(project)
     if active:
         return {"error": "Another task is already active for this project", "activeTaskId": active.get("id"), "_status": 409}
     snapshot = _project_execution_git_snapshot(workspace["path"])
+    start_mode = _project_execution_start_mode(project, body) if body.get("projectStart") else "single"
+    project_flow = bool(body.get("projectStart")) and start_mode == "continuous"
     if snapshot.get("dirty") and str(body.get("dirtyFingerprint") or "") != snapshot.get("fingerprint"):
-        return {"ok": False, "confirmationRequired": True, "code": "dirty_worktree_confirmation_required", "dirtyFingerprint": snapshot.get("fingerprint"), "dirtyFiles": snapshot.get("files", [])[:50], "truncated": snapshot.get("truncated", False), "_status": 409}
+        return {"ok": False, "confirmationRequired": True, "code": "dirty_worktree_confirmation_required", "taskId": task_id, "startMode": start_mode, "requiresUserAcceptance": _project_execution_requires_user_acceptance(task), "dirtyFingerprint": snapshot.get("fingerprint"), "dirtyFiles": snapshot.get("files", [])[:50], "truncated": snapshot.get("truncated", False), "_status": 409}
     if snapshot.get("dirty"):
-        used_confirmations = set(project.get("executionDirtyConfirmations") or [])
-        if snapshot.get("fingerprint") in used_confirmations:
-            return {"ok": False, "confirmationRequired": True, "code": "dirty_worktree_confirmation_already_used", "dirtyFingerprint": snapshot.get("fingerprint"), "dirtyFiles": snapshot.get("files", [])[:50], "truncated": snapshot.get("truncated", False), "_status": 409}
         project.setdefault("executionDirtyConfirmations", []).append(snapshot.get("fingerprint"))
         project["executionDirtyConfirmations"] = project["executionDirtyConfirmations"][-100:]
     attempt_id = str(uuid.uuid4())
-    attempt = {"id": attempt_id, "status": "executing", "startedAt": _proj_now(), "workspacePath": workspace["path"], "workspaceKind": workspace["kind"], "dirtyConfirmed": bool(snapshot.get("dirty")), "dirtyFingerprint": snapshot.get("fingerprint") if snapshot.get("dirty") else "", "executor": roles["executor"], "reviewer": roles["reviewer"], "baseline": snapshot}
+    project["projectExecutionStartMode"] = start_mode if body.get("projectStart") else project.get("projectExecutionStartMode", "continuous")
+    project["projectExecutionFlowActive"] = project_flow
+    project["projectExecutionFlowStopReason"] = None
+    attempt = {"id": attempt_id, "status": "executing", "startedAt": _proj_now(), "workspacePath": workspace["path"], "workspaceKind": workspace["kind"], "dirtyConfirmed": bool(snapshot.get("dirty")), "dirtyFingerprint": snapshot.get("fingerprint") if snapshot.get("dirty") else "", "executor": roles["executor"], "reviewer": roles.get("reviewer"), "skipReview": bool(roles.get("skipReview")), "skipReviewReason": roles.get("skipReviewReason"), "baseline": snapshot, "startMode": start_mode, "projectFlow": project_flow, "requiresUserAcceptance": _project_execution_requires_user_acceptance(task), "autoReviewAfterExecution": bool(body.get("autoReviewAfterExecution")) and not roles.get("skipReview")}
     task.setdefault("attempts", []).append(attempt)
     task["attempts"] = task["attempts"][-20:]
-    task.update({"activeAttemptId": attempt_id, "executorAgentId": roles["executor"]["id"], "reviewerAgentId": roles["reviewer"]["id"], "blockedReason": None, "lastError": None})
+    task.update({"activeAttemptId": attempt_id, "executorAgentId": roles["executor"]["id"], "reviewerAgentId": (roles.get("reviewer") or {}).get("id"), "blockedReason": None, "lastError": None})
     project.update({"workspaceStatus": workspace, "workflowActive": True, "workflowPhase": "executing", "activeTaskId": task_id, "activeAgent": roles["executor"]["id"]})
     _project_execution_transition(project, task, "executing", "user", "Project Execution task started", attempt_id)
     _save_projects(data)
@@ -10053,7 +12810,62 @@ def _handle_project_execution_start(project_id, task_id, body):
     with _PROJECT_EXECUTION_LOCK:
         _PROJECT_EXECUTION_CANCEL_FLAGS[attempt_id] = cancel_flag
     threading.Thread(target=_project_execution_run_attempt, args=(project_id, task_id, attempt_id, cancel_flag), daemon=True).start()
-    return {"ok": True, "status": "started", "taskId": task_id, "attemptId": attempt_id}
+    return {"ok": True, "status": "started", "taskId": task_id, "attemptId": attempt_id, "startMode": start_mode, "requiresUserAcceptance": _project_execution_requires_user_acceptance(task)}
+
+
+def _handle_project_execution_project_start(project_id, body=None):
+    body = body or {}
+    data, project, _ = _project_execution_find(project_id)
+    if not project:
+        return {"error": "Project not found", "_status": 404}
+    if not _project_execution_enabled(project):
+        return {"error": "Project Execution is not enabled for this project", "_status": 409}
+    active = _project_execution_active_task(project)
+    if active:
+        return {"error": "Another task is already active for this project", "activeTaskId": active.get("id"), "_status": 409}
+    task = _project_execution_next_task(project)
+    if not task:
+        project["projectExecutionFlowActive"] = False
+        project["projectExecutionFlowStopReason"] = "no_eligible_task"
+        project["workflowActive"] = False
+        project["workflowPhase"] = "no_eligible_task"
+        project["updatedAt"] = _proj_now()
+        _save_projects(data)
+        return {"error": "No eligible task to start", "code": "no_eligible_task", "_status": 409}
+    mode = _project_execution_start_mode(project, body)
+    result = _handle_project_execution_start(project_id, task.get("id"), {**body, "mode": mode, "projectStart": True, "autoReviewAfterExecution": True})
+    if result.get("ok") or result.get("confirmationRequired"):
+        result["selectedTask"] = {"id": task.get("id"), "title": task.get("title", "")}
+    if result.get("confirmationRequired") or (not result.get("ok") and result.get("error")):
+        data, project, _ = _project_execution_find(project_id)
+        if project:
+            project["projectExecutionStartMode"] = mode
+            project["projectExecutionFlowActive"] = False
+            project["projectExecutionFlowStopReason"] = result.get("code") or result.get("error")
+            project["workflowActive"] = False
+            project["workflowPhase"] = result.get("code") or "start_failed"
+            project["updatedAt"] = _proj_now()
+            _save_projects(data)
+        result["selectedTask"] = {"id": task.get("id"), "title": task.get("title", "")}
+    return result
+
+
+def _project_execution_schedule_continue(project_id, reason="continue"):
+    def run():
+        time.sleep(0.05)
+        result = _handle_project_execution_project_start(project_id, {"mode": "continuous", "by": "system", "flowReason": reason})
+        if result.get("ok"):
+            return
+        data, project, _ = _project_execution_find(project_id)
+        if not project:
+            return
+        project["projectExecutionFlowActive"] = False
+        project["projectExecutionFlowStopReason"] = result.get("code") or result.get("error") or reason
+        if not project.get("workflowActive"):
+            project["workflowPhase"] = result.get("code") or "stopped"
+        project["updatedAt"] = _proj_now()
+        _save_projects(data)
+    threading.Thread(target=run, daemon=True).start()
 
 
 def _handle_project_execution_status(project_id, task_id=None):
@@ -10075,7 +12887,16 @@ def _handle_project_execution_status(project_id, task_id=None):
     if changed:
         project.update({"workflowActive": False, "activeTaskId": None, "activeAgent": None, "workflowPhase": "blocked"})
         _save_projects(data)
-    return {"ok": True, "active": bool(project.get("workflowActive")), "phase": project.get("workflowPhase") or "idle", "currentTaskId": project.get("activeTaskId"), "task": task}
+    return {
+        "ok": True,
+        "active": bool(project.get("workflowActive")),
+        "phase": project.get("workflowPhase") or "idle",
+        "currentTaskId": project.get("activeTaskId"),
+        "startMode": project.get("projectExecutionStartMode") or "continuous",
+        "flowActive": bool(project.get("projectExecutionFlowActive")),
+        "flowStopReason": project.get("projectExecutionFlowStopReason"),
+        "task": task,
+    }
 
 
 def _handle_project_execution_cancel(project_id, task_id, body=None):
@@ -10144,22 +12965,26 @@ def _handle_project_execution_acceptance(project_id, task_id, body=None):
     review = task.get("reviewResult") or {}
     attempt_id = str(body.get("attemptId") or "")
     if action == "accept":
-        if task.get("executionState") != "awaiting_user_acceptance" or review.get("status") != "pass":
-            return {"error": "Reviewer pass is required before user acceptance", "_status": 409}
+        if task.get("executionState") != "awaiting_user_acceptance" or review.get("status") not in {"pass", "skipped"}:
+            return {"error": "Reviewer pass or skipped review confirmation is required before user acceptance", "_status": 409}
         if not attempt_id or attempt_id != review.get("attemptId"):
             return {"error": "Stale or mismatched acceptance attempt", "_status": 409}
         done_col = _wf_get_done_col(project)
         if not done_col:
             return {"error": "Done column not found", "_status": 409}
-        _project_execution_transition(project, task, "done", "user", "User accepted reviewer pass", attempt_id)
-        task["completedAt"] = _proj_now()
-        task["columnId"] = done_col.get("id")
+        done_reason = "User accepted skipped review result" if review.get("status") == "skipped" else "User accepted reviewer pass"
+        done_result = _project_execution_mark_done(project, task, "user", done_reason, attempt_id)
+        if not done_result.get("ok"):
+            return done_result
         task.setdefault("acceptanceHistory", []).append({"action": "accept", "attemptId": attempt_id, "at": _proj_now(), "by": "user"})
         task["acceptanceHistory"] = task["acceptanceHistory"][-50:]
-        project.update({"workflowActive": False, "workflowPhase": "done", "activeTaskId": None, "activeAgent": None, "updatedAt": _proj_now()})
+        should_continue = project.get("projectExecutionStartMode") == "continuous"
+        project.update({"workflowActive": False, "workflowPhase": "done", "activeTaskId": None, "activeAgent": None, "updatedAt": _proj_now(), "projectExecutionFlowActive": should_continue, "projectExecutionFlowStopReason": None if should_continue else "user_acceptance_completed"})
         _log_activity(project, "project_execution_user_accepted", "user", f"User accepted Project Execution task '{task.get('title', '')}'", task_id)
         _save_projects(data)
-        return {"ok": True, "status": "done", "task": task}
+        if should_continue:
+            _project_execution_schedule_continue(project_id, "user_accepted")
+        return {"ok": True, "status": "done", "task": task, "flowContinues": should_continue}
     feedback = str(body.get("feedback") or "").strip()
     if not feedback:
         return {"error": "Feedback is required", "_status": 400}
@@ -13966,6 +16791,24 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(json.dumps({"ok": True, "history": history}).encode())
+        elif self.path == "/api/meetings/requests" or self.path.startswith("/api/meetings/requests?"):
+            parsed = urllib.parse.urlparse(self.path)
+            result = _meeting_request_list_filtered(parsed.query)
+            self.send_response(result.get("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            result.pop("_status", None)
+            self.wfile.write(json.dumps(result).encode())
+        elif self.path.startswith("/api/meetings/requests/"):
+            request_id = urllib.parse.unquote(urllib.parse.urlparse(self.path).path.split("/api/meetings/requests/", 1)[1].strip("/"))
+            result = _handle_meeting_request_detail(request_id)
+            self.send_response(result.get("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            result.pop("_status", None)
+            self.wfile.write(json.dumps(result).encode())
         elif self.path == "/api/meetings/executable/reconcile":
             result = _handle_executable_meeting_reconcile()
             self.send_response(result.get("_status", 200))
@@ -14227,6 +17070,14 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(json.dumps(result).encode())
+        elif self.path == "/api/projects/scheduled-cron":
+            result = _handle_project_scheduled_cron_all()
+            self.send_response(result.get("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            result.pop("_status", None)
+            self.wfile.write(json.dumps(result).encode())
         elif self.path.startswith("/api/projects/") and self.path.endswith("/workflow/chat"):
             proj_id = self.path.split("/api/projects/")[1].rsplit("/workflow/chat", 1)[0]
             result = _handle_workflow_chat(proj_id)
@@ -14238,6 +17089,15 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
         elif self.path.startswith("/api/projects/") and self.path.endswith("/workflow/status"):
             proj_id = self.path.split("/api/projects/")[1].rsplit("/workflow/status", 1)[0]
             result = _handle_workflow_status(proj_id)
+            self.send_response(result.get("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            result.pop("_status", None)
+            self.wfile.write(json.dumps(result).encode())
+        elif self.path.startswith("/api/projects/") and self.path.endswith("/scheduled-cron"):
+            proj_id = self.path.split("/api/projects/")[1].rsplit("/scheduled-cron", 1)[0]
+            result = _handle_project_scheduled_cron_list(proj_id)
             self.send_response(result.get("_status", 200))
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
@@ -14277,6 +17137,17 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             proj_id, task_rest = rest.split("/tasks/", 1)
             task_id = task_rest.rsplit("/project-execution/status", 1)[0]
             result = _handle_project_execution_status(proj_id, task_id)
+            self.send_response(result.get("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            result.pop("_status", None)
+            self.wfile.write(json.dumps(result).encode())
+        elif self.path.startswith("/api/projects/") and "/tasks/" in self.path and self.path.endswith("/meeting-requests"):
+            rest = urllib.parse.urlparse(self.path).path.split("/api/projects/")[1]
+            proj_id, task_rest = rest.split("/tasks/", 1)
+            task_id = task_rest.rsplit("/meeting-requests", 1)[0]
+            result = _meeting_request_list_filtered(f"projectId={urllib.parse.quote(proj_id)}&taskId={urllib.parse.quote(task_id)}")
             self.send_response(result.get("_status", 200))
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
@@ -15348,6 +18219,17 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             self.end_headers()
             result.pop("_status", None)
             self.wfile.write(json.dumps(result).encode())
+        elif self.path.startswith("/api/projects/") and "/scheduled-cron/" in self.path:
+            rest = self.path.split("/api/projects/")[1]
+            proj_id, cron_rest = rest.split("/scheduled-cron/", 1)
+            cron_id = cron_rest.strip("/")
+            result = _handle_project_scheduled_cron_update(proj_id, cron_id, body)
+            self.send_response(result.get("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            result.pop("_status", None)
+            self.wfile.write(json.dumps(result).encode())
         elif self.path.startswith("/api/projects/"):
             parts = self.path.split("/api/projects/")[1].strip("/").split("/")
             proj_id = parts[0]
@@ -15442,9 +18324,23 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             self.end_headers()
             result.pop("_status", None)
             self.wfile.write(json.dumps(result).encode())
+        elif self.path.startswith("/api/projects/") and "/scheduled-cron/" in self.path:
+            rest = self.path.split("/api/projects/")[1]
+            proj_id, cron_rest = rest.split("/scheduled-cron/", 1)
+            cron_id = cron_rest.strip("/")
+            result = _handle_project_scheduled_cron_delete(proj_id, cron_id)
+            self.send_response(result.get("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            result.pop("_status", None)
+            self.wfile.write(json.dumps(result).encode())
         elif self.path.startswith("/api/projects/"):
-            proj_id = self.path.split("/api/projects/")[1].strip("/")
-            result = _handle_project_delete(proj_id)
+            parsed = urllib.parse.urlparse(self.path)
+            proj_id = parsed.path.split("/api/projects/")[1].strip("/")
+            qs = urllib.parse.parse_qs(parsed.query or "")
+            delete_workspace = str((qs.get("deleteWorkspace") or ["false"])[0]).lower() in ("1", "true", "yes")
+            result = _handle_project_delete(proj_id, delete_workspace=delete_workspace)
             self.send_response(result.get("_status", 200))
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
@@ -15586,6 +18482,30 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             self.wfile.write(json.dumps(result).encode())
             return
         # --- MEETINGS API ---
+        elif self.path.startswith("/api/meetings/requests/") and self.path.endswith("/confirm"):
+            request_id = urllib.parse.unquote(self.path.split("/api/meetings/requests/", 1)[1].rsplit("/confirm", 1)[0].strip("/"))
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            result = _handle_meeting_request_confirm(request_id, body)
+            self.send_response(result.get("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            result.pop("_status", None)
+            self.wfile.write(json.dumps(result).encode())
+            return
+        elif self.path.startswith("/api/meetings/requests/") and self.path.endswith("/reject"):
+            request_id = urllib.parse.unquote(self.path.split("/api/meetings/requests/", 1)[1].rsplit("/reject", 1)[0].strip("/"))
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            result = _handle_meeting_request_reject(request_id, body)
+            self.send_response(result.get("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            result.pop("_status", None)
+            self.wfile.write(json.dumps(result).encode())
+            return
         elif self.path == "/api/meetings/executable/create":
             length = int(self.headers.get('Content-Length', 0))
             body = json.loads(self.rfile.read(length)) if length else {}
@@ -15614,6 +18534,81 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             length = int(self.headers.get('Content-Length', 0))
             body = json.loads(self.rfile.read(length)) if length else {}
             result = _handle_executable_meeting_intervention(meeting_id, body)
+            self.send_response(result.get("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            result.pop("_status", None)
+            self.wfile.write(json.dumps(result).encode())
+            return
+        elif self.path.startswith("/api/meetings/executable/") and self.path.endswith("/agenda-change"):
+            meeting_id = urllib.parse.unquote(self.path.split("/api/meetings/executable/", 1)[1].rsplit("/agenda-change", 1)[0].strip("/"))
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            result = _handle_executable_meeting_agenda_change(meeting_id, body)
+            self.send_response(result.get("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            result.pop("_status", None)
+            self.wfile.write(json.dumps(result).encode())
+            return
+        elif self.path.startswith("/api/meetings/executable/") and self.path.endswith("/arbitration"):
+            meeting_id = urllib.parse.unquote(self.path.split("/api/meetings/executable/", 1)[1].rsplit("/arbitration", 1)[0].strip("/"))
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            result = _handle_executable_meeting_arbitration(meeting_id, body)
+            self.send_response(result.get("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            result.pop("_status", None)
+            self.wfile.write(json.dumps(result).encode())
+            return
+        elif self.path.startswith("/api/meetings/executable/") and self.path.endswith("/moderator-takeover"):
+            meeting_id = urllib.parse.unquote(self.path.split("/api/meetings/executable/", 1)[1].rsplit("/moderator-takeover", 1)[0].strip("/"))
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            result = _handle_executable_meeting_moderator_takeover(meeting_id, body)
+            self.send_response(result.get("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            result.pop("_status", None)
+            self.wfile.write(json.dumps(result).encode())
+            return
+        elif self.path.startswith("/api/meetings/executable/") and self.path.endswith("/conflict"):
+            meeting_id = urllib.parse.unquote(self.path.split("/api/meetings/executable/", 1)[1].rsplit("/conflict", 1)[0].strip("/"))
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            result = _handle_executable_meeting_conflict_action(meeting_id, body)
+            self.send_response(result.get("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            result.pop("_status", None)
+            self.wfile.write(json.dumps(result).encode())
+            return
+        elif self.path.startswith("/api/meetings/executable/") and "/action-items/" in self.path:
+            rest = urllib.parse.urlparse(self.path).path.split("/api/meetings/executable/", 1)[1]
+            meeting_part, action_part = rest.split("/action-items/", 1)
+            meeting_id = urllib.parse.unquote(meeting_part.strip("/"))
+            action_item_id = urllib.parse.unquote(action_part.strip("/"))
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            result = _handle_executable_meeting_action_item(meeting_id, action_item_id, body)
+            self.send_response(result.get("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            result.pop("_status", None)
+            self.wfile.write(json.dumps(result).encode())
+            return
+        elif self.path.startswith("/api/meetings/executable/") and self.path.endswith("/targeted-question"):
+            meeting_id = urllib.parse.unquote(self.path.split("/api/meetings/executable/", 1)[1].rsplit("/targeted-question", 1)[0].strip("/"))
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            result = _handle_executable_meeting_targeted_question(meeting_id, body)
             self.send_response(result.get("_status", 200))
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
@@ -16440,6 +19435,17 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             self.end_headers()
             result.pop("_status", None)
             self.wfile.write(json.dumps(result).encode())
+        elif self.path.startswith("/api/projects/") and "/tasks/" not in self.path and self.path.endswith("/project-execution/start"):
+            proj_id = self.path.split("/api/projects/")[1].rsplit("/project-execution/start", 1)[0]
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            result = _handle_project_execution_project_start(proj_id, body)
+            self.send_response(result.get("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            result.pop("_status", None)
+            self.wfile.write(json.dumps(result).encode())
         elif self.path.startswith("/api/projects/") and "/tasks/" in self.path and self.path.endswith("/project-execution/start"):
             rest = self.path.split("/api/projects/")[1]
             proj_id, task_rest = rest.split("/tasks/", 1)
@@ -16500,6 +19506,33 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(json.dumps(result).encode())
+        elif self.path.startswith("/api/projects/") and self.path.endswith("/scheduled-cron"):
+            proj_id = self.path.split("/api/projects/")[1].rsplit("/scheduled-cron", 1)[0]
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            result = _handle_project_scheduled_cron_create(proj_id, body)
+            self.send_response(result.get("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            result.pop("_status", None)
+            self.wfile.write(json.dumps(result).encode())
+        elif self.path.startswith("/api/projects/") and self.path.endswith("/run"):
+            parsed_path = urllib.parse.urlparse(self.path).path
+            if "/scheduled-cron/" in parsed_path:
+                rest = parsed_path.split("/api/projects/")[1]
+                proj_id, cron_rest = rest.split("/scheduled-cron/", 1)
+                cron_id = cron_rest.rsplit("/run", 1)[0].strip("/")
+                result = _handle_project_scheduled_cron_run(proj_id, cron_id)
+                self.send_response(result.get("_status", 200))
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                result.pop("_status", None)
+                self.wfile.write(json.dumps(result).encode())
+            else:
+                self.send_response(404)
+                self.end_headers()
         elif self.path.startswith("/api/projects/") and "/tasks" in self.path and "/comments" in self.path:
             # POST /api/projects/{id}/tasks/{taskId}/comments
             rest = self.path.split("/api/projects/")[1]
@@ -16509,6 +19542,19 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             length = int(self.headers.get('Content-Length', 0))
             body = json.loads(self.rfile.read(length)) if length else {}
             result = _handle_task_comment(proj_id, task_rest, body)
+            self.send_response(result.get("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            result.pop("_status", None)
+            self.wfile.write(json.dumps(result).encode())
+        elif self.path.startswith("/api/projects/") and "/tasks/" in self.path and self.path.endswith("/meeting-requests"):
+            rest = self.path.split("/api/projects/")[1]
+            proj_id, task_rest = rest.split("/tasks/", 1)
+            task_id = task_rest.rsplit("/meeting-requests", 1)[0]
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            result = _handle_meeting_request_create(proj_id, task_id, body)
             self.send_response(result.get("_status", 200))
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")

@@ -83,11 +83,165 @@ def test_project_store_round_trip_and_legacy_defaults():
         }]})
         loaded = store.load_all()["projects"][0]
         assert loaded["workspacePath"] == "/tmp/work"
+        assert loaded["workspaceManagedBy"] is None
         assert loaded["defaultReviewerAgentId"] == "reviewer"
         assert loaded["workflowPhase"] == "executing"
         assert loaded["activeTaskId"] == "t1"
         assert loaded["tasks"][0]["executionState"] == "backlog"
         assert loaded["tasks"][0]["attempts"] == []
+
+
+def test_project_create_auto_workspace_and_store_round_trip():
+    with tempfile.TemporaryDirectory() as status_dir:
+        old = with_store(status_dir)
+        old_auto_root = os.environ.get("VO_AUTO_PROJECT_WORKSPACE_ROOT")
+        auto_root = os.path.join(status_dir, "auto-root")
+        os.environ["VO_AUTO_PROJECT_WORKSPACE_ROOT"] = auto_root
+        try:
+            created = server._handle_project_create({
+                "title": "Demo Project",
+                "projectExecutionEnabled": True,
+                "defaultExecutorAgentId": "executor",
+                "defaultReviewerAgentId": "reviewer",
+            })
+            assert created["ok"] is True
+            project = created["project"]
+            assert project["projectExecutionEnabled"] is True
+            assert project["workspaceManagedBy"] == "system"
+            assert project["workspaceCreatedAt"]
+            assert project["workspaceStatus"]["ok"] is True
+            assert project["workspaceKind"] == "directory"
+            assert os.path.isdir(project["workspacePath"])
+            assert os.path.realpath(project["workspacePath"]).startswith(os.path.realpath(auto_root) + os.sep)
+            assert os.path.basename(project["workspacePath"]).startswith("demo-project-")
+            assert os.path.basename(project["workspacePath"]).split("-")[-1].isdigit()
+
+            loaded = server._load_projects()["projects"][0]
+            assert loaded["workspacePath"] == project["workspacePath"]
+            assert loaded["workspaceManagedBy"] == "system"
+            assert loaded["workspaceCreatedAt"] == project["workspaceCreatedAt"]
+        finally:
+            if old_auto_root is None:
+                os.environ.pop("VO_AUTO_PROJECT_WORKSPACE_ROOT", None)
+            else:
+                os.environ["VO_AUTO_PROJECT_WORKSPACE_ROOT"] = old_auto_root
+            restore_store(old)
+
+
+def test_project_create_normal_and_manual_workspace_provenance():
+    with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as workspace:
+        old = with_store(status_dir)
+        try:
+            normal = server._handle_project_create({"title": "Normal Project", "projectExecutionEnabled": False})
+            assert normal["ok"] is True
+            assert normal["project"]["projectExecutionEnabled"] is False
+            assert normal["project"]["workspacePath"] is None
+            assert normal["project"]["workspaceManagedBy"] is None
+
+            manual = server._handle_project_create({
+                "title": "Manual Project",
+                "projectExecutionEnabled": True,
+                "workspacePath": workspace,
+            })
+            assert manual["ok"] is True
+            assert manual["project"]["projectExecutionEnabled"] is True
+            assert manual["project"]["workspacePath"] == os.path.realpath(workspace)
+            assert manual["project"]["workspaceManagedBy"] == "user"
+        finally:
+            restore_store(old)
+
+
+def test_project_from_template_auto_workspace_matches_project_create():
+    with tempfile.TemporaryDirectory() as status_dir:
+        old = with_store(status_dir)
+        old_auto_root = os.environ.get("VO_AUTO_PROJECT_WORKSPACE_ROOT")
+        os.environ["VO_AUTO_PROJECT_WORKSPACE_ROOT"] = os.path.join(status_dir, "auto-root")
+        try:
+            created = server._handle_project_from_template({
+                "templateId": "tpl-software",
+                "title": "Template Project",
+                "projectExecutionEnabled": True,
+            })
+            assert created["ok"] is True
+            project = created["project"]
+            assert project["projectExecutionEnabled"] is True
+            assert project["workspaceManagedBy"] == "system"
+            assert os.path.isdir(project["workspacePath"])
+            assert os.path.basename(project["workspacePath"]).startswith("template-project-")
+
+            normal = server._handle_project_from_template({
+                "templateId": "tpl-software",
+                "title": "Template Normal",
+                "projectExecutionEnabled": False,
+            })
+            assert normal["ok"] is True
+            assert normal["project"]["projectExecutionEnabled"] is False
+            assert normal["project"]["workspacePath"] is None
+        finally:
+            if old_auto_root is None:
+                os.environ.pop("VO_AUTO_PROJECT_WORKSPACE_ROOT", None)
+            else:
+                os.environ["VO_AUTO_PROJECT_WORKSPACE_ROOT"] = old_auto_root
+            restore_store(old)
+
+
+def test_project_delete_auto_workspace_keep_or_delete_and_never_delete_user_workspace():
+    with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as user_workspace:
+        old = with_store(status_dir)
+        old_auto_root = os.environ.get("VO_AUTO_PROJECT_WORKSPACE_ROOT")
+        os.environ["VO_AUTO_PROJECT_WORKSPACE_ROOT"] = os.path.join(status_dir, "auto-root")
+        try:
+            keep = server._handle_project_create({"title": "Keep Workspace", "projectExecutionEnabled": True})["project"]
+            keep_path = keep["workspacePath"]
+            kept = server._handle_project_delete(keep["id"], delete_workspace=False)
+            assert kept["ok"] is True
+            assert kept["workspaceDeleted"] is False
+            assert os.path.isdir(keep_path)
+
+            remove = server._handle_project_create({"title": "Remove Workspace", "projectExecutionEnabled": True})["project"]
+            remove_path = remove["workspacePath"]
+            removed = server._handle_project_delete(remove["id"], delete_workspace=True)
+            assert removed["ok"] is True
+            assert removed["workspaceDeleted"] is True
+            assert not os.path.exists(remove_path)
+
+            user = server._handle_project_create({
+                "title": "User Workspace",
+                "projectExecutionEnabled": True,
+                "workspacePath": user_workspace,
+            })["project"]
+            user_deleted = server._handle_project_delete(user["id"], delete_workspace=True)
+            assert user_deleted["ok"] is True
+            assert user_deleted["workspaceDeleted"] is False
+            assert "workspaceDeleteError" in user_deleted
+            assert os.path.isdir(user_workspace)
+        finally:
+            if old_auto_root is None:
+                os.environ.pop("VO_AUTO_PROJECT_WORKSPACE_ROOT", None)
+            else:
+                os.environ["VO_AUTO_PROJECT_WORKSPACE_ROOT"] = old_auto_root
+            restore_store(old)
+
+
+def test_auto_workspace_create_failure_does_not_create_project():
+    with tempfile.TemporaryDirectory() as status_dir:
+        old = with_store(status_dir)
+        old_auto_root = os.environ.get("VO_AUTO_PROJECT_WORKSPACE_ROOT")
+        blocker = os.path.join(status_dir, "not-a-dir")
+        with open(blocker, "w", encoding="utf-8") as f:
+            f.write("x\n")
+        os.environ["VO_AUTO_PROJECT_WORKSPACE_ROOT"] = blocker
+        try:
+            result = server._handle_project_create({"title": "Cannot Create Workspace", "projectExecutionEnabled": True})
+            assert result["_status"] == 400
+            assert result["code"] == "workspace_root_create_failed"
+            assert server._load_projects()["projects"] == []
+        finally:
+            if old_auto_root is None:
+                os.environ.pop("VO_AUTO_PROJECT_WORKSPACE_ROOT", None)
+            else:
+                os.environ["VO_AUTO_PROJECT_WORKSPACE_ROOT"] = old_auto_root
+            restore_store(old)
 
 
 def test_workspace_validation_and_dirty_fingerprint():
@@ -173,6 +327,8 @@ def test_project_artifacts_include_phase7_source_records():
                 f.write("# Artifact")
             with open(os.path.join(workspace, "docs", "manual.md"), "w", encoding="utf-8") as f:
                 f.write("# Manual")
+            with open(os.path.join(workspace, "docs", "hermes-summary.md"), "w", encoding="utf-8") as f:
+                f.write("# Hermes Summary")
             with open(os.path.join(workspace, "other", "artifact.md"), "w", encoding="utf-8") as f:
                 f.write("# Other")
             project, task = create_project_execution_project(workspace)
@@ -201,12 +357,27 @@ def test_project_artifacts_include_phase7_source_records():
                 "capturedAt": "2026-06-12T00:00:00+00:00",
                 "providerRef": {"providerKind": "hermes", "agentId": "hermes-executor"},
             }
+            later_task["attempts"] = [{
+                "id": "attempt-2",
+                "executor": {"id": "hermes-executor", "providerKind": "hermes"},
+                "evidence": later_task["evidence"],
+            }, {
+                "id": "attempt-3",
+                "executor": {"id": "hermes-executor", "providerKind": "hermes"},
+                "evidence": {
+                    "attemptId": "attempt-3",
+                    "changedFiles": [],
+                    "capturedAt": "2026-06-13T00:00:00+00:00",
+                    "executorSummary": f"review diff a/{workspace}/docs/hermes-summary.md -> b/{workspace}/docs/hermes-summary.md",
+                    "providerRef": {"providerKind": "hermes", "agentId": "hermes-executor"},
+                },
+            }]
             server._save_projects(data)
 
             listed = server._handle_project_artifacts_list(project["id"])
             assert listed["ok"] is True
             by_path = {a["path"]: a for a in listed["artifacts"]}
-            assert set(by_path) == {"docs/artifact.md", "docs/manual.md", "other/artifact.md"}
+            assert set(by_path) == {"docs/artifact.md", "docs/hermes-summary.md", "docs/manual.md", "other/artifact.md"}
             source = by_path["docs/artifact.md"]["sources"][0]
             assert source["taskId"] == later_task["id"]
             assert source["taskTitle"] == later_task["title"]
@@ -215,6 +386,11 @@ def test_project_artifacts_include_phase7_source_records():
             assert source["attemptId"] == "attempt-2"
             assert by_path["docs/artifact.md"]["sources"][1]["taskId"] == task["id"]
             assert len(by_path["docs/artifact.md"]["sources"]) == 2
+            hermes_summary_source = by_path["docs/hermes-summary.md"]["sources"][0]
+            assert hermes_summary_source["taskId"] == later_task["id"]
+            assert hermes_summary_source["agentId"] == "hermes-executor"
+            assert hermes_summary_source["providerKind"] == "hermes"
+            assert hermes_summary_source["attemptId"] == "attempt-3"
             assert by_path["docs/manual.md"]["unassociated"] is True
             assert by_path["other/artifact.md"]["unassociated"] is True
 
@@ -453,6 +629,304 @@ def test_selected_task_executes_and_stops_at_execution_complete():
             restore_store(old)
 
 
+def test_project_level_start_selects_first_eligible_and_auto_reviews_to_acceptance():
+    with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as workspace:
+        old = with_store(status_dir)
+        old_executor = server._project_execution_call_executor
+        old_reviewer = server._project_execution_call_reviewer
+        server._project_execution_call_executor = lambda executor, prompt, workspace, attempt_id, project_id=None, task_id=None, timeout=600: {
+            "ok": True, "status": "completed", "reply": "implemented", "modifiedFiles": [],
+        }
+        server._project_execution_call_reviewer = lambda reviewer, prompt, review_id, project_id=None, task_id=None, timeout=600: {
+            "ok": True, "status": "completed", "reply": '{"status":"pass","summary":"ready","rationale":"ok","items":[]}',
+        }
+        try:
+            project, first = create_project_execution_project(workspace)
+            second = server._handle_task_create(project["id"], {"title": "Second", "columnId": project["columns"][0]["id"]})["task"]
+            started = server._handle_project_execution_project_start(project["id"], {"mode": "single"})
+            assert started["ok"] is True
+            assert started["taskId"] == first["id"]
+            assert started["startMode"] == "single"
+            assert started["requiresUserAcceptance"] is True
+
+            def awaiting():
+                current = server._handle_project_get(project["id"])["project"]
+                task = next(t for t in current["tasks"] if t["id"] == first["id"])
+                return task if task.get("executionState") == "awaiting_user_acceptance" else None
+
+            task = wait_for(awaiting)
+            assert task["reviewResult"]["status"] == "pass"
+            current = server._handle_project_get(project["id"])["project"]
+            untouched = next(t for t in current["tasks"] if t["id"] == second["id"])
+            assert untouched["executionState"] == "backlog"
+            assert current["projectExecutionStartMode"] == "single"
+            assert current["projectExecutionFlowStopReason"] == "awaiting_user_acceptance"
+        finally:
+            server._project_execution_call_executor = old_executor
+            server._project_execution_call_reviewer = old_reviewer
+            restore_store(old)
+
+
+def test_project_level_start_skips_done_columns_and_reports_no_eligible_task():
+    with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as workspace:
+        old = with_store(status_dir)
+        try:
+            empty = server._handle_project_create({
+                "title": "Empty",
+                "projectExecutionEnabled": True,
+                "workspacePath": workspace,
+                "defaultExecutorAgentId": "executor",
+                "defaultReviewerAgentId": "reviewer",
+            })["project"]
+            no_task = server._handle_project_execution_project_start(empty["id"], {"mode": "continuous"})
+            assert no_task["_status"] == 409
+            assert no_task["code"] == "no_eligible_task"
+
+            project, task = create_project_execution_project(workspace)
+            done_col = next(c for c in project["columns"] if c["title"] == "Done")
+            data = server._load_projects()
+            current = data["projects"][-1]
+            current["tasks"][0]["columnId"] = done_col["id"]
+            current["tasks"][0]["executionState"] = "done"
+            current["tasks"][0]["completedAt"] = server._proj_now()
+            server._save_projects(data)
+            no_eligible = server._handle_project_execution_project_start(project["id"], {"mode": "continuous"})
+            assert no_eligible["_status"] == 409
+            assert no_eligible["code"] == "no_eligible_task"
+        finally:
+            restore_store(old)
+
+
+def test_project_level_start_persists_reviewer_skip_confirmation_for_toolbar_state():
+    with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as workspace:
+        old = with_store(status_dir)
+        try:
+            project, task = create_project_execution_project(workspace)
+            server._handle_project_update(project["id"], {"defaultReviewerAgentId": None})
+            server._handle_task_update(project["id"], task["id"], {"reviewerAgentId": None})
+            result = server._handle_project_execution_project_start(project["id"], {"mode": "continuous"})
+            assert result["_status"] == 409
+            assert result["confirmationRequired"] is True
+            assert result["code"] == "reviewer_skip_confirmation_required"
+            current = server._handle_project_get(project["id"])["project"]
+            assert current["workflowActive"] is False
+            assert current["workflowPhase"] == "reviewer_skip_confirmation_required"
+            assert current["projectExecutionFlowStopReason"] == "reviewer_skip_confirmation_required"
+        finally:
+            restore_store(old)
+
+
+def test_missing_reviewer_can_be_skipped_after_explicit_confirmation():
+    with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as workspace:
+        old = with_store(status_dir)
+        old_executor = server._project_execution_call_executor
+        server._project_execution_call_executor = lambda executor, prompt, workspace, attempt_id, project_id=None, task_id=None, timeout=600: {
+            "ok": True, "status": "completed", "reply": "implemented without reviewer", "modifiedFiles": [],
+        }
+        try:
+            project, task = create_project_execution_project(workspace)
+            server._handle_project_update(project["id"], {"defaultReviewerAgentId": None})
+            server._handle_task_update(project["id"], task["id"], {"reviewerAgentId": None})
+            first = server._handle_project_execution_project_start(project["id"], {"mode": "continuous"})
+            assert first["_status"] == 409
+            assert first["confirmationRequired"] is True
+            assert first["code"] == "reviewer_skip_confirmation_required"
+            assert first["selectedTask"]["id"] == task["id"]
+
+            confirmed = server._handle_project_execution_project_start(project["id"], {"mode": "continuous", "skipReviewConfirmed": True})
+            assert confirmed["ok"] is True
+
+            def awaiting_acceptance():
+                current = server._handle_project_get(project["id"])["project"]
+                task = current["tasks"][0]
+                return task if task.get("executionState") == "awaiting_user_acceptance" else None
+
+            task = wait_for(awaiting_acceptance)
+            assert task["reviewResult"]["status"] == "skipped"
+            assert "skipped" in task["reviewResult"]["summary"].lower()
+            assert task["completedAt"] is None
+        finally:
+            server._project_execution_call_executor = old_executor
+            restore_store(old)
+
+
+def test_skipped_review_can_be_accepted_to_done():
+    with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as workspace:
+        old = with_store(status_dir)
+        old_executor = server._project_execution_call_executor
+        server._project_execution_call_executor = lambda executor, prompt, workspace, attempt_id, project_id=None, task_id=None, timeout=600: {
+            "ok": True, "status": "completed", "reply": "implemented without reviewer", "modifiedFiles": [],
+        }
+        try:
+            project, task = create_project_execution_project(workspace)
+            done_col = next(c["id"] for c in project["columns"] if c["title"] == "Done")
+            server._handle_project_update(project["id"], {"defaultReviewerAgentId": None})
+            server._handle_task_update(project["id"], task["id"], {"reviewerAgentId": None})
+            first = server._handle_project_execution_project_start(project["id"], {"mode": "single"})
+            assert first["code"] == "reviewer_skip_confirmation_required"
+            confirmed = server._handle_project_execution_project_start(project["id"], {"mode": "single", "skipReviewConfirmed": True})
+            assert confirmed["ok"] is True
+
+            task = wait_for(lambda: server._handle_project_get(project["id"])["project"]["tasks"][0]
+                            if server._handle_project_get(project["id"])["project"]["tasks"][0].get("executionState") == "awaiting_user_acceptance"
+                            else None)
+            assert task["reviewResult"]["status"] == "skipped"
+            accepted = server._handle_project_execution_acceptance(project["id"], task["id"], {
+                "action": "accept",
+                "attemptId": task["reviewResult"]["attemptId"],
+            })
+            assert accepted["ok"] is True
+            assert accepted["task"]["executionState"] == "done"
+            assert accepted["task"]["columnId"] == done_col
+            assert accepted["task"]["completedAt"]
+        finally:
+            server._project_execution_call_executor = old_executor
+            restore_store(old)
+
+
+def test_project_start_preserves_dirty_confirmation_after_reviewer_skip_confirmation():
+    with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as workspace:
+        subprocess.run(["git", "init", "-q"], cwd=workspace, check=True)
+        with open(os.path.join(workspace, "dirty.txt"), "w", encoding="utf-8") as f:
+            f.write("dirty\n")
+        old = with_store(status_dir)
+        old_executor = server._project_execution_call_executor
+        server._project_execution_call_executor = lambda executor, prompt, workspace, attempt_id, project_id=None, task_id=None, timeout=600: {
+            "ok": True, "status": "completed", "reply": "implemented without reviewer", "modifiedFiles": [],
+        }
+        try:
+            project, task = create_project_execution_project(workspace)
+            server._handle_project_update(project["id"], {"defaultReviewerAgentId": None})
+            server._handle_task_update(project["id"], task["id"], {"reviewerAgentId": None})
+
+            reviewer_confirm = server._handle_project_execution_project_start(project["id"], {"mode": "continuous"})
+            assert reviewer_confirm["_status"] == 409
+            assert reviewer_confirm["code"] == "reviewer_skip_confirmation_required"
+
+            dirty_confirm = server._handle_project_execution_project_start(project["id"], {"mode": "continuous", "skipReviewConfirmed": True})
+            assert dirty_confirm["_status"] == 409
+            assert dirty_confirm["code"] == "dirty_worktree_confirmation_required"
+            assert dirty_confirm["dirtyFingerprint"]
+
+            started = server._handle_project_execution_project_start(project["id"], {
+                "mode": "continuous",
+                "skipReviewConfirmed": True,
+                "dirtyFingerprint": dirty_confirm["dirtyFingerprint"],
+            })
+            assert started["ok"] is True
+            assert started["taskId"] == task["id"]
+
+            current_task = wait_for(lambda: server._handle_project_get(project["id"])["project"]["tasks"][0]
+                                    if server._handle_project_get(project["id"])["project"]["tasks"][0].get("executionState") == "awaiting_user_acceptance"
+                                    else None)
+            assert current_task["reviewResult"]["status"] == "skipped"
+        finally:
+            server._project_execution_call_executor = old_executor
+            restore_store(old)
+
+
+def test_direct_task_start_supports_reviewer_skip_and_dirty_confirmation_chain():
+    with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as workspace:
+        subprocess.run(["git", "init", "-q"], cwd=workspace, check=True)
+        with open(os.path.join(workspace, "dirty.txt"), "w", encoding="utf-8") as f:
+            f.write("dirty\n")
+        old = with_store(status_dir)
+        old_executor = server._project_execution_call_executor
+        server._project_execution_call_executor = lambda executor, prompt, workspace, attempt_id, project_id=None, task_id=None, timeout=600: {
+            "ok": True, "status": "completed", "reply": "implemented without reviewer", "modifiedFiles": [],
+        }
+        try:
+            project, task = create_project_execution_project(workspace)
+            server._handle_project_update(project["id"], {"defaultReviewerAgentId": None})
+            server._handle_task_update(project["id"], task["id"], {"reviewerAgentId": None})
+
+            reviewer_confirm = server._handle_project_execution_start(project["id"], task["id"], {})
+            assert reviewer_confirm["_status"] == 409
+            assert reviewer_confirm["code"] == "reviewer_skip_confirmation_required"
+
+            dirty_confirm = server._handle_project_execution_start(project["id"], task["id"], {"skipReviewConfirmed": True})
+            assert dirty_confirm["_status"] == 409
+            assert dirty_confirm["code"] == "dirty_worktree_confirmation_required"
+
+            started = server._handle_project_execution_start(project["id"], task["id"], {
+                "skipReviewConfirmed": True,
+                "dirtyFingerprint": dirty_confirm["dirtyFingerprint"],
+            })
+            assert started["ok"] is True
+            assert started["startMode"] == "single"
+
+            current_task = wait_for(lambda: server._handle_project_get(project["id"])["project"]["tasks"][0]
+                                    if server._handle_project_get(project["id"])["project"]["tasks"][0].get("executionState") == "awaiting_user_acceptance"
+                                    else None)
+            assert current_task["reviewResult"]["status"] == "skipped"
+        finally:
+            server._project_execution_call_executor = old_executor
+            restore_store(old)
+
+
+def test_continuous_flow_auto_continues_when_task_does_not_require_acceptance():
+    with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as workspace:
+        old = with_store(status_dir)
+        old_executor = server._project_execution_call_executor
+        old_reviewer = server._project_execution_call_reviewer
+        calls = []
+
+        def executor_call(executor, prompt, workspace, attempt_id, project_id=None, task_id=None, timeout=600):
+            calls.append(("execute", task_id))
+            return {"ok": True, "status": "completed", "reply": "implemented", "modifiedFiles": []}
+
+        server._project_execution_call_executor = executor_call
+        server._project_execution_call_reviewer = lambda reviewer, prompt, review_id, project_id=None, task_id=None, timeout=600: {
+            "ok": True, "status": "completed", "reply": '{"status":"pass","summary":"ready","rationale":"ok","items":[]}',
+        }
+        try:
+            project, first = create_project_execution_project(workspace)
+            server._handle_task_update(project["id"], first["id"], {"requiresUserAcceptance": False})
+            second = server._handle_task_create(project["id"], {"title": "Second", "columnId": project["columns"][0]["id"], "requiresUserAcceptance": True})["task"]
+            started = server._handle_project_execution_project_start(project["id"], {"mode": "continuous"})
+            assert started["ok"] is True
+
+            def second_awaiting():
+                current = server._handle_project_get(project["id"])["project"]
+                first_task = next(t for t in current["tasks"] if t["id"] == first["id"])
+                second_task = next(t for t in current["tasks"] if t["id"] == second["id"])
+                if first_task.get("executionState") == "done" and second_task.get("executionState") == "awaiting_user_acceptance":
+                    return current, first_task, second_task
+                return None
+
+            current, first_task, second_task = wait_for(second_awaiting, timeout=8)
+            assert first_task["completedAt"]
+            assert second_task["reviewResult"]["status"] == "pass"
+            assert [call[1] for call in calls] == [first["id"], second["id"]]
+            assert current["projectExecutionFlowStopReason"] == "awaiting_user_acceptance"
+        finally:
+            server._project_execution_call_executor = old_executor
+            server._project_execution_call_reviewer = old_reviewer
+            restore_store(old)
+
+
+def test_direct_task_start_does_not_enable_continuous_flow_even_when_project_default_is_continuous():
+    with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as workspace:
+        old = with_store(status_dir)
+        old_executor = server._project_execution_call_executor
+        server._project_execution_call_executor = lambda executor, prompt, workspace, attempt_id, project_id=None, task_id=None, timeout=600: {
+            "ok": True, "status": "completed", "reply": "implemented", "modifiedFiles": [],
+        }
+        try:
+            project, task = create_project_execution_project(workspace)
+            server._handle_project_update(project["id"], {"projectExecutionStartMode": "continuous"})
+            started = server._handle_project_execution_start(project["id"], task["id"], {})
+            assert started["ok"] is True
+            assert started["startMode"] == "single"
+            wait_for(lambda: server._handle_project_get(project["id"])["project"]["tasks"][0].get("executionState") == "execution_complete")
+            current = server._handle_project_get(project["id"])["project"]
+            assert current["projectExecutionStartMode"] == "continuous"
+            assert current["projectExecutionFlowActive"] is False
+        finally:
+            server._project_execution_call_executor = old_executor
+            restore_store(old)
+
+
 def test_dirty_confirmation_is_bound_to_current_fingerprint():
     with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as workspace:
         subprocess.run(["git", "init", "-q"], cwd=workspace, check=True)
@@ -473,7 +947,7 @@ def test_dirty_confirmation_is_bound_to_current_fingerprint():
             restore_store(old)
 
 
-def test_dirty_confirmation_is_single_use():
+def test_dirty_confirmation_can_be_reconfirmed_for_same_fingerprint():
     with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as workspace:
         subprocess.run(["git", "init", "-q"], cwd=workspace, check=True)
         with open(os.path.join(workspace, "dirty.txt"), "w", encoding="utf-8") as f:
@@ -492,8 +966,8 @@ def test_dirty_confirmation_is_single_use():
             wait_for(lambda: server._handle_project_get(project["id"])["project"]["tasks"][0].get("executionState") == "execution_complete")
             second_task = server._handle_task_create(project["id"], {"title": "Second", "columnId": project["columns"][0]["id"]})["task"]
             repeated = server._handle_project_execution_start(project["id"], second_task["id"], {"dirtyFingerprint": first["dirtyFingerprint"]})
-            assert repeated["_status"] == 409
-            assert repeated["code"] == "dirty_worktree_confirmation_already_used"
+            assert repeated["ok"] is True
+            assert repeated["taskId"] == second_task["id"]
         finally:
             server._project_execution_call_executor = old_call
             restore_store(old)
@@ -886,6 +1360,11 @@ def test_legacy_review_check_cannot_update_project_execution_project():
 
 if __name__ == "__main__":
     test_project_store_round_trip_and_legacy_defaults()
+    test_project_create_auto_workspace_and_store_round_trip()
+    test_project_create_normal_and_manual_workspace_provenance()
+    test_project_from_template_auto_workspace_matches_project_create()
+    test_project_delete_auto_workspace_keep_or_delete_and_never_delete_user_workspace()
+    test_auto_workspace_create_failure_does_not_create_project()
     test_workspace_validation_and_dirty_fingerprint()
     test_workspace_validation_rejects_files_and_outside_allowed_roots()
     test_artifact_core_lists_markdown_only_and_reads_safely()
@@ -897,8 +1376,17 @@ if __name__ == "__main__":
     test_task_role_overrides_project_defaults()
     test_provider_matrix_routes_execution_with_workspace_and_provider_ref()
     test_selected_task_executes_and_stops_at_execution_complete()
+    test_project_level_start_selects_first_eligible_and_auto_reviews_to_acceptance()
+    test_project_level_start_skips_done_columns_and_reports_no_eligible_task()
+    test_project_level_start_persists_reviewer_skip_confirmation_for_toolbar_state()
+    test_missing_reviewer_can_be_skipped_after_explicit_confirmation()
+    test_skipped_review_can_be_accepted_to_done()
+    test_project_start_preserves_dirty_confirmation_after_reviewer_skip_confirmation()
+    test_direct_task_start_supports_reviewer_skip_and_dirty_confirmation_chain()
+    test_continuous_flow_auto_continues_when_task_does_not_require_acceptance()
+    test_direct_task_start_does_not_enable_continuous_flow_even_when_project_default_is_continuous()
     test_dirty_confirmation_is_bound_to_current_fingerprint()
-    test_dirty_confirmation_is_single_use()
+    test_dirty_confirmation_can_be_reconfirmed_for_same_fingerprint()
     test_start_rejects_when_another_task_is_reviewing()
     test_execution_failure_blocks_with_redacted_bounded_evidence()
     test_cancel_active_execution_blocks_and_preserves_evidence()

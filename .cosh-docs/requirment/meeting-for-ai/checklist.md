@@ -2,6 +2,16 @@
 
 确认状态：待确认
 
+## 阶段验收记录
+
+- 2026-06-17T04:34:19+08:00：用户确认 Meeting for AI Phase 3 已完成验收，并要求在 `meeting-for-ai` 与 `meeting-for-ai-phase-1-3` 中做标记。子需求 `meeting-for-ai-phase-1-3` 已归档为完成；父需求 `meeting-for-ai` 仅记录 Phase 1-3 完成，Phase 4-7 仍待后续独立实现和验收。
+- 2026-06-17T23:46:48+08:00：用户确认 Meeting for AI Phase 4 已完成验收并可以归档。子需求 `meeting-for-ai-phase-4` 已标记为 `done`；父需求 `meeting-for-ai` 同步记录 Phase 4 完成，Phase 5-7 仍待后续独立实现和验收。
+- 2026-06-18T00:13:45+08:00：已根据当前需求澄清抽出 Meeting for AI Phase 5 子需求 `meeting-for-ai-phase-5`。该子需求覆盖 CHK-004、CHK-005、CHK-006、CHK-016、CHK-019、CHK-023、CHK-028，并新增 advisory turn 与轻量预约相关验收项；当前等待用户确认子需求 checklist。
+- 2026-06-18T03:57:48+08:00：用户确认 Meeting for AI Phase 5 已完成验收并可以归档。子需求 `meeting-for-ai-phase-5` 已标记为 `done`；父需求 `meeting-for-ai` 同步记录 Phase 5 完成，Phase 6-7 仍待后续独立实现和验收。
+- 2026-06-18T04:07:41+08:00：已根据当前 Phase 6 范围抽出 Meeting for AI Phase 6 子需求 `meeting-for-ai-phase-6`。该子需求覆盖会议绑定项目、行动项草稿、用户确认、正式项目任务创建、幂等、审计和回归验收；当前等待用户确认子需求 checklist。
+- 2026-06-18T04:11:42+08:00：用户以 `continuee` 确认 Meeting for AI Phase 6 checklist。子需求 `meeting-for-ai-phase-6` 已生成 todolist，可进入执行计划和开发阶段。
+- 2026-06-19T02:25:45+08:00：用户要求正式归档 Meeting for AI Phase 6。子需求 `meeting-for-ai-phase-6` 已标记为 `done`；父需求 `meeting-for-ai` 同步记录 Phase 6 完成，剩余范围为 Phase 7 系统级异常、恢复、安全、观测和总回归验收。
+
 ## Phase 对应关系
 
 - Phase 1：CHK-005、CHK-017、CHK-018、CHK-019、CHK-022、CHK-023、CHK-026、CHK-027。
@@ -211,3 +221,17 @@
 - 关联需求：AI 主持。
 - 验证方法：人工完成一场三 AI 的讨论决策会议，并在中途插话和点名。
 - 预期结果：AI 主持能够推进、收敛并响应用户干预；若无共识则正确等待用户裁决。
+
+## Phase 7 总测试记录
+
+- 2026-06-19T02:38:06+08:00：Phase 6 已正式归档后执行 Meeting for AI Phase 7 总测试，主需求进入 `tested`，等待用户最终验收后再标记 `done`。
+- 自动化回归通过：`.venv/bin/python tests/test_meeting_for_ai_phase1.py`、`.venv/bin/python tests/test_meeting_for_ai_phase4.py`、`env VO_MEETING_DISABLE_LIVE_ADVISORY=1 .venv/bin/python tests/test_meeting_for_ai_phase5.py`、`.venv/bin/python tests/test_meeting_for_ai_phase6.py`、`.venv/bin/python tests/test_project_execution.py`、`node --check app/game.js`、`node --check app/projects.js`、`node tests/test_i18n_integrity.js`、`.venv/bin/python -m py_compile app/server.py app/project_store.py tests/test_meeting_for_ai_phase1.py tests/test_meeting_for_ai_phase4.py tests/test_meeting_for_ai_phase5.py tests/test_meeting_for_ai_phase6.py`。
+- chrome-devtools MCP 真实环境验证通过：在 `http://127.0.0.1:8040/` 页面内 fetch `/status`、`/api/meetings/active`、`/api/meetings/executable/e1b875b5-5a6c-4fdd-b2c9-e39d8e270f49`、`/api/projects`。真实冲突会议 `e1b875b5-5a6c-4fdd-b2c9-e39d8e270f49` 绑定项目 `82b4883a-6aed-49a5-9046-a6cc9711d836`，codex-local 与 hermes-default 均返回 `agent_advisory_turn` 且 `status=completed`，包含预计可用性、打断风险、建议和 providerRef。
+- 真实数据闭环复核通过：已完成会议 `37f6f861-e69e-4ae8-9426-80449dace804` 的行动项草稿仍可追踪；`ai-1` 确认后创建任务 `6c50bb5c-c70c-426f-81fb-f3c193a88449` 并保存 `meetingId/actionItemId` 来源；`ai-2` 为 `kept_as_meeting_item`；`ai-3` 为 `rejected`；未绑定目标项目确认返回 `target_project_required`。
+- 已识别残留项 1：直接运行 `.venv/bin/python tests/test_meeting_for_ai_phase5.py` 的 live-advisory 自动化在当前环境失败。沙箱内失败为 gateway WebSocket `Operation not permitted`；非沙箱复测失败为 `127.0.0.1:18789` gateway 未连接。该失败与 8040 真实数据中的 `agent_advisory_turn` 成功记录不矛盾，归类为 live gateway 可用性前置条件。
+- 已识别残留项 2：真实 8040 环境仍有 3 个 active meeting，其中包含 conflict 测试会议。现有取消/清理 API 能力不足以安全批量清理历史测试会议，建议后续补“测试会议清理/取消入口”，以覆盖 CHK-019 的运维清理路径。
+
+## 最终归档记录
+
+- 2026-06-19T02:46:22+08:00：用户确认“这个需求也归档吧”。Meeting for AI 主需求已完成 Phase 1-7 阶段验收、Phase 7 总测试和真实数据/MCP 复核，正式标记为 `done`。
+- 归档说明：live advisory 自动化对本地 gateway `127.0.0.1:18789` 的可用性依赖、以及历史测试会议清理入口，作为后续运维/测试便利性改进项保留，不阻塞本主需求闭环。

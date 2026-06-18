@@ -1,20 +1,28 @@
 {
   "name": "localization-completion",
-  "stage": "implementation_done",
-  "waiting_for_user": true,
-  "updated_at": "2026-06-15T20:31:56+08:00",
+  "stage": "done",
+  "waiting_for_user": false,
+  "updated_at": "2026-06-17T02:40:45+08:00",
   "confirmed": {
     "checklist": true,
-    "tested": false,
-    "done": false
+    "tested": true,
+    "done": true
   },
   "confirmations": {
     "checklist": {
       "confirmed_at": "2026-06-15T14:29:31+08:00",
       "summary": "用户要求所有浏览器相关 checklist 必须使用 MCP 工具验证，并同意生成 todolist。"
     },
-    "tested": null,
-    "done": null
+    "tested": {
+      "item": "tested",
+      "confirmed_at": "2026-06-17T02:40:45+08:00",
+      "summary": "用户确认 localization-completion 可以标记为已完成。"
+    },
+    "done": {
+      "item": "done",
+      "confirmed_at": "2026-06-17T02:40:45+08:00",
+      "summary": "用户确认 localization-completion 可以标记为已完成。"
+    }
   },
   "files": {
     "requirement": "requirement.md",
@@ -32,6 +40,6 @@
     "已增加 /website/ 部署路由并完成官网 MCP 全页验证。",
     "已使用隔离浏览器上下文、临时 DOM 数据和 mock 接口补测 CRUD、故障降级、XSS、首次访问、Codex/Hermes 状态。",
     "24 项业务 checklist 已通过；pytest 和 Puppeteer E2E 因环境缺少依赖未启动。",
-    "confirmed.tested 保持 false，等待用户人工确认测试结果。"
+    "2026-06-17T02:40:45+08:00 用户确认该需求可标记为已完成。"
   ]
 }

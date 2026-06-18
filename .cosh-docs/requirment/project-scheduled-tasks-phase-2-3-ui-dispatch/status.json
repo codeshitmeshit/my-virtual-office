@@ -1,0 +1,38 @@
+{
+  "name": "project-scheduled-tasks-phase-2-3-ui-dispatch",
+  "stage": "done",
+  "waiting_for_user": false,
+  "updated_at": "2026-06-18T18:04:05+08:00",
+  "confirmed": {
+    "checklist": true,
+    "tested": true,
+    "done": true
+  },
+  "confirmations": {
+    "checklist": {
+      "confirmed_at": "2026-06-18T04:05:09+08:00",
+      "summary": "用户回复 “continue”，确认 Phase 2+3 checklist，可以生成 todolist。"
+    },
+    "tested": {
+      "confirmed_at": "2026-06-18T17:49:16+08:00",
+      "summary": "自动化测试、8090 live 验收、Chrome MCP 页面验收、whole-project 真实触发验收、任务级 scheduledRepeatEnabled 重复触发开关验收、全局定时任务页创建项目 cron 入口验收、项目详情页表单化创建项目 cron 验收，以及项目详情页编辑项目 cron 入口验收已通过，等待用户人工确认。"
+    },
+    "done": {
+      "confirmed_at": "2026-06-18T18:04:05+08:00",
+      "summary": "用户回复“我验收了，归档吧”，确认 Phase 2+3 子需求验收通过并归档。"
+    }
+  },
+  "files": {
+    "requirement": "requirement.md",
+    "review": "review.md",
+    "checklist": "checklist.md",
+    "todolist": "todolist.md"
+  },
+  "notes": [
+    "这是父需求 project-scheduled-tasks 的 Phase 2+3 子需求。",
+    "范围包括项目详情页 UI、全局定时任务页总览和项目绑定 cron 派发。",
+    "执行历史和控制面板异常提示保留到 Phase 4。",
+    "用户已确认 checklist，todolist.md 已创建。",
+    "Phase 2+3 实现已完成并通过自动化测试、8090 live 验收、Chrome MCP 验收、whole-project 真实触发验收、任务级 scheduledRepeatEnabled 重复触发开关验收、全局定时任务页创建项目 cron 入口验收、项目详情页表单化创建项目 cron 验收和项目详情页编辑项目 cron 入口验收；用户已确认验收通过并归档。"
+  ]
+}

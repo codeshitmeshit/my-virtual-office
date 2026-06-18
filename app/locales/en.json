@@ -567,6 +567,16 @@
   "meeting_start": "Start meeting",
   "meeting_running": "Running...",
   "meeting_current_speaker": "Speaker",
+  "meeting_status_completed": "Completed",
+  "meeting_status_cancelled": "Cancelled",
+  "meeting_status_failed": "Failed",
+  "meeting_stage_preparing": "Preparing",
+  "meeting_stage_conflict": "Conflict",
+  "meeting_stage_active_opening": "Opening",
+  "meeting_stage_active_discussion": "Discussion",
+  "meeting_stage_awaiting_user_decision": "Awaiting user decision",
+  "meeting_stage_paused": "Paused",
+  "meeting_stage_summarizing": "Summarizing",
   "meeting_contributions": "Contributions",
   "meeting_transcript": "Round transcript",
   "meeting_live_discussion": "Live discussion",
@@ -591,6 +601,71 @@
   "meeting_parse_fallback": "Original text retained",
   "meeting_ai_end": "Ask moderator to end",
   "meeting_ai_ending": "Moderator summarizing...",
+  "meeting_decision_window": "Round decision window",
+  "meeting_decision_window_hint": "A formal round is complete. Ask one participant, add context, or continue the agenda.",
+  "meeting_decision_summary_hint": "The final formal round is complete. Ask one participant, add context, or wait for the moderator to summarize and end.",
+  "meeting_decision_window_timeout": "Timeout",
+  "meeting_decision_deadline": "Deadline",
+  "meeting_decision_waiting": "Waiting",
+  "meeting_decision_continuing": "Continuing",
+  "meeting_target_participant": "Target participant",
+  "meeting_target_question": "Targeted question",
+  "meeting_target_question_placeholder": "Ask this participant to respond before the next round.",
+  "meeting_send_targeted_question": "Ask participant",
+  "meeting_continue": "Continue",
+  "meeting_targeted_question": "Targeted question",
+  "meeting_targeted_response": "Targeted response",
+  "meeting_target_required": "Select a target participant.",
+  "meeting_target_question_required": "Enter a targeted question.",
+  "meeting_targeted_calling": "Answering targeted question",
+  "meeting_current_agenda": "Current agenda",
+  "meeting_adjust_agenda": "Adjust agenda",
+  "meeting_new_agenda": "New agenda",
+  "meeting_new_agenda_placeholder": "Set the agenda for upcoming turns.",
+  "meeting_agenda_reason": "Reason",
+  "meeting_agenda_reason_placeholder": "Optional reason for the change.",
+  "meeting_save_agenda": "Save agenda",
+  "meeting_agenda_required": "Enter a new agenda.",
+  "meeting_agenda_changed": "Agenda changed",
+  "meeting_previous_agenda": "Previous agenda",
+  "meeting_resolution_policy": "Resolution policy",
+  "meeting_resolution_user_decision": "User decides disagreements",
+  "meeting_resolution_moderator_decision": "Moderator decides and closes",
+  "meeting_result_summary": "Meeting result",
+  "meeting_outcome": "Outcome",
+  "meeting_outcome_approved": "Approved",
+  "meeting_outcome_rejected": "Rejected",
+  "meeting_outcome_no_consensus": "No consensus",
+  "meeting_outcome_needs_user_decision": "Needs user decision",
+  "meeting_rationale": "Rationale",
+  "meeting_unresolved_questions": "Unresolved questions",
+  "meeting_disagreements": "Disagreements",
+  "meeting_arbitration_title": "No consensus arbitration",
+  "meeting_arbitration_hint": "Choose a decision, continue discussion, or end with no consensus.",
+  "meeting_arbitration_waiting": "Waiting for arbitration",
+  "meeting_arbitration_waiting_hint": "The meeting has unresolved disagreement. Choose a decision, continue discussion, or end with no consensus.",
+  "meeting_arbitration_decision": "Decision",
+  "meeting_arbitration_decision_placeholder": "Write the user decision to finalize.",
+  "meeting_arbitration_rationale": "Rationale",
+  "meeting_arbitration_rationale_placeholder": "Optional rationale.",
+  "meeting_arbitration_consensus_summary": "Consensus reached, summarize",
+  "meeting_arbitration_decide": "Finalize decision",
+  "meeting_arbitration_continue": "Continue one round",
+  "meeting_arbitration_end": "End no consensus",
+  "meeting_arbitration_decision_required": "Enter a decision.",
+  "meeting_arbitration_marker": "Arbitration",
+  "meeting_arbitration_action": "Action",
+  "meeting_moderator_takeover_title": "Moderator takeover",
+  "meeting_moderator_takeover_hint": "The moderator failed while summarizing. Take over manually or choose another moderator to retry.",
+  "meeting_takeover_summary": "User summary",
+  "meeting_takeover_summary_placeholder": "Write the final summary to close the meeting.",
+  "meeting_takeover_decision": "Decision",
+  "meeting_takeover_decision_placeholder": "Optional final decision.",
+  "meeting_takeover_summary_required": "Enter a user summary.",
+  "meeting_takeover_submit": "Take over and close",
+  "meeting_replacement_moderator": "Replacement moderator",
+  "meeting_replace_moderator_submit": "Retry with moderator",
+  "meeting_current_moderator": "current",
   "meeting_pause": "Pause",
   "meeting_resume": "Resume",
   "meeting_cancel": "Cancel meeting",
@@ -714,6 +789,88 @@
   "proj_new_project_title": "NEW PROJECT",
   "proj_new_project_title_placeholder": "Project title",
   "proj_new_project_desc_placeholder": "What is this project about?",
+  "proj_long_term_project": "Long-term project",
+  "proj_long_term_project_hint": "Long-term projects can recommend a project scheduled task, but nothing is created or enabled automatically.",
+  "proj_scheduled_cron_recommend_title": "Schedule this long-term project",
+  "proj_scheduled_cron_recommend_text": "Use a project scheduled task to keep work moving or run recurring project tasks. It is only created after you save the form.",
+  "proj_scheduled_cron_recommend_action": "Configure schedule",
+  "proj_scheduled_cron_title": "Project Scheduled Tasks",
+  "proj_scheduled_cron_subtitle": "Uses global Cron scheduling and binds it to this project",
+  "proj_scheduled_cron_paused_subtitle": "Paused. This project's scheduled tasks will not dispatch.",
+  "proj_scheduled_cron_pause": "Pause schedule",
+  "proj_scheduled_cron_resume": "Resume schedule",
+  "proj_scheduled_cron_new": "New scheduled task",
+  "proj_scheduled_cron_empty": "This project has no scheduled tasks yet",
+  "proj_scheduled_cron_run_now": "Run now",
+  "proj_scheduled_cron_edit": "Edit",
+  "proj_scheduled_cron_disable": "Disable",
+  "proj_scheduled_cron_enable": "Enable",
+  "proj_scheduled_cron_delete": "Delete",
+  "proj_scheduled_cron_error": "Error",
+  "proj_scheduled_cron_default_name": "Scheduled task",
+  "proj_scheduled_cron_no_extra_info": "No additional information",
+  "proj_scheduled_cron_target_task": "Task",
+  "proj_scheduled_cron_target_workflow": "Full project workflow",
+  "proj_scheduled_cron_task_missing": "Task missing",
+  "proj_scheduled_cron_history_title": "Scheduled Execution History",
+  "proj_scheduled_cron_history_subtitle": "Latest {count} project scheduled task dispatch results",
+  "proj_scheduled_cron_history_empty": "No scheduled execution history yet",
+  "proj_scheduled_cron_history_started": "Started",
+  "proj_scheduled_cron_history_skipped": "Skipped",
+  "proj_scheduled_cron_history_paused": "Paused",
+  "proj_scheduled_cron_history_failed": "Failed",
+  "proj_scheduled_cron_history_intervention_required": "Needs intervention",
+  "proj_scheduled_cron_history_unknown": "Unknown",
+  "proj_scheduled_cron_default_project_name": "{title} scheduled task",
+  "proj_scheduled_cron_edit_title": "Edit Project Scheduled Task",
+  "proj_scheduled_cron_create_title": "New Project Scheduled Task",
+  "proj_scheduled_cron_name_label": "Scheduled task name",
+  "proj_scheduled_cron_target_label": "Target",
+  "proj_scheduled_cron_task_label": "Task",
+  "proj_scheduled_cron_schedule_type": "Schedule type",
+  "proj_scheduled_cron_schedule_every": "Repeat by interval",
+  "proj_scheduled_cron_schedule_cron": "Cron expression",
+  "proj_scheduled_cron_schedule_at": "One-time",
+  "proj_scheduled_cron_interval_minutes": "Interval (minutes)",
+  "proj_scheduled_cron_time_label": "Time",
+  "proj_scheduled_cron_timezone_label": "Time zone",
+  "proj_scheduled_cron_days_label": "Days",
+  "proj_scheduled_cron_date_label": "Date",
+  "proj_scheduled_cron_enabled_label": "Enabled",
+  "proj_scheduled_cron_repeat_gate_hint": "If the target task is already Done, repeat dispatch is controlled by the task detail setting \"Allow scheduled tasks to repeat completed tasks\".",
+  "proj_scheduled_cron_save": "Save scheduled task",
+  "proj_scheduled_cron_create": "Create scheduled task",
+  "proj_scheduled_cron_error_interval": "Interval must be at least 1 minute",
+  "proj_scheduled_cron_error_time": "Select a valid time",
+  "proj_scheduled_cron_error_day": "Select at least one day",
+  "proj_scheduled_cron_error_at": "Select a one-time execution date and time",
+  "proj_scheduled_cron_error_task": "Select a task",
+  "proj_scheduled_cron_created": "Project scheduled task created",
+  "proj_scheduled_cron_updated": "Project scheduled task updated",
+  "proj_scheduled_cron_save_failed": "Failed to save project scheduled task: {message}",
+  "proj_scheduled_cron_not_found": "Project scheduled task not found",
+  "proj_scheduled_cron_paused": "Project scheduled tasks paused",
+  "proj_scheduled_cron_resumed": "Project scheduled tasks resumed",
+  "proj_scheduled_cron_pause_failed": "Failed to update pause state: {message}",
+  "proj_scheduled_cron_triggered": "Project scheduled task triggered",
+  "proj_scheduled_cron_run_failed": "Failed to run project scheduled task: {message}",
+  "proj_scheduled_cron_disabled": "Project scheduled task disabled",
+  "proj_scheduled_cron_enabled": "Project scheduled task enabled",
+  "proj_scheduled_cron_update_failed": "Failed to update project scheduled task: {message}",
+  "proj_scheduled_cron_delete_confirm": "Delete this project scheduled task?",
+  "proj_scheduled_cron_deleted": "Project scheduled task deleted",
+  "proj_scheduled_cron_delete_failed": "Failed to delete project scheduled task: {message}",
+  "proj_scheduled_cron_alert_title": "Project scheduled task issue",
+  "proj_scheduled_cron_alert_badge": "Schedule issue",
+  "proj_task_scheduled_repeat_enabled": "Allow scheduled tasks to repeat completed tasks",
+  "proj_task_scheduled_repeat_hint": "When enabled, a project scheduled task can reopen and dispatch a Done task when it triggers again.",
+  "weekday_mon": "Mon",
+  "weekday_tue": "Tue",
+  "weekday_wed": "Wed",
+  "weekday_thu": "Thu",
+  "weekday_fri": "Fri",
+  "weekday_sat": "Sat",
+  "weekday_sun": "Sun",
   "proj_create_project_btn": "Create Project",
   "proj_edit_project_title": "EDIT PROJECT",
   "proj_save_changes": "Save Changes",
@@ -1185,7 +1342,7 @@
   ,"proj_accept_confirm": "Accept and move to Done?"
   ,"proj_accept_action_failed": "Failed to submit acceptance action"
   ,"setup_license_note": "<b>Demo mode:</b> Free for up to 3 agents; some features are locked.<br><br><b>Full license:</b> Unlimited agents and all features.<br><b>Early bird:</b> Same features at a limited-time launch price.<br><br>Get your key at <a href=\"https://myvirtualoffice.ai\" target=\"_blank\">myvirtualoffice.ai</a>"
-  ,"setup_browser_note": "<b>What is this?</b> Agent Browser provides a live browser controlled through CDP and viewed through VNC.<br><br><b>Docker setup:</b><br><code>docker run -d --name vo-browser -p 9222:9222 -p 6902:6902 kasmweb/chromium:1.17.0</code><br><br>CDP: <code>http://127.0.0.1:9222</code><br>Viewer: <code>http://127.0.0.1:6902</code><br><br>You can skip this and configure it later."
+  ,"setup_browser_note": "<b>What is this?</b> Agent Browser provides a live browser controlled through CDP and viewed through VNC.<br><br><b>Project Agent Browser Docker setup:</b><br><code>./start.sh --browser</code><br><br>This command starts only the Agent Browser Docker service; run the main app separately with <code>./start.sh</code> in another terminal.<br><br>CDP: <code>http://127.0.0.1:9224</code><br>Viewer: <code>https://127.0.0.1:6901</code><br><br>You can skip this and configure it later."
   ,"setup_sms_note": "<b>What you need:</b> A Twilio account, phone number, Account SID, and Auth Token.<br><br>Incoming MMS can display when credentials are configured. Outgoing attachments require a public HTTPS media URL that Twilio can access. Text-only SMS works without one.<br><br>You can skip this and configure it later."
   ,"setup_metrics_note": "<b>How it works:</b> Run the included metrics server on the computer to monitor.<br><br><code>pip install psutil</code><br><code>python pc-metrics-server.py 8099</code><br><br>Use <code>http://127.0.0.1:8099</code> locally or the computer's LAN/Tailscale address remotely. NVIDIA GPU monitoring also requires <code>pynvml</code>."
   ,"setup_done_note": "<b>What you can do:</b><br>• Edit the office layout and colors<br>• Customize agents and assign desks<br>• Chat with agents<br>• Change connection settings and export/import configuration<br><br><b>Live presence:</b> Long-running agent work remains visible until it finishes.<br><br><b>API usage:</b> Provider usage and credential health are detected from OpenClaw automatically."
@@ -1365,4 +1522,95 @@
   ,"hermes_task_plan": "task plan"
   ,"hermes_steps_complete": "{{count}} steps complete"
   ,"hermes_plan_preview": "receive · run · export · render"
+  ,"meeting_ai_requests": "AI Requests"
+  ,"meeting_request_empty": "No AI meeting requests"
+  ,"meeting_request_title": "AI meeting request"
+  ,"meeting_request_status_pending": "Pending"
+  ,"meeting_request_status_rejected": "Rejected"
+  ,"meeting_request_status_confirmed": "Confirmed"
+  ,"meeting_request_goal": "Goal"
+  ,"meeting_request_expected": "Expected outcome"
+  ,"meeting_request_reason": "Why meeting is needed"
+  ,"meeting_request_context_candidates": "Context candidates"
+  ,"meeting_request_no_context": "No context candidates."
+  ,"meeting_request_reject_reason": "Reject reason"
+  ,"meeting_request_reject_reason_required": "Enter a rejection reason."
+  ,"meeting_request_confirm_start": "Confirm and start"
+  ,"meeting_request_reject": "Reject"
+  ,"meeting_request_created_meeting": "Created meeting"
+  ,"meeting_request_pending_prompt": "AI meeting requests need confirmation"
+  ,"meeting_urgency": "Urgency"
+  ,"meeting_requesting_agent": "Requesting AI"
+  ,"meeting_auto_start_high_urgency": "High urgency auto-starts"
+  ,"meeting_created_by_user": "User started"
+  ,"meeting_created_by_agent": "AI started"
+  ,"meeting_context_source_project": "Project"
+  ,"meeting_context_source_task": "Task"
+  ,"meeting_context_source_related_task": "Related task"
+  ,"meeting_context_source_meeting": "Meeting"
+  ,"meeting_context_source_supplemental": "Supplemental context"
+  ,"meeting_fixture_user_requested_ai_meeting": "User requested AI meeting"
+  ,"meeting_fixture_invite_gg_urgency_3": "Invite gg to urgency 3 AI meeting"
+  ,"meeting_fixture_invite_gg_urgency_3_summary": "User requested Codex to start an urgency 3 AI meeting and invite gg. This task exists as the required project-task source for the meeting request."
+  ,"meeting_conflicts": "Participant conflicts"
+  ,"meeting_conflict_estimated": "Availability"
+  ,"meeting_pause_capability": "Pause"
+  ,"meeting_advisory": "Advisory recommendation"
+  ,"meeting_advisory_source": "Source"
+  ,"meeting_advisory_source_agent": "Busy agent advisory"
+  ,"meeting_advisory_source_local": "Local fallback"
+  ,"meeting_advisory_source_local_failed": "AI advisory failed; local fallback"
+  ,"meeting_unknown": "unknown"
+  ,"meeting_conflict_idle": "Idle"
+  ,"meeting_conflict_provider_call": "Provider call in progress"
+  ,"meeting_conflict_already_in_meeting": "Already in meeting: {topic}"
+  ,"meeting_conflict_risk_high": "high"
+  ,"meeting_conflict_risk_medium": "medium"
+  ,"meeting_conflict_risk_low": "low"
+  ,"meeting_conflict_risk_busy": "busy"
+  ,"meeting_conflict_risk_idle": "idle"
+  ,"meeting_pause_unavailable": "unavailable"
+  ,"meeting_pause_logical": "logical pause"
+  ,"meeting_pause_none": "none"
+  ,"meeting_recommend_wait": "wait"
+  ,"meeting_recommend_reserve": "try later"
+  ,"meeting_recommend_replace": "replace"
+  ,"meeting_recommend_force_join": "force join"
+  ,"meeting_conflict_risk_meeting_occupied": "Agent is already in another active meeting. Do not force join unless the existing meeting is cancelled."
+  ,"meeting_conflict_resume_none": "No original task can be resumed from this meeting conflict."
+  ,"meeting_conflict_risk_provider_call": "A provider call is in progress. Interrupting can lose an in-flight response."
+  ,"meeting_conflict_resume_provider_call": "Wait for the provider call to finish, then retry conflict handling."
+  ,"meeting_conflict_risk_logical_pause": "The current task can only be logically paused; the provider process may not stop immediately."
+  ,"meeting_conflict_resume_logical_pause": "Save current task context and resume from the recorded task state after the meeting."
+  ,"meeting_conflict_risk_uncertain": "Pause safety is uncertain."
+  ,"meeting_conflict_resume_recheck": "Recheck the agent state before forcing a meeting."
+  ,"meeting_conflict_wait": "Wait"
+  ,"meeting_conflict_reserve": "Try later"
+  ,"meeting_conflict_replace": "Replace"
+  ,"meeting_conflict_force": "Force join"
+  ,"meeting_conflict_refresh": "Recheck conflicts"
+  ,"meeting_reservation_notice": "Reservations are reminders only; conflicts are rechecked before the meeting starts."
+  ,"meeting_conflict_failed": "Conflict handling failed"
+  ,"meeting_conflict_reserve_prompt": "Reminder timing is based on the agent's availability."
+  ,"meeting_conflict_replace_prompt": "Replacement agent ID"
+  ,"meeting_conflict_force_confirm": "Force join can interrupt current work. Continue?"
+  ,"meeting_project": "Project"
+  ,"meeting_project_none": "No project"
+  ,"meeting_action_drafts": "Action item drafts"
+  ,"meeting_action_drafts_hint": "Confirming creates a project task. Drafts do not execute automatically."
+  ,"meeting_action_untitled": "Untitled action item"
+  ,"meeting_action_status_draft": "Draft"
+  ,"meeting_action_status_confirmed": "Task created"
+  ,"meeting_action_status_rejected": "Rejected"
+  ,"meeting_action_status_kept": "Kept only"
+  ,"meeting_action_owner": "Owner"
+  ,"meeting_action_title": "Task title"
+  ,"meeting_action_description": "Description"
+  ,"meeting_action_save_draft": "Save draft"
+  ,"meeting_action_confirm_task": "Create task"
+  ,"meeting_action_keep": "Keep only"
+  ,"meeting_action_reject": "Reject"
+  ,"meeting_action_open_task": "Open task"
+  ,"meeting_action_task_created": "Task created"
+  ,"meeting_action_rejected_by_user": "Rejected by user"
 }

@@ -52,6 +52,7 @@ a:hover { text-decoration: underline; }
 .job-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .job-name { font-weight: 700; font-size: 15px; color: var(--accent); min-width: 0; word-break: break-word; }
 .job-agent { background: var(--surface2); padding: 3px 10px; border-radius: 12px; font-size: 12px; color: var(--blue); white-space: nowrap; }
+.job-agent.project { color: var(--green); border: 1px solid rgba(68,255,136,.35); }
 .job-schedule { font-size: 13px; color: var(--dim); font-family: monospace; white-space: nowrap; }
 .job-status { margin-left: auto; display: flex; gap: 8px; align-items: center; }
 .job-status .badge { padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 600; white-space: nowrap; }
@@ -68,6 +69,8 @@ a:hover { text-decoration: underline; }
 .job-actions button.delete { border-color: var(--red); color: var(--red); }
 .job-actions button.delete:hover { background: #3a1a1a; }
 .job-actions button.toggle { border-color: var(--orange); color: var(--orange); }
+.job-project-context { margin-top: 7px; display: flex; gap: 8px; flex-wrap: wrap; font-size: 12px; color: var(--green); }
+.job-project-context a { color: var(--green); text-decoration: underline; }
 
 /* Mobile responsive */
 @media (max-width: 600px) {
@@ -96,12 +99,18 @@ a:hover { text-decoration: underline; }
 .modal h2 { font-family: 'Press Start 2P', monospace; font-size: 12px; color: var(--accent); margin-bottom: 16px; }
 .form-group { margin-bottom: 14px; }
 .form-group label { display: block; font-size: 12px; color: var(--dim); margin-bottom: 4px; font-weight: 600; text-transform: uppercase; }
-.form-group input, .form-group select, .form-group textarea {
+.form-group input:not([type="checkbox"]):not([type="radio"]), .form-group select, .form-group textarea {
   width: 100%; background: var(--surface2); color: var(--text); border: 1px solid var(--border);
   padding: 8px 12px; border-radius: 6px; font-size: 14px; font-family: inherit;
 }
+.form-group input[type="checkbox"], .form-group input[type="radio"] {
+  width: auto;
+  padding: 0;
+  margin-right: 6px;
+  vertical-align: middle;
+}
 .form-group textarea { min-height: 80px; resize: vertical; }
-.form-group input:focus, .form-group select:focus, .form-group textarea:focus { border-color: var(--accent); outline: none; }
+.form-group input:not([type="checkbox"]):not([type="radio"]):focus, .form-group select:focus, .form-group textarea:focus { border-color: var(--accent); outline: none; }
 .form-row { display: flex; gap: 12px; }
 .form-row .form-group { flex: 1; }
 .form-hint { font-size: 11px; color: var(--dim); margin-top: 2px; }
@@ -143,6 +152,7 @@ a:hover { text-decoration: underline; }
 
 <div class="toolbar">
   <button onclick="openCreateModal()" data-i18n="new_job">+ New Job</button>
+  <button onclick="openCreateProjectCronModal()" style="background:var(--green);color:#001a08">+ 项目定时任务</button>
   <button onclick="loadJobs()" style="background:var(--surface2);color:var(--text);border:1px solid var(--border)" data-i18n="refresh_btn">↻ Refresh</button>
   <div class="filter">
     <label style="font-size:12px;color:var(--dim)" data-i18n="agent_label">Agent:</label>
@@ -152,6 +162,16 @@ a:hover { text-decoration: underline; }
     <label style="font-size:12px;color:var(--dim);margin-left:8px">
       <input type="checkbox" id="filter-disabled" onchange="renderJobs()"> <span data-i18n="show_disabled">Show Disabled</span>
     </label>
+    <label style="font-size:12px;color:var(--dim);margin-left:8px">Type:</label>
+    <select id="filter-type" onchange="renderJobs()">
+      <option value="">All Types</option>
+      <option value="agent">Agent cron</option>
+      <option value="project">Project cron</option>
+    </select>
+    <label style="font-size:12px;color:var(--dim);margin-left:8px">Project:</label>
+    <select id="filter-project" onchange="renderJobs()">
+      <option value="">All Projects</option>
+    </select>
   </div>
 </div>
 
@@ -169,7 +189,7 @@ a:hover { text-decoration: underline; }
       <input id="f-name" data-i18n-placeholder="job_name_placeholder" placeholder="e.g. Morning Standup">
     </div>
 
-    <div class="form-row">
+    <div id="agent-cron-fields" class="form-row">
       <div class="form-group">
         <label data-i18n="agent_label">Agent</label>
         <select id="f-agent"></select>
@@ -180,6 +200,32 @@ a:hover { text-decoration: underline; }
           <option value="isolated" data-i18n="isolated">Isolated (agentTurn)</option>
           <option value="main" data-i18n="main_session">Main (systemEvent)</option>
         </select>
+      </div>
+    </div>
+
+    <div id="project-cron-fields" style="display:none;border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:14px;background:var(--surface2)">
+      <label style="display:block;font-size:12px;color:var(--green);margin-bottom:10px;font-weight:600;text-transform:uppercase">项目绑定</label>
+      <div class="form-row">
+        <div class="form-group">
+          <label>项目</label>
+          <select id="f-project" onchange="onProjectCronProjectChange()">
+            <option value="">选择项目...</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>目标</label>
+          <select id="f-project-target" onchange="toggleProjectCronTaskField()">
+            <option value="projectWorkflow">整个项目 workflow</option>
+            <option value="projectTask">指定任务</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group" id="project-task-field" style="display:none">
+        <label>任务</label>
+        <select id="f-project-task">
+          <option value="">选择任务...</option>
+        </select>
+        <div class="form-hint">重复触发 Done 任务时，仍受任务详情里的“允许定时任务重复触发已完成任务”开关控制。</div>
       </div>
     </div>
 
@@ -244,17 +290,17 @@ a:hover { text-decoration: underline; }
       <div class="form-hint" data-i18n="one_shot_hint">One-shot — runs once at this date/time (your timezone)</div>
     </div>
 
-    <div class="form-group">
+    <div class="form-group" id="message-field">
       <label data-i18n="message_prompt">Message / Prompt</label>
       <textarea id="f-message" data-i18n-placeholder="message_placeholder" placeholder="What should the agent do?"></textarea>
     </div>
 
-    <div class="form-group">
+    <div class="form-group" id="timeout-field">
       <label data-i18n="timeout_seconds">Timeout (seconds)</label>
       <input id="f-timeout" type="number" value="300" min="10" style="width:120px">
     </div>
 
-    <div style="border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:14px;background:var(--surface2)">
+    <div id="delivery-section" style="border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:14px;background:var(--surface2)">
       <label style="display:block;font-size:12px;color:var(--accent);margin-bottom:10px;font-weight:600;text-transform:uppercase" data-i18n="delivery_settings">📬 Delivery Settings</label>
       <div class="form-group">
         <label data-i18n="delivery_mode">Delivery Mode</label>
@@ -340,6 +386,10 @@ let _cronWsPath = '/ws';
 
 let ws = null, reqId = 0, connected = false, pendingCB = {};
 let allJobs = [];
+let projectCronJobs = [];
+let projectCronProjects = [];
+let projectCronFormProjects = [];
+let cronModalMode = 'agent';
 let editingJobId = null;
 
 // --- WS Connection ---
@@ -469,11 +519,25 @@ function populateAgentSelects() {
 async function loadJobs() {
   try {
     const res = await rpc('cron.list', {includeDisabled: true});
-    allJobs = res.payload?.jobs || res.jobs || [];
+    const projectRes = await fetch('/api/projects/scheduled-cron').then(r => r.json()).catch(e => ({ok:false, error:e.message, jobs:[], projects:[]}));
+    const projectIds = new Set((projectRes.jobs || []).map(j => String(j.id)));
+    allJobs = (res.payload?.jobs || res.jobs || []).filter(j => !projectIds.has(String(j.id))).map(j => ({...j, kind: 'agent'}));
+    projectCronJobs = (projectRes.jobs || []).map(j => ({...j, kind: 'project'}));
+    projectCronProjects = projectRes.projects || [];
+    populateProjectFilter();
     renderJobs();
   } catch (e) {
     document.getElementById('jobs-container').innerHTML = `<div class="empty" style="color:var(--red)">${i18n.t('failed_to_load')}: ${e.message}</div>`;
   }
+}
+
+function populateProjectFilter() {
+  const sel = document.getElementById('filter-project');
+  if (!sel) return;
+  const current = sel.value;
+  while (sel.options.length > 1) sel.remove(1);
+  projectCronProjects.forEach(p => sel.add(new Option(p.title || p.id, p.id)));
+  if (current && Array.from(sel.options).some(o => o.value === current)) sel.value = current;
 }
 
 // --- Render ---
@@ -481,8 +545,12 @@ function renderJobs() {
   const container = document.getElementById('jobs-container');
   const agentFilter = document.getElementById('filter-agent').value;
   const showDisabled = document.getElementById('filter-disabled').checked;
+  const typeFilter = document.getElementById('filter-type')?.value || '';
+  const projectFilter = document.getElementById('filter-project')?.value || '';
 
-  let jobs = allJobs;
+  let jobs = allJobs.concat(projectCronJobs);
+  if (typeFilter) jobs = jobs.filter(j => (j.kind || 'agent') === typeFilter);
+  if (projectFilter) jobs = jobs.filter(j => j.projectId === projectFilter);
   if (agentFilter) jobs = jobs.filter(j => j.agentId === agentFilter);
   if (!showDisabled) jobs = jobs.filter(j => j.enabled !== false);
 
@@ -500,11 +568,14 @@ function renderJobs() {
     const duration = state.lastDurationMs ? (state.lastDurationMs/1000).toFixed(1)+'s' : '—';
     const payload = j.payload || {};
     const msgPreview = (payload.message || payload.text || '').slice(0,100);
+    const isProject = j.kind === 'project';
+    const target = j.targetType === 'projectTask' ? `Project task · ${j.taskTitle || j.taskId || 'missing task'}` : 'Whole project workflow';
 
     return `<div class="job-card ${j.enabled === false ? 'disabled' : ''}" id="job-${j.id}">
       <div class="job-row">
         <span class="job-name">${esc(j.name || j.id)}</span>
-        <span class="job-agent">${esc(j.agentId)}</span>
+        <span class="job-agent ${isProject ? 'project' : ''}">${isProject ? 'Project cron' : esc(j.agentId)}</span>
+        ${isProject ? `<span class="job-agent">${esc(j.agentId || '')}</span>` : ''}
         <span class="job-schedule">${esc(schedText)}</span>
         <div class="job-status">
           <span class="badge ${lastStatus}">${lastStatus}</span>
@@ -515,14 +586,19 @@ function renderJobs() {
         <span>${i18n.t('next_run')}: ${esc(nextRun)}</span>
         <span>${i18n.t('last_run')}: ${esc(lastRun)}</span>
         <span>${i18n.t('duration')}: ${duration}</span>
-        <span>${i18n.t('kind')} ${payload.kind || '?'}</span>
+        <span>${i18n.t('kind')} ${isProject ? 'project' : (payload.kind || '?')}</span>
         ${j.delivery?.mode === 'announce' ? `<span style="color:var(--blue)">${i18n.t('announce_delivery')} ${esc(j.delivery.channel||'')}${j.delivery.to ? ' → '+esc(j.delivery.to) : ''}</span>` : `<span>${i18n.t('silent_label')}</span>`}
         ${state.lastError ? `<span style="color:var(--red)" title="${esc(state.lastError)}">⚠ ${esc(state.lastError.slice(0,50))}</span>` : ''}
       </div>
+      ${isProject ? `<div class="job-project-context">
+        <span>Project: <a href="/#projects">${esc(j.projectName || j.projectId)}</a></span>
+        <span>Target: ${esc(target)}</span>
+        ${j.projectCronPaused ? `<span style="color:var(--orange)">Paused</span>` : ''}
+      </div>` : ''}
       ${msgPreview ? `<div style="margin-top:6px;font-size:12px;color:var(--dim);font-style:italic">"${esc(msgPreview)}${msgPreview.length>=100?'...':''}"</div>` : ''}
       <div class="job-actions">
         <button class="run" onclick="runJob('${j.id}')">${i18n.t('run_now')}</button>
-        <button onclick="openEditModal('${j.id}')">${i18n.t('edit_job')}</button>
+        ${isProject ? '' : `<button onclick="openEditModal('${j.id}')">${i18n.t('edit_job')}</button>`}
         <button class="toggle" onclick="toggleJob('${j.id}', ${j.enabled !== false})">${j.enabled !== false ? i18n.t('disable_job') : i18n.t('enable_job')}</button>
         <button class="delete" onclick="deleteJob('${j.id}', '${esc(j.name||j.id)}')">${i18n.t('delete_job')}</button>
       </div>
@@ -626,7 +702,9 @@ async function runJob(id) {
   const btn = event.target;
   btn.disabled = true; btn.textContent = '⏳ ' + (i18n.t('working') || 'Running...');
   try {
-    await rpc('cron.run', {id});
+    const projectJob = projectCronJobs.find(j => String(j.id) === String(id));
+    if (projectJob) await projectCronRequest(projectJob, 'run');
+    else await rpc('cron.run', {id});
     toast(i18n.t('job_triggered') || 'Job triggered!', 'success');
   } catch (e) {
     toast((i18n.t('run_failed') || 'Run failed') + ': '+e.message, 'error');
@@ -637,7 +715,9 @@ async function runJob(id) {
 
 async function toggleJob(id, currentlyEnabled) {
   try {
-    await rpc('cron.update', {id, patch:{enabled: !currentlyEnabled}});
+    const projectJob = projectCronJobs.find(j => String(j.id) === String(id));
+    if (projectJob) await projectCronRequest(projectJob, 'update', {enabled: !currentlyEnabled});
+    else await rpc('cron.update', {id, patch:{enabled: !currentlyEnabled}});
     toast(currentlyEnabled ? (i18n.t('job_disabled') || 'Job disabled') : (i18n.t('job_enabled') || 'Job enabled'), 'success');
     loadJobs();
   } catch (e) { toast((i18n.t('toggle_failed') || 'Toggle failed') + ': '+e.message, 'error'); }
@@ -646,18 +726,116 @@ async function toggleJob(id, currentlyEnabled) {
 async function deleteJob(id, name) {
   if (!confirm(`${i18n.t('confirm_delete_job') || 'Delete job'} "${name}"? ${i18n.t('cannot_be_undone') || 'This cannot be undone.'}`)) return;
   try {
-    await rpc('cron.remove', {id});
+    const projectJob = projectCronJobs.find(j => String(j.id) === String(id));
+    if (projectJob) await projectCronRequest(projectJob, 'delete');
+    else await rpc('cron.remove', {id});
     toast(i18n.t('job_deleted') || 'Job deleted', 'success');
     loadJobs();
   } catch (e) { toast((i18n.t('delete_failed') || 'Delete failed') + ': '+e.message, 'error'); }
 }
 
+async function projectCronRequest(job, action, body) {
+  let url = `/api/projects/${encodeURIComponent(job.projectId)}/scheduled-cron/${encodeURIComponent(job.id)}`;
+  let method = 'PUT';
+  if (action === 'run') { url += '/run'; method = 'POST'; }
+  else if (action === 'delete') method = 'DELETE';
+  const res = await fetch(url, {
+    method,
+    headers: body ? {'Content-Type':'application/json'} : undefined,
+    body: body ? JSON.stringify(body) : undefined
+  });
+  const data = await res.json();
+  if (!data.ok) throw new Error(data.error || data.reason || 'Project cron request failed');
+  return data;
+}
+
+async function loadProjectCronFormProjects() {
+  try {
+    const data = await fetch('/api/projects').then(r => r.json());
+    projectCronFormProjects = (data.projects || []).filter(p => p && p.status !== 'archived');
+  } catch (e) {
+    projectCronFormProjects = [];
+  }
+  populateProjectCronProjectSelect();
+}
+
+function populateProjectCronProjectSelect() {
+  const sel = document.getElementById('f-project');
+  if (!sel) return;
+  const current = sel.value;
+  while (sel.options.length > 1) sel.remove(1);
+  projectCronFormProjects.forEach(p => {
+    sel.add(new Option(p.title || p.id, p.id));
+  });
+  if (current && Array.from(sel.options).some(o => o.value === current)) sel.value = current;
+  onProjectCronProjectChange();
+}
+
+function selectedProjectCronProject() {
+  const id = document.getElementById('f-project')?.value || '';
+  return projectCronFormProjects.find(p => String(p.id) === String(id)) || null;
+}
+
+async function onProjectCronProjectChange() {
+  const taskSel = document.getElementById('f-project-task');
+  if (!taskSel) return;
+  const current = taskSel.value;
+  while (taskSel.options.length > 1) taskSel.remove(1);
+  let project = selectedProjectCronProject();
+  if (project && !Array.isArray(project.tasks)) {
+    try {
+      const data = await fetch(`/api/projects/${encodeURIComponent(project.id)}`).then(r => r.json());
+      if (data.project) {
+        project = data.project;
+        projectCronFormProjects = projectCronFormProjects.map(p => String(p.id) === String(project.id) ? project : p);
+      }
+    } catch (e) {
+      console.warn('Failed to load project detail for cron form:', e);
+    }
+  }
+  (project?.tasks || []).forEach(t => {
+    taskSel.add(new Option(t.title || t.id, t.id));
+  });
+  if (current && Array.from(taskSel.options).some(o => o.value === current)) taskSel.value = current;
+  toggleProjectCronTaskField();
+}
+
+function toggleProjectCronTaskField() {
+  const isTask = document.getElementById('f-project-target')?.value === 'projectTask';
+  const field = document.getElementById('project-task-field');
+  if (field) field.style.display = isTask ? 'block' : 'none';
+}
+
+function setCronModalMode(mode) {
+  cronModalMode = mode === 'project' ? 'project' : 'agent';
+  const isProject = cronModalMode === 'project';
+  document.getElementById('agent-cron-fields').style.display = isProject ? 'none' : 'flex';
+  document.getElementById('project-cron-fields').style.display = isProject ? 'block' : 'none';
+  document.getElementById('message-field').style.display = isProject ? 'none' : 'block';
+  document.getElementById('timeout-field').style.display = isProject ? 'none' : 'block';
+  document.getElementById('delivery-section').style.display = isProject ? 'none' : 'block';
+}
+
 // --- Modal ---
 function openCreateModal() {
   editingJobId = null;
+  setCronModalMode('agent');
   document.getElementById('modal-title').textContent = i18n.t('new_cron_job');
   document.getElementById('modal-save').textContent = i18n.t('create_job');
   clearForm();
+  document.getElementById('modal').classList.add('open');
+}
+
+async function openCreateProjectCronModal() {
+  editingJobId = null;
+  setCronModalMode('project');
+  document.getElementById('modal-title').textContent = '新建项目定时任务';
+  document.getElementById('modal-save').textContent = '创建项目定时任务';
+  clearForm();
+  setCronModalMode('project');
+  document.getElementById('f-name').value = 'Project scheduled task';
+  document.getElementById('f-project-target').value = 'projectWorkflow';
+  await loadProjectCronFormProjects();
   document.getElementById('modal').classList.add('open');
 }
 
@@ -665,6 +843,7 @@ function openEditModal(id) {
   const job = allJobs.find(j => j.id === id);
   if (!job) return;
   editingJobId = id;
+  setCronModalMode('agent');
   document.getElementById('modal-title').textContent = i18n.t('edit_cron_job') || 'EDIT CRON JOB';
   document.getElementById('modal-save').textContent = i18n.t('save_changes') || 'Save Changes';
   populateForm(job);
@@ -674,6 +853,7 @@ function openEditModal(id) {
 function closeModal() {
   document.getElementById('modal').classList.remove('open');
   editingJobId = null;
+  cronModalMode = 'agent';
 }
 
 function clearForm() {
@@ -683,7 +863,7 @@ function clearForm() {
   document.getElementById('f-sched-type').value = 'cron';
   document.getElementById('f-cron-time').value = '09:00';
   try { document.getElementById('f-cron-tz').value = Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch(e) { document.getElementById('f-cron-tz').value = ''; }
-  document.querySelectorAll('.day-cb').forEach(cb => cb.checked = false);
+  document.querySelectorAll('.day-cb').forEach(cb => cb.checked = true);
   document.getElementById('f-every-min').value = '';
   document.getElementById('f-at-date').value = '';
   document.getElementById('f-at-time').value = '';
@@ -694,8 +874,12 @@ function clearForm() {
   document.getElementById('f-del-account').value = '';
   document.getElementById('f-del-to').value = '';
   document.getElementById('f-enabled').checked = true;
+  document.getElementById('f-project').value = '';
+  document.getElementById('f-project-target').value = 'projectWorkflow';
+  document.getElementById('f-project-task').value = '';
   toggleScheduleFields();
   toggleDeliveryFields();
+  toggleProjectCronTaskField();
 }
 
 function populateForm(job) {
@@ -747,7 +931,7 @@ async function saveJob() {
   const timeout = parseInt(document.getElementById('f-timeout').value) || 300;
   const deliveryMode = document.getElementById('f-delivery').value;
 
-  if (!message) { toast(i18n.t('message_required') || 'Message/prompt is required', 'error'); return; }
+  if (cronModalMode !== 'project' && !message) { toast(i18n.t('message_required') || 'Message/prompt is required', 'error'); return; }
 
   // Build schedule
   const schedType = document.getElementById('f-sched-type').value;
@@ -792,7 +976,35 @@ async function saveJob() {
   btn.disabled = true; btn.textContent = i18n.t('saving') || 'Saving...';
 
   try {
-    if (editingJobId) {
+    if (cronModalMode === 'project') {
+      const projectId = document.getElementById('f-project').value;
+      const targetType = document.getElementById('f-project-target').value;
+      const taskId = document.getElementById('f-project-task').value;
+      if (!projectId) throw new Error('请选择项目');
+      if (targetType === 'projectTask' && !taskId) throw new Error('请选择任务');
+      const project = selectedProjectCronProject();
+      const targetLabel = targetType === 'projectTask'
+        ? `Scheduled project task for project '${project?.title || projectId}'.`
+        : `Scheduled project workflow for project '${project?.title || projectId}'.`;
+      const body = {
+        name: name || (targetType === 'projectTask' ? 'Project task cron' : 'Project workflow cron'),
+        schedule,
+        enabled,
+        targetType,
+        message: targetLabel,
+        sessionTarget: 'isolated',
+        timeoutSeconds: 300,
+      };
+      if (targetType === 'projectTask') body.taskId = taskId;
+      const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/scheduled-cron`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(body)
+      });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || data.reason || '创建项目定时任务失败');
+      toast('项目定时任务已创建', 'success');
+    } else if (editingJobId) {
       await rpc('cron.update', {id: editingJobId, patch: {...job, agentId}});
       toast(i18n.t('job_updated') || 'Job updated!', 'success');
     } else {
@@ -806,7 +1018,7 @@ async function saveJob() {
     toast((i18n.t('save_failed') || 'Save failed') + ': '+e.message, 'error');
   }
   btn.disabled = false;
-  btn.textContent = editingJobId ? (i18n.t('save_changes') || 'Save Changes') : i18n.t('create_job');
+  btn.textContent = cronModalMode === 'project' ? '创建项目定时任务' : (editingJobId ? (i18n.t('save_changes') || 'Save Changes') : i18n.t('create_job'));
 }
 
 // --- Toast ---

@@ -1,0 +1,40 @@
+{
+  "name": "project-scheduled-tasks-phase-1-cron-binding",
+  "stage": "done",
+  "waiting_for_user": false,
+  "updated_at": "2026-06-18T00:00:00+08:00",
+  "confirmed": {
+    "checklist": true,
+    "tested": true,
+    "done": true
+  },
+  "confirmations": {
+    "checklist": {
+      "confirmed_at": "2026-06-18T00:00:00+08:00",
+      "summary": "用户确认 Phase 1 子需求 checklist 可以继续执行。"
+    },
+    "tested": {
+      "confirmed_at": "2026-06-18T00:00:00+08:00",
+      "summary": "用户验收 Phase 1，并要求将全局定时任务页展示项目绑定 cron 的需求写入 Phase 2。"
+    },
+    "done": {
+      "confirmed_at": "2026-06-18T00:00:00+08:00",
+      "summary": "Phase 1 后端基础能力验收通过，剩余 UI 可见性诉求转入父需求 Phase 2。"
+    }
+  },
+  "files": {
+    "requirement": "requirement.md",
+    "review": "review.md",
+    "checklist": "checklist.md",
+    "todolist": "todolist.md"
+  },
+  "notes": [
+    "这是父需求 project-scheduled-tasks 的 Phase 1 子需求。",
+    "子需求聚焦扩展现有 Cron 支持项目绑定，不重做 scheduler。",
+    "已发现本仓库只有 cron.html 的 cron.* gateway 调用，未发现本地 cron.* handler；已纳入 checklist 首项技术确认。",
+    "用户已确认 checklist，已生成 todolist.md。",
+    "Phase 1 已实现：VO 侧保存项目 Cron 绑定表，底层复用 gateway cron.*。",
+    "自动化测试已通过。",
+    "用户已确认 Phase 1 完成；全局定时任务页可见性诉求已转入父需求 Phase 2。"
+  ]
+}

@@ -21,14 +21,15 @@
         templates: [],
         currentProject: null,  // full project object
         currentTask: null,     // task being edited in detail panel
+        meetingRequestsByTask: {},
         agentRoster: [],
         dragState: null,       // {taskId, projectId, sourceColId, ghost}
         touchDrag: null,
         filters: { status: '', priority: '', tag: '', search: '', sort: 'updatedAt' },
-        workflow: { active: false, autoMode: false, phase: 'idle', currentTaskId: null, pollTimer: null },
+        workflow: { active: false, autoMode: false, phase: 'idle', currentTaskId: null, pollTimer: null, startMode: 'continuous', flowStopReason: null },
     };
 
-    const _t = (key) => typeof i18n !== 'undefined' ? i18n.t(key) : key;
+    const _t = (key, params) => typeof i18n !== 'undefined' ? i18n.t(key, params) : key;
 
     // ── DEFAULT TEMPLATES ─────────────────────────────────────────
     const DEFAULT_TEMPLATES = [
@@ -135,8 +136,9 @@
             const r = await fetch(`/api/projects/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
             return r.json();
         },
-        async deleteProject(id) {
-            const r = await fetch(`/api/projects/${id}`, { method: 'DELETE' });
+        async deleteProject(id, opts = {}) {
+            const qs = opts.deleteWorkspace ? '?deleteWorkspace=true' : '';
+            const r = await fetch(`/api/projects/${id}${qs}`, { method: 'DELETE' });
             return r.json();
         },
         async createTask(projectId, body) {
@@ -220,8 +222,12 @@
             const r = await fetch(`/api/projects/${projectId}/project-execution/workspace/validate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ workspacePath }) });
             return r.json();
         },
-        async projectExecutionStart(projectId, taskId, dirtyFingerprint) {
-            const r = await fetch(`/api/projects/${projectId}/tasks/${taskId}/project-execution/start`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dirtyFingerprint: dirtyFingerprint || '' }) });
+        async projectExecutionStart(projectId, taskId, dirtyFingerprint, opts = {}) {
+            const r = await fetch(`/api/projects/${projectId}/tasks/${taskId}/project-execution/start`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dirtyFingerprint: dirtyFingerprint || '', skipReviewConfirmed: !!opts.skipReviewConfirmed }) });
+            return r.json();
+        },
+        async projectExecutionProjectStart(projectId, mode, dirtyFingerprint, opts = {}) {
+            const r = await fetch(`/api/projects/${projectId}/project-execution/start`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: mode || 'continuous', dirtyFingerprint: dirtyFingerprint || '', skipReviewConfirmed: !!opts.skipReviewConfirmed }) });
             return r.json();
         },
         async projectExecutionCancel(projectId, taskId, attemptId) {
@@ -247,6 +253,31 @@
         },
         async readArtifact(projectId, path) {
             const r = await fetch(`/api/projects/${projectId}/artifacts/read?path=${encodeURIComponent(path)}`);
+            return r.json();
+        },
+        async listMeetingRequests(projectId, taskId) {
+            const qs = taskId ? `?projectId=${encodeURIComponent(projectId)}&taskId=${encodeURIComponent(taskId)}` : `?projectId=${encodeURIComponent(projectId)}`;
+            const r = await fetch(`/api/meetings/requests${qs}`);
+            return r.json();
+        },
+        async listScheduledCron(projectId) {
+            const r = await fetch(`/api/projects/${projectId}/scheduled-cron`);
+            return r.json();
+        },
+        async createScheduledCron(projectId, body) {
+            const r = await fetch(`/api/projects/${projectId}/scheduled-cron`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+            return r.json();
+        },
+        async updateScheduledCron(projectId, cronId, body) {
+            const r = await fetch(`/api/projects/${projectId}/scheduled-cron/${cronId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+            return r.json();
+        },
+        async deleteScheduledCron(projectId, cronId) {
+            const r = await fetch(`/api/projects/${projectId}/scheduled-cron/${cronId}`, { method: 'DELETE' });
+            return r.json();
+        },
+        async runScheduledCron(projectId, cronId) {
+            const r = await fetch(`/api/projects/${projectId}/scheduled-cron/${cronId}/run`, { method: 'POST' });
             return r.json();
         },
     };
@@ -628,12 +659,27 @@
             const d = await api.getProject(id);
             if (!d.project) throw new Error('Not found');
             state.currentProject = d.project;
+            await loadScheduledCronForCurrentProject();
+            await loadProjectMeetingRequests();
             mc.innerHTML = renderBoardView();
             bindBoardEvents();
             populateBoardScoreboard();
             checkWorkflowOnOpen();
         } catch (e) {
             mc.innerHTML = `<div class="proj-loading">${_t('proj_failed_to_load_project')}</div>`;
+        }
+    }
+
+    async function loadScheduledCronForCurrentProject() {
+        const p = state.currentProject;
+        if (!p) return;
+        try {
+            const d = await api.listScheduledCron(p.id);
+            p.scheduledCronJobs = d.jobs || [];
+            p.scheduledCronLoadError = d.error || '';
+        } catch (e) {
+            p.scheduledCronJobs = [];
+            p.scheduledCronLoadError = e.message || 'load failed';
         }
     }
 
@@ -644,15 +690,24 @@
         const tasks = p.tasks || [];
 
         return `
-        <div class="proj-toolbar">
+        <div class="proj-toolbar proj-board-toolbar">
             <button class="proj-btn" onclick="ProjMgr.backToList()">${_t('proj_back')}</button>
-            <span class="proj-toolbar-title" style="font-size:8px;max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(p.title)}</span>
+            <span class="proj-toolbar-title proj-board-title">${escHtml(p.title)}</span>
             <span class="proj-badge badge-${p.status || 'active'}">${p.status || _t('proj_status_active')}</span>
             <span class="proj-badge badge-${p.priority || 'medium'}">${p.priority || _t('proj_priority_medium')}</span>
-            <div style="flex:1"></div>
+            <div class="proj-toolbar-spacer"></div>
             ${p.projectExecutionEnabled ? `<div class="proj-exec-project-state">
+                <div class="proj-exec-mode-group">
+                    <label class="proj-exec-mode"><input type="radio" name="proj-exec-start-mode" value="single" ${(p.projectExecutionStartMode || 'continuous') === 'single' ? 'checked' : ''} onchange="ProjMgr.setProjectExecutionStartMode(this.value)">启动下一个任务</label>
+                    <label class="proj-exec-mode"><input type="radio" name="proj-exec-start-mode" value="continuous" ${(p.projectExecutionStartMode || 'continuous') !== 'single' ? 'checked' : ''} onchange="ProjMgr.setProjectExecutionStartMode(this.value)">连续启动任务</label>
+                </div>
+                <div class="proj-exec-primary-actions">
+                    <button class="proj-btn proj-btn-sm proj-btn-start" id="proj-exec-start-btn" onclick="ProjMgr.projectExecutionProjectStart()">▶ 启动项目</button>
+                    <button class="proj-btn proj-btn-sm proj-btn-stop hidden" id="proj-exec-stop-btn" onclick="ProjMgr.projectExecutionCancelActive()">停止当前任务</button>
+                </div>
                 <span class="proj-wf-status ${p.workflowActive ? 'wf-active' : ''}" id="wf-status-badge">${escHtml(p.workflowPhase || '')}</span>
-                <span class="proj-exec-workspace" title="${escHtml(p.workspacePath || '')}">${p.workspaceKind === 'git' ? 'Git' : 'DIR'} · ${escHtml(p.workspacePath || '未配置工作区')}</span>
+                <span class="proj-exec-workspace" title="${escHtml(p.workspacePath || '')}"><span>${p.workspaceKind === 'git' ? 'Git' : 'DIR'} · </span><span class="proj-exec-workspace-path">${escHtml(p.workspacePath || '未配置工作区')}</span></span>
+                ${p.workspacePath ? `<button class="proj-btn proj-btn-sm" title="复制工作区路径" onclick="ProjMgr.copyWorkspacePath(event, '${escHtml(p.workspacePath)}')">📋</button>` : ''}
             </div>` : `<div class="proj-workflow-controls" id="proj-wf-controls">
                 <button class="proj-btn proj-btn-sm proj-btn-start" id="wf-start-btn" onclick="ProjMgr.workflowStart()" title="${_t('proj_workflow_start')}">▶ ${_t('proj_workflow_start')}</button>
                 <button class="proj-btn proj-btn-sm proj-btn-stop hidden" id="wf-stop-btn" onclick="ProjMgr.workflowStop()" title="${_t('proj_workflow_stop')}">⏹ ${_t('proj_workflow_stop')}</button>
@@ -675,6 +730,8 @@
             <span class="proj-board-desc-toggle" onclick="this.nextElementSibling.classList.toggle('expanded');this.textContent=this.nextElementSibling.classList.contains('expanded')?'▲ ${_t('proj_hide_description')}:${_t('proj_description')}':'▼ ${_t('proj_show_description')}:${_t('proj_description')}'">▼ ${_t('proj_show_description')}</span>
             <div class="proj-board-desc">${escHtml(p.description)}</div>
         </div>` : ''}
+        ${renderScheduledCronPanel(p)}
+        ${renderScheduledCronHistoryPanel(p)}
         ${renderBoardScoreboard()}
         <div class="proj-board-body" id="proj-board-cols">
             <div class="proj-col proj-chat-col" id="proj-wf-chat-col">
@@ -688,6 +745,123 @@
                 </div>
             </div>
             ${cols.map(col => renderColumn(col, tasks)).join('')}
+        </div>`;
+    }
+
+    function formatCronSchedule(schedule) {
+        if (!schedule) return '未设置';
+        if (schedule.kind === 'every') return `每 ${Math.round((schedule.everyMs || 0) / 60000)} 分钟`;
+        if (schedule.kind === 'at') return `一次 · ${new Date(schedule.at).toLocaleString()}`;
+        if (schedule.kind === 'cron') return `Cron · ${schedule.expr || ''}${schedule.tz ? ` · ${schedule.tz}` : ''}`;
+        return JSON.stringify(schedule);
+    }
+
+    function scheduledCronTargetLabel(job, p) {
+        if (job.targetType === 'projectTask') {
+            const task = (p.tasks || []).find(t => t.id === job.taskId);
+            return `${_t('proj_scheduled_cron_target_task')} · ${(task && task.title) || job.taskTitle || job.taskId || _t('proj_scheduled_cron_task_missing')}`;
+        }
+        return _t('proj_scheduled_cron_target_workflow');
+    }
+
+    function scheduledCronRepeatGate(job, p) {
+        if (job.targetType !== 'projectTask') return null;
+        const task = (p.tasks || []).find(t => t.id === job.taskId);
+        if (!task) return { state: 'missing', label: 'Repeat gate: task missing' };
+        const isDone = !!task.completedAt;
+        const repeatEnabled = task.scheduledRepeatEnabled === true;
+        if (!isDone) return { state: 'open', label: 'Repeat gate: open task' };
+        if (repeatEnabled) return { state: 'enabled', label: 'Repeat gate: completed task can repeat' };
+        return { state: 'blocked', label: 'Repeat gate: completed task blocked' };
+    }
+
+    function scheduledCronHistoryStatusLabel(status) {
+        const labels = {
+            started: _t('proj_scheduled_cron_history_started'),
+            skipped: _t('proj_scheduled_cron_history_skipped'),
+            paused: _t('proj_scheduled_cron_history_paused'),
+            failed: _t('proj_scheduled_cron_history_failed'),
+            intervention_required: _t('proj_scheduled_cron_history_intervention_required'),
+        };
+        return labels[status] || status || _t('proj_scheduled_cron_history_unknown');
+    }
+
+    function scheduledCronHistoryTargetLabel(item) {
+        if ((item.targetType || '') === 'projectTask') {
+            return `${_t('proj_scheduled_cron_target_task')} · ${item.taskTitle || item.taskId || _t('proj_scheduled_cron_task_missing')}`;
+        }
+        return _t('proj_scheduled_cron_target_workflow');
+    }
+
+    function renderScheduledCronHistoryPanel(p) {
+        const history = Array.isArray(p.scheduledCronHistory) ? p.scheduledCronHistory.slice() : [];
+        history.sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+        const recent = history.slice(0, 20);
+        return `<div class="proj-scheduled-history-panel">
+            <div class="proj-section-header">
+                <div>
+                    <div class="proj-section-title">${_t('proj_scheduled_cron_history_title')}</div>
+                    <div class="proj-scheduled-cron-subtitle">${_t('proj_scheduled_cron_history_subtitle', { count: recent.length })}</div>
+                </div>
+            </div>
+            ${recent.length ? `<div class="proj-scheduled-history-list">${recent.map(item => `
+                <div class="proj-scheduled-history-item status-${escHtml(item.status || 'unknown')}">
+                    <div class="proj-scheduled-history-main">
+                        <span class="proj-scheduled-history-badge">${escHtml(scheduledCronHistoryStatusLabel(item.status))}</span>
+                        <strong>${escHtml(item.cronName || item.cronId || _t('proj_scheduled_cron_default_name'))}</strong>
+                        <span>${escHtml(scheduledCronHistoryTargetLabel(item))}</span>
+                    </div>
+                    <div class="proj-scheduled-history-reason">${escHtml(item.message || item.reason || item.error || _t('proj_scheduled_cron_no_extra_info'))}</div>
+                    <div class="proj-scheduled-history-time">${escHtml(timeAgo(item.createdAt))}</div>
+                </div>`).join('')}</div>` : `<div class="proj-scheduled-cron-empty">${_t('proj_scheduled_cron_history_empty')}</div>`}
+        </div>`;
+    }
+
+    function renderScheduledCronPanel(p) {
+        const jobs = p.scheduledCronJobs || [];
+        const paused = !!p.scheduledCronPaused;
+        const showRecommendation = !!p.longTermProject && jobs.length === 0;
+        return `<div class="proj-scheduled-cron-panel">
+            <div class="proj-section-header">
+                <div>
+                    <div class="proj-section-title">${_t('proj_scheduled_cron_title')}</div>
+                    <div class="proj-scheduled-cron-subtitle">${paused ? _t('proj_scheduled_cron_paused_subtitle') : _t('proj_scheduled_cron_subtitle')}</div>
+                </div>
+                <div class="proj-scheduled-cron-actions">
+                    <button class="proj-btn proj-btn-sm" onclick="ProjMgr.toggleProjectCronPause()">${paused ? _t('proj_scheduled_cron_resume') : _t('proj_scheduled_cron_pause')}</button>
+                    <button class="proj-btn proj-btn-sm proj-btn-primary" onclick="ProjMgr.createProjectCronPrompt()">${_t('proj_scheduled_cron_new')}</button>
+                </div>
+            </div>
+            ${showRecommendation ? `<div class="proj-scheduled-cron-recommendation">
+                <div>
+                    <strong>${_t('proj_scheduled_cron_recommend_title')}</strong>
+                    <span>${_t('proj_scheduled_cron_recommend_text')}</span>
+                </div>
+                <button class="proj-btn proj-btn-sm proj-btn-primary" onclick="ProjMgr.createProjectCronPrompt()">${_t('proj_scheduled_cron_recommend_action')}</button>
+            </div>` : ''}
+            ${jobs.length ? `<div class="proj-scheduled-cron-list">${jobs.map(j => {
+                const repeatGate = scheduledCronRepeatGate(j, p);
+                return `
+                <div class="proj-scheduled-cron-item ${j.enabled === false ? 'is-disabled' : ''}">
+                    <div class="proj-scheduled-cron-main">
+                        <strong>${escHtml(j.name || j.id)}</strong>
+                        <span>${escHtml(scheduledCronTargetLabel(j, p))}</span>
+                        ${repeatGate ? `<span class="proj-scheduled-repeat-gate is-${repeatGate.state}">${escHtml(repeatGate.label)}</span>` : ''}
+                        <code>${escHtml(formatCronSchedule(j.schedule))}</code>
+                    </div>
+                    <div class="proj-scheduled-cron-meta">
+                        <span>${j.enabled === false ? 'disabled' : 'enabled'}</span>
+                        <span>${escHtml(((j.state || {}).lastStatus) || 'pending')}</span>
+                        ${((j.state || {}).lastError) ? `<span title="${escHtml((j.state || {}).lastError)}">${_t('proj_scheduled_cron_error')}</span>` : ''}
+                    </div>
+                    <div class="proj-scheduled-cron-buttons">
+                        <button class="proj-btn proj-btn-sm" onclick="ProjMgr.runProjectCron('${escHtml(j.id)}')">${_t('proj_scheduled_cron_run_now')}</button>
+                        <button class="proj-btn proj-btn-sm" onclick="ProjMgr.editProjectCron('${escHtml(j.id)}')">${_t('proj_scheduled_cron_edit')}</button>
+                        <button class="proj-btn proj-btn-sm" onclick="ProjMgr.toggleProjectCron('${escHtml(j.id)}', ${j.enabled !== false})">${j.enabled !== false ? _t('proj_scheduled_cron_disable') : _t('proj_scheduled_cron_enable')}</button>
+                        <button class="proj-btn proj-btn-sm proj-btn-danger" onclick="ProjMgr.deleteProjectCron('${escHtml(j.id)}')">${_t('proj_scheduled_cron_delete')}</button>
+                    </div>
+                </div>`;
+            }).join('')}</div>` : `<div class="proj-scheduled-cron-empty">${_t('proj_scheduled_cron_empty')}</div>`}
         </div>`;
     }
 
@@ -710,6 +884,7 @@
             </div>
             <div class="proj-quick-add hidden" id="quick-add-${col.id}">
                 <input class="proj-quick-add-input" id="quick-input-${col.id}" type="text" placeholder="${_t('proj_task_title_placeholder')}">
+                ${state.currentProject && state.currentProject.projectExecutionEnabled ? `<label style="display:flex;align-items:center;gap:4px;font-size:10px;color:#aaa;margin-top:6px"><input type="checkbox" id="quick-acceptance-${col.id}" checked>需要人工验收</label>` : ''}
                 <div class="proj-quick-add-actions">
                     <button class="proj-btn proj-btn-sm proj-btn-primary" onclick="ProjMgr.submitQuickAdd('${col.id}')">${_t('proj_add')}</button>
                     <button class="proj-btn proj-btn-sm" onclick="ProjMgr.hideQuickAdd('${col.id}')">${_t('proj_cancel')}</button>
@@ -729,6 +904,8 @@
         const assignee = task.assignee ? state.agentRoster.find(a => a.key === task.assignee || a.statusKey === task.assignee || a.agentId === task.assignee) : null;
         const priorityLabel = task.priority !== 'medium' ? _t('proj_priority_' + task.priority) : '';
         const projectExecutionState = task.executionState && task.executionState !== 'backlog' ? `<span class="proj-exec-state state-${escHtml(task.executionState)}">${escHtml(task.executionState)}</span>` : '';
+        const mtgRequests = state.meetingRequestsByTask[task.id] || [];
+        const pendingMtgRequests = mtgRequests.filter(r => r.status === 'pending').length;
         return `
         <div class="proj-task-card" id="task-${task.id}" data-task-id="${task.id}"
             style="--pri-color:${pc}"
@@ -744,6 +921,7 @@
                 ${due ? `<span class="proj-task-due ${overdue ? 'overdue' : ''}" title="${formatDate(due)}">${overdue ? '⚠️' : '📅'} ${formatDate(due)}</span>` : ''}
                 ${(task.tags || []).slice(0, 2).map(t => `<span class="proj-tag" style="font-size:9px">${escHtml(t)}</span>`).join('')}
                 ${comments > 0 ? `<span class="proj-task-comment-icon">💬 ${comments}</span>` : ''}
+                ${pendingMtgRequests > 0 ? `<span class="proj-task-comment-icon proj-task-mtg-request">📊 ${pendingMtgRequests}</span>` : ''}
                 ${projectExecutionState}
             </div>
             ${hasCheck ? `
@@ -1001,7 +1179,10 @@
         const p = state.currentProject;
         if (!p) return;
         try {
-            const d = await api.createTask(p.id, { title, columnId: colId });
+            const acceptance = document.getElementById(`quick-acceptance-${colId}`);
+            const body = { title, columnId: colId };
+            if (p.projectExecutionEnabled) body.requiresUserAcceptance = acceptance ? acceptance.checked : true;
+            const d = await api.createTask(p.id, body);
             if (d.task) {
                 p.tasks.push(d.task);
                 const mc = getMainContent();
@@ -1062,6 +1243,7 @@
         if (!task) return;
         state.currentTask = task;
         renderDetailPanel(task);
+        loadTaskMeetingRequests(task.id);
         const panel = document.getElementById('proj-detail-panel');
         if (panel) panel.classList.add('open');
     }
@@ -1089,6 +1271,7 @@
         const reviewItems = (task.reviewCheck && task.reviewCheck.length) ? task.reviewCheck : (task.lastReviewCheck || []);
         const reviewTitle = (task.reviewCheck && task.reviewCheck.length) ? '🔍 Review Check' : ((task.lastReviewCheck && task.lastReviewCheck.length) ? '🕘 Last Failed Review' : '🔍 Review Check');
         const activity = (p && p.activity || []).filter(a => a.taskId === task.id).slice().reverse().slice(0, 20);
+        const meetingRequests = state.meetingRequestsByTask[task.id] || [];
         const projectExecution = !!(p && p.projectExecutionEnabled);
         const evidence = task.evidence || {};
         const reviewResult = task.reviewResult || {};
@@ -1165,6 +1348,20 @@
                         <select class="proj-detail-select" onchange="ProjMgr.updateTaskField('reviewerAgentId', this.value || null)">${projectExecutionAgentOptions(task.reviewerAgentId || '')}</select>
                     </div>
                 </div>` : ''}
+                ${projectExecution ? `<div class="proj-field">
+                    <label class="proj-form-label" style="display:flex;align-items:center;gap:6px">
+                        <input type="checkbox" ${task.requiresUserAcceptance !== false ? 'checked' : ''} onchange="ProjMgr.updateTaskField('requiresUserAcceptance', this.checked)">
+                        需要人工验收
+                    </label>
+                    <div class="proj-exec-meta">关闭后，审查通过会直接完成；连续启动任务模式会继续下一个任务。</div>
+                </div>` : ''}
+                <div class="proj-field">
+                    <label class="proj-form-label" style="display:flex;align-items:center;gap:6px">
+                        <input type="checkbox" ${task.scheduledRepeatEnabled === true ? 'checked' : ''} onchange="ProjMgr.updateTaskField('scheduledRepeatEnabled', this.checked)">
+                        ${_t('proj_task_scheduled_repeat_enabled')}
+                    </label>
+                    <div class="proj-exec-meta">${_t('proj_task_scheduled_repeat_hint')}</div>
+                </div>
                 <div class="proj-field">
                     <label class="proj-field-label">${_t('proj_tags')}</label>
                     <div class="proj-tag-input-wrap" id="detail-tags-wrap" onclick="document.getElementById('detail-tag-in').focus()">
@@ -1175,7 +1372,7 @@
             </div>
 
             ${projectExecution ? `<div class="proj-section proj-exec-panel">
-                <div class="proj-section-header"><span class="proj-section-title">Project Execution 执行与审查</span><span class="proj-exec-state state-${escHtml(task.executionState || 'backlog')}">${escHtml(task.executionState || 'backlog')}</span></div>
+                <div class="proj-section-header"><span class="proj-section-title">Project Execution 执行与审查</span><span class="proj-exec-state state-${escHtml(task.executionState || 'backlog')}">${task.requiresUserAcceptance === false ? '无需人工验收 · ' : '需要人工验收 · '}${escHtml(task.executionState || 'backlog')}</span></div>
                 <div class="proj-exec-actions">
                     ${projectExecutionActionsHtml}
                 </div>
@@ -1190,6 +1387,13 @@
                 ${projectExecutionReviewHtml}
                 ${task.reworkFeedback ? `<div class="proj-exec-meta">返工反馈：${escHtml(task.reworkFeedback)}</div>` : ''}
             </div>` : ''}
+
+            <div class="proj-section">
+                <div class="proj-section-header"><span class="proj-section-title">AI 会议申请</span></div>
+                <div class="proj-meeting-requests" id="detail-meeting-requests">
+                    ${renderTaskMeetingRequests(meetingRequests)}
+                </div>
+            </div>
 
             <div class="proj-section">
                 <div class="proj-section-header"><span class="proj-section-title">${_t('proj_description')}</span></div>
@@ -1323,6 +1527,67 @@
                 saveDescription();
             };
         }
+    }
+
+    function renderTaskMeetingRequests(requests) {
+        if (!requests.length) return `<div style="font-size:11px;color:#555">当前任务暂无 AI 会议申请</div>`;
+        return requests.map(req => {
+            const proposal = req.originalProposal || {};
+            const status = req.status || 'pending';
+            const statusText = status === 'confirmed' ? '已确认' : (status === 'rejected' ? '已拒绝' : '待确认');
+            const rejectReason = req.review && req.review.rejectionReason ? `<div class="proj-exec-warning">${escHtml(req.review.rejectionReason)}</div>` : '';
+            return `
+            <div class="proj-meeting-request state-${escHtml(status)}">
+                <div class="proj-meeting-request-head">
+                    <strong>${escHtml(proposal.topic || proposal.goal || 'AI 会议申请')}</strong>
+                    <span class="proj-exec-state state-${escHtml(status)}">${statusText}</span>
+                </div>
+                <div class="proj-exec-meta">请求 AI：${escHtml(req.requestingAgentId || '')}</div>
+                <div class="proj-exec-summary">${escHtml(proposal.cannotCompleteAloneReason || '')}</div>
+                ${rejectReason}
+                <button class="proj-btn proj-btn-sm" onclick="ProjMgr.openMeetingRequestsQueue()">打开会议申请队列</button>
+            </div>`;
+        }).join('');
+    }
+
+    async function loadProjectMeetingRequests() {
+        const p = state.currentProject;
+        if (!p) return;
+        try {
+            const d = await api.listMeetingRequests(p.id);
+            const grouped = {};
+            (d.requests || []).forEach(req => {
+                const taskId = req.source && req.source.taskId;
+                if (!taskId) return;
+                (grouped[taskId] = grouped[taskId] || []).push(req);
+            });
+            state.meetingRequestsByTask = grouped;
+        } catch (e) {
+            state.meetingRequestsByTask = {};
+        }
+    }
+
+    async function loadTaskMeetingRequests(taskId) {
+        const p = state.currentProject;
+        if (!p || !taskId) return;
+        try {
+            const d = await api.listMeetingRequests(p.id, taskId);
+            state.meetingRequestsByTask[taskId] = d.requests || [];
+            const current = state.currentTask;
+            if (current && current.id === taskId) {
+                const el = document.getElementById('detail-meeting-requests');
+                if (el) el.innerHTML = renderTaskMeetingRequests(state.meetingRequestsByTask[taskId] || []);
+            }
+            const mc = getMainContent();
+            if (mc && state.view === 'board') {
+                mc.querySelectorAll('.proj-task-mtg-request').forEach(() => {});
+            }
+        } catch (e) { /* non-fatal */ }
+    }
+
+    function openMeetingRequestsQueue() {
+        if (typeof openMeetingsDashboard === 'function') openMeetingsDashboard();
+        if (typeof switchMtgTab === 'function') switchMtgTab('requests');
     }
 
     function switchDescTab(tab) {
@@ -1551,7 +1816,7 @@
         if (!p) return;
         const src = p.tasks.find(t => t.id === taskId);
         if (!src) return;
-        const copy = { title: src.title + ' (copy)', description: src.description, columnId: src.columnId, priority: src.priority, tags: [...(src.tags || [])], checklist: (src.checklist || []).map(c => ({ ...c, id: genId(), done: false })) };
+        const copy = { title: src.title + ' (copy)', description: src.description, columnId: src.columnId, priority: src.priority, tags: [...(src.tags || [])], checklist: (src.checklist || []).map(c => ({ ...c, id: genId(), done: false })), requiresUserAcceptance: src.requiresUserAcceptance !== false, scheduledRepeatEnabled: src.scheduledRepeatEnabled === true };
         try {
             const d = await api.createTask(p.id, copy);
             if (d.task) { p.tasks.push(d.task); const mc = getMainContent(); if (mc) { mc.innerHTML = renderBoardView(); bindBoardEvents(); } toast(_t('proj_task_duplicated'), 'success'); }
@@ -1613,10 +1878,24 @@
                     </div>
                 </div>
                 <div class="proj-form-group">
-                    <label class="proj-form-label">Project Execution 工作区路径</label>
-                    <input class="proj-form-input" id="pf-workspace" type="text" placeholder="/path/to/project">
+                    <label class="proj-form-label">
+                        <input type="checkbox" id="pf-project-execution" checked onchange="ProjMgr.toggleProjectExecutionFields(this.checked)">
+                        可执行项目
+                    </label>
+                    <div style="font-size:10px;color:#888;margin-top:4px">默认启用 Project Execution。留空时系统会自动创建“项目-时间戳”工作区。</div>
                 </div>
-                <div class="proj-form-row">
+                <div class="proj-form-group">
+                    <label class="proj-form-label">
+                        <input type="checkbox" id="pf-long-term-project">
+                        ${_t('proj_long_term_project')}
+                    </label>
+                    <div style="font-size:10px;color:#888;margin-top:4px">${_t('proj_long_term_project_hint')}</div>
+                </div>
+                <div class="proj-form-group" id="pf-workspace-group">
+                    <label class="proj-form-label">Project Execution 工作区路径</label>
+                    <input class="proj-form-input" id="pf-workspace" type="text" placeholder="留空自动创建项目工作区">
+                </div>
+                <div class="proj-form-row" id="pf-agent-row">
                     <div class="proj-form-group"><label class="proj-form-label">默认执行 Agent</label><select class="proj-form-select" id="pf-executor">${projectExecutionAgentOptions('')}</select></div>
                     <div class="proj-form-group"><label class="proj-form-label">默认 Reviewer</label><select class="proj-form-select" id="pf-reviewer">${projectExecutionAgentOptions('')}</select></div>
                 </div>
@@ -1683,6 +1962,13 @@
                     </div>
                 </div>
                 <div class="proj-form-group">
+                    <label class="proj-form-label">
+                        <input type="checkbox" id="pf-long-term-project" ${data.longTermProject ? 'checked' : ''}>
+                        ${_t('proj_long_term_project')}
+                    </label>
+                    <div style="font-size:10px;color:#888;margin-top:4px">${_t('proj_long_term_project_hint')}</div>
+                </div>
+                <div class="proj-form-group">
                     <label class="proj-form-label">Project Execution 工作区路径</label>
                     <input class="proj-form-input" id="pf-workspace" type="text" value="${escHtml(data.workspacePath || '')}" placeholder="/path/to/project">
                 </div>
@@ -1716,6 +2002,107 @@
                     <button class="proj-btn" onclick="ProjMgr.hideFormModal()">${_t('proj_cancel')}</button>
                     <button class="proj-btn proj-btn-primary" onclick="ProjMgr.submitSaveTemplate()">${_t('proj_save_template_btn')}</button>
                 </div>
+                </div>
+            </div>`;
+        } else if (type === 'project-cron') {
+            const p = data || state.currentProject;
+            const job = extra || null;
+            const tasks = (p && p.tasks) || [];
+            const isEdit = !!(job && job.id);
+            const defaultName = (job && job.name) || _t('proj_scheduled_cron_default_project_name', { title: (p && p.title) || _t('project') });
+            const targetType = (job && job.targetType) || 'projectWorkflow';
+            const schedule = (job && job.schedule) || { kind: 'every', everyMs: 3600000 };
+            const scheduleKind = schedule.kind || 'every';
+            const everyMin = schedule.kind === 'every' ? Math.max(1, Math.round((schedule.everyMs || 3600000) / 60000)) : 60;
+            const cronParts = schedule.kind === 'cron' ? String(schedule.expr || '0 9 * * *').split(/\s+/) : [];
+            const cronMinute = cronParts[0] || '0';
+            const cronHour = cronParts[1] || '9';
+            const cronTime = `${String(cronHour).padStart(2, '0')}:${String(cronMinute).padStart(2, '0')}`;
+            const cronDow = cronParts[4] || '*';
+            const atDate = schedule.kind === 'at' && schedule.at ? new Date(schedule.at).toISOString().slice(0, 10) : '';
+            const atTime = schedule.kind === 'at' && schedule.at ? new Date(schedule.at).toTimeString().slice(0, 5) : '';
+            overlay.innerHTML = `
+            <div class="proj-form-modal" style="position:static;padding:0;background:transparent" onclick="event.stopPropagation()">
+            <div class="proj-form-box" style="max-width:620px">
+                <div class="proj-form-title">${isEdit ? _t('proj_scheduled_cron_edit_title') : _t('proj_scheduled_cron_create_title')}</div>
+                <input type="hidden" id="pf-cron-id" value="${escHtml((job && job.id) || '')}">
+                <div class="proj-form-group">
+                    <label class="proj-form-label">${_t('proj_scheduled_cron_name_label')} *</label>
+                    <input class="proj-form-input" id="pf-cron-name" type="text" value="${escHtml(defaultName)}" autofocus>
+                </div>
+                <div class="proj-form-row">
+                    <div class="proj-form-group">
+                        <label class="proj-form-label">${_t('proj_scheduled_cron_target_label')}</label>
+                        <select class="proj-form-select" id="pf-cron-target" onchange="ProjMgr.toggleProjectCronTaskField()">
+                            <option value="projectWorkflow" ${targetType === 'projectWorkflow' ? 'selected' : ''}>${_t('proj_scheduled_cron_target_workflow')}</option>
+                            <option value="projectTask" ${targetType === 'projectTask' ? 'selected' : ''}>${_t('proj_scheduled_cron_target_task')}</option>
+                        </select>
+                    </div>
+                    <div class="proj-form-group" id="pf-cron-task-group" style="${targetType === 'projectTask' ? '' : 'display:none'}">
+                        <label class="proj-form-label">${_t('proj_scheduled_cron_task_label')}</label>
+                        <select class="proj-form-select" id="pf-cron-task">
+                            ${tasks.map(t => `<option value="${escHtml(t.id)}" ${job && job.taskId === t.id ? 'selected' : ''}>${escHtml(t.title || t.id)}</option>`).join('')}
+                        </select>
+                    </div>
+                </div>
+                <div class="proj-form-group">
+                    <label class="proj-form-label">${_t('proj_scheduled_cron_schedule_type')}</label>
+                    <select class="proj-form-select" id="pf-cron-schedule-type" onchange="ProjMgr.toggleProjectCronScheduleFields()">
+                        <option value="every" ${scheduleKind === 'every' ? 'selected' : ''}>${_t('proj_scheduled_cron_schedule_every')}</option>
+                        <option value="cron" ${scheduleKind === 'cron' ? 'selected' : ''}>${_t('proj_scheduled_cron_schedule_cron')}</option>
+                        <option value="at" ${scheduleKind === 'at' ? 'selected' : ''}>${_t('proj_scheduled_cron_schedule_at')}</option>
+                    </select>
+                </div>
+                <div class="proj-form-row" id="pf-cron-every-fields" style="${scheduleKind === 'every' ? '' : 'display:none'}">
+                    <div class="proj-form-group">
+                        <label class="proj-form-label">${_t('proj_scheduled_cron_interval_minutes')}</label>
+                        <input class="proj-form-input" id="pf-cron-every-min" type="number" min="1" value="${escHtml(String(everyMin))}">
+                    </div>
+                </div>
+                <div id="pf-cron-cron-fields" style="${scheduleKind === 'cron' ? '' : 'display:none'}">
+                    <div class="proj-form-row">
+                        <div class="proj-form-group">
+                            <label class="proj-form-label">${_t('proj_scheduled_cron_time_label')}</label>
+                            <input class="proj-form-input" id="pf-cron-time" type="time" value="${escHtml(cronTime)}">
+                        </div>
+                        <div class="proj-form-group">
+                            <label class="proj-form-label">${_t('proj_scheduled_cron_timezone_label')}</label>
+                            <input class="proj-form-input" id="pf-cron-tz" type="text" value="${escHtml(schedule.tz || projectCronDefaultTimezone())}">
+                        </div>
+                    </div>
+                    <div class="proj-form-group">
+                        <label class="proj-form-label">${_t('proj_scheduled_cron_days_label')}</label>
+                        <div class="proj-cron-days">
+                            ${projectCronDayCheckbox('1', _t('weekday_mon'), cronDow)}
+                            ${projectCronDayCheckbox('2', _t('weekday_tue'), cronDow)}
+                            ${projectCronDayCheckbox('3', _t('weekday_wed'), cronDow)}
+                            ${projectCronDayCheckbox('4', _t('weekday_thu'), cronDow)}
+                            ${projectCronDayCheckbox('5', _t('weekday_fri'), cronDow)}
+                            ${projectCronDayCheckbox('6', _t('weekday_sat'), cronDow)}
+                            ${projectCronDayCheckbox('0', _t('weekday_sun'), cronDow)}
+                        </div>
+                    </div>
+                </div>
+                <div id="pf-cron-at-fields" style="${scheduleKind === 'at' ? '' : 'display:none'}">
+                    <div class="proj-form-row">
+                        <div class="proj-form-group">
+                            <label class="proj-form-label">${_t('proj_scheduled_cron_date_label')}</label>
+                            <input class="proj-form-input" id="pf-cron-at-date" type="date" value="${escHtml(atDate)}">
+                        </div>
+                        <div class="proj-form-group">
+                            <label class="proj-form-label">${_t('proj_scheduled_cron_time_label')}</label>
+                            <input class="proj-form-input" id="pf-cron-at-time" type="time" value="${escHtml(atTime)}">
+                        </div>
+                    </div>
+                </div>
+                <div class="proj-form-group">
+                    <label class="proj-form-label"><input type="checkbox" id="pf-cron-enabled" ${!job || job.enabled !== false ? 'checked' : ''}> ${_t('proj_scheduled_cron_enabled_label')}</label>
+                    <div style="font-size:10px;color:#888;margin-top:4px">${_t('proj_scheduled_cron_repeat_gate_hint')}</div>
+                </div>
+                <div class="proj-form-actions">
+                    <button class="proj-btn" onclick="ProjMgr.hideFormModal()">${_t('proj_cancel')}</button>
+                    <button class="proj-btn proj-btn-primary" onclick="ProjMgr.submitProjectCron()">${isEdit ? _t('proj_scheduled_cron_save') : _t('proj_scheduled_cron_create')}</button>
+                </div>
             </div>
             </div>`;
         }
@@ -1726,10 +2113,95 @@
         if (overlay) { overlay.innerHTML = ''; overlay.classList.add('hidden'); }
     }
 
+    function toggleProjectExecutionFields(enabled) {
+        const workspaceGroup = document.getElementById('pf-workspace-group');
+        const agentRow = document.getElementById('pf-agent-row');
+        if (workspaceGroup) workspaceGroup.style.display = enabled ? '' : 'none';
+        if (agentRow) agentRow.style.display = enabled ? '' : 'none';
+    }
+
+    function projectCronDefaultTimezone() {
+        try { return Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch (e) { return ''; }
+    }
+
+    function projectCronDayCheckbox(value, label, dow = '*') {
+        const selected = dow === '*' || String(dow).split(',').includes(String(value));
+        return `<label class="proj-cron-day"><input type="checkbox" class="pf-cron-day" value="${value}" ${selected ? 'checked' : ''}> ${label}</label>`;
+    }
+
+    function toggleProjectCronTaskField() {
+        const target = (document.getElementById('pf-cron-target') || {}).value || 'projectWorkflow';
+        const group = document.getElementById('pf-cron-task-group');
+        if (group) group.style.display = target === 'projectTask' ? '' : 'none';
+    }
+
+    function toggleProjectCronScheduleFields() {
+        const type = (document.getElementById('pf-cron-schedule-type') || {}).value || 'every';
+        const every = document.getElementById('pf-cron-every-fields');
+        const cron = document.getElementById('pf-cron-cron-fields');
+        const at = document.getElementById('pf-cron-at-fields');
+        if (every) every.style.display = type === 'every' ? 'flex' : 'none';
+        if (cron) cron.style.display = type === 'cron' ? 'block' : 'none';
+        if (at) at.style.display = type === 'at' ? 'block' : 'none';
+    }
+
+    function buildProjectCronScheduleFromForm() {
+        const type = (document.getElementById('pf-cron-schedule-type') || {}).value || 'every';
+        if (type === 'every') {
+            const min = parseInt((document.getElementById('pf-cron-every-min') || {}).value, 10);
+            if (!min || min < 1) throw new Error(_t('proj_scheduled_cron_error_interval'));
+            return { kind: 'every', everyMs: min * 60000 };
+        }
+        if (type === 'cron') {
+            const time = (document.getElementById('pf-cron-time') || {}).value || '09:00';
+            const parts = time.split(':').map(Number);
+            const days = Array.from(document.querySelectorAll('.pf-cron-day:checked')).map(cb => parseInt(cb.value, 10));
+            if (parts.length < 2 || Number.isNaN(parts[0]) || Number.isNaN(parts[1])) throw new Error(_t('proj_scheduled_cron_error_time'));
+            if (!days.length) throw new Error(_t('proj_scheduled_cron_error_day'));
+            const dow = days.length === 7 ? '*' : days.sort((a, b) => a - b).join(',');
+            return { kind: 'cron', expr: `${parts[1]} ${parts[0]} * * ${dow}`, tz: ((document.getElementById('pf-cron-tz') || {}).value || '').trim() || undefined };
+        }
+        const date = (document.getElementById('pf-cron-at-date') || {}).value;
+        const time = (document.getElementById('pf-cron-at-time') || {}).value;
+        if (!date || !time) throw new Error(_t('proj_scheduled_cron_error_at'));
+        return { kind: 'at', at: new Date(`${date}T${time}`).toISOString() };
+    }
+
+    async function submitProjectCron() {
+        const p = state.currentProject;
+        if (!p) return;
+        const cronId = ((document.getElementById('pf-cron-id') || {}).value || '').trim();
+        const name = ((document.getElementById('pf-cron-name') || {}).value || '').trim() || _t('proj_scheduled_cron_default_project_name', { title: p.title });
+        const targetType = (document.getElementById('pf-cron-target') || {}).value || 'projectWorkflow';
+        const taskId = (document.getElementById('pf-cron-task') || {}).value || '';
+        try {
+            if (targetType === 'projectTask' && !taskId) throw new Error(_t('proj_scheduled_cron_error_task'));
+            const body = {
+                name,
+                schedule: buildProjectCronScheduleFromForm(),
+                targetType,
+                enabled: !!((document.getElementById('pf-cron-enabled') || {}).checked),
+                message: `Scheduled project cron for ${p.title}`,
+            };
+            if (targetType === 'projectTask') body.taskId = taskId;
+            const d = cronId
+                ? await api.updateScheduledCron(p.id, cronId, body)
+                : await api.createScheduledCron(p.id, body);
+            if (!d.ok) throw new Error(d.error || (cronId ? 'update failed' : 'create failed'));
+            hideFormModal();
+            toast(cronId ? _t('proj_scheduled_cron_updated') : _t('proj_scheduled_cron_created'), 'success');
+            await refreshProjectScheduledCronPanel();
+        } catch (e) {
+            toast(_t('proj_scheduled_cron_save_failed', { message: e.message }), 'error');
+        }
+    }
+
     async function submitNewProject() {
         const title = (document.getElementById('pf-title') || {}).value.trim();
         if (!title) { toast(_t('proj_title_required'), 'error'); return; }
         const tplId = document.getElementById('pf-template-id');
+        const execToggle = document.getElementById('pf-project-execution');
+        const projectExecutionEnabled = execToggle ? execToggle.checked : true;
         const body = {
             title,
             description: (document.getElementById('pf-desc') || {}).value || '',
@@ -1737,7 +2209,8 @@
             priority: (document.getElementById('pf-priority') || {}).value || 'medium',
             dueDate: (document.getElementById('pf-due') || {}).value ? new Date(document.getElementById('pf-due').value).toISOString() : null,
             tags: ((document.getElementById('pf-tags') || {}).value || '').split(',').map(t => t.trim()).filter(Boolean),
-            projectExecutionEnabled: !!((document.getElementById('pf-workspace') || {}).value || '').trim(),
+            longTermProject: !!((document.getElementById('pf-long-term-project') || {}).checked),
+            projectExecutionEnabled,
             workspacePath: ((document.getElementById('pf-workspace') || {}).value || '').trim() || null,
             defaultExecutorAgentId: (document.getElementById('pf-executor') || {}).value || null,
             defaultReviewerAgentId: (document.getElementById('pf-reviewer') || {}).value || null,
@@ -1749,10 +2222,14 @@
             } else {
                 d = await api.createProject(body);
             }
-            if (d.error) { toast(d.error, 'error'); return; }
+            if (d.error) {
+                toast(d.error, 'error');
+                await refreshProjectExecutionProject((d.selectedTask || {}).id || d.taskId);
+                return;
+            }
             hideFormModal();
             if (d.project) {
-                if (body.projectExecutionEnabled) {
+                if (body.projectExecutionEnabled && body.workspacePath) {
                     const validation = await api.projectExecutionValidateWorkspace(d.project.id, body.workspacePath);
                     if (validation.error) { toast(validation.error, 'error'); return; }
                 }
@@ -1773,7 +2250,7 @@
             priority: (document.getElementById('pf-priority') || {}).value || 'medium',
             dueDate: (document.getElementById('pf-due') || {}).value ? new Date(document.getElementById('pf-due').value).toISOString() : null,
             tags: ((document.getElementById('pf-tags') || {}).value || '').split(',').map(t => t.trim()).filter(Boolean),
-            projectExecutionEnabled: !!((document.getElementById('pf-workspace') || {}).value || '').trim(),
+            longTermProject: !!((document.getElementById('pf-long-term-project') || {}).checked),
             workspacePath: ((document.getElementById('pf-workspace') || {}).value || '').trim() || null,
             defaultExecutorAgentId: (document.getElementById('pf-executor') || {}).value || null,
             defaultReviewerAgentId: (document.getElementById('pf-reviewer') || {}).value || null,
@@ -1809,8 +2286,15 @@
     async function deleteProject(id, e) {
         if (e) e.stopPropagation();
         if (!confirm(_t('proj_delete_confirm'))) return;
+        const project = (state.projects || []).find(p => p.id === id) || (state.currentProject && state.currentProject.id === id ? state.currentProject : null);
+        let deleteWorkspace = false;
+        if (project && project.workspaceManagedBy === 'system' && project.workspacePath) {
+            deleteWorkspace = confirm(`是否一并删除自动创建的项目工作区？\n${project.workspacePath}`);
+        }
         try {
-            await api.deleteProject(id);
+            const d = await api.deleteProject(id, { deleteWorkspace });
+            if (d.error) { toast(d.error, 'error'); return; }
+            if (d.workspaceDeleteError) toast(`项目已删除，但工作区删除失败：${d.workspaceDeleteError}`, 'error');
             toast(_t('proj_deleted'), 'success');
             showListView();
         } catch (e) { toast(_t('proj_failed_delete'), 'error'); }
@@ -2186,18 +2670,29 @@
     function updateSidebar() {
         const el = document.getElementById('sidebar-projects-list');
         if (!el) return;
-        const active = state.projects.filter(p => p.status === 'active').slice(0, 5);
+        const projectSortTime = p => {
+            const raw = (p && (p.updatedAt || p.createdAt)) || '';
+            const value = Date.parse(raw);
+            return Number.isFinite(value) ? value : 0;
+        };
+        const active = state.projects
+            .filter(p => p.status === 'active')
+            .sort((a, b) => projectSortTime(b) - projectSortTime(a))
+            .slice(0, 5);
         if (active.length === 0) {
             el.innerHTML = `<div style="font-size:10px;color:#555;padding:4px">${_t('proj_no_active_projects')}</div>`;
             return;
         }
         el.innerHTML = active.map(p => {
             const pct = p.taskCount > 0 ? Math.round(p.taskDone / p.taskCount * 100) : 0;
+            const alerts = Array.isArray(p.scheduledCronAlerts) ? p.scheduledCronAlerts : [];
+            const latestAlert = alerts[0] || null;
             return `
             <div class="sidebar-proj-item" onclick="ProjMgr.openProjectsManager();ProjMgr.openProject('${p.id}')">
                 <div class="proj-dot" style="background:${priorityColor(p.priority)}"></div>
                 <span class="proj-name">${escHtml(p.title)}</span>
                 <span class="proj-progress-mini">${pct}%</span>
+                ${latestAlert ? `<span class="sidebar-proj-cron-alert" title="${escHtml(latestAlert.message || latestAlert.reason || latestAlert.error || _t('proj_scheduled_cron_alert_title'))}">${_t('proj_scheduled_cron_alert_badge')}</span>` : ''}
             </div>`;
         }).join('');
     }
@@ -2225,15 +2720,25 @@
 
     // ── WORKFLOW CONTROLS ──────────────────────────────────────────
 
-    async function projectExecutionStartAction(taskId, dirtyFingerprint) {
+    async function projectExecutionStartAction(taskId, dirtyFingerprint, opts = {}) {
         const p = state.currentProject;
         if (!p) return;
+        const confirmedDirtyFingerprint = dirtyFingerprint || opts.dirtyFingerprint || '';
         try {
-            const d = await api.projectExecutionStart(p.id, taskId, dirtyFingerprint);
+            const d = await api.projectExecutionStart(p.id, taskId, confirmedDirtyFingerprint, opts);
             if (d.confirmationRequired) {
+                if (d.code === 'reviewer_skip_confirmation_required') {
+                    const task = (p.tasks || []).find(t => t.id === taskId) || {};
+                    const message = `当前项目/任务没有配置 Reviewer。\n${task.title ? `任务：${task.title}\n` : ''}是否确认跳过独立审查并继续执行？`;
+                    if (confirm(message)) {
+                        return projectExecutionStartAction(taskId, confirmedDirtyFingerprint, { ...opts, dirtyFingerprint: confirmedDirtyFingerprint, skipReviewConfirmed: true });
+                    }
+                    await refreshProjectExecutionProject(taskId);
+                    return;
+                }
                 const files = (d.dirtyFiles || []).slice(0, 12).join('\n');
-            if (confirm(_t('proj_dirty_workspace_confirm', { files: files + (d.truncated ? '\n...' : '') }))) {
-                    return projectExecutionStartAction(taskId, d.dirtyFingerprint);
+                if (confirm(_t('proj_dirty_workspace_confirm', { files: files + (d.truncated ? '\n...' : '') }))) {
+                    return projectExecutionStartAction(taskId, d.dirtyFingerprint, { ...opts, dirtyFingerprint: d.dirtyFingerprint });
                 }
                 return;
             }
@@ -2245,6 +2750,78 @@
             startProjectExecutionPolling();
             await refreshProjectExecutionProject(taskId);
     } catch (e) { toast(_t('proj_start_task_failed'), 'error'); }
+    }
+
+    function projectExecutionSelectedStartMode() {
+        const checked = document.querySelector('input[name="proj-exec-start-mode"]:checked');
+        return checked ? checked.value : ((state.currentProject && state.currentProject.projectExecutionStartMode) || 'continuous');
+    }
+
+    async function setProjectExecutionStartModeAction(mode) {
+        const p = state.currentProject;
+        if (!p) return;
+        p.projectExecutionStartMode = mode === 'single' ? 'single' : 'continuous';
+        try {
+            await api.updateProject(p.id, { projectExecutionStartMode: p.projectExecutionStartMode });
+        } catch (e) { toast(_t('proj_save_failed'), 'error'); }
+    }
+
+    async function projectExecutionProjectStartAction(dirtyFingerprint, opts = {}) {
+        const p = state.currentProject;
+        if (!p) return;
+        const mode = projectExecutionSelectedStartMode();
+        const confirmedDirtyFingerprint = dirtyFingerprint || opts.dirtyFingerprint || '';
+        try {
+            const d = await api.projectExecutionProjectStart(p.id, mode, confirmedDirtyFingerprint, opts);
+            if (d.confirmationRequired) {
+                if (d.code === 'reviewer_skip_confirmation_required') {
+                    const taskTitle = (d.selectedTask || {}).title || '';
+                    const message = `当前项目/任务没有配置 Reviewer。\n${taskTitle ? `任务：${taskTitle}\n` : ''}是否确认跳过独立审查并继续执行？`;
+                    if (confirm(message)) {
+                        return projectExecutionProjectStartAction(confirmedDirtyFingerprint, { ...opts, dirtyFingerprint: confirmedDirtyFingerprint, skipReviewConfirmed: true });
+                    }
+                    await refreshProjectExecutionProject((d.selectedTask || {}).id || d.taskId);
+                    return;
+                }
+                const files = (d.dirtyFiles || []).slice(0, 12).join('\n');
+                if (confirm(_t('proj_dirty_workspace_confirm', { files: files + (d.truncated ? '\n...' : '') }))) {
+                    return projectExecutionProjectStartAction(d.dirtyFingerprint, { ...opts, dirtyFingerprint: d.dirtyFingerprint });
+                }
+                return;
+            }
+            if (d.error) { toast(d.error, 'error'); return; }
+            toast(mode === 'continuous' ? '项目连续任务流已启动' : '项目任务已启动', 'success');
+            state.workflow.active = true;
+            state.workflow.phase = 'executing';
+            state.workflow.currentTaskId = d.taskId;
+            state.workflow.startMode = mode;
+            startProjectExecutionPolling();
+            await refreshProjectExecutionProject(d.taskId);
+        } catch (e) { toast(_t('proj_start_task_failed'), 'error'); }
+    }
+
+    async function projectExecutionCancelActiveAction() {
+        const p = state.currentProject;
+        if (!p) return;
+        const taskId = state.workflow.currentTaskId || p.activeTaskId;
+        const task = (p.tasks || []).find(t => t.id === taskId);
+        if (!task) { toast('没有正在执行的任务', 'info'); return; }
+        await projectExecutionCancelAction(task.id, task.activeAttemptId || '');
+    }
+
+    async function copyWorkspacePathAction(event, path) {
+        if (event) event.stopPropagation();
+        try {
+            await navigator.clipboard.writeText(path || '');
+        } catch (e) {
+            const ta = document.createElement('textarea');
+            ta.value = path || '';
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand('copy');
+            ta.remove();
+        }
+        toast('工作区路径已复制', 'success');
     }
 
     async function projectExecutionCancelAction(taskId, attemptId) {
@@ -2290,17 +2867,38 @@
     } catch (e) { toast(_t('proj_accept_action_failed'), 'error'); }
     }
 
-    async function refreshProjectExecutionProject(selectedTaskId) {
+    function projectExecutionBoardSignature(project) {
+        return JSON.stringify(((project && project.tasks) || []).map(t => [
+            t.id,
+            t.columnId,
+            t.order || 0,
+            t.executionState || '',
+            t.activeAttemptId || '',
+            t.completedAt || '',
+            t.blockedReason || '',
+            (t.reviewResult || {}).status || '',
+        ]));
+    }
+
+    async function refreshProjectExecutionProject(selectedTaskId, opts = {}) {
         const p = state.currentProject;
         if (!p) return;
+        const oldSignature = projectExecutionBoardSignature(p);
         const fresh = await api.getProject(p.id);
         if (!fresh.project) return;
         state.currentProject = fresh.project;
+        await loadProjectMeetingRequests();
         const taskId = selectedTaskId || (state.currentTask && state.currentTask.id);
         if (taskId) state.currentTask = fresh.project.tasks.find(t => t.id === taskId) || null;
         const mc = getMainContent();
-        if (mc && state.view === 'board') { mc.innerHTML = renderBoardView(); bindBoardEvents(); populateBoardScoreboard(); }
+        const newSignature = projectExecutionBoardSignature(fresh.project);
+        if (mc && state.view === 'board' && (!opts.lightweight || oldSignature !== newSignature)) {
+            mc.innerHTML = renderBoardView();
+            bindBoardEvents();
+            populateBoardScoreboard();
+        }
         if (state.currentTask) renderDetailPanel(state.currentTask);
+        updateWorkflowUI();
     }
 
     function startProjectExecutionPolling() {
@@ -2313,7 +2911,9 @@
                 state.workflow.active = d.active;
                 state.workflow.phase = d.phase || 'idle';
                 state.workflow.currentTaskId = d.currentTaskId;
-                await refreshProjectExecutionProject(d.currentTaskId);
+                state.workflow.startMode = d.startMode || 'continuous';
+                state.workflow.flowStopReason = d.flowStopReason || null;
+                await refreshProjectExecutionProject(d.currentTaskId, { lightweight: true });
                 if (!d.active) stopWorkflowPolling();
             } catch (e) { /* keep the last visible state */ }
         }, 2500);
@@ -2346,6 +2946,90 @@
             updateWorkflowUI();
             stopWorkflowPolling();
         } catch (e) { toast(_t('proj_failed_stop_workflow'), 'error'); }
+    }
+
+    async function refreshProjectScheduledCronPanel() {
+        const p = state.currentProject;
+        if (!p) return;
+        const fresh = await api.getProject(p.id);
+        if (fresh.project) state.currentProject = fresh.project;
+        await loadScheduledCronForCurrentProject();
+        const mc = getMainContent();
+        if (mc) {
+            mc.innerHTML = renderBoardView();
+            bindBoardEvents();
+            populateBoardScoreboard();
+        }
+    }
+
+    async function createProjectCronPromptAction() {
+        const p = state.currentProject;
+        if (!p) return;
+        showFormModal('project-cron', p);
+    }
+
+    function editProjectCronAction(cronId) {
+        const p = state.currentProject;
+        if (!p) return;
+        const job = (p.scheduledCronJobs || []).find(j => String(j.id) === String(cronId));
+        if (!job) {
+            toast(_t('proj_scheduled_cron_not_found'), 'error');
+            return;
+        }
+        showFormModal('project-cron', p, job);
+    }
+
+    async function toggleProjectCronPauseAction() {
+        const p = state.currentProject;
+        if (!p) return;
+        try {
+            const d = await api.updateProject(p.id, { scheduledCronPaused: !p.scheduledCronPaused });
+            if (!d.ok) throw new Error(d.error || 'update failed');
+            state.currentProject = d.project;
+            await refreshProjectScheduledCronPanel();
+            toast(state.currentProject.scheduledCronPaused ? _t('proj_scheduled_cron_paused') : _t('proj_scheduled_cron_resumed'), 'success');
+        } catch (e) {
+            toast(_t('proj_scheduled_cron_pause_failed', { message: e.message }), 'error');
+        }
+    }
+
+    async function runProjectCronAction(cronId) {
+        const p = state.currentProject;
+        if (!p) return;
+        try {
+            const d = await api.runScheduledCron(p.id, cronId);
+            if (!d.ok) throw new Error(d.error || 'run failed');
+            toast(_t('proj_scheduled_cron_triggered'), 'success');
+            await refreshProjectScheduledCronPanel();
+        } catch (e) {
+            toast(_t('proj_scheduled_cron_run_failed', { message: e.message }), 'error');
+        }
+    }
+
+    async function toggleProjectCronAction(cronId, currentlyEnabled) {
+        const p = state.currentProject;
+        if (!p) return;
+        try {
+            const d = await api.updateScheduledCron(p.id, cronId, { enabled: !currentlyEnabled });
+            if (!d.ok) throw new Error(d.error || 'update failed');
+            toast(currentlyEnabled ? _t('proj_scheduled_cron_disabled') : _t('proj_scheduled_cron_enabled'), 'success');
+            await refreshProjectScheduledCronPanel();
+        } catch (e) {
+            toast(_t('proj_scheduled_cron_update_failed', { message: e.message }), 'error');
+        }
+    }
+
+    async function deleteProjectCronAction(cronId) {
+        const p = state.currentProject;
+        if (!p || !confirm(_t('proj_scheduled_cron_delete_confirm'))) return;
+        try {
+            const d = await api.deleteScheduledCron(p.id, cronId);
+            if (!d.ok) throw new Error(d.error || 'delete failed');
+            toast(_t('proj_scheduled_cron_deleted'), 'success');
+            await refreshProjectScheduledCronPanel();
+        } catch (e) {
+            toast(_t('proj_scheduled_cron_delete_failed', { message: e.message }), 'error');
+        }
     }
 
     async function toggleAutoModeAction(enabled) {
@@ -2526,10 +3210,20 @@
 
     function updateWorkflowUI() {
         const startBtn = document.getElementById('wf-start-btn');
+        const execStartBtn = document.getElementById('proj-exec-start-btn');
+        const execStopBtn = document.getElementById('proj-exec-stop-btn');
         const stopBtn = document.getElementById('wf-stop-btn');
         const badge = document.getElementById('wf-status-badge');
         const autoToggle = document.getElementById('wf-auto-toggle');
 
+        if (execStartBtn) {
+            if (state.workflow.active) { execStartBtn.classList.add('hidden'); }
+            else { execStartBtn.classList.remove('hidden'); }
+        }
+        if (execStopBtn) {
+            if (state.workflow.active) { execStopBtn.classList.remove('hidden'); }
+            else { execStopBtn.classList.add('hidden'); }
+        }
         if (startBtn) {
             if (state.workflow.active) { startBtn.classList.add('hidden'); }
             else { startBtn.classList.remove('hidden'); }
@@ -2555,11 +3249,27 @@
                 'stopped': _t('proj_workflow_stopped'),
                 'stalled': _t('proj_workflow_stalled'),
                 'error': _t('proj_workflow_error'),
+                'executing': '执行中',
+                'execution_complete': '执行完成',
+                'awaiting_user_acceptance': '等待用户验收',
+                'blocked': '阻塞',
+                'done': '已完成',
+                'no_eligible_task': '没有可启动任务',
+                'dirty_worktree_confirmation_required': '等待确认工作区变更',
+                'executor_required': '缺少执行 Agent',
+                'reviewer_required': '缺少 Reviewer',
+                'reviewer_skip_confirmation_required': '确认跳过审查',
+                'reviewer_not_independent': 'Reviewer 需独立',
+                'workspace_required': '缺少工作区',
+                'workspace_missing': '工作区不存在',
+                'start_failed': '启动失败',
             };
-            badge.textContent = phaseLabels[phase] || phase;
+            badge.textContent = phaseLabels[phase] || phase || '';
             badge.className = 'proj-wf-status' + (state.workflow.active ? ' wf-active' : '') + (phase === 'awaiting_user_review' ? ' wf-attention' : '') + (phase === 'error' ? ' wf-error' : '');
             if (state.workflow.error && phase === 'error') {
                 badge.title = state.workflow.error;
+            } else if (state.workflow.flowStopReason) {
+                badge.title = state.workflow.flowStopReason;
             }
         }
     }
@@ -2593,6 +3303,10 @@
                 state.workflow.active = d.active;
                 state.workflow.phase = d.phase || 'idle';
                 state.workflow.currentTaskId = d.currentTaskId;
+                state.workflow.startMode = d.startMode || 'continuous';
+                state.workflow.flowStopReason = d.flowStopReason || null;
+                p.projectExecutionStartMode = d.startMode || p.projectExecutionStartMode || 'continuous';
+                updateWorkflowUI();
                 if (d.active) startProjectExecutionPolling();
             } catch (e) { /* non-fatal */ }
             return;
@@ -2667,6 +3381,7 @@
         hideQuickAdd,
         submitQuickAdd,
         hideFormModal,
+        toggleProjectExecutionFields,
         submitNewProject,
         submitEditProject,
         // Drag & drop
@@ -2682,12 +3397,26 @@
         workflowStart: workflowStartAction,
         workflowStop: workflowStopAction,
         toggleAutoMode: toggleAutoModeAction,
+        createProjectCronPrompt: createProjectCronPromptAction,
+        editProjectCron: editProjectCronAction,
+        toggleProjectCronTaskField,
+        toggleProjectCronScheduleFields,
+        submitProjectCron,
+        toggleProjectCronPause: toggleProjectCronPauseAction,
+        runProjectCron: runProjectCronAction,
+        toggleProjectCron: toggleProjectCronAction,
+        deleteProjectCron: deleteProjectCronAction,
         updateReviewItemStatus: updateReviewItemStatusAction,
         saveReviewCheck: saveReviewCheckAction,
         projectExecutionStart: projectExecutionStartAction,
+        projectExecutionProjectStart: projectExecutionProjectStartAction,
+        setProjectExecutionStartMode: setProjectExecutionStartModeAction,
+        projectExecutionCancelActive: projectExecutionCancelActiveAction,
+        copyWorkspacePath: copyWorkspacePathAction,
         projectExecutionCancel: projectExecutionCancelAction,
         projectExecutionReviewStart: projectExecutionReviewStartAction,
         projectExecutionAccept: projectExecutionAcceptAction,
+        openMeetingRequestsQueue,
     };
 
 })();

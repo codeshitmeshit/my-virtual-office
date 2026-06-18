@@ -91,3 +91,13 @@
 - 回归：Codex bridge、server、Phase 6 HTTP E2E、JavaScript 聚合与语法检查全部通过。
 - 真实 Codex：`_VO_INT=1`、`demo=false` 下完成复杂只读任务；runtime 发出 1 个 reasoning item、1 个 section boundary、5 个 summary delta 和最终摘要 `Correcting parallel usage`，未修改文件。
 - 待确认：用户在浏览器硬刷新后确认 Thinking 卡实时出现、可展开，并在刷新后不重复。
+
+## 人工确认记录
+
+- 确认项：tested
+- 确认时间：2026-06-17T03:01:16+08:00
+- 用户确认摘要：用户确认验收通过，可以归档。
+
+- 确认项：done
+- 确认时间：2026-06-17T03:01:16+08:00
+- 用户确认摘要：用户确认验收通过，并请求将该需求归档为完成。

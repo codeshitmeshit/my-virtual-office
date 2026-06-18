@@ -196,3 +196,11 @@
 - 实现确认：当前前端 `产物` 按钮按 `projectExecutionEnabled` 展示，不按 artifact 数量展示；Artifact Manager 已有空状态 `当前上下文没有 Markdown 产物。`。
 - 自动化补充：`tests/test_project_execution.py` 已增加项目级空 workspace 验证，确认 Project Execution 项目无 Markdown 时 `/artifacts` 返回 `ok:true`、`artifacts: []`、`truncated:false`。
 - 回归结果：`.venv/bin/python tests/test_project_execution.py` 与 `node --check app/projects.js` 均通过；测试环境仍有非致命 gateway abort 连接失败警告，最终输出 `ok`。
+
+- 人工验收确认时间：2026-06-17T03:01:16+08:00
+- 确认项：tested
+- 用户确认摘要：用户确认验收通过，可以归档。
+
+- 人工归档确认时间：2026-06-17T03:01:16+08:00
+- 确认项：done
+- 用户确认摘要：用户确认验收通过，并请求将该需求归档为完成。

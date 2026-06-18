@@ -274,6 +274,16 @@ Phase 1
   - 状态：已完成专项评审、checklist 已确认、已生成按 Phase 分组的 todolist。
   - 路径：`../meeting-for-ai-phase-1-3/`
   - 说明：三个 Phase 一起开发，但分别执行 Phase Gate，上一 Phase 自测通过后才能进入下一 Phase。
+- `meeting-for-ai-phase-4`
+  - 范围：Phase 4，AI 发起申请与会前上下文。
+  - 状态：已完成实现、测试和用户验收，已归档为 done。
+  - 路径：`../meeting-for-ai-phase-4/`
+  - 说明：AI 可提交会议申请，但只有用户确认后的配置和上下文会进入会议。
+- `meeting-for-ai-phase-5`
+  - 范围：Phase 5，Agent 忙碌冲突、任务暂停与并发。
+  - 状态：已创建独立子需求，方案评审通过，checklist 草稿待确认。
+  - 路径：`../meeting-for-ai-phase-5/`
+  - 说明：包含中高风险冲突 advisory、等待/更换/强制加入、轻量预约、任务暂停恢复和单 Agent 单会议约束。
 
 ## 非目标
 

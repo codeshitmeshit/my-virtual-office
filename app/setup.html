@@ -308,16 +308,16 @@
             <div class="step-desc" data-i18n="agent_browser_setup_desc">Connect a browser so your agents can browse the web and you can watch live. You can skip this and set it up later.</div>
 
             <label style="display:flex;align-items:center;gap:8px;margin-top:12px;">
-                <input type="checkbox" id="s-browser-enable"> <span data-i18n="enable_browser_setup">Enable Agent Browser</span>
+                <input type="checkbox" id="s-browser-enable" checked> <span data-i18n="enable_browser_setup">Enable Agent Browser</span>
             </label>
 
-            <div id="browser-fields" style="display:none;margin-top:16px;">
+            <div id="browser-fields" style="display:block;margin-top:16px;">
                 <label data-i18n="cdp_setup">CDP URL <span style="color:#666;font-size:12px" data-i18n="cdp_setup_hint">(Chrome DevTools Protocol)</span></label>
-                <input type="text" id="s-cdp-url" placeholder="e.g. http://your-host:9222" data-i18n-placeholder="cdp_setup">
+                <input type="text" id="s-cdp-url" placeholder="http://127.0.0.1:9224" data-i18n-placeholder="cdp_setup">
                 <div style="font-size:12px;color:#666;margin:4px 0 12px;" data-i18n="cdp_setup_desc">The address where Chrome/Chromium remote debugging is running.</div>
 
                 <label data-i18n="viewer_setup">Browser Viewer URL <span style="color:#666;font-size:12px" data-i18n="viewer_setup_hint">(VNC / live view)</span></label>
-                <input type="text" id="s-viewer-url" placeholder="e.g. http://your-host:6902" data-i18n-placeholder="viewer_setup">
+                <input type="text" id="s-viewer-url" placeholder="https://localhost:6901" data-i18n-placeholder="viewer_setup">
                 <div style="font-size:12px;color:#666;margin:4px 0 12px;" data-i18n="viewer_setup_desc">URL for the live browser view (KasmVNC, noVNC, etc.). This is what shows in the floating browser window so you can watch your agents browse in real time.</div>
 
                 <button onclick="testBrowserConnection()" style="margin:8px 0 16px;padding:8px 16px;font-size:9px;" data-i18n="test_connection_btn">🔍 TEST CONNECTION</button>
@@ -328,11 +328,11 @@
                 <b data-i18n="what_is_browser">What is this?</b> The Agent Browser gives your AI agents a real web browser you can watch live. You need two things:<br><br>
                 <b>1. CDP (Chrome DevTools Protocol)</b> — how agents control the browser<br>
                 <b>2. VNC Viewer</b> — how you watch the browser live in the office<br><br>
-                <b>Easiest setup — one Docker command:</b><br>
-                <code style="color:#90caf9;font-size:13px;">docker run -d --name vo-browser \<br>&nbsp;&nbsp;-p 9222:9222 -p 6902:6902 -p 6901:6901 \<br>&nbsp;&nbsp;kasmweb/chromium:1.17.0</code><br><br>
+                <b>Easiest setup — project Agent Browser Docker service:</b><br>
+                <code style="color:#90caf9;font-size:13px;">./start.sh --browser</code><br><br>
                 This gives you both:<br>
-                • CDP URL: <code style="color:#90caf9;">http://127.0.0.1:9222</code><br>
-                • Viewer URL: <code style="color:#90caf9;">http://127.0.0.1:6902</code> (HTTP, no cert needed)<br><br>
+                • CDP URL: <code style="color:#90caf9;">http://127.0.0.1:9224</code><br>
+                • Viewer URL: <code style="color:#90caf9;">https://127.0.0.1:6901</code><br><br>
                 <b>Or use your own Chrome + VNC:</b><br>
                 <code style="color:#90caf9;font-size:13px;">google-chrome --remote-debugging-port=9222 --user-data-dir=/tmp/vo-browser</code><br>
                 Then point Viewer URL to your VNC/noVNC server.<br><br>
@@ -404,10 +404,10 @@
             <div class="step-desc" data-i18n="pc_performance_desc">Monitor a PC's CPU, RAM, and GPU stats live in your office dashboard. You can skip this and set it up later.</div>
 
             <label style="display:flex;align-items:center;gap:8px;margin-top:12px;">
-                <input type="checkbox" id="s-pcmetrics-enable"> <span data-i18n="enable_pc_metrics">Enable PC Performance Monitor</span>
+                <input type="checkbox" id="s-pcmetrics-enable" checked> <span data-i18n="enable_pc_metrics">Enable PC Performance Monitor</span>
             </label>
 
-            <div id="pcmetrics-fields" style="display:none;margin-top:16px;">
+            <div id="pcmetrics-fields" style="display:block;margin-top:16px;">
                 <label data-i18n="metrics_server_url">Metrics Server URL</label>
                 <input type="text" id="s-pcmetrics-url" placeholder="http://192.168.1.100:8099" data-i18n-placeholder="metrics_server_url">
                 <div style="font-size:12px;color:#666;margin:4px 0 12px;" data-i18n="metrics_url_desc">The address where the PC Metrics Server is running. This can be a local or remote machine.</div>
@@ -520,9 +520,21 @@
         window.addEventListener('i18n:ready', checkExistingLicense);
         window.addEventListener('i18n:changed', checkExistingLicense);
 
+        var DEFAULT_BROWSER_CDP_URL = 'http://127.0.0.1:9224';
+        var DEFAULT_BROWSER_VIEWER_URL = 'https://localhost:6901';
+
+        function populateDefaultBrowserUrls() {
+            var cdpInput = document.getElementById('s-cdp-url');
+            var viewerInput = document.getElementById('s-viewer-url');
+            if (cdpInput && !cdpInput.value.trim()) cdpInput.value = DEFAULT_BROWSER_CDP_URL;
+            if (viewerInput && !viewerInput.value.trim()) viewerInput.value = DEFAULT_BROWSER_VIEWER_URL;
+        }
+        populateDefaultBrowserUrls();
+
         // Browser enable toggle
         document.getElementById('s-browser-enable').addEventListener('change', function() {
             document.getElementById('browser-fields').style.display = this.checked ? 'block' : 'none';
+            if (this.checked) populateDefaultBrowserUrls();
         });
 
         // SMS enable toggle
@@ -862,7 +874,7 @@
                     browserPanel: browserEnabled,
                     smsPanel: smsEnabled,
                     pcMetrics: pcMetricsEnabled,
-                    apiUsage: true
+                    apiUsage: false
                 },
                 browser: browserEnabled ? {
                     cdpUrl: document.getElementById('s-cdp-url').value.trim() || null,

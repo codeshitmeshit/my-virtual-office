@@ -567,6 +567,16 @@
   "meeting_start": "开始会议",
   "meeting_running": "会议运行中...",
   "meeting_current_speaker": "当前发言者",
+  "meeting_status_completed": "已完成",
+  "meeting_status_cancelled": "已取消",
+  "meeting_status_failed": "失败",
+  "meeting_stage_preparing": "准备中",
+  "meeting_stage_conflict": "冲突待处理",
+  "meeting_stage_active_opening": "开场中",
+  "meeting_stage_active_discussion": "讨论中",
+  "meeting_stage_awaiting_user_decision": "等待用户决策",
+  "meeting_stage_paused": "已暂停",
+  "meeting_stage_summarizing": "总结中",
   "meeting_contributions": "主要贡献",
   "meeting_transcript": "逐轮发言",
   "meeting_live_discussion": "实时讨论",
@@ -591,6 +601,71 @@
   "meeting_parse_fallback": "已保留原文",
   "meeting_ai_end": "请主持人总结并结束",
   "meeting_ai_ending": "主持人总结中...",
+  "meeting_decision_window": "轮末决策窗口",
+  "meeting_decision_window_hint": "本轮正式发言已结束。可以点名、补充上下文，或继续原议程。",
+  "meeting_decision_summary_hint": "最后一轮正式发言已结束。可以点名、补充上下文，或等待主持人总结并结束。",
+  "meeting_decision_window_timeout": "等待",
+  "meeting_decision_deadline": "截止",
+  "meeting_decision_waiting": "等待中",
+  "meeting_decision_continuing": "继续中",
+  "meeting_target_participant": "点名对象",
+  "meeting_target_question": "点名问题",
+  "meeting_target_question_placeholder": "请指定参会 Agent 在进入下一轮前补充回答",
+  "meeting_send_targeted_question": "点名提问",
+  "meeting_continue": "继续",
+  "meeting_targeted_question": "点名提问",
+  "meeting_targeted_response": "点名回答",
+  "meeting_target_required": "请选择点名对象。",
+  "meeting_target_question_required": "请输入点名问题。",
+  "meeting_targeted_calling": "正在回答点名",
+  "meeting_current_agenda": "当前议题",
+  "meeting_adjust_agenda": "调整议题",
+  "meeting_new_agenda": "新议题",
+  "meeting_new_agenda_placeholder": "设置后续轮次要讨论的议题",
+  "meeting_agenda_reason": "调整原因",
+  "meeting_agenda_reason_placeholder": "可选，说明为什么调整",
+  "meeting_save_agenda": "保存议题",
+  "meeting_agenda_required": "请填写新议题。",
+  "meeting_agenda_changed": "议题调整",
+  "meeting_previous_agenda": "原议题",
+  "meeting_resolution_policy": "裁决策略",
+  "meeting_resolution_user_decision": "用户裁决分歧",
+  "meeting_resolution_moderator_decision": "主持裁决并关闭",
+  "meeting_result_summary": "会议结论",
+  "meeting_outcome": "结果",
+  "meeting_outcome_approved": "通过",
+  "meeting_outcome_rejected": "不通过",
+  "meeting_outcome_no_consensus": "无共识",
+  "meeting_outcome_needs_user_decision": "需要用户裁决",
+  "meeting_rationale": "理由",
+  "meeting_unresolved_questions": "未解决问题",
+  "meeting_disagreements": "分歧",
+  "meeting_arbitration_title": "无共识裁决",
+  "meeting_arbitration_hint": "请选择裁决、继续讨论或以无共识结束。",
+  "meeting_arbitration_waiting": "等待裁决",
+  "meeting_arbitration_waiting_hint": "会议存在未解决分歧。请选择裁决、继续讨论或以无共识结束。",
+  "meeting_arbitration_decision": "裁决",
+  "meeting_arbitration_decision_placeholder": "填写最终采纳的用户裁决",
+  "meeting_arbitration_rationale": "裁决理由",
+  "meeting_arbitration_rationale_placeholder": "可选，说明裁决依据",
+  "meeting_arbitration_consensus_summary": "达成共识并总结",
+  "meeting_arbitration_decide": "采纳裁决并结束",
+  "meeting_arbitration_continue": "继续一轮",
+  "meeting_arbitration_end": "无共识结束",
+  "meeting_arbitration_decision_required": "请填写裁决内容。",
+  "meeting_arbitration_marker": "用户裁决",
+  "meeting_arbitration_action": "动作",
+  "meeting_moderator_takeover_title": "主持接管",
+  "meeting_moderator_takeover_hint": "主持人在总结时失败。你可以手动接管结束，或选择另一位主持人重试。",
+  "meeting_takeover_summary": "用户总结",
+  "meeting_takeover_summary_placeholder": "填写最终总结以结束会议",
+  "meeting_takeover_decision": "决议",
+  "meeting_takeover_decision_placeholder": "可选，填写最终决议",
+  "meeting_takeover_summary_required": "请填写用户总结。",
+  "meeting_takeover_submit": "接管并结束",
+  "meeting_replacement_moderator": "替换主持人",
+  "meeting_replace_moderator_submit": "用新主持重试",
+  "meeting_current_moderator": "当前",
   "meeting_pause": "暂停",
   "meeting_resume": "继续",
   "meeting_cancel": "取消会议",
@@ -714,6 +789,88 @@
   "proj_new_project_title": "新建项目",
   "proj_new_project_title_placeholder": "项目标题",
   "proj_new_project_desc_placeholder": "这个项目是关于什么的？",
+  "proj_long_term_project": "长期项目",
+  "proj_long_term_project_hint": "长期项目会推荐配置项目定时任务，但不会自动创建或启用。",
+  "proj_scheduled_cron_recommend_title": "建议为长期项目配置定时任务",
+  "proj_scheduled_cron_recommend_text": "可以定期推进项目或执行固定周期任务。只有保存表单后才会创建并启用。",
+  "proj_scheduled_cron_recommend_action": "配置定时任务",
+  "proj_scheduled_cron_title": "项目定时任务",
+  "proj_scheduled_cron_subtitle": "使用全局 Cron 调度并绑定到当前项目",
+  "proj_scheduled_cron_paused_subtitle": "已暂停，该项目定时任务不会派发",
+  "proj_scheduled_cron_pause": "暂停定时任务",
+  "proj_scheduled_cron_resume": "恢复定时任务",
+  "proj_scheduled_cron_new": "新建定时任务",
+  "proj_scheduled_cron_empty": "当前项目还没有定时任务",
+  "proj_scheduled_cron_run_now": "立即运行",
+  "proj_scheduled_cron_edit": "编辑",
+  "proj_scheduled_cron_disable": "禁用",
+  "proj_scheduled_cron_enable": "启用",
+  "proj_scheduled_cron_delete": "删除",
+  "proj_scheduled_cron_error": "错误",
+  "proj_scheduled_cron_default_name": "定时任务",
+  "proj_scheduled_cron_no_extra_info": "无额外信息",
+  "proj_scheduled_cron_target_task": "指定任务",
+  "proj_scheduled_cron_target_workflow": "整个项目 workflow",
+  "proj_scheduled_cron_task_missing": "任务缺失",
+  "proj_scheduled_cron_history_title": "定时执行历史",
+  "proj_scheduled_cron_history_subtitle": "最近 {count} 条项目定时任务派发结果",
+  "proj_scheduled_cron_history_empty": "暂无定时执行历史",
+  "proj_scheduled_cron_history_started": "已启动",
+  "proj_scheduled_cron_history_skipped": "已跳过",
+  "proj_scheduled_cron_history_paused": "已暂停",
+  "proj_scheduled_cron_history_failed": "失败",
+  "proj_scheduled_cron_history_intervention_required": "需人工处理",
+  "proj_scheduled_cron_history_unknown": "未知",
+  "proj_scheduled_cron_default_project_name": "{title} 定时任务",
+  "proj_scheduled_cron_edit_title": "编辑项目定时任务",
+  "proj_scheduled_cron_create_title": "新建项目定时任务",
+  "proj_scheduled_cron_name_label": "定时任务名称",
+  "proj_scheduled_cron_target_label": "目标",
+  "proj_scheduled_cron_task_label": "任务",
+  "proj_scheduled_cron_schedule_type": "调度类型",
+  "proj_scheduled_cron_schedule_every": "按间隔重复",
+  "proj_scheduled_cron_schedule_cron": "Cron 表达式",
+  "proj_scheduled_cron_schedule_at": "一次性",
+  "proj_scheduled_cron_interval_minutes": "间隔（分钟）",
+  "proj_scheduled_cron_time_label": "时间",
+  "proj_scheduled_cron_timezone_label": "时区",
+  "proj_scheduled_cron_days_label": "日期",
+  "proj_scheduled_cron_date_label": "日期",
+  "proj_scheduled_cron_enabled_label": "启用",
+  "proj_scheduled_cron_repeat_gate_hint": "如果目标任务已经 Done，是否允许重复触发由任务详情里的“允许定时任务重复触发已完成任务”控制。",
+  "proj_scheduled_cron_save": "保存定时任务",
+  "proj_scheduled_cron_create": "创建定时任务",
+  "proj_scheduled_cron_error_interval": "间隔必须大于等于 1 分钟",
+  "proj_scheduled_cron_error_time": "请选择有效时间",
+  "proj_scheduled_cron_error_day": "至少选择一天",
+  "proj_scheduled_cron_error_at": "请选择一次性执行日期和时间",
+  "proj_scheduled_cron_error_task": "请选择任务",
+  "proj_scheduled_cron_created": "项目定时任务已创建",
+  "proj_scheduled_cron_updated": "项目定时任务已更新",
+  "proj_scheduled_cron_save_failed": "保存项目定时任务失败：{message}",
+  "proj_scheduled_cron_not_found": "未找到项目定时任务",
+  "proj_scheduled_cron_paused": "项目定时任务已暂停",
+  "proj_scheduled_cron_resumed": "项目定时任务已恢复",
+  "proj_scheduled_cron_pause_failed": "更新暂停状态失败：{message}",
+  "proj_scheduled_cron_triggered": "项目定时任务已触发",
+  "proj_scheduled_cron_run_failed": "运行项目定时任务失败：{message}",
+  "proj_scheduled_cron_disabled": "项目定时任务已禁用",
+  "proj_scheduled_cron_enabled": "项目定时任务已启用",
+  "proj_scheduled_cron_update_failed": "更新项目定时任务失败：{message}",
+  "proj_scheduled_cron_delete_confirm": "删除这个项目定时任务？",
+  "proj_scheduled_cron_deleted": "项目定时任务已删除",
+  "proj_scheduled_cron_delete_failed": "删除项目定时任务失败：{message}",
+  "proj_scheduled_cron_alert_title": "项目定时任务异常",
+  "proj_scheduled_cron_alert_badge": "定时异常",
+  "proj_task_scheduled_repeat_enabled": "允许定时任务重复触发已完成任务",
+  "proj_task_scheduled_repeat_hint": "开启后，项目定时任务再次触发 Done 任务时会重新打开该任务并派发执行。",
+  "weekday_mon": "周一",
+  "weekday_tue": "周二",
+  "weekday_wed": "周三",
+  "weekday_thu": "周四",
+  "weekday_fri": "周五",
+  "weekday_sat": "周六",
+  "weekday_sun": "周日",
   "proj_create_project_btn": "创建项目",
   "proj_edit_project_title": "编辑项目",
   "proj_save_changes": "保存更改",
@@ -1185,7 +1342,7 @@
   ,"proj_accept_confirm": "确认验收通过并移动到 Done？"
   ,"proj_accept_action_failed": "提交验收动作失败"
   ,"setup_license_note": "<b>演示模式：</b>最多可免费使用 3 个代理，部分功能受限。<br><br><b>完整许可证：</b>无限代理并解锁全部功能。<br><b>早鸟版：</b>功能相同，享受限时首发价格。<br><br>前往 <a href=\"https://myvirtualoffice.ai\" target=\"_blank\">myvirtualoffice.ai</a> 获取密钥"
-  ,"setup_browser_note": "<b>这是什么？</b>代理浏览器通过 CDP 控制浏览器，并通过 VNC 显示实时画面。<br><br><b>Docker 配置：</b><br><code>docker run -d --name vo-browser -p 9222:9222 -p 6902:6902 kasmweb/chromium:1.17.0</code><br><br>CDP：<code>http://127.0.0.1:9222</code><br>查看器：<code>http://127.0.0.1:6902</code><br><br>可以跳过此步骤，稍后再配置。"
+  ,"setup_browser_note": "<b>这是什么？</b>代理浏览器通过 CDP 控制浏览器，并通过 VNC 显示实时画面。<br><br><b>项目代理浏览器 Docker 配置：</b><br><code>./start.sh --browser</code><br><br>该命令只启动代理浏览器 Docker 服务；主应用请另开终端运行 <code>./start.sh</code>。<br><br>CDP：<code>http://127.0.0.1:9224</code><br>查看器：<code>https://127.0.0.1:6901</code><br><br>可以跳过此步骤，稍后再配置。"
   ,"setup_sms_note": "<b>所需内容：</b>Twilio 账户、电话号码、Account SID 和 Auth Token。<br><br>配置凭据后可以显示收到的 MMS。发送附件需要 Twilio 能访问的公开 HTTPS 媒体地址；纯文本短信不需要该地址。<br><br>可以跳过此步骤，稍后再配置。"
   ,"setup_metrics_note": "<b>工作原理：</b>在需要监控的电脑上运行项目自带的指标服务器。<br><br><code>pip install psutil</code><br><code>python pc-metrics-server.py 8099</code><br><br>本机使用 <code>http://127.0.0.1:8099</code>，远程电脑使用其局域网或 Tailscale 地址。NVIDIA 显卡监控还需要安装 <code>pynvml</code>。"
   ,"setup_done_note": "<b>你可以：</b><br>• 编辑办公室布局和颜色<br>• 自定义代理并分配工位<br>• 与代理聊天<br>• 修改连接设置并导入或导出配置<br><br><b>实时状态：</b>长时间运行的代理工作会持续显示到完成。<br><br><b>API 用量：</b>系统会自动从 OpenClaw 检测提供商用量和凭据状态。"
@@ -1365,4 +1522,95 @@
   ,"hermes_task_plan": "任务计划"
   ,"hermes_steps_complete": "已完成 {{count}} 步"
   ,"hermes_plan_preview": "接收 · 运行 · 导出 · 渲染"
+  ,"meeting_ai_requests": "AI 申请"
+  ,"meeting_request_empty": "暂无 AI 会议申请"
+  ,"meeting_request_title": "AI 会议申请"
+  ,"meeting_request_status_pending": "待确认"
+  ,"meeting_request_status_rejected": "已拒绝"
+  ,"meeting_request_status_confirmed": "已确认"
+  ,"meeting_request_goal": "目标"
+  ,"meeting_request_expected": "期望产物"
+  ,"meeting_request_reason": "为什么需要会议"
+  ,"meeting_request_context_candidates": "上下文候选"
+  ,"meeting_request_no_context": "暂无上下文候选。"
+  ,"meeting_request_reject_reason": "拒绝原因"
+  ,"meeting_request_reject_reason_required": "请输入拒绝原因。"
+  ,"meeting_request_confirm_start": "确认并开始"
+  ,"meeting_request_reject": "拒绝"
+  ,"meeting_request_created_meeting": "已创建会议"
+  ,"meeting_request_pending_prompt": "有 AI 会议申请需要确认"
+  ,"meeting_urgency": "紧急程度"
+  ,"meeting_requesting_agent": "申请 AI"
+  ,"meeting_auto_start_high_urgency": "高紧急度自动召开"
+  ,"meeting_created_by_user": "人工召开"
+  ,"meeting_created_by_agent": "AI 召开"
+  ,"meeting_context_source_project": "项目"
+  ,"meeting_context_source_task": "任务"
+  ,"meeting_context_source_related_task": "相关任务"
+  ,"meeting_context_source_meeting": "会议"
+  ,"meeting_context_source_supplemental": "补充上下文"
+  ,"meeting_fixture_user_requested_ai_meeting": "用户请求的 AI 会议"
+  ,"meeting_fixture_invite_gg_urgency_3": "邀请 gg 参加紧急程度 3 的 AI 会议"
+  ,"meeting_fixture_invite_gg_urgency_3_summary": "用户要求 Codex 发起一个紧急程度 3 的 AI 会议并邀请 gg。该任务作为会议申请所需的项目任务来源。"
+  ,"meeting_conflicts": "参会冲突"
+  ,"meeting_conflict_estimated": "预计可用"
+  ,"meeting_pause_capability": "暂停能力"
+  ,"meeting_advisory": "建议"
+  ,"meeting_advisory_source": "来源"
+  ,"meeting_advisory_source_agent": "忙碌 Agent 建议"
+  ,"meeting_advisory_source_local": "本地兜底"
+  ,"meeting_advisory_source_local_failed": "AI 建议失败，本地兜底"
+  ,"meeting_unknown": "未知"
+  ,"meeting_conflict_idle": "空闲"
+  ,"meeting_conflict_provider_call": "模型调用进行中"
+  ,"meeting_conflict_already_in_meeting": "已在会议中：{topic}"
+  ,"meeting_conflict_risk_high": "高风险"
+  ,"meeting_conflict_risk_medium": "中风险"
+  ,"meeting_conflict_risk_low": "低风险"
+  ,"meeting_conflict_risk_busy": "忙碌"
+  ,"meeting_conflict_risk_idle": "空闲"
+  ,"meeting_pause_unavailable": "不可暂停"
+  ,"meeting_pause_logical": "逻辑暂停"
+  ,"meeting_pause_none": "无需暂停"
+  ,"meeting_recommend_wait": "等待"
+  ,"meeting_recommend_reserve": "稍后再试"
+  ,"meeting_recommend_replace": "更换"
+  ,"meeting_recommend_force_join": "强制加入"
+  ,"meeting_conflict_risk_meeting_occupied": "该 Agent 已在另一场进行中的会议里。除非先取消已有会议，否则不建议强制加入。"
+  ,"meeting_conflict_resume_none": "该会议冲突没有可恢复的原任务。"
+  ,"meeting_conflict_risk_provider_call": "模型调用正在进行中，打断可能丢失正在生成的回复。"
+  ,"meeting_conflict_resume_provider_call": "等待模型调用完成后，再重新处理冲突。"
+  ,"meeting_conflict_risk_logical_pause": "当前任务只能逻辑暂停；模型进程不一定会立即停止。"
+  ,"meeting_conflict_resume_logical_pause": "保存当前任务上下文，会议结束后从记录的任务状态恢复。"
+  ,"meeting_conflict_risk_uncertain": "暂停安全性不确定。"
+  ,"meeting_conflict_resume_recheck": "强制开会前请重新检查 Agent 状态。"
+  ,"meeting_conflict_wait": "等待"
+  ,"meeting_conflict_reserve": "稍后再试"
+  ,"meeting_conflict_replace": "更换"
+  ,"meeting_conflict_force": "强制加入"
+  ,"meeting_conflict_refresh": "重新检查冲突"
+  ,"meeting_reservation_notice": "预约只是提醒；会议开始前会重新检查冲突。"
+  ,"meeting_conflict_failed": "冲突处理失败"
+  ,"meeting_conflict_reserve_prompt": "将根据该 Agent 的可用性在空闲后提醒/重试。"
+  ,"meeting_conflict_replace_prompt": "替换 Agent ID"
+  ,"meeting_conflict_force_confirm": "强制加入可能打断当前工作。是否继续？"
+  ,"meeting_project": "项目"
+  ,"meeting_project_none": "不绑定项目"
+  ,"meeting_action_drafts": "行动项草稿"
+  ,"meeting_action_drafts_hint": "确认后才会创建项目任务，草稿不会自动执行。"
+  ,"meeting_action_untitled": "未命名行动项"
+  ,"meeting_action_status_draft": "待确认"
+  ,"meeting_action_status_confirmed": "已创建任务"
+  ,"meeting_action_status_rejected": "已拒绝"
+  ,"meeting_action_status_kept": "仅保存"
+  ,"meeting_action_owner": "负责人"
+  ,"meeting_action_title": "任务标题"
+  ,"meeting_action_description": "说明"
+  ,"meeting_action_save_draft": "保存草稿"
+  ,"meeting_action_confirm_task": "创建任务"
+  ,"meeting_action_keep": "仅保存"
+  ,"meeting_action_reject": "拒绝"
+  ,"meeting_action_open_task": "打开任务"
+  ,"meeting_action_task_created": "任务已创建"
+  ,"meeting_action_rejected_by_user": "用户拒绝"
 }

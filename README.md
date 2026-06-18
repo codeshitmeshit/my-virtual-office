@@ -1,131 +1,138 @@
-# My Virtual Office
+# My Virtual Office 二开版
 
-🌐 **[myvirtualoffice.ai](https://myvirtualoffice.ai/)**
+> 中文为主文档。英文辅助文档见 [README.en.md](README.en.md)。
 
-A self-hosted 2D AI workspace for AI Agents. Turn invisible agent work into a living, breathing office.
+My Virtual Office 二开版是一个本地优先的 AI Agent 可视化工作台。它基于原开源项目 [eliautobot/my-virtual-office](https://github.com/eliautobot/my-virtual-office) 二次开发，保留像素风办公室、Agent 状态可视化和浏览器内运行体验，并扩展为一个可以连接 OpenClaw、Hermes、Codex 等本地 Agent/CLI 的统一控制台。
+
+感谢原项目作者和社区提供的基础实现。本仓库是在原项目之上的二次开发版本，不代表原项目官方发行版；原项目的 Docker 镜像、商业授权、部署方式和功能说明不一定适用于当前二开版本。
 
 ![My Virtual Office](screenshot.png)
 
-## What Is It?
+## 当前定位
 
-Virtual Office gives your AI agents a physical presence. Instead of watching logs scroll by, you see agents walking between desks, grabbing coffee, sitting in meetings, and chatting in a charming 2D style office that runs in your browser.
+这个项目现在更接近一个「本地 AI 团队控制台」：
 
-It connects to supported agent harnesses and visualizes what your agents are doing in real time.
+- 用像素办公室展示 Agent 的在线、空闲、工作、会议等状态
+- 在同一个界面里和 OpenClaw、Hermes、Codex 等 Agent 对话
+- 让不同平台的 Agent 通过 Virtual Office 中转通信
+- 把项目、任务、评审、验收和产物沉淀到项目看板
+- 观察 Codex 任务执行、推理、工具调用、审批、取消和上下文压缩
+- 管理 Agent 工作区、技能库、会议、浏览器、短信和本机监控等能力
 
-## Supported Agent Harnesses
+## 主要功能
 
-### OpenClaw
+### 像素办公室
 
-Virtual Office connects to OpenClaw through the OpenClaw gateway and the mounted OpenClaw home directory. The gateway provides live chat and activity events, while the home directory lets Virtual Office discover agents, read safe profile metadata, load model settings, and surface workspace tools in the UI.
+- 浏览器中的实时像素风办公室画布
+- Agent 行走、坐下、工作、空闲、会议和休息状态
+- A* 路径寻路、碰撞规避、墙体遮挡
+- 可编辑办公室布局、家具、地板、墙体、分区和标签
+- Agent 外观、姓名、表情、部门、工位和角色配置
+- 办公室宠物、动态天气、昼夜变化、电视和时钟等环境元素
 
-For Docker deployments, mount your OpenClaw home directory into the container and set `VO_OPENCLAW_PATH`, `VO_GATEWAY_URL`, and `VO_GATEWAY_HTTP` when the defaults do not match your setup.
+### 多 Provider Agent
 
-### Hermes Agents
+当前二开版将 Virtual Office 从 OpenClaw 单一可视化界面扩展为多 Provider 工作台：
 
-Virtual Office can discover local Hermes Agent profiles as first-class office agents when the Hermes CLI and home directory are available to the app. It uses conservative Hermes CLI surfaces for discovery and status, sends chat messages through `hermes -z` with the selected profile, captures replies from stdout, and stores local Virtual Office history under `VO_STATUS_DIR`.
+- OpenClaw：保留原有网关、会话、模型、技能和状态路径
+- Hermes：通过本地 Hermes CLI 发现 profile、发送消息、读取本地历史
+- Codex：通过本地 Codex harness 暴露为办公室 Agent
+- 跨平台通信：`/api/agent-platform-communications/send`
+- 统一 Agent 列表、状态、聊天气泡和可视化事件
 
-For Docker deployments, mount or otherwise expose the Hermes home directory and CLI path to the container, then set `VO_HERMES_HOME` and `VO_HERMES_BIN` accordingly. Hermes secrets, private memory files, raw logs, and config internals are not read or exposed by default.
+### Codex Live Bridge
 
-### Codex
+启用 `VO_CODEX_ENABLED=1` 后，Virtual Office 会把本地 Codex 暴露为 `codex-local` Agent。
 
-Virtual Office can create Codex-backed office agents when the Codex CLI is available to the app. Chat uses Codex's native `codex app-server` JSON-RPC protocol for thread start/resume, live progress, approval requests, and interrupt support. `codex exec` is retained only as an explicit compatibility fallback.
+已支持：
 
-Discovery includes Virtual Office-created Codex agents, Codex's standard `$CODEX_HOME/agents/*.toml` custom agents, and a synthesized `Main` entry for the default Codex root agent. Newly created Virtual Office Codex agents can use the default Codex agents directory or a custom parent directory. Default-directory creation registers a native custom-agent TOML file under `$CODEX_HOME/agents` when `VO_CODEX_REGISTER_NATIVE_AGENTS=1`; custom-directory creation writes a project-local `.codex/agents/<profile>.toml` and keeps a small Virtual Office registry so the agent remains discoverable.
+- 本地 `codex app-server` live bridge
+- 可选外部 bridge：`VO_CODEX_BRIDGE_URL`
+- 聊天窗口调用：`POST /api/codex/chat`
+- 活动流：`GET /api/codex/activity`
+- 历史：`GET /api/codex/history`
+- 上下文压缩：`POST /api/codex/compact`
+- 会话重置：`POST /api/codex/reset`
+- 执行取消：`POST /api/codex/cancel`
+- 审批/用户输入交互：`POST /api/codex/interaction`
+- 线程映射持久化，刷新和重启后可继续同一 office conversation
 
-For Docker deployments, install Codex inside the container image or set `VO_CODEX_BIN` to a Codex executable path available inside the container. Set `VO_CODEX_HOME` to a deployment-specific Codex home so auth and config stay out of the repo and are not tied to any developer's machine. Useful variables: `VO_CODEX_BIN`, `VO_CODEX_HOME`, `VO_CODEX_WORKSPACE_ROOT`, `VO_CODEX_MAIN_WORKSPACE`, `VO_CODEX_INCLUDE_MAIN`, `VO_CODEX_INCLUDE_NATIVE_AGENTS`, `VO_CODEX_REGISTER_NATIVE_AGENTS`, `VO_CODEX_PREFER_APP_SERVER`, `VO_CODEX_SANDBOX`, and `VO_CODEX_APPROVAL_POLICY`. The Docker example defaults `VO_CODEX_SANDBOX` to `danger-full-access` because Codex's bubblewrap sandbox usually needs extra container privileges; set it to a stricter Codex sandbox mode when your deployment supports it.
+`VO_CODEX_REPLY_TEXT` 可用于确定性回归测试，不会触发真实 Codex 工具执行。
 
-### Claude Code
+### 项目与任务执行
 
-Virtual Office can create Claude Code-backed office agents when the Claude Code CLI is available to the app. Chat uses Claude Code's native non-interactive stream protocol, `claude -p --output-format stream-json --include-partial-messages`, so text deltas, tool calls, tool results, usage, session IDs, interrupts, and local Virtual Office chat history work like the other native harness providers.
+项目功能已经从普通看板扩展为可执行工作流：
 
-Discovery includes Virtual Office-created Claude Code agents, Claude Code's native `$CLAUDE_CONFIG_DIR/agents/*.md` subagents, and a synthesized `Main` entry for Claude Code's default workspace agent. Newly created Virtual Office Claude Code agents can use the default managed workspace root or a custom parent directory. Standard creation writes `AGENTS.md`, `CLAUDE.md`, project `.claude/agents/<profile>.md`, and, when `VO_CLAUDE_CODE_REGISTER_NATIVE_AGENTS=1`, a native `$CLAUDE_CONFIG_DIR/agents/<profile>.md` subagent file. Custom creation writes the project-local subagent file and a small Virtual Office registry entry so the agent remains discoverable.
+- 项目、列、任务、评论、清单、标签、模板
+- 自动创建或绑定项目工作区
+- `VO_AUTO_PROJECT_WORKSPACE_ROOT` 可配置系统托管项目工作区根目录
+- `VO_PROJECT_ROOTS` 可限制手动绑定工作区的允许根路径
+- 工作区路径校验和 dirty workspace 确认
+- 项目级启动和任务级启动
+- 单任务执行和连续项目执行模式
+- OpenClaw、Hermes、Codex provider ref 路由
+- 执行 Agent 与独立 Reviewer 分离
+- 缺少 Reviewer 时的显式跳过确认
+- 执行取消、失败证据、阻塞状态
+- Reviewer 评审、自动返工、最多返工次数控制
+- 用户验收、拒绝、标记阻塞
+- Markdown artifact 扫描和安全读取
 
-For Docker deployments, install Claude Code inside the container image or set `VO_CLAUDE_CODE_BIN` to a Claude executable path available inside the container. Set `VO_CLAUDE_CODE_HOME` to a deployment-specific Claude config directory so auth and config stay out of the repo and are not tied to any developer's machine. Useful variables: `VO_CLAUDE_CODE_BIN`, `VO_CLAUDE_CODE_HOME`, `VO_CLAUDE_CODE_WORKSPACE_ROOT`, `VO_CLAUDE_CODE_MAIN_WORKSPACE`, `VO_CLAUDE_CODE_MODEL`, `VO_CLAUDE_CODE_PERMISSION_MODE`, `VO_CLAUDE_CODE_INCLUDE_MAIN`, `VO_CLAUDE_CODE_INCLUDE_NATIVE_AGENTS`, and `VO_CLAUDE_CODE_REGISTER_NATIVE_AGENTS`.
+核心接口见 [docs/VIRTUAL_OFFICE_AGENT_TOOLS.md](docs/VIRTUAL_OFFICE_AGENT_TOOLS.md)。
 
-## Features
+### 会议系统
 
-### 🏢 Live Office Canvas
-- Real-time 2D style office with agents that walk, sit, work, and interact
-- Agents move to their desks when working, wander when idle, visit the kitchen, lounge on the couch
-- Smooth A* pathfinding with collision avoidance
-- Wall occlusion: agents behind walls get naturally shadowed
-- 100 FPS rendering with configurable canvas size
+- 传统会议：创建、结束、历史记录
+- 可执行 AI 会议：Agent 参与、轮次推进、暂停、恢复、取消
+- 信息收集、讨论决策、任务协作三类会议
+- 用户发起会议，选择参会 Agent、主持人、轮次上限、上下文传递模式和关联项目
+- AI 发起会议申请，但必须由用户确认、编辑或拒绝后才能开始
+- 会前上下文候选来自当前项目、当前任务、同项目相关任务和历史会议，只有用户选中的内容会进入会议快照
+- 用户介入、补充上下文、议程调整、定向提问、仲裁、暂停/恢复、提前结束和主持人接管
+- 忙碌 Agent 冲突检测、advisory 建议、等待、更换、强制加入二次确认和轻量稍后再试
+- 参会前记录原工作快照，会议结束/取消/失败后尝试幂等恢复
+- 任务协作会议可生成行动项草稿，用户确认后再创建项目任务
+- 会议请求、质量门禁、紧急程度自动确认
+- 会议状态投影到办公室画布
 
-### 🎨 Full Office Editor
-- Drag-and-drop furniture placement with snap-to-grid
-- 25+ furniture items: desks, boss desk, meeting table, couches, bookshelves, whiteboards, filing cabinets, plants, vending machines, kitchen appliances, ping pong table, dart board, TV, and more
-- Interior wall builder: create rooms, hallways, and departments with doors
-- Wall color picker per section with accent and trim colors
-- Floor tile color customization
-- Rotation support for select furniture (couch)
-- Text labels for naming rooms and areas
+Meeting for AI 的安全边界：
 
-### 👤 Agent Customization
-- Full character appearance editor: skin tone, hair style/color, eye color, eyebrows
-- Facial hair, glasses, headwear options
-- Costumes (lobster suit, capes, etc.)
-- Held items and desk accessories (coffee mug, envelope, clipboard, plant, etc.)
-- Gender-aware sprite rendering
-- Each agent gets a unique color tag and emoji
+- 未确认的 AI 会议申请不会占用 Agent，也不会调用参会 Agent provider
+- Advisory turn 只给建议，不会自动暂停任务、替换参会者或强制开会
+- 同一个 Agent 同一时间只能参加一场可执行会议
+- 会议行动项不会自动执行，转成项目任务前必须由用户确认
 
-### 🐾 Office Pet
-- Choose from Cat, Pug, or Lobster
-- Realistic behavior: sleeping, sitting, grooming, wandering, greeting agents, investigating furniture
-- Agents interact with the pet: petting (♥) and playful chasing
-- Full pathfinding and collision avoidance, same as agents
-- Directional walking sprites (front, back, side views) for cat and pug
-- Custom naming: default pet is a lobster named Clawy
+### 技能库和 Agent 工作区
 
-### 💬 Chat with Agents
-- Click any agent to open a chat window
-- Full markdown rendering with syntax highlighting
-- Inline image support: send images and see thumbnails in the chat
-- Click images for full-size lightbox view
-- Voice input via Whisper STT (premium)
-- File attachments with drag-and-drop or paste
-- Audio file auto-transcription
-- Streaming responses with live typing indicator
-- Tool activity feed showing what the agent is doing (exec, read, write, search, etc.)
-- Movable/snappable chat window with float mode
-- Agent selector dropdown to switch between agents
+- Skills Library：集中管理可复用 `SKILL.md`
+- 将技能复制到指定 Agent 工作区
+- Agent workspace 面板：概览、公告、任务、文件、技能、笔记、设置
+- 本地文件和技能以 `VO_STATUS_DIR` / Agent workspace 为持久化来源
 
-### 📊 Dashboard Panel
-- **PC Performance**: live CPU and RAM monitoring
-- **API Usage**: track agent API calls and costs
-- **Branch Management**: organize agents into departments/teams with color-coded borders
-- **Agent Directory**: see all agents with live status (working, idle, meeting, break)
-- **Activity Log**: real-time feed of office events
+### 辅助面板
 
-### 🌦️ Dynamic Environment
-- **Interactive windows** with live weather pulled from your location
-- **Day/night cycle**: ambient lighting shifts throughout the day
-- **Animated furniture**: TV with 5 channels (sports, news, cooking, cartoon, movie) that agents walk over to watch
-- **Clock** showing real time
+- Chat：支持 Markdown、附件、图片预览、语音输入入口、Codex 推理摘要
+- Browser Panel：显示共享浏览器/VNC 视图和当前 URL
+- SMS Panel：Twilio 短信收发和人工接管
+- PC Metrics：CPU、内存等本机性能监控
+- API Usage：API 用量统计
+- Models Panel：模型和 Provider 配置
+- Cron 页面：Agent 定时任务与项目定时任务管理入口
 
-### 📋 Meeting System
-- 1-on-1 meetings: agents walk to each other's desks
-- Group meetings: agents gather around the meeting table (10 seats, 5 per side)
-- Meetings triggered by agent activity or manual scheduling
-- Meeting status visible in dashboard
+### 项目定时任务
 
-### 🏗️ Branch System
-- Create departments (Engineering, Sales, Support, etc.)
-- Color-coded wall sections per branch
-- Agents assigned to branches with visual grouping
-- Branch themes and emoji customization
+定时任务页面和项目详情页已经支持把全局 Cron 调度绑定到项目：
 
-### 🔧 Additional Tools (Premium)
-- **Agent Browser**: embedded browser with live view, URL bar, and remote control
-- **SMS Panel**: Twilio integration for SMS/phone from the office
-- **Cron Manager**: schedule recurring agent tasks visually
-- **Models Panel**: per-agent model switching from the UI
-- **Whisper STT**: voice-to-text input in chat
+- 支持项目工作流定时启动和指定任务定时启动
+- 支持 `cron`、`every`、`at` 三种 schedule
+- Cron job 由 OpenClaw Gateway 管理，项目绑定关系保存在 Virtual Office
+- 项目归档、项目暂停定时任务、已有任务运行中、目标任务缺失等情况会跳过派发并记录历史
+- 已完成任务默认不会重复执行，除非任务开启 scheduled repeat
+- 派发历史和需要人工介入的告警会显示在项目面板
 
-## Quick Start
+## 快速启动
 
-### Local Start with `start.sh` (recommended)
-
-For local development and normal desktop use, start the project through the repository script instead of invoking `app/server.py` directly. The script prepares the local environment, checks the required Python WebSocket dependency, loads configuration, and starts the service with the expected paths and ports.
+当前二开版本推荐只用本地方式启动。
 
 ```bash
 git clone https://github.com/eliautobot/my-virtual-office.git
@@ -134,136 +141,153 @@ chmod +x start.sh
 ./start.sh
 ```
 
-Then open `http://localhost:8090/setup` to run the setup wizard.
+启动后打开：
 
-Use `./start.sh --help` to view the available local options.
-
-### Docker Support
-
-This customized fork does **not** support starting the application directly through Docker or Docker Compose. Its local provider integrations, scripts, paths, and runtime assumptions are designed for host execution through `./start.sh`.
-
-The Docker files inherited from the upstream project may remain in the repository for reference, but they are not a supported startup or deployment path for this fork.
-
-### Docker Image / Platform Support
-
-The upstream project publishes a Docker image at:
-- `ghcr.io/eliautobot/my-virtual-office:latest`
-
-Multi-arch images are published for:
-- `linux/amd64`
-- `linux/arm64`
-
-Those images describe upstream platform support only. They do not include or guarantee the behavior of this customized fork.
-
-### First Run
-
-1. Open `http://localhost:8090/setup`
-2. Follow the setup wizard to connect your OpenClaw instance, Hermes Agents, or both
-3. Enter a license key or skip for demo mode
-4. Customize your office, add agents, and watch them come to life
-
-## Remote Access and Security
-
-**Recommended remote access: use [Tailscale](https://tailscale.com/).**
-
-Virtual Office is a control surface for your local agent harnesses. If you want to reach it away from home, the safest default is to keep it on your private machine or LAN and access it over a private tailnet such as Tailscale.
-
-### Recommended setup
-- Keep Virtual Office bound to your local machine, LAN, or private tailnet
-- Use Tailscale to reach the host remotely instead of opening router ports
-- Keep your agent harnesses and Virtual Office behind trusted access controls
-- Use strong device/account security on the machines that can reach your tailnet
-
-### Warning
-- **Do not expose Virtual Office directly to the public internet unless you fully understand and accept the security risk**
-- Avoid simple port forwarding for ports `8090`, `8091`, or your agent harness gateways
-- If someone can reach your Virtual Office deployment, they may be able to interact with a live control surface for your agents
-
-This project is designed first for self-hosted local/private-network use. You are responsible for securing any remote deployment.
-
-## Modes
-
-### Free Demo
-Works without a license key:
-- Up to 3 agents
-- Branch management
-- Weather and day/night cycle
-- Chat with any agent
-- API usage monitoring
-- Setup wizard
-
-Demo mode shows a watermark and demo banner.
-
-### Full License
-Unlocks everything:
-- Unlimited agents
-- Full office editor and furniture
-- Agent customization and appearance editor
-- Office pet
-- Agent Browser panel
-- SMS / Twilio panel
-- Cron Job Manager
-- Whisper STT voice input
-- No watermark or demo banner
-
-### How to Activate
-Activate during the setup wizard or later from **☰ Menu → Settings**.
-
-License keys are provided after purchase and look like this:
-```
-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+```text
+http://localhost:8090/setup
 ```
 
-Enter your key during setup or in **☰ Menu → Settings**. The key is validated once online with Lemon Squeezy, then works offline forever. Premium features unlock immediately and persist across restarts and updates.
+常用入口：
 
-## Configuration
+- 主界面：`http://localhost:8090/`
+- 设置向导：`http://localhost:8090/setup`
+- 模型管理：`http://localhost:8090/models`
+- 定时任务：`http://localhost:8090/cron.html`
+- 健康检查：`http://localhost:8090/health`
 
-All settings live in `vo-config.json`. Environment variables override config values.
+查看启动脚本参数：
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `VO_OFFICE_NAME` | Virtual Office | Office display name |
-| `VO_PORT` | 8090 | HTTP server port |
-| `VO_WS_PORT` | 8091 | WebSocket proxy port |
-| `VO_GATEWAY_URL` | ws://127.0.0.1:18789 | OpenClaw gateway WebSocket URL |
-| `VO_GATEWAY_HTTP` | http://127.0.0.1:18789 | OpenClaw gateway HTTP URL |
-| `VO_OPENCLAW_PATH` | ~/.openclaw | Path to OpenClaw home directory |
-| `VO_HERMES_ENABLED` | true | Enable discovery of local Hermes Agent profiles when Hermes is available |
-| `VO_HERMES_HOME` | ~/.hermes | Path to the Hermes home/profile root directory |
-| `VO_HERMES_BIN` | ~/.local/bin/hermes | Hermes CLI binary used for discovery and safe request/response chat calls |
-| `VO_HERMES_TIMEOUT_SEC` | 600 | Timeout for Hermes CLI chat calls |
-| `VO_STATUS_DIR` | `./data` when using `start.sh` | Directory for local presence and status data. |
-| `VO_WEATHER_LOCATION` | Beijing | Weather location for window display |
+```bash
+./start.sh --help
+```
 
-### Hermes Agent compatibility
+## Docker 说明
 
-Virtual Office can now discover local Hermes Agent profiles as first-class office agents when the Hermes CLI and home directory are available to the app. The adapter is intentionally conservative:
+当前二开版本不建议直接通过 Docker 或 Docker Compose 启动。原因是当前实现大量依赖宿主机上的本地 CLI、工作区路径、浏览器、OpenClaw/Hermes/Codex 配置和文件权限。
 
-- discovery/status uses safe Hermes CLI surfaces (`profile list`, `profile show`, `status`-style metadata)
-- chat sends one-shot messages through `hermes -z` using the selected Hermes profile
-- replies are captured from stdout
-- local Virtual Office history is stored under `VO_STATUS_DIR`
-- Hermes secrets/config/memories/raw logs are not read or exposed by default
+仓库中的 Dockerfile / docker-compose 文件主要是从上游项目继承或用于参考，不代表当前二开版的受支持部署路径。
 
-This fork expects Hermes and other local providers to be available on the host. Start Virtual Office with `./start.sh` so the configured home and CLI paths resolve correctly.
+如果你需要使用上游官方 Docker 镜像，请参考原项目说明。上游镜像不保证包含本仓库的二开功能。
 
-## Updating
+## 配置
+
+推荐使用 `.env` 或 `vo-config.json` 配置。`start.sh` 会加载本地配置并使用仓库内 `data` 目录作为默认状态目录。
+
+常用环境变量：
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `VO_PORT` | `8090` | HTTP 服务端口 |
+| `VO_WS_PORT` | `8091` | WebSocket 代理端口 |
+| `VO_WS_PATH` | `/ws` | 反向代理下的同源 WebSocket 路径 |
+| `VO_STATUS_DIR` | `./data` | 本地状态、项目、技能、历史数据目录 |
+| `VO_OFFICE_NAME` | `Virtual Office` | 办公室显示名称 |
+| `VO_OPENCLAW_PATH` | `~/.openclaw` | OpenClaw home 路径 |
+| `VO_GATEWAY_URL` | 自动探测 | OpenClaw Gateway WebSocket 地址 |
+| `VO_GATEWAY_HTTP` | 自动探测 | OpenClaw Gateway HTTP 地址 |
+| `VO_HERMES_ENABLED` | `true` | 是否发现 Hermes profiles |
+| `VO_HERMES_HOME` | `~/.hermes` | Hermes home/profile 根目录 |
+| `VO_HERMES_BIN` | `~/.local/bin/hermes` | Hermes CLI 路径 |
+| `VO_CODEX_ENABLED` | 未启用 | 是否启用 Codex harness |
+| `VO_CODEX_BIN` | `codex` | Codex CLI 路径 |
+| `VO_CODEX_WORKSPACE` | 当前工作目录 | Codex 可读写 workspace |
+| `VO_CODEX_MODEL` | 空 | Codex 模型覆盖 |
+| `VO_CODEX_BRIDGE_URL` | 空 | 外部 Codex bridge 地址 |
+| `VO_CODEX_REASONING_SUMMARY` | `concise` | Codex 推理摘要模式 |
+| `VO_BROWSER_PANEL` | `true` | 是否显示 Browser Panel |
+| `VO_CDP_URL` | `http://127.0.0.1:9224` | 浏览器 CDP 地址 |
+| `VO_VIEWER_URL` | `https://localhost:6901` | 浏览器可视化/VNC 地址 |
+| `VO_AUTO_PROJECT_WORKSPACE_ROOT` | 空 | 自动创建项目工作区的根目录 |
+| `VO_PROJECT_ROOTS` | 空 | 允许手动绑定的项目工作区根目录列表，按系统路径分隔符分隔 |
+| `VO_MEETING_DECISION_WINDOW_SEC` | `20` | AI 会议冲突/紧急程度决策窗口 |
+| `VO_MEETING_ADVISORY_TIMEOUT_SEC` | `45` | 会议 busy advisory 超时时间 |
+| `VO_MEETING_PROVIDER_TIMEOUT_SEC` | `120` | 会议 provider 调用超时时间 |
+| `VO_PC_METRICS_ENABLED` | `true` | 是否启用本机性能面板 |
+| `VO_PC_METRICS_URL` | `http://127.0.0.1:8099` | 性能监控服务地址 |
+| `VO_API_USAGE` | `false` | 是否启用 API usage 面板 |
+| `VO_WEATHER_LOCATION` | 空 | 天气位置 |
+
+更多示例见 [.env.example](.env.example)。
+
+## 本地数据
+
+主要持久化数据位于 `VO_STATUS_DIR`：
+
+- 项目 Markdown 数据：`projects-md/`
+- 旧项目 JSON：`projects.json`
+- 技能库：`skills-library/`
+- 跨平台通信历史：`agent-platform-communications.jsonl`
+- Codex conversation/thread 映射和活动记录
+- 项目定时任务绑定：`project-cron-bindings.json`
+- 会议、presence、workflow、workspace 相关状态
+
+不要把包含密钥、聊天记录或工作区内容的本地数据公开发布。
+
+## 安全边界
+
+这是一个高权限本地控制台。它可能连接本机 CLI、读写项目工作区、控制 Agent、展示浏览器、发送短信和触发模型调用。
+
+建议：
+
+- 默认只在本机、局域网或 Tailscale 等私有网络中使用
+- 不要直接暴露 `8090`、`8091`、OpenClaw Gateway 或浏览器 CDP 到公网
+- 给可访问该服务的机器和账号配置强认证
+- 谨慎选择 `VO_CODEX_WORKSPACE` 和项目 workspace
+- 对 dirty workspace、跳过 reviewer、用户验收等确认保持人工判断
+- 不要在公开日志或截图中泄露 `.env`、token、短信号码或私有聊天内容
+
+## 测试
+
+项目包含 Python 和 JavaScript 测试，覆盖 Codex bridge、项目执行、会议、国际化、浏览器 URL、前端小模块等。
+
+常用测试示例：
+
+```bash
+npm test
+.venv/bin/python tests/test_project_execution.py
+.venv/bin/python tests/test_codex_bridge.py
+.venv/bin/python tests/test_meeting_for_ai_phase1.py
+.venv/bin/python tests/test_meeting_for_ai_phase4.py
+.venv/bin/python tests/test_meeting_for_ai_phase5.py
+.venv/bin/python tests/test_meeting_for_ai_phase6.py
+.venv/bin/python tests/test_project_scheduled_cron_phase1.py
+.venv/bin/python tests/test_project_scheduled_cron_phase2_3.py
+.venv/bin/python tests/test_project_scheduled_cron_phase4.py
+```
+
+实际可用命令取决于你的本地虚拟环境和依赖安装方式。
+
+## 文档索引
+
+- Agent 工具索引：[docs/VIRTUAL_OFFICE_AGENT_TOOLS.md](docs/VIRTUAL_OFFICE_AGENT_TOOLS.md)
+- VO 内 Agent 使用手册：[docs/VO_AGENT_USAGE_GUIDE.md](docs/VO_AGENT_USAGE_GUIDE.md)
+- 跨平台通信：[docs/AGENT_PLATFORM_COMMUNICATIONS.md](docs/AGENT_PLATFORM_COMMUNICATIONS.md)
+- Codex Provider：[docs/CODEX_PROVIDER_ADAPTER.md](docs/CODEX_PROVIDER_ADAPTER.md)
+- Hermes Provider：[docs/HERMES_PROVIDER_ADAPTER.md](docs/HERMES_PROVIDER_ADAPTER.md)
+- 多 Provider 架构草案：[docs/UNIVERSAL-AGENT-HARNESS-SPEC.md](docs/UNIVERSAL-AGENT-HARNESS-SPEC.md)
+- 技能库：[docs/SKILLS-LIBRARY-SPEC.md](docs/SKILLS-LIBRARY-SPEC.md)
+- 多聊天窗口架构：[docs/MULTI-CHAT-ARCHITECTURE.md](docs/MULTI-CHAT-ARCHITECTURE.md)
+- 历史设计记录：[docs/design-history/](docs/design-history/)
+
+## 更新
 
 ```bash
 git pull
 ./start.sh
 ```
 
-Stop the currently running local process before restarting when necessary. Local state remains under the configured `VO_STATUS_DIR` (the startup script defaults to the repository `data` directory).
+如果已有服务在运行，先停止旧进程再启动。数据默认保存在 `VO_STATUS_DIR`，通常不会因为代码更新而丢失。
 
-## Roadmap
+## 致谢与版权说明
 
-- More office themes and skins
-- Premium character packs and costumes
-- More pet species and behaviors
-- Agent-to-agent visible interactions
-- Deeper IDE integrations
-- More idle activities and office events
+本项目是基于原开源项目 [eliautobot/my-virtual-office](https://github.com/eliautobot/my-virtual-office) 的二次开发版本。感谢原作者提供的像素办公室、Agent 可视化和 Web 应用基础。
+
+请注意：
+
+- 本仓库不是原项目官方发行版
+- 本仓库中的新增功能、文档和本地集成由二开版本维护
+- 上游项目的商业授权、Docker 镜像和线上产品说明不自动适用于本仓库
+- 原项目和本项目的授权信息请以仓库中的 [LICENSE](LICENSE) 以及各依赖/资源文件为准
 
 ## License
 

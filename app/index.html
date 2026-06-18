@@ -9,15 +9,15 @@
     <link rel="apple-touch-icon" href="icon-192.png">
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#1a1a2e">
-    <link rel="stylesheet" href="style.css?v=1781556283-reasoning-summary">
-    <link rel="stylesheet" href="projects.css?v=1781556283-project-execution">
-    <link rel="stylesheet" href="fonts.css?v=1781556283.05.07">
+    <link rel="stylesheet" href="style.css?v=1781812220-meeting-countdown">
+    <link rel="stylesheet" href="projects.css?v=1781812220-project-cron-edit-form">
+    <link rel="stylesheet" href="fonts.css?v=1781812220.05.07">
     <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
     <!-- i18n: inline locale data for immediate init -->
     <script id="locale-en" type="application/json">{}</script>
     <script id="locale-zh" type="application/json">{}</script>
     <script src="i18n.js"></script>
-    <script src="font-scale.js?v=1781556283-font-scale"></script>
+    <script src="font-scale.js?v=1781812220-font-scale"></script>
     <script>
     (function(){
         var lang='en';
@@ -156,13 +156,13 @@
                             </label>
                             <div id="mm-browser-fields" style="display:none;margin-top:8px;">
                                 <label class="mm-label"><span data-i18n="cdp_url">CDP URL</span> <span style="color:#666;font-size:9px" data-i18n="cdp_url_hint">(how agents control the browser)</span></label>
-                                <input type="text" id="mm-cdp-url" class="mm-input" placeholder="e.g. http://127.0.0.1:9222">
+                                <input type="text" id="mm-cdp-url" class="mm-input" placeholder="e.g. http://127.0.0.1:9224">
                                 <div style="font-size:10px;color:#666;margin:2px 0 6px;" data-i18n="cdp_url_desc">The Chrome DevTools Protocol endpoint.</div>
                                 <button class="mm-btn" onclick="mmTestCdp()" style="font-size:9px;padding:4px 10px;" data-i18n="test_cdp">&#x1F50D; Test CDP</button>
                                 <div id="mm-cdp-status" style="margin:4px 0 10px;"></div>
                                 
                                 <label class="mm-label"><span data-i18n="browser_viewer_url">Browser Viewer URL</span> <span style="color:#666;font-size:9px" data-i18n="viewer_url_hint">(live view you watch)</span></label>
-                                <input type="text" id="mm-viewer-url" class="mm-input" placeholder="e.g. http://192.168.1.100:6902">
+                                <input type="text" id="mm-viewer-url" class="mm-input" placeholder="https://localhost:6901">
                                 <div style="font-size:10px;color:#666;margin:2px 0 6px;" data-i18n="viewer_url_desc">The URL that loads in the floating browser window.</div>
                                 <button class="mm-btn" onclick="mmTestViewer()" style="font-size:9px;padding:4px 10px;" data-i18n="test_viewer">&#x1F50D; Test Viewer</button>
                                 <div id="mm-viewer-status" style="margin:4px 0;"></div>
@@ -509,6 +509,7 @@
             </div>
             <div class="mtg-tabs">
                 <button class="mtg-tab active" data-tab="active" onclick="switchMtgTab('active')" data-i18n="active">Active</button>
+                <button class="mtg-tab" data-tab="requests" onclick="switchMtgTab('requests')" data-i18n="meeting_ai_requests">AI Requests</button>
                 <button class="mtg-tab" data-tab="completed" onclick="switchMtgTab('completed')" data-i18n="history">History</button>
             </div>
             <div class="mtg-bulk-actions">
@@ -862,11 +863,11 @@
         setTimeout(resizeCanvas, 320);
     }
     </script>
-    <script src="internal-bubble.js?v=1781556283"></script>
-    <script src="game.js?v=1781556283-internal-bubble-auto-collapse"></script>
-    <script src="browser-viewer-url.js?v=1781556283"></script>
-    <script src="browser-panel.js?v=1781556283"></script>
-    <script src="projects.js?v=1781556283-project-execution"></script>
+    <script src="internal-bubble.js?v=1781812220"></script>
+    <script src="game.js?v=1781812220-meeting-auto-continue"></script>
+    <script src="browser-viewer-url.js?v=1781812220"></script>
+    <script src="browser-panel.js?v=1781812220"></script>
+    <script src="projects.js?v=1781812220-project-cron-edit-form"></script>
     <script>
     // Bio sections for agent modal
     let _bioCache = {};
@@ -1090,11 +1091,11 @@
     </script>
     <!-- marked.js v15.0.12 - bundled locally for airgapped/offline use -->
     <script src="marked.min.js"></script>
-    <script src="codex-reasoning.js?v=1781556283"></script>
-    <script src="chat.js?v=1781556283-reasoning-summary"></script>
-    <script src="sms-panel.js?v=1781556283"></script>
-    <script src="pc-monitor.js?v=1781556283"></script>
-    <script src="api-usage.js?v=1781556283"></script>
+    <script src="codex-reasoning.js?v=1781812220"></script>
+    <script src="chat.js?v=1781812220-reasoning-summary"></script>
+    <script src="sms-panel.js?v=1781812220"></script>
+    <script src="pc-monitor.js?v=1781812220"></script>
+    <script src="api-usage.js?v=1781812220"></script>
     <script>
     // License check — demo watermark + feature gates
     (function() {

@@ -1,0 +1,43 @@
+{
+  "name": "meeting-for-ai-phase-6",
+  "parent": "meeting-for-ai",
+  "stage": "done",
+  "waiting_for_user": false,
+  "updated_at": "2026-06-19T02:25:45+08:00",
+  "confirmed": {
+    "checklist": true,
+    "tested": true,
+    "done": true
+  },
+  "confirmations": {
+    "checklist": {
+      "confirmed_at": "2026-06-18T04:11:42+08:00",
+      "summary": "User replied `continuee`; treated as confirmation to continue from Phase 6 checklist into todolist generation. Scope includes meeting-project binding, action item drafts, user confirmation, formal project task creation, idempotency, audit, permissions, and Phase 1-5 regression."
+    },
+    "tested": {
+      "confirmed_at": "2026-06-18T04:43:20+08:00",
+      "summary": "Phase 6 implementation completed and verified with automated tests plus chrome-devtools MCP UI acceptance. Verified meeting-project binding, action item drafts, confirm-to-task, reject, keep-only, source tracking, idempotency, missing-project guard, i18n, and Phase 5 deterministic regression."
+    },
+    "done": {
+      "confirmed_at": "2026-06-19T02:25:45+08:00",
+      "summary": "用户要求正式归档 Phase 6。确认范围包含真实数据、真实 AI advisory、行动项未绑定项目保护、仅保存、拒绝、绑定真实项目创建任务、任务 source meetingId/actionItemId 追踪，以及 MCP 浏览器复核。"
+    }
+  },
+  "files": {
+    "requirement": "requirement.md",
+    "review": "review.md",
+    "checklist": "checklist.md",
+    "todolist": "todolist.md"
+  },
+  "notes": [
+    "Child requirement created from meeting-for-ai Phase 6.",
+    "Phase 6 explicitly includes meeting-project binding because action items cannot become formal project tasks without a stable target project.",
+    "Checklist created and awaiting user confirmation before todolist generation.",
+    "2026-06-18T04:11:42+08:00 User confirmed checklist with `continuee`; todolist created.",
+    "2026-06-18T04:43:20+08:00 Phase 6 implementation completed: executable meetings support optional projectId/projectTitle, completed task meetings create action item drafts, drafts can be edited/rejected/kept/confirmed, confirmed drafts create formal project tasks with source meeting/action item tracking, and repeated confirmation is idempotent.",
+    "2026-06-18T04:43:20+08:00 Verification passed: node --check app/game.js, node tests/test_i18n_integrity.js, .venv/bin/python -m py_compile app/server.py app/project_store.py, .venv/bin/python tests/test_meeting_for_ai_phase6.py, and env VO_MEETING_DISABLE_LIVE_ADVISORY=1 .venv/bin/python tests/test_meeting_for_ai_phase5.py.",
+    "2026-06-18T04:43:20+08:00 chrome-devtools MCP acceptance passed on http://127.0.0.1:8148. Verified project-bound meeting detail shows project and action item drafts, Create task creates exactly one project task with source meeting/actionItem metadata, Reject creates no task, Keep only creates no task, and unbound meeting confirmation is blocked with target_project_required while preserving draft state.",
+    "2026-06-18T04:49:53+08:00 Reran Phase 6 verification on isolated local service http://127.0.0.1:8148 via chrome-devtools MCP. Browser-page same-origin API test created project 991a0cbb-07a5-4714-979a-cdbc7b8e2ec1, bound meeting dd01a15c-3ac4-4c0e-ab8e-8f29bbe22d18, confirmed action item ai-1 into exactly one project task with source.kind=meeting_action_item, verified repeated confirmation idempotent, and verified unbound meeting 5e09a15d-d374-438a-85b8-7ca104208eb5 returned target_project_required without creating another task.",
+    "2026-06-19T02:25:45+08:00 Real-data and real-AI acceptance completed before archival: real conflict advisory meeting e1b875b5-5a6c-4fdd-b2c9-e39d8e270f49 returned completed agent_advisory_turn results from codex-local and hermes-default; real completed meeting 37f6f861-e69e-4ae8-9426-80449dace804 produced action item drafts; ai-1 without project returned target_project_required, ai-2 was kept_as_meeting_item, ai-3 was rejected, and ai-1 confirmed into real project task 6c50bb5c-c70c-426f-81fb-f3c193a88449 with source meeting/actionItem metadata. User requested formal archival; Phase 6 marked done."
+  ]
+}

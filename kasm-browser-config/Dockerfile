@@ -2,18 +2,8 @@ FROM kasmweb/chromium:1.17.0
 
 USER root
 
-RUN apt-get update -qq \
-    && apt-get install -y -qq --no-install-recommends wget ca-certificates \
-    && wget -q -O /tmp/google-chrome.deb \
-        https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb \
-    && apt-get install -y -qq /tmp/google-chrome.deb \
-    && rm -f /tmp/google-chrome.deb \
-    && rm -rf /var/lib/apt/lists/* \
-    && mkdir -p /opt/agent-browser /etc/opt/chrome/policies/managed \
-    && printf '%s\n' '{"CommandLineFlagSecurityWarningsEnabled":false}' \
-        > /etc/opt/chrome/policies/managed/virtual-office.json \
-    && sed -i 's/^PGREP="chromium"/PGREP="chrome"/' \
-        /dockerstartup/custom_startup.sh
+RUN mkdir -p /opt/agent-browser /home/kasm-user/.config/chromium \
+    && chown -R 1000:1000 /home/kasm-user/.config
 
 COPY --chmod=0755 chromium-browser /usr/bin/chromium
 COPY --chmod=0755 cdp-proxy.py /opt/agent-browser/cdp-proxy.py

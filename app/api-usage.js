@@ -181,5 +181,11 @@
         return `linear-gradient(90deg, ${baseColor}, ${baseColor}cc)`;
     }
 
-    if (_open) startPolling();
+    fetch('/vo-config').then(function(r) { return r.json(); }).then(function(cfg) {
+        if (cfg && cfg.features && cfg.features.apiUsage === true) {
+            if (_open) startPolling();
+        }
+    }).catch(function() {
+        // Leave API usage disabled when config cannot be loaded.
+    });
 })();

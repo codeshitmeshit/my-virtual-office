@@ -1,20 +1,26 @@
 {
   "name": "phase-6-reasoning-summary-visibility",
-  "stage": "implementation_done",
-  "waiting_for_user": true,
-  "updated_at": "2026-06-09T23:39:00+08:00",
+  "stage": "done",
+  "waiting_for_user": false,
+  "updated_at": "2026-06-17T03:01:16+08:00",
   "confirmed": {
     "checklist": true,
-    "tested": false,
-    "done": false
+    "tested": true,
+    "done": true
   },
   "confirmations": {
     "checklist": {
       "confirmed_at": "2026-06-09T23:30:28+08:00",
       "summary": "User requested continuation and confirmed the 10-item supplemental checklist."
     },
-    "tested": null,
-    "done": null
+    "tested": {
+      "confirmed_at": "2026-06-17T03:01:16+08:00",
+      "summary": "User confirmed browser acceptance passed for Phase 6 reasoning summary visibility."
+    },
+    "done": {
+      "confirmed_at": "2026-06-17T03:01:16+08:00",
+      "summary": "User requested archival after confirming acceptance passed."
+    }
   },
   "files": {
     "requirement": "requirement.md",
@@ -30,6 +36,7 @@
     "Todolist created for protocol normalization, persistence, browser rendering, regression coverage, and live acceptance.",
     "Implementation and automated regression completed.",
     "Real Codex validation with summary=concise emitted readable summary deltas and a final summary with no modified files.",
-    "Waiting for user browser acceptance before confirmed.tested and done can advance."
+    "Waiting for user browser acceptance before confirmed.tested and done can advance.",
+    "2026-06-17 user confirmed acceptance passed and requested archival; confirmed.tested and confirmed.done were set true and stage advanced to done."
   ]
 }

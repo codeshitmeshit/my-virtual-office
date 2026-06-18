@@ -1,39 +1,51 @@
 {
   "name": "universal-project-execution",
-  "stage": "implementation_done",
-  "waiting_for_user": true,
-  "updated_at": "2026-06-11T01:30:28+08:00",
+  "stage": "done",
+  "waiting_for_user": false,
+  "updated_at": "2026-06-17T03:05:27+08:00",
   "confirmed": {
     "checklist": true,
-    "tested": false,
-    "done": false
+    "tested": true,
+    "done": true
   },
   "confirmations": {
     "checklist": {
       "confirmed_at": "2026-06-10T00:55:54+08:00",
       "summary": "用户确认 执行底座/独立审查 分阶段 checklist，并要求生成 todolist。"
     },
-    "tested": null,
-    "done": null
+    "tested": {
+      "confirmed_at": "2026-06-17T03:05:27+08:00",
+      "summary": "User confirmed acceptance passed for Universal Project Execution."
+    },
+    "done": {
+      "confirmed_at": "2026-06-17T03:05:27+08:00",
+      "summary": "User requested archival after confirming acceptance passed."
+    }
   },
   "stages": {
     "execution_foundation": {
       "name": "universal-project-execution-foundation",
-      "tested": false,
-      "confirmation": null,
+      "tested": true,
+      "confirmation": {
+        "confirmed_at": "2026-06-17T03:05:27+08:00",
+        "summary": "User confirmed execution foundation acceptance passed."
+      },
       "implementation": "completed",
       "automated_tests": "passed_phase_a_expanded_2026-06-11",
       "browser_acceptance_by_codex": "passed_phase_a_smoke_2026-06-11",
-      "waiting_for": "user_manual_acceptance"
+      "waiting_for": null
     },
     "independent_review": {
       "name": "independent-review-and-final-acceptance",
-      "tested": false,
-      "confirmation": null,
+      "tested": true,
+      "confirmation": {
+        "confirmed_at": "2026-06-17T03:05:27+08:00",
+        "summary": "User confirmed independent review and final acceptance passed."
+      },
       "implementation": "completed",
       "automated_tests": "passed_phase_b_expanded_2026-06-11",
       "browser_acceptance_by_codex": "passed_phase_b_smoke_2026-06-11",
-      "waiting_for": "user_manual_acceptance"
+      "waiting_for": null
     }
   },
   "files": {
@@ -64,6 +76,7 @@
     "Phase B expanded implementation completed on 2026-06-11: malformed Reviewer output is blocked instead of passing, Reviewer needs_more_work now dispatches automatic rework through the original executor, successful rework automatically starts a fresh independent review, and the fourth needs_more_work after three rework cycles blocks without a fourth automatic rework.",
     "Phase B expanded automated coverage completed on 2026-06-11: added assertions for OpenClaw/Hermes/Codex Reviewer routing, read-only evidence packet shape, schema-invalid Reviewer pass blocking, automatic rework and re-review to awaiting_user_acceptance, three-cycle rework cap, stale acceptance rejection, feedback-required rejection/blocking, and legacy review-check blocking.",
     "Phase B regression tests passed on 2026-06-11: .venv/bin/python tests/test_project_execution.py, tests/test_codex_bridge.py, tests/test_codex_provider.py, tests/test_codex_server.py, tests/test_codex_live_activity_e2e.py, tests/test_websocket_route_contract.py, tests/test_review_parser.py, node tests/test_browser_viewer_url.js, node tests/test_codex_reasoning.js, node tests/test_internal_bubble.js, and NO_PROXY local HTTP tests/test_crud_projects.sh against http://127.0.0.1:8157.",
-    "Phase B browser smoke passed on 2026-06-11 against http://127.0.0.1:8157: Virtual Office loaded, Project Manager opened, ProjMgr was present, and no new frontend JavaScript errors were observed beyond an existing 404 resource request."
+    "Phase B browser smoke passed on 2026-06-11 against http://127.0.0.1:8157: Virtual Office loaded, Project Manager opened, ProjMgr was present, and no new frontend JavaScript errors were observed beyond an existing 404 resource request.",
+    "2026-06-17 user confirmed acceptance passed and requested archival; both stage confirmations were marked tested, confirmed.tested and confirmed.done were set true, and stage advanced to done."
   ]
 }

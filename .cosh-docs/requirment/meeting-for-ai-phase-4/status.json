@@ -1,0 +1,49 @@
+{
+  "name": "meeting-for-ai-phase-4",
+  "parent": "meeting-for-ai",
+  "stage": "done",
+  "waiting_for_user": false,
+  "updated_at": "2026-06-17T23:46:48+08:00",
+  "confirmed": {
+    "checklist": true,
+    "tested": true,
+    "done": true
+  },
+  "confirmations": {
+    "checklist": {
+      "confirmed_at": "2026-06-17T00:00:00+08:00",
+      "summary": "用户确认可以生成 todolist。确认范围包含 Phase 4 checklist、前期 API/UI fixture 验证、真实 AI 测试前 skill 安装门禁、以及控制面板 Meetings 区域人工确认提示。"
+    },
+    "tested": {
+      "confirmed_at": "2026-06-17T23:46:48+08:00",
+      "summary": "用户确认 Phase 4 验收已完成。确认范围包含确定性 API/UI 验证、MCP 前端补测和真实 AI-originated happy path 验收记录。"
+    },
+    "done": {
+      "confirmed_at": "2026-06-17T23:46:48+08:00",
+      "summary": "用户确认 Phase 4 可以归档，需求闭环完成。"
+    }
+  },
+  "files": {
+    "requirement": "requirement.md",
+    "review": "review.md",
+    "checklist": "checklist.md",
+    "todolist": "todolist.md"
+  },
+  "notes": [
+    "Product clarification completed with cosh-product-clarifier.",
+    "User selected: project-task blocker trigger, same-project context candidates, editable confirmation, required request justification, rejection feedback, and ordinary chat out of scope.",
+    "Future trigger sources should remain possible but are not implemented in Phase 4.",
+    "User added delivery constraint: implement APIs and frontend UI first; before true AI-originated testing, stop and notify the user so the required skill can be installed for the AI.",
+    "Frontend placement clarified: source task detail panel is the primary context view, Meetings dashboard gets a dedicated AI Requests queue, and the right control panel Meetings widget shows a lightweight pending/confirmation-needed prompt.",
+    "User clarified that AI meeting requests requiring manual confirmation should surface through the control panel Meetings section as a prompt.",
+    "2026-06-17T00:00:00+08:00 User confirmed checklist and requested todolist generation.",
+    "Todolist created with explicit real AI skill preparation gate before true AI-originated acceptance.",
+    "2026-06-17T13:18:34+08:00 Implementation completed for deterministic API/UI-support scope: request persistence, APIs, confirmation/rejection lifecycle, dashboard/task/control-panel frontend hooks, styles, i18n, and backend lifecycle tests.",
+    "2026-06-17T13:18:34+08:00 Verification passed: node syntax checks for app/game.js and app/projects.js, locale JSON parse, tests/test_meeting_for_ai_phase4.py, tests/test_meeting_for_ai_phase1.py, and 8038 API fixture for pending safety, context candidates, confirm idempotency, and rejection feedback.",
+    "2026-06-17T13:18:34+08:00 MCP Chrome DevTools frontend validation attempted but blocked by existing chrome-devtools-mcp profile lock; page-level UI verification remained pending at that time.",
+    "2026-06-17T14:22:56+08:00 MCP Chrome DevTools frontend validation completed on isolated port 8038: control panel Meetings prompt, AI Requests queue, Active tab separation, task card badge, task detail request section, UI confirmation conversion, and UI rejection feedback all passed with deterministic fixtures.",
+    "2026-06-17T14:22:56+08:00 Waiting for user to prepare/install the required AI skill before running true AI-originated request acceptance.",
+    "2026-06-17T15:35:42+08:00 True AI-originated acceptance passed in the real 8090 VO environment: hermes-default submitted pending meeting request 61fd964c-00de-4814-a187-d80a07576921 from project task context; no active meeting existed before user confirmation; MCP UI showed the control-panel prompt and AI Requests queue; user confirmation converted it to executable meeting 87adccde-e700-447e-8c35-7690a961dbda with selected task context only; running the meeting produced real provider calls and participant turns from main and hermes-default.",
+    "2026-06-17T23:46:48+08:00 User confirmed Phase 4 acceptance is complete and approved archival. Requirement stage moved to done."
+  ]
+}

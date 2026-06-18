@@ -2,13 +2,12 @@
 # =============================================================================
 # Virtual Office — 一键启动脚本
 # 用法: ./start.sh              本地启动（默认）
-#       ./start.sh --docker     Docker 模式启动
+#       ./start.sh --browser    启动代理浏览器 Docker 服务
 #       ./start.sh --stop       停止 Docker 服务
-#       ./start.sh --restart    重启服务
-#       ./start.sh --update     拉取最新镜像后重启
-#       ./start.sh --logs       查看日志
-#       ./start.sh --status     查看状态
-#       ./start.sh --browser    启用浏览器面板启动配置
+#       ./start.sh --restart    重启代理浏览器 Docker 服务
+#       ./start.sh --update     重建代理浏览器镜像后重启
+#       ./start.sh --logs       查看代理浏览器 Docker 日志
+#       ./start.sh --status     查看本地应用与代理浏览器状态
 # =============================================================================
 
 set -euo pipefail
@@ -26,8 +25,8 @@ ENV_FILE="$SCRIPT_DIR/.env"
 ENV_EXAMPLE="$SCRIPT_DIR/.env.example"
 COMPOSE_FILE="$SCRIPT_DIR/docker-compose.yml"
 ENABLE_BROWSER=0
+START_BROWSER_SERVICE=0
 BROWSER_CDP_URL=""
-BROWSER_VIEWER_URL=""
 POSITIONAL_ARGS=()
 
 # ── 帮助信息 ──────────────────────────────────────────────────────────────
@@ -39,21 +38,18 @@ ${CYAN}My Virtual Office — 一键部署${NC}
 
 选项:
   (无)          本地启动（默认，直接运行 Python）
-  --docker      Docker 模式启动
+  --browser     启动代理浏览器 Docker 服务，并写入浏览器面板配置
   --stop        停止 Docker 服务
-  --restart     重启服务
-  --update      拉取最新镜像并重启
-  --logs        查看服务日志
-  --status      查看服务状态
-  --browser     启用浏览器面板，并写入 .env
+  --restart     重启代理浏览器 Docker 服务
+  --update      重建代理浏览器镜像并重启
+  --logs        查看代理浏览器 Docker 日志
+  --status      查看本地应用与代理浏览器状态
   --browser-cdp URL
-               浏览器 CDP 地址（默认: http://host.docker.internal:9222）
-  --browser-viewer URL
-               浏览器查看器地址（默认: https://localhost:6901）
+               浏览器 CDP 地址（默认: http://127.0.0.1:9224）
   --clean       停止 Docker 服务并删除数据卷（⚠️ 会丢失所有数据）
   --help        显示此帮助信息
 
-${CYAN}启动后访问: http://localhost:8090/setup${NC}
+${CYAN}本地启动后访问: http://localhost:8090/setup${NC}
 EOF
     exit 0
 }
@@ -65,6 +61,7 @@ parse_args() {
         case "$1" in
             --browser)
                 ENABLE_BROWSER=1
+                START_BROWSER_SERVICE=1
                 ;;
             --browser-cdp)
                 if [ $# -lt 2 ]; then
@@ -72,14 +69,6 @@ parse_args() {
                     exit 1
                 fi
                 BROWSER_CDP_URL="$2"
-                shift
-                ;;
-            --browser-viewer)
-                if [ $# -lt 2 ]; then
-                    echo -e "${RED}--browser-viewer 需要 URL 参数${NC}"
-                    exit 1
-                fi
-                BROWSER_VIEWER_URL="$2"
                 shift
                 ;;
             *)
@@ -105,10 +94,48 @@ set_env_var() {
 apply_start_options() {
     if [ "$ENABLE_BROWSER" -eq 1 ]; then
         set_env_var "VO_BROWSER_PANEL" "true"
-        set_env_var "VO_CDP_URL" "${BROWSER_CDP_URL:-http://host.docker.internal:9222}"
-        set_env_var "VO_VIEWER_URL" "${BROWSER_VIEWER_URL:-https://localhost:6901}"
+        set_env_var "VO_CDP_URL" "${BROWSER_CDP_URL:-http://127.0.0.1:9224}"
+        set_env_var "VO_VIEWER_URL" "https://localhost:6901"
         echo -e "  ${GREEN}✓${NC} 已启用浏览器面板启动配置"
     fi
+}
+
+is_truthy() {
+    case "${1:-}" in
+        1|true|TRUE|yes|YES|on|ON|enabled|ENABLED) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+host_cdp_url_for_check() {
+    local cdp_url="${1:-}"
+    cdp_url="${cdp_url/host.docker.internal/127.0.0.1}"
+    cdp_url="${cdp_url/localhost/127.0.0.1}"
+    echo "${cdp_url%/}"
+}
+
+warn_if_browser_unavailable() {
+    local browser_enabled="${VO_BROWSER_PANEL:-}"
+    local cdp_url="${VO_CDP_URL:-}"
+    if ! is_truthy "$browser_enabled"; then
+        return 0
+    fi
+    if [ -z "$cdp_url" ]; then
+        echo -e "  ${YELLOW}⚠ 已启用代理浏览器面板，但未配置 VO_CDP_URL${NC}"
+        echo -e "  ${YELLOW}  建议运行: ./start.sh --browser${NC}"
+        return 0
+    fi
+
+    local check_url
+    check_url="$(host_cdp_url_for_check "$cdp_url")"
+    if curl -sf "${check_url}/json/version" >/dev/null 2>&1; then
+        echo -e "  ${GREEN}✓${NC} 代理浏览器 CDP 可用: ${check_url}"
+        return 0
+    fi
+
+    echo -e "  ${YELLOW}⚠ 代理浏览器面板已启用，但 CDP 不可达: ${cdp_url}${NC}"
+    echo -e "  ${YELLOW}  如果还没有启动代理浏览器，请运行: ./start.sh --browser${NC}"
+    echo -e "  ${YELLOW}  Docker 镜像默认 CDP 端口: http://127.0.0.1:9224${NC}"
 }
 
 # ── 前置检查 ──────────────────────────────────────────────────────────────
@@ -160,9 +187,12 @@ VO_PORT=8090
 VO_WS_PORT=8091
 VO_OFFICE_NAME=Virtual Office
 VO_WEATHER_LOCATION=
-VO_BROWSER_PANEL=false
-VO_CDP_URL=http://host.docker.internal:9222
+VO_BROWSER_PANEL=true
+VO_CDP_URL=http://127.0.0.1:9224
 VO_VIEWER_URL=https://localhost:6901
+VO_PC_METRICS_ENABLED=true
+VO_PC_METRICS_URL=http://127.0.0.1:8099
+VO_API_USAGE=false
 EOF
             echo -e "  ${GREEN}✓${NC} 已创建默认 .env"
         fi
@@ -175,15 +205,24 @@ EOF
         {
             echo ""
             echo "# Agent Browser panel (optional)"
-            echo "VO_BROWSER_PANEL=false"
+            echo "VO_BROWSER_PANEL=true"
         } >> "$ENV_FILE"
         echo -e "  ${GREEN}✓${NC} 已补充浏览器面板启动配置到 .env"
     fi
     if ! grep -q '^VO_CDP_URL=' "$ENV_FILE"; then
-        echo "VO_CDP_URL=http://host.docker.internal:9222" >> "$ENV_FILE"
+        echo "VO_CDP_URL=http://127.0.0.1:9224" >> "$ENV_FILE"
     fi
     if ! grep -q '^VO_VIEWER_URL=' "$ENV_FILE"; then
         echo "VO_VIEWER_URL=https://localhost:6901" >> "$ENV_FILE"
+    fi
+    if ! grep -q '^VO_PC_METRICS_ENABLED=' "$ENV_FILE"; then
+        echo "VO_PC_METRICS_ENABLED=true" >> "$ENV_FILE"
+    fi
+    if ! grep -q '^VO_PC_METRICS_URL=' "$ENV_FILE"; then
+        echo "VO_PC_METRICS_URL=http://127.0.0.1:8099" >> "$ENV_FILE"
+    fi
+    if ! grep -q '^VO_API_USAGE=' "$ENV_FILE"; then
+        echo "VO_API_USAGE=false" >> "$ENV_FILE"
     fi
 
     apply_start_options
@@ -199,22 +238,21 @@ EOF
     fi
 }
 
-# ── 启动服务 ──────────────────────────────────────────────────────────────
-start_service() {
-    echo -e "${CYAN}[3/5] 拉取最新镜像...${NC}"
+# ── 启动代理浏览器 Docker 服务 ────────────────────────────────────────────
+start_browser_service() {
+    echo -e "${CYAN}[3/5] 构建代理浏览器镜像...${NC}"
     cd "$SCRIPT_DIR"
-    docker compose pull virtual-office 2>&1 | grep -v "^$" || true
     docker compose build agent-browser
 
-    echo -e "${CYAN}[4/5] 启动服务...${NC}"
-    docker compose up -d agent-browser virtual-office
+    echo -e "${CYAN}[4/5] 启动代理浏览器...${NC}"
+    docker compose up -d agent-browser
 
-    echo -e "${CYAN}[5/5] 等待服务就绪...${NC}"
+    echo -e "${CYAN}[5/5] 等待代理浏览器 CDP 就绪...${NC}"
     local max_wait=30
     local waited=0
     while [ $waited -lt $max_wait ]; do
-        if curl -sf "http://localhost:$(grep '^VO_PORT=' "$ENV_FILE" | cut -d'=' -f2-)health" &>/dev/null; then
-            echo -e "  ${GREEN}✓${NC} 服务已就绪!"
+        if curl -sf "http://127.0.0.1:9224/json/version" &>/dev/null; then
+            echo -e "  ${GREEN}✓${NC} 代理浏览器 CDP 已就绪: http://127.0.0.1:9224"
             break
         fi
         sleep 1
@@ -222,8 +260,14 @@ start_service() {
     done
 
     if [ $waited -ge $max_wait ]; then
-        echo -e "  ${YELLOW}⚠ 服务启动超时（仍在启动中），请稍候几秒再试${NC}"
+        echo -e "  ${YELLOW}⚠ 代理浏览器 CDP 尚未就绪，容器可能仍在启动中${NC}"
+        echo -e "  ${YELLOW}  可稍后检查: curl http://127.0.0.1:9224/json/version${NC}"
     fi
+
+    set -a
+    source "$ENV_FILE" 2>/dev/null || true
+    set +a
+    warn_if_browser_unavailable
 }
 
 # ── 显示访问信息 ──────────────────────────────────────────────────────────
@@ -256,29 +300,40 @@ show_access_info() {
     echo ""
 }
 
+show_browser_access_info() {
+    echo ""
+    echo -e "${GREEN}╔══════════════════════════════════════════════════╗${NC}"
+    echo -e "${GREEN}║          代理浏览器 Docker 已启动              ║${NC}"
+    echo -e "${GREEN}╠══════════════════════════════════════════════════╣${NC}"
+    echo -e "${GREEN}║  CDP:     http://127.0.0.1:9224                 ${NC}"
+    echo -e "${GREEN}║  Viewer:  https://localhost:6901                ${NC}"
+    echo -e "${GREEN}║                                                  ${NC}"
+    echo -e "${GREEN}║  主应用请另开终端运行: ./start.sh               ${NC}"
+    echo -e "${GREEN}╚══════════════════════════════════════════════════╝${NC}"
+    echo ""
+}
+
 # ── 停止服务 ──────────────────────────────────────────────────────────────
 stop_service() {
-    echo -e "${YELLOW}停止 Virtual Office 服务...${NC}"
+    echo -e "${YELLOW}停止 Docker 服务...${NC}"
     cd "$SCRIPT_DIR"
-    docker compose down
-    echo -e "${GREEN}✓ 服务已停止${NC}"
+    docker compose stop agent-browser virtual-office 2>/dev/null || docker compose down
+    echo -e "${GREEN}✓ Docker 服务已停止${NC}"
 }
 
 # ── 更新服务 ──────────────────────────────────────────────────────────────
 update_service() {
-    echo -e "${YELLOW}拉取最新镜像并重启...${NC}"
+    echo -e "${YELLOW}重建并重启代理浏览器...${NC}"
     cd "$SCRIPT_DIR"
-    docker compose pull virtual-office
     docker compose build agent-browser
-    docker compose up -d --force-recreate agent-browser virtual-office
-    echo -e "${GREEN}✓ 已更新并重启${NC}"
-    show_access_info
+    docker compose up -d --force-recreate agent-browser
+    echo -e "${GREEN}✓ 代理浏览器已重建并重启${NC}"
 }
 
 # ── 查看日志 ──────────────────────────────────────────────────────────────
 show_logs() {
     cd "$SCRIPT_DIR"
-    docker compose logs -f virtual-office
+    docker compose logs -f agent-browser
 }
 
 # ── 查看状态 ──────────────────────────────────────────────────────────────
@@ -286,7 +341,7 @@ show_status() {
     cd "$SCRIPT_DIR"
 
     echo -e "${CYAN}服务状态:${NC}"
-    docker compose ps virtual-office 2>/dev/null || echo -e "${RED}服务未运行${NC}"
+    docker compose ps agent-browser virtual-office 2>/dev/null || echo -e "${RED}Docker 服务未运行${NC}"
 
     echo ""
     local vo_port
@@ -299,10 +354,10 @@ show_status() {
     fi
 
     # 显示容器资源使用
-    if docker ps --filter name=virtual-office --format '{{.Status}}' | grep -q Up; then
+    if docker ps --filter name=agent-browser --format '{{.Status}}' | grep -q Up; then
         echo ""
-        echo -e "${CYAN}资源使用:${NC}"
-        docker stats virtual-office --no-stream --format "  CPU: {{.CPUPerc}} | 内存: {{.MemUsage}}" 2>/dev/null || true
+        echo -e "${CYAN}代理浏览器资源使用:${NC}"
+        docker stats agent-browser --no-stream --format "  CPU: {{.CPUPerc}} | 内存: {{.MemUsage}}" 2>/dev/null || true
     fi
 }
 
@@ -397,9 +452,12 @@ PY
     gateway_port="${gateway_port:-18789}"
     export VO_GATEWAY_URL="${VO_GATEWAY_URL:-ws://localhost:${gateway_port}}"
     export VO_GATEWAY_HTTP="${VO_GATEWAY_HTTP:-http://localhost:${gateway_port}}"
-    export VO_BROWSER_PANEL="${VO_BROWSER_PANEL:-false}"
-    export VO_CDP_URL="${VO_CDP_URL:-http://localhost:9222}"
-    export VO_VIEWER_URL="${VO_VIEWER_URL:-http://localhost:6901}"
+    export VO_BROWSER_PANEL="${VO_BROWSER_PANEL:-true}"
+    export VO_CDP_URL="${VO_CDP_URL:-http://127.0.0.1:9224}"
+    export VO_VIEWER_URL="${VO_VIEWER_URL:-https://localhost:6901}"
+    export VO_PC_METRICS_ENABLED="${VO_PC_METRICS_ENABLED:-true}"
+    export VO_PC_METRICS_URL="${VO_PC_METRICS_URL:-http://127.0.0.1:8099}"
+    export VO_API_USAGE="${VO_API_USAGE:-false}"
     export NO_PROXY="127.0.0.1,localhost,${NO_PROXY:-}"
     export no_proxy="127.0.0.1,localhost,${no_proxy:-}"
 
@@ -545,6 +603,8 @@ with open(output, "w") as f:
 print(json.dumps(report, ensure_ascii=False))
 PY
 
+    warn_if_browser_unavailable
+
     echo ""
     echo -e "${GREEN}✓ HTTP 已就绪: http://localhost:${VO_PORT}${NC}"
     echo -e "${GREEN}✓ WebSocket 已监听: 127.0.0.1:${VO_WS_PORT}${NC}"
@@ -578,15 +638,19 @@ main() {
     local cmd="${POSITIONAL_ARGS[0]:-}"
     case "$cmd" in
         --help|-h)   usage ;;
-        --docker)    check_prerequisites && setup_env && start_service && show_access_info ;;
+        --browser)   START_BROWSER_SERVICE=1; ENABLE_BROWSER=1; check_prerequisites && setup_env && start_browser_service && show_browser_access_info ;;
         --stop)      stop_service ;;
-        --restart)   stop_service && start_service && show_access_info ;;
+        --restart)   stop_service && check_prerequisites && setup_env && start_browser_service && show_browser_access_info ;;
         --update)    update_service ;;
         --logs)      show_logs ;;
         --status)    show_status ;;
         --clean)     clean_data ;;
         "")
-            start_local
+            if [ "$START_BROWSER_SERVICE" -eq 1 ]; then
+                check_prerequisites && setup_env && start_browser_service && show_browser_access_info
+            else
+                start_local
+            fi
             ;;
         *)
             echo -e "${RED}未知选项: $cmd${NC}"

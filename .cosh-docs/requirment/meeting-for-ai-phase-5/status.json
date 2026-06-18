@@ -1,0 +1,47 @@
+{
+  "name": "meeting-for-ai-phase-5",
+  "parent": "meeting-for-ai",
+  "stage": "done",
+  "waiting_for_user": false,
+  "updated_at": "2026-06-18T03:57:48+08:00",
+  "confirmed": {
+    "checklist": true,
+    "tested": true,
+    "done": true
+  },
+  "confirmations": {
+    "checklist": {
+      "confirmed_at": "2026-06-18T00:24:39+08:00",
+      "summary": "用户回复 pass，确认 Phase 5 checklist 可以进入 todolist 生成。确认范围包含忙碌冲突检测、advisory turn、轻量预约、任务暂停恢复、并发占用、UI 可观测性和 Phase 1-4 回归。"
+    },
+    "tested": {
+      "confirmed_at": "2026-06-18T01:25:17+08:00",
+      "summary": "Phase 5 implementation, deterministic tests, and chrome-devtools MCP p2p browser acceptance completed. MCP p2p found and fixed the meeting detail conflict projection gap and changed Try later so reminder timing follows agent availability instead of user-entered time. Awaiting user acceptance before final done."
+    },
+    "done": {
+      "confirmed_at": "2026-06-18T03:57:48+08:00",
+      "summary": "用户明确验收 Phase 5。验收范围包含确定性测试、chrome-devtools MCP p2p、真实 AI 冲突测试、busy-agent advisory turn、预计可用时间/建议展示、中文 UI 文案、取消会议状态语义修复，以及轻量稍后再试能力边界记录。"
+    }
+  },
+  "files": {
+    "requirement": "requirement.md",
+    "review": "review.md",
+    "checklist": "checklist.md",
+    "todolist": "todolist.md"
+  },
+  "notes": [
+    "Child requirement created from meeting-for-ai Phase 5.",
+    "Product clarification completed in conversation: advisory turn recommends but does not execute; medium/high risk conflicts trigger advisory by default; conflict UI prioritizes busy reason, expected availability, interruption risk, and resume notes; advisory failure allows continued user choice but force join requires second confirmation; safety is the top success criterion.",
+    "Lightweight scheduling is included only as a conflict-handling option: remind/try later or wait until available, not a full calendar or hard reservation system.",
+    "Checklist created and awaiting user confirmation before todolist generation.",
+    "2026-06-18T00:24:39+08:00 User confirmed checklist with pass; todolist created.",
+    "2026-06-18T01:25:17+08:00 Phase 5 implementation completed: conflict-aware meeting creation, busy detection, advisory recommendation, reservation/reminder option, conflict resolution API, force-join confirmation, original work snapshot, logical pause state, idempotent terminal resume, frontend conflict panel, and focused tests.",
+    "2026-06-18T01:25:17+08:00 Verification passed: node --check app/game.js, locale JSON parse for en/zh, py_compile app/server.py, tests/test_meeting_for_ai_phase5.py, tests/test_meeting_for_ai_phase1.py, tests/test_meeting_for_ai_phase4.py, and tests/test_project_execution.py. Existing gateway connection warnings appeared in project/phase4 tests but did not fail the suite.",
+    "2026-06-18T01:25:17+08:00 Waiting for user acceptance before marking done.",
+    "2026-06-18T03:19:38+08:00 chrome-devtools MCP p2p acceptance passed on http://127.0.0.1:8038. Verified conflict UI visibility, advisory WAIT, risk/resume copy, Try later reservation without user-entered time, force-join confirmation, original work logical pause snapshot, terminal resume, and single-agent single-active-meeting conflict protection.",
+    "2026-06-18T03:19:38+08:00 MCP p2p discovered and fixed active meeting projection for conflicts/reservation/originalWork/participantState; reran node --check app/game.js, locale JSON parsing with .venv/bin/python, server py_compile, and tests/test_meeting_for_ai_phase5.py.",
+    "2026-06-18T03:57:48+08:00 Real AI conflict acceptance passed: a real Hermes/Codex meeting occupied hermes-default, a second overlapping meeting entered conflict, busy-agent advisory turn called Hermes and returned Chinese busy reason, estimated availability, recommendation=reserve, interruption risk, resume notes, and source=agent_advisory_turn. chrome-devtools MCP verified the UI displayed 高风险、不可暂停、稍后再试 and 来源: 忙碌 Agent 建议.",
+    "2026-06-18T03:57:48+08:00 Follow-up fixes completed before acceptance: conflict UI enum/local fallback text localization, cancelled meeting history status no longer displays as completed, and the lightweight scheduling gap was recorded in docs/todo-task.md.",
+    "2026-06-18T03:57:48+08:00 User accepted Phase 5; child requirement marked done."
+  ]
+}
