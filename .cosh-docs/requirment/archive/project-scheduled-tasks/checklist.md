@@ -182,3 +182,22 @@
 - 确认项：checklist 初次确认
   - 确认时间：2026-06-18T00:00:00+08:00
   - 用户确认摘要：用户确认当前中文 checklist 可以继续，并要求生成 todolist。
+- 确认项：测试通过确认
+  - 确认时间：2026-06-20T07:52:08+08:00
+  - 用户确认摘要：Phase 1、Phase 2-3、Phase 4、Phase 5 及补充修正均已完成并验收，用户确认父需求可以归档。
+- 确认项：最终完成确认
+  - 确认时间：2026-06-20T07:52:08+08:00
+  - 用户确认摘要：用户回复“可以，那这个需求可以归档了”，确认 project-scheduled-tasks 父需求闭环完成。
+
+## 阶段归档汇总
+
+- [x] Phase 1：`project-scheduled-tasks-phase-1-cron-binding` 已完成。复用现有 Cron，为 cron 增加项目绑定能力。
+- [x] Phase 2-3：`project-scheduled-tasks-phase-2-3-ui-dispatch` 已完成。项目详情页和全局定时任务页支持项目 cron 创建、编辑、展示、暂停/恢复、立即触发和派发。
+- [x] Phase 4：`project-scheduled-tasks-phase-4-history-alerts` 已完成。项目定时任务执行历史、异常提示和控制面板提示已接入。
+- [x] Phase 5：`project-scheduled-tasks-phase-5-polish-recommendation` 已完成。长期项目推荐、本地化、兼容性、回归和真实环境验收已完成。
+- [x] 补充修正：任务级“允许该任务被重新触发”、项目级“重启流水线”、任务级“允许没有 Reviewer 时跳过独立审查”已完成并通过用户验收。
+
+## 父需求测试记录
+
+- 2026-06-20T07:52:08+08:00：父需求按子 phase 归档结果收口。Phase 1、Phase 2-3、Phase 4、Phase 5 均为 `done`。
+- 2026-06-20T07:52:08+08:00：真实环境 8090/8091 已用于项目定时任务、项目重启流水线和 Reviewer 跳过属性验收；用户确认可以归档。

@@ -9,15 +9,16 @@
     <link rel="apple-touch-icon" href="icon-192.png">
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#1a1a2e">
-    <link rel="stylesheet" href="style.css?v=1781812220-meeting-countdown">
-    <link rel="stylesheet" href="projects.css?v=1781812220-project-cron-edit-form">
-    <link rel="stylesheet" href="fonts.css?v=1781812220.05.07">
+    <link rel="stylesheet" href="style.css?v=1782047402-meeting-countdown">
+    <link rel="stylesheet" href="projects.css?v=1782047402-project-restart-pipeline">
+    <link rel="stylesheet" href="archive-room.css?v=1782047402-phase13">
+    <link rel="stylesheet" href="fonts.css?v=1782047402.05.07">
     <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
     <!-- i18n: inline locale data for immediate init -->
     <script id="locale-en" type="application/json">{}</script>
     <script id="locale-zh" type="application/json">{}</script>
     <script src="i18n.js"></script>
-    <script src="font-scale.js?v=1781812220-font-scale"></script>
+    <script src="font-scale.js?v=1782047402-font-scale"></script>
     <script>
     (function(){
         var lang='en';
@@ -97,6 +98,9 @@
                             <label class="mm-label" for="mm-internal-bubble-timeout" style="margin-top:8px;" data-i18n="internal_bubble_timeout">Internal bubble auto-collapse (seconds)</label>
                             <input type="number" id="mm-internal-bubble-timeout" class="mm-input" min="0" step="1" value="60">
                             <div style="font-size:9px;color:#666;margin:4px 0 8px;" data-i18n="internal_bubble_timeout_hint">Use 0 to keep Internal bubbles expanded.</div>
+                            <label class="mm-label" for="mm-meeting-preparing-timeout" style="margin-top:8px;" data-i18n="meeting_preparing_timeout">Preparing meeting auto-release (seconds)</label>
+                            <input type="number" id="mm-meeting-preparing-timeout" class="mm-input" min="30" max="86400" step="1" value="300">
+                            <div style="font-size:9px;color:#666;margin:4px 0 8px;" data-i18n="meeting_preparing_timeout_hint">Preparing meetings release automatically if they are not started before this timeout.</div>
                             <label class="mm-label" for="mm-font-scale" style="margin-top:8px;" data-i18n="ui_font_size">UI font size</label>
                             <select id="mm-font-scale" class="mm-input" onchange="mmApplyFontScaleSetting(this.value)">
                                 <option value="1">100%</option>
@@ -213,6 +217,7 @@
                 <a href="/models.html" style="text-decoration:none"><button title="Model & Provider Settings" data-i18n="models" data-i18n-title="model_settings_title">⚙️ Models</button></a>
                 <a href="/cron.html" style="text-decoration:none"><button title="Cron Job Manager" data-i18n="cron" data-i18n-title="cron_manager_title">⏰ Cron</button></a>
                 <button title="Project Manager" onclick="openProjectsManager()" data-i18n="projects" data-i18n-title="projects_title">📋 Projects</button>
+                <button title="Archive Room" onclick="openArchiveRoom()" data-i18n="archive_room" data-i18n-title="archive_room">🗄️ 档案室</button>
                 <button title="Reset canvas zoom" onclick="resetCamera()" data-i18n="reset_zoom" data-i18n-title="reset_zoom">🔍 Reset</button>
                 <button id="sms-toggle" title="SMS/Phone Panel" data-i18n="sms" data-i18n-title="sms_phone_panel">📞 SMS</button>
                 <button id="browser-toggle" title="Agent Browser" class="browser-toggle-btn" data-i18n="browser" data-i18n-title="agent_browser_title">🌐 Browser</button>
@@ -240,7 +245,7 @@
                 <button class="sidebar-bulk-btn" onclick="sidebarCollapseAll()" title="Collapse all widgets" data-i18n="sidebar_collapse_all">▲ Collapse All</button>
             </div>
 
-            <div class="pc-monitor" id="pc-monitor">
+            <div class="pc-monitor" id="pc-monitor" style="display:none">
                 <h4 class="pc-monitor-toggle" onclick="togglePcMonitor()">
                     <span id="pc-toggle-arrow">▶</span> <span data-i18n="pc_performance">🖥️ PC PERFORMANCE</span>
                     <span id="pc-status-dot" class="pc-dot offline" data-i18n-title="offline" title="Offline"></span>
@@ -272,7 +277,7 @@
                 </div>
             </div>
 
-            <div class="api-usage-monitor" id="api-usage-monitor">
+            <div class="api-usage-monitor" id="api-usage-monitor" style="display:none">
                 <h4 class="api-usage-toggle" onclick="toggleApiUsage()">
                     <span id="api-toggle-arrow">▶</span> <span data-i18n="api_usage">☁️ API USAGE</span>
                     <span id="api-status-dot" class="pc-dot offline" data-i18n-title="loading" title="Loading..."></span>
@@ -631,6 +636,36 @@
         </div>
     </div>
 
+    <!-- Archive Room Modal -->
+    <div id="archiveRoomModal" class="modal hidden" onclick="if(event.target===this)closeArchiveRoom()">
+        <div class="modal-content archive-room-modal-content">
+            <div class="modal-header archive-room-header">
+                <span class="modal-emoji">🗄️</span>
+                <h2>档案室</h2>
+                <span class="archive-room-manager" id="archive-room-manager">后续阶段启用</span>
+                <span class="close-btn" onclick="closeArchiveRoom()">&times;</span>
+            </div>
+            <div id="archive-room-content" class="archive-room-content">
+                <!-- Populated by archive-room.js -->
+            </div>
+        </div>
+        <div id="archiveArtifactOverlay" class="archive-artifact-overlay hidden" onclick="if(event.target===this)ArchiveRoom.closeArtifact()">
+            <div class="archive-artifact-modal">
+                <div class="archive-artifact-modal-head">
+                    <div>
+                        <div id="archive-artifact-modal-title" class="archive-artifact-modal-title">产物</div>
+                        <div id="archive-artifact-modal-meta" class="archive-artifact-modal-meta"></div>
+                    </div>
+                    <div class="archive-artifact-modal-actions">
+                        <a id="archive-artifact-open-link" class="archive-open-link" href="#" target="_blank" rel="noopener">打开</a>
+                        <button class="archive-copy-btn" onclick="ArchiveRoom.closeArtifact()">关闭</button>
+                    </div>
+                </div>
+                <div id="archive-artifact-modal-body" class="archive-artifact-modal-body"></div>
+            </div>
+        </div>
+    </div>
+
     <!-- SMS Panel -->
     <div id="sms-panel" class="sms-panel">
         <div class="sms-resize-handle top-left"></div>
@@ -863,11 +898,12 @@
         setTimeout(resizeCanvas, 320);
     }
     </script>
-    <script src="internal-bubble.js?v=1781812220"></script>
-    <script src="game.js?v=1781812220-meeting-auto-continue"></script>
-    <script src="browser-viewer-url.js?v=1781812220"></script>
-    <script src="browser-panel.js?v=1781812220"></script>
-    <script src="projects.js?v=1781812220-project-cron-edit-form"></script>
+    <script src="internal-bubble.js?v=1782047402"></script>
+    <script src="game.js?v=1782047402-meeting-auto-continue"></script>
+    <script src="browser-viewer-url.js?v=1782047402"></script>
+    <script src="browser-panel.js?v=1782047402"></script>
+    <script src="projects.js?v=1782047402-project-restart-pipeline"></script>
+    <script src="archive-room.js?v=1782047402-phase13"></script>
     <script>
     // Bio sections for agent modal
     let _bioCache = {};
@@ -1091,11 +1127,11 @@
     </script>
     <!-- marked.js v15.0.12 - bundled locally for airgapped/offline use -->
     <script src="marked.min.js"></script>
-    <script src="codex-reasoning.js?v=1781812220"></script>
-    <script src="chat.js?v=1781812220-reasoning-summary"></script>
-    <script src="sms-panel.js?v=1781812220"></script>
-    <script src="pc-monitor.js?v=1781812220"></script>
-    <script src="api-usage.js?v=1781812220"></script>
+    <script src="codex-reasoning.js?v=1782047402"></script>
+    <script src="chat.js?v=1782047402-reasoning-summary"></script>
+    <script src="sms-panel.js?v=1782047402"></script>
+    <script src="pc-monitor.js?v=1782047402"></script>
+    <script src="api-usage.js?v=1782047402"></script>
     <script>
     // License check — demo watermark + feature gates
     (function() {

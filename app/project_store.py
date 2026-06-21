@@ -16,7 +16,7 @@ COMPLEX_JSON_FIELDS = {
     "executionPolicy_json", "executionDirtyConfirmations_json", "attempts_json",
     "evidence_json", "reviewResult_json", "reviewHistory_json",
     "acceptanceHistory_json", "stateHistory_json", "source_json",
-    "scheduledCronHistory_json",
+    "scheduledCronHistory_json", "archiveMaintenance_json",
 }
 
 
@@ -264,6 +264,8 @@ class MarkdownProjectStore:
             "tags_json": project.get("tags", []),
             "branch": project.get("branch", ""),
             "longTermProject": project.get("longTermProject", False),
+            "archiveMaintenanceEnabled": project.get("archiveMaintenanceEnabled"),
+            "archiveMaintenance_json": project.get("archiveMaintenance", {}),
             "projectExecutionEnabled": project.get("projectExecutionEnabled", False),
             "workspacePath": project.get("workspacePath"),
             "workspaceKind": project.get("workspaceKind"),
@@ -326,6 +328,7 @@ class MarkdownProjectStore:
             "executorAgentId": task.get("executorAgentId"),
             "reviewerAgentId": task.get("reviewerAgentId"),
             "requiresUserAcceptance": task.get("requiresUserAcceptance", True),
+            "allowReviewerlessExecution": task.get("allowReviewerlessExecution", False),
             "scheduledRepeatEnabled": task.get("scheduledRepeatEnabled", False),
             "executionState": task.get("executionState", "done" if task.get("completedAt") else "backlog"),
             "activeAttemptId": task.get("activeAttemptId"),
@@ -408,6 +411,8 @@ class MarkdownProjectStore:
             "tags": meta.get("tags_json", []),
             "branch": meta.get("branch", ""),
             "longTermProject": meta.get("longTermProject", False),
+            "archiveMaintenanceEnabled": meta.get("archiveMaintenanceEnabled"),
+            "archiveMaintenance": meta.get("archiveMaintenance_json", {}),
             "projectExecutionEnabled": meta.get("projectExecutionEnabled", False),
             "workspacePath": meta.get("workspacePath"),
             "workspaceKind": meta.get("workspaceKind"),
@@ -461,6 +466,7 @@ class MarkdownProjectStore:
             "executorAgentId": meta.get("executorAgentId") or meta.get("assignee"),
             "reviewerAgentId": meta.get("reviewerAgentId"),
             "requiresUserAcceptance": meta.get("requiresUserAcceptance", True),
+            "allowReviewerlessExecution": meta.get("allowReviewerlessExecution", False),
             "scheduledRepeatEnabled": meta.get("scheduledRepeatEnabled", False),
             "executionState": meta.get("executionState") or ("done" if meta.get("completedAt") else "backlog"),
             "activeAttemptId": meta.get("activeAttemptId"),

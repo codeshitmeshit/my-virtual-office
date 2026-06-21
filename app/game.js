@@ -283,6 +283,9 @@ const FURNITURE_BOUNDS = {
     'plant':         { w: 18,  h: 26,  ox: 0,    oy: 0.23 },  // leaves start above (x,y)
     'tallPlant':     { w: 22,  h: 58,  ox: 0.09, oy: 0.17 },  // pot at y+28, leaves above
     'meetingTable':  { w: 240, h: 120, ox: 0,    oy: 0    },
+    'meetingTable4': { w: 116, h: 96,  ox: 0,    oy: 0    },
+    'meetingTable6': { w: 164, h: 104, ox: 0,    oy: 0    },
+    'meetingRoom':   { w: 300, h: 180, ox: 0,    oy: 0    },
     'lounge':        { w: 200, h: 140, ox: 0,    oy: 0    },
     'breakArea':     { w: 240, h: 130, ox: 0,    oy: 0    },
     'engLounge':     { w: 168, h: 38,  ox: 0,    oy: 0    },
@@ -297,6 +300,7 @@ const FURNITURE_BOUNDS = {
     'interactiveWindow': { w: 44, h: 52, ox: 0.09, oy: 0.08 },  // interactive window with weather/sun settings
     'clock':         { w: 28,  h: 28,  ox: 0.5,  oy: 0.5  },  // (x,y)=center, radius 14
     'bookshelf':     { w: 50,  h: 80,  ox: 0,    oy: 0    },  // top-left, tall bookshelf
+    'functionalBookshelf': { w: 50, h: 80, ox: 0, oy: 0 },    // top-left, clickable archive bookshelf
     'couch':         { w: 160, h: 80,  ox: 0,    oy: 0    },  // L-shaped couch (4×1 tiles + 1×1 daybed)
     'endTable':      { w: 20,  h: 20,  ox: 0,    oy: 0    },  // small decor table with plant
     'coffeeTable':   { w: 64,  h: 34,  ox: 0,    oy: 0    },
@@ -324,6 +328,12 @@ const CATALOG_CATEGORIES = [
         { type: 'plant',      key: 'furniture_plant',           icon: '🪴' },
         { type: 'tallPlant',  key: 'furniture_tall_plant',      icon: '🌿' },
         { type: 'endTable',   key: 'furniture_end_table_plant', icon: '🪴' },
+    ]},
+    { key: 'catalog_functional', items: [
+        { type: 'functionalBookshelf', key: 'furniture_functional_bookshelf', icon: '📚' },
+        { type: 'meetingTable4', key: 'furniture_meeting_table_4', icon: '▣' },
+        { type: 'meetingTable6', key: 'furniture_meeting_table_6', icon: '▤' },
+        { type: 'meetingRoom',   key: 'furniture_meeting_room',    icon: '▥' },
     ]},
     { key: 'catalog_kitchen', items: [
         { type: 'kitchenCounter',key: 'furniture_kitchen_counter', icon: '🏪' },
@@ -1856,6 +1866,177 @@ function getMeetingSlots() {
 // Legacy constant — kept for backward compat but now calls dynamic function
 var MEETING_SLOTS = getMeetingSlots();
 
+const FUNCTIONAL_MEETING_SPACE_TYPES = ['meetingTable4', 'meetingTable6', 'meetingRoom'];
+
+function _isFunctionalMeetingSpace(item) {
+    return !!(item && FUNCTIONAL_MEETING_SPACE_TYPES.indexOf(item.type) >= 0);
+}
+
+function _meetingSpaceCapacity(item) {
+    if (!item) return 0;
+    if (item.type === 'meetingTable4') return 4;
+    if (item.type === 'meetingTable6') return 6;
+    if (item.type === 'meetingRoom') return Infinity;
+    return 0;
+}
+
+function _meetingSpaceOrder(item) {
+    if (!item) return 99;
+    if (item.type === 'meetingTable4') return 4;
+    if (item.type === 'meetingTable6') return 6;
+    if (item.type === 'meetingRoom') return 10;
+    return 99;
+}
+
+function _meetingSpaceDisplayName(item) {
+    if (!item) return '';
+    if (item.type === 'meetingTable4') return _tr('furniture_meeting_table_4');
+    if (item.type === 'meetingTable6') return _tr('furniture_meeting_table_6');
+    if (item.type === 'meetingRoom') return _tr('furniture_meeting_room');
+    return _tr('meeting');
+}
+
+function _getFunctionalMeetingSpaces() {
+    if (typeof officeConfig === 'undefined' || !Array.isArray(officeConfig.furniture)) return [];
+    return officeConfig.furniture
+        .filter(_isFunctionalMeetingSpace)
+        .slice()
+        .sort(function(a, b) {
+            var oa = _meetingSpaceOrder(a);
+            var ob = _meetingSpaceOrder(b);
+            if (oa !== ob) return oa - ob;
+            var ax = Number(a.x || 0), bx = Number(b.x || 0);
+            if (ax !== bx) return ax - bx;
+            return Number(a.y || 0) - Number(b.y || 0);
+        });
+}
+
+function _findMeetingSpaceForCount(count, occupiedSpaceIds) {
+    var spaces = _getFunctionalMeetingSpaces();
+    var preferred = count <= 4 ? ['meetingTable4', 'meetingTable6', 'meetingRoom'] :
+        (count <= 6 ? ['meetingTable6', 'meetingRoom'] : ['meetingRoom']);
+    for (var p = 0; p < preferred.length; p++) {
+        for (var i = 0; i < spaces.length; i++) {
+            var item = spaces[i];
+            if (item.type !== preferred[p]) continue;
+            if (occupiedSpaceIds && occupiedSpaceIds.has(item.id)) continue;
+            if (_meetingSpaceCapacity(item) >= count) return item;
+        }
+    }
+    return null;
+}
+
+function _meetingSpaceCenter(item) {
+    var b = FURNITURE_BOUNDS[item.type] || { w: 120, h: 80 };
+    return { x: item.x + b.w / 2, y: item.y + b.h / 2 };
+}
+
+function _tableSlotsForSpace(item, count) {
+    var slots = [];
+    if (!item) return slots;
+    var center = _meetingSpaceCenter(item);
+    var pushSlot = function(x, y, faceDir, isSitting) {
+        slots.push({
+            x: x,
+            y: y,
+            faceDir: faceDir,
+            isSitting: isSitting !== false,
+            centerX: center.x,
+            centerY: center.y,
+            meetingSpaceId: item.id,
+            meetingSpaceType: item.type
+        });
+    };
+    if (item.type === 'meetingTable4') {
+        pushSlot(item.x + 28, item.y + 18, 2, true);
+        pushSlot(item.x + 88, item.y + 18, 2, true);
+        pushSlot(item.x + 28, item.y + 78, 0, true);
+        pushSlot(item.x + 88, item.y + 78, 0, true);
+        return slots;
+    }
+    if (item.type === 'meetingTable6') {
+        [26, 82, 138].forEach(function(dx) { pushSlot(item.x + dx, item.y + 18, 2, true); });
+        [26, 82, 138].forEach(function(dx) { pushSlot(item.x + dx, item.y + 86, 0, true); });
+        return slots;
+    }
+    if (item.type === 'meetingRoom') {
+        [56, 103, 150, 197, 244].forEach(function(dx) { pushSlot(item.x + dx, item.y + 45, 2, true); });
+        [56, 103, 150, 197, 244].forEach(function(dx) { pushSlot(item.x + dx, item.y + 132, 0, true); });
+        var overflow = Math.max(0, count - slots.length);
+        for (var i = 0; i < overflow; i++) {
+            var col = i % 6;
+            var row = Math.floor(i / 6);
+            pushSlot(item.x + 38 + col * 42, item.y + 160 + row * 24, 0, false);
+        }
+        return slots;
+    }
+    return slots;
+}
+
+function _buildMeetingSpaceAssignment(meeting, meetingAgents, occupiedSpaceIds) {
+    var space = _findMeetingSpaceForCount(meetingAgents.length, occupiedSpaceIds);
+    if (!space) return null;
+    var slots = _tableSlotsForSpace(space, meetingAgents.length);
+    if (!slots.length) return null;
+    occupiedSpaceIds.add(space.id);
+    return {
+        space: space,
+        slots: slots,
+        slotAssignments: meetingAgents.map(function(agent, i) {
+            return { agent: agent.id, slot: slots[i % slots.length] };
+        })
+    };
+}
+
+function _buildFallbackMeetingAssignment(meetingAgents) {
+    var slots = getMeetingSlots();
+    var slotAssignments = [];
+    if (slots.length > 0) {
+        meetingAgents.forEach(function(agent, i) {
+            var slot = Object.assign({
+                isSitting: true,
+                centerX: getMeetingTablePos().x + 120,
+                centerY: getMeetingTablePos().y + 60
+            }, slots[i % slots.length]);
+            slotAssignments.push({ agent: agent.id, slot: slot });
+        });
+    } else {
+        var anchor = meetingAgents[0];
+        meetingAgents.forEach(function(agent, i) {
+            var angle = (i / meetingAgents.length) * Math.PI * 2;
+            var slot = {
+                x: anchor.x + Math.cos(angle) * 40,
+                y: anchor.y + Math.sin(angle) * 40,
+                isSitting: false,
+                centerX: anchor.x,
+                centerY: anchor.y
+            };
+            slotAssignments.push({ agent: agent.id, slot: slot });
+        });
+    }
+    return { space: null, slots: slots, slotAssignments: slotAssignments };
+}
+
+function _applyGroupMeetingAssignment(meetingId, rawMeeting, meetingAgents, topic, occupiedSpaceIds) {
+    var assignment = _buildMeetingSpaceAssignment(rawMeeting, meetingAgents, occupiedSpaceIds) || _buildFallbackMeetingAssignment(meetingAgents);
+    meetingAgents.forEach(function(agent) {
+        var assigned = assignment.slotAssignments.find(function(a) { return a.agent === agent.id; });
+        var slot = assigned ? assigned.slot : { x: agent.x, y: agent.y, isSitting: false };
+        var slotChanged = !agent.meetingSlot ||
+            Math.abs(Number(agent.meetingSlot.x || 0) - Number(slot.x || 0)) > 1 ||
+            Math.abs(Number(agent.meetingSlot.y || 0) - Number(slot.y || 0)) > 1 ||
+            agent.meetingSpaceId !== (slot.meetingSpaceId || null) ||
+            !!agent.isSitting !== !!slot.isSitting;
+        if (agent.meetingId !== meetingId || agent.state !== 'meeting' || slotChanged) {
+            agent.joinMeeting(meetingId, slot, topic);
+        } else {
+            agent.meetingSlot = slot;
+            if (typeof slot.faceDir !== 'undefined') agent.faceDir = slot.faceDir;
+        }
+    });
+    return assignment;
+}
+
 // --- 1-on-1 meeting positions (relative to target desk) ---
 const VISIT_OFFSET = { x: -30, y: 15 };  // visitor stands beside desk
 
@@ -2683,6 +2864,8 @@ class Agent {
         this.meetingId = null;
         this.meetingSlot = null;
         this.visitTarget = null;
+        this._meetingTurnTimer = 0;
+        this._meetingLastSpeakerKey = '';
 
         // --- Notification / Task I/O ---
         this.notify = false;          // pulsing notification light
@@ -2979,6 +3162,23 @@ class Agent {
                 }
             }
         }
+        const meetingMotionState = _meetingMotionState(this);
+        if (meetingMotionState && meetingMotionState.hasSpeaker && meetingMotionState.role === 'listener') {
+            const speaker = meetingMotionState.speaker;
+            const speakerKey = speaker ? String(speaker.id || speaker.statusKey || speaker.name || '') : '';
+            if (speakerKey && speakerKey !== this._meetingLastSpeakerKey) {
+                this._meetingTurnTimer = 24;
+                this._meetingLastSpeakerKey = speakerKey;
+            }
+            if (speaker && Math.abs(speaker.x - this.x) > 2) {
+                const nextFaceDir = speaker.x > this.x ? 1 : -1;
+                if (nextFaceDir !== this.faceDir) this._meetingTurnTimer = 24;
+                this.faceDir = nextFaceDir;
+            }
+        } else {
+            this._meetingLastSpeakerKey = '';
+        }
+        if (this._meetingTurnTimer > 0) this._meetingTurnTimer--;
 
         // --- Social proximity: face nearby agents in social areas ---
         const isMovingNow = Math.abs(this.targetX - this.x) > this.speed || Math.abs(this.targetY - this.y) > this.speed;
@@ -3348,7 +3548,9 @@ class Agent {
         this.targetX = slot.x;
         this.targetY = slot.y;
         this.state = 'meeting';
-        this.isSitting = false;
+        this.isSitting = !!slot.isSitting;
+        this.meetingSpaceId = slot.meetingSpaceId || null;
+        if (typeof slot.faceDir !== 'undefined') this.faceDir = slot.faceDir;
         this.addIntent(`Meeting: ${topic || 'discussion'}`);
     }
 
@@ -3370,10 +3572,12 @@ class Agent {
     leaveMeeting() {
         this.meetingId = null;
         this.meetingSlot = null;
+        this.meetingSpaceId = null;
         this.visitTarget = null;
         this.targetX = this.desk.x;
         this.targetY = this.desk.y;
         this.state = this.task ? 'working' : 'idle';
+        this.isSitting = false;
         this.resetIdleTimer();
         this.addIntent('Meeting ended, returning to desk');
     }
@@ -3716,6 +3920,7 @@ class Agent {
         ctx.save();
         ctx.translate(this.x, this.y);
         this._yawning = false; // reset per frame
+        const meetingMotion = _meetingMotionDraw(this);
 
         const breathe = (Math.abs(this.targetX - this.x) < 1 && Math.abs(this.targetY - this.y) < 1) ? Math.sin(this.tick * 0.05) * 1 : 0;
         const isMoving = Math.abs(this.targetX - this.x) > this.speed || Math.abs(this.targetY - this.y) > this.speed;
@@ -3726,6 +3931,7 @@ class Agent {
         // Shadow
         ctx.fillStyle = 'rgba(0,0,0,0.2)';
         ctx.beginPath(); ctx.ellipse(0, 4, 12, 5, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.translate(meetingMotion.offsetX, 0);
 
         // === CARRIED ITEM ON DESK (anchored to desk, no body bob) ===
         // (Unique character items drawn in environment pass — always visible)
@@ -3757,7 +3963,7 @@ class Agent {
             }
         }
 
-        ctx.translate(0, -walkBob + sitOffset);
+        ctx.translate(0, -walkBob + sitOffset + meetingMotion.offsetY);
 
         // --- RIM LIGHT via canvas shadow (physics-based, follows exact shape) ---
         var _rim = getRimLight(this);
@@ -4011,7 +4217,7 @@ class Agent {
         ctx.fillRect(0, -27, 2, 2);
 
         // Mouth
-        const _sm = this._socialMouth;
+        const _sm = meetingMotion.mouth || this._socialMouth;
         this._socialMouth = null;
         if (_sm === 'laugh') {
             // Wide open laughing mouth
@@ -4612,6 +4818,132 @@ const dismissedNotify = new Set();  // track dismissed notifications to prevent 
 // --- MEETING SYSTEM ---
 let activeMeetings = {};  // id -> { agents: [], topic, type, slotAssignments }
 
+function _meetingAgentKeySet(agent) {
+    if (!agent) return [];
+    return [agent.id, agent.statusKey, agent.name].filter(Boolean).map(function(v) { return String(v); });
+}
+
+function _meetingFindAgentByKey(key) {
+    if (!key) return null;
+    var k = String(key);
+    if (agentMap[k]) return agentMap[k];
+    for (var i = 0; i < agents.length; i++) {
+        var a = agents[i];
+        if (a.id === k || a.statusKey === k || a.name === k) return a;
+    }
+    return null;
+}
+
+function _meetingAgentMatchesKey(agent, key) {
+    if (!agent || !key) return false;
+    var k = String(key);
+    return agent.id === k || agent.statusKey === k || agent.name === k;
+}
+
+function _meetingRawActiveRecord(meetingId) {
+    if (!meetingId || typeof _mtgData === 'undefined' || !_mtgData || !Array.isArray(_mtgData.active)) return null;
+    for (var i = 0; i < _mtgData.active.length; i++) {
+        var m = _mtgData.active[i];
+        if (m && m.id === meetingId) {
+            return (typeof _mtgMergeLiveMeeting === 'function') ? _mtgMergeLiveMeeting(m) : m;
+        }
+    }
+    return null;
+}
+
+function _meetingSpeakerKeyFromRecord(record) {
+    if (!record) return '';
+    if (record.currentSpeaker) return String(record.currentSpeaker);
+    var pending = Array.isArray(record.pendingCalls) ? record.pendingCalls : [];
+    for (var i = 0; i < pending.length; i++) {
+        var call = pending[i] || {};
+        var speaker = call.speaker || call.agentId || call.participant || call.actorId;
+        if (speaker) return String(speaker);
+    }
+    return '';
+}
+
+function _meetingSpeakerFor(meeting) {
+    if (!meeting) return null;
+    var record = _meetingRawActiveRecord(meeting.id) || meeting.raw || meeting;
+    var speakerKey = _meetingSpeakerKeyFromRecord(record);
+    if (!speakerKey) return null;
+    var speaker = _meetingFindAgentByKey(speakerKey);
+    if (!speaker || !meeting.agents || meeting.agents.indexOf(speaker) < 0) return null;
+    return speaker;
+}
+
+function _meetingForAgent(agent) {
+    if (!agent) return null;
+    if (agent.meetingId && activeMeetings[agent.meetingId]) return activeMeetings[agent.meetingId];
+    var keys = _meetingAgentKeySet(agent);
+    var ids = Object.keys(activeMeetings);
+    for (var i = 0; i < ids.length; i++) {
+        var meeting = activeMeetings[ids[i]];
+        if (!meeting || !meeting.agents) continue;
+        if (meeting.agents.indexOf(agent) >= 0) return meeting;
+        for (var j = 0; j < keys.length; j++) {
+            if ((meeting.participantKeys || []).indexOf(keys[j]) >= 0) return meeting;
+        }
+    }
+    return null;
+}
+
+function _meetingMotionState(agent) {
+    var meeting = _meetingForAgent(agent);
+    if (!meeting) return null;
+    var speaker = _meetingSpeakerFor(meeting);
+    if (!speaker) return { meeting: meeting, speaker: null, role: 'participant', hasSpeaker: false };
+    var isSpeaker = speaker === agent || _meetingAgentMatchesKey(agent, speaker.id) || _meetingAgentMatchesKey(agent, speaker.statusKey);
+    return {
+        meeting: meeting,
+        speaker: speaker,
+        role: isSpeaker ? 'speaker' : 'listener',
+        hasSpeaker: true
+    };
+}
+
+function _meetingMotionDraw(agent) {
+    var state = _meetingMotionState(agent);
+    if (!state) return { offsetX: 0, offsetY: 0, mouth: null, hasSpeaker: false, role: 'none' };
+    if (!state.hasSpeaker) {
+        var slot = agent.meetingSlot || {};
+        if (slot.centerX && Math.abs(slot.centerX - agent.x) > 8) agent.faceDir = slot.centerX > agent.x ? 1 : -1;
+        return { offsetX: 0, offsetY: 0, mouth: null, hasSpeaker: false, role: 'participant' };
+    }
+    if (state.role === 'speaker') {
+        return {
+            offsetX: 0,
+            offsetY: -0.8 + Math.sin(agent.tick * 0.22) * 0.8,
+            mouth: Math.floor(agent.tick / 5) % 3 === 0 ? 'open' : Math.floor(agent.tick / 5) % 3 === 1 ? 'half' : 'closed',
+            hasSpeaker: true,
+            role: 'speaker'
+        };
+    }
+    if (state.speaker && Math.abs(state.speaker.x - agent.x) > 8) {
+        agent.faceDir = state.speaker.x > agent.x ? 1 : -1;
+    }
+    var seed = 0;
+    var id = String(agent.id || agent.statusKey || '');
+    for (var i = 0; i < id.length; i++) seed += id.charCodeAt(i);
+    var cycle = (agent.tick + seed * 7) % 210;
+    var nod = cycle < 22 ? Math.sin((cycle / 22) * Math.PI) * 3 : 0;
+    var turnProgress = Math.max(0, Number(agent._meetingTurnTimer || 0)) / 24;
+    var turnLean = turnProgress > 0 ? -agent.faceDir * Math.sin(turnProgress * Math.PI) * 5 : 0;
+    return {
+        offsetX: turnLean,
+        offsetY: nod,
+        mouth: null,
+        hasSpeaker: true,
+        role: 'listener'
+    };
+}
+
+function _meetingShouldSuppressRandomTalk(agent) {
+    var state = _meetingMotionState(agent);
+    return !!(state && state.hasSpeaker && state.role !== 'speaker');
+}
+
 function processMeetings(meetingsData) {
     if (!meetingsData || !Array.isArray(meetingsData)) {
         // No meetings — end any active ones
@@ -4628,6 +4960,12 @@ function processMeetings(meetingsData) {
         if (!newIds.has(mid)) endMeeting(mid);
     }
 
+    const occupiedSpaceIds = new Set();
+    for (const mid of Object.keys(activeMeetings)) {
+        const meeting = activeMeetings[mid];
+        if (meeting && meeting.meetingSpaceId && newIds.has(mid)) occupiedSpaceIds.add(meeting.meetingSpaceId);
+    }
+
     // Start or update meetings
     for (const m of meetingsData) {
         const participantKeys = Array.isArray(m.participants) && m.participants.length ? m.participants : (m.agents || []);
@@ -4640,10 +4978,20 @@ function processMeetings(meetingsData) {
         const existing = activeMeetings[m.id];
         if (existing) {
             existing.agents = meetingAgents;
+            existing.participantKeys = participantKeys;
+            existing.raw = m;
             existing.topic = topic;
             existing.purpose = purpose;
             existing.type = type;
             if (type === '1on1' && meetingAgents.length === 2) {
+                if (existing.meetingSpaceId) {
+                    occupiedSpaceIds.delete(existing.meetingSpaceId);
+                    existing.meetingSpaceId = null;
+                    existing.meetingSpaceType = null;
+                    existing.meetingSpaceCapacity = null;
+                    existing.meetingSpaceName = '';
+                    existing.slotAssignments = [];
+                }
                 const visitor = meetingAgents[0];
                 const host = meetingAgents[1];
                 if (visitor.state !== 'visiting' || visitor.visitTarget !== host.id || host.state !== 'visiting' || host.visitTarget !== visitor.id) {
@@ -4653,14 +5001,13 @@ function processMeetings(meetingsData) {
                     host.addIntent(`Meeting with ${visitor.name}: ${topic}`);
                 }
             } else {
-                const assignments = existing.slotAssignments || [];
-                meetingAgents.forEach((agent, i) => {
-                    const assigned = assignments.find(a => a.agent === agent.id);
-                    const slot = assigned ? assigned.slot : (getMeetingSlots()[i % Math.max(1, getMeetingSlots().length)] || { x: agent.x, y: agent.y });
-                    if (agent.meetingId !== m.id || agent.state !== 'meeting') {
-                        agent.joinMeeting(m.id, slot, topic);
-                    }
-                });
+                if (existing.meetingSpaceId) occupiedSpaceIds.delete(existing.meetingSpaceId);
+                const assignment = _applyGroupMeetingAssignment(m.id, m, meetingAgents, topic, occupiedSpaceIds);
+                existing.slotAssignments = assignment.slotAssignments;
+                existing.meetingSpaceId = assignment.space ? assignment.space.id : null;
+                existing.meetingSpaceType = assignment.space ? assignment.space.type : null;
+                existing.meetingSpaceCapacity = assignment.space ? _meetingSpaceCapacity(assignment.space) : null;
+                existing.meetingSpaceName = assignment.space ? _meetingSpaceDisplayName(assignment.space) : '';
             }
             continue;
         }
@@ -4673,30 +5020,12 @@ function processMeetings(meetingsData) {
             host.state = 'visiting';
             host.visitTarget = visitor.id;
             host.addIntent(`Meeting with ${visitor.name}: ${topic}`);
-            activeMeetings[m.id] = { agents: meetingAgents, topic, purpose, type, organizer: m.organizer || participantKeys[0] || '', kind: m.kind || 'discussion', rules: m.rules || null };
+            activeMeetings[m.id] = { id: m.id, agents: meetingAgents, participantKeys, raw: m, topic, purpose, type, organizer: m.organizer || participantKeys[0] || '', kind: m.kind || 'discussion', rules: m.rules || null };
             addGlobalLog(`🤝 ${visitor.name} → ${host.name}: ${topic}`);
         } else {
-            // Group meeting — use meeting table if it exists, otherwise random cluster
-            const slots = getMeetingSlots();
-            const slotAssignments = [];
-            if (slots.length > 0) {
-                // Meeting at the table
-                meetingAgents.forEach((agent, i) => {
-                    const slot = slots[i % slots.length];
-                    agent.joinMeeting(m.id, slot, topic);
-                    slotAssignments.push({ agent: agent.id, slot });
-                });
-            } else {
-                // No meeting table — cluster agents near first agent's position
-                const anchor = meetingAgents[0];
-                meetingAgents.forEach((agent, i) => {
-                    const angle = (i / meetingAgents.length) * Math.PI * 2;
-                    const slot = { x: anchor.x + Math.cos(angle) * 40, y: anchor.y + Math.sin(angle) * 40 };
-                    agent.joinMeeting(m.id, slot, topic);
-                    slotAssignments.push({ agent: agent.id, slot });
-                });
-            }
-            activeMeetings[m.id] = { agents: meetingAgents, topic, purpose, type, organizer: m.organizer || participantKeys[0] || '', kind: m.kind || 'discussion', rules: m.rules || null, slotAssignments };
+            // Group meeting — prefer functional meeting spaces, then fall back to the legacy meeting table/cluster behavior.
+            const assignment = _applyGroupMeetingAssignment(m.id, m, meetingAgents, topic, occupiedSpaceIds);
+            activeMeetings[m.id] = { id: m.id, agents: meetingAgents, participantKeys, raw: m, topic, purpose, type, organizer: m.organizer || participantKeys[0] || '', kind: m.kind || 'discussion', rules: m.rules || null, slotAssignments: assignment.slotAssignments, meetingSpaceId: assignment.space ? assignment.space.id : null, meetingSpaceType: assignment.space ? assignment.space.type : null, meetingSpaceCapacity: assignment.space ? _meetingSpaceCapacity(assignment.space) : null, meetingSpaceName: assignment.space ? _meetingSpaceDisplayName(assignment.space) : '' };
             addGlobalLog(`📊 ` + (typeof i18n !== 'undefined' ? i18n.t('meeting_prefix') : 'Meeting') + `: ${meetingAgents.map(a => a.name).join(', ')} — ${topic}`);
         }
     }
@@ -5997,6 +6326,116 @@ function drawMeetingRoom(x, y) {
     _clearFurnitureShadow();
 }
 
+function _meetingForSpace(item) {
+    if (!item || !item.id) return null;
+    var ids = Object.keys(activeMeetings || {});
+    for (var i = 0; i < ids.length; i++) {
+        var meeting = activeMeetings[ids[i]];
+        if (meeting && meeting.meetingSpaceId === item.id) return meeting;
+    }
+    return null;
+}
+
+function _drawMeetingSpaceStatus(item, meeting) {
+    var b = FURNITURE_BOUNDS[item.type] || { w: 100, h: 80 };
+    ctx.save();
+    if (meeting) {
+        ctx.strokeStyle = 'rgba(76, 175, 80, 0.72)';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(item.x + 2, item.y + 2, b.w - 4, b.h - 4);
+        ctx.fillStyle = '#4caf50';
+        ctx.beginPath();
+        ctx.arc(item.x + b.w - 12, item.y + 12, 5, 0, Math.PI * 2);
+        ctx.fill();
+    } else {
+        ctx.fillStyle = '#607d8b';
+        ctx.fillRect(item.x + b.w - 16, item.y + 8, 8, 8);
+    }
+
+    if ((editMode || selectedItemId === item.id) && meeting) {
+        var label = meeting.topic || meeting.purpose || _tr('meeting');
+        ctx.font = '9px Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        var textW = Math.min(168, Math.max(64, ctx.measureText(label).width + 12));
+        var lx = item.x + b.w / 2 - textW / 2;
+        var ly = item.y - 16;
+        ctx.fillStyle = 'rgba(20,20,32,0.86)';
+        ctx.fillRect(lx, ly, textW, 13);
+        ctx.strokeStyle = '#4caf50';
+        ctx.strokeRect(lx, ly, textW, 13);
+        ctx.fillStyle = '#fff';
+        var clipped = label.length > 22 ? label.slice(0, 21) + '…' : label;
+        ctx.fillText(clipped, item.x + b.w / 2, ly + 7);
+    }
+    ctx.restore();
+}
+
+function _drawMeetingChair(cx, cy, faceDir) {
+    ctx.fillStyle = '#37474f';
+    ctx.fillRect(cx - 7, cy - 7, 14, 14);
+    ctx.fillStyle = '#546e7a';
+    ctx.fillRect(cx - 5, cy - 5, 10, 8);
+    ctx.fillStyle = faceDir === 2 ? '#263238' : '#455a64';
+    ctx.fillRect(cx - 6, faceDir === 2 ? cy - 8 : cy + 3, 12, 3);
+}
+
+function drawFunctionalMeetingTable(item, seats) {
+    var b = FURNITURE_BOUNDS[item.type];
+    var meeting = _meetingForSpace(item);
+    var tableX = item.x + 18;
+    var tableY = item.y + 34;
+    var tableW = b.w - 36;
+    var tableH = b.h - 52;
+    _setFurnitureLampShadow(item.x + b.w / 2, item.y + b.h / 2);
+    ctx.fillStyle = 'rgba(0,0,0,0.12)';
+    ctx.fillRect(tableX + 3, tableY + 4, tableW, tableH);
+    ctx.fillStyle = '#5d4037';
+    drawRoundRect(tableX, tableY, tableW, tableH, 6);
+    ctx.fill();
+    ctx.fillStyle = '#8d6e63';
+    drawRoundRect(tableX + 3, tableY + 3, tableW - 6, tableH - 6, 5);
+    ctx.fill();
+    ctx.fillStyle = '#cfd8dc';
+    ctx.fillRect(tableX + tableW / 2 - 8, tableY + tableH / 2 - 5, 16, 10);
+    var slots = _tableSlotsForSpace(item, seats);
+    for (var i = 0; i < Math.min(seats, slots.length); i++) {
+        _drawMeetingChair(slots[i].x, slots[i].y, slots[i].faceDir);
+    }
+    _drawMeetingSpaceStatus(item, meeting);
+    _clearFurnitureShadow();
+}
+
+function drawFunctionalMeetingRoom(item) {
+    var b = FURNITURE_BOUNDS[item.type];
+    var meeting = _meetingForSpace(item);
+    _setFurnitureLampShadow(item.x + b.w / 2, item.y + b.h / 2);
+    ctx.fillStyle = 'rgba(0,0,0,0.12)';
+    ctx.fillRect(item.x + 5, item.y + 8, b.w - 10, b.h - 4);
+    ctx.fillStyle = '#263238';
+    ctx.fillRect(item.x + 8, item.y + 8, b.w - 16, 5);
+    ctx.fillRect(item.x + 8, item.y + 8, 5, b.h - 18);
+    ctx.fillRect(item.x + b.w - 13, item.y + 8, 5, b.h - 18);
+    ctx.fillStyle = 'rgba(69,90,100,0.42)';
+    ctx.fillRect(item.x + 14, item.y + 14, b.w - 28, b.h - 28);
+    ctx.strokeStyle = '#90a4ae';
+    ctx.strokeRect(item.x + 18, item.y + 20, b.w - 36, b.h - 46);
+    ctx.fillStyle = '#5d4037';
+    drawRoundRect(item.x + 44, item.y + 66, b.w - 88, 48, 7);
+    ctx.fill();
+    ctx.fillStyle = '#8d6e63';
+    drawRoundRect(item.x + 48, item.y + 70, b.w - 96, 40, 6);
+    ctx.fill();
+    ctx.fillStyle = '#263238';
+    ctx.fillRect(item.x + b.w / 2 - 16, item.y + 78, 32, 20);
+    ctx.fillStyle = '#4fc3f7';
+    ctx.fillRect(item.x + b.w / 2 - 13, item.y + 81, 26, 13);
+    var slots = _tableSlotsForSpace(item, 10);
+    for (var i = 0; i < 10; i++) _drawMeetingChair(slots[i].x, slots[i].y, slots[i].faceDir);
+    _drawMeetingSpaceStatus(item, meeting);
+    _clearFurnitureShadow();
+}
+
 // --- FURNITURE ITEM DISPATCHER ---
 // Called by drawEnvironment for each item in officeConfig.furniture.
 function drawFurnitureItem(item) {
@@ -6009,6 +6448,9 @@ function drawFurnitureItem(item) {
         case 'plant':         drawPlant(item.x, item.y);         break;
         case 'tallPlant':     drawTallPlant(item.x, item.y);     break;
         case 'meetingTable':  drawMeetingRoom(item.x, item.y);   break;
+        case 'meetingTable4': drawFunctionalMeetingTable(item, 4); break;
+        case 'meetingTable6': drawFunctionalMeetingTable(item, 6); break;
+        case 'meetingRoom':   drawFunctionalMeetingRoom(item);   break;
         case 'lounge':        drawLoungeArea(item.x, item.y);    break;
         case 'breakArea':     drawBreakArea(item.x, item.y);     break;
         case 'engLounge':     drawEngLounge(item.x, item.y);     break;
@@ -6023,6 +6465,7 @@ function drawFurnitureItem(item) {
         case 'interactiveWindow': drawInteractiveWindow(item); break;
         case 'clock':         drawClock(item.x, item.y);         break;
         case 'bookshelf':     drawBookshelf(item.x, item.y);     break;
+        case 'functionalBookshelf': drawFunctionalBookshelf(item); break;
         case 'couch':         drawCouch(item);                    break;
         case 'coffeeTable':   drawCoffeeTable(item.x, item.y);   break;
         case 'endTable':      drawEndTable(item.x, item.y);      break;
@@ -7376,6 +7819,276 @@ function drawBookshelf(x, y) {
     ctx.fillStyle = '#ffeb3b'; ctx.fillRect(x + 37, y + 7, 4, 4);
 }
 
+function _archiveBindingLabel(item) {
+    return item && (item.archiveProjectTitle || item.archiveTitle || item.archiveProjectId || item.archiveId || '');
+}
+
+function drawFunctionalBookshelf(item) {
+    drawBookshelf(item.x, item.y);
+    var hasArchive = !!(item.archiveProjectId || item.archiveId);
+    ctx.save();
+    ctx.fillStyle = hasArchive ? '#4caf50' : '#607d8b';
+    ctx.fillRect(item.x + 34, item.y + 64, 10, 10);
+    ctx.fillStyle = '#ffffff';
+    ctx.font = '8px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(hasArchive ? '✓' : '!', item.x + 39, item.y + 69);
+
+    if (editMode || selectedItemId === item.id) {
+        var label = hasArchive ? _archiveBindingLabel(item) : _tr('bookshelf_unbound');
+        ctx.font = '9px Arial';
+        var textW = Math.min(140, Math.max(54, ctx.measureText(label).width + 10));
+        var lx = item.x + 25 - textW / 2;
+        var ly = item.y - 16;
+        ctx.fillStyle = 'rgba(20,20,32,0.85)';
+        ctx.fillRect(lx, ly, textW, 13);
+        ctx.strokeStyle = hasArchive ? '#4caf50' : '#90a4ae';
+        ctx.strokeRect(lx, ly, textW, 13);
+        ctx.fillStyle = '#fff';
+        var clipped = label.length > 18 ? label.slice(0, 17) + '…' : label;
+        ctx.fillText(clipped, item.x + 25, ly + 7);
+    }
+    ctx.restore();
+}
+
+var _bookshelfActionMenu = null;
+var _bookshelfBindDialog = null;
+var _archiveProjectCache = { loadedAt: 0, projects: [] };
+
+function _isFunctionalBookshelf(item) {
+    return item && item.type === 'functionalBookshelf';
+}
+
+function _archiveToast(message, type) {
+    var el = document.createElement('div');
+    el.textContent = message;
+    var border = type === 'error' ? '#ef5350' : '#4caf50';
+    el.style.cssText = 'position:fixed;bottom:86px;left:50%;transform:translateX(-50%);z-index:100000;background:#15151f;border:1px solid ' + border + ';color:#fff;padding:8px 14px;border-radius:6px;font-size:12px;box-shadow:0 8px 24px rgba(0,0,0,.35);';
+    document.body.appendChild(el);
+    setTimeout(function(){ if (el.parentNode) el.parentNode.removeChild(el); }, 3000);
+}
+
+function _closeBookshelfActionMenu() {
+    if (_bookshelfActionMenu && _bookshelfActionMenu.parentNode) _bookshelfActionMenu.parentNode.removeChild(_bookshelfActionMenu);
+    _bookshelfActionMenu = null;
+}
+
+function _handleFunctionalFurnitureClick(item, screenX, screenY) {
+    if (editMode) return false;
+    if (_isFunctionalBookshelf(item)) {
+        _showBookshelfActionMenu(item, screenX, screenY);
+        return true;
+    }
+    if (_isFunctionalMeetingSpace(item)) {
+        _handleMeetingSpaceClick(item, screenX, screenY);
+        return true;
+    }
+    return false;
+}
+
+function _handleMeetingSpaceClick(item, screenX, screenY) {
+    var meeting = _meetingForSpace(item);
+    _closeBookshelfActionMenu();
+    if (meeting && meeting.id) {
+        _showOccupiedMeetingSpaceMenu(item, meeting, screenX, screenY);
+        return;
+    }
+    _showIdleMeetingSpaceMenu(item, screenX, screenY);
+}
+
+function _positionMeetingSpaceMenu(menu, screenX, screenY) {
+    document.body.appendChild(menu);
+    var left = Math.min(screenX + 10, window.innerWidth - 230);
+    var top = Math.min(screenY + 10, window.innerHeight - 120);
+    menu.style.left = Math.max(8, left) + 'px';
+    menu.style.top = Math.max(8, top) + 'px';
+    _bookshelfActionMenu = menu;
+    setTimeout(function() {
+        document.addEventListener('click', _closeBookshelfActionMenu, { once: true });
+    }, 0);
+}
+
+function _meetingTopicLabel(meeting) {
+    return (meeting && (meeting.topic || meeting.purpose || meeting.title || meeting.id)) || _tr('meeting');
+}
+
+function _showOccupiedMeetingSpaceMenu(item, meeting, screenX, screenY) {
+    var menu = document.createElement('div');
+    menu.className = 'bookshelf-action-menu meeting-space-action-menu';
+    var title = document.createElement('div');
+    title.className = 'bookshelf-action-title';
+    title.textContent = _meetingSpaceDisplayName(item);
+    var topic = document.createElement('div');
+    topic.className = 'meeting-space-topic';
+    topic.textContent = _meetingTopicLabel(meeting);
+    topic.title = topic.textContent;
+    var viewBtn = document.createElement('button');
+    viewBtn.textContent = _tr('meeting_space_view_current');
+    viewBtn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        _closeBookshelfActionMenu();
+        openMeetingDetailModal(meeting.id);
+    });
+    menu.appendChild(title);
+    menu.appendChild(topic);
+    menu.appendChild(viewBtn);
+    _positionMeetingSpaceMenu(menu, screenX, screenY);
+}
+
+function _showIdleMeetingSpaceMenu(item, screenX, screenY) {
+    var menu = document.createElement('div');
+    menu.className = 'bookshelf-action-menu meeting-space-action-menu';
+    var title = document.createElement('div');
+    title.className = 'bookshelf-action-title';
+    title.textContent = _meetingSpaceDisplayName(item);
+    var empty = document.createElement('div');
+    empty.className = 'meeting-space-empty';
+    empty.textContent = _tr('meeting_space_idle');
+    var viewBtn = document.createElement('button');
+    viewBtn.textContent = _tr('meeting_space_view_all');
+    viewBtn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        _closeBookshelfActionMenu();
+        openMeetingsDashboard();
+    });
+    menu.appendChild(title);
+    menu.appendChild(empty);
+    menu.appendChild(viewBtn);
+    _positionMeetingSpaceMenu(menu, screenX, screenY);
+}
+
+function _showBookshelfActionMenu(item, screenX, screenY) {
+    _closeBookshelfActionMenu();
+    var bound = !!(item.archiveProjectId || item.archiveId);
+    var menu = document.createElement('div');
+    menu.className = 'bookshelf-action-menu';
+    var title = document.createElement('div');
+    title.className = 'bookshelf-action-title';
+    title.textContent = bound ? _archiveBindingLabel(item) : _tr('bookshelf_unbound');
+
+    var viewBtn = document.createElement('button');
+    viewBtn.textContent = _tr('bookshelf_view_archive');
+    viewBtn.disabled = !bound;
+    viewBtn.title = bound ? _tr('bookshelf_view_archive') : _tr('bookshelf_unbound_hint');
+    viewBtn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        if (!bound) return;
+        _closeBookshelfActionMenu();
+        _openBoundBookshelfArchive(item);
+    });
+
+    var bindBtn = document.createElement('button');
+    bindBtn.textContent = bound ? _tr('bookshelf_change_archive') : _tr('bookshelf_bind_archive');
+    bindBtn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        _closeBookshelfActionMenu();
+        _showArchiveBindingDialog(item);
+    });
+
+    menu.appendChild(title);
+    menu.appendChild(viewBtn);
+    menu.appendChild(bindBtn);
+    document.body.appendChild(menu);
+    var left = Math.min(screenX + 10, window.innerWidth - 190);
+    var top = Math.min(screenY + 10, window.innerHeight - 120);
+    menu.style.left = Math.max(8, left) + 'px';
+    menu.style.top = Math.max(8, top) + 'px';
+    _bookshelfActionMenu = menu;
+    setTimeout(function() {
+        document.addEventListener('click', _closeBookshelfActionMenu, { once: true });
+    }, 0);
+}
+
+function _openBoundBookshelfArchive(item) {
+    var archiveId = item.archiveProjectId || item.archiveId;
+    if (!archiveId) {
+        _archiveToast(_tr('bookshelf_unbound_hint'), 'error');
+        return;
+    }
+    if (typeof window.openArchiveRoomProject === 'function') {
+        window.openArchiveRoomProject(archiveId);
+        return;
+    }
+    if (typeof window.openArchiveRoom === 'function') {
+        window.openArchiveRoom();
+        setTimeout(function() {
+            if (window.ArchiveRoom && typeof window.ArchiveRoom.openProject === 'function') {
+                window.ArchiveRoom.openProject(archiveId);
+            }
+        }, 350);
+        return;
+    }
+    _archiveToast(_tr('bookshelf_archive_unavailable'), 'error');
+}
+
+function _fetchArchiveProjects() {
+    var now = Date.now();
+    if (_archiveProjectCache.projects.length && now - _archiveProjectCache.loadedAt < 30000) {
+        return Promise.resolve(_archiveProjectCache.projects);
+    }
+    return fetch('/api/archive-room').then(function(r) { return r.json(); }).then(function(d) {
+        if (d.error) throw new Error(d.error);
+        _archiveProjectCache = { loadedAt: Date.now(), projects: d.projects || [] };
+        return _archiveProjectCache.projects;
+    });
+}
+
+function _closeArchiveBindingDialog() {
+    if (_bookshelfBindDialog && _bookshelfBindDialog.parentNode) _bookshelfBindDialog.parentNode.removeChild(_bookshelfBindDialog);
+    _bookshelfBindDialog = null;
+}
+
+function _showArchiveBindingDialog(item) {
+    _closeArchiveBindingDialog();
+    var overlay = document.createElement('div');
+    overlay.className = 'bookshelf-bind-overlay';
+    overlay.innerHTML = '<div class="bookshelf-bind-dialog"><div class="bookshelf-bind-head"><strong>' + _tr('bookshelf_bind_archive') + '</strong><button type="button" aria-label="' + _tr('close_panel') + '">×</button></div><div class="bookshelf-bind-body">' + _tr('bookshelf_loading_archives') + '</div></div>';
+    document.body.appendChild(overlay);
+    _bookshelfBindDialog = overlay;
+    overlay.addEventListener('click', function(e) {
+        if (e.target === overlay) _closeArchiveBindingDialog();
+    });
+    overlay.querySelector('button').addEventListener('click', _closeArchiveBindingDialog);
+    _fetchArchiveProjects().then(function(projects) {
+        if (!_bookshelfBindDialog) return;
+        var body = overlay.querySelector('.bookshelf-bind-body');
+        if (!projects.length) {
+            body.innerHTML = '<div class="bookshelf-bind-empty">' + _tr('bookshelf_no_archives') + '</div>';
+            return;
+        }
+        body.innerHTML = '';
+        projects.forEach(function(p) {
+            var btn = document.createElement('button');
+            btn.className = 'bookshelf-archive-choice';
+            var title = p.title || p.name || p.id;
+            var desc = p.description || p.summary || '';
+            btn.innerHTML = '<span>' + _escapeHtml(title) + '</span><small>' + _escapeHtml(desc || p.id) + '</small>';
+            btn.addEventListener('click', function() {
+                _pushUndo();
+                item.archiveProjectId = p.id;
+                item.archiveProjectTitle = title;
+                saveOfficeConfig();
+                _closeArchiveBindingDialog();
+                _archiveToast(_tr('bookshelf_bound_archive', { name: title }), 'success');
+            });
+            body.appendChild(btn);
+        });
+    }).catch(function(e) {
+        var body = overlay.querySelector('.bookshelf-bind-body');
+        if (body) body.innerHTML = '<div class="bookshelf-bind-empty">' + _tr('bookshelf_archive_load_failed') + ': ' + _escapeHtml(e.message || e) + '</div>';
+    });
+}
+
+function _escapeHtml(value) {
+    return String(value == null ? '' : value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
 // --- INTERACTION ---
 // Track drag distance to distinguish clicks from pans
 let _clickStartX = 0, _clickStartY = 0;
@@ -7420,6 +8133,8 @@ function handleCanvasClick(clientX, clientY) {
     if (handleChatBubbleClick(cx, cy)) return;
     // Thought/speech bubble close/minimize
     if (handleBubbleClick(cx, cy)) return;
+    var furnitureHit = _findFurnitureAt(cx, cy);
+    if (furnitureHit && _handleFunctionalFurnitureClick(furnitureHit, clientX, clientY)) return;
     // Check gear icon click to open agent modal
     for (const agent of agents) {
         const g = agent.gearRect;
@@ -8693,12 +9408,20 @@ function wrapChatText(text, maxW) {
 }
 
 function minimizeAllChat() {
-    for (var key in agentChatData) { chatMinimized[key] = true; }
+    for (var key in agentChatData) {
+        var agent = agentMap[key] || agents.find(function(a) { return a.statusKey === key || a.id === key; });
+        if (agent && (agent.meetingId || agent.state === 'meeting' || agent.state === 'visiting')) continue;
+        chatMinimized[key] = true;
+    }
     addGlobalLog('💬 All chat bubbles minimized');
 }
 
 function expandAllChat() {
-    for (var key in agentChatData) { chatMinimized[key] = false; }
+    for (var key in agentChatData) {
+        var agent = agentMap[key] || agents.find(function(a) { return a.statusKey === key || a.id === key; });
+        if (agent && (agent.meetingId || agent.state === 'meeting' || agent.state === 'visiting')) continue;
+        chatMinimized[key] = false;
+    }
     addGlobalLog('💬 All chat bubbles expanded');
 }
 
@@ -8723,6 +9446,74 @@ function handleChatBubbleClick(canvasX, canvasY) {
     return false;
 }
 
+function _meetingBubbleText(turn) {
+    if (!turn) return '';
+    if (turn.pending) return turn.timedOut ? 'Provider call timed out' : 'Calling provider...';
+    if (turn.structured && turn.structured.position) return String(turn.structured.position || '');
+    return String(turn.text || turn.rawText || '');
+}
+
+function _meetingLatestSpeakerKey(record) {
+    if (!record) return '';
+    if (record.currentSpeaker) return String(record.currentSpeaker);
+    var pending = Array.isArray(record.pendingCalls) ? record.pendingCalls : [];
+    if (pending.length) {
+        var lastPending = pending[pending.length - 1] || {};
+        return String(lastPending.speaker || lastPending.agentId || lastPending.participant || lastPending.actorId || '');
+    }
+    var transcript = Array.isArray(record.transcript) ? record.transcript : [];
+    for (var i = transcript.length - 1; i >= 0; i--) {
+        if (transcript[i] && transcript[i].speaker) return String(transcript[i].speaker);
+    }
+    return '';
+}
+
+function _meetingChatSourceForSpeaker(agent) {
+    var meeting = _meetingForAgent(agent);
+    if (!meeting) return null;
+    var record = _meetingRawActiveRecord(meeting.id) || meeting.raw || meeting;
+    var speakerKey = _meetingLatestSpeakerKey(record);
+    if (!speakerKey || !_meetingAgentMatchesKey(agent, speakerKey)) return null;
+    var rows = [];
+    var latestTranscriptSeq = 0;
+    (record.transcript || []).forEach(function(turn) {
+        if (!turn || !_meetingAgentMatchesKey(agent, turn.speaker)) return;
+        latestTranscriptSeq = Math.max(latestTranscriptSeq, Number(turn.sequence || 0));
+        rows.push(Object.assign({ pending: false }, turn));
+    });
+    (record.pendingCalls || []).forEach(function(call) {
+        var speaker = call && (call.speaker || call.agentId || call.participant || call.actorId);
+        if (!speaker || !_meetingAgentMatchesKey(agent, speaker)) return;
+        if (latestTranscriptSeq && Number(call.sequence || 0) <= latestTranscriptSeq) return;
+        rows.push(Object.assign({ pending: true, speaker: speaker }, call));
+    });
+    rows.sort(function(a, b) { return Number(a.sequence || 0) - Number(b.sequence || 0); });
+    rows = rows.filter(function(turn) { return _meetingBubbleText(turn); });
+    if (!rows.length) return null;
+    var msgs = rows.slice(-1).map(function(turn) {
+        return {
+            role: 'assistant',
+            text: _meetingBubbleText(turn),
+            epochMs: Date.parse(turn.createdAt || turn.updatedAt || '') || 0,
+            _meetingTurn: true
+        };
+    });
+    var wrapped = [];
+    for (var mi = 0; mi < msgs.length; mi++) {
+        var msg = msgs[mi];
+        if (mi < msgs.length - 1) {
+            var displayText = msg.text || '';
+            if (displayText.length > 350) displayText = displayText.substring(0, 347) + '...';
+            var lines = wrapChatText(displayText, 155);
+            for (var li = 0; li < lines.length; li++) wrapped.push({ text: lines[li], isUser: false });
+            wrapped.push({ text: '', separator: true });
+        } else {
+            wrapped.push({ _lastMsg: true, msg: msg, isUser: false, prefix: '' });
+        }
+    }
+    return { msgs: msgs, wrapped: wrapped };
+}
+
 function drawChatBubbles() {
     var chatBubbles = [];
     renderedChatBubbles = [];
@@ -8730,14 +9521,26 @@ function drawChatBubbles() {
 
     for (var ai = 0; ai < agents.length; ai++) {
         var agent = agents[ai];
-        var msgs = agentChatData[agent.statusKey];
-        if (!msgs || msgs.length === 0) continue;
+        var meeting = _meetingForAgent(agent);
+        var meetingSource = meeting ? _meetingChatSourceForSpeaker(agent) : null;
+        var msgs = null;
+        var preWrapped = null;
+        var isMeetingBubble = !!meeting;
+        if (meeting) {
+            if (!meetingSource) continue;
+            msgs = meetingSource.msgs;
+            preWrapped = meetingSource.wrapped;
+        } else {
+            msgs = agentChatData[agent.statusKey];
+            preWrapped = agentChatWrapped[agent.statusKey];
+            if (!msgs || msgs.length === 0 || !preWrapped) continue;
+        }
 
         var headX = agent.x;
         var headY = agent.y - 50;
 
         // Minimized icon
-        if (chatMinimized[agent.statusKey]) {
+        if (!isMeetingBubble && chatMinimized[agent.statusKey]) {
             var iconX = headX + 18;
             var iconY = headY - 20;
             // Draw minimized icon
@@ -8757,8 +9560,6 @@ function drawChatBubbles() {
             continue;
         }
 
-        var preWrapped = agentChatWrapped[agent.statusKey];
-        if (!preWrapped) continue;
         var renderedLines = [];
         for (var pi = 0; pi < preWrapped.length; pi++) {
             var entry = preWrapped[pi];
@@ -12369,6 +13170,7 @@ function handleEditClick(worldX, worldY, screenX, screenY, event) {
     // 3. Hit-test furniture — skip if mousedown already handled it (drag)
     var hit = _findFurnitureAt(worldX, worldY);
     if (hit) {
+        if (_handleFunctionalFurnitureClick(hit, screenX || 200, screenY || 200)) return true;
         // Meeting table click → open dashboard (only outside edit mode)
         if (_meetingTableClickCheck(hit)) return true;
         // Furniture selection is handled by mousedown now.
@@ -12609,6 +13411,26 @@ function _updateFloatingToolbarPosition() {
     }
     iwSettingsBtn.style.display = (selItem.type === 'interactiveWindow') ? '' : 'none';
 
+    var bookshelfBindBtn = document.getElementById('ftb-bookshelf-bind-btn');
+    if (!bookshelfBindBtn) {
+        bookshelfBindBtn = document.createElement('button');
+        bookshelfBindBtn.id = 'ftb-bookshelf-bind-btn';
+        bookshelfBindBtn.textContent = '🗄️';
+        bookshelfBindBtn.title = _tr('bookshelf_bind_archive');
+        bookshelfBindBtn.style.cssText = 'padding:4px 6px;background:#2a2a4e;border:1px solid #3a3a5e;border-radius:4px;cursor:pointer;font-size:12px;';
+        bookshelfBindBtn.onclick = function() {
+            if (!selectedItemId) return;
+            var item = officeConfig.furniture.find(function(f){ return f.id === selectedItemId; });
+            if (!_isFunctionalBookshelf(item)) return;
+            _showArchiveBindingDialog(item);
+        };
+        _floatingToolbar.appendChild(bookshelfBindBtn);
+    }
+    bookshelfBindBtn.style.display = _isFunctionalBookshelf(selItem) ? '' : 'none';
+    if (_isFunctionalBookshelf(selItem)) {
+        bookshelfBindBtn.title = selItem.archiveProjectId ? _tr('bookshelf_change_archive') : _tr('bookshelf_bind_archive');
+    }
+
     // Show color button for couch items
     var couchColorBtn = document.getElementById('ftb-couch-color-btn');
     if (!couchColorBtn) {
@@ -12813,8 +13635,7 @@ function _mmLoadCurrentSettings() {
         var hermesFields = document.getElementById('mm-hermes-fields');
         var hermesHome = document.getElementById('mm-hermes-home');
         var hermesBin = document.getElementById('mm-hermes-bin');
-        var hermesApiUrl = document.getElementById('mm-hermes-api-url');
-        var hermesApiKey = document.getElementById('mm-hermes-api-key');
+        var meetingPreparingTimeout = document.getElementById('mm-meeting-preparing-timeout');
         if (gwInput) gwInput.value = (cfg.openclaw || {}).gatewayUrl || '';
         if (nameInput) nameInput.value = (cfg.office || {}).name || '';
         // Parse "City,State" or "City+Name,State" back into separate fields
@@ -12848,7 +13669,7 @@ function _mmLoadCurrentSettings() {
         if (pcmFields) pcmFields.style.display = pcmEnabled ? "block" : "none";
         // API Usage
         var apiUsageCb = document.getElementById("mm-apiusage-enable");
-        if (apiUsageCb) apiUsageCb.checked = (cfg.features || {}).apiUsage !== false;
+        if (apiUsageCb) apiUsageCb.checked = (cfg.features || {}).apiUsage === true;
         // Browser
         var brEnabled = ((cfg.features || {}).browserPanel) || false;
         var brCdp = ((cfg.browser || {}).cdpUrl) || DEFAULT_BROWSER_CDP_URL;
@@ -12861,6 +13682,9 @@ function _mmLoadCurrentSettings() {
         if (brCdpEl) brCdpEl.value = brCdp;
         if (brViewerEl) brViewerEl.value = brViewer;
         if (brFields) brFields.style.display = brEnabled ? "block" : "none";
+        if (meetingPreparingTimeout) {
+            meetingPreparingTimeout.value = String(_mtgNormalizePreparingTimeoutSec((cfg.meetings || {}).preparingTimeoutSec));
+        }
     }).catch(function(){});
     // Load display prefs from localStorage
     var prefs = {};
@@ -13149,6 +13973,9 @@ function mmSaveSettings() {
     }
     config.office = { name: officeName || 'Virtual Office' };
     config.weather = { location: weather || null };
+    config.meetings = {
+        preparingTimeoutSec: _mtgNormalizePreparingTimeoutSec((document.getElementById('mm-meeting-preparing-timeout') || {}).value)
+    };
     // PC Metrics
     var _pcmCb = document.getElementById("mm-pcmetrics-enable");
     var _pcmUrl = document.getElementById("mm-pcmetrics-url");
@@ -13187,6 +14014,12 @@ function mmSaveSettings() {
             var brandEl = document.getElementById('brand-title');
             if (brandEl && officeName) brandEl.textContent = officeName.toUpperCase();
             if (officeName) document.title = officeName;
+            if (typeof window.setPcMonitorEnabled === 'function' && config.features && Object.prototype.hasOwnProperty.call(config.features, 'pcMetrics')) {
+                window.setPcMonitorEnabled(config.features.pcMetrics === true);
+            }
+            if (typeof window.setApiUsageEnabled === 'function' && config.features && Object.prototype.hasOwnProperty.call(config.features, 'apiUsage')) {
+                window.setApiUsageEnabled(config.features.apiUsage === true);
+            }
         } else {
             _acpShowToast('❌ Save failed');
         }
@@ -15943,6 +16776,8 @@ function _mtgRender() {
                 if (m.contextMode) activeRightMeta.push('🧩 ' + _escMtg(_mtgT('meeting_context_mode', 'Context')) + ': ' + _escMtg(m.contextMode));
                 if (m.currentSpeaker) activeRightMeta.push('🗣️ ' + _escMtg(_mtgT('meeting_current_speaker', 'Speaker')) + ': ' + _escMtg(m.currentSpeaker));
                 if (m.resolutionPolicy) activeRightMeta.push('⚖️ ' + _escMtg(_mtgResolutionPolicyLabel(m.resolutionPolicy)));
+                var activePreparingTimeoutLabel = _mtgPreparingTimeoutLabel(m);
+                if (activePreparingTimeoutLabel) activeRightMeta.push('⏱️ ' + _escMtg(activePreparingTimeoutLabel));
                 if (m.urgency) activeRightMeta.push('🚦 ' + _escMtg(_mtgUrgencyLabel(m.urgency)));
             }
             activeRightMeta.push(_mtgProjectMetaLabel(m));
@@ -15980,6 +16815,8 @@ function _mtgRender() {
             if (m.agenda && m.agenda !== m.topic) rightMeta.push('📝 ' + _escMtg(_mtgT('meeting_current_agenda', 'Current agenda')) + ': ' + _escMtg(m.agenda));
             if (m.contextMode) rightMeta.push('🧩 ' + _escMtg(_mtgT('meeting_context_mode', 'Context')) + ': ' + _escMtg(m.contextMode));
             if (m.resolutionPolicy) rightMeta.push('⚖️ ' + _escMtg(_mtgT('meeting_resolution_policy', 'Resolution policy')) + ': ' + _escMtg(_mtgResolutionPolicyLabel(m.resolutionPolicy)));
+            var cardPreparingTimeoutLabel = _mtgPreparingTimeoutLabel(m);
+            if (cardPreparingTimeoutLabel) rightMeta.push('⏱️ ' + _escMtg(cardPreparingTimeoutLabel));
             if (m.currentSpeaker) rightMeta.push('🗣️ ' + _escMtg(_mtgT('meeting_current_speaker', 'Speaker')) + ': ' + _escMtg(m.currentSpeaker));
             if (m.urgency) rightMeta.push('🚦 ' + _escMtg(_mtgUrgencyLabel(m.urgency)));
         }
@@ -16145,13 +16982,41 @@ function _mtgMeetingStageLabel(stage) {
     return map[key] ? _mtgT(map[key], key) : key;
 }
 
+function _mtgNormalizePreparingTimeoutSec(value) {
+    var seconds = parseInt(value, 10);
+    if (!isFinite(seconds) || seconds < 30) seconds = 300;
+    if (seconds > 86400) seconds = 86400;
+    return seconds;
+}
+
+function _mtgPreparingRemainingSec(m) {
+    if (!m || (m.executionStage || '') !== 'preparing') return null;
+    var started = Date.parse(m.preparingStartedAt || m.createdAt || '');
+    if (!started) return null;
+    var timeout = _mtgNormalizePreparingTimeoutSec(m.preparingTimeoutSec || 300);
+    return Math.max(0, Math.ceil((started + timeout * 1000 - Date.now()) / 1000));
+}
+
+function _mtgPreparingTimeoutLabel(m) {
+    if (!m || !m.executableMeeting) return '';
+    if (m.cancelReason === 'preparing_timeout') {
+        return _mtgT('meeting_preparing_timeout_released', 'Preparing timeout released');
+    }
+    var remaining = _mtgPreparingRemainingSec(m);
+    if (remaining === null) return '';
+    return _mtgT('meeting_preparing_timeout_remaining', 'Auto-release in {seconds}s').replace('{seconds}', String(remaining));
+}
+
 function _mtgMeetingStatusInfo(m) {
     var stage = String((m && (m.executionStage || m.status)) || '').trim();
     if ((m && m.status) === 'active' && stage !== 'cancelled' && stage !== 'failed' && stage !== 'completed') {
         return { icon: '●', label: _tr('active'), className: 'mtg-badge-active' };
     }
     if (stage === 'cancelled') {
-        return { icon: '✕', label: _mtgT('meeting_status_cancelled', 'Cancelled'), className: 'mtg-badge-kind' };
+        var cancelledLabel = (m && m.cancelReason === 'preparing_timeout')
+            ? _mtgT('meeting_preparing_timeout_released', 'Preparing timeout released')
+            : _mtgT('meeting_status_cancelled', 'Cancelled');
+        return { icon: '✕', label: cancelledLabel, className: 'mtg-badge-kind' };
     }
     if (stage === 'failed') {
         return { icon: '!', label: _mtgT('meeting_status_failed', 'Failed'), className: 'mtg-badge-countdown' };
@@ -16243,13 +17108,13 @@ function _mtgRenderRequestReview(req) {
     if (req.status !== 'pending') return '';
     var proposal = _mtgRequestProposal(req);
     var participants = proposal.suggestedParticipants || [];
-    var participantOptions = _mtgAgents.map(function(a) {
-        var key = _mtgAgentKey(a);
-        var checked = participants.indexOf(key) >= 0 ? ' checked' : '';
-        return '<label class="mtg-label" style="display:inline-flex;align-items:center;gap:4px;margin-right:10px;margin-top:4px;">' +
-            '<input type="checkbox" class="mtg-request-participant mtg-request-participant-' + _escMtg(req.id) + '" data-request-id="' + _escMtg(req.id) + '" value="' + _escMtg(key) + '"' + checked + ' onchange="_mtgUpdateRequestModeratorOptions(\'' + _escMtg(req.id) + '\')"> ' +
-            _escMtg((a.emoji || '🤖') + ' ' + (a.name || key)) + '</label>';
-    }).join('');
+    var participantOptions = _mtgParticipantSelectorHtml({
+        selected: participants,
+        participantClass: 'mtg-request-participant mtg-request-participant-' + req.id,
+        branchClass: 'mtg-request-branch mtg-request-branch-' + req.id,
+        participantAttrs: ' data-request-id="' + _escMtg(req.id) + '" onchange="_mtgUpdateRequestModeratorOptions(\'' + _escMtg(req.id) + '\')"',
+        branchAttrs: ' data-request-id="' + _escMtg(req.id) + '" onchange="_mtgToggleRequestBranch(\'' + _escMtg(req.id) + '\', this)"'
+    });
     return '<div class="mtg-request-review" id="mtg-request-review-' + _escMtg(req.id) + '">' +
         '<label class="mtg-label">' + _escMtg(_mtgT('meeting_topic', 'Topic')) + '</label>' +
         '<input id="mtg-request-topic-' + _escMtg(req.id) + '" class="skl-input" type="text" value="' + _escMtg(proposal.topic || '') + '">' +
@@ -16321,16 +17186,17 @@ function _mtgRenderRequests(container) {
     });
 }
 
+function _mtgToggleRequestBranch(requestId, branchEl) {
+    var branchId = branchEl.getAttribute('data-branch-id') || '';
+    _mtgApplyBranchSelection('[data-request-id="' + requestId + '"].mtg-request-branch', '[data-request-id="' + requestId + '"].mtg-request-participant', branchId, branchEl.checked);
+    _mtgUpdateRequestModeratorOptions(requestId);
+}
+
 function _mtgUpdateRequestModeratorOptions(requestId) {
-    var select = document.getElementById('mtg-request-moderator-' + requestId);
-    if (!select) return;
     var req = (_mtgData.requests || []).find(function(item) { return item.id === requestId; }) || {};
     var proposal = _mtgRequestProposal(req);
-    var selected = Array.prototype.slice.call(document.querySelectorAll('[data-request-id="' + requestId + '"].mtg-request-participant:checked')).map(function(el) { return el.value; });
-    select.innerHTML = selected.map(function(key) {
-        var info = _mtgAgentMap[key] || { name: key, emoji: '🤖' };
-        return '<option value="' + _escMtg(key) + '"' + (key === proposal.suggestedModerator ? ' selected' : '') + '>' + _escMtg((info.emoji || '🤖') + ' ' + (info.name || key)) + '</option>';
-    }).join('');
+    _mtgSyncBranchSelectionState('[data-request-id="' + requestId + '"].mtg-request-branch', '[data-request-id="' + requestId + '"].mtg-request-participant');
+    _mtgUpdateModeratorOptions('mtg-request-moderator-' + requestId, '[data-request-id="' + requestId + '"].mtg-request-participant', proposal.suggestedModerator);
 }
 
 function _mtgRequestError(requestId, msg) {
@@ -16343,7 +17209,7 @@ function _mtgRequestError(requestId, msg) {
 
 async function _mtgConfirmRequest(requestId) {
     _mtgRequestError(requestId, '');
-    var participants = Array.prototype.slice.call(document.querySelectorAll('[data-request-id="' + requestId + '"].mtg-request-participant:checked')).map(function(el) { return el.value; });
+    var participants = _mtgFilterAssignableParticipants(Array.prototype.slice.call(document.querySelectorAll('[data-request-id="' + requestId + '"].mtg-request-participant:checked')).map(function(el) { return el.value; }));
     var selectedContextIds = Array.prototype.slice.call(document.querySelectorAll('[data-request-id="' + requestId + '"].mtg-request-context:checked')).map(function(el) { return el.value; });
     var body = {
         topic: ((document.getElementById('mtg-request-topic-' + requestId) || {}).value || '').trim(),
@@ -16633,6 +17499,8 @@ function _mtgT(key, fallback) {
         new_meeting: '新建会议',
         meeting_executable: '可执行会议',
         meeting_stage: '阶段',
+        meeting_preparing_timeout_remaining: '{seconds} 秒后自动释放',
+        meeting_preparing_timeout_released: '准备超时已释放',
         meeting_version: '版本',
         meeting_round: '轮次',
         meeting_moderator: '主持人',
@@ -16732,6 +17600,8 @@ function _mtgT(key, fallback) {
         meeting_type_discussion: '讨论决策',
         meeting_type_task: '任务协作',
         meeting_participants: '参会者',
+        meeting_branch_quick_select: '按部门快捷选择',
+        meeting_branch_quick_select_hint: '先选择部门，再手动调整单个 Agent。',
         meeting_context_incremental: '增量',
         meeting_context_summary: '摘要',
         meeting_context_full: '完整',
@@ -16782,7 +17652,8 @@ function _mtgLiveStateFromMeeting(m) {
         lastSeq: Number(m.lastEventSequence || 0),
         transcript: [],
         pendingBySeq: {},
-        turnBySeq: {}
+        turnBySeq: {},
+        timeoutRunBySeq: {}
     };
     (m.transcript || []).forEach(function(turn) {
         var seq = Number(turn.sequence || 0);
@@ -16919,12 +17790,37 @@ function _mtgPendingFromProviderEvent(event) {
         purpose: payload.purpose || '',
         promptChars: Number(payload.promptChars || 0),
         contextMode: payload.contextMode || '',
-        createdAt: event.createdAt || ''
+        createdAt: event.createdAt || '',
+        elapsedSec: Number(payload.elapsedSec || 0),
+        timeoutSec: Number(payload.timeoutSec || 0),
+        timedOut: !!payload.timedOut
     };
 }
 
+function _mtgProviderTimeoutSec() {
+    return 120;
+}
+
+function _mtgCallElapsedSec(call) {
+    if (!call) return 0;
+    if (Number(call.elapsedSec || 0) > 0) return Number(call.elapsedSec || 0);
+    if (!call.createdAt) return 0;
+    var ts = Date.parse(call.createdAt);
+    if (!isFinite(ts)) return 0;
+    return Math.max(0, Math.floor((Date.now() - ts) / 1000));
+}
+
+function _mtgHydratePendingCall(call) {
+    if (!call) return call;
+    var copy = Object.assign({}, call);
+    copy.elapsedSec = _mtgCallElapsedSec(copy);
+    copy.timeoutSec = Number(copy.timeoutSec || _mtgProviderTimeoutSec());
+    copy.timedOut = !!copy.timedOut || (copy.timeoutSec > 0 && copy.elapsedSec >= copy.timeoutSec);
+    return copy;
+}
+
 function _mtgApplyLiveEvent(meetingId, event) {
-    var state = _mtgLiveEvents[meetingId] || { lastSeq: 0, transcript: [], pendingBySeq: {}, turnBySeq: {} };
+    var state = _mtgLiveEvents[meetingId] || { lastSeq: 0, transcript: [], pendingBySeq: {}, turnBySeq: {}, timeoutRunBySeq: {} };
     var seq = Number(event.sequence || 0);
     if (seq) state.lastSeq = Math.max(Number(state.lastSeq || 0), seq);
     if (event.type === 'provider_call_started') {
@@ -16999,6 +17895,23 @@ async function _mtgPollLiveMeetings() {
                     shouldRefresh = true;
                 }
             });
+            var hydratedPending = Object.keys(state.pendingBySeq || {}).map(function(key) {
+                var call = _mtgHydratePendingCall(state.pendingBySeq[key]);
+                state.pendingBySeq[key] = call;
+                return call;
+            });
+            if (hydratedPending.some(function(call) { return call.timedOut; })) changed = true;
+            hydratedPending.forEach(function(call) {
+                if (!call.timedOut || !call.sequence || state.timeoutRunBySeq[call.sequence]) return;
+                state.timeoutRunBySeq[call.sequence] = Date.now();
+                fetch('/api/meetings/executable/' + encodeURIComponent(m.id) + '/run', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'provider_timeout_skip', pendingSequence: call.sequence })
+                }).catch(function(e) {
+                    console.warn('[meetings] provider timeout skip failed:', e);
+                });
+            });
         } catch (e) {
             console.warn('[meetings] live poll error:', e);
         }
@@ -17027,7 +17940,7 @@ function _mtgRenderTranscript(m) {
         return Object.assign({ pending: false }, turn);
     });
     (m.pendingCalls || []).forEach(function(call) {
-        rows.push(Object.assign({ pending: true }, call));
+        rows.push(Object.assign({ pending: true }, _mtgHydratePendingCall(call)));
     });
     rows.sort(function(a, b) { return Number(a.sequence || 0) - Number(b.sequence || 0); });
     rows.forEach(function(turn) {
@@ -17053,9 +17966,16 @@ function _mtgRenderTranscript(m) {
             var isUserTurn = turn.type === 'user_intervention' || turn.actorType === 'user';
             var info = isUserTurn ? { emoji: '👤', name: _mtgT('meeting_user', 'User') } : (_mtgAgentMap[turn.speaker] || { emoji: '🤖', name: turn.speaker || 'Unknown' });
             var providerKind = ((turn.providerRef || {}).providerKind || '').trim();
-            var status = isUserTurn ? '' : (turn.pending ? ' · ' + _mtgT('meeting_provider_calling', 'calling') : (turn.ok ? '' : ' · ' + _mtgT('meeting_turn_failed', 'failed')));
+            var pendingStatus = turn.timedOut ? _mtgT('meeting_provider_call_timeout', 'call timed out') : _mtgT('meeting_provider_calling', 'calling');
+            var status = isUserTurn ? '' : (turn.pending ? ' · ' + pendingStatus : (turn.ok ? '' : ' · ' + _mtgT('meeting_turn_failed', 'failed')));
             var duration = turn.durationMs ? ' · ' + Math.round(turn.durationMs / 1000) + 's' : '';
-            var text = turn.pending ? (isTargetedPending ? _mtgT('meeting_targeted_calling', 'Answering targeted question...') : _mtgT('meeting_provider_calling', 'Calling provider...')) : (turn.text || '');
+            var pendingText = isTargetedPending ? _mtgT('meeting_targeted_calling', 'Answering targeted question...') : _mtgT('meeting_provider_calling', 'Calling provider...');
+            if (turn.pending && turn.timedOut) {
+                pendingText = _mtgT('meeting_provider_timeout_monitor', 'Provider call has exceeded the timeout and will be skipped so the meeting can continue.');
+            } else if (turn.pending && turn.elapsedSec) {
+                pendingText += ' · ' + _mtgT('meeting_provider_waited', 'waited') + ' ' + Math.round(turn.elapsedSec) + 's';
+            }
+            var text = turn.pending ? pendingText : (turn.text || '');
             var marker = '';
             if (isTargetedQuestion) {
                 var targetInfo = _mtgAgentMap[turn.target] || { emoji: '🤖', name: turn.target || '' };
@@ -17082,7 +18002,7 @@ function _mtgRenderTranscript(m) {
             if (isTargetedResponse && turn.targetQuestion) {
                 text = _mtgT('meeting_targeted_question', 'Targeted question') + ': ' + turn.targetQuestion + '\n\n' + text;
             }
-            html += '<div class="mtg-turn' + (turn.pending ? ' mtg-turn-pending' : '') + (isUserTurn ? ' mtg-turn-user' : '') + '">';
+            html += '<div class="mtg-turn' + (turn.pending ? ' mtg-turn-pending' : '') + (turn.timedOut ? ' mtg-turn-timeout' : '') + (isUserTurn ? ' mtg-turn-user' : '') + '">';
             html += '<div class="mtg-turn-header"><span class="mtg-response-emoji">' + _escMtg(info.emoji || '🤖') + '</span><span class="mtg-response-name">' + _escMtg(info.name || turn.speaker || 'Unknown') + '</span>';
             html += '<span class="mtg-turn-meta">' + _escMtg([marker, providerKind + status + duration].filter(Boolean).join(' · ')) + '</span></div>';
             if (!turn.pending && !isUserTurn && _mtgHasStructuredTurn(turn.structured)) {
@@ -17412,6 +18332,140 @@ function _mtgAgentKey(agent) {
     return agent.key || agent.statusKey || agent.agentId || agent.id || '';
 }
 
+function _mtgNormalizeBranchToken(value) {
+    return String(value || '').trim().toLowerCase();
+}
+
+function _mtgParticipantBranchId(agent) {
+    var rawBranch = (agent && agent.branch) || '';
+    var normalized = _mtgNormalizeBranchToken(rawBranch);
+    var branches = getBranchList();
+    var matched = branches.find(function(b) {
+        return b.id === rawBranch ||
+            _mtgNormalizeBranchToken(b.id) === normalized ||
+            _mtgNormalizeBranchToken(b.name) === normalized;
+    });
+    if (matched) return matched.id;
+    var unassignedNames = [
+        'unassigned',
+        _mtgT('branch_unassigned', 'Unassigned')
+    ].map(_mtgNormalizeBranchToken);
+    if (!normalized || unassignedNames.indexOf(normalized) >= 0) return 'UNASSIGNED';
+    if (agent && agent.providerKind) {
+        var providerMatched = branches.find(function(b) {
+            return _mtgNormalizeBranchToken(b.name) === _mtgNormalizeBranchToken(agent.providerKind) ||
+                _mtgNormalizeBranchToken(b.id) === _mtgNormalizeBranchToken(agent.providerKind);
+        });
+        if (providerMatched) return providerMatched.id;
+    }
+    return 'UNASSIGNED';
+}
+
+function _mtgBranchDisplayLabel(branch) {
+    if (!branch) return _mtgT('branch_unassigned', 'Unassigned');
+    var name = branch.id === 'UNASSIGNED' ? _mtgT('branch_unassigned', 'Unassigned') : (branch.name || branch.id);
+    if (typeof name === 'string' && name.indexOf('branch_') === 0) name = _mtgT(name, branch.id || name);
+    return (branch.emoji || '🏢') + ' ' + name;
+}
+
+function _mtgIsAssignableMeetingAgent(agent) {
+    return !!(agent && agent.assignable !== false && agent.systemRole !== 'archive_manager' && !agent.archiveManager);
+}
+
+function _mtgMeetingAgents() {
+    return (_mtgAgents || []).filter(_mtgIsAssignableMeetingAgent);
+}
+
+function _mtgAssignableParticipantSet() {
+    return new Set(_mtgMeetingAgents().map(function(agent) { return _mtgAgentKey(agent); }));
+}
+
+function _mtgFilterAssignableParticipants(participants) {
+    var allowed = _mtgAssignableParticipantSet();
+    return (participants || []).filter(function(key) { return allowed.has(key); });
+}
+
+function _mtgParticipantSelectorHtml(opts) {
+    opts = opts || {};
+    var participantClass = opts.participantClass || '';
+    var branchClass = opts.branchClass || '';
+    var branchAttrs = opts.branchAttrs || '';
+    var participantAttrs = opts.participantAttrs || '';
+    var allowed = _mtgAssignableParticipantSet();
+    var selected = new Set((opts.selected || []).map(function(item) { return String(item); }).filter(function(key) { return allowed.has(key); }));
+    var byBranch = {};
+    getBranchList().forEach(function(branch) { byBranch[branch.id] = []; });
+    _mtgMeetingAgents().forEach(function(agent) {
+        var branchId = _mtgParticipantBranchId(agent);
+        if (!byBranch[branchId]) byBranch[branchId] = [];
+        byBranch[branchId].push(agent);
+    });
+    var branchHtml = getBranchList().map(function(branch) {
+        var branchAgents = byBranch[branch.id] || [];
+        if (!branchAgents.length) return '';
+        return '<label class="mtg-label" style="display:inline-flex;align-items:center;gap:4px;margin-right:10px;margin-top:4px;">' +
+            '<input type="checkbox" class="' + _escMtg(branchClass) + '" data-branch-id="' + _escMtg(branch.id) + '"' + branchAttrs + '> ' +
+            _escMtg(_mtgBranchDisplayLabel(branch)) +
+            '</label>';
+    }).join('');
+    var agentHtml = getBranchList().map(function(branch) {
+        var branchAgents = byBranch[branch.id] || [];
+        if (!branchAgents.length) return '';
+        var items = branchAgents.map(function(agent) {
+            var key = _mtgAgentKey(agent);
+            var checked = selected.has(key) ? ' checked' : '';
+            return '<label class="mtg-label" style="display:inline-flex;align-items:center;gap:4px;margin-right:10px;margin-top:4px;">' +
+                '<input type="checkbox" class="' + _escMtg(participantClass) + '" data-branch-id="' + _escMtg(branch.id) + '" value="' + _escMtg(key) + '"' + checked + participantAttrs + '> ' +
+                _escMtg((agent.emoji || '🤖') + ' ' + (agent.name || key)) +
+                '</label>';
+        }).join('');
+        return '<div class="mtg-participant-branch-group" data-branch-id="' + _escMtg(branch.id) + '" style="margin-top:6px;">' +
+            '<div class="mtg-section-text" style="font-size:10px;color:#aaa;">' + _escMtg(_mtgBranchDisplayLabel(branch)) + '</div>' +
+            '<div>' + items + '</div>' +
+            '</div>';
+    }).join('');
+    return '<div class="mtg-participant-selector">' +
+        '<div class="mtg-section-text" style="font-size:10px;color:#aaa;margin:2px 0 4px;">' + _escMtg(_mtgT('meeting_branch_quick_select', 'Quick select by branch')) + '</div>' +
+        '<div class="mtg-branch-selectors">' + branchHtml + '</div>' +
+        '<div class="mtg-section-text" style="font-size:10px;color:#777;margin-top:4px;">' + _escMtg(_mtgT('meeting_branch_quick_select_hint', 'Choose a branch, then manually adjust individual agents.')) + '</div>' +
+        '<div class="mtg-agent-selectors" style="margin-top:6px;">' + agentHtml + '</div>' +
+        '</div>';
+}
+
+function _mtgSelectedParticipantValues(selector) {
+    return Array.prototype.slice.call(document.querySelectorAll(selector + ':checked')).map(function(el) { return el.value; });
+}
+
+function _mtgApplyBranchSelection(branchSelector, participantSelector, branchId, checked) {
+    Array.prototype.slice.call(document.querySelectorAll(participantSelector + '[data-branch-id="' + branchId + '"]')).forEach(function(el) {
+        el.checked = checked;
+    });
+}
+
+function _mtgSyncBranchSelectionState(branchSelector, participantSelector) {
+    Array.prototype.slice.call(document.querySelectorAll(branchSelector)).forEach(function(branchEl) {
+        var branchId = branchEl.getAttribute('data-branch-id') || '';
+        var items = Array.prototype.slice.call(document.querySelectorAll(participantSelector + '[data-branch-id="' + branchId + '"]'));
+        var checkedCount = items.filter(function(el) { return el.checked; }).length;
+        branchEl.checked = items.length > 0 && checkedCount === items.length;
+        branchEl.indeterminate = checkedCount > 0 && checkedCount < items.length;
+    });
+}
+
+function _mtgUpdateModeratorOptions(selectId, participantSelector, preferredModerator) {
+    var select = document.getElementById(selectId);
+    if (!select) return;
+    var previous = select.value || preferredModerator || '';
+    var selected = _mtgSelectedParticipantValues(participantSelector);
+    var selectedSet = new Set(selected);
+    var target = selectedSet.has(previous) ? previous : (selected[0] || '');
+    select.innerHTML = selected.map(function(key) {
+        var info = _mtgAgentMap[key] || { name: key, emoji: '🤖' };
+        return '<option value="' + _escMtg(key) + '"' + (key === target ? ' selected' : '') + '>' + _escMtg((info.emoji || '🤖') + ' ' + (info.name || key)) + '</option>';
+    }).join('');
+    if (target) select.value = target;
+}
+
 function toggleNewMeetingForm(forceOpen) {
     var modal = document.getElementById('newMeetingModal');
     var panel = document.getElementById('new-meeting-panel');
@@ -17434,13 +18488,13 @@ function toggleNewMeetingForm(forceOpen) {
 function renderNewMeetingForm() {
     var panel = document.getElementById('new-meeting-panel');
     if (!panel) return;
-    var agentOptions = _mtgAgents.map(function(a) {
-        var key = _mtgAgentKey(a);
-        var name = a.name || key;
-        return '<label class="mtg-label" style="display:inline-flex;align-items:center;gap:4px;margin-right:10px;margin-top:4px;">' +
-            '<input type="checkbox" class="new-mtg-participant" value="' + _escMtg(key) + '" onchange="updateNewMeetingModeratorOptions()"> ' +
-            _escMtg((a.emoji || '🤖') + ' ' + name) + '</label>';
-    }).join('');
+    var agentOptions = _mtgParticipantSelectorHtml({
+        selected: [],
+        participantClass: 'new-mtg-participant',
+        branchClass: 'new-mtg-branch',
+        participantAttrs: ' onchange="updateNewMeetingModeratorOptions()"',
+        branchAttrs: ' onchange="toggleNewMeetingBranch(this)"'
+    });
     panel.innerHTML =
         '<div class="mtg-section-title">' + _escMtg(_mtgT('new_meeting', 'New Meeting')) + '</div>' +
         '<label class="mtg-label">' + _escMtg(_mtgT('meeting_topic', 'Topic')) + '</label>' +
@@ -17469,14 +18523,15 @@ function renderNewMeetingForm() {
     updateNewMeetingModeratorOptions();
 }
 
+function toggleNewMeetingBranch(branchEl) {
+    var branchId = branchEl.getAttribute('data-branch-id') || '';
+    _mtgApplyBranchSelection('.new-mtg-branch', '.new-mtg-participant', branchId, branchEl.checked);
+    updateNewMeetingModeratorOptions();
+}
+
 function updateNewMeetingModeratorOptions() {
-    var select = document.getElementById('new-mtg-moderator');
-    if (!select) return;
-    var selected = Array.prototype.slice.call(document.querySelectorAll('.new-mtg-participant:checked')).map(function(el) { return el.value; });
-    select.innerHTML = selected.map(function(key) {
-        var info = _mtgAgentMap[key] || { name: key, emoji: '🤖' };
-        return '<option value="' + _escMtg(key) + '">' + _escMtg((info.emoji || '🤖') + ' ' + (info.name || key)) + '</option>';
-    }).join('');
+    _mtgSyncBranchSelectionState('.new-mtg-branch', '.new-mtg-participant');
+    _mtgUpdateModeratorOptions('new-mtg-moderator', '.new-mtg-participant', '');
 }
 
 async function submitNewMeeting() {
@@ -17485,7 +18540,7 @@ async function submitNewMeeting() {
     function fail(msg) {
         if (err) { err.textContent = msg; err.style.display = 'block'; }
     }
-    var participants = Array.prototype.slice.call(document.querySelectorAll('.new-mtg-participant:checked')).map(function(el) { return el.value; });
+    var participants = _mtgFilterAssignableParticipants(Array.prototype.slice.call(document.querySelectorAll('.new-mtg-participant:checked')).map(function(el) { return el.value; }));
     var topic = (document.getElementById('new-mtg-topic') || {}).value || '';
     var moderator = (document.getElementById('new-mtg-moderator') || {}).value || '';
     if (!topic.trim()) return fail(_mtgT('meeting_error_topic_required', 'Topic is required.'));
@@ -17644,6 +18699,8 @@ function _mtgRenderMeetingDetail(m) {
         if (m.moderator) rightMeta.push('🎙️ ' + _escMtg(_mtgT('meeting_moderator', 'Moderator')) + ': ' + _escMtg(m.moderator));
         if (m.contextMode) rightMeta.push('🧩 ' + _escMtg(_mtgT('meeting_context_mode', 'Context')) + ': ' + _escMtg(m.contextMode));
         if (m.resolutionPolicy) rightMeta.push('⚖️ ' + _escMtg(_mtgT('meeting_resolution_policy', 'Resolution policy')) + ': ' + _escMtg(_mtgResolutionPolicyLabel(m.resolutionPolicy)));
+        var preparingTimeoutLabel = _mtgPreparingTimeoutLabel(m);
+        if (preparingTimeoutLabel) rightMeta.push('⏱️ ' + _escMtg(preparingTimeoutLabel));
         if (m.urgency) rightMeta.push('🚦 ' + _escMtg(_mtgUrgencyLabel(m.urgency)));
         rightMeta.push(_mtgProjectMetaLabel(m));
     }
@@ -18228,6 +19285,7 @@ setInterval(function() {
         var data = results[0] || {};
         var requests = results[1] || {};
         _mtgData.active = data.meetings || [];
+        _mtgSeedLiveMeetings(_mtgData.active);
         _mtgData.requests = requests.requests || [];
         // Also refresh agent map if empty
         if (Object.keys(_mtgAgentMap).length === 0) {
@@ -18252,6 +19310,7 @@ setInterval(_mtgUpdateDecisionCountdowns, 1000);
 setTimeout(function() {
     fetch('/api/meetings/active').then(function(r) { return r.json(); }).then(function(data) {
         _mtgData.active = data.meetings || [];
+        _mtgSeedLiveMeetings(_mtgData.active);
         fetch('/agents-list').then(function(r) { return r.json(); }).then(function(d) {
             var list = d.agents || d || [];
             if (Array.isArray(list)) {

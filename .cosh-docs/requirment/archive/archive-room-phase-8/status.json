@@ -1,0 +1,45 @@
+{
+  "name": "archive-room-phase-8",
+  "stage": "done",
+  "waiting_for_user": false,
+  "updated_at": "2026-06-22T00:49:20+08:00",
+  "confirmed": {
+    "checklist": true,
+    "tested": true,
+    "done": true
+  },
+  "confirmations": {
+    "checklist": {
+      "item": "Archive Room Phase 8 checklist",
+      "confirmed_at": "2026-06-21T02:30:32+08:00",
+      "summary": "pass"
+    },
+    "tested": {
+      "item": "Archive Room Phase 8 implementation tests",
+      "confirmed_at": "2026-06-21T03:18:29+08:00",
+      "summary": "Implementation completed and self-tested. Covered schedule controls, event-only skip behavior, archive-manager-first automatic governance, stale replacement, human boundary pending queue, context exclusion of stale content, Phase4/6/7 regressions, real Phase8 fixture data, and Chrome DevTools CDP UI validation with localization check."
+    },
+    "done": {
+      "item": "Archive Room Phase 8 final acceptance",
+      "confirmed_at": "2026-06-22T00:49:20+08:00",
+      "summary": "用户确认“我暂时没问题了，这个需求可以验收了”。验收范围包含 Phase8 维护频率配置、计划/事件巡检展示、档案管理员优先治理、stale/source comparison/pending 展示、产物浏览、滚动位置保持、按钮对齐和档案室顶部留白调整。"
+    }
+  },
+  "files": {
+    "requirement": "requirement.md",
+    "review": "review.md",
+    "checklist": "checklist.md",
+    "todolist": "todolist.md"
+  },
+  "notes": [
+    "Child requirement created for Archive Room Phase 8 after Phase 7 acceptance.",
+    "Product clarification completed: Phase 8 balances maintenance frequency controls and archive-manager-first governance.",
+    "Checklist generated and waiting for user confirmation before todolist creation.",
+    "Checklist confirmed by user on 2026-06-21.",
+    "Todolist generated from confirmed checklist.",
+    "Phase8 implementation completed and self-tested on 2026-06-21.",
+    "Real acceptance project created: Archive Room Phase 8 Frequency Governance Acceptance (7e8fb87a-bff6-4442-9854-c761e8c97532).",
+    "Chrome DevTools CDP validation passed; screenshot saved to /tmp/archive-room-phase8-cdp.png.",
+    "Final acceptance confirmed by user on 2026-06-22; requirement marked done and archived."
+  ]
+}

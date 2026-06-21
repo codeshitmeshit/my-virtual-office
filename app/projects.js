@@ -227,7 +227,7 @@
             return r.json();
         },
         async projectExecutionProjectStart(projectId, mode, dirtyFingerprint, opts = {}) {
-            const r = await fetch(`/api/projects/${projectId}/project-execution/start`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: mode || 'continuous', dirtyFingerprint: dirtyFingerprint || '', skipReviewConfirmed: !!opts.skipReviewConfirmed }) });
+            const r = await fetch(`/api/projects/${projectId}/project-execution/start`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: mode || 'continuous', dirtyFingerprint: dirtyFingerprint || '', skipReviewConfirmed: !!opts.skipReviewConfirmed, restartPipeline: !!opts.restartPipeline }) });
             return r.json();
         },
         async projectExecutionCancel(projectId, taskId, attemptId) {
@@ -688,6 +688,7 @@
         if (!p) return '';
         const cols = (p.columns || []).slice().sort((a, b) => (a.order || 0) - (b.order || 0));
         const tasks = p.tasks || [];
+        const canRestartProjectPipeline = tasks.length > 0 && tasks.every(t => t.scheduledRepeatEnabled === true);
 
         return `
         <div class="proj-toolbar proj-board-toolbar">
@@ -703,6 +704,7 @@
                 </div>
                 <div class="proj-exec-primary-actions">
                     <button class="proj-btn proj-btn-sm proj-btn-start" id="proj-exec-start-btn" onclick="ProjMgr.projectExecutionProjectStart()">▶ 启动项目</button>
+                    ${canRestartProjectPipeline ? `<button class="proj-btn proj-btn-sm" id="proj-exec-restart-btn" onclick="ProjMgr.projectExecutionProjectRestart()">重启流水线</button>` : ''}
                     <button class="proj-btn proj-btn-sm proj-btn-stop hidden" id="proj-exec-stop-btn" onclick="ProjMgr.projectExecutionCancelActive()">停止当前任务</button>
                 </div>
                 <span class="proj-wf-status ${p.workflowActive ? 'wf-active' : ''}" id="wf-status-badge">${escHtml(p.workflowPhase || '')}</span>
@@ -767,12 +769,12 @@
     function scheduledCronRepeatGate(job, p) {
         if (job.targetType !== 'projectTask') return null;
         const task = (p.tasks || []).find(t => t.id === job.taskId);
-        if (!task) return { state: 'missing', label: 'Repeat gate: task missing' };
+        if (!task) return { state: 'missing', label: _t('proj_scheduled_cron_repeat_gate_missing') };
         const isDone = !!task.completedAt;
         const repeatEnabled = task.scheduledRepeatEnabled === true;
-        if (!isDone) return { state: 'open', label: 'Repeat gate: open task' };
-        if (repeatEnabled) return { state: 'enabled', label: 'Repeat gate: completed task can repeat' };
-        return { state: 'blocked', label: 'Repeat gate: completed task blocked' };
+        if (!isDone) return { state: 'open', label: _t('proj_scheduled_cron_repeat_gate_open') };
+        if (repeatEnabled) return { state: 'enabled', label: _t('proj_scheduled_cron_repeat_gate_enabled') };
+        return { state: 'blocked', label: _t('proj_scheduled_cron_repeat_gate_blocked') };
     }
 
     function scheduledCronHistoryStatusLabel(status) {
@@ -1335,7 +1337,11 @@
                     <label class="proj-field-label">${_t('proj_assignee')}</label>
                     <select class="proj-detail-select" id="detail-assignee" onchange="ProjMgr.updateTaskField('assignee', this.value || null)">
                         <option value="">— ${_t('proj_unassigned')} —</option>
-                        ${agents.map(a => `<option value="${a.key || a.statusKey || a.id}" ${task.assignee === (a.key || a.statusKey || a.id) ? 'selected' : ''}>${escHtml((a.emoji || '👤') + ' ' + a.name)}</option>`).join('')}
+                        ${agents.map(a => {
+                            const id = a.key || a.statusKey || a.id;
+                            const blocked = a.assignable === false || a.systemRole === 'archive_manager';
+                            return `<option value="${id}" ${task.assignee === id ? 'selected' : ''} ${blocked ? 'disabled' : ''}>${escHtml((a.emoji || '👤') + ' ' + a.name + (blocked ? '（系统角色，不可分配）' : ''))}</option>`;
+                        }).join('')}
                     </select>
                 </div>
                 ${projectExecution ? `<div style="display:flex;gap:8px">
@@ -1362,6 +1368,13 @@
                     </label>
                     <div class="proj-exec-meta">${_t('proj_task_scheduled_repeat_hint')}</div>
                 </div>
+                ${projectExecution ? `<div class="proj-field">
+                    <label class="proj-form-label" style="display:flex;align-items:center;gap:6px">
+                        <input type="checkbox" ${task.allowReviewerlessExecution === true ? 'checked' : ''} onchange="ProjMgr.updateTaskField('allowReviewerlessExecution', this.checked)">
+                        允许没有 Reviewer 时跳过独立审查
+                    </label>
+                    <div class="proj-exec-meta">开启后，如果任务和项目都没有配置 Reviewer，启动任务或项目流水线时会直接执行，不再弹出跳过审查确认。</div>
+                </div>` : ''}
                 <div class="proj-field">
                     <label class="proj-field-label">${_t('proj_tags')}</label>
                     <div class="proj-tag-input-wrap" id="detail-tags-wrap" onclick="document.getElementById('detail-tag-in').focus()">
@@ -1816,7 +1829,7 @@
         if (!p) return;
         const src = p.tasks.find(t => t.id === taskId);
         if (!src) return;
-        const copy = { title: src.title + ' (copy)', description: src.description, columnId: src.columnId, priority: src.priority, tags: [...(src.tags || [])], checklist: (src.checklist || []).map(c => ({ ...c, id: genId(), done: false })), requiresUserAcceptance: src.requiresUserAcceptance !== false, scheduledRepeatEnabled: src.scheduledRepeatEnabled === true };
+        const copy = { title: src.title + ' (copy)', description: src.description, columnId: src.columnId, priority: src.priority, tags: [...(src.tags || [])], checklist: (src.checklist || []).map(c => ({ ...c, id: genId(), done: false })), requiresUserAcceptance: src.requiresUserAcceptance !== false, allowReviewerlessExecution: src.allowReviewerlessExecution === true, scheduledRepeatEnabled: src.scheduledRepeatEnabled === true };
         try {
             const d = await api.createTask(p.id, copy);
             if (d.task) { p.tasks.push(d.task); const mc = getMainContent(); if (mc) { mc.innerHTML = renderBoardView(); bindBoardEvents(); } toast(_t('proj_task_duplicated'), 'success'); }
@@ -1837,7 +1850,8 @@
     function projectExecutionAgentOptions(selected) {
         return `<option value="">— 请选择 —</option>` + state.agentRoster.map(a => {
             const id = a.key || a.statusKey || a.id;
-            return `<option value="${escHtml(id)}" ${selected === id ? 'selected' : ''}>${escHtml((a.emoji || 'Agent') + ' ' + a.name)}</option>`;
+            const blocked = a.assignable === false || a.systemRole === 'archive_manager';
+            return `<option value="${escHtml(id)}" ${selected === id ? 'selected' : ''} ${blocked ? 'disabled' : ''}>${escHtml((a.emoji || 'Agent') + ' ' + a.name + (blocked ? '（系统角色，不可分配）' : ''))}</option>`;
         }).join('');
     }
 
@@ -2770,6 +2784,7 @@
         const p = state.currentProject;
         if (!p) return;
         const mode = projectExecutionSelectedStartMode();
+        const restartPipeline = opts.restartPipeline === true;
         const confirmedDirtyFingerprint = dirtyFingerprint || opts.dirtyFingerprint || '';
         try {
             const d = await api.projectExecutionProjectStart(p.id, mode, confirmedDirtyFingerprint, opts);
@@ -2790,7 +2805,7 @@
                 return;
             }
             if (d.error) { toast(d.error, 'error'); return; }
-            toast(mode === 'continuous' ? '项目连续任务流已启动' : '项目任务已启动', 'success');
+            toast(restartPipeline ? `项目流水线已重启，已重置 ${d.resetTaskCount || 0} 个任务` : (mode === 'continuous' ? '项目连续任务流已启动' : '项目任务已启动'), 'success');
             state.workflow.active = true;
             state.workflow.phase = 'executing';
             state.workflow.currentTaskId = d.taskId;
@@ -2798,6 +2813,23 @@
             startProjectExecutionPolling();
             await refreshProjectExecutionProject(d.taskId);
         } catch (e) { toast(_t('proj_start_task_failed'), 'error'); }
+    }
+
+    async function projectExecutionProjectRestartAction(dirtyFingerprint, opts = {}) {
+        const p = state.currentProject;
+        if (!p) return;
+        if (state.workflow.active || p.workflowActive) {
+            toast('请先停止当前任务，再重启流水线', 'error');
+            return;
+        }
+        const tasks = p.tasks || [];
+        if (!tasks.length || !tasks.every(t => t.scheduledRepeatEnabled === true)) {
+            toast('只有项目内所有任务都允许重新触发时，才能重启流水线', 'error');
+            return;
+        }
+        const confirmed = opts.confirmed === true || confirm('重启流水线会把项目内所有任务恢复到待执行状态，然后重新启动项目。任务历史会保留。是否继续？');
+        if (!confirmed) return;
+        return projectExecutionProjectStartAction(dirtyFingerprint, { ...opts, restartPipeline: true, confirmed: true });
     }
 
     async function projectExecutionCancelActiveAction() {
@@ -3211,6 +3243,7 @@
     function updateWorkflowUI() {
         const startBtn = document.getElementById('wf-start-btn');
         const execStartBtn = document.getElementById('proj-exec-start-btn');
+        const execRestartBtn = document.getElementById('proj-exec-restart-btn');
         const execStopBtn = document.getElementById('proj-exec-stop-btn');
         const stopBtn = document.getElementById('wf-stop-btn');
         const badge = document.getElementById('wf-status-badge');
@@ -3219,6 +3252,10 @@
         if (execStartBtn) {
             if (state.workflow.active) { execStartBtn.classList.add('hidden'); }
             else { execStartBtn.classList.remove('hidden'); }
+        }
+        if (execRestartBtn) {
+            if (state.workflow.active) { execRestartBtn.classList.add('hidden'); }
+            else { execRestartBtn.classList.remove('hidden'); }
         }
         if (execStopBtn) {
             if (state.workflow.active) { execStopBtn.classList.remove('hidden'); }
@@ -3410,6 +3447,7 @@
         saveReviewCheck: saveReviewCheckAction,
         projectExecutionStart: projectExecutionStartAction,
         projectExecutionProjectStart: projectExecutionProjectStartAction,
+        projectExecutionProjectRestart: projectExecutionProjectRestartAction,
         setProjectExecutionStartMode: setProjectExecutionStartModeAction,
         projectExecutionCancelActive: projectExecutionCancelActiveAction,
         copyWorkspacePath: copyWorkspacePathAction,

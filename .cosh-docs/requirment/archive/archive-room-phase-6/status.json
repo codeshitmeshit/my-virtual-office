@@ -1,0 +1,47 @@
+{
+  "name": "archive-room-phase-6",
+  "stage": "done",
+  "waiting_for_user": false,
+  "updated_at": "2026-06-20T19:53:24+08:00",
+  "confirmed": {
+    "checklist": true,
+    "tested": true,
+    "done": true
+  },
+  "confirmations": {
+    "checklist": {
+      "confirmed_at": "2026-06-20T17:04:27+08:00",
+      "item": "checklist",
+      "summary": "User replied `continue,可以写todolist了`, confirming Archive Room Phase 6 checklist and asking to generate todolist. Confirmation covers human-readable archive introduction, project basic information, AI onboarding package, task-level context, project-characterized AI context injection, graded archive manager reminders, Phase 1-5 regression, and Phase 7 boundary."
+    },
+    "tested": {
+      "confirmed_at": "2026-06-20T19:53:24+08:00",
+      "item": "tested",
+      "summary": "User replied `可以了，我验收通过了，这个子需求可以归档了`, confirming Archive Room Phase 6 acceptance. Acceptance covers the human-readable project archive, higher-density archive index redesign, AI onboarding/context package, artifact browsing regression, maintenance visibility, automated tests, and Chrome DevTools MCP validation."
+    },
+    "done": {
+      "confirmed_at": "2026-06-20T19:53:24+08:00",
+      "item": "done",
+      "summary": "User replied `可以了，我验收通过了，这个子需求可以归档了`, confirming Archive Room Phase 6 acceptance. Acceptance covers the human-readable project archive, higher-density archive index redesign, AI onboarding/context package, artifact browsing regression, maintenance visibility, automated tests, and Chrome DevTools MCP validation."
+    }
+  },
+  "files": {
+    "requirement": "requirement.md",
+    "review": "review.md",
+    "checklist": "checklist.md",
+    "todolist": "todolist.md"
+  },
+  "notes": [
+    "Child requirement created for Archive Room Phase 6 after Phase 5 acceptance.",
+    "Product clarification completed before creation: Phase 6 serves both humans and AI, prioritizes a readable archive information map, task-level AI context, project-characterized context injection, and graded reminders.",
+    "Checklist confirmed by user reply `continue,可以写todolist了`; todolist created from confirmed checklist.",
+    "Phase 6 excludes full human free-form Ask Archive Room UI and Phase 7 confirmation queue governance.",
+    "Implementation completed: archive introduction, project basic information, content/usage maps, onboarding/context package, task-level context, project-characterized context injection, identity-boundary guard, graded reminders, project execution prompt supplementation, and Archive Room detail UI updates.",
+    "Automated tests passed: tests/test_archive_room_phase_6.py, tests/test_archive_room_phase_1_3.py, tests/test_archive_room_phase_4.py, tests/test_archive_room_phase_5.py, tests/test_project_execution.py, tests/test_meeting_for_ai_phase1.py, tests/test_meeting_for_ai_phase4.py, python compile check for app/server.py, and node --check app/archive-room.js.",
+    "Local API smoke passed on http://127.0.0.1:8160 for real project 7692ca8b-2d88-44cf-9dbb-765f2e4eb855, including archiveIntroduction/projectBasicInfo/archiveContentMap/archiveUsageMap/contextPackage and context API fields.",
+    "Chrome MCP acceptance passed outside sandbox via chrome-devtools-mcp@latest --browserUrl http://127.0.0.1:9224 against shared Chrome/CDP. Shared Chrome loaded the host service at http://10.110.139.216:8160, opened Archive Room through openArchiveRoom(), verified project archive intro, information map, project basic info, usage/content sections, AI onboarding package, artifact button, and long-term maintenance UI, then saved /tmp/archive-room-phase6-mcp.png.",
+    "Waiting for user acceptance before marking confirmed.tested or confirmed.done.",
+    "Post-test UX correction completed before final acceptance: Archive Room detail UI now shows a higher-density 档案索引 with attention signals and concrete current task, decisions, risks, pending confirmations, artifacts, and important messages/meetings; archiveContentMap/archiveUsageMap remain available as derived API fields.",
+    "Final acceptance received from user on 2026-06-20T19:53:24+08:00; requirement marked done and ready for archive move."
+  ]
+}

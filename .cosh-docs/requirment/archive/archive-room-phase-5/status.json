@@ -1,0 +1,51 @@
+{
+  "name": "archive-room-phase-5",
+  "stage": "done",
+  "waiting_for_user": false,
+  "updated_at": "2026-06-20T16:49:40+08:00",
+  "confirmed": {
+    "checklist": true,
+    "tested": true,
+    "done": true
+  },
+  "confirmations": {
+    "checklist": {
+      "confirmed_at": "2026-06-20T15:20:07+08:00",
+      "item": "checklist",
+      "summary": "User replied `continue`, confirming Archive Room Phase 5 checklist can proceed to todolist creation. Confirmation covers project maintenance eligibility, event-triggered maintenance, startup/daily gap-filling inspections, important chat maintenance, pending confirmation routing, maintenance activity visibility, Phase 1-4 regression, and Phase 6/7 boundaries."
+    },
+    "tested": {
+      "confirmed_at": "2026-06-20T16:49:40+08:00",
+      "item": "tested",
+      "summary": "Phase 5 implementation was self-tested with automated tests, local live smoke, and real-data MCP/P2P validation. User accepted the phase after review."
+    },
+    "done": {
+      "confirmed_at": "2026-06-20T16:49:40+08:00",
+      "item": "done",
+      "summary": "User said `phase5应该没什么问题了，验收通过`, confirming Archive Room Phase 5 is accepted."
+    }
+  },
+  "files": {
+    "requirement": "requirement.md",
+    "review": "review.md",
+    "checklist": "checklist.md",
+    "todolist": "todolist.md"
+  },
+  "notes": [
+    "Child requirement created for Archive Room Phase 5 after Phase 4 acceptance.",
+    "Product clarification completed before creation: Phase 5 prioritizes human-facing archive completeness while also serving AI handoff readiness.",
+    "Maintenance eligibility is a new project-level product attribute. Defaults follow project status; active/ongoing projects are maintained, completed/paused/archived/inactive projects are not maintained unless explicitly overridden.",
+    "Maintenance-off projects skip startup/daily inspection and low-value events, but high-value events still trigger archive maintenance.",
+    "High-value events include task completion/failure, project status change, important artifact, blocker, conflict reminder, and meeting conclusion.",
+    "Startup and daily inspections are gap-filling checks only for maintained projects. No-update inspections update latest inspection time without noisy maintenance records.",
+    "Important messages marked by users enter a pending maintenance queue and are summarized by the archive manager before becoming archive entries.",
+    "Phase 5 excludes Phase 6 AI context query/onboarding API and Phase 7 confirmation governance polish.",
+    "Checklist confirmed by user reply `continue`; todolist created from confirmed checklist.",
+    "Implemented Phase 5 project archive maintenance eligibility, event-triggered archive maintenance, startup/daily inspections, important message intake, maintenance activity records, source references, pending confirmation routing basics, and Archive Room maintenance controls.",
+    "Automated self-test passed: tests/test_archive_room_phase_5.py, tests/test_archive_room_phase_1_3.py, tests/test_archive_room_phase_4.py, tests/test_meeting_for_ai_phase1.py, tests/test_meeting_for_ai_phase4.py, tests/test_project_execution.py, python compile check for app/server.py and app/project_store.py, and node --check app/archive-room.js.",
+    "Live smoke passed on service started through ./start.sh at http://localhost:8160: maintained temporary project fb6db40e-4c32-4e62-9609-e62a5406d17b was included in forced daily inspection and a marked important message created an important_message archive entry.",
+    "Real-data MCP/P2P validation passed on project 7692ca8b-2d88-44cf-9dbb-765f2e4eb855 (金融分析项目): archive maintenance was enabled, forced daily inspection updated lastDailyInspectionAt, a marked important message created an important_message entry with chat source reference, and codex-local to archive-manager communication was recorded in VO history under codex__archive-manager__phase5-real-data-mcp.",
+    "P2P reply landed in history after roughly 31 seconds; the synchronous smoke script used a 30 second HTTP timeout and timed out locally, so future acceptance checks should either use a larger timeout or verify the reply through communication history.",
+    "2026-06-20T16:49:40+08:00 User accepted Phase 5 with: phase5应该没什么问题了，验收通过."
+  ]
+}

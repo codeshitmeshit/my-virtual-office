@@ -134,6 +134,8 @@ Meeting for AI 的安全边界：
 
 当前二开版本推荐只用本地方式启动。
 
+建议直接使用仓库内的 `start.sh` 启动。该脚本会加载本地配置并进入真实本地运行路径，避免误用回归测试或 demo 模式。
+
 ```bash
 git clone https://github.com/eliautobot/my-virtual-office.git
 cd my-virtual-office

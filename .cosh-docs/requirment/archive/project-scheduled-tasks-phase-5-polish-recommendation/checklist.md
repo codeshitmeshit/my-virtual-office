@@ -98,6 +98,8 @@
 ## 人工确认记录
 
 - checklist 确认：2026-06-19T00:59:00+08:00，用户回复 “continue”，确认 Phase 5 checklist，可以生成 todolist。
+- done 确认：2026-06-19T15:42:46+08:00，用户回复 “验收吧”，确认 Phase 5 可以验收归档。
+- 补充修正确认：2026-06-20T07:40:46+08:00，用户确认“任务级允许没有 Reviewer 时跳过独立审查”需求验收通过，并要求对当前需求标记完成。
 
 ## 测试记录
 
@@ -107,3 +109,4 @@
 - 2026-06-19T03:52:53+08:00：`tests/test_project_scheduled_cron_phase5.py`、`tests/test_project_scheduled_cron_phase2_3.py`、`tests/test_project_scheduled_cron_phase4.py`、`tests/test_project_scheduled_cron_phase1.py` 通过。Phase 1 仍有 gateway 权限 warning，但测试退出码为 0。
 - 2026-06-19T03:52:53+08:00：8090 live 环境已重启，端口 `8090/8091` 由 PID `377913` 提供服务；创建长期项目、创建项目 cron、立即触发、项目详情历史回写、全局 cron 可见性均通过。
 - 2026-06-19T03:52:53+08:00：Chrome MCP 因共享 profile lock 无法接管页面，未强制关闭共享浏览器；UI 验收由静态检查、文案扫描和 8090 真实 API smoke 替代。
+- 2026-06-20T07:40:46+08:00：补充修正已完成：任务详情中“允许没有 Reviewer 时跳过独立审查”作为任务级属性展示在“允许该任务被重新触发”下方；后端持久化和执行逻辑接入 `allowReviewerlessExecution`；`tests/test_project_execution.py` 通过；8090/8091 已重启，用户确认 UI 验收通过。

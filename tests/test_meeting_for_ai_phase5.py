@@ -157,6 +157,47 @@ def test_phase5_force_join_requires_confirmation_snapshots_work_and_resumes_once
             restore_store(old)
 
 
+def test_phase5_force_join_transfers_existing_meeting_occupancy():
+    with tempfile.TemporaryDirectory() as status_dir:
+        old = with_store(status_dir)
+        try:
+            first = create_meeting(
+                topic="Existing Meeting",
+                participants=["busy-agent", "first-reviewer"],
+                moderator="first-reviewer",
+                idempotencyKey="phase5-existing-meeting",
+            )["meeting"]
+            assert first["stage"] == "preparing"
+
+            second = create_meeting(
+                topic="Forced Meeting",
+                participants=["busy-agent", "second-reviewer"],
+                moderator="second-reviewer",
+                allowConflicts=True,
+                idempotencyKey="phase5-force-meeting-occupied",
+            )["meeting"]
+            assert second["stage"] == "conflict"
+            assert second["conflicts"][0]["reason"] == "meeting_occupied"
+
+            forced = server._handle_executable_meeting_conflict_action(second["id"], {
+                "action": "force_join",
+                "agentId": "busy-agent",
+                "confirmForce": True,
+                "idempotencyKey": "force-existing-meeting",
+            })
+            assert forced["ok"] is True
+            meeting = forced["meeting"]
+            assert meeting["stage"] == "preparing"
+            assert all(c.get("status") != "open" for c in meeting["conflicts"])
+            assert meeting["participantState"]["busy-agent"]["forcedJoin"] is True
+            store = server._load_exec_meeting_store()
+            assert store["occupancy"]["busy-agent"] == meeting["id"]
+            assert store["occupancy"]["second-reviewer"] == meeting["id"]
+            assert store["meetings"][first["id"]]["stage"] == "preparing"
+        finally:
+            restore_store(old)
+
+
 def test_phase5_replace_and_single_agent_single_meeting_guard():
     with tempfile.TemporaryDirectory() as status_dir:
         old = with_store(status_dir)
@@ -190,5 +231,6 @@ if __name__ == "__main__":
     test_phase5_busy_agent_requires_conflict_aware_creation_and_advisory_is_read_only()
     test_phase5_reservation_does_not_lock_agent_and_refresh_rechecks_conflict()
     test_phase5_force_join_requires_confirmation_snapshots_work_and_resumes_once()
+    test_phase5_force_join_transfers_existing_meeting_occupancy()
     test_phase5_replace_and_single_agent_single_meeting_guard()
     print("test_meeting_for_ai_phase5.py passed")

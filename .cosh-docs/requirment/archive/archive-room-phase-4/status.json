@@ -1,0 +1,51 @@
+{
+  "name": "archive-room-phase-4",
+  "stage": "done",
+  "waiting_for_user": false,
+  "updated_at": "2026-06-20T13:31:14+08:00",
+  "confirmed": {
+    "checklist": true,
+    "tested": true,
+    "done": true
+  },
+  "confirmations": {
+    "checklist": {
+      "confirmed_at": "2026-06-20T08:12:23+08:00",
+      "item": "checklist",
+      "summary": "User replied `continue`, confirming the Archive Room Phase 4 checklist. Confirmation covers global archive manager auto-creation, visibility, pause/resume, current-project manual整理, failure degradation, main-office dual visibility, role boundaries, prompt/soul/identity/agent.md output discipline, Phase 1-3 regression, and Phase 5/6/7 boundaries."
+    },
+    "tested": {
+      "confirmed_at": "2026-06-20T12:45:09+08:00",
+      "item": "implementation_and_tests",
+      "summary": "Implementation completed and automated/live checks passed: py_compile app/server.py, tests/test_archive_room_phase_4.py, tests/test_archive_room_phase_1_3.py, standalone tests/test_project_execution.py, meeting boundary tests, and live smoke on http://localhost:8160 for /api/archive-room, /agents-list, pause/resume, OpenClaw profile files, profile version update, startup profile sync, and archive-manager meeting rejection."
+    },
+    "done": {
+      "confirmed_at": "2026-06-20T13:31:14+08:00",
+      "item": "done",
+      "summary": "User replied `可以了，这个子需求可以验收了`, confirming Archive Room Phase 4 acceptance and completion. Scope accepted includes global archive manager lifecycle, status and controls, current-project manual maintenance, main-office visibility, role boundaries, prompt/profile sync, normal task and meeting boundaries, Phase 1-3 regression, and live smoke results."
+    }
+  },
+  "files": {
+    "requirement": "requirement.md",
+    "review": "review.md",
+    "checklist": "checklist.md",
+    "todolist": "todolist.md"
+  },
+  "notes": [
+    "Child requirement created from Archive Room parent requirement after Phase 1-3 acceptance.",
+    "Scope is limited to Phase 4: global archive manager AI lifecycle, visibility, controls, degraded mode, current-project manual整理, recent activity, and role boundaries.",
+    "Phase 5 event/scheduled整理, Phase 6 AI context query/onboarding, and Phase 7 confirmation governance are explicitly out of scope.",
+    "Checklist generated and awaiting user confirmation before todolist creation.",
+    "User added Phase 4 requirement: archive manager prompt/persona files such as agent.md, identity, soul, and prompts must explicitly define work style, personality, role boundaries, and structured output discipline so VO can recognize, process, persist, and render manager output."
+    ,
+    "Checklist confirmed by user reply `continue`; todolist generation may proceed.",
+    "Todolist created from confirmed checklist.",
+    "Implementation completed for Phase 4 scope: global archive manager lifecycle, auto-create, status UI, pause/resume, current-project manual整理, activity log, degraded mode, main-office visibility metadata, prompt/persona files, chat boundary, delete protection, and normal task assignment protection.",
+    "Automated tests passed on 2026-06-20. User acceptance is still pending before marking done.",
+    "Live smoke passed on 2026-06-20T09:40:01+08:00 using VO_PORT=8160 VO_WS_PORT=8161 ./start.sh. Archive manager is restored to idle/已接入 after pause/resume.",
+    "Maintainability update on 2026-06-20T09:55:07+08:00: archive manager profile text moved from app/server.py into app/archive-manager-profile.md. Backend now loads the single template file, renders variables, and writes profile files into the OpenClaw workspace.",
+    "Prompt/provisioning update on 2026-06-20T12:45:09+08:00: archive manager profile template upgraded to 2026-06-20.2 with manual maintenance operating procedure, evidence/confidence rules, stable output contract field rules, update kind semantics, and hard output boundaries. VO startup now checks the built-in archive manager profile version and rewrites stale/missing profile files.",
+    "Meeting boundary update on 2026-06-20T13:22:07+08:00: archive manager is filtered out of normal meeting participant selectors and backend meeting create/request/confirm APIs reject archive-manager as participant or moderator with archive_manager_not_meeting_participant. Main office visibility is retained through /agents-list metadata.",
+    "Final acceptance on 2026-06-20T13:31:14+08:00: user confirmed this child requirement can be accepted and archived as complete."
+  ]
+}

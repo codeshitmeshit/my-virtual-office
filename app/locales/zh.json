@@ -27,6 +27,8 @@
   "show_chat_bubbles": "显示聊天气泡",
   "internal_bubble_timeout": "内部状态气泡自动收起（秒）",
   "internal_bubble_timeout_hint": "设为 0 可保持内部状态气泡展开。",
+  "meeting_preparing_timeout": "准备中会议超时释放（秒）",
+  "meeting_preparing_timeout_hint": "准备中的会议如果在这个时间内没有开始，会自动释放占用。",
   "ui_font_size": "界面字体大小",
   "ui_font_size_hint": "仅缩放界面面板，画布标签保持不变。",
   "show_agent_names": "显示代理名称",
@@ -83,7 +85,9 @@
   "minimize_all": "💬 全部折叠",
   "models_toolbar": "⚙️ 模型",
   "cron": "⏰ 定时任务",
+  "project": "项目",
   "projects": "📋 项目",
+  "archive_room": "🗄️ 档案室",
   "reset_zoom": "🔍 重置缩放",
   "sms": "📞 短信",
   "sms_unavailable_hint": "短信面板未启用。请在设置中启用短信面板，并配置 Twilio 凭据。",
@@ -571,6 +575,8 @@
   "meeting_status_cancelled": "已取消",
   "meeting_status_failed": "失败",
   "meeting_stage_preparing": "准备中",
+  "meeting_preparing_timeout_remaining": "{seconds} 秒后自动释放",
+  "meeting_preparing_timeout_released": "准备超时已释放",
   "meeting_stage_conflict": "冲突待处理",
   "meeting_stage_active_opening": "开场中",
   "meeting_stage_active_discussion": "讨论中",
@@ -584,6 +590,9 @@
   "meeting_discussion_round": "讨论轮",
   "meeting_turn_failed": "调用失败",
   "meeting_provider_calling": "正在调用",
+  "meeting_provider_call_timeout": "调用超时",
+  "meeting_provider_timeout_monitor": "调用已超过超时阈值，系统将跳过本次调用并继续会议。",
+  "meeting_provider_waited": "已等待",
   "meeting_user_intervention": "用户插话",
   "meeting_user_message": "发言",
   "meeting_user_message_placeholder": "给正在讨论的 Agent 补充一段发言",
@@ -837,7 +846,11 @@
   "proj_scheduled_cron_days_label": "日期",
   "proj_scheduled_cron_date_label": "日期",
   "proj_scheduled_cron_enabled_label": "启用",
-  "proj_scheduled_cron_repeat_gate_hint": "如果目标任务已经 Done，是否允许重复触发由任务详情里的“允许定时任务重复触发已完成任务”控制。",
+  "proj_scheduled_cron_repeat_gate_hint": "如果目标任务已经 Done，是否允许重新触发由任务详情里的“允许该任务被重新触发”控制。",
+  "proj_scheduled_cron_repeat_gate_missing": "任务缺失",
+  "proj_scheduled_cron_repeat_gate_open": "任务未完成，可触发",
+  "proj_scheduled_cron_repeat_gate_enabled": "已完成，可重新触发",
+  "proj_scheduled_cron_repeat_gate_blocked": "已完成，不可重新触发",
   "proj_scheduled_cron_save": "保存定时任务",
   "proj_scheduled_cron_create": "创建定时任务",
   "proj_scheduled_cron_error_interval": "间隔必须大于等于 1 分钟",
@@ -862,8 +875,8 @@
   "proj_scheduled_cron_delete_failed": "删除项目定时任务失败：{message}",
   "proj_scheduled_cron_alert_title": "项目定时任务异常",
   "proj_scheduled_cron_alert_badge": "定时异常",
-  "proj_task_scheduled_repeat_enabled": "允许定时任务重复触发已完成任务",
-  "proj_task_scheduled_repeat_hint": "开启后，项目定时任务再次触发 Done 任务时会重新打开该任务并派发执行。",
+  "proj_task_scheduled_repeat_enabled": "允许该任务被重新触发",
+  "proj_task_scheduled_repeat_hint": "开启后，该任务即使已经 Done，也可以被手动或项目定时任务重新触发，并会重新打开后执行。",
   "weekday_mon": "周一",
   "weekday_tue": "周二",
   "weekday_wed": "周三",
@@ -1353,6 +1366,7 @@
   ,"branch_change_title": "分支：{{name}}（点击更改）"
   ,"catalog_office": "办公"
   ,"catalog_comfort": "休闲"
+  ,"catalog_functional": "功能性家具"
   ,"catalog_kitchen": "茶水间"
   ,"catalog_fun": "娱乐"
   ,"catalog_structure": "建筑"
@@ -1368,6 +1382,23 @@
   ,"furniture_coffee_table": "茶几"
   ,"furniture_tv": "电视"
   ,"furniture_bookshelf": "书架"
+  ,"furniture_functional_bookshelf": "档案书架"
+  ,"furniture_meeting_table_4": "四人会议桌"
+  ,"furniture_meeting_table_6": "六人会议桌"
+  ,"furniture_meeting_room": "会议室"
+  ,"meeting_space_idle": "当前没有会议"
+  ,"meeting_space_view_all": "查看所有会议"
+  ,"meeting_space_view_current": "查看当前会议"
+  ,"bookshelf_view_archive": "查看档案"
+  ,"bookshelf_bind_archive": "绑定档案"
+  ,"bookshelf_change_archive": "更换档案"
+  ,"bookshelf_unbound": "未绑定档案"
+  ,"bookshelf_unbound_hint": "请先绑定档案"
+  ,"bookshelf_loading_archives": "正在加载档案..."
+  ,"bookshelf_no_archives": "暂无可绑定档案"
+  ,"bookshelf_archive_load_failed": "档案加载失败"
+  ,"bookshelf_archive_unavailable": "档案室不可用"
+  ,"bookshelf_bound_archive": "已绑定档案：{{name}}"
   ,"furniture_plant": "绿植"
   ,"furniture_tall_plant": "高株绿植"
   ,"furniture_end_table_plant": "边桌和绿植"

@@ -4299,6 +4299,8 @@ button:active { transform: translateY(3px); box-shadow: none; }
 .mtg-round-title { font-size: 9px; color: #ddd; background: #18182a; border-bottom: 1px solid #2a2a4e; padding: 7px 9px; font-weight: bold; }
 .mtg-turn { padding: 9px; border-top: 1px solid rgba(42,42,78,0.65); }
 .mtg-turn-pending { background: rgba(255, 215, 0, 0.04); }
+.mtg-turn-timeout { background: rgba(255, 82, 82, 0.08); border-left: 2px solid rgba(255, 82, 82, 0.75); }
+.mtg-turn-timeout .mtg-turn-meta { color: #ff8a80; }
 .mtg-turn-user { background: rgba(82, 183, 136, 0.06); }
 .mtg-turn:first-of-type { border-top: none; }
 .mtg-turn-header { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; flex-wrap: wrap; }
@@ -4668,6 +4670,159 @@ button:active { transform: translateY(3px); box-shadow: none; }
     white-space: nowrap;
     direction: rtl;
     text-align: left;
+}
+
+.bookshelf-action-menu {
+    position: fixed;
+    z-index: 100000;
+    width: 180px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px;
+    background: #171726;
+    border: 1px solid #4a4a68;
+    border-radius: 6px;
+    box-shadow: 0 10px 28px rgba(0,0,0,0.45);
+    color: #f4f4f8;
+    font-family: Arial, sans-serif;
+}
+
+.bookshelf-action-title {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: #ffd86b;
+    font-size: 12px;
+}
+
+.meeting-space-empty {
+    color: #c7c7d8;
+    font-size: 12px;
+    line-height: 1.4;
+    padding: 2px 0 4px;
+}
+
+.meeting-space-action-menu {
+    width: 224px;
+}
+
+.meeting-space-topic {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: #f4f4f8;
+    font-size: 12px;
+    line-height: 1.4;
+    padding: 2px 0 4px;
+}
+
+.bookshelf-action-menu button,
+.bookshelf-bind-head button,
+.bookshelf-archive-choice {
+    border: 1px solid #3a3a5e;
+    background: #232342;
+    color: #f4f4f8;
+    border-radius: 5px;
+    cursor: pointer;
+}
+
+.bookshelf-action-menu button {
+    min-height: 30px;
+    font-size: 12px;
+}
+
+.bookshelf-action-menu button:disabled {
+    opacity: .45;
+    cursor: not-allowed;
+}
+
+.bookshelf-bind-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 100001;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    background: rgba(0,0,0,0.55);
+}
+
+.bookshelf-bind-dialog {
+    width: min(520px, calc(100vw - 32px));
+    max-height: min(620px, calc(100vh - 48px));
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: #151521;
+    border: 1px solid #4a4a68;
+    border-radius: 8px;
+    box-shadow: 0 18px 48px rgba(0,0,0,0.5);
+    color: #f4f4f8;
+    font-family: Arial, sans-serif;
+}
+
+.bookshelf-bind-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 12px;
+    border-bottom: 1px solid #30304a;
+}
+
+.bookshelf-bind-head strong {
+    color: #ffd86b;
+    font-size: 14px;
+}
+
+.bookshelf-bind-head button {
+    width: 28px;
+    height: 28px;
+    font-size: 18px;
+}
+
+.bookshelf-bind-body {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px;
+    overflow: auto;
+}
+
+.bookshelf-archive-choice {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+    width: 100%;
+    padding: 10px;
+    text-align: left;
+}
+
+.bookshelf-archive-choice:hover {
+    border-color: #ffd86b;
+    background: #2b2b4c;
+}
+
+.bookshelf-archive-choice span,
+.bookshelf-archive-choice small {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.bookshelf-archive-choice span {
+    font-size: 13px;
+}
+
+.bookshelf-archive-choice small,
+.bookshelf-bind-empty {
+    color: #aaa;
+    font-size: 11px;
 }
 
 @media (max-width: 1100px) {

@@ -697,6 +697,54 @@ def test_project_level_start_skips_done_columns_and_reports_no_eligible_task():
             restore_store(old)
 
 
+def test_project_pipeline_restart_requires_every_task_to_allow_retriggering():
+    with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as workspace:
+        old = with_store(status_dir)
+        old_executor = server._project_execution_call_executor
+        server._project_execution_call_executor = lambda executor, prompt, workspace, attempt_id, project_id=None, task_id=None, timeout=600: {
+            "ok": True, "status": "completed", "reply": "restarted", "modifiedFiles": [],
+        }
+        try:
+            project, first = create_project_execution_project(workspace)
+            second = server._handle_task_create(project["id"], {"title": "Second", "columnId": project["columns"][0]["id"]})["task"]
+            done_col = next(c for c in project["columns"] if c["title"].lower() == "done")
+            data, stored = server._project_find(project["id"])
+            for task in stored["tasks"]:
+                task["columnId"] = done_col["id"]
+                task["completedAt"] = server._proj_now()
+                task["executionState"] = "done"
+                task["scheduledRepeatEnabled"] = task["id"] == first["id"]
+            server._save_projects(data)
+
+            blocked = server._handle_project_execution_project_start(project["id"], {"mode": "continuous", "restartPipeline": True})
+            assert blocked["_status"] == 409
+            assert blocked["code"] == "project_restart_requires_all_tasks_repeatable"
+
+            data, stored = server._project_find(project["id"])
+            for task in stored["tasks"]:
+                task["scheduledRepeatEnabled"] = True
+            server._save_projects(data)
+
+            restarted = server._handle_project_execution_project_start(project["id"], {"mode": "continuous", "restartPipeline": True})
+            assert restarted["ok"] is True
+            assert restarted["restartPipeline"] is True
+            assert restarted["resetTaskCount"] == 2
+            assert restarted["taskId"] == first["id"]
+
+            current = server._handle_project_get(project["id"])["project"]
+            backlog_col = next(c for c in current["columns"] if c["title"].lower() == "backlog")
+            current_first = next(t for t in current["tasks"] if t["id"] == first["id"])
+            current_second = next(t for t in current["tasks"] if t["id"] == second["id"])
+            assert current_first["executionState"] == "executing"
+            assert current_first["completedAt"] is None
+            assert current_second["executionState"] == "backlog"
+            assert current_second["completedAt"] is None
+            assert current_second["columnId"] == backlog_col["id"]
+        finally:
+            server._project_execution_call_executor = old_executor
+            restore_store(old)
+
+
 def test_project_level_start_persists_reviewer_skip_confirmation_for_toolbar_state():
     with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as workspace:
         old = with_store(status_dir)
@@ -745,6 +793,41 @@ def test_missing_reviewer_can_be_skipped_after_explicit_confirmation():
             assert task["reviewResult"]["status"] == "skipped"
             assert "skipped" in task["reviewResult"]["summary"].lower()
             assert task["completedAt"] is None
+        finally:
+            server._project_execution_call_executor = old_executor
+            restore_store(old)
+
+
+def test_task_can_allow_missing_reviewer_without_confirmation():
+    with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as workspace:
+        old = with_store(status_dir)
+        old_executor = server._project_execution_call_executor
+        server._project_execution_call_executor = lambda executor, prompt, workspace, attempt_id, project_id=None, task_id=None, timeout=600: {
+            "ok": True, "status": "completed", "reply": "implemented without reviewer confirmation", "modifiedFiles": [],
+        }
+        try:
+            project, task = create_project_execution_project(workspace)
+            server._handle_project_update(project["id"], {"defaultReviewerAgentId": None})
+            server._handle_task_update(project["id"], task["id"], {
+                "reviewerAgentId": None,
+                "allowReviewerlessExecution": True,
+            })
+
+            started = server._handle_project_execution_project_start(project["id"], {"mode": "continuous"})
+            assert started["ok"] is True
+            assert started.get("confirmationRequired") is None
+
+            def awaiting_acceptance():
+                current = server._handle_project_get(project["id"])["project"]
+                task = current["tasks"][0]
+                return task if task.get("executionState") == "awaiting_user_acceptance" else None
+
+            task = wait_for(awaiting_acceptance)
+            latest = task["attempts"][-1]
+            assert latest["skipReview"] is True
+            assert latest["skipReviewReason"] == "reviewer_missing"
+            assert task["reviewResult"]["status"] == "skipped"
+            assert task["allowReviewerlessExecution"] is True
         finally:
             server._project_execution_call_executor = old_executor
             restore_store(old)
@@ -922,6 +1005,46 @@ def test_direct_task_start_does_not_enable_continuous_flow_even_when_project_def
             current = server._handle_project_get(project["id"])["project"]
             assert current["projectExecutionStartMode"] == "continuous"
             assert current["projectExecutionFlowActive"] is False
+        finally:
+            server._project_execution_call_executor = old_executor
+            restore_store(old)
+
+
+def test_direct_task_start_respects_repeat_trigger_setting_for_done_tasks():
+    with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as workspace:
+        old = with_store(status_dir)
+        old_executor = server._project_execution_call_executor
+        server._project_execution_call_executor = lambda executor, prompt, workspace, attempt_id, project_id=None, task_id=None, timeout=600: {
+            "ok": True, "status": "completed", "reply": "retriggered", "modifiedFiles": [],
+        }
+        try:
+            project, task = create_project_execution_project(workspace)
+            done_col = next(c for c in project["columns"] if c["title"].lower() == "done")
+            data, stored = server._project_find(project["id"])
+            stored_task = next(t for t in stored["tasks"] if t["id"] == task["id"])
+            stored_task["columnId"] = done_col["id"]
+            stored_task["completedAt"] = server._proj_now()
+            stored_task["executionState"] = "done"
+            stored_task["scheduledRepeatEnabled"] = False
+            server._save_projects(data)
+
+            blocked = server._handle_project_execution_start(project["id"], task["id"], {})
+            assert blocked["_status"] == 409
+            assert blocked["code"] == "task_completed_repeat_disabled"
+
+            data, stored = server._project_find(project["id"])
+            stored_task = next(t for t in stored["tasks"] if t["id"] == task["id"])
+            stored_task["scheduledRepeatEnabled"] = True
+            server._save_projects(data)
+            started = server._handle_project_execution_start(project["id"], task["id"], {})
+            assert started["ok"] is True
+            assert started["reopenedCompletedTask"] is True
+
+            current = server._handle_project_get(project["id"])["project"]["tasks"][0]
+            backlog_col = next(c for c in project["columns"] if c["title"].lower() == "backlog")
+            assert current["completedAt"] is None
+            assert current["columnId"] == backlog_col["id"]
+            assert current["executionState"] == "executing"
         finally:
             server._project_execution_call_executor = old_executor
             restore_store(old)
@@ -1378,13 +1501,16 @@ if __name__ == "__main__":
     test_selected_task_executes_and_stops_at_execution_complete()
     test_project_level_start_selects_first_eligible_and_auto_reviews_to_acceptance()
     test_project_level_start_skips_done_columns_and_reports_no_eligible_task()
+    test_project_pipeline_restart_requires_every_task_to_allow_retriggering()
     test_project_level_start_persists_reviewer_skip_confirmation_for_toolbar_state()
     test_missing_reviewer_can_be_skipped_after_explicit_confirmation()
+    test_task_can_allow_missing_reviewer_without_confirmation()
     test_skipped_review_can_be_accepted_to_done()
     test_project_start_preserves_dirty_confirmation_after_reviewer_skip_confirmation()
     test_direct_task_start_supports_reviewer_skip_and_dirty_confirmation_chain()
     test_continuous_flow_auto_continues_when_task_does_not_require_acceptance()
     test_direct_task_start_does_not_enable_continuous_flow_even_when_project_default_is_continuous()
+    test_direct_task_start_respects_repeat_trigger_setting_for_done_tasks()
     test_dirty_confirmation_is_bound_to_current_fingerprint()
     test_dirty_confirmation_can_be_reconfirmed_for_same_fingerprint()
     test_start_rejects_when_another_task_is_reviewing()

@@ -1,0 +1,41 @@
+{
+  "name": "project-scheduled-tasks",
+  "stage": "done",
+  "waiting_for_user": false,
+  "updated_at": "2026-06-20T07:52:08+08:00",
+  "confirmed": {
+    "checklist": true,
+    "tested": true,
+    "done": true
+  },
+  "confirmations": {
+    "checklist": {
+      "confirmed_at": "2026-06-18T00:00:00+08:00",
+      "summary": "用户确认当前中文 checklist 可以继续，并要求生成 todolist。"
+    },
+    "tested": {
+      "confirmed_at": "2026-06-20T07:52:08+08:00",
+      "summary": "Phase 1、Phase 2-3、Phase 4、Phase 5 及补充修正均已完成并通过真实环境或人工验收，用户确认父需求可以归档。"
+    },
+    "done": {
+      "confirmed_at": "2026-06-20T07:52:08+08:00",
+      "summary": "用户回复“可以，那这个需求可以归档了”，确认 project-scheduled-tasks 父需求闭环完成。"
+    }
+  },
+  "files": {
+    "requirement": "requirement.md",
+    "review": "review.md",
+    "checklist": "checklist.md",
+    "todolist": "todolist.md"
+  },
+  "notes": [
+    "已按用户要求将 checklist 拆分为五个 phase。",
+    "已按用户要求将需求归档正文改为中文。",
+    "已修正 Phase 1：不是重做 scheduler，而是扩展现有 Cron 支持项目绑定。",
+    "用户已确认 checklist，已生成 todolist.md。",
+    "根据用户验收反馈，Phase 2 增加全局定时任务页展示项目绑定 cron 的要求。",
+    "Phase 1、Phase 2-3、Phase 4、Phase 5 均已独立归档为 done。",
+    "补充修正“任务级允许没有 Reviewer 时跳过独立审查”已完成并通过用户验收。",
+    "2026-06-20T07:52:08+08:00：用户确认父需求可以归档，project-scheduled-tasks 标记为 done。"
+  ]
+}

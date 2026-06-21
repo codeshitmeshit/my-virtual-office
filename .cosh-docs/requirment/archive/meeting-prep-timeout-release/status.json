@@ -1,0 +1,40 @@
+{
+  "name": "meeting-prep-timeout-release",
+  "stage": "done",
+  "waiting_for_user": false,
+  "updated_at": "2026-06-22T00:00:00+08:00",
+  "confirmed": {
+    "checklist": true,
+    "tested": true,
+    "done": true
+  },
+  "confirmations": {
+    "checklist": {
+      "item": "checklist",
+      "confirmed_at": "2026-06-20T13:09:43+08:00",
+      "summary": "User replied `continue`, confirming the checklist and authorizing todolist generation."
+    },
+    "tested": {
+      "item": "Meeting prep timeout release acceptance",
+      "confirmed_at": "2026-06-22T00:00:00+08:00",
+      "summary": "User confirmed this requirement can be accepted."
+    },
+    "done": {
+      "item": "Final closure",
+      "confirmed_at": "2026-06-22T00:00:00+08:00",
+      "summary": "User confirmed this requirement can be accepted and archived."
+    }
+  },
+  "files": {
+    "requirement": "requirement.md",
+    "review": "review.md",
+    "checklist": "checklist.md",
+    "todolist": "todolist.md"
+  },
+  "notes": [
+    "Initial requirement archived from user request: preparing meetings should release after 5 minutes if not started; timeout configurable in seconds.",
+    "Checklist confirmed by user reply `continue`; todolist generated.",
+    "Implementation completed for backend preparing timeout release, settings UI, i18n, and focused tests.",
+    "User confirmed acceptance on 2026-06-22; requirement ready for archive."
+  ]
+}

@@ -30,6 +30,12 @@ def restore_meeting_store(old):
     server.STATUS_DIR, server.STATUS_FILE = old
 
 
+def load_scores(status_dir):
+    path = os.path.join(status_dir, "project-scores.json")
+    with open(path, "r") as f:
+        return json.load(f)
+
+
 def create_meeting(**overrides):
     body = {
         "topic": "Executable Design Review",
@@ -72,6 +78,29 @@ def test_executable_meeting_create_persists_events_and_projects_active():
             assert repeated["ok"] is True
             assert repeated["idempotent"] is True
             assert repeated["meeting"]["id"] == meeting["id"]
+        finally:
+            restore_meeting_store(old)
+
+
+def test_executable_meeting_rejects_archive_manager_participant():
+    with tempfile.TemporaryDirectory() as status_dir:
+        old = with_meeting_store(status_dir)
+        try:
+            blocked = create_meeting(
+                participants=["main", "archive-manager"],
+                moderator="main",
+                idempotencyKey="archive-manager-blocked",
+            )
+            assert blocked["_status"] == 400
+            assert blocked["code"] == "archive_manager_not_meeting_participant"
+
+            blocked_moderator = create_meeting(
+                participants=["main", "codex-local"],
+                moderator="archive-manager",
+                idempotencyKey="archive-manager-moderator-blocked",
+            )
+            assert blocked_moderator["_status"] == 400
+            assert blocked_moderator["code"] == "archive_manager_not_meeting_participant"
         finally:
             restore_meeting_store(old)
 
@@ -148,6 +177,90 @@ def test_executable_meeting_occupancy_transition_and_history_projection():
                 idempotencyKey="post-release",
             )
             assert next_meeting["ok"] is True
+        finally:
+            restore_meeting_store(old)
+
+
+def test_executable_meeting_completion_awards_participant_xp_once():
+    with tempfile.TemporaryDirectory() as status_dir:
+        old = with_meeting_store(status_dir)
+        try:
+            created = create_meeting(
+                participants=["main", "hermes-default", "main"],
+                moderator="main",
+                idempotencyKey="meeting-xp-complete",
+            )
+            meeting = created["meeting"]
+            server._handle_executable_meeting_transition(meeting["id"], {"action": "start", "expectedVersion": 1})
+            server._handle_executable_meeting_transition(meeting["id"], {"stage": "active_discussion", "expectedVersion": 2})
+            server._handle_executable_meeting_transition(meeting["id"], {"stage": "summarizing", "expectedVersion": 3})
+            completed = server._handle_executable_meeting_transition(meeting["id"], {
+                "stage": "completed",
+                "expectedVersion": 4,
+                "summary": "Meeting XP should be awarded once.",
+            })
+            assert completed["meeting"]["stage"] == "completed"
+            award = completed["meeting"]["scoreAwarded"]["meetingParticipantXp"]
+            assert award["awarded"] is True
+            assert award["points"] == server.SCORE_MEETING_PARTICIPANT_XP
+            assert award["participants"] == ["main", "hermes-default"]
+
+            scores = load_scores(status_dir)
+            assert scores["agents"]["main"]["score"] == 3
+            assert scores["agents"]["hermes-default"]["score"] == 3
+            assert scores["agents"]["main"]["completed"] == 0
+            assert scores["agents"]["main"]["meetings"] == 1
+            hist = scores["agents"]["main"]["history"][-1]
+            assert hist["type"] == "meeting_participation"
+            assert hist["meetingId"] == meeting["id"]
+
+            repeated = server._handle_executable_meeting_transition(meeting["id"], {
+                "stage": "completed",
+                "idempotencyKey": "too-late",
+            })
+            assert repeated["_status"] == 409
+            scores_after = load_scores(status_dir)
+            assert scores_after["agents"]["main"]["score"] == 3
+            assert scores_after["agents"]["main"]["meetings"] == 1
+
+            leaderboard = server._handle_scores_leaderboard()["leaderboard"]
+            main_entry = next(e for e in leaderboard if e["agent"] == "main")
+            assert main_entry["meetings"] == 1
+            assert main_entry["completed"] == 0
+        finally:
+            restore_meeting_store(old)
+
+
+def test_meeting_participant_xp_skips_non_completed_and_invalid_participants():
+    with tempfile.TemporaryDirectory() as status_dir:
+        old = with_meeting_store(status_dir)
+        try:
+            pending = {
+                "id": "pending-meeting",
+                "stage": "awaiting_user_decision",
+                "participants": ["main"],
+                "topic": "Pending",
+            }
+            assert server._award_meeting_participation_points(pending)["awarded"] is False
+            assert not os.path.exists(os.path.join(status_dir, "project-scores.json"))
+
+            completed = {
+                "id": "manual-completed",
+                "stage": "completed",
+                "participants": ["", "unassigned", "archive-manager", "codex-local", "codex-local"],
+                "topic": "Defensive scoring",
+            }
+            result = server._award_meeting_participation_points(completed)
+            assert result["awarded"] is True
+            assert result["award"]["participants"] == ["codex-local"]
+            repeated = server._award_meeting_participation_points(completed)
+            assert repeated["alreadyAwarded"] is True
+
+            scores = load_scores(status_dir)
+            assert list(scores["agents"]) == ["codex-local"]
+            assert scores["agents"]["codex-local"]["score"] == 3
+            assert scores["agents"]["codex-local"]["completed"] == 0
+            assert scores["agents"]["codex-local"]["meetings"] == 1
         finally:
             restore_meeting_store(old)
 
@@ -967,6 +1080,8 @@ def test_phase2_provider_timeout_is_configurable_for_real_calls():
 def test_phase3_active_projection_includes_live_transcript_and_pending_calls():
     with tempfile.TemporaryDirectory() as status_dir:
         old = with_meeting_store(status_dir)
+        old_timeout = os.environ.get("VO_MEETING_PROVIDER_TIMEOUT_SEC")
+        os.environ["VO_MEETING_PROVIDER_TIMEOUT_SEC"] = "5"
         try:
             created = create_meeting(idempotencyKey="phase3-live")
             meeting_id = created["meeting"]["id"]
@@ -982,32 +1097,55 @@ def test_phase3_active_projection_includes_live_transcript_and_pending_calls():
                     actor={"type": "agent", "id": "main"},
                     payload={"speaker": "main", "stage": "active_opening", "round": 0, "contextMode": "incremental", "promptChars": 123},
                 )
+                pending["createdAt"] = "2026-06-20T00:00:00+00:00"
                 server._save_exec_meeting_store(store)
 
             active = [m for m in server._meeting_active_projection() if m.get("id") == meeting_id][0]
             assert active["lastEventSequence"] == pending["sequence"]
             assert active["pendingCalls"][0]["speaker"] == "main"
             assert active["pendingCalls"][0]["promptChars"] == 123
+            assert active["pendingCalls"][0]["timeoutSec"] == 5
+            assert active["pendingCalls"][0]["elapsedSec"] >= 5
+            assert active["pendingCalls"][0]["timedOut"] is True
             assert active["transcript"] == []
+            assert server._meeting_pending_formal_turn_exists(active["pendingCalls"], "active_opening", 0, "main") is False
+
+            with server._EXEC_MEETING_LOCK:
+                store = server._load_exec_meeting_store()
+                events = store.get("events", {}).get(meeting_id, [])
+            assert server._meeting_pending_formal_turn_exists(events, "active_opening", 0, "main") is True
+
+            skipped = server._handle_executable_meeting_run(meeting_id, {
+                "action": "provider_timeout_skip",
+                "pendingSequence": pending["sequence"],
+                "_noAutoContinue": True,
+            })
+            assert skipped["ok"] is True
+            assert skipped["skipped"] is True
+            assert skipped["event"]["type"] == "participant_turn"
+            assert skipped["event"]["payload"]["ok"] is False
+            assert skipped["event"]["payload"]["skipReason"] == "provider_timeout"
+            assert skipped["event"]["payload"]["inReplyToSequence"] == pending["sequence"]
+
+            active = [m for m in server._meeting_active_projection() if m.get("id") == meeting_id][0]
+            assert active["pendingCalls"] == []
+            assert active["transcript"][0]["speaker"] == "main"
+            assert active["transcript"][0]["ok"] is False
+            assert active["transcript"][0]["parseError"] == "provider_timeout_skipped"
 
             with server._EXEC_MEETING_LOCK:
                 store = server._load_exec_meeting_store()
                 meeting = store["meetings"][meeting_id]
-                server._append_exec_meeting_event(
+                server._append_ignored_provider_completion(
                     store,
                     meeting,
-                    "participant_turn",
-                    actor={"type": "agent", "id": "main"},
-                    payload={
-                        "speaker": "main",
-                        "text": "Live opening statement",
-                        "ok": True,
-                        "stage": "active_opening",
-                        "round": 0,
-                        "providerRef": {"providerKind": "fake", "agentId": "main"},
-                        "durationMs": 7,
-                        "inReplyToSequence": pending["sequence"],
-                    },
+                    "main",
+                    {"ok": True, "reply": "Late opening statement", "providerRef": {"providerKind": "fake", "agentId": "main"}, "durationMs": 7},
+                    {"text": "Late opening statement", "rawText": "Late opening statement", "structured": {}, "parseError": ""},
+                    pending,
+                    "meeting_state_changed",
+                    "active_opening",
+                    0,
                 )
                 server._save_exec_meeting_store(store)
 
@@ -1015,8 +1153,86 @@ def test_phase3_active_projection_includes_live_transcript_and_pending_calls():
             assert active["pendingCalls"] == []
             assert len(active["transcript"]) == 1
             assert active["transcript"][0]["speaker"] == "main"
-            assert active["transcript"][0]["text"] == "Live opening statement"
+            assert active["transcript"][0]["parseError"] == "provider_timeout_skipped"
+            detail = server._handle_executable_meeting_detail(meeting_id)
+            assert len([e for e in detail["events"] if e["type"] == "provider_call_ignored"]) == 1
         finally:
+            if old_timeout is None:
+                os.environ.pop("VO_MEETING_PROVIDER_TIMEOUT_SEC", None)
+            else:
+                os.environ["VO_MEETING_PROVIDER_TIMEOUT_SEC"] = old_timeout
+            restore_meeting_store(old)
+
+
+def test_phase3_provider_timeout_skip_continues_meeting():
+    with tempfile.TemporaryDirectory() as status_dir:
+        old = with_meeting_store(status_dir)
+        old_timeout = os.environ.get("VO_MEETING_PROVIDER_TIMEOUT_SEC")
+        old_call = server._meeting_call_provider
+        os.environ["VO_MEETING_PROVIDER_TIMEOUT_SEC"] = "5"
+        calls = []
+
+        def fake_call(meeting, speaker, prompt):
+            calls.append({"speaker": speaker, "stage": meeting.get("stage"), "round": meeting.get("round")})
+            return {
+                "ok": True,
+                "reply": f"Position: {speaker} can continue.\nReasoning: timeout skip should not stall the meeting.\nSuggested next step: continue.",
+                "providerRef": {"providerKind": "fake", "agentId": speaker},
+                "durationMs": 1,
+                "conversationId": f"meeting:{meeting['id']}:participant:{speaker}",
+            }
+
+        server._meeting_call_provider = fake_call
+        try:
+            created = create_meeting(
+                participants=["main", "hermes-default"],
+                moderator="main",
+                maxRounds=1,
+                idempotencyKey="phase3-timeout-continues",
+            )
+            meeting_id = created["meeting"]["id"]
+            server._handle_executable_meeting_transition(meeting_id, {"action": "start", "expectedVersion": 1})
+
+            with server._EXEC_MEETING_LOCK:
+                store = server._load_exec_meeting_store()
+                meeting = store["meetings"][meeting_id]
+                pending = server._append_exec_meeting_event(
+                    store,
+                    meeting,
+                    "provider_call_started",
+                    actor={"type": "agent", "id": "main"},
+                    payload={"speaker": "main", "stage": "active_opening", "round": 0, "contextMode": "incremental", "promptChars": 123},
+                )
+                pending["createdAt"] = "2026-06-20T00:00:00+00:00"
+                meeting["currentSpeaker"] = "main"
+                server._save_exec_meeting_store(store)
+
+            skipped = server._handle_executable_meeting_run(meeting_id, {
+                "action": "provider_timeout_skip",
+                "pendingSequence": pending["sequence"],
+            })
+
+            assert skipped["ok"] is True
+            assert skipped["timeoutSkipped"] is True
+            assert skipped["meeting"]["stage"] == "awaiting_user_decision"
+            assert calls == [{"speaker": "hermes-default", "stage": "active_opening", "round": 0}]
+
+            detail = server._handle_executable_meeting_detail(meeting_id)
+            turns = [
+                e for e in detail["events"]
+                if e["type"] == "participant_turn" and (e.get("payload") or {}).get("stage") == "active_opening"
+            ]
+            assert [(e["payload"]["speaker"], e["payload"].get("parseError", "")) for e in turns] == [
+                ("main", "provider_timeout_skipped"),
+                ("hermes-default", "structured_json_not_found"),
+            ]
+            assert not server._meeting_active_projection()[0]["pendingCalls"]
+        finally:
+            server._meeting_call_provider = old_call
+            if old_timeout is None:
+                os.environ.pop("VO_MEETING_PROVIDER_TIMEOUT_SEC", None)
+            else:
+                os.environ["VO_MEETING_PROVIDER_TIMEOUT_SEC"] = old_timeout
             restore_meeting_store(old)
 
 
@@ -1370,6 +1586,8 @@ def test_phase2_openclaw_workflow_session_key_is_safe_for_meeting_ids():
 if __name__ == "__main__":
     test_executable_meeting_create_persists_events_and_projects_active()
     test_executable_meeting_occupancy_transition_and_history_projection()
+    test_executable_meeting_completion_awards_participant_xp_once()
+    test_meeting_participant_xp_skips_non_completed_and_invalid_participants()
     test_phase3_pause_resume_cancel_controls_project_previous_stage_and_history()
     test_phase3_active_executable_meeting_projects_to_status_canvas_meetings()
     test_phase3_decision_window_timeout_setting_defaults_and_clamps()
@@ -1385,6 +1603,7 @@ if __name__ == "__main__":
     test_phase2_prompt_context_modes()
     test_phase2_provider_timeout_is_configurable_for_real_calls()
     test_phase3_active_projection_includes_live_transcript_and_pending_calls()
+    test_phase3_provider_timeout_skip_continues_meeting()
     test_phase3_user_intervention_is_projected_and_passed_to_incremental_prompt()
     test_phase3_agenda_change_updates_future_prompt_and_projection()
     test_phase3_provider_envelope_is_unwrapped_and_structured_turn_is_projected()

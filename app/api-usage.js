@@ -20,8 +20,13 @@
 
     let _open = true;
     let _pollTimer = null;
+    let _enabled = false;
 
     window.toggleApiUsage = function() {
+        if (!_enabled) {
+            stopPolling();
+            return;
+        }
         _open = !_open;
         const body = document.getElementById('api-usage-body');
         const arrow = document.getElementById('api-toggle-arrow');
@@ -31,7 +36,27 @@
         if (!_open && _pollTimer) stopPolling();
     };
 
-    function startPolling() { fetchUsage(); _pollTimer = setInterval(fetchUsage, POLL_INTERVAL); }
+    window.setApiUsageEnabled = function(enabled) {
+        _enabled = enabled === true;
+        const root = document.getElementById('api-usage-monitor');
+        const body = document.getElementById('api-usage-body');
+        const arrow = document.getElementById('api-toggle-arrow');
+        if (root) root.style.display = _enabled ? '' : 'none';
+        if (!_enabled) {
+            stopPolling();
+            setDot(false);
+            if (body) body.style.display = 'none';
+            if (arrow) arrow.textContent = '▶';
+            return;
+        }
+        if (_open && !_pollTimer) startPolling();
+    };
+
+    function startPolling() {
+        if (!_enabled) return;
+        fetchUsage();
+        _pollTimer = setInterval(fetchUsage, POLL_INTERVAL);
+    }
     function stopPolling() { if (_pollTimer) clearInterval(_pollTimer); _pollTimer = null; }
 
     async function fetchUsage() {
@@ -182,10 +207,9 @@
     }
 
     fetch('/vo-config').then(function(r) { return r.json(); }).then(function(cfg) {
-        if (cfg && cfg.features && cfg.features.apiUsage === true) {
-            if (_open) startPolling();
-        }
+        window.setApiUsageEnabled(!!(cfg && cfg.features && cfg.features.apiUsage === true));
     }).catch(function() {
+        window.setApiUsageEnabled(false);
         // Leave API usage disabled when config cannot be loaded.
     });
 })();

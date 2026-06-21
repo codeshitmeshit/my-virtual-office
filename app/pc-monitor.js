@@ -15,8 +15,13 @@
     let _open = true;
     let _pollTimer = null;
     let _online = false;
+    let _enabled = false;
 
     window.togglePcMonitor = function() {
+        if (!_enabled) {
+            stopPolling();
+            return;
+        }
         _open = !_open;
         const body = document.getElementById('pc-monitor-body');
         const arrow = document.getElementById('pc-toggle-arrow');
@@ -26,7 +31,24 @@
         if (!_open && _pollTimer) stopPolling();
     };
 
+    window.setPcMonitorEnabled = function(enabled) {
+        _enabled = enabled === true;
+        const root = document.getElementById('pc-monitor');
+        const body = document.getElementById('pc-monitor-body');
+        const arrow = document.getElementById('pc-toggle-arrow');
+        if (root) root.style.display = _enabled ? '' : 'none';
+        if (!_enabled) {
+            stopPolling();
+            setStatusDot(false);
+            if (body) body.style.display = 'none';
+            if (arrow) arrow.textContent = '▶';
+            return;
+        }
+        if (_open && !_pollTimer) startPolling();
+    };
+
     function startPolling() {
+        if (!_enabled) return;
         fetchMetrics();
         _pollTimer = setInterval(fetchMetrics, POLL_INTERVAL);
     }
@@ -213,11 +235,10 @@
 
     // Auto-start polling only if pcMetrics feature is enabled
     fetch('/vo-config').then(function(r) { return r.json(); }).then(function(cfg) {
-        if (cfg && cfg.features && cfg.features.pcMetrics === true) {
-            if (_open) startPolling();
-        }
+        window.setPcMonitorEnabled(!!(cfg && cfg.features && cfg.features.pcMetrics === true));
         // If pcMetrics is not enabled, don't start polling — avoids 404 spam
     }).catch(function() {
+        window.setPcMonitorEnabled(false);
         // If vo-config fetch fails, don't start polling to avoid 404s
     });
 })();

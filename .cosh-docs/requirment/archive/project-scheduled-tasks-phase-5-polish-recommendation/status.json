@@ -1,0 +1,42 @@
+{
+  "name": "project-scheduled-tasks-phase-5-polish-recommendation",
+  "stage": "done",
+  "waiting_for_user": false,
+  "updated_at": "2026-06-20T07:40:46+08:00",
+  "confirmed": {
+    "checklist": true,
+    "tested": true,
+    "done": true
+  },
+  "confirmations": {
+    "checklist": {
+      "confirmed_at": "2026-06-19T00:59:00+08:00",
+      "summary": "用户回复 “continue”，确认 Phase 5 checklist，可以生成 todolist。"
+    },
+    "tested": {
+      "confirmed_at": "2026-06-19T03:52:53+08:00",
+      "summary": "Phase 5 已实现并通过自动化、静态检查和 8090 live API 验收，等待用户人工验收。"
+    },
+    "done": {
+      "confirmed_at": "2026-06-20T07:40:46+08:00",
+      "summary": "Phase 5 已完成归档；用户追加确认“任务级允许没有 Reviewer 时跳过独立审查”补充修正验收通过，并要求当前需求标记完成。"
+    }
+  },
+  "files": {
+    "requirement": "requirement.md",
+    "review": "review.md",
+    "checklist": "checklist.md",
+    "todolist": "todolist.md"
+  },
+  "notes": [
+    "这是父需求 project-scheduled-tasks 的 Phase 5 子需求。",
+    "Phase 1、Phase 2+3、Phase 4 均已归档完成。",
+    "范围聚焦长期项目推荐、项目定时任务本地化、兼容性和完整回归。",
+    "用户已确认 checklist，todolist.md 已创建。",
+    "Phase 5 已完成长期项目标记、长期项目推荐入口、项目定时任务本地化、历史回写保护和 8090 live 验收。",
+    "8090 live 当前运行在 http://localhost:8090，PID 377913。",
+    "Chrome MCP 因共享 profile lock 未接管页面；未强制关闭共享浏览器，已用真实 API 和静态检查替代记录。",
+    "用户已于 2026-06-19T15:42:46+08:00 确认验收，Phase 5 归档完成。",
+    "2026-06-20T07:40:46+08:00：补充修正“任务级允许没有 Reviewer 时跳过独立审查”已完成并通过用户验收；需求保持 done。"
+  ]
+}

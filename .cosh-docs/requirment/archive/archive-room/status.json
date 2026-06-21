@@ -1,0 +1,45 @@
+{
+  "name": "archive-room",
+  "stage": "done",
+  "waiting_for_user": false,
+  "updated_at": "2026-06-22T01:05:12+08:00",
+  "confirmed": {
+    "checklist": true,
+    "tested": true,
+    "done": true
+  },
+  "confirmations": {
+    "checklist": {
+      "item": "Archive Room parent checklist",
+      "confirmed_at": "2026-06-22T00:54:03+08:00",
+      "summary": "用户确认“可以的，争取今天把他收尾掉吧”。父需求 checklist 由已完成归档的 archive-room-phase-1-3、phase-4、phase-5、phase-6、phase-7、phase-8 及 functional-furniture-bookshelf-archive 分阶段验收覆盖。"
+    },
+    "tested": {
+      "item": "Archive Room phased acceptance coverage",
+      "confirmed_at": "2026-06-22T00:54:03+08:00",
+      "summary": "总体验收基于各子需求的自动化测试、Chrome/CDP 验收、真实项目数据验收和人工确认记录。覆盖档案室一级入口、项目列表、详情、产物预览、档案管理员生命周期、事件/计划整理、AI 入场上下文、人工治理、维护频率、档案管理员优先治理和书架绑定入口。"
+    },
+    "done": {
+      "item": "Archive Room parent final closeout",
+      "confirmed_at": "2026-06-22T00:54:03+08:00",
+      "summary": "用户同意今天收尾档案室总需求；父需求作为总验收壳闭环归档，不再生成重复 todolist。"
+    }
+  },
+  "files": {
+    "requirement": "requirement.md",
+    "review": "review.md",
+    "checklist": "checklist.md",
+    "todolist": null
+  },
+  "notes": [
+    "Requirement archived from product clarification conversation.",
+    "Checklist generated and awaiting user confirmation before todolist creation.",
+    "Phase 7 clarification added: pending confirmations must have a dedicated project-detail UI with item content, confidence, impact, reason, source references, created time, and confirm/reject/defer actions; project-card pending count alone is insufficient.",
+    "Phase 6 clarification added: project archive detail must explain what the archive is for, what it contains, what it will contain in the future, and how humans/AI can use it; basic project information must be visible before mechanical summaries.",
+    "Phase 6 clarification added: AI onboarding/task context must be project-characterized, reflecting project-specific business background, goals, confirmed rules, user preferences, decision style, important history, risks, and artifacts without changing the AI's global identity or safety/tool boundaries.",
+    "Phase 8 backlog added: Archive Room should support per-project maintenance frequency controls, including event-triggered only, daily, weekly, and possibly custom interval scheduling, with next/last run visibility and skipped-run records when paused or disabled.",
+    "Phase 8 backlog expanded: governance should be archive-manager-first, with humans only used as fallback for truly ambiguous or high-impact owner decisions; the pending-human queue should remain small and actionable.",
+    "Parent Archive Room requirement closed on 2026-06-22 after child requirements archive-room-phase-1-3 through archive-room-phase-8 and bookshelf archive binding were accepted and archived.",
+    "Main acceptance run completed on 2026-06-22T01:05:12+08:00: requirement status, service health, Archive Room API, JS syntax, and CDP UI acceptance all passed."
+  ]
+}

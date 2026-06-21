@@ -1,0 +1,42 @@
+{
+  "name": "archive-room-phase-1-3",
+  "stage": "done",
+  "waiting_for_user": false,
+  "updated_at": "2026-06-20T07:50:53+08:00",
+  "confirmed": {
+    "checklist": true,
+    "tested": true,
+    "done": true
+  },
+  "confirmations": {
+    "checklist": {
+      "confirmed_at": "2026-06-19T17:52:41+08:00",
+      "item": "checklist",
+      "summary": "User requested todolist generation after Phase 1-3 product clarification; checklist confirmed with clarified boundaries for minimal archive manager placeholder, attention-first overview, human-readable onboarding package, explicit artifact association, and AI onboarding as soft acceptance."
+    },
+    "tested": {
+      "confirmed_at": "2026-06-20T07:50:53+08:00",
+      "item": "tested",
+      "summary": "User completed manual acceptance for Archive Room Phase 1-3 and explicitly confirmed it passed. Acceptance covered real project data, image/video/audio/Markdown artifact preview, two-column artifact modal, source display, source/path directory views, and a three-level path artifact test project."
+    },
+    "done": {
+      "confirmed_at": "2026-06-20T07:50:53+08:00",
+      "item": "done",
+      "summary": "User requested archiving the Phase 1-3 requirement after acceptance. Archive Room Phase 1-3 is closed as done."
+    }
+  },
+  "files": {
+    "requirement": "requirement.md",
+    "review": "review.md",
+    "checklist": "checklist.md",
+    "todolist": "todolist.md"
+  },
+  "notes": [
+    "Sub-requirement opened from Archive Room product clarification.",
+    "Scope is limited to Phase 1-3: data foundation, first-level Archive Room overview, project detail and artifact preview.",
+    "Checklist generated and awaiting user confirmation before todolist creation.",
+    "Checklist confirmed and todolist created after latest product clarification.",
+    "Implementation completed for Archive Room Phase 1-3. Automated tests passed; user confirmation is still required before marking tested or done.",
+    "User manually accepted Archive Room Phase 1-3 on 2026-06-20T07:50:53+08:00 and requested final archival. Requirement marked done."
+  ]
+}

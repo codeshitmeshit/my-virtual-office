@@ -1,0 +1,40 @@
+{
+  "name": "meeting-participant-xp",
+  "stage": "done",
+  "waiting_for_user": false,
+  "updated_at": "2026-06-21T00:00:00+08:00",
+  "confirmed": {
+    "checklist": true,
+    "tested": true,
+    "done": true
+  },
+  "confirmations": {
+    "checklist": {
+      "item": "checklist",
+      "confirmed_at": "2026-06-20T16:42:13+08:00",
+      "summary": "User replied `pass`, confirming the checklist for meeting participant XP."
+    },
+    "tested": {
+      "item": "Meeting participant XP implementation tests",
+      "confirmed_at": "2026-06-21T00:00:00+08:00",
+      "summary": "User confirmed meeting-participant-xp can be archived."
+    },
+    "done": {
+      "item": "Final closure",
+      "confirmed_at": "2026-06-21T00:00:00+08:00",
+      "summary": "User confirmed meeting-participant-xp can be archived."
+    }
+  },
+  "files": {
+    "requirement": "requirement.md",
+    "review": "review.md",
+    "checklist": "checklist.md",
+    "todolist": "todolist.md"
+  },
+  "notes": [
+    "Checklist confirmed by user.",
+    "Todolist created from confirmed checklist.",
+    "Implementation completed and targeted tests passed.",
+    "User confirmed tested/done on 2026-06-21; requirement ready for archive."
+  ]
+}

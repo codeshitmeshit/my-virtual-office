@@ -108,6 +108,37 @@ def test_phase4_request_quality_gate_and_pending_safety():
             restore_store(old)
 
 
+def test_phase4_request_rejects_archive_manager_participant():
+    with tempfile.TemporaryDirectory() as status_dir:
+        old = with_store(status_dir)
+        try:
+            project, task = create_project_and_task()
+            blocked = server._handle_meeting_request_create(
+                project["id"],
+                task["id"],
+                valid_request_body(
+                    idempotencyKey="phase4-archive-manager-request",
+                    suggestedParticipants=["executor", "archive-manager"],
+                ),
+            )
+            assert blocked["_status"] == 400
+            assert blocked["code"] == "archive_manager_not_meeting_participant"
+
+            req = server._handle_meeting_request_create(
+                project["id"],
+                task["id"],
+                valid_request_body(idempotencyKey="phase4-archive-manager-confirm"),
+            )["request"]
+            confirm_blocked = server._handle_meeting_request_confirm(req["id"], {
+                "participants": ["executor", "archive-manager"],
+                "moderator": "executor",
+            })
+            assert confirm_blocked["_status"] == 400
+            assert confirm_blocked["code"] == "archive_manager_not_meeting_participant"
+        finally:
+            restore_store(old)
+
+
 def test_phase4_high_urgency_auto_confirms_agent_request():
     with tempfile.TemporaryDirectory() as status_dir:
         old = with_store(status_dir)

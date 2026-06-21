@@ -832,10 +832,10 @@
 }
 .proj-scheduled-cron-item {
     display: grid;
-    grid-template-columns: minmax(180px, 1fr) auto auto;
-    gap: 10px;
+    grid-template-columns: minmax(220px, 1fr) max-content max-content;
+    gap: 12px;
     align-items: center;
-    padding: 9px;
+    padding: 12px;
     border: 1px solid #2a2f46;
     border-radius: 6px;
     background: #151a2b;
@@ -845,13 +845,16 @@
 }
 .proj-scheduled-cron-main {
     display: flex;
-    flex-direction: column;
-    gap: 4px;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 5px 8px;
     min-width: 0;
 }
 .proj-scheduled-cron-main strong {
+    flex-basis: 100%;
     color: #e6e9f2;
-    font-size: 12px;
+    font-size: 13px;
+    line-height: 1.35;
     overflow-wrap: anywhere;
 }
 .proj-scheduled-cron-main span,
@@ -896,12 +899,19 @@
     color: #f0d66c;
 }
 .proj-scheduled-cron-main code {
+    display: inline-flex;
+    align-items: center;
+    min-height: 20px;
     color: #9fc6ff;
-    background: #0c1020;
+    background: #11172a;
     border: 1px solid #26304b;
-    border-radius: 4px;
-    padding: 2px 5px;
-    width: fit-content;
+    border-radius: 999px;
+    padding: 2px 8px;
+    font-size: 10px;
+    line-height: 1.25;
+    font-family: inherit;
+    font-weight: 600;
+    width: auto;
     max-width: 100%;
     overflow-wrap: anywhere;
 }

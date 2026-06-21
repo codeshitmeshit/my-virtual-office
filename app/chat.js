@@ -400,6 +400,34 @@
       return this.getSelectedProviderKind() === 'codex' || String(this.sessionKey || '').startsWith('codex:');
     }
 
+    getSelectedAgentRecord() {
+      const agentId = this.getSelectedAgentId();
+      return (this.agentList || []).find(a =>
+        a.key === this.selectedAgentKey ||
+        a.sessionKey === this.sessionKey ||
+        a.agentId === agentId ||
+        a.key === agentId
+      ) || null;
+    }
+
+    isArchiveManagerSelected() {
+      const a = this.getSelectedAgentRecord();
+      return !!(a && (a.systemRole === 'archive_manager' || a.archiveManager));
+    }
+
+    isArchiveRelatedMessage(text) {
+      const lower = String(text || '').toLowerCase();
+      return [
+        '档案', '归档', '档案室', '项目产物', '产物', '上下文', '入场包', '目录', '来源', '证据',
+        'archive', 'archives', 'archival', 'artifact', 'artifacts', 'onboarding', 'context',
+        'catalog', 'source', 'sources', 'evidence', 'summary', 'summaries'
+      ].some(k => lower.includes(k));
+    }
+
+    archiveManagerBoundaryReply() {
+      return '我是档案管理员，只处理档案室、项目上下文、产物来源、入场包和归档维护相关问题。普通执行、编码、审查、闲聊或项目任务分配请转给对应执行 AI。';
+    }
+
     updateProviderControls() {
       if (this.compactContextBtn) this.compactContextBtn.style.display = this.isCodexSelected() ? '' : 'none';
       if (this.stopBtn) this.stopBtn.style.display = '';
@@ -806,6 +834,17 @@
       if (nonImageNames.length) displayText += (displayText ? '\n' : '') + '📎 ' + nonImageNames.join(', ');
       this.appendMessage('user', displayText, Date.now(), imageDataUrls, { label: _ct('chat_you_label'), kind: 'human' });
       this.scrollBottom();
+
+      if (this.isArchiveManagerSelected() && !this.isArchiveRelatedMessage(text || displayText)) {
+        this.pendingAttachments = [];
+        this.renderAttachmentPreviews();
+        this.appendMessage('assistant', this.archiveManagerBoundaryReply(), Date.now(), [], {
+          label: this.agentSelect.selectedOptions[0]?.textContent.trim() || '档案管理员',
+          kind: 'agent'
+        });
+        this.scrollBottom();
+        return;
+      }
 
       let attachments;
       let uploadedFiles = [];

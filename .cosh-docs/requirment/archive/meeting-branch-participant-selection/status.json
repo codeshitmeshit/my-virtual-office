@@ -1,0 +1,40 @@
+{
+  "name": "meeting-branch-participant-selection",
+  "stage": "done",
+  "waiting_for_user": false,
+  "updated_at": "2026-06-20T10:00:00+08:00",
+  "confirmed": {
+    "checklist": true,
+    "tested": true,
+    "done": true
+  },
+  "confirmations": {
+    "checklist": {
+      "confirmed_at": "2026-06-20T08:11:21+08:00",
+      "summary": "用户回复 “continuee”，确认 checklist，可以生成 todolist。"
+    },
+    "tested": {
+      "confirmed_at": "2026-06-20T09:45:00+08:00",
+      "summary": "已完成实现、自动化回归与 Chrome MCP 真实页面 smoke；等待用户最终验收。"
+    },
+    "done": {
+      "confirmed_at": "2026-06-20T10:00:00+08:00",
+      "summary": "用户回复“我测完了，可以归档了”，确认需求验收通过并允许归档。"
+    }
+  },
+  "files": {
+    "requirement": "requirement.md",
+    "review": "review.md",
+    "checklist": "checklist.md",
+    "todolist": "todolist.md"
+  },
+  "notes": [
+    "Product clarification completed with answers: C C A B C.",
+    "Scope covers new meeting form and AI meeting request confirmation form.",
+    "Checklist generated and awaiting user confirmation before todolist creation.",
+    "2026-06-20T08:11:21+08:00：用户确认 checklist，进入 todolist 创建。",
+    "2026-06-20T09:45:00+08:00：实现完成。新建会议和 AI 会议申请确认共用 branch participant selector；完成 node --check、会议 phase1/phase6 回归测试与 Chrome MCP 真实页面 smoke。",
+    "Chrome MCP 验收后已释放到 about:blank。真实环境当前未构造 pending AI 会议申请，最终双入口人工验收仍待用户确认。",
+    "2026-06-20T10:00:00+08:00：用户完成最终验收，确认可以归档；需求闭环完成。"
+  ]
+}

@@ -27,6 +27,8 @@
   "show_chat_bubbles": "Show chat bubbles",
   "internal_bubble_timeout": "Internal bubble auto-collapse (seconds)",
   "internal_bubble_timeout_hint": "Use 0 to keep Internal bubbles expanded.",
+  "meeting_preparing_timeout": "Preparing meeting auto-release (seconds)",
+  "meeting_preparing_timeout_hint": "Preparing meetings release automatically if they are not started before this timeout.",
   "ui_font_size": "UI font size",
   "ui_font_size_hint": "Scales interface panels only. Canvas labels stay unchanged.",
   "show_agent_names": "Show agent names",
@@ -83,7 +85,9 @@
   "minimize_all": "💬 Minimize All",
   "models_toolbar": "⚙️ Models",
   "cron": "⏰ Cron",
+  "project": "Project",
   "projects": "📋 Projects",
+  "archive_room": "🗄️ Archive Room",
   "reset_zoom": "🔍 Reset",
   "sms": "📞 SMS",
   "sms_unavailable_hint": "SMS panel is disabled. Enable SMS Panel in Settings and configure Twilio credentials.",
@@ -571,6 +575,8 @@
   "meeting_status_cancelled": "Cancelled",
   "meeting_status_failed": "Failed",
   "meeting_stage_preparing": "Preparing",
+  "meeting_preparing_timeout_remaining": "Auto-release in {seconds}s",
+  "meeting_preparing_timeout_released": "Preparing timeout released",
   "meeting_stage_conflict": "Conflict",
   "meeting_stage_active_opening": "Opening",
   "meeting_stage_active_discussion": "Discussion",
@@ -584,6 +590,9 @@
   "meeting_discussion_round": "Discussion round",
   "meeting_turn_failed": "failed",
   "meeting_provider_calling": "calling provider",
+  "meeting_provider_call_timeout": "call timed out",
+  "meeting_provider_timeout_monitor": "Provider call exceeded the timeout and will be skipped so the meeting can continue.",
+  "meeting_provider_waited": "waited",
   "meeting_user_intervention": "User intervention",
   "meeting_user_message": "Message",
   "meeting_user_message_placeholder": "Add a live comment for the agents.",
@@ -837,7 +846,11 @@
   "proj_scheduled_cron_days_label": "Days",
   "proj_scheduled_cron_date_label": "Date",
   "proj_scheduled_cron_enabled_label": "Enabled",
-  "proj_scheduled_cron_repeat_gate_hint": "If the target task is already Done, repeat dispatch is controlled by the task detail setting \"Allow scheduled tasks to repeat completed tasks\".",
+  "proj_scheduled_cron_repeat_gate_hint": "If the target task is already Done, retriggering is controlled by the task detail setting \"Allow this task to be retriggered\".",
+  "proj_scheduled_cron_repeat_gate_missing": "Task missing",
+  "proj_scheduled_cron_repeat_gate_open": "Task is open and can run",
+  "proj_scheduled_cron_repeat_gate_enabled": "Done task can be retriggered",
+  "proj_scheduled_cron_repeat_gate_blocked": "Done task cannot be retriggered",
   "proj_scheduled_cron_save": "Save scheduled task",
   "proj_scheduled_cron_create": "Create scheduled task",
   "proj_scheduled_cron_error_interval": "Interval must be at least 1 minute",
@@ -862,8 +875,8 @@
   "proj_scheduled_cron_delete_failed": "Failed to delete project scheduled task: {message}",
   "proj_scheduled_cron_alert_title": "Project scheduled task issue",
   "proj_scheduled_cron_alert_badge": "Schedule issue",
-  "proj_task_scheduled_repeat_enabled": "Allow scheduled tasks to repeat completed tasks",
-  "proj_task_scheduled_repeat_hint": "When enabled, a project scheduled task can reopen and dispatch a Done task when it triggers again.",
+  "proj_task_scheduled_repeat_enabled": "Allow this task to be retriggered",
+  "proj_task_scheduled_repeat_hint": "When enabled, this task can be retriggered manually or by a project scheduled task even after it is Done; it will be reopened and executed again.",
   "weekday_mon": "Mon",
   "weekday_tue": "Tue",
   "weekday_wed": "Wed",
@@ -1353,6 +1366,7 @@
   ,"branch_change_title": "Branch: {{name}} (click to change)"
   ,"catalog_office": "Office"
   ,"catalog_comfort": "Comfort"
+  ,"catalog_functional": "Functional Furniture"
   ,"catalog_kitchen": "Kitchen"
   ,"catalog_fun": "Fun"
   ,"catalog_structure": "Structure"
@@ -1368,6 +1382,23 @@
   ,"furniture_coffee_table": "Coffee Table"
   ,"furniture_tv": "TV"
   ,"furniture_bookshelf": "Bookshelf"
+  ,"furniture_functional_bookshelf": "Archive Bookshelf"
+  ,"furniture_meeting_table_4": "4-Person Meeting Table"
+  ,"furniture_meeting_table_6": "6-Person Meeting Table"
+  ,"furniture_meeting_room": "Meeting Room"
+  ,"meeting_space_idle": "No meeting is running"
+  ,"meeting_space_view_all": "View All Meetings"
+  ,"meeting_space_view_current": "View Current Meeting"
+  ,"bookshelf_view_archive": "View Archive"
+  ,"bookshelf_bind_archive": "Bind Archive"
+  ,"bookshelf_change_archive": "Change Archive"
+  ,"bookshelf_unbound": "No archive bound"
+  ,"bookshelf_unbound_hint": "Bind an archive first"
+  ,"bookshelf_loading_archives": "Loading archives..."
+  ,"bookshelf_no_archives": "No archives available"
+  ,"bookshelf_archive_load_failed": "Failed to load archives"
+  ,"bookshelf_archive_unavailable": "Archive Room is unavailable"
+  ,"bookshelf_bound_archive": "Bound archive: {{name}}"
   ,"furniture_plant": "Plant"
   ,"furniture_tall_plant": "Tall Plant"
   ,"furniture_end_table_plant": "End Table + Plant"
