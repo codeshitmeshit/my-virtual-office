@@ -22,6 +22,7 @@
         currentProject: null,  // full project object
         currentTask: null,     // task being edited in detail panel
         meetingRequestsByTask: {},
+        expandedCommentTasks: {},
         agentRoster: [],
         dragState: null,       // {taskId, projectId, sourceColId, ghost}
         touchDrag: null,
@@ -30,6 +31,14 @@
     };
 
     const _t = (key, params) => typeof i18n !== 'undefined' ? i18n.t(key, params) : key;
+
+    function commentsToggleLabel(expanded, hiddenCount) {
+        if (expanded) return _t('proj_comments_collapse');
+        const label = _t('proj_comments_expand', { count: hiddenCount });
+        if (label && label !== 'proj_comments_expand') return label;
+        const lang = (typeof i18n !== 'undefined' && i18n.getLanguage && i18n.getLanguage()) || document.documentElement.lang || 'en';
+        return String(lang).toLowerCase().startsWith('zh') ? `展开全部（还有 ${hiddenCount} 条）` : `Show all (${hiddenCount} more)`;
+    }
 
     // ── DEFAULT TEMPLATES ─────────────────────────────────────────
     const DEFAULT_TEMPLATES = [
@@ -1270,6 +1279,9 @@
         const checklist = task.checklist || [];
         const checkDone = checklist.filter(c => c.done).length;
         const comments = task.comments || [];
+        const commentsExpanded = !!state.expandedCommentTasks[task.id];
+        const visibleComments = commentsExpanded ? comments : comments.slice(-3);
+        const hiddenCommentCount = Math.max(0, comments.length - visibleComments.length);
         const reviewItems = (task.reviewCheck && task.reviewCheck.length) ? task.reviewCheck : (task.lastReviewCheck || []);
         const reviewTitle = (task.reviewCheck && task.reviewCheck.length) ? '🔍 Review Check' : ((task.lastReviewCheck && task.lastReviewCheck.length) ? '🕘 Last Failed Review' : '🔍 Review Check');
         const activity = (p && p.activity || []).filter(a => a.taskId === task.id).slice().reverse().slice(0, 20);
@@ -1477,10 +1489,13 @@
             </div>` : ''}
 
             <div class="proj-section">
-                <div class="proj-section-header"><span class="proj-section-title">${_t('proj_comments')}</span></div>
+                <div class="proj-section-header">
+                    <span class="proj-section-title">${_t('proj_comments')}</span>
+                    ${comments.length > 3 ? `<button class="proj-link-btn" onclick="ProjMgr.toggleComments('${task.id}')">${commentsToggleLabel(commentsExpanded, hiddenCommentCount)}</button>` : ''}
+                </div>
                 <div class="proj-comments-list" id="detail-comments">
                     ${comments.length === 0 ? `<div style="font-size:11px;color:#555">${_t('proj_no_comments')}</div>` : ''}
-                    ${comments.map(c => `
+                    ${visibleComments.map(c => `
                     <div class="proj-comment">
                         <div class="proj-comment-header">
                             <span class="proj-comment-author">${escHtml(c.author)}</span>
@@ -1539,6 +1554,18 @@
                 clearTimeout(state._descAutoSaveTimer);
                 saveDescription();
             };
+        }
+    }
+
+    function toggleCommentsAction(taskId) {
+        if (!taskId) return;
+        const body = document.querySelector('.proj-detail-body');
+        const scrollTop = body ? body.scrollTop : 0;
+        state.expandedCommentTasks[taskId] = !state.expandedCommentTasks[taskId];
+        if (state.currentTask && state.currentTask.id === taskId) {
+            renderDetailPanel(state.currentTask);
+            const nextBody = document.querySelector('.proj-detail-body');
+            if (nextBody) nextBody.scrollTop = scrollTop;
         }
     }
 
@@ -3410,6 +3437,7 @@
         addTag,
         removeTag,
         submitComment,
+        toggleComments: toggleCommentsAction,
         deleteCurrentTask,
         duplicateTask,
         addColumn,

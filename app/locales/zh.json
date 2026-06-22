@@ -753,6 +753,8 @@
   "proj_add_checklist_item": "添加检查项…",
   "proj_comments": "评论",
   "proj_no_comments": "暂无评论",
+  "proj_comments_expand": "展开全部（还有 {{count}} 条）",
+  "proj_comments_collapse": "收起评论",
   "proj_add_comment_placeholder": "添加评论…（支持 Markdown）",
   "proj_post_comment": "发表评论",
   "proj_activity": "活动",

@@ -753,6 +753,8 @@
   "proj_add_checklist_item": "Add checklist item…",
   "proj_comments": "Comments",
   "proj_no_comments": "No comments yet",
+  "proj_comments_expand": "Show all ({{count}} more)",
+  "proj_comments_collapse": "Collapse comments",
   "proj_add_comment_placeholder": "Add a comment… (Markdown supported)",
   "proj_post_comment": "Post Comment",
   "proj_activity": "Activity",

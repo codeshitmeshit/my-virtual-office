@@ -745,6 +745,18 @@
     gap: 10px;
     margin-bottom: 10px;
 }
+.proj-link-btn {
+    border: 0;
+    background: transparent;
+    color: #8fb7ff;
+    font-size: 10px;
+    cursor: pointer;
+    padding: 2px 0;
+}
+.proj-link-btn:hover {
+    color: #ffd700;
+    text-decoration: underline;
+}
 .proj-comment {
     background: #0d0d1e;
     border: 1px solid #2a2a4e;
