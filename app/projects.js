@@ -1261,7 +1261,7 @@
         if (!panel) return;
         // Preserve unsaved description text from textarea before re-render
         const existingDescEl = document.getElementById('detail-desc');
-        if (existingDescEl && task) {
+        if (existingDescEl && task && existingDescEl.dataset.taskId === task.id) {
             task.description = existingDescEl.value;
         }
         const p = state.currentProject;
@@ -1414,7 +1414,7 @@
                     <button class="proj-desc-tab active" id="desc-tab-edit" onclick="ProjMgr.switchDescTab('edit')">${_t('proj_edit_desc')}</button>
                     <button class="proj-desc-tab" id="desc-tab-preview" onclick="ProjMgr.switchDescTab('preview')">${_t('proj_preview')}</button>
                 </div>
-                <textarea class="proj-detail-textarea" id="detail-desc" rows="4" placeholder="${_t('proj_description')} (Markdown supported)">${escHtml(task.description || '')}</textarea>
+                <textarea class="proj-detail-textarea" id="detail-desc" data-task-id="${escHtml(task.id)}" rows="4" placeholder="${_t('proj_description')} (Markdown supported)">${escHtml(task.description || '')}</textarea>
                 <div class="proj-desc-preview hidden" id="detail-desc-preview">${simpleMarkdown(task.description || '')}</div>
                 <div style="text-align:right;margin-top:4px">
                     <button class="proj-btn proj-btn-sm proj-btn-gold" onclick="ProjMgr.saveDescription()">${_t('proj_save')}</button>
