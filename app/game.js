@@ -1866,7 +1866,7 @@ function getMeetingSlots() {
 // Legacy constant — kept for backward compat but now calls dynamic function
 var MEETING_SLOTS = getMeetingSlots();
 
-const FUNCTIONAL_MEETING_SPACE_TYPES = ['meetingTable4', 'meetingTable6', 'meetingRoom'];
+const FUNCTIONAL_MEETING_SPACE_TYPES = ['meetingTable4', 'meetingTable6', 'meetingTable', 'meetingRoom'];
 
 function _isFunctionalMeetingSpace(item) {
     return !!(item && FUNCTIONAL_MEETING_SPACE_TYPES.indexOf(item.type) >= 0);
@@ -1876,6 +1876,7 @@ function _meetingSpaceCapacity(item) {
     if (!item) return 0;
     if (item.type === 'meetingTable4') return 4;
     if (item.type === 'meetingTable6') return 6;
+    if (item.type === 'meetingTable') return 10;
     if (item.type === 'meetingRoom') return Infinity;
     return 0;
 }
@@ -1884,6 +1885,7 @@ function _meetingSpaceOrder(item) {
     if (!item) return 99;
     if (item.type === 'meetingTable4') return 4;
     if (item.type === 'meetingTable6') return 6;
+    if (item.type === 'meetingTable') return 8;
     if (item.type === 'meetingRoom') return 10;
     return 99;
 }
@@ -1892,6 +1894,7 @@ function _meetingSpaceDisplayName(item) {
     if (!item) return '';
     if (item.type === 'meetingTable4') return _tr('furniture_meeting_table_4');
     if (item.type === 'meetingTable6') return _tr('furniture_meeting_table_6');
+    if (item.type === 'meetingTable') return _tr('furniture_meeting_table');
     if (item.type === 'meetingRoom') return _tr('furniture_meeting_room');
     return _tr('meeting');
 }
@@ -1913,8 +1916,8 @@ function _getFunctionalMeetingSpaces() {
 
 function _findMeetingSpaceForCount(count, occupiedSpaceIds) {
     var spaces = _getFunctionalMeetingSpaces();
-    var preferred = count <= 4 ? ['meetingTable4', 'meetingTable6', 'meetingRoom'] :
-        (count <= 6 ? ['meetingTable6', 'meetingRoom'] : ['meetingRoom']);
+    var preferred = count <= 4 ? ['meetingTable4', 'meetingTable6', 'meetingTable', 'meetingRoom'] :
+        (count <= 6 ? ['meetingTable6', 'meetingTable', 'meetingRoom'] : ['meetingTable', 'meetingRoom']);
     for (var p = 0; p < preferred.length; p++) {
         for (var i = 0; i < spaces.length; i++) {
             var item = spaces[i];
@@ -1957,6 +1960,11 @@ function _tableSlotsForSpace(item, count) {
     if (item.type === 'meetingTable6') {
         [26, 82, 138].forEach(function(dx) { pushSlot(item.x + dx, item.y + 18, 2, true); });
         [26, 82, 138].forEach(function(dx) { pushSlot(item.x + dx, item.y + 86, 0, true); });
+        return slots;
+    }
+    if (item.type === 'meetingTable') {
+        [27, 73, 120, 166, 213].forEach(function(dx) { pushSlot(item.x + dx, item.y + 15, 2, true); });
+        [27, 73, 120, 166, 213].forEach(function(dx) { pushSlot(item.x + dx, item.y + 103, 0, true); });
         return slots;
     }
     if (item.type === 'meetingRoom') {
@@ -9408,20 +9416,16 @@ function wrapChatText(text, maxW) {
 }
 
 function minimizeAllChat() {
-    for (var key in agentChatData) {
-        var agent = agentMap[key] || agents.find(function(a) { return a.statusKey === key || a.id === key; });
-        if (agent && (agent.meetingId || agent.state === 'meeting' || agent.state === 'visiting')) continue;
-        chatMinimized[key] = true;
-    }
+    agents.forEach(function(agent) {
+        if (agent && agent.statusKey) chatMinimized[agent.statusKey] = true;
+    });
     addGlobalLog('💬 All chat bubbles minimized');
 }
 
 function expandAllChat() {
-    for (var key in agentChatData) {
-        var agent = agentMap[key] || agents.find(function(a) { return a.statusKey === key || a.id === key; });
-        if (agent && (agent.meetingId || agent.state === 'meeting' || agent.state === 'visiting')) continue;
-        chatMinimized[key] = false;
-    }
+    agents.forEach(function(agent) {
+        if (agent && agent.statusKey) chatMinimized[agent.statusKey] = false;
+    });
     addGlobalLog('💬 All chat bubbles expanded');
 }
 
@@ -9448,8 +9452,15 @@ function handleChatBubbleClick(canvasX, canvasY) {
 
 function _meetingBubbleText(turn) {
     if (!turn) return '';
-    if (turn.pending) return turn.timedOut ? 'Provider call timed out' : 'Calling provider...';
+    if (turn.pending) {
+        if (turn.timedOut) return _mtgT('meeting_provider_call_timeout', 'Meeting response timed out');
+        var waiting = _mtgT('meeting_provider_calling', 'Preparing meeting response...');
+        var elapsed = Number(turn.elapsedSec || 0);
+        if (elapsed > 0) waiting += ' · ' + _mtgT('meeting_provider_waited', 'waited') + ' ' + Math.round(elapsed) + 's';
+        return waiting;
+    }
     if (turn.structured && turn.structured.position) return String(turn.structured.position || '');
+    if (turn.structured && turn.structured.summary) return String(turn.structured.summary || '');
     return String(turn.text || turn.rawText || '');
 }
 
@@ -9472,8 +9483,6 @@ function _meetingChatSourceForSpeaker(agent) {
     var meeting = _meetingForAgent(agent);
     if (!meeting) return null;
     var record = _meetingRawActiveRecord(meeting.id) || meeting.raw || meeting;
-    var speakerKey = _meetingLatestSpeakerKey(record);
-    if (!speakerKey || !_meetingAgentMatchesKey(agent, speakerKey)) return null;
     var rows = [];
     var latestTranscriptSeq = 0;
     (record.transcript || []).forEach(function(turn) {
@@ -9489,6 +9498,20 @@ function _meetingChatSourceForSpeaker(agent) {
     });
     rows.sort(function(a, b) { return Number(a.sequence || 0) - Number(b.sequence || 0); });
     rows = rows.filter(function(turn) { return _meetingBubbleText(turn); });
+    var result = record.result || {};
+    if (record.moderator && _meetingAgentMatchesKey(agent, record.moderator) && (record.executionStage === 'summarizing' || result.summary || result.resolution)) {
+        var summaryText = String(result.summary || result.resolution || '').trim();
+        if (summaryText) {
+            rows.push({
+                sequence: Number(record.lastEventSequence || 0) + 1,
+                speaker: record.moderator,
+                text: summaryText,
+                createdAt: result.createdAt || record.updatedAt || '',
+                pending: false,
+                kind: 'meeting_result'
+            });
+        }
+    }
     if (!rows.length) return null;
     var msgs = rows.slice(-1).map(function(turn) {
         return {
@@ -9540,7 +9563,7 @@ function drawChatBubbles() {
         var headY = agent.y - 50;
 
         // Minimized icon
-        if (!isMeetingBubble && chatMinimized[agent.statusKey]) {
+        if (chatMinimized[agent.statusKey]) {
             var iconX = headX + 18;
             var iconY = headY - 20;
             // Draw minimized icon

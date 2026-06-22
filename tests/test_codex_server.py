@@ -55,6 +55,14 @@ class BlockingProvider:
         }
 
 
+class RaisingProvider:
+    def __init__(self, workspace):
+        self.workspace = workspace
+
+    def send_message(self, *args, **kwargs):
+        raise RuntimeError("provider exploded")
+
+
 def test_busy_rejects_second_request_and_releases_lock():
     with tempfile.TemporaryDirectory() as workspace:
         started = threading.Event()
@@ -99,6 +107,27 @@ def test_busy_rejects_second_request_and_releases_lock():
         finally:
             release.set()
             worker.join(5)
+            server.get_roster = old_roster
+            server._codex_provider_from_config = old_provider
+
+
+def test_provider_exception_clears_active_operation():
+    with tempfile.TemporaryDirectory() as workspace:
+        old_roster = server.get_roster
+        old_provider = server._codex_provider_from_config
+        server.get_roster = lambda: [AGENT]
+        server._codex_provider_from_config = lambda: RaisingProvider(workspace)
+        try:
+            result = server._handle_codex_chat({
+                "agentId": "codex-local",
+                "message": "boom",
+                "conversationId": "conv-exception",
+            })
+            assert result["ok"] is False
+            assert result["status"] == "execution_failed"
+            assert "provider exploded" in result["error"]
+            assert server._get_codex_active("codex-local") is None
+        finally:
             server.get_roster = old_roster
             server._codex_provider_from_config = old_provider
 
@@ -159,6 +188,7 @@ def test_activity_persists_redacted_and_reports_active_conversation():
 
 if __name__ == "__main__":
     test_busy_rejects_second_request_and_releases_lock()
+    test_provider_exception_clears_active_operation()
     test_thread_mapping_persists_and_resets()
     test_activity_persists_redacted_and_reports_active_conversation()
     print("ok")

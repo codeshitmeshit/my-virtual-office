@@ -6005,6 +6005,13 @@ def _handle_codex_chat(body):
             event_callback=on_event,
             allow_interaction=allow_interaction,
         )
+    except Exception as exc:
+        result = {
+            "ok": False,
+            "status": "execution_failed",
+            "error": str(exc),
+            "reply": "",
+        }
     finally:
         operation_lock.release()
     thread_id = str(result.get("threadId") or "")
