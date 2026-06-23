@@ -16599,6 +16599,7 @@ function openMeetingsDashboard() {
 function closeMeetingsModal() {
     document.getElementById('meetingsModal').classList.add('hidden');
     toggleNewMeetingForm(false);
+    closeMeetingRequestDetailModal();
     closeMeetingDetailModal();
     _mtgStopLivePolling();
 }
@@ -16674,6 +16675,28 @@ function _mtgHistorySnippet(m) {
     return String(text || '').trim().slice(0, 180);
 }
 
+function _mtgRequestProcessed(req) {
+    var status = req && req.status;
+    if (status === 'confirmed' || status === 'rejected') return true;
+    var review = (req && req.review) || {};
+    var conversion = (req && req.conversion) || {};
+    return !!(review.confirmedAt || review.rejectedAt || conversion.meetingId);
+}
+
+function _mtgRequestTime(req) {
+    var raw = (req && (req.updatedAt || req.createdAt)) || '';
+    var ms = Date.parse(raw);
+    return Number.isFinite(ms) ? ms : 0;
+}
+
+function _mtgSortRequestsByStatusThenTime(requests) {
+    return (requests || []).slice().sort(function(a, b) {
+        var statusDelta = Number(_mtgRequestProcessed(a)) - Number(_mtgRequestProcessed(b));
+        if (statusDelta) return statusDelta;
+        return _mtgRequestTime(b) - _mtgRequestTime(a);
+    });
+}
+
 async function _mtgRefresh() {
     try {
         var [activeRes, histRes, requestsRes, agentsRes, projectsRes] = await Promise.all([
@@ -16685,7 +16708,7 @@ async function _mtgRefresh() {
         ]);
         _mtgData.active = activeRes.meetings || [];
         _mtgData.history = _mtgSortMeetingsByTime(histRes.history || []);
-        _mtgData.requests = requestsRes.requests || [];
+        _mtgData.requests = _mtgSortRequestsByStatusThenTime(requestsRes.requests || []);
         _mtgData.projects = projectsRes.projects || [];
         _mtgSeedLiveMeetings(_mtgData.active);
         _mtgAgentMap = {};
@@ -16987,6 +17010,12 @@ function _mtgRequestStatusLabel(status) {
     return _mtgT('meeting_request_status_pending', 'Pending');
 }
 
+function _mtgRequestStatusClass(status) {
+    if (status === 'confirmed') return 'status-confirmed';
+    if (status === 'rejected') return 'status-rejected';
+    return 'status-pending';
+}
+
 function _mtgMeetingStageLabel(stage) {
     var key = String(stage || '').trim();
     var map = {
@@ -17179,11 +17208,12 @@ function _mtgRenderRequests(container) {
         var source = _mtgRequestSource(req);
         var status = req.status || 'pending';
         var urgency = req.urgency || proposal.urgency || 3;
-        var html = '<div class="mtg-card mtg-request-card" data-request-id="' + _escMtg(req.id) + '">';
-        html += '<div class="mtg-card-header"><div><div class="mtg-card-title">' + _escMtg(proposal.topic || proposal.goal || _mtgT('meeting_request_title', 'AI meeting request')) + '</div>';
+        var statusClass = _mtgRequestStatusClass(status);
+        var html = '<div class="mtg-card mtg-request-card ' + statusClass + '" data-request-id="' + _escMtg(req.id) + '">';
+        html += '<div class="mtg-card-header" onclick="openMeetingRequestDetailModal(\'' + _escMtg(req.id) + '\')"><div><div class="mtg-card-title">' + _escMtg(proposal.topic || proposal.goal || _mtgT('meeting_request_title', 'AI meeting request')) + '</div>';
         html += '<div class="mtg-card-purpose">' + _escMtg(source.projectTitle || '') + (source.taskTitle ? ' · ' + _escMtg(source.taskTitle) : '') + '</div></div>';
-        html += '<div class="mtg-card-badges"><span class="mtg-badge mtg-badge-kind">' + _escMtg(_mtgRequestStatusLabel(status)) + '</span></div></div>';
-        html += '<div class="mtg-card-body open">';
+        html += '<div class="mtg-card-badges"><span class="mtg-badge mtg-request-status ' + statusClass + '">' + _escMtg(_mtgRequestStatusLabel(status)) + '</span></div></div>';
+        html += '<div class="mtg-card-summary mtg-request-summary">';
         html += _mtgRenderMetaColumns([
             '🤖 ' + _escMtg(_mtgT('meeting_requesting_agent', 'Requesting agent')) + ': ' + _escMtg(_mtgRequestAgentName(req.requestingAgentId)),
             '📌 ' + _escMtg(source.taskTitle || '')
@@ -17191,22 +17221,69 @@ function _mtgRenderRequests(container) {
             '🚦 ' + _escMtg(_mtgUrgencyLabel(urgency)),
             urgency >= 4 ? '⚡ ' + _escMtg(_mtgT('meeting_auto_start_high_urgency', 'High urgency auto-starts')) : ''
         ]);
-        html += '<div class="mtg-section"><div class="mtg-section-title">' + _escMtg(_mtgT('meeting_request_goal', 'Goal')) + '</div><div class="mtg-section-text">' + _escMtg(proposal.goal || '') + '</div></div>';
-        html += '<div class="mtg-section"><div class="mtg-section-title">' + _escMtg(_mtgT('meeting_request_expected', 'Expected outcome')) + '</div><div class="mtg-section-text">' + _escMtg(proposal.expectedOutcome || '') + '</div></div>';
-        html += '<div class="mtg-section"><div class="mtg-section-title">' + _escMtg(_mtgT('meeting_request_reason', 'Why meeting is needed')) + '</div><div class="mtg-section-text">' + _escMtg(proposal.cannotCompleteAloneReason || '') + '</div></div>';
+        html += '<div class="mtg-section-text mtg-request-preview">' + _escMtg(proposal.goal || proposal.cannotCompleteAloneReason || '') + '</div>';
         if (status === 'confirmed' && req.conversion && req.conversion.meetingId) {
             html += '<div class="mtg-section-text">' + _escMtg(_mtgT('meeting_request_created_meeting', 'Created meeting')) + ': ' + _escMtg(req.conversion.meetingId) + '</div>';
         }
         if (status === 'rejected' && req.review && req.review.rejectionReason) {
             html += '<div class="mtg-inline-error" style="display:block">' + _escMtg(req.review.rejectionReason) + '</div>';
         }
-        html += _mtgRenderRequestReview(req);
+        html += '<div class="mtg-actions-bar"><button class="mtg-btn" onclick="openMeetingRequestDetailModal(\'' + _escMtg(req.id) + '\')">' + _escMtg(_mtgT('meeting_request_view_detail', 'View details')) + '</button></div>';
         html += '</div></div>';
         return html;
     }).join('');
-    requests.forEach(function(req) {
-        setTimeout(function() { _mtgUpdateRequestModeratorOptions(req.id); }, 0);
-    });
+}
+
+function _mtgFindRequest(requestId) {
+    return (_mtgData.requests || []).find(function(req) { return req && req.id === requestId; });
+}
+
+function _mtgRenderRequestDetail(req) {
+    var proposal = _mtgRequestProposal(req);
+    var source = _mtgRequestSource(req);
+    var status = req.status || 'pending';
+    var urgency = req.urgency || proposal.urgency || 3;
+    var html = '<div class="mtg-request-detail" data-request-id="' + _escMtg(req.id) + '">';
+    html += _mtgRenderMetaColumns([
+        '🤖 ' + _escMtg(_mtgT('meeting_requesting_agent', 'Requesting agent')) + ': ' + _escMtg(_mtgRequestAgentName(req.requestingAgentId)),
+        '📋 ' + _escMtg(source.projectTitle || ''),
+        '📌 ' + _escMtg(source.taskTitle || '')
+    ], [
+        '🚦 ' + _escMtg(_mtgUrgencyLabel(urgency)),
+        '<span class="mtg-badge mtg-request-status ' + _mtgRequestStatusClass(status) + '">' + _escMtg(_mtgRequestStatusLabel(status)) + '</span>'
+    ]);
+    html += '<div class="mtg-section"><div class="mtg-section-title">' + _escMtg(_mtgT('meeting_request_goal', 'Goal')) + '</div><div class="mtg-section-text">' + _escMtg(proposal.goal || '') + '</div></div>';
+    html += '<div class="mtg-section"><div class="mtg-section-title">' + _escMtg(_mtgT('meeting_request_expected', 'Expected outcome')) + '</div><div class="mtg-section-text">' + _escMtg(proposal.expectedOutcome || '') + '</div></div>';
+    html += '<div class="mtg-section"><div class="mtg-section-title">' + _escMtg(_mtgT('meeting_request_reason', 'Why meeting is needed')) + '</div><div class="mtg-section-text">' + _escMtg(proposal.cannotCompleteAloneReason || '') + '</div></div>';
+    if (status === 'confirmed' && req.conversion && req.conversion.meetingId) {
+        html += '<div class="mtg-section-text">' + _escMtg(_mtgT('meeting_request_created_meeting', 'Created meeting')) + ': ' + _escMtg(req.conversion.meetingId) + '</div>';
+    }
+    if (status === 'rejected' && req.review && req.review.rejectionReason) {
+        html += '<div class="mtg-inline-error" style="display:block">' + _escMtg(req.review.rejectionReason) + '</div>';
+    }
+    html += _mtgRenderRequestReview(req);
+    html += '</div>';
+    return html;
+}
+
+function openMeetingRequestDetailModal(requestId) {
+    var req = _mtgFindRequest(requestId);
+    var modal = document.getElementById('meetingRequestDetailModal');
+    var body = document.getElementById('meeting-request-detail-body');
+    var title = document.getElementById('meeting-request-detail-title');
+    if (!req || !modal || !body) return;
+    var proposal = _mtgRequestProposal(req);
+    if (title) title.textContent = proposal.topic || proposal.goal || _mtgT('meeting_request_title', 'AI meeting request');
+    body.innerHTML = _mtgRenderRequestDetail(req);
+    modal.classList.remove('hidden');
+    setTimeout(function() { _mtgUpdateRequestModeratorOptions(req.id); }, 0);
+}
+
+function closeMeetingRequestDetailModal() {
+    var modal = document.getElementById('meetingRequestDetailModal');
+    var body = document.getElementById('meeting-request-detail-body');
+    if (modal) modal.classList.add('hidden');
+    if (body) body.innerHTML = '';
 }
 
 function _mtgToggleRequestBranch(requestId, branchEl) {
@@ -17259,6 +17336,7 @@ async function _mtgConfirmRequest(requestId) {
         if (meetingId) {
             await _mtgRunMeeting(meetingId, { action: 'confirmed_start' });
         }
+        closeMeetingRequestDetailModal();
         await _mtgRefresh();
         switchMtgTab('active');
     } catch (e) {
@@ -17278,6 +17356,7 @@ async function _mtgRejectRequest(requestId) {
         });
         var data = await res.json();
         if (!res.ok || data.error) throw new Error(data.error || 'Failed to reject request');
+        closeMeetingRequestDetailModal();
         await _mtgRefresh();
         switchMtgTab('requests');
     } catch (e) {
@@ -19278,8 +19357,7 @@ function _updateSidebarMeetings() {
     var requestHtml = '';
     if (pendingRequests.length) {
         requestHtml = '<div class="sidebar-mtg-request" onclick="openMeetingsDashboard();switchMtgTab(\'requests\')">' +
-            '<div class="sidebar-mtg-item-title"><span class="sidebar-mtg-request-dot"></span>' + _escMtg(_mtgT('meeting_request_pending_prompt', 'AI meeting requests need confirmation')) + '</div>' +
-            '<div class="sidebar-mtg-item-meta">' + _escMtg(String(pendingRequests.length)) + '</div>' +
+            '<div class="sidebar-mtg-item-title sidebar-mtg-request-title"><span><span class="sidebar-mtg-request-dot"></span>' + _escMtg(_mtgT('meeting_request_pending_prompt', 'AI meeting requests need confirmation')) + '</span><span class="sidebar-mtg-request-count">' + _escMtg(String(pendingRequests.length)) + '</span></div>' +
             '</div>';
     }
     if (!active.length) {
@@ -19309,7 +19387,7 @@ setInterval(function() {
         var requests = results[1] || {};
         _mtgData.active = data.meetings || [];
         _mtgSeedLiveMeetings(_mtgData.active);
-        _mtgData.requests = requests.requests || [];
+        _mtgData.requests = _mtgSortRequestsByStatusThenTime(requests.requests || []);
         // Also refresh agent map if empty
         if (Object.keys(_mtgAgentMap).length === 0) {
             fetch('/agents-list').then(function(r) { return r.json(); }).then(function(d) {
@@ -19360,7 +19438,9 @@ function _meetingTableClickCheck(item) {
 // Close meetings modal on Escape
 document.addEventListener('keydown', function(e) {
     if (e.key === 'Escape') {
-        if (!document.getElementById('meetingDetailModal').classList.contains('hidden')) {
+        if (!document.getElementById('meetingRequestDetailModal').classList.contains('hidden')) {
+            closeMeetingRequestDetailModal();
+        } else if (!document.getElementById('meetingDetailModal').classList.contains('hidden')) {
             closeMeetingDetailModal();
         } else if (!document.getElementById('endMeetingModal').classList.contains('hidden')) {
             closeEndMeetingModal();
@@ -19379,6 +19459,9 @@ document.getElementById('endMeetingModal').addEventListener('click', function(e)
 });
 document.getElementById('meetingDetailModal').addEventListener('click', function(e) {
     if (e.target === this) closeMeetingDetailModal();
+});
+document.getElementById('meetingRequestDetailModal').addEventListener('click', function(e) {
+    if (e.target === this) closeMeetingRequestDetailModal();
 });
 
 // ============================================================

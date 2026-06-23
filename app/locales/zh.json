@@ -908,6 +908,33 @@
   "proj_failed_archive": "归档失败",
   "proj_failed_delete": "删除失败",
   "proj_failed_delete_artifact": "删除产物失败：{message}",
+  "proj_exec_state_backlog": "待办",
+  "proj_exec_state_executing": "执行中",
+  "proj_exec_state_reworking": "返工中",
+  "proj_exec_state_execution_complete": "执行完成",
+  "proj_exec_state_reviewing": "审查中",
+  "proj_exec_state_awaiting_user_acceptance": "等待用户验收",
+  "proj_exec_state_awaiting_meeting_resolution": "等待会议结论",
+  "proj_exec_state_blocked": "阻塞",
+  "proj_exec_state_done": "已完成",
+  "proj_meeting_blocker_title": "等待会议结论",
+  "proj_meeting_blocker_body": "任务存在需要开会统一的问题。会议明确达成一致前，项目执行不会继续推进此任务。",
+  "proj_meeting_blocker_rejected_title": "会议申请已拒绝，等待用户处理",
+  "proj_meeting_blocker_rejected_body": "会议申请被拒绝后，任务不会自动继续。请选择继续执行、标记阻塞或重新申请会议。",
+  "proj_meeting_blocker_continue": "继续执行",
+  "proj_meeting_blocker_mark_blocked": "标记阻塞",
+  "proj_meeting_blocker_reopen": "重新申请会议",
+  "proj_meeting_blocker_continue_reason": "说明为什么跳过会议等待并继续执行：",
+  "proj_meeting_blocker_continue_reason_optional": "继续执行理由（可选）：",
+  "proj_meeting_blocker_block_reason": "说明为什么标记为阻塞：",
+  "proj_meeting_blocker_reopen_reason": "说明重新申请会议的原因：",
+  "proj_meeting_blocker_continue_placeholder": "说明为什么可以继续执行...",
+  "proj_meeting_blocker_block_placeholder": "说明为什么无法继续推进...",
+  "proj_meeting_blocker_reopen_placeholder": "说明新会议需要解决什么问题...",
+  "proj_meeting_blocker_continue_started": "任务已继续执行",
+  "proj_meeting_blocker_continue_failed": "已退出会议等待，但任务启动失败",
+  "proj_meeting_blocker_updated": "会议等待状态已更新",
+  "proj_exec_last_error_title": "任务启动失败",
   "proj_no_active_projects": "暂无进行中的项目",
   "proj_template_choose": "选择一个模板来创建新项目，或将当前项目保存为模板。",
   "proj_use_template": "使用模板",
@@ -1562,6 +1589,8 @@
   ,"meeting_ai_requests": "AI 申请"
   ,"meeting_request_empty": "暂无 AI 会议申请"
   ,"meeting_request_title": "AI 会议申请"
+  ,"meeting_request_detail_title": "AI 会议申请"
+  ,"meeting_request_view_detail": "查看详情/处理"
   ,"meeting_request_status_pending": "待确认"
   ,"meeting_request_status_rejected": "已拒绝"
   ,"meeting_request_status_confirmed": "已确认"

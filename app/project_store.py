@@ -16,6 +16,7 @@ COMPLEX_JSON_FIELDS = {
     "executionPolicy_json", "executionDirtyConfirmations_json", "attempts_json",
     "evidence_json", "reviewResult_json", "reviewHistory_json",
     "acceptanceHistory_json", "stateHistory_json", "source_json",
+    "meetingBlocker_json", "meetingBlockerHistory_json",
     "scheduledCronHistory_json", "archiveMaintenance_json",
 }
 
@@ -337,6 +338,8 @@ class MarkdownProjectStore:
             "reviewResult_json": task.get("reviewResult", {}),
             "reviewHistory_json": task.get("reviewHistory", []),
             "acceptanceHistory_json": task.get("acceptanceHistory", []),
+            "meetingBlocker_json": task.get("meetingBlocker", {}),
+            "meetingBlockerHistory_json": task.get("meetingBlockerHistory", []),
             "reworkCount": task.get("reworkCount", 0),
             "stateHistory_json": task.get("stateHistory", []),
             "blockedReason": task.get("blockedReason"),
@@ -475,6 +478,8 @@ class MarkdownProjectStore:
             "reviewResult": meta.get("reviewResult_json", {}),
             "reviewHistory": meta.get("reviewHistory_json", []),
             "acceptanceHistory": meta.get("acceptanceHistory_json", []),
+            "meetingBlocker": meta.get("meetingBlocker_json", {}),
+            "meetingBlockerHistory": meta.get("meetingBlockerHistory_json", []),
             "reworkCount": meta.get("reworkCount", 0),
             "stateHistory": meta.get("stateHistory_json", []),
             "blockedReason": meta.get("blockedReason"),

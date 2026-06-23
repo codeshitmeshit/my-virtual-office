@@ -908,6 +908,33 @@
   "proj_failed_archive": "Failed to archive",
   "proj_failed_delete": "Failed to delete",
   "proj_failed_delete_artifact": "Failed to delete artifact: {message}",
+  "proj_exec_state_backlog": "Backlog",
+  "proj_exec_state_executing": "Executing",
+  "proj_exec_state_reworking": "Reworking",
+  "proj_exec_state_execution_complete": "Execution complete",
+  "proj_exec_state_reviewing": "Reviewing",
+  "proj_exec_state_awaiting_user_acceptance": "Awaiting user acceptance",
+  "proj_exec_state_awaiting_meeting_resolution": "Awaiting meeting resolution",
+  "proj_exec_state_blocked": "Blocked",
+  "proj_exec_state_done": "Done",
+  "proj_meeting_blocker_title": "Awaiting meeting resolution",
+  "proj_meeting_blocker_body": "This task has an issue that must be aligned in a meeting. Project Execution will not continue this task until the meeting reaches explicit consensus.",
+  "proj_meeting_blocker_rejected_title": "Meeting request rejected, waiting for user action",
+  "proj_meeting_blocker_rejected_body": "The task will not continue automatically after a meeting request is rejected. Choose continue execution, mark blocked, or request a new meeting.",
+  "proj_meeting_blocker_continue": "Continue execution",
+  "proj_meeting_blocker_mark_blocked": "Mark blocked",
+  "proj_meeting_blocker_reopen": "Request new meeting",
+  "proj_meeting_blocker_continue_reason": "Explain why execution should continue despite the unresolved meeting blocker:",
+  "proj_meeting_blocker_continue_reason_optional": "Reason for continuing (optional):",
+  "proj_meeting_blocker_block_reason": "Explain why this should be marked blocked:",
+  "proj_meeting_blocker_reopen_reason": "Explain why a new meeting request is needed:",
+  "proj_meeting_blocker_continue_placeholder": "Describe why it is acceptable to continue...",
+  "proj_meeting_blocker_block_placeholder": "Describe why this task cannot continue...",
+  "proj_meeting_blocker_reopen_placeholder": "Describe what the new meeting should resolve...",
+  "proj_meeting_blocker_continue_started": "Task execution restarted",
+  "proj_meeting_blocker_continue_failed": "Meeting wait was cleared, but task start failed",
+  "proj_meeting_blocker_updated": "Meeting wait state updated",
+  "proj_exec_last_error_title": "Task start failed",
   "proj_no_active_projects": "No active projects",
   "proj_template_choose": "Choose a template to create a new project, or save your current project as a template.",
   "proj_use_template": "Use Template",
@@ -1562,6 +1589,8 @@
   ,"meeting_ai_requests": "AI Requests"
   ,"meeting_request_empty": "No AI meeting requests"
   ,"meeting_request_title": "AI meeting request"
+  ,"meeting_request_detail_title": "AI Meeting Request"
+  ,"meeting_request_view_detail": "View details / handle"
   ,"meeting_request_status_pending": "Pending"
   ,"meeting_request_status_rejected": "Rejected"
   ,"meeting_request_status_confirmed": "Confirmed"

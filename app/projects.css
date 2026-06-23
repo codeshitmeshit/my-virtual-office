@@ -2198,9 +2198,29 @@
 .proj-exec-state.state-reviewing { border-color:#d4a33a; color:#ffd479; }
 .proj-exec-state.state-execution_complete { border-color:#4f8bd8; color:#8fc1ff; }
 .proj-exec-state.state-awaiting_user_acceptance { border-color:#34a7a0; color:#8ee8df; }
+.proj-exec-state.state-awaiting_meeting_resolution { border-color:#b98cff; color:#d9c3ff; }
 .proj-exec-state.state-done { border-color:#4caf50; color:#8ee393; }
 .proj-exec-state.state-blocked { border-color:#d45a5a; color:#ff9b9b; }
-.proj-exec-panel { border-left:3px solid #4f8bd8; }
+.proj-meeting-blocker {
+    border: 1px solid #6b55a4;
+    background: rgba(120, 93, 190, 0.1);
+    border-radius: 6px;
+    padding: 10px;
+    margin: 8px 0;
+}
+.proj-meeting-blocker.state-rejected {
+    border-color: #d45a5a;
+    background: rgba(212, 90, 90, 0.08);
+}
+.proj-meeting-blocker-title {
+    color: #d9c3ff;
+    font-size: 12px;
+    font-weight: 700;
+    margin-bottom: 6px;
+}
+.proj-meeting-blocker.state-rejected .proj-meeting-blocker-title {
+    color: #ff9b9b;
+}
 .proj-exec-actions { display:flex; flex-wrap:wrap; gap:6px; margin:8px 0; }
 .proj-exec-warning { margin:6px 0; padding:7px; border:1px solid #8a4a4a; background:rgba(170,50,50,.12); color:#ffb1b1; font-size:10px; line-height:1.5; }
 .proj-exec-evidence { display:flex; flex-direction:column; gap:5px; margin-top:8px; color:#bfc4d2; font-size:10px; }
@@ -2215,11 +2235,15 @@
 .proj-task-mtg-request { color:#ffd479; }
 .proj-meeting-requests { display:flex; flex-direction:column; gap:8px; }
 .proj-meeting-request { padding:8px; border:1px solid #343a4d; border-radius:6px; background:#121622; }
-.proj-meeting-request.state-pending { border-color:#9d7d28; background:rgba(255,215,0,.06); }
-.proj-meeting-request.state-confirmed { border-color:#348f69; }
-.proj-meeting-request.state-rejected { border-color:#8a4a4a; }
+.proj-meeting-request.state-pending { border-color:rgba(255,193,7,.52); background:rgba(255,193,7,.07); }
+.proj-meeting-request.state-confirmed { border-color:rgba(76,175,80,.52); background:rgba(76,175,80,.06); }
+.proj-meeting-request.state-rejected { border-color:rgba(212,90,90,.58); background:rgba(212,90,90,.08); }
 .proj-meeting-request-head { display:flex; align-items:flex-start; justify-content:space-between; gap:8px; margin-bottom:5px; }
 .proj-meeting-request-head strong { color:#d9deea; font-size:11px; line-height:1.35; }
+.proj-meeting-request-status { display:inline-flex; align-items:center; min-height:20px; padding:2px 7px; border:1px solid #41465a; border-radius:4px; color:#b9bfd0; font-size:9px; white-space:nowrap; }
+.proj-meeting-request-status.state-pending { border-color:rgba(255,193,7,.68); background:rgba(255,193,7,.12); color:#ffd479; }
+.proj-meeting-request-status.state-confirmed { border-color:rgba(76,175,80,.68); background:rgba(76,175,80,.12); color:#8ee393; }
+.proj-meeting-request-status.state-rejected { border-color:rgba(212,90,90,.72); background:rgba(212,90,90,.14); color:#ff9b9b; }
 
 @media (max-width: 720px) {
     .proj-exec-project-state { width:100%; order:3; }

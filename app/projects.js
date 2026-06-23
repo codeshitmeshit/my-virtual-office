@@ -259,6 +259,10 @@
             const r = await fetch(`/api/projects/${projectId}/tasks/${taskId}/project-execution/accept`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, attemptId, feedback: feedback || '' }) });
             return r.json();
         },
+        async projectExecutionMeetingBlocker(projectId, taskId, action, feedback) {
+            const r = await fetch(`/api/projects/${projectId}/tasks/${taskId}/project-execution/meeting-blocker`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, feedback: feedback || '' }) });
+            return r.json();
+        },
         async projectExecutionStatus(projectId, taskId) {
             const suffix = taskId ? `/tasks/${taskId}` : '';
             const r = await fetch(`/api/projects/${projectId}${suffix}/project-execution/status`);
@@ -926,7 +930,7 @@
         const comments = (task.comments || []).length;
         const assignee = task.assignee ? state.agentRoster.find(a => a.key === task.assignee || a.statusKey === task.assignee || a.agentId === task.assignee) : null;
         const priorityLabel = task.priority !== 'medium' ? _t('proj_priority_' + task.priority) : '';
-        const projectExecutionState = task.executionState && task.executionState !== 'backlog' ? `<span class="proj-exec-state state-${escHtml(task.executionState)}">${escHtml(task.executionState)}</span>` : '';
+        const projectExecutionState = task.executionState && task.executionState !== 'backlog' ? `<span class="proj-exec-state state-${escHtml(task.executionState)}">${escHtml(projectExecutionStateLabel(task))}</span>` : '';
         const mtgRequests = state.meetingRequestsByTask[task.id] || [];
         const pendingMtgRequests = mtgRequests.filter(r => r.status === 'pending').length;
         return `
@@ -1297,7 +1301,7 @@
         const reviewItems = (task.reviewCheck && task.reviewCheck.length) ? task.reviewCheck : (task.lastReviewCheck || []);
         const reviewTitle = (task.reviewCheck && task.reviewCheck.length) ? '🔍 Review Check' : ((task.lastReviewCheck && task.lastReviewCheck.length) ? '🕘 Last Failed Review' : '🔍 Review Check');
         const activity = (p && p.activity || []).filter(a => a.taskId === task.id).slice().reverse().slice(0, 20);
-        const meetingRequests = state.meetingRequestsByTask[task.id] || [];
+        const meetingRequests = activeTaskMeetingRequests(task, state.meetingRequestsByTask[task.id] || []);
         const projectExecution = !!(p && p.projectExecutionEnabled);
         const evidence = task.evidence || {};
         const reviewResult = task.reviewResult || {};
@@ -1313,6 +1317,7 @@
         const projectExecutionActionsHtml = (() => {
             if (task.executionState === 'executing' || task.executionState === 'reworking') return `<button class="proj-btn proj-btn-sm proj-btn-stop" onclick="ProjMgr.projectExecutionCancel('${task.id}', '${escHtml(attemptId)}')">停止执行</button>`;
             if (task.executionState === 'reviewing') return `<button class="proj-btn proj-btn-sm" disabled>审查中</button>`;
+            if (task.executionState === 'awaiting_meeting_resolution') return `<button class="proj-btn proj-btn-sm" disabled>${escHtml(projectExecutionStateLabel(task))}</button>`;
             if (task.executionState === 'execution_complete') return `
                 <button class="proj-btn proj-btn-sm proj-btn-start" onclick="ProjMgr.projectExecutionReviewStart('${task.id}', '${escHtml(evidenceAttemptId)}')">启动审查</button>
                 <button class="proj-btn proj-btn-sm" onclick="ProjMgr.projectExecutionStart('${task.id}')">重新执行</button>`;
@@ -1412,10 +1417,12 @@
             </div>
 
             ${projectExecution ? `<div class="proj-section proj-exec-panel">
-                <div class="proj-section-header"><span class="proj-section-title">Project Execution 执行与审查</span><span class="proj-exec-state state-${escHtml(task.executionState || 'backlog')}">${task.requiresUserAcceptance === true ? '需要人工验收 · ' : '无需人工验收 · '}${escHtml(task.executionState || 'backlog')}</span></div>
+                <div class="proj-section-header"><span class="proj-section-title">Project Execution 执行与审查</span><span class="proj-exec-state state-${escHtml(task.executionState || 'backlog')}">${task.requiresUserAcceptance === true ? '需要人工验收 · ' : '无需人工验收 · '}${escHtml(projectExecutionStateLabel(task))}</span></div>
                 <div class="proj-exec-actions">
                     ${projectExecutionActionsHtml}
                 </div>
+                ${renderMeetingBlocker(task)}
+                ${renderProjectExecutionError(task)}
                 ${task.blockedReason ? `<div class="proj-exec-warning">${escHtml(task.blockedReason)}</div>` : ''}
                 ${evidence.capturedAt ? `<div class="proj-exec-evidence">
                     <div><strong>执行总结</strong></div><div class="proj-exec-summary">${escHtml(evidence.executorSummary || '无')}</div>
@@ -1585,6 +1592,7 @@
     }
 
     function renderTaskMeetingRequests(requests) {
+        requests = sortMeetingRequestsByStatusThenTime(requests);
         if (!requests.length) return `<div style="font-size:11px;color:#555">当前任务暂无 AI 会议申请</div>`;
         return requests.map(req => {
             const proposal = req.originalProposal || {};
@@ -1595,7 +1603,7 @@
             <div class="proj-meeting-request state-${escHtml(status)}">
                 <div class="proj-meeting-request-head">
                     <strong>${escHtml(proposal.topic || proposal.goal || 'AI 会议申请')}</strong>
-                    <span class="proj-exec-state state-${escHtml(status)}">${statusText}</span>
+                    <span class="proj-meeting-request-status state-${escHtml(status)}">${statusText}</span>
                 </div>
                 <div class="proj-exec-meta">请求 AI：${escHtml(req.requestingAgentId || '')}</div>
                 <div class="proj-exec-summary">${escHtml(proposal.cannotCompleteAloneReason || '')}</div>
@@ -1603,6 +1611,96 @@
                 <button class="proj-btn proj-btn-sm" onclick="ProjMgr.openMeetingRequestsQueue()">打开会议申请队列</button>
             </div>`;
         }).join('');
+    }
+
+    function activeTaskMeetingRequests(task, requests) {
+        const blocker = task && task.meetingBlocker;
+        return sortMeetingRequestsByStatusThenTime((requests || []).filter(req => {
+            if (!req || !req.blockingTask) return true;
+            const taskBlocker = req.taskBlocker || {};
+            if (taskBlocker.resolvedAt) return false;
+            const status = taskBlocker.status || req.status || '';
+            if (['resolved_continue', 'blocked', 'cleared'].includes(status)) return false;
+            if (blocker && blocker.requestId === req.id && blocker.resolvedAt) return false;
+            return ['pending', 'confirmed', 'rejected', 'needs_user_decision'].includes(status) || ['pending', 'confirmed', 'rejected'].includes(req.status || '');
+        }));
+    }
+
+    function meetingRequestProcessed(req) {
+        const status = req && req.status;
+        if (status === 'confirmed' || status === 'rejected') return true;
+        const review = req && req.review || {};
+        const conversion = req && req.conversion || {};
+        return !!(review.confirmedAt || review.rejectedAt || conversion.meetingId);
+    }
+
+    function meetingRequestTime(req) {
+        const raw = req && (req.updatedAt || req.createdAt) || '';
+        const ms = Date.parse(raw);
+        return Number.isFinite(ms) ? ms : 0;
+    }
+
+    function sortMeetingRequestsByStatusThenTime(requests) {
+        return (requests || []).slice().sort((a, b) => {
+            const statusDelta = Number(meetingRequestProcessed(a)) - Number(meetingRequestProcessed(b));
+            if (statusDelta) return statusDelta;
+            return meetingRequestTime(b) - meetingRequestTime(a);
+        });
+    }
+
+    function projectExecutionStateLabel(task) {
+        const state = task && (task.executionState || 'backlog');
+        const labels = {
+            backlog: _tf('proj_exec_state_backlog', 'Backlog', '待办'),
+            executing: _tf('proj_exec_state_executing', 'Executing', '执行中'),
+            reworking: _tf('proj_exec_state_reworking', 'Reworking', '返工中'),
+            execution_complete: _tf('proj_exec_state_execution_complete', 'Execution complete', '执行完成'),
+            reviewing: _tf('proj_exec_state_reviewing', 'Reviewing', '审查中'),
+            awaiting_user_acceptance: _tf('proj_exec_state_awaiting_user_acceptance', 'Awaiting user acceptance', '等待用户验收'),
+            awaiting_meeting_resolution: _tf('proj_exec_state_awaiting_meeting_resolution', 'Awaiting meeting resolution', '等待会议结论'),
+            blocked: _tf('proj_exec_state_blocked', 'Blocked', '阻塞'),
+            done: _tf('proj_exec_state_done', 'Done', '已完成'),
+        };
+        const label = labels[state] || state;
+        return label;
+    }
+
+    function renderMeetingBlocker(task) {
+        const blocker = task && task.meetingBlocker;
+        if (!blocker || task.executionState !== 'awaiting_meeting_resolution') return '';
+        const status = blocker.status || 'pending';
+        const rejected = status === 'rejected';
+        const safeTitle = rejected
+            ? _tf('proj_meeting_blocker_rejected_title', 'Meeting request rejected, waiting for user action', '会议申请已拒绝，等待用户处理')
+            : _tf('proj_meeting_blocker_title', 'Awaiting meeting resolution', '等待会议结论');
+        const safeMessage = rejected
+            ? _tf('proj_meeting_blocker_rejected_body', 'The task will not continue automatically after a meeting request is rejected. Choose continue execution, mark blocked, or request a new meeting.', '会议申请被拒绝后，任务不会自动继续。请选择继续执行、标记阻塞或重新申请会议。')
+            : _tf('proj_meeting_blocker_body', 'This task has an issue that must be aligned in a meeting. Project Execution will not continue this task until the meeting reaches explicit consensus.', '任务存在需要开会统一的问题。会议明确达成一致前，项目执行不会继续推进此任务。');
+        return `
+            <div class="proj-meeting-blocker state-${escHtml(status)}">
+                <div class="proj-meeting-blocker-title">${escHtml(safeTitle)}</div>
+                <div class="proj-exec-summary">${escHtml(safeMessage)}</div>
+                <div class="proj-exec-meta">
+                    ${blocker.requestId ? `<span>request ${escHtml(String(blocker.requestId).slice(0, 8))}</span>` : ''}
+                    ${blocker.meetingId ? `<span>meeting ${escHtml(String(blocker.meetingId).slice(0, 8))}</span>` : ''}
+                    ${blocker.rejectionReason ? `<span>${escHtml(blocker.rejectionReason)}</span>` : ''}
+                </div>
+                <div class="proj-exec-actions">
+                    <button class="proj-btn proj-btn-sm proj-btn-start" onclick="ProjMgr.projectExecutionMeetingBlocker('${task.id}', 'continue_execution')">${escHtml(_tf('proj_meeting_blocker_continue', 'Continue execution', '继续执行'))}</button>
+                    <button class="proj-btn proj-btn-sm proj-btn-stop" onclick="ProjMgr.projectExecutionMeetingBlocker('${task.id}', 'mark_blocked')">${escHtml(_tf('proj_meeting_blocker_mark_blocked', 'Mark blocked', '标记阻塞'))}</button>
+                    <button class="proj-btn proj-btn-sm" onclick="ProjMgr.projectExecutionMeetingBlocker('${task.id}', 'reopen_meeting')">${escHtml(_tf('proj_meeting_blocker_reopen', 'Request new meeting', '重新申请会议'))}</button>
+                </div>
+            </div>`;
+    }
+
+    function renderProjectExecutionError(task) {
+        const err = task && task.lastError ? String(task.lastError).trim() : '';
+        if (!err) return '';
+        return `
+            <div class="proj-exec-warning">
+                <strong>${escHtml(_tf('proj_exec_last_error_title', 'Task start failed', '任务启动失败'))}</strong>
+                <div>${escHtml(err)}</div>
+            </div>`;
     }
 
     async function loadProjectMeetingRequests() {
@@ -1631,7 +1729,7 @@
             const current = state.currentTask;
             if (current && current.id === taskId) {
                 const el = document.getElementById('detail-meeting-requests');
-                if (el) el.innerHTML = renderTaskMeetingRequests(state.meetingRequestsByTask[taskId] || []);
+                if (el) el.innerHTML = renderTaskMeetingRequests(activeTaskMeetingRequests(current, state.meetingRequestsByTask[taskId] || []));
             }
             const mc = getMainContent();
             if (mc && state.view === 'board') {
@@ -2196,6 +2294,48 @@
                 </div>
             </div>`;
         });
+    }
+
+    function showTextInputDialog(opts = {}) {
+        const overlay = document.getElementById('proj-form-overlay');
+        if (!overlay) return Promise.resolve({ confirmed: false, value: '' });
+        return new Promise(resolve => {
+            const cancelText = opts.cancelText || _tf('proj_cancel', 'Cancel', '取消');
+            const confirmText = opts.confirmText || _tf('proj_confirm', 'Confirm', '确认');
+            const done = result => {
+                hideFormModal();
+                resolve(result || { confirmed: false, value: '' });
+            };
+            state.textInputDialog = { done };
+            overlay.classList.remove('hidden');
+            overlay.innerHTML = `
+            <div class="proj-form-modal" style="position:static;padding:0;background:transparent" onclick="event.stopPropagation()">
+                <div class="proj-form-box proj-acceptance-dialog" role="dialog" aria-modal="true" aria-labelledby="proj-text-input-title">
+                    <div class="proj-form-title" id="proj-text-input-title">${escHtml(opts.title || confirmText)}</div>
+                    ${opts.message ? `<div class="proj-form-help">${escHtml(opts.message)}</div>` : ''}
+                    ${opts.taskTitle ? `<div class="proj-acceptance-task">${escHtml(opts.taskTitle)}</div>` : ''}
+                    <div class="proj-form-group">
+                        <label class="proj-form-label">${escHtml(opts.label || '')}</label>
+                        <textarea class="proj-form-textarea proj-acceptance-textarea" id="proj-text-input-value" placeholder="${escHtml(opts.placeholder || '')}" autofocus></textarea>
+                    </div>
+                    <div class="proj-form-actions">
+                        <button class="proj-btn" onclick="ProjMgr.submitTextInputDialog(false)">${escHtml(cancelText)}</button>
+                        <button class="proj-btn ${opts.tone === 'danger' ? 'proj-btn-stop' : 'proj-btn-primary'}" onclick="ProjMgr.submitTextInputDialog(true)">${escHtml(confirmText)}</button>
+                    </div>
+                </div>
+            </div>`;
+            const input = document.getElementById('proj-text-input-value');
+            if (input) input.focus();
+        });
+    }
+
+    function submitTextInputDialogAction(confirmed) {
+        const dialog = state.textInputDialog;
+        const input = document.getElementById('proj-text-input-value');
+        const value = confirmed ? ((input && input.value) || '').trim() : '';
+        if (dialog && typeof dialog.done === 'function') dialog.done({ confirmed: !!confirmed, value });
+        else hideFormModal();
+        state.textInputDialog = null;
     }
 
     function resolveConfirmAction(confirmed) {
@@ -3022,6 +3162,69 @@
     } catch (e) { toast(_t('proj_stop_task_failed'), 'error'); }
     }
 
+    async function projectExecutionMeetingBlockerAction(taskId, action) {
+        const p = state.currentProject;
+        if (!p) return;
+        const task = (p.tasks || []).find(t => t.id === taskId);
+        let feedback = '';
+        let dialogResult = null;
+        if (action === 'mark_blocked') {
+            dialogResult = await showTextInputDialog({
+                title: _tf('proj_meeting_blocker_mark_blocked', 'Mark blocked', '标记阻塞'),
+                label: _tf('proj_meeting_blocker_block_reason', 'Explain why this should be marked blocked:', '说明为什么标记为阻塞：'),
+                placeholder: _tf('proj_meeting_blocker_block_placeholder', 'Describe why this task cannot continue...', '说明为什么无法继续推进...'),
+                confirmText: _tf('proj_confirm', 'Confirm', '确认'),
+                taskTitle: task && task.title,
+                tone: 'danger',
+            });
+            if (!dialogResult.confirmed) return;
+            feedback = dialogResult.value || '';
+            if (!feedback.trim()) return;
+        } else if (action === 'continue_execution') {
+            dialogResult = await showTextInputDialog({
+                title: _tf('proj_meeting_blocker_continue', 'Continue execution', '继续执行'),
+                label: _tf('proj_meeting_blocker_continue_reason_optional', 'Reason for continuing (optional):', '继续执行理由（可选）：'),
+                placeholder: _tf('proj_meeting_blocker_continue_placeholder', 'Describe why it is acceptable to continue...', '说明为什么可以继续执行...'),
+                confirmText: _tf('proj_meeting_blocker_continue', 'Continue execution', '继续执行'),
+                taskTitle: task && task.title,
+            });
+            if (!dialogResult.confirmed) return;
+            feedback = dialogResult.value || '';
+        } else if (action === 'reopen_meeting') {
+            dialogResult = await showTextInputDialog({
+                title: _tf('proj_meeting_blocker_reopen', 'Request new meeting', '重新申请会议'),
+                label: _tf('proj_meeting_blocker_reopen_reason', 'Explain why a new meeting request is needed:', '说明重新申请会议的原因：'),
+                placeholder: _tf('proj_meeting_blocker_reopen_placeholder', 'Describe what the new meeting should resolve...', '说明新会议需要解决什么问题...'),
+                confirmText: _tf('proj_meeting_blocker_reopen', 'Request new meeting', '重新申请会议'),
+                taskTitle: task && task.title,
+            });
+            if (!dialogResult.confirmed) return;
+            feedback = dialogResult.value || '';
+            if (!feedback.trim()) return;
+        }
+        try {
+            const d = await api.projectExecutionMeetingBlocker(p.id, taskId, action, feedback);
+            if (d.error) {
+                if (action === 'continue_execution' && d.status === 'start_failed') {
+                    toast(`${_tf('proj_meeting_blocker_continue_failed', 'Meeting wait was cleared, but task start failed', '已退出会议等待，但任务启动失败')}：${d.error}`, 'error');
+                } else {
+                    toast(d.error, 'error');
+                }
+                await refreshProjectExecutionProject(taskId);
+                return;
+            }
+            const startResult = d.startResult || {};
+            if (action === 'continue_execution' && startResult.ok) {
+                toast(_tf('proj_meeting_blocker_continue_started', 'Task execution restarted', '任务已继续执行'), 'success');
+            } else {
+                toast(_tf('proj_meeting_blocker_updated', 'Meeting wait state updated', '会议等待状态已更新'), 'success');
+            }
+            await refreshProjectExecutionProject(taskId);
+        } catch (e) {
+            toast(String(e.message || e), 'error');
+        }
+    }
+
     async function projectExecutionReviewStartAction(taskId, attemptId) {
         const p = state.currentProject;
         if (!p) return;
@@ -3660,6 +3863,7 @@
         hideQuickAdd,
         submitQuickAdd,
         hideFormModal,
+        submitTextInputDialog: submitTextInputDialogAction,
         toggleProjectExecutionFields,
         submitNewProject,
         submitEditProject,
@@ -3694,6 +3898,7 @@
         projectExecutionCancelActive: projectExecutionCancelActiveAction,
         copyWorkspacePath: copyWorkspacePathAction,
         projectExecutionCancel: projectExecutionCancelAction,
+        projectExecutionMeetingBlocker: projectExecutionMeetingBlockerAction,
         projectExecutionReviewStart: projectExecutionReviewStartAction,
         projectExecutionAccept: projectExecutionAcceptAction,
         submitProjectExecutionFeedback: submitProjectExecutionFeedbackAction,
