@@ -1,0 +1,37 @@
+{
+  "name": "project-execution-state-machine-columns",
+  "stage": "done",
+  "waiting_for_user": false,
+  "updated_at": "2026-06-23T03:45:30+08:00",
+  "confirmed": {
+    "checklist": true,
+    "tested": true,
+    "done": true
+  },
+  "confirmations": {
+    "checklist": {
+      "confirmed_at": "2026-06-23T02:51:35+08:00",
+      "summary": "User replied pass and confirmed the checklist as the basis for todolist, implementation, and acceptance."
+    },
+    "tested": {
+      "confirmed_at": "2026-06-23T03:45:30+08:00",
+      "summary": "User completed local acceptance and confirmed the Project Execution state-machine, rework rerun, and acceptance dialog fixes are working."
+    },
+    "done": {
+      "confirmed_at": "2026-06-23T03:45:30+08:00",
+      "summary": "User said the requirement has no remaining issues and can pass acceptance."
+    }
+  },
+  "files": {
+    "requirement": "requirement.md",
+    "review": "review.md",
+    "checklist": "checklist.md",
+    "todolist": "todolist.md"
+  },
+  "notes": [
+    "Created from product clarification: Project Execution columns must align with task state machine while ordinary projects remain free-form.",
+    "Checklist confirmed by user and todolist created.",
+    "Implementation completed and automated test results recorded.",
+    "User confirmed testing and final acceptance; requirement archived as done."
+  ]
+}

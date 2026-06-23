@@ -40,7 +40,7 @@ for raw in sys.stdin:
     elif method == "thread/resume":
         send({"id": request_id, "result": {"thread": {"id": params["threadId"]}}})
     elif method == "turn/start":
-        if params.get("summary") != "concise":
+        if params.get("summary") != "detailed":
             send({"id": request_id, "error": {"message": "reasoning summary was not requested"}})
             continue
         prompt = params["input"][0]["text"]
@@ -105,6 +105,20 @@ def make_fake_codex(tmp):
         f.write(FAKE_SERVER)
     os.chmod(path, os.stat(path).st_mode | stat.S_IXUSR)
     return path
+
+
+def test_reasoning_summary_defaults_to_detailed():
+    with tempfile.TemporaryDirectory() as tmp:
+        old = os.environ.pop("VO_CODEX_REASONING_SUMMARY", None)
+        try:
+            client = CodexAppServerClient(tmp, binary=make_fake_codex(tmp))
+            try:
+                assert client.reasoning_summary == "detailed"
+            finally:
+                client.close()
+        finally:
+            if old is not None:
+                os.environ["VO_CODEX_REASONING_SUMMARY"] = old
 
 
 def test_execute_collects_reply_files_and_thread():

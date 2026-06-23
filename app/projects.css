@@ -1473,6 +1473,23 @@
     justify-content: flex-end;
     margin-top: 20px;
 }
+.proj-acceptance-dialog {
+    max-width: 460px;
+}
+.proj-acceptance-task {
+    color: #e8e8f0;
+    font-size: 13px;
+    line-height: 1.45;
+    background: rgba(0,0,0,0.28);
+    border: 1px solid #2a2a4e;
+    border-radius: 4px;
+    padding: 10px 12px;
+    margin: -6px 0 16px;
+    word-break: break-word;
+}
+.proj-acceptance-textarea {
+    min-height: 120px;
+}
 
 /* ── COLUMN TITLE EDITOR (inline) ───────────────────────────── */
 .proj-col-title-input {
@@ -2012,6 +2029,36 @@
 }
 .proj-chat-msg-text {
     white-space: pre-wrap;
+}
+.proj-chat-thinking {
+    margin: 2px 0 4px;
+    border: 1px solid rgba(255, 224, 130, 0.22);
+    border-radius: 6px;
+    background: rgba(255, 224, 130, 0.06);
+}
+.proj-chat-thinking summary {
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    padding: 4px 6px;
+    color: #ffe08a;
+    font-size: 10px;
+    list-style-position: inside;
+}
+.proj-chat-thinking-state {
+    color: #aaa;
+    font-size: 9px;
+}
+.proj-chat-thinking pre {
+    margin: 0;
+    padding: 0 6px 6px;
+    max-height: 180px;
+    overflow: auto;
+    white-space: pre-wrap;
+    color: #d6d0bb;
+    font: 10px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 .proj-chat-msg-tools {
     font-size: 9px;

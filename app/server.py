@@ -2726,6 +2726,35 @@ def _agent_id_from_session_key(session_key):
     return m.group(1) if m else ""
 
 
+def _openclaw_gateway_session_key(agent_id, session_key):
+    if not agent_id or not session_key:
+        return session_key or ""
+    raw = str(session_key)
+    if raw.startswith(f"agent:{agent_id}:"):
+        return raw
+    return f"agent:{agent_id}:{raw}"
+
+
+def _openclaw_session_key_candidates(agent_id, session_key):
+    raw = str(session_key or "")
+    gateway_key = _openclaw_gateway_session_key(agent_id, raw)
+    keys = []
+    for key in (gateway_key, raw):
+        if key and key not in keys:
+            keys.append(key)
+    return keys
+
+
+def _openclaw_get_session_info(sessions_data, agent_id, session_key):
+    if not isinstance(sessions_data, dict):
+        return {}, ""
+    for key in _openclaw_session_key_candidates(agent_id, session_key):
+        info = sessions_data.get(key)
+        if isinstance(info, dict):
+            return info, key
+    return {}, ""
+
+
 def _is_hermes_agent(agent_id_or_key):
     needle = str(agent_id_or_key or "")
     for a in get_roster():
@@ -2799,8 +2828,8 @@ def _openclaw_session_paths(agent_id, session_key=None):
     try:
         with open(sessions_json_path, "r") as f:
             sessions = json.load(f)
-        if session_key and isinstance(sessions.get(session_key), dict):
-            session_info = sessions.get(session_key) or {}
+        if session_key:
+            session_info, _ = _openclaw_get_session_info(sessions, agent_id, session_key)
         if not session_info:
             best_ts = -1
             for val in sessions.values():
@@ -2942,963 +2971,23 @@ def _get_hermes_agent(agent_id_or_key=None):
     return None
 
 
-def _get_codex_agent(agent_id_or_key=None):
-    needle = str(agent_id_or_key or "")
-    for a in get_roster():
-        if a.get("providerKind") == "codex" and (not needle or needle in (a.get("id"), a.get("statusKey"), a.get("providerAgentId"), a.get("profile"))):
-            return a
-    return None
+def _safe_hermes_path_part(value, fallback="default", limit=80):
+    safe = re.sub(r"[^a-zA-Z0-9_.-]+", "-", str(value or fallback))[:limit].strip(".-")
+    return safe or fallback
 
 
-def _is_codex_agent(agent_id_or_key):
-    needle = str(agent_id_or_key or "")
-    for a in get_roster():
-        if needle in (a.get("id"), a.get("statusKey"), a.get("providerAgentId"), a.get("profile")):
-            return a.get("providerKind") == "codex"
-    return needle.startswith("codex:") or needle.startswith("codex-")
-
-
-def _codex_provider():
-    codex_cfg = VO_CONFIG.get("codex", {})
-    return CodexProvider(
-        home_path=codex_cfg.get("homePath"),
-        binary=codex_cfg.get("binary"),
-        workspace_root=codex_cfg.get("workspaceRoot"),
-        enabled=codex_cfg.get("enabled", True),
-        timeout_sec=int(codex_cfg.get("timeoutSec") or 900),
-        model=codex_cfg.get("model") or "",
-        sandbox=codex_cfg.get("sandbox") or "workspace-write",
-        approval_policy=codex_cfg.get("approvalPolicy") or "never",
-        prefer_app_server=codex_cfg.get("preferAppServer", True),
-        main_workspace=codex_cfg.get("mainWorkspace"),
-        include_main=codex_cfg.get("includeMain", True),
-        include_native_agents=codex_cfg.get("includeNativeAgents", True),
-        register_native_agents=codex_cfg.get("registerNativeAgents", True),
-    )
-
-
-def _codex_history_path(profile="default"):
+def _hermes_history_path(profile="default", conversation_id=None):
     safe_profile = re.sub(r"[^a-zA-Z0-9_.-]+", "-", profile or "default")[:80] or "default"
-    return os.path.join(STATUS_DIR, f"codex-chat-{safe_profile}.json")
-
-
-def _load_codex_history(profile="default"):
-    path = _codex_history_path(profile)
-    try:
-        with open(path, "r") as f:
-            data = json.load(f)
-        messages = data.get("messages", []) if isinstance(data, dict) else []
-        return messages if isinstance(messages, list) else []
-    except (FileNotFoundError, json.JSONDecodeError, OSError):
-        return []
-
-
-def _load_codex_state(profile="default"):
-    path = _codex_history_path(profile)
-    try:
-        with open(path, "r") as f:
-            data = json.load(f)
-        return data if isinstance(data, dict) else {"messages": []}
-    except (FileNotFoundError, json.JSONDecodeError, OSError):
-        return {"messages": []}
-
-
-def _codex_int(value, default=0):
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return default
-
-
-def _codex_context_used_from_token_usage(token_usage):
-    token_usage = token_usage if isinstance(token_usage, dict) else {}
-    last = token_usage.get("last") if isinstance(token_usage.get("last"), dict) else {}
-    last_total = _codex_int(last.get("totalTokens"), 0)
-    if last_total:
-        return last_total
-    last_input = _codex_int(last.get("inputTokens"), 0)
-    if last_input:
-        return last_input
-    total = token_usage.get("total") if isinstance(token_usage.get("total"), dict) else {}
-    return _codex_int(total.get("totalTokens"), 0)
-
-
-def _codex_context_window_from_token_usage(token_usage):
-    token_usage = token_usage if isinstance(token_usage, dict) else {}
-    return _codex_int(token_usage.get("modelContextWindow"), 0)
-
-
-def _get_codex_token_usage(profile="default"):
-    state = _load_codex_state(profile)
-    token_usage = state.get("tokenUsage") if isinstance(state.get("tokenUsage"), dict) else {}
-    return token_usage
-
-
-def _set_codex_token_usage(profile="default", token_usage=None):
-    if not isinstance(token_usage, dict) or not token_usage:
-        return
-    path = _codex_history_path(profile)
-    state = _load_codex_state(profile)
-    state["tokenUsage"] = token_usage
-    state["contextUsed"] = _codex_context_used_from_token_usage(token_usage)
-    context_window = _codex_context_window_from_token_usage(token_usage)
-    if context_window:
-        state["contextWindow"] = context_window
-    state.setdefault("messages", [])
-    state["updatedAt"] = int(time.time() * 1000)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w") as f:
-        json.dump(state, f, indent=2)
-    try:
-        os.chmod(path, 0o666)
-    except OSError:
-        pass
-
-
-def _clear_codex_token_usage(profile="default"):
-    path = _codex_history_path(profile)
-    state = _load_codex_state(profile)
-    for key in ("tokenUsage", "contextUsed", "contextWindow"):
-        state.pop(key, None)
-    state.setdefault("messages", [])
-    state["updatedAt"] = int(time.time() * 1000)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w") as f:
-        json.dump(state, f, indent=2)
-    try:
-        os.chmod(path, 0o666)
-    except OSError:
-        pass
-
-
-def _save_codex_history(profile, messages):
-    path = _codex_history_path(profile)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    state = _load_codex_state(profile)
-    state["messages"] = messages
-    state["updatedAt"] = int(time.time() * 1000)
-    with open(path, "w") as f:
-        json.dump(state, f, indent=2)
-    try:
-        os.chmod(path, 0o666)
-    except OSError:
-        pass
-
-
-def _get_codex_session_id(profile="default"):
-    state = _load_codex_state(profile)
-    return str(state.get("sessionId") or "")
-
-
-def _set_codex_session_id(profile="default", session_id=""):
-    path = _codex_history_path(profile)
-    state = _load_codex_state(profile)
-    state["sessionId"] = session_id or ""
-    state.setdefault("messages", [])
-    state["updatedAt"] = int(time.time() * 1000)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w") as f:
-        json.dump(state, f, indent=2)
-    try:
-        os.chmod(path, 0o666)
-    except OSError:
-        pass
-
-
-def _set_codex_active_run(profile="default", session_id="", run_id=""):
-    path = _codex_history_path(profile)
-    state = _load_codex_state(profile)
-    state["sessionId"] = session_id or state.get("sessionId") or ""
-    state["runId"] = run_id or ""
-    state.setdefault("messages", [])
-    state["updatedAt"] = int(time.time() * 1000)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w") as f:
-        json.dump(state, f, indent=2)
-    try:
-        os.chmod(path, 0o666)
-    except OSError:
-        pass
-
-
-def _get_claude_code_agent(agent_id_or_key=None):
-    needle = str(agent_id_or_key or "")
-    for a in get_roster():
-        if a.get("providerKind") == "claude-code" and (not needle or needle in (a.get("id"), a.get("statusKey"), a.get("providerAgentId"), a.get("profile"))):
-            return a
-    return None
-
-
-def _is_claude_code_agent(agent_id_or_key):
-    needle = str(agent_id_or_key or "")
-    for a in get_roster():
-        if needle in (a.get("id"), a.get("statusKey"), a.get("providerAgentId"), a.get("profile")):
-            return a.get("providerKind") == "claude-code"
-    return needle.startswith("claude-code:") or needle.startswith("claude-code-")
-
-
-def _claude_code_provider():
-    claude_cfg = VO_CONFIG.get("claudeCode", {})
-    return ClaudeCodeProvider(
-        home_path=claude_cfg.get("homePath"),
-        binary=claude_cfg.get("binary"),
-        workspace_root=claude_cfg.get("workspaceRoot"),
-        enabled=claude_cfg.get("enabled", True),
-        timeout_sec=int(claude_cfg.get("timeoutSec") or 900),
-        model=claude_cfg.get("model") or "",
-        permission_mode=claude_cfg.get("permissionMode") or "acceptEdits",
-        main_workspace=claude_cfg.get("mainWorkspace"),
-        include_main=claude_cfg.get("includeMain", True),
-        include_native_agents=claude_cfg.get("includeNativeAgents", True),
-        register_native_agents=claude_cfg.get("registerNativeAgents", True),
-    )
-
-
-def _claude_code_history_path(profile="main"):
-    safe_profile = re.sub(r"[^a-zA-Z0-9_.-]+", "-", profile or "main")[:80] or "main"
-    return os.path.join(STATUS_DIR, f"claude-code-chat-{safe_profile}.json")
-
-
-def _load_claude_code_history(profile="main"):
-    path = _claude_code_history_path(profile)
-    try:
-        with open(path, "r") as f:
-            data = json.load(f)
-        messages = data.get("messages", []) if isinstance(data, dict) else []
-        return messages if isinstance(messages, list) else []
-    except (FileNotFoundError, json.JSONDecodeError, OSError):
-        return []
-
-
-def _load_claude_code_state(profile="main"):
-    path = _claude_code_history_path(profile)
-    try:
-        with open(path, "r") as f:
-            data = json.load(f)
-        return data if isinstance(data, dict) else {"messages": []}
-    except (FileNotFoundError, json.JSONDecodeError, OSError):
-        return {"messages": []}
-
-
-def _get_claude_code_token_usage(profile="main"):
-    state = _load_claude_code_state(profile)
-    token_usage = state.get("tokenUsage") if isinstance(state.get("tokenUsage"), dict) else {}
-    return token_usage
-
-
-def _set_claude_code_token_usage(profile="main", token_usage=None):
-    if not isinstance(token_usage, dict) or not token_usage:
-        return
-    path = _claude_code_history_path(profile)
-    state = _load_claude_code_state(profile)
-    state["tokenUsage"] = token_usage
-    state["contextUsed"] = _codex_context_used_from_token_usage(token_usage)
-    context_window = _codex_context_window_from_token_usage(token_usage)
-    if context_window:
-        state["contextWindow"] = context_window
-    state.setdefault("messages", [])
-    state["updatedAt"] = int(time.time() * 1000)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w") as f:
-        json.dump(state, f, indent=2)
-    try:
-        os.chmod(path, 0o666)
-    except OSError:
-        pass
-
-
-def _clear_claude_code_token_usage(profile="main"):
-    path = _claude_code_history_path(profile)
-    state = _load_claude_code_state(profile)
-    for key in ("tokenUsage", "contextUsed", "contextWindow"):
-        state.pop(key, None)
-    state.setdefault("messages", [])
-    state["updatedAt"] = int(time.time() * 1000)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w") as f:
-        json.dump(state, f, indent=2)
-    try:
-        os.chmod(path, 0o666)
-    except OSError:
-        pass
-
-
-def _save_claude_code_history(profile, messages):
-    path = _claude_code_history_path(profile)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    state = _load_claude_code_state(profile)
-    state["messages"] = messages
-    state["updatedAt"] = int(time.time() * 1000)
-    with open(path, "w") as f:
-        json.dump(state, f, indent=2)
-    try:
-        os.chmod(path, 0o666)
-    except OSError:
-        pass
-
-
-def _get_claude_code_session_id(profile="main"):
-    state = _load_claude_code_state(profile)
-    return str(state.get("sessionId") or "")
-
-
-def _set_claude_code_session_id(profile="main", session_id=""):
-    path = _claude_code_history_path(profile)
-    state = _load_claude_code_state(profile)
-    state["sessionId"] = session_id or ""
-    state.setdefault("messages", [])
-    state["updatedAt"] = int(time.time() * 1000)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w") as f:
-        json.dump(state, f, indent=2)
-    try:
-        os.chmod(path, 0o666)
-    except OSError:
-        pass
-
-
-def _set_claude_code_active_run(profile="main", session_id="", run_id=""):
-    path = _claude_code_history_path(profile)
-    state = _load_claude_code_state(profile)
-    state["sessionId"] = session_id or state.get("sessionId") or ""
-    state["runId"] = run_id or ""
-    state.setdefault("messages", [])
-    state["updatedAt"] = int(time.time() * 1000)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w") as f:
-        json.dump(state, f, indent=2)
-    try:
-        os.chmod(path, 0o666)
-    except OSError:
-        pass
-
-
-def _publish_claude_code_progress(profile, agent_id, progress_id, run_state):
-    if not progress_id:
-        return
-    run_state = run_state if isinstance(run_state, dict) else {}
-    history = _load_claude_code_history(profile)
-    history = [
-        msg for msg in history
-        if not (isinstance(msg, dict) and msg.get("ephemeral") == "claude-code-progress" and msg.get("progressId") == progress_id)
-    ]
-    session_id = run_state.get("sessionId") or run_state.get("threadId") or _get_claude_code_session_id(profile) or ""
-    run_id = run_state.get("runId") or session_id
-    token_usage = run_state.get("tokenUsage") if isinstance(run_state.get("tokenUsage"), dict) else {}
-    progress_message = {
-        "role": "assistant",
-        "text": run_state.get("reply") or "",
-        "ts": int(time.time() * 1000),
-        "agentId": agent_id,
-        "ephemeral": "claude-code-progress",
-        "progressId": progress_id,
-        "sessionId": session_id,
-        "runId": run_id,
-        "tools": run_state.get("tools") or [],
-        "thinking": run_state.get("status") or run_state.get("thinking") or "Waiting for Claude Code stream events.",
-        "reasoningTokens": 0,
-        "error": run_state.get("error") or None,
-    }
-    if token_usage:
-        progress_message["tokenUsage"] = token_usage
-        progress_message["contextUsed"] = _codex_context_used_from_token_usage(token_usage)
-        context_window = _codex_context_window_from_token_usage(token_usage)
-        if context_window:
-            progress_message["contextWindow"] = context_window
-        _set_claude_code_token_usage(profile, token_usage)
-    history.append(progress_message)
-    _save_claude_code_history(profile, history)
-    if session_id or run_id:
-        _set_claude_code_active_run(profile, session_id, run_id)
-
-
-def _remove_claude_code_progress_messages(messages):
-    return [m for m in messages if not (isinstance(m, dict) and m.get("ephemeral") == "claude-code-progress")]
-
-
-def _publish_codex_progress(profile, agent_id, progress_id, run_state):
-    """Publish in-flight Codex app-server state to the visible chat history."""
-    if not progress_id:
-        return
-    run_state = run_state if isinstance(run_state, dict) else {}
-    history = _load_codex_history(profile)
-    history = [
-        msg for msg in history
-        if not (isinstance(msg, dict) and msg.get("ephemeral") == "codex-progress" and msg.get("progressId") == progress_id)
-    ]
-    session_id = run_state.get("threadId") or _get_codex_session_id(profile) or ""
-    run_id = run_state.get("runId") or run_state.get("turnId") or ""
-    token_usage = run_state.get("tokenUsage") if isinstance(run_state.get("tokenUsage"), dict) else {}
-    progress_message = {
-        "role": "assistant",
-        "text": run_state.get("reply") or "",
-        "ts": int(time.time() * 1000),
-        "agentId": agent_id,
-        "ephemeral": "codex-progress",
-        "progressId": progress_id,
-        "sessionId": session_id,
-        "runId": run_id,
-        "tools": run_state.get("tools") or [],
-        "thinking": run_state.get("thinking") or "Waiting for Codex app-server events.",
-        "reasoningTokens": 0,
-        "approval": run_state.get("approval") if isinstance(run_state.get("approval"), dict) else None,
-        "error": run_state.get("error") or None,
-    }
-    if token_usage:
-        progress_message["tokenUsage"] = token_usage
-        progress_message["contextUsed"] = _codex_context_used_from_token_usage(token_usage)
-        context_window = _codex_context_window_from_token_usage(token_usage)
-        if context_window:
-            progress_message["contextWindow"] = context_window
-        _set_codex_token_usage(profile, token_usage)
-    history.append(progress_message)
-    _save_codex_history(profile, history)
-    if session_id or run_id:
-        _set_codex_active_run(profile, session_id, run_id)
-
-
-def _remove_codex_progress_messages(messages):
-    return [m for m in messages if not (isinstance(m, dict) and m.get("ephemeral") == "codex-progress")]
-
-
-CODEX_STREAM_RUNS_LOCK = threading.Lock()
-CODEX_STREAM_RUNS = {}
-
-
-def _remember_codex_stream_run(meta):
-    if not isinstance(meta, dict) or not meta.get("runId"):
-        return
-    with CODEX_STREAM_RUNS_LOCK:
-        CODEX_STREAM_RUNS[str(meta["runId"])] = meta
-
-
-def _get_codex_stream_run(run_id):
-    with CODEX_STREAM_RUNS_LOCK:
-        meta = CODEX_STREAM_RUNS.get(str(run_id or ""))
-        return meta if isinstance(meta, dict) else None
-
-
-def _clear_codex_stream_run(run_id):
-    with CODEX_STREAM_RUNS_LOCK:
-        CODEX_STREAM_RUNS.pop(str(run_id or ""), None)
-
-
-def _codex_stream_event_payload(run_id, agent, profile, run_state=None, **extra):
-    run_state = run_state if isinstance(run_state, dict) else {}
-    payload = {
-        "runId": run_id,
-        "agentId": (agent or {}).get("id") or "",
-        "profile": profile or "",
-        "sessionId": run_state.get("threadId") or _get_codex_session_id(profile) or "",
-        "turnId": run_state.get("turnId") or run_state.get("runId") or "",
-        "reply": run_state.get("reply") or "",
-        "tools": run_state.get("tools") or [],
-        "thinking": run_state.get("thinking") or "",
-        "approval": run_state.get("approval") if isinstance(run_state.get("approval"), dict) else None,
-        "error": run_state.get("error") or "",
-        "status": run_state.get("status") or "",
-        "providerPath": "app-server",
-    }
-    token_usage = run_state.get("tokenUsage") if isinstance(run_state.get("tokenUsage"), dict) else {}
-    if token_usage:
-        payload["tokenUsage"] = token_usage
-        payload["contextUsed"] = _codex_context_used_from_token_usage(token_usage)
-        context_window = _codex_context_window_from_token_usage(token_usage)
-        if context_window:
-            payload["contextWindow"] = context_window
-    payload.update({k: v for k, v in extra.items() if v is not None})
-    return payload
-
-
-def _codex_tool_stream_key(tool, idx=0):
-    if not isinstance(tool, dict):
-        return str(idx)
-    return str(tool.get("id") or f"{idx}:{tool.get('name') or 'tool'}:{json.dumps(tool.get('arguments') or {}, sort_keys=True, default=str)[:120]}")
-
-
-def _handle_codex_run_start(body):
-    """Start a Codex message in the background and expose progress over SSE."""
-    message = (body.get("message") or "").strip()
-    agent_key = body.get("agentId") or body.get("key") or body.get("sessionKey") or "codex-default"
-    if not message:
-        return {"ok": False, "error": "message is required", "_status": 400}
-
-    agent = _get_codex_agent(agent_key)
-    if not agent:
-        return {"ok": False, "error": f"Codex agent '{agent_key}' not found", "_status": 404}
-
-    profile = agent.get("profile") or agent.get("providerAgentId") or "default"
-    run_id = f"codex-{int(time.time() * 1000)}-{str(uuid.uuid4())[:8]}"
-    progress_id = f"codex-progress-{run_id}"
-    events = queue.Queue()
-    status_key = agent.get("statusKey") or agent.get("id")
-    meta = {
-        "runId": run_id,
-        "agentId": agent.get("id"),
-        "agentKey": agent_key,
-        "profile": profile,
-        "statusKey": status_key,
-        "events": events,
-        "startedAt": int(time.time() * 1000),
-        "done": False,
-        "result": None,
-    }
-    _remember_codex_stream_run(meta)
-
-    def enqueue(event_name, payload=None):
-        payload = payload if isinstance(payload, dict) else {}
-        payload.setdefault("runId", run_id)
-        payload.setdefault("agentId", agent.get("id") or "")
-        payload.setdefault("profile", profile)
-        try:
-            events.put_nowait({"event": event_name, "data": payload, "ts": int(time.time() * 1000)})
-        except Exception:
-            pass
-
-    def worker():
-        last_reply = ""
-        last_thinking = ""
-        last_approval_id = ""
-        last_token_usage_signature = ""
-        seen_tools = {}
-        enqueue("run.started", {"providerPath": "app-server"})
-
-        def on_progress(run_state):
-            nonlocal last_reply, last_thinking, last_approval_id, last_token_usage_signature
-            run_state = run_state if isinstance(run_state, dict) else {}
-            with CODEX_STREAM_RUNS_LOCK:
-                meta["sessionId"] = run_state.get("threadId") or meta.get("sessionId") or ""
-                meta["turnId"] = run_state.get("turnId") or run_state.get("runId") or meta.get("turnId") or ""
-            gateway_presence.set_provider_event(status_key, "codex", {
-                "event": "turn.stream",
-                "thread_id": run_state.get("threadId") or "",
-                "turn_id": run_state.get("turnId") or run_state.get("runId") or "",
-                "status": run_state.get("status") or "",
-            })
-
-            token_usage = run_state.get("tokenUsage") if isinstance(run_state.get("tokenUsage"), dict) else {}
-            if token_usage:
-                token_usage_signature = json.dumps(token_usage, sort_keys=True, default=str)
-                if token_usage_signature != last_token_usage_signature:
-                    last_token_usage_signature = token_usage_signature
-                    enqueue("session.metrics", _codex_stream_event_payload(run_id, agent, profile, run_state))
-
-            reply = str(run_state.get("reply") or "")
-            if reply and reply != last_reply:
-                delta = reply[len(last_reply):] if reply.startswith(last_reply) else ""
-                last_reply = reply
-                enqueue("message.delta", _codex_stream_event_payload(run_id, agent, profile, run_state, delta=delta))
-
-            thinking = str(run_state.get("thinking") or "")
-            if thinking and thinking != last_thinking:
-                last_thinking = thinking
-                enqueue("reasoning.available", _codex_stream_event_payload(run_id, agent, profile, run_state))
-
-            approval = run_state.get("approval") if isinstance(run_state.get("approval"), dict) else None
-            approval_id = str((approval or {}).get("approval_id") or (approval or {}).get("id") or "")
-            if approval and approval_id and approval_id != last_approval_id:
-                last_approval_id = approval_id
-                enqueue("approval.request", _codex_stream_event_payload(run_id, agent, profile, run_state, approval=approval))
-
-            for idx, tool in enumerate(run_state.get("tools") or []):
-                if not isinstance(tool, dict):
-                    continue
-                key = _codex_tool_stream_key(tool, idx)
-                status = str(tool.get("status") or "").lower()
-                is_terminal = status in {"done", "error", "failed"}
-                prior = seen_tools.get(key)
-                if not prior:
-                    enqueue("tool.started", _codex_stream_event_payload(run_id, agent, profile, run_state, toolCard=tool, toolCallId=key))
-                if is_terminal and (not prior or prior.get("status") != status or prior.get("result") != tool.get("result") or prior.get("error") != tool.get("error")):
-                    event_name = "tool.failed" if status in {"error", "failed"} or tool.get("error") else "tool.completed"
-                    enqueue(event_name, _codex_stream_event_payload(run_id, agent, profile, run_state, toolCard=tool, toolCallId=key))
-                seen_tools[key] = dict(tool)
-
-        run_body = dict(body)
-        run_body["_streamRunId"] = run_id
-        run_body["_streamProgressId"] = progress_id
-        run_body["_onProgress"] = on_progress
-        try:
-            result = _handle_codex_chat(run_body)
-        except Exception as exc:
-            result = {"ok": False, "error": str(exc), "_status": 500}
-        with CODEX_STREAM_RUNS_LOCK:
-            meta["done"] = True
-            meta["result"] = result
-        if result.get("ok"):
-            token_usage = result.get("tokenUsage") if isinstance(result.get("tokenUsage"), dict) else {}
-            enqueue("run.completed", {
-                "runId": run_id,
-                "agentId": agent.get("id") or "",
-                "profile": profile,
-                "sessionId": result.get("sessionId") or _get_codex_session_id(profile) or "",
-                "turnId": result.get("runId") or meta.get("turnId") or "",
-                "reply": result.get("reply") or "",
-                "tools": result.get("tools") or [],
-                "thinking": result.get("thinking") or "",
-                "approval": result.get("approval") if isinstance(result.get("approval"), dict) else None,
-                "tokenUsage": token_usage,
-                "contextUsed": _codex_context_used_from_token_usage(token_usage),
-                "contextWindow": _codex_context_window_from_token_usage(token_usage),
-                "providerPath": result.get("providerPath") or "app-server",
-            })
-        else:
-            token_usage = result.get("tokenUsage") if isinstance(result.get("tokenUsage"), dict) else {}
-            enqueue("run.failed", {
-                "runId": run_id,
-                "agentId": agent.get("id") or "",
-                "profile": profile,
-                "sessionId": result.get("sessionId") or _get_codex_session_id(profile) or "",
-                "turnId": result.get("runId") or meta.get("turnId") or "",
-                "reply": result.get("reply") or "",
-                "tools": result.get("tools") or [],
-                "thinking": result.get("thinking") or "",
-                "approval": result.get("approval") if isinstance(result.get("approval"), dict) else None,
-                "tokenUsage": token_usage,
-                "contextUsed": _codex_context_used_from_token_usage(token_usage),
-                "contextWindow": _codex_context_window_from_token_usage(token_usage),
-                "providerPath": result.get("providerPath") or "app-server",
-                "error": result.get("error") or result.get("reply") or "Codex run failed",
-            })
-        threading.Timer(600, _clear_codex_stream_run, args=(run_id,)).start()
-
-    threading.Thread(target=worker, daemon=True, name=f"codex-run-{run_id}").start()
-    return {
-        "ok": True,
-        "runId": run_id,
-        "providerPath": "app-server",
-        "agent": {"id": agent.get("id"), "name": agent.get("name"), "providerKind": "codex", "profile": profile},
-    }
-
-
-def _handle_codex_run_events(handler, run_id):
-    meta = _get_codex_stream_run(run_id)
-    if not meta:
-        handler.send_response(404)
-        handler.send_header("Content-Type", "text/event-stream")
-        handler.send_header("Cache-Control", "no-cache")
-        handler.send_header("Access-Control-Allow-Origin", "*")
-        handler.end_headers()
-        handler.wfile.write(b"event: run.failed\ndata: {\"error\":\"Codex run not found\"}\n\n")
-        return
-
-    handler.send_response(200)
-    handler.send_header("Content-Type", "text/event-stream")
-    handler.send_header("Cache-Control", "no-cache")
-    handler.send_header("Connection", "keep-alive")
-    handler.send_header("Access-Control-Allow-Origin", "*")
-    handler.end_headers()
-
-    events = meta.get("events")
-    if not isinstance(events, queue.Queue):
-        return
-
-    last_keepalive = time.time()
-    try:
-        while True:
-            try:
-                item = events.get(timeout=0.5)
-            except queue.Empty:
-                if time.time() - last_keepalive >= 10:
-                    handler.wfile.write(b": keepalive\n\n")
-                    handler.wfile.flush()
-                    last_keepalive = time.time()
-                if meta.get("done") and events.empty():
-                    break
-                continue
-
-            event_name = str(item.get("event") or "message")
-            payload = item.get("data") if isinstance(item.get("data"), dict) else {}
-            encoded = json.dumps(payload, ensure_ascii=False, default=str)
-            handler.wfile.write(f"event: {event_name}\ndata: {encoded}\n\n".encode("utf-8"))
-            handler.wfile.flush()
-            if event_name in {"run.completed", "run.failed", "run.cancelled", "run.canceled"}:
-                break
-    except (BrokenPipeError, ConnectionError, OSError):
-        pass
-    finally:
-        if meta.get("done"):
-            _clear_codex_stream_run(run_id)
-
-
-CLAUDE_CODE_STREAM_RUNS_LOCK = threading.Lock()
-CLAUDE_CODE_STREAM_RUNS = {}
-
-
-def _remember_claude_code_stream_run(meta):
-    if not isinstance(meta, dict) or not meta.get("runId"):
-        return
-    with CLAUDE_CODE_STREAM_RUNS_LOCK:
-        CLAUDE_CODE_STREAM_RUNS[str(meta["runId"])] = meta
-
-
-def _get_claude_code_stream_run(run_id):
-    with CLAUDE_CODE_STREAM_RUNS_LOCK:
-        meta = CLAUDE_CODE_STREAM_RUNS.get(str(run_id or ""))
-        return meta if isinstance(meta, dict) else None
-
-
-def _clear_claude_code_stream_run(run_id):
-    with CLAUDE_CODE_STREAM_RUNS_LOCK:
-        CLAUDE_CODE_STREAM_RUNS.pop(str(run_id or ""), None)
-
-
-def _claude_code_stream_event_payload(run_id, agent, profile, run_state=None, **extra):
-    run_state = run_state if isinstance(run_state, dict) else {}
-    token_usage = run_state.get("tokenUsage") if isinstance(run_state.get("tokenUsage"), dict) else {}
-    payload = {
-        "runId": run_id,
-        "agentId": (agent or {}).get("id") or "",
-        "profile": profile or "",
-        "sessionId": run_state.get("sessionId") or run_state.get("threadId") or _get_claude_code_session_id(profile) or "",
-        "turnId": run_state.get("runId") or run_state.get("sessionId") or "",
-        "reply": run_state.get("reply") or "",
-        "tools": run_state.get("tools") or [],
-        "thinking": run_state.get("status") or run_state.get("thinking") or "",
-        "error": run_state.get("error") or "",
-        "status": run_state.get("status") or "",
-        "providerPath": "claude-code-cli",
-    }
-    if token_usage:
-        payload["tokenUsage"] = token_usage
-        payload["contextUsed"] = _codex_context_used_from_token_usage(token_usage)
-        context_window = _codex_context_window_from_token_usage(token_usage)
-        if context_window:
-            payload["contextWindow"] = context_window
-    payload.update({k: v for k, v in extra.items() if v is not None})
-    return payload
-
-
-def _claude_code_tool_stream_key(tool, idx=0):
-    if not isinstance(tool, dict):
-        return f"claude-code-tool-{idx}"
-    return str(tool.get("id") or f"{idx}:{tool.get('name') or 'tool'}:{json.dumps(tool.get('arguments') or {}, sort_keys=True, default=str)[:120]}")
-
-
-def _handle_claude_code_run_start(body):
-    """Start a Claude Code message in the background and expose progress over SSE."""
-    message = (body.get("message") or "").strip()
-    agent_key = body.get("agentId") or body.get("key") or body.get("sessionKey") or "claude-code-main"
-    if not message:
-        return {"ok": False, "error": "message is required", "_status": 400}
-
-    agent = _get_claude_code_agent(agent_key)
-    if not agent:
-        return {"ok": False, "error": f"Claude Code agent '{agent_key}' not found", "_status": 404}
-
-    profile = agent.get("profile") or agent.get("providerAgentId") or "main"
-    run_id = f"claude-code-{int(time.time() * 1000)}-{str(uuid.uuid4())[:8]}"
-    progress_id = f"claude-code-progress-{run_id}"
-    events = queue.Queue()
-    status_key = agent.get("statusKey") or agent.get("id")
-    meta = {
-        "runId": run_id,
-        "agentId": agent.get("id"),
-        "agentKey": agent_key,
-        "profile": profile,
-        "statusKey": status_key,
-        "events": events,
-        "startedAt": int(time.time() * 1000),
-        "done": False,
-        "result": None,
-    }
-    _remember_claude_code_stream_run(meta)
-
-    def enqueue(event_name, payload=None):
-        payload = payload if isinstance(payload, dict) else {}
-        payload.setdefault("runId", run_id)
-        payload.setdefault("agentId", agent.get("id") or "")
-        payload.setdefault("profile", profile)
-        try:
-            events.put_nowait({"event": event_name, "data": payload, "ts": int(time.time() * 1000)})
-        except Exception:
-            pass
-
-    def worker():
-        last_reply = ""
-        last_thinking = ""
-        last_token_usage_signature = ""
-        seen_tools = {}
-        enqueue("run.started", {"providerPath": "claude-code-cli"})
-
-        def on_progress(run_state):
-            nonlocal last_reply, last_thinking, last_token_usage_signature
-            run_state = run_state if isinstance(run_state, dict) else {}
-            with CLAUDE_CODE_STREAM_RUNS_LOCK:
-                meta["sessionId"] = run_state.get("sessionId") or run_state.get("threadId") or meta.get("sessionId") or ""
-                meta["turnId"] = run_state.get("runId") or meta.get("turnId") or ""
-            gateway_presence.set_provider_event(status_key, "claude-code", {
-                "event": "turn.stream",
-                "session_id": run_state.get("sessionId") or run_state.get("threadId") or "",
-                "run_id": run_state.get("runId") or "",
-                "status": run_state.get("status") or "",
-            })
-
-            token_usage = run_state.get("tokenUsage") if isinstance(run_state.get("tokenUsage"), dict) else {}
-            if token_usage:
-                token_usage_signature = json.dumps(token_usage, sort_keys=True, default=str)
-                if token_usage_signature != last_token_usage_signature:
-                    last_token_usage_signature = token_usage_signature
-                    enqueue("session.metrics", _claude_code_stream_event_payload(run_id, agent, profile, run_state))
-
-            reply = str(run_state.get("reply") or "")
-            if reply and reply != last_reply:
-                delta = reply[len(last_reply):] if reply.startswith(last_reply) else ""
-                last_reply = reply
-                enqueue("message.delta", _claude_code_stream_event_payload(run_id, agent, profile, run_state, delta=delta))
-
-            thinking = str(run_state.get("status") or run_state.get("thinking") or "")
-            if thinking and thinking != last_thinking:
-                last_thinking = thinking
-                enqueue("reasoning.available", _claude_code_stream_event_payload(run_id, agent, profile, run_state))
-
-            for idx, tool in enumerate(run_state.get("tools") or []):
-                if not isinstance(tool, dict):
-                    continue
-                key = _claude_code_tool_stream_key(tool, idx)
-                status = str(tool.get("status") or "").lower()
-                is_terminal = status in {"done", "error", "failed"}
-                prior = seen_tools.get(key)
-                if not prior:
-                    enqueue("tool.started", _claude_code_stream_event_payload(run_id, agent, profile, run_state, toolCard=tool, toolCallId=key))
-                if is_terminal and (not prior or prior.get("status") != status or prior.get("result") != tool.get("result") or prior.get("error") != tool.get("error")):
-                    event_name = "tool.failed" if status in {"error", "failed"} or tool.get("error") else "tool.completed"
-                    enqueue(event_name, _claude_code_stream_event_payload(run_id, agent, profile, run_state, toolCard=tool, toolCallId=key))
-                seen_tools[key] = dict(tool)
-
-        run_body = dict(body)
-        run_body["_streamRunId"] = run_id
-        run_body["_streamProgressId"] = progress_id
-        run_body["_onProgress"] = on_progress
-        try:
-            result = _handle_claude_code_chat(run_body)
-        except Exception as exc:
-            result = {"ok": False, "error": str(exc), "_status": 500}
-        with CLAUDE_CODE_STREAM_RUNS_LOCK:
-            meta["done"] = True
-            meta["result"] = result
-        token_usage = result.get("tokenUsage") if isinstance(result.get("tokenUsage"), dict) else {}
-        payload = {
-            "runId": run_id,
-            "agentId": agent.get("id") or "",
-            "profile": profile,
-            "sessionId": result.get("sessionId") or _get_claude_code_session_id(profile) or "",
-            "turnId": result.get("runId") or result.get("sessionId") or meta.get("turnId") or "",
-            "reply": result.get("reply") or "",
-            "tools": result.get("tools") or [],
-            "thinking": result.get("thinking") or "",
-            "tokenUsage": token_usage,
-            "contextUsed": _codex_context_used_from_token_usage(token_usage),
-            "contextWindow": _codex_context_window_from_token_usage(token_usage),
-            "providerPath": result.get("providerPath") or "claude-code-cli",
-        }
-        if result.get("ok"):
-            enqueue("run.completed", payload)
-        else:
-            payload["error"] = result.get("error") or result.get("reply") or "Claude Code run failed"
-            enqueue("run.failed", payload)
-        threading.Timer(600, _clear_claude_code_stream_run, args=(run_id,)).start()
-
-    threading.Thread(target=worker, daemon=True, name=f"claude-code-run-{run_id}").start()
-    return {
-        "ok": True,
-        "runId": run_id,
-        "providerPath": "claude-code-cli",
-        "agent": {"id": agent.get("id"), "name": agent.get("name"), "providerKind": "claude-code", "profile": profile},
-    }
-
-
-def _handle_claude_code_run_events(handler, run_id):
-    meta = _get_claude_code_stream_run(run_id)
-    if not meta:
-        handler.send_response(404)
-        handler.send_header("Content-Type", "text/event-stream")
-        handler.send_header("Cache-Control", "no-cache")
-        handler.send_header("Access-Control-Allow-Origin", "*")
-        handler.end_headers()
-        handler.wfile.write(b"event: run.failed\ndata: {\"error\":\"Claude Code run not found\"}\n\n")
-        return
-
-    handler.send_response(200)
-    handler.send_header("Content-Type", "text/event-stream")
-    handler.send_header("Cache-Control", "no-cache")
-    handler.send_header("Connection", "keep-alive")
-    handler.send_header("Access-Control-Allow-Origin", "*")
-    handler.end_headers()
-
-    events = meta.get("events")
-    if not isinstance(events, queue.Queue):
-        return
-
-    last_keepalive = time.time()
-    try:
-        while True:
-            try:
-                item = events.get(timeout=0.5)
-            except queue.Empty:
-                if time.time() - last_keepalive >= 10:
-                    handler.wfile.write(b": keepalive\n\n")
-                    handler.wfile.flush()
-                    last_keepalive = time.time()
-                if meta.get("done") and events.empty():
-                    break
-                continue
-
-            event_name = str(item.get("event") or "message")
-            payload = item.get("data") if isinstance(item.get("data"), dict) else {}
-            encoded = json.dumps(payload, ensure_ascii=False, default=str)
-            handler.wfile.write(f"event: {event_name}\ndata: {encoded}\n\n".encode("utf-8"))
-            handler.wfile.flush()
-            if event_name in {"run.completed", "run.failed", "run.cancelled", "run.canceled"}:
-                break
-    except (BrokenPipeError, ConnectionError, OSError):
-        pass
-    finally:
-        if meta.get("done"):
-            _clear_claude_code_stream_run(run_id)
-
-
-def _normalize_codex_approval_choice(choice):
-    choice = str(choice or "").strip().lower()
-    if choice in {"approve", "approved", "accept", "allow", "allow_once", "approve_once", "yes"}:
-        return "approve"
-    return "cancel"
-
-
-def _codex_approval_result_message(approval, choice):
-    approval = approval if isinstance(approval, dict) else {}
-    normalized = _normalize_codex_approval_choice(choice)
-    status = "approved" if normalized == "approve" else "cancelled"
-    return {
-        "role": "assistant",
-        "text": "",
-        "ts": int(time.time() * 1000),
-        "agentId": approval.get("agentId") or "codex-default",
-        "approval": {**approval, "status": status, "resolvedAt": int(time.time() * 1000), "choice": normalized},
-        "tools": [],
-        "thinking": "",
-        "reasoningTokens": 0,
-    }
-
-
-def _history_has_approval(messages, approval_id):
-    approval_id = str(approval_id or "")
-    if not approval_id:
-        return False
-    for msg in messages or []:
-        approval = msg.get("approval") if isinstance(msg, dict) and isinstance(msg.get("approval"), dict) else {}
-        if approval_id in {str(approval.get("id") or ""), str(approval.get("approval_id") or "")}:
-            return True
-    return False
-
-
-def _hermes_history_path(profile="default"):
-    safe_profile = re.sub(r"[^a-zA-Z0-9_.-]+", "-", profile or "default")[:80] or "default"
+    if conversation_id:
+        raw_conversation = str(conversation_id)
+        safe_conversation = _safe_hermes_path_part(raw_conversation, "conversation", 80)
+        digest = hashlib.sha1(raw_conversation.encode("utf-8")).hexdigest()[:10]
+        return os.path.join(STATUS_DIR, f"hermes-chat-{safe_profile}-conv-{safe_conversation}-{digest}.json")
     return os.path.join(STATUS_DIR, f"hermes-chat-{safe_profile}.json")
 
 
-def _load_hermes_history(profile="default"):
-    path = _hermes_history_path(profile)
+def _load_hermes_history(profile="default", conversation_id=None):
+    path = _hermes_history_path(profile, conversation_id)
     try:
         with open(path, "r") as f:
             data = json.load(f)
@@ -3908,21 +2997,27 @@ def _load_hermes_history(profile="default"):
         return []
 
 
-def _load_hermes_state(profile="default"):
-    path = _hermes_history_path(profile)
+def _load_hermes_state(profile="default", conversation_id=None):
+    path = _hermes_history_path(profile, conversation_id)
     try:
         with open(path, "r") as f:
             data = json.load(f)
-        return data if isinstance(data, dict) else {"profile": profile, "messages": []}
+        if isinstance(data, dict):
+            return data
+        return {"profile": profile, "conversationId": conversation_id or "", "messages": []}
     except (FileNotFoundError, json.JSONDecodeError, OSError):
-        return {"profile": profile, "messages": []}
+        return {"profile": profile, "conversationId": conversation_id or "", "messages": []}
 
 
-def _save_hermes_history(profile, messages):
-    path = _hermes_history_path(profile)
+def _save_hermes_history(profile, messages, conversation_id=None):
+    path = _hermes_history_path(profile, conversation_id)
     try:
-        existing = _load_hermes_state(profile)
+        existing = _load_hermes_state(profile, conversation_id)
         existing["profile"] = profile
+        if conversation_id:
+            existing["conversationId"] = conversation_id
+        else:
+            existing.pop("conversationId", None)
         existing["messages"] = messages[-500:]
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w") as f:
@@ -3935,16 +3030,20 @@ def _save_hermes_history(profile, messages):
         print(f"[HERMES] Failed to save history: {e}")
 
 
-def _get_hermes_session_id(profile="default"):
-    state = _load_hermes_state(profile)
+def _get_hermes_session_id(profile="default", conversation_id=None):
+    state = _load_hermes_state(profile, conversation_id)
     session_id = state.get("sessionId") or state.get("session_id")
     return str(session_id).strip() if session_id else ""
 
 
-def _set_hermes_session_id(profile="default", session_id=""):
-    path = _hermes_history_path(profile)
-    state = _load_hermes_state(profile)
+def _set_hermes_session_id(profile="default", session_id="", conversation_id=None):
+    path = _hermes_history_path(profile, conversation_id)
+    state = _load_hermes_state(profile, conversation_id)
     state["profile"] = profile
+    if conversation_id:
+        state["conversationId"] = conversation_id
+    else:
+        state.pop("conversationId", None)
     if session_id:
         state["sessionId"] = session_id
     else:
@@ -4976,6 +4075,7 @@ def _handle_hermes_chat(body):
     """
     message = (body.get("message") or "").strip()
     agent_key = body.get("agentId") or body.get("key") or body.get("sessionKey") or "hermes-default"
+    conversation_id = str(body.get("conversationId") or body.get("threadId") or "").strip()
     if not message:
         return {"ok": False, "error": "message is required", "_status": 400}
 
@@ -4986,11 +4086,11 @@ def _handle_hermes_chat(body):
     if archive_guard:
         profile = agent.get("profile") or agent.get("providerAgentId") or "default"
         now_ms = int(time.time() * 1000)
-        history = _load_hermes_history(profile)
+        history = _load_hermes_history(profile, conversation_id)
         history.append({"role": "user", "text": message, "ts": now_ms, "agentId": agent.get("id"), "from": "User", "fromType": body.get("fromType") or ""})
         history.append({"role": "assistant", "text": archive_guard["reply"], "ts": int(time.time() * 1000), "agentId": agent.get("id")})
-        _save_hermes_history(profile, history)
-        return archive_guard
+        _save_hermes_history(profile, history, conversation_id)
+        return {**archive_guard, "conversationId": conversation_id}
 
     hermes_cfg = VO_CONFIG.get("hermes", {})
     hermes_bin = os.path.expanduser(agent.get("binary") or hermes_cfg.get("binary") or "~/.local/bin/hermes")
@@ -5019,7 +4119,7 @@ def _handle_hermes_chat(body):
         delivery_message = f"{delivery_message}\n\n{attachment_context}"
 
     now_ms = int(time.time() * 1000)
-    history = _load_hermes_history(profile)
+    history = _load_hermes_history(profile, conversation_id)
     history.append({
         "role": "user",
         "text": message,
@@ -5030,9 +4130,9 @@ def _handle_hermes_chat(body):
         "sourceApp": source_app if is_human_source else "",
         "sourceSurface": source_surface if is_human_source else "",
         "sourceLabel": source_label if is_human_source else "",
-        "attachments": attachments,
+        "conversationId": conversation_id,
     })
-    _save_hermes_history(profile, history)
+    _save_hermes_history(profile, history, conversation_id)
 
     progress_id = f"hermes-progress-{now_ms}"
     history.append({
@@ -5045,8 +4145,9 @@ def _handle_hermes_chat(body):
         "tools": [],
         "thinking": "Waiting for native Hermes API events.",
         "reasoningTokens": 0,
+        "conversationId": conversation_id,
     })
-    _save_hermes_history(profile, history)
+    _save_hermes_history(profile, history, conversation_id)
 
     try:
         provider = HermesProvider(
@@ -5055,23 +4156,11 @@ def _handle_hermes_chat(body):
             enabled=hermes_cfg.get("enabled", True),
             timeout_sec=timeout,
         )
-        session_id = _get_hermes_session_id(profile)
-
-        result = None
-        used_api = False
-        if hermes_cfg.get("preferApi", True) and not yolo_once:
-            api_result = _handle_hermes_api_chat(agent, profile, delivery_message, message, timeout)
-            if not api_result.get("fallback"):
-                result = api_result
-                used_api = True
-
-        if result is None:
-            gateway_presence.set_manual_override(agent.get("statusKey") or agent.get("id"), "working", "Hermes CLI task")
-            result = provider.send_chat_message(profile, delivery_message, session_id=session_id, timeout_sec=timeout, yolo_once=yolo_once)
-
+        session_id = _get_hermes_session_id(profile, conversation_id)
+        result = provider.send_chat_message(profile, delivery_message, session_id=session_id, timeout_sec=timeout, yolo_once=yolo_once)
         if result.get("sessionId"):
-            _set_hermes_session_id(profile, result.get("sessionId"))
-        activity = {"tools": result.get("tools") or [], "thinking": result.get("thinking") or "", "reasoningTokens": result.get("reasoningTokens") or 0}
+            _set_hermes_session_id(profile, result.get("sessionId"), conversation_id)
+        activity = {"tools": [], "thinking": "", "reasoningTokens": 0}
         active_session_id = result.get("sessionId") or session_id
         if not used_api and active_session_id:
             exported = provider.export_session(profile, active_session_id)
@@ -5094,15 +4183,7 @@ def _handle_hermes_chat(body):
                 profile=profile,
                 session_id=active_session_id or "",
             )
-        history = _remove_hermes_progress_messages(_load_hermes_history(profile))
-        final_ts = int(time.time() * 1000)
-        history.extend(_hermes_tool_activity_messages(
-            visible_tools,
-            agent_id=agent.get("id"),
-            run_id=result.get("runId") or "",
-            base_ts=final_ts,
-            coerce_complete=bool(result.get("ok")) and not approval,
-        ))
+        history = _remove_hermes_progress_messages(_load_hermes_history(profile, conversation_id))
         history.append({
             "role": "assistant",
             "text": reply,
@@ -5115,11 +4196,11 @@ def _handle_hermes_chat(body):
             "thinking": activity.get("thinking") or "",
             "reasoningTokens": activity.get("reasoningTokens") or 0,
             "approval": approval,
+            "conversationId": conversation_id,
         })
-        _save_hermes_history(profile, history)
-        if not used_api:
-            state = "idle" if result.get("ok") else "offline"
-            gateway_presence.set_manual_override(agent.get("statusKey") or agent.get("id"), state, "")
+        _save_hermes_history(profile, history, conversation_id)
+        state = "idle" if result.get("ok") else "offline"
+        gateway_presence.set_manual_override(agent.get("statusKey") or agent.get("id"), state, "")
         return {
             "ok": bool(result.get("ok")),
             "reply": reply,
@@ -5133,10 +4214,11 @@ def _handle_hermes_chat(body):
             "reasoningTokens": activity.get("reasoningTokens") or 0,
             "approval": approval,
             "error": result.get("error"),
+            "conversationId": conversation_id,
             "agent": {"id": agent.get("id"), "name": agent.get("name"), "providerKind": "hermes", "profile": profile},
         }
     except Exception as e:
-        history = _remove_hermes_progress_messages(_load_hermes_history(profile))
+        history = _remove_hermes_progress_messages(_load_hermes_history(profile, conversation_id))
         history.append({
             "role": "assistant",
             "text": "",
@@ -5145,10 +4227,11 @@ def _handle_hermes_chat(body):
             "tools": [_hermes_task_breakdown_tool("error", str(e))],
             "thinking": "",
             "reasoningTokens": 0,
+            "conversationId": conversation_id,
         })
-        _save_hermes_history(profile, history)
+        _save_hermes_history(profile, history, conversation_id)
         gateway_presence.set_manual_override(agent.get("statusKey") or agent.get("id"), "offline", "Hermes CLI error")
-        return {"ok": False, "error": str(e), "_status": 500}
+        return {"ok": False, "error": str(e), "conversationId": conversation_id, "_status": 500}
 
 
 def _handle_codex_chat(body):
@@ -10962,9 +10045,58 @@ _PROJECT_CRON_BINDINGS_LOCK = threading.Lock()
 _PROJECT_CRON_HISTORY_LIMIT = 200
 _PROJECT_CRON_ALERT_STATUSES = {"failed", "intervention_required"}
 
+
+def _project_execution_repair_acceptance_state(data):
+    if not isinstance(data, dict):
+        return data
+    done_titles = {"done", "completed", "verified", "published", "fixed", "closed"}
+    for project in data.get("projects", []) or []:
+        if not isinstance(project, dict):
+            continue
+        done_col = next((c for c in project.get("columns", []) or [] if str(c.get("title", "")).lower() in done_titles), None)
+        for task in project.get("tasks", []) or []:
+            if not isinstance(task, dict):
+                continue
+            if task.get("executionState") != "awaiting_user_acceptance":
+                continue
+            review = task.get("reviewResult") or {}
+            if review.get("status") not in {"pass", "skipped"}:
+                continue
+            attempt_id = review.get("attemptId")
+            attempt = next((a for a in task.get("attempts", []) or [] if a.get("id") == attempt_id), None)
+            if _project_execution_attempt_requires_user_acceptance(task, attempt):
+                continue
+            now = datetime.now(timezone.utc).isoformat()
+            task["executionState"] = "done"
+            task["completedAt"] = task.get("completedAt") or now
+            task["activeAttemptId"] = None
+            if done_col and done_col.get("id"):
+                task["columnId"] = done_col.get("id")
+            if attempt and attempt.get("status") == "review_skipped_waiting_acceptance":
+                attempt["status"] = "execution_complete"
+            task.setdefault("stateHistory", []).append({
+                "attemptId": attempt_id,
+                "actor": "system",
+                "from": "awaiting_user_acceptance",
+                "to": "done",
+                "reason": "Repaired stale acceptance state for a task that does not require user acceptance.",
+                "at": now,
+            })
+            task["stateHistory"] = task["stateHistory"][-100:]
+            if project.get("workflowPhase") in {"awaiting_user_acceptance", "blocked_by_active_task"} or project.get("activeTaskId") == task.get("id"):
+                project["workflowPhase"] = "done"
+            if project.get("projectExecutionFlowStopReason") == "awaiting_user_acceptance":
+                project["projectExecutionFlowStopReason"] = None
+            project["projectExecutionFlowActive"] = False
+            project["workflowActive"] = False
+            project["activeTaskId"] = None
+            project["activeAgent"] = None
+    return data
+
+
 def _load_projects():
     """Load projects from the markdown-backed store."""
-    return PROJECT_STORE.load_all()
+    return _project_execution_repair_acceptance_state(PROJECT_STORE.load_all())
 
 
 def _save_projects(data):
@@ -12001,7 +11133,7 @@ def _handle_task_create(project_id, body):
         "assigneeBranch": body.get("assigneeBranch"),
         "executorAgentId": body.get("executorAgentId") or body.get("assignee"),
         "reviewerAgentId": body.get("reviewerAgentId"),
-        "requiresUserAcceptance": body.get("requiresUserAcceptance", True) is not False,
+        "requiresUserAcceptance": body.get("requiresUserAcceptance", False) is True,
         "allowReviewerlessExecution": body.get("allowReviewerlessExecution", False) is True,
         "scheduledRepeatEnabled": body.get("scheduledRepeatEnabled", False) is True,
         "executionState": "backlog",
@@ -12096,7 +11228,7 @@ def _handle_project_from_template(body):
                 "assigneeBranch": None,
                 "executorAgentId": None,
                 "reviewerAgentId": None,
-                "requiresUserAcceptance": tt.get("requiresUserAcceptance", True) is not False,
+                "requiresUserAcceptance": tt.get("requiresUserAcceptance", False) is True,
                 "allowReviewerlessExecution": tt.get("allowReviewerlessExecution", False) is True,
                 "scheduledRepeatEnabled": tt.get("scheduledRepeatEnabled", False) is True,
                 "executionState": "backlog",
@@ -12602,7 +11734,13 @@ def _project_execution_done_column_ids(project):
 
 
 def _project_execution_requires_user_acceptance(task):
-    return task.get("requiresUserAcceptance", True) is not False
+    return task.get("requiresUserAcceptance", False) is True
+
+
+def _project_execution_attempt_requires_user_acceptance(task, attempt):
+    if isinstance(attempt, dict) and "requiresUserAcceptance" in attempt:
+        return attempt.get("requiresUserAcceptance") is True
+    return _project_execution_requires_user_acceptance(task)
 
 
 def _project_execution_start_mode(project, body=None):
@@ -12710,12 +11848,36 @@ def _project_execution_mark_done(project, task, actor, reason, attempt_id=None):
     return {"ok": True}
 
 
+def _project_execution_column_for_state(project, state):
+    state = str(state or "").strip()
+    if state in {"executing", "reworking"}:
+        return _wf_get_inprogress_col(project)
+    if state in {"execution_complete", "reviewing", "awaiting_user_acceptance"}:
+        return _wf_get_review_col(project)
+    if state == "done":
+        return _wf_get_done_col(project)
+    return None
+
+
+def _project_execution_sync_task_column(project, task, state):
+    col = _project_execution_column_for_state(project, state)
+    if not col or not col.get("id"):
+        return False
+    if task.get("columnId") == col.get("id"):
+        return False
+    task["columnId"] = col.get("id")
+    col_tasks = [t for t in project.get("tasks", []) if t is not task and t.get("columnId") == col.get("id")]
+    task["order"] = max((t.get("order", 0) for t in col_tasks), default=-1) + 1
+    return True
+
+
 def _project_execution_transition(project, task, next_state, actor, reason, attempt_id=None):
     previous = task.get("executionState") or ("done" if task.get("completedAt") else "backlog")
     task["executionState"] = next_state
     task["updatedAt"] = _proj_now()
     if next_state != "done":
         task["completedAt"] = None
+    _project_execution_sync_task_column(project, task, next_state)
     project["updatedAt"] = _proj_now()
     _log_activity(project, "project_execution_state_changed", actor, f"Project Execution task '{task.get('title', '')}' changed from {previous} to {next_state}: {reason}", task.get("id"))
     task.setdefault("stateHistory", []).append({"attemptId": attempt_id, "actor": actor, "from": previous, "to": next_state, "reason": _project_execution_redact(reason), "at": _proj_now()})
@@ -15525,7 +14687,7 @@ def _project_execution_call_executor(executor, prompt, workspace, attempt_id, pr
     if provider_kind == "codex":
         return _handle_codex_chat({"agentId": agent_id, "message": prompt, "conversationId": attempt_id, "timeoutSec": timeout, "workspace": workspace, "fromType": "agent"})
     if provider_kind == "hermes":
-        return _handle_hermes_chat({"agentId": agent_id, "message": prompt, "timeoutSec": timeout, "fromType": "agent"})
+        return _handle_hermes_chat({"agentId": agent_id, "message": prompt, "conversationId": attempt_id, "timeoutSec": timeout, "fromType": "agent"})
     reply = _wf_call_agent(agent_id, prompt, timeout=timeout, project_id=project_id, task_id=task_id)
     ok = not str(reply).startswith("[ERROR]")
     return {"ok": ok, "reply": reply, "error": None if ok else reply, "status": "completed" if ok else "execution_failed"}
@@ -15568,7 +14730,7 @@ def _project_execution_call_reviewer(reviewer, prompt, review_id, project_id=Non
     if provider_kind == "codex":
         return _handle_codex_chat({"agentId": agent_id, "message": prompt, "conversationId": review_id, "timeoutSec": timeout, "fromType": "agent"})
     if provider_kind == "hermes":
-        return _handle_hermes_chat({"agentId": agent_id, "message": prompt, "timeoutSec": timeout, "fromType": "agent"})
+        return _handle_hermes_chat({"agentId": agent_id, "message": prompt, "conversationId": review_id, "timeoutSec": timeout, "fromType": "agent"})
     reply = _wf_call_agent(agent_id, prompt, timeout=timeout, project_id=project_id, task_id=task_id)
     ok = not str(reply).startswith("[ERROR]")
     return {"ok": ok, "reply": reply, "error": None if ok else reply, "status": "completed" if ok else "review_failed"}
@@ -15654,7 +14816,7 @@ def _project_execution_run_review(project_id, task_id, attempt_id, review_id):
         if review["status"] == "pass":
             task.update({"blockedReason": None, "lastError": None})
             attempt["status"] = "review_passed"
-            if _project_execution_requires_user_acceptance(task):
+            if _project_execution_attempt_requires_user_acceptance(task, attempt):
                 project["projectExecutionFlowActive"] = False
                 project["projectExecutionFlowStopReason"] = "awaiting_user_acceptance"
                 _project_execution_transition(project, task, "awaiting_user_acceptance", reviewer.get("id") or "reviewer", "Reviewer passed; waiting for explicit user acceptance.", attempt_id)
@@ -15780,7 +14942,7 @@ def _project_execution_run_attempt(project_id, task_id, attempt_id, cancel_flag)
             }
             task.setdefault("reviewHistory", []).append(task["reviewResult"])
             task["reviewHistory"] = task["reviewHistory"][-50:]
-            if _project_execution_requires_user_acceptance(task):
+            if _project_execution_attempt_requires_user_acceptance(task, attempt):
                 attempt["status"] = "review_skipped_waiting_acceptance"
                 project["projectExecutionFlowActive"] = False
                 project["projectExecutionFlowStopReason"] = "awaiting_user_acceptance"
@@ -15994,7 +15156,8 @@ def _handle_project_execution_cancel(project_id, task_id, body=None):
     if executor.get("providerKind") == "codex":
         _handle_codex_cancel({"agentId": executor.get("id"), "conversationId": attempt_id, "workspace": attempt.get("workspacePath")})
     elif executor.get("providerKind") == "openclaw":
-        _wf_abort_task_session(_wf_task_session_key(executor.get("id"), project_id, task_id))
+        raw_session_key = _wf_task_session_key(executor.get("id"), project_id, task_id)
+        _wf_abort_task_session(_openclaw_gateway_session_key(executor.get("id"), raw_session_key))
     return {"ok": True, "status": "cancelling", "attemptId": attempt_id}
 
 
@@ -16067,8 +15230,8 @@ def _handle_project_execution_acceptance(project_id, task_id, body=None):
     feedback = str(body.get("feedback") or "").strip()
     if not feedback:
         return {"error": "Feedback is required", "_status": 400}
-    if task.get("executionState") != "awaiting_user_acceptance" or review.get("status") != "pass":
-        return {"error": "A current reviewer pass is required before this acceptance action", "_status": 409}
+    if task.get("executionState") != "awaiting_user_acceptance" or review.get("status") not in {"pass", "skipped"}:
+        return {"error": "A current reviewer pass or skipped review result is required before this acceptance action", "_status": 409}
     if attempt_id and attempt_id != review.get("attemptId"):
         return {"error": "Stale or mismatched acceptance attempt", "_status": 409}
     task.setdefault("acceptanceHistory", []).append({"action": action, "attemptId": review.get("attemptId"), "feedback": _project_execution_redact(feedback), "at": _proj_now(), "by": "user"})
@@ -16076,12 +15239,60 @@ def _handle_project_execution_acceptance(project_id, task_id, body=None):
     task["reviewResult"] = {}
     task["reworkFeedback"] = _project_execution_redact(feedback)
     if action == "reject_and_rework":
+        workspace = _project_execution_validate_workspace(project.get("workspacePath"))
+        if not workspace.get("ok"):
+            task["blockedReason"] = workspace.get("error") or "Project workspace is not available for rework."
+            _project_execution_transition(project, task, "blocked", "system", task["blockedReason"], review.get("attemptId"))
+            project.update({"workspaceStatus": workspace, "workflowActive": False, "workflowPhase": "blocked", "activeTaskId": None, "activeAgent": None, "updatedAt": _proj_now()})
+            _save_projects(data)
+            return {**workspace, "_status": 409}
+        active = _project_execution_active_task(project)
+        if active:
+            return {"error": "Another task is already active for this project", "activeTaskId": active.get("id"), "_status": 409}
+        roles = _project_execution_resolve_start_roles(
+            project,
+            task,
+            allow_skip_reviewer=task.get("allowReviewerlessExecution") is True or review.get("status") == "skipped",
+        )
+        if not roles.get("ok"):
+            return {**roles, "_status": 409}
         task["reworkCount"] = int(task.get("reworkCount") or 0) + 1
         task["blockedReason"] = None
-        _project_execution_transition(project, task, "backlog", "user", f"User rejected reviewer pass: {feedback}", review.get("attemptId"))
-        project.update({"workflowActive": False, "workflowPhase": "backlog", "activeTaskId": None, "activeAgent": None, "updatedAt": _proj_now()})
+        rejected_source = "skipped review result" if review.get("status") == "skipped" else "reviewer pass"
+        rework_attempt_id = str(uuid.uuid4())
+        rework_attempt = {
+            "id": rework_attempt_id,
+            "status": "reworking",
+            "startedAt": _proj_now(),
+            "workspacePath": workspace["path"],
+            "workspaceKind": workspace["kind"],
+            "dirtyConfirmed": False,
+            "dirtyFingerprint": "",
+            "executor": roles["executor"],
+            "reviewer": roles.get("reviewer"),
+            "skipReview": bool(roles.get("skipReview")),
+            "skipReviewReason": roles.get("skipReviewReason"),
+            "baseline": _project_execution_git_snapshot(workspace["path"]),
+            "startMode": "single",
+            "projectFlow": False,
+            "requiresUserAcceptance": _project_execution_requires_user_acceptance(task),
+            "rework": True,
+            "reworkCycle": task["reworkCount"],
+            "reworkFromAttemptId": review.get("attemptId"),
+            "reworkFeedback": task["reworkFeedback"],
+            "autoReviewAfterExecution": not roles.get("skipReview"),
+        }
+        task.setdefault("attempts", []).append(rework_attempt)
+        task["attempts"] = task["attempts"][-20:]
+        task.update({"activeAttemptId": rework_attempt_id, "executorAgentId": roles["executor"]["id"], "reviewerAgentId": (roles.get("reviewer") or {}).get("id"), "lastError": None})
+        project.update({"workspaceStatus": workspace, "projectExecutionFlowActive": False, "projectExecutionFlowStopReason": None, "workflowActive": True, "workflowPhase": "reworking", "activeTaskId": task_id, "activeAgent": roles["executor"]["id"], "updatedAt": _proj_now()})
+        _project_execution_transition(project, task, "reworking", "user", f"User rejected {rejected_source}: {feedback}", rework_attempt_id)
         _save_projects(data)
-        return {"ok": True, "status": "backlog", "task": task}
+        cancel_flag = threading.Event()
+        with _PROJECT_EXECUTION_LOCK:
+            _PROJECT_EXECUTION_CANCEL_FLAGS[rework_attempt_id] = cancel_flag
+        threading.Thread(target=_project_execution_run_attempt, args=(project_id, task_id, rework_attempt_id, cancel_flag), daemon=True).start()
+        return {"ok": True, "status": "reworking", "task": task, "attemptId": rework_attempt_id}
     task["blockedReason"] = _project_execution_redact(feedback)
     _project_execution_transition(project, task, "blocked", "user", feedback, review.get("attemptId"))
     project.update({"workflowActive": False, "workflowPhase": "blocked", "activeTaskId": None, "activeAgent": None, "updatedAt": _proj_now()})
@@ -16445,14 +15656,11 @@ def _wf_extract_session_activity(agent_id, project_id, task_id):
             return activity
         with open(sessions_json_path, "r") as f:
             sessions_data = json.load(f)
-        session_info = sessions_data.get(session_key)
+        session_info, _ = _openclaw_get_session_info(sessions_data, agent_id, session_key)
         if not session_info:
             return activity
         session_id = session_info.get("sessionId", "")
-        if not session_id:
-            return activity
-
-        jsonl_path = os.path.join(sessions_dir, f"{session_id}.jsonl")
+        jsonl_path = session_info.get("sessionFile") or (os.path.join(sessions_dir, f"{session_id}.jsonl") if session_id else "")
         if not os.path.exists(jsonl_path):
             return activity
 
@@ -16761,9 +15969,10 @@ def _wf_cleanup_task_sessions(agent_id, project_id, task_id):
     fires "Continue where you left off" retries that loop forever.
     """
     session_key = _wf_task_session_key(agent_id, project_id, task_id)
+    gateway_session_key = _openclaw_gateway_session_key(agent_id, session_key)
 
     # Phase 1: Delete from gateway's in-memory state
-    _wf_delete_session_via_gateway(session_key)
+    _wf_delete_session_via_gateway(gateway_session_key)
 
     # Phase 2: Clean up session files on disk
     home_path = VO_CONFIG.get("openclaw", {}).get("homePath", os.path.expanduser("~/.openclaw"))
@@ -16777,24 +15986,29 @@ def _wf_cleanup_task_sessions(agent_id, project_id, task_id):
         with open(sessions_json_path, "r") as f:
             sessions_data = json.load(f)
 
-        if session_key not in sessions_data:
+        session_info, stored_session_key = _openclaw_get_session_info(sessions_data, agent_id, session_key)
+        if not session_info:
             return
 
         # Get session ID to delete the JSONL file
-        session_id = sessions_data[session_key].get("sessionId", "")
-        del sessions_data[session_key]
+        session_id = session_info.get("sessionId", "")
+        session_file = session_info.get("sessionFile", "")
+        del sessions_data[stored_session_key]
 
         with open(sessions_json_path, "w") as f:
             json.dump(sessions_data, f)
 
         # Delete session JSONL and lock files
+        cleanup_paths = []
+        if session_file:
+            cleanup_paths.extend([session_file, f"{session_file}.lock"])
         if session_id:
-            for ext in [".jsonl", ".jsonl.lock"]:
-                fpath = os.path.join(sessions_dir, f"{session_id}{ext}")
-                if os.path.exists(fpath):
-                    os.remove(fpath)
+            cleanup_paths.extend([os.path.join(sessions_dir, f"{session_id}{ext}") for ext in [".jsonl", ".jsonl.lock", ".trajectory.jsonl", ".trajectory-path.json"]])
+        for fpath in dict.fromkeys(cleanup_paths):
+            if fpath and os.path.exists(fpath):
+                os.remove(fpath)
 
-        print(f"[WORKFLOW] Cleaned up session files for agent={agent_id} task={task_id[:8]}: {session_key}")
+        print(f"[WORKFLOW] Cleaned up session files for agent={agent_id} task={task_id[:8]}: {stored_session_key}")
     except Exception as e:
         print(f"[WORKFLOW] Session file cleanup error: {e}")
 
@@ -17923,14 +17137,23 @@ def _handle_workflow_chat(project_id):
     if not p:
         return {"ok": True, "messages": [], "agent": None}
 
-    agent_key = None
-    task_id = current_task_id
+    project_execution_active = _project_execution_enabled(p) and p.get("workflowActive") and p.get("activeTaskId")
+    agent_key = p.get("activeAgent") if project_execution_active else None
+    task_id = p.get("activeTaskId") if project_execution_active else current_task_id
+    conversation_id = None
 
     # First try the tracked current task
     if task_id:
         task = next((t for t in p["tasks"] if t["id"] == task_id), None)
         if task:
-            agent_key = task.get("assignee")
+            if project_execution_active:
+                phase = p.get("workflowPhase") or phase
+                conversation_id = task.get("activeAttemptId")
+                if phase == "reviewing":
+                    agent_key = agent_key or task.get("reviewerAgentId")
+                else:
+                    agent_key = agent_key or task.get("executorAgentId")
+            agent_key = agent_key or task.get("assignee")
 
     # If no tracked task, find the most recently active task (in progress or review)
     if not agent_key:
@@ -17945,7 +17168,7 @@ def _handle_workflow_chat(project_id):
         return {"ok": True, "messages": [], "agent": None, "phase": phase}
 
     # Read ONLY from the task-specific workflow session — not the agent's main session
-    msgs = _wf_get_task_session_messages(agent_key, project_id, task_id)
+    msgs = _wf_get_task_session_messages(agent_key, project_id, task_id, conversation_id=conversation_id)
 
     # Check if the workflow session is still actively running
     session_active = _wf_is_task_session_active(agent_key, project_id, task_id)
@@ -17960,17 +17183,69 @@ def _handle_workflow_chat(project_id):
     }
 
 
-def _wf_get_task_session_messages(agent_id, project_id, task_id, max_messages=50):
+def _codex_reasoning_events_to_chat_messages(events, agent_id, max_messages=50):
+    states = {}
+    ordered = []
+    for event in events:
+        if event.get("type") != "reasoning":
+            continue
+        key = f"{event.get('operationId') or event.get('turnId') or event.get('threadId') or 'turn'}:{event.get('itemId') or 'reasoning'}"
+        state = states.get(key)
+        if not state:
+            state = {"text": "", "ids": set(), "lastTs": 0, "status": "running"}
+            states[key] = state
+            ordered.append((key, state))
+        event_id = event.get("id")
+        if event_id and event_id in state["ids"]:
+            continue
+        if event_id:
+            state["ids"].add(event_id)
+        incoming = str(event.get("text") or event.get("output") or "")
+        if event.get("replace") and incoming.strip():
+            state["text"] = incoming
+        else:
+            if event.get("boundary") and state["text"].strip() and not state["text"].endswith("\n\n"):
+                state["text"] += "\n\n"
+            state["text"] += incoming
+        state["lastTs"] = max(int(event.get("ts") or 0), int(state.get("lastTs") or 0))
+        state["status"] = event.get("status") or state.get("status") or "running"
+
+    messages = []
+    for _, state in ordered:
+        text = state.get("text", "").strip()
+        if not text:
+            continue
+        messages.append({
+            "role": "assistant",
+            "text": "",
+            "thinking": text,
+            "reasoningStatus": state.get("status") or "running",
+            "ts": state.get("lastTs") or 0,
+            "epochMs": state.get("lastTs") or 0,
+            "fromAgentId": agent_id,
+            "source": "codex-activity",
+        })
+    return messages[-max_messages:]
+
+
+def _wf_get_task_session_messages(agent_id, project_id, task_id, max_messages=50, conversation_id=None):
     if _is_hermes_agent(agent_id):
         agent = _get_hermes_agent(agent_id) or {}
         profile = agent.get("profile") or agent.get("providerAgentId") or "default"
-        return _load_hermes_history(profile)[-max_messages:]
+        return _load_hermes_history(profile, conversation_id)[-max_messages:]
     if _is_codex_agent(agent_id):
         messages = []
-        for event in _load_comm_history(limit=max_messages, conversation_id=task_id):
+        codex_conversation_id = conversation_id or task_id
+        for event in _load_comm_history(limit=max_messages, conversation_id=codex_conversation_id):
             msg = _comm_event_to_chat_message(event, agent_id)
             if msg:
                 messages.append(msg)
+        messages.extend(_codex_reasoning_events_to_chat_messages(
+            _get_codex_activity(agent_id, codex_conversation_id, 0),
+            agent_id,
+            max_messages=max_messages,
+        ))
+        messages.sort(key=lambda m: int(m.get("epochMs") or m.get("ts") or 0))
         return messages[-max_messages:]
 
     """Read messages from the task-specific workflow session JSONL only."""
@@ -17985,15 +17260,12 @@ def _wf_get_task_session_messages(agent_id, project_id, task_id, max_messages=50
     except (FileNotFoundError, json.JSONDecodeError):
         return []
 
-    session_info = sessions_data.get(session_key)
+    session_info, _ = _openclaw_get_session_info(sessions_data, agent_id, session_key)
     if not session_info:
         return []
 
     session_id = session_info.get("sessionId", "")
-    if not session_id:
-        return []
-
-    jsonl_path = os.path.join(sessions_dir, f"{session_id}.jsonl")
+    jsonl_path = session_info.get("sessionFile") or (os.path.join(sessions_dir, f"{session_id}.jsonl") if session_id else "")
     if not os.path.exists(jsonl_path):
         return []
 
@@ -18093,7 +17365,7 @@ def _wf_is_task_session_active(agent_id, project_id, task_id):
     try:
         with open(sessions_json_path, "r") as f:
             sessions_data = json.load(f)
-        session_info = sessions_data.get(session_key, {})
+        session_info, _ = _openclaw_get_session_info(sessions_data, agent_id, session_key)
         status = session_info.get("status", "")
         return status == "running"
     except Exception:
@@ -23679,10 +22951,11 @@ def _wf_auto_resume_on_startup():
                 try:
                     with open(sessions_json_path, "r") as f:
                         sessions_data = json.load(f)
-                    if session_key in sessions_data:
-                        session_status = sessions_data[session_key].get("status", "")
+                    session_info, stored_session_key = _openclaw_get_session_info(sessions_data, assignee, session_key)
+                    if session_info:
+                        session_status = session_info.get("status", "")
                         if session_status in ("done", "running", "failed"):
-                            print(f"[WORKFLOW AUTO-RESUME] Found interrupted task: '{task.get('title', '?')}' (project={project_id[:8]}, session={session_status})")
+                            print(f"[WORKFLOW AUTO-RESUME] Found interrupted task: '{task.get('title', '?')}' (project={project_id[:8]}, session={session_status}, key={stored_session_key})")
                             # Resume the workflow for this project
                             with _WORKFLOW_LOCK:
                                 if project_id not in _WORKFLOW_STATE or not _WORKFLOW_STATE.get(project_id, {}).get("active"):

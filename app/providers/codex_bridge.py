@@ -102,8 +102,8 @@ class CodexAppServerClient:
         self.workspace = os.path.abspath(workspace)
         self.model = model or ""
         self.binary = binary or os.environ.get("VO_CODEX_BIN") or shutil.which("codex") or "codex"
-        summary = str(os.environ.get("VO_CODEX_REASONING_SUMMARY") or "concise").strip().lower()
-        self.reasoning_summary = summary if summary in {"auto", "concise", "detailed", "none"} else "concise"
+        summary = str(os.environ.get("VO_CODEX_REASONING_SUMMARY") or "detailed").strip().lower()
+        self.reasoning_summary = summary if summary in {"auto", "concise", "detailed", "none"} else "detailed"
         self._proc: subprocess.Popen[str] | None = None
         self._write_lock = threading.Lock()
         self._start_lock = threading.Lock()

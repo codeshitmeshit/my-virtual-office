@@ -28,6 +28,7 @@
         touchDrag: null,
         filters: { status: '', priority: '', tag: '', search: '', sort: 'updatedAt' },
         workflow: { active: false, autoMode: false, phase: 'idle', currentTaskId: null, pollTimer: null, startMode: 'continuous', flowStopReason: null },
+        acceptanceDialog: null,
     };
 
     const _t = (key, params) => typeof i18n !== 'undefined' ? i18n.t(key, params) : key;
@@ -895,7 +896,7 @@
             </div>
             <div class="proj-quick-add hidden" id="quick-add-${col.id}">
                 <input class="proj-quick-add-input" id="quick-input-${col.id}" type="text" placeholder="${_t('proj_task_title_placeholder')}">
-                ${state.currentProject && state.currentProject.projectExecutionEnabled ? `<label style="display:flex;align-items:center;gap:4px;font-size:10px;color:#aaa;margin-top:6px"><input type="checkbox" id="quick-acceptance-${col.id}" checked>需要人工验收</label>` : ''}
+                ${state.currentProject && state.currentProject.projectExecutionEnabled ? `<label style="display:flex;align-items:center;gap:4px;font-size:10px;color:#aaa;margin-top:6px"><input type="checkbox" id="quick-acceptance-${col.id}">需要人工验收</label>` : ''}
                 <div class="proj-quick-add-actions">
                     <button class="proj-btn proj-btn-sm proj-btn-primary" onclick="ProjMgr.submitQuickAdd('${col.id}')">${_t('proj_add')}</button>
                     <button class="proj-btn proj-btn-sm" onclick="ProjMgr.hideQuickAdd('${col.id}')">${_t('proj_cancel')}</button>
@@ -1192,7 +1193,7 @@
         try {
             const acceptance = document.getElementById(`quick-acceptance-${colId}`);
             const body = { title, columnId: colId };
-            if (p.projectExecutionEnabled) body.requiresUserAcceptance = acceptance ? acceptance.checked : true;
+            if (p.projectExecutionEnabled) body.requiresUserAcceptance = acceptance ? acceptance.checked : false;
             const d = await api.createTask(p.id, body);
             if (d.task) {
                 p.tasks.push(d.task);
@@ -1304,10 +1305,13 @@
             if (task.executionState === 'execution_complete') return `
                 <button class="proj-btn proj-btn-sm proj-btn-start" onclick="ProjMgr.projectExecutionReviewStart('${task.id}', '${escHtml(evidenceAttemptId)}')">启动审查</button>
                 <button class="proj-btn proj-btn-sm" onclick="ProjMgr.projectExecutionStart('${task.id}')">重新执行</button>`;
-            if (task.executionState === 'awaiting_user_acceptance') return `
+            if (task.executionState === 'awaiting_user_acceptance') {
+                const rejectLabel = reviewResult.status === 'skipped' ? '退回返工' : '拒绝返工';
+                return `
                 <button class="proj-btn proj-btn-sm proj-btn-start" onclick="ProjMgr.projectExecutionAccept('${task.id}', 'accept', '${escHtml(reviewResult.attemptId || evidenceAttemptId)}')">验收通过</button>
-                <button class="proj-btn proj-btn-sm" onclick="ProjMgr.projectExecutionAccept('${task.id}', 'reject_and_rework', '${escHtml(reviewResult.attemptId || evidenceAttemptId)}')">拒绝返工</button>
+                <button class="proj-btn proj-btn-sm" onclick="ProjMgr.projectExecutionAccept('${task.id}', 'reject_and_rework', '${escHtml(reviewResult.attemptId || evidenceAttemptId)}')">${rejectLabel}</button>
                 <button class="proj-btn proj-btn-sm proj-btn-stop" onclick="ProjMgr.projectExecutionAccept('${task.id}', 'mark_blocked', '${escHtml(reviewResult.attemptId || evidenceAttemptId)}')">标记阻塞</button>`;
+            }
             return `<button class="proj-btn proj-btn-sm proj-btn-start" onclick="ProjMgr.projectExecutionStart('${task.id}')">启动此任务</button>`;
         })();
 
@@ -1368,7 +1372,7 @@
                 </div>` : ''}
                 ${projectExecution ? `<div class="proj-field">
                     <label class="proj-form-label" style="display:flex;align-items:center;gap:6px">
-                        <input type="checkbox" ${task.requiresUserAcceptance !== false ? 'checked' : ''} onchange="ProjMgr.updateTaskField('requiresUserAcceptance', this.checked)">
+                        <input type="checkbox" ${task.requiresUserAcceptance === true ? 'checked' : ''} onchange="ProjMgr.updateTaskField('requiresUserAcceptance', this.checked)">
                         需要人工验收
                     </label>
                     <div class="proj-exec-meta">关闭后，审查通过会直接完成；连续启动任务模式会继续下一个任务。</div>
@@ -1397,7 +1401,7 @@
             </div>
 
             ${projectExecution ? `<div class="proj-section proj-exec-panel">
-                <div class="proj-section-header"><span class="proj-section-title">Project Execution 执行与审查</span><span class="proj-exec-state state-${escHtml(task.executionState || 'backlog')}">${task.requiresUserAcceptance === false ? '无需人工验收 · ' : '需要人工验收 · '}${escHtml(task.executionState || 'backlog')}</span></div>
+                <div class="proj-section-header"><span class="proj-section-title">Project Execution 执行与审查</span><span class="proj-exec-state state-${escHtml(task.executionState || 'backlog')}">${task.requiresUserAcceptance === true ? '需要人工验收 · ' : '无需人工验收 · '}${escHtml(task.executionState || 'backlog')}</span></div>
                 <div class="proj-exec-actions">
                     ${projectExecutionActionsHtml}
                 </div>
@@ -1856,7 +1860,7 @@
         if (!p) return;
         const src = p.tasks.find(t => t.id === taskId);
         if (!src) return;
-        const copy = { title: src.title + ' (copy)', description: src.description, columnId: src.columnId, priority: src.priority, tags: [...(src.tags || [])], checklist: (src.checklist || []).map(c => ({ ...c, id: genId(), done: false })), requiresUserAcceptance: src.requiresUserAcceptance !== false, allowReviewerlessExecution: src.allowReviewerlessExecution === true, scheduledRepeatEnabled: src.scheduledRepeatEnabled === true };
+        const copy = { title: src.title + ' (copy)', description: src.description, columnId: src.columnId, priority: src.priority, tags: [...(src.tags || [])], checklist: (src.checklist || []).map(c => ({ ...c, id: genId(), done: false })), requiresUserAcceptance: src.requiresUserAcceptance === true, allowReviewerlessExecution: src.allowReviewerlessExecution === true, scheduledRepeatEnabled: src.scheduledRepeatEnabled === true };
         try {
             const d = await api.createTask(p.id, copy);
             if (d.task) { p.tasks.push(d.task); const mc = getMainContent(); if (mc) { mc.innerHTML = renderBoardView(); bindBoardEvents(); } toast(_t('proj_task_duplicated'), 'success'); }
@@ -2152,6 +2156,7 @@
     function hideFormModal() {
         const overlay = document.getElementById('proj-form-overlay');
         if (overlay) { overlay.innerHTML = ''; overlay.classList.add('hidden'); }
+        state.acceptanceDialog = null;
     }
 
     function toggleProjectExecutionFields(enabled) {
@@ -2911,17 +2916,88 @@
     async function projectExecutionAcceptAction(taskId, action, attemptId) {
         const p = state.currentProject;
         if (!p) return;
-        let feedback = '';
         if (action !== 'accept') {
-            feedback = prompt(action === 'reject_and_rework' ? '请输入返工反馈' : '请输入阻塞原因') || '';
-        if (!feedback.trim()) { toast(_t('proj_feedback_required'), 'error'); return; }
-    } else if (!confirm(_t('proj_accept_confirm'))) {
+            showProjectExecutionFeedbackDialog(taskId, action, attemptId);
             return;
         }
+        showProjectExecutionAcceptDialog(taskId, attemptId);
+    }
+
+    function showProjectExecutionAcceptDialog(taskId, attemptId) {
+        const overlay = document.getElementById('proj-form-overlay');
+        if (!overlay) return;
+        const task = state.currentProject && (state.currentProject.tasks || []).find(t => t.id === taskId);
+        state.acceptanceDialog = { taskId, action: 'accept', attemptId };
+        overlay.classList.remove('hidden');
+        overlay.innerHTML = `
+        <div class="proj-form-modal" style="position:static;padding:0;background:transparent" onclick="event.stopPropagation()">
+            <div class="proj-form-box proj-acceptance-dialog" role="dialog" aria-modal="true" aria-labelledby="proj-acceptance-dialog-title">
+                <div class="proj-form-title" id="proj-acceptance-dialog-title">确认验收</div>
+                <div class="proj-acceptance-task">${escHtml(task ? task.title : '')}</div>
+                <div class="proj-form-help">确认验收通过，并将任务移动到 Done？</div>
+                <div class="proj-form-actions">
+                    <button class="proj-btn" onclick="ProjMgr.hideFormModal()">取消</button>
+                    <button class="proj-btn proj-btn-primary" onclick="ProjMgr.submitProjectExecutionAcceptance()">确认通过</button>
+                </div>
+            </div>
+        </div>`;
+    }
+
+    function showProjectExecutionFeedbackDialog(taskId, action, attemptId) {
+        const overlay = document.getElementById('proj-form-overlay');
+        if (!overlay) return;
+        const task = state.currentProject && (state.currentProject.tasks || []).find(t => t.id === taskId);
+        const isRework = action === 'reject_and_rework';
+        state.acceptanceDialog = { taskId, action, attemptId };
+        overlay.classList.remove('hidden');
+        overlay.innerHTML = `
+        <div class="proj-form-modal" style="position:static;padding:0;background:transparent" onclick="event.stopPropagation()">
+            <div class="proj-form-box proj-acceptance-dialog" role="dialog" aria-modal="true" aria-labelledby="proj-acceptance-dialog-title">
+                <div class="proj-form-title" id="proj-acceptance-dialog-title">${isRework ? '退回返工' : '标记阻塞'}</div>
+                <div class="proj-acceptance-task">${escHtml(task ? task.title : '')}</div>
+                <div class="proj-form-group">
+                    <label class="proj-form-label">${isRework ? '退回/返工原因' : '阻塞原因'} *</label>
+                    <textarea class="proj-form-textarea proj-acceptance-textarea" id="proj-acceptance-feedback" placeholder="${isRework ? '说明需要补充或重做的内容...' : '说明为什么无法继续推进...'}" autofocus></textarea>
+                </div>
+                <div class="proj-form-actions">
+                    <button class="proj-btn" onclick="ProjMgr.hideFormModal()">取消</button>
+                    <button class="proj-btn ${isRework ? 'proj-btn-primary' : 'proj-btn-stop'}" onclick="ProjMgr.submitProjectExecutionFeedback()">${isRework ? '确认退回' : '确认阻塞'}</button>
+                </div>
+            </div>
+        </div>`;
+        const input = document.getElementById('proj-acceptance-feedback');
+        if (input) input.focus();
+    }
+
+    async function submitProjectExecutionFeedbackAction() {
+        const dialog = state.acceptanceDialog;
+        if (!dialog) return;
+        const input = document.getElementById('proj-acceptance-feedback');
+        const feedback = input ? input.value : '';
+        if (!feedback.trim()) { toast(_t('proj_feedback_required'), 'error'); return; }
+        await submitProjectExecutionAcceptance(dialog.taskId, dialog.action, dialog.attemptId, feedback);
+    }
+
+    async function submitProjectExecutionAcceptanceAction() {
+        const dialog = state.acceptanceDialog;
+        if (!dialog) return;
+        await submitProjectExecutionAcceptance(dialog.taskId, dialog.action, dialog.attemptId, '');
+    }
+
+    async function submitProjectExecutionAcceptance(taskId, action, attemptId, feedback) {
+        const p = state.currentProject;
+        if (!p) return;
         try {
             const d = await api.projectExecutionAccept(p.id, taskId, action, attemptId, feedback);
             if (d.error) { toast(d.error, 'error'); return; }
-            toast(action === 'accept' ? '任务已验收完成' : '验收状态已更新', 'success');
+            toast(action === 'accept' ? '任务已验收完成' : (d.status === 'reworking' ? '已退回并开始返工' : '验收状态已更新'), 'success');
+            hideFormModal();
+            if (d.status === 'reworking') {
+                state.workflow.active = true;
+                state.workflow.phase = 'reworking';
+                state.workflow.currentTaskId = taskId;
+                startProjectExecutionPolling();
+            }
             await refreshProjectExecutionProject(taskId);
     } catch (e) { toast(_t('proj_accept_action_failed'), 'error'); }
     }
@@ -2973,6 +3049,7 @@
                 state.workflow.startMode = d.startMode || 'continuous';
                 state.workflow.flowStopReason = d.flowStopReason || null;
                 await refreshProjectExecutionProject(d.currentTaskId, { lightweight: true });
+                pollWorkflowChat();
                 if (!d.active) stopWorkflowPolling();
             } catch (e) { /* keep the last visible state */ }
         }, 2500);
@@ -3216,11 +3293,22 @@
             // Truncate very long messages
             if (text.length > 500) text = text.substring(0, 500) + '…';
             text = escHtml(text);
+            let thinkingHtml = '';
+            if (isAssistant && m.thinking) {
+                let thinking = String(m.thinking || '');
+                if (thinking.length > 8000) thinking = thinking.substring(0, 8000) + '…';
+                const status = m.reasoningStatus === 'done' ? _t('complete') : _t('live');
+                thinkingHtml = `<details class="proj-chat-thinking">
+                    <summary><span>${_t('reasoning_summary')}</span><span class="proj-chat-thinking-state">${escHtml(status)}</span></summary>
+                    <pre>${escHtml(thinking)}</pre>
+                </details>`;
+            }
 
             // Format timestamp in user's local timezone
             let timeStr = '';
-            if (m.timestamp) {
-                const d = new Date(m.timestamp);
+            const timestamp = m.timestamp || m.epochMs || m.ts;
+            if (timestamp) {
+                const d = new Date(timestamp);
                 if (!isNaN(d.getTime())) {
                     timeStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                 }
@@ -3236,6 +3324,7 @@
 
             return `<div class="${cls}">
                 ${timeHtml}
+                ${thinkingHtml}
                 <div class="proj-chat-msg-text">${text}</div>
                 ${toolHtml}
             </div>`;
@@ -3482,6 +3571,8 @@
         projectExecutionCancel: projectExecutionCancelAction,
         projectExecutionReviewStart: projectExecutionReviewStartAction,
         projectExecutionAccept: projectExecutionAcceptAction,
+        submitProjectExecutionFeedback: submitProjectExecutionFeedbackAction,
+        submitProjectExecutionAcceptance: submitProjectExecutionAcceptanceAction,
         openMeetingRequestsQueue,
     };
 
