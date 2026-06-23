@@ -1290,7 +1290,44 @@
     border-radius: 8px;
     padding: 10px;
     margin-bottom: 10px;
+    margin-left: calc(var(--artifact-depth, 0) * 14px);
+    width: calc(100% - (var(--artifact-depth, 0) * 14px));
     cursor: pointer;
+}
+.proj-artifact-dir {
+    margin-left: calc(var(--artifact-depth, 0) * 14px);
+    margin-bottom: 8px;
+}
+.proj-artifact-dir summary {
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 28px;
+    color: #ffd700;
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+    user-select: none;
+    border-bottom: 1px solid rgba(255, 215, 0, 0.18);
+}
+.proj-artifact-dir summary::-webkit-details-marker { display: none; }
+.proj-artifact-dir-icon {
+    display: inline-block;
+    width: 12px;
+    color: #8f96a8;
+    transition: transform 0.12s ease;
+}
+.proj-artifact-dir[open] > summary .proj-artifact-dir-icon {
+    transform: rotate(90deg);
+}
+.proj-artifact-dir summary code {
+    margin-left: auto;
+    color: #8f96a8;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 4px;
+    padding: 1px 5px;
+    font-size: 10px;
 }
 .proj-artifact-row:hover,
 .proj-artifact-row.active {

@@ -2489,6 +2489,48 @@
             </div>`).join('');
     }
 
+    function buildArtifactTree(artifacts) {
+        const root = { name: '', path: '', dirs: new Map(), files: [] };
+        (artifacts || []).forEach(artifact => {
+            const parts = String(artifact.path || artifact.name || '').split('/').filter(Boolean);
+            if (!parts.length) return;
+            let node = root;
+            parts.slice(0, -1).forEach(part => {
+                if (!node.dirs.has(part)) {
+                    const path = node.path ? `${node.path}/${part}` : part;
+                    node.dirs.set(part, { name: part, path, dirs: new Map(), files: [] });
+                }
+                node = node.dirs.get(part);
+            });
+            node.files.push(artifact);
+        });
+        return root;
+    }
+
+    function renderArtifactTreeNode(node, model, selected, depth = 0) {
+        const dirs = Array.from(node.dirs.values()).sort((a, b) => a.name.localeCompare(b.name));
+        const files = node.files.slice().sort((a, b) => (b.modifiedAt || '').localeCompare(a.modifiedAt || '') || String(a.name || a.path).localeCompare(String(b.name || b.path)));
+        const fileHtml = files.map(a => `
+            <button class="proj-artifact-row ${selected && selected.path === a.path ? 'active' : ''}" style="--artifact-depth:${depth}" onclick="ProjMgr.openArtifact('${model.projectId}', decodeURIComponent('${encodeURIComponent(a.path)}'))">
+                <div class="proj-artifact-name">${escHtml(a.name || a.path)}</div>
+                <div class="proj-artifact-path">${escHtml(a.path)}</div>
+                <div class="proj-artifact-meta">
+                    <span>${formatBytes(a.size)}</span>
+                    <span>${a.modifiedAt ? new Date(a.modifiedAt).toLocaleString() : ''}</span>
+                </div>
+                ${renderSourceRecords(a, model.labels || {})}
+            </button>`).join('');
+        const dirHtml = dirs.map(dir => {
+            const containsSelected = !!(selected && selected.path && (selected.path === dir.path || selected.path.startsWith(dir.path + '/')));
+            return `
+            <details class="proj-artifact-dir" style="--artifact-depth:${depth}" ${depth === 0 || containsSelected ? 'open' : ''}>
+                <summary><span class="proj-artifact-dir-icon">▸</span><span>${escHtml(dir.name)}</span><code>${dir.files.length + dir.dirs.size}</code></summary>
+                ${renderArtifactTreeNode(dir, model, selected, depth + 1)}
+            </details>`;
+        }).join('');
+        return dirHtml + fileHtml;
+    }
+
     function renderMarkdownPreview(content) {
         return simpleMarkdown(content || '');
     }
@@ -2502,6 +2544,7 @@
         const labels = model.labels || {};
         const title = context.title || labels.contextFallback || 'Project';
         const itemLabel = labels.itemPlural || 'Markdown 产物';
+        const artifactTree = buildArtifactTree(artifacts);
         return `
         <div class="proj-toolbar">
             <button class="proj-btn" onclick="ProjMgr.openProject('${model.projectId}')">${_t('proj_back')}</button>
@@ -2514,16 +2557,7 @@
             <div class="proj-artifacts-list">
                 <div class="proj-chart-title">${escHtml(itemLabel)} ${model.truncated ? '<span class="proj-artifact-warn">已截断</span>' : ''}</div>
                 ${!model.error && artifacts.length === 0 ? `<div class="proj-artifact-empty">${escHtml(labels.empty || '当前上下文没有 Markdown 产物。')}</div>` : ''}
-                ${artifacts.map(a => `
-                    <button class="proj-artifact-row ${selected && selected.path === a.path ? 'active' : ''}" onclick="ProjMgr.openArtifact('${model.projectId}', decodeURIComponent('${encodeURIComponent(a.path)}'))">
-                        <div class="proj-artifact-name">${escHtml(a.name || a.path)}</div>
-                        <div class="proj-artifact-path">${escHtml(a.path)}</div>
-                        <div class="proj-artifact-meta">
-                            <span>${formatBytes(a.size)}</span>
-                            <span>${a.modifiedAt ? new Date(a.modifiedAt).toLocaleString() : ''}</span>
-                        </div>
-                        ${renderSourceRecords(a, labels)}
-                    </button>`).join('')}
+                ${renderArtifactTreeNode(artifactTree, model, selected)}
             </div>
             <div class="proj-artifact-viewer">
                 ${selected ? `
