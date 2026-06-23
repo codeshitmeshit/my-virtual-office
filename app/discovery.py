@@ -13,6 +13,7 @@ import re
 import glob
 import time
 from providers.codex import CodexProvider
+from providers.claude_code import ClaudeCodeProvider
 from providers.hermes import HermesProvider
 
 def discover_agents(oc_home):
@@ -124,8 +125,25 @@ def discover_codex_agents(codex_home=None, codex_bin=None, workspace_root=None, 
     ).discover_agents()
 
 
-def discover_all_agents(oc_home, hermes_home=None, hermes_bin=None, hermes_enabled=True, codex_home=None, codex_bin=None, codex_workspace_root=None, codex_enabled=True, codex_model="", codex_sandbox="workspace-write", codex_approval_policy="never", codex_prefer_app_server=True, codex_timeout_sec=900, codex_main_workspace=None, codex_include_main=True, codex_include_native_agents=True, codex_register_native_agents=True):
-    """Discover OpenClaw agents plus optional local Hermes and Codex agents."""
+def discover_claude_code_agents(claude_home=None, claude_bin=None, workspace_root=None, enabled=True, model="", permission_mode="acceptEdits", timeout_sec=900, main_workspace=None, include_main=True, include_native_agents=True, register_native_agents=True):
+    """Discover local Claude Code CLI-backed Virtual Office agents."""
+    return ClaudeCodeProvider(
+        home_path=claude_home,
+        binary=claude_bin,
+        workspace_root=workspace_root,
+        enabled=enabled,
+        model=model or "",
+        permission_mode=permission_mode or "acceptEdits",
+        timeout_sec=timeout_sec,
+        main_workspace=main_workspace,
+        include_main=include_main,
+        include_native_agents=include_native_agents,
+        register_native_agents=register_native_agents,
+    ).discover_agents()
+
+
+def discover_all_agents(oc_home, hermes_home=None, hermes_bin=None, hermes_enabled=True, codex_home=None, codex_bin=None, codex_workspace_root=None, codex_enabled=True, codex_model="", codex_sandbox="workspace-write", codex_approval_policy="never", codex_prefer_app_server=True, codex_timeout_sec=900, codex_main_workspace=None, codex_include_main=True, codex_include_native_agents=True, codex_register_native_agents=True, claude_home=None, claude_bin=None, claude_workspace_root=None, claude_enabled=True, claude_model="", claude_permission_mode="acceptEdits", claude_timeout_sec=900, claude_main_workspace=None, claude_include_main=True, claude_include_native_agents=True, claude_register_native_agents=True):
+    """Discover OpenClaw agents plus optional local Hermes, Codex, and Claude Code agents."""
     agents = discover_agents(oc_home)
     agents.extend(discover_hermes_agents(hermes_home=hermes_home, hermes_bin=hermes_bin, enabled=hermes_enabled))
     agents.extend(discover_codex_agents(
@@ -142,6 +160,19 @@ def discover_all_agents(oc_home, hermes_home=None, hermes_bin=None, hermes_enabl
         include_main=codex_include_main,
         include_native_agents=codex_include_native_agents,
         register_native_agents=codex_register_native_agents,
+    ))
+    agents.extend(discover_claude_code_agents(
+        claude_home=claude_home,
+        claude_bin=claude_bin,
+        workspace_root=claude_workspace_root,
+        enabled=claude_enabled,
+        model=claude_model,
+        permission_mode=claude_permission_mode,
+        timeout_sec=claude_timeout_sec,
+        main_workspace=claude_main_workspace,
+        include_main=claude_include_main,
+        include_native_agents=claude_include_native_agents,
+        register_native_agents=claude_register_native_agents,
     ))
     return agents
 

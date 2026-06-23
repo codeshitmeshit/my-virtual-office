@@ -208,10 +208,15 @@ def _load_vo_config():
     sms_cfg = cfg.get("sms") or {}
     hermes_cfg = cfg.get("hermes") or {}
     codex_cfg = cfg.get("codex") or {}
+    claude_code_cfg = cfg.get("claudeCode") or cfg.get("claude_code") or {}
 
     codex_workspace_root = _env_or(
         "VO_CODEX_WORKSPACE_ROOT",
         codex_cfg.get("workspaceRoot", os.path.join(_env_or("VO_STATUS_DIR", presence.get("statusDir", "/data")), "codex-agents")),
+    )
+    claude_code_workspace_root = _env_or(
+        "VO_CLAUDE_CODE_WORKSPACE_ROOT",
+        claude_code_cfg.get("workspaceRoot", os.path.join(_env_or("VO_STATUS_DIR", presence.get("statusDir", "/data")), "claude-code-agents")),
     )
 
     return {
@@ -285,6 +290,19 @@ def _load_vo_config():
             "includeMain": str(_env_or("VO_CODEX_INCLUDE_MAIN", codex_cfg.get("includeMain", True))).lower() not in ("0", "false", "no", "off"),
             "includeNativeAgents": str(_env_or("VO_CODEX_INCLUDE_NATIVE_AGENTS", codex_cfg.get("includeNativeAgents", True))).lower() not in ("0", "false", "no", "off"),
             "registerNativeAgents": str(_env_or("VO_CODEX_REGISTER_NATIVE_AGENTS", codex_cfg.get("registerNativeAgents", True))).lower() not in ("0", "false", "no", "off"),
+        },
+        "claudeCode": {
+            "enabled": str(_env_or("VO_CLAUDE_CODE_ENABLED", claude_code_cfg.get("enabled", True))).lower() not in ("0", "false", "no", "off"),
+            "homePath": _env_or("VO_CLAUDE_CODE_HOME", claude_code_cfg.get("homePath", os.path.expanduser("~/.claude"))),
+            "binary": _env_or("VO_CLAUDE_CODE_BIN", claude_code_cfg.get("binary", "")),
+            "workspaceRoot": claude_code_workspace_root,
+            "mainWorkspace": _env_or("VO_CLAUDE_CODE_MAIN_WORKSPACE", claude_code_cfg.get("mainWorkspace", os.path.join(_env_or("VO_STATUS_DIR", presence.get("statusDir", "/data")), "claude-code-main"))),
+            "timeoutSec": int(_env_or("VO_CLAUDE_CODE_TIMEOUT_SEC", claude_code_cfg.get("timeoutSec", 900))),
+            "model": _env_or("VO_CLAUDE_CODE_MODEL", claude_code_cfg.get("model", "")),
+            "permissionMode": _env_or("VO_CLAUDE_CODE_PERMISSION_MODE", claude_code_cfg.get("permissionMode", "acceptEdits")),
+            "includeMain": str(_env_or("VO_CLAUDE_CODE_INCLUDE_MAIN", claude_code_cfg.get("includeMain", True))).lower() not in ("0", "false", "no", "off"),
+            "includeNativeAgents": str(_env_or("VO_CLAUDE_CODE_INCLUDE_NATIVE_AGENTS", claude_code_cfg.get("includeNativeAgents", True))).lower() not in ("0", "false", "no", "off"),
+            "registerNativeAgents": str(_env_or("VO_CLAUDE_CODE_REGISTER_NATIVE_AGENTS", claude_code_cfg.get("registerNativeAgents", True))).lower() not in ("0", "false", "no", "off"),
         },
     }
 
@@ -1234,6 +1252,7 @@ def _get_native_model_state():
         "openclaw": _get_openclaw_native_models(),
         "hermes": _get_hermes_native_models(),
         "codex": _get_codex_native_setup_state(),
+        "claudeCode": _get_claude_code_native_setup_state(),
     }
 
 
@@ -1260,6 +1279,31 @@ def _get_codex_native_setup_state():
             "appServer": "codex app-server --stdio",
             "exec": "codex exec",
             "agents": "$CODEX_HOME/agents/*.toml",
+        },
+    }
+
+
+def _get_claude_code_native_setup_state():
+    cfg = VO_CONFIG.get("claudeCode", {}) or {}
+    home_path = cfg.get("homePath") or os.path.expanduser("~/.claude")
+    return {
+        "ok": True,
+        "enabled": bool(cfg.get("enabled", True)),
+        "binary": cfg.get("binary") or "",
+        "homePath": home_path,
+        "workspaceRoot": cfg.get("workspaceRoot") or "",
+        "mainWorkspace": cfg.get("mainWorkspace") or "",
+        "model": cfg.get("model") or "",
+        "permissionMode": cfg.get("permissionMode") or "acceptEdits",
+        "includeMain": bool(cfg.get("includeMain", True)),
+        "includeNativeAgents": bool(cfg.get("includeNativeAgents", True)),
+        "registerNativeAgents": bool(cfg.get("registerNativeAgents", True)),
+        "nativeAgentsDir": os.path.join(home_path, "agents") if home_path else "",
+        "nativeCommands": {
+            "login": "claude auth login",
+            "status": "claude auth status --json",
+            "stream": "claude -p --output-format stream-json --include-partial-messages",
+            "agents": "$CLAUDE_CONFIG_DIR/agents/*.md",
         },
     }
 
@@ -1562,6 +1606,7 @@ def _save_openclaw_api_key(provider, api_key, profile_id=""):
 # ─── DYNAMIC AGENT DISCOVERY ─────────────────────────────────
 from discovery import discover_all_agents, get_agent_workspace_dir, get_agent_session_id
 from providers.codex import CodexProvider
+from providers.claude_code import ClaudeCodeProvider
 from providers.hermes import HermesApiClient, HermesProvider
 from license import get_license_status, activate_license, deactivate_license, check_feature, get_agent_limit
 from project_store import MarkdownProjectStore
@@ -1619,7 +1664,7 @@ _WORKSPACE_FILE_LIMIT = 256 * 1024
 def _agent_workspace_abs_path(agent_key, agent):
     if agent.get("providerKind") == "hermes":
         return None
-    if agent.get("providerKind") == "codex":
+    if agent.get("providerKind") in {"codex", "claude-code"}:
         ws = agent.get("workspace") or agent.get("home") or AGENT_WORKSPACES.get(agent_key) or AGENT_WORKSPACES.get(agent.get("statusKey"))
         return os.path.abspath(ws) if ws else None
     ws_dir = AGENT_WORKSPACES.get(agent_key) or AGENT_WORKSPACES.get(agent.get("statusKey"))
@@ -1806,6 +1851,9 @@ def _agent_recent_activity(agent_key, agent):
     elif agent.get("providerKind") == "codex":
         profile = agent.get("profile") or agent.get("providerAgentId") or "default"
         messages = _load_codex_history(profile)[-80:]
+    elif agent.get("providerKind") == "claude-code":
+        profile = agent.get("profile") or agent.get("providerAgentId") or "main"
+        messages = _load_claude_code_history(profile)[-80:]
     else:
         messages = get_agent_messages(agent_key, max_messages=80)
     return messages[-80:] if isinstance(messages, list) else []
@@ -2436,6 +2484,7 @@ def _ensure_builtin_communication_skill():
 def _discover_roster():
     hermes = VO_CONFIG.get("hermes", {})
     codex = VO_CONFIG.get("codex", {})
+    claude_code = VO_CONFIG.get("claudeCode", {})
     return discover_all_agents(
         WORKSPACE_BASE,
         hermes_home=hermes.get("homePath"),
@@ -2454,6 +2503,17 @@ def _discover_roster():
         codex_include_main=codex.get("includeMain", True),
         codex_include_native_agents=codex.get("includeNativeAgents", True),
         codex_register_native_agents=codex.get("registerNativeAgents", True),
+        claude_home=claude_code.get("homePath"),
+        claude_bin=claude_code.get("binary"),
+        claude_workspace_root=claude_code.get("workspaceRoot"),
+        claude_enabled=claude_code.get("enabled", True),
+        claude_model=claude_code.get("model") or "",
+        claude_permission_mode=claude_code.get("permissionMode") or "acceptEdits",
+        claude_timeout_sec=int(claude_code.get("timeoutSec") or 900),
+        claude_main_workspace=claude_code.get("mainWorkspace"),
+        claude_include_main=claude_code.get("includeMain", True),
+        claude_include_native_agents=claude_code.get("includeNativeAgents", True),
+        claude_register_native_agents=claude_code.get("registerNativeAgents", True),
     )
 
 _discovered_roster = _discover_roster()
@@ -2521,13 +2581,13 @@ def _build_agent_info():
 def _build_agent_workspaces():
     result = {}
     for a in get_roster():
-        if a.get("providerKind") in {"hermes", "codex"}:
+        if a.get("providerKind") in {"hermes", "codex", "claude-code"}:
             result[a["statusKey"]] = a.get("home") or a.get("workspace") or ""
         else:
             result[a["statusKey"]] = get_agent_workspace_dir(WORKSPACE_BASE, a["id"]).replace(WORKSPACE_BASE + "/", "") if a["workspace"].startswith(WORKSPACE_BASE) else os.path.basename(a["workspace"])
     return result
 def _build_agent_session_ids():
-    return {a["statusKey"]: (a.get("providerAgentId") if a.get("providerKind") in {"hermes", "codex"} else get_agent_session_id(a["id"])) for a in get_roster()}
+    return {a["statusKey"]: (a.get("providerAgentId") if a.get("providerKind") in {"hermes", "codex", "claude-code"} else get_agent_session_id(a["id"])) for a in get_roster()}
 
 # Compatibility properties (lazily rebuilt)
 @property
@@ -2999,6 +3059,201 @@ def _set_codex_active_run(profile="default", session_id="", run_id=""):
         pass
 
 
+def _get_claude_code_agent(agent_id_or_key=None):
+    needle = str(agent_id_or_key or "")
+    for a in get_roster():
+        if a.get("providerKind") == "claude-code" and (not needle or needle in (a.get("id"), a.get("statusKey"), a.get("providerAgentId"), a.get("profile"))):
+            return a
+    return None
+
+
+def _is_claude_code_agent(agent_id_or_key):
+    needle = str(agent_id_or_key or "")
+    for a in get_roster():
+        if needle in (a.get("id"), a.get("statusKey"), a.get("providerAgentId"), a.get("profile")):
+            return a.get("providerKind") == "claude-code"
+    return needle.startswith("claude-code:") or needle.startswith("claude-code-")
+
+
+def _claude_code_provider():
+    claude_cfg = VO_CONFIG.get("claudeCode", {})
+    return ClaudeCodeProvider(
+        home_path=claude_cfg.get("homePath"),
+        binary=claude_cfg.get("binary"),
+        workspace_root=claude_cfg.get("workspaceRoot"),
+        enabled=claude_cfg.get("enabled", True),
+        timeout_sec=int(claude_cfg.get("timeoutSec") or 900),
+        model=claude_cfg.get("model") or "",
+        permission_mode=claude_cfg.get("permissionMode") or "acceptEdits",
+        main_workspace=claude_cfg.get("mainWorkspace"),
+        include_main=claude_cfg.get("includeMain", True),
+        include_native_agents=claude_cfg.get("includeNativeAgents", True),
+        register_native_agents=claude_cfg.get("registerNativeAgents", True),
+    )
+
+
+def _claude_code_history_path(profile="main"):
+    safe_profile = re.sub(r"[^a-zA-Z0-9_.-]+", "-", profile or "main")[:80] or "main"
+    return os.path.join(STATUS_DIR, f"claude-code-chat-{safe_profile}.json")
+
+
+def _load_claude_code_history(profile="main"):
+    path = _claude_code_history_path(profile)
+    try:
+        with open(path, "r") as f:
+            data = json.load(f)
+        messages = data.get("messages", []) if isinstance(data, dict) else []
+        return messages if isinstance(messages, list) else []
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return []
+
+
+def _load_claude_code_state(profile="main"):
+    path = _claude_code_history_path(profile)
+    try:
+        with open(path, "r") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {"messages": []}
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return {"messages": []}
+
+
+def _get_claude_code_token_usage(profile="main"):
+    state = _load_claude_code_state(profile)
+    token_usage = state.get("tokenUsage") if isinstance(state.get("tokenUsage"), dict) else {}
+    return token_usage
+
+
+def _set_claude_code_token_usage(profile="main", token_usage=None):
+    if not isinstance(token_usage, dict) or not token_usage:
+        return
+    path = _claude_code_history_path(profile)
+    state = _load_claude_code_state(profile)
+    state["tokenUsage"] = token_usage
+    state["contextUsed"] = _codex_context_used_from_token_usage(token_usage)
+    context_window = _codex_context_window_from_token_usage(token_usage)
+    if context_window:
+        state["contextWindow"] = context_window
+    state.setdefault("messages", [])
+    state["updatedAt"] = int(time.time() * 1000)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        json.dump(state, f, indent=2)
+    try:
+        os.chmod(path, 0o666)
+    except OSError:
+        pass
+
+
+def _clear_claude_code_token_usage(profile="main"):
+    path = _claude_code_history_path(profile)
+    state = _load_claude_code_state(profile)
+    for key in ("tokenUsage", "contextUsed", "contextWindow"):
+        state.pop(key, None)
+    state.setdefault("messages", [])
+    state["updatedAt"] = int(time.time() * 1000)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        json.dump(state, f, indent=2)
+    try:
+        os.chmod(path, 0o666)
+    except OSError:
+        pass
+
+
+def _save_claude_code_history(profile, messages):
+    path = _claude_code_history_path(profile)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    state = _load_claude_code_state(profile)
+    state["messages"] = messages
+    state["updatedAt"] = int(time.time() * 1000)
+    with open(path, "w") as f:
+        json.dump(state, f, indent=2)
+    try:
+        os.chmod(path, 0o666)
+    except OSError:
+        pass
+
+
+def _get_claude_code_session_id(profile="main"):
+    state = _load_claude_code_state(profile)
+    return str(state.get("sessionId") or "")
+
+
+def _set_claude_code_session_id(profile="main", session_id=""):
+    path = _claude_code_history_path(profile)
+    state = _load_claude_code_state(profile)
+    state["sessionId"] = session_id or ""
+    state.setdefault("messages", [])
+    state["updatedAt"] = int(time.time() * 1000)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        json.dump(state, f, indent=2)
+    try:
+        os.chmod(path, 0o666)
+    except OSError:
+        pass
+
+
+def _set_claude_code_active_run(profile="main", session_id="", run_id=""):
+    path = _claude_code_history_path(profile)
+    state = _load_claude_code_state(profile)
+    state["sessionId"] = session_id or state.get("sessionId") or ""
+    state["runId"] = run_id or ""
+    state.setdefault("messages", [])
+    state["updatedAt"] = int(time.time() * 1000)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        json.dump(state, f, indent=2)
+    try:
+        os.chmod(path, 0o666)
+    except OSError:
+        pass
+
+
+def _publish_claude_code_progress(profile, agent_id, progress_id, run_state):
+    if not progress_id:
+        return
+    run_state = run_state if isinstance(run_state, dict) else {}
+    history = _load_claude_code_history(profile)
+    history = [
+        msg for msg in history
+        if not (isinstance(msg, dict) and msg.get("ephemeral") == "claude-code-progress" and msg.get("progressId") == progress_id)
+    ]
+    session_id = run_state.get("sessionId") or run_state.get("threadId") or _get_claude_code_session_id(profile) or ""
+    run_id = run_state.get("runId") or session_id
+    token_usage = run_state.get("tokenUsage") if isinstance(run_state.get("tokenUsage"), dict) else {}
+    progress_message = {
+        "role": "assistant",
+        "text": run_state.get("reply") or "",
+        "ts": int(time.time() * 1000),
+        "agentId": agent_id,
+        "ephemeral": "claude-code-progress",
+        "progressId": progress_id,
+        "sessionId": session_id,
+        "runId": run_id,
+        "tools": run_state.get("tools") or [],
+        "thinking": run_state.get("status") or run_state.get("thinking") or "Waiting for Claude Code stream events.",
+        "reasoningTokens": 0,
+        "error": run_state.get("error") or None,
+    }
+    if token_usage:
+        progress_message["tokenUsage"] = token_usage
+        progress_message["contextUsed"] = _codex_context_used_from_token_usage(token_usage)
+        context_window = _codex_context_window_from_token_usage(token_usage)
+        if context_window:
+            progress_message["contextWindow"] = context_window
+        _set_claude_code_token_usage(profile, token_usage)
+    history.append(progress_message)
+    _save_claude_code_history(profile, history)
+    if session_id or run_id:
+        _set_claude_code_active_run(profile, session_id, run_id)
+
+
+def _remove_claude_code_progress_messages(messages):
+    return [m for m in messages if not (isinstance(m, dict) and m.get("ephemeral") == "claude-code-progress")]
+
+
 def _publish_codex_progress(profile, agent_id, progress_id, run_state):
     """Publish in-flight Codex app-server state to the visible chat history."""
     if not progress_id:
@@ -3302,6 +3557,243 @@ def _handle_codex_run_events(handler, run_id):
     finally:
         if meta.get("done"):
             _clear_codex_stream_run(run_id)
+
+
+CLAUDE_CODE_STREAM_RUNS_LOCK = threading.Lock()
+CLAUDE_CODE_STREAM_RUNS = {}
+
+
+def _remember_claude_code_stream_run(meta):
+    if not isinstance(meta, dict) or not meta.get("runId"):
+        return
+    with CLAUDE_CODE_STREAM_RUNS_LOCK:
+        CLAUDE_CODE_STREAM_RUNS[str(meta["runId"])] = meta
+
+
+def _get_claude_code_stream_run(run_id):
+    with CLAUDE_CODE_STREAM_RUNS_LOCK:
+        meta = CLAUDE_CODE_STREAM_RUNS.get(str(run_id or ""))
+        return meta if isinstance(meta, dict) else None
+
+
+def _clear_claude_code_stream_run(run_id):
+    with CLAUDE_CODE_STREAM_RUNS_LOCK:
+        CLAUDE_CODE_STREAM_RUNS.pop(str(run_id or ""), None)
+
+
+def _claude_code_stream_event_payload(run_id, agent, profile, run_state=None, **extra):
+    run_state = run_state if isinstance(run_state, dict) else {}
+    token_usage = run_state.get("tokenUsage") if isinstance(run_state.get("tokenUsage"), dict) else {}
+    payload = {
+        "runId": run_id,
+        "agentId": (agent or {}).get("id") or "",
+        "profile": profile or "",
+        "sessionId": run_state.get("sessionId") or run_state.get("threadId") or _get_claude_code_session_id(profile) or "",
+        "turnId": run_state.get("runId") or run_state.get("sessionId") or "",
+        "reply": run_state.get("reply") or "",
+        "tools": run_state.get("tools") or [],
+        "thinking": run_state.get("status") or run_state.get("thinking") or "",
+        "error": run_state.get("error") or "",
+        "status": run_state.get("status") or "",
+        "providerPath": "claude-code-cli",
+    }
+    if token_usage:
+        payload["tokenUsage"] = token_usage
+        payload["contextUsed"] = _codex_context_used_from_token_usage(token_usage)
+        context_window = _codex_context_window_from_token_usage(token_usage)
+        if context_window:
+            payload["contextWindow"] = context_window
+    payload.update({k: v for k, v in extra.items() if v is not None})
+    return payload
+
+
+def _claude_code_tool_stream_key(tool, idx=0):
+    if not isinstance(tool, dict):
+        return f"claude-code-tool-{idx}"
+    return str(tool.get("id") or f"{idx}:{tool.get('name') or 'tool'}:{json.dumps(tool.get('arguments') or {}, sort_keys=True, default=str)[:120]}")
+
+
+def _handle_claude_code_run_start(body):
+    """Start a Claude Code message in the background and expose progress over SSE."""
+    message = (body.get("message") or "").strip()
+    agent_key = body.get("agentId") or body.get("key") or body.get("sessionKey") or "claude-code-main"
+    if not message:
+        return {"ok": False, "error": "message is required", "_status": 400}
+
+    agent = _get_claude_code_agent(agent_key)
+    if not agent:
+        return {"ok": False, "error": f"Claude Code agent '{agent_key}' not found", "_status": 404}
+
+    profile = agent.get("profile") or agent.get("providerAgentId") or "main"
+    run_id = f"claude-code-{int(time.time() * 1000)}-{str(uuid.uuid4())[:8]}"
+    progress_id = f"claude-code-progress-{run_id}"
+    events = queue.Queue()
+    status_key = agent.get("statusKey") or agent.get("id")
+    meta = {
+        "runId": run_id,
+        "agentId": agent.get("id"),
+        "agentKey": agent_key,
+        "profile": profile,
+        "statusKey": status_key,
+        "events": events,
+        "startedAt": int(time.time() * 1000),
+        "done": False,
+        "result": None,
+    }
+    _remember_claude_code_stream_run(meta)
+
+    def enqueue(event_name, payload=None):
+        payload = payload if isinstance(payload, dict) else {}
+        payload.setdefault("runId", run_id)
+        payload.setdefault("agentId", agent.get("id") or "")
+        payload.setdefault("profile", profile)
+        try:
+            events.put_nowait({"event": event_name, "data": payload, "ts": int(time.time() * 1000)})
+        except Exception:
+            pass
+
+    def worker():
+        last_reply = ""
+        last_thinking = ""
+        last_token_usage_signature = ""
+        seen_tools = {}
+        enqueue("run.started", {"providerPath": "claude-code-cli"})
+
+        def on_progress(run_state):
+            nonlocal last_reply, last_thinking, last_token_usage_signature
+            run_state = run_state if isinstance(run_state, dict) else {}
+            with CLAUDE_CODE_STREAM_RUNS_LOCK:
+                meta["sessionId"] = run_state.get("sessionId") or run_state.get("threadId") or meta.get("sessionId") or ""
+                meta["turnId"] = run_state.get("runId") or meta.get("turnId") or ""
+            gateway_presence.set_provider_event(status_key, "claude-code", {
+                "event": "turn.stream",
+                "session_id": run_state.get("sessionId") or run_state.get("threadId") or "",
+                "run_id": run_state.get("runId") or "",
+                "status": run_state.get("status") or "",
+            })
+
+            token_usage = run_state.get("tokenUsage") if isinstance(run_state.get("tokenUsage"), dict) else {}
+            if token_usage:
+                token_usage_signature = json.dumps(token_usage, sort_keys=True, default=str)
+                if token_usage_signature != last_token_usage_signature:
+                    last_token_usage_signature = token_usage_signature
+                    enqueue("session.metrics", _claude_code_stream_event_payload(run_id, agent, profile, run_state))
+
+            reply = str(run_state.get("reply") or "")
+            if reply and reply != last_reply:
+                delta = reply[len(last_reply):] if reply.startswith(last_reply) else ""
+                last_reply = reply
+                enqueue("message.delta", _claude_code_stream_event_payload(run_id, agent, profile, run_state, delta=delta))
+
+            thinking = str(run_state.get("status") or run_state.get("thinking") or "")
+            if thinking and thinking != last_thinking:
+                last_thinking = thinking
+                enqueue("reasoning.available", _claude_code_stream_event_payload(run_id, agent, profile, run_state))
+
+            for idx, tool in enumerate(run_state.get("tools") or []):
+                if not isinstance(tool, dict):
+                    continue
+                key = _claude_code_tool_stream_key(tool, idx)
+                status = str(tool.get("status") or "").lower()
+                is_terminal = status in {"done", "error", "failed"}
+                prior = seen_tools.get(key)
+                if not prior:
+                    enqueue("tool.started", _claude_code_stream_event_payload(run_id, agent, profile, run_state, toolCard=tool, toolCallId=key))
+                if is_terminal and (not prior or prior.get("status") != status or prior.get("result") != tool.get("result") or prior.get("error") != tool.get("error")):
+                    event_name = "tool.failed" if status in {"error", "failed"} or tool.get("error") else "tool.completed"
+                    enqueue(event_name, _claude_code_stream_event_payload(run_id, agent, profile, run_state, toolCard=tool, toolCallId=key))
+                seen_tools[key] = dict(tool)
+
+        run_body = dict(body)
+        run_body["_streamRunId"] = run_id
+        run_body["_streamProgressId"] = progress_id
+        run_body["_onProgress"] = on_progress
+        try:
+            result = _handle_claude_code_chat(run_body)
+        except Exception as exc:
+            result = {"ok": False, "error": str(exc), "_status": 500}
+        with CLAUDE_CODE_STREAM_RUNS_LOCK:
+            meta["done"] = True
+            meta["result"] = result
+        token_usage = result.get("tokenUsage") if isinstance(result.get("tokenUsage"), dict) else {}
+        payload = {
+            "runId": run_id,
+            "agentId": agent.get("id") or "",
+            "profile": profile,
+            "sessionId": result.get("sessionId") or _get_claude_code_session_id(profile) or "",
+            "turnId": result.get("runId") or result.get("sessionId") or meta.get("turnId") or "",
+            "reply": result.get("reply") or "",
+            "tools": result.get("tools") or [],
+            "thinking": result.get("thinking") or "",
+            "tokenUsage": token_usage,
+            "contextUsed": _codex_context_used_from_token_usage(token_usage),
+            "contextWindow": _codex_context_window_from_token_usage(token_usage),
+            "providerPath": result.get("providerPath") or "claude-code-cli",
+        }
+        if result.get("ok"):
+            enqueue("run.completed", payload)
+        else:
+            payload["error"] = result.get("error") or result.get("reply") or "Claude Code run failed"
+            enqueue("run.failed", payload)
+        threading.Timer(600, _clear_claude_code_stream_run, args=(run_id,)).start()
+
+    threading.Thread(target=worker, daemon=True, name=f"claude-code-run-{run_id}").start()
+    return {
+        "ok": True,
+        "runId": run_id,
+        "providerPath": "claude-code-cli",
+        "agent": {"id": agent.get("id"), "name": agent.get("name"), "providerKind": "claude-code", "profile": profile},
+    }
+
+
+def _handle_claude_code_run_events(handler, run_id):
+    meta = _get_claude_code_stream_run(run_id)
+    if not meta:
+        handler.send_response(404)
+        handler.send_header("Content-Type", "text/event-stream")
+        handler.send_header("Cache-Control", "no-cache")
+        handler.send_header("Access-Control-Allow-Origin", "*")
+        handler.end_headers()
+        handler.wfile.write(b"event: run.failed\ndata: {\"error\":\"Claude Code run not found\"}\n\n")
+        return
+
+    handler.send_response(200)
+    handler.send_header("Content-Type", "text/event-stream")
+    handler.send_header("Cache-Control", "no-cache")
+    handler.send_header("Connection", "keep-alive")
+    handler.send_header("Access-Control-Allow-Origin", "*")
+    handler.end_headers()
+
+    events = meta.get("events")
+    if not isinstance(events, queue.Queue):
+        return
+
+    last_keepalive = time.time()
+    try:
+        while True:
+            try:
+                item = events.get(timeout=0.5)
+            except queue.Empty:
+                if time.time() - last_keepalive >= 10:
+                    handler.wfile.write(b": keepalive\n\n")
+                    handler.wfile.flush()
+                    last_keepalive = time.time()
+                if meta.get("done") and events.empty():
+                    break
+                continue
+
+            event_name = str(item.get("event") or "message")
+            payload = item.get("data") if isinstance(item.get("data"), dict) else {}
+            encoded = json.dumps(payload, ensure_ascii=False, default=str)
+            handler.wfile.write(f"event: {event_name}\ndata: {encoded}\n\n".encode("utf-8"))
+            handler.wfile.flush()
+            if event_name in {"run.completed", "run.failed", "run.cancelled", "run.canceled"}:
+                break
+    except (BrokenPipeError, ConnectionError, OSError):
+        pass
+    finally:
+        if meta.get("done"):
+            _clear_claude_code_stream_run(run_id)
 
 
 def _normalize_codex_approval_choice(choice):
@@ -4866,6 +5358,223 @@ def _handle_codex_test(body=None):
     return result
 
 
+def _handle_claude_code_chat(body):
+    """Send one message to a local Claude Code CLI-backed agent."""
+    message = (body.get("message") or "").strip()
+    agent_key = body.get("agentId") or body.get("key") or body.get("sessionKey") or "claude-code-main"
+    if not message:
+        return {"ok": False, "error": "message is required", "_status": 400}
+
+    agent = _get_claude_code_agent(agent_key)
+    if not agent:
+        return {"ok": False, "error": f"Claude Code agent '{agent_key}' not found", "_status": 404}
+
+    claude_cfg = VO_CONFIG.get("claudeCode", {})
+    timeout = int(body.get("timeoutSec") or claude_cfg.get("timeoutSec") or 900)
+    profile = agent.get("profile") or agent.get("providerAgentId") or "main"
+    stream_run_id = str(body.get("_streamRunId") or "").strip()
+    stream_progress_id = str(body.get("_streamProgressId") or "").strip()
+    stream_progress_cb = body.get("_onProgress") if callable(body.get("_onProgress")) else None
+    from_type = str(body.get("fromType") or body.get("senderType") or "").strip().lower()
+    is_human_source = from_type in {"human", "user", "chat", "ui"}
+    attachments = body.get("attachments") if isinstance(body.get("attachments"), list) else []
+    sender_name = str(body.get("fromDisplayName") or body.get("displayName") or body.get("fromName") or "User").strip() or "User"
+
+    delivery_message = message
+    if is_human_source:
+        delivery_message = (
+            f"Message from {sender_name} via Virtual Office Chat.\n\n"
+            f"{message}\n\n"
+            "Reply directly to the user. Do not assume the user's name unless they identify themselves."
+        )
+    if attachments:
+        file_lines = []
+        for item in attachments:
+            if isinstance(item, dict):
+                file_lines.append(f"- {item.get('name') or 'attachment'}: {item.get('path') or item.get('url') or ''}".strip())
+        if file_lines:
+            delivery_message += "\n\nAttached files uploaded through Virtual Office:\n" + "\n".join(file_lines)
+
+    now_ms = int(time.time() * 1000)
+    history = _load_claude_code_history(profile)
+    history.append({
+        "role": "user",
+        "text": message,
+        "ts": now_ms,
+        "agentId": agent.get("id"),
+        "from": sender_name if is_human_source else "You",
+        "fromType": from_type or "",
+        "attachments": attachments,
+    })
+    progress_id = stream_progress_id or f"claude-code-progress-{now_ms}"
+    history.append({
+        "role": "assistant",
+        "text": "",
+        "ts": int(time.time() * 1000),
+        "agentId": agent.get("id"),
+        "ephemeral": "claude-code-progress",
+        "progressId": progress_id,
+        "runId": stream_run_id,
+        "tools": [],
+        "thinking": "Starting Claude Code.",
+        "reasoningTokens": 0,
+    })
+    _save_claude_code_history(profile, history)
+
+    try:
+        provider = _claude_code_provider()
+        agent_model = agent.get("model") or ""
+        if agent_model and agent_model != "inherit":
+            provider.model = agent_model
+        requested_permission_mode = str(body.get("permissionMode") or body.get("claudePermissionMode") or "").strip()
+        if requested_permission_mode in {"default", "acceptEdits", "auto", "dontAsk", "plan", "bypassPermissions"}:
+            provider.permission_mode = requested_permission_mode
+        session_id = _get_claude_code_session_id(profile)
+        status_key = agent.get("statusKey") or agent.get("id")
+        gateway_presence.set_manual_override(status_key, "working", "Claude Code task")
+
+        def on_progress(run_state):
+            run_state = run_state if isinstance(run_state, dict) else {}
+            usage = run_state.get("usage") if isinstance(run_state.get("usage"), dict) else {}
+            token_usage = provider._usage_to_token_usage(usage)
+            if token_usage:
+                run_state = dict(run_state)
+                run_state["tokenUsage"] = token_usage
+            gateway_presence.set_provider_event(status_key, "claude-code", {
+                "event": "turn.progress",
+                "session_id": run_state.get("sessionId") or run_state.get("threadId") or "",
+                "status": run_state.get("status") or "",
+            })
+            _publish_claude_code_progress(profile, agent.get("id"), progress_id, run_state)
+            if stream_progress_cb:
+                try:
+                    stream_progress_cb(run_state)
+                except Exception:
+                    pass
+
+        result = provider.send_chat_message(profile, delivery_message, session_id=session_id, timeout_sec=timeout, on_progress=on_progress)
+        active_session_id = result.get("sessionId") or session_id
+        if active_session_id:
+            _set_claude_code_session_id(profile, active_session_id)
+            _set_claude_code_active_run(profile, active_session_id, result.get("runId") or active_session_id)
+
+        reply = result.get("reply", "")
+        stderr = result.get("stderr", "")
+        exit_code = result.get("exitCode")
+        history = _remove_claude_code_progress_messages(_load_claude_code_history(profile))
+        final_ts = int(time.time() * 1000)
+        tools = result.get("tools") or []
+        token_usage = result.get("tokenUsage") if isinstance(result.get("tokenUsage"), dict) else {}
+        context_used = _codex_context_used_from_token_usage(token_usage)
+        token_context_window = _codex_context_window_from_token_usage(token_usage)
+        if token_usage:
+            _set_claude_code_token_usage(profile, token_usage)
+        if tools:
+            history.append({
+                "role": "assistant",
+                "text": "",
+                "ts": final_ts,
+                "agentId": agent.get("id"),
+                "source": "claude-code-tool-activity",
+                "tools": tools,
+            })
+        history.append({
+            "role": "assistant",
+            "text": reply,
+            "ts": final_ts + (1 if tools else 0),
+            "agentId": agent.get("id"),
+            "exitCode": exit_code,
+            "sessionId": active_session_id,
+            "runId": result.get("runId") or active_session_id,
+            "tools": [],
+            "thinking": result.get("thinking") or "",
+            "reasoningTokens": 0,
+            "error": result.get("error") or None,
+            "tokenUsage": token_usage or None,
+            "contextUsed": context_used,
+            "contextWindow": token_context_window or None,
+        })
+        _save_claude_code_history(profile, history)
+        gateway_presence.set_manual_override(agent.get("statusKey") or agent.get("id"), "idle" if result.get("ok") else "offline", "")
+        return {
+            "ok": bool(result.get("ok")),
+            "reply": reply,
+            "stderr": stderr[:2000],
+            "exitCode": exit_code,
+            "sessionId": active_session_id,
+            "runId": result.get("runId") or active_session_id,
+            "providerPath": result.get("providerPath") or "claude-code-cli",
+            "tools": tools,
+            "thinking": result.get("thinking") or "",
+            "reasoningTokens": 0,
+            "tokenUsage": token_usage,
+            "contextUsed": context_used,
+            "contextWindow": token_context_window,
+            "error": result.get("error"),
+            "agent": {"id": agent.get("id"), "name": agent.get("name"), "providerKind": "claude-code", "profile": profile},
+        }
+    except Exception as e:
+        history = _remove_claude_code_progress_messages(_load_claude_code_history(profile))
+        history.append({
+            "role": "assistant",
+            "text": "",
+            "ts": int(time.time() * 1000),
+            "agentId": agent.get("id"),
+            "tools": [{"id": "claude-code-error", "name": "claude-code", "status": "error", "arguments": {}, "error": str(e)}],
+            "thinking": "",
+            "reasoningTokens": 0,
+        })
+        _save_claude_code_history(profile, history)
+        gateway_presence.set_manual_override(agent.get("statusKey") or agent.get("id"), "offline", "Claude Code error")
+        return {"ok": False, "error": str(e), "_status": 500}
+
+
+def _handle_claude_code_interrupt(body):
+    agent_key = body.get("agentId") or body.get("key") or body.get("sessionKey") or "claude-code-main"
+    agent = _get_claude_code_agent(agent_key)
+    if not agent:
+        return {"ok": False, "error": f"Claude Code agent '{agent_key}' not found", "_status": 404}
+    profile = agent.get("profile") or agent.get("providerAgentId") or "main"
+    result = _claude_code_provider().interrupt(profile)
+    if result.get("ok"):
+        history = _load_claude_code_history(profile)
+        history.append({
+            "role": "assistant",
+            "text": "Claude Code run interrupted.",
+            "ts": int(time.time() * 1000),
+            "agentId": agent.get("id"),
+            "ephemeral": "claude-code-progress",
+            "progressId": f"claude-code-interrupt-{int(time.time() * 1000)}",
+            "sessionId": _get_claude_code_session_id(profile),
+            "runId": body.get("runId") or "",
+            "thinking": "Interrupted by user.",
+        })
+        _save_claude_code_history(profile, history)
+        gateway_presence.set_manual_override(agent.get("statusKey") or agent.get("id"), "idle", "")
+    else:
+        result["_status"] = 409
+    return result
+
+
+def _handle_claude_code_test(body=None):
+    cfg = dict(VO_CONFIG.get("claudeCode", {}))
+    if isinstance(body, dict):
+        cfg.update({k: v for k, v in body.items() if v is not None})
+    return ClaudeCodeProvider(
+        home_path=cfg.get("homePath"),
+        binary=cfg.get("binary"),
+        workspace_root=cfg.get("workspaceRoot"),
+        enabled=cfg.get("enabled", True),
+        timeout_sec=int(cfg.get("timeoutSec") or 900),
+        model=cfg.get("model") or "",
+        permission_mode=cfg.get("permissionMode") or "acceptEdits",
+        main_workspace=cfg.get("mainWorkspace"),
+        include_main=cfg.get("includeMain", True),
+        include_native_agents=cfg.get("includeNativeAgents", True),
+        register_native_agents=cfg.get("registerNativeAgents", True),
+    ).test()
+
+
 def _handle_hermes_approval_respond(body):
     approval = body.get("approval") if isinstance(body.get("approval"), dict) else {}
     choice = _normalize_hermes_approval_choice(body.get("choice") or body.get("action") or "")
@@ -4989,6 +5698,9 @@ def _handle_agent_platforms():
     codex_cfg = VO_CONFIG.get("codex", {})
     codex_status = _codex_provider().test()
     codex_home = codex_status.get("homePath") or codex_cfg.get("homePath") or ""
+    claude_cfg = VO_CONFIG.get("claudeCode", {})
+    claude_status = _claude_code_provider().test()
+    claude_home = claude_status.get("homePath") or claude_cfg.get("homePath") or ""
     return {
         "ok": True,
         "platforms": [
@@ -5027,6 +5739,24 @@ def _handle_agent_platforms():
                     "mainWorkspace": codex_status.get("mainWorkspace") or codex_cfg.get("mainWorkspace") or "",
                     "defaultCreationMode": "standard",
                     "registerNativeAgents": bool(codex_cfg.get("registerNativeAgents", True)),
+                },
+            },
+            {
+                "id": "claude-code",
+                "label": "Claude Code",
+                "description": "Native Claude Code CLI workspace agent",
+                "providerType": "harness",
+                "available": bool(claude_status.get("ok")),
+                "create": bool(claude_status.get("ok")),
+                "delete": bool(claude_status.get("ok")),
+                "error": "" if claude_status.get("ok") else claude_status.get("error", "Claude Code is not available"),
+                "claudeCode": {
+                    "homePath": claude_home,
+                    "nativeAgentsDir": os.path.join(claude_home, "agents") if claude_home else "",
+                    "workspaceRoot": claude_status.get("workspaceRoot") or claude_cfg.get("workspaceRoot") or "",
+                    "mainWorkspace": claude_status.get("mainWorkspace") or claude_cfg.get("mainWorkspace") or "",
+                    "defaultCreationMode": "standard",
+                    "registerNativeAgents": bool(claude_cfg.get("registerNativeAgents", True)),
                 },
             },
         ],
@@ -5291,6 +6021,8 @@ def _handle_agent_platform_comm_send(body):
     provider_prefixes = {
         "openclaw": "OpenClaw",
         "hermes": "Hermes",
+        "codex": "Codex",
+        "claude-code": "Claude Code",
     }
     if is_human_source:
         sender_label = from_ref.get("name") or "User"
@@ -5560,6 +6292,8 @@ def _handle_agent_create(body):
         return _handle_hermes_agent_create(body, name)
     if platform in {"codex", "codex-cli", "codex-agent"}:
         return _handle_codex_agent_create(body, name)
+    if platform in {"claude-code", "claude", "claude-cli", "claude-code-agent"}:
+        return _handle_claude_code_agent_create(body, name)
     if platform not in {"openclaw", "openclaw-agent"}:
         return {"error": f"Unsupported agent platform '{platform}'", "_status": 400}
 
@@ -5667,6 +6401,45 @@ def _handle_codex_agent_create(body, name):
         "creationMode": result.get("creationMode"),
         "nativeAgentPath": result.get("nativeAgentPath"),
         "message": result.get("message", f"Codex agent '{name}' created successfully"),
+    }
+
+
+def _handle_claude_code_agent_create(body, name):
+    emoji = body.get("emoji", "🤖")
+    role = body.get("role", "Claude Code Agent")
+    prompt = body.get("prompt") or body.get("systemPrompt") or body.get("instructions") or role
+    model = body.get("model") or VO_CONFIG.get("claudeCode", {}).get("model", "")
+    profile = body.get("id") or body.get("profile") or _sanitize_agent_id(name)
+    creation_mode = body.get("claudeCodeCreationMode") or body.get("creationMode") or body.get("agentDirectoryMode") or "standard"
+    custom_directory = body.get("claudeCodeCustomDirectory") or body.get("customDirectory") or body.get("agentDirectory") or ""
+    provider = _claude_code_provider()
+    result = provider.create_agent(
+        name=name,
+        role=role,
+        model=model,
+        emoji=emoji,
+        profile=profile,
+        prompt=prompt,
+        creation_mode=creation_mode,
+        custom_directory=custom_directory,
+    )
+    if not result.get("ok"):
+        return {"error": result.get("error", "Claude Code agent creation failed"), "_status": 500}
+    global _discovered_at
+    _discovered_at = 0
+    refresh_agent_maps()
+    return {
+        "ok": True,
+        "agentId": result.get("agentId"),
+        "providerKind": "claude-code",
+        "providerType": "harness",
+        "providerAgentId": result.get("profile"),
+        "profile": result.get("profile"),
+        "name": name,
+        "workspace": result.get("workspace"),
+        "creationMode": result.get("creationMode"),
+        "nativeAgentPath": result.get("nativeAgentPath"),
+        "message": result.get("message", f"Claude Code agent '{name}' created successfully"),
     }
 
 
@@ -7807,6 +8580,16 @@ def _wf_call_agent(agent_id, message, timeout=600, project_id=None, task_id=None
         if result.get("ok"):
             return result.get("reply", "")
         return f"[ERROR] Hermes agent failed: {result.get('error') or result.get('reply') or result}"
+    if _is_codex_agent(agent_id):
+        result = _handle_codex_chat({"agentId": agent_id, "message": message, "timeoutSec": timeout})
+        if result.get("ok"):
+            return result.get("reply", "")
+        return f"[ERROR] Codex agent failed: {result.get('error') or result.get('reply') or result}"
+    if _is_claude_code_agent(agent_id):
+        result = _handle_claude_code_chat({"agentId": agent_id, "message": message, "timeoutSec": timeout})
+        if result.get("ok"):
+            return result.get("reply", "")
+        return f"[ERROR] Claude Code agent failed: {result.get('error') or result.get('reply') or result}"
 
     # Use a stable session key per task — reused across all calls for this task
     session_key = None
@@ -9326,6 +10109,17 @@ def _handle_agent_delete(body):
                 pass
             except OSError as e:
                 print(f"[CODEX] Failed to remove VO history for deleted profile {profile}: {e}")
+        elif provider_kind == "claude-code" or agent_id.startswith("claude-code-"):
+            profile = (agent or {}).get("providerAgentId") or agent_id.replace("claude-code-", "", 1)
+            result = _claude_code_provider().delete_agent(profile)
+            if not result.get("ok"):
+                return {"error": result.get("error", "Claude Code agent delete failed"), "_status": 500}
+            try:
+                os.remove(_claude_code_history_path(profile))
+            except FileNotFoundError:
+                pass
+            except OSError as e:
+                print(f"[CLAUDE_CODE] Failed to remove VO history for deleted profile {profile}: {e}")
         else:
             result = _gateway_rpc_call("agents.delete", {"agentId": agent_id, "deleteFiles": True}, timeout=30)
             if not result.get("ok"):
@@ -9559,6 +10353,34 @@ def get_codex_agent_messages(profile, max_messages=500):
             "reasoningTokens": _codex_int(msg.get("reasoningTokens"), 0),
             "approval": approval,
             "source": msg.get("source") or "codex",
+        })
+    return messages[-max_messages:]
+
+
+def get_claude_code_agent_messages(profile, max_messages=500):
+    """Read recent Claude Code provider history for floor chat bubbles."""
+    messages = []
+    for msg in _load_claude_code_history(profile)[-max_messages:]:
+        if not isinstance(msg, dict):
+            continue
+        role = str(msg.get("role") or "assistant")
+        text = str(msg.get("text") or "")
+        tools = msg.get("tools") if isinstance(msg.get("tools"), list) else []
+        thinking = str(msg.get("thinking") or "")
+        if not text and not tools and not thinking:
+            continue
+        epoch_ms = _codex_int(msg.get("epochMs") or msg.get("ts"), 0)
+        messages.append({
+            "role": role,
+            "text": text[:500],
+            "ts": epoch_ms,
+            "epochMs": epoch_ms,
+            "from": msg.get("from") or ("User" if role == "user" else ""),
+            "fromType": msg.get("fromType") or "",
+            "tools": tools,
+            "thinking": thinking,
+            "reasoningTokens": _codex_int(msg.get("reasoningTokens"), 0),
+            "source": msg.get("source") or "claude-code",
         })
     return messages[-max_messages:]
 
@@ -10175,6 +10997,8 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                     session_key = f"hermes:{a.get('profile', a['id'])}"
                 elif provider_kind == "codex":
                     session_key = f"codex:{a.get('profile') or a.get('providerAgentId') or a['id']}"
+                elif provider_kind == "claude-code":
+                    session_key = f"claude-code:{a.get('profile') or a.get('providerAgentId') or a['id']}"
                 else:
                     session_key = f"agent:{a['id']}:main"
                 # Prefer office-config name/emoji over IDENTITY.md
@@ -10183,7 +11007,7 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                 branch_id = oc.get("branch", "")
                 branch_name = _oc_branches.get(branch_id, "") if branch_id else ""
                 if not branch_name:
-                    branch_name = "Hermes" if provider_kind == "hermes" else ("Codex" if provider_kind == "codex" else "Unassigned")
+                    branch_name = "Hermes" if provider_kind == "hermes" else ("Codex" if provider_kind == "codex" else ("Claude Code" if provider_kind == "claude-code" else "Unassigned"))
                 agents.append({
                     "key": a["statusKey"],
                     "agentId": a["id"],
@@ -10241,6 +11065,10 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                     agent = _get_codex_agent(agent_key) or {}
                     profile = agent.get("profile") or agent.get("providerAgentId") or "default"
                     msgs = get_codex_agent_messages(profile, max_messages=500)
+                elif _is_claude_code_agent(agent_key):
+                    agent = _get_claude_code_agent(agent_key) or {}
+                    profile = agent.get("profile") or agent.get("providerAgentId") or "main"
+                    msgs = get_claude_code_agent_messages(profile, max_messages=500)
                 else:
                     msgs = get_agent_messages(agent_key, max_messages=500)
                 if msgs:
@@ -10252,7 +11080,7 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             # This works across all VO instances since they read the same session files.
             project_work = {}
             for agent_key, agent_id in AGENT_SESSION_IDS.items():
-                if _is_hermes_agent(agent_key) or _is_codex_agent(agent_key):
+                if _is_hermes_agent(agent_key) or _is_codex_agent(agent_key) or _is_claude_code_agent(agent_key):
                     continue
                 try:
                     sdir = os.path.join(WORKSPACE_BASE, f"agents/{agent_id}/sessions")
@@ -10647,6 +11475,25 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                 "contextUsed": _codex_context_used_from_token_usage(token_usage) or _codex_int(state.get("contextUsed"), 0),
                 "contextWindow": _codex_context_window_from_token_usage(token_usage) or _codex_int(state.get("contextWindow"), 0),
             }).encode())
+        elif self.path == "/api/claude-code/history" or self.path.startswith("/api/claude-code/history?"):
+            qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            agent_key = (qs.get("agentId") or qs.get("key") or ["claude-code-main"])[0]
+            agent = _get_claude_code_agent(agent_key)
+            profile = (agent or {}).get("profile") or (agent or {}).get("providerAgentId") or "main"
+            state = _load_claude_code_state(profile)
+            token_usage = _get_claude_code_token_usage(profile)
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps({
+                "ok": True,
+                "messages": _load_claude_code_history(profile),
+                "sessionId": _get_claude_code_session_id(profile),
+                "tokenUsage": token_usage,
+                "contextUsed": _codex_context_used_from_token_usage(token_usage) or _codex_int(state.get("contextUsed"), 0),
+                "contextWindow": _codex_context_window_from_token_usage(token_usage) or _codex_int(state.get("contextWindow"), 0),
+            }).encode())
         elif request_path == "/api/hermes/approval/pending":
             agent_key = (query_params.get("agentId") or query_params.get("key") or ["hermes-default"])[0]
             session_id = (query_params.get("session_id") or query_params.get("sessionId") or [""])[0]
@@ -10674,6 +11521,9 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
         elif request_path.startswith("/api/codex/runs/") and request_path.endswith("/events"):
             run_id = urllib.parse.unquote(request_path[len("/api/codex/runs/"):-len("/events")].strip("/"))
             _handle_codex_run_events(self, run_id)
+        elif request_path.startswith("/api/claude-code/runs/") and request_path.endswith("/events"):
+            run_id = urllib.parse.unquote(request_path[len("/api/claude-code/runs/"):-len("/events")].strip("/"))
+            _handle_claude_code_run_events(self, run_id)
         elif request_path == "/api/codex/approval/pending":
             agent_key = (query_params.get("agentId") or query_params.get("key") or ["codex-default"])[0]
             result = _handle_codex_approval_pending(agent_key)
@@ -10692,6 +11542,13 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             self.wfile.write(json.dumps(result).encode())
         elif self.path == "/api/codex/test":
             result = _handle_codex_test()
+            self.send_response(200 if result.get("ok") else 503)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps(result).encode())
+        elif self.path == "/api/claude-code/test":
+            result = _handle_claude_code_test()
             self.send_response(200 if result.get("ok") else 503)
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
@@ -10867,6 +11724,19 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                     "includeMain": VO_CONFIG.get("codex", {}).get("includeMain", True),
                     "includeNativeAgents": VO_CONFIG.get("codex", {}).get("includeNativeAgents", True),
                     "registerNativeAgents": VO_CONFIG.get("codex", {}).get("registerNativeAgents", True),
+                },
+                "claudeCode": {
+                    "enabled": VO_CONFIG.get("claudeCode", {}).get("enabled", True),
+                    "homePath": VO_CONFIG.get("claudeCode", {}).get("homePath"),
+                    "binary": VO_CONFIG.get("claudeCode", {}).get("binary"),
+                    "workspaceRoot": VO_CONFIG.get("claudeCode", {}).get("workspaceRoot"),
+                    "mainWorkspace": VO_CONFIG.get("claudeCode", {}).get("mainWorkspace"),
+                    "timeoutSec": VO_CONFIG.get("claudeCode", {}).get("timeoutSec", 900),
+                    "model": VO_CONFIG.get("claudeCode", {}).get("model"),
+                    "permissionMode": VO_CONFIG.get("claudeCode", {}).get("permissionMode", "acceptEdits"),
+                    "includeMain": VO_CONFIG.get("claudeCode", {}).get("includeMain", True),
+                    "includeNativeAgents": VO_CONFIG.get("claudeCode", {}).get("includeNativeAgents", True),
+                    "registerNativeAgents": VO_CONFIG.get("claudeCode", {}).get("registerNativeAgents", True),
                 },
                 "license": {
                     "licensed": lic["licensed"],
@@ -11422,6 +12292,25 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                 "model": model,
                 "provider": provider,
                 "providerKind": "codex",
+                "contextWindow": token_context_window or self._context_window_for_model(model, cfg),
+                "contextUsed": context_used,
+                "tokenUsage": token_usage,
+            }
+        if agent_id and _is_claude_code_agent(agent_id):
+            agent = _get_claude_code_agent(agent_id) or {}
+            model = agent.get("model") or VO_CONFIG.get("claudeCode", {}).get("model") or default_model
+            if model == "inherit":
+                model = VO_CONFIG.get("claudeCode", {}).get("model") or default_model
+            provider = agent.get("provider") or "Claude Code"
+            profile = agent.get("profile") or agent.get("providerAgentId") or "main"
+            token_usage = _get_claude_code_token_usage(profile)
+            state = _load_claude_code_state(profile)
+            context_used = _codex_context_used_from_token_usage(token_usage) or _codex_int(state.get("contextUsed"), 0)
+            token_context_window = _codex_context_window_from_token_usage(token_usage) or _codex_int(state.get("contextWindow"), 0)
+            return {
+                "model": model,
+                "provider": provider,
+                "providerKind": "claude-code",
                 "contextWindow": token_context_window or self._context_window_for_model(model, cfg),
                 "contextUsed": context_used,
                 "tokenUsage": token_usage,
@@ -12384,12 +13273,36 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             result.pop("_status", None)
             self.wfile.write(json.dumps(result).encode())
             return
+        elif self.path == "/api/claude-code/runs":
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            result = _handle_claude_code_run_start(body)
+            self.send_response(result.get("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            result.pop("_status", None)
+            self.wfile.write(json.dumps(result).encode())
+            return
         elif request_path.startswith("/api/codex/runs/") and request_path.endswith("/stop"):
             run_id = urllib.parse.unquote(request_path[len("/api/codex/runs/"):-len("/stop")].strip("/"))
             length = int(self.headers.get('Content-Length', 0))
             body = json.loads(self.rfile.read(length)) if length else {}
             body["runId"] = run_id
             result = _handle_codex_interrupt(body)
+            self.send_response(result.get("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            result.pop("_status", None)
+            self.wfile.write(json.dumps(result).encode())
+            return
+        elif request_path.startswith("/api/claude-code/runs/") and request_path.endswith("/stop"):
+            run_id = urllib.parse.unquote(request_path[len("/api/claude-code/runs/"):-len("/stop")].strip("/"))
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            body["runId"] = run_id
+            result = _handle_claude_code_interrupt(body)
             self.send_response(result.get("_status", 200))
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
@@ -12408,10 +13321,32 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             result.pop("_status", None)
             self.wfile.write(json.dumps(result).encode())
             return
+        elif self.path == "/api/claude-code/chat":
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            result = _handle_claude_code_chat(body)
+            self.send_response(result.get("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            result.pop("_status", None)
+            self.wfile.write(json.dumps(result).encode())
+            return
         elif self.path == "/api/codex/interrupt":
             length = int(self.headers.get('Content-Length', 0))
             body = json.loads(self.rfile.read(length)) if length else {}
             result = _handle_codex_interrupt(body)
+            self.send_response(result.get("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            result.pop("_status", None)
+            self.wfile.write(json.dumps(result).encode())
+            return
+        elif self.path == "/api/claude-code/interrupt":
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            result = _handle_claude_code_interrupt(body)
             self.send_response(result.get("_status", 200))
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
@@ -12492,6 +13427,21 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(json.dumps({"ok": True, "clearedCodexSession": bool(session_id), "sessionId": session_id}).encode())
             return
+        elif self.path == "/api/claude-code/history/clear":
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            agent = _get_claude_code_agent(body.get("agentId") or body.get("key") or "claude-code-main") or {}
+            profile = agent.get("profile") or agent.get("providerAgentId") or "main"
+            session_id = _get_claude_code_session_id(profile)
+            _save_claude_code_history(profile, [])
+            _set_claude_code_session_id(profile, "")
+            _clear_claude_code_token_usage(profile)
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps({"ok": True, "clearedClaudeCodeSession": bool(session_id), "sessionId": session_id}).encode())
+            return
         elif self.path == "/api/hermes/test":
             length = int(self.headers.get('Content-Length', 0))
             body = json.loads(self.rfile.read(length)) if length else {}
@@ -12506,6 +13456,16 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             length = int(self.headers.get('Content-Length', 0))
             body = json.loads(self.rfile.read(length)) if length else {}
             result = _handle_codex_test(body)
+            self.send_response(200 if result.get("ok") else 503)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps(result).encode())
+            return
+        elif self.path == "/api/claude-code/test":
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            result = _handle_claude_code_test(body)
             self.send_response(200 if result.get("ok") else 503)
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")

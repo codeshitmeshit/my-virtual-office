@@ -114,7 +114,7 @@
         <!-- Step 2: Connect Agent Providers -->
         <div class="step" id="step-2">
             <div class="step-title">2. CONNECT AGENT PROVIDERS</div>
-            <div class="step-desc">Tell the Virtual Office where your agent runtimes live. OpenClaw, Hermes, and Codex agents can appear together in the same office.</div>
+            <div class="step-desc">Tell the Virtual Office where your agent runtimes live. OpenClaw, Hermes, Codex, and Claude Code agents can appear together in the same office.</div>
 
             <label>OpenClaw Home Directory</label>
             <input type="text" id="s-ocpath" value="" placeholder="/home/youruser/.openclaw">
@@ -230,6 +230,48 @@
                     </label>
                     <button onclick="testCodexConnection()" style="margin:0 0 12px;padding:8px 16px;font-size:9px;">🔍 TEST CODEX</button>
                     <div id="codex-test-status"></div>
+                </div>
+            </div>
+
+            <div style="border-top:1px solid #333;padding-top:16px;margin-top:18px;">
+                <div style="font-size:13px;color:#ffd700;font-weight:bold;margin-bottom:8px;">◇ Claude Code Agents</div>
+                <label style="display:flex;align-items:center;gap:8px;margin-top:8px;">
+                    <input type="checkbox" id="s-claude-enable" checked> Auto-detect Claude Code Agents
+                </label>
+                <div style="font-size:13px;color:#999;margin:6px 0 10px;line-height:1.5;">
+                    Virtual Office can create and chat with Claude Code-backed workspace agents through the native Claude Code CLI stream-json protocol.
+                </div>
+                <div id="claude-fields" style="margin-top:10px;">
+                    <label>Claude Config Directory</label>
+                    <input type="text" id="s-claude-home" placeholder="/home/youruser/.claude">
+                    <label>Claude CLI Path</label>
+                    <input type="text" id="s-claude-bin" placeholder="claude or /home/youruser/.local/bin/claude">
+                    <label>Claude Workspace Root</label>
+                    <input type="text" id="s-claude-workspace" placeholder="/data/claude-code-agents">
+                    <label>Claude Main Workspace</label>
+                    <input type="text" id="s-claude-main-workspace" placeholder="/data/claude-code-main">
+                    <label>Default Model <span style="color:#666;font-size:12px">(optional)</span></label>
+                    <input type="text" id="s-claude-model" placeholder="leave blank to use Claude Code default">
+                    <label>Permission Mode</label>
+                    <select id="s-claude-permission">
+                        <option value="acceptEdits">acceptEdits</option>
+                        <option value="default">default</option>
+                        <option value="auto">auto</option>
+                        <option value="dontAsk">dontAsk</option>
+                        <option value="plan">plan</option>
+                        <option value="bypassPermissions">bypassPermissions</option>
+                    </select>
+                    <label style="display:flex;align-items:center;gap:8px;margin-top:10px;">
+                        <input type="checkbox" id="s-claude-main" checked> Show Claude Code Main agent
+                    </label>
+                    <label style="display:flex;align-items:center;gap:8px;margin-top:10px;">
+                        <input type="checkbox" id="s-claude-native" checked> Discover native Claude Code subagents
+                    </label>
+                    <label style="display:flex;align-items:center;gap:8px;margin-top:10px;">
+                        <input type="checkbox" id="s-claude-register" checked> Register new standard agents in native Claude Code
+                    </label>
+                    <button onclick="testClaudeCodeConnection()" style="margin:0 0 12px;padding:8px 16px;font-size:9px;">🔍 TEST CLAUDE CODE</button>
+                    <div id="claude-test-status"></div>
                 </div>
             </div>
 
@@ -481,6 +523,11 @@
             document.getElementById('codex-fields').style.display = this.checked ? 'block' : 'none';
         });
 
+        // Claude Code enable toggle
+        document.getElementById('s-claude-enable').addEventListener('change', function() {
+            document.getElementById('claude-fields').style.display = this.checked ? 'block' : 'none';
+        });
+
         // Pre-populate provider fields from current config
         fetch('/vo-config').then(function(r) { return r.json(); }).then(function(cfg) {
             var h = cfg.hermes || {};
@@ -517,6 +564,30 @@
             if (cSandbox && c.sandbox) cSandbox.value = c.sandbox;
             if (cApproval && c.approvalPolicy) cApproval.value = c.approvalPolicy;
             if (cAppServer) cAppServer.checked = c.preferAppServer !== false;
+
+            var cl = cfg.claudeCode || {};
+            var clEnable = document.getElementById('s-claude-enable');
+            var clFields = document.getElementById('claude-fields');
+            if (clEnable) clEnable.checked = cl.enabled !== false;
+            if (clFields && clEnable) clFields.style.display = clEnable.checked ? 'block' : 'none';
+            var clHome = document.getElementById('s-claude-home');
+            var clBin = document.getElementById('s-claude-bin');
+            var clWorkspace = document.getElementById('s-claude-workspace');
+            var clMainWorkspace = document.getElementById('s-claude-main-workspace');
+            var clModel = document.getElementById('s-claude-model');
+            var clPermission = document.getElementById('s-claude-permission');
+            var clMain = document.getElementById('s-claude-main');
+            var clNative = document.getElementById('s-claude-native');
+            var clRegister = document.getElementById('s-claude-register');
+            if (clHome && cl.homePath) clHome.value = cl.homePath;
+            if (clBin && cl.binary) clBin.value = cl.binary;
+            if (clWorkspace && cl.workspaceRoot) clWorkspace.value = cl.workspaceRoot;
+            if (clMainWorkspace && cl.mainWorkspace) clMainWorkspace.value = cl.mainWorkspace;
+            if (clModel && cl.model) clModel.value = cl.model;
+            if (clPermission && cl.permissionMode) clPermission.value = cl.permissionMode;
+            if (clMain) clMain.checked = cl.includeMain !== false;
+            if (clNative) clNative.checked = cl.includeNativeAgents !== false;
+            if (clRegister) clRegister.checked = cl.registerNativeAgents !== false;
         }).catch(function(){});
 
         function testPcMetrics() {
@@ -609,6 +680,21 @@
             };
         }
 
+        function claudeCodePayloadFromSetup() {
+            return {
+                enabled: document.getElementById('s-claude-enable').checked,
+                homePath: document.getElementById('s-claude-home').value.trim() || null,
+                binary: document.getElementById('s-claude-bin').value.trim() || null,
+                workspaceRoot: document.getElementById('s-claude-workspace').value.trim() || null,
+                mainWorkspace: document.getElementById('s-claude-main-workspace').value.trim() || null,
+                model: document.getElementById('s-claude-model').value.trim() || '',
+                permissionMode: document.getElementById('s-claude-permission').value || 'acceptEdits',
+                includeMain: document.getElementById('s-claude-main').checked,
+                includeNativeAgents: document.getElementById('s-claude-native').checked,
+                registerNativeAgents: document.getElementById('s-claude-register').checked
+            };
+        }
+
         function testCodexConnection() {
             var payload = codexPayloadFromSetup();
             var statusEl = document.getElementById('codex-test-status');
@@ -641,6 +727,44 @@
                     statusEl.innerHTML = html;
                 } else {
                     statusEl.innerHTML = '<div class="status-box error">❌ Codex not reachable: ' + escapeHtml(d.error || 'unknown error') + '</div>';
+                }
+            }).catch(function(e) {
+                statusEl.innerHTML = '<div class="status-box error">Error: ' + escapeHtml(e.message) + '</div>';
+            });
+        }
+
+        function testClaudeCodeConnection() {
+            var payload = claudeCodePayloadFromSetup();
+            var statusEl = document.getElementById('claude-test-status');
+            if (!payload.enabled) {
+                statusEl.innerHTML = '<div class="status-box info">Claude Code auto-detect is disabled.</div>';
+                return;
+            }
+            statusEl.innerHTML = '<div class="status-box info">Saving and testing Claude Code...</div>';
+            fetch('/setup/save', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ claudeCode: payload })
+            }).then(function() {
+                return fetch('/api/claude-code/test', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+            }).then(function(r) { return r.json(); }).then(function(d) {
+                if (d.ok) {
+                    var agents = d.agents || [];
+                    var html = '<div class="status-box success">✅ Claude Code connected — found ' + agents.length + ' agent' + (agents.length === 1 ? '' : 's') + '</div>';
+                    if (agents.length) {
+                        html += '<div class="agent-list-preview">';
+                        agents.slice(0, 10).forEach(function(a) {
+                            html += '<div class="agent-row"><span class="emoji">' + escapeHtml(a.emoji || '🤖') + '</span><span class="name">' + escapeHtml(a.name) + '</span><span class="role">' + escapeHtml(a.model || a.providerAgentId || 'Claude Code') + '</span></div>';
+                        });
+                        html += '</div>';
+                    }
+                    statusEl.innerHTML = html;
+                } else {
+                    statusEl.innerHTML = '<div class="status-box error">❌ Claude Code not reachable: ' + escapeHtml(d.error || 'unknown error') + '</div>';
                 }
             }).catch(function(e) {
                 statusEl.innerHTML = '<div class="status-box error">Error: ' + escapeHtml(e.message) + '</div>';
@@ -852,6 +976,7 @@
                     return h;
                 })(),
                 codex: codexPayloadFromSetup(),
+                claudeCode: claudeCodePayloadFromSetup(),
                 _setupComplete: true
             };
 

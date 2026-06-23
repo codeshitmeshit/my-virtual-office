@@ -39,7 +39,7 @@ Use when the office needs to create or remove agents on a connected platform.
 - `POST /api/agent/create`
 - `DELETE /api/agent/delete`
 
-`POST /api/agent/create` accepts `platform: "openclaw"`, `platform: "hermes"`, or `platform: "codex"`. OpenClaw creation goes through Gateway `agents.create` / `agents.files.set` so the agent is runnable immediately and files are owned by the OpenClaw user. Hermes creation maps one office agent to one Hermes profile and uses `hermes profile create/delete`. Codex creation maps one office agent to a Codex workspace, writes `AGENTS.md` plus `.codex/agents/<profile>.toml`, and chats through Codex's native app-server JSON-RPC protocol. `codex exec` is only a compatibility fallback when app-server is explicitly disabled.
+`POST /api/agent/create` accepts `platform: "openclaw"`, `platform: "hermes"`, `platform: "codex"`, or `platform: "claude-code"`. OpenClaw creation goes through Gateway `agents.create` / `agents.files.set` so the agent is runnable immediately and files are owned by the OpenClaw user. Hermes creation maps one office agent to one Hermes profile and uses `hermes profile create/delete`. Codex creation maps one office agent to a Codex workspace, writes `AGENTS.md` plus `.codex/agents/<profile>.toml`, and chats through Codex's native app-server JSON-RPC protocol. Claude Code creation maps one office agent to a Claude Code workspace, writes `AGENTS.md`, `CLAUDE.md`, and `.claude/agents/<profile>.md`, and chats through Claude Code's native `stream-json` CLI protocol.
 
 Codex creation supports two location modes:
 
@@ -49,6 +49,15 @@ Codex creation supports two location modes:
 Codex discovery also reads the standard `$CODEX_HOME/agents/*.toml` custom-agent directory and includes a synthesized `codex-main` entry for Codex's default Main agent.
 
 Codex app-server approval requests are surfaced through chat history while a turn is running. The web chat renders pending command, file-change, and permission approval cards with Approve/Cancel controls. Integrations can also poll `GET /api/codex/approval/pending?agentId=<id>` and answer the active callback with `POST /api/codex/approval/respond` using `approval_id` and `choice: "approve"` or `"cancel"`.
+
+Claude Code creation supports two location modes:
+
+- `claudeCodeCreationMode: "standard"`: create under configured `claudeCode.workspaceRoot` and register `$CLAUDE_CONFIG_DIR/agents/<profile>.md` when native registration is enabled.
+- `claudeCodeCreationMode: "custom"` with `claudeCodeCustomDirectory`: create `<claudeCodeCustomDirectory>/<profile>` and write project-local `.claude/agents/<profile>.md`. Virtual Office stores a registry entry under `claudeCode.workspaceRoot` so the custom agent remains discoverable.
+
+Claude Code discovery also reads native `$CLAUDE_CONFIG_DIR/agents/*.md` subagents and includes a synthesized `claude-code-main` entry for Claude Code's default Main agent.
+
+Claude Code chat uses `claude -p --output-format stream-json --include-partial-messages` with `--resume <session_id>` when available. The adapter converts assistant deltas, `tool_use` blocks, `tool_result` blocks, usage metadata, run completion, and interrupts into the same Virtual Office chat/event shapes used by Hermes and Codex.
 
 Codex configuration is product-neutral:
 
@@ -63,7 +72,19 @@ Codex configuration is product-neutral:
 - `VO_CODEX_SANDBOX`: Codex sandbox mode, Docker example defaults to `danger-full-access` because bubblewrap sandboxing usually needs extra container privileges
 - `VO_CODEX_APPROVAL_POLICY`: Codex approval policy, default `never` so unattended Office runs do not hang on approval prompts
 
-Never hardcode host usernames, personal auth paths, or a developer's local container layout into Codex product support.
+Claude Code configuration is product-neutral:
+
+- `VO_CLAUDE_CODE_BIN`: Claude Code CLI executable, default `claude` on `PATH`
+- `VO_CLAUDE_CODE_HOME`: Claude config/auth directory for this deployment
+- `VO_CLAUDE_CODE_WORKSPACE_ROOT`: Office-created Claude Code agent workspaces
+- `VO_CLAUDE_CODE_MAIN_WORKSPACE`: Workspace used by `claude-code-main` and native subagents
+- `VO_CLAUDE_CODE_MODEL`: optional default Claude Code model
+- `VO_CLAUDE_CODE_PERMISSION_MODE`: Claude Code permission mode, default `acceptEdits`
+- `VO_CLAUDE_CODE_INCLUDE_MAIN`: include Claude Code's default Main agent, enabled by default
+- `VO_CLAUDE_CODE_INCLUDE_NATIVE_AGENTS`: read `$CLAUDE_CONFIG_DIR/agents/*.md`, enabled by default
+- `VO_CLAUDE_CODE_REGISTER_NATIVE_AGENTS`: write `$CLAUDE_CONFIG_DIR/agents/<profile>.md` when creating standard VO Claude Code agents, enabled by default
+
+Never hardcode host usernames, personal auth paths, or a developer's local container layout into Codex or Claude Code product support.
 
 ### AgentPlatform-to-AgentPlatform Communications
 

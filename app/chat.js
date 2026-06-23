@@ -89,6 +89,9 @@
       this.codexHistoryPollTimer = null;
       this.codexEventSource = null;
       this.codexCompletedToolKeys = new Set();
+      this.claudeCodeHistoryPollTimer = null;
+      this.claudeCodeEventSource = null;
+      this.claudeCodeCompletedToolKeys = new Set();
       this.hermesApprovalPollTimer = null;
       this.hermesApprovalLastId = '';
       this.codexApprovalPollTimer = null;
@@ -183,8 +186,12 @@
       if (this.toolFlushTimer) { clearTimeout(this.toolFlushTimer); this.toolFlushTimer = null; }
       if (this.recoveryTimer) { clearInterval(this.recoveryTimer); this.recoveryTimer = null; }
       this.stopHermesProgressTimers();
+      this.stopHermesHistoryPolling();
+      this.stopCodexHistoryPolling();
+      this.stopClaudeCodeHistoryPolling();
       this.closeHermesEventSource();
       this.closeCodexEventSource();
+      this.closeClaudeCodeEventSource();
       this.pendingToolEvents.clear();
       this.currentRunId = null;
       this.sessionModel = '—';
@@ -286,7 +293,7 @@
           this.hasExplicitAgentSelection = true;
           this.saveSelection();
         }
-        if (connected || this.isHermesSelected() || this.isCodexSelected()) this.fetchSessionInfo();
+        if (connected || this.isHermesSelected() || this.isCodexSelected() || this.isClaudeCodeSelected()) this.fetchSessionInfo();
         return;
       }
       this.selectedAgentKey = newAgentKey;
@@ -299,11 +306,12 @@
       this.resetConversation(`${systemPrefix} ${opt.textContent.trim()}`);
       const isHermes = this.isHermesSelected();
       const isCodex = this.isCodexSelected();
+      const isClaudeCode = this.isClaudeCodeSelected();
       if (isHermes) this.startHermesApprovalPolling();
       else this.stopHermesApprovalPolling();
       if (isCodex) this.startCodexApprovalPolling();
       else this.stopCodexApprovalPolling();
-      if (connected || isHermes || isCodex) {
+      if (connected || isHermes || isCodex || isClaudeCode) {
         this.loadHistory();
         this.fetchSessionInfo();
       }
@@ -338,7 +346,7 @@
           this.agentSelect.appendChild(group);
         }
         this.syncAgentSelect();
-        if (connected || this.isHermesSelected() || this.isCodexSelected()) this.fetchSessionInfo();
+        if (connected || this.isHermesSelected() || this.isCodexSelected() || this.isClaudeCodeSelected()) this.fetchSessionInfo();
       } catch (e) {
         console.warn('[chat] Failed to load agent list:', e);
       }
@@ -350,7 +358,7 @@
 
     async fetchContextUsage() {
       if (!this.isVisibleForPolling()) return;
-      if (this.isHermesSelected() || this.isCodexSelected()) return;
+      if (this.isHermesSelected() || this.isCodexSelected() || this.isClaudeCodeSelected()) return;
       try {
         // Avoid broad sessions.list polling. Describe only the selected session.
         const res = await rpc('sessions.describe', { key: this.sessionKey });
@@ -383,6 +391,10 @@
 
     isCodexSelected() {
       return this.getSelectedProviderKind() === 'codex' || String(this.sessionKey || '').startsWith('codex:');
+    }
+
+    isClaudeCodeSelected() {
+      return this.getSelectedProviderKind() === 'claude-code' || String(this.sessionKey || '').startsWith('claude-code:');
     }
 
     startHermesApprovalPolling() {
@@ -498,7 +510,7 @@
       let gatewayContext = 0;
       try {
         // Targeted lookup avoids rebuilding the full sessions.list index.
-        if (!this.isHermesSelected() && !this.isCodexSelected()) {
+        if (!this.isHermesSelected() && !this.isCodexSelected() && !this.isClaudeCodeSelected()) {
           const res = await rpc('sessions.describe', { key: this.sessionKey });
           const s = res?.payload?.session;
           if (res.ok && s) {
@@ -530,11 +542,12 @@
 
     async loadHistory(opts = {}) {
       try {
-        if (this.isHermesSelected() || this.isCodexSelected()) {
+        if (this.isHermesSelected() || this.isCodexSelected() || this.isClaudeCodeSelected()) {
           const isHermes = this.isHermesSelected();
           const isCodex = this.isCodexSelected();
-          const providerPath = isHermes ? 'hermes' : 'codex';
-          const progressMarker = isHermes ? 'hermes-progress' : 'codex-progress';
+          const isClaudeCode = this.isClaudeCodeSelected();
+          const providerPath = isHermes ? 'hermes' : (isClaudeCode ? 'claude-code' : 'codex');
+          const progressMarker = isHermes ? 'hermes-progress' : (isClaudeCode ? 'claude-code-progress' : 'codex-progress');
           if (isHermes) this.startHermesApprovalPolling();
           if (isCodex) this.startCodexApprovalPolling();
           const res = await fetch('/api/' + providerPath + '/history?agentId=' + encodeURIComponent(this.getSelectedAgentId() || this.selectedAgentKey));
@@ -627,9 +640,9 @@
     async newSession() {
       const agentName = this.agentSelect.selectedOptions[0]?.textContent.trim() || 'this agent';
       if (!confirm(`Start a new session for ${agentName}? This clears the conversation history.`)) return;
-      if (this.isHermesSelected() || this.isCodexSelected()) {
-        const providerName = this.isCodexSelected() ? 'Codex' : 'Hermes';
-        const providerPath = this.isCodexSelected() ? 'codex' : 'hermes';
+      if (this.isHermesSelected() || this.isCodexSelected() || this.isClaudeCodeSelected()) {
+        const providerName = this.isClaudeCodeSelected() ? 'Claude Code' : (this.isCodexSelected() ? 'Codex' : 'Hermes');
+        const providerPath = this.isClaudeCodeSelected() ? 'claude-code' : (this.isCodexSelected() ? 'codex' : 'hermes');
         try {
           const res = await fetch('/api/' + providerPath + '/history/clear', {
             method: 'POST',
@@ -724,7 +737,7 @@
     async sendMessage() {
       let text = this.input.value.trim();
       const hasAttachments = this.pendingAttachments.length > 0;
-      if ((!text && !hasAttachments) || (!connected && !this.isHermesSelected() && !this.isCodexSelected())) return;
+      if ((!text && !hasAttachments) || (!connected && !this.isHermesSelected() && !this.isCodexSelected() && !this.isClaudeCodeSelected())) return;
 
       this.input.value = '';
       this.input.style.height = 'auto';
@@ -908,6 +921,52 @@
         return;
       }
 
+      if (this.isClaudeCodeSelected()) {
+        const claudeLabel = this.agentSelect.selectedOptions[0]?.textContent.trim() || 'Claude Code';
+        const claudeSendStartedAt = Date.now();
+        const claudeBody = {
+          agentId: this.getSelectedAgentId() || this.selectedAgentKey,
+          message: text || '(attached files)',
+          fromType: 'human',
+          fromDisplayName: 'User',
+          sourceApp: 'virtual-office',
+          sourceSurface: 'chat-window',
+          sourceLabel: 'Virtual Office Chat',
+          attachments: uploadedFiles
+        };
+        this.updateTypingIndicator(claudeLabel + ' is running Claude Code');
+        this.setStatus('Claude Code running...', 'connecting');
+        try {
+          const resp = await fetch('/api/claude-code/runs', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(claudeBody)
+          });
+          const data = await resp.json();
+          if (!resp.ok || data.ok === false) {
+            if (data.fallback) {
+              await this.sendClaudeCodeBlockingMessage(claudeBody, claudeSendStartedAt);
+              return;
+            }
+            throw new Error(data.error || data.reply || resp.statusText);
+          }
+          this.currentRunId = data.runId || null;
+          await this.fetchSessionInfo();
+          await this.streamClaudeCodeRunEvents(data.runId);
+          this.removeTypingIndicator();
+          await this.loadHistory({ recoverFinal: true, startedAt: claudeSendStartedAt });
+          await this.fetchSessionInfo();
+          this.setStatus('Claude Code ready', 'connected');
+        } catch (e) {
+          this.closeClaudeCodeEventSource();
+          this.removeTypingIndicator();
+          await this.loadHistory({ recoverFinal: true, startedAt: claudeSendStartedAt }).catch(() => {});
+          this.appendSystem('Claude Code send failed: ' + e.message);
+          this.setStatus('Claude Code error', 'disconnected');
+        }
+        return;
+      }
+
       const sendSessionKey = this.sessionKey;
       rpc('chat.send', params).then(res => {
         if (res.ok && res.payload?.runId) {
@@ -945,6 +1004,20 @@
           await this.loadHistory({ recoverFinal: true }).catch(() => {});
           this.appendSystem('Stop sent');
           this.setStatus('Codex stopping...', 'connecting');
+          return;
+        }
+        if (this.isClaudeCodeSelected()) {
+          const resp = await fetch('/api/claude-code/interrupt', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ agentId: this.getSelectedAgentId() || this.selectedAgentKey, runId: this.currentRunId || '' })
+          });
+          const data = await resp.json().catch(() => ({}));
+          if (!resp.ok || data.ok === false) throw new Error(data.error || resp.statusText);
+          this.removeTypingIndicator();
+          await this.loadHistory({ recoverFinal: true }).catch(() => {});
+          this.appendSystem('Stop sent');
+          this.setStatus('Claude Code stopping...', 'connecting');
           return;
         }
         if (this.streamingMsg) {
@@ -1322,6 +1395,13 @@
       }
     }
 
+    closeClaudeCodeEventSource() {
+      if (this.claudeCodeEventSource) {
+        try { this.claudeCodeEventSource.close(); } catch (_) {}
+        this.claudeCodeEventSource = null;
+      }
+    }
+
     async sendHermesBlockingMessage(hermesBody, hermesProgress, hermesSendStartedAt) {
       this.startHermesHistoryPolling();
       try {
@@ -1375,6 +1455,33 @@
         this.setStatus('Codex ready', 'connected');
       } catch (e) {
         this.stopCodexHistoryPolling();
+        throw e;
+      }
+    }
+
+    async sendClaudeCodeBlockingMessage(claudeBody, claudeSendStartedAt) {
+      this.startClaudeCodeHistoryPolling();
+      try {
+        const resp = await fetch('/api/claude-code/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(claudeBody)
+        });
+        const data = await resp.json();
+        this.stopClaudeCodeHistoryPolling();
+        this.removeTypingIndicator();
+        if (!resp.ok || data.ok === false) throw new Error(data.error || data.reply || resp.statusText);
+        if (this.streamingMsg) {
+          this.pendingStreamContent = data.reply || this.pendingStreamContent || this.streamingMsg.content || '';
+          this.flushStreamingRender(true);
+          const existing = this.messages.querySelector('.streaming-msg');
+          if (existing) existing.remove();
+          this.streamingMsg = null;
+        }
+        await this.loadHistory({ recoverFinal: true, startedAt: claudeSendStartedAt });
+        this.setStatus('Claude Code ready', 'connected');
+      } catch (e) {
+        this.stopClaudeCodeHistoryPolling();
         throw e;
       }
     }
@@ -1648,6 +1755,135 @@
       }
     }
 
+    streamClaudeCodeRunEvents(runId) {
+      if (!runId) return Promise.reject(new Error('Claude Code run did not return a run id'));
+      this.closeClaudeCodeEventSource();
+      this.claudeCodeCompletedToolKeys = new Set();
+      this.currentRunId = runId;
+      this.setStatus('Claude Code stream active...', 'connecting');
+      this.markLiveEvent();
+      const agentId = this.getSelectedAgentId() || this.selectedAgentKey || '';
+      const url = '/api/claude-code/runs/' + encodeURIComponent(runId) + '/events?agentId=' + encodeURIComponent(agentId);
+      return new Promise((resolve, reject) => {
+        let settled = false;
+        const source = new EventSource(url);
+        this.claudeCodeEventSource = source;
+        const cleanup = () => {
+          if (this.claudeCodeEventSource === source) this.claudeCodeEventSource = null;
+          source.close();
+        };
+        const finish = (ok, value) => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          if (ok) resolve(value);
+          else reject(value instanceof Error ? value : new Error(String(value || 'Claude Code stream failed')));
+        };
+        const handle = (eventName, evt) => {
+          let data = {};
+          try { data = JSON.parse(evt.data || '{}'); } catch (_) {}
+          this.handleClaudeCodeNativeEvent(eventName, data);
+          if (['run.completed', 'run.failed', 'run.cancelled', 'run.canceled'].includes(eventName)) {
+            finish(eventName === 'run.completed', eventName === 'run.completed' ? data : new Error(data.error || eventName));
+          }
+        };
+        [
+          'run.started',
+          'session.metrics',
+          'message.delta',
+          'reasoning.available',
+          'tool.started',
+          'tool.completed',
+          'tool.failed',
+          'run.completed',
+          'run.failed',
+          'run.cancelled',
+          'run.canceled'
+        ].forEach(name => source.addEventListener(name, evt => handle(name, evt)));
+        source.onmessage = evt => handle('message', evt);
+        source.onerror = () => {
+          if (!settled) finish(false, new Error('Claude Code native stream disconnected'));
+        };
+      });
+    }
+
+    handleClaudeCodeNativeEvent(eventName, data) {
+      this.markLiveEvent();
+      this.applySessionMetrics(data);
+      const runId = data?.runId || this.currentRunId || '';
+      if (runId) this.currentRunId = runId;
+
+      if (eventName === 'run.started') {
+        this.updateTypingIndicator('Claude Code is running...');
+        this.fetchSessionInfo().catch(() => {});
+        return;
+      }
+
+      if (eventName === 'message.delta') {
+        if (!this.streamingMsg || this.streamingMsg.id !== runId) {
+          this.streamingMsg = { id: runId, role: 'assistant', content: '' };
+          this.pendingStreamContent = '';
+          this.appendStreamingMessage();
+        }
+        if (data.reply) this.pendingStreamContent = data.reply;
+        else if (data.delta) this.pendingStreamContent += String(data.delta || '');
+        this.scheduleStreamingRender();
+        return;
+      }
+
+      if (eventName === 'reasoning.available') {
+        this.updateTypingIndicator('Claude Code is reasoning...');
+        return;
+      }
+
+      if (eventName === 'tool.started' || eventName === 'tool.completed' || eventName === 'tool.failed') {
+        const card = data.toolCard || {};
+        const isTerminal = eventName !== 'tool.started';
+        const payload = {
+          runId,
+          data: {
+            toolCallId: card.id || data.toolCallId || data.id || '',
+            phase: isTerminal ? 'result' : 'start',
+            name: card.name || data.tool || data.name || 'Claude Code tool',
+            args: card.arguments || (card.args_preview ? { command: card.args_preview } : (data.preview ? { command: data.preview } : {})),
+            result: card.result || data.result || data.output || '',
+            isError: eventName === 'tool.failed' || card.status === 'error' || !!data.error,
+            error: data.error || card.error || ''
+          }
+        };
+        const label = formatToolLabel(payload.data.name, coerceToolArgs(payload.data.args));
+        this.updateTypingIndicator(isTerminal ? 'Processing...' : label);
+        if (isTerminal) {
+          if (!this.liveToolCards.has(this.toolKey(payload))) {
+            this.appendToolCall({ ...payload, data: { ...payload.data, phase: 'start' } });
+          }
+          this.finishToolCall(payload);
+          this.claudeCodeCompletedToolKeys.add(`${runId}:${payload.data.toolCallId}`);
+        } else {
+          this.updateToolCall(payload);
+        }
+        return;
+      }
+
+      if (['run.completed', 'run.failed', 'run.cancelled', 'run.canceled'].includes(eventName)) {
+        const finalText = data.reply || data.output || this.pendingStreamContent || (this.streamingMsg ? this.streamingMsg.content : '');
+        this.flushStreamingRender(true);
+        this.flushToolEvents(true);
+        this.clearActivityFeed();
+        this.removeTypingIndicator();
+        if (this.streamingMsg) {
+          this.finalizeStreamingMessage(finalText);
+          this.streamingMsg = null;
+        } else if (finalText) {
+          this.appendMessage('assistant', finalText);
+        }
+        if (runId) this.finalizeRunToolCards(runId);
+        this.currentRunId = null;
+        this.stopRecoveryWatchdog();
+        this.fetchSessionInfo().catch(() => {});
+      }
+    }
+
     stopHermesProgressTimers() {
       if (!this.hermesProgressTimers?.length) return;
       for (const timer of this.hermesProgressTimers) clearTimeout(timer);
@@ -1680,6 +1916,77 @@
     stopCodexHistoryPolling() {
       if (this.codexHistoryPollTimer) clearInterval(this.codexHistoryPollTimer);
       this.codexHistoryPollTimer = null;
+    }
+
+    startClaudeCodeHistoryPolling() {
+      this.stopClaudeCodeHistoryPolling();
+      this.claudeCodeCompletedToolKeys = new Set();
+      this.pollClaudeCodeLiveActivity().catch(() => {});
+      this.claudeCodeHistoryPollTimer = setInterval(() => {
+        if (this.isClaudeCodeSelected()) this.pollClaudeCodeLiveActivity().catch(() => {});
+      }, HERMES_HISTORY_POLL_MS);
+    }
+
+    stopClaudeCodeHistoryPolling() {
+      if (this.claudeCodeHistoryPollTimer) clearInterval(this.claudeCodeHistoryPollTimer);
+      this.claudeCodeHistoryPollTimer = null;
+    }
+
+    async pollClaudeCodeLiveActivity() {
+      if (!this.isClaudeCodeSelected()) return;
+      const agentId = this.getSelectedAgentId() || this.selectedAgentKey;
+      const res = await fetch('/api/claude-code/history?agentId=' + encodeURIComponent(agentId));
+      const data = await res.json();
+      if (!data.ok || !Array.isArray(data.messages)) return;
+      const progress = [...data.messages].reverse().find(msg =>
+        msg && msg.role === 'assistant' && msg.ephemeral === 'claude-code-progress'
+      );
+      if (!progress) return;
+
+      this.applySessionMetrics(progress);
+
+      const runId = progress.runId || progress.progressId || this.currentRunId || '';
+      if (runId) this.currentRunId = runId;
+
+      if (progress.text) {
+        if (!this.streamingMsg || this.streamingMsg.id !== runId) {
+          this.streamingMsg = { id: runId, role: 'assistant', content: '' };
+          this.pendingStreamContent = '';
+          this.appendStreamingMessage();
+        }
+        this.pendingStreamContent = progress.text;
+        this.scheduleStreamingRender();
+      }
+
+      const tools = normalizeHermesTools(progress.tools || []);
+      tools.forEach((tool, idx) => {
+        const toolId = tool.id || `${idx}:${tool.name}:${JSON.stringify(tool.arguments || {}).slice(0, 80)}`;
+        const key = `${runId}:${toolId}`;
+        const isDone = ['done', 'error', 'failed'].includes(String(tool.status || '').toLowerCase());
+        if (isDone && this.claudeCodeCompletedToolKeys.has(key)) return;
+        const payload = {
+          runId,
+          data: {
+            toolCallId: toolId,
+            phase: isDone ? 'result' : 'update',
+            name: tool.name,
+            args: tool.arguments || {},
+            result: tool.result || '',
+            isError: tool.status === 'error' || !!tool.error,
+            error: tool.error || ''
+          }
+        };
+        if (isDone) {
+          if (!this.liveToolCards.has(this.toolKey(payload))) {
+            this.appendToolCall({ ...payload, data: { ...payload.data, phase: 'start' } });
+          }
+          this.finishToolCall(payload);
+          this.claudeCodeCompletedToolKeys.add(key);
+        } else {
+          this.updateToolCall(payload);
+        }
+      });
+      if (progress.thinking) this.updateTypingIndicator('Claude Code is reasoning...');
     }
 
     async pollCodexLiveActivity() {

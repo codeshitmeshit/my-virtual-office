@@ -7312,6 +7312,26 @@ function handleCanvasClick(clientX, clientY) {
     }
 }
 
+function _providerKindDisplay(providerKind) {
+    var kind = String(providerKind || 'openclaw').toLowerCase();
+    if (kind === 'hermes') return 'Hermes';
+    if (kind === 'codex') return 'Codex CLI';
+    if (kind === 'claude-code') return 'Claude Code';
+    return 'OpenClaw';
+}
+
+function _providerAgentLabel(agent) {
+    var provider = _providerKindDisplay(agent && agent.providerKind);
+    var bits = [provider + ' Agent'];
+    if (agent && agent.providerAgentId) bits.push('profile: ' + agent.providerAgentId);
+    if (agent && agent.provider && agent.provider !== provider) bits.push(agent.provider);
+    return bits.join(' · ');
+}
+
+function _isOpenClawAgent(agent) {
+    return String((agent && agent.providerKind) || 'openclaw').toLowerCase() === 'openclaw';
+}
+
 function openModal(agent) {
     selectedAgent = agent;
     window.selectedAgent = agent;
@@ -7340,16 +7360,14 @@ function openModal(agent) {
     document.getElementById('modal-branch').textContent = getBranchDisplayName(agent.branch);
     document.getElementById('modal-updated').textContent = timeStr();
 
-    var providerLabel = agent.providerKind === 'hermes'
-        ? ('Hermes Agent' + (agent.providerAgentId ? ' · profile: ' + agent.providerAgentId : '') + (agent.provider ? ' · ' + agent.provider : ''))
-        : 'OpenClaw Agent';
+    var providerLabel = _providerAgentLabel(agent);
     var roleEl = document.getElementById('modal-role');
     if (roleEl) roleEl.textContent = (agent.role || '') + (agent.role ? ' · ' : '') + providerLabel;
 
-    var isHermes = agent.providerKind === 'hermes';
+    var isOpenClaw = _isOpenClawAgent(agent);
     var modelSection = document.querySelector('#modal-model-select')?.closest('.modal-section');
-    if (modelSection) modelSection.style.display = isHermes ? 'none' : '';
-    document.querySelectorAll('.bio-section').forEach(function(el) { el.style.display = isHermes ? 'none' : ''; });
+    if (modelSection) modelSection.style.display = isOpenClaw ? '' : 'none';
+    document.querySelectorAll('.bio-section').forEach(function(el) { el.style.display = isOpenClaw ? '' : 'none'; });
 
     // Task I/O
     const inputBox = document.getElementById('modal-input');
@@ -7382,10 +7400,9 @@ function openModal(agent) {
     });
     logBox.scrollTop = logBox.scrollHeight;
 
-    // Load OpenClaw-only editable files/skills for OpenClaw agents. Hermes
-    // agents are connected through their public CLI surfaces; VO should not
-    // expose or edit Hermes config, memories, or private files here.
-    if (!isHermes) loadAgentSkills(agent.statusKey || agent.id);
+    // Load OpenClaw-only editable files/skills only for OpenClaw agents.
+    // Harness-backed agents expose their workspace in the dedicated panel.
+    if (isOpenClaw) loadAgentSkills(agent.statusKey || agent.id);
 
     document.getElementById('agentModal').classList.remove('hidden');
 }
@@ -7715,7 +7732,7 @@ function _renderAgentWorkspaceNotes(data) {
 
 function _renderAgentWorkspaceSettings(data) {
     var agent = data.agent || {};
-    var provider = agent.providerKind === 'hermes' ? 'Hermes' : 'OpenClaw';
+    var provider = _providerKindDisplay(agent.providerKind);
     var workspace = data.workspace || {};
     var settings = workspace.settings || {};
     var score = data.score || {};
@@ -7740,7 +7757,7 @@ function _renderAgentWorkspaceSettings(data) {
             '<div class="agent-workspace-meta">' + escHtml(provider) + ' · current ' + escHtml(agent.model || agent.provider || 'default') + ' · ' + (data.settings && data.settings.cronApplicable ? 'OpenClaw cron supported' : 'Cron not surfaced for this platform') + '</div>' +
         '</section>' +
         '<section class="agent-workspace-settings-section"><h3>Heartbeat</h3>' +
-            (data.settings && data.settings.heartbeatApplicable ? '<textarea name="heartbeatContent" spellcheck="false">' + escTextarea(data.settings.heartbeatContent || '') + '</textarea>' : '<div class="agent-workspace-item">Not applicable<div class="agent-workspace-meta">Hermes does not use OpenClaw HEARTBEAT.md.</div></div>') +
+            (data.settings && data.settings.heartbeatApplicable ? '<textarea name="heartbeatContent" spellcheck="false">' + escTextarea(data.settings.heartbeatContent || '') + '</textarea>' : '<div class="agent-workspace-item">Not applicable<div class="agent-workspace-meta">' + escHtml(provider) + ' does not use OpenClaw HEARTBEAT.md.</div></div>') +
         '</section>' +
         '<div class="agent-workspace-settings-footer"><button class="agent-workspace-action" type="submit">Save Settings</button><span id="agent-workspace-settings-status" class="agent-workspace-meta"></span></div>' +
     '</form>';
@@ -7889,7 +7906,7 @@ function _openAgentWorkspace(agent, deskItem) {
     _agentWorkspace.desk = deskItem || null;
     document.getElementById('agent-workspace-emoji').textContent = agent.emoji || '🤖';
     document.getElementById('agent-workspace-name').textContent = agent.name || 'Agent Workspace';
-    document.getElementById('agent-workspace-subtitle').textContent = (agent.providerKind === 'hermes' ? 'Hermes' : 'OpenClaw') + ' · ' + (agent.role || agent.statusKey || agent.id || 'Workspace');
+    document.getElementById('agent-workspace-subtitle').textContent = _providerKindDisplay(agent.providerKind) + ' · ' + (agent.role || agent.statusKey || agent.id || 'Workspace');
     panel.classList.remove('hidden');
     if (!panel.style.left && !panel.style.right) {
         panel.style.right = '24px';
@@ -13759,6 +13776,13 @@ function _acpAgentPlatformDefaults(platformId) {
             prompt: 'You are a Codex-backed Virtual Office agent. Help with software tasks, keep changes scoped, and explain results clearly.'
         };
     }
+    if (platformId === 'claude-code') {
+        return {
+            role: 'Claude Code Agent',
+            emoji: '🤖',
+            prompt: 'You are a Claude Code-backed Virtual Office agent. Help with software tasks, use tools carefully, and explain results clearly.'
+        };
+    }
     return {
         role: 'AI assistant',
         emoji: '🤖',
@@ -13790,8 +13814,8 @@ function _acpShowCreateAgentDialog(platforms) {
                     '<label>Agent Platform<select name="platform">' + optionsHtml + '</select></label>' +
                     '<div class="agent-create-platform-note"></div>' +
                     '<div class="agent-create-codex-options" hidden>' +
-                        '<label>Codex Location<select name="codexCreationMode">' +
-                            '<option value="standard">Default Codex agents directory</option>' +
+                        '<label><span class="agent-create-native-label">Native Location</span><select name="codexCreationMode">' +
+                            '<option value="standard">Default native agents directory</option>' +
                             '<option value="custom">Custom parent directory</option>' +
                         '</select></label>' +
                         '<label class="agent-create-codex-custom" hidden>Custom Parent Directory<input name="codexCustomDirectory" placeholder="/path/to/agent-workspaces" autocomplete="off"></label>' +
@@ -13828,7 +13852,7 @@ function _acpShowCreateAgentDialog(platforms) {
             if (!prompt.value.trim() || prompt.value === lastDefaults.prompt) prompt.value = next.prompt;
             note.textContent = p.description || '';
             if (codexOptions) {
-                codexOptions.hidden = p.id !== 'codex';
+                codexOptions.hidden = !(p.id === 'codex' || p.id === 'claude-code');
                 updateCodexDirectoryControls();
             }
             lastDefaults = next;
@@ -13840,16 +13864,19 @@ function _acpShowCreateAgentDialog(platforms) {
             var custom = modal.querySelector('.agent-create-codex-custom');
             var customInput = modal.querySelector('input[name="codexCustomDirectory"]');
             var note = modal.querySelector('.agent-create-codex-note');
+            var label = modal.querySelector('.agent-create-native-label');
             if (!codexBox || !mode || !custom || !note) return;
-            var isCodex = p.id === 'codex';
-            codexBox.hidden = !isCodex;
-            if (!isCodex) return;
-            var codex = p.codex || {};
-            var nativeDir = codex.nativeAgentsDir || '$CODEX_HOME/agents';
-            var workspaceRoot = codex.workspaceRoot || '';
+            var isHarness = p.id === 'codex' || p.id === 'claude-code';
+            codexBox.hidden = !isHarness;
+            if (!isHarness) return;
+            var providerData = p.id === 'claude-code' ? (p.claudeCode || {}) : (p.codex || {});
+            var providerName = p.id === 'claude-code' ? 'Claude Code' : 'Codex';
+            var nativeDir = providerData.nativeAgentsDir || (p.id === 'claude-code' ? '$CLAUDE_CONFIG_DIR/agents' : '$CODEX_HOME/agents');
+            var workspaceRoot = providerData.workspaceRoot || '';
+            if (label) label.textContent = providerName + ' Location';
             custom.hidden = mode.value !== 'custom';
             if (mode.value === 'custom') {
-                note.textContent = 'Creates a project-local Codex agent under the custom parent directory.';
+                note.textContent = 'Creates a project-local ' + providerName + ' agent under the custom parent directory.';
                 if (customInput && !customInput.value.trim() && workspaceRoot) customInput.placeholder = workspaceRoot;
             } else {
                 note.textContent = 'Registers the agent in ' + nativeDir + ' and creates a managed workspace for Virtual Office.';
@@ -13886,8 +13913,8 @@ function _acpShowCreateAgentDialog(platforms) {
                 return;
             }
             var p = selectedPlatform();
-            if (p.id === 'codex' && codexCreationMode === 'custom' && !codexCustomDirectory) {
-                error.textContent = 'Custom parent directory is required for custom Codex creation.';
+            if ((p.id === 'codex' || p.id === 'claude-code') && codexCreationMode === 'custom' && !codexCustomDirectory) {
+                error.textContent = 'Custom parent directory is required for custom ' + (p.id === 'claude-code' ? 'Claude Code' : 'Codex') + ' creation.';
                 modal.querySelector('input[name="codexCustomDirectory"]').focus();
                 return;
             }
@@ -13898,8 +13925,8 @@ function _acpShowCreateAgentDialog(platforms) {
                 agentRole: role || fallback.role,
                 agentEmoji: emoji || fallback.emoji,
                 agentPrompt: prompt || role || fallback.prompt,
-                codexCreationMode: p.id === 'codex' ? codexCreationMode : '',
-                codexCustomDirectory: p.id === 'codex' ? codexCustomDirectory : ''
+                codexCreationMode: (p.id === 'codex' || p.id === 'claude-code') ? codexCreationMode : '',
+                codexCustomDirectory: (p.id === 'codex' || p.id === 'claude-code') ? codexCustomDirectory : ''
             });
         });
         document.addEventListener('keydown', onKeyDown);
@@ -13935,6 +13962,9 @@ function _acpCreateNewAgent() {
         if (selectedPlatform.id === 'codex') {
             createPayload.codexCreationMode = form.codexCreationMode || 'standard';
             createPayload.codexCustomDirectory = form.codexCustomDirectory || '';
+        } else if (selectedPlatform.id === 'claude-code') {
+            createPayload.claudeCodeCreationMode = form.codexCreationMode || 'standard';
+            createPayload.claudeCodeCustomDirectory = form.codexCustomDirectory || '';
         }
 
         _acpShowToast('Creating agent in ' + selectedPlatform.label + '...');
@@ -13997,7 +14027,10 @@ function _acpDeleteAgent(agentId) {
     var agentCfg = (officeConfig.agents || []).find(function(a) { return a.id === agentId; });
     if (agentCfg) agentName = agentCfg.name || agentId;
 
-    var providerKind = (agentCfg && agentCfg.providerKind) || (agentId.indexOf('hermes-') === 0 ? 'hermes' : 'OpenClaw');
+    var providerKind = (agentCfg && agentCfg.providerKind)
+        || (agentId.indexOf('hermes-') === 0 ? 'hermes'
+        : (agentId.indexOf('codex-') === 0 ? 'codex'
+        : (agentId.indexOf('claude-code-') === 0 ? 'claude-code' : 'openclaw')));
     if (!confirm('Delete agent "' + agentName + '"?\n\nThis will permanently remove the agent from ' + providerKind + ', including its workspace/profile files, memory, and session history.\n\nThis cannot be undone.')) return;
 
     // Call server to delete from the backing agent platform.

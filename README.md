@@ -34,6 +34,14 @@ Discovery includes Virtual Office-created Codex agents, Codex's standard `$CODEX
 
 For Docker deployments, install Codex inside the container image or set `VO_CODEX_BIN` to a Codex executable path available inside the container. Set `VO_CODEX_HOME` to a deployment-specific Codex home so auth and config stay out of the repo and are not tied to any developer's machine. Useful variables: `VO_CODEX_BIN`, `VO_CODEX_HOME`, `VO_CODEX_WORKSPACE_ROOT`, `VO_CODEX_MAIN_WORKSPACE`, `VO_CODEX_INCLUDE_MAIN`, `VO_CODEX_INCLUDE_NATIVE_AGENTS`, `VO_CODEX_REGISTER_NATIVE_AGENTS`, `VO_CODEX_PREFER_APP_SERVER`, `VO_CODEX_SANDBOX`, and `VO_CODEX_APPROVAL_POLICY`. The Docker example defaults `VO_CODEX_SANDBOX` to `danger-full-access` because Codex's bubblewrap sandbox usually needs extra container privileges; set it to a stricter Codex sandbox mode when your deployment supports it.
 
+### Claude Code
+
+Virtual Office can create Claude Code-backed office agents when the Claude Code CLI is available to the app. Chat uses Claude Code's native non-interactive stream protocol, `claude -p --output-format stream-json --include-partial-messages`, so text deltas, tool calls, tool results, usage, session IDs, interrupts, and local Virtual Office chat history work like the other native harness providers.
+
+Discovery includes Virtual Office-created Claude Code agents, Claude Code's native `$CLAUDE_CONFIG_DIR/agents/*.md` subagents, and a synthesized `Main` entry for Claude Code's default workspace agent. Newly created Virtual Office Claude Code agents can use the default managed workspace root or a custom parent directory. Standard creation writes `AGENTS.md`, `CLAUDE.md`, project `.claude/agents/<profile>.md`, and, when `VO_CLAUDE_CODE_REGISTER_NATIVE_AGENTS=1`, a native `$CLAUDE_CONFIG_DIR/agents/<profile>.md` subagent file. Custom creation writes the project-local subagent file and a small Virtual Office registry entry so the agent remains discoverable.
+
+For Docker deployments, install Claude Code inside the container image or set `VO_CLAUDE_CODE_BIN` to a Claude executable path available inside the container. Set `VO_CLAUDE_CODE_HOME` to a deployment-specific Claude config directory so auth and config stay out of the repo and are not tied to any developer's machine. Useful variables: `VO_CLAUDE_CODE_BIN`, `VO_CLAUDE_CODE_HOME`, `VO_CLAUDE_CODE_WORKSPACE_ROOT`, `VO_CLAUDE_CODE_MAIN_WORKSPACE`, `VO_CLAUDE_CODE_MODEL`, `VO_CLAUDE_CODE_PERMISSION_MODE`, `VO_CLAUDE_CODE_INCLUDE_MAIN`, `VO_CLAUDE_CODE_INCLUDE_NATIVE_AGENTS`, and `VO_CLAUDE_CODE_REGISTER_NATIVE_AGENTS`.
+
 ## Features
 
 ### 🏢 Live Office Canvas

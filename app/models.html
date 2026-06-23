@@ -67,11 +67,13 @@
         <div class="tab active" onclick="showTab(event,'openclaw')">🧠 OpenClaw Models</div>
         <div class="tab" onclick="showTab(event,'hermes')">☤ Hermes Models</div>
         <div class="tab" onclick="showTab(event,'codex')">⌘ Codex CLI</div>
+        <div class="tab" onclick="showTab(event,'claude-code')">◇ Claude Code</div>
         <div class="tab" onclick="showTab(event,'setup')">⚙️ Native Setup</div>
     </div>
     <div id="panel-openclaw" class="panel active"><div id="openclaw-models">Loading...</div></div>
     <div id="panel-hermes" class="panel"><div id="hermes-models">Loading...</div></div>
     <div id="panel-codex" class="panel"><div id="codex-models">Loading...</div></div>
+    <div id="panel-claude-code" class="panel"><div id="claude-code-models">Loading...</div></div>
     <div id="panel-setup" class="panel"><div id="native-setup">Loading...</div></div>
 
 <script>
@@ -106,6 +108,7 @@ async function loadNativeModels() {
     renderOpenClaw();
     renderHermes();
     renderCodex();
+    renderClaudeCode();
     renderSetup();
 }
 
@@ -413,6 +416,41 @@ function renderCodex() {
     </div>`;
 }
 
+function renderClaudeCode() {
+    const root = document.getElementById('claude-code-models');
+    const claude = nativeData.claudeCode || {};
+    root.innerHTML = `<div class="grid">
+        <div class="card wide"><div class="provider-name">Claude Code Agent Integration</div>
+            <p class="muted">Virtual Office can discover and create Claude Code-backed agents through the native Claude Code CLI. Chat streams through <code>claude -p --output-format stream-json --include-partial-messages</code> and keeps Claude session IDs for resume.</p>
+            <label class="checkbox-row"><input id="setup-claude-enabled" type="checkbox" ${claude.enabled !== false ? 'checked' : ''}> Enable Claude Code agents</label>
+            <label class="checkbox-row"><input id="setup-claude-main" type="checkbox" ${claude.includeMain !== false ? 'checked' : ''}> Show Claude Code Main agent</label>
+            <label class="checkbox-row"><input id="setup-claude-native" type="checkbox" ${claude.includeNativeAgents !== false ? 'checked' : ''}> Discover native <code>$CLAUDE_CONFIG_DIR/agents</code></label>
+            <label class="checkbox-row"><input id="setup-claude-register" type="checkbox" ${claude.registerNativeAgents !== false ? 'checked' : ''}> Register new standard agents in native Claude Code</label>
+            <div class="row"><label>Claude Config Dir</label><input id="setup-claude-home" value="${esc(claude.homePath || '')}" placeholder="~/.claude"></div>
+            <div class="row"><label>Claude CLI</label><input id="setup-claude-bin" value="${esc(claude.binary || '')}" placeholder="claude or /path/to/claude"></div>
+            <div class="row"><label>Workspace Root</label><input id="setup-claude-workspace" value="${esc(claude.workspaceRoot || '')}" placeholder="/data/claude-code-agents"></div>
+            <div class="row"><label>Main Workspace</label><input id="setup-claude-main-workspace" value="${esc(claude.mainWorkspace || '')}" placeholder="/data/claude-code-main"></div>
+            <div class="row"><label>Default Model</label><input id="setup-claude-model" value="${esc(claude.model || '')}" placeholder="optional"></div>
+            <div class="row"><label>Permission Mode</label><select id="setup-claude-permission">
+                <option value="acceptEdits" ${(claude.permissionMode || 'acceptEdits') === 'acceptEdits' ? 'selected' : ''}>acceptEdits</option>
+                <option value="default" ${(claude.permissionMode || '') === 'default' ? 'selected' : ''}>default</option>
+                <option value="auto" ${(claude.permissionMode || '') === 'auto' ? 'selected' : ''}>auto</option>
+                <option value="dontAsk" ${(claude.permissionMode || '') === 'dontAsk' ? 'selected' : ''}>dontAsk</option>
+                <option value="plan" ${(claude.permissionMode || '') === 'plan' ? 'selected' : ''}>plan</option>
+                <option value="bypassPermissions" ${(claude.permissionMode || '') === 'bypassPermissions' ? 'selected' : ''}>bypassPermissions</option>
+            </select></div>
+            <div class="provider-tools" style="justify-content:flex-start">
+                <button class="btn btn-green" onclick="saveClaudeCodeSetup()">Save Claude Code Setup</button>
+                <button class="btn btn-blue" onclick="testClaudeCodeSetup()">Test Claude Code</button>
+            </div>
+            <p id="setup-claude-status" class="status-msg"></p>
+            <p><code>claude auth login</code></p>
+            <p><code>claude -p --output-format stream-json --include-partial-messages</code></p>
+            <p><code>$CLAUDE_CONFIG_DIR/agents/*.md</code></p>
+        </div>
+    </div>`;
+}
+
 function renderSetup() {
     const root = document.getElementById('native-setup');
     root.innerHTML = `<div class="grid">
@@ -446,6 +484,13 @@ function renderSetup() {
             <p><code>codex app-server --stdio</code></p>
             <p><code>$CODEX_HOME/agents/*.toml</code></p>
             <p>Configure it in the <code>Codex CLI</code> tab.</p>
+        </div>
+        <div class="card"><div class="provider-name">Claude Code Agents</div>
+            <p class="muted">Claude Code has its own config dir, auth state, workspace roots, permission mode, and markdown subagents.</p>
+            <p><code>claude auth login</code></p>
+            <p><code>claude -p --output-format stream-json --include-partial-messages</code></p>
+            <p><code>$CLAUDE_CONFIG_DIR/agents/*.md</code></p>
+            <p>Configure it in the <code>Claude Code</code> tab.</p>
         </div>
         <div class="card wide"><div class="provider-name">OAuth Note</div>
             <p class="muted">API keys and local/custom providers can be completed inside Virtual Office. OAuth needs an interactive browser/device callback; the next step is wiring a guided callback window so users never touch terminal.</p>
@@ -505,6 +550,21 @@ function codexSetupPayload() {
     };
 }
 
+function claudeCodeSetupPayload() {
+    return {
+        enabled: !!document.getElementById('setup-claude-enabled')?.checked,
+        homePath: val('setup-claude-home') || null,
+        binary: val('setup-claude-bin') || null,
+        workspaceRoot: val('setup-claude-workspace') || null,
+        mainWorkspace: val('setup-claude-main-workspace') || null,
+        model: val('setup-claude-model') || '',
+        permissionMode: val('setup-claude-permission') || 'acceptEdits',
+        includeMain: !!document.getElementById('setup-claude-main')?.checked,
+        includeNativeAgents: !!document.getElementById('setup-claude-native')?.checked,
+        registerNativeAgents: !!document.getElementById('setup-claude-register')?.checked
+    };
+}
+
 async function saveCodexSetup() {
     const data = await postJson('/setup/save', { codex: codexSetupPayload() });
     setStatus('setup-codex-status', data, 'Codex setup saved');
@@ -522,6 +582,30 @@ async function testCodexSetup() {
     const text = data.ok
         ? 'Codex connected · ' + (data.protocol || 'codex') + ' · ' + ((data.agents || []).length) + ' agent' + (((data.agents || []).length) === 1 ? '' : 's')
         : (data.error || 'Codex test failed');
+    if (status) {
+        status.className = 'status-msg ' + (data.ok ? 'ok' : 'err');
+        status.textContent = text;
+    }
+    if (data.ok) setTimeout(reloadNative, 800);
+}
+
+async function saveClaudeCodeSetup() {
+    const data = await postJson('/setup/save', { claudeCode: claudeCodeSetupPayload() });
+    setStatus('setup-claude-status', data, 'Claude Code setup saved');
+    if (data.ok) setTimeout(reloadNative, 800);
+}
+
+async function testClaudeCodeSetup() {
+    const status = document.getElementById('setup-claude-status');
+    if (status) {
+        status.className = 'status-msg muted';
+        status.textContent = 'Testing Claude Code CLI...';
+    }
+    await postJson('/setup/save', { claudeCode: claudeCodeSetupPayload() });
+    const data = await postJson('/api/claude-code/test', claudeCodeSetupPayload());
+    const text = data.ok
+        ? 'Claude Code connected · found ' + ((data.agents || []).length) + ' agent' + (((data.agents || []).length) === 1 ? '' : 's')
+        : (data.error || 'Claude Code test failed');
     if (status) {
         status.className = 'status-msg ' + (data.ok ? 'ok' : 'err');
         status.textContent = text;
@@ -673,6 +757,7 @@ function reloadNative() {
     document.getElementById('openclaw-models').textContent = 'Loading...';
     document.getElementById('hermes-models').textContent = 'Loading...';
     document.getElementById('codex-models').textContent = 'Loading...';
+    document.getElementById('claude-code-models').textContent = 'Loading...';
     document.getElementById('native-setup').textContent = 'Loading...';
     loadNativeModels().catch(e => {
         document.getElementById('openclaw-models').innerHTML = `<div class="card err">${esc(e.message)}</div>`;

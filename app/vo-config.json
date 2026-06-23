@@ -55,5 +55,18 @@
     "includeMain": true,
     "includeNativeAgents": true,
     "registerNativeAgents": true
+  },
+  "claudeCode": {
+    "enabled": true,
+    "homePath": "~/.claude",
+    "binary": "claude",
+    "workspaceRoot": "/data/claude-code-agents",
+    "mainWorkspace": "/data/claude-code-main",
+    "timeoutSec": 900,
+    "model": "",
+    "permissionMode": "acceptEdits",
+    "includeMain": true,
+    "includeNativeAgents": true,
+    "registerNativeAgents": true
   }
 }
