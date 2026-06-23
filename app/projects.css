@@ -1294,6 +1294,47 @@
     width: calc(100% - (var(--artifact-depth, 0) * 14px));
     cursor: pointer;
 }
+.proj-artifact-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+.proj-artifact-head > div {
+    min-width: 0;
+}
+.proj-artifact-delete {
+    flex: 0 0 auto;
+    min-width: 48px;
+    height: 22px;
+    padding: 0 7px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    background: transparent;
+    color: #7f8599;
+    font-size: 11px;
+    line-height: 1;
+    white-space: nowrap;
+    cursor: pointer;
+    opacity: 0.72;
+}
+.proj-artifact-delete span {
+    font-size: 14px;
+    line-height: 1;
+}
+.proj-artifact-row:hover .proj-artifact-delete,
+.proj-artifact-row.active .proj-artifact-delete {
+    opacity: 1;
+}
+.proj-artifact-delete:hover {
+    background: rgba(244, 67, 54, 0.16);
+    border-color: rgba(244, 67, 54, 0.38);
+    color: #f87171;
+}
 .proj-artifact-dir {
     margin-left: calc(var(--artifact-depth, 0) * 14px);
     margin-bottom: 8px;
@@ -1512,6 +1553,28 @@
 }
 .proj-acceptance-dialog {
     max-width: 460px;
+}
+.proj-confirm-dialog {
+    max-width: 440px;
+}
+.proj-confirm-message {
+    color: #d9d9e8;
+    font-size: 13px;
+    line-height: 1.5;
+    margin: -6px 0 12px;
+}
+.proj-confirm-detail {
+    color: #aeb4c8;
+    font-size: 12px;
+    line-height: 1.45;
+    background: rgba(0,0,0,0.28);
+    border: 1px solid #2a2a4e;
+    border-radius: 4px;
+    padding: 10px 12px;
+    word-break: break-all;
+}
+.proj-confirm-danger .proj-form-title {
+    color: #f87171;
 }
 .proj-acceptance-task {
     color: #e8e8f0;

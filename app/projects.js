@@ -32,13 +32,20 @@
     };
 
     const _t = (key, params) => typeof i18n !== 'undefined' ? i18n.t(key, params) : key;
+    function currentLang() {
+        return ((typeof i18n !== 'undefined' && i18n.getLanguage && i18n.getLanguage()) || document.documentElement.lang || 'en').toLowerCase();
+    }
+    function _tf(key, fallbackEn, fallbackZh, params) {
+        const value = _t(key, params);
+        if (value && value !== key) return value;
+        return currentLang().startsWith('zh') ? fallbackZh : fallbackEn;
+    }
 
     function commentsToggleLabel(expanded, hiddenCount) {
         if (expanded) return _t('proj_comments_collapse');
         const label = _t('proj_comments_expand', { count: hiddenCount });
         if (label && label !== 'proj_comments_expand') return label;
-        const lang = (typeof i18n !== 'undefined' && i18n.getLanguage && i18n.getLanguage()) || document.documentElement.lang || 'en';
-        return String(lang).toLowerCase().startsWith('zh') ? `展开全部（还有 ${hiddenCount} 条）` : `Show all (${hiddenCount} more)`;
+        return currentLang().startsWith('zh') ? `展开全部（还有 ${hiddenCount} 条）` : `Show all (${hiddenCount} more)`;
     }
 
     // ── DEFAULT TEMPLATES ─────────────────────────────────────────
@@ -263,6 +270,10 @@
         },
         async readArtifact(projectId, path) {
             const r = await fetch(`/api/projects/${projectId}/artifacts/read?path=${encodeURIComponent(path)}`);
+            return r.json();
+        },
+        async deleteArtifact(projectId, path) {
+            const r = await fetch(`/api/projects/${projectId}/artifacts?path=${encodeURIComponent(path)}`, { method: 'DELETE' });
             return r.json();
         },
         async listMeetingRequests(projectId, taskId) {
@@ -2159,6 +2170,41 @@
         state.acceptanceDialog = null;
     }
 
+    function showConfirmDialog(opts = {}) {
+        const overlay = document.getElementById('proj-form-overlay');
+        if (!overlay) return Promise.resolve(false);
+        return new Promise(resolve => {
+            const cancelText = opts.cancelText || _tf('proj_cancel', 'Cancel', '取消');
+            const confirmText = opts.confirmText || _tf('proj_confirm', 'Confirm', '确认');
+            const tone = opts.tone === 'danger' ? ' proj-confirm-danger' : '';
+            const done = confirmed => {
+                hideFormModal();
+                resolve(confirmed);
+            };
+            state.confirmDialog = { done };
+            overlay.classList.remove('hidden');
+            overlay.innerHTML = `
+            <div class="proj-form-modal" style="position:static;padding:0;background:transparent" onclick="event.stopPropagation()">
+                <div class="proj-form-box proj-confirm-dialog${tone}" role="dialog" aria-modal="true" aria-labelledby="proj-confirm-dialog-title">
+                    <div class="proj-form-title" id="proj-confirm-dialog-title">${escHtml(opts.title || confirmText)}</div>
+                    ${opts.message ? `<div class="proj-confirm-message">${escHtml(opts.message)}</div>` : ''}
+                    ${opts.detail ? `<div class="proj-confirm-detail">${escHtml(opts.detail)}</div>` : ''}
+                    <div class="proj-form-actions">
+                        <button class="proj-btn" onclick="ProjMgr.resolveConfirm(false)">${escHtml(cancelText)}</button>
+                        <button class="proj-btn ${opts.tone === 'danger' ? 'proj-btn-stop' : 'proj-btn-primary'}" onclick="ProjMgr.resolveConfirm(true)">${escHtml(confirmText)}</button>
+                    </div>
+                </div>
+            </div>`;
+        });
+    }
+
+    function resolveConfirmAction(confirmed) {
+        const dialog = state.confirmDialog;
+        if (dialog && typeof dialog.done === 'function') dialog.done(!!confirmed);
+        else hideFormModal();
+        state.confirmDialog = null;
+    }
+
     function toggleProjectExecutionFields(enabled) {
         const workspaceGroup = document.getElementById('pf-workspace-group');
         const agentRow = document.getElementById('pf-agent-row');
@@ -2511,15 +2557,20 @@
         const dirs = Array.from(node.dirs.values()).sort((a, b) => a.name.localeCompare(b.name));
         const files = node.files.slice().sort((a, b) => (b.modifiedAt || '').localeCompare(a.modifiedAt || '') || String(a.name || a.path).localeCompare(String(b.name || b.path)));
         const fileHtml = files.map(a => `
-            <button class="proj-artifact-row ${selected && selected.path === a.path ? 'active' : ''}" style="--artifact-depth:${depth}" onclick="ProjMgr.openArtifact('${model.projectId}', decodeURIComponent('${encodeURIComponent(a.path)}'))">
-                <div class="proj-artifact-name">${escHtml(a.name || a.path)}</div>
-                <div class="proj-artifact-path">${escHtml(a.path)}</div>
+            <div class="proj-artifact-row ${selected && selected.path === a.path ? 'active' : ''}" style="--artifact-depth:${depth}" role="button" tabindex="0" onclick="ProjMgr.openArtifact('${model.projectId}', decodeURIComponent('${encodeURIComponent(a.path)}'))" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();ProjMgr.openArtifact('${model.projectId}', decodeURIComponent('${encodeURIComponent(a.path)}'));}">
+                <div class="proj-artifact-head">
+                    <div>
+                        <div class="proj-artifact-name">${escHtml(a.name || a.path)}</div>
+                        <div class="proj-artifact-path">${escHtml(a.path)}</div>
+                    </div>
+                    <button class="proj-artifact-delete" title="${escHtml(_tf('proj_delete_artifact', 'Delete artifact', '删除产物'))}" onclick="ProjMgr.deleteArtifact('${model.projectId}', decodeURIComponent('${encodeURIComponent(a.path)}'), event)"><span>×</span>${escHtml(_tf('proj_delete', 'Delete', '删除'))}</button>
+                </div>
                 <div class="proj-artifact-meta">
                     <span>${formatBytes(a.size)}</span>
                     <span>${a.modifiedAt ? new Date(a.modifiedAt).toLocaleString() : ''}</span>
                 </div>
                 ${renderSourceRecords(a, model.labels || {})}
-            </button>`).join('');
+            </div>`).join('');
         const dirHtml = dirs.map(dir => {
             const containsSelected = !!(selected && selected.path && (selected.path === dir.path || selected.path.startsWith(dir.path + '/')));
             return `
@@ -2608,6 +2659,45 @@
         if (!mc || !state._artifactModel) return;
         state._artifactModel.sourceMode = mode === 'source' ? 'source' : 'preview';
         mc.innerHTML = renderArtifactManager(state._artifactModel);
+    }
+
+    async function deleteArtifactAction(projectId, path, event) {
+        if (event) {
+            event.preventDefault();
+            event.stopPropagation();
+        }
+        if (!path) return;
+        const confirmed = await showConfirmDialog({
+            title: _tf('proj_delete_artifact', 'Delete artifact', '删除产物'),
+            message: _tf('proj_delete_artifact_confirm', 'This artifact will be deleted from the project workspace.', '这个产物将从项目工作区中删除。'),
+            detail: path,
+            confirmText: _tf('proj_delete', 'Delete', '删除'),
+            cancelText: _tf('proj_cancel', 'Cancel', '取消'),
+            tone: 'danger',
+        });
+        if (!confirmed) return;
+        const mc = getMainContent();
+        try {
+            const d = await api.deleteArtifact(projectId, path);
+            if (!d.ok) throw new Error(d.error || 'delete failed');
+            const list = await api.listArtifacts(projectId);
+            const selectedPath = state._artifactModel && state._artifactModel.selected && state._artifactModel.selected.path;
+            const keepSelected = selectedPath && selectedPath !== path;
+            const selected = keepSelected ? (list.artifacts || []).find(a => a.path === selectedPath) : null;
+            state._artifactModel = {
+                projectId,
+                context: list.context || {},
+                artifacts: list.artifacts || [],
+                truncated: !!list.truncated,
+                selected,
+                selectedContent: selected && keepSelected ? state._artifactModel.selectedContent : '',
+                sourceMode: state._artifactModel ? state._artifactModel.sourceMode : 'preview',
+            };
+            if (mc) mc.innerHTML = renderArtifactManager(state._artifactModel);
+            toast(_tf('proj_artifact_deleted', 'Artifact deleted', '产物已删除'), 'success');
+        } catch (e) {
+            toast(_tf('proj_failed_delete_artifact', `Failed to delete artifact: ${String(e.message || e)}`, `删除产物失败：${String(e.message || e)}`, { message: String(e.message || e) }), 'error');
+        }
     }
 
     // ── REPORT VIEW ───────────────────────────────────────────────
@@ -3543,6 +3633,7 @@
         showArtifacts,
         openArtifact,
         switchArtifactMode,
+        deleteArtifact: deleteArtifactAction,
         exportReport,
         saveAsTemplateDialog,
         submitSaveTemplate,
@@ -3607,6 +3698,7 @@
         projectExecutionAccept: projectExecutionAcceptAction,
         submitProjectExecutionFeedback: submitProjectExecutionFeedbackAction,
         submitProjectExecutionAcceptance: submitProjectExecutionAcceptanceAction,
+        resolveConfirm: resolveConfirmAction,
         openMeetingRequestsQueue,
     };
 

@@ -12074,6 +12074,27 @@ def _artifact_context_file_response(context, rel_path):
     return {"ok": True, "path": full_path, "rel": rel, "kind": _artifact_kind_for_ext(ext)}
 
 
+def _artifact_context_delete(context, rel_path):
+    root = os.path.realpath(context.get("root") or "")
+    if not root or not os.path.isdir(root):
+        return {"error": "Artifact root is not accessible", "_status": 409}
+    full_path, rel = _artifact_safe_path(root, rel_path)
+    if not rel:
+        return {"error": "Artifact path is required", "_status": 400}
+    if not full_path:
+        return {"error": "Artifact path is outside the artifact root", "_status": 403}
+    if not os.path.isfile(full_path):
+        return {"error": "Artifact not found", "_status": 404}
+    ext = os.path.splitext(rel)[1].lower()
+    if ext not in _ARTIFACT_ALLOWED_EXTENSIONS:
+        return {"error": "Artifact type is not deletable here", "_status": 415}
+    try:
+        os.remove(full_path)
+    except OSError as exc:
+        return {"error": f"Unable to delete artifact: {exc}", "_status": 500}
+    return {"ok": True, "deleted": rel}
+
+
 def _project_artifact_source_records(project):
     sources_by_path = {}
     workspace_root = project.get("workspacePath") or ""
@@ -12210,6 +12231,18 @@ def _handle_project_artifact_file(project_id, query_string=""):
     params = urllib.parse.parse_qs(query_string or "")
     rel_path = (params.get("path") or [""])[0]
     return _artifact_context_file_response(context, rel_path)
+
+
+def _handle_project_artifact_delete(project_id, query_string=""):
+    _, project, _ = _project_execution_find(project_id)
+    if not project:
+        return {"error": "Project not found", "_status": 404}
+    context = _project_artifact_context(project)
+    if not context.get("ok"):
+        return context
+    params = urllib.parse.parse_qs(query_string or "")
+    rel_path = (params.get("path") or [""])[0]
+    return _artifact_context_delete(context, rel_path)
 
 
 ARCHIVE_ROOM_DIR = os.path.join(STATUS_DIR, "archive-room")
@@ -20747,6 +20780,16 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             proj_id, cron_rest = rest.split("/scheduled-cron/", 1)
             cron_id = cron_rest.strip("/")
             result = _handle_project_scheduled_cron_delete(proj_id, cron_id)
+            self.send_response(result.get("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            result.pop("_status", None)
+            self.wfile.write(json.dumps(result).encode())
+        elif urllib.parse.urlparse(self.path).path.startswith("/api/projects/") and urllib.parse.urlparse(self.path).path.endswith("/artifacts"):
+            parsed = urllib.parse.urlparse(self.path)
+            proj_id = parsed.path.split("/api/projects/")[1].rsplit("/artifacts", 1)[0]
+            result = _handle_project_artifact_delete(proj_id, parsed.query)
             self.send_response(result.get("_status", 200))
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
