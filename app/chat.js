@@ -380,8 +380,8 @@
       else this.stopHermesApprovalPolling();
       if (this.isCodexSelected()) this.startCodexApprovalPolling();
       else this.stopCodexApprovalPolling();
+      this.loadHistory();
       if (connected || this.isHermesSelected() || this.isCodexSelected() || this.isClaudeCodeSelected()) {
-        this.loadHistory();
         this.fetchSessionInfo();
       }
     }
@@ -732,6 +732,15 @@
     }
 
     async loadHistory(opts = {}) {
+      const loadToken = (this.historyLoadToken || 0) + 1;
+      this.historyLoadToken = loadToken;
+      const expectedAgentKey = this.selectedAgentKey;
+      const expectedSessionKey = this.sessionKey;
+      const isCurrentHistoryRequest = () => (
+        this.historyLoadToken === loadToken &&
+        this.selectedAgentKey === expectedAgentKey &&
+        this.sessionKey === expectedSessionKey
+      );
       try {
         if (this.isCodexSelected()) {
           this.startCodexApprovalPolling();
@@ -739,6 +748,7 @@
           const agentId = this.getSelectedAgentId() || this.selectedAgentKey;
           const res = await fetch('/api/codex/history?agentId=' + encodeURIComponent(agentId) + '&conversationId=' + encodeURIComponent(conversationId));
           const data = await res.json();
+          if (!isCurrentHistoryRequest()) return;
           if (data.ok && Array.isArray(data.events)) {
             this.messages.innerHTML = '';
             this.liveToolCards.clear();
@@ -803,6 +813,7 @@
           if (this.isClaudeCodeSelected()) query.set('conversationId', this.getProviderConversationId('claude-code'));
           const res = await fetch('/api/' + providerPath + '/history?' + query.toString());
           const data = await res.json();
+          if (!isCurrentHistoryRequest()) return;
           if (data.ok && Array.isArray(data.messages)) {
             this.applySessionMetrics(data);
             this.messages.innerHTML = '';
@@ -825,6 +836,7 @@
           return;
         }
         const res = await rpc('chat.history', { sessionKey: this.sessionKey, limit: 500 });
+        if (!isCurrentHistoryRequest()) return;
         if (res.ok && res.payload?.messages) {
           const messages = res.payload.messages;
           const seenToolKeys = new Set();
