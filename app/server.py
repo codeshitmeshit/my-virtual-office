@@ -23521,6 +23521,24 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
         except Exception:
             return {}
 
+    def _default_config_model(self, cfg):
+        cfg = cfg if isinstance(cfg, dict) else {}
+        model_cfg = (cfg.get("agents") or {}).get("defaults", {}).get("model", "")
+        if isinstance(model_cfg, dict):
+            return str(model_cfg.get("primary") or model_cfg.get("default") or model_cfg.get("id") or "").strip()
+        return str(model_cfg or "").strip()
+
+    def _provider_for_model(self, model, cfg):
+        model = str(model or "")
+        cfg = cfg if isinstance(cfg, dict) else {}
+        if "/" in model:
+            return model.split("/", 1)[0]
+        for provider, pdata in (cfg.get("models", {}).get("providers", {}) or {}).items():
+            for item in pdata.get("models", []) or []:
+                if str(item.get("id") or "") == model:
+                    return provider
+        return _provider_from_model_id(model) if model else ""
+
     def _get_configured_model(self, agent_id=None):
         """Return configured model metadata for a specific agent or default.
 
