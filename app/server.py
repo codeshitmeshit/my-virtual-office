@@ -13582,6 +13582,12 @@ def _handle_task_update(project_id, task_id, body):
     checklist_was_complete = _project_execution_acceptance_checklist_complete(task) if _project_execution_enabled(p) else False
     if _project_execution_enabled(p) and "columnId" in body:
         done_cols = {c["id"] for c in p.get("columns", []) if c.get("title", "").lower() in ("done", "completed", "verified", "published", "fixed", "closed")}
+        if body.get("columnId") != task.get("columnId") and _project_execution_column_locked(task):
+            return {
+                "error": "Project Execution is controlling this task column; wait for the state machine transition or stop/reset execution before moving it manually.",
+                "code": "project_execution_column_locked",
+                "_status": 409,
+            }
         if body.get("columnId") in done_cols and task.get("executionState") != "done":
             return {"error": "Project Execution tasks require final user acceptance before Done", "_status": 409}
     # Track column move
@@ -13750,6 +13756,12 @@ def _handle_tasks_reorder(project_id, body):
         if tid in task_map:
             task = task_map[tid]
             new_col = u.get("columnId")
+            if _project_execution_enabled(p) and new_col and new_col != task.get("columnId") and _project_execution_column_locked(task):
+                return {
+                    "error": "Project Execution is controlling this task column; wait for the state machine transition or stop/reset execution before moving it manually.",
+                    "code": "project_execution_column_locked",
+                    "_status": 409,
+                }
             if _project_execution_enabled(p) and new_col in done_cols and task.get("executionState") != "done":
                 return {"error": "Project Execution tasks require final user acceptance before Done", "_status": 409}
             if new_col and new_col != task.get("columnId"):
@@ -13942,7 +13954,7 @@ def _project_execution_attempt(task, attempt_id):
 
 
 def _project_execution_active_task(project):
-    active_states = {"validating", "executing", "reviewing", "reworking", "awaiting_meeting_resolution"}
+    active_states = {"validating", "executing", "retrying", "reviewing", "reworking", "awaiting_meeting_resolution"}
     return next((t for t in project.get("tasks", []) if t.get("executionState") in active_states), None)
 
 
@@ -13963,6 +13975,21 @@ def _project_execution_attempt_requires_user_acceptance(task, attempt):
 def _project_execution_acceptance_checklist_complete(task):
     checklist = _project_execution_acceptance_checklist(task)
     return bool(checklist) and all(isinstance(item, dict) and item.get("done") is True for item in checklist)
+
+
+_PROJECT_EXECUTION_COLUMN_LOCKED_STATES = {
+    "executing",
+    "retrying",
+    "reworking",
+    "reviewing",
+    "execution_complete",
+    "awaiting_user_acceptance",
+    "awaiting_meeting_resolution",
+}
+
+
+def _project_execution_column_locked(task):
+    return str((task or {}).get("executionState") or "") in _PROJECT_EXECUTION_COLUMN_LOCKED_STATES
 
 
 def _project_execution_can_complete_after_checklist_update(task):

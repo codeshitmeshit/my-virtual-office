@@ -1145,6 +1145,12 @@
         if (col) col.classList.remove('drag-over');
         const p = state.currentProject;
         if (!p) return;
+        const task = p.tasks.find(t => t.id === taskId);
+        if (!task) return;
+        if (isProjectExecutionColumnLocked(task) && task.columnId !== colId) {
+            toast(_tf('proj_exec_column_locked_toast', 'Project Execution controls this task column until the current state finishes.', '项目执行状态机正在接管该任务的列位置，当前状态结束前不能拖动到其他列。'), 'warning');
+            return;
+        }
         // Determine new order
         const tasksEl = document.getElementById(`tasks-${colId}`);
         const line = tasksEl && tasksEl.querySelector('.proj-drop-line');
@@ -1160,8 +1166,6 @@
             tasksEl.querySelectorAll('.proj-drop-line').forEach(l => l.remove());
         }
         // Optimistic update
-        const task = p.tasks.find(t => t.id === taskId);
-        if (!task) return;
         const oldColId = task.columnId;
         task.columnId = colId;
         // Re-sort tasks in affected columns
@@ -1466,9 +1470,10 @@
             <div class="proj-section">
                 <div class="proj-field">
                     <label class="proj-field-label">${_t('proj_column_title')}</label>
-                    <select class="proj-detail-select" id="detail-col" onchange="ProjMgr.updateTaskField('columnId', this.value)">
+                    <select class="proj-detail-select" id="detail-col" ${isProjectExecutionColumnLocked(task) ? 'disabled title="项目执行状态机正在接管列位置"' : ''} onchange="ProjMgr.updateTaskField('columnId', this.value)">
                         ${cols.map(c => `<option value="${c.id}" ${task.columnId === c.id ? 'selected' : ''}>${escHtml(c._titleKey ? _t(c._titleKey) : c.title)}</option>`).join('')}
                     </select>
+                    ${isProjectExecutionColumnLocked(task) ? `<div class="proj-form-help">${escHtml(_tf('proj_exec_column_locked_hint', 'Column is controlled by Project Execution until this state finishes.', '当前列由项目执行状态机接管，状态结束前不能手动修改。'))}</div>` : ''}
                 </div>
                 <div style="display:flex;gap:8px">
                     <div class="proj-field" style="flex:1">
@@ -1842,11 +1847,17 @@
             reviewing: _tf('proj_exec_state_reviewing', 'Reviewing', '审查中'),
             awaiting_user_acceptance: _tf('proj_exec_state_awaiting_user_acceptance', 'Awaiting user acceptance', '等待用户验收'),
             awaiting_meeting_resolution: _tf('proj_exec_state_awaiting_meeting_resolution', 'Awaiting meeting resolution', '等待会议结论'),
+            retrying: _tf('proj_exec_state_retrying', 'Retrying', '重试中'),
             blocked: _tf('proj_exec_state_blocked', 'Blocked', '阻塞'),
             done: _tf('proj_exec_state_done', 'Done', '已完成'),
         };
         const label = labels[state] || state;
         return label;
+    }
+
+    function isProjectExecutionColumnLocked(task) {
+        const stateValue = task && task.executionState;
+        return ['executing', 'retrying', 'reworking', 'reviewing', 'execution_complete', 'awaiting_user_acceptance', 'awaiting_meeting_resolution'].includes(stateValue);
     }
 
     function projectExecutionReviewStatusLabel(status) {
@@ -1976,6 +1987,13 @@
                 'proj_exec_error_checklist_empty',
                 'The task has no acceptance checklist. Create checklist items first, or explicitly skip the empty checklist if the task truly does not need one.',
                 '当前任务还没有验收清单。请先创建 checklist；如果确实不需要 checklist，可以在验收确认中显式跳过空清单。'
+            );
+        }
+        if (normalized === 'project_execution_column_locked') {
+            return _tf(
+                'proj_exec_error_column_locked',
+                'Project Execution is controlling this task column. Wait for the state machine transition, or stop/reset execution before moving it manually.',
+                '项目执行状态机正在接管该任务的列位置。请等待状态自动流转，或先停止/重置执行后再手动移动。'
             );
         }
         if (normalized.includes('llm request timed out') || normalized.includes('gatewayclientrequesterror') || normalized.includes('failovererror') || normalized.includes('cooldown')) {

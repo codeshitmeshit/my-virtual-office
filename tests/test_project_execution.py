@@ -1150,8 +1150,15 @@ def test_selected_task_executes_and_stops_at_execution_complete():
             done_col = next(c["id"] for c in project["columns"] if c["title"] == "Done")
             blocked = server._handle_task_update(project["id"], selected["id"], {"columnId": done_col})
             assert blocked["_status"] == 409
+            in_progress_col = next(c["id"] for c in project["columns"] if c["title"] == "In Progress")
+            state_locked = server._handle_task_update(project["id"], selected["id"], {"columnId": in_progress_col})
+            assert state_locked["_status"] == 409
+            assert state_locked["code"] == "project_execution_column_locked"
             reorder_blocked = server._handle_tasks_reorder(project["id"], {"updates": [{"id": selected["id"], "columnId": done_col, "order": 0}]})
             assert reorder_blocked["_status"] == 409
+            reorder_state_locked = server._handle_tasks_reorder(project["id"], {"updates": [{"id": selected["id"], "columnId": in_progress_col, "order": 0}]})
+            assert reorder_state_locked["_status"] == 409
+            assert reorder_state_locked["code"] == "project_execution_column_locked"
         finally:
             server._project_execution_call_executor = old_call
             restore_store(old)
