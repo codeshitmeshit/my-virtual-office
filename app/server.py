@@ -3657,6 +3657,16 @@ def _publish_hermes_progress(profile, agent_id, progress_id, run_state, conversa
     _save_hermes_history(profile, history, conversation_id)
 
 
+def _publish_hermes_api_progress(profile, agent_id, run_id, tools=None, reasoning_parts=None, reply="", conversation_id=None):
+    _publish_hermes_progress(profile, agent_id, f"hermes-progress-{run_id}", {
+        "runId": run_id,
+        "status": "running",
+        "thinking": "\n\n".join(reasoning_parts or []),
+        "reply": reply or "",
+        "tools": tools or [],
+    }, conversation_id)
+
+
 def _format_hermes_attachment_context(attachments):
     if not isinstance(attachments, list) or not attachments:
         return ""
@@ -4102,23 +4112,30 @@ def _build_hermes_delivery_message(agent, agent_key, message, body):
     }
 
 
-def _handle_hermes_api_chat(agent, profile, delivery_message, original_message, timeout):
+def _handle_hermes_api_chat(agent, profile, delivery_message, original_message, conversation_id=None, timeout=None, on_event=None):
     """Run a Hermes turn through the native Hermes API Server + SSE events."""
+    if isinstance(conversation_id, (int, float)) and timeout is None:
+        timeout = conversation_id
+        conversation_id = None
+    conversation_id = str(conversation_id or "").strip()
+    timeout = int(timeout or VO_CONFIG.get("hermes", {}).get("timeoutSec") or 600)
     agent_id = agent.get("id") or agent.get("statusKey") or "hermes-default"
     status_key = agent.get("statusKey") or agent_id
     client = _hermes_api_client_for_profile(profile)
     if not client.is_available():
         return {"ok": False, "fallback": True, "error": "Hermes API Server is not available"}
 
-    session_id = _get_hermes_session_id(profile) or f"vo-hermes-{HermesProvider._safe_suffix(profile)}"
+    session_id = _get_hermes_session_id(profile, conversation_id) or f"vo-hermes-{_safe_hermes_path_part(profile)}"
     session_key = f"virtual-office:hermes:{profile}"
     started = client.start_run(delivery_message, session_id=session_id, session_key=session_key)
     run_id = started.get("run_id")
     if not run_id:
         return {"ok": False, "fallback": True, "error": started.get("error") or "Hermes API did not return a run_id"}
 
-    _set_hermes_session_id(profile, session_id)
+    _set_hermes_session_id(profile, session_id, conversation_id)
     gateway_presence.set_provider_event(status_key, "hermes", {"event": "run.started", "run_id": run_id})
+    if callable(on_event):
+        on_event({"event": "run.started", "run_id": run_id, "session_id": session_id})
 
     reply = ""
     reasoning_parts = []
@@ -4135,7 +4152,7 @@ def _handle_hermes_api_chat(agent, profile, delivery_message, original_message, 
         nonlocal last_progress_publish
         now = time.time()
         if force or now - last_progress_publish >= 0.25:
-            _publish_hermes_api_progress(profile, agent_id, run_id, tools=tools, reasoning_parts=reasoning_parts, reply=reply)
+            _publish_hermes_api_progress(profile, agent_id, run_id, tools=tools, reasoning_parts=reasoning_parts, reply=reply, conversation_id=conversation_id)
             last_progress_publish = now
 
     publish_progress(force=True)
@@ -4143,6 +4160,8 @@ def _handle_hermes_api_chat(agent, profile, delivery_message, original_message, 
     try:
         for event in client.stream_run_events(run_id, timeout_sec=int(timeout) + 30):
             gateway_presence.set_provider_event(status_key, "hermes", event)
+            if callable(on_event):
+                on_event(event if isinstance(event, dict) else {})
             event_name = str(event.get("event") or "").lower()
             if event_name == "message.delta":
                 reply += str(event.get("delta") or "")
@@ -4519,6 +4538,7 @@ def _handle_hermes_chat(body):
     hermes_bin = os.path.expanduser(agent.get("binary") or hermes_cfg.get("binary") or "~/.local/bin/hermes")
     timeout = int(body.get("timeoutSec") or hermes_cfg.get("timeoutSec") or 600)
     profile = agent.get("profile") or agent.get("providerAgentId") or "default"
+    used_api = False
 
     from_type = str(body.get("fromType") or body.get("senderType") or "").strip().lower()
     is_human_source = from_type in {"human", "user", "chat", "ui"}
@@ -4578,6 +4598,7 @@ def _handle_hermes_chat(body):
         if hermes_cfg.get("apiEnabled"):
             api_result = _handle_hermes_api_chat(agent, profile, delivery_message, message, conversation_id, timeout, on_event=body.get("_onHermesApiEvent"))
             if not api_result.get("fallback"):
+                used_api = True
                 active_session_id = api_result.get("sessionId") or _get_hermes_session_id(profile, conversation_id)
                 reply = api_result.get("reply", "")
                 exit_code = api_result.get("exitCode")
@@ -4658,6 +4679,7 @@ def _handle_hermes_chat(body):
                 session_id=active_session_id or "",
             )
         history = _remove_hermes_progress_messages(_load_hermes_history(profile, conversation_id))
+        final_ts = int(time.time() * 1000)
         history.append({
             "role": "assistant",
             "text": reply,
