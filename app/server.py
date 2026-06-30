@@ -6731,12 +6731,23 @@ class ProviderRunBridge:
                 try:
                     item = events.get(timeout=0.5)
                 except queue.Empty:
+                    if meta.get("done") and events.empty():
+                        result = meta.get("result") if isinstance(meta.get("result"), dict) else {}
+                        status = str(result.get("status") or "").lower()
+                        event_name = "run.completed" if result.get("ok") else ("run.cancelled" if status in {"cancelled", "canceled"} else "run.failed")
+                        payload = result if isinstance(result, dict) else {}
+                        payload = dict(payload)
+                        payload.setdefault("runId", run_id)
+                        payload.setdefault("agentId", meta.get("agentId") or "")
+                        payload.setdefault("profile", meta.get("profile") or "")
+                        encoded = json.dumps(payload, ensure_ascii=False, default=str)
+                        handler.wfile.write(f"event: {event_name}\ndata: {encoded}\n\n".encode("utf-8"))
+                        handler.wfile.flush()
+                        break
                     if time.time() - last_keepalive >= 10:
                         handler.wfile.write(b": keepalive\n\n")
                         handler.wfile.flush()
                         last_keepalive = time.time()
-                    if meta.get("done") and events.empty():
-                        break
                     continue
 
                 event_name = str(item.get("event") or "message")

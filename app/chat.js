@@ -1323,8 +1323,7 @@
           this.currentRunId = data.runId || null;
           await this.streamHermesRunEvents(data.runId, hermesProgress);
           this.removeTypingIndicator();
-          if (!resp.ok || (data.ok === false && !data.approval)) throw new Error(data.error || data.reply || resp.statusText);
-          this.appendMessage('assistant', data.reply || '', Date.now(), [], { label: providerLabel, kind: 'agent', thinking: data.thinking || '', reasoningTokens: data.reasoningTokens || 0, approval: data.approval || null }, normalizeHermesTools(data.tools || []));
+          await this.loadHistory({ recoverFinal: true, startedAt: hermesSendStartedAt });
           await this.pollHermesApproval().catch(() => {});
           this.setStatus(typeof i18n !== 'undefined' ? i18n.t('chat_hermes_ready') : 'Hermes ready', 'connected');
         } catch (e) {

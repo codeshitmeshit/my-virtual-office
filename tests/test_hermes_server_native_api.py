@@ -5,6 +5,7 @@ import os
 import sys
 import tempfile
 import time
+import io
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 APP_DIR = os.path.join(ROOT, "app")
@@ -334,6 +335,50 @@ def test_hermes_progress_history_is_recoverable_while_run_active():
         restore_native_fakes(old)
 
 
+class FakeSseHandler:
+    def __init__(self):
+        self.headers = []
+        self.status = None
+        self.wfile = io.BytesIO()
+
+    def send_response(self, status):
+        self.status = status
+
+    def send_header(self, name, value):
+        self.headers.append((name, value))
+
+    def end_headers(self):
+        pass
+
+
+def test_hermes_run_events_replays_terminal_for_late_sse_connection():
+    old = install_native_fakes("success")
+    try:
+        started = server._handle_hermes_run_start({"agentId": "hermes-default", "message": "hello", "conversationId": "conv-run-late"})
+        assert started["ok"] is True
+        run_id = started["runId"]
+
+        deadline = time.time() + 2
+        while time.time() < deadline:
+            meta = server.PROVIDER_RUN_BRIDGE.get(run_id)
+            if meta and meta.get("done"):
+                break
+            time.sleep(0.02)
+        meta = server.PROVIDER_RUN_BRIDGE.get(run_id)
+        assert meta and meta["done"] is True
+        while not meta["events"].empty():
+            meta["events"].get_nowait()
+
+        handler = FakeSseHandler()
+        server._handle_hermes_run_events(handler, run_id)
+        output = handler.wfile.getvalue().decode("utf-8")
+        assert handler.status == 200
+        assert "event: run.completed" in output
+        assert "native reply" in output
+    finally:
+        restore_native_fakes(old)
+
+
 def test_hermes_run_start_publishes_approval_event_before_failure_terminal():
     old = install_native_fakes("approval")
     try:
@@ -396,6 +441,7 @@ if __name__ == "__main__":
     test_hermes_history_clear_is_conversation_scoped()
     test_hermes_run_start_publishes_provider_bridge_events()
     test_hermes_progress_history_is_recoverable_while_run_active()
+    test_hermes_run_events_replays_terminal_for_late_sse_connection()
     test_hermes_run_start_publishes_approval_event_before_failure_terminal()
     test_hermes_run_stop_delegates_to_native_api_and_emits_terminal()
     print("ok")
