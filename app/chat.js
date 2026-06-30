@@ -206,7 +206,8 @@
         }
       });
 
-      this.agentSelect?.addEventListener('change', () => {
+      this.agentSelect?.addEventListener('change', (event) => {
+        event.__voChatHandledByInstance = true;
         const opt = this.agentSelect.selectedOptions[0];
         if (!opt) return;
         this.applySelection(opt, { markExplicit: true, systemPrefix: typeof i18n !== 'undefined' ? i18n.t('chat_switched_to') : 'Switched to' });
@@ -355,6 +356,13 @@
       }
     }
 
+    saveSelection() {
+      saveChatSelection(this.slotId, {
+        selectedAgentKey: this.selectedAgentKey,
+        sessionKey: this.sessionKey
+      });
+    }
+
     applySelection(opt, { markExplicit = false, systemPrefix = typeof i18n !== 'undefined' ? i18n.t('chat_switched_to') : 'Switched to' } = {}) {
       if (!opt) return;
       const newSessionKey = opt.dataset.sessionKey;
@@ -375,6 +383,7 @@
       this.streamingMsg = null;
       this.syncAgentSelect();
       this.resetConversation(`${systemPrefix} ${opt.textContent.trim()}`);
+      this.appendSystem(typeof i18n !== 'undefined' ? i18n.t('chat_loading_history') : 'Loading chat history...');
       this.updateProviderControls();
       if (this.isHermesSelected()) this.startHermesApprovalPolling();
       else this.stopHermesApprovalPolling();
@@ -869,6 +878,10 @@
         }
       } catch (e) {
         console.warn('Failed to load history:', e);
+        if (isCurrentHistoryRequest() && opts.showError !== false) {
+          this.messages.innerHTML = '';
+          this.appendSystem(typeof i18n !== 'undefined' ? i18n.t('chat_history_unavailable') : 'Chat history is unavailable right now.');
+        }
       }
     }
 
@@ -4684,6 +4697,22 @@
   });
 
   chatWindows.forEach(w => w.loadAgentList());
+  window.__voChatWindows = chatWindows;
+  window.__voChatWindowsByRoot = chatWindowsByRoot;
+  document.addEventListener('change', (event) => {
+    const select = event.target?.closest?.('.chat-agent-select');
+    if (!select) return;
+    const panel = select.closest('.chat-panel');
+    const windowInstance = panel ? chatWindowsByRoot.get(panel) : null;
+    if (!windowInstance || windowInstance.agentSelect !== select) return;
+    if (event.__voChatHandledByInstance) return;
+    const opt = select.selectedOptions?.[0];
+    if (!opt) return;
+    windowInstance.applySelection(opt, {
+      markExplicit: true,
+      systemPrefix: typeof i18n !== 'undefined' ? i18n.t('chat_switched_to') : 'Switched to'
+    });
+  });
   syncSecondaryChatControls();
 
   function applyQueryAgentAssignments() {
