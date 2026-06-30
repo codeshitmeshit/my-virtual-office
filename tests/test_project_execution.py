@@ -2079,6 +2079,48 @@ def test_execution_failure_blocks_with_redacted_bounded_evidence():
             restore_store(old)
 
 
+def test_transient_gateway_timeout_retries_once_before_blocking():
+    with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as workspace:
+        old = with_store(status_dir)
+        old_call = server._project_execution_call_executor
+        old_sleep = server.time.sleep
+        calls = {"executor": 0}
+
+        def flaky_executor(executor, prompt, workspace, attempt_id, project_id=None, task_id=None, timeout=600):
+            calls["executor"] += 1
+            if calls["executor"] == 1:
+                return {
+                    "ok": False,
+                    "status": "execution_failed",
+                    "error": "[ERROR] Agent returned code 1: GatewayClientRequestError: FailoverError: LLM request timed out.",
+                    "modifiedFiles": [],
+                }
+            return {"ok": True, "status": "completed", "reply": "completed after retry", "modifiedFiles": []}
+
+        server._project_execution_call_executor = flaky_executor
+        server.time.sleep = lambda seconds: None
+        try:
+            project, task = create_project_execution_project(workspace)
+            server._handle_task_update(project["id"], task["id"], {"checklist": [{"text": "Run tests", "done": False}]})
+            started = server._handle_project_execution_start(project["id"], task["id"], {})
+            assert started["ok"] is True
+
+            current_task = wait_for(lambda: server._handle_project_get(project["id"])["project"]["tasks"][0]
+                                    if calls["executor"] >= 2 else None)
+            assert calls["executor"] == 2
+            assert current_task.get("executionState") == "execution_complete"
+            assert current_task.get("blockedReason") in (None, "")
+            attempts = current_task.get("attempts") or []
+            assert attempts[0]["status"] == "retry_scheduled"
+            assert attempts[0]["retryReason"] in {"llm request timed out", "gatewayclientrequesterror", "failovererror", "timed out", "timeout"}
+            assert attempts[1]["transientRetry"] is True
+            assert attempts[1]["retryFromAttemptId"] == attempts[0]["id"]
+        finally:
+            server.time.sleep = old_sleep
+            server._project_execution_call_executor = old_call
+            restore_store(old)
+
+
 def test_cancel_active_execution_blocks_and_preserves_evidence():
     with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as workspace:
         old = with_store(status_dir)

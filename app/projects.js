@@ -1978,6 +1978,13 @@
                 '当前任务还没有验收清单。请先创建 checklist；如果确实不需要 checklist，可以在验收确认中显式跳过空清单。'
             );
         }
+        if (normalized.includes('llm request timed out') || normalized.includes('gatewayclientrequesterror') || normalized.includes('failovererror') || normalized.includes('cooldown')) {
+            return _tf(
+                'proj_exec_error_provider_timeout',
+                'The model gateway timed out or entered cooldown. Virtual Office will retry transient failures once; if it remains blocked, wait briefly or switch to another available executor/provider and start the task again.',
+                '模型网关超时或进入冷却。Virtual Office 会对临时失败自动重试一次；如果仍然阻塞，请稍后重试，或切换到可用的执行 Agent / provider 后重新启动任务。'
+            );
+        }
         if (normalized === 'executor_required' || normalized === 'a valid executor agent is required') {
             return _tf(
                 'proj_exec_error_executor_required',

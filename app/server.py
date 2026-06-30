@@ -14182,6 +14182,96 @@ def _project_execution_incomplete_checklist_feedback(done_result):
     )
 
 
+def _project_execution_transient_failure_reason(result):
+    text = " ".join(str(result.get(key) or "") for key in ("error", "reply", "status")).lower() if isinstance(result, dict) else ""
+    if not text:
+        return ""
+    markers = (
+        "llm request timed out",
+        "gatewayclientrequesterror",
+        "failovererror",
+        "provider call exceeded",
+        "provider_timeout",
+        "provider timeout",
+        "timed out",
+        "timeout",
+        "cooldown",
+        "temporarily unavailable",
+        "connection reset",
+        "connection aborted",
+        "gnutls",
+    )
+    for marker in markers:
+        if marker in text:
+            return marker
+    return ""
+
+
+def _project_execution_attempt_retry_count(attempt):
+    try:
+        return int((attempt or {}).get("transientRetryCount") or 0)
+    except Exception:
+        return 0
+
+
+def _project_execution_schedule_transient_retry(data, project_id, task_id, project, task, attempt, evidence, reason):
+    if _project_execution_attempt_retry_count(attempt) >= 1:
+        return False
+    workspace = _project_execution_validate_workspace(project.get("workspacePath"))
+    if not workspace.get("ok"):
+        return False
+    retry_attempt_id = str(uuid.uuid4())
+    retry_attempt = {
+        **attempt,
+        "id": retry_attempt_id,
+        "status": "retrying",
+        "startedAt": _proj_now(),
+        "finishedAt": None,
+        "evidence": {},
+        "baseline": _project_execution_git_snapshot(workspace["path"]),
+        "workspacePath": workspace["path"],
+        "workspaceKind": workspace["kind"],
+        "rework": False,
+        "transientRetry": True,
+        "transientRetryCount": _project_execution_attempt_retry_count(attempt) + 1,
+        "retryFromAttemptId": attempt.get("id"),
+        "retryReason": reason,
+        "previousFailureEvidence": evidence,
+    }
+    attempt["status"] = "retry_scheduled"
+    attempt["retryAttemptId"] = retry_attempt_id
+    attempt["retryReason"] = reason
+    task.setdefault("attempts", []).append(retry_attempt)
+    task["attempts"] = task["attempts"][-20:]
+    task.update({
+        "activeAttemptId": retry_attempt_id,
+        "blockedReason": None,
+        "lastError": None,
+        "executorAgentId": (retry_attempt.get("executor") or {}).get("id"),
+        "reviewerAgentId": (retry_attempt.get("reviewer") or {}).get("id"),
+    })
+    project.update({
+        "workspaceStatus": workspace,
+        "workflowActive": True,
+        "workflowPhase": "retrying",
+        "activeTaskId": task_id,
+        "activeAgent": (retry_attempt.get("executor") or {}).get("id"),
+        "updatedAt": _proj_now(),
+    })
+    _project_execution_transition(project, task, "executing", "system", f"Provider timeout or transient gateway failure detected; retrying once ({reason}).", retry_attempt_id)
+    _save_projects(data)
+    cancel_flag = threading.Event()
+    with _PROJECT_EXECUTION_LOCK:
+        _PROJECT_EXECUTION_CANCEL_FLAGS[retry_attempt_id] = cancel_flag
+
+    def retry_later():
+        time.sleep(3)
+        _project_execution_run_attempt(project_id, task_id, retry_attempt_id, cancel_flag)
+
+    threading.Thread(target=retry_later, daemon=True).start()
+    return True
+
+
 def _project_execution_continue_for_incomplete_checklist(data, project_id, task_id, project, task, attempt_id, actor, done_result):
     if not isinstance(done_result, dict) or done_result.get("code") != "checklist_incomplete":
         return {"ok": False, "error": (done_result or {}).get("error") or "Unable to mark task done"}
@@ -18252,6 +18342,11 @@ def _project_execution_run_attempt(project_id, task_id, attempt_id, cancel_flag)
         else:
             _project_execution_transition(project, task, "execution_complete", executor.get("id") or "executor", "Execution completed; Independent review has not started.", attempt_id)
     else:
+        transient_reason = _project_execution_transient_failure_reason(result)
+        if transient_reason and not cancelled and _project_execution_schedule_transient_retry(data, project_id, task_id, project, task, attempt, evidence, transient_reason):
+            with _PROJECT_EXECUTION_LOCK:
+                _PROJECT_EXECUTION_CANCEL_FLAGS.pop(attempt_id, None)
+            return
         attempt["status"] = "blocked"
         task["lastError"] = evidence["error"] or "Executor failed"
         task["blockedReason"] = task["lastError"]
