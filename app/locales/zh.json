@@ -477,6 +477,8 @@
   "once_label": "单次",
   "chat_new_session": "新会话",
   "chat_switched_to": "已切换到",
+  "chat_loading_history": "正在加载聊天记录...",
+  "chat_history_unavailable": "聊天记录暂时不可用，请检查 Gateway 连接或稍后重试。",
   "chat_ready_to_chat_with": "准备与以下代理聊天",
   "chat_loaded": "已加载",
   "chat_not_connected": "未连接",

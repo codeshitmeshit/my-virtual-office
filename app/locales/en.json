@@ -477,6 +477,8 @@
   "once_label": "Once",
   "chat_new_session": "New Session",
   "chat_switched_to": "Switched to",
+  "chat_loading_history": "Loading chat history...",
+  "chat_history_unavailable": "Chat history is temporarily unavailable. Check the Gateway connection or try again later.",
   "chat_ready_to_chat_with": "Ready to chat with",
   "chat_loaded": "Loaded",
   "chat_not_connected": "Not connected",
