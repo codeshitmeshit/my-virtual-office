@@ -22588,13 +22588,19 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
         elif self.path == "/api/hermes/history" or self.path.startswith("/api/hermes/history?"):
             qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             agent_key = (qs.get("agentId") or qs.get("key") or ["hermes-default"])[0]
+            conversation_id = (qs.get("conversationId") or qs.get("threadId") or [""])[0]
             agent = _get_hermes_agent(agent_key)
             profile = (agent or {}).get("profile") or (agent or {}).get("providerAgentId") or "default"
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
-            self.wfile.write(json.dumps({"ok": True, "messages": _load_hermes_history(profile)}).encode())
+            self.wfile.write(json.dumps({
+                "ok": True,
+                "messages": _load_hermes_history(profile, conversation_id),
+                "sessionId": _get_hermes_session_id(profile, conversation_id),
+                "conversationId": conversation_id,
+            }).encode())
         elif self.path == "/api/codex/history" or self.path.startswith("/api/codex/history?"):
             qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             agent_key = (qs.get("agentId") or qs.get("key") or ["codex-default"])[0]

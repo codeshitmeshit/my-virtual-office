@@ -820,6 +820,7 @@
           const providerPath = this.isClaudeCodeSelected() ? 'claude-code' : 'hermes';
           const query = new URLSearchParams({ agentId: this.getSelectedAgentId() || this.selectedAgentKey });
           if (this.isClaudeCodeSelected()) query.set('conversationId', this.getProviderConversationId('claude-code'));
+          else query.set('conversationId', this.getProviderConversationId('hermes'));
           const res = await fetch('/api/' + providerPath + '/history?' + query.toString());
           const data = await res.json();
           if (!isCurrentHistoryRequest()) return;
@@ -932,7 +933,7 @@
         try {
           const providerPath = this.isClaudeCodeSelected() ? 'claude-code' : 'hermes';
           const clearBody = { agentId: this.getSelectedAgentId() || this.selectedAgentKey };
-          if (this.isClaudeCodeSelected()) clearBody.conversationId = this.getProviderConversationId('claude-code');
+          clearBody.conversationId = this.getProviderConversationId(this.isClaudeCodeSelected() ? 'claude-code' : 'hermes');
           const res = await fetch('/api/' + providerPath + '/history/clear', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1305,6 +1306,18 @@
 
       if (this.isHermesSelected()) {
         const providerLabel = this.agentSelect.selectedOptions[0]?.textContent.trim() || 'Hermes';
+        const hermesSendStartedAt = Date.now();
+        const hermesBody = {
+          agentId: this.getSelectedAgentId() || this.selectedAgentKey,
+          message: text || '(attached files)',
+          conversationId: this.getProviderConversationId('hermes'),
+          fromType: 'human',
+          fromDisplayName: 'User',
+          sourceApp: 'virtual-office',
+          sourceSurface: 'chat-window',
+          sourceLabel: 'Virtual Office Chat',
+          attachments: attachments || []
+        };
         const hermesProgress = this.startHermesProgress(providerLabel);
         try {
           const resp = await fetch('/api/hermes/runs', {
@@ -3285,6 +3298,7 @@
     startHermesProgress(label) {
       this.stopHermesProgressTimers();
       const runId = 'hermes-' + Date.now() + '-' + Math.random().toString(36).slice(2);
+      const planId = runId + ':task-breakdown';
       this.currentRunId = runId;
       this.setStatus(typeof i18n !== 'undefined' ? i18n.t('chat_hermes_stream_active') : 'Hermes stream active...', 'connecting');
       this.updateTypingIndicator(label + ' ' + (typeof i18n !== 'undefined' ? i18n.t('chat_hermes_is_running') : 'is running Hermes'));
@@ -3444,7 +3458,13 @@
         this.setStatus(_ct('chat_codex_error'), 'disconnected');
       }
     }
-    scrollBottom() {
+    isNearBottom(threshold = 80) {
+      if (!this.messages) return true;
+      return this.messages.scrollHeight - this.messages.scrollTop - this.messages.clientHeight <= threshold;
+    }
+
+    scrollBottom(force = true) {
+      if (!force) return;
       if (this.scrollFrame) return;
       this.scrollFrame = requestAnimationFrame(() => {
         this.scrollFrame = null;
