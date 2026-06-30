@@ -14117,18 +14117,29 @@ def _project_execution_clear_restart_bindings(task, now=None, actor="user", reas
     return task
 
 
-def _project_execution_mark_done(project, task, actor, reason, attempt_id=None):
+def _project_execution_mark_done(project, task, actor, reason, attempt_id=None, allow_empty_checklist=False):
     done_col = _wf_get_done_col(project)
     if not done_col:
         return {"error": "Done column not found", "_status": 409}
     checklist = _project_execution_acceptance_checklist(task)
     if not checklist:
-        return {
-            "error": "Acceptance checklist is empty; create and complete acceptance checklist items before marking the task done.",
-            "code": "checklist_empty",
-            "unfinishedChecklist": [{"id": "", "text": "Create and complete acceptance checklist items."}],
-            "_status": 409,
-        }
+        if allow_empty_checklist:
+            task.setdefault("acceptanceHistory", []).append({
+                "action": "skip_empty_checklist",
+                "attemptId": attempt_id,
+                "at": _proj_now(),
+                "by": actor or "user",
+                "reason": "Accepted without an acceptance checklist after explicit confirmation.",
+            })
+            task["acceptanceHistory"] = task["acceptanceHistory"][-50:]
+        else:
+            return {
+                "error": "Acceptance checklist is empty; create and complete acceptance checklist items before marking the task done.",
+                "code": "checklist_empty",
+                "unfinishedChecklist": [{"id": "", "text": "Create and complete acceptance checklist items."}],
+                "allowSkip": True,
+                "_status": 409,
+            }
     unfinished = [
         item for item in checklist
         if isinstance(item, dict) and item.get("done") is not True
@@ -18519,7 +18530,14 @@ def _handle_project_execution_acceptance(project_id, task_id, body=None):
         if not done_col:
             return {"error": "Done column not found", "_status": 409}
         done_reason = "User accepted skipped review result" if review.get("status") == "skipped" else "User accepted reviewer pass"
-        done_result = _project_execution_mark_done(project, task, "user", done_reason, attempt_id)
+        done_result = _project_execution_mark_done(
+            project,
+            task,
+            "user",
+            done_reason,
+            attempt_id,
+            allow_empty_checklist=body.get("allowEmptyChecklist") is True,
+        )
         if not done_result.get("ok"):
             return done_result
         task.setdefault("acceptanceHistory", []).append({"action": "accept", "attemptId": attempt_id, "at": _proj_now(), "by": "user"})

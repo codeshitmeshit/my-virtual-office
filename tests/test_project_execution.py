@@ -1218,6 +1218,32 @@ def test_project_execution_mark_done_rejects_empty_checklist():
             restore_store(old)
 
 
+def test_project_execution_mark_done_allows_explicit_empty_checklist_skip():
+    with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as workspace:
+        old = with_store(status_dir)
+        try:
+            project, task = create_project_execution_project(workspace)
+            task["checklist"] = []
+
+            result = server._project_execution_mark_done(
+                project,
+                task,
+                "user",
+                "accepted without checklist",
+                "attempt-1",
+                allow_empty_checklist=True,
+            )
+
+            assert result["ok"] is True
+            assert task.get("executionState") == "done"
+            assert task.get("completedAt")
+            assert task["columnId"] == col_id(project, "Done")
+            assert task["acceptanceHistory"][-1]["action"] == "skip_empty_checklist"
+            assert task["acceptanceHistory"][-1]["attemptId"] == "attempt-1"
+        finally:
+            restore_store(old)
+
+
 def test_project_execution_checklist_completion_after_review_marks_done_without_user_acceptance():
     with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as workspace:
         old = with_store(status_dir)
@@ -1339,7 +1365,6 @@ def test_project_execution_auto_pass_continues_when_checklist_incomplete():
             server._project_execution_call_executor = old_executor
             server._project_execution_call_reviewer = old_reviewer
             restore_store(old)
-
 
 def test_project_load_repairs_stale_acceptance_state_when_user_acceptance_disabled():
     with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as workspace:

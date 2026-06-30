@@ -339,8 +339,8 @@
             const r = await fetch(`/api/projects/${projectId}/tasks/${taskId}/project-execution/review/start`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ attemptId }) });
             return r.json();
         },
-        async projectExecutionAccept(projectId, taskId, action, attemptId, feedback) {
-            const r = await fetch(`/api/projects/${projectId}/tasks/${taskId}/project-execution/accept`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, attemptId, feedback: feedback || '' }) });
+        async projectExecutionAccept(projectId, taskId, action, attemptId, feedback, opts = {}) {
+            const r = await fetch(`/api/projects/${projectId}/tasks/${taskId}/project-execution/accept`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, attemptId, feedback: feedback || '', allowEmptyChecklist: opts.allowEmptyChecklist === true }) });
             return r.json();
         },
         async projectExecutionMeetingBlocker(projectId, taskId, action, feedback) {
@@ -1971,6 +1971,13 @@
                 '验收清单尚未完成。请先继续处理未完成的清单项，再标记任务完成。'
             );
         }
+        if (normalized === 'checklist_empty' || normalized === 'acceptance checklist is empty; create and complete acceptance checklist items before marking the task done.') {
+            return _tf(
+                'proj_exec_error_checklist_empty',
+                'The task has no acceptance checklist. Create checklist items first, or explicitly skip the empty checklist if the task truly does not need one.',
+                '当前任务还没有验收清单。请先创建 checklist；如果确实不需要 checklist，可以在验收确认中显式跳过空清单。'
+            );
+        }
         if (normalized === 'executor_required' || normalized === 'a valid executor agent is required') {
             return _tf(
                 'proj_exec_error_executor_required',
@@ -1986,7 +1993,7 @@
         const raw = response && response.error ? String(response.error) : code;
         let text = projectExecutionReasonText(code || raw);
         const unfinished = response && Array.isArray(response.unfinishedChecklist) ? response.unfinishedChecklist : [];
-        if (code === 'checklist_incomplete' && unfinished.length) {
+        if ((code === 'checklist_incomplete' || code === 'checklist_empty') && unfinished.length) {
             text += '\n' + unfinished.slice(0, 8).map(item => `- ${item && item.text ? item.text : ''}`).filter(Boolean).join('\n');
         }
         return text;
@@ -3649,17 +3656,19 @@
         const overlay = document.getElementById('proj-form-overlay');
         if (!overlay) return;
         const task = state.currentProject && (state.currentProject.tasks || []).find(t => t.id === taskId);
-        state.acceptanceDialog = { taskId, action: 'accept', attemptId };
+        const acceptanceChecklist = ((task && task.checklist) || []).filter(item => item && item.source !== 'meeting_action_item' && item.source !== 'meeting_risk');
+        const hasAcceptanceChecklist = acceptanceChecklist.length > 0;
+        state.acceptanceDialog = { taskId, action: 'accept', attemptId, allowEmptyChecklist: !hasAcceptanceChecklist };
         overlay.classList.remove('hidden');
         overlay.innerHTML = `
         <div class="proj-form-modal" style="position:static;padding:0;background:transparent" onclick="event.stopPropagation()">
             <div class="proj-form-box proj-acceptance-dialog" role="dialog" aria-modal="true" aria-labelledby="proj-acceptance-dialog-title">
                 <div class="proj-form-title" id="proj-acceptance-dialog-title">确认验收</div>
                 <div class="proj-acceptance-task">${escHtml(task ? task.title : '')}</div>
-                <div class="proj-form-help">确认验收通过，并将任务移动到 Done？</div>
+                <div class="proj-form-help">${hasAcceptanceChecklist ? '确认验收通过，并将任务移动到 Done？' : '当前任务还没有验收清单。建议先创建并完成 checklist；如果这个任务确实不需要 checklist，可以跳过空清单并完成任务。'}</div>
                 <div class="proj-form-actions">
                     <button class="proj-btn" onclick="ProjMgr.hideFormModal()">取消</button>
-                    <button class="proj-btn proj-btn-primary" onclick="ProjMgr.submitProjectExecutionAcceptance()">确认通过</button>
+                    <button class="proj-btn proj-btn-primary" onclick="ProjMgr.submitProjectExecutionAcceptance()">${hasAcceptanceChecklist ? '确认通过' : '仍然跳过'}</button>
                 </div>
             </div>
         </div>`;
@@ -3703,14 +3712,14 @@
     async function submitProjectExecutionAcceptanceAction() {
         const dialog = state.acceptanceDialog;
         if (!dialog) return;
-        await submitProjectExecutionAcceptance(dialog.taskId, dialog.action, dialog.attemptId, '');
+        await submitProjectExecutionAcceptance(dialog.taskId, dialog.action, dialog.attemptId, '', { allowEmptyChecklist: dialog.allowEmptyChecklist === true });
     }
 
-    async function submitProjectExecutionAcceptance(taskId, action, attemptId, feedback) {
+    async function submitProjectExecutionAcceptance(taskId, action, attemptId, feedback, opts = {}) {
         const p = state.currentProject;
         if (!p) return;
         try {
-            const d = await api.projectExecutionAccept(p.id, taskId, action, attemptId, feedback);
+            const d = await api.projectExecutionAccept(p.id, taskId, action, attemptId, feedback, opts);
             if (d.error) { toast(d.error, 'error'); return; }
             toast(action === 'accept' ? '任务已验收完成' : (d.status === 'reworking' ? '已退回并开始返工' : '验收状态已更新'), 'success');
             hideFormModal();
