@@ -6409,6 +6409,112 @@ def _handle_codex_test(body=None):
     return _codex_provider_from_config().test()
 
 
+def _codex_history_path(profile="default"):
+    safe_profile = re.sub(r"[^a-zA-Z0-9_.-]+", "-", str(profile or "default"))[:80] or "default"
+    return os.path.join(STATUS_DIR, f"codex-chat-{safe_profile}.json")
+
+
+def _load_codex_state(profile="default"):
+    path = _codex_history_path(profile)
+    try:
+        with open(path, "r") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            data.setdefault("profile", profile)
+            data.setdefault("messages", [])
+            return data
+        if isinstance(data, list):
+            return {"profile": profile, "messages": data}
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        pass
+    return {"profile": profile, "messages": []}
+
+
+def _load_codex_history(profile="default"):
+    state = _load_codex_state(profile)
+    messages = state.get("messages") if isinstance(state.get("messages"), list) else []
+    return messages
+
+
+def _save_codex_state(profile, state):
+    state = state if isinstance(state, dict) else {}
+    state["profile"] = profile
+    if not isinstance(state.get("messages"), list):
+        state["messages"] = []
+    path = _codex_history_path(profile)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(state, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, path)
+
+
+def _save_codex_history(profile, messages):
+    state = _load_codex_state(profile)
+    state["messages"] = (messages or [])[-500:]
+    _save_codex_state(profile, state)
+
+
+def _get_codex_session_id(profile="default"):
+    state = _load_codex_state(profile)
+    session_id = state.get("sessionId") or state.get("threadId") or state.get("session_id")
+    return str(session_id).strip() if session_id else ""
+
+
+def _set_codex_session_id(profile="default", session_id=""):
+    state = _load_codex_state(profile)
+    if session_id:
+        state["sessionId"] = session_id
+        state["threadId"] = session_id
+    else:
+        state.pop("sessionId", None)
+        state.pop("threadId", None)
+    _save_codex_state(profile, state)
+
+
+def _set_codex_active_run(profile="default", session_id="", run_id=""):
+    state = _load_codex_state(profile)
+    if run_id:
+        state["activeRunId"] = run_id
+        state["activeSessionId"] = session_id or state.get("sessionId") or ""
+        state["activeRunUpdatedAt"] = int(time.time() * 1000)
+    else:
+        state.pop("activeRunId", None)
+        state.pop("activeSessionId", None)
+        state.pop("activeRunUpdatedAt", None)
+    _save_codex_state(profile, state)
+
+
+def _get_codex_token_usage(profile="default"):
+    state = _load_codex_state(profile)
+    token_usage = state.get("tokenUsage") if isinstance(state.get("tokenUsage"), dict) else {}
+    return token_usage
+
+
+def _set_codex_token_usage(profile="default", token_usage=None):
+    token_usage = token_usage if isinstance(token_usage, dict) else {}
+    state = _load_codex_state(profile)
+    if token_usage:
+        state["tokenUsage"] = token_usage
+        context_used = _provider_context_used_from_token_usage(token_usage)
+        context_window = _provider_context_window_from_token_usage(token_usage)
+        if context_used:
+            state["contextUsed"] = context_used
+        if context_window:
+            state["contextWindow"] = context_window
+    else:
+        state.pop("tokenUsage", None)
+    _save_codex_state(profile, state)
+
+
+def _clear_codex_token_usage(profile="default"):
+    state = _load_codex_state(profile)
+    state.pop("tokenUsage", None)
+    state.pop("contextUsed", None)
+    state.pop("contextWindow", None)
+    _save_codex_state(profile, state)
+
+
 def _claude_code_provider_from_config():
     cfg = VO_CONFIG.get("claudeCode", {})
     return ClaudeCodeProvider(
@@ -6498,6 +6604,44 @@ def _get_claude_code_session_id(profile="local", conversation_id=None):
     return str(session_id).strip() if session_id else ""
 
 
+def _get_claude_code_token_usage(profile="local", conversation_id=None):
+    state = _load_claude_code_state(profile, conversation_id)
+    return state.get("tokenUsage") if isinstance(state.get("tokenUsage"), dict) else {}
+
+
+def _set_claude_code_token_usage(profile="local", token_usage=None, conversation_id=None):
+    token_usage = token_usage if isinstance(token_usage, dict) else {}
+    state = _load_claude_code_state(profile, conversation_id)
+    if token_usage:
+        state["tokenUsage"] = token_usage
+        context_used = _provider_context_used_from_token_usage(token_usage)
+        context_window = _provider_context_window_from_token_usage(token_usage)
+        if context_used:
+            state["contextUsed"] = context_used
+        if context_window:
+            state["contextWindow"] = context_window
+    else:
+        state.pop("tokenUsage", None)
+    _save_claude_code_history(profile, state.get("messages") or [], conversation_id, state.get("sessionId") or "")
+
+
+def _clear_claude_code_token_usage(profile="local", conversation_id=None):
+    state = _load_claude_code_state(profile, conversation_id)
+    state.pop("tokenUsage", None)
+    state.pop("contextUsed", None)
+    state.pop("contextWindow", None)
+    _save_claude_code_history(profile, state.get("messages") or [], conversation_id, state.get("sessionId") or "")
+
+
+def _codex_int(value, default=0):
+    try:
+        if value is None or value == "":
+            return default
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def _provider_context_used_from_token_usage(token_usage):
     if not isinstance(token_usage, dict):
         return 0
@@ -6521,6 +6665,14 @@ def _provider_context_window_from_token_usage(token_usage):
         if isinstance(value, (int, float)):
             return int(value)
     return 0
+
+
+def _codex_context_used_from_token_usage(token_usage):
+    return _provider_context_used_from_token_usage(token_usage)
+
+
+def _codex_context_window_from_token_usage(token_usage):
+    return _provider_context_window_from_token_usage(token_usage)
 
 
 def _provider_visible_thinking(provider_kind, run_state):
@@ -23545,8 +23697,9 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
         When agent_id is provided, resolves that agent's configured model
         (per-agent override or default). Otherwise returns the main/default agent model.
         """
-        cfg = self._load_model_config()
-        default_model = self._default_config_model(cfg)
+        helper = self if self is not None else OfficeHandler
+        cfg = helper._load_model_config(helper) if self is None else helper._load_model_config()
+        default_model = helper._default_config_model(helper, cfg) if self is None else helper._default_config_model(cfg)
         if agent_id and _is_hermes_agent(agent_id):
             agent = _get_hermes_agent(agent_id) or {}
             model = agent.get("model") or "Hermes"
@@ -23564,9 +23717,9 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             return {"model": model, "provider": provider, "providerKind": "claude-code", "contextWindow": 0}
         return {
             "model": default_model,
-            "provider": self._provider_for_model(default_model, cfg),
+            "provider": helper._provider_for_model(helper, default_model, cfg) if self is None else helper._provider_for_model(default_model, cfg),
             "providerKind": "openclaw",
-            "contextWindow": self._context_window_for_model(default_model, cfg),
+            "contextWindow": helper._context_window_for_model(helper, default_model, cfg) if self is None else helper._context_window_for_model(default_model, cfg),
         }
 
     def _context_window_for_model(self, model, cfg):
@@ -23630,8 +23783,9 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
         When agent_id is provided, resolves that agent's configured model
         (per-agent override or default). Otherwise returns the main/default agent model.
         """
-        cfg = self._load_model_config()
-        default_model = self._default_config_model(cfg)
+        helper = self if self is not None else OfficeHandler
+        cfg = helper._load_model_config(helper) if self is None else helper._load_model_config()
+        default_model = helper._default_config_model(helper, cfg) if self is None else helper._default_config_model(cfg)
         if agent_id and _is_hermes_agent(agent_id):
             agent = _get_hermes_agent(agent_id) or {}
             model = agent.get("model") or "Hermes"
@@ -23650,7 +23804,7 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                 "model": model,
                 "provider": provider,
                 "providerKind": "codex",
-                "contextWindow": token_context_window or self._context_window_for_model(model, cfg),
+                "contextWindow": token_context_window or (helper._context_window_for_model(helper, model, cfg) if self is None else helper._context_window_for_model(model, cfg)),
                 "contextUsed": context_used,
                 "tokenUsage": token_usage,
             }
@@ -23669,7 +23823,7 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                 "model": model,
                 "provider": provider,
                 "providerKind": "claude-code",
-                "contextWindow": token_context_window or self._context_window_for_model(model, cfg),
+                "contextWindow": token_context_window or (helper._context_window_for_model(helper, model, cfg) if self is None else helper._context_window_for_model(model, cfg)),
                 "contextUsed": context_used,
                 "tokenUsage": token_usage,
             }
@@ -23684,7 +23838,7 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                         model = a["model"]
                     break
 
-        return {"model": model, "contextWindow": self._context_window_for_model(model, cfg)}
+        return {"model": model, "contextWindow": helper._context_window_for_model(helper, model, cfg) if self is None else helper._context_window_for_model(model, cfg)}
 
     def _get_providers(self):
         """Read providers, auth profiles, and models for the model manager UI."""
@@ -25067,17 +25221,6 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(json.dumps(result).encode())
             return
-        elif self.path == "/api/agent-platform-communications/send":
-            length = int(self.headers.get('Content-Length', 0))
-            body = json.loads(self.rfile.read(length)) if length else {}
-            result = _handle_agent_platform_comm_send(body)
-            self.send_response(result.get("_status", 200))
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.end_headers()
-            result.pop("_status", None)
-            self.wfile.write(json.dumps(result).encode())
-            return
         elif self.path == "/api/hermes/history/clear":
             length = int(self.headers.get('Content-Length', 0))
             body = json.loads(self.rfile.read(length)) if length else {}
@@ -25138,22 +25281,6 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(json.dumps(result).encode())
             return
-        elif self.path == "/api/codex/chat":
-            length = int(self.headers.get('Content-Length', 0))
-            body = json.loads(self.rfile.read(length)) if length else {}
-            body.setdefault("fromType", "human")
-            body.setdefault("fromDisplayName", "User")
-            body.setdefault("sourceApp", "virtual-office")
-            body.setdefault("sourceSurface", "chat-window")
-            body.setdefault("sourceLabel", "Virtual Office Chat")
-            result = _handle_codex_chat(body)
-            self.send_response(result.get("_status", 200) if "_status" in result else (200 if result.get("ok") or result.get("status") == "cancelled" else 409 if result.get("status") in {"busy", "needs_human_intervention"} else 500))
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.end_headers()
-            result.pop("_status", None)
-            self.wfile.write(json.dumps(result).encode())
-            return
         elif self.path == "/api/codex/reset":
             length = int(self.headers.get('Content-Length', 0))
             body = json.loads(self.rfile.read(length)) if length else {}
@@ -25162,6 +25289,17 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
+            self.wfile.write(json.dumps(result).encode())
+            return
+        elif self.path == "/api/agent-platform-communications/send":
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            result = _handle_agent_platform_comm_send(body)
+            self.send_response(result.get("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            result.pop("_status", None)
             self.wfile.write(json.dumps(result).encode())
             return
         elif self.path == "/api/codex/compact":
