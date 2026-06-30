@@ -23342,9 +23342,14 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
         except Exception:
             return {}
 
+    def _get_configured_model(self, agent_id=None):
+        """Return configured model metadata for a specific agent or default.
+
         When agent_id is provided, resolves that agent's configured model
         (per-agent override or default). Otherwise returns the main/default agent model.
         """
+        cfg = self._load_model_config()
+        default_model = self._default_config_model(cfg)
         if agent_id and _is_hermes_agent(agent_id):
             agent = _get_hermes_agent(agent_id) or {}
             model = agent.get("model") or "Hermes"
@@ -23360,6 +23365,12 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             model = agent.get("model") or "Claude Code"
             provider = agent.get("provider") or "Claude Code"
             return {"model": model, "provider": provider, "providerKind": "claude-code", "contextWindow": 0}
+        return {
+            "model": default_model,
+            "provider": self._provider_for_model(default_model, cfg),
+            "providerKind": "openclaw",
+            "contextWindow": self._context_window_for_model(default_model, cfg),
+        }
 
     def _context_window_for_model(self, model, cfg):
         model = str(model or "")
