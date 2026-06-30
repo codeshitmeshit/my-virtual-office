@@ -1,0 +1,102 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>项目执行、Provider Bridge 与会议阻塞的设计来源</title><link rel="stylesheet" href="../asset/reverse-tutorial.css"><style>
+:root {
+  --card: #ffffff;
+  --text: #1f2937;
+  --muted: #64748b;
+  --primary: #2563eb;
+  --soft: #dbeafe;
+  --border: #e2e8f0;
+  --shadow: 0 18px 45px rgba(15, 23, 42, 0.08);
+  --radius: 20px;
+  --green: #15803d;
+  --amber: #b45309;
+  --red: #b91c1c;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+  background: linear-gradient(180deg, #f8fbff 0%, #eef2f7 100%);
+  color: var(--text);
+  line-height: 1.8;
+}
+a { color: inherit; }
+.container { max-width: 1120px; margin: 0 auto; padding: 34px 24px 72px; }
+.hero, .card, .toc, .guide-card, .diagram, .step, .mini-card {
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+.hero { padding: 38px; margin-bottom: 22px; }
+.back {
+  display: inline-flex;
+  margin-bottom: 18px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(255,255,255,0.8);
+  text-decoration: none;
+  font-weight: 700;
+  font-size: 14px;
+}
+.eyebrow { display: inline-flex; margin-bottom: 16px; padding: 6px 12px; border-radius: 999px; background: var(--soft); color: var(--primary); font-size: 13px; font-weight: 800; }
+h1 { margin: 0 0 16px; font-size: clamp(32px, 5vw, 54px); line-height: 1.1; letter-spacing: 0; }
+h2 { margin: 0 0 18px; font-size: 26px; line-height: 1.35; }
+h3 { margin: 0 0 8px; font-size: 19px; line-height: 1.4; }
+p { margin: 0; color: #475569; }
+.hero p { max-width: 850px; font-size: 17px; color: var(--muted); }
+.meta, .toc-links, .tags { display: flex; flex-wrap: wrap; gap: 10px; }
+.meta, .tags { margin-top: 18px; }
+.tag { padding: 5px 11px; border-radius: 999px; background: #f1f5f9; color: #475569; font-size: 12px; font-weight: 800; }
+.toc { padding: 20px 24px; margin: 22px 0; }
+.toc strong { display: block; margin-bottom: 10px; }
+.toc a { padding: 7px 11px; border-radius: 10px; background: #f8fafc; color: #334155; text-decoration: none; font-size: 14px; font-weight: 700; }
+.card { padding: 30px; margin-top: 22px; }
+.prose { display: grid; gap: 14px; margin-top: 16px; }
+.grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-top: 18px; }
+.guide-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin-top: 18px; }
+.guide-card { display: flex; flex-direction: column; justify-content: space-between; min-height: 230px; padding: 24px; text-decoration: none; }
+.guide-card:hover { border-color: rgba(37,99,235,0.42); transform: translateY(-2px); transition: 0.2s ease; }
+.mini-card { box-shadow: none; padding: 18px; background: #f8fafc; }
+.mini-card strong { display: block; margin-bottom: 6px; color: var(--text); }
+.mini-card span { color: var(--muted); font-size: 14px; }
+.steps { display: grid; gap: 14px; margin-top: 18px; }
+.step { display: flex; gap: 18px; padding: 20px; box-shadow: none; background: #fff; }
+.step-number { width: 48px; height: 48px; flex: 0 0 48px; display: grid; place-items: center; border-radius: 14px; background: var(--soft); color: var(--primary); font-weight: 900; }
+.flow-step { display: grid; grid-template-columns: 160px minmax(0,1fr); gap: 16px; padding: 18px; border: 1px solid var(--border); border-radius: 16px; background: #fff; }
+.flow-step strong { color: var(--text); }
+.flow-step span { display: block; color: var(--muted); font-size: 14px; }
+.diagram { margin-top: 18px; padding: 16px; background: #fff; overflow-x: auto; }
+.diagram img { display: block; width: 100%; min-width: 640px; border-radius: 18px; border: 1px solid var(--border); }
+.caption { margin-top: 10px; font-size: 14px; text-align: center; color: var(--muted); }
+pre { overflow-x: auto; margin: 18px 0 0; padding: 20px; border-radius: 16px; background: #0f172a; color: #e5e7eb; font-size: 14px; line-height: 1.7; }
+code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.code-card { margin-top: 18px; padding: 18px; border: 1px solid var(--border); border-radius: 16px; background: #fff; }
+.code-meta { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.code-meta span { padding: 4px 9px; border-radius: 999px; background: #f1f5f9; color: #475569; font-size: 12px; font-weight: 800; }
+table { width: 100%; border-collapse: collapse; margin-top: 16px; font-size: 14px; }
+th, td { padding: 12px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+th { background: #f8fafc; color: #334155; }
+.note { border-left: 4px solid var(--primary); padding: 14px 16px; background: #eff6ff; border-radius: 12px; color: #334155; }
+.risk { border-left-color: var(--amber); background: #fffbeb; }
+@media (max-width: 860px) {
+  .grid, .guide-grid { grid-template-columns: 1fr; }
+  .flow-step { grid-template-columns: 1fr; }
+}
+@media (max-width: 560px) {
+  .container { padding: 28px 16px 52px; }
+  .hero, .card, .toc, .guide-card { padding: 22px; border-radius: 18px; }
+  .step { flex-direction: column; }
+}
+
+</style></head><body><main class="container"><a class="back" href="../guide.html">返回教程目录</a><section class="hero"><span class="eyebrow">Git 历史溯源 Subagent</span><h1>项目执行、Provider Bridge 与会议阻塞的设计来源</h1><p>本页从当前复杂设计反推历史来源：Project Execution 状态机、MarkdownProjectStore 字段增长、Hermes/Codex adapter、Codex bridge、meeting blocker。只把 Git 能验证的部分写成确定结论。</p><div class="meta"><span class="tag">Git blame</span><span class="tag">commit diff</span></div></section><nav class="toc"><strong>本页目录</strong><div class="toc-links"><a href="#flow">演进链路</a><a href="#diagrams">图</a><a href="#code">代码摘录</a><a href="#concept-notes">概念</a></div></nav><section id="flow" class="card"><h2>历史演进链路</h2><div class="steps"><div class="step"><div class="step-number">1</div><div><h3>项目执行主流程来自 v0.6.0</h3><p>`be6ff12` 把 workflow pipeline、agent dispatch、review system 和项目 UI 大量并入，因此当前 project execution 应从这个 commit 开始读。</p></div></div><div class="step"><div class="step-number">2</div><div><h3>MarkdownProjectStore 承载复杂字段</h3><p>`ee8f3cc` 创建 `app/project_store.py`。随着 executionPolicy、attempts、evidence、reviewHistory、meetingBlocker 等字段加入，项目数据模型从单纯看板变成执行审计记录。</p></div></div><div class="step"><div class="step-number">3</div><div><h3>Hermes adapter 先进入</h3><p>`40e917a` 引入 HermesProvider，并在文件注释中说明通过 public CLI surfaces 隔离 Hermes 私有状态。</p></div></div><div class="step"><div class="step-number">4</div><div><h3>Codex harness 和 bridge 后进入</h3><p>`d3388db` 创建 CodexProvider，`0041762` 创建 `codex_bridge.py`。当前 Codex 文件含未提交扩展，历史解释要分层。</p></div></div><div class="step"><div class="step-number">5</div><div><h3>状态机有后补修复</h3><p>`baa2c80` 修复 project execution state transitions，说明当前 transition、列同步、完成状态不是一次成型。</p></div></div><div class="step"><div class="step-number">6</div><div><h3>meeting blocker 是后续扩展</h3><p>`f73f92e` 添加 blocking meeting requests for project tasks，并在 `project_store.py` 加入 `meetingBlocker_json` 和 `meetingBlockerHistory_json`。</p></div></div></div></section><section id="diagrams" class="card"><h2>演进图</h2><div class="diagram"><img src="../asset/history-provider-bridge.svg" alt="Provider bridge 历史"><p class="caption">最后一层未提交扩展应按当前现场代码理解，不当作 Git 历史事实。</p></div><div class="diagram"><img src="../asset/history-state-machine.svg" alt="状态机历史"><p class="caption">项目执行状态机先出现，再经历状态转移修复和会议阻塞扩展。</p></div></section><section id="code" class="card"><h2>关键代码摘录</h2><div class="code-card"><h3>复杂字段增长</h3><div class="code-meta"><span>app/project_store.py</span><span>COMPLEX_JSON_FIELDS</span></div><pre><code>COMPLEX_JSON_FIELDS = {
+    "executionPolicy_json", "attempts_json", "evidence_json",
+    "reviewResult_json", "reviewHistory_json",
+    "acceptanceHistory_json", "stateHistory_json",
+    "meetingBlocker_json", "meetingBlockerHistory_json",
+}</code></pre><p>这些字段解释了为什么项目 store 不再只是保存看板列和任务标题，而是保存执行、评审、验收和会议阻塞状态。</p></div><div class="code-card"><h3>Hermes 隔离边界</h3><div class="code-meta"><span>app/providers/hermes.py</span><span>module docstring</span></div><pre><code>"""Hermes provider adapter for My Virtual Office.
+This module is intentionally isolated from the OpenClaw discovery/runtime paths.
+It talks to Hermes through public CLI surfaces only...
+"""</code></pre><p>这段注释由 Git blame 指向 `40e917a`，因此“通过公开 CLI surface 隔离私有状态”是可验证设计边界。</p></div></section><section id="concept-notes" class="card"><h2>关键概念补充</h2><h3 id="concept-codex-bridge">1. Codex Bridge</h3><p><strong>出现位置：</strong>`app/providers/codex_bridge.py`。它让 Codex 从 opt-in harness 进入实时 chat/run/activity/control 链路。</p><h3 id="concept-state-transition">2. Project Execution State Transition</h3><p><strong>出现位置：</strong>`app/server.py`。它把任务状态、看板列、attempt、review、acceptance 结果同步到一致流程状态。</p></section></main></body></html>

@@ -1,0 +1,104 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>评审、返工、验收链路</title><link rel="stylesheet" href="../asset/reverse-tutorial.css"><style>
+:root {
+  --card: #ffffff;
+  --text: #1f2937;
+  --muted: #64748b;
+  --primary: #2563eb;
+  --soft: #dbeafe;
+  --border: #e2e8f0;
+  --shadow: 0 18px 45px rgba(15, 23, 42, 0.08);
+  --radius: 20px;
+  --green: #15803d;
+  --amber: #b45309;
+  --red: #b91c1c;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+  background: linear-gradient(180deg, #f8fbff 0%, #eef2f7 100%);
+  color: var(--text);
+  line-height: 1.8;
+}
+a { color: inherit; }
+.container { max-width: 1120px; margin: 0 auto; padding: 34px 24px 72px; }
+.hero, .card, .toc, .guide-card, .diagram, .step, .mini-card {
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+.hero { padding: 38px; margin-bottom: 22px; }
+.back {
+  display: inline-flex;
+  margin-bottom: 18px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(255,255,255,0.8);
+  text-decoration: none;
+  font-weight: 700;
+  font-size: 14px;
+}
+.eyebrow { display: inline-flex; margin-bottom: 16px; padding: 6px 12px; border-radius: 999px; background: var(--soft); color: var(--primary); font-size: 13px; font-weight: 800; }
+h1 { margin: 0 0 16px; font-size: clamp(32px, 5vw, 54px); line-height: 1.1; letter-spacing: 0; }
+h2 { margin: 0 0 18px; font-size: 26px; line-height: 1.35; }
+h3 { margin: 0 0 8px; font-size: 19px; line-height: 1.4; }
+p { margin: 0; color: #475569; }
+.hero p { max-width: 850px; font-size: 17px; color: var(--muted); }
+.meta, .toc-links, .tags { display: flex; flex-wrap: wrap; gap: 10px; }
+.meta, .tags { margin-top: 18px; }
+.tag { padding: 5px 11px; border-radius: 999px; background: #f1f5f9; color: #475569; font-size: 12px; font-weight: 800; }
+.toc { padding: 20px 24px; margin: 22px 0; }
+.toc strong { display: block; margin-bottom: 10px; }
+.toc a { padding: 7px 11px; border-radius: 10px; background: #f8fafc; color: #334155; text-decoration: none; font-size: 14px; font-weight: 700; }
+.card { padding: 30px; margin-top: 22px; }
+.prose { display: grid; gap: 14px; margin-top: 16px; }
+.grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-top: 18px; }
+.guide-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin-top: 18px; }
+.guide-card { display: flex; flex-direction: column; justify-content: space-between; min-height: 230px; padding: 24px; text-decoration: none; }
+.guide-card:hover { border-color: rgba(37,99,235,0.42); transform: translateY(-2px); transition: 0.2s ease; }
+.mini-card { box-shadow: none; padding: 18px; background: #f8fafc; }
+.mini-card strong { display: block; margin-bottom: 6px; color: var(--text); }
+.mini-card span { color: var(--muted); font-size: 14px; }
+.steps { display: grid; gap: 14px; margin-top: 18px; }
+.step { display: flex; gap: 18px; padding: 20px; box-shadow: none; background: #fff; }
+.step-number { width: 48px; height: 48px; flex: 0 0 48px; display: grid; place-items: center; border-radius: 14px; background: var(--soft); color: var(--primary); font-weight: 900; }
+.flow-step { display: grid; grid-template-columns: 160px minmax(0,1fr); gap: 16px; padding: 18px; border: 1px solid var(--border); border-radius: 16px; background: #fff; }
+.flow-step strong { color: var(--text); }
+.flow-step span { display: block; color: var(--muted); font-size: 14px; }
+.diagram { margin-top: 18px; padding: 16px; background: #fff; overflow-x: auto; }
+.diagram img { display: block; width: 100%; min-width: 640px; border-radius: 18px; border: 1px solid var(--border); }
+.caption { margin-top: 10px; font-size: 14px; text-align: center; color: var(--muted); }
+pre { overflow-x: auto; margin: 18px 0 0; padding: 20px; border-radius: 16px; background: #0f172a; color: #e5e7eb; font-size: 14px; line-height: 1.7; }
+code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.code-card { margin-top: 18px; padding: 18px; border: 1px solid var(--border); border-radius: 16px; background: #fff; }
+.code-meta { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.code-meta span { padding: 4px 9px; border-radius: 999px; background: #f1f5f9; color: #475569; font-size: 12px; font-weight: 800; }
+table { width: 100%; border-collapse: collapse; margin-top: 16px; font-size: 14px; }
+th, td { padding: 12px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+th { background: #f8fafc; color: #334155; }
+.note { border-left: 4px solid var(--primary); padding: 14px 16px; background: #eff6ff; border-radius: 12px; color: #334155; }
+.risk { border-left-color: var(--amber); background: #fffbeb; }
+@media (max-width: 860px) {
+  .grid, .guide-grid { grid-template-columns: 1fr; }
+  .flow-step { grid-template-columns: 1fr; }
+}
+@media (max-width: 560px) {
+  .container { padding: 28px 16px 52px; }
+  .hero, .card, .toc, .guide-card { padding: 22px; border-radius: 18px; }
+  .step { flex-direction: column; }
+}
+
+</style></head><body><main class="container"><a class="back" href="../guide.html">返回教程目录</a><section class="hero"><span class="eyebrow">链路深挖 Subagent</span><h1>评审、返工、验收链路</h1><p>执行成功不等于任务完成。这个项目把 executor 和 reviewer 分开，并把用户验收作为最终门禁。理解这条链路后，才能看懂为什么任务会在 execution_complete、reviewing、reworking、awaiting_user_acceptance、done、blocked 之间切换。</p><div class="meta"><span class="tag">Review</span><span class="tag">Acceptance</span></div></section><nav class="toc"><strong>本页目录</strong><div class="toc-links"><a href="#flow">详细链路</a><a href="#diagram">状态图</a><a href="#code">代码摘录</a><a href="#branches">分支</a><a href="#concept-notes">概念</a></div></nav><section id="flow" class="card"><h2>详细链路说明</h2><div class="steps"><div class="step"><div class="step-number">1</div><div><h3>前端渲染可用操作</h3><p>`projects.js` 根据 task.executionState 显示 Start review、accept、rework、block 等按钮。输入是当前任务状态，输出是用户动作。</p></div></div><div class="step"><div class="step-number">2</div><div><h3>`api.projectExecutionReviewStart`</h3><p>输入 taskId 和 attemptId，POST 到 `/project-execution/review/start`，把执行证据交给后端 review 入口。</p></div></div><div class="step"><div class="step-number">3</div><div><h3>`_handle_project_execution_review_start`</h3><p>校验任务必须处于 execution_complete，attempt 必须有 evidence，并检查 reviewer 和 executor 独立性，输出 reviewId 和 activeAttemptId。</p></div></div><div class="step"><div class="step-number">4</div><div><h3>`_project_execution_run_review`</h3><p>构造 review prompt，调用 reviewer provider，解析 JSON status，写入 reviewResult 和 reviewHistory。</p></div></div><div class="step"><div class="step-number">5</div><div><h3>review pass 分支</h3><p>如果 requiresUserAcceptance 为 true，进入 awaiting_user_acceptance；否则 `_project_execution_mark_done` 并可能继续下一任务。</p></div></div><div class="step"><div class="step-number">6</div><div><h3>needs_more_work 分支</h3><p>review feedback 触发 reworkCount 检查，未超过上限时创建 rework attempt 并重新进入 `_project_execution_run_attempt`。</p></div></div><div class="step"><div class="step-number">7</div><div><h3>用户验收动作</h3><p>前端 accept 需要确认，reject_and_rework 或 mark_blocked 需要 feedback，然后 POST `/project-execution/accept`。</p></div></div><div class="step"><div class="step-number">8</div><div><h3>`_handle_project_execution_acceptance`</h3><p>accept 标记 done；reject 创建返工 attempt；mark_blocked 写入 blocked。输出最终状态或下一轮执行。</p></div></div></div></section><section id="diagram" class="card"><h2>状态机图</h2><div class="diagram"><img src="../asset/chain-project-execution-review.svg" alt="评审验收状态机"><p class="caption">重点看两条返工入口：reviewer 返回 needs_more_work，以及用户拒绝验收。</p></div></section><section id="code" class="card"><h2>关键代码摘录</h2><div class="code-card"><h3>review 状态机</h3><div class="code-meta"><span>app/server.py</span><span>_project_execution_run_review</span></div><pre><code>if review["status"] == "pass":
+    ...
+elif review["status"] == "needs_more_work":
+    ...
+else:
+    ...</code></pre><p>reviewer 输出被归一化为有限状态，随后决定等待验收、自动完成、返工或阻塞。</p></div><div class="code-card"><h3>用户验收安全门</h3><div class="code-meta"><span>app/server.py</span><span>_handle_project_execution_acceptance</span></div><pre><code>if action == "accept":
+    _project_execution_mark_done(...)
+if action == "reject_and_rework":
+    ...
+if action == "mark_blocked":
+    ...</code></pre><p>用户验收只允许在合适状态下推进，是 review pass/skipped 后的最终门禁。</p></div></section><section id="branches" class="card"><h2>分支、失败路径和数据变化</h2><table><tr><th>类型</th><th>说明</th></tr><tr><td>分支</td><td>review pass、needs_more_work、blocked、requiresUserAcceptance、reject_and_rework、mark_blocked、reworkCount >= 3。</td></tr><tr><td>失败路径</td><td>execution_complete 前启动 review 返回 409；attempt stale 返回 409；缺 evidence 返回 409；非 accept 操作缺 feedback 返回 400；checklist 未完成会阻止进入完成状态。</td></tr><tr><td>数据流</td><td>evidence -> review prompt -> reviewer JSON -> reviewResult -> acceptance dialog -> acceptanceHistory -> done/rework/block。</td></tr></table></section><section id="concept-notes" class="card"><h2>关键概念补充</h2><h3 id="concept-review-result">1. reviewResult</h3><p><strong>出现位置：</strong>`_project_execution_run_review`。它是 reviewer 对 evidence 的结构化判断，不是普通评论。</p><h3 id="concept-acceptance-history">2. acceptanceHistory</h3><p><strong>出现位置：</strong>`_handle_project_execution_acceptance`。它记录用户最终接受、拒绝返工或标记阻塞的决策历史。</p></section></main></body></html>

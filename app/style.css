@@ -66,6 +66,23 @@
     margin-bottom: 4px;
 }
 .mm-input:focus { border-color: #ffd700; outline: none; }
+.mm-weather-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 82px;
+    gap: 8px;
+    align-items: start;
+}
+.mm-weather-row .mm-input {
+    min-width: 0;
+}
+.mm-weather-actions {
+    margin-top: 2px;
+}
+.mm-weather-test-btn {
+    width: 100%;
+    margin: 0 0 4px;
+    white-space: nowrap;
+}
 .mm-btn {
     width: 100%;
     padding: 6px 10px;
@@ -83,6 +100,11 @@
 .mm-btn-primary:hover { background: #2e7d32; color: #a5d6a7; }
 .mm-btn-danger { background: #4a1515; border-color: #f44336; color: #ef9a9a; }
 .mm-btn-danger:hover { background: #6a1b1b; color: #ffcdd2; }
+@media (max-width: 420px) {
+    .mm-weather-row {
+        grid-template-columns: minmax(0, 1fr) 72px;
+    }
+}
 .mm-warning {
     font-size: 9px;
     color: #f44336;
@@ -1037,6 +1059,9 @@ button:active { transform: translateY(3px); box-shadow: none; }
     padding: 10px;
     overflow-y: auto;
 }
+.modal.modal-above-projects {
+    z-index: 10020;
+}
 .hidden { display: none; }
 .modal-content {
     background: var(--ui-surface);
@@ -1124,115 +1149,124 @@ button:active { transform: translateY(3px); box-shadow: none; }
 .modal-controls button { font-size: 7px; padding: 6px 8px; }
 .modal-controls-sep { color: #555; margin: 0 4px; font-size: 12px; }
 
-.agent-create-modal {
-    width: 460px;
+.chat-confirm-modal {
+    width: 440px;
 }
-.agent-create-form {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    padding-top: 14px;
+.chat-confirm-body {
+    margin-top: 14px;
+    color: var(--ui-text);
+    font-size: 11px;
+    line-height: 1.75;
+    word-break: break-word;
 }
-.agent-create-form label {
-    display: flex;
-    flex-direction: column;
-    gap: 5px;
-    color: var(--gold);
+.chat-confirm-actions {
+    justify-content: flex-end;
+}
+.chat-confirm-actions button {
     font-size: 9px;
-    text-transform: uppercase;
+    padding: 7px 12px;
 }
-.agent-create-form input,
-.agent-create-form select,
-.agent-create-form textarea {
+
+.agent-create-modal { max-width: 560px; }
+.agent-create-form {
+    display: grid;
+    gap: 10px;
+    margin-top: 14px;
+}
+.agent-create-label {
+    color: var(--gold);
+    font-size: 8px;
+}
+.agent-platform-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+    gap: 8px;
+}
+.agent-platform-grid-loading {
+    display: block;
+    color: var(--ui-text-dim);
+    font-size: 9px;
+    padding: 12px;
+    border: 1px dashed var(--ui-border);
+    border-radius: 6px;
+    background: rgba(0,0,0,0.22);
+}
+.agent-platform-card {
+    min-height: 58px;
+    padding: 10px;
+    border: 1px solid var(--ui-border);
+    border-radius: 6px;
+    background: rgba(0,0,0,0.28);
+    color: var(--ui-text);
+    text-align: left;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 5px;
+}
+.agent-platform-card:hover,
+.agent-platform-card.selected {
+    border-color: var(--gold);
+    background: rgba(255, 215, 0, 0.1);
+    box-shadow: 0 0 0 1px rgba(255, 215, 0, 0.18);
+}
+.agent-platform-name {
+    font-size: 9px;
+    color: var(--gold);
+    overflow-wrap: anywhere;
+}
+.agent-platform-id {
+    font-size: 7px;
+    color: var(--ui-text-dim);
+    overflow-wrap: anywhere;
+}
+.agent-create-field {
+    display: grid;
+    gap: 5px;
+    font-size: 8px;
+    color: var(--ui-text-dim);
+}
+.agent-create-field input {
     width: 100%;
     box-sizing: border-box;
-    background: #0b1020;
-    border: 1px solid #344664;
-    color: #e8e8f0;
+    background: rgba(0,0,0,0.45);
+    color: var(--ui-text);
+    border: 1px solid var(--ui-border);
     border-radius: 4px;
-    padding: 9px 10px;
+    padding: 8px;
     font-family: inherit;
-    font-size: 11px;
-    line-height: 1.4;
-    outline: none;
-}
-.agent-create-form input:focus,
-.agent-create-form select:focus,
-.agent-create-form textarea:focus {
-    border-color: var(--gold);
-    box-shadow: 0 0 0 2px rgba(255, 215, 0, 0.12);
-}
-.agent-create-form textarea {
-    min-height: 120px;
-    resize: vertical;
-}
-.agent-create-row {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) 84px;
-    gap: 10px;
-}
-.agent-create-platform-note {
-    min-height: 18px;
-    color: #9da8bd;
-    font-size: 11px;
-    line-height: 1.4;
-    margin-top: -4px;
-}
-.agent-create-codex-options {
-    display: grid;
-    gap: 8px;
-    padding: 10px;
-    border: 1px solid #323653;
-    border-radius: 6px;
-    background: rgba(18, 24, 39, 0.8);
-}
-.agent-create-codex-options[hidden],
-.agent-create-codex-custom[hidden] {
-    display: none;
-}
-.agent-create-codex-note {
-    min-height: 16px;
-    color: #9da8bd;
-    font-size: 11px;
-    line-height: 1.4;
-}
-.agent-create-error {
-    min-height: 16px;
-    color: #ff8a80;
-    font-size: 11px;
-}
-.agent-create-actions {
-    display: flex;
-    justify-content: flex-end;
-    gap: 8px;
-    flex-wrap: wrap;
-}
-.agent-create-actions button {
-    border: 1px solid #3a3a5e;
-    background: #1f2a44;
-    color: #e8e8f0;
-    border-radius: 4px;
-    padding: 8px 12px;
     font-size: 10px;
 }
-.agent-create-actions button[type="submit"] {
-    border-color: rgba(255, 215, 0, 0.7);
-    background: #3a3215;
-    color: var(--gold);
-}
-.agent-create-actions button:hover {
+.agent-create-field input:focus {
+    outline: none;
     border-color: var(--gold);
+    box-shadow: 0 0 0 1px rgba(255, 215, 0, 0.22);
 }
-@media (max-width: 520px) {
-    .agent-create-row {
-        grid-template-columns: 1fr;
-    }
-    .agent-create-actions {
-        justify-content: stretch;
-    }
-    .agent-create-actions button {
-        flex: 1;
-    }
+.agent-create-modal .mtg-btn:disabled {
+    opacity: 0.45;
+    cursor: wait;
+}
+.agent-create-emoji-field {
+    max-width: 150px;
+}
+.agent-message-modal {
+    max-width: 460px;
+}
+.agent-message-error {
+    border-color: #ef5350;
+    box-shadow: 0 0 40px rgba(239, 83, 80, 0.16);
+}
+.agent-message-body {
+    margin-top: 14px;
+    padding: 12px;
+    border: 1px solid var(--ui-border);
+    border-radius: 6px;
+    background: rgba(0,0,0,0.28);
+    color: var(--ui-text);
+    font-size: 10px;
+    line-height: 1.65;
+    overflow-wrap: anywhere;
 }
 
 /* --- RESPONSIVE: Sidebar below canvas on narrow screens --- */
@@ -2788,6 +2822,33 @@ button:active { transform: translateY(3px); box-shadow: none; }
 }
 .chat-tool-call.done { border-left-color: #81c784; }
 .chat-tool-call.error { border-left-color: #ef9a9a; border-color: rgba(244,67,54,0.36); }
+.chat-codex-run-status { justify-content: flex-start; }
+.codex-run-status-card {
+    max-width: 56%;
+    width: 360px;
+    border: 1px solid rgba(255,213,79,0.18);
+    border-left: 3px solid #ffd54f;
+    border-radius: 8px;
+    background: rgba(255,255,255,0.055);
+    color: var(--ui-text);
+    padding: 9px 12px;
+    font-size: 12px;
+    animation: hermes-card-in 220ms cubic-bezier(.2,.7,.2,1) both;
+}
+.chat-codex-run-status[data-status="completed"] .codex-run-status-card { border-left-color: #81c784; }
+.chat-codex-run-status[data-status="failed"] .codex-run-status-card { border-left-color: #ef9a9a; border-color: rgba(244,67,54,0.32); }
+.codex-run-status-title {
+    display: block;
+    color: #ffd54f;
+    font-size: 11px;
+    margin-bottom: 5px;
+}
+.chat-codex-run-status[data-status="completed"] .codex-run-status-title { color: #81c784; }
+.chat-codex-run-status[data-status="failed"] .codex-run-status-title { color: #ef9a9a; }
+.codex-run-status-body {
+    color: rgba(255,255,255,0.72);
+    line-height: 1.45;
+}
 .codex-interaction-card {
     border: 1px solid rgba(255, 213, 79, 0.45) !important;
     border-left: 3px solid #ffd54f !important;
@@ -2901,6 +2962,63 @@ button:active { transform: translateY(3px); box-shadow: none; }
     border-radius: 6px;
     padding: 7px;
     font-size: 11px;
+    line-height: 1.35;
+}
+.chat-agent-result-summary {
+    border: 1px solid rgba(129, 199, 132, 0.24);
+    border-left: 3px solid #81c784;
+    border-radius: 7px;
+    background: rgba(129, 199, 132, 0.055);
+    padding: 8px 9px;
+}
+.chat-agent-result-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    color: rgba(255,255,255,0.86);
+    font-size: 12px;
+}
+.chat-agent-result-meta {
+    margin-top: 4px;
+    color: rgba(255,255,255,0.46);
+    font-size: 10px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.chat-agent-result-reply {
+    margin-top: 8px;
+    color: rgba(255,255,255,0.78);
+    font-size: 12px;
+    line-height: 1.45;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+.chat-agent-result-facts {
+    margin-top: 7px;
+    color: rgba(255,213,79,0.78);
+    font-size: 10px;
+}
+.chat-agent-result-raw {
+    margin-top: 8px;
+    color: rgba(255,255,255,0.48);
+    font-size: 10px;
+}
+.chat-agent-result-raw summary {
+    cursor: pointer;
+    user-select: none;
+}
+.chat-agent-result-raw pre {
+    margin: 6px 0 0;
+    max-height: 160px;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    background: rgba(0,0,0,0.24);
+    border-radius: 6px;
+    padding: 7px;
+    font-size: 10px;
     line-height: 1.35;
 }
 
@@ -4212,17 +4330,18 @@ button:active { transform: translateY(3px); box-shadow: none; }
 .mtg-cards::-webkit-scrollbar-thumb { background: var(--ui-border); border-radius: 3px; }
 
 .mtg-card { background: #1a1a2e; border: 1px solid #2a2a4e; border-radius: 8px; padding: 0; overflow: hidden; }
-.mtg-card-header { display: flex; align-items: flex-start; justify-content: space-between; padding: 12px 14px; cursor: pointer; user-select: none; transition: background 0.2s; }
+.mtg-card-header { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: flex-start; gap: 12px; padding: 12px 14px; cursor: pointer; user-select: none; transition: background 0.2s; }
 .mtg-card-header:hover { background: #1e1e36; }
-.mtg-card-title { font-size: 12px; font-weight: bold; color: #eee; }
+.mtg-card-header > div:first-child { min-width: 0; }
+.mtg-card-title { font-size: 12px; font-weight: bold; color: #eee; line-height: 1.35; overflow-wrap: anywhere; }
 .mtg-card-toggle { font-size: 10px; color: #666; margin-right: 6px; transition: transform 0.2s; display: inline-block; }
 .mtg-card-toggle.open { transform: rotate(90deg); }
-.mtg-card-purpose { font-size: 9px; color: #999; margin: 2px 0 0; }
+.mtg-card-purpose { font-size: 9px; color: #999; margin: 2px 0 0; line-height: 1.45; overflow-wrap: anywhere; }
 .mtg-card-body { padding: 0 14px 14px; display: none; }
 .mtg-card-body.open { display: block; }
 .mtg-card-summary { padding: 0 14px 14px; }
-.mtg-card-badges { display: flex; align-items: center; justify-content: flex-end; gap: 6px; flex-wrap: wrap; max-width: 50%; }
-.mtg-badge { display: inline-block; font-size: 8px; padding: 2px 8px; border-radius: 10px; font-weight: bold; }
+.mtg-card-badges { display: flex; align-items: center; justify-content: flex-end; gap: 6px; flex-wrap: wrap; max-width: min(360px, 44vw); min-width: 0; }
+.mtg-badge { display: inline-flex; align-items: center; max-width: 100%; font-size: 8px; line-height: 1.25; padding: 2px 8px; border-radius: 10px; font-weight: bold; white-space: nowrap; }
 .mtg-badge-active { background: #1b4332; color: #52b788; }
 .mtg-badge-completed { background: #1a2744; color: #6c9bcf; }
 .mtg-badge-kind { background: #2a2a4e; color: #aaa; margin-left: 6px; }
@@ -4257,6 +4376,7 @@ button:active { transform: translateY(3px); box-shadow: none; }
 .mtg-response-role { font-size: 8px; color: #666; margin-left: 4px; }
 .mtg-response-text { font-size: 9px; color: #bbb; line-height: 1.5; white-space: pre-wrap; word-break: break-word; max-height: 80px; overflow-y: auto; -webkit-overflow-scrolling: touch; resize: vertical; min-height: 30px; transition: max-height 0.3s; }
 .mtg-response-text.expanded { max-height: none; }
+.mtg-response-text .mtg-structured-turn { white-space: normal; }
 .mtg-response-text::-webkit-scrollbar { width: 4px; }
 .mtg-response-text::-webkit-scrollbar-thumb { background: #2a2a4e; border-radius: 2px; }
 .mtg-response-expand { font-size: 8px; color: var(--gold); cursor: pointer; margin-top: 3px; display: inline-block; }
@@ -4325,7 +4445,7 @@ button:active { transform: translateY(3px); box-shadow: none; }
 .mtg-structured-value { color: #bbb; font-size: 9px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
 .mtg-turn-parse { margin-top: 6px; color: #777; font-size: 8px; }
 
-.mtg-actions-bar { display: flex; gap: 8px; margin-top: 10px; justify-content: flex-end; }
+.mtg-actions-bar { display: flex; gap: 8px; margin-top: 10px; justify-content: flex-end; align-items: center; flex-wrap: wrap; }
 .mtg-btn { font-size: 9px; padding: 5px 12px; border: 1px solid #2a2a4e; background: #12121e; color: #ccc; border-radius: 4px; cursor: pointer; }
 .mtg-btn:hover { background: #1a1a2e; color: #fff; }
 .mtg-btn-end { background: #1b4332; color: #52b788; border-color: #2d6a4f; }
@@ -4335,21 +4455,60 @@ button:active { transform: translateY(3px); box-shadow: none; }
 .mtg-action-drafts { display: grid; gap: 8px; }
 .mtg-action-draft {
     display: grid;
-    gap: 8px;
-    padding: 10px;
+    gap: 5px;
+    padding: 8px 10px;
     border: 1px solid #2a2a4e;
     border-radius: 6px;
     background: rgba(16, 16, 27, 0.82);
 }
-.mtg-action-draft .mtg-card-header {
-    padding: 0;
-    cursor: default;
+.mtg-action-draft-title {
+    min-width: 0;
+    color: #eee;
+    font-size: 11px;
+    font-weight: bold;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
 }
-.mtg-action-draft .mtg-card-header:hover { background: transparent; }
+.mtg-action-draft-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    flex-wrap: wrap;
+}
+.mtg-action-draft-meta {
+    flex: 1 1 220px;
+    min-width: 0;
+    color: #777;
+    font-size: 8px;
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+}
+.mtg-action-draft-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 6px;
+    flex: 0 1 auto;
+    margin-left: auto;
+    flex-wrap: wrap;
+}
+.mtg-action-draft-actions .mtg-btn {
+    padding: 4px 9px;
+}
 .mtg-action-form {
     display: grid;
-    gap: 9px;
-    margin-top: 2px;
+    grid-template-columns: minmax(180px, 1fr) minmax(220px, 1.25fr) minmax(160px, 0.8fr) auto;
+    align-items: end;
+    gap: 8px;
+    margin-top: 6px;
+    padding-top: 7px;
+    border-top: 1px solid rgba(42, 42, 78, 0.7);
+}
+.mtg-action-form.hidden {
+    display: none;
+}
+.mtg-action-form .mtg-inline-error {
+    grid-column: 1 / -1;
 }
 .mtg-field {
     display: grid;
@@ -4365,17 +4524,28 @@ button:active { transform: translateY(3px); box-shadow: none; }
     box-sizing: border-box;
 }
 .mtg-action-form .mtg-textarea {
-    min-height: 56px;
+    min-height: 34px;
+    height: 34px;
     line-height: 1.45;
 }
 .mtg-action-form .mtg-actions-bar {
     flex-wrap: wrap;
     gap: 7px;
-    margin-top: 2px;
+    margin-top: 0;
+    justify-content: flex-end;
 }
 .mtg-action-form .mtg-btn {
     min-height: 28px;
     white-space: nowrap;
+}
+
+@media (max-width: 900px) {
+    .mtg-action-form {
+        grid-template-columns: 1fr;
+    }
+    .mtg-action-form .mtg-actions-bar {
+        justify-content: flex-start;
+    }
 }
 
 .mtg-form { display: flex; flex-direction: column; gap: 8px; }

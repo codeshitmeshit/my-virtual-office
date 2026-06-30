@@ -1,0 +1,39 @@
+{
+  "name": "weather-glass-furniture",
+  "stage": "implementation_done",
+  "waiting_for_user": false,
+  "updated_at": "2026-06-28T18:39:04+08:00",
+  "confirmed": {
+    "checklist": true,
+    "tested": true,
+    "done": false
+  },
+  "confirmations": {
+    "checklist": {
+      "confirmed_at": "2026-06-28T02:02:15+08:00",
+      "summary": "User replied \"pass\" to confirm the checklist."
+    },
+    "tested": {
+      "confirmed_at": "2026-06-28T18:39:04+08:00",
+      "summary": "User accepted the implemented floorWindow / 落地窗 feature."
+    },
+    "done": null
+  },
+  "files": {
+    "requirement": "requirement.md",
+    "review": "review.md",
+    "checklist": "checklist.md",
+    "todolist": "todolist.md"
+  },
+  "notes": [
+    "Requirement archived from product clarification conversation.",
+    "Checklist generated and waiting for user confirmation before todolist creation.",
+    "Checklist confirmed by user reply \"pass\".",
+    "Todolist created from confirmed checklist.",
+    "Implementation completed for app/game.js, en/zh locale labels, and focused Node regression coverage. User confirmation is still required before marking tested.",
+    "Implementation adjusted per user feedback: the new functional furniture is named floorWindow / 落地窗 and renders as one frameless glass pane rather than a framed weather window.",
+    "Implementation adjusted per user feedback: floorWindow is now 2x2 tiles (80x80), and horizontally adjacent floorWindow items render as one connected scene.",
+    "Implementation adjusted per user feedback: floorWindow hover now shows a lightweight tooltip with configured city, weather condition, and temperature.",
+    "User accepted the requirement on 2026-06-28T18:39:04+08:00; tested is now confirmed."
+  ]
+}

@@ -23,6 +23,31 @@
   "office_section": "🏢 Office",
   "office_name": "Office Name",
   "weather_location": "Weather Location",
+  "weather_city_placeholder": "City, e.g. Beijing",
+  "weather_region_placeholder": "Region, optional",
+  "test_weather": "🔍 Test",
+  "testing_weather": "Testing weather...",
+  "weather_test_ok": "Weather location works",
+  "weather_test_failed": "Weather test failed",
+  "weather_test_location_required": "Enter a weather location first",
+  "weather_location_unconfigured": "Not configured",
+  "weather_label": "Weather",
+  "weather_condition_clear": "Clear",
+  "weather_condition_sunny": "Sunny",
+  "weather_condition_partly_cloudy": "Partly cloudy",
+  "weather_condition_cloudy": "Cloudy",
+  "weather_condition_overcast": "Overcast",
+  "weather_condition_foggy": "Foggy",
+  "weather_condition_drizzle": "Drizzle",
+  "weather_condition_light_rain": "Light rain",
+  "weather_condition_rain": "Rain",
+  "weather_condition_heavy_rain": "Heavy rain",
+  "weather_condition_thunderstorm": "Thunderstorm",
+  "weather_condition_light_snow": "Light snow",
+  "weather_condition_snow": "Snow",
+  "weather_condition_snow_storm": "Snow storm",
+  "weather_condition_sleet": "Sleet",
+  "weather_condition_unknown": "Unknown",
   "display_section": "🖥️ Display",
   "show_chat_bubbles": "Show chat bubbles",
   "internal_bubble_timeout": "Internal bubble auto-collapse (seconds)",
@@ -461,6 +486,10 @@
   "chat_hermes_error": "Hermes error",
   "chat_hermes_ready": "Hermes ready",
   "chat_hermes_send_failed": "Hermes send failed",
+  "claude_code_error": "Claude Code error",
+  "claude_code_ready": "Claude Code ready",
+  "claude_code_send_failed": "Claude Code send failed",
+  "claude_code_working": "Claude Code working...",
   "chat_hermes_stream_active": "Hermes stream active...",
   "chat_hermes_is_running": "is running Hermes",
   "chat_hermes_queued": "queued message",
@@ -470,6 +499,16 @@
   "chat_hermes_approval_required": "Hermes approval required",
   "chat_hermes_needs_approval": "Hermes needs user approval before it can continue.",
   "chat_approval_gated_command": "Approval-gated Hermes command",
+  "chat_codex_approval_required": "Codex approval required",
+  "chat_codex_needs_approval": "Codex needs user approval before it can continue.",
+  "chat_codex_approval_gated_action": "Approval-gated Codex action",
+  "chat_codex_approval_allow_hint": "Approve this Codex action for the active turn",
+  "chat_codex_approval_cancel_hint": "Cancel this Codex approval request",
+  "chat_cancelling_approval": "Cancelling approval...",
+  "chat_cancelled_status": "cancelled",
+  "chat_codex_approval_cancelled": "Codex approval cancelled.",
+  "chat_codex_approval_failed": "Codex approval failed",
+  "chat_codex_error": "Codex error",
   "chat_allow_once": "Allow once",
   "chat_deny": "Deny",
   "chat_approving_once": "Approving once...",
@@ -528,7 +567,6 @@
   "agents_title": "AGENTS",
   "close_btn": "Close",
   "new_agent": "New Agent",
-  "save": "Save",
   "edit_label": "Edit label",
   "assign_agent": "Assign agent to this desk",
   "assigned_to": "Assigned to",
@@ -536,6 +574,15 @@
   "branch_label": "Branch",
   "window_settings": "Window settings (weather/sun)",
   "weather_window_settings": "Weather Window Settings",
+  "floor_window_settings": "Floor Window Settings",
+  "weather_effects_label": "Show Weather Effects",
+  "weather_effects_desc": "Rain, snow, clouds, fog animations on the glass",
+  "sun_moon_label": "Show Sun / Moon",
+  "sun_moon_desc": "Animated sun during the day, crescent moon at night",
+  "weather_effects_on": "Weather effects ON",
+  "weather_effects_off": "Weather effects OFF",
+  "sun_moon_on": "Sun/Moon ON",
+  "sun_moon_off": "Sun/Moon OFF",
   "weather_window_label": "Weather Window",
   "change_couch_color": "Change couch color",
   "rotate_90": "Rotate 90",
@@ -752,6 +799,27 @@
   "proj_save": "Save",
   "proj_checklist": "Checklist",
   "proj_add_checklist_item": "Add checklist item…",
+  "proj_meeting_action_items": "Meeting action items",
+  "proj_meeting_action_status_pending": "Pending",
+  "proj_meeting_action_status_completed": "Completed",
+  "proj_meeting_action_status_linked": "Added to source task",
+  "proj_meeting_action_owner": "Owner",
+  "proj_meeting_action_source": "Meeting",
+  "proj_meeting_action_linked_task": "Source task",
+  "proj_meeting_records": "Meeting records",
+  "proj_meeting_record_kind_decision": "Decision",
+  "proj_meeting_record_kind_risk": "Risk",
+  "proj_meeting_record_kind_note": "Note",
+  "proj_meeting_record_status_approved": "Approved",
+  "proj_meeting_record_status_no_consensus": "No consensus",
+  "proj_meeting_record_status_rejected": "Rejected",
+  "proj_meeting_record_status_needs_user_decision": "Needs user decision",
+  "proj_meeting_record_status_unknown": "Meeting",
+  "proj_meeting_record_no_summary": "No meeting summary",
+  "proj_meeting_record_risks": "Risks:",
+  "proj_meeting_record_actions": "Action items:",
+  "proj_meeting_record_meeting": "Meeting",
+  "proj_meeting_record_request": "Request",
   "proj_comments": "Comments",
   "proj_no_comments": "No comments yet",
   "proj_comments_expand": "Show all ({{count}} more)",
@@ -917,10 +985,37 @@
   "proj_exec_state_awaiting_meeting_resolution": "Awaiting meeting resolution",
   "proj_exec_state_blocked": "Blocked",
   "proj_exec_state_done": "Done",
+  "proj_exec_panel_title": "Project Execution",
+  "proj_exec_executor_agent": "Executor agent",
+  "proj_exec_reviewer": "Reviewer",
+  "proj_exec_start_task": "Start this task",
+  "proj_exec_start_review": "Start review",
+  "proj_exec_rerun": "Run again",
+  "proj_exec_accept": "Accept",
+  "proj_exec_rework_skipped": "Return for rework",
+  "proj_exec_rework_rejected": "Reject for rework",
+  "proj_exec_mark_blocked": "Mark blocked",
+  "proj_exec_requires_user_acceptance": "Require user acceptance",
+  "proj_exec_requires_user_acceptance_hint": "When disabled, a passed review completes the task directly and continuous mode moves to the next task.",
+  "proj_exec_allow_reviewerless": "Allow skipping independent review when no reviewer is configured",
+  "proj_exec_allow_reviewerless_hint": "When enabled, tasks without a configured reviewer run without the skip-review confirmation.",
+  "proj_exec_user_acceptance_required_badge": "User acceptance required",
+  "proj_exec_user_acceptance_not_required_badge": "No user acceptance",
+  "proj_exec_summary_title": "Execution summary",
+  "proj_exec_changed_files": "Changed files",
+  "proj_exec_test_results": "Test results",
+  "proj_exec_duration": "Duration",
+  "proj_exec_evidence_pending": "Execution evidence will appear after the task finishes. Completed execution requires independent review and user acceptance.",
+  "proj_exec_rework_feedback": "Rework feedback",
+  "proj_exec_review_status_pass": "Passed",
+  "proj_exec_review_status_skipped": "Skipped",
+  "proj_exec_review_status_needs_more_work": "Needs more work",
+  "proj_exec_review_status_blocked": "Blocked",
   "proj_meeting_blocker_title": "Awaiting meeting resolution",
   "proj_meeting_blocker_body": "This task has an issue that must be aligned in a meeting. Project Execution will not continue this task until the meeting reaches explicit consensus.",
   "proj_meeting_blocker_rejected_title": "Meeting request rejected, waiting for user action",
   "proj_meeting_blocker_rejected_body": "The task will not continue automatically after a meeting request is rejected. Choose continue execution, mark blocked, or request a new meeting.",
+  "proj_meeting_blocker_view": "View meeting",
   "proj_meeting_blocker_continue": "Continue execution",
   "proj_meeting_blocker_mark_blocked": "Mark blocked",
   "proj_meeting_blocker_reopen": "Request new meeting",
@@ -935,6 +1030,8 @@
   "proj_meeting_blocker_continue_failed": "Meeting wait was cleared, but task start failed",
   "proj_meeting_blocker_updated": "Meeting wait state updated",
   "proj_exec_last_error_title": "Task start failed",
+  "proj_exec_error_previous_not_resumable": "The previous execution could not be resumed after the service restarted.",
+  "proj_exec_error_checklist_incomplete": "The acceptance checklist is incomplete. Continue working on the unfinished checklist items before marking the task done.",
   "proj_no_active_projects": "No active projects",
   "proj_template_choose": "Choose a template to create a new project, or save your current project as a template.",
   "proj_use_template": "Use Template",
@@ -1275,6 +1372,7 @@
   "new_session_confirm": "Start a new session for {{agent}}? This clears the conversation history.",
   "new_codex_session": "New Codex session started",
   "new_hermes_session": "New Hermes session started",
+  "new_claude_code_session": "New Claude Code session started",
   "compress_context_confirm": "Compress the current Codex context? Visible chat history will be kept.",
   "compressing_codex_context": "Compressing Codex context...",
   "codex_compression_failed": "Codex compression failed",
@@ -1302,7 +1400,6 @@
   "saving_testing": "Saving and testing...",
   "unexpected_response": "Unexpected response",
   "hermes_disabled": "Hermes auto-detect is disabled.",
-  "testing_hermes": "Saving and testing Hermes...",
   "hermes_connected_profiles": "✅ Hermes connected — found {{count}} profiles",
   "hermes_not_reachable": "Hermes not reachable",
   "enter_cdp_url": "Please enter a CDP URL",
@@ -1326,7 +1423,6 @@
   "back_office_short": "← Office",
   "website_title": "Your Virtual Office — A Visual Workspace for AI Agents",
   "preview_chat_message": "Moe: Mike, check the inbox for the SR 985 submittal...",
-  "hermes_test_failed": "Hermes test failed",
   "enter_cdp_first": "Enter a CDP URL first",
   "cdp_connected_tabs": "✅ CDP connected! {{count}} tabs open",
   "cdp_reachable": "✅ CDP reachable",
@@ -1355,6 +1451,7 @@
   "emoji_prompt": "Emoji:",
   "failed_create_agent": "Failed to create agent",
   "error_create_agent": "Error creating agent",
+  "agent_error_main_reserved": "main is a reserved system name. Choose a different agent name.",
   "delete_agent_confirm": "Delete agent \"{{name}}\" from {{provider}}? Workspace files, memory, and session history will be permanently removed.",
   "failed_delete_agent": "Failed to delete agent",
   "error_delete_agent": "Error deleting agent",
@@ -1446,6 +1543,7 @@
   ,"furniture_meeting_table": "Meeting Table"
   ,"furniture_window": "Window"
   ,"furniture_weather_window": "Weather Window"
+  ,"furniture_floor_window": "Floor Window"
   ,"furniture_clock": "Clock"
   ,"furniture_floor_lamp": "Floor Lamp"
   ,"furniture_custom_text": "Custom Text"
@@ -1557,6 +1655,8 @@
   ,"gateway_token_failed": "Gateway token authentication failed"
   ,"gateway_agents_connected": "{{count}} agents connected"
   ,"agent_platform_prompt": "Agent platform:"
+  ,"agent_create_title": "New Agent"
+  ,"agent_create_submit": "Create Agent"
   ,"creating_agent_platform": "Creating agent in {{platform}}..."
   ,"agent_created_platform": "Agent \"{{name}}\" created in {{platform}}."
   ,"agent_deleted": "Agent \"{{name}}\" deleted"
@@ -1663,20 +1763,98 @@
   ,"meeting_project": "Project"
   ,"meeting_project_none": "No project"
   ,"meeting_action_drafts": "Action item drafts"
-  ,"meeting_action_drafts_hint": "Confirming creates a project task. Drafts do not execute automatically."
+  ,"meeting_action_drafts_hint": "Confirming adds the item to the source task. Drafts do not execute automatically."
   ,"meeting_action_untitled": "Untitled action item"
   ,"meeting_action_status_draft": "Draft"
-  ,"meeting_action_status_confirmed": "Task created"
+  ,"meeting_action_status_confirmed": "Added to source task"
   ,"meeting_action_status_rejected": "Rejected"
   ,"meeting_action_status_kept": "Kept only"
+  ,"meeting_action_edit": "Edit"
   ,"meeting_action_owner": "Owner"
   ,"meeting_action_title": "Task title"
   ,"meeting_action_description": "Description"
   ,"meeting_action_save_draft": "Save draft"
-  ,"meeting_action_confirm_task": "Create task"
+  ,"meeting_action_confirm_task": "Add to source task"
   ,"meeting_action_keep": "Keep only"
   ,"meeting_action_reject": "Reject"
-  ,"meeting_action_open_task": "Open task"
-  ,"meeting_action_task_created": "Task created"
+  ,"meeting_action_open_task": "Open source task"
+  ,"meeting_action_task_created": "Added to source task"
   ,"meeting_action_rejected_by_user": "Rejected by user"
+  ,"use_hermes_native_api": "Use Hermes native API"
+  ,"hermes_api_url": "Hermes API URL"
+  ,"hermes_api_key": "Hermes API Key"
+  ,"leave_blank_keep_key": "Leave blank to keep existing key"
+  ,"native_agent_providers": "🤖 Native Agent Providers"
+  ,"enable_codex": "Enable Codex"
+  ,"codex_workspace": "Codex Workspace"
+  ,"codex_agent_root": "Codex Agent Root"
+  ,"codex_main_workspace": "Codex Main Workspace"
+  ,"codex_model": "Codex Model"
+  ,"codex_bridge_url": "Codex Bridge URL"
+  ,"optional_app_server_bridge_url": "Optional app-server bridge URL"
+  ,"show_codex_main_agent": "Show Codex Main agent"
+  ,"discover_native_codex_agents": "Discover native Codex agents"
+  ,"test_codex": "🔍 Test Codex"
+  ,"enable_claude_code": "Enable Claude Code"
+  ,"claude_code_home": "Claude Code Home"
+  ,"claude_code_cli": "Claude Code CLI"
+  ,"claude_code_workspace": "Claude Code Workspace"
+  ,"claude_code_agent_root": "Claude Code Agent Root"
+  ,"claude_code_main_workspace": "Claude Code Main Workspace"
+  ,"claude_code_model": "Claude Code Model"
+  ,"show_claude_code_main_agent": "Show Claude Code Main agent"
+  ,"discover_native_claude_code_agents": "Discover native Claude Code agents"
+  ,"register_new_standard_agents_natively": "Register new standard agents natively"
+  ,"test_claude_code": "🔍 Test Claude Code"
+  ,"native_status_available": "available"
+  ,"native_status_configured_not_detected": "configured, not detected"
+  ,"native_status_disabled": "disabled"
+  ,"native_status_not_detected": "not detected"
+  ,"native_status_unavailable": "unavailable"
+  ,"native_model": "model"
+  ,"native_workspace": "workspace"
+  ,"native_workspace_root": "workspace root"
+  ,"native_main_workspace": "main workspace"
+  ,"native_api": "native API"
+  ,"native_configure_runtime_here": "Configure this runtime here or from the office settings menu."
+  ,"enable_hermes_agents": "Enable Hermes agents"
+  ,"native_home": "Home"
+  ,"native_cli": "CLI"
+  ,"native_api_url": "API URL"
+  ,"native_api_key": "API Key"
+  ,"save": "Save"
+  ,"test": "Test"
+  ,"enable_codex_agents": "Enable Codex agents"
+  ,"register_new_standard_agents_in_native_codex": "Register new standard agents in native Codex"
+  ,"prefer_app_server_protocol": "Prefer app-server protocol"
+  ,"native_agent_root": "Agent Root"
+  ,"native_main": "Main"
+  ,"optional": "optional"
+  ,"native_sandbox": "Sandbox"
+  ,"native_approval": "Approval"
+  ,"enable_claude_code_agents": "Enable Claude Code agents"
+  ,"discover_native_claude_code_subagents": "Discover native Claude Code subagents"
+  ,"register_new_standard_agents_in_native_claude_code": "Register new standard agents in native Claude Code"
+  ,"native_config": "Config"
+  ,"native_mode": "Mode"
+  ,"native_setup_guide": "Native Setup Guide"
+  ,"native_setup_guide_desc": "OpenClaw cloud providers use auth profiles and model provider entries. Hermes profiles use CLI profile config plus optional native API. Codex agents use <code>$CODEX_HOME/agents/*.toml</code>. Claude Code subagents use <code>$CLAUDE_CONFIG_DIR/agents/*.md</code>."
+  ,"native_agents_tab": "🤖 Native Agents"
+  ,"loading_native_agent_runtimes": "Loading native agent runtimes..."
+  ,"hermes_setup_saved": "Hermes setup saved"
+  ,"testing_hermes": "Testing Hermes..."
+  ,"hermes_connected": "Hermes connected"
+  ,"hermes_test_failed": "Hermes test failed"
+  ,"codex_setup_saved": "Codex setup saved"
+  ,"testing_codex": "Testing Codex..."
+  ,"codex_connected": "Codex connected"
+  ,"claude_code_setup_saved": "Claude Code setup saved"
+  ,"testing_claude_code": "Testing Claude Code..."
+  ,"claude_code_connected": "Claude Code connected"
+  ,"agent_singular": "agent"
+  ,"agent_plural": "agents"
+  ,"claude_code_stream_active": "Claude Code stream active..."
+  ,"claude_code_stream_failed": "Claude Code stream failed"
+  ,"claude_code_run_failed": "Claude Code run failed"
+  ,"claude_code_stream_disconnected": "Claude Code event stream disconnected"
 }

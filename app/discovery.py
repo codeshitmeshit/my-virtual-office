@@ -16,6 +16,7 @@ from providers.codex import CodexProvider
 from providers.claude_code import ClaudeCodeProvider
 from providers.hermes import HermesProvider
 from providers.codex import CodexProvider
+from providers.claude_code import ClaudeCodeProvider
 
 def discover_agents(oc_home):
     """
@@ -107,20 +108,50 @@ def discover_hermes_agents(hermes_home=None, hermes_bin=None, enabled=True):
     return HermesProvider(home_path=hermes_home, binary=hermes_bin, enabled=enabled).discover_agents()
 
 
-def discover_codex_agents(enabled=False, workspace=None, name=None, agent_id=None, model=None, reply_text=None, bridge_url=None):
+def discover_codex_agents(enabled=False, workspace=None, home_path=None, binary=None, workspace_root=None, main_workspace=None, name=None, agent_id=None, model=None, reply_text=None, bridge_url=None, sandbox="workspace-write", approval_policy="never", include_main=True, include_native_agents=True, register_native_agents=True):
     """Discover the optional local Codex collaborator harness."""
     return CodexProvider(
         enabled=enabled,
         workspace=workspace,
+        home_path=home_path,
+        binary=binary,
+        workspace_root=workspace_root,
+        main_workspace=main_workspace,
         name=name,
         agent_id=agent_id,
         model=model,
         reply_text=reply_text,
         bridge_url=bridge_url,
+        sandbox=sandbox,
+        approval_policy=approval_policy,
+        include_main=include_main,
+        include_native_agents=include_native_agents,
+        register_native_agents=register_native_agents,
     ).discover_agents()
 
 
-def discover_all_agents(oc_home, hermes_home=None, hermes_bin=None, hermes_enabled=True, codex=None):
+def discover_claude_code_agents(enabled=False, workspace=None, home_path=None, binary=None, workspace_root=None, main_workspace=None, name=None, agent_id=None, model=None, reply_text=None, timeout_sec=900, permission_mode="acceptEdits", include_main=True, include_native_agents=True, register_native_agents=True):
+    """Discover the optional local Claude Code collaborator harness."""
+    return ClaudeCodeProvider(
+        enabled=enabled,
+        workspace=workspace,
+        home_path=home_path,
+        binary=binary,
+        name=name,
+        agent_id=agent_id,
+        workspace_root=workspace_root,
+        main_workspace=main_workspace,
+        model=model,
+        reply_text=reply_text,
+        timeout_sec=timeout_sec,
+        permission_mode=permission_mode,
+        include_main=include_main,
+        include_native_agents=include_native_agents,
+        register_native_agents=register_native_agents,
+    ).discover_agents()
+
+
+def discover_all_agents(oc_home, hermes_home=None, hermes_bin=None, hermes_enabled=True, codex=None, claude_code=None):
     """Discover OpenClaw agents plus optional local provider agents."""
     agents = discover_agents(oc_home)
     agents.extend(discover_hermes_agents(hermes_home=hermes_home, hermes_bin=hermes_bin, enabled=hermes_enabled))
@@ -128,11 +159,38 @@ def discover_all_agents(oc_home, hermes_home=None, hermes_bin=None, hermes_enabl
     agents.extend(discover_codex_agents(
         enabled=codex.get("enabled", False),
         workspace=codex.get("workspace"),
+        home_path=codex.get("homePath"),
+        binary=codex.get("binary"),
+        workspace_root=codex.get("workspaceRoot"),
+        main_workspace=codex.get("mainWorkspace"),
         name=codex.get("name"),
         agent_id=codex.get("agentId"),
         model=codex.get("model"),
         reply_text=codex.get("replyText"),
         bridge_url=codex.get("bridgeUrl"),
+        sandbox=codex.get("sandbox", "workspace-write"),
+        approval_policy=codex.get("approvalPolicy", "never"),
+        include_main=codex.get("includeMain", True),
+        include_native_agents=codex.get("includeNativeAgents", True),
+        register_native_agents=codex.get("registerNativeAgents", True),
+    ))
+    claude_code = claude_code or {}
+    agents.extend(discover_claude_code_agents(
+        enabled=claude_code.get("enabled", False),
+        workspace=claude_code.get("workspace"),
+        home_path=claude_code.get("homePath"),
+        binary=claude_code.get("binary"),
+        workspace_root=claude_code.get("workspaceRoot"),
+        main_workspace=claude_code.get("mainWorkspace"),
+        name=claude_code.get("name"),
+        agent_id=claude_code.get("agentId"),
+        model=claude_code.get("model"),
+        reply_text=claude_code.get("replyText"),
+        timeout_sec=claude_code.get("timeoutSec", 900),
+        permission_mode=claude_code.get("permissionMode", "acceptEdits"),
+        include_main=claude_code.get("includeMain", True),
+        include_native_agents=claude_code.get("includeNativeAgents", True),
+        register_native_agents=claude_code.get("registerNativeAgents", True),
     ))
     return agents
 

@@ -1,0 +1,94 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>项目全景与模块边界</title><link rel="stylesheet" href="../asset/reverse-tutorial.css"><style>
+:root {
+  --card: #ffffff;
+  --text: #1f2937;
+  --muted: #64748b;
+  --primary: #2563eb;
+  --soft: #dbeafe;
+  --border: #e2e8f0;
+  --shadow: 0 18px 45px rgba(15, 23, 42, 0.08);
+  --radius: 20px;
+  --green: #15803d;
+  --amber: #b45309;
+  --red: #b91c1c;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+  background: linear-gradient(180deg, #f8fbff 0%, #eef2f7 100%);
+  color: var(--text);
+  line-height: 1.8;
+}
+a { color: inherit; }
+.container { max-width: 1120px; margin: 0 auto; padding: 34px 24px 72px; }
+.hero, .card, .toc, .guide-card, .diagram, .step, .mini-card {
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+.hero { padding: 38px; margin-bottom: 22px; }
+.back {
+  display: inline-flex;
+  margin-bottom: 18px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(255,255,255,0.8);
+  text-decoration: none;
+  font-weight: 700;
+  font-size: 14px;
+}
+.eyebrow { display: inline-flex; margin-bottom: 16px; padding: 6px 12px; border-radius: 999px; background: var(--soft); color: var(--primary); font-size: 13px; font-weight: 800; }
+h1 { margin: 0 0 16px; font-size: clamp(32px, 5vw, 54px); line-height: 1.1; letter-spacing: 0; }
+h2 { margin: 0 0 18px; font-size: 26px; line-height: 1.35; }
+h3 { margin: 0 0 8px; font-size: 19px; line-height: 1.4; }
+p { margin: 0; color: #475569; }
+.hero p { max-width: 850px; font-size: 17px; color: var(--muted); }
+.meta, .toc-links, .tags { display: flex; flex-wrap: wrap; gap: 10px; }
+.meta, .tags { margin-top: 18px; }
+.tag { padding: 5px 11px; border-radius: 999px; background: #f1f5f9; color: #475569; font-size: 12px; font-weight: 800; }
+.toc { padding: 20px 24px; margin: 22px 0; }
+.toc strong { display: block; margin-bottom: 10px; }
+.toc a { padding: 7px 11px; border-radius: 10px; background: #f8fafc; color: #334155; text-decoration: none; font-size: 14px; font-weight: 700; }
+.card { padding: 30px; margin-top: 22px; }
+.prose { display: grid; gap: 14px; margin-top: 16px; }
+.grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-top: 18px; }
+.guide-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin-top: 18px; }
+.guide-card { display: flex; flex-direction: column; justify-content: space-between; min-height: 230px; padding: 24px; text-decoration: none; }
+.guide-card:hover { border-color: rgba(37,99,235,0.42); transform: translateY(-2px); transition: 0.2s ease; }
+.mini-card { box-shadow: none; padding: 18px; background: #f8fafc; }
+.mini-card strong { display: block; margin-bottom: 6px; color: var(--text); }
+.mini-card span { color: var(--muted); font-size: 14px; }
+.steps { display: grid; gap: 14px; margin-top: 18px; }
+.step { display: flex; gap: 18px; padding: 20px; box-shadow: none; background: #fff; }
+.step-number { width: 48px; height: 48px; flex: 0 0 48px; display: grid; place-items: center; border-radius: 14px; background: var(--soft); color: var(--primary); font-weight: 900; }
+.flow-step { display: grid; grid-template-columns: 160px minmax(0,1fr); gap: 16px; padding: 18px; border: 1px solid var(--border); border-radius: 16px; background: #fff; }
+.flow-step strong { color: var(--text); }
+.flow-step span { display: block; color: var(--muted); font-size: 14px; }
+.diagram { margin-top: 18px; padding: 16px; background: #fff; overflow-x: auto; }
+.diagram img { display: block; width: 100%; min-width: 640px; border-radius: 18px; border: 1px solid var(--border); }
+.caption { margin-top: 10px; font-size: 14px; text-align: center; color: var(--muted); }
+pre { overflow-x: auto; margin: 18px 0 0; padding: 20px; border-radius: 16px; background: #0f172a; color: #e5e7eb; font-size: 14px; line-height: 1.7; }
+code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.code-card { margin-top: 18px; padding: 18px; border: 1px solid var(--border); border-radius: 16px; background: #fff; }
+.code-meta { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.code-meta span { padding: 4px 9px; border-radius: 999px; background: #f1f5f9; color: #475569; font-size: 12px; font-weight: 800; }
+table { width: 100%; border-collapse: collapse; margin-top: 16px; font-size: 14px; }
+th, td { padding: 12px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+th { background: #f8fafc; color: #334155; }
+.note { border-left: 4px solid var(--primary); padding: 14px 16px; background: #eff6ff; border-radius: 12px; color: #334155; }
+.risk { border-left-color: var(--amber); background: #fffbeb; }
+@media (max-width: 860px) {
+  .grid, .guide-grid { grid-template-columns: 1fr; }
+  .flow-step { grid-template-columns: 1fr; }
+}
+@media (max-width: 560px) {
+  .container { padding: 28px 16px 52px; }
+  .hero, .card, .toc, .guide-card { padding: 22px; border-radius: 18px; }
+  .step { flex-direction: column; }
+}
+
+</style></head><body><main class="container"><a class="back" href="../guide.html">返回教程目录</a><section class="hero"><span class="eyebrow">结构分析 Subagent</span><h1>项目全景与模块边界</h1><p>读这个项目时，先不要从像素画布开始。当前仓库的真实边界是：`start.sh` 本地启动、`app/server.py` 单体后端、`app/*.js` 静态前端、`app/providers/*` provider adapter、`app/project_store.py` 本地项目存储、`kasm-browser-config/` 浏览器代理、`tests/` 回归保障。</p><div class="meta"><span class="tag">结构页</span><span class="tag">置信度高</span></div></section><nav class="toc"><strong>本页目录</strong><div class="toc-links"><a href="#map">目录地图</a><a href="#boundaries">模块边界</a><a href="#flow">结构穿透链路</a><a href="#evidence">证据</a><a href="#concept-notes">概念</a></div></nav><section id="map" class="card"><h2>目录地图</h2><div class="grid"><div class="mini-card"><strong>`app/server.py`</strong><span>静态资源、REST、SSE/WS 信息、项目执行、会议、provider 路由的单体汇聚层。</span></div><div class="mini-card"><strong>`app/index.html` + JS</strong><span>无独立构建系统，直接加载 `game.js`、`chat.js`、`projects.js` 等脚本。</span></div><div class="mini-card"><strong>`app/providers/*`</strong><span>把 OpenClaw、Hermes、Codex、Claude Code 包装成统一办公室 Agent。</span></div><div class="mini-card"><strong>`app/project_store.py`</strong><span>项目数据的 Markdown/frontmatter 持久化层，兼容旧 `projects.json`。</span></div><div class="mini-card"><strong>`kasm-browser-config/`</strong><span>代理浏览器容器和 CDP/VNC 边界，不是主应用推荐启动路径。</span></div><div class="mini-card"><strong>`docs/` 与 `tests/`</strong><span>设计说明、provider/项目执行/会议/Chrome UI 回归测试。</span></div></div><div class="diagram"><img src="../asset/vo-2026-structure.svg" alt="结构概览图"><p class="caption">结构图把仓库分成运行时、状态、外部 provider、浏览器代理和质量保障几类边界。</p></div></section><section id="boundaries" class="card"><h2>模块边界和依赖方向</h2><div class="prose"><p>依赖方向应理解为浏览器静态 JS 调用 Python API，Python API 再调用 store、presence、discovery 和 provider adapter。前端不会直接调用 Hermes/Codex/OpenClaw；provider 也不会直接驱动前端。</p><p>`app/server.py` 不宜描述成清晰分层框架。它更像持续吸收功能的单体控制台：配置、presence、聊天、项目、会议、归档、定时任务、provider bridge 都在同一文件里，但若干关键边界已经被抽出到 `project_store.py`、`discovery.py`、`gateway_presence.py` 和 `providers/`。</p><p>本地状态边界集中在 `VO_STATUS_DIR`。项目 Markdown、presence snapshot、meeting request、provider history、project cron binding 都围绕这个目录持久化，所以“本地优先”不是口号，而是文件系统设计。</p></div></section><section id="flow" class="card"><h2>结构穿透链路</h2><div class="steps"><div class="step"><div class="step-number">1</div><div><h3>`start.sh:start_local`</h3><p>读取 `.env`，准备 `.venv` 和 `VO_STATUS_DIR`，导出 `VO_PORT`、`VO_WS_PORT`、gateway/browser/metrics 变量。</p></div></div><div class="step"><div class="step-number">2</div><div><h3>`app/server.py` 模块初始化</h3><p>加载配置，初始化 `MarkdownProjectStore(STATUS_DIR)`，导入 discovery、provider、presence 和 execution 辅助模块。</p></div></div><div class="step"><div class="step-number">3</div><div><h3>`__main__` 后台线程</h3><p>启动 API usage collector、WebSocket proxy、workflow auto-resume 等后台能力。</p></div></div><div class="step"><div class="step-number">4</div><div><h3>`start_http_server`</h3><p>用 `get_roster()` 初始化 presence，加载 snapshot，再让 `ThreadingHTTPServer` 分发 `OfficeHandler` 请求。</p></div></div><div class="step"><div class="step-number">5</div><div><h3>`OfficeHandler`</h3><p>按路径分发静态文件、`/status`、`/api/projects/*`、`/api/meetings/*`、provider chat/test/history 等接口。</p></div></div><div class="step"><div class="step-number">6</div><div><h3>静态前端回调</h3><p>`index.html` 加载的 JS 通过 fetch、EventSource、WebSocket 信息接口更新画布、聊天、项目看板和会议面板。</p></div></div></div></section><section id="evidence" class="card"><h2>证据清单</h2><table><tr><th>结论</th><th>证据</th></tr><tr><td>推荐本地启动</td><td>`README.md` 快速启动；`start.sh:start_local` 运行 `app/server.py`。</td></tr><tr><td>单体后端汇聚层</td><td>`app/server.py:OfficeHandler`、`do_GET`、`do_POST`、`start_http_server`。</td></tr><tr><td>静态前端</td><td>`app/index.html` script tags；`app/projects.js`、`app/chat.js` 直接 fetch API。</td></tr><tr><td>provider adapter</td><td>`app/discovery.py:discover_all_agents`、`app/providers/codex.py`、`app/providers/hermes.py`。</td></tr></table></section><section id="concept-notes" class="card"><h2>关键概念补充</h2><h3 id="concept-provider-adapter">1. Provider Adapter</h3><p><strong>出现位置：</strong>`app/providers/codex.py`、`app/providers/hermes.py`、`app/discovery.py`。它把不同 Agent 平台的发现、状态、聊天和会话能力包装成统一 roster/API 形态。</p><h3 id="concept-vo-status-dir">2. VO_STATUS_DIR</h3><p><strong>出现位置：</strong>`README.md`、`start.sh`、`app/project_store.py`。它是 Virtual Office 的本地状态根目录。</p></section></main></body></html>

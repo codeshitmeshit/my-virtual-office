@@ -298,6 +298,7 @@ const FURNITURE_BOUNDS = {
     'toaster':       { w: 18,  h: 16,  ox: 0,    oy: 0    },
     'window':        { w: 44,  h: 52,  ox: 0.09, oy: 0.08 },  // frame extends beyond glass
     'interactiveWindow': { w: 44, h: 52, ox: 0.09, oy: 0.08 },  // interactive window with weather/sun settings
+    'floorWindow':   { w: 80,  h: 80,  ox: 0,    oy: 0    },  // 2x2 frameless floor window, top-wall mounted
     'clock':         { w: 28,  h: 28,  ox: 0.5,  oy: 0.5  },  // (x,y)=center, radius 14
     'bookshelf':     { w: 50,  h: 80,  ox: 0,    oy: 0    },  // top-left, tall bookshelf
     'functionalBookshelf': { w: 50, h: 80, ox: 0, oy: 0 },    // top-left, clickable archive bookshelf
@@ -334,6 +335,7 @@ const CATALOG_CATEGORIES = [
         { type: 'meetingTable4', key: 'furniture_meeting_table_4', icon: '▣' },
         { type: 'meetingTable6', key: 'furniture_meeting_table_6', icon: '▤' },
         { type: 'meetingRoom',   key: 'furniture_meeting_room',    icon: '▥' },
+        { type: 'floorWindow',   key: 'furniture_floor_window',    icon: '🪟' },
     ]},
     { key: 'catalog_kitchen', items: [
         { type: 'kitchenCounter',key: 'furniture_kitchen_counter', icon: '🏪' },
@@ -683,7 +685,7 @@ function releaseObjectServiceQueueForAgent(agent, reason) {
 // ============================================================
 // REAL WEATHER SYSTEM — fetches weather for configured location, renders on windows
 // ============================================================
-var weatherData = { condition: 'clear', code: 113, temp: 0, wind: 0, humidity: 0, feelsLike: 0, uvIndex: 0, visibility: 0, precipMM: 0, cloudcover: 0 };
+var weatherData = { condition: 'clear', description: '', code: 113, temp: 0, tempC: null, wind: 0, humidity: 0, feelsLike: 0, uvIndex: 0, visibility: 0, precipMM: 0, cloudcover: 0 };
 var _displayPrefs = { showBubbles: true, showWeather: true, showNames: true, internalBubbleTimeoutSec: 60, fontScale: 1 };
 try {
     var _dp = JSON.parse(localStorage.getItem("vo-display-prefs") || "{}");
@@ -709,6 +711,8 @@ if (typeof document !== 'undefined') {
 var lastWeatherPoll = 0;
 var weatherParticles = []; // rain/snow particles
 var _weatherTick = 0;
+var _floorWindowTooltip = null;
+var _voWeatherLocation = '';
 var _tod = { sky: "#2196f3", upper: "#42a5f5", top: "#bbdefb", cloud: "rgba(255,255,255,0.5)", glow: "rgba(255,255,240,0.08)", stars: false }; // global time-of-day sky
 var _lastLightningFlash = 0;
 var _nextLightningAt = 0;
@@ -752,8 +756,10 @@ function pollWeather() {
         else cond = 'cloudy';
         weatherData = {
             condition: cond,
+            description: ((c.weatherDesc || [{}])[0] || {}).value || '',
             code: code,
             temp: parseInt(c.temp_F) || 0,
+            tempC: Number.isFinite(parseInt(c.temp_C)) ? parseInt(c.temp_C) : null,
             wind: parseInt(c.windspeedMiles) || 0,
             humidity: parseInt(c.humidity) || 0,
             feelsLike: parseInt(c.FeelsLikeF) || 0,
@@ -768,9 +774,84 @@ function pollWeather() {
     }).catch(function() {});
 }
 
+function _refreshWeatherLocationFromConfig() {
+    fetch('/vo-config').then(function(r) { return r.json(); }).then(function(cfg) {
+        _voWeatherLocation = (((cfg || {}).weather || {}).location || '').trim();
+    }).catch(function() {});
+}
+
 // Initialize weather on load
+_refreshWeatherLocationFromConfig();
 pollWeather();
 setInterval(pollWeather, 600000);
+
+function _formatWeatherConditionLabel(condition) {
+    var labels = {
+        clear: 'weather_condition_clear',
+        sunny: 'weather_condition_sunny',
+        partly_cloudy: 'weather_condition_partly_cloudy',
+        cloudy: 'weather_condition_cloudy',
+        overcast: 'weather_condition_overcast',
+        foggy: 'weather_condition_foggy',
+        drizzle: 'weather_condition_drizzle',
+        light_rain: 'weather_condition_light_rain',
+        rain: 'weather_condition_rain',
+        heavy_rain: 'weather_condition_heavy_rain',
+        thunderstorm: 'weather_condition_thunderstorm',
+        light_snow: 'weather_condition_light_snow',
+        snow: 'weather_condition_snow',
+        snow_storm: 'weather_condition_snow_storm',
+        sleet: 'weather_condition_sleet'
+    };
+    var key = labels[condition] || 'weather_condition_unknown';
+    return typeof i18n !== 'undefined' ? i18n.t(key) : (condition || 'Unknown').replace(/_/g, ' ');
+}
+
+function _getWeatherLocationLabel() {
+    var loc = (_voWeatherLocation || (((officeConfig || {}).weather || {}).location || '')).trim();
+    return loc || (typeof i18n !== 'undefined' ? i18n.t('weather_location_unconfigured') : 'Not configured');
+}
+
+function _getWeatherTemperatureC() {
+    if (Number.isFinite(weatherData.tempC)) return weatherData.tempC;
+    if (Number.isFinite(weatherData.temp)) return Math.round((weatherData.temp - 32) * 5 / 9);
+    return 0;
+}
+
+function _getFloorWindowWeatherTooltipLines() {
+    return [
+        (typeof i18n !== 'undefined' ? i18n.t('weather_location') : 'Weather Location') + ': ' + _getWeatherLocationLabel(),
+        (typeof i18n !== 'undefined' ? i18n.t('weather_label') : 'Weather') + ': ' + (weatherData.description || _formatWeatherConditionLabel(weatherData.condition)),
+        (typeof i18n !== 'undefined' ? i18n.t('temperature') : 'Temperature') + ': ' + _getWeatherTemperatureC() + '°C'
+    ];
+}
+
+function _conditionFromWeatherDescription(desc) {
+    var text = String(desc || '').toLowerCase();
+    if (text.indexOf('thunder') >= 0) return 'thunderstorm';
+    if (text.indexOf('snow') >= 0 || text.indexOf('blizzard') >= 0) return text.indexOf('light') >= 0 ? 'light_snow' : 'snow';
+    if (text.indexOf('sleet') >= 0 || text.indexOf('ice') >= 0) return 'sleet';
+    if (text.indexOf('drizzle') >= 0) return 'drizzle';
+    if (text.indexOf('rain') >= 0 || text.indexOf('shower') >= 0) {
+        if (text.indexOf('heavy') >= 0) return 'heavy_rain';
+        if (text.indexOf('light') >= 0 || text.indexOf('patchy') >= 0) return 'light_rain';
+        return 'rain';
+    }
+    if (text.indexOf('fog') >= 0 || text.indexOf('mist') >= 0) return 'foggy';
+    if (text.indexOf('overcast') >= 0) return 'overcast';
+    if (text.indexOf('cloud') >= 0) return text.indexOf('partly') >= 0 ? 'partly_cloudy' : 'cloudy';
+    if (text.indexOf('sun') >= 0 || text.indexOf('clear') >= 0) return 'sunny';
+    return 'clear';
+}
+
+function _applyWeatherTestResult(location, result) {
+    if (!officeConfig.weather) officeConfig.weather = {};
+    officeConfig.weather.location = location || result.location || officeConfig.weather.location || null;
+    weatherData.condition = _conditionFromWeatherDescription(result.weather);
+    weatherData.description = result.weather || '';
+    weatherData.temp = parseInt(result.tempF) || weatherData.temp || 0;
+    weatherData.tempC = Number.isFinite(parseInt(result.tempC)) ? parseInt(result.tempC) : weatherData.tempC;
+}
 
 // --- Helper: pseudo-random from seed ---
 function _wRand(seed) {
@@ -1719,6 +1800,19 @@ canvas.addEventListener('mousemove', function(e) {
     }
 }, { passive: true });
 
+canvas.addEventListener('mousemove', function(e) {
+    _floorWindowTooltip = null;
+    var world = screenToWorld(e.clientX, e.clientY);
+    var item = _findFurnitureAt(world.x, world.y);
+    if (!item || item.type !== 'floorWindow') return;
+    var run = _getConnectedFloorWindowRun(item);
+    _floorWindowTooltip = {
+        x: Math.max(0, Math.min(W - 150, world.x + 10)),
+        y: Math.max(0, run.y - 44),
+        lines: _getFloorWindowWeatherTooltipLines()
+    };
+}, { passive: true });
+
 // Touch: pan with one finger, pinch-zoom with two
 canvas.addEventListener('touchstart', function(e) {
     if (e.touches.length === 1) {
@@ -2291,21 +2385,49 @@ var AGENT_DEFS = [];
 // Color palette for auto-assigning agent colors
 var _AGENT_COLORS = ['#ffd700','#d32f2f','#1976d2','#388e3c','#f9a825','#e65100','#00897b','#7b1fa2','#6d4c41','#5c6bc0','#78909c','#4caf50','#00bcd4','#e91e90','#ff6d00','#795548','#607d8b','#9c27b0','#009688','#ff5722'];
 
+function _agentConfigKeys(agent) {
+    if (!agent) return [];
+    var keys = [];
+    function add(value) {
+        if (value !== undefined && value !== null && String(value).trim()) keys.push(String(value));
+    }
+    add(agent.id);
+    add(agent.statusKey);
+    add(agent.agentId);
+    var providerKind = String(agent.providerKind || '').trim();
+    var providerAgentId = String(agent.providerAgentId || agent.profile || '').trim();
+    if (providerKind && providerAgentId) add(providerKind + '-' + providerAgentId);
+    if (!providerKind || providerKind === 'openclaw') {
+        add(agent.providerAgentId);
+        add(agent.profile);
+    }
+    return Array.from(new Set(keys));
+}
+
+function _agentConfigMatches(saved, agent) {
+    if (!saved || !agent) return false;
+    var savedKeys = _agentConfigKeys(saved);
+    var agentKeys = _agentConfigKeys(agent);
+    return savedKeys.some(function(k) { return agentKeys.indexOf(k) >= 0; });
+}
+
+function _findOfficeAgentConfig(agent) {
+    var savedAgents = (officeConfig && officeConfig.agents) || [];
+    return savedAgents.find(function(saved) { return _agentConfigMatches(saved, agent); }) || null;
+}
+
 function _buildAgentDefs(apiAgents) {
     // Build AGENT_DEFS from API response, merging with saved officeConfig.agents for overrides
-    var savedAgents = (officeConfig && officeConfig.agents) || [];
-    var savedMap = {};
-    savedAgents.forEach(function(s) { savedMap[s.id] = s; });
-
     var defs = [];
     apiAgents.forEach(function(a, idx) {
-        var saved = savedMap[a.id] || savedMap[a.statusKey] || {};
+        var saved = _findOfficeAgentConfig(a) || {};
         defs.push({
             id: a.statusKey || a.id,
             statusKey: a.statusKey || a.id,
             providerKind: a.providerKind || 'openclaw',
             providerType: a.providerType || 'runtime',
             providerAgentId: a.providerAgentId || a.id,
+            profile: a.profile || a.providerAgentId || '',
             provider: a.provider || '',
             name: saved.name || a.name || a.id,
             emoji: saved.emoji || a.emoji || '🤖',
@@ -2893,7 +3015,7 @@ class Agent {
 
     getAppearance() {
         // Check for per-agent config override (used by the appearance panel)
-        const cfg = officeConfig.agents && officeConfig.agents.find(a => a.id === this.id);
+        const cfg = _findOfficeAgentConfig(this);
         if (cfg && cfg.appearance) return cfg.appearance;
         // Use the pre-computed instance appearance (set in constructor)
         return this.appearance || getDefaultAppearance(this);
@@ -6471,6 +6593,7 @@ function drawFurnitureItem(item) {
         case 'toaster':       drawToasterStandalone(item.x, item.y);     break;
         case 'window':        drawWindow(item.x, item.y);        break;
         case 'interactiveWindow': drawInteractiveWindow(item); break;
+        case 'floorWindow':   drawFloorWindow(item); break;
         case 'clock':         drawClock(item.x, item.y);         break;
         case 'bookshelf':     drawBookshelf(item.x, item.y);     break;
         case 'functionalBookshelf': drawFunctionalBookshelf(item); break;
@@ -6918,6 +7041,171 @@ function drawInteractiveWindow(item) {
     }
 }
 
+function _getConnectedFloorWindowRun(item) {
+    var b = FURNITURE_BOUNDS['floorWindow'] || { w: TILE * 2, h: TILE * 2 };
+    var items = (officeConfig.furniture || []).filter(function(f) {
+        return f.type === 'floorWindow' && Math.abs(f.y - item.y) < 1;
+    }).sort(function(a, b2) { return a.x - b2.x; });
+    var left = item.x;
+    var right = item.x + b.w;
+    var changed = true;
+    while (changed) {
+        changed = false;
+        for (var i = 0; i < items.length; i++) {
+            var f = items[i];
+            if (Math.abs(f.x + b.w - left) < 1) {
+                left = f.x;
+                changed = true;
+            }
+            if (Math.abs(f.x - right) < 1) {
+                right = f.x + b.w;
+                changed = true;
+            }
+        }
+    }
+    return {
+        x: left,
+        y: item.y,
+        w: right - left,
+        h: b.h,
+        hasLeft: left < item.x,
+        hasRight: right > item.x + b.w
+    };
+}
+
+function _drawFloorWindowSunMoon(sceneX, sceneY, sceneW, sceneH) {
+    var cx = sceneX + sceneW - 18;
+    var cy = sceneY + 14;
+    if (_tod.stars) {
+        ctx.fillStyle = 'rgba(255,255,220,0.86)';
+        ctx.beginPath();
+        ctx.arc(cx, cy, 7, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = _tod.sky;
+        ctx.beginPath();
+        ctx.arc(cx + 4, cy - 2, 7, 0, Math.PI * 2);
+        ctx.fill();
+    } else {
+        var pulse = 7 + Math.sin(_weatherTick * 0.025) * 1.5;
+        var grad = ctx.createRadialGradient(cx, cy, 2, cx, cy, 24);
+        grad.addColorStop(0, 'rgba(255,245,157,0.9)');
+        grad.addColorStop(0.45, 'rgba(255,213,79,0.45)');
+        grad.addColorStop(1, 'rgba(255,213,79,0)');
+        ctx.fillStyle = grad;
+        ctx.fillRect(cx - 24, cy - 24, 48, 48);
+        ctx.fillStyle = 'rgba(255,224,90,0.95)';
+        ctx.beginPath();
+        ctx.arc(cx, cy, pulse, 0, Math.PI * 2);
+        ctx.fill();
+    }
+}
+
+function drawFloorWindow(item) {
+    var run = _getConnectedFloorWindowRun(item);
+    if (run.hasLeft) return;
+
+    var x = run.x, y = run.y;
+    var bw = run.w, bh = run.h;
+    var edge = 3;
+    var wx = x + edge, wy = y + edge;
+    var ww = bw - edge * 2, wh = bh - edge * 2 - 4;
+    var sceneX = run.x + edge;
+    var sceneY = run.y + edge;
+    var sceneW = run.w - edge * 2;
+    var sceneH = run.h - edge * 2 - 4;
+    var showWeather = item.weather !== false && _displayPrefs.showWeather !== false;
+    var showSun = item.showSun !== false;
+
+    ctx.save();
+    _setFurnitureLampShadow(x + bw / 2, y + bh - 10);
+
+    // Floor glow lands behind the glass so the object reads as a passive floor window.
+    var lightTop = y + bh - 12;
+    var lightBottom = Math.min(H, y + bh + 110);
+    var lightGrad = ctx.createLinearGradient(0, lightTop, 0, lightBottom);
+    lightGrad.addColorStop(0, _tod.glow);
+    lightGrad.addColorStop(0.55, _tod.glow.replace(/[\d.]+\)$/, function(m) { return (parseFloat(m) * 0.35).toFixed(2) + ')'; }));
+    lightGrad.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = lightGrad;
+    ctx.beginPath();
+    ctx.moveTo(x + 6, lightTop);
+    ctx.lineTo(x + bw - 6, lightTop);
+    ctx.lineTo(x + bw + 20, lightBottom);
+    ctx.lineTo(x - 20, lightBottom);
+    ctx.closePath();
+    ctx.fill();
+
+    // One continuous pane of glass with only a thin polished edge.
+    ctx.fillStyle = 'rgba(214,232,242,0.18)';
+    ctx.fillRect(wx - 1, wy - 1, ww + 2, wh + 2);
+    ctx.fillStyle = 'rgba(255,255,255,0.42)';
+    ctx.fillRect(wx - 1, wy - 1, ww + 2, 1);
+    ctx.fillRect(wx - 1, wy - 1, 1, wh + 2);
+    ctx.fillStyle = 'rgba(55,72,84,0.18)';
+    ctx.fillRect(wx + ww, wy, 1, wh + 1);
+    ctx.fillRect(wx, wy + wh, ww + 1, 1);
+
+    // Time-of-day sky base.
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(wx, wy, ww, wh);
+    ctx.clip();
+    ctx.fillStyle = _tod.sky; ctx.fillRect(sceneX, sceneY, sceneW, sceneH);
+    ctx.fillStyle = _tod.upper; ctx.fillRect(sceneX, sceneY, sceneW, Math.floor(sceneH * 0.38));
+    ctx.fillStyle = _tod.top; ctx.fillRect(sceneX, sceneY, sceneW, Math.floor(sceneH * 0.18));
+    ctx.fillStyle = 'rgba(46,79,92,0.18)';
+    ctx.fillRect(sceneX, sceneY + Math.floor(sceneH * 0.62), sceneW, Math.floor(sceneH * 0.16));
+    ctx.fillStyle = 'rgba(26,71,64,0.20)';
+    ctx.fillRect(sceneX, sceneY + Math.floor(sceneH * 0.75), sceneW, Math.floor(sceneH * 0.25));
+
+    if (_tod.stars) {
+        for (var si = 0; si < 18; si++) {
+            var sx = sceneX + 8 + (si * 23) % Math.max(16, sceneW - 16);
+            var sy = sceneY + 8 + (si * 17) % Math.max(20, sceneH - 28);
+            var twinkle = 0.25 + 0.65 * (0.5 + 0.5 * Math.sin(_weatherTick * 0.035 + si * 1.7));
+            ctx.fillStyle = 'rgba(255,255,255,' + twinkle.toFixed(2) + ')';
+            ctx.fillRect(sx, sy, si % 3 === 0 ? 2 : 1, si % 4 === 0 ? 2 : 1);
+        }
+    } else {
+        ctx.fillStyle = _tod.cloud;
+        ctx.fillRect(sceneX + 14, sceneY + 20, 24, 7);
+        ctx.fillRect(sceneX + 22, sceneY + 15, 12, 7);
+        ctx.fillRect(sceneX + sceneW - 46, sceneY + 31, 30, 7);
+        ctx.fillRect(sceneX + sceneW - 38, sceneY + 25, 14, 7);
+    }
+
+    if (showSun) {
+        _drawFloorWindowSunMoon(sceneX, sceneY, sceneW, sceneH);
+    }
+
+    if (showWeather) {
+        var floorWindowWeatherTick = _weatherTick;
+        drawWeatherOnWindow(sceneX, sceneY, sceneW, sceneH, showSun);
+        _weatherTick = floorWindowWeatherTick;
+    }
+    ctx.restore();
+
+    // Restrained glass reflections, no window frame or pane dividers.
+    ctx.fillStyle = 'rgba(255,255,255,0.18)';
+    ctx.fillRect(wx + 7, wy + 8, 18, 3);
+    ctx.fillRect(wx + 10, wy + 13, 10, 2);
+    ctx.fillStyle = 'rgba(255,255,255,0.10)';
+    ctx.fillRect(wx + ww - 22, wy + wh - 24, 14, 4);
+    ctx.fillStyle = 'rgba(255,255,255,0.08)';
+    ctx.beginPath();
+    ctx.moveTo(wx + 45, wy + 5);
+    ctx.lineTo(wx + 56, wy + 5);
+    ctx.lineTo(wx + 32, wy + wh - 9);
+    ctx.lineTo(wx + 23, wy + wh - 9);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = 'rgba(96,113,126,0.32)';
+    ctx.fillRect(wx - 2, y + bh - 9, ww + 4, 4);
+
+    _clearFurnitureShadow();
+    ctx.restore();
+}
+
 function _showInteractiveWindowEditor(item) {
     var existing = document.getElementById('iw-editor');
     if (existing) existing.remove();
@@ -6928,24 +7216,25 @@ function _showInteractiveWindowEditor(item) {
 
     var weatherChecked = item.weather !== false ? 'checked' : '';
     var sunChecked = item.showSun ? 'checked' : '';
+    var titleKey = item.type === 'floorWindow' ? 'floor_window_settings' : 'weather_window_settings';
 
-    popup.innerHTML = '<div style="font-size:14px;font-weight:bold;color:#ffd700;margin-bottom:14px;">🌤️ ' + (typeof i18n !== 'undefined' ? i18n.t('weather_window_settings') : 'Weather Window Settings') + '</div>' +
+    popup.innerHTML = '<div style="font-size:14px;font-weight:bold;color:#ffd700;margin-bottom:14px;">🌤️ ' + (typeof i18n !== 'undefined' ? i18n.t(titleKey) : (item.type === 'floorWindow' ? 'Floor Window Settings' : 'Weather Window Settings')) + '</div>' +
         '<div style="margin-bottom:16px;">' +
         '<label style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:8px;background:#0d0d1e;border:1px solid #2a2a4e;border-radius:8px;margin-bottom:8px;">' +
         '<input id="iw-weather" type="checkbox" ' + weatherChecked + ' style="width:18px;height:18px;cursor:pointer;">' +
-        '<div><div style="font-size:13px;color:#e0e0e0;">🌧️ Show Weather Effects</div>' +
-        '<div style="font-size:11px;color:#888;margin-top:2px;">Rain, snow, clouds, fog animations on the glass</div></div>' +
+        '<div><div style="font-size:13px;color:#e0e0e0;">🌧️ ' + (typeof i18n !== 'undefined' ? i18n.t('weather_effects_label') : 'Show Weather Effects') + '</div>' +
+        '<div style="font-size:11px;color:#888;margin-top:2px;">' + (typeof i18n !== 'undefined' ? i18n.t('weather_effects_desc') : 'Rain, snow, clouds, fog animations on the glass') + '</div></div>' +
         '</label>' +
         '<label style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:8px;background:#0d0d1e;border:1px solid #2a2a4e;border-radius:8px;">' +
         '<input id="iw-sun" type="checkbox" ' + sunChecked + ' style="width:18px;height:18px;cursor:pointer;">' +
-        '<div><div style="font-size:13px;color:#e0e0e0;">☀️ Show Sun / Moon</div>' +
-        '<div style="font-size:11px;color:#888;margin-top:2px;">Animated sun during the day, crescent moon at night</div></div>' +
+        '<div><div style="font-size:13px;color:#e0e0e0;">☀️ ' + (typeof i18n !== 'undefined' ? i18n.t('sun_moon_label') : 'Show Sun / Moon') + '</div>' +
+        '<div style="font-size:11px;color:#888;margin-top:2px;">' + (typeof i18n !== 'undefined' ? i18n.t('sun_moon_desc') : 'Animated sun during the day, crescent moon at night') + '</div></div>' +
         '</label>' +
         '</div>' +
         '<div id="iw-preview" style="padding:12px;background:#0d0d1e;border:1px solid #2a2a4e;border-radius:8px;margin-bottom:14px;text-align:center;font-size:12px;color:#aaa;"></div>' +
         '<div style="display:flex;gap:8px;justify-content:flex-end;">' +
-        '<button id="iw-cancel" style="padding:6px 16px;background:#333;border:1px solid #555;border-radius:6px;color:#ccc;cursor:pointer;font-size:12px;">Cancel</button>' +
-        '<button id="iw-save" style="padding:6px 16px;background:#ffd700;border:none;border-radius:6px;color:#000;font-weight:bold;cursor:pointer;font-size:12px;">Save</button>' +
+        '<button id="iw-cancel" style="padding:6px 16px;background:#333;border:1px solid #555;border-radius:6px;color:#ccc;cursor:pointer;font-size:12px;">' + (typeof i18n !== 'undefined' ? i18n.t('cancel') : 'Cancel') + '</button>' +
+        '<button id="iw-save" style="padding:6px 16px;background:#ffd700;border:none;border-radius:6px;color:#000;font-weight:bold;cursor:pointer;font-size:12px;">' + (typeof i18n !== 'undefined' ? i18n.t('save') : 'Save') + '</button>' +
         '</div>';
 
     document.body.appendChild(popup);
@@ -6955,10 +7244,10 @@ function _showInteractiveWindowEditor(item) {
         var w = document.getElementById('iw-weather').checked;
         var s = document.getElementById('iw-sun').checked;
         var desc = [];
-        if (w) desc.push('🌧️ Weather effects ON');
-        else desc.push('Weather effects OFF');
-        if (s) desc.push('☀️ Sun/Moon ON');
-        else desc.push('Sun/Moon OFF');
+        if (w) desc.push('🌧️ ' + (typeof i18n !== 'undefined' ? i18n.t('weather_effects_on') : 'Weather effects ON'));
+        else desc.push(typeof i18n !== 'undefined' ? i18n.t('weather_effects_off') : 'Weather effects OFF');
+        if (s) desc.push('☀️ ' + (typeof i18n !== 'undefined' ? i18n.t('sun_moon_on') : 'Sun/Moon ON'));
+        else desc.push(typeof i18n !== 'undefined' ? i18n.t('sun_moon_off') : 'Sun/Moon OFF');
         pv.innerHTML = desc.join(' &nbsp;|&nbsp; ');
     }
 
@@ -8352,6 +8641,32 @@ function _agentWorkspaceRecentActivity(data, limit) {
     });
 }
 
+function _agentWorkspaceProjectMeta(t, compact) {
+    var parts = [];
+    if (t.projectTitle) parts.push(t.projectTitle);
+    if (t.role) parts.push(t.role);
+    if (t.priority) parts.push(t.priority);
+    if (t.column) parts.push(t.column);
+    if (t.executionState) parts.push(t.executionState);
+    if (!compact && t.projectWorkflowPhase) parts.push('project ' + t.projectWorkflowPhase);
+    if (!compact && t.activeAttemptStatus) parts.push('attempt ' + t.activeAttemptStatus);
+    if (!compact && t.scheduledRepeatEnabled) parts.push('scheduled');
+    return parts.join(' · ');
+}
+
+function _agentWorkspaceProjectBadges(t) {
+    var badges = [];
+    if (t.completed) badges.push('done');
+    if (t.activeAttemptId) badges.push('active');
+    if (t.meetingBlocker && t.meetingBlocker.status) badges.push('meeting ' + t.meetingBlocker.status);
+    if (t.projectExecutionFlowActive) badges.push('flow active');
+    if (t.projectExecutionFlowStopReason) badges.push(t.projectExecutionFlowStopReason);
+    if (t.blockedReason) badges.push('blocked');
+    return badges.length ? '<div class="agent-workspace-badges">' + badges.map(function(label) {
+        return '<span>' + escHtml(label) + '</span>';
+    }).join('') + '</div>' : '';
+}
+
 function _workspaceFolderOptions(current) {
     var notes = ((_agentWorkspace.data || {}).workspace || {}).notes || [];
     var folders = {};
@@ -8396,7 +8711,10 @@ function _renderAgentWorkspaceOverview(data) {
         '</div>' +
         '<div class="agent-workspace-card"><h3>Project Work</h3>' +
             _agentWorkspaceItemList(projectTasks, 'No assigned project cards', function(t) {
-                return '<div class="agent-workspace-item">' + escHtml(t.title) + '<div class="agent-workspace-meta">' + escHtml(t.projectTitle || '') + (t.column ? ' · ' + escHtml(t.column) : '') + '</div></div>';
+                return '<div class="agent-workspace-item">' + escHtml(t.title) +
+                    '<div class="agent-workspace-meta">' + escHtml(_agentWorkspaceProjectMeta(t, true)) + '</div>' +
+                    _agentWorkspaceProjectBadges(t) +
+                '</div>';
             }) +
         '</div>' +
         '<div class="agent-workspace-card agent-workspace-wide"><h3>Recent Activity</h3>' +
@@ -8453,7 +8771,15 @@ function _renderAgentWorkspaceTasks(data) {
     }) +
     '<div class="agent-workspace-card" style="margin-top:10px"><h3>Project Cards</h3>' +
     _agentWorkspaceItemList(projectTasks, 'No assigned project cards', function(t) {
-        return '<div class="agent-workspace-item">' + escHtml(t.title) + '<div class="agent-workspace-meta">' + escHtml(t.projectTitle || '') + (t.priority ? ' · ' + escHtml(t.priority) : '') + (t.column ? ' · ' + escHtml(t.column) : '') + '</div></div>';
+        var blocker = t.meetingBlocker || {};
+        return '<div class="agent-workspace-item agent-workspace-project-card">' +
+            '<div><b>' + escHtml(t.title) + '</b></div>' +
+            (t.description ? '<div class="agent-workspace-detail">' + escHtml(String(t.description).slice(0, 360)) + '</div>' : '') +
+            '<div class="agent-workspace-meta">' + escHtml(_agentWorkspaceProjectMeta(t, false)) + '</div>' +
+            _agentWorkspaceProjectBadges(t) +
+            (blocker.status ? '<div class="agent-workspace-detail">Meeting blocker: ' + escHtml(blocker.status) + (blocker.requestId ? ' · ' + escHtml(blocker.requestId) : '') + '</div>' : '') +
+            (t.lastError || t.blockedReason ? '<div class="agent-workspace-detail">' + escHtml(t.lastError || t.blockedReason) + '</div>' : '') +
+        '</div>';
     }) + '</div>';
 }
 
@@ -12437,6 +12763,26 @@ function loop() {
         ctx.textAlign = 'left';
         ctx.fillText(_chatTooltip.text, ttX + 4, ttY + 10);
     }
+    if (_floorWindowTooltip) {
+        ctx.font = 'bold 8px Arial, sans-serif';
+        var fwLines = _floorWindowTooltip.lines || [];
+        var fwW = 0;
+        for (var fwi = 0; fwi < fwLines.length; fwi++) fwW = Math.max(fwW, ctx.measureText(fwLines[fwi]).width);
+        fwW = Math.max(96, fwW + 12);
+        var fwH = 10 + fwLines.length * 11;
+        var fwX = _floorWindowTooltip.x;
+        var fwY = _floorWindowTooltip.y;
+        ctx.fillStyle = 'rgba(20,20,40,0.92)';
+        ctx.fillRect(fwX, fwY, fwW, fwH);
+        ctx.strokeStyle = 'rgba(255,214,0,0.75)';
+        ctx.lineWidth = 0.8;
+        ctx.strokeRect(fwX, fwY, fwW, fwH);
+        ctx.fillStyle = '#f5f7ff';
+        ctx.textAlign = 'left';
+        for (var fwl = 0; fwl < fwLines.length; fwl++) {
+            ctx.fillText(fwLines[fwl], fwX + 6, fwY + 12 + fwl * 11);
+        }
+    }
     ctx.restore();
 
     // FPS counter
@@ -13041,7 +13387,7 @@ function _snapToCounterTop(type, worldX, worldY) {
 // Check if a position is valid for a given furniture type
 function _isValidPlacement(type, x, y) {
     // Windows can only be placed on the top wall
-    if (type === 'window' || type === 'interactiveWindow') {
+    if (type === 'window' || type === 'interactiveWindow' || type === 'floorWindow') {
         var wallH = officeConfig.walls.height || 70;
         if (y > wallH - 10 || y < 0) return false;
         if (x < 0 || x + (FURNITURE_BOUNDS[type] || {w:40}).w > W) return false;
@@ -13416,7 +13762,7 @@ function _updateFloatingToolbarPosition() {
     }
     labelEditBtn.style.display = (selItem.type === 'textLabel') ? '' : 'none';
 
-    // Show settings button for interactiveWindow items
+    // Show settings button for weather window items
     var iwSettingsBtn = document.getElementById('ftb-iw-settings-btn');
     if (!iwSettingsBtn) {
         iwSettingsBtn = document.createElement('button');
@@ -13427,12 +13773,12 @@ function _updateFloatingToolbarPosition() {
         iwSettingsBtn.onclick = function() {
             if (!selectedItemId) return;
             var item = officeConfig.furniture.find(function(f){ return f.id === selectedItemId; });
-            if (!item || item.type !== 'interactiveWindow') return;
+            if (!item || (item.type !== 'interactiveWindow' && item.type !== 'floorWindow')) return;
             _showInteractiveWindowEditor(item);
         };
         _floatingToolbar.appendChild(iwSettingsBtn);
     }
-    iwSettingsBtn.style.display = (selItem.type === 'interactiveWindow') ? '' : 'none';
+    iwSettingsBtn.style.display = (selItem.type === 'interactiveWindow' || selItem.type === 'floorWindow') ? '' : 'none';
 
     var bookshelfBindBtn = document.getElementById('ftb-bookshelf-bind-btn');
     if (!bookshelfBindBtn) {
@@ -13555,7 +13901,7 @@ canvas.addEventListener('mousemove', function(e) {
                         _dragWR.x >= 0 && _dragWR.y >= 0 &&
                         _dragWR.x + _dragWR.w <= W &&
                         _dragWR.y + _dragWR.h <= H) {
-                        if (dragItem.type === 'window' || dragItem.type === 'interactiveWindow') {
+                        if (dragItem.type === 'window' || dragItem.type === 'interactiveWindow' || dragItem.type === 'floorWindow') {
                             var wallH = officeConfig.walls.height || 70;
                             if (snapY <= wallH - 10) {
                                 dragItem.x = snapX;
@@ -13658,6 +14004,26 @@ function _mmLoadCurrentSettings() {
         var hermesFields = document.getElementById('mm-hermes-fields');
         var hermesHome = document.getElementById('mm-hermes-home');
         var hermesBin = document.getElementById('mm-hermes-bin');
+        var hermesApiEnabled = document.getElementById('mm-hermes-api-enable');
+        var hermesApiUrl = document.getElementById('mm-hermes-api-url');
+        var codexEnabled = document.getElementById('mm-codex-enable');
+        var codexWorkspace = document.getElementById('mm-codex-workspace');
+        var codexWorkspaceRoot = document.getElementById('mm-codex-workspace-root');
+        var codexMainWorkspace = document.getElementById('mm-codex-main-workspace');
+        var codexModel = document.getElementById('mm-codex-model');
+        var codexBridgeUrl = document.getElementById('mm-codex-bridge-url');
+        var codexIncludeMain = document.getElementById('mm-codex-include-main');
+        var codexIncludeNative = document.getElementById('mm-codex-include-native');
+        var claudeCodeEnabled = document.getElementById('mm-claude-code-enable');
+        var claudeCodeHome = document.getElementById('mm-claude-code-home');
+        var claudeCodeBin = document.getElementById('mm-claude-code-bin');
+        var claudeCodeWorkspace = document.getElementById('mm-claude-code-workspace');
+        var claudeCodeWorkspaceRoot = document.getElementById('mm-claude-code-workspace-root');
+        var claudeCodeMainWorkspace = document.getElementById('mm-claude-code-main-workspace');
+        var claudeCodeModel = document.getElementById('mm-claude-code-model');
+        var claudeCodeIncludeMain = document.getElementById('mm-claude-code-include-main');
+        var claudeCodeIncludeNative = document.getElementById('mm-claude-code-include-native');
+        var claudeCodeRegisterNative = document.getElementById('mm-claude-code-register-native');
         var meetingPreparingTimeout = document.getElementById('mm-meeting-preparing-timeout');
         if (gwInput) gwInput.value = (cfg.openclaw || {}).gatewayUrl || '';
         if (nameInput) nameInput.value = (cfg.office || {}).name || '';
@@ -13673,8 +14039,28 @@ function _mmLoadCurrentSettings() {
         if (hermesFields) hermesFields.style.display = hermesEnabled ? 'block' : 'none';
         if (hermesHome) hermesHome.value = hermesCfg.homePath || '';
         if (hermesBin) hermesBin.value = hermesCfg.binary || '';
+        if (hermesApiEnabled) hermesApiEnabled.checked = hermesCfg.apiEnabled === true;
         if (hermesApiUrl) hermesApiUrl.value = hermesCfg.apiUrl || '';
-        if (hermesApiKey && hermesCfg.apiKeyConfigured) hermesApiKey.placeholder = 'Configured - leave blank to keep';
+        var codexCfg = cfg.codex || {};
+        if (codexEnabled) codexEnabled.checked = codexCfg.enabled === true;
+        if (codexWorkspace) codexWorkspace.value = codexCfg.workspace || '';
+        if (codexWorkspaceRoot) codexWorkspaceRoot.value = codexCfg.workspaceRoot || '';
+        if (codexMainWorkspace) codexMainWorkspace.value = codexCfg.mainWorkspace || '';
+        if (codexModel) codexModel.value = codexCfg.model || '';
+        if (codexBridgeUrl) codexBridgeUrl.value = codexCfg.bridgeUrl || '';
+        if (codexIncludeMain) codexIncludeMain.checked = codexCfg.includeMain !== false;
+        if (codexIncludeNative) codexIncludeNative.checked = codexCfg.includeNativeAgents !== false;
+        var claudeCfg = cfg.claudeCode || {};
+        if (claudeCodeEnabled) claudeCodeEnabled.checked = claudeCfg.enabled === true;
+        if (claudeCodeHome) claudeCodeHome.value = claudeCfg.homePath || '';
+        if (claudeCodeBin) claudeCodeBin.value = claudeCfg.binary || '';
+        if (claudeCodeWorkspace) claudeCodeWorkspace.value = claudeCfg.workspace || '';
+        if (claudeCodeWorkspaceRoot) claudeCodeWorkspaceRoot.value = claudeCfg.workspaceRoot || '';
+        if (claudeCodeMainWorkspace) claudeCodeMainWorkspace.value = claudeCfg.mainWorkspace || '';
+        if (claudeCodeModel) claudeCodeModel.value = claudeCfg.model || '';
+        if (claudeCodeIncludeMain) claudeCodeIncludeMain.checked = claudeCfg.includeMain !== false;
+        if (claudeCodeIncludeNative) claudeCodeIncludeNative.checked = claudeCfg.includeNativeAgents !== false;
+        if (claudeCodeRegisterNative) claudeCodeRegisterNative.checked = claudeCfg.registerNativeAgents !== false;
         // Auto-populate token from /gateway-info (shows current effective token)
         if (tokenInput) {
             fetch('/gateway-info').then(function(r) { return r.json(); }).then(function(gi) {
@@ -13775,33 +14161,94 @@ function mmTestHermes() {
     var enabled = !!(document.getElementById('mm-hermes-enable') || {}).checked;
     var homePath = (document.getElementById('mm-hermes-home') || {}).value || '';
     var binary = (document.getElementById('mm-hermes-bin') || {}).value || '';
+    var apiEnabled = !!(document.getElementById('mm-hermes-api-enable') || {}).checked;
     var apiUrl = (document.getElementById('mm-hermes-api-url') || {}).value || '';
-    var apiKey = ((document.getElementById('mm-hermes-api-key') || {}).value || '').trim();
+    var apiKey = (document.getElementById('mm-hermes-api-key') || {}).value || '';
     if (!enabled) {
         statusEl.innerHTML = '<div class="mm-status info">' + _tr('hermes_disabled') + '</div>';
         return;
     }
     statusEl.innerHTML = '<div class="mm-status info">' + _tr('testing_hermes') + '</div>';
+    var hermesSave = { enabled: enabled, homePath: homePath || null, binary: binary || null, apiEnabled: apiEnabled, apiUrl: apiUrl || null };
+    if (apiKey.trim()) hermesSave.apiKey = apiKey.trim();
     fetch('/setup/save', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ hermes: hermesPayload })
+        body: JSON.stringify({ hermes: hermesSave })
     }).then(function() {
         return fetch('/api/hermes/test', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ homePath: homePath || null, binary: binary || null })
+            body: JSON.stringify({ homePath: homePath || null, binary: binary || null, apiEnabled: apiEnabled, apiUrl: apiUrl || null, apiKey: apiKey.trim() || undefined })
         });
     }).then(function(r) { return r.json().then(function(d){ d._httpOk = r.ok; return d; }); }).then(function(d) {
         if (d.ok) {
             var count = (d.agents || []).length;
             var names = (d.agents || []).slice(0, 5).map(function(a){ return (a.emoji || '⚕️') + ' ' + a.name + (a.model ? ' · ' + a.model : ''); }).join('<br>');
-            statusEl.innerHTML = '<div class="mm-status ok">' + _tr('hermes_connected_profiles', { count: count }) + (names ? '<br>' + names : '') + '</div>';
+            var api = d.api || {};
+            var apiLine = apiEnabled ? '<br>Native API: ' + (api.ok ? 'connected' : ('unavailable' + (api.error ? ' · ' + escHtml(api.error) : ''))) : '';
+            statusEl.innerHTML = '<div class="mm-status ok">' + _tr('hermes_connected_profiles', { count: count }) + apiLine + (names ? '<br>' + names : '') + '</div>';
         } else {
             statusEl.innerHTML = '<div class="mm-status err">❌ ' + _tr('hermes_not_reachable') + ': ' + escHtml(d.error || _tr('unknown')) + '</div>';
         }
     }).catch(function(e) {
         statusEl.innerHTML = '<div class="mm-status err">❌ ' + _tr('hermes_test_failed') + ': ' + escHtml(e.message) + '</div>';
+    });
+}
+
+function mmTestCodex() {
+    var statusEl = document.getElementById('mm-codex-status');
+    if (!statusEl) return;
+    statusEl.innerHTML = '<div class="mm-status info">' + _tr('saving_testing') + '</div>';
+    var cfg = {
+        enabled: !!(document.getElementById('mm-codex-enable') || {}).checked,
+        workspace: ((document.getElementById('mm-codex-workspace') || {}).value || '').trim() || null,
+        workspaceRoot: ((document.getElementById('mm-codex-workspace-root') || {}).value || '').trim() || null,
+        mainWorkspace: ((document.getElementById('mm-codex-main-workspace') || {}).value || '').trim() || null,
+        model: ((document.getElementById('mm-codex-model') || {}).value || '').trim() || null,
+        bridgeUrl: ((document.getElementById('mm-codex-bridge-url') || {}).value || '').trim() || null,
+        includeMain: !!(document.getElementById('mm-codex-include-main') || {}).checked,
+        includeNativeAgents: !!(document.getElementById('mm-codex-include-native') || {}).checked
+    };
+    fetch('/setup/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ codex: cfg })
+    }).then(function() {
+        return fetch('/api/codex/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cfg) });
+    }).then(function(r) { return r.json(); }).then(function(d) {
+        statusEl.innerHTML = '<div class="mm-status ' + (d.ok ? 'ok' : 'err') + '">' + (d.ok ? 'Connected' : ('❌ ' + escHtml(d.error || _tr('unknown')))) + '</div>';
+    }).catch(function(e) {
+        statusEl.innerHTML = '<div class="mm-status err">❌ ' + escHtml(e.message) + '</div>';
+    });
+}
+
+function mmTestClaudeCode() {
+    var statusEl = document.getElementById('mm-claude-code-status');
+    if (!statusEl) return;
+    statusEl.innerHTML = '<div class="mm-status info">' + _tr('saving_testing') + '</div>';
+    var cfg = {
+        enabled: !!(document.getElementById('mm-claude-code-enable') || {}).checked,
+        homePath: ((document.getElementById('mm-claude-code-home') || {}).value || '').trim() || null,
+        binary: ((document.getElementById('mm-claude-code-bin') || {}).value || '').trim() || null,
+        workspace: ((document.getElementById('mm-claude-code-workspace') || {}).value || '').trim() || null,
+        workspaceRoot: ((document.getElementById('mm-claude-code-workspace-root') || {}).value || '').trim() || null,
+        mainWorkspace: ((document.getElementById('mm-claude-code-main-workspace') || {}).value || '').trim() || null,
+        model: ((document.getElementById('mm-claude-code-model') || {}).value || '').trim() || null,
+        includeMain: !!(document.getElementById('mm-claude-code-include-main') || {}).checked,
+        includeNativeAgents: !!(document.getElementById('mm-claude-code-include-native') || {}).checked,
+        registerNativeAgents: !!(document.getElementById('mm-claude-code-register-native') || {}).checked
+    };
+    fetch('/setup/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ claudeCode: cfg })
+    }).then(function() {
+        return fetch('/api/claude-code/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cfg) });
+    }).then(function(r) { return r.json(); }).then(function(d) {
+        statusEl.innerHTML = '<div class="mm-status ' + (d.ok ? 'ok' : 'err') + '">' + (d.ok ? 'Connected' : ('❌ ' + escHtml(d.error || _tr('unknown')))) + '</div>';
+    }).catch(function(e) {
+        statusEl.innerHTML = '<div class="mm-status err">❌ ' + escHtml(e.message) + '</div>';
     });
 }
 
@@ -13937,6 +14384,33 @@ function _buildWeatherLocation(city, state) {
     return state ? city.replace(/ /g, '+') + ',' + state.replace(/ /g, '+') : city.replace(/ /g, '+');
 }
 
+function mmTestWeather() {
+    var statusEl = document.getElementById('mm-weather-status');
+    if (!statusEl) return;
+    var location = _buildWeatherLocation(
+        (document.getElementById('mm-weather-city') || {}).value,
+        (document.getElementById('mm-weather-state') || {}).value
+    );
+    if (!location) {
+        statusEl.innerHTML = '<div class="mm-status err">' + _tr('weather_test_location_required') + '</div>';
+        return;
+    }
+    statusEl.innerHTML = '<div class="mm-status info">' + _tr('testing_weather') + '</div>';
+    fetch('/api/weather/test?location=' + encodeURIComponent(location))
+        .then(function(r) { return r.json().then(function(d) { d._httpOk = r.ok; return d; }); })
+        .then(function(d) {
+            if (!d.ok) {
+                statusEl.innerHTML = '<div class="mm-status err">❌ ' + _tr('weather_test_failed') + ': ' + escHtml(d.error || _tr('unknown')) + '</div>';
+                return;
+            }
+            _applyWeatherTestResult(location, d);
+            var details = escHtml(d.resolvedLocation || location) + ' · ' + escHtml(d.weather || '') + ' · ' + escHtml(String(d.tempF || '?')) + '°F / ' + escHtml(String(d.tempC || '?')) + '°C';
+            statusEl.innerHTML = '<div class="mm-status ok">✅ ' + _tr('weather_test_ok') + '<br>' + details + '</div>';
+        }).catch(function(e) {
+            statusEl.innerHTML = '<div class="mm-status err">❌ ' + _tr('weather_test_failed') + ': ' + escHtml(e.message) + '</div>';
+        });
+}
+
 function mmSaveSettings() {
     var gwUrl = document.getElementById('mm-gateway-url').value;
     var officeName = document.getElementById('mm-office-name').value;
@@ -13980,6 +14454,7 @@ function mmSaveSettings() {
     var _hCb = document.getElementById('mm-hermes-enable');
     var _hHome = document.getElementById('mm-hermes-home');
     var _hBin = document.getElementById('mm-hermes-bin');
+    var _hApiEnabled = document.getElementById('mm-hermes-api-enable');
     var _hApiUrl = document.getElementById('mm-hermes-api-url');
     var _hApiKey = document.getElementById('mm-hermes-api-key');
     if (_hCb) {
@@ -13987,8 +14462,37 @@ function mmSaveSettings() {
             enabled: _hCb.checked,
             homePath: (_hHome ? _hHome.value.trim() : '') || null,
             binary: (_hBin ? _hBin.value.trim() : '') || null,
-            apiUrl: (_hApiUrl ? _hApiUrl.value.trim() : '') || null,
-            preferApi: true
+            apiEnabled: _hApiEnabled ? _hApiEnabled.checked : false,
+            apiUrl: (_hApiUrl ? _hApiUrl.value.trim() : '') || null
+        };
+        if (_hApiKey && _hApiKey.value.trim()) config.hermes.apiKey = _hApiKey.value.trim();
+    }
+    var _codexCb = document.getElementById('mm-codex-enable');
+    if (_codexCb) {
+        config.codex = {
+            enabled: _codexCb.checked,
+            workspace: ((document.getElementById('mm-codex-workspace') || {}).value || '').trim() || null,
+            workspaceRoot: ((document.getElementById('mm-codex-workspace-root') || {}).value || '').trim() || null,
+            mainWorkspace: ((document.getElementById('mm-codex-main-workspace') || {}).value || '').trim() || null,
+            model: ((document.getElementById('mm-codex-model') || {}).value || '').trim() || null,
+            bridgeUrl: ((document.getElementById('mm-codex-bridge-url') || {}).value || '').trim() || null,
+            includeMain: !!(document.getElementById('mm-codex-include-main') || {}).checked,
+            includeNativeAgents: !!(document.getElementById('mm-codex-include-native') || {}).checked
+        };
+    }
+    var _claudeCb = document.getElementById('mm-claude-code-enable');
+    if (_claudeCb) {
+        config.claudeCode = {
+            enabled: _claudeCb.checked,
+            homePath: ((document.getElementById('mm-claude-code-home') || {}).value || '').trim() || null,
+            binary: ((document.getElementById('mm-claude-code-bin') || {}).value || '').trim() || null,
+            workspace: ((document.getElementById('mm-claude-code-workspace') || {}).value || '').trim() || null,
+            workspaceRoot: ((document.getElementById('mm-claude-code-workspace-root') || {}).value || '').trim() || null,
+            mainWorkspace: ((document.getElementById('mm-claude-code-main-workspace') || {}).value || '').trim() || null,
+            model: ((document.getElementById('mm-claude-code-model') || {}).value || '').trim() || null,
+            includeMain: !!(document.getElementById('mm-claude-code-include-main') || {}).checked,
+            includeNativeAgents: !!(document.getElementById('mm-claude-code-include-native') || {}).checked,
+            registerNativeAgents: !!(document.getElementById('mm-claude-code-register-native') || {}).checked
         };
         var hermesApiKey = (_hApiKey ? _hApiKey.value.trim() : '');
         if (hermesApiKey) hermesSettings.apiKey = hermesApiKey;
@@ -14033,6 +14537,8 @@ function mmSaveSettings() {
     }).then(function(r){ return r.json(); }).then(function(d) {
         if (d.ok) {
             _acpShowToast('💾 Settings saved! Hard refresh (Ctrl+Shift+R) to apply all changes.');
+            _voWeatherLocation = (config.weather || {}).location || '';
+            pollWeather();
             // Update brand title live
             var brandEl = document.getElementById('brand-title');
             if (brandEl && officeName) brandEl.textContent = officeName.toUpperCase();
@@ -14216,6 +14722,9 @@ function _acpSelectAgent(agentId) {
         gender: agent.gender,
         branch: agent.branch || 'UNASSIGNED',
         statusKey: agent.statusKey || '',
+        providerKind: agent.providerKind || '',
+        providerAgentId: agent.providerAgentId || '',
+        profile: agent.profile || '',
         appearance: agent.getAppearance()
     }));
     _acpBuildEditor(agent);
@@ -14688,7 +15197,7 @@ function _acpSave() {
     if (!officeConfig.agents) officeConfig.agents = [];
 
     // Find or create config entry
-    var idx = officeConfig.agents.findIndex(function(a){ return a.id === es.id; });
+    var idx = officeConfig.agents.findIndex(function(a){ return _agentConfigMatches(a, es); });
     if (idx >= 0) {
         officeConfig.agents[idx].appearance = es.appearance;
         officeConfig.agents[idx].name = es.name;
@@ -14697,8 +15206,12 @@ function _acpSave() {
         officeConfig.agents[idx].color = es.color;
         officeConfig.agents[idx].gender = es.gender;
         officeConfig.agents[idx].branch = es.branch;
+        officeConfig.agents[idx].statusKey = es.statusKey;
+        officeConfig.agents[idx].providerKind = es.providerKind;
+        officeConfig.agents[idx].providerAgentId = es.providerAgentId;
+        officeConfig.agents[idx].profile = es.profile;
     } else {
-        officeConfig.agents.push({ id: es.id, name: es.name, role: es.role, emoji: es.emoji, color: es.color, gender: es.gender, branch: es.branch, appearance: es.appearance });
+        officeConfig.agents.push({ id: es.id, name: es.name, role: es.role, emoji: es.emoji, color: es.color, gender: es.gender, branch: es.branch, statusKey: es.statusKey, providerKind: es.providerKind, providerAgentId: es.providerAgentId, profile: es.profile, appearance: es.appearance });
     }
 
     // Update live agent object
@@ -14731,8 +15244,8 @@ function _acpAutoSave() {
     }
 
     if (!officeConfig.agents) officeConfig.agents = [];
-    var idx = officeConfig.agents.findIndex(function(a){ return a.id === es.id; });
-    var agentData = { id: es.id, name: es.name, role: es.role, emoji: es.emoji, color: es.color, gender: es.gender, branch: es.branch, statusKey: es.statusKey, appearance: es.appearance };
+    var idx = officeConfig.agents.findIndex(function(a){ return _agentConfigMatches(a, es); });
+    var agentData = { id: es.id, name: es.name, role: es.role, emoji: es.emoji, color: es.color, gender: es.gender, branch: es.branch, statusKey: es.statusKey, providerKind: es.providerKind, providerAgentId: es.providerAgentId, profile: es.profile, appearance: es.appearance };
     if (idx >= 0) {
         Object.assign(officeConfig.agents[idx], agentData);
     } else {
@@ -14768,229 +15281,209 @@ function _acpShowToast(msg) {
     setTimeout(function(){ if (toast.parentNode) toast.parentNode.removeChild(toast); }, 4000);
 }
 
+function _acpLocalizeCreateAgentError(errorText) {
+    var msg = String(errorText || '').trim();
+    if (/["']?main["']?\s+is\s+reserved/i.test(msg)) return _tr('agent_error_main_reserved');
+    return msg || _tr('unknown');
+}
+
+function _acpShowMessageDialog(title, message, kind) {
+    var existing = document.getElementById('agent-message-dialog');
+    if (existing) existing.remove();
+    var modal = document.createElement('div');
+    modal.id = 'agent-message-dialog';
+    modal.className = 'modal';
+    modal.innerHTML =
+        '<div class="modal-content agent-message-modal agent-message-' + escAttr(kind || 'info') + '">' +
+            '<div class="modal-header">' +
+                '<span class="modal-emoji">' + (kind === 'error' ? '⚠️' : 'ℹ️') + '</span>' +
+                '<h2>' + escHtml(title || _tr('error')) + '</h2>' +
+                '<span class="close-btn" data-agent-message-close>&times;</span>' +
+            '</div>' +
+            '<div class="agent-message-body">' + escHtml(message || '') + '</div>' +
+            '<div class="modal-controls">' +
+                '<button type="button" class="mtg-btn mtg-btn-end" data-agent-message-close>' + escHtml(_tr('confirm')) + '</button>' +
+            '</div>' +
+        '</div>';
+    modal.addEventListener('click', function(e) {
+        if (e.target === modal || e.target.closest('[data-agent-message-close]')) modal.remove();
+    });
+    modal.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape' || e.key === 'Enter') modal.remove();
+    });
+    document.body.appendChild(modal);
+    var close = modal.querySelector('[data-agent-message-close]');
+    if (close) close.focus();
+}
+
 function _isCustomAgent(agentId) {
     // Built-in agents come from AGENT_DEFS
     return !AGENT_DEFS.find(function(d){ return d.id === agentId; });
 }
 
-function _acpAgentPlatformDefaults(platformId) {
-    if (platformId === 'hermes') {
-        return {
-            role: 'Hermes Agent',
-            emoji: '⚕️',
-            prompt: 'You are a Hermes-backed Virtual Office agent. Reply clearly and stay focused on the assigned role.'
-        };
-    }
-    if (platformId === 'codex') {
-        return {
-            role: 'Codex Agent',
-            emoji: '🤖',
-            prompt: 'You are a Codex-backed Virtual Office agent. Help with software tasks, keep changes scoped, and explain results clearly.'
-        };
-    }
-    if (platformId === 'claude-code') {
-        return {
-            role: 'Claude Code Agent',
-            emoji: '🤖',
-            prompt: 'You are a Claude Code-backed Virtual Office agent. Help with software tasks, use tools carefully, and explain results clearly.'
-        };
-    }
-    return {
-        role: 'AI assistant',
-        emoji: '🤖',
-        prompt: 'You are a helpful Virtual Office agent. Stay organized, concise, and focused on your assigned role.'
-    };
+function _acpPlatformDefaults(platform) {
+    var id = platform && platform.id || 'openclaw';
+    if (id === 'hermes') return { role: 'Hermes Agent', emoji: '⚕️' };
+    if (id === 'codex') return { role: 'Codex Collaborator', emoji: '⚡' };
+    if (id === 'claude-code') return { role: 'Claude Code Agent', emoji: '🧠' };
+    return { role: _tr('ai_assistant'), emoji: '🤖' };
 }
 
-function _acpShowCreateAgentDialog(platforms) {
+function _acpSlugAgentName(name) {
+    var slug = String(name || '').trim().toLowerCase()
+        .replace(/[^a-z0-9_.-]+/g, '-')
+        .replace(/^[-._]+|[-._]+$/g, '')
+        .slice(0, 64);
+    return slug || 'agent';
+}
+
+function _acpShowCreateAgentDialog(platformsSource) {
     return new Promise(function(resolve) {
         var existing = document.getElementById('agent-create-dialog');
         if (existing) existing.remove();
+
+        var platforms = [];
+        var selectedPlatform = null;
+        var defaults = _acpPlatformDefaults(null);
         var modal = document.createElement('div');
         modal.id = 'agent-create-dialog';
         modal.className = 'modal';
-        var optionsHtml = platforms.map(function(p) {
-            return '<option value="' + escAttr(p.id) + '">' + escHtml(p.label || p.id) + '</option>';
-        }).join('');
-        var first = platforms[0] || { id: 'openclaw', label: 'OpenClaw' };
-        var defaults = _acpAgentPlatformDefaults(first.id);
-        var lastDefaults = defaults;
         modal.innerHTML =
             '<div class="modal-content agent-create-modal">' +
                 '<div class="modal-header">' +
                     '<span class="modal-emoji">➕</span>' +
-                    '<h2>Create Agent</h2>' +
-                    '<span class="close-btn" data-agent-create-cancel>&times;</span>' +
+                    '<h2>' + escHtml(_tr('agent_create_title')) + '</h2>' +
+                    '<span class="close-btn" data-acp-create-cancel>&times;</span>' +
                 '</div>' +
-                '<form class="agent-create-form">' +
-                    '<label>Agent Platform<select name="platform">' + optionsHtml + '</select></label>' +
-                    '<div class="agent-create-platform-note"></div>' +
-                    '<div class="agent-create-codex-options" hidden>' +
-                        '<label><span class="agent-create-native-label">Native Location</span><select name="codexCreationMode">' +
-                            '<option value="standard">Default native agents directory</option>' +
-                            '<option value="custom">Custom parent directory</option>' +
-                        '</select></label>' +
-                        '<label class="agent-create-codex-custom" hidden>Custom Parent Directory<input name="codexCustomDirectory" placeholder="/path/to/agent-workspaces" autocomplete="off"></label>' +
-                        '<div class="agent-create-codex-note"></div>' +
-                    '</div>' +
-                    '<label>Name<input name="name" maxlength="80" placeholder="New Agent" autocomplete="off"></label>' +
-                    '<div class="agent-create-row">' +
-                        '<label>Role<input name="role" maxlength="160" value="' + escAttr(defaults.role) + '"></label>' +
-                        '<label>Emoji<input name="emoji" maxlength="8" value="' + escAttr(defaults.emoji) + '"></label>' +
-                    '</div>' +
-                    '<label>Standing Prompt<textarea name="prompt" maxlength="5000">' + escTextarea(defaults.prompt) + '</textarea></label>' +
-                    '<div class="agent-create-error" aria-live="polite"></div>' +
-                    '<div class="agent-create-actions">' +
-                        '<button type="submit">Create Agent</button>' +
-                        '<button type="button" data-agent-create-cancel>Cancel</button>' +
-                    '</div>' +
-                '</form>' +
+                '<div class="agent-create-form">' +
+                    '<div class="agent-create-label">' + escHtml(_tr('agent_platform_prompt')) + '</div>' +
+                    '<div class="agent-platform-grid agent-platform-grid-loading">' + escHtml(_tr('loading')) + '</div>' +
+                    '<label class="agent-create-field"><span>' + escHtml(_tr('agent_name_prompt')) + '</span><input id="agent-create-name" value="' + escAttr(_tr('new_agent_default')) + '"></label>' +
+                    '<label class="agent-create-field"><span>' + escHtml(_tr('agent_role_prompt')) + '</span><input id="agent-create-role" value="' + escAttr(defaults.role) + '"></label>' +
+                    '<label class="agent-create-field agent-create-emoji-field"><span>' + escHtml(_tr('emoji_prompt')) + '</span><input id="agent-create-emoji" value="' + escAttr(defaults.emoji) + '" maxlength="8"></label>' +
+                '</div>' +
+                '<div class="modal-controls">' +
+                    '<button type="button" class="mtg-btn" data-acp-create-cancel>' + escHtml(_tr('cancel')) + '</button>' +
+                    '<button type="button" class="mtg-btn mtg-btn-end" data-acp-create-submit disabled>' + escHtml(_tr('agent_create_submit')) + '</button>' +
+                '</div>' +
             '</div>';
 
-        function selectedPlatform() {
-            var value = modal.querySelector('select[name="platform"]').value;
-            return platforms.find(function(p) { return p.id === value; }) || first;
-        }
-        function updatePlatformDefaults() {
-            var p = selectedPlatform();
-            var next = _acpAgentPlatformDefaults(p.id);
-            var role = modal.querySelector('input[name="role"]');
-            var emoji = modal.querySelector('input[name="emoji"]');
-            var prompt = modal.querySelector('textarea[name="prompt"]');
-            var note = modal.querySelector('.agent-create-platform-note');
-            var codexOptions = modal.querySelector('.agent-create-codex-options');
-            if (!role.value.trim() || role.value === lastDefaults.role) role.value = next.role;
-            if (!emoji.value.trim() || emoji.value === lastDefaults.emoji) emoji.value = next.emoji;
-            if (!prompt.value.trim() || prompt.value === lastDefaults.prompt) prompt.value = next.prompt;
-            note.textContent = p.description || '';
-            if (codexOptions) {
-                codexOptions.hidden = !(p.id === 'codex' || p.id === 'claude-code');
-                updateCodexDirectoryControls();
-            }
-            lastDefaults = next;
-        }
-        function updateCodexDirectoryControls() {
-            var p = selectedPlatform();
-            var codexBox = modal.querySelector('.agent-create-codex-options');
-            var mode = modal.querySelector('select[name="codexCreationMode"]');
-            var custom = modal.querySelector('.agent-create-codex-custom');
-            var customInput = modal.querySelector('input[name="codexCustomDirectory"]');
-            var note = modal.querySelector('.agent-create-codex-note');
-            var label = modal.querySelector('.agent-create-native-label');
-            if (!codexBox || !mode || !custom || !note) return;
-            var isHarness = p.id === 'codex' || p.id === 'claude-code';
-            codexBox.hidden = !isHarness;
-            if (!isHarness) return;
-            var providerData = p.id === 'claude-code' ? (p.claudeCode || {}) : (p.codex || {});
-            var providerName = p.id === 'claude-code' ? 'Claude Code' : 'Codex';
-            var nativeDir = providerData.nativeAgentsDir || (p.id === 'claude-code' ? '$CLAUDE_CONFIG_DIR/agents' : '$CODEX_HOME/agents');
-            var workspaceRoot = providerData.workspaceRoot || '';
-            if (label) label.textContent = providerName + ' Location';
-            custom.hidden = mode.value !== 'custom';
-            if (mode.value === 'custom') {
-                note.textContent = 'Creates a project-local ' + providerName + ' agent under the custom parent directory.';
-                if (customInput && !customInput.value.trim() && workspaceRoot) customInput.placeholder = workspaceRoot;
-            } else {
-                note.textContent = 'Registers the agent in ' + nativeDir + ' and creates a managed workspace for Virtual Office.';
-            }
-        }
         function close(value) {
-            document.removeEventListener('keydown', onKeyDown);
             modal.remove();
             resolve(value || null);
         }
-        function onKeyDown(e) {
-            if (e.key === 'Escape') close(null);
+        function renderPlatforms(nextPlatforms, errorText) {
+            platforms = (nextPlatforms || []).filter(function(p){ return p && p.available && p.create; });
+            var grid = modal.querySelector('.agent-platform-grid');
+            var submit = modal.querySelector('[data-acp-create-submit]');
+            if (!grid) return;
+            grid.classList.remove('agent-platform-grid-loading');
+            if (!platforms.length) {
+                grid.classList.add('agent-platform-grid-loading');
+                grid.textContent = errorText || _tr('no_agent_platforms');
+                if (submit) submit.disabled = true;
+                return;
+            }
+            selectedPlatform = platforms[0];
+            grid.innerHTML = platforms.map(function(p, i) {
+                return '<button type="button" class="agent-platform-card' + (i === 0 ? ' selected' : '') + '" data-platform-id="' + escAttr(p.id) + '">' +
+                    '<span class="agent-platform-name">' + escHtml(p.label || p.id) + '</span>' +
+                    '<span class="agent-platform-id">' + escHtml(p.id) + '</span>' +
+                '</button>';
+            }).join('');
+            if (submit) submit.disabled = false;
+            syncDefaults(selectedPlatform);
+        }
+        function syncDefaults(platform) {
+            var d = _acpPlatformDefaults(platform);
+            var role = document.getElementById('agent-create-role');
+            var emoji = document.getElementById('agent-create-emoji');
+            if (role && (!role.value.trim() || role.dataset.autofill === '1')) {
+                role.value = d.role;
+                role.dataset.autofill = '1';
+            }
+            if (emoji && (!emoji.value.trim() || emoji.dataset.autofill === '1')) {
+                emoji.value = d.emoji;
+                emoji.dataset.autofill = '1';
+            }
         }
 
+        modal.addEventListener('input', function(e) {
+            if (e.target && (e.target.id === 'agent-create-role' || e.target.id === 'agent-create-emoji')) {
+                e.target.dataset.autofill = '0';
+            }
+        });
         modal.addEventListener('click', function(e) {
-            if (e.target === modal || e.target.closest('[data-agent-create-cancel]')) {
+            if (e.target === modal || e.target.closest('[data-acp-create-cancel]')) {
                 close(null);
-            }
-        });
-        modal.querySelector('select[name="platform"]').addEventListener('change', updatePlatformDefaults);
-        modal.querySelector('select[name="codexCreationMode"]').addEventListener('change', updateCodexDirectoryControls);
-        modal.querySelector('form').addEventListener('submit', function(e) {
-            e.preventDefault();
-            var error = modal.querySelector('.agent-create-error');
-            var name = modal.querySelector('input[name="name"]').value.trim();
-            var role = modal.querySelector('input[name="role"]').value.trim();
-            var emoji = modal.querySelector('input[name="emoji"]').value.trim();
-            var prompt = modal.querySelector('textarea[name="prompt"]').value.trim();
-            var codexCreationMode = modal.querySelector('select[name="codexCreationMode"]').value;
-            var codexCustomDirectory = modal.querySelector('input[name="codexCustomDirectory"]').value.trim();
-            if (!name) {
-                error.textContent = 'Agent name is required.';
-                modal.querySelector('input[name="name"]').focus();
                 return;
             }
-            var p = selectedPlatform();
-            if ((p.id === 'codex' || p.id === 'claude-code') && codexCreationMode === 'custom' && !codexCustomDirectory) {
-                error.textContent = 'Custom parent directory is required for custom ' + (p.id === 'claude-code' ? 'Claude Code' : 'Codex') + ' creation.';
-                modal.querySelector('input[name="codexCustomDirectory"]').focus();
+            var platformBtn = e.target.closest('.agent-platform-card');
+            if (platformBtn) {
+                selectedPlatform = platforms.find(function(p) { return p.id === platformBtn.dataset.platformId; }) || selectedPlatform;
+                modal.querySelectorAll('.agent-platform-card').forEach(function(btn) { btn.classList.toggle('selected', btn === platformBtn); });
+                syncDefaults(selectedPlatform);
                 return;
             }
-            var fallback = _acpAgentPlatformDefaults(p.id);
-            close({
-                selectedPlatform: p,
-                agentName: name,
-                agentRole: role || fallback.role,
-                agentEmoji: emoji || fallback.emoji,
-                agentPrompt: prompt || role || fallback.prompt,
-                codexCreationMode: (p.id === 'codex' || p.id === 'claude-code') ? codexCreationMode : '',
-                codexCustomDirectory: (p.id === 'codex' || p.id === 'claude-code') ? codexCustomDirectory : ''
-            });
+            if (e.target.closest('[data-acp-create-submit]')) {
+                if (!selectedPlatform) return;
+                var name = (document.getElementById('agent-create-name').value || '').trim();
+                var role = (document.getElementById('agent-create-role').value || '').trim();
+                var emoji = (document.getElementById('agent-create-emoji').value || '').trim();
+                var d = _acpPlatformDefaults(selectedPlatform);
+                if (!name) {
+                    var nameInput = document.getElementById('agent-create-name');
+                    if (nameInput) nameInput.focus();
+                    return;
+                }
+                close({ platform: selectedPlatform, name: name, role: role || d.role, emoji: emoji || d.emoji });
+            }
         });
-        document.addEventListener('keydown', onKeyDown);
+        modal.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') close(null);
+            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                var submit = modal.querySelector('[data-acp-create-submit]');
+                if (submit) submit.click();
+            }
+        });
         document.body.appendChild(modal);
-        updatePlatformDefaults();
-        setTimeout(function() {
-            var nameInput = modal.querySelector('input[name="name"]');
-            if (nameInput) nameInput.focus();
-        }, 0);
+        var nameInput = document.getElementById('agent-create-name');
+        var roleInput = document.getElementById('agent-create-role');
+        var emojiInput = document.getElementById('agent-create-emoji');
+        if (roleInput) roleInput.dataset.autofill = '1';
+        if (emojiInput) emojiInput.dataset.autofill = '1';
+        if (nameInput) {
+            nameInput.focus();
+            nameInput.select();
+        }
+        Promise.resolve(platformsSource).then(function(platformData) {
+            var loaded = Array.isArray(platformData) ? platformData : (platformData && platformData.platforms) || [];
+            renderPlatforms(loaded);
+        }).catch(function() {
+            renderPlatforms([{ id: 'openclaw', label: 'OpenClaw', available: true, create: true }]);
+        });
     });
 }
 
 function _acpCreateNewAgent() {
-    fetch('/api/agent-platforms').then(function(res) {
+    var platformsPromise = fetch('/api/agent-platforms').then(function(res) {
         return res.json();
     }).catch(function() {
         return { platforms: [{ id: 'openclaw', label: 'OpenClaw', available: true, create: true }] };
-    }).then(function(platformData) {
-        var platforms = (platformData.platforms || []).filter(function(p){ return p.available && p.create; });
-        if (!platforms.length) {
-        alert(_tr('no_agent_platforms'));
-            return null;
-        }
-        var platformPrompt = _tr('agent_platform_prompt') + '\n' + platforms.map(function(p, i){
-            return (i + 1) + '. ' + p.label;
-        }).join('\n');
-        var platformChoice = prompt(platformPrompt, platforms[0].label);
-        if (platformChoice === null) return null;
-        platformChoice = platformChoice.trim().toLowerCase();
-        var selectedPlatform = platforms.find(function(p, i){
-            return platformChoice === p.id.toLowerCase() ||
-                   platformChoice === p.label.toLowerCase() ||
-                   platformChoice === String(i + 1);
-        }) || platforms[0];
-
-    var agentName = prompt(_tr('agent_name_prompt'), _tr('new_agent_default'));
-        if (!agentName || !agentName.trim()) return null;
-        agentName = agentName.trim();
-
-    var agentRole = prompt(_tr('agent_role_prompt'), selectedPlatform.id === 'hermes' ? 'Hermes Agent' : _tr('ai_assistant'));
-        if (agentRole === null) return null;
-        agentRole = agentRole.trim() || (selectedPlatform.id === 'hermes' ? 'Hermes Agent' : _tr('ai_assistant'));
-
-    var agentEmoji = prompt(_tr('emoji_prompt'), selectedPlatform.id === 'hermes' ? '⚕️' : '🤖');
-        if (agentEmoji === null) return null;
-        agentEmoji = agentEmoji.trim() || (selectedPlatform.id === 'hermes' ? '⚕️' : '🤖');
+    });
+    _acpShowCreateAgentDialog(platformsPromise).then(function(selection) {
+        if (!selection) return null;
+        var selectedPlatform = selection.platform;
+        var agentName = selection.name;
+        var agentRole = selection.role;
+        var agentEmoji = selection.emoji;
+        var agentProfile = _acpSlugAgentName(agentName);
 
         _acpShowToast(_tr('creating_agent_platform', { platform: selectedPlatform.label }));
         return fetch('/api/agent/create', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(createPayload)
+            body: JSON.stringify({ platform: selectedPlatform.id, id: agentProfile, profile: agentProfile, name: agentName, role: agentRole, emoji: agentEmoji })
         }).then(function(res) { return res.json(); }).then(function(data) {
             return { data: data, platform: selectedPlatform, name: agentName, role: agentRole, emoji: agentEmoji, prompt: agentPrompt };
         });
@@ -14998,7 +15491,7 @@ function _acpCreateNewAgent() {
         if (!result) return;
         var data = result.data;
         if (data.error) {
-        alert(_tr('failed_create_agent') + ': ' + data.error);
+            _acpShowMessageDialog(_tr('failed_create_agent'), _acpLocalizeCreateAgentError(data.error), 'error');
             return;
         }
         var newId = data.agentId;
@@ -15013,13 +15506,19 @@ function _acpCreateNewAgent() {
             providerKind: data.providerKind || result.platform.id || 'openclaw',
             providerType: data.providerType || result.platform.providerType || 'runtime',
             providerAgentId: data.providerAgentId || data.profile || newId,
+            profile: data.profile || data.providerAgentId || '',
             branch: 'UNASSIGNED',
             deskType: 'center',
         };
 
         var appearance = getDefaultAppearance(newId, 'M');
         if (!officeConfig.agents) officeConfig.agents = [];
-        officeConfig.agents.push(Object.assign({}, newAgent, { appearance: appearance }));
+        var savedAgent = Object.assign({}, newAgent, { appearance: appearance });
+        var existingIdx = officeConfig.agents.findIndex(function(a) {
+            return _agentConfigMatches(a, savedAgent);
+        });
+        if (existingIdx >= 0) officeConfig.agents[existingIdx] = Object.assign({}, officeConfig.agents[existingIdx], savedAgent);
+        else officeConfig.agents.push(savedAgent);
 
         var startX = 500 + (agents.length * 20) % 100;
         var startY = 350;
@@ -15037,7 +15536,7 @@ function _acpCreateNewAgent() {
         _acpSelectAgent(newId);
         _acpShowToast('✅ ' + _tr('agent_created_platform', { name: result.name, platform: result.platform.label }));
     }).catch(function(e) {
-        alert(_tr('error_create_agent') + ': ' + e.message);
+        _acpShowMessageDialog(_tr('error_create_agent'), _acpLocalizeCreateAgentError(e.message), 'error');
     });
 }
 
@@ -16590,6 +17089,10 @@ var _mtgDecisionAutoContinuing = {};
 var _mtgDetailMeetingId = '';
 
 function openMeetingsDashboard() {
+    ['meetingsModal', 'meetingDetailModal', 'meetingRequestDetailModal', 'newMeetingModal'].forEach(function(id) {
+        var el = document.getElementById(id);
+        if (el) el.classList.add('modal-above-projects');
+    });
     document.getElementById('meetingsModal').classList.remove('hidden');
     updateMeetingLabels();
     _mtgRefresh();
@@ -16634,6 +17137,12 @@ function _mtgSortMeetingsByTime(meetings) {
     return (meetings || []).slice().sort(function(a, b) {
         return _mtgMeetingTime(b) - _mtgMeetingTime(a);
     });
+}
+
+function _mtgMeetingCompleted(m) {
+    if (!m) return false;
+    var state = m.stage || m.executionStage || m.status || '';
+    return state === 'completed' || state === 'cancelled';
 }
 
 function _mtgHistorySearchText(m) {
@@ -16711,6 +17220,7 @@ async function _mtgRefresh() {
         _mtgData.requests = _mtgSortRequestsByStatusThenTime(requestsRes.requests || []);
         _mtgData.projects = projectsRes.projects || [];
         _mtgSeedLiveMeetings(_mtgData.active);
+        (_mtgData.active || []).forEach(_mtgMaybeAutoContinueDecisionMeeting);
         _mtgAgentMap = {};
         var agentsList = agentsRes.agents || agentsRes || [];
         _mtgAgents = Array.isArray(agentsList) ? agentsList : [];
@@ -16727,6 +17237,52 @@ async function _mtgRefresh() {
         _updateSidebarMeetings();
     } catch (e) {
         console.warn('[meetings] refresh error:', e);
+    }
+}
+
+async function openMeetingReference(ref) {
+    ref = ref || {};
+    var requestId = String(ref.requestId || '').trim();
+    var meetingId = String(ref.meetingId || '').trim();
+    updateMeetingLabels();
+    _mtgEnsureLivePolling();
+    ['meetingsModal', 'meetingDetailModal', 'meetingRequestDetailModal'].forEach(function(id) {
+        var el = document.getElementById(id);
+        if (el) el.classList.add('modal-above-projects');
+    });
+    await _mtgRefresh();
+
+    var request = requestId ? _mtgFindRequest(requestId) : null;
+    if (requestId && !request) request = await _mtgFetchRequestDetail(requestId);
+    if (request && !meetingId) meetingId = _mtgMeetingIdFromRequest(request);
+
+    var meeting = meetingId ? _mtgFindMeeting(meetingId) : null;
+    if (!meeting && requestId) {
+        meeting = _mtgFindMeetingByRequestId(requestId);
+        if (meeting && meeting.id) meetingId = meeting.id;
+    }
+    if (meeting) {
+        switchMtgTab(meeting && meeting.status === 'active' ? 'active' : 'completed');
+        openMeetingDetailModal(meetingId);
+        return;
+    }
+
+    if (meetingId) {
+        switchMtgTab('completed');
+        openMeetingDetailModal(meetingId);
+        return;
+    }
+
+    if (requestId) {
+        var modal = document.getElementById('meetingsModal');
+        if (modal) modal.classList.remove('hidden');
+        switchMtgTab('requests');
+        if (!request) request = await _mtgFetchRequestDetail(requestId);
+        if (request) {
+            openMeetingRequestDetailModal(requestId);
+        } else if (meetingId) {
+            switchMtgTab('completed');
+        }
     }
 }
 
@@ -16969,7 +17525,7 @@ function _mtgRender() {
                 Object.keys(m.result.contributions).forEach(function(agentId) {
                     var info = _mtgAgentMap[agentId] || { emoji: '🤖', name: agentId };
                     html += '<div class="mtg-response"><div class="mtg-response-header"><span class="mtg-response-emoji">' + info.emoji + '</span><span class="mtg-response-name">' + _escMtg(info.name) + '</span></div>';
-                    html += '<div class="mtg-response-text">' + _escMtg(m.result.contributions[agentId] || '') + '</div></div>';
+                    html += '<div class="mtg-response-text">' + _mtgRenderContributionText(m.result.contributions[agentId] || '') + '</div></div>';
                 });
                 html += '</div>';
             }
@@ -17225,6 +17781,9 @@ function _mtgRenderRequests(container) {
         if (status === 'confirmed' && req.conversion && req.conversion.meetingId) {
             html += '<div class="mtg-section-text">' + _escMtg(_mtgT('meeting_request_created_meeting', 'Created meeting')) + ': ' + _escMtg(req.conversion.meetingId) + '</div>';
         }
+        if (req.review && req.review.autoConfirmed) {
+            html += '<div class="mtg-section-text">' + _escMtg(req.review.autoConfirmLabel || req.review.autoConfirmReason || _mtgT('meeting_request_auto_confirmed', 'Auto-approved')) + '</div>';
+        }
         if (status === 'rejected' && req.review && req.review.rejectionReason) {
             html += '<div class="mtg-inline-error" style="display:block">' + _escMtg(req.review.rejectionReason) + '</div>';
         }
@@ -17257,6 +17816,9 @@ function _mtgRenderRequestDetail(req) {
     html += '<div class="mtg-section"><div class="mtg-section-title">' + _escMtg(_mtgT('meeting_request_reason', 'Why meeting is needed')) + '</div><div class="mtg-section-text">' + _escMtg(proposal.cannotCompleteAloneReason || '') + '</div></div>';
     if (status === 'confirmed' && req.conversion && req.conversion.meetingId) {
         html += '<div class="mtg-section-text">' + _escMtg(_mtgT('meeting_request_created_meeting', 'Created meeting')) + ': ' + _escMtg(req.conversion.meetingId) + '</div>';
+    }
+    if (req.review && req.review.autoConfirmed) {
+        html += '<div class="mtg-section-text">' + _escMtg(req.review.autoConfirmLabel || req.review.autoConfirmReason || _mtgT('meeting_request_auto_confirmed', 'Auto-approved')) + '</div>';
     }
     if (status === 'rejected' && req.review && req.review.rejectionReason) {
         html += '<div class="mtg-inline-error" style="display:block">' + _escMtg(req.review.rejectionReason) + '</div>';
@@ -17333,12 +17895,17 @@ async function _mtgConfirmRequest(requestId) {
         var data = await res.json();
         if (!res.ok || data.error) throw new Error(data.error || 'Failed to confirm request');
         var meetingId = data.meetingId || (data.meeting && data.meeting.id) || (data.request && data.request.conversion && data.request.conversion.meetingId) || '';
+        var ran = null;
         if (meetingId) {
-            await _mtgRunMeeting(meetingId, { action: 'confirmed_start' });
+            ran = await _mtgRunMeeting(meetingId, { action: 'confirmed_start' });
         }
         closeMeetingRequestDetailModal();
         await _mtgRefresh();
-        switchMtgTab('active');
+        var latest = meetingId ? _mtgFindMeeting(meetingId) : null;
+        var current = latest || (ran && ran.meeting) || data.meeting || null;
+        switchMtgTab(_mtgMeetingCompleted(current) ? 'completed' : 'active');
+        if (current) openMeetingDetailRecord(current);
+        else if (meetingId) openMeetingDetailModal(meetingId);
     } catch (e) {
         _mtgRequestError(requestId, e.message || String(e));
     }
@@ -17437,6 +18004,14 @@ function _mtgUpdateDecisionCountdowns() {
     });
 }
 
+function _mtgMaybeAutoContinueDecisionMeeting(m) {
+    if (!m || !m.executableMeeting || (m.executionStage || '') !== 'awaiting_user_decision') return;
+    if (m.arbitration && m.arbitration.reason === 'no_consensus') return;
+    if (_mtgDecisionSecondsRemaining(m.decisionDeadlineAt || '') === 0) {
+        _mtgAutoContinueDecisionWindow(m.id || '');
+    }
+}
+
 async function _mtgAutoContinueDecisionWindow(meetingId) {
     if (!meetingId || _mtgDecisionAutoContinuing[meetingId]) return;
     _mtgDecisionAutoContinuing[meetingId] = true;
@@ -17449,7 +18024,7 @@ async function _mtgAutoContinueDecisionWindow(meetingId) {
     try {
         var ran = await _mtgRunMeeting(meetingId, { action: 'timeout' });
         await _mtgAfterMeetingRefresh();
-        if (ran && ran.meeting && ran.meeting.stage === 'completed') switchMtgTab('completed');
+        if (_mtgMeetingCompleted(ran && ran.meeting)) switchMtgTab('completed');
         else switchMtgTab('active');
     } catch (e) {
         console.warn('[meetings] decision window auto-continue failed:', e);
@@ -17512,6 +18087,7 @@ function _mtgRenderDecisionWindowControls(m) {
     if (!isNoConsensus && deadline) hint += ' · ' + _mtgT('meeting_decision_deadline', 'Deadline') + ': ' + deadline;
     var html = '<div class="mtg-section mtg-decision-window" data-meeting-id="' + id + '">' +
         '<div class="mtg-section-title">' + _escMtg(_mtgT('meeting_decision_window', 'Round decision window')) + '</div>' +
+        (!isNoConsensus ? '<div class="mtg-section-text mtg-decision-countdown" data-meeting-id="' + id + '" data-deadline="' + _escMtg(m.decisionDeadlineAt || '') + '" data-auto-continue="1">' + _escMtg(_mtgDecisionCountdownText(m)) + '</div>' : '') +
         '<div class="mtg-section-text">' + _escMtg(hint) + '</div>' +
         '<label class="mtg-label">' + _escMtg(_mtgT('meeting_target_participant', 'Target participant')) + '</label>' +
         '<select id="mtg-target-participant-' + id + '" class="skl-input">' + options + '</select>' +
@@ -17588,6 +18164,10 @@ function _mtgRenderModeratorTakeoverControls(m) {
 function _escMtg(s) {
     if (!s) return '';
     return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function _mtgJsArg(value) {
+    return JSON.stringify(value == null ? '' : String(value)).replace(/</g, '\\u003c');
 }
 
 function _mtgT(key, fallback) {
@@ -17728,21 +18308,22 @@ function _mtgT(key, fallback) {
         meeting_error_participants_required: '至少选择两名参会者。',
         meeting_error_moderator_required: '请选择主持人。',
         meeting_action_drafts: '行动项草稿',
-        meeting_action_drafts_hint: '确认后才会创建项目任务，草稿不会自动执行。',
+        meeting_action_drafts_hint: '确认后会加入来源任务的会议行动项，草稿不会自动执行。',
         meeting_action_untitled: '未命名行动项',
         meeting_action_status_draft: '待确认',
-        meeting_action_status_confirmed: '已创建任务',
+        meeting_action_status_confirmed: '已加入当前任务',
         meeting_action_status_rejected: '已拒绝',
         meeting_action_status_kept: '仅保存',
+        meeting_action_edit: '编辑',
         meeting_action_owner: '负责人',
         meeting_action_title: '任务标题',
         meeting_action_description: '说明',
         meeting_action_save_draft: '保存草稿',
-        meeting_action_confirm_task: '创建任务',
+        meeting_action_confirm_task: '加入当前任务',
         meeting_action_keep: '仅保存',
         meeting_action_reject: '拒绝',
-        meeting_action_open_task: '打开任务',
-        meeting_action_task_created: '任务已创建',
+        meeting_action_open_task: '打开来源任务',
+        meeting_action_task_created: '已加入来源任务',
         meeting_action_rejected_by_user: '用户拒绝'
     };
     if (String(lang).toLowerCase().indexOf('zh') === 0 && zhFallback[key]) return zhFallback[key];
@@ -17990,6 +18571,7 @@ async function _mtgPollLiveMeetings() {
             var res = await fetch('/api/meetings/executable/' + encodeURIComponent(m.id) + '/events?after=' + encodeURIComponent(state.lastSeq || 0));
             var data = await res.json();
             if (!res.ok || data.error) return;
+            _mtgMaybeAutoContinueDecisionMeeting(m);
             (data.events || []).forEach(function(event) {
                 _mtgApplyLiveEvent(m.id, event);
                 changed = true;
@@ -18136,6 +18718,112 @@ function _mtgHasStructuredTurn(structured) {
 function _mtgStructuredValue(value) {
     if (Array.isArray(value)) return value.filter(function(item) { return String(item || '').trim(); }).join('\n');
     return String(value || '').trim();
+}
+
+function _mtgStripJsonFence(text) {
+    var raw = String(text || '').trim();
+    if (raw.indexOf('```') === 0) {
+        var lines = raw.split(/\r?\n/);
+        if (lines.length && lines[0].trim().indexOf('```') === 0) lines.shift();
+        if (lines.length && lines[lines.length - 1].trim().indexOf('```') === 0) lines.pop();
+        raw = lines.join('\n').trim();
+    }
+    return raw;
+}
+
+function _mtgParseJsonObject(text) {
+    var raw = _mtgStripJsonFence(text);
+    if (!raw) return null;
+    try {
+        var parsed = JSON.parse(raw);
+        return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+    } catch (e) {}
+    var idx = raw.indexOf('{');
+    while (idx >= 0) {
+        var end = raw.lastIndexOf('}');
+        while (end > idx) {
+            try {
+                var obj = JSON.parse(raw.slice(idx, end + 1));
+                return obj && typeof obj === 'object' && !Array.isArray(obj) ? obj : null;
+            } catch (e2) {
+                end = raw.lastIndexOf('}', end - 1);
+            }
+        }
+        idx = raw.indexOf('{', idx + 1);
+    }
+    return null;
+}
+
+function _mtgNormalizeStructuredContribution(obj) {
+    var keyMap = {
+        position: 'position',
+        reasoning: 'reasoning',
+        disagreements: 'disagreements',
+        questions: 'questions',
+        suggestednextstep: 'suggestedNextStep',
+        suggested_next_step: 'suggestedNextStep',
+        confidence: 'confidence'
+    };
+    var structured = {};
+    Object.keys(obj || {}).forEach(function(rawKey) {
+        var normalized = String(rawKey || '').replace(/[^A-Za-z_]/g, '').toLowerCase();
+        var key = keyMap[normalized];
+        if (!key) return;
+        if (key === 'disagreements' || key === 'questions') {
+            var value = obj[rawKey];
+            structured[key] = Array.isArray(value) ? value.map(function(item) { return String(item || '').trim(); }).filter(Boolean) : [String(value || '').trim()].filter(Boolean);
+        } else {
+            structured[key] = String(obj[rawKey] || '').trim();
+        }
+    });
+    if (structured.position || structured.reasoning || structured.suggestedNextStep || structured.confidence || (structured.disagreements || []).length || (structured.questions || []).length) {
+        structured.disagreements = structured.disagreements || [];
+        structured.questions = structured.questions || [];
+        return structured;
+    }
+    return null;
+}
+
+function _mtgParseLabeledContribution(text) {
+    var labelMap = {
+        position: 'position',
+        reasoning: 'reasoning',
+        disagreements: 'disagreements',
+        questions: 'questions',
+        suggestednextstep: 'suggestedNextStep',
+        confidence: 'confidence'
+    };
+    var structured = {};
+    var currentKey = '';
+    String(text || '').split(/\r?\n/).forEach(function(line) {
+        var match = line.match(/^\s*([A-Za-z][A-Za-z ]{1,40}):\s*(.*)$/);
+        var mapped = match ? labelMap[String(match[1] || '').replace(/[^A-Za-z]/g, '').toLowerCase()] : '';
+        if (mapped) {
+            currentKey = mapped;
+            if (mapped === 'disagreements' || mapped === 'questions') {
+                structured[mapped] = structured[mapped] || [];
+                if (String(match[2] || '').trim()) structured[mapped].push(String(match[2] || '').trim());
+            } else {
+                structured[mapped] = [structured[mapped], String(match[2] || '').trim()].filter(Boolean).join('\n\n');
+            }
+            return;
+        }
+        if (!currentKey || !line.trim()) return;
+        if (currentKey === 'disagreements' || currentKey === 'questions') {
+            structured[currentKey] = structured[currentKey] || [];
+            structured[currentKey].push(line.trim().replace(/^[-*]\s*/, ''));
+        } else {
+            structured[currentKey] = [structured[currentKey], line.trim()].filter(Boolean).join('\n');
+        }
+    });
+    return _mtgNormalizeStructuredContribution(structured);
+}
+
+function _mtgRenderContributionText(text) {
+    var raw = String(text || '').trim();
+    var structured = _mtgNormalizeStructuredContribution(_mtgParseJsonObject(raw)) || _mtgParseLabeledContribution(raw);
+    if (structured && _mtgHasStructuredTurn(structured)) return _mtgRenderStructuredTurn(structured);
+    return _escMtg(raw);
 }
 
 function _mtgRenderStructuredTurn(structured) {
@@ -18316,7 +19004,7 @@ async function submitMeetingArbitration(meetingId, action) {
             latest = await _mtgRunMeeting(meetingId, { action: 'continue' });
         }
         await _mtgAfterMeetingRefresh();
-        if (latest && latest.meeting && latest.meeting.stage === 'completed') switchMtgTab('completed');
+        if (_mtgMeetingCompleted(latest && latest.meeting)) switchMtgTab('completed');
         else switchMtgTab('active');
     } catch (e) {
         fail(e.message || String(e));
@@ -18364,7 +19052,7 @@ async function submitModeratorTakeover(meetingId, action) {
         if (data.event) _mtgApplyLiveEvent(meetingId, data.event);
         if (data.takeoverEvent) _mtgApplyLiveEvent(meetingId, data.takeoverEvent);
         await _mtgAfterMeetingRefresh();
-        if (data.meeting && data.meeting.stage === 'completed') switchMtgTab('completed');
+        if (_mtgMeetingCompleted(data.meeting)) switchMtgTab('completed');
         else switchMtgTab('active');
     } catch (e) {
         fail(e.message || String(e));
@@ -18382,7 +19070,7 @@ async function continueMeetingDecisionWindow(meetingId) {
     try {
         var ran = await _mtgRunMeeting(meetingId, { action: 'continue' });
         await _mtgAfterMeetingRefresh();
-        if (ran && ran.meeting && ran.meeting.stage === 'completed') switchMtgTab('completed');
+        if (_mtgMeetingCompleted(ran && ran.meeting)) switchMtgTab('completed');
         else switchMtgTab('active');
     } catch (e) {
         alert(_mtgT('meeting_control_failed', 'Meeting control failed') + ': ' + (e.message || String(e)));
@@ -18412,7 +19100,7 @@ async function startExecutableMeeting(meetingId) {
     try {
         var ran = await _mtgRunMeeting(meetingId, { action: 'start' });
         await _mtgAfterMeetingRefresh();
-        if (ran && ran.meeting && ran.meeting.stage === 'completed') switchMtgTab('completed');
+        if (_mtgMeetingCompleted(ran && ran.meeting)) switchMtgTab('completed');
         else switchMtgTab('active');
     } catch (e) {
         alert(_mtgT('meeting_start_failed', 'Failed to start meeting') + ': ' + (e.message || String(e)));
@@ -18573,6 +19261,7 @@ function toggleNewMeetingForm(forceOpen) {
     var panel = document.getElementById('new-meeting-panel');
     if (!modal || !panel) return;
     var shouldOpen = typeof forceOpen === 'boolean' ? forceOpen : modal.classList.contains('hidden');
+    modal.classList.toggle('modal-above-projects', shouldOpen);
     modal.classList.toggle('hidden', !shouldOpen);
     if (shouldOpen) {
         renderNewMeetingForm();
@@ -18584,6 +19273,7 @@ function toggleNewMeetingForm(forceOpen) {
         }, 0);
     } else {
         panel.innerHTML = '';
+        modal.classList.remove('modal-above-projects');
     }
 }
 
@@ -18681,7 +19371,7 @@ async function submitNewMeeting() {
         var ran = await _mtgRunMeeting(created.meeting.id);
         toggleNewMeetingForm(false);
         await _mtgAfterMeetingRefresh();
-        switchMtgTab(ran && ran.meeting && ran.meeting.stage === 'completed' ? 'completed' : 'active');
+        switchMtgTab(_mtgMeetingCompleted(ran && ran.meeting) ? 'completed' : 'active');
     } catch (e) {
         fail(e.message || String(e));
     } finally {
@@ -18742,16 +19432,95 @@ function _mtgFindMeeting(meetingId) {
     });
 }
 
+function _mtgFindMeetingByRequestId(requestId) {
+    if (!requestId) return null;
+    return (_mtgData.active || []).concat(_mtgData.history || []).find(function(m) {
+        var source = (m && m.source) || {};
+        return source.meetingRequestId === requestId;
+    }) || null;
+}
+
+function _mtgMeetingIdFromRequest(req) {
+    if (!req) return '';
+    var conversion = req.conversion && typeof req.conversion === 'object' ? req.conversion : {};
+    var taskBlocker = req.taskBlocker && typeof req.taskBlocker === 'object' ? req.taskBlocker : {};
+    return String(conversion.meetingId || taskBlocker.meetingId || '').trim();
+}
+
+function _mtgUpsertRequest(req) {
+    if (!req || !req.id) return null;
+    var requests = Array.isArray(_mtgData.requests) ? _mtgData.requests : [];
+    var idx = requests.findIndex(function(item) { return item && item.id === req.id; });
+    if (idx >= 0) requests[idx] = req;
+    else requests.unshift(req);
+    _mtgData.requests = _mtgSortRequestsByStatusThenTime(requests);
+    return req;
+}
+
+async function _mtgFetchRequestDetail(requestId) {
+    if (!requestId) return null;
+    try {
+        var res = await fetch('/api/meetings/requests/' + encodeURIComponent(requestId));
+        var data = await res.json();
+        if (!res.ok || data.error || !data.request) return null;
+        return _mtgUpsertRequest(data.request);
+    } catch (e) {
+        console.warn('[meetings] request detail fetch error:', e);
+        return null;
+    }
+}
+
 function openMeetingDetailModal(meetingId) {
     var meeting = _mtgFindMeeting(meetingId);
+    if (meeting) {
+        openMeetingDetailRecord(meeting, meetingId);
+        return;
+    }
+    openMeetingDetailPlaceholder(meetingId, _mtgT('loading', 'Loading...'));
+    _mtgFetchMeetingDetail(meetingId);
+}
+
+function openMeetingDetailRecord(meeting, fallbackMeetingId) {
     var modal = document.getElementById('meetingDetailModal');
     var body = document.getElementById('meeting-detail-body');
     var title = document.getElementById('meeting-detail-title');
     if (!meeting || !modal || !body) return;
-    _mtgDetailMeetingId = meetingId;
+    _mtgDetailMeetingId = meeting.id || fallbackMeetingId || '';
     if (title) title.textContent = meeting.topic || _tr('untitled_meeting');
     body.innerHTML = _mtgRenderMeetingDetail(_mtgMergeLiveMeeting(meeting));
     modal.classList.remove('hidden');
+}
+
+function openMeetingDetailPlaceholder(meetingId, message) {
+    var modal = document.getElementById('meetingDetailModal');
+    var body = document.getElementById('meeting-detail-body');
+    var title = document.getElementById('meeting-detail-title');
+    if (!meetingId || !modal || !body) return;
+    _mtgDetailMeetingId = meetingId;
+    if (title) title.textContent = _mtgT('meeting_detail_title', 'Meeting Detail');
+    body.innerHTML = '<div class="mtg-empty">' + _escMtg(message || '') + '</div>';
+    modal.classList.remove('hidden');
+}
+
+async function _mtgFetchMeetingDetail(meetingId) {
+    if (!meetingId) return;
+    try {
+        var res = await fetch('/api/meetings/executable/' + encodeURIComponent(meetingId));
+        var data = await res.json();
+        if (!res.ok || data.error || !data.meeting) {
+            throw new Error(data.error || _mtgT('meeting_not_found', 'Meeting not found'));
+        }
+        if (Array.isArray(data.events)) {
+            _mtgLiveEvents[meetingId] = _mtgLiveStateFromMeeting(data.meeting);
+            data.events.forEach(function(event) { _mtgApplyLiveEvent(meetingId, event); });
+        }
+        openMeetingDetailRecord(data.meeting, meetingId);
+    } catch (e) {
+        var body = document.getElementById('meeting-detail-body');
+        if (_mtgDetailMeetingId === meetingId && body) {
+            body.innerHTML = '<div class="mtg-inline-error" style="display:block">' + _escMtg(e.message || String(e)) + '</div>';
+        }
+    }
 }
 
 function closeMeetingDetailModal() {
@@ -18857,7 +19626,7 @@ function _mtgRenderMeetingDetail(m) {
         Object.keys(m.result.contributions).forEach(function(agentId) {
             var info = _mtgAgentMap[agentId] || { emoji: '🤖', name: agentId };
             html += '<div class="mtg-response"><div class="mtg-response-header"><span class="mtg-response-emoji">' + info.emoji + '</span><span class="mtg-response-name">' + _escMtg(info.name) + '</span></div>';
-            html += '<div class="mtg-response-text expanded">' + _escMtg(m.result.contributions[agentId] || '') + '</div></div>';
+            html += '<div class="mtg-response-text expanded">' + _mtgRenderContributionText(m.result.contributions[agentId] || '') + '</div></div>';
         });
         html += '</div>';
     }
@@ -18908,19 +19677,27 @@ function _mtgRenderActionItemDrafts(m) {
     }
     if (!drafts.length) return '';
     var html = '<div class="mtg-section mtg-action-drafts"><div class="mtg-section-title">' + _escMtg(_mtgT('meeting_action_drafts', 'Action item drafts')) + '</div>';
-    html += '<div class="mtg-section-text">' + _escMtg(_mtgT('meeting_action_drafts_hint', 'Confirming creates a project task. Drafts do not execute automatically.')) + '</div>';
+    html += '<div class="mtg-section-text">' + _escMtg(_mtgT('meeting_action_drafts_hint', 'Confirming adds the item to the source task. Drafts do not execute automatically.')) + '</div>';
     drafts.forEach(function(d) {
         var id = _escMtg(d.id || '');
+        var formId = 'mtg-action-form-' + _escMtg(m.id) + '-' + id;
         var projectSelectId = 'mtg-action-project-' + _escMtg(m.id) + '-' + id;
         html += '<div class="mtg-action-draft" data-action-item-id="' + id + '">';
-        html += '<div class="mtg-card-header"><div class="mtg-card-title">' + _escMtg(d.title || _mtgT('meeting_action_untitled', 'Untitled action item')) + '</div><span class="mtg-badge mtg-badge-kind">' + _escMtg(_mtgActionStatusLabel(d.status)) + '</span></div>';
+        html += '<div class="mtg-action-draft-title">' + _escMtg(d.title || _mtgT('meeting_action_untitled', 'Untitled action item')) + '</div>';
         if (d.description || d.sourceText) html += '<div class="mtg-section-text">' + _escMtg(d.description || d.sourceText || '') + '</div>';
-        html += '<div class="mtg-meta"><span>' + _escMtg(_mtgT('meeting_action_owner', 'Owner')) + ': ' + _escMtg(d.assignee || d.suggestedOwner || _mtgT('meeting_unknown', 'unknown')) + '</span>';
-        html += '<span>' + _escMtg(_mtgT('meeting_project', 'Project')) + ': ' + _escMtg(_mtgProjectName(d.targetProjectId || m.projectId) || _mtgT('meeting_project_none', 'No project')) + '</span></div>';
+        html += '<div class="mtg-action-draft-row">';
+        html += '<span class="mtg-badge mtg-badge-kind">' + _escMtg(_mtgActionStatusLabel(d.status)) + '</span>';
+        html += '<span class="mtg-action-draft-meta">' + _escMtg(_mtgT('meeting_action_owner', 'Owner')) + ': ' + _escMtg(d.assignee || d.suggestedOwner || _mtgT('meeting_unknown', 'unknown')) + ' · ' + _escMtg(_mtgT('meeting_project', 'Project')) + ': ' + _escMtg(_mtgProjectName(d.targetProjectId || m.projectId) || _mtgT('meeting_project_none', 'No project')) + '</span>';
         if (d.status === 'confirmed' && d.taskId) {
-            html += '<div class="mtg-actions-bar"><button class="mtg-btn mtg-btn-end" onclick="openMeetingTaskLink(\'' + _escMtg(d.targetProjectId || m.projectId) + '\',\'' + _escMtg(d.taskId) + '\')">' + _escMtg(_mtgT('meeting_action_open_task', 'Open task')) + '</button></div>';
+            html += '<div class="mtg-action-draft-actions"><button class="mtg-btn mtg-btn-end" onclick="openMeetingTaskLink(\'' + _escMtg(d.targetProjectId || m.projectId) + '\',\'' + _escMtg(d.sourceTaskId || d.taskId) + '\')">' + _escMtg(_mtgT('meeting_action_open_task', 'Open source task')) + '</button></div>';
         } else if (d.status !== 'rejected' && d.status !== 'kept_as_meeting_item') {
-            html += '<div class="mtg-action-form">';
+            html += '<div class="mtg-action-draft-actions">';
+            html += '<button class="mtg-btn" onclick="toggleMeetingActionItemEditor(\'' + _escMtg(m.id) + '\',\'' + id + '\')">' + _escMtg(_mtgT('meeting_action_edit', 'Edit')) + '</button>';
+            html += '<button class="mtg-btn mtg-btn-end" onclick="confirmMeetingActionItem(\'' + _escMtg(m.id) + '\',\'' + id + '\')">' + _escMtg(_mtgT('meeting_action_confirm_task', 'Add to source task')) + '</button>';
+            html += '<button class="mtg-btn" onclick="keepMeetingActionItem(\'' + _escMtg(m.id) + '\',\'' + id + '\')">' + _escMtg(_mtgT('meeting_action_keep', 'Keep only')) + '</button>';
+            html += '<button class="mtg-btn mtg-btn-delete" onclick="rejectMeetingActionItem(\'' + _escMtg(m.id) + '\',\'' + id + '\')">' + _escMtg(_mtgT('meeting_action_reject', 'Reject')) + '</button>';
+            html += '</div>';
+            html += '<div id="' + formId + '" class="mtg-action-form hidden">';
             html += '<div class="mtg-field"><label class="mtg-label">' + _escMtg(_mtgT('meeting_action_title', 'Task title')) + '</label>';
             html += '<input id="mtg-action-title-' + _escMtg(m.id) + '-' + id + '" class="skl-input" type="text" value="' + _escMtg(d.title || '') + '">';
             html += '</div>';
@@ -18933,16 +19710,18 @@ function _mtgRenderActionItemDrafts(m) {
             html += '<div id="mtg-action-error-' + _escMtg(m.id) + '-' + id + '" class="mtg-inline-error"></div>';
             html += '<div class="mtg-actions-bar">';
             html += '<button class="mtg-btn" onclick="updateMeetingActionItem(\'' + _escMtg(m.id) + '\',\'' + id + '\')">' + _escMtg(_mtgT('meeting_action_save_draft', 'Save draft')) + '</button>';
-            html += '<button class="mtg-btn mtg-btn-end" onclick="confirmMeetingActionItem(\'' + _escMtg(m.id) + '\',\'' + id + '\')">' + _escMtg(_mtgT('meeting_action_confirm_task', 'Create task')) + '</button>';
-            html += '<button class="mtg-btn" onclick="keepMeetingActionItem(\'' + _escMtg(m.id) + '\',\'' + id + '\')">' + _escMtg(_mtgT('meeting_action_keep', 'Keep only')) + '</button>';
-            html += '<button class="mtg-btn mtg-btn-delete" onclick="rejectMeetingActionItem(\'' + _escMtg(m.id) + '\',\'' + id + '\')">' + _escMtg(_mtgT('meeting_action_reject', 'Reject')) + '</button>';
             html += '</div>';
             html += '</div>';
         }
-        html += '</div>';
+        html += '</div></div>';
     });
     html += '</div>';
     return html;
+}
+
+function toggleMeetingActionItemEditor(meetingId, actionItemId) {
+    var form = document.getElementById('mtg-action-form-' + meetingId + '-' + actionItemId);
+    if (form) form.classList.toggle('hidden');
 }
 
 function _mtgActionInput(meetingId, actionItemId, suffix) {
@@ -19370,7 +20149,7 @@ function _updateSidebarMeetings() {
             var info = _mtgAgentMap[k];
             return info ? info.emoji + ' ' + info.name : k;
         }).join(', ');
-        return '<div class="sidebar-mtg-item" onclick="openMeetingsDashboard()">' +
+        return '<div class="sidebar-mtg-item" onclick="openMeetingReference({ meetingId: ' + _escMtg(_mtgJsArg(m.id || '')) + ' })">' +
             '<div class="sidebar-mtg-item-title"><span class="sidebar-mtg-item-dot"></span>' + _escMtg(m.topic || _tr('untitled_meeting')) + '</div>' +
             '<div class="sidebar-mtg-item-meta">' + pNames + '</div>' +
             '</div>';
@@ -19387,6 +20166,7 @@ setInterval(function() {
         var requests = results[1] || {};
         _mtgData.active = data.meetings || [];
         _mtgSeedLiveMeetings(_mtgData.active);
+        (_mtgData.active || []).forEach(_mtgMaybeAutoContinueDecisionMeeting);
         _mtgData.requests = _mtgSortRequestsByStatusThenTime(requests.requests || []);
         // Also refresh agent map if empty
         if (Object.keys(_mtgAgentMap).length === 0) {

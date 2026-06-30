@@ -1,0 +1,105 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Project Execution attempt 运行链路</title><link rel="stylesheet" href="../asset/reverse-tutorial.css"><style>
+:root {
+  --card: #ffffff;
+  --text: #1f2937;
+  --muted: #64748b;
+  --primary: #2563eb;
+  --soft: #dbeafe;
+  --border: #e2e8f0;
+  --shadow: 0 18px 45px rgba(15, 23, 42, 0.08);
+  --radius: 20px;
+  --green: #15803d;
+  --amber: #b45309;
+  --red: #b91c1c;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+  background: linear-gradient(180deg, #f8fbff 0%, #eef2f7 100%);
+  color: var(--text);
+  line-height: 1.8;
+}
+a { color: inherit; }
+.container { max-width: 1120px; margin: 0 auto; padding: 34px 24px 72px; }
+.hero, .card, .toc, .guide-card, .diagram, .step, .mini-card {
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+.hero { padding: 38px; margin-bottom: 22px; }
+.back {
+  display: inline-flex;
+  margin-bottom: 18px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(255,255,255,0.8);
+  text-decoration: none;
+  font-weight: 700;
+  font-size: 14px;
+}
+.eyebrow { display: inline-flex; margin-bottom: 16px; padding: 6px 12px; border-radius: 999px; background: var(--soft); color: var(--primary); font-size: 13px; font-weight: 800; }
+h1 { margin: 0 0 16px; font-size: clamp(32px, 5vw, 54px); line-height: 1.1; letter-spacing: 0; }
+h2 { margin: 0 0 18px; font-size: 26px; line-height: 1.35; }
+h3 { margin: 0 0 8px; font-size: 19px; line-height: 1.4; }
+p { margin: 0; color: #475569; }
+.hero p { max-width: 850px; font-size: 17px; color: var(--muted); }
+.meta, .toc-links, .tags { display: flex; flex-wrap: wrap; gap: 10px; }
+.meta, .tags { margin-top: 18px; }
+.tag { padding: 5px 11px; border-radius: 999px; background: #f1f5f9; color: #475569; font-size: 12px; font-weight: 800; }
+.toc { padding: 20px 24px; margin: 22px 0; }
+.toc strong { display: block; margin-bottom: 10px; }
+.toc a { padding: 7px 11px; border-radius: 10px; background: #f8fafc; color: #334155; text-decoration: none; font-size: 14px; font-weight: 700; }
+.card { padding: 30px; margin-top: 22px; }
+.prose { display: grid; gap: 14px; margin-top: 16px; }
+.grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-top: 18px; }
+.guide-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin-top: 18px; }
+.guide-card { display: flex; flex-direction: column; justify-content: space-between; min-height: 230px; padding: 24px; text-decoration: none; }
+.guide-card:hover { border-color: rgba(37,99,235,0.42); transform: translateY(-2px); transition: 0.2s ease; }
+.mini-card { box-shadow: none; padding: 18px; background: #f8fafc; }
+.mini-card strong { display: block; margin-bottom: 6px; color: var(--text); }
+.mini-card span { color: var(--muted); font-size: 14px; }
+.steps { display: grid; gap: 14px; margin-top: 18px; }
+.step { display: flex; gap: 18px; padding: 20px; box-shadow: none; background: #fff; }
+.step-number { width: 48px; height: 48px; flex: 0 0 48px; display: grid; place-items: center; border-radius: 14px; background: var(--soft); color: var(--primary); font-weight: 900; }
+.flow-step { display: grid; grid-template-columns: 160px minmax(0,1fr); gap: 16px; padding: 18px; border: 1px solid var(--border); border-radius: 16px; background: #fff; }
+.flow-step strong { color: var(--text); }
+.flow-step span { display: block; color: var(--muted); font-size: 14px; }
+.diagram { margin-top: 18px; padding: 16px; background: #fff; overflow-x: auto; }
+.diagram img { display: block; width: 100%; min-width: 640px; border-radius: 18px; border: 1px solid var(--border); }
+.caption { margin-top: 10px; font-size: 14px; text-align: center; color: var(--muted); }
+pre { overflow-x: auto; margin: 18px 0 0; padding: 20px; border-radius: 16px; background: #0f172a; color: #e5e7eb; font-size: 14px; line-height: 1.7; }
+code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.code-card { margin-top: 18px; padding: 18px; border: 1px solid var(--border); border-radius: 16px; background: #fff; }
+.code-meta { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.code-meta span { padding: 4px 9px; border-radius: 999px; background: #f1f5f9; color: #475569; font-size: 12px; font-weight: 800; }
+table { width: 100%; border-collapse: collapse; margin-top: 16px; font-size: 14px; }
+th, td { padding: 12px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+th { background: #f8fafc; color: #334155; }
+.note { border-left: 4px solid var(--primary); padding: 14px 16px; background: #eff6ff; border-radius: 12px; color: #334155; }
+.risk { border-left-color: var(--amber); background: #fffbeb; }
+@media (max-width: 860px) {
+  .grid, .guide-grid { grid-template-columns: 1fr; }
+  .flow-step { grid-template-columns: 1fr; }
+}
+@media (max-width: 560px) {
+  .container { padding: 28px 16px 52px; }
+  .hero, .card, .toc, .guide-card { padding: 22px; border-radius: 18px; }
+  .step { flex-direction: column; }
+}
+
+</style></head><body><main class="container"><a class="back" href="../guide.html">返回教程目录</a><section class="hero"><span class="eyebrow">链路深挖 Subagent</span><h1>Project Execution attempt 运行链路</h1><p>attempt 是一次任务执行的审计单元。它把执行角色、workspace 基线、provider 输出、文件变化、测试证据、评审结果和后续状态转移串起来，是整个项目执行总线最核心的链路。</p><div class="meta"><span class="tag">入口 _handle_project_execution_start</span><span class="tag">主链路</span></div></section><nav class="toc"><strong>本页目录</strong><div class="toc-links"><a href="#flow">详细链路</a><a href="#diagram">图</a><a href="#code">代码摘录</a><a href="#branches">分支</a><a href="#concept-notes">概念</a></div></nav><section id="flow" class="card"><h2>详细链路说明</h2><div class="steps"><div class="step"><div class="step-number">1</div><div><h3>启动前校验</h3><p>`_handle_project_execution_start` 输入 project_id、task_id、body，校验 workspace、执行/评审角色、git snapshot 和 dirty 状态，输出 workspace、roles、snapshot。</p></div></div><div class="step"><div class="step-number">2</div><div><h3>创建 attempt</h3><p>生成 uuid attempt，写入 `task.attempts`、`activeAttemptId`、`workflowActive`、`workflowPhase`，保存项目状态。</p></div></div><div class="step"><div class="step-number">3</div><div><h3>启动后台线程</h3><p>用 `threading.Thread(... _project_execution_run_attempt ...)` 异步运行，HTTP 请求可以快速返回 started。</p></div></div><div class="step"><div class="step-number">4</div><div><h3>构造 prompt</h3><p>`_project_execution_build_prompt` 读取项目、任务、checklist、会议 action、archive context，输出 executor prompt。</p></div></div><div class="step"><div class="step-number">5</div><div><h3>调用 executor</h3><p>`_project_execution_call_executor` 根据 providerKind 分派 Codex/Hermes/Claude Code/OpenClaw，输出 provider result。</p></div></div><div class="step"><div class="step-number">6</div><div><h3>采集 evidence</h3><p>运行结束后重新取 git snapshot，合并 provider modifiedFiles，写 executorSummary、changedFiles、testResults、providerStatus、providerRef。</p></div></div><div class="step"><div class="step-number">7</div><div><h3>状态转移</h3><p>根据 cancelled、result.ok、skipReview、autoReviewAfterExecution、requiresUserAcceptance 分流到 blocked、execution_complete、done、awaiting_user_acceptance 或 review。</p></div></div></div></section><section id="diagram" class="card"><h2>调用链图</h2><div class="diagram"><img src="../asset/chain-project-execution-run.svg" alt="Project Execution attempt 运行链路"><p class="caption">图中每个节点都对应 `app/server.py` 中的真实函数或 `provider_execution.py` 的归一化合同。</p></div></section><section id="code" class="card"><h2>关键代码摘录</h2><div class="code-card"><h3>attempt 证据落库</h3><div class="code-meta"><span>app/server.py</span><span>_project_execution_run_attempt</span></div><pre><code>evidence = {
+    "attemptId": attempt_id,
+    "executorSummary": _project_execution_redact(result.get("reply") or ""),
+    "changedFiles": sorted(set(final_snapshot.get("files", [])) | set(result.get("modifiedFiles") or []))[:200],
+    "providerStatus": result.get("status") or ("completed" if result.get("ok") else "execution_failed"),
+}</code></pre><p>这段代码把 provider 输出、文件快照和执行状态汇总到任务 evidence，是后续评审和验收读取的基础。</p></div><div class="code-card"><h3>provider 分发</h3><div class="code-meta"><span>app/server.py</span><span>_project_execution_call_executor</span></div><pre><code>if provider_kind == "codex":
+    return _handle_codex_chat({...})
+if provider_kind == "hermes":
+    return _handle_hermes_chat({...})
+if provider_kind == "claude-code":
+    return _handle_claude_code_chat({...})
+reply = _wf_call_agent(agent_id, prompt, timeout=timeout, ...)</code></pre><p>Project Execution 不直接理解各 Agent 的原生命令，而是通过 providerKind 进入适配层。</p></div></section><section id="branches" class="card"><h2>分支、失败路径和数据变化</h2><table><tr><th>类型</th><th>说明</th></tr><tr><td>分支</td><td>cancelled、result.ok false、skipReview、autoReviewAfterExecution、meetingActionPhase、checklist incomplete。</td></tr><tr><td>失败路径</td><td>provider failure 或 cancel 进入 blocked；workspace invalid 在启动前返回 409；stale activeAttemptId 会让旧线程停止推进。</td></tr><tr><td>数据流</td><td>project/task metadata -> prompt -> provider result -> git snapshot + parsed JSON -> evidence -> stateHistory/reviewHistory。</td></tr></table></section><section id="concept-notes" class="card"><h2>关键概念补充</h2><h3 id="concept-attempt">1. attempt</h3><p><strong>出现位置：</strong>`app/server.py:_handle_project_execution_start`。一次任务执行尝试，承载基线、角色、证据和后续 review/rework 关联。</p><h3 id="concept-provider-ref">2. providerRef</h3><p><strong>出现位置：</strong>attempt evidence。它记录 providerKind、conversationId、threadId、runId 等，方便把执行证据追回具体 Agent 会话。</p></section></main></body></html>

@@ -29,12 +29,16 @@ import signal
 import sqlite3
 import subprocess
 import time
+import difflib
 import gateway_presence
 from zoneinfo import ZoneInfo
-try:
-    import yaml
-except Exception:
-    yaml = None
+from provider_execution import (
+    collect_modified_files,
+    normalize_active_operation,
+    normalize_approval_record,
+    normalize_provider_result,
+    provider_http_status,
+)
 
 
 def _normalize_presence_entry(entry):
@@ -247,6 +251,12 @@ def _load_vo_config():
     sms_cfg = cfg.get("sms") or {}
     hermes_cfg = cfg.get("hermes") or {}
     codex_cfg = cfg.get("codex") or {}
+    claude_code_cfg = cfg.get("claudeCode") or cfg.get("claude_code") or {}
+    codex_workspace_root = _env_or("VO_CODEX_WORKSPACE_ROOT", codex_cfg.get("workspaceRoot", os.path.join(_env_or("VO_STATUS_DIR", presence.get("statusDir", "/data")), "codex-agents")))
+    codex_workspace = _env_or("VO_CODEX_WORKSPACE", codex_cfg.get("workspace", os.path.dirname(os.path.dirname(__file__))))
+    claude_code_workspace_root = _env_or("VO_CLAUDE_CODE_WORKSPACE_ROOT", claude_code_cfg.get("workspaceRoot", os.path.join(_env_or("VO_STATUS_DIR", presence.get("statusDir", "/data")), "claude-code-agents")))
+    claude_code_workspace = _env_or("VO_CLAUDE_CODE_WORKSPACE", claude_code_cfg.get("workspace", os.path.dirname(os.path.dirname(__file__))))
+    hermes_api_enabled = hermes_cfg.get("apiEnabled", hermes_cfg.get("preferApi", False))
     gateway_port = "18789"
     try:
         oc_cfg_path = os.path.join(os.path.expanduser(oc_home), "openclaw.json")
@@ -313,52 +323,158 @@ def _load_vo_config():
             "homePath": _env_or("VO_HERMES_HOME", hermes_cfg.get("homePath", os.path.expanduser("~/.hermes"))),
             "binary": _env_or("VO_HERMES_BIN", hermes_cfg.get("binary", os.path.expanduser("~/.local/bin/hermes"))),
             "timeoutSec": int(_env_or("VO_HERMES_TIMEOUT_SEC", hermes_cfg.get("timeoutSec", 600))),
+            "apiEnabled": _env_bool("VO_HERMES_API_ENABLED", _env_bool("VO_HERMES_PREFER_API", hermes_api_enabled)),
+            "preferApi": _env_bool("VO_HERMES_API_ENABLED", _env_bool("VO_HERMES_PREFER_API", hermes_api_enabled)),
             "apiUrl": _env_or("VO_HERMES_API_URL", hermes_cfg.get("apiUrl", "http://127.0.0.1:8642")),
             "apiKey": _env_or("VO_HERMES_API_KEY", hermes_cfg.get("apiKey", "")),
-            "preferApi": str(_env_or("VO_HERMES_PREFER_API", hermes_cfg.get("preferApi", True))).lower() not in ("0", "false", "no", "off"),
-            "autoStartProfileApis": str(_env_or("VO_HERMES_AUTO_START_PROFILE_APIS", hermes_cfg.get("autoStartProfileApis", True))).lower() not in ("0", "false", "no", "off"),
-            "autoStartDefaultApi": str(_env_or("VO_HERMES_AUTO_START_DEFAULT_API", hermes_cfg.get("autoStartDefaultApi", hermes_cfg.get("autoStartProfileApis", True)))).lower() not in ("0", "false", "no", "off"),
-            "apiProfilePortBase": _env_or("VO_HERMES_API_PROFILE_PORT_BASE", hermes_cfg.get("apiProfilePortBase")),
-            "apiProfiles": hermes_cfg.get("apiProfiles") if isinstance(hermes_cfg.get("apiProfiles"), dict) else {},
-        },
-        "codex": {
-            "enabled": str(_env_or("VO_CODEX_ENABLED", codex_cfg.get("enabled", True))).lower() not in ("0", "false", "no", "off"),
-            "homePath": _env_or("VO_CODEX_HOME", codex_cfg.get("homePath", os.path.expanduser("~/.codex"))),
-            "binary": _env_or("VO_CODEX_BIN", codex_cfg.get("binary", "")),
-            "workspaceRoot": codex_workspace_root,
-            "mainWorkspace": _env_or("VO_CODEX_MAIN_WORKSPACE", codex_cfg.get("mainWorkspace", codex_workspace_root)),
-            "timeoutSec": int(_env_or("VO_CODEX_TIMEOUT_SEC", codex_cfg.get("timeoutSec", 900))),
-            "model": _env_or("VO_CODEX_MODEL", codex_cfg.get("model", "")),
-            "sandbox": _env_or("VO_CODEX_SANDBOX", codex_cfg.get("sandbox", "workspace-write")),
-            "approvalPolicy": _env_or("VO_CODEX_APPROVAL_POLICY", codex_cfg.get("approvalPolicy", "never")),
-            "preferAppServer": str(_env_or("VO_CODEX_PREFER_APP_SERVER", codex_cfg.get("preferAppServer", True))).lower() not in ("0", "false", "no", "off"),
-            "includeMain": str(_env_or("VO_CODEX_INCLUDE_MAIN", codex_cfg.get("includeMain", True))).lower() not in ("0", "false", "no", "off"),
-            "includeNativeAgents": str(_env_or("VO_CODEX_INCLUDE_NATIVE_AGENTS", codex_cfg.get("includeNativeAgents", True))).lower() not in ("0", "false", "no", "off"),
-            "registerNativeAgents": str(_env_or("VO_CODEX_REGISTER_NATIVE_AGENTS", codex_cfg.get("registerNativeAgents", True))).lower() not in ("0", "false", "no", "off"),
-        },
-        "claudeCode": {
-            "enabled": str(_env_or("VO_CLAUDE_CODE_ENABLED", claude_code_cfg.get("enabled", True))).lower() not in ("0", "false", "no", "off"),
-            "homePath": _env_or("VO_CLAUDE_CODE_HOME", claude_code_cfg.get("homePath", os.path.expanduser("~/.claude"))),
-            "binary": _env_or("VO_CLAUDE_CODE_BIN", claude_code_cfg.get("binary", "")),
-            "workspaceRoot": claude_code_workspace_root,
-            "mainWorkspace": _env_or("VO_CLAUDE_CODE_MAIN_WORKSPACE", claude_code_cfg.get("mainWorkspace", os.path.join(_env_or("VO_STATUS_DIR", presence.get("statusDir", "/data")), "claude-code-main"))),
-            "timeoutSec": int(_env_or("VO_CLAUDE_CODE_TIMEOUT_SEC", claude_code_cfg.get("timeoutSec", 900))),
-            "model": _env_or("VO_CLAUDE_CODE_MODEL", claude_code_cfg.get("model", "")),
-            "permissionMode": _env_or("VO_CLAUDE_CODE_PERMISSION_MODE", claude_code_cfg.get("permissionMode", "acceptEdits")),
-            "includeMain": str(_env_or("VO_CLAUDE_CODE_INCLUDE_MAIN", claude_code_cfg.get("includeMain", True))).lower() not in ("0", "false", "no", "off"),
-            "includeNativeAgents": str(_env_or("VO_CLAUDE_CODE_INCLUDE_NATIVE_AGENTS", claude_code_cfg.get("includeNativeAgents", True))).lower() not in ("0", "false", "no", "off"),
-            "registerNativeAgents": str(_env_or("VO_CLAUDE_CODE_REGISTER_NATIVE_AGENTS", claude_code_cfg.get("registerNativeAgents", True))).lower() not in ("0", "false", "no", "off"),
         },
         "codex": {
             "enabled": _env_bool("VO_CODEX_ENABLED", codex_cfg.get("enabled", False)),
-            "workspace": _env_or("VO_CODEX_WORKSPACE", codex_cfg.get("workspace", os.path.dirname(os.path.dirname(__file__)))),
+            "homePath": _env_or("VO_CODEX_HOME", codex_cfg.get("homePath", os.path.expanduser("~/.codex"))),
+            "binary": _env_or("VO_CODEX_BIN", codex_cfg.get("binary", "codex")),
+            "workspace": codex_workspace,
+            "workspaceRoot": codex_workspace_root,
+            "mainWorkspace": _env_or("VO_CODEX_MAIN_WORKSPACE", codex_cfg.get("mainWorkspace", codex_workspace)),
             "name": _env_or("VO_CODEX_AGENT_NAME", codex_cfg.get("name", "Codex")),
             "agentId": _env_or("VO_CODEX_AGENT_ID", codex_cfg.get("agentId", "local")),
             "model": _env_or("VO_CODEX_MODEL", codex_cfg.get("model", os.environ.get("OPENAI_MODEL", ""))),
             "replyText": _env_or("VO_CODEX_REPLY_TEXT", codex_cfg.get("replyText")),
             "bridgeUrl": _env_or("VO_CODEX_BRIDGE_URL", codex_cfg.get("bridgeUrl")),
+            "sandbox": _env_or("VO_CODEX_SANDBOX", codex_cfg.get("sandbox", "workspace-write")),
+            "approvalPolicy": _env_or("VO_CODEX_APPROVAL_POLICY", codex_cfg.get("approvalPolicy", "never")),
+            "includeMain": _env_bool("VO_CODEX_INCLUDE_MAIN", codex_cfg.get("includeMain", True)),
+            "includeNativeAgents": _env_bool("VO_CODEX_INCLUDE_NATIVE_AGENTS", codex_cfg.get("includeNativeAgents", True)),
+            "registerNativeAgents": _env_bool("VO_CODEX_REGISTER_NATIVE_AGENTS", codex_cfg.get("registerNativeAgents", True)),
+        },
+        "claudeCode": {
+            "enabled": _env_bool("VO_CLAUDE_CODE_ENABLED", claude_code_cfg.get("enabled", False)),
+            "homePath": _env_or("VO_CLAUDE_CODE_HOME", claude_code_cfg.get("homePath", os.path.expanduser("~/.claude"))),
+            "binary": _env_or("VO_CLAUDE_CODE_BIN", claude_code_cfg.get("binary", "claude")),
+            "workspace": claude_code_workspace,
+            "workspaceRoot": claude_code_workspace_root,
+            "mainWorkspace": _env_or("VO_CLAUDE_CODE_MAIN_WORKSPACE", claude_code_cfg.get("mainWorkspace", claude_code_workspace)),
+            "name": _env_or("VO_CLAUDE_CODE_AGENT_NAME", claude_code_cfg.get("name", "Claude Code")),
+            "agentId": _env_or("VO_CLAUDE_CODE_AGENT_ID", claude_code_cfg.get("agentId", "local")),
+            "model": _env_or("VO_CLAUDE_CODE_MODEL", claude_code_cfg.get("model", "")),
+            "replyText": _env_or("VO_CLAUDE_CODE_REPLY_TEXT", claude_code_cfg.get("replyText")),
+            "timeoutSec": int(_env_or("VO_CLAUDE_CODE_TIMEOUT_SEC", claude_code_cfg.get("timeoutSec", 900))),
+            "permissionMode": _env_or("VO_CLAUDE_CODE_PERMISSION_MODE", claude_code_cfg.get("permissionMode", "acceptEdits")),
+            "includeMain": _env_bool("VO_CLAUDE_CODE_INCLUDE_MAIN", claude_code_cfg.get("includeMain", True)),
+            "includeNativeAgents": _env_bool("VO_CLAUDE_CODE_INCLUDE_NATIVE_AGENTS", claude_code_cfg.get("includeNativeAgents", True)),
+            "registerNativeAgents": _env_bool("VO_CLAUDE_CODE_REGISTER_NATIVE_AGENTS", claude_code_cfg.get("registerNativeAgents", True)),
         },
     }
+
+_SETUP_SECRET_KEYS = {"apiKey", "gatewayToken", "twilioAuthToken"}
+
+
+def _merge_setup_config(existing, incoming):
+    """Merge setup/settings payloads without erasing saved secrets with empty fields."""
+    merged = copy.deepcopy(existing) if isinstance(existing, dict) else {}
+    if not isinstance(incoming, dict):
+        return merged
+    for key, value in incoming.items():
+        if str(key).startswith("_"):
+            continue
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            target = merged[key]
+            for child_key, child_value in value.items():
+                if str(child_key).startswith("_"):
+                    continue
+                if child_key in _SETUP_SECRET_KEYS and child_value in ("", None):
+                    continue
+                if isinstance(child_value, dict) and isinstance(target.get(child_key), dict):
+                    target[child_key] = _merge_setup_config(target[child_key], child_value)
+                else:
+                    target[child_key] = child_value
+        else:
+            if key in _SETUP_SECRET_KEYS and value in ("", None):
+                continue
+            merged[key] = value
+    return merged
+
+
+def _build_safe_vo_config():
+    lic = get_license_status()
+    hermes_test = _handle_hermes_test()
+    return {
+        "office": VO_CONFIG["office"],
+        "features": VO_CONFIG["features"],
+        "weather": VO_CONFIG["weather"],
+        "openclaw": {
+            "gatewayUrl": VO_CONFIG["openclaw"]["gatewayUrl"],
+            "gatewayHttp": VO_CONFIG["openclaw"]["gatewayHttp"],
+            "homePath": VO_CONFIG["openclaw"]["homePath"],
+            "detected": os.path.isdir(VO_CONFIG["openclaw"]["homePath"]),
+        },
+        "browser": {
+            "cdpUrl": VO_CONFIG.get("browser", {}).get("cdpUrl"),
+            "viewerUrl": VO_CONFIG.get("browser", {}).get("viewerUrl"),
+        },
+        "hermes": {
+            "enabled": VO_CONFIG.get("hermes", {}).get("enabled", True),
+            "homePath": VO_CONFIG.get("hermes", {}).get("homePath"),
+            "binary": VO_CONFIG.get("hermes", {}).get("binary"),
+            "timeoutSec": VO_CONFIG.get("hermes", {}).get("timeoutSec", 600),
+            "apiEnabled": VO_CONFIG.get("hermes", {}).get("apiEnabled", False),
+            "preferApi": VO_CONFIG.get("hermes", {}).get("preferApi", VO_CONFIG.get("hermes", {}).get("apiEnabled", False)),
+            "apiUrl": VO_CONFIG.get("hermes", {}).get("apiUrl"),
+            "detected": bool(hermes_test.get("ok")),
+            "apiDetected": bool((hermes_test.get("api") or {}).get("ok")),
+        },
+        "codex": {
+            "enabled": VO_CONFIG.get("codex", {}).get("enabled", False),
+            "homePath": VO_CONFIG.get("codex", {}).get("homePath"),
+            "binary": VO_CONFIG.get("codex", {}).get("binary"),
+            "workspace": VO_CONFIG.get("codex", {}).get("workspace"),
+            "workspaceRoot": VO_CONFIG.get("codex", {}).get("workspaceRoot"),
+            "mainWorkspace": VO_CONFIG.get("codex", {}).get("mainWorkspace"),
+            "name": VO_CONFIG.get("codex", {}).get("name"),
+            "agentId": VO_CONFIG.get("codex", {}).get("agentId"),
+            "model": VO_CONFIG.get("codex", {}).get("model"),
+            "bridgeUrl": VO_CONFIG.get("codex", {}).get("bridgeUrl"),
+            "sandbox": VO_CONFIG.get("codex", {}).get("sandbox"),
+            "approvalPolicy": VO_CONFIG.get("codex", {}).get("approvalPolicy"),
+            "includeMain": VO_CONFIG.get("codex", {}).get("includeMain", True),
+            "includeNativeAgents": VO_CONFIG.get("codex", {}).get("includeNativeAgents", True),
+            "registerNativeAgents": VO_CONFIG.get("codex", {}).get("registerNativeAgents", True),
+            "detected": bool(_handle_codex_test().get("ok")),
+        },
+        "claudeCode": {
+            "enabled": VO_CONFIG.get("claudeCode", {}).get("enabled", False),
+            "homePath": VO_CONFIG.get("claudeCode", {}).get("homePath"),
+            "binary": VO_CONFIG.get("claudeCode", {}).get("binary"),
+            "workspace": VO_CONFIG.get("claudeCode", {}).get("workspace"),
+            "workspaceRoot": VO_CONFIG.get("claudeCode", {}).get("workspaceRoot"),
+            "mainWorkspace": VO_CONFIG.get("claudeCode", {}).get("mainWorkspace"),
+            "name": VO_CONFIG.get("claudeCode", {}).get("name"),
+            "agentId": VO_CONFIG.get("claudeCode", {}).get("agentId"),
+            "model": VO_CONFIG.get("claudeCode", {}).get("model"),
+            "timeoutSec": VO_CONFIG.get("claudeCode", {}).get("timeoutSec", 900),
+            "permissionMode": VO_CONFIG.get("claudeCode", {}).get("permissionMode"),
+            "includeMain": VO_CONFIG.get("claudeCode", {}).get("includeMain", True),
+            "includeNativeAgents": VO_CONFIG.get("claudeCode", {}).get("includeNativeAgents", True),
+            "registerNativeAgents": VO_CONFIG.get("claudeCode", {}).get("registerNativeAgents", True),
+            "detected": bool(_handle_claude_code_test().get("ok")),
+        },
+        "license": {
+            "licensed": lic["licensed"],
+            "tier": lic["tier"],
+            "tierName": lic["tierName"],
+            "demo": lic["demo"],
+            "limits": lic.get("limits"),
+        },
+    }
+
+
+def _first_provider_agent_model(provider_kind):
+    try:
+        for agent in get_roster():
+            if str(agent.get("providerKind") or "") == provider_kind:
+                return agent.get("model") or ""
+    except Exception:
+        pass
+    return ""
 
 VO_CONFIG = _load_vo_config()
 
@@ -1660,8 +1776,9 @@ def _save_openclaw_api_key(provider, api_key, profile_id=""):
 
 # ─── DYNAMIC AGENT DISCOVERY ─────────────────────────────────
 from discovery import discover_all_agents, get_agent_workspace_dir, get_agent_session_id
-from providers.hermes import HermesProvider
+from providers.hermes import HermesApiClient, HermesProvider
 from providers.codex import CodexProvider
+from providers.claude_code import ClaudeCodeProvider
 from license import get_license_status, activate_license, deactivate_license, check_feature, get_agent_limit
 from project_store import MarkdownProjectStore
 
@@ -1884,17 +2001,54 @@ def _agent_project_tasks(agent):
     for project in data.get("projects", []):
         columns = {c.get("id"): c.get("title", "") for c in project.get("columns", [])}
         for task in project.get("tasks", []):
-            if str(task.get("assignee") or "") not in aliases:
+            assignee = str(task.get("assignee") or "")
+            executor = str(task.get("executorAgentId") or "")
+            reviewer = str(task.get("reviewerAgentId") or "")
+            if not aliases.intersection({assignee, executor, reviewer}):
                 continue
+            blocker = task.get("meetingBlocker") if isinstance(task.get("meetingBlocker"), dict) else {}
+            attempts = task.get("attempts") if isinstance(task.get("attempts"), list) else []
+            active_attempt = next((a for a in attempts if isinstance(a, dict) and a.get("id") == task.get("activeAttemptId")), None)
             items.append({
                 "projectId": project.get("id", ""),
                 "projectTitle": project.get("title", ""),
+                "projectStatus": project.get("status", "active"),
+                "projectExecutionEnabled": bool(project.get("projectExecutionEnabled")),
+                "projectWorkflowPhase": project.get("workflowPhase") or "",
+                "projectExecutionFlowActive": bool(project.get("projectExecutionFlowActive")),
+                "projectExecutionFlowStopReason": project.get("projectExecutionFlowStopReason") or "",
                 "taskId": task.get("id", ""),
+                "id": task.get("id", ""),
                 "title": task.get("title", ""),
+                "description": task.get("description", ""),
                 "priority": task.get("priority", "medium"),
                 "column": columns.get(task.get("columnId"), ""),
+                "columnId": task.get("columnId", ""),
+                "executionState": task.get("executionState") or ("done" if task.get("completedAt") else "backlog"),
+                "activeAttemptId": task.get("activeAttemptId") or "",
+                "activeAttemptStatus": (active_attempt or {}).get("status", ""),
+                "assignee": assignee,
+                "executorAgentId": executor,
+                "reviewerAgentId": reviewer,
+                "role": "executor" if executor in aliases else ("reviewer" if reviewer in aliases else "assignee"),
                 "completed": bool(task.get("completedAt")),
+                "completedAt": task.get("completedAt") or "",
+                "dueDate": task.get("dueDate") or "",
+                "blockedReason": task.get("blockedReason") or "",
+                "lastError": task.get("lastError") or "",
+                "meetingBlocker": {
+                    "requestId": blocker.get("requestId") or "",
+                    "meetingId": blocker.get("meetingId") or "",
+                    "status": blocker.get("status") or "",
+                    "awaitingUserDecision": bool(blocker.get("awaitingUserDecision")),
+                    "outcome": blocker.get("outcome") or "",
+                    "reason": blocker.get("reason") or "",
+                } if blocker else {},
+                "meetingRecordCount": len(task.get("meetingRecords") if isinstance(task.get("meetingRecords"), list) else []),
+                "meetingActionItemCount": len(task.get("meetingActionItems") if isinstance(task.get("meetingActionItems"), list) else []),
+                "scheduledRepeatEnabled": task.get("scheduledRepeatEnabled") is True,
                 "updatedAt": task.get("updatedAt") or project.get("updatedAt", ""),
+                "readOnly": True,
             })
     items.sort(key=lambda x: x.get("updatedAt") or "", reverse=True)
     return items[:25]
@@ -2540,12 +2694,14 @@ def _ensure_builtin_communication_skill():
 def _discover_roster():
     hermes = VO_CONFIG.get("hermes", {})
     codex = VO_CONFIG.get("codex", {})
+    claude_code = VO_CONFIG.get("claudeCode", {})
     return discover_all_agents(
         WORKSPACE_BASE,
         hermes_home=hermes.get("homePath"),
         hermes_bin=hermes.get("binary"),
         hermes_enabled=hermes.get("enabled", True),
         codex=codex,
+        claude_code=claude_code,
     )
 
 _discovered_roster = _discover_roster()
@@ -2606,6 +2762,63 @@ def _apply_agent_limit_balanced(agents):
         if len(selected) >= agent_limit:
             break
     return selected
+
+
+def _load_office_agent_overrides():
+    overrides = {}
+    branches = {}
+    try:
+        oc_path = os.path.join(STATUS_DIR, "office-config.json")
+        with open(oc_path, "r") as f:
+            data = json.load(f)
+        for agent in data.get("agents", []):
+            if not isinstance(agent, dict):
+                continue
+            keys = [
+                agent.get("id"),
+                agent.get("statusKey"),
+                agent.get("agentId"),
+                agent.get("providerAgentId"),
+                agent.get("profile"),
+            ]
+            provider_kind = str(agent.get("providerKind") or "").strip()
+            provider_agent_id = str(agent.get("providerAgentId") or agent.get("profile") or "").strip()
+            if provider_kind and provider_agent_id:
+                keys.append(f"{provider_kind}-{provider_agent_id}")
+            for key in keys:
+                if key:
+                    overrides[str(key)] = agent
+        for branch in data.get("branches", []):
+            if not isinstance(branch, dict):
+                continue
+            branch_id = branch.get("id", "")
+            if branch_id:
+                branches[branch_id] = branch.get("name", branch_id)
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        pass
+    return overrides, branches
+
+
+def _office_agent_override_for(discovered_agent, overrides):
+    candidates = [
+        discovered_agent.get("statusKey"),
+        discovered_agent.get("id"),
+        discovered_agent.get("agentId"),
+    ]
+    provider_kind = str(discovered_agent.get("providerKind") or "").strip()
+    provider_agent_id = str(discovered_agent.get("providerAgentId") or discovered_agent.get("profile") or "").strip()
+    if provider_kind and provider_agent_id:
+        candidates.append(f"{provider_kind}-{provider_agent_id}")
+    if provider_kind in {"", "openclaw"}:
+        candidates.extend([
+            discovered_agent.get("providerAgentId"),
+            discovered_agent.get("profile"),
+        ])
+    for key in candidates:
+        if key and str(key) in overrides:
+            return overrides[str(key)]
+    return {}
+
 
 # Build compatibility maps from discovery (these update on refresh)
 def _build_agent_info():
@@ -2771,10 +2984,26 @@ def _is_codex_agent(agent_id_or_key):
     return needle.startswith("codex:")
 
 
+def _is_claude_code_agent(agent_id_or_key):
+    needle = str(agent_id_or_key or "")
+    for a in get_roster():
+        if needle in (a.get("id"), a.get("statusKey"), a.get("providerAgentId")):
+            return a.get("providerKind") == "claude-code"
+    return needle.startswith("claude-code:") or needle.startswith("claude-code-")
+
+
 def _get_codex_agent(agent_id_or_key=None):
     needle = str(agent_id_or_key or "")
     for a in get_roster():
         if a.get("providerKind") == "codex" and (not needle or needle in (a.get("id"), a.get("statusKey"), a.get("providerAgentId"))):
+            return a
+    return None
+
+
+def _get_claude_code_agent(agent_id_or_key=None):
+    needle = str(agent_id_or_key or "")
+    for a in get_roster():
+        if a.get("providerKind") == "claude-code" and (not needle or needle in (a.get("id"), a.get("statusKey"), a.get("providerAgentId"))):
             return a
     return None
 
@@ -2997,6 +3226,50 @@ def _load_hermes_history(profile="default", conversation_id=None):
         return []
 
 
+def _load_provider_histories_for_bubbles(provider_kind, profile="default", limit=500):
+    """Load global and conversation-scoped provider history for map bubbles."""
+    safe_profile = re.sub(r"[^a-zA-Z0-9_.-]+", "-", str(profile or "default"))[:80] or "default"
+    prefixes = {
+        "hermes": f"hermes-chat-{safe_profile}",
+        "claude-code": f"claude-code-chat-{safe_profile}",
+    }
+    prefix = prefixes.get(provider_kind)
+    if not prefix:
+        return []
+    messages = []
+    seen = set()
+    for path in sorted(glob.glob(os.path.join(STATUS_DIR, f"{prefix}*.json"))):
+        try:
+            with open(path, "r") as f:
+                state = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
+            continue
+        file_messages = state.get("messages") if isinstance(state, dict) else []
+        if not isinstance(file_messages, list):
+            continue
+        conversation_id = state.get("conversationId") if isinstance(state, dict) else ""
+        for msg in file_messages:
+            if not isinstance(msg, dict):
+                continue
+            item = dict(msg)
+            item.setdefault("conversationId", conversation_id or "")
+            if provider_kind == "claude-code":
+                item["thinking"] = _claude_code_visible_thinking(item)
+            key = (
+                item.get("role") or "",
+                item.get("text") or "",
+                item.get("ts") or "",
+                item.get("conversationId") or "",
+                item.get("agentId") or "",
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            messages.append(item)
+    messages.sort(key=lambda item: int(item.get("epochMs") or item.get("ts") or 0))
+    return messages[-max(1, min(int(limit or 500), 1000)):]
+
+
 def _load_hermes_state(profile="default", conversation_id=None):
     path = _hermes_history_path(profile, conversation_id)
     try:
@@ -3204,34 +3477,184 @@ def _hermes_task_breakdown_tool(status="running", result=""):
     }
 
 
-def _publish_hermes_api_progress(profile, agent_id, run_id, tools=None, reasoning_parts=None, reply=""):
-    """Publish in-flight native Hermes API events to the visible chat history."""
-    if not run_id:
-        return
-    progress_id = f"hermes-api-progress-{run_id}"
-    history = _load_hermes_history(profile)
-    history = [
-        msg for msg in history
-        if not (isinstance(msg, dict) and msg.get("ephemeral") == "hermes-progress" and msg.get("progressId") == progress_id)
-    ]
-    history.append({
-        "role": "assistant",
-        "text": reply or "",
-        "ts": int(time.time() * 1000),
-        "agentId": agent_id,
-        "ephemeral": "hermes-progress",
-        "progressId": progress_id,
+def _hermes_api_client():
+    hermes_cfg = VO_CONFIG.get("hermes", {})
+    return HermesApiClient(
+        base_url=hermes_cfg.get("apiUrl"),
+        api_key=hermes_cfg.get("apiKey"),
+        timeout_sec=min(int(hermes_cfg.get("timeoutSec") or 600), 60),
+    )
+
+
+def _hermes_event_name(event):
+    return str((event or {}).get("event") or (event or {}).get("type") or "").strip().lower().replace("_", ".")
+
+
+def _hermes_event_text(event):
+    if not isinstance(event, dict):
+        return ""
+    for key in ("delta", "text", "content", "output"):
+        value = event.get(key)
+        if isinstance(value, str) and value:
+            return value
+    data = event.get("data") if isinstance(event.get("data"), dict) else {}
+    for key in ("delta", "text", "content", "output"):
+        value = data.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return ""
+
+
+def _hermes_api_tool_card(event, status="running", fallback_id=""):
+    event = event if isinstance(event, dict) else {}
+    name = str(event.get("tool") or event.get("name") or event.get("tool_name") or "Hermes tool")
+    preview = str(event.get("preview") or event.get("label") or event.get("command") or "")
+    result = str(event.get("result") or event.get("output") or event.get("error") or "")
+    return {
+        "id": str(event.get("toolCallId") or event.get("tool_call_id") or event.get("id") or fallback_id or f"hermes-tool-{int(time.time() * 1000)}"),
+        "name": name,
+        "status": status,
+        "arguments": {"command": preview} if preview else {},
+        "result": result or ("Running" if status == "running" else "Completed"),
+    }
+
+
+def _hermes_api_approval_from_event(event, agent_id="", profile="", session_id="", original_message=""):
+    event = event if isinstance(event, dict) else {}
+    command = str(event.get("command") or event.get("preview") or event.get("tool") or "Hermes approval request")
+    run_id = str(event.get("run_id") or event.get("runId") or "")
+    seed = f"{agent_id}|{profile}|{session_id}|{run_id}|{command}|{original_message}"
+    approval_id = "hermes-api-approval-" + hashlib.sha1(seed.encode("utf-8")).hexdigest()[:16]
+    return {
+        "id": approval_id,
+        "approval_id": approval_id,
+        "provider": "hermes-api",
+        "status": "pending",
+        "kind": "command",
+        "title": "Hermes approval required",
+        "description": str(event.get("description") or "Hermes needs approval before it can continue this run."),
+        "command": command,
+        "message": original_message,
+        "agentId": agent_id or "hermes-default",
+        "profile": profile or "default",
+        "session_id": session_id or "",
         "runId": run_id,
-        "sessionId": _get_hermes_session_id(profile) or "",
-        "tools": tools or [],
-        "thinking": "\n\n".join(reasoning_parts or [])[:12000],
-        "reasoningTokens": 0,
-    })
-    _save_hermes_history(profile, history)
+        "choices": event.get("choices") or ["approve_once", "deny"],
+    }
+
+
+def _handle_hermes_api_chat(agent, profile, delivery_message, original_message, conversation_id, timeout, on_event=None):
+    hermes_cfg = VO_CONFIG.get("hermes", {})
+    if not hermes_cfg.get("apiEnabled"):
+        return {"ok": False, "fallback": True, "error": "Hermes native API is disabled"}
+    client = _hermes_api_client()
+    try:
+        if not client.is_available():
+            return {"ok": False, "fallback": True, "error": "Hermes native API is not available"}
+        session_id = _get_hermes_session_id(profile, conversation_id) or f"vo-hermes-{_safe_hermes_path_part(profile)}"
+        started = client.start_run(delivery_message, session_id=session_id, session_key=f"virtual-office:hermes:{profile}")
+        run_id = str(started.get("run_id") or started.get("runId") or started.get("id") or "")
+        if not run_id:
+            return {"ok": False, "fallback": True, "error": started.get("error") or "Hermes native API did not return a run id"}
+        _set_hermes_session_id(profile, session_id, conversation_id)
+        if callable(on_event):
+            on_event({"event": "run.native.started", "run_id": run_id, "session_id": session_id})
+
+        reply = ""
+        thinking_parts = []
+        tools_by_id = {}
+        tool_order = []
+        approval = None
+        terminal = ""
+        error_text = ""
+        for event in client.stream_run_events(run_id, timeout_sec=int(timeout) + 30):
+            name = _hermes_event_name(event)
+            if callable(on_event):
+                on_event(event if isinstance(event, dict) else {})
+            if name in {"message.delta", "message.delta.text", "response.delta", "delta"}:
+                reply += _hermes_event_text(event)
+            elif name in {"message", "message.completed", "run.completed", "completed"} and _hermes_event_text(event):
+                if name in {"run.completed", "completed"}:
+                    reply = _hermes_event_text(event) or reply
+                else:
+                    reply += _hermes_event_text(event)
+            elif name in {"reasoning.available", "reasoning", "thinking"}:
+                text = _hermes_event_text(event)
+                if text:
+                    thinking_parts.append(text)
+            elif name in {"tool.started", "tool.call", "tool"}:
+                card = _hermes_api_tool_card(event, "running", f"{run_id}:tool:{len(tool_order) + 1}")
+                tools_by_id[card["id"]] = card
+                tool_order.append(card["id"])
+            elif name in {"tool.completed", "tool.result", "tool.failed"}:
+                status = "error" if name == "tool.failed" or event.get("error") else "done"
+                card = _hermes_api_tool_card(event, status, str(event.get("id") or event.get("toolCallId") or ""))
+                if card["id"] in tools_by_id:
+                    tools_by_id[card["id"]].update(card)
+                else:
+                    tools_by_id[card["id"]] = card
+                    tool_order.append(card["id"])
+            elif name in {"approval.request", "approval"}:
+                approval = _remember_hermes_approval_pending(
+                    _hermes_api_approval_from_event(event, agent_id=agent.get("id") or agent.get("statusKey"), profile=profile, session_id=session_id, original_message=original_message),
+                    agent_id=agent.get("id") or agent.get("statusKey"),
+                    profile=profile,
+                    session_id=session_id,
+                )
+            elif name in {"run.completed", "completed"}:
+                terminal = "completed"
+                if _hermes_event_text(event):
+                    reply = _hermes_event_text(event) or reply
+                break
+            elif name in {"run.failed", "failed", "run.cancelled", "run.canceled", "cancelled", "canceled"}:
+                terminal = name
+                error_text = str(event.get("error") or event.get("message") or name)
+                break
+        tools = [tools_by_id[tid] for tid in tool_order if tid in tools_by_id]
+        if approval:
+            return {
+                "ok": False,
+                "providerPath": "api",
+                "reply": reply,
+                "error": "Hermes is waiting for approval.",
+                "sessionId": session_id,
+                "runId": run_id,
+                "tools": tools,
+                "thinking": "\n\n".join(thinking_parts),
+                "reasoningTokens": 0,
+                "approval": approval,
+                "exitCode": 1,
+            }
+        ok = terminal in {"completed", ""}
+        return {
+            "ok": ok,
+            "providerPath": "api",
+            "reply": reply,
+            "error": None if ok else error_text,
+            "sessionId": session_id,
+            "runId": run_id,
+            "tools": tools,
+            "thinking": "\n\n".join(thinking_parts),
+            "reasoningTokens": 0,
+            "approval": None,
+            "exitCode": 0 if ok else 1,
+        }
+    except Exception as exc:
+        return {"ok": False, "fallback": True, "providerPath": "api", "error": str(exc)}
 
 
 def _remove_hermes_progress_messages(messages):
-    return [m for m in messages if not (isinstance(m, dict) and m.get("ephemeral") == "hermes-progress")]
+    return _remove_provider_progress_messages(messages, "hermes")
+
+
+def _publish_hermes_progress(profile, agent_id, progress_id, run_state, conversation_id=None):
+    if not progress_id:
+        return
+    run_state = run_state if isinstance(run_state, dict) else {}
+    progress_message = _provider_progress_message("hermes", agent_id, progress_id, run_state, conversation_id, "Waiting for Hermes run events.")
+    history = _load_hermes_history(profile, conversation_id)
+    history = _upsert_ephemeral_message(history, "hermes-progress", progress_id, progress_message)
+    _save_hermes_history(profile, history, conversation_id)
 
 
 def _format_hermes_attachment_context(attachments):
@@ -4149,7 +4572,58 @@ def _handle_hermes_chat(body):
     })
     _save_hermes_history(profile, history, conversation_id)
 
+    gateway_presence.set_manual_override(agent.get("statusKey") or agent.get("id"), "working", "Hermes task")
     try:
+        api_result = None
+        if hermes_cfg.get("apiEnabled"):
+            api_result = _handle_hermes_api_chat(agent, profile, delivery_message, message, conversation_id, timeout, on_event=body.get("_onHermesApiEvent"))
+            if not api_result.get("fallback"):
+                active_session_id = api_result.get("sessionId") or _get_hermes_session_id(profile, conversation_id)
+                reply = api_result.get("reply", "")
+                exit_code = api_result.get("exitCode")
+                task_status = "done" if api_result.get("ok") else ("running" if api_result.get("approval") else "error")
+                task_result = (
+                    "Hermes native API run completed."
+                    if api_result.get("ok")
+                    else (api_result.get("error") or "Hermes native API run did not complete.")
+                )
+                visible_tools = [_hermes_task_breakdown_tool(task_status, task_result)] + (api_result.get("tools") or [])
+                history = _remove_hermes_progress_messages(_load_hermes_history(profile, conversation_id))
+                history.append({
+                    "role": "assistant",
+                    "text": reply,
+                    "ts": int(time.time() * 1000),
+                    "agentId": agent.get("id"),
+                    "exitCode": exit_code,
+                    "sessionId": active_session_id,
+                    "runId": api_result.get("runId") or "",
+                    "providerPath": "api",
+                    "tools": visible_tools,
+                    "thinking": api_result.get("thinking") or "",
+                    "reasoningTokens": api_result.get("reasoningTokens") or 0,
+                    "approval": api_result.get("approval"),
+                    "conversationId": conversation_id,
+                })
+                _save_hermes_history(profile, history, conversation_id)
+                state = "idle" if api_result.get("ok") else ("working" if api_result.get("approval") else "offline")
+                gateway_presence.set_manual_override(agent.get("statusKey") or agent.get("id"), state, "")
+                return {
+                    "ok": bool(api_result.get("ok")),
+                    "reply": reply,
+                    "stderr": "",
+                    "exitCode": exit_code,
+                    "sessionId": active_session_id,
+                    "runId": api_result.get("runId") or "",
+                    "providerPath": "api",
+                    "tools": visible_tools,
+                    "thinking": api_result.get("thinking") or "",
+                    "reasoningTokens": api_result.get("reasoningTokens") or 0,
+                    "approval": api_result.get("approval"),
+                    "error": api_result.get("error"),
+                    "conversationId": conversation_id,
+                    "agent": {"id": agent.get("id"), "name": agent.get("name"), "providerKind": "hermes", "profile": profile},
+                }
+
         provider = HermesProvider(
             home_path=hermes_cfg.get("homePath"),
             binary=hermes_bin,
@@ -4796,6 +5270,225 @@ def _handle_hermes_approval_respond(body):
     return result
 
 
+def _hermes_stream_event_payload(run_id, agent, profile, result=None, **extra):
+    result = result if isinstance(result, dict) else {}
+    visible_thinking = _provider_visible_thinking("hermes", result)
+    payload = {
+        "runId": run_id,
+        "agentId": (agent or {}).get("id") or "",
+        "profile": profile or "",
+        "sessionId": result.get("sessionId") or _get_hermes_session_id(profile, extra.get("conversationId") or "") or "",
+        "turnId": result.get("runId") or run_id,
+        "reply": result.get("reply") or "",
+        "tools": result.get("tools") or [],
+        "thinking": visible_thinking,
+        "error": result.get("error") or "",
+        "status": result.get("status") or ("completed" if result.get("ok") else "failed" if result else ""),
+        "providerPath": result.get("providerPath") or "api",
+    }
+    if result.get("approval"):
+        payload["approval"] = result.get("approval")
+    payload.update({k: v for k, v in extra.items() if v is not None})
+    return payload
+
+
+def _handle_hermes_run_start(body):
+    """Start a Hermes message in the background and expose progress through ProviderRunBridge."""
+    message = (body.get("message") or "").strip()
+    agent_key = body.get("agentId") or body.get("key") or body.get("sessionKey") or "hermes-default"
+    if not message:
+        return {"ok": False, "error": "message is required", "_status": 400}
+    agent = _get_hermes_agent(agent_key)
+    if not agent:
+        return {"ok": False, "error": f"Hermes agent '{agent_key}' not found", "_status": 404}
+
+    profile = agent.get("profile") or agent.get("providerAgentId") or "default"
+    run_id = f"hermes-{int(time.time() * 1000)}-{str(uuid.uuid4())[:8]}"
+    conversation_id = str(body.get("conversationId") or body.get("threadId") or "").strip()
+    status_key = agent.get("statusKey") or agent.get("id")
+    events = queue.Queue()
+    meta = {
+        "runId": run_id,
+        "agentId": agent.get("id"),
+        "agentKey": agent_key,
+        "profile": profile,
+        "statusKey": status_key,
+        "conversationId": conversation_id,
+        "events": events,
+        "startedAt": int(time.time() * 1000),
+        "done": False,
+        "result": None,
+    }
+    PROVIDER_RUN_BRIDGE.remember(meta)
+
+    def enqueue(event_name, payload=None):
+        PROVIDER_RUN_BRIDGE.emit(run_id, event_name, payload)
+
+    def worker():
+        enqueue("run.started", {"providerPath": "api", "conversationId": conversation_id})
+        progress_id = f"hermes-progress-{run_id}"
+        _publish_hermes_progress(profile, agent.get("id") or agent_key, progress_id, {
+            "runId": run_id,
+            "status": "running",
+            "thinking": "Waiting for Hermes run events.",
+            "tools": [_hermes_task_breakdown_tool("running", "Hermes native API run queued.")],
+        }, conversation_id)
+        if hasattr(gateway_presence, "set_provider_event"):
+            gateway_presence.set_provider_event(status_key, "hermes", {"event": "run.started", "run_id": run_id})
+
+        def on_native_event(event):
+            event = event if isinstance(event, dict) else {}
+            name = _hermes_event_name(event)
+            provider_run_id = str(event.get("run_id") or event.get("runId") or "")
+            if provider_run_id:
+                PROVIDER_RUN_BRIDGE.update(run_id, turnId=provider_run_id)
+            payload = {
+                "runId": run_id,
+                "agentId": agent.get("id") or "",
+                "profile": profile,
+                "sessionId": event.get("session_id") or event.get("sessionId") or _get_hermes_session_id(profile, conversation_id) or "",
+                "turnId": provider_run_id or run_id,
+                "providerPath": "api",
+                "rawEvent": event,
+            }
+            text = _hermes_event_text(event)
+            if text:
+                payload["delta"] = text
+                payload["reply"] = text
+                payload["thinking"] = text
+            progress_state = {
+                "runId": run_id,
+                "sessionId": payload.get("sessionId") or "",
+                "turnId": payload.get("turnId") or "",
+                "status": name or "running",
+                "reply": payload.get("reply") or "",
+                "thinking": payload.get("thinking") or "",
+                "tools": [],
+            }
+            if name in {"message.delta", "message.delta.text", "response.delta", "delta", "message", "message.completed"}:
+                enqueue("message.delta", payload)
+            elif name in {"reasoning.available", "reasoning", "thinking"}:
+                enqueue("reasoning.available", payload)
+            elif name in {"tool.started", "tool.call", "tool"}:
+                tool_card = _hermes_api_tool_card(event, "running", f"{run_id}:tool")
+                progress_state["tools"] = [tool_card]
+                enqueue("tool.started", {**payload, "toolCard": tool_card})
+            elif name in {"tool.completed", "tool.result"}:
+                tool_card = _hermes_api_tool_card(event, "done", f"{run_id}:tool")
+                progress_state["tools"] = [tool_card]
+                enqueue("tool.completed", {**payload, "toolCard": tool_card})
+            elif name == "tool.failed":
+                tool_card = _hermes_api_tool_card(event, "error", f"{run_id}:tool")
+                progress_state["tools"] = [tool_card]
+                enqueue("tool.failed", {**payload, "toolCard": tool_card})
+            _publish_hermes_progress(profile, agent.get("id") or agent_key, progress_id, progress_state, conversation_id)
+
+        run_body = dict(body)
+        run_body["_onHermesApiEvent"] = on_native_event
+        run_body.setdefault("fromType", "human")
+        run_body.setdefault("fromDisplayName", "User")
+        run_body.setdefault("sourceApp", "virtual-office")
+        run_body.setdefault("sourceSurface", "chat-window")
+        run_body.setdefault("sourceLabel", "Virtual Office Chat")
+        try:
+            result = _handle_hermes_chat(run_body)
+        except Exception as exc:
+            result = {"ok": False, "error": str(exc), "_status": 500}
+        PROVIDER_RUN_BRIDGE.update(
+            run_id,
+            done=True,
+            result=result,
+            sessionId=result.get("sessionId") or "",
+            turnId=result.get("runId") or run_id,
+        )
+        terminal_payload = _hermes_stream_event_payload(run_id, agent, profile, result, conversationId=conversation_id)
+        if result.get("approval"):
+            enqueue("approval.required", terminal_payload)
+        status = str(result.get("status") or "").lower()
+        if result.get("ok"):
+            enqueue("run.completed", terminal_payload)
+            presence_event = "run.completed"
+        elif status in {"cancelled", "canceled"}:
+            enqueue("run.cancelled", terminal_payload)
+            presence_event = "run.cancelled"
+        else:
+            terminal_payload["error"] = result.get("error") or result.get("reply") or "Hermes run failed"
+            enqueue("run.failed", terminal_payload)
+            presence_event = "run.failed"
+        if hasattr(gateway_presence, "set_provider_event"):
+            gateway_presence.set_provider_event(status_key, "hermes", {"event": presence_event, "run_id": run_id, "error": terminal_payload.get("error") or ""})
+        threading.Timer(600, PROVIDER_RUN_BRIDGE.clear, args=(run_id,)).start()
+
+    threading.Thread(target=worker, daemon=True, name=f"hermes-run-{run_id}").start()
+    return {
+        "ok": True,
+        "runId": run_id,
+        "providerPath": "api",
+        "agent": {"id": agent.get("id"), "name": agent.get("name"), "providerKind": "hermes", "profile": profile},
+    }
+
+
+def _handle_hermes_run_events(handler, run_id):
+    PROVIDER_RUN_BRIDGE.stream_events(handler, run_id, "Hermes")
+
+
+def _handle_hermes_run_stop(body):
+    run_id = str(body.get("runId") or "").strip()
+    meta = PROVIDER_RUN_BRIDGE.get(run_id)
+    hermes_cfg = VO_CONFIG.get("hermes", {})
+    result = {"ok": False, "error": "Hermes run not found", "_status": 404}
+    if meta:
+        provider_run_id = str((meta.get("result") or {}).get("runId") or meta.get("turnId") or run_id)
+        if hermes_cfg.get("apiEnabled"):
+            try:
+                result = _hermes_api_client().stop_run(provider_run_id)
+                result = {"ok": result.get("ok", True), "status": "cancelled", "runId": provider_run_id, "providerPath": "api", **result}
+            except Exception as exc:
+                result = {"ok": False, "error": str(exc), "runId": provider_run_id, "providerPath": "api", "_status": 500}
+        else:
+            result = {"ok": False, "error": "Hermes native API stop is unavailable", "providerPath": "api", "_status": 409}
+        event_name = "run.cancelled" if result.get("ok") else "run.failed"
+        PROVIDER_RUN_BRIDGE.update(run_id, done=True, result=result)
+        PROVIDER_RUN_BRIDGE.emit(run_id, event_name, {
+            "runId": run_id,
+            "agentId": meta.get("agentId") or "",
+            "profile": meta.get("profile") or "",
+            "conversationId": meta.get("conversationId") or "",
+            "status": result.get("status") or "",
+            "error": result.get("error") or "",
+            "providerPath": "api",
+        })
+    return result
+
+
+def _handle_hermes_history_clear(body):
+    body = body or {}
+    agent = _get_hermes_agent(body.get("agentId") or body.get("key") or "hermes-default") or {}
+    profile = agent.get("profile") or agent.get("providerAgentId") or "default"
+    conversation_id = str(body.get("conversationId") or "").strip()
+    session_id = _get_hermes_session_id(profile, conversation_id)
+    delete_result = {"ok": True, "deleted": False}
+    if session_id:
+        hermes_cfg = VO_CONFIG.get("hermes", {})
+        hermes_bin = os.path.expanduser(agent.get("binary") or hermes_cfg.get("binary") or "~/.local/bin/hermes")
+        provider = HermesProvider(
+            home_path=hermes_cfg.get("homePath"),
+            binary=hermes_bin,
+            enabled=hermes_cfg.get("enabled", True),
+            timeout_sec=int(hermes_cfg.get("timeoutSec") or 600),
+        )
+        delete_result = provider.delete_session(profile, session_id)
+    _save_hermes_history(profile, [], conversation_id)
+    _set_hermes_session_id(profile, "", conversation_id)
+    return {
+        "ok": True,
+        "deletedHermesSession": bool(delete_result.get("deleted")),
+        "sessionId": session_id,
+        "conversationId": conversation_id,
+        "profile": profile,
+    }
+
+
 def _handle_hermes_test(body=None):
     """Test the configured Hermes installation without changing Hermes state."""
     body = body or {}
@@ -4803,42 +5496,26 @@ def _handle_hermes_test(body=None):
     hermes_bin = os.path.expanduser(body.get("binary") or hermes_cfg.get("binary") or "~/.local/bin/hermes")
     hermes_home = os.path.expanduser(body.get("homePath") or hermes_cfg.get("homePath") or "~/.hermes")
     result = HermesProvider(home_path=hermes_home, binary=hermes_bin, enabled=True).test()
-    api = _hermes_api_client_for_profile("default")
-    try:
-        caps = api.capabilities()
-        features = caps.get("features") if isinstance(caps.get("features"), dict) else {}
-        result["api"] = {
-            "ok": bool(features.get("run_submission") and features.get("run_events_sse")),
-            "url": api.base_url,
-            "features": {
-                "runSubmission": bool(features.get("run_submission")),
-                "runEventsSse": bool(features.get("run_events_sse")),
-                "runApprovalResponse": bool(features.get("run_approval_response")),
-            },
-        }
-    except Exception as exc:
-        result["api"] = {"ok": False, "url": api.base_url, "error": str(exc)[:500]}
-    profile_apis = {}
-    for agent in result.get("agents") or []:
-        profile = agent.get("profile") or agent.get("providerAgentId") or "default"
+    api_enabled = bool(body.get("apiEnabled") if "apiEnabled" in body else hermes_cfg.get("apiEnabled", False))
+    api_url = body.get("apiUrl") or hermes_cfg.get("apiUrl") or "http://127.0.0.1:8642"
+    api_key = body.get("apiKey") if "apiKey" in body else hermes_cfg.get("apiKey", "")
+    result["api"] = {"enabled": api_enabled, "ok": False, "url": api_url}
+    if api_enabled:
         try:
-            profile_api = _hermes_api_client_for_profile(profile)
-            caps = profile_api.capabilities()
+            client = HermesApiClient(base_url=api_url, api_key=api_key, timeout_sec=min(int(hermes_cfg.get("timeoutSec") or 600), 30))
+            caps = client.capabilities()
             features = caps.get("features") if isinstance(caps.get("features"), dict) else {}
-            profile_apis[profile] = {
+            result["api"].update({
                 "ok": bool(features.get("run_submission") and features.get("run_events_sse")),
-                "url": profile_api.base_url,
-                "model": (caps.get("model") or caps.get("model_name") or ""),
                 "features": {
                     "runSubmission": bool(features.get("run_submission")),
                     "runEventsSse": bool(features.get("run_events_sse")),
                     "runApprovalResponse": bool(features.get("run_approval_response")),
                 },
-            }
+                "model": caps.get("model") or caps.get("model_name") or "",
+            })
         except Exception as exc:
-            cfg = _hermes_profile_api_config(profile)
-            profile_apis[profile] = {"ok": False, "url": cfg.get("url"), "error": str(exc)[:500]}
-    result["profileApis"] = profile_apis
+            result["api"]["error"] = str(exc)[:500]
     return result
 
 
@@ -4847,11 +5524,20 @@ def _codex_provider_from_config():
     return CodexProvider(
         enabled=cfg.get("enabled", False),
         workspace=cfg.get("workspace"),
+        home_path=cfg.get("homePath"),
+        binary=cfg.get("binary"),
+        workspace_root=cfg.get("workspaceRoot"),
+        main_workspace=cfg.get("mainWorkspace"),
         name=cfg.get("name"),
         agent_id=cfg.get("agentId"),
         model=cfg.get("model"),
         reply_text=cfg.get("replyText"),
         bridge_url=cfg.get("bridgeUrl"),
+        sandbox=cfg.get("sandbox", "workspace-write"),
+        approval_policy=cfg.get("approvalPolicy", "never"),
+        include_main=cfg.get("includeMain", True),
+        include_native_agents=cfg.get("includeNativeAgents", True),
+        register_native_agents=cfg.get("registerNativeAgents", True),
     )
 
 
@@ -4930,7 +5616,8 @@ def _append_codex_activity(agent_id, conversation_id, event):
             active["updatedAt"] = record.get("ts") or int(time.time() * 1000)
             if record.get("type") == "interaction":
                 if record.get("status") == "pending":
-                    active["pending"] = record
+                    active["pending"] = normalize_approval_record("codex", agent_id, conversation_id, record)
+                    active["pending"]["raw"] = record
                 elif active.get("pending", {}).get("interactionId") == record.get("interactionId"):
                     active["pending"] = None
     return record
@@ -5030,6 +5717,42 @@ def _codex_git_paths(workspace):
         return set()
 
 
+def _append_codex_user_comm_event(agent, agent_id, conversation_id, message, body):
+    from_type = str(body.get("fromType") or body.get("senderType") or "").strip().lower()
+    if from_type not in {"human", "user", "chat", "ui"}:
+        return None
+    sender_name = str(body.get("fromDisplayName") or body.get("displayName") or body.get("fromName") or "User").strip() or "User"
+    source_app = str(body.get("sourceApp") or body.get("app") or "virtual-office").strip() or "virtual-office"
+    source_surface = str(body.get("sourceSurface") or body.get("surface") or "chat-window").strip() or "chat-window"
+    source_label = str(body.get("sourceLabel") or "").strip()
+    metadata = {
+        "providerKind": "codex",
+        "sourceApp": source_app,
+        "sourceSurface": source_surface,
+        "fromType": from_type,
+    }
+    if source_label:
+        metadata["sourceLabel"] = source_label
+    return _append_comm_event({
+        "type": "message",
+        "direction": "request",
+        "conversationId": conversation_id,
+        "from": {
+            "id": "user",
+            "providerKind": "human",
+            "name": sender_name,
+            "emoji": "",
+            "sourceApp": source_app,
+            "sourceSurface": source_surface,
+            "sourceLabel": source_label,
+        },
+        "to": _office_agent_ref(agent_id),
+        "text": message,
+        "metadata": metadata,
+        "visibleInOffice": True,
+    })
+
+
 def _handle_codex_chat(body):
     """Send one office-mediated message to the Codex harness adapter."""
     message = (body.get("message") or "").strip()
@@ -5046,6 +5769,7 @@ def _handle_codex_chat(body):
     if not conversation_id:
         return {"ok": False, "status": "invalid_request", "error": "conversationId is required", "_status": 400}
     agent_id = agent.get("id") or agent_key
+    inbound_event = None
     operation_lock = _codex_operation_lock(agent_id)
     if not operation_lock.acquire(blocking=False):
         active = _get_codex_active(agent_id) or {}
@@ -5063,21 +5787,61 @@ def _handle_codex_chat(body):
     requested_workspace = str(body.get("workspace") or "").strip()
     if requested_workspace:
         provider.workspace = os.path.realpath(os.path.expanduser(requested_workspace))
+    elif agent.get("workspace"):
+        provider.workspace = os.path.realpath(os.path.expanduser(str(agent.get("workspace"))))
+    inbound_event = _append_codex_user_comm_event(agent, agent_id, conversation_id, message, body)
     before_paths = _codex_git_paths(provider.workspace)
     allow_interaction = str(body.get("fromType") or "agent").lower() in {"human", "user", "chat", "ui"}
     with _CODEX_ACTIVE_LOCK:
-        _CODEX_ACTIVE_OPERATIONS[agent_id] = {
-            "agentId": agent_id,
+        _CODEX_ACTIVE_OPERATIONS[agent_id] = normalize_active_operation(
+            "codex",
+            agent_id,
+            conversation_id,
+            thread_id=_get_codex_thread_id(agent_id, conversation_id),
+        )
+    activity_callback = body.get("_onActivity")
+    reply_event_appended = {"done": False}
+
+    def append_reply_event(reply, metadata=None, ok=True):
+        text = str(reply or "")
+        if not inbound_event or not text or reply_event_appended["done"]:
+            return
+        meta = metadata if isinstance(metadata, dict) else {}
+        _append_comm_event({
+            "type": "message",
+            "direction": "reply",
             "conversationId": conversation_id,
-            "threadId": _get_codex_thread_id(agent_id, conversation_id),
-            "turnId": "",
-            "status": "running",
-            "pending": None,
-            "startedAt": int(time.time() * 1000),
-        }
+            "from": _office_agent_ref(agent_id),
+            "to": inbound_event.get("from") or {"id": "user", "providerKind": "human", "name": "User"},
+            "text": text,
+            "inReplyTo": inbound_event.get("id"),
+            "metadata": {
+                "providerKind": "codex",
+                "threadId": meta.get("threadId") or "",
+                "turnId": meta.get("turnId") or "",
+                "modifiedFiles": meta.get("modifiedFiles") or [],
+                "needsHumanIntervention": bool(meta.get("needsHumanIntervention")),
+            },
+            "visibleInOffice": True,
+            "ok": bool(ok),
+        })
+        reply_event_appended["done"] = True
 
     def on_event(event):
-        _append_codex_activity(agent_id, conversation_id, event)
+        record = _append_codex_activity(agent_id, conversation_id, event)
+        if record.get("type") == "turn" and str(record.get("status") or "").lower() in {"completed", "done", "success"}:
+            output = record.get("output") if isinstance(record.get("output"), dict) else {}
+            append_reply_event(output.get("reply") or record.get("reply") or "", {
+                "threadId": record.get("threadId") or "",
+                "turnId": record.get("turnId") or "",
+                "modifiedFiles": output.get("modifiedFiles") or record.get("modifiedFiles") or [],
+                "needsHumanIntervention": record.get("needsHumanIntervention"),
+            }, ok=True)
+        if callable(activity_callback):
+            try:
+                activity_callback(record)
+            except Exception:
+                pass
 
     try:
         result = provider.send_message(
@@ -5101,25 +5865,224 @@ def _handle_codex_chat(body):
     if thread_id:
         _set_codex_thread_id(agent_id, conversation_id, thread_id)
     after_paths = _codex_git_paths(provider.workspace)
-    modified_files = set(result.get("modifiedFiles") or []) | (after_paths - before_paths)
+    modified_files = collect_modified_files(result.get("modifiedFiles") or [], before_paths, after_paths)
     with _CODEX_ACTIVE_LOCK:
         _CODEX_ACTIVE_OPERATIONS.pop(agent_id, None)
-    return {
-        "ok": bool(result.get("ok")),
-        "reply": result.get("reply") or "",
-        "error": result.get("error"),
-        "errorCode": result.get("errorCode"),
-        "status": result.get("status", "completed" if result.get("ok") else "execution_failed"),
-        "mode": result.get("mode", ""),
-        "conversationId": conversation_id,
-        "threadId": thread_id,
-        "turnId": result.get("turnId", ""),
-        "modifiedFiles": sorted(modified_files),
-        "needsHumanIntervention": bool(result.get("needsHumanIntervention")),
-        "durationMs": result.get("durationMs"),
-        "agent": {"id": agent.get("id"), "name": agent.get("name"), "providerKind": "codex", "profile": agent.get("profile", "")},
-        "_status": 200 if result.get("ok") or result.get("status") == "cancelled" else (408 if result.get("status") == "timeout" else 503 if result.get("status") == "bridge_unavailable" else 409 if result.get("status") == "needs_human_intervention" else 500),
+    normalized = normalize_provider_result(
+        "codex",
+        agent,
+        result,
+        conversation_id=conversation_id,
+        thread_id=thread_id,
+        turn_id=result.get("turnId", ""),
+        modified_files=modified_files,
+    )
+    if inbound_event and normalized.get("reply"):
+        append_reply_event(normalized.get("reply") or "", {
+            "threadId": normalized.get("threadId") or thread_id,
+            "turnId": normalized.get("turnId") or result.get("turnId", ""),
+            "modifiedFiles": modified_files,
+            "needsHumanIntervention": bool(normalized.get("needsHumanIntervention")),
+        }, ok=bool(normalized.get("ok")))
+    normalized["_status"] = provider_http_status(normalized)
+    return normalized
+
+
+def _codex_stream_event_payload(run_id, agent, record=None, result=None, **extra):
+    record = record if isinstance(record, dict) else {}
+    result = result if isinstance(result, dict) else {}
+    payload = {
+        "runId": run_id,
+        "agentId": (agent or {}).get("id") or record.get("agentId") or "",
+        "profile": (agent or {}).get("profile") or (agent or {}).get("providerAgentId") or "",
+        "conversationId": record.get("conversationId") or result.get("conversationId") or "",
+        "threadId": record.get("threadId") or result.get("threadId") or "",
+        "turnId": record.get("turnId") or result.get("turnId") or "",
+        "status": record.get("status") or result.get("status") or "",
+        "providerPath": "codex-app-server",
     }
+    text = record.get("text") or record.get("delta") or record.get("message") or record.get("content") or ""
+    if text:
+        payload["text"] = text
+        payload["delta"] = text
+    if record.get("type") in {"reasoning", "thinking"}:
+        visible_thinking = _provider_visible_thinking("codex", {**record, "thinking": text})
+        if visible_thinking:
+            payload["thinking"] = visible_thinking
+    if record:
+        payload["activity"] = record
+    if result:
+        payload.update({
+            "reply": result.get("reply") or "",
+            "error": result.get("error") or "",
+            "modifiedFiles": result.get("modifiedFiles") or [],
+            "needsHumanIntervention": bool(result.get("needsHumanIntervention")),
+        })
+    payload.update({k: v for k, v in extra.items() if v is not None})
+    return payload
+
+
+def _codex_activity_bridge_event_name(record):
+    record = record if isinstance(record, dict) else {}
+    event_type = str(record.get("type") or "").lower()
+    status = str(record.get("status") or "").lower()
+    if event_type == "interaction" and status == "pending":
+        return "approval.request"
+    if event_type in {"message", "assistant_message", "assistant", "text", "output"}:
+        return "message.delta"
+    if event_type in {"reasoning", "thinking"}:
+        text = record.get("text") or record.get("delta") or record.get("message") or record.get("content") or ""
+        return "reasoning.available" if _provider_visible_thinking("codex", {**record, "thinking": text}) else "provider.activity"
+    if event_type in {"tool", "tool_call", "command", "activity"}:
+        if status in {"done", "completed", "success"}:
+            return "tool.completed"
+        if status in {"error", "failed", "failure"}:
+            return "tool.failed"
+        return "tool.started"
+    if event_type in {"turn", "run"} and status in {"done", "completed", "success"}:
+        return "run.completed"
+    if event_type in {"turn", "run"} and status in {"cancelled", "canceled"}:
+        return "run.cancelled"
+    if event_type in {"turn", "run"} and status in {"error", "failed", "failure"}:
+        return "run.failed"
+    return "provider.activity"
+
+
+def _handle_codex_run_start(body):
+    """Start a Codex message in the background and expose legacy activity over SSE."""
+    message = (body.get("message") or "").strip()
+    agent_key = body.get("agentId") or body.get("key") or body.get("sessionKey") or "codex-local"
+    if not message:
+        return {"ok": False, "error": "message is required", "_status": 400}
+    agent = _get_codex_agent(agent_key)
+    if not agent:
+        return {"ok": False, "error": f"Codex agent '{agent_key}' not found", "_status": 404}
+    conversation_id = str(body.get("conversationId") or body.get("threadId") or "").strip()
+    if not conversation_id:
+        return {"ok": False, "status": "invalid_request", "error": "conversationId is required", "_status": 400}
+
+    run_id = f"codex-{int(time.time() * 1000)}-{str(uuid.uuid4())[:8]}"
+    profile = agent.get("profile") or agent.get("providerAgentId") or "local"
+    status_key = agent.get("statusKey") or agent.get("id")
+    events = queue.Queue()
+    meta = {
+        "runId": run_id,
+        "agentId": agent.get("id"),
+        "agentKey": agent_key,
+        "profile": profile,
+        "statusKey": status_key,
+        "conversationId": conversation_id,
+        "events": events,
+        "startedAt": int(time.time() * 1000),
+        "done": False,
+        "result": None,
+    }
+    PROVIDER_RUN_BRIDGE.remember(meta)
+
+    def enqueue(event_name, payload=None):
+        PROVIDER_RUN_BRIDGE.emit(run_id, event_name, payload)
+
+    def worker():
+        enqueue("run.started", {"providerPath": "codex-app-server", "conversationId": conversation_id})
+        progress_id = f"codex-progress-{run_id}"
+        _append_codex_progress_comm_event(agent, agent.get("id") or agent_key, conversation_id, progress_id, {
+            "runId": run_id,
+            "status": "running",
+            "thinking": "Waiting for Codex run events.",
+        })
+        if hasattr(gateway_presence, "set_provider_event"):
+            gateway_presence.set_provider_event(status_key, "codex", {"event": "run.started", "run_id": run_id})
+
+        def on_activity(record):
+            progress_state = {
+                "runId": run_id,
+                "threadId": record.get("threadId") or meta.get("threadId") or "",
+                "turnId": record.get("turnId") or meta.get("turnId") or "",
+                "status": record.get("status") or "running",
+                "reply": record.get("text") or "",
+                "thinking": _provider_visible_thinking("codex", {**record, "thinking": record.get("text")}) if record.get("type") in {"reasoning", "thinking"} else "",
+                "tools": [record] if record.get("type") in {"activity", "tool", "command"} else [],
+                "approval": record if record.get("type") == "interaction" and record.get("status") == "pending" else None,
+            }
+            _append_codex_progress_comm_event(agent, agent.get("id") or agent_key, conversation_id, progress_id, progress_state)
+            PROVIDER_RUN_BRIDGE.update(
+                run_id,
+                threadId=record.get("threadId") or meta.get("threadId") or "",
+                turnId=record.get("turnId") or meta.get("turnId") or "",
+            )
+            event_name = _codex_activity_bridge_event_name(record)
+            enqueue(event_name, _codex_stream_event_payload(run_id, agent, record))
+            if hasattr(gateway_presence, "set_provider_event"):
+                gateway_presence.set_provider_event(status_key, "codex", {
+                    "event": event_name,
+                    "run_id": run_id,
+                    "thread_id": record.get("threadId") or "",
+                    "turn_id": record.get("turnId") or "",
+                    "status": record.get("status") or "",
+                })
+
+        run_body = dict(body)
+        run_body["_streamRunId"] = run_id
+        run_body["_onActivity"] = on_activity
+        run_body.setdefault("fromType", "human")
+        run_body.setdefault("fromDisplayName", "User")
+        run_body.setdefault("sourceApp", "virtual-office")
+        run_body.setdefault("sourceSurface", "chat-window")
+        run_body.setdefault("sourceLabel", "Virtual Office Chat")
+        try:
+            result = _handle_codex_chat(run_body)
+        except Exception as exc:
+            result = {"ok": False, "status": "execution_failed", "error": str(exc), "_status": 500}
+        PROVIDER_RUN_BRIDGE.update(run_id, done=True, result=result)
+        _remove_comm_progress_events("codex-progress", progress_id, conversation_id)
+        terminal_payload = _codex_stream_event_payload(run_id, agent, result=result, conversationId=conversation_id)
+        status = str(result.get("status") or "").lower()
+        if result.get("ok"):
+            enqueue("run.completed", terminal_payload)
+            presence_event = "run.completed"
+        elif status in {"cancelled", "canceled"}:
+            enqueue("run.cancelled", terminal_payload)
+            presence_event = "run.cancelled"
+        else:
+            terminal_payload["error"] = result.get("error") or result.get("reply") or "Codex run failed"
+            enqueue("run.failed", terminal_payload)
+            presence_event = "run.failed"
+        if hasattr(gateway_presence, "set_provider_event"):
+            gateway_presence.set_provider_event(status_key, "codex", {"event": presence_event, "run_id": run_id, "error": terminal_payload.get("error") or ""})
+        threading.Timer(600, PROVIDER_RUN_BRIDGE.clear, args=(run_id,)).start()
+
+    threading.Thread(target=worker, daemon=True, name=f"codex-run-{run_id}").start()
+    return {
+        "ok": True,
+        "runId": run_id,
+        "providerPath": "codex-app-server",
+        "agent": {"id": agent.get("id"), "name": agent.get("name"), "providerKind": "codex", "profile": profile},
+    }
+
+
+def _handle_codex_run_events(handler, run_id):
+    PROVIDER_RUN_BRIDGE.stream_events(handler, run_id, "Codex")
+
+
+def _handle_codex_run_stop(body):
+    run_id = str(body.get("runId") or "").strip()
+    meta = PROVIDER_RUN_BRIDGE.get(run_id)
+    if meta:
+        body = {**body, "agentId": body.get("agentId") or meta.get("agentId") or meta.get("agentKey") or "codex-local", "conversationId": body.get("conversationId") or meta.get("conversationId") or ""}
+    result = _handle_codex_cancel(body)
+    if meta:
+        event_name = "run.cancelled" if result.get("ok") else "run.failed"
+        PROVIDER_RUN_BRIDGE.update(run_id, done=True, result=result)
+        PROVIDER_RUN_BRIDGE.emit(run_id, event_name, {
+            "runId": run_id,
+            "agentId": meta.get("agentId") or "",
+            "profile": meta.get("profile") or "",
+            "conversationId": meta.get("conversationId") or "",
+            "status": result.get("status") or "",
+            "error": result.get("error") or "",
+            "providerPath": "codex-app-server",
+        })
+    return result
 
 
 def _handle_codex_activity(query):
@@ -5170,6 +6133,184 @@ def _handle_codex_interaction(body):
     protocol_action = "accept" if action == "answer" else action
     ok = provider.respond(active.get("threadId", ""), interaction_id, protocol_action, body.get("answers") or {})
     return {"ok": ok, "status": "submitted" if ok else "stale", "_status": 200 if ok else 409}
+
+
+def _handle_codex_approval_pending(query_or_body=None):
+    data = query_or_body if isinstance(query_or_body, dict) else {}
+    def _first(value, fallback=""):
+        if isinstance(value, list):
+            return value[0] if value else fallback
+        return value if value not in (None, "") else fallback
+    agent_key = _first(data.get("agentId") or data.get("key") or data.get("sessionKey"), "codex-local")
+    agent = _get_codex_agent(agent_key)
+    if not agent:
+        return {"ok": False, "error": f"Codex agent '{agent_key}' not found", "_status": 404}
+    profile = agent.get("profile") or agent.get("providerAgentId") or "local"
+    result = _codex_provider_from_config().pending_approval(profile)
+    result.setdefault("ok", True)
+    result.setdefault("profile", profile)
+    result.setdefault("agentId", agent.get("id") or agent_key)
+    return result
+
+
+def _normalize_codex_approval_choice(choice):
+    value = str(choice or "").strip().lower()
+    if value in {"approve", "approved", "accept", "allow", "allow_once", "approve_once", "yes"}:
+        return "approve"
+    return "cancel"
+
+
+def _codex_approval_result_message(approval, choice):
+    approval = approval if isinstance(approval, dict) else {}
+    normalized_choice = _normalize_codex_approval_choice(choice)
+    status = "approved" if normalized_choice == "approve" else "cancelled"
+    approval_id = str(approval.get("approval_id") or approval.get("approvalId") or approval.get("id") or "").strip()
+    resolved = dict(approval)
+    if approval_id:
+        resolved.setdefault("id", approval_id)
+        resolved.setdefault("approval_id", approval_id)
+        resolved.setdefault("approvalId", approval_id)
+    resolved["status"] = status
+    return {
+        "role": "assistant",
+        "text": f"Codex approval {status}.",
+        "approval": resolved,
+        "tools": [],
+        "thinking": "",
+        "reasoningTokens": 0,
+    }
+
+
+def _codex_history_has_approval(conversation_id, agent_id, approval_id):
+    if not conversation_id or not approval_id:
+        return False
+    for event in _load_comm_history(limit=1000, conversation_id=conversation_id, agent_id=agent_id):
+        metadata = event.get("metadata") if isinstance(event, dict) else {}
+        metadata = metadata if isinstance(metadata, dict) else {}
+        codex_meta = metadata.get("codex") if isinstance(metadata.get("codex"), dict) else {}
+        approval = metadata.get("approval") if isinstance(metadata.get("approval"), dict) else {}
+        candidates = {
+            str(metadata.get("approvalId") or ""),
+            str(metadata.get("approval_id") or ""),
+            str(codex_meta.get("approvalId") or ""),
+            str(codex_meta.get("approval_id") or ""),
+            str(approval.get("approvalId") or ""),
+            str(approval.get("approval_id") or ""),
+            str(approval.get("id") or ""),
+        }
+        if str(approval_id) in candidates:
+            return True
+    return False
+
+
+def _codex_approval_conversation_id(body, approval, agent_id, session_id):
+    conversation_id = str(body.get("conversationId") or body.get("conversation_id") or approval.get("conversationId") or approval.get("conversation_id") or "").strip()
+    if conversation_id:
+        return conversation_id
+    active = _get_codex_active(agent_id)
+    active_thread = str((active or {}).get("threadId") or "")
+    if active and (not session_id or session_id == active_thread):
+        return str(active.get("conversationId") or "")
+    return ""
+
+
+def _append_codex_approval_result_comm_event(agent, agent_id, conversation_id, approval, choice):
+    approval = approval if isinstance(approval, dict) else {}
+    approval_id = str(approval.get("approval_id") or approval.get("approvalId") or approval.get("id") or "").strip()
+    if not conversation_id or not approval_id:
+        return None
+    if _codex_history_has_approval(conversation_id, agent_id, approval_id):
+        return None
+    message = _codex_approval_result_message(approval, choice)
+    resolved = message.get("approval") if isinstance(message.get("approval"), dict) else {}
+    normalized_choice = _normalize_codex_approval_choice(choice)
+    return _append_comm_event({
+        "type": "message",
+        "direction": "reply",
+        "conversationId": conversation_id,
+        "from": _office_agent_ref(agent_id),
+        "to": {"id": "user", "providerKind": "human", "name": "User"},
+        "text": message.get("text") or "",
+        "metadata": {
+            "providerKind": "codex",
+            "event": "approval.responded",
+            "approvalId": approval_id,
+            "approvalChoice": normalized_choice,
+            "threadId": resolved.get("threadId") or resolved.get("sessionId") or "",
+            "turnId": resolved.get("turnId") or resolved.get("runId") or "",
+            "approval": resolved,
+            "codex": {
+                "event": "approval.responded",
+                "approvalId": approval_id,
+                "approvalChoice": normalized_choice,
+            },
+        },
+        "visibleInOffice": True,
+        "ok": True,
+    })
+
+
+def _handle_codex_approval_respond(body):
+    body = body if isinstance(body, dict) else {}
+    approval = body.get("approval") if isinstance(body.get("approval"), dict) else {}
+    agent_key = body.get("agentId") or body.get("key") or approval.get("agentId") or "codex-local"
+    agent = _get_codex_agent(agent_key)
+    if not agent:
+        return {"ok": False, "error": f"Codex agent '{agent_key}' not found", "_status": 404}
+    approval_id = str(body.get("approval_id") or body.get("approvalId") or approval.get("approval_id") or approval.get("id") or "").strip()
+    if not approval_id:
+        return {"ok": False, "error": "approvalId is required", "_status": 400}
+    choice = str(body.get("choice") or body.get("action") or "cancel")
+    session_id = str(body.get("sessionId") or body.get("session_id") or body.get("threadId") or approval.get("sessionId") or approval.get("session_id") or approval.get("threadId") or "").strip()
+    profile = agent.get("profile") or agent.get("providerAgentId") or "local"
+    result = _codex_provider_from_config().respond_approval(profile, approval_id, choice, session_id=session_id or None)
+    normalized_choice = _normalize_codex_approval_choice(choice)
+    agent_id = agent.get("id") or agent_key
+    result_approval = result.get("approval") if isinstance(result.get("approval"), dict) else {}
+    merged_approval = {
+        **approval,
+        **result_approval,
+        "id": result_approval.get("id") or approval.get("id") or approval_id,
+        "approval_id": result_approval.get("approval_id") or approval.get("approval_id") or approval_id,
+        "approvalId": result_approval.get("approvalId") or approval.get("approvalId") or approval_id,
+        "threadId": result_approval.get("threadId") or approval.get("threadId") or session_id,
+        "turnId": result_approval.get("turnId") or approval.get("turnId") or result.get("turnId") or "",
+        "status": "approved" if normalized_choice == "approve" else "cancelled",
+    }
+    conversation_id = _codex_approval_conversation_id(body, merged_approval, agent_id, session_id)
+    result_message = _codex_approval_result_message(merged_approval, normalized_choice)
+    history_event = None
+    if result.get("ok"):
+        history_event = _append_codex_approval_result_comm_event(agent, agent_id, conversation_id, merged_approval, normalized_choice)
+        status_key = agent.get("statusKey") or agent_id
+        if hasattr(gateway_presence, "set_provider_event"):
+            gateway_presence.set_provider_event(status_key, "codex", {
+                "event": "approval.responded",
+                "provider": "codex",
+                "approval_id": approval_id,
+                "approvalId": approval_id,
+                "thread_id": merged_approval.get("threadId") or "",
+                "threadId": merged_approval.get("threadId") or "",
+                "turn_id": merged_approval.get("turnId") or "",
+                "turnId": merged_approval.get("turnId") or "",
+                "choice": normalized_choice,
+                "status": merged_approval.get("status") or "",
+                "conversationId": conversation_id,
+            })
+    result.setdefault("profile", profile)
+    result.setdefault("agentId", agent_id)
+    result.setdefault("approvalId", approval_id)
+    result.setdefault("approval_id", approval_id)
+    result.setdefault("choice", normalized_choice)
+    result.setdefault("approvalChoice", normalized_choice)
+    result["approval"] = merged_approval
+    result.setdefault("message", result_message)
+    result.setdefault("historyEventId", (history_event or {}).get("id") or "")
+    result.setdefault("conversationId", conversation_id)
+    result.setdefault("providerPath", "codex-app-server")
+    status = str(result.get("status") or "").lower()
+    result["_status"] = 200 if result.get("ok") else 409 if status in {"stale", "not_found"} else 500
+    return result
 
 
 def _handle_codex_cancel(body):
@@ -5245,6 +6386,711 @@ def _handle_codex_test(body=None):
     """Test the configured Codex harness without requiring OpenClaw/Hermes."""
     return _codex_provider_from_config().test()
 
+
+def _claude_code_provider_from_config():
+    cfg = VO_CONFIG.get("claudeCode", {})
+    return ClaudeCodeProvider(
+        enabled=cfg.get("enabled", False),
+        home_path=cfg.get("homePath"),
+        binary=cfg.get("binary"),
+        workspace=cfg.get("workspace"),
+        workspace_root=cfg.get("workspaceRoot"),
+        main_workspace=cfg.get("mainWorkspace"),
+        name=cfg.get("name"),
+        agent_id=cfg.get("agentId"),
+        model=cfg.get("model"),
+        reply_text=cfg.get("replyText"),
+        timeout_sec=int(cfg.get("timeoutSec") or 900),
+        permission_mode=cfg.get("permissionMode", "acceptEdits"),
+        include_main=cfg.get("includeMain", True),
+        include_native_agents=cfg.get("includeNativeAgents", True),
+        register_native_agents=cfg.get("registerNativeAgents", True),
+    )
+
+
+def _claude_code_history_path(profile="local", conversation_id=None):
+    safe_profile = re.sub(r"[^a-zA-Z0-9_.-]+", "-", str(profile or "local"))[:80] or "local"
+    if conversation_id:
+        raw = str(conversation_id)
+        safe_conversation = re.sub(r"[^a-zA-Z0-9_.-]+", "-", raw)[:80].strip(".-") or "conversation"
+        digest = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:10]
+        return os.path.join(STATUS_DIR, f"claude-code-chat-{safe_profile}-conv-{safe_conversation}-{digest}.json")
+    return os.path.join(STATUS_DIR, f"claude-code-chat-{safe_profile}.json")
+
+
+def _load_claude_code_state(profile="local", conversation_id=None):
+    path = _claude_code_history_path(profile, conversation_id)
+    try:
+        with open(path, "r") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            return data
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        pass
+    return {"profile": profile, "conversationId": conversation_id or "", "messages": []}
+
+
+def _load_claude_code_history(profile="local", conversation_id=None):
+    state = _load_claude_code_state(profile, conversation_id)
+    messages = state.get("messages") if isinstance(state.get("messages"), list) else []
+    return messages
+
+
+def _sanitize_claude_code_history_messages(messages):
+    cleaned = []
+    for msg in messages or []:
+        if not isinstance(msg, dict):
+            continue
+        item = dict(msg)
+        item["thinking"] = _claude_code_visible_thinking(item)
+        cleaned.append(item)
+    return cleaned
+
+
+def _save_claude_code_history(profile, messages, conversation_id=None, session_id=""):
+    path = _claude_code_history_path(profile, conversation_id)
+    state = _load_claude_code_state(profile, conversation_id)
+    state["profile"] = profile
+    state["messages"] = messages[-500:]
+    if conversation_id:
+        state["conversationId"] = conversation_id
+    else:
+        state.pop("conversationId", None)
+    if session_id:
+        state["sessionId"] = session_id
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as f:
+            json.dump(state, f, indent=2)
+        try:
+            os.chmod(path, 0o666)
+        except OSError:
+            pass
+    except OSError as e:
+        print(f"[CLAUDE-CODE] Failed to save history: {e}")
+
+
+def _get_claude_code_session_id(profile="local", conversation_id=None):
+    state = _load_claude_code_state(profile, conversation_id)
+    session_id = state.get("sessionId") or state.get("session_id")
+    return str(session_id).strip() if session_id else ""
+
+
+def _provider_context_used_from_token_usage(token_usage):
+    if not isinstance(token_usage, dict):
+        return 0
+    for key in ("total_tokens", "totalTokens", "tokens", "contextUsed"):
+        value = token_usage.get(key)
+        if isinstance(value, (int, float)):
+            return int(value)
+    total = 0
+    for key in ("input_tokens", "inputTokens", "prompt_tokens", "promptTokens", "output_tokens", "outputTokens", "completion_tokens", "completionTokens"):
+        value = token_usage.get(key)
+        if isinstance(value, (int, float)):
+            total += int(value)
+    return total
+
+
+def _provider_context_window_from_token_usage(token_usage):
+    if not isinstance(token_usage, dict):
+        return 0
+    for key in ("context_window", "contextWindow", "max_context_tokens", "maxContextTokens"):
+        value = token_usage.get(key)
+        if isinstance(value, (int, float)):
+            return int(value)
+    return 0
+
+
+def _provider_visible_thinking(provider_kind, run_state):
+    run_state = run_state if isinstance(run_state, dict) else {}
+    thinking = str(run_state.get("thinking") or "").strip()
+    status = str(run_state.get("status") or "").strip().lower()
+    if not thinking or thinking.lower() == status:
+        return ""
+    terminal_or_status = {"queued", "starting", "running", "completed", "complete", "done", "success", "failed", "error", "execution_failed", "cancelled", "canceled"}
+    if thinking.lower() in terminal_or_status:
+        return ""
+    provider = str(provider_kind or "").lower()
+    if provider == "claude-code" and thinking.lower() in {"claude code completed.", "claude code completed"}:
+        return ""
+    if provider == "codex" and thinking.lower() in {"codex run 已完成", "codex run 未完成", "codex run 正在执行", "codex run 正在取消", "waiting for codex run events."}:
+        return ""
+    return thinking
+
+
+def _provider_progress_message(
+    provider_kind,
+    agent_id,
+    progress_id,
+    run_state,
+    conversation_id=None,
+    default_thinking="",
+):
+    run_state = run_state if isinstance(run_state, dict) else {}
+    token_usage = run_state.get("tokenUsage") if isinstance(run_state.get("tokenUsage"), dict) else {}
+    session_id = run_state.get("sessionId") or run_state.get("threadId") or ""
+    run_id = run_state.get("runId") or run_state.get("turnId") or session_id or progress_id
+    progress_message = {
+        "role": "assistant",
+        "text": run_state.get("reply") or run_state.get("text") or "",
+        "reply": run_state.get("reply") or run_state.get("text") or "",
+        "ts": int(time.time() * 1000),
+        "agentId": agent_id,
+        "ephemeral": f"{provider_kind}-progress",
+        "progressId": progress_id,
+        "sessionId": session_id,
+        "threadId": run_state.get("threadId") or session_id,
+        "turnId": run_state.get("turnId") or run_state.get("runId") or "",
+        "runId": run_id,
+        "status": run_state.get("status") or "",
+        "tools": run_state.get("tools") or [],
+        "thinking": _provider_visible_thinking(provider_kind, {**run_state, "thinking": run_state.get("thinking") or default_thinking}),
+        "reasoningTokens": run_state.get("reasoningTokens") or 0,
+        "error": run_state.get("error") or None,
+        "conversationId": conversation_id or "",
+    }
+    if run_state.get("approval"):
+        progress_message["approval"] = run_state.get("approval")
+    if token_usage:
+        progress_message["tokenUsage"] = token_usage
+        progress_message["contextUsed"] = _provider_context_used_from_token_usage(token_usage)
+        context_window = _provider_context_window_from_token_usage(token_usage)
+        if context_window:
+            progress_message["contextWindow"] = context_window
+    return progress_message
+
+
+def _upsert_ephemeral_message(messages, ephemeral, progress_id, progress_message):
+    cleaned = [
+        msg for msg in (messages or [])
+        if not (
+            isinstance(msg, dict)
+            and msg.get("ephemeral") == ephemeral
+            and (not progress_id or msg.get("progressId") == progress_id)
+        )
+    ]
+    cleaned.append(progress_message)
+    return cleaned
+
+
+def _remove_provider_progress_messages(messages, provider_kind=None, progress_id=None):
+    markers = {f"{provider_kind}-progress"} if provider_kind else {"codex-progress", "claude-code-progress", "hermes-progress"}
+    result = []
+    for msg in messages or []:
+        if not isinstance(msg, dict) or msg.get("ephemeral") not in markers:
+            result.append(msg)
+            continue
+        if progress_id and msg.get("progressId") != progress_id:
+            result.append(msg)
+    return result
+
+
+def _set_claude_code_session_id(profile="local", session_id="", conversation_id=None):
+    path = _claude_code_history_path(profile, conversation_id)
+    state = _load_claude_code_state(profile, conversation_id)
+    state["sessionId"] = session_id or ""
+    state.setdefault("messages", [])
+    state["updatedAt"] = int(time.time() * 1000)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        json.dump(state, f, indent=2)
+    try:
+        os.chmod(path, 0o666)
+    except OSError:
+        pass
+
+
+def _set_claude_code_active_run(profile="local", session_id="", run_id="", conversation_id=None):
+    path = _claude_code_history_path(profile, conversation_id)
+    state = _load_claude_code_state(profile, conversation_id)
+    state["sessionId"] = session_id or state.get("sessionId") or ""
+    state["runId"] = run_id or ""
+    state.setdefault("messages", [])
+    state["updatedAt"] = int(time.time() * 1000)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        json.dump(state, f, indent=2)
+    try:
+        os.chmod(path, 0o666)
+    except OSError:
+        pass
+
+
+def _publish_claude_code_progress(profile, agent_id, progress_id, run_state, conversation_id=None):
+    if not progress_id:
+        return
+    run_state = run_state if isinstance(run_state, dict) else {}
+    history = _load_claude_code_history(profile, conversation_id)
+    session_id = run_state.get("sessionId") or run_state.get("threadId") or _get_claude_code_session_id(profile, conversation_id) or ""
+    run_state = {**run_state, "sessionId": session_id, "runId": run_state.get("runId") or session_id}
+    progress_message = _provider_progress_message("claude-code", agent_id, progress_id, run_state, conversation_id, "Waiting for Claude Code stream events.")
+    history = _upsert_ephemeral_message(history, "claude-code-progress", progress_id, progress_message)
+    _save_claude_code_history(profile, history, conversation_id, session_id)
+    if session_id or progress_message.get("runId"):
+        _set_claude_code_active_run(profile, session_id, progress_message.get("runId") or "", conversation_id)
+
+
+def _remove_claude_code_progress_messages(messages):
+    return _remove_provider_progress_messages(messages, "claude-code")
+
+
+class ProviderRunBridge:
+    """Provider-neutral run registry and SSE event distributor."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._runs = {}
+
+    def remember(self, meta):
+        if not isinstance(meta, dict) or not meta.get("runId"):
+            return
+        with self._lock:
+            self._runs[str(meta["runId"])] = meta
+
+    def get(self, run_id):
+        with self._lock:
+            meta = self._runs.get(str(run_id or ""))
+            return meta if isinstance(meta, dict) else None
+
+    def clear(self, run_id):
+        with self._lock:
+            self._runs.pop(str(run_id or ""), None)
+
+    def update(self, run_id, **updates):
+        with self._lock:
+            meta = self._runs.get(str(run_id or ""))
+            if isinstance(meta, dict):
+                meta.update({k: v for k, v in updates.items() if v is not None})
+            return meta if isinstance(meta, dict) else None
+
+    def emit(self, run_id, event_name, payload=None):
+        meta = self.get(run_id)
+        if not meta:
+            return False
+        events = meta.get("events")
+        if not isinstance(events, queue.Queue):
+            return False
+        payload = payload if isinstance(payload, dict) else {}
+        payload.setdefault("runId", run_id)
+        payload.setdefault("agentId", meta.get("agentId") or "")
+        payload.setdefault("profile", meta.get("profile") or "")
+        try:
+            events.put_nowait({"event": event_name, "data": payload, "ts": int(time.time() * 1000)})
+            return True
+        except Exception:
+            return False
+
+    def stream_events(self, handler, run_id, missing_provider_label="Provider"):
+        meta = self.get(run_id)
+        if not meta:
+            handler.send_response(404)
+            handler.send_header("Content-Type", "text/event-stream")
+            handler.send_header("Cache-Control", "no-cache")
+            handler.send_header("Access-Control-Allow-Origin", "*")
+            handler.end_headers()
+            payload = json.dumps({"error": f"{missing_provider_label} run not found"}, ensure_ascii=False)
+            handler.wfile.write(f"event: run.failed\ndata: {payload}\n\n".encode("utf-8"))
+            return
+
+        handler.send_response(200)
+        handler.send_header("Content-Type", "text/event-stream")
+        handler.send_header("Cache-Control", "no-cache")
+        handler.send_header("Connection", "keep-alive")
+        handler.send_header("Access-Control-Allow-Origin", "*")
+        handler.end_headers()
+
+        events = meta.get("events")
+        if not isinstance(events, queue.Queue):
+            return
+
+        last_keepalive = time.time()
+        try:
+            while True:
+                try:
+                    item = events.get(timeout=0.5)
+                except queue.Empty:
+                    if time.time() - last_keepalive >= 10:
+                        handler.wfile.write(b": keepalive\n\n")
+                        handler.wfile.flush()
+                        last_keepalive = time.time()
+                    if meta.get("done") and events.empty():
+                        break
+                    continue
+
+                event_name = str(item.get("event") or "message")
+                payload = item.get("data") if isinstance(item.get("data"), dict) else {}
+                encoded = json.dumps(payload, ensure_ascii=False, default=str)
+                handler.wfile.write(f"event: {event_name}\ndata: {encoded}\n\n".encode("utf-8"))
+                handler.wfile.flush()
+                if event_name in {"run.completed", "run.failed", "run.cancelled", "run.canceled"}:
+                    break
+        except (BrokenPipeError, ConnectionError, OSError):
+            pass
+        finally:
+            if meta.get("done"):
+                self.clear(run_id)
+
+
+PROVIDER_RUN_BRIDGE = ProviderRunBridge()
+CLAUDE_CODE_STREAM_RUNS_LOCK = PROVIDER_RUN_BRIDGE._lock
+CLAUDE_CODE_STREAM_RUNS = PROVIDER_RUN_BRIDGE._runs
+
+
+def _remember_claude_code_stream_run(meta):
+    PROVIDER_RUN_BRIDGE.remember(meta)
+
+
+def _get_claude_code_stream_run(run_id):
+    return PROVIDER_RUN_BRIDGE.get(run_id)
+
+
+def _clear_claude_code_stream_run(run_id):
+    PROVIDER_RUN_BRIDGE.clear(run_id)
+
+
+def _claude_code_visible_thinking(run_state):
+    return _provider_visible_thinking("claude-code", run_state)
+
+
+def _claude_code_stream_event_payload(run_id, agent, profile, run_state=None, **extra):
+    run_state = run_state if isinstance(run_state, dict) else {}
+    token_usage = run_state.get("tokenUsage") if isinstance(run_state.get("tokenUsage"), dict) else {}
+    payload = {
+        "runId": run_id,
+        "agentId": (agent or {}).get("id") or "",
+        "profile": profile or "",
+        "sessionId": run_state.get("sessionId") or run_state.get("threadId") or _get_claude_code_session_id(profile) or "",
+        "turnId": run_state.get("runId") or run_state.get("sessionId") or "",
+        "reply": run_state.get("reply") or "",
+        "tools": run_state.get("tools") or [],
+        "thinking": _claude_code_visible_thinking(run_state),
+        "error": run_state.get("error") or "",
+        "status": run_state.get("status") or "",
+        "providerPath": "claude-code-cli",
+    }
+    if token_usage:
+        payload["tokenUsage"] = token_usage
+        payload["contextUsed"] = _provider_context_used_from_token_usage(token_usage)
+        context_window = _provider_context_window_from_token_usage(token_usage)
+        if context_window:
+            payload["contextWindow"] = context_window
+    payload.update({k: v for k, v in extra.items() if v is not None})
+    return payload
+
+
+def _claude_code_tool_stream_key(tool, idx=0):
+    if not isinstance(tool, dict):
+        return f"claude-code-tool-{idx}"
+    return str(tool.get("id") or f"{idx}:{tool.get('name') or 'tool'}:{json.dumps(tool.get('arguments') or {}, sort_keys=True, default=str)[:120]}")
+
+
+def _handle_claude_code_run_start(body):
+    """Start a Claude Code message in the background and expose progress over SSE."""
+    message = (body.get("message") or "").strip()
+    agent_key = body.get("agentId") or body.get("key") or body.get("sessionKey") or "claude-code-local"
+    if not message:
+        return {"ok": False, "error": "message is required", "_status": 400}
+
+    agent = _get_claude_code_agent(agent_key)
+    if not agent:
+        return {"ok": False, "error": f"Claude Code agent '{agent_key}' not found", "_status": 404}
+
+    profile = agent.get("profile") or agent.get("providerAgentId") or "local"
+    run_id = f"claude-code-{int(time.time() * 1000)}-{str(uuid.uuid4())[:8]}"
+    progress_id = f"claude-code-progress-{run_id}"
+    events = queue.Queue()
+    status_key = agent.get("statusKey") or agent.get("id")
+    conversation_id = str(body.get("conversationId") or body.get("threadId") or "").strip()
+    meta = {
+        "runId": run_id,
+        "agentId": agent.get("id"),
+        "agentKey": agent_key,
+        "profile": profile,
+        "statusKey": status_key,
+        "conversationId": conversation_id,
+        "events": events,
+        "startedAt": int(time.time() * 1000),
+        "done": False,
+        "result": None,
+    }
+    _remember_claude_code_stream_run(meta)
+
+    def enqueue(event_name, payload=None):
+        PROVIDER_RUN_BRIDGE.emit(run_id, event_name, payload)
+
+    def worker():
+        last_reply = ""
+        last_thinking = ""
+        last_token_usage_signature = ""
+        seen_tools = {}
+        enqueue("run.started", {"providerPath": "claude-code-cli"})
+        _publish_claude_code_progress(profile, agent.get("id") or agent_key, progress_id, {
+            "runId": run_id,
+            "status": "running",
+            "thinking": "Waiting for Claude Code stream events.",
+        }, conversation_id)
+        if hasattr(gateway_presence, "set_provider_event"):
+            gateway_presence.set_provider_event(status_key, "claude-code", {"event": "run.started", "run_id": run_id})
+
+        def on_progress(run_state):
+            nonlocal last_reply, last_thinking, last_token_usage_signature
+            run_state = run_state if isinstance(run_state, dict) else {}
+            PROVIDER_RUN_BRIDGE.update(
+                run_id,
+                sessionId=run_state.get("sessionId") or run_state.get("threadId") or meta.get("sessionId") or "",
+                turnId=run_state.get("runId") or meta.get("turnId") or "",
+            )
+            _publish_claude_code_progress(profile, agent.get("id") or agent_key, progress_id, {
+                **run_state,
+                "runId": run_id,
+                "turnId": run_state.get("runId") or meta.get("turnId") or "",
+            }, conversation_id)
+            if hasattr(gateway_presence, "set_provider_event"):
+                gateway_presence.set_provider_event(status_key, "claude-code", {
+                    "event": "turn.stream",
+                    "session_id": run_state.get("sessionId") or run_state.get("threadId") or "",
+                    "run_id": run_state.get("runId") or run_id,
+                    "status": run_state.get("status") or "",
+                })
+
+            token_usage = run_state.get("tokenUsage") if isinstance(run_state.get("tokenUsage"), dict) else {}
+            if token_usage:
+                token_usage_signature = json.dumps(token_usage, sort_keys=True, default=str)
+                if token_usage_signature != last_token_usage_signature:
+                    last_token_usage_signature = token_usage_signature
+                    enqueue("session.metrics", _claude_code_stream_event_payload(run_id, agent, profile, run_state))
+
+            reply = str(run_state.get("reply") or "")
+            if reply and reply != last_reply:
+                delta = reply[len(last_reply):] if reply.startswith(last_reply) else ""
+                last_reply = reply
+                enqueue("message.delta", _claude_code_stream_event_payload(run_id, agent, profile, run_state, delta=delta))
+
+            thinking = _claude_code_visible_thinking(run_state)
+            if thinking and thinking != last_thinking:
+                last_thinking = thinking
+                enqueue("reasoning.available", _claude_code_stream_event_payload(run_id, agent, profile, run_state))
+
+            for idx, tool in enumerate(run_state.get("tools") or []):
+                if not isinstance(tool, dict):
+                    continue
+                key = _claude_code_tool_stream_key(tool, idx)
+                status = str(tool.get("status") or "").lower()
+                is_terminal = status in {"done", "error", "failed"}
+                prior = seen_tools.get(key)
+                if not prior:
+                    enqueue("tool.started", _claude_code_stream_event_payload(run_id, agent, profile, run_state, toolCard=tool, toolCallId=key))
+                    if hasattr(gateway_presence, "set_provider_event"):
+                        gateway_presence.set_provider_event(status_key, "claude-code", {"event": "tool.started", "run_id": run_id, "toolCallId": key, "name": tool.get("name") or "Claude tool"})
+                if is_terminal and (not prior or prior.get("status") != status or prior.get("result") != tool.get("result") or prior.get("error") != tool.get("error")):
+                    event_name = "tool.failed" if status in {"error", "failed"} or tool.get("error") else "tool.completed"
+                    enqueue(event_name, _claude_code_stream_event_payload(run_id, agent, profile, run_state, toolCard=tool, toolCallId=key))
+                    if hasattr(gateway_presence, "set_provider_event"):
+                        gateway_presence.set_provider_event(status_key, "claude-code", {"event": event_name, "run_id": run_id, "toolCallId": key, "name": tool.get("name") or "Claude tool"})
+                seen_tools[key] = dict(tool)
+
+        run_body = dict(body)
+        run_body["_streamRunId"] = run_id
+        run_body["_streamProgressId"] = progress_id
+        run_body["_onProgress"] = on_progress
+        try:
+            result = _handle_claude_code_chat(run_body)
+        except Exception as exc:
+            result = {"ok": False, "error": str(exc), "_status": 500}
+        history = _remove_claude_code_progress_messages(_load_claude_code_history(profile, conversation_id))
+        _save_claude_code_history(profile, history, conversation_id, result.get("sessionId") or _get_claude_code_session_id(profile, conversation_id) or "")
+        PROVIDER_RUN_BRIDGE.update(run_id, done=True, result=result)
+        token_usage = result.get("tokenUsage") if isinstance(result.get("tokenUsage"), dict) else {}
+        payload = {
+            "runId": run_id,
+            "agentId": agent.get("id") or "",
+            "profile": profile,
+            "sessionId": result.get("sessionId") or _get_claude_code_session_id(profile, conversation_id) or "",
+            "turnId": result.get("runId") or result.get("sessionId") or meta.get("turnId") or "",
+            "reply": result.get("reply") or "",
+            "tools": result.get("tools") or [],
+            "thinking": result.get("thinking") or "",
+            "tokenUsage": token_usage,
+            "contextUsed": _provider_context_used_from_token_usage(token_usage),
+            "contextWindow": _provider_context_window_from_token_usage(token_usage),
+            "providerPath": result.get("providerPath") or "claude-code-cli",
+        }
+        if result.get("ok"):
+            enqueue("run.completed", payload)
+            if hasattr(gateway_presence, "set_provider_event"):
+                gateway_presence.set_provider_event(status_key, "claude-code", {"event": "run.completed", "run_id": run_id})
+        else:
+            payload["error"] = result.get("error") or result.get("reply") or "Claude Code run failed"
+            enqueue("run.failed", payload)
+            if hasattr(gateway_presence, "set_provider_event"):
+                gateway_presence.set_provider_event(status_key, "claude-code", {"event": "run.failed", "run_id": run_id, "error": payload["error"]})
+        threading.Timer(600, _clear_claude_code_stream_run, args=(run_id,)).start()
+
+    threading.Thread(target=worker, daemon=True, name=f"claude-code-run-{run_id}").start()
+    return {
+        "ok": True,
+        "runId": run_id,
+        "providerPath": "claude-code-cli",
+        "agent": {"id": agent.get("id"), "name": agent.get("name"), "providerKind": "claude-code", "profile": profile},
+    }
+
+
+def _handle_claude_code_run_events(handler, run_id):
+    PROVIDER_RUN_BRIDGE.stream_events(handler, run_id, "Claude Code")
+
+
+def _handle_claude_code_interrupt(body):
+    agent_key = body.get("agentId") or body.get("key") or body.get("sessionKey") or "claude-code-local"
+    agent = _get_claude_code_agent(agent_key)
+    if not agent:
+        return {"ok": False, "error": f"Claude Code agent '{agent_key}' not found", "_status": 404}
+    result = _handle_claude_code_cancel(body)
+    profile = agent.get("profile") or agent.get("providerAgentId") or "local"
+    history = _load_claude_code_history(profile, body.get("conversationId") or "")
+    history.append({
+        "role": "assistant",
+        "text": "Claude Code run interrupted.",
+        "ts": int(time.time() * 1000),
+        "agentId": agent.get("id"),
+        "ephemeral": "claude-code-progress",
+        "progressId": f"claude-code-interrupt-{int(time.time() * 1000)}",
+        "error": result.get("error") or "",
+    })
+    _save_claude_code_history(profile, history, body.get("conversationId") or "", _get_claude_code_session_id(profile, body.get("conversationId") or ""))
+    return result
+
+
+def _handle_claude_code_chat(body):
+    message = (body.get("message") or "").strip()
+    agent_key = body.get("agentId") or body.get("key") or body.get("sessionKey") or "claude-code-local"
+    conversation_id = str(body.get("conversationId") or body.get("threadId") or "").strip()
+    stream_progress_id = body.get("_streamProgressId") or ""
+    on_progress = body.get("_onProgress") if callable(body.get("_onProgress")) else None
+    if not message:
+        return {"ok": False, "error": "message is required", "_status": 400}
+    agent = _get_claude_code_agent(agent_key)
+    if not agent:
+        return {"ok": False, "error": f"Claude Code agent '{agent_key}' not found", "_status": 404}
+    archive_guard = _archive_manager_chat_guard(agent.get("id") or agent_key, message)
+    if archive_guard:
+        return archive_guard
+    cfg = VO_CONFIG.get("claudeCode", {})
+    provider = ClaudeCodeProvider(
+        enabled=cfg.get("enabled", False),
+        home_path=cfg.get("homePath"),
+        binary=agent.get("binary") or cfg.get("binary"),
+        workspace=body.get("workspace") or agent.get("workspace") or cfg.get("workspace"),
+        name=agent.get("name") or cfg.get("name"),
+        agent_id=agent.get("providerAgentId") or agent.get("profile") or cfg.get("agentId"),
+        model=agent.get("model") or cfg.get("model"),
+        reply_text=cfg.get("replyText"),
+        timeout_sec=int(body.get("timeoutSec") or cfg.get("timeoutSec") or 900),
+    )
+    profile = agent.get("profile") or agent.get("providerAgentId") or "local"
+    history = _load_claude_code_history(profile, conversation_id)
+    now_ms = int(time.time() * 1000)
+    history.append({
+        "role": "user",
+        "text": message,
+        "ts": now_ms,
+        "agentId": agent.get("id"),
+        "from": body.get("fromDisplayName") or "User",
+        "fromType": body.get("fromType") or "",
+        "conversationId": conversation_id,
+    })
+    _save_claude_code_history(profile, history, conversation_id, _get_claude_code_session_id(profile, conversation_id))
+    gateway_presence.set_manual_override(agent.get("statusKey") or agent.get("id"), "working", "Claude Code task")
+    session_id = _get_claude_code_session_id(profile, conversation_id)
+    result = provider.send_chat_message(
+        message,
+        conversation_id=conversation_id,
+        timeout_sec=int(body.get("timeoutSec") or cfg.get("timeoutSec") or 900),
+        session_id=session_id,
+    )
+    active_session_id = result.get("sessionId") or session_id
+    progress_state = {
+        "reply": result.get("reply") or "",
+        "sessionId": active_session_id,
+        "runId": result.get("runId") or active_session_id,
+        "tools": result.get("tools") or [],
+        "thinking": result.get("thinking") or "",
+        "tokenUsage": result.get("tokenUsage") or {},
+        "status": result.get("status", "completed" if result.get("ok") else "execution_failed"),
+        "error": result.get("error") or "",
+    }
+    if on_progress:
+        try:
+            on_progress(progress_state)
+        except Exception as e:
+            print(f"[CLAUDE-CODE] Progress callback failed: {e}")
+    if stream_progress_id:
+        _publish_claude_code_progress(profile, agent.get("id"), stream_progress_id, progress_state, conversation_id)
+    history = _load_claude_code_history(profile, conversation_id)
+    history = _remove_claude_code_progress_messages(history)
+    history.append({
+        "role": "assistant",
+        "text": result.get("reply") or "",
+        "ts": int(time.time() * 1000),
+        "agentId": agent.get("id"),
+        "sessionId": active_session_id,
+        "tools": result.get("tools") or [],
+        "thinking": result.get("thinking") or "",
+        "tokenUsage": result.get("tokenUsage") or {},
+        "error": result.get("error") or "",
+        "conversationId": conversation_id,
+    })
+    _save_claude_code_history(profile, history, conversation_id, active_session_id)
+    gateway_presence.set_manual_override(agent.get("statusKey") or agent.get("id"), "idle" if result.get("ok") else "offline", "")
+    normalized = normalize_provider_result(
+        "claude-code",
+        agent,
+        result,
+        conversation_id=conversation_id,
+        session_id=active_session_id,
+        run_id=result.get("runId") or active_session_id,
+        modified_files=result.get("modifiedFiles") or [],
+    )
+    normalized["_status"] = provider_http_status(normalized)
+    return normalized
+
+
+def _handle_claude_code_test(body=None):
+    body = body or {}
+    cfg = VO_CONFIG.get("claudeCode", {})
+    provider = ClaudeCodeProvider(
+        enabled=bool(body.get("enabled", cfg.get("enabled", False))),
+        home_path=body.get("homePath") or cfg.get("homePath"),
+        binary=body.get("binary") or cfg.get("binary"),
+        workspace=body.get("workspace") or cfg.get("workspace"),
+        name=body.get("name") or cfg.get("name"),
+        agent_id=body.get("agentId") or cfg.get("agentId"),
+        model=body.get("model") or cfg.get("model"),
+        reply_text=body.get("replyText") if "replyText" in body else cfg.get("replyText"),
+        timeout_sec=int(body.get("timeoutSec") or cfg.get("timeoutSec") or 900),
+    )
+    return provider.test()
+
+
+def _handle_claude_code_cancel(body):
+    agent_key = body.get("agentId") or body.get("key") or "claude-code-local"
+    agent = _get_claude_code_agent(agent_key) or {}
+    cfg = VO_CONFIG.get("claudeCode", {})
+    provider = ClaudeCodeProvider(
+        enabled=cfg.get("enabled", False),
+        home_path=cfg.get("homePath"),
+        binary=agent.get("binary") or cfg.get("binary"),
+        workspace=agent.get("workspace") or cfg.get("workspace"),
+        name=agent.get("name") or cfg.get("name"),
+        agent_id=agent.get("providerAgentId") or agent.get("profile") or cfg.get("agentId"),
+        model=agent.get("model") or cfg.get("model"),
+        reply_text=cfg.get("replyText"),
+        timeout_sec=int(cfg.get("timeoutSec") or 900),
+    )
+    result = provider.interrupt(agent.get("providerAgentId") or agent.get("profile") or cfg.get("agentId") or "local")
+    result["_status"] = 200 if result.get("ok") else 404
+    return result
+
+
 def _handle_agent_platforms():
     """Return agent platforms available to the New Agent workflow."""
     hermes_cfg = VO_CONFIG.get("hermes", {})
@@ -5254,6 +7100,7 @@ def _handle_agent_platforms():
         enabled=hermes_cfg.get("enabled", True),
     ).test()
     codex_status = _handle_codex_test()
+    claude_code_status = _handle_claude_code_test()
     return {
         "ok": True,
         "platforms": [
@@ -5279,11 +7126,20 @@ def _handle_agent_platforms():
             {
                 "id": "codex",
                 "label": "Codex",
-                "description": "Local Codex collaborator harness",
+                "description": "Codex app-server bridge and native agent workspaces",
                 "available": bool(codex_status.get("ok")),
-                "create": False,
-                "delete": False,
+                "create": bool(codex_status.get("ok")),
+                "delete": bool(codex_status.get("ok")),
                 "error": "" if codex_status.get("ok") else codex_status.get("error", "Codex harness is disabled"),
+            },
+            {
+                "id": "claude-code",
+                "label": "Claude Code",
+                "description": "Claude Code CLI and native subagent workspaces",
+                "available": bool(claude_code_status.get("ok")),
+                "create": bool(claude_code_status.get("ok")),
+                "delete": bool(claude_code_status.get("ok")),
+                "error": "" if claude_code_status.get("ok") else claude_code_status.get("error", "Claude Code provider is disabled"),
             },
         ],
     }
@@ -5348,6 +7204,103 @@ def _append_comm_event(event):
     return event
 
 
+def _rewrite_comm_events(events):
+    path = _comm_log_path()
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp_path = f"{path}.tmp"
+        with open(tmp_path, "w") as f:
+            for event in events or []:
+                if isinstance(event, dict):
+                    f.write(json.dumps(event, ensure_ascii=False) + "\n")
+        os.replace(tmp_path, path)
+        try:
+            os.chmod(path, 0o666)
+        except OSError:
+            pass
+    except OSError as e:
+        print(f"[COMM] Failed to rewrite communication history: {e}")
+
+
+def _comm_event_progress_marker(event):
+    metadata = event.get("metadata") if isinstance(event, dict) else {}
+    metadata = metadata if isinstance(metadata, dict) else {}
+    return metadata.get("ephemeral") or event.get("ephemeral"), metadata.get("progressId") or event.get("progressId")
+
+
+def _upsert_comm_progress_event(event, ephemeral, progress_id):
+    event = dict(event)
+    if "text" in event:
+        event["text"] = _extract_openclaw_text(event.get("text"))
+    event.setdefault("ts", int(time.time() * 1000))
+    event.setdefault("id", str(uuid.uuid4()))
+    event.setdefault("schema", "vo.agent-platform-communication.v1")
+    conversation_id = event.get("conversationId") or ""
+    events = _load_comm_history(limit=1000)
+    kept = []
+    for item in events:
+        item_ephemeral, item_progress_id = _comm_event_progress_marker(item)
+        if (
+            item.get("conversationId") == conversation_id
+            and item_ephemeral == ephemeral
+            and item_progress_id == progress_id
+        ):
+            continue
+        kept.append(item)
+    kept.append(event)
+    _rewrite_comm_events(kept)
+    return event
+
+
+def _remove_comm_progress_events(ephemeral, progress_id=None, conversation_id=None):
+    events = _load_comm_history(limit=1000)
+    kept = []
+    for item in events:
+        item_ephemeral, item_progress_id = _comm_event_progress_marker(item)
+        if item_ephemeral != ephemeral:
+            kept.append(item)
+            continue
+        if progress_id and item_progress_id != progress_id:
+            kept.append(item)
+            continue
+        if conversation_id and item.get("conversationId") != conversation_id:
+            kept.append(item)
+            continue
+    _rewrite_comm_events(kept)
+
+
+def _append_codex_progress_comm_event(agent, agent_id, conversation_id, progress_id, run_state):
+    if not conversation_id or not progress_id:
+        return None
+    run_state = run_state if isinstance(run_state, dict) else {}
+    progress_message = _provider_progress_message(
+        "codex",
+        agent_id,
+        progress_id,
+        run_state,
+        conversation_id,
+        "Waiting for Codex run events.",
+    )
+    status = progress_message.get("status") or run_state.get("status") or "running"
+    event_text = f"Codex progress: {status}"
+    return _upsert_comm_progress_event({
+        "type": "operation",
+        "operation": "provider_progress",
+        "direction": "progress",
+        "conversationId": conversation_id,
+        "from": _office_agent_ref(agent_id),
+        "to": {"id": "user", "providerKind": "human", "name": "User"},
+        "text": event_text,
+        "metadata": {
+            "providerKind": "codex",
+            "ephemeral": "codex-progress",
+            "progressId": progress_id,
+            "progress": progress_message,
+        },
+        "visibleInOffice": False,
+    }, "codex-progress", progress_id)
+
+
 def _load_comm_history(limit=200, conversation_id=None, agent_id=None):
     path = _comm_log_path()
     events = []
@@ -5371,6 +7324,33 @@ def _load_comm_history(limit=200, conversation_id=None, agent_id=None):
     except OSError as e:
         print(f"[COMM] Failed to load communication history: {e}")
     return events[-max(1, min(int(limit or 200), 1000)):]
+
+
+def _is_a2a_envelope_text(text):
+    value = str(text or "")
+    return value.startswith("[A2A ") and "Message from " in value and "Reply directly to the sender" in value
+
+
+def _dedupe_visible_comm_history(events):
+    deduped = []
+    seen = set()
+    for event in events or []:
+        if _is_a2a_envelope_text(event.get("text") if isinstance(event, dict) else ""):
+            continue
+        direction = event.get("direction") or ""
+        key = (
+            event.get("conversationId") or "",
+            direction,
+            (event.get("from") or {}).get("id") or "",
+            (event.get("to") or {}).get("id") or "",
+            event.get("text") or "",
+            "" if direction == "reply" else event.get("inReplyTo") or "",
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(event)
+    return deduped
 
 
 def _comm_event_to_chat_message(event, agent_key):
@@ -5576,6 +7556,7 @@ def _handle_agent_platform_comm_send(body):
         "openclaw": "OpenClaw",
         "hermes": "Hermes",
         "codex": "Codex",
+        "claude-code": "Claude Code",
     }
     if is_human_source:
         sender_label = from_ref.get("name") or "User"
@@ -5598,6 +7579,16 @@ def _handle_agent_platform_comm_send(body):
     try:
         if str(to_ref.get("providerKind") or "").lower() == "codex":
             provider_result = _handle_codex_chat({
+                "agentId": to_ref["id"],
+                "message": target_prompt,
+                "timeoutSec": timeout,
+                "conversationId": conversation_id,
+                "fromType": "human" if is_human_source else "agent",
+            })
+            reply = provider_result.get("reply") or provider_result.get("error") or ""
+            ok = bool(provider_result.get("ok"))
+        elif str(to_ref.get("providerKind") or "").lower() == "claude-code":
+            provider_result = _handle_claude_code_chat({
                 "agentId": to_ref["id"],
                 "message": target_prompt,
                 "timeoutSec": timeout,
@@ -5871,9 +7862,9 @@ def _handle_agent_create(body):
     platform = (body.get("agentPlatform") or body.get("platform") or body.get("providerKind") or "openclaw").strip().lower()
     if platform in {"hermes", "hermes-agent"}:
         return _handle_hermes_agent_create(body, name)
-    if platform in {"codex", "codex-cli", "codex-agent"}:
+    if platform in {"codex", "codex-agent"}:
         return _handle_codex_agent_create(body, name)
-    if platform in {"claude-code", "claude", "claude-cli", "claude-code-agent"}:
+    if platform in {"claude-code", "claude_code", "claude-code-agent"}:
         return _handle_claude_code_agent_create(body, name)
     if platform not in {"openclaw", "openclaw-agent"}:
         return {"error": f"Unsupported agent platform '{platform}'", "_status": 400}
@@ -5954,8 +7945,7 @@ def _handle_codex_agent_create(body, name):
     profile = body.get("id") or body.get("profile") or _sanitize_agent_id(name)
     creation_mode = body.get("codexCreationMode") or body.get("creationMode") or body.get("agentDirectoryMode") or "standard"
     custom_directory = body.get("codexCustomDirectory") or body.get("customDirectory") or body.get("agentDirectory") or ""
-    provider = _codex_provider()
-    result = provider.create_agent(
+    result = _codex_provider_from_config().create_agent(
         name=name,
         role=role,
         model=model,
@@ -5974,7 +7964,7 @@ def _handle_codex_agent_create(body, name):
         "ok": True,
         "agentId": result.get("agentId"),
         "providerKind": "codex",
-        "providerType": "harness",
+        "providerType": "app-server-bridge",
         "providerAgentId": result.get("profile"),
         "profile": result.get("profile"),
         "name": name,
@@ -5993,8 +7983,7 @@ def _handle_claude_code_agent_create(body, name):
     profile = body.get("id") or body.get("profile") or _sanitize_agent_id(name)
     creation_mode = body.get("claudeCodeCreationMode") or body.get("creationMode") or body.get("agentDirectoryMode") or "standard"
     custom_directory = body.get("claudeCodeCustomDirectory") or body.get("customDirectory") or body.get("agentDirectory") or ""
-    provider = _claude_code_provider()
-    result = provider.create_agent(
+    result = _claude_code_provider_from_config().create_agent(
         name=name,
         role=role,
         model=model,
@@ -6852,6 +8841,44 @@ def _meeting_request_urgency(raw):
     return max(1, min(5, value))
 
 
+def _project_high_priority_ai_meeting_requires_confirmation(project):
+    return bool((project or {}).get("highPriorityAiMeetingAutoApprove"))
+
+
+def _meeting_request_auto_confirm_reason(project, urgency):
+    if _project_high_priority_ai_meeting_requires_confirmation(project):
+        return ""
+    return "standard_project_ai_meeting_auto_approve"
+
+
+def _meeting_request_auto_confirm_label(reason):
+    labels = {
+        "high_priority_project_ai_meeting_auto_approve": "已因高优先级项目自动批准",
+        "standard_project_ai_meeting_auto_approve": "已按普通项目自动批准",
+        "urgency": "已因高紧急度自动批准",
+    }
+    return labels.get(str(reason or ""), str(reason or ""))
+
+
+def _meeting_request_log_auto_confirm_activity(req, meeting, reason):
+    source = (req or {}).get("source") if isinstance((req or {}).get("source"), dict) else {}
+    project_id = source.get("projectId")
+    if not project_id:
+        return
+    data = _load_projects()
+    project = next((p for p in data.get("projects", []) if p.get("id") == project_id), None)
+    if not project:
+        return
+    label = _meeting_request_auto_confirm_label(reason)
+    meeting_id = (meeting or {}).get("id") or ((req or {}).get("conversion") or {}).get("meetingId") or ""
+    detail = label or "AI meeting request auto-approved"
+    if meeting_id:
+        detail = f"{detail}: {meeting_id}"
+    _log_activity(project, "meeting_request_auto_confirmed", req.get("requestingAgentId") or "ai", detail, source.get("taskId"))
+    project["updatedAt"] = _proj_now()
+    _save_projects(data)
+
+
 def _handle_meeting_request_create(project_id, task_id, body):
     project, task = _meeting_request_find_project_task(project_id, task_id)
     if not project:
@@ -6886,6 +8913,8 @@ def _handle_meeting_request_create(project_id, task_id, body):
     now = _exec_meeting_now()
     request_id = str(body.get("id") or uuid.uuid4())
     idempotency_key = str(body.get("idempotencyKey") or "").strip()
+    requested_context_ids = body.get("selectedContextIds") or body.get("contextIds") or []
+    requested_supplemental_context = str(body.get("supplementalContext") or "").strip()
     with _MEETING_REQUEST_LOCK:
         store = _load_meeting_request_store()
         existing_unresolved = next((r for r in store.get("requests", {}).values() if _meeting_request_unresolved_for_task(r, project_id, task_id)), None)
@@ -6917,6 +8946,10 @@ def _handle_meeting_request_create(project_id, task_id, body):
             "blockingTask": True,
             "taskBlocker": {"status": "pending", "createdAt": now, "updatedAt": now, "resolvedAt": ""},
             "contextCandidates": _meeting_request_context_candidates(project, task),
+            "requestedContext": {
+                "selectedContextIds": list(requested_context_ids),
+                "supplementalContext": requested_supplemental_context,
+            },
             "review": {},
             "conversion": {},
             "idempotencyKey": idempotency_key,
@@ -6930,11 +8963,14 @@ def _handle_meeting_request_create(project_id, task_id, body):
     blocked = _project_execution_block_for_meeting_request(project_id, task_id, request, "AI meeting requested; waiting for meeting resolution.")
     if not blocked.get("ok"):
         return blocked
-    if urgency >= 4:
+    auto_confirm_reason = _meeting_request_auto_confirm_reason(project, urgency)
+    if auto_confirm_reason:
         auto = _handle_meeting_request_confirm(request_id, {
             "confirmedBy": f"agent:{requester}",
             "autoConfirmed": True,
-            "autoConfirmReason": "urgency",
+            "autoConfirmReason": auto_confirm_reason,
+            "selectedContextIds": requested_context_ids,
+            "supplementalContext": requested_supplemental_context,
             "idempotencyKey": f"meeting-request-auto:{request_id}",
         })
         if auto.get("ok"):
@@ -7052,6 +9088,7 @@ def _handle_meeting_request_confirm(request_id, body):
             "confirmedAt": _exec_meeting_now(),
             "autoConfirmed": bool(body.get("autoConfirmed")),
             "autoConfirmReason": str(body.get("autoConfirmReason") or ""),
+            "autoConfirmLabel": _meeting_request_auto_confirm_label(body.get("autoConfirmReason")) if body.get("autoConfirmed") else "",
         }
         # Save review before conversion so a failure can be inspected/retried.
         req["updatedAt"] = req["review"]["confirmedAt"]
@@ -7071,7 +9108,15 @@ def _handle_meeting_request_confirm(request_id, body):
         "createdByType": "agent" if body.get("autoConfirmed") else "user",
         "createdByAgentId": req.get("requestingAgentId") if body.get("autoConfirmed") else "",
         "idempotencyKey": idempotency_key or f"meeting-request-confirm:{request_id}",
-        "source": {"meetingRequestId": request_id, "requestingAgentId": req.get("requestingAgentId"), "urgency": req.get("urgency"), **(req.get("source") or {})},
+        "source": {
+            "meetingRequestId": request_id,
+            "requestingAgentId": req.get("requestingAgentId"),
+            "urgency": req.get("urgency"),
+            "autoConfirmed": bool(body.get("autoConfirmed")),
+            "autoConfirmReason": str(body.get("autoConfirmReason") or ""),
+            "autoConfirmLabel": _meeting_request_auto_confirm_label(body.get("autoConfirmReason")) if body.get("autoConfirmed") else "",
+            **(req.get("source") or {}),
+        },
         "projectId": final_config.get("projectId") or "",
     }
     created = _handle_executable_meeting_create(meeting_body)
@@ -7089,6 +9134,8 @@ def _handle_meeting_request_confirm(request_id, body):
             _save_meeting_request_store(store)
             source = req.get("source") or {}
             _project_execution_update_meeting_blocker(source.get("projectId"), source.get("taskId"), req.get("id"), status="confirmed", meetingId=created["meeting"]["id"], awaitingUserDecision=False)
+            if body.get("autoConfirmed"):
+                _meeting_request_log_auto_confirm_activity(req, created["meeting"], body.get("autoConfirmReason"))
     auto_run_result = None
     auto_run_summary = {}
     if body.get("autoConfirmed"):
@@ -7547,13 +9594,11 @@ def _meeting_normalize_advisory_reply(conflict, result):
     fallback["providerRef"] = result.get("providerRef") or {}
     fallback["durationMs"] = result.get("durationMs") or 0
     if not result.get("ok"):
-        fallback["status"] = "failed"
-        fallback["error"] = result.get("reply") or "advisory provider call failed"
+        fallback["providerError"] = result.get("reply") or "advisory provider call failed"
         return fallback
     parsed = _meeting_parse_json_object(result.get("reply") or "")
     if not parsed:
-        fallback["status"] = "failed"
-        fallback["error"] = "advisory provider did not return JSON"
+        fallback["providerError"] = "advisory provider did not return JSON"
         fallback["rawText"] = _meeting_truncate_text(result.get("reply") or "", 1200)
         return fallback
     recommendation = str(parsed.get("recommendation") or fallback.get("recommendation") or "wait").strip().lower()
@@ -8186,6 +10231,51 @@ def _meeting_action_item_snapshot(draft):
     return {k: copy.deepcopy(v) for k, v in (draft or {}).items() if k != "audit"}
 
 
+def _meeting_confirm_action_item_on_source_task(project_id, task_id, meeting, draft, action_item_id, actor_id, source_snapshot=None):
+    if not project_id or not task_id:
+        return {"error": "Meeting action items must be attached to the source task", "code": "source_task_required", "_status": 400}
+    data, project = _project_find(project_id)
+    if not project:
+        return {"error": "Project not found", "_status": 404}
+    if project.get("status") == "archived":
+        return {"error": "Archived projects cannot receive meeting action items", "_status": 400}
+    task = next((t for t in project.get("tasks", []) if t.get("id") == task_id), None)
+    if not task:
+        return {"error": "Source task not found", "_status": 404}
+    meeting_id = str(meeting.get("id") or "").strip()
+    now = _proj_now()
+    item_id = _project_execution_meeting_action_key(meeting_id, action_item_id)
+    task.setdefault("meetingActionItems", [])
+    existing = next((a for a in task["meetingActionItems"] if isinstance(a, dict) and str(a.get("id") or "") == item_id), None)
+    record = {
+        "id": item_id,
+        "meetingId": meeting_id,
+        "requestId": str(((meeting.get("source") or {}) if isinstance(meeting.get("source"), dict) else {}).get("meetingRequestId") or ""),
+        "sourceActionItemId": action_item_id,
+        "title": str(draft.get("title") or "").strip() or "Meeting action item",
+        "description": str(draft.get("description") or draft.get("sourceText") or "").strip(),
+        "owner": str(draft.get("assignee") or draft.get("suggestedOwner") or task.get("executorAgentId") or task.get("assignee") or "").strip(),
+        "status": "pending",
+        "requiredForResume": True,
+        "priority": str(draft.get("priority") or "medium").strip() or "medium",
+        "sourceSnapshot": copy.deepcopy(source_snapshot or draft),
+        "confirmedBy": actor_id,
+        "confirmedAt": now,
+        "updatedAt": now,
+    }
+    if existing:
+        existing.update({k: v for k, v in record.items() if k not in {"createdAt"}})
+        record = existing
+    else:
+        record["createdAt"] = now
+        task["meetingActionItems"].append(record)
+    task["updatedAt"] = now
+    project["updatedAt"] = now
+    _log_activity(project, "meeting_action_item_attached", actor_id or "meeting", f"Attached meeting action item '{record.get('title')}' to source task", task.get("id"))
+    _save_projects(data)
+    return {"ok": True, "project": project, "task": task, "record": record}
+
+
 def _handle_executable_meeting_action_item(meeting_id, action_item_id, body):
     action = str(body.get("action") or "").strip()
     if action not in {"update", "reject", "keep", "confirm"}:
@@ -8203,7 +10293,8 @@ def _handle_executable_meeting_action_item(meeting_id, action_item_id, body):
             return {"error": "Action item draft not found", "_status": 404}
         idem_key = f"{meeting_id}:action-item:{action_item_id}:{action}:{idempotency_key}" if idempotency_key else ""
         if idem_key and idem_key in store.get("idempotency", {}):
-            return {"ok": True, "meeting": meeting, "actionItem": draft, "taskId": draft.get("taskId"), "idempotent": True}
+            idem = store.get("idempotency", {}).get(idem_key) or {}
+            return {"ok": True, "meeting": meeting, "actionItem": draft, "taskId": idem.get("taskId") or draft.get("sourceTaskId") or draft.get("taskId"), "meetingActionItemId": idem.get("meetingActionItemId") or draft.get("meetingActionItemId"), "idempotent": True}
         before = _meeting_action_item_snapshot(draft)
         if action == "update":
             if draft.get("status") == "confirmed":
@@ -8229,21 +10320,18 @@ def _handle_executable_meeting_action_item(meeting_id, action_item_id, body):
             draft["updatedAt"] = _exec_meeting_now()
             _meeting_audit_action_item(draft, "keep", actor_id, before)
         elif action == "confirm":
-            if draft.get("status") == "confirmed" and draft.get("taskId"):
+            if draft.get("status") == "confirmed":
+                confirmed_task_id = draft.get("sourceTaskId") or draft.get("taskId")
                 if idem_key:
-                    store.setdefault("idempotency", {})[idem_key] = {"meetingId": meeting_id, "taskId": draft.get("taskId")}
+                    store.setdefault("idempotency", {})[idem_key] = {"meetingId": meeting_id, "taskId": confirmed_task_id}
                     _save_exec_meeting_store(store)
-                return {"ok": True, "meeting": meeting, "actionItem": draft, "taskId": draft.get("taskId"), "idempotent": True}
-            target_project_id = str(body.get("targetProjectId") or body.get("projectId") or draft.get("targetProjectId") or meeting.get("projectId") or "").strip()
-            if not target_project_id:
-                return {"error": "Target project is required before confirming this action item", "code": "target_project_required", "_status": 400}
-            data, project = _project_find(target_project_id)
-            if not project:
-                return {"error": "Project not found", "_status": 404}
-            if project.get("status") == "archived":
-                return {"error": "Archived projects cannot receive meeting action items", "_status": 400}
-            if draft.get("taskId"):
-                return {"ok": True, "meeting": meeting, "actionItem": draft, "taskId": draft.get("taskId"), "idempotent": True}
+                return {"ok": True, "meeting": meeting, "actionItem": draft, "taskId": confirmed_task_id, "idempotent": True}
+            source = meeting.get("source") if isinstance(meeting.get("source"), dict) else {}
+            target_project_id = str(source.get("projectId") or meeting.get("projectId") or body.get("targetProjectId") or body.get("projectId") or draft.get("targetProjectId") or "").strip()
+            source_task_id = str(source.get("taskId") or body.get("taskId") or draft.get("sourceTaskId") or "").strip()
+            attach_result = _meeting_confirm_action_item_on_source_task(target_project_id, source_task_id, meeting, draft, action_item_id, actor_id, before)
+            if attach_result.get("error"):
+                return attach_result
             _save_exec_meeting_store(store)
         if action != "confirm":
             event = _append_exec_meeting_event(store, meeting, "action_item_updated", actor={"type": "user", "id": actor_id}, payload={"action": action, "actionItemId": action_item_id, "before": before, "after": draft}, idempotency_key=idempotency_key)
@@ -8252,50 +10340,32 @@ def _handle_executable_meeting_action_item(meeting_id, action_item_id, body):
             _save_exec_meeting_store(store)
             return {"ok": True, "meeting": meeting, "actionItem": draft}
 
-    task_body = {
-        "title": body.get("title") or draft.get("title"),
-        "description": body.get("description") or draft.get("description") or draft.get("sourceText") or "",
-        "priority": body.get("priority") or draft.get("priority") or "medium",
-        "assignee": body.get("assignee") or draft.get("assignee") or draft.get("suggestedOwner"),
-        "by": actor_id,
-        "source": {
-            "kind": "meeting_action_item",
-            "meetingId": meeting_id,
-            "actionItemId": action_item_id,
-            "meetingTopic": meeting.get("topic") or "",
-                "originalActionItem": before,
-            "confirmedBy": actor_id,
-            "confirmedAt": _exec_meeting_now(),
-        },
-    }
-    created = _handle_task_create(target_project_id, task_body)
-    if not created.get("ok"):
-        return created
-    task = created["task"]
     with _EXEC_MEETING_LOCK:
         store = _load_exec_meeting_store()
         meeting = store.get("meetings", {}).get(meeting_id)
         if not meeting:
-            return {"ok": True, "task": task, "taskId": task.get("id")}
+            return {"ok": True, "task": attach_result.get("task"), "taskId": (attach_result.get("task") or {}).get("id")}
         _meeting_ensure_action_item_drafts(store, meeting)
         draft = _meeting_find_action_draft(meeting, action_item_id)
         if draft:
             before2 = _meeting_action_item_snapshot(draft)
-            confirmed_at = task_body["source"]["confirmedAt"]
+            task = attach_result.get("task") or {}
+            record = attach_result.get("record") or {}
             draft.update({
                 "status": "confirmed",
                 "targetProjectId": target_project_id,
-                "taskId": task.get("id"),
+                "sourceTaskId": task.get("id"),
+                "meetingActionItemId": record.get("id"),
                 "confirmedBy": actor_id,
-                "confirmedAt": confirmed_at,
+                "confirmedAt": record.get("confirmedAt") or _exec_meeting_now(),
                 "updatedAt": _exec_meeting_now(),
             })
-            _meeting_audit_action_item(draft, "confirm", actor_id, before2, {"taskId": task.get("id"), "projectId": target_project_id})
-            event = _append_exec_meeting_event(store, meeting, "action_item_confirmed", actor={"type": "user", "id": actor_id}, payload={"actionItemId": action_item_id, "projectId": target_project_id, "taskId": task.get("id")}, idempotency_key=idempotency_key)
+            _meeting_audit_action_item(draft, "confirm", actor_id, before2, {"taskId": task.get("id"), "projectId": target_project_id, "meetingActionItemId": record.get("id")})
+            event = _append_exec_meeting_event(store, meeting, "action_item_confirmed", actor={"type": "user", "id": actor_id}, payload={"actionItemId": action_item_id, "projectId": target_project_id, "taskId": task.get("id"), "meetingActionItemId": record.get("id")}, idempotency_key=idempotency_key)
             if idem_key:
-                store.setdefault("idempotency", {})[idem_key] = {"meetingId": meeting_id, "taskId": task.get("id"), "sequence": event["sequence"]}
+                store.setdefault("idempotency", {})[idem_key] = {"meetingId": meeting_id, "taskId": task.get("id"), "meetingActionItemId": record.get("id"), "sequence": event["sequence"]}
         _save_exec_meeting_store(store)
-        return {"ok": True, "meeting": meeting, "actionItem": draft, "task": task, "taskId": task.get("id")}
+        return {"ok": True, "meeting": meeting, "actionItem": draft, "task": task, "taskId": task.get("id"), "meetingActionItem": attach_result.get("record")}
 
 
 def _handle_executable_meeting_create(body):
@@ -8560,7 +10630,7 @@ def _handle_executable_meeting_conflict_action(meeting_id, body):
         if idem_key:
             store.setdefault("idempotency", {})[idem_key] = {"meetingId": meeting_id, "sequence": event["sequence"]}
         _save_exec_meeting_store(store)
-    if target in _EXEC_MEETING_TERMINAL:
+    if meeting.get("stage") in _EXEC_MEETING_TERMINAL:
         _project_execution_apply_meeting_result(meeting)
     return {"ok": True, "meeting": meeting, "event": event}
 
@@ -9510,10 +11580,15 @@ def _meeting_call_provider(meeting, speaker, prompt):
             ok = bool(result.get("ok"))
             provider_ref = {"providerKind": "codex", "agentId": speaker, "conversationId": conversation_id, "threadId": result.get("threadId"), "turnId": result.get("turnId")}
         elif provider_kind == "hermes":
-            result = _handle_hermes_chat({"agentId": speaker, "message": prompt, "timeoutSec": timeout, "fromType": "agent"})
+            result = _handle_hermes_chat({"agentId": speaker, "message": prompt, "conversationId": conversation_id, "timeoutSec": timeout, "fromType": "agent"})
             reply = result.get("reply") or result.get("error") or ""
             ok = bool(result.get("ok"))
             provider_ref = {"providerKind": "hermes", "agentId": speaker, "conversationId": conversation_id, "sessionId": result.get("sessionId")}
+        elif provider_kind == "claude-code":
+            result = _handle_claude_code_chat({"agentId": speaker, "message": prompt, "conversationId": conversation_id, "timeoutSec": timeout, "fromType": "agent"})
+            reply = result.get("reply") or result.get("error") or ""
+            ok = bool(result.get("ok"))
+            provider_ref = {"providerKind": "claude-code", "agentId": speaker, "conversationId": conversation_id, "sessionId": result.get("sessionId")}
         else:
             reply = _wf_call_agent(speaker, prompt, timeout=timeout, project_id="meeting-for-ai", task_id=conversation_id)
             ok = not str(reply or "").startswith("[ERROR]")
@@ -9825,14 +11900,6 @@ def _handle_meeting_end(body):
     if not ended_meeting:
         detail = _handle_executable_meeting_detail(meet_id)
         if detail.get("ok"):
-            if summary:
-                return _handle_executable_meeting_transition(meet_id, {
-                    "stage": "completed",
-                    "summary": summary,
-                    "result": {"summary": summary, "decision": resolution, "actionItems": action_items if isinstance(action_items, list) else []},
-                    "actorId": ended_by or "user",
-                    "actorType": "user",
-                })
             return _handle_executable_meeting_end_with_moderator(meet_id, {"actorId": ended_by or "user", "actorType": "user"})
         return {"error": f"Meeting '{meet_id}' not found", "_status": 404}
 
@@ -10104,7 +12171,27 @@ def _project_execution_repair_acceptance_state(data):
         for task in project.get("tasks", []) or []:
             if not isinstance(task, dict):
                 continue
-            if task.get("executionState") != "awaiting_user_acceptance":
+            if task.get("executionState") == "done" or task.get("completedAt"):
+                if task.get("blockedReason") or task.get("lastError") or project.get("activeTaskId") == task.get("id") or project.get("workflowPhase") in {"blocked", "executing", "reworking", "reviewing", "execution_complete", "awaiting_user_acceptance", "blocked_by_active_task"}:
+                    other_active_task = next((
+                        item for item in project.get("tasks", []) or []
+                        if isinstance(item, dict)
+                        and item.get("id") != task.get("id")
+                        and item.get("executionState") in {"validating", "executing", "reviewing", "reworking", "awaiting_user_acceptance", "awaiting_meeting_resolution", "execution_complete"}
+                    ), None)
+                    task["blockedReason"] = None
+                    task["lastError"] = None
+                    task["activeAttemptId"] = None
+                    if done_col and done_col.get("id"):
+                        task["columnId"] = done_col.get("id")
+                    if project.get("activeTaskId") == task.get("id") or not other_active_task:
+                        project["workflowPhase"] = "done"
+                        project["workflowActive"] = False
+                        project["activeTaskId"] = None
+                        project["activeAgent"] = None
+                        project["projectExecutionFlowActive"] = False
+                        if project.get("projectExecutionFlowStopReason") in {"awaiting_user_acceptance", "previous_execution_not_resumable", "checklist_incomplete"}:
+                            project["projectExecutionFlowStopReason"] = None
                 continue
             review = task.get("reviewResult") or {}
             if review.get("status") not in {"pass", "skipped"}:
@@ -10113,10 +12200,17 @@ def _project_execution_repair_acceptance_state(data):
             attempt = next((a for a in task.get("attempts", []) or [] if a.get("id") == attempt_id), None)
             if _project_execution_attempt_requires_user_acceptance(task, attempt):
                 continue
+            state = str(task.get("executionState") or "backlog")
+            if state in {"validating", "executing", "reviewing", "reworking", "awaiting_meeting_resolution"}:
+                continue
+            if not _project_execution_acceptance_checklist_complete(task):
+                continue
             now = datetime.now(timezone.utc).isoformat()
             task["executionState"] = "done"
             task["completedAt"] = task.get("completedAt") or now
             task["activeAttemptId"] = None
+            task["blockedReason"] = None
+            task["lastError"] = None
             if done_col and done_col.get("id"):
                 task["columnId"] = done_col.get("id")
             if attempt and attempt.get("status") == "review_skipped_waiting_acceptance":
@@ -10124,15 +12218,15 @@ def _project_execution_repair_acceptance_state(data):
             task.setdefault("stateHistory", []).append({
                 "attemptId": attempt_id,
                 "actor": "system",
-                "from": "awaiting_user_acceptance",
+                "from": state,
                 "to": "done",
-                "reason": "Repaired stale acceptance state for a task that does not require user acceptance.",
+                "reason": "Repaired stale completed checklist state for a task that does not require user acceptance.",
                 "at": now,
             })
             task["stateHistory"] = task["stateHistory"][-100:]
-            if project.get("workflowPhase") in {"awaiting_user_acceptance", "blocked_by_active_task"} or project.get("activeTaskId") == task.get("id"):
+            if project.get("workflowPhase") in {"awaiting_user_acceptance", "blocked_by_active_task", "blocked", "executing", "reworking", "reviewing", "execution_complete"} or project.get("activeTaskId") == task.get("id"):
                 project["workflowPhase"] = "done"
-            if project.get("projectExecutionFlowStopReason") == "awaiting_user_acceptance":
+            if project.get("projectExecutionFlowStopReason") in {"awaiting_user_acceptance", "previous_execution_not_resumable", "checklist_incomplete"}:
                 project["projectExecutionFlowStopReason"] = None
             project["projectExecutionFlowActive"] = False
             project["workflowActive"] = False
@@ -10241,6 +12335,7 @@ def _project_cron_reason_label(reason, error=None):
         "reviewer_skip_confirmation_required": "当前任务需要确认是否跳过独立审查。",
         "dirty_workspace_confirmation_required": "工作区存在未确认变更，需要人工确认。",
         "dispatch_failed": "派发项目定时任务失败。",
+        "project_all_tasks_completed": "项目所有任务已完成，定时任务已跳过。",
     }
     if reason in labels:
         return labels[reason]
@@ -10706,6 +12801,7 @@ def _project_execution_reopen_completed_task(project, task, actor="project-execu
     previous_col = task.get("columnId")
     task["completedAt"] = None
     task["executionState"] = "backlog" if _project_execution_enabled(project) else "backlog"
+    _project_execution_reset_checklist_completion(task)
     if target_col:
         task["columnId"] = target_col.get("id")
         col_tasks = [t for t in project.get("tasks", []) if t.get("columnId") == target_col.get("id") and t.get("id") != task.get("id")]
@@ -10782,6 +12878,25 @@ def _handle_project_scheduled_cron_dispatch(project_id, cron_id, source="manual"
         if reopened and isinstance(result, dict):
             result["reopenedCompletedTask"] = True
     else:
+        # ── Idempotency guard: skip if all tasks are completed ──
+        all_completed = False
+        tasks = project.get("tasks", []) or []
+        if target_type == "projectWorkflow" and tasks:
+            done_cols = _project_execution_done_column_ids(project)
+            non_done_tasks = [t for t in tasks if t.get("columnId") not in done_cols and not t.get("completedAt")]
+            if not non_done_tasks:
+                all_completed = True
+
+        if all_completed:
+            _project_cron_update_binding_status(cron_id, "skipped_completed_project", "All tasks completed; project cron dispatch skipped")
+            record("skipped", "project_all_tasks_completed")
+            # ── Alert on repeated skipped-due-to-completion ──
+            history = project.get("scheduledCronHistory", []) or []
+            recent_same = [h for h in history[-10:] if h.get("reason") == "project_all_tasks_completed"]
+            if len(recent_same) >= 2:
+                _gateway_rpc_call("cron.alert", {"id": cron_id, "message": f"P0 cron 重复触发缺陷告警：项目 {project_id} 的所有任务已完成，但定时任务被重复触发（最近 10 次中有 {len(recent_same)} 次因 '项目已完成' 跳过）。请检查 cron 绑定配置或关闭该定时任务。"}, timeout=10)
+            return {"ok": True, "status": "skipped", "reason": "project_all_tasks_completed", "projectId": project_id, "id": cron_id, "allCompleted": True}
+
         if _project_execution_enabled(project):
             result = _handle_project_execution_project_start(project_id, {"mode": project.get("projectExecutionStartMode") or "continuous", "by": "project-cron", "source": source, "skipReviewConfirmed": True})
         else:
@@ -11117,6 +13232,7 @@ def _handle_project_create(body):
         "tags": body.get("tags", []),
         "branch": body.get("branch", ""),
         "longTermProject": bool(body.get("longTermProject", False)),
+        "highPriorityAiMeetingAutoApprove": bool(body.get("highPriorityAiMeetingAutoApprove", False)),
         "archiveMaintenanceEnabled": bool(body["archiveMaintenanceEnabled"]) if "archiveMaintenanceEnabled" in body else _archive_project_default_maintenance_enabled({"status": body.get("status", "active")}),
         "archiveMaintenance": {
             "enabled": bool(body["archiveMaintenanceEnabled"]) if "archiveMaintenanceEnabled" in body else _archive_project_default_maintenance_enabled({"status": body.get("status", "active")}),
@@ -11169,6 +13285,8 @@ def _handle_task_create(project_id, body):
     # Max order in column
     max_order = max((t.get("order", 0) for t in p["tasks"] if t.get("columnId") == col_id), default=-1) + 1
     now = _proj_now()
+    default_executor_id = body.get("executorAgentId")
+    assignee_id = body.get("assignee")
     task = {
         "id": _proj_uuid(),
         "title": title,
@@ -11176,9 +13294,9 @@ def _handle_task_create(project_id, body):
         "columnId": col_id,
         "order": max_order,
         "priority": body.get("priority", "medium"),
-        "assignee": body.get("assignee"),
+        "assignee": assignee_id,
         "assigneeBranch": body.get("assigneeBranch"),
-        "executorAgentId": body.get("executorAgentId") or body.get("assignee"),
+        "executorAgentId": default_executor_id,
         "reviewerAgentId": body.get("reviewerAgentId"),
         "requiresUserAcceptance": body.get("requiresUserAcceptance", False) is True,
         "allowReviewerlessExecution": body.get("allowReviewerlessExecution", False) is True,
@@ -11192,6 +13310,10 @@ def _handle_task_create(project_id, body):
         "dueDate": body.get("dueDate"),
         "tags": body.get("tags", []),
         "checklist": body.get("checklist", []),
+        "meetingActionItems": body.get("meetingActionItems", []) if isinstance(body.get("meetingActionItems"), list) else [],
+        "meetingDecisionHistory": body.get("meetingDecisionHistory", []) if isinstance(body.get("meetingDecisionHistory"), list) else [],
+        "meetingDiscussionPoints": body.get("meetingDiscussionPoints", []) if isinstance(body.get("meetingDiscussionPoints"), list) else [],
+        "meetingRecords": body.get("meetingRecords", []) if isinstance(body.get("meetingRecords"), list) else [],
         "source": body.get("source") if isinstance(body.get("source"), dict) else {},
         "comments": [],
         "attachments": [],
@@ -11313,6 +13435,7 @@ def _handle_project_from_template(body):
         "tags": body.get("tags", []),
         "branch": body.get("branch", ""),
         "longTermProject": bool(body.get("longTermProject", False)),
+        "highPriorityAiMeetingAutoApprove": bool(body.get("highPriorityAiMeetingAutoApprove", False)),
         "archiveMaintenanceEnabled": bool(body["archiveMaintenanceEnabled"]) if "archiveMaintenanceEnabled" in body else True,
         "archiveMaintenance": {
             "enabled": bool(body["archiveMaintenanceEnabled"]) if "archiveMaintenanceEnabled" in body else True,
@@ -11402,7 +13525,7 @@ def _handle_project_update(project_id, body):
         body["workspaceStatus"] = workspace_status
     updatable = [
         "title", "description", "status", "priority", "dueDate", "tags", "branch",
-        "longTermProject",
+        "longTermProject", "highPriorityAiMeetingAutoApprove",
         "projectExecutionEnabled", "workspacePath", "workspaceKind", "workspaceStatus",
         "workspaceManagedBy", "workspaceCreatedAt",
         "defaultExecutorAgentId", "defaultReviewerAgentId", "projectExecutionStartMode",
@@ -11444,9 +13567,19 @@ def _handle_task_update(project_id, task_id, body):
     for field in ("assignee", "executorAgentId", "reviewerAgentId"):
         if _is_archive_manager_agent(body.get(field)):
             return {"error": "档案管理员不能被分配普通项目任务", "code": "archive_manager_not_assignable", "_status": 400}
+    old_executor = task.get("executorAgentId")
+    if (
+        _project_execution_enabled(p)
+        and "assignee" in body
+        and "executorAgentId" not in body
+        and body.get("assignee")
+        and not old_executor
+    ):
+        body["executorAgentId"] = body.get("assignee")
     by = body.get("by", "user")
     now = _proj_now()
     was_completed = bool(task.get("completedAt"))
+    checklist_was_complete = _project_execution_acceptance_checklist_complete(task) if _project_execution_enabled(p) else False
     if _project_execution_enabled(p) and "columnId" in body:
         done_cols = {c["id"] for c in p.get("columns", []) if c.get("title", "").lower() in ("done", "completed", "verified", "published", "fixed", "closed")}
         if body.get("columnId") in done_cols and task.get("executionState") != "done":
@@ -11494,7 +13627,7 @@ def _handle_task_update(project_id, task_id, body):
     updatable = [
         "title", "description", "columnId", "order", "priority", "assignee",
         "assigneeBranch", "executorAgentId", "reviewerAgentId", "dueDate", "tags",
-        "checklist", "completedAt", "requiresUserAcceptance", "allowReviewerlessExecution", "scheduledRepeatEnabled",
+        "checklist", "meetingActionItems", "meetingDecisionHistory", "meetingDiscussionPoints", "meetingRecords", "completedAt", "requiresUserAcceptance", "allowReviewerlessExecution", "scheduledRepeatEnabled",
     ]
     # Track which fields changed for md file update
     changed_fields = []
@@ -11503,9 +13636,38 @@ def _handle_task_update(project_id, task_id, body):
             if task.get(field) != body[field]:
                 changed_fields.append(field)
             task[field] = body[field]
+    schedule_project_execution_continue = False
+    if (
+        _project_execution_enabled(p)
+        and "checklist" in changed_fields
+        and not checklist_was_complete
+        and _project_execution_acceptance_checklist_complete(task)
+        and _project_execution_can_complete_after_checklist_update(task)
+    ):
+        review = task.get("reviewResult") if isinstance(task.get("reviewResult"), dict) else {}
+        done_result = _project_execution_mark_done(
+            p,
+            task,
+            by,
+            "Acceptance checklist completed after reviewer pass.",
+            review.get("attemptId"),
+        )
+        if done_result.get("ok"):
+            schedule_project_execution_continue = p.get("projectExecutionStartMode") == "continuous"
+            p.update({
+                "workflowActive": False,
+                "workflowPhase": "done",
+                "activeTaskId": None,
+                "activeAgent": None,
+                "projectExecutionFlowActive": schedule_project_execution_continue,
+                "projectExecutionFlowStopReason": None if schedule_project_execution_continue else "checklist_completed",
+            })
+            _log_activity(p, "project_execution_checklist_completed", by, f"Completed Project Execution task '{task.get('title', '')}' after checklist completion.", task_id)
     task["updatedAt"] = now
     p["updatedAt"] = now
     _save_projects(data)
+    if schedule_project_execution_continue:
+        _project_execution_schedule_continue(project_id, "checklist_completed")
     # Update task markdown file on meaningful changes
     if changed_fields:
         current_col = next((c["title"] for c in p.get("columns", []) if c["id"] == task.get("columnId")), "unknown")
@@ -11666,6 +13828,7 @@ _PROJECT_EXECUTION_LOCK = threading.Lock()
 _PROJECT_EXECUTION_CANCEL_FLAGS = {}
 _PROJECT_EXECUTION_REVIEW_FLAGS = set()
 _PROJECT_EXECUTION_MAX_TEXT = 12000
+_PROJECT_EXECUTION_MAX_EVIDENCE_LINE = 360
 _PROJECT_EXECUTION_SECRET_RE = re.compile(
     r"(?i)(authorization|api[_-]?key|access[_-]?token|refresh[_-]?token|password|secret)\s*[:=]\s*([^\s,;]+)"
 )
@@ -11678,6 +13841,13 @@ def _project_execution_enabled(project):
 def _project_execution_redact(value):
     text = _PROJECT_EXECUTION_SECRET_RE.sub(lambda m: f"{m.group(1)}=[REDACTED]", str(value or ""))
     return text if len(text) <= _PROJECT_EXECUTION_MAX_TEXT else text[:_PROJECT_EXECUTION_MAX_TEXT] + "\n...[truncated]"
+
+
+def _project_execution_compact_evidence_line(value, limit=_PROJECT_EXECUTION_MAX_EVIDENCE_LINE):
+    text = re.sub(r"\s+", " ", _project_execution_redact(value)).strip()
+    if not text:
+        return ""
+    return text if len(text) <= limit else text[:limit].rstrip() + "...[truncated]"
 
 
 def _project_execution_allowed_roots():
@@ -11790,6 +13960,28 @@ def _project_execution_attempt_requires_user_acceptance(task, attempt):
     return _project_execution_requires_user_acceptance(task)
 
 
+def _project_execution_acceptance_checklist_complete(task):
+    checklist = _project_execution_acceptance_checklist(task)
+    return bool(checklist) and all(isinstance(item, dict) and item.get("done") is True for item in checklist)
+
+
+def _project_execution_can_complete_after_checklist_update(task):
+    if not isinstance(task, dict):
+        return False
+    if task.get("activeAttemptId"):
+        return False
+    if task.get("executionState") == "done" or task.get("completedAt"):
+        return False
+    state = str(task.get("executionState") or "backlog")
+    if state in {"validating", "executing", "reviewing", "reworking", "awaiting_meeting_resolution"}:
+        return False
+    review = task.get("reviewResult") if isinstance(task.get("reviewResult"), dict) else {}
+    if review.get("status") not in {"pass", "skipped"}:
+        return False
+    attempt = _project_execution_attempt(task, review.get("attemptId"))
+    return not _project_execution_attempt_requires_user_acceptance(task, attempt)
+
+
 def _project_execution_start_mode(project, body=None):
     if body and body.get("projectStart") is False:
         return "single"
@@ -11840,6 +14032,16 @@ def _project_execution_reset_project_tasks_for_restart(project, actor="user"):
     for idx, task in enumerate(tasks):
         previous_state = task.get("executionState") or ("done" if task.get("completedAt") else "backlog")
         previous_col = task.get("columnId")
+        stale_bindings = any(bool(task.get(field)) for field in (
+            "meetingBlocker", "meetingActionItems", "meetingDecisionHistory",
+            "meetingDiscussionPoints", "meetingRecords", "evidence", "reviewResult",
+        ))
+        checklist_completed = any(
+            isinstance(item, dict)
+            and item.get("source") not in {"meeting_action_item", "meeting_risk"}
+            and (item.get("done") is True or item.get("completedAt") or item.get("completedBy") or item.get("completionEvidence"))
+            for item in task.get("checklist") or []
+        )
         changed = (
             previous_col != backlog_col.get("id")
             or previous_state != "backlog"
@@ -11847,6 +14049,8 @@ def _project_execution_reset_project_tasks_for_restart(project, actor="user"):
             or bool(task.get("activeAttemptId"))
             or bool(task.get("blockedReason"))
             or bool(task.get("lastError"))
+            or stale_bindings
+            or checklist_completed
         )
         task["columnId"] = backlog_col.get("id")
         task["order"] = idx
@@ -11857,8 +14061,7 @@ def _project_execution_reset_project_tasks_for_restart(project, actor="user"):
         task["lastError"] = None
         task["reworkFeedback"] = None
         task["reworkCount"] = 0
-        task.pop("evidence", None)
-        task.pop("reviewResult", None)
+        _project_execution_clear_restart_bindings(task, now, actor, "project pipeline restart")
         task["updatedAt"] = now
         if changed:
             reset_count += 1
@@ -11882,10 +14085,67 @@ def _project_execution_reset_project_tasks_for_restart(project, actor="user"):
     return {"ok": True, "resetTaskCount": reset_count}
 
 
+def _project_execution_clear_restart_bindings(task, now=None, actor="user", reason="project execution restart"):
+    """Clear current-run meeting/execution bindings before a fresh restart.
+
+    Persistent audit trails such as comments, attempts, stateHistory, and
+    meetingBlockerHistory are retained. The task-level current meeting fields
+    are reset so stale meeting action items do not hijack the new execution.
+    """
+    now = now or _proj_now()
+    blocker = task.get("meetingBlocker") if isinstance(task.get("meetingBlocker"), dict) else {}
+    if blocker:
+        archived = dict(blocker)
+        archived["resetAt"] = now
+        archived["resetBy"] = actor
+        archived["resetReason"] = reason
+        task.setdefault("meetingBlockerHistory", []).append(archived)
+        task["meetingBlockerHistory"] = task["meetingBlockerHistory"][-50:]
+    task["meetingBlocker"] = {}
+    task["meetingActionItems"] = []
+    task["meetingDecisionHistory"] = []
+    task["meetingDiscussionPoints"] = []
+    task["meetingRecords"] = []
+    task["activeAttemptId"] = None
+    task["blockedReason"] = None
+    task["lastError"] = None
+    task["reworkFeedback"] = None
+    task["reworkCount"] = 0
+    task["evidence"] = {}
+    task["reviewResult"] = {}
+    _project_execution_reset_checklist_completion(task)
+    return task
+
+
 def _project_execution_mark_done(project, task, actor, reason, attempt_id=None):
     done_col = _wf_get_done_col(project)
     if not done_col:
         return {"error": "Done column not found", "_status": 409}
+    checklist = _project_execution_acceptance_checklist(task)
+    if not checklist:
+        return {
+            "error": "Acceptance checklist is empty; create and complete acceptance checklist items before marking the task done.",
+            "code": "checklist_empty",
+            "unfinishedChecklist": [{"id": "", "text": "Create and complete acceptance checklist items."}],
+            "_status": 409,
+        }
+    unfinished = [
+        item for item in checklist
+        if isinstance(item, dict) and item.get("done") is not True
+    ]
+    if unfinished:
+        return {
+            "error": "Checklist is incomplete; finish all acceptance checklist items before marking the task done.",
+            "code": "checklist_incomplete",
+            "unfinishedChecklist": [
+                {
+                    "id": item.get("id") or "",
+                    "text": item.get("text") or "",
+                }
+                for item in unfinished[:20]
+            ],
+            "_status": 409,
+        }
     was_completed = bool(task.get("completedAt"))
     _project_execution_transition(project, task, "done", actor, reason, attempt_id)
     task["completedAt"] = _proj_now()
@@ -11893,6 +14153,95 @@ def _project_execution_mark_done(project, task, actor, reason, attempt_id=None):
     if not was_completed:
         _archive_trigger_task_completed(project.get("id"), task)
     return {"ok": True}
+
+
+def _project_execution_incomplete_checklist_feedback(done_result):
+    unfinished = done_result.get("unfinishedChecklist") if isinstance(done_result, dict) else []
+    lines = []
+    for item in unfinished or []:
+        if not isinstance(item, dict):
+            continue
+        text = str(item.get("text") or "").strip()
+        if text:
+            lines.append(f"- {text}")
+    detail = "\n".join(lines) if lines else "- Review the task acceptance checklist and complete every unfinished item."
+    return _project_execution_redact(
+        "Acceptance checklist is incomplete. Continue executing the task until all acceptance checklist items are complete:\n"
+        + detail
+    )
+
+
+def _project_execution_continue_for_incomplete_checklist(data, project_id, task_id, project, task, attempt_id, actor, done_result):
+    if not isinstance(done_result, dict) or done_result.get("code") != "checklist_incomplete":
+        return {"ok": False, "error": (done_result or {}).get("error") or "Unable to mark task done"}
+    workspace = _project_execution_validate_workspace(project.get("workspacePath"))
+    if not workspace.get("ok"):
+        task["blockedReason"] = workspace.get("error") or "Project workspace is not available for checklist completion."
+        _project_execution_transition(project, task, "blocked", "system", task["blockedReason"], attempt_id)
+        project.update({"workspaceStatus": workspace, "workflowActive": False, "workflowPhase": "blocked", "activeTaskId": None, "activeAgent": None, "updatedAt": _proj_now()})
+        _save_projects(data)
+        return {**workspace, "continued": False}
+    roles = _project_execution_resolve_start_roles(project, task, allow_skip_reviewer=True)
+    if not roles.get("ok"):
+        task["blockedReason"] = roles.get("error") or "Project Execution roles are not available."
+        _project_execution_transition(project, task, "blocked", "system", task["blockedReason"], attempt_id)
+        project.update({"workflowActive": False, "workflowPhase": "blocked", "activeTaskId": None, "activeAgent": None, "updatedAt": _proj_now()})
+        _save_projects(data)
+        return {**roles, "continued": False}
+    feedback = _project_execution_incomplete_checklist_feedback(done_result)
+    task["reworkCount"] = int(task.get("reworkCount") or 0) + 1
+    task["blockedReason"] = None
+    task["lastError"] = None
+    task["reworkFeedback"] = feedback
+    rework_attempt_id = str(uuid.uuid4())
+    rework_attempt = {
+        "id": rework_attempt_id,
+        "status": "reworking",
+        "startedAt": _proj_now(),
+        "workspacePath": workspace["path"],
+        "workspaceKind": workspace["kind"],
+        "dirtyConfirmed": False,
+        "dirtyFingerprint": "",
+        "executor": roles["executor"],
+        "reviewer": roles.get("reviewer"),
+        "skipReview": bool(roles.get("skipReview")),
+        "skipReviewReason": roles.get("skipReviewReason"),
+        "baseline": _project_execution_git_snapshot(workspace["path"]),
+        "startMode": project.get("projectExecutionStartMode") or "continuous",
+        "projectFlow": bool(project.get("projectExecutionFlowActive")),
+        "requiresUserAcceptance": _project_execution_requires_user_acceptance(task),
+        "rework": True,
+        "reworkCycle": task["reworkCount"],
+        "reworkFromAttemptId": attempt_id,
+        "reworkFeedback": feedback,
+        "autoReviewAfterExecution": not roles.get("skipReview"),
+        "checklistCompletionRetry": True,
+    }
+    task.setdefault("attempts", []).append(rework_attempt)
+    task["attempts"] = task["attempts"][-20:]
+    task.update({
+        "activeAttemptId": rework_attempt_id,
+        "executorAgentId": roles["executor"]["id"],
+        "reviewerAgentId": (roles.get("reviewer") or {}).get("id"),
+        "reviewResult": {},
+    })
+    project.update({
+        "workspaceStatus": workspace,
+        "workflowActive": True,
+        "workflowPhase": "reworking",
+        "activeTaskId": task_id,
+        "activeAgent": roles["executor"]["id"],
+        "projectExecutionFlowActive": False,
+        "projectExecutionFlowStopReason": "checklist_incomplete",
+        "updatedAt": _proj_now(),
+    })
+    _project_execution_transition(project, task, "reworking", actor or "system", feedback, rework_attempt_id)
+    _save_projects(data)
+    cancel_flag = threading.Event()
+    with _PROJECT_EXECUTION_LOCK:
+        _PROJECT_EXECUTION_CANCEL_FLAGS[rework_attempt_id] = cancel_flag
+    threading.Thread(target=_project_execution_run_attempt, args=(project_id, task_id, rework_attempt_id, cancel_flag), daemon=True).start()
+    return {"ok": True, "continued": True, "status": "reworking", "attemptId": rework_attempt_id}
 
 
 def _project_execution_column_for_state(project, state):
@@ -12039,6 +14388,569 @@ def _project_execution_update_meeting_blocker(project_id, task_id, request_id, *
     return {"ok": True, "project": project, "task": task}
 
 
+def _project_execution_action_item_text(item):
+    if not isinstance(item, dict):
+        return str(item or "").strip()
+    return str(item.get("title") or item.get("item") or item.get("text") or item.get("task") or item.get("action") or "").strip()
+
+
+def _project_execution_action_item_description(item):
+    if not isinstance(item, dict):
+        return ""
+    return str(item.get("description") or item.get("details") or item.get("note") or item.get("sourceText") or "").strip()
+
+
+def _project_execution_action_item_owner(item):
+    if not isinstance(item, dict):
+        return ""
+    return str(item.get("owner") or item.get("assignee") or item.get("responsible") or item.get("agent") or "").strip()
+
+
+def _project_execution_normalize_meeting_risks(result):
+    risks = []
+    for key in ("risks", "riskItems", "concerns", "unresolvedQuestions", "disagreements"):
+        raw = result.get(key)
+        if not isinstance(raw, list):
+            continue
+        for item in raw:
+            if isinstance(item, dict):
+                text = str(item.get("title") or item.get("text") or item.get("summary") or item.get("question") or item.get("issue") or "").strip()
+            else:
+                text = str(item or "").strip()
+            if text:
+                risks.append(text)
+    deduped = []
+    seen = set()
+    for text in risks:
+        key = text.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(text)
+    return deduped
+
+
+def _project_execution_task_executor_id(project, task):
+    return str(task.get("executorAgentId") or task.get("assignee") or project.get("defaultExecutorAgentId") or "").strip()
+
+
+def _project_execution_owner_matches(owner, agent_id):
+    owner = str(owner or "").strip().lower()
+    agent_id = str(agent_id or "").strip().lower()
+    if not owner or not agent_id:
+        return False
+    return owner == agent_id
+
+
+def _project_execution_meeting_action_key(meeting_id, action_id):
+    return f"meeting:{meeting_id}:action:{action_id}"
+
+
+def _project_execution_find_checklist_item(task, meeting_action_id):
+    for item in task.get("checklist") or []:
+        if isinstance(item, dict) and item.get("meetingActionItemId") == meeting_action_id:
+            return item
+    return None
+
+
+def _project_execution_acceptance_checklist(task):
+    return [
+        item for item in (task.get("checklist") or [])
+        if isinstance(item, dict) and item.get("source") not in {"meeting_action_item", "meeting_risk"}
+    ]
+
+
+def _project_execution_seed_acceptance_checklist(task, actor="system"):
+    if _project_execution_acceptance_checklist(task):
+        return False
+    now = _proj_now()
+    title = str(task.get("title") or "").strip()
+    description = str(task.get("description") or "").strip()
+    items = []
+    if title:
+        items.append(f"完成任务目标：{title}")
+    else:
+        items.append("完成任务描述中的交付目标")
+    if description:
+        compact = re.sub(r"\s+", " ", description).strip()
+        if len(compact) > 96:
+            compact = compact[:93].rstrip() + "..."
+        items.append(f"交付内容覆盖任务描述：{compact}")
+    items.append("确认会议结论和行动项已纳入最终交付")
+    checklist = task.setdefault("checklist", [])
+    existing = {_project_execution_checklist_compact_key(item.get("text")) for item in checklist if isinstance(item, dict)}
+    changed = False
+    for text in items:
+        key = _project_execution_checklist_compact_key(text)
+        if not key or key in existing:
+            continue
+        checklist.append({
+            "id": "acceptance-" + hashlib.sha256(key.encode("utf-8")).hexdigest()[:12],
+            "text": text,
+            "done": False,
+            "source": "project_execution_acceptance",
+            "createdAt": now,
+            "createdBy": actor or "system",
+        })
+        existing.add(key)
+        changed = True
+    return changed
+
+
+def _project_execution_checklist_key(text):
+    return re.sub(r"\s+", " ", str(text or "").strip()).lower()
+
+
+def _project_execution_reset_checklist_completion(task):
+    checklist = task.get("checklist")
+    if not isinstance(checklist, list) or not checklist:
+        return False
+    task["checklist"] = [
+        item for item in checklist
+        if isinstance(item, dict) and item.get("source") in {"meeting_action_item", "meeting_risk"}
+    ]
+    return len(task["checklist"]) != len(checklist)
+
+
+def _project_execution_checklist_compact_key(text):
+    return re.sub(r"[\s，。；;、,.：:!！?？()\[\]{}<>《》\"'`]+", "", str(text or "").strip()).lower()
+
+
+def _project_execution_checklist_prefix(text):
+    raw = str(text or "").strip()
+    for marker in ("：", ":"):
+        if marker in raw:
+            prefix = raw.split(marker, 1)[0].strip().lower()
+            if prefix:
+                return prefix
+    return ""
+
+
+def _project_execution_checklist_ascii_tokens(text):
+    return [
+        token.lower()
+        for token in re.findall(r"[a-zA-Z0-9][a-zA-Z0-9_./+-]*", str(text or ""))
+        if len(token) >= 3
+    ]
+
+
+def _project_execution_checklist_match_score(update_text, item_text):
+    update_key = _project_execution_checklist_key(update_text)
+    item_key = _project_execution_checklist_key(item_text)
+    if not update_key or not item_key:
+        return 0.0
+    if update_key == item_key:
+        return 1.0
+    update_compact = _project_execution_checklist_compact_key(update_text)
+    item_compact = _project_execution_checklist_compact_key(item_text)
+    if not update_compact or not item_compact:
+        return 0.0
+    shorter, longer = sorted((update_compact, item_compact), key=len)
+    if len(shorter) >= 12 and shorter in longer:
+        return 0.94
+
+    update_chars = {ch for ch in update_compact if not ch.isdigit()}
+    item_chars = {ch for ch in item_compact if not ch.isdigit()}
+    char_overlap = (len(update_chars & item_chars) / max(1, len(update_chars))) if update_chars else 0.0
+    sequence_ratio = difflib.SequenceMatcher(None, update_compact, item_compact).ratio()
+    prefix_bonus = 0.12 if _project_execution_checklist_prefix(update_text) and _project_execution_checklist_prefix(update_text) == _project_execution_checklist_prefix(item_text) else 0.0
+    ascii_tokens = _project_execution_checklist_ascii_tokens(update_text)
+    if ascii_tokens:
+        present = sum(1 for token in ascii_tokens if token in item_key)
+        ascii_bonus = 0.16 * (present / len(ascii_tokens))
+    else:
+        ascii_bonus = 0.0
+    return min(0.99, (0.50 * char_overlap) + (0.28 * sequence_ratio) + prefix_bonus + ascii_bonus)
+
+
+def _project_execution_find_checklist_update_target(checklist, update):
+    update_id = update.get("id")
+    if update_id:
+        for item in checklist:
+            if str(item.get("id") or "") == update_id:
+                return item
+    text = update.get("text")
+    if not text:
+        return None
+    update_key = _project_execution_checklist_key(text)
+    for item in checklist:
+        if _project_execution_checklist_key(item.get("text")) == update_key:
+            return item
+    scored = [
+        (_project_execution_checklist_match_score(text, item.get("text")), item)
+        for item in checklist
+        if item.get("text")
+    ]
+    scored = [entry for entry in scored if entry[0] >= 0.72]
+    if not scored:
+        return None
+    scored.sort(key=lambda entry: entry[0], reverse=True)
+    if len(scored) > 1 and scored[0][0] - scored[1][0] < 0.08:
+        return None
+    return scored[0][1]
+
+
+def _project_execution_checklist_done_value(value):
+    if isinstance(value, bool):
+        return value
+    raw = str(value or "").strip().lower()
+    if raw in {"done", "complete", "completed", "pass", "passed", "verified", "true", "yes", "完成", "已完成", "通过"}:
+        return True
+    if raw in {"todo", "pending", "incomplete", "failed", "false", "no", "未完成", "待完成", "失败"}:
+        return False
+    return None
+
+
+def _project_execution_result_checklist_updates(result):
+    candidates = []
+    for value in (result.get("checklistUpdates"), result.get("checklistVerification")):
+        if isinstance(value, dict):
+            items = value.get("items") or value.get("checklist") or []
+            if isinstance(items, list):
+                candidates.extend(items)
+        elif isinstance(value, list):
+            candidates.extend(value)
+    parsed = _project_execution_extract_json(result.get("reply") or "")
+    if isinstance(parsed, dict):
+        for key in ("checklistUpdates", "checklistVerification", "checklist"):
+            value = parsed.get(key)
+            if isinstance(value, dict):
+                items = value.get("items") or value.get("checklist") or []
+                if isinstance(items, list):
+                    candidates.extend(items)
+            elif isinstance(value, list):
+                candidates.extend(value)
+        if isinstance(parsed.get("items"), list) and any(k in parsed for k in ("checklistStatus", "checklistSummary")):
+            candidates.extend(parsed.get("items") or [])
+    updates = []
+    for item in candidates:
+        if not isinstance(item, dict):
+            continue
+        done = _project_execution_checklist_done_value(item.get("done") if "done" in item else item.get("status"))
+        if done is None:
+            continue
+        updates.append({
+            "id": str(item.get("id") or item.get("checklistItemId") or "").strip(),
+            "text": str(item.get("text") or item.get("title") or item.get("item") or "").strip(),
+            "done": done,
+            "evidence": _project_execution_redact(item.get("evidence") or item.get("summary") or item.get("reason") or ""),
+        })
+    return updates[:100]
+
+
+def _project_execution_checklist_update_key(update):
+    raw = str(update.get("id") or "").strip()
+    if raw:
+        return raw
+    text_key = _project_execution_checklist_compact_key(update.get("text"))
+    return "checklist-" + hashlib.sha256(text_key.encode("utf-8")).hexdigest()[:12] if text_key else _proj_uuid()
+
+
+def _project_execution_apply_checklist_updates(task, result):
+    checklist = _project_execution_acceptance_checklist(task)
+    allow_create = not checklist
+    changed = False
+    now = _proj_now()
+    for update in _project_execution_result_checklist_updates(result):
+        item = _project_execution_find_checklist_update_target(checklist, update)
+        if not item and allow_create and update.get("text"):
+            item = {
+                "id": _project_execution_checklist_update_key(update),
+                "text": update.get("text"),
+                "done": False,
+                "source": "project_execution_acceptance",
+                "createdAt": now,
+            }
+            task.setdefault("checklist", []).append(item)
+            checklist.append(item)
+            changed = True
+        if not item:
+            continue
+        if update.get("done") is True and item.get("done") is not True:
+            item["done"] = True
+            item["completedAt"] = now
+            item["completedBy"] = "executor"
+            if update.get("evidence"):
+                item["completionEvidence"] = update["evidence"]
+            changed = True
+    return changed
+
+
+def _project_execution_result_meeting_discussion_points(result):
+    candidates = []
+    for value in (result.get("meetingDiscussionPoints"), result.get("discussionPoints"), result.get("meetingNotes")):
+        if isinstance(value, list):
+            candidates.extend(value)
+    parsed = _project_execution_extract_json(result.get("reply") or "")
+    if isinstance(parsed, dict):
+        for key in ("meetingDiscussionPoints", "discussionPoints", "meetingNotes"):
+            value = parsed.get(key)
+            if isinstance(value, list):
+                candidates.extend(value)
+    points = []
+    for item in candidates:
+        if isinstance(item, dict):
+            text = str(item.get("text") or item.get("summary") or item.get("note") or item.get("risk") or item.get("decision") or "").strip()
+            if not text:
+                continue
+            kind = str(item.get("kind") or item.get("type") or ("risk" if item.get("risk") else "note")).strip().lower()
+            if kind not in {"decision", "risk", "note"}:
+                kind = "note"
+            title = str(item.get("title") or ("会议结论" if kind == "decision" else "风险" if kind == "risk" else "要点")).strip()
+            meeting_id = str(item.get("meetingId") or item.get("meeting_id") or "").strip()
+            request_id = str(item.get("requestId") or item.get("request_id") or "").strip()
+        else:
+            text = str(item or "").strip()
+            if not text:
+                continue
+            kind = "note"
+            title = "要点"
+            meeting_id = ""
+            request_id = ""
+        points.append({
+            "id": "",
+            "meetingId": meeting_id,
+            "requestId": request_id,
+            "kind": kind,
+            "title": title,
+            "text": _project_execution_redact(text),
+        })
+    return points[:100]
+
+
+def _project_execution_apply_meeting_discussion_points(task, result):
+    points = _project_execution_result_meeting_discussion_points(result)
+    if not points:
+        return False
+    now = _proj_now()
+    task.setdefault("meetingDiscussionPoints", [])
+    existing_ids = {str(p.get("id") or "") for p in task.get("meetingDiscussionPoints") or [] if isinstance(p, dict)}
+    changed = False
+    for point in points:
+        point_id = _project_execution_meeting_discussion_key(point.get("meetingId") or "executor", point.get("kind") or "note", point.get("text"))
+        if point_id in existing_ids:
+            continue
+        task["meetingDiscussionPoints"].append({
+            "id": point_id,
+            "meetingId": point.get("meetingId") or "",
+            "requestId": point.get("requestId") or "",
+            "kind": point.get("kind") or "note",
+            "title": point.get("title") or "要点",
+            "text": point.get("text") or "",
+            "createdAt": now,
+        })
+        existing_ids.add(point_id)
+        changed = True
+    return changed
+
+
+def _project_execution_meeting_discussion_key(meeting_id, kind, text):
+    digest = hashlib.sha256(str(text or "").encode("utf-8")).hexdigest()[:10]
+    return f"meeting:{meeting_id}:discussion:{kind}:{digest}"
+
+
+def _project_execution_meeting_record_key(meeting_id, request_id):
+    key = str(meeting_id or request_id or "unknown").strip()
+    return f"meeting:{key}:record"
+
+
+def _project_execution_meeting_action_summaries(result):
+    raw_items = result.get("actionItems") if isinstance(result.get("actionItems"), list) else []
+    summaries = []
+    for idx, raw in enumerate(raw_items):
+        title = _project_execution_action_item_text(raw)
+        if not title:
+            continue
+        owner = _project_execution_action_item_owner(raw)
+        raw_action_id = (raw or {}).get("id") if isinstance(raw, dict) else ""
+        action_id = str(raw_action_id).strip() if raw_action_id is not None else ""
+        summaries.append({
+            "id": action_id or f"ai-{idx + 1}",
+            "title": title,
+            "owner": owner,
+        })
+    return summaries
+
+
+def _project_execution_upsert_meeting_record(task, meeting, result, request_id, outcome, now=None):
+    if not isinstance(task, dict) or not isinstance(meeting, dict):
+        return False
+    now = now or _proj_now()
+    meeting_id = str(meeting.get("id") or "").strip()
+    request_id = str(request_id or "").strip()
+    outcome = _meeting_result_outcome(outcome) or "needs_user_decision"
+    decision_text = str(result.get("decision") or result.get("summary") or "").strip()
+    summary_text = str(result.get("summary") or "").strip()
+    if not decision_text:
+        if outcome == "no_consensus":
+            decision_text = "No consensus was reached."
+        elif outcome == "rejected":
+            decision_text = "Meeting rejected the current path."
+        elif outcome == "needs_user_decision":
+            decision_text = "Meeting requires user decision."
+    action_summaries = _project_execution_meeting_action_summaries(result)
+    record = {
+        "id": _project_execution_meeting_record_key(meeting_id, request_id),
+        "meetingId": meeting_id,
+        "requestId": request_id,
+        "outcome": outcome,
+        "status": outcome,
+        "decision": _project_execution_redact(decision_text),
+        "summary": _project_execution_redact(summary_text),
+        "risks": [_project_execution_redact(risk) for risk in _project_execution_normalize_meeting_risks(result)],
+        "actionItems": action_summaries,
+        "actionItemCount": len(action_summaries),
+        "appliedAt": now,
+        "updatedAt": now,
+    }
+    task.setdefault("meetingRecords", [])
+    existing = next((item for item in task["meetingRecords"] if isinstance(item, dict) and str(item.get("id") or "") == record["id"]), None)
+    if existing:
+        created_at = existing.get("createdAt") or existing.get("appliedAt") or now
+        stable_keys = ("meetingId", "requestId", "outcome", "status", "decision", "summary", "risks", "actionItems", "actionItemCount")
+        previous_stable = {key: existing.get(key) for key in stable_keys}
+        next_stable = {key: record.get(key) for key in stable_keys}
+        if previous_stable == next_stable:
+            return False
+        existing.update(record)
+        existing["createdAt"] = created_at
+        return True
+    record["createdAt"] = now
+    task["meetingRecords"].append(record)
+    task["meetingRecords"].sort(key=lambda item: str((item or {}).get("appliedAt") or (item or {}).get("createdAt") or ""))
+    return True
+
+
+def _project_execution_all_required_meeting_actions_done(task):
+    actions = task.get("meetingActionItems") if isinstance(task.get("meetingActionItems"), list) else []
+    required = [a for a in actions if isinstance(a, dict) and a.get("requiredForResume") is True and a.get("status") != "external_task_created"]
+    return all(a.get("status") == "completed" for a in required)
+
+
+def _project_execution_mark_meeting_actions_completed(project, task, attempt_id, actor):
+    changed = False
+    now = _proj_now()
+    for item in task.get("meetingActionItems") or []:
+        if not isinstance(item, dict):
+            continue
+        if item.get("requiredForResume") is True and item.get("status") == "pending":
+            item["status"] = "completed"
+            item["completedAt"] = now
+            item["completedBy"] = actor or task.get("executorAgentId") or task.get("assignee") or "executor"
+            item["completionAttemptId"] = attempt_id
+            changed = True
+    if changed:
+        task["updatedAt"] = now
+        project["updatedAt"] = now
+        _log_activity(project, "meeting_action_items_completed", actor or "executor", f"Completed meeting action items for '{task.get('title', '')}'", task.get("id"))
+    return changed
+
+
+def _project_execution_has_pending_meeting_actions(task):
+    actions = task.get("meetingActionItems") if isinstance(task.get("meetingActionItems"), list) else []
+    return any(isinstance(a, dict) and a.get("requiredForResume") is True and a.get("status") == "pending" for a in actions)
+
+
+def _project_execution_apply_meeting_output_to_task(project, task, meeting, result, request_id):
+    meeting_id = str(meeting.get("id") or "").strip()
+    executor_id = _project_execution_task_executor_id(project, task)
+    now = _proj_now()
+    applied = 0
+    linked = 0
+    risks_added = 0
+    checklist_seeded = _project_execution_seed_acceptance_checklist(task, "meeting")
+    record_changed = _project_execution_upsert_meeting_record(task, meeting, result, request_id, "approved", now)
+    task.setdefault("meetingActionItems", [])
+    task.setdefault("meetingDecisionHistory", [])
+    task.setdefault("meetingDiscussionPoints", [])
+    existing_action_ids = {str(a.get("id") or "") for a in task.get("meetingActionItems") or [] if isinstance(a, dict)}
+    existing_discussion_ids = {str(p.get("id") or "") for p in task.get("meetingDiscussionPoints") or [] if isinstance(p, dict)}
+    decision_key = f"meeting:{meeting_id}:decision"
+    if decision_key not in {str(d.get("id") or "") for d in task.get("meetingDecisionHistory") or [] if isinstance(d, dict)}:
+        decision_text = str(result.get("decision") or result.get("summary") or "").strip()
+        if decision_text:
+            task["meetingDecisionHistory"].append({
+                "id": decision_key,
+                "meetingId": meeting_id,
+                "requestId": request_id,
+                "decision": _project_execution_redact(decision_text),
+                "summary": _project_execution_redact(str(result.get("summary") or "")),
+                "appliedAt": now,
+            })
+            discussion_id = _project_execution_meeting_discussion_key(meeting_id, "decision", decision_text)
+            if discussion_id not in existing_discussion_ids:
+                task["meetingDiscussionPoints"].append({
+                    "id": discussion_id,
+                    "meetingId": meeting_id,
+                    "requestId": request_id,
+                    "kind": "decision",
+                    "title": "会议结论",
+                    "text": _project_execution_redact(decision_text),
+                    "createdAt": now,
+                })
+                existing_discussion_ids.add(discussion_id)
+    raw_items = result.get("actionItems") if isinstance(result.get("actionItems"), list) else []
+    for idx, raw in enumerate(raw_items):
+        title = _project_execution_action_item_text(raw)
+        if not title:
+            continue
+        raw_action_id = (raw or {}).get("id") if isinstance(raw, dict) else ""
+        action_id = str(raw_action_id).strip() if raw_action_id is not None else ""
+        if not action_id:
+            action_id = f"ai-{idx + 1}"
+        meeting_action_id = _project_execution_meeting_action_key(meeting_id, action_id)
+        if meeting_action_id in existing_action_ids:
+            continue
+        description = _project_execution_action_item_description(raw)
+        owner = _project_execution_action_item_owner(raw) or executor_id
+        raw_priority = (raw or {}).get("priority") if isinstance(raw, dict) else ""
+        priority = str(raw_priority).strip() if raw_priority is not None else ""
+        priority = priority or "medium"
+        if _is_archive_manager_agent(owner):
+            continue
+        task["meetingActionItems"].append({
+            "id": meeting_action_id,
+            "meetingId": meeting_id,
+            "requestId": request_id,
+            "sourceActionItemId": action_id,
+            "title": title,
+            "description": description,
+            "owner": owner or executor_id,
+            "status": "pending",
+            "requiredForResume": True,
+            "priority": priority,
+            "createdAt": now,
+            "updatedAt": now,
+        })
+        existing_action_ids.add(meeting_action_id)
+        applied += 1
+    for risk in _project_execution_normalize_meeting_risks(result):
+        risk_id = _project_execution_meeting_discussion_key(meeting_id, "risk", risk)
+        if risk_id in existing_discussion_ids:
+            continue
+        task["meetingDiscussionPoints"].append({
+            "id": risk_id,
+            "meetingId": meeting_id,
+            "requestId": request_id,
+            "kind": "risk",
+            "title": "风险",
+            "text": _project_execution_redact(risk),
+            "createdAt": now,
+        })
+        existing_discussion_ids.add(risk_id)
+        risks_added += 1
+    if applied or linked or risks_added or checklist_seeded or record_changed:
+        task["updatedAt"] = now
+        project["updatedAt"] = now
+        summary = f"Applied meeting {meeting_id}: {applied} task action item(s), {risks_added} risk comment(s)"
+        if checklist_seeded:
+            summary += ", seeded acceptance checklist"
+        if record_changed:
+            summary += ", recorded meeting conclusion"
+        _log_activity(project, "meeting_result_applied_to_task", "meeting", summary, task.get("id"))
+    return {"applied": applied, "linked": linked, "risks": risks_added, "meetingRecordChanged": record_changed, "checklistSeeded": checklist_seeded, "pendingRequired": _project_execution_has_pending_meeting_actions(task)}
+
+
 def _project_execution_apply_meeting_result(meeting):
     if not isinstance(meeting, dict):
         return {"ok": False, "skipped": True, "reason": "invalid_meeting"}
@@ -12072,23 +14984,31 @@ def _project_execution_apply_meeting_result(meeting):
         task["blockedReason"] = None
         task["lastError"] = None
         task["activeAttemptId"] = None
-        _project_execution_transition(project, task, "backlog", "meeting", f"Meeting {meeting.get('id')} reached consensus; task may continue.", request_id)
+        applied = _project_execution_apply_meeting_output_to_task(project, task, meeting, result, request_id)
+        resume_reason = f"Meeting {meeting.get('id')} reached consensus"
+        if applied.get("pendingRequired"):
+            resume_reason += "; meeting action items must be completed before original task resumes."
+        else:
+            resume_reason += "; task may continue."
+        _project_execution_transition(project, task, "backlog", "meeting", resume_reason, request_id)
         _project_execution_move_task_to_column(project, task, _wf_get_backlog_col(project))
         project.update({"workflowActive": False, "workflowPhase": "meeting_resolved_continue", "activeTaskId": None, "activeAgent": None, "projectExecutionFlowActive": project.get("projectExecutionStartMode") == "continuous", "projectExecutionFlowStopReason": None, "updatedAt": now})
         _save_projects(data)
         threading.Thread(target=lambda: _handle_project_execution_start(project_id, task_id, {"projectStart": True, "mode": project.get("projectExecutionStartMode") or "continuous", "autoReviewAfterExecution": True, "by": "meeting"}), daemon=True).start()
-        return {"ok": True, "status": "resolved_continue", "taskId": task_id}
+        return {"ok": True, "status": "resolved_continue", "taskId": task_id, "appliedMeetingResult": applied}
     if outcome in {"rejected", "no_consensus"}:
         blocker.update({"status": "blocked", "resolvedAt": now, "awaitingUserDecision": False})
         _meeting_request_resolve_task_blocker(request_id, "blocked", {"meetingId": meeting.get("id") or "", "outcome": outcome})
         task["meetingBlocker"] = blocker
         task["blockedReason"] = result.get("decision") or result.get("summary") or "Meeting ended without consensus."
+        _project_execution_upsert_meeting_record(task, meeting, result, request_id, outcome, now)
         _project_execution_transition(project, task, "blocked", "meeting", task["blockedReason"], request_id)
         project.update({"workflowActive": False, "workflowPhase": "blocked", "activeTaskId": None, "activeAgent": None, "projectExecutionFlowActive": False, "projectExecutionFlowStopReason": "meeting_no_consensus", "updatedAt": now})
         _save_projects(data)
         return {"ok": True, "status": "blocked", "taskId": task_id}
     blocker.update({"status": "needs_user_decision", "awaitingUserDecision": True})
     task["meetingBlocker"] = blocker
+    _project_execution_upsert_meeting_record(task, meeting, result, request_id, "needs_user_decision", now)
     _project_execution_transition(project, task, "awaiting_meeting_resolution", "meeting", "Meeting requires user decision before task can continue.", request_id)
     project.update({"workflowActive": False, "workflowPhase": "awaiting_meeting_resolution", "activeTaskId": task_id, "activeAgent": None, "projectExecutionFlowActive": False, "projectExecutionFlowStopReason": "meeting_needs_user_decision", "updatedAt": now})
     _save_projects(data)
@@ -14899,17 +17819,53 @@ def _handle_archive_governance_action(project_id, item_id, body):
 
 
 def _project_execution_build_prompt(project, task, attempt, workspace):
-    checklist = task.get("checklist", [])
+    checklist = _project_execution_acceptance_checklist(task)
     checklist_text = "\n".join(f"- [{'x' if item.get('done') else ' '}] {item.get('text', '')}" for item in checklist) or "- No checklist supplied"
     rework_feedback = task.get("reworkFeedback") or attempt.get("reworkFeedback") or ""
     archive_context = _archive_context_prompt_block(project, task)
+    meeting_action_block = ""
+    if attempt.get("meetingActionPhase"):
+        pending_actions = [
+            a for a in (task.get("meetingActionItems") or [])
+            if isinstance(a, dict) and a.get("requiredForResume") is True and a.get("status") == "pending"
+        ]
+        action_lines = []
+        for item in pending_actions:
+            detail = item.get("description") or ""
+            owner = item.get("owner") or task.get("executorAgentId") or task.get("assignee") or ""
+            action_lines.append(f"- {item.get('title', '')}" + (f" — {detail}" if detail else "") + (f" (owner: {owner})" if owner else ""))
+        decision_lines = []
+        for decision in (task.get("meetingDecisionHistory") or [])[-3:]:
+            if isinstance(decision, dict) and decision.get("decision"):
+                decision_lines.append(f"- {decision.get('decision')}")
+        meeting_action_block = (
+            "\nMEETING ACTION ITEM PHASE:\n"
+            "Complete ONLY the meeting-created action items listed below. Do not continue the original task yet.\n"
+            "After completing them, return a concise summary of what was done and any remaining risk.\n"
+            "Pending meeting action items:\n"
+            + ("\n".join(action_lines) if action_lines else "- No pending meeting action items")
+            + "\nMeeting decision context:\n"
+            + ("\n".join(decision_lines) if decision_lines else "- No meeting decision context")
+            + "\n"
+        )
     return (
         "You are the execution agent for a Virtual Office project task.\n"
         f"WORKSPACE: {workspace}\nWork only inside this workspace. Do not review or mark the task complete.\n"
-        "Return a concise execution summary including tests run and remaining risks.\n\n"
+        "EXPECTED WORKFLOW:\n"
+        "1. First read the task and determine what content or deliverable must be produced. Write the task/deliverable acceptance criteria into the task checklist. The checklist is only for deliverable acceptance criteria, not a meeting action-item queue. If the task checklist is empty, include the created acceptance criteria in checklistUpdates and, when possible, persist them with PUT /api/projects/{projectId}/tasks/{taskId}.\n"
+        "2. Execute the task. For any Virtual Office operation, first use the vo-operating-guidelines skill to detect the VO environment, choose the correct VO skill, and follow its boundaries. If you discover an issue that requires alignment, use vo-operating-guidelines to decide whether a formal AI meeting is appropriate; when it is, proactively request a meeting with POST /api/projects/{projectId}/tasks/{taskId}/meeting-requests. Do not confirm or reject meetings yourself. Add the corresponding action items and discussion points as meeting/task context. Do not put those meeting action items or risks into the checklist or comments.\n"
+        "3. Before finishing, inspect whether every checklist item is complete. Mark completed checklist items done; if any item is unfinished, continue working until it is complete.\n"
+        "FINAL RESPONSE FORMAT (strict):\n"
+        "- First output a human-visible Markdown summary under 1200 characters. It may include short bullets for changed files, tests run, and remaining risks.\n"
+        "- Then output exactly one fenced ```json block containing a single object with these optional fields: checklistUpdates, meetingDiscussionPoints, tests.\n"
+        "- Do not print raw JSON outside the fenced json block. Do not put escaped JSON inside the Markdown summary.\n"
+        "- tests must be an array of short strings only, each under 180 characters. Do not put full logs, full API responses, raw tool output, source material, or nested objects in tests.\n"
+        "- checklistUpdates is an array of {id, text, done, evidence}; set done=true only for checklist items you actually verified as complete.\n"
+        "- meetingDiscussionPoints is an array of {kind, title, text, meetingId, requestId} for meeting conclusions, risks, and discussion notes that belong in the task details.\n\n"
         f"PROJECT: {project.get('title', '')}\nPROJECT DESCRIPTION: {project.get('description', '')}\n"
-        f"TASK: {task.get('title', '')}\nTASK DESCRIPTION: {task.get('description', '')}\nATTEMPT: {attempt.get('id')}\n"
+        f"PROJECT_ID: {project.get('id', '')}\nTASK_ID: {task.get('id', '')}\nTASK: {task.get('title', '')}\nTASK DESCRIPTION: {task.get('description', '')}\nATTEMPT: {attempt.get('id')}\n"
         f"REWORK FEEDBACK: {rework_feedback}\nCHECKLIST:\n{checklist_text}\n"
+        f"{meeting_action_block}"
         f"{archive_context}\n"
     )
 
@@ -14917,11 +17873,45 @@ def _project_execution_build_prompt(project, task, attempt, workspace):
 def _project_execution_test_evidence(result):
     explicit = result.get("tests")
     if isinstance(explicit, list):
-        return [_project_execution_redact(item) for item in explicit[:50]]
+        evidence = []
+        for item in explicit[:50]:
+            if isinstance(item, dict):
+                label = item.get("name") or item.get("title") or item.get("command") or item.get("text") or item.get("summary") or item.get("status")
+                status = item.get("status") or item.get("result") or item.get("outcome")
+                text = " · ".join(str(part).strip() for part in (label, status) if str(part or "").strip())
+            else:
+                text = str(item or "")
+            compact = _project_execution_compact_evidence_line(text)
+            if compact:
+                evidence.append(compact)
+        return evidence
     lines = []
+    parsed = _project_execution_extract_json(result.get("reply") or "")
+    if isinstance(parsed, dict):
+        for key in ("tests", "testResults", "checks", "validation", "checkResults"):
+            value = parsed.get(key)
+            if not isinstance(value, list):
+                continue
+            for item in value[:50]:
+                if isinstance(item, dict):
+                    label = item.get("name") or item.get("title") or item.get("command") or item.get("text") or item.get("summary") or item.get("id")
+                    status = item.get("status") or item.get("result") or item.get("outcome")
+                    text = " · ".join(str(part).strip() for part in (label, status) if str(part or "").strip())
+                else:
+                    text = str(item or "")
+                compact = _project_execution_compact_evidence_line(text)
+                if compact:
+                    lines.append(compact)
+            if lines:
+                return lines[:50]
     for line in str(result.get("reply") or "").splitlines():
+        stripped = line.strip()
+        if not stripped or (stripped.startswith("{") and stripped.endswith("}")) or (stripped.startswith("[") and stripped.endswith("]")):
+            continue
         if re.search(r"(?i)\b(test|pytest|npm test|unittest|passed|failed)\b", line):
-            lines.append(_project_execution_redact(line.strip()))
+            compact = _project_execution_compact_evidence_line(stripped)
+            if compact:
+                lines.append(compact)
     return lines[:50]
 
 
@@ -14932,8 +17922,19 @@ def _project_execution_call_executor(executor, prompt, workspace, attempt_id, pr
         return _handle_codex_chat({"agentId": agent_id, "message": prompt, "conversationId": attempt_id, "timeoutSec": timeout, "workspace": workspace, "fromType": "agent"})
     if provider_kind == "hermes":
         return _handle_hermes_chat({"agentId": agent_id, "message": prompt, "conversationId": attempt_id, "timeoutSec": timeout, "fromType": "agent"})
-    reply = _wf_call_agent(agent_id, prompt, timeout=timeout, project_id=project_id, task_id=task_id)
-    ok = not str(reply).startswith("[ERROR]")
+    if provider_kind == "claude-code":
+        return _handle_claude_code_chat({"agentId": agent_id, "message": prompt, "conversationId": attempt_id, "timeoutSec": timeout, "workspace": workspace, "fromType": "agent"})
+    reply = _wf_call_agent(agent_id, prompt, timeout=timeout, project_id=project_id, task_id=attempt_id or task_id)
+    reply_text = str(reply or "")
+    delivered_only = reply_text.startswith("[DELIVERED]")
+    ok = bool(reply) and not reply_text.startswith("[ERROR]") and not delivered_only
+    if delivered_only:
+        return {
+            "ok": False,
+            "reply": reply_text,
+            "error": "OpenClaw message was delivered but no final execution result was returned.",
+            "status": "execution_pending_result",
+        }
     return {"ok": ok, "reply": reply, "error": None if ok else reply, "status": "completed" if ok else "execution_failed"}
 
 
@@ -14949,7 +17950,7 @@ def _project_execution_latest_attempt(task):
 
 def _project_execution_build_review_prompt(project, task, attempt):
     evidence = attempt.get("evidence") or task.get("evidence") or {}
-    checklist = task.get("checklist", [])
+    checklist = _project_execution_acceptance_checklist(task)
     checklist_text = "\n".join(f"- [{'x' if item.get('done') else ' '}] {item.get('text', '')}" for item in checklist) or "- No checklist supplied"
     changed = "\n".join(f"- {name}" for name in (evidence.get("changedFiles") or [])[:100]) or "- No changed files reported"
     tests = "\n".join(f"- {line}" for line in (evidence.get("testResults") or [])[:50]) or "- No test evidence reported"
@@ -14957,6 +17958,7 @@ def _project_execution_build_review_prompt(project, task, attempt):
     return (
         "You are the independent read-only reviewer for a Virtual Office Project Execution task.\n"
         "Review only the evidence below. Do not modify files, run tools that write files, or mark the task done.\n"
+        "The checklist contains deliverable acceptance criteria only; meeting action items and risks are context, not acceptance checklist items.\n"
         "Return one JSON object with fields: status, summary, rationale, items.\n"
         "status must be one of: pass, needs_more_work, blocked.\n\n"
         f"PROJECT: {project.get('title', '')}\nPROJECT DESCRIPTION: {project.get('description', '')}\n"
@@ -14975,7 +17977,9 @@ def _project_execution_call_reviewer(reviewer, prompt, review_id, project_id=Non
         return _handle_codex_chat({"agentId": agent_id, "message": prompt, "conversationId": review_id, "timeoutSec": timeout, "fromType": "agent"})
     if provider_kind == "hermes":
         return _handle_hermes_chat({"agentId": agent_id, "message": prompt, "conversationId": review_id, "timeoutSec": timeout, "fromType": "agent"})
-    reply = _wf_call_agent(agent_id, prompt, timeout=timeout, project_id=project_id, task_id=task_id)
+    if provider_kind == "claude-code":
+        return _handle_claude_code_chat({"agentId": agent_id, "message": prompt, "conversationId": review_id, "timeoutSec": timeout, "fromType": "agent"})
+    reply = _wf_call_agent(agent_id, prompt, timeout=timeout, project_id=project_id, task_id=review_id or task_id)
     ok = not str(reply).startswith("[ERROR]")
     return {"ok": ok, "reply": reply, "error": None if ok else reply, "status": "completed" if ok else "review_failed"}
 
@@ -15067,6 +18071,9 @@ def _project_execution_run_review(project_id, task_id, attempt_id, review_id):
             else:
                 done_result = _project_execution_mark_done(project, task, reviewer.get("id") or "reviewer", "Reviewer passed; task does not require user acceptance.", attempt_id)
                 if not done_result.get("ok"):
+                    continued = _project_execution_continue_for_incomplete_checklist(data, project_id, task_id, project, task, attempt_id, reviewer.get("id") or "reviewer", done_result)
+                    if continued.get("continued"):
+                        return
                     task["blockedReason"] = done_result.get("error")
                     _project_execution_transition(project, task, "blocked", "system", task["blockedReason"], attempt_id)
                 elif attempt.get("projectFlow") or project.get("projectExecutionFlowActive"):
@@ -15150,18 +18157,22 @@ def _project_execution_run_attempt(project_id, task_id, attempt_id, cancel_flag)
     if not project or not task:
         return
     attempt = _project_execution_attempt(task, attempt_id)
-    if not attempt or task.get("activeAttemptId") != attempt_id:
+    if not attempt or (task.get("activeAttemptId") != attempt_id and attempt.get("status") != "cancelling"):
         return
+    checklist_changed = _project_execution_apply_checklist_updates(task, result)
+    discussion_points_changed = _project_execution_apply_meeting_discussion_points(task, result)
     cancelled = cancel_flag.is_set() or result.get("status") == "cancelled"
     evidence = {
         "attemptId": attempt_id,
         "executorSummary": _project_execution_redact(result.get("reply") or ""),
         "changedFiles": sorted(set(final_snapshot.get("files", [])) | set(result.get("modifiedFiles") or []))[:200],
         "workspaceBefore": attempt.get("baseline", {}), "workspaceAfter": final_snapshot,
-        "checklist": task.get("checklist", []),
+        "checklist": _project_execution_acceptance_checklist(task),
         "providerStatus": result.get("status") or ("completed" if result.get("ok") else "execution_failed"),
         "error": _project_execution_redact(result.get("error") or ""), "durationMs": int((time.time() - started) * 1000), "capturedAt": _proj_now(),
         "testResults": _project_execution_test_evidence(result),
+        "checklistUpdated": checklist_changed,
+        "meetingDiscussionUpdated": discussion_points_changed,
         "providerRef": {"providerKind": executor.get("providerKind"), "agentId": executor.get("id"), "attemptId": attempt_id},
     }
     attempt.update({"evidence": evidence, "finishedAt": _proj_now()})
@@ -15174,6 +18185,28 @@ def _project_execution_run_attempt(project_id, task_id, attempt_id, cancel_flag)
     elif result.get("ok"):
         attempt["status"] = "execution_complete"
         task.update({"blockedReason": None, "lastError": None})
+        if attempt.get("meetingActionPhase"):
+            _project_execution_mark_meeting_actions_completed(project, task, attempt_id, executor.get("id") or "executor")
+            attempt["status"] = "meeting_action_items_completed"
+            task["reviewResult"] = {}
+            task["evidence"] = evidence
+            _project_execution_transition(project, task, "backlog", executor.get("id") or "executor", "Meeting action items completed; original task can resume.", attempt_id)
+            _project_execution_move_task_to_column(project, task, _wf_get_backlog_col(project))
+            project.update({
+                "workflowActive": False,
+                "workflowPhase": "meeting_action_items_completed",
+                "activeTaskId": None,
+                "activeAgent": None,
+                "projectExecutionFlowActive": project.get("projectExecutionStartMode") == "continuous",
+                "projectExecutionFlowStopReason": None,
+                "updatedAt": _proj_now(),
+            })
+            _save_projects(data)
+            with _PROJECT_EXECUTION_LOCK:
+                _PROJECT_EXECUTION_CANCEL_FLAGS.pop(attempt_id, None)
+            if not _project_execution_has_pending_meeting_actions(task):
+                threading.Thread(target=lambda: _handle_project_execution_start(project_id, task_id, {"projectStart": True, "mode": project.get("projectExecutionStartMode") or "continuous", "autoReviewAfterExecution": True, "by": "meeting-action-items"}), daemon=True).start()
+            return
         if attempt.get("skipReview"):
             task["reviewResult"] = {
                 "id": f"skipped-{attempt_id}",
@@ -15194,6 +18227,11 @@ def _project_execution_run_attempt(project_id, task_id, attempt_id, cancel_flag)
             else:
                 done_result = _project_execution_mark_done(project, task, "system", "Review skipped by user confirmation; task does not require user acceptance.", attempt_id)
                 if not done_result.get("ok"):
+                    continued = _project_execution_continue_for_incomplete_checklist(data, project_id, task_id, project, task, attempt_id, "system", done_result)
+                    if continued.get("continued"):
+                        with _PROJECT_EXECUTION_LOCK:
+                            _PROJECT_EXECUTION_CANCEL_FLAGS.pop(attempt_id, None)
+                        return
                     task["blockedReason"] = done_result.get("error")
                     _project_execution_transition(project, task, "blocked", "system", task["blockedReason"], attempt_id)
                 elif attempt.get("projectFlow") or project.get("projectExecutionFlowActive"):
@@ -15263,16 +18301,23 @@ def _handle_project_execution_start(project_id, task_id, body):
                 "_status": 409,
             }
         reopened_completed_task = _project_execution_reopen_completed_task(project, task, actor=str(body.get("by") or "user"))
+    if body.get("resetExecutionContext") is True:
+        _project_execution_clear_restart_bindings(task, _proj_now(), str(body.get("by") or "user"), "manual task restart")
     attempt_id = str(uuid.uuid4())
     project["projectExecutionStartMode"] = start_mode if body.get("projectStart") else project.get("projectExecutionStartMode", "continuous")
     project["projectExecutionFlowActive"] = project_flow
     project["projectExecutionFlowStopReason"] = None
-    attempt = {"id": attempt_id, "status": "executing", "startedAt": _proj_now(), "workspacePath": workspace["path"], "workspaceKind": workspace["kind"], "dirtyConfirmed": bool(snapshot.get("dirty")), "dirtyFingerprint": snapshot.get("fingerprint") if snapshot.get("dirty") else "", "executor": roles["executor"], "reviewer": roles.get("reviewer"), "skipReview": bool(roles.get("skipReview")), "skipReviewReason": roles.get("skipReviewReason"), "baseline": snapshot, "startMode": start_mode, "projectFlow": project_flow, "requiresUserAcceptance": _project_execution_requires_user_acceptance(task), "autoReviewAfterExecution": bool(body.get("autoReviewAfterExecution")) and not roles.get("skipReview")}
+    meeting_action_phase = _project_execution_has_pending_meeting_actions(task)
+    attempt_status = "meeting_action_items" if meeting_action_phase else "executing"
+    attempt = {"id": attempt_id, "status": attempt_status, "startedAt": _proj_now(), "workspacePath": workspace["path"], "workspaceKind": workspace["kind"], "dirtyConfirmed": bool(snapshot.get("dirty")), "dirtyFingerprint": snapshot.get("fingerprint") if snapshot.get("dirty") else "", "executor": roles["executor"], "reviewer": roles.get("reviewer"), "skipReview": bool(roles.get("skipReview")), "skipReviewReason": roles.get("skipReviewReason"), "baseline": snapshot, "startMode": start_mode, "projectFlow": project_flow, "requiresUserAcceptance": _project_execution_requires_user_acceptance(task), "autoReviewAfterExecution": bool(body.get("autoReviewAfterExecution")) and not roles.get("skipReview"), "meetingActionPhase": meeting_action_phase}
     task.setdefault("attempts", []).append(attempt)
     task["attempts"] = task["attempts"][-20:]
+    if not task.get("assignee"):
+        task["assignee"] = roles["executor"]["id"]
     task.update({"activeAttemptId": attempt_id, "executorAgentId": roles["executor"]["id"], "reviewerAgentId": (roles.get("reviewer") or {}).get("id"), "blockedReason": None, "lastError": None})
     project.update({"workspaceStatus": workspace, "workflowActive": True, "workflowPhase": "executing", "activeTaskId": task_id, "activeAgent": roles["executor"]["id"]})
-    _project_execution_transition(project, task, "executing", "user", "Project Execution task started", attempt_id)
+    transition_reason = "Meeting action item phase started" if meeting_action_phase else "Project Execution task started"
+    _project_execution_transition(project, task, "executing", "user", transition_reason, attempt_id)
     _save_projects(data)
     cancel_flag = threading.Event()
     with _PROJECT_EXECUTION_LOCK:
@@ -15366,7 +18411,7 @@ def _handle_project_execution_status(project_id, task_id=None):
                 live = bool(attempt_id and (attempt_id in _PROJECT_EXECUTION_CANCEL_FLAGS or attempt_id in _PROJECT_EXECUTION_REVIEW_FLAGS))
             if not live:
                 item["activeAttemptId"] = None
-                item["blockedReason"] = "The previous execution could not be resumed after service restart."
+                item["blockedReason"] = "previous_execution_not_resumable"
                 _project_execution_transition(project, item, "blocked", "system", item["blockedReason"], attempt_id)
                 changed = True
     if changed:
@@ -15385,7 +18430,7 @@ def _handle_project_execution_status(project_id, task_id=None):
 
 
 def _handle_project_execution_cancel(project_id, task_id, body=None):
-    _, project, task = _project_execution_find(project_id, task_id)
+    data, project, task = _project_execution_find(project_id, task_id)
     if not project or not task:
         return {"error": "Task not found", "_status": 404}
     attempt_id = str((body or {}).get("attemptId") or task.get("activeAttemptId") or "")
@@ -15396,13 +18441,28 @@ def _handle_project_execution_cancel(project_id, task_id, body=None):
         if flag:
             flag.set()
     attempt = _project_execution_attempt(task, attempt_id) or {}
+    attempt["status"] = "cancelling"
+    task["activeAttemptId"] = None
+    task["blockedReason"] = "Execution was stopped by user. Existing workspace changes were not rolled back."
+    task["lastError"] = None
+    _project_execution_transition(project, task, "blocked", "user", task["blockedReason"], attempt_id)
+    project.update({
+        "workflowActive": False,
+        "workflowPhase": "blocked",
+        "activeTaskId": None,
+        "activeAgent": None,
+        "projectExecutionFlowActive": False,
+        "projectExecutionFlowStopReason": "user_stopped_execution",
+        "updatedAt": _proj_now(),
+    })
+    _save_projects(data)
     executor = attempt.get("executor") or {}
     if executor.get("providerKind") == "codex":
         _handle_codex_cancel({"agentId": executor.get("id"), "conversationId": attempt_id, "workspace": attempt.get("workspacePath")})
     elif executor.get("providerKind") == "openclaw":
-        raw_session_key = _wf_task_session_key(executor.get("id"), project_id, task_id)
+        raw_session_key = _wf_task_session_key(executor.get("id"), project_id, attempt_id or task_id)
         _wf_abort_task_session(_openclaw_gateway_session_key(executor.get("id"), raw_session_key))
-    return {"ok": True, "status": "cancelling", "attemptId": attempt_id}
+    return {"ok": True, "status": "blocked", "attemptId": attempt_id, "task": task}
 
 
 def _handle_project_execution_review_start(project_id, task_id, body=None):
@@ -16615,9 +19675,10 @@ def _wf_build_task_prompt(task, task_file_content=None, project=None):
         project_context = _wf_build_project_context(project, task) + "\n\n"
 
     checklist_text = ""
-    if task.get("checklist"):
+    acceptance_checklist = _project_execution_acceptance_checklist(task)
+    if acceptance_checklist:
         checklist_text = "\n\nChecklist (you must complete ALL items):\n"
-        for i, item in enumerate(task["checklist"], 1):
+        for i, item in enumerate(acceptance_checklist, 1):
             status = "✅ DONE" if item.get("done") else "⬜ TODO"
             checklist_text += f"  {i}. [{status}] {item.get('text', '')}\n"
 
@@ -16634,11 +19695,17 @@ DESCRIPTION:
 {checklist_text}
 {previous_work}
 
+EXPECTED WORKFLOW:
+1. First read the task and determine what content or deliverable must be produced. Write the task/deliverable acceptance criteria into the task checklist. The checklist is only for deliverable acceptance criteria, not a meeting action-item queue. If the task checklist is empty, include the created acceptance criteria in checklistUpdates and, when possible, persist them with PUT /api/projects/{{projectId}}/tasks/{{taskId}}.
+2. Execute the task. For any Virtual Office operation, first use the vo-operating-guidelines skill to detect the VO environment, choose the correct VO skill, and follow its boundaries. If you discover an issue that requires alignment, use vo-operating-guidelines to decide whether a formal AI meeting is appropriate; when it is, proactively request a meeting with POST /api/projects/{{projectId}}/tasks/{{taskId}}/meeting-requests. Do not confirm or reject meetings yourself. Add the corresponding action items and discussion points as meeting/task context. Do not put those meeting action items or risks into the checklist or comments.
+3. Before finishing, inspect whether every checklist item is complete. Mark completed checklist items done; if any item is unfinished, continue working until it is complete.
+
 MANDATORY RULES — VIOLATIONS WILL FAIL REVIEW:
 1. You MUST use tools (read, edit, exec, browser) to make REAL changes to actual files. Text-only responses WILL BE REJECTED.
 2. Read the relevant source files FIRST to understand the codebase before making changes.
 3. Use the edit tool to modify files. Use exec to run commands, test, or verify.
 4. After making changes, verify them yourself — run the app, check the output, confirm it works.
+5. In your final response include checklistUpdates as JSON: an array of {{id, text, done, evidence}}. Set done=true only for checklist items you actually verified as complete. Include meetingDiscussionPoints as JSON when there are meeting conclusions, risks, or discussion notes for the task.
 5. Use the browser tool to visually verify UI changes on the running app/site if applicable.
 6. In your final report, list EVERY file you modified and what you changed.
 
@@ -16680,8 +19747,9 @@ def _wf_build_review_prompt(task, task_file_content=None, project=None):
         project_context = _wf_build_project_context(project, task) + "\n\n"
 
     items_text = ""
-    if task.get("checklist"):
-        for i, item in enumerate(task["checklist"], 1):
+    acceptance_checklist = _project_execution_acceptance_checklist(task)
+    if acceptance_checklist:
+        for i, item in enumerate(acceptance_checklist, 1):
             items_text += f"  {i}. {item.get('text', '')}\n"
 
     needs_visual_review = _wf_task_needs_visual_review(task)
@@ -16916,6 +19984,12 @@ def _wf_parse_review_response(response_text, checklist, review_cycle=0):
 
     return results
 
+def _wf_unfinished_checklist_items(checklist):
+    return [
+        item for item in (checklist or [])
+        if isinstance(item, dict) and item.get("done") is not True
+    ]
+
 def _wf_run_pipeline(project_id, single_task=False):
     """Main workflow pipeline — runs in a background thread."""
     with _WORKFLOW_LOCK:
@@ -17066,10 +20140,23 @@ def _wf_run_pipeline_inner(project_id, single_task, wf, stop_flag):
             if not task:
                 break
 
-            checklist = task.get("checklist", [])
+            checklist = _project_execution_acceptance_checklist(task)
             if not checklist:
-                # No checklist = auto-pass
-                task_done = True
+                _wf_write_task_file(
+                    project_id,
+                    task,
+                    "review",
+                    review_results=[{
+                        "id": "acceptance-checklist",
+                        "text": "Create task acceptance checklist items before completion.",
+                        "status": "needs_more_work",
+                        "reviewStatus": "needs_more_work",
+                        "reason": "Acceptance checklist is empty.",
+                    }],
+                    work_log_entry="❌ Review: REJECTED — acceptance checklist is empty."
+                )
+                wf["_reworkCount"] = wf.get("_reworkCount", 0) + 1
+                task_done = False
                 break
 
             task_file = _wf_read_task_file(project_id, task_id)
@@ -17129,10 +20216,31 @@ def _wf_run_pipeline_inner(project_id, single_task, wf, stop_flag):
                         work_log_entry=f"❌ Review cycle {review_cycle}: REJECTED — agent claimed PASS but {reason}. {review_tool_count} total tool calls.")
 
             if all_pass:
-                wf["_reworkCount"] = 0
-                wf["_parseFailCount"] = 0
-                task_done = True
-                break
+                unfinished_items = _wf_unfinished_checklist_items(checklist)
+                if unfinished_items:
+                    all_pass = False
+                    failed_items = [
+                        {
+                            "id": item.get("id"),
+                            "text": item.get("text", ""),
+                            "status": "needs_more_work",
+                            "reviewStatus": "needs_more_work",
+                            "reason": "Checklist item is still unchecked.",
+                        }
+                        for item in unfinished_items
+                    ]
+                    _wf_write_task_file(
+                        project_id,
+                        task,
+                        "review",
+                        review_results=failed_items,
+                        work_log_entry=f"❌ Review cycle {review_cycle}: REJECTED — {len(unfinished_items)} checklist item(s) are still unchecked."
+                    )
+                else:
+                    wf["_reworkCount"] = 0
+                    wf["_parseFailCount"] = 0
+                    task_done = True
+                    break
 
             if needs_user:
                 # Pause workflow — user must intervene
@@ -17257,17 +20365,6 @@ def _wf_run_pipeline_inner(project_id, single_task, wf, stop_flag):
                 # Write completion with activity summary
                 completion_entry = f"Task completed — all review checks passed\n\n### Task Completion Summary\n{activity_summary}"
                 _wf_write_task_file(project_id, task, "done", work_log_entry=completion_entry)
-
-                # Mark all checklist items as done
-                data = _load_projects()
-                project = next((x for x in data["projects"] if x["id"] == project_id), None)
-                if project:
-                    task = next((t for t in project["tasks"] if t["id"] == task_id), None)
-                    if task and task.get("checklist"):
-                        for item in task["checklist"]:
-                            item["done"] = True
-                        task["updatedAt"] = _proj_now()
-                        _save_projects(data)
 
             # Clean up workflow sessions for this task (AFTER activity extraction)
             _wf_cleanup_task_sessions(assignee, project_id, task_id)
@@ -17475,11 +20572,14 @@ def _handle_workflow_chat(project_id):
     if not agent_key or not task_id:
         return {"ok": True, "messages": [], "agent": None, "phase": phase}
 
-    # Read ONLY from the task-specific workflow session — not the agent's main session
-    msgs = _wf_get_task_session_messages(agent_key, project_id, task_id, conversation_id=conversation_id)
+    # Read ONLY from the execution-scoped session. Project Execution uses the
+    # active attempt/review id for OpenClaw sessions so repeat triggers do not
+    # continue a prior run's transcript.
+    session_task_id = conversation_id if (project_execution_active and conversation_id and not (_is_hermes_agent(agent_key) or _is_codex_agent(agent_key))) else task_id
+    msgs = _wf_get_task_session_messages(agent_key, project_id, session_task_id, conversation_id=conversation_id)
 
     # Check if the workflow session is still actively running
-    session_active = _wf_is_task_session_active(agent_key, project_id, task_id)
+    session_active = _wf_is_task_session_active(agent_key, project_id, session_task_id)
 
     return {
         "ok": True,
@@ -17508,7 +20608,9 @@ def _codex_reasoning_events_to_chat_messages(events, agent_id, max_messages=50):
             continue
         if event_id:
             state["ids"].add(event_id)
-        incoming = str(event.get("text") or event.get("output") or "")
+        incoming = _provider_visible_thinking("codex", {**event, "thinking": event.get("text") or event.get("output") or ""})
+        if not incoming:
+            continue
         if event.get("replace") and incoming.strip():
             state["text"] = incoming
         else:
@@ -17904,8 +21006,22 @@ def _handle_agent_delete(body):
         agent = _office_agent_lookup(agent_id)
         provider_kind = (agent or {}).get("providerKind", "openclaw")
         if provider_kind == "codex" or agent_id.startswith("codex-"):
-            return {"error": "Codex collaborator is configured by VO_CODEX_* startup settings and cannot be deleted here", "_status": 403}
-        if provider_kind == "hermes" or agent_id.startswith("hermes-"):
+            profile = (agent or {}).get("providerAgentId") or agent_id.replace("codex-", "", 1)
+            result = _codex_provider_from_config().delete_agent(profile)
+            if not result.get("ok"):
+                return {"error": result.get("error", "Codex agent delete failed"), "_status": 500}
+        elif provider_kind == "claude-code" or agent_id.startswith("claude-code-"):
+            profile = (agent or {}).get("providerAgentId") or agent_id.replace("claude-code-", "", 1)
+            result = _claude_code_provider_from_config().delete_agent(profile)
+            if not result.get("ok"):
+                return {"error": result.get("error", "Claude Code agent delete failed"), "_status": 500}
+            try:
+                os.remove(_claude_code_history_path(profile))
+            except FileNotFoundError:
+                pass
+            except OSError as e:
+                print(f"[CLAUDE-CODE] Failed to remove VO history for deleted profile {profile}: {e}")
+        elif provider_kind == "hermes" or agent_id.startswith("hermes-"):
             profile = (agent or {}).get("providerAgentId") or agent_id.replace("hermes-", "", 1)
             provider = HermesProvider(
                 home_path=VO_CONFIG.get("hermes", {}).get("homePath"),
@@ -18826,23 +21942,7 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             # Return dynamically discovered agent roster
             refresh_agent_maps()
             # Load office-config overrides for agent names/emoji/branch
-            _oc_overrides = {}
-            _oc_branches = {}
-            try:
-                _oc_path = os.path.join(STATUS_DIR, "office-config.json")
-                with open(_oc_path, "r") as f:
-                    _oc_data = json.load(f)
-                for _oc_agent in _oc_data.get("agents", []):
-                    _oc_id = _oc_agent.get("id", "")
-                    if _oc_id:
-                        _oc_overrides[_oc_id] = _oc_agent
-                # Build branch ID → display name map
-                for _br in _oc_data.get("branches", []):
-                    _br_id = _br.get("id", "")
-                    if _br_id:
-                        _oc_branches[_br_id] = _br.get("name", _br_id)
-            except (FileNotFoundError, json.JSONDecodeError):
-                pass
+            _oc_overrides, _oc_branches = _load_office_agent_overrides()
             agents = []
             for a in get_roster():
                 provider_kind = a.get("providerKind", "openclaw")
@@ -18850,10 +21950,12 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                     session_key = f"hermes:{a.get('profile', a['id'])}"
                 elif provider_kind == "codex":
                     session_key = f"codex:{a.get('profile') or a.get('providerAgentId') or a['id']}"
+                elif provider_kind == "claude-code":
+                    session_key = f"claude-code:{a.get('profile') or a.get('providerAgentId') or a['id']}"
                 else:
                     session_key = f"agent:{a['id']}:main"
-                # Prefer office-config name/emoji over IDENTITY.md
-                oc = _oc_overrides.get(a["statusKey"], {})
+                # Prefer office-config name/emoji over provider discovery.
+                oc = _office_agent_override_for(a, _oc_overrides)
                 # Resolve branch ID to display name
                 branch_id = oc.get("branch", "")
                 branch_name = _oc_branches.get(branch_id, "") if branch_id else ""
@@ -18866,6 +21968,7 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                     "providerKind": provider_kind,
                     "providerType": a.get("providerType", "runtime"),
                     "providerAgentId": a.get("providerAgentId", a["id"]),
+                    "profile": a.get("profile") or a.get("providerAgentId") or "",
                     "emoji": oc.get("emoji") or a["emoji"],
                     "name": oc.get("name") or a["name"],
                     "role": a.get("role", ""),
@@ -18914,9 +22017,13 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                 if _is_hermes_agent(agent_key):
                     agent = _get_hermes_agent(agent_key) or {}
                     profile = agent.get("profile") or agent.get("providerAgentId") or "default"
-                    msgs = _load_hermes_history(profile)[-500:]
+                    msgs = _load_provider_histories_for_bubbles("hermes", profile, 500)
                 elif _is_codex_agent(agent_key):
                     msgs = []
+                elif _is_claude_code_agent(agent_key):
+                    agent = _get_claude_code_agent(agent_key) or {}
+                    profile = agent.get("profile") or agent.get("providerAgentId") or "local"
+                    msgs = _load_provider_histories_for_bubbles("claude-code", profile, 500)
                 else:
                     msgs = get_agent_messages(agent_key, max_messages=500)
                 if msgs:
@@ -19261,20 +22368,29 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
+            _oc_overrides, _oc_branches = _load_office_agent_overrides()
             roster = []
             for a in get_roster():
+                oc = _office_agent_override_for(a, _oc_overrides)
+                provider_kind = a.get("providerKind", "openclaw")
+                branch_id = oc.get("branch", "")
+                branch_name = _oc_branches.get(branch_id, "") if branch_id else ""
+                if not branch_name:
+                    branch_name = provider_kind.title() if provider_kind != "openclaw" else "Unassigned"
                 agent_payload = {
                     "id": a["id"],
                     "statusKey": a["statusKey"],
-                    "providerKind": a.get("providerKind", "openclaw"),
+                    "providerKind": provider_kind,
                     "providerType": a.get("providerType", "runtime"),
                     "providerAgentId": a.get("providerAgentId", a["id"]),
-                    "name": a["name"],
-                    "emoji": a["emoji"],
+                    "profile": a.get("profile") or a.get("providerAgentId") or "",
+                    "name": oc.get("name") or a["name"],
+                    "emoji": oc.get("emoji") or a["emoji"],
                     "role": a.get("role", ""),
                     "model": a.get("model", ""),
                     "provider": a.get("provider", ""),
                     "lastActiveAt": a.get("lastActiveAt", 0),
+                    "branch": branch_name,
                 }
                 agent_payload.update(_agent_archive_manager_meta(a.get("statusKey") or a.get("id")))
                 roster.append(agent_payload)
@@ -19368,21 +22484,6 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
         elif request_path.startswith("/api/hermes/runs/") and request_path.endswith("/events"):
             run_id = urllib.parse.unquote(request_path[len("/api/hermes/runs/"):-len("/events")].strip("/"))
             _handle_hermes_run_events(self, run_id)
-        elif request_path.startswith("/api/codex/runs/") and request_path.endswith("/events"):
-            run_id = urllib.parse.unquote(request_path[len("/api/codex/runs/"):-len("/events")].strip("/"))
-            _handle_codex_run_events(self, run_id)
-        elif request_path.startswith("/api/claude-code/runs/") and request_path.endswith("/events"):
-            run_id = urllib.parse.unquote(request_path[len("/api/claude-code/runs/"):-len("/events")].strip("/"))
-            _handle_claude_code_run_events(self, run_id)
-        elif request_path == "/api/codex/approval/pending":
-            agent_key = (query_params.get("agentId") or query_params.get("key") or ["codex-default"])[0]
-            result = _handle_codex_approval_pending(agent_key)
-            self.send_response(result.get("_status", 200))
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.end_headers()
-            result.pop("_status", None)
-            self.wfile.write(json.dumps(result).encode())
         elif self.path == "/api/hermes/test":
             result = _handle_hermes_test()
             self.send_response(200 if result.get("ok") else 503)
@@ -19401,7 +22502,7 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             conversation_id = (qs.get("conversationId") or [""])[0]
             agent_id = (qs.get("agentId") or ["codex-local"])[0]
-            events = _load_comm_history(limit=500, conversation_id=conversation_id, agent_id=agent_id)
+            events = _dedupe_visible_comm_history(_load_comm_history(limit=500, conversation_id=conversation_id, agent_id=agent_id))
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
@@ -19411,6 +22512,38 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             result = _handle_codex_activity(qs)
             self.send_response(result.pop("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps(result).encode())
+        elif request_path == "/api/codex/approval/pending":
+            result = _handle_codex_approval_pending(query_params)
+            self.send_response(result.pop("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps(result).encode())
+        elif request_path.startswith("/api/codex/runs/") and request_path.endswith("/events"):
+            run_id = urllib.parse.unquote(request_path[len("/api/codex/runs/"):-len("/events")].strip("/"))
+            _handle_codex_run_events(self, run_id)
+        elif self.path == "/api/claude-code/history" or self.path.startswith("/api/claude-code/history?"):
+            qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            agent_key = (qs.get("agentId") or qs.get("key") or ["claude-code-local"])[0]
+            conversation_id = (qs.get("conversationId") or [""])[0]
+            agent = _get_claude_code_agent(agent_key)
+            profile = (agent or {}).get("profile") or (agent or {}).get("providerAgentId") or "local"
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            messages = _sanitize_claude_code_history_messages(_load_claude_code_history(profile, conversation_id))
+            self.wfile.write(json.dumps({"ok": True, "messages": messages}).encode())
+        elif request_path.startswith("/api/claude-code/runs/") and request_path.endswith("/events"):
+            run_id = urllib.parse.unquote(request_path[len("/api/claude-code/runs/"):-len("/events")].strip("/"))
+            _handle_claude_code_run_events(self, run_id)
+        elif self.path == "/api/claude-code/test":
+            result = _handle_claude_code_test()
+            self.send_response(200 if result.get("ok") else 503)
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
@@ -19584,67 +22717,7 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             self.wfile.write(json.dumps(status).encode())
         elif self.path == "/vo-config":
             # Expose config to frontend
-            lic = get_license_status()
-            safe_config = {
-                "office": VO_CONFIG["office"],
-                "features": VO_CONFIG["features"],
-                "weather": VO_CONFIG["weather"],
-                "openclaw": {
-                    "gatewayUrl": VO_CONFIG["openclaw"]["gatewayUrl"],
-                    "gatewayHttp": VO_CONFIG["openclaw"]["gatewayHttp"],
-                    "homePath": VO_CONFIG["openclaw"]["homePath"],
-                    "detected": os.path.isdir(VO_CONFIG["openclaw"]["homePath"]),
-                },
-                "browser": {
-                    "cdpUrl": VO_CONFIG.get("browser", {}).get("cdpUrl"),
-                    "viewerUrl": VO_CONFIG.get("browser", {}).get("viewerUrl"),
-                },
-                "hermes": {
-                    "enabled": VO_CONFIG.get("hermes", {}).get("enabled", True),
-                    "homePath": VO_CONFIG.get("hermes", {}).get("homePath"),
-                    "binary": VO_CONFIG.get("hermes", {}).get("binary"),
-                    "timeoutSec": VO_CONFIG.get("hermes", {}).get("timeoutSec", 600),
-                    "apiUrl": VO_CONFIG.get("hermes", {}).get("apiUrl"),
-                    "apiKeyConfigured": bool(VO_CONFIG.get("hermes", {}).get("apiKey")),
-                    "preferApi": VO_CONFIG.get("hermes", {}).get("preferApi", True),
-                    "detected": bool(_handle_hermes_test().get("ok")),
-                },
-                "codex": {
-                    "enabled": VO_CONFIG.get("codex", {}).get("enabled", True),
-                    "homePath": VO_CONFIG.get("codex", {}).get("homePath"),
-                    "binary": VO_CONFIG.get("codex", {}).get("binary"),
-                    "workspaceRoot": VO_CONFIG.get("codex", {}).get("workspaceRoot"),
-                    "mainWorkspace": VO_CONFIG.get("codex", {}).get("mainWorkspace"),
-                    "timeoutSec": VO_CONFIG.get("codex", {}).get("timeoutSec", 900),
-                    "model": VO_CONFIG.get("codex", {}).get("model"),
-                    "sandbox": VO_CONFIG.get("codex", {}).get("sandbox", "workspace-write"),
-                    "approvalPolicy": VO_CONFIG.get("codex", {}).get("approvalPolicy", "never"),
-                    "preferAppServer": VO_CONFIG.get("codex", {}).get("preferAppServer", True),
-                    "includeMain": VO_CONFIG.get("codex", {}).get("includeMain", True),
-                    "includeNativeAgents": VO_CONFIG.get("codex", {}).get("includeNativeAgents", True),
-                    "registerNativeAgents": VO_CONFIG.get("codex", {}).get("registerNativeAgents", True),
-                },
-                "claudeCode": {
-                    "enabled": VO_CONFIG.get("claudeCode", {}).get("enabled", True),
-                    "homePath": VO_CONFIG.get("claudeCode", {}).get("homePath"),
-                    "binary": VO_CONFIG.get("claudeCode", {}).get("binary"),
-                    "workspaceRoot": VO_CONFIG.get("claudeCode", {}).get("workspaceRoot"),
-                    "mainWorkspace": VO_CONFIG.get("claudeCode", {}).get("mainWorkspace"),
-                    "timeoutSec": VO_CONFIG.get("claudeCode", {}).get("timeoutSec", 900),
-                    "model": VO_CONFIG.get("claudeCode", {}).get("model"),
-                    "permissionMode": VO_CONFIG.get("claudeCode", {}).get("permissionMode", "acceptEdits"),
-                    "includeMain": VO_CONFIG.get("claudeCode", {}).get("includeMain", True),
-                    "includeNativeAgents": VO_CONFIG.get("claudeCode", {}).get("includeNativeAgents", True),
-                    "registerNativeAgents": VO_CONFIG.get("claudeCode", {}).get("registerNativeAgents", True),
-                },
-                "license": {
-                    "licensed": lic["licensed"],
-                    "tier": lic["tier"],
-                    "tierName": lic["tierName"],
-                    "demo": lic["demo"],
-                    "limits": lic.get("limits"),
-                },
-            }
+            safe_config = _build_safe_vo_config()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
@@ -19678,6 +22751,45 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                 self.send_response(502)
                 self.end_headers()
                 self.wfile.write(json.dumps({"error": str(e)}).encode())
+        elif urllib.parse.urlparse(self.path).path == "/api/weather/test":
+            parsed_weather = urllib.parse.urlparse(self.path)
+            qs = urllib.parse.parse_qs(parsed_weather.query or "")
+            _wloc = (qs.get("location") or [""])[0].strip()
+            if not _wloc:
+                self.send_response(400)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(json.dumps({"ok": False, "error": "Weather location is required"}).encode())
+                return
+            try:
+                _wloc_encoded = urllib.parse.quote(_wloc, safe='')
+                req = urllib.request.Request(f"https://wttr.in/{_wloc_encoded}?format=j1", headers={"User-Agent": "curl/7.68"})
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
+                current = (data.get("current_condition") or [{}])[0]
+                area = (((data.get("nearest_area") or [{}])[0]).get("areaName") or [{}])[0].get("value") or _wloc
+                region = (((data.get("nearest_area") or [{}])[0]).get("region") or [{}])[0].get("value") or ""
+                desc = ((current.get("weatherDesc") or [{}])[0].get("value") or "")
+                result = {
+                    "ok": True,
+                    "location": _wloc,
+                    "resolvedLocation": (area + ((", " + region) if region else "")).strip(),
+                    "weather": desc,
+                    "tempF": current.get("temp_F"),
+                    "tempC": current.get("temp_C"),
+                }
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(json.dumps(result).encode())
+            except Exception as e:
+                self.send_response(502)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(json.dumps({"ok": False, "error": str(e)}).encode())
         elif self.path == "/api/skills-library":
             result = _handle_skills_library_list()
             self.send_response(200)
@@ -20243,6 +23355,11 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             model = agent.get("model") or "Codex"
             provider = agent.get("provider") or "OpenAI Codex"
             return {"model": model, "provider": provider, "providerKind": "codex", "contextWindow": 0}
+        if agent_id and _is_claude_code_agent(agent_id):
+            agent = _get_claude_code_agent(agent_id) or {}
+            model = agent.get("model") or "Claude Code"
+            provider = agent.get("provider") or "Claude Code"
+            return {"model": model, "provider": provider, "providerKind": "claude-code", "contextWindow": 0}
 
     def _context_window_for_model(self, model, cfg):
         model = str(model or "")
@@ -20450,7 +23567,58 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
         for mid, mdata in cfg.get("agents", {}).get("defaults", {}).get("models", {}).items():
             configured_models[mid] = mdata
 
-        return {"authProfiles": auth_profiles, "customProviders": custom_providers, "modelParams": model_params, "configuredModels": configured_models}
+        safe_vo_config = _build_safe_vo_config()
+        native_providers = {
+            "hermes": {
+                "enabled": safe_vo_config.get("hermes", {}).get("enabled", True),
+                "detected": safe_vo_config.get("hermes", {}).get("detected", False),
+                "model": _first_provider_agent_model("hermes"),
+                "homePath": safe_vo_config.get("hermes", {}).get("homePath"),
+                "binary": safe_vo_config.get("hermes", {}).get("binary"),
+                "timeoutSec": safe_vo_config.get("hermes", {}).get("timeoutSec"),
+                "apiEnabled": safe_vo_config.get("hermes", {}).get("apiEnabled", False),
+                "preferApi": safe_vo_config.get("hermes", {}).get("preferApi", safe_vo_config.get("hermes", {}).get("apiEnabled", False)),
+                "apiUrl": safe_vo_config.get("hermes", {}).get("apiUrl"),
+                "apiDetected": safe_vo_config.get("hermes", {}).get("apiDetected", False),
+                "configSurface": "models-native",
+            },
+            "codex": {
+                "enabled": safe_vo_config.get("codex", {}).get("enabled", False),
+                "detected": safe_vo_config.get("codex", {}).get("detected", False),
+                "model": safe_vo_config.get("codex", {}).get("model") or _first_provider_agent_model("codex"),
+                "homePath": safe_vo_config.get("codex", {}).get("homePath"),
+                "binary": safe_vo_config.get("codex", {}).get("binary"),
+                "workspace": safe_vo_config.get("codex", {}).get("workspace"),
+                "workspaceRoot": safe_vo_config.get("codex", {}).get("workspaceRoot"),
+                "mainWorkspace": safe_vo_config.get("codex", {}).get("mainWorkspace"),
+                "bridgeUrl": safe_vo_config.get("codex", {}).get("bridgeUrl"),
+                "sandbox": safe_vo_config.get("codex", {}).get("sandbox"),
+                "approvalPolicy": safe_vo_config.get("codex", {}).get("approvalPolicy"),
+                "includeMain": safe_vo_config.get("codex", {}).get("includeMain", True),
+                "includeNativeAgents": safe_vo_config.get("codex", {}).get("includeNativeAgents", True),
+                "registerNativeAgents": safe_vo_config.get("codex", {}).get("registerNativeAgents", True),
+                "preferAppServer": safe_vo_config.get("codex", {}).get("preferAppServer", True),
+                "configSurface": "models-native",
+            },
+            "claude-code": {
+                "enabled": safe_vo_config.get("claudeCode", {}).get("enabled", False),
+                "detected": safe_vo_config.get("claudeCode", {}).get("detected", False),
+                "model": safe_vo_config.get("claudeCode", {}).get("model") or _first_provider_agent_model("claude-code"),
+                "homePath": safe_vo_config.get("claudeCode", {}).get("homePath"),
+                "binary": safe_vo_config.get("claudeCode", {}).get("binary"),
+                "workspace": safe_vo_config.get("claudeCode", {}).get("workspace"),
+                "workspaceRoot": safe_vo_config.get("claudeCode", {}).get("workspaceRoot"),
+                "mainWorkspace": safe_vo_config.get("claudeCode", {}).get("mainWorkspace"),
+                "timeoutSec": safe_vo_config.get("claudeCode", {}).get("timeoutSec"),
+                "permissionMode": safe_vo_config.get("claudeCode", {}).get("permissionMode"),
+                "includeMain": safe_vo_config.get("claudeCode", {}).get("includeMain", True),
+                "includeNativeAgents": safe_vo_config.get("claudeCode", {}).get("includeNativeAgents", True),
+                "registerNativeAgents": safe_vo_config.get("claudeCode", {}).get("registerNativeAgents", True),
+                "configSurface": "models-native",
+            },
+        }
+
+        return {"authProfiles": auth_profiles, "customProviders": custom_providers, "modelParams": model_params, "configuredModels": configured_models, "nativeProviders": native_providers}
 
     def _save_provider_key(self, provider, key):
         """Save a cloud provider API key to auth-profiles.json via watcher."""
@@ -21100,7 +24268,15 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
         # --- SETUP WIZARD ---
         if self.path == "/setup/save":
             length = int(self.headers.get('Content-Length', 0))
-            body = json.loads(self.rfile.read(length)) if length else {}
+            try:
+                body = json.loads(self.rfile.read(length)) if length else {}
+            except json.JSONDecodeError as e:
+                self.send_response(400)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(json.dumps({"ok": False, "error": f"Invalid JSON: {str(e)}"}).encode())
+                return
             cfg_path = _resolve_config_path()
             # Always save to persistent volume if available (survives container recreation)
             data_dir = os.environ.get("VO_STATUS_DIR", "/data")
@@ -21117,25 +24293,7 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                         break
                     except (FileNotFoundError, json.JSONDecodeError):
                         continue
-                # Deep merge
-                for key in body:
-                    if key.startswith("_"):
-                        continue
-                    if key == "hermes" and isinstance(body[key], dict) and isinstance(existing.get(key), dict):
-                        hermes_body = dict(body[key])
-                        # Password fields render blank/masked in the browser. A blank submit
-                        # should keep the existing server-side secret instead of disabling
-                        # native Hermes API auth.
-                        if not hermes_body.get("apiKey") and existing[key].get("apiKey"):
-                            hermes_body.pop("apiKey", None)
-                        if not hermes_body.get("apiUrl") and existing[key].get("apiUrl"):
-                            hermes_body.pop("apiUrl", None)
-                        existing[key].update(hermes_body)
-                        continue
-                    if isinstance(body[key], dict) and isinstance(existing.get(key), dict):
-                        existing[key].update(body[key])
-                    else:
-                        existing[key] = body[key]
+                existing = _merge_setup_config(existing, body)
                 existing["_setupComplete"] = True
                 with open(cfg_path, "w") as f:
                     json.dump(existing, f, indent=2)
@@ -21679,6 +24837,28 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             result.pop("_status", None)
             self.wfile.write(json.dumps(result).encode())
             return
+        elif self.path == "/api/hermes/runs":
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            result = _handle_hermes_run_start(body)
+            self.send_response(result.pop("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps(result).encode())
+            return
+        elif request_path.startswith("/api/hermes/runs/") and request_path.endswith("/stop"):
+            run_id = urllib.parse.unquote(request_path[len("/api/hermes/runs/"):-len("/stop")].strip("/"))
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            body["runId"] = body.get("runId") or run_id
+            result = _handle_hermes_run_stop(body)
+            self.send_response(result.pop("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps(result).encode())
+            return
         elif self.path == "/api/agent-platform-communications/send":
             length = int(self.headers.get('Content-Length', 0))
             body = json.loads(self.rfile.read(length)) if length else {}
@@ -21693,27 +24873,12 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
         elif self.path == "/api/hermes/history/clear":
             length = int(self.headers.get('Content-Length', 0))
             body = json.loads(self.rfile.read(length)) if length else {}
-            agent = _get_hermes_agent(body.get("agentId") or body.get("key") or "hermes-default") or {}
-            profile = agent.get("profile") or agent.get("providerAgentId") or "default"
-            session_id = _get_hermes_session_id(profile)
-            delete_result = {"ok": True, "deleted": False}
-            if session_id:
-                hermes_cfg = VO_CONFIG.get("hermes", {})
-                hermes_bin = os.path.expanduser(agent.get("binary") or hermes_cfg.get("binary") or "~/.local/bin/hermes")
-                provider = HermesProvider(
-                    home_path=hermes_cfg.get("homePath"),
-                    binary=hermes_bin,
-                    enabled=hermes_cfg.get("enabled", True),
-                    timeout_sec=int(hermes_cfg.get("timeoutSec") or 600),
-                )
-                delete_result = provider.delete_session(profile, session_id)
-            _save_hermes_history(profile, [])
-            _set_hermes_session_id(profile, "")
+            result = _handle_hermes_history_clear(body)
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
-            self.wfile.write(json.dumps({"ok": True, "deletedHermesSession": bool(delete_result.get("deleted")), "sessionId": session_id}).encode())
+            self.wfile.write(json.dumps(result).encode())
             return
         elif self.path == "/api/codex/history/clear":
             length = int(self.headers.get('Content-Length', 0))
@@ -21770,9 +24935,10 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             body = json.loads(self.rfile.read(length)) if length else {}
             body.setdefault("fromType", "human")
             body.setdefault("fromDisplayName", "User")
-            body.setdefault("fromId", "user")
-            body.setdefault("toAgentId", body.get("agentId") or "codex-local")
-            result = _handle_agent_platform_comm_send(body)
+            body.setdefault("sourceApp", "virtual-office")
+            body.setdefault("sourceSurface", "chat-window")
+            body.setdefault("sourceLabel", "Virtual Office Chat")
+            result = _handle_codex_chat(body)
             self.send_response(result.get("_status", 200) if "_status" in result else (200 if result.get("ok") or result.get("status") == "cancelled" else 409 if result.get("status") in {"busy", "needs_human_intervention"} else 500))
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
@@ -21810,10 +24976,118 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(json.dumps(result).encode())
             return
+        elif self.path == "/api/codex/approval/respond":
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            result = _handle_codex_approval_respond(body)
+            self.send_response(result.pop("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps(result).encode())
+            return
         elif self.path == "/api/codex/cancel":
             length = int(self.headers.get('Content-Length', 0))
             body = json.loads(self.rfile.read(length)) if length else {}
             result = _handle_codex_cancel(body)
+            self.send_response(result.pop("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps(result).encode())
+            return
+        elif self.path == "/api/codex/runs":
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            result = _handle_codex_run_start(body)
+            self.send_response(result.pop("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps(result).encode())
+            return
+        elif request_path.startswith("/api/codex/runs/") and request_path.endswith("/stop"):
+            run_id = urllib.parse.unquote(request_path[len("/api/codex/runs/"):-len("/stop")].strip("/"))
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            body["runId"] = body.get("runId") or run_id
+            result = _handle_codex_run_stop(body)
+            self.send_response(result.pop("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps(result).encode())
+            return
+        elif self.path == "/api/claude-code/chat":
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            result = _handle_claude_code_chat(body)
+            self.send_response(result.get("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            result.pop("_status", None)
+            self.wfile.write(json.dumps(result).encode())
+            return
+        elif self.path == "/api/claude-code/runs":
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            result = _handle_claude_code_run_start(body)
+            self.send_response(result.pop("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps(result).encode())
+            return
+        elif request_path.startswith("/api/claude-code/runs/") and request_path.endswith("/stop"):
+            run_id = urllib.parse.unquote(request_path[len("/api/claude-code/runs/"):-len("/stop")].strip("/"))
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            body["runId"] = body.get("runId") or run_id
+            result = _handle_claude_code_interrupt(body)
+            self.send_response(result.pop("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps(result).encode())
+            return
+        elif self.path == "/api/claude-code/history/clear":
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            agent = _get_claude_code_agent(body.get("agentId") or body.get("key") or "claude-code-local") or {}
+            profile = agent.get("profile") or agent.get("providerAgentId") or "local"
+            conversation_id = str(body.get("conversationId") or "").strip()
+            _save_claude_code_history(profile, [], conversation_id, "")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps({"ok": True, "clearedClaudeCodeSession": True, "profile": profile, "conversationId": conversation_id}).encode())
+            return
+        elif self.path == "/api/claude-code/test":
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            result = _handle_claude_code_test(body)
+            self.send_response(200 if result.get("ok") else 503)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps(result).encode())
+            return
+        elif self.path == "/api/claude-code/cancel":
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            result = _handle_claude_code_cancel(body)
+            self.send_response(result.pop("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps(result).encode())
+            return
+        elif self.path == "/api/claude-code/interrupt":
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            result = _handle_claude_code_interrupt(body)
             self.send_response(result.pop("_status", 200))
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")

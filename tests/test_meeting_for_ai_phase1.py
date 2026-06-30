@@ -51,6 +51,127 @@ def create_meeting(**overrides):
     return server._handle_executable_meeting_create(body)
 
 
+def test_meeting_hermes_provider_uses_meeting_conversation_id():
+    old_lookup = server._office_agent_lookup
+    old_chat = server._handle_hermes_chat
+    calls = []
+
+    def fake_lookup(agent_id):
+        if agent_id == "hermes-default":
+            return {"id": agent_id, "providerKind": "hermes", "providerAgentId": "default"}
+        return old_lookup(agent_id)
+
+    def fake_chat(body):
+        calls.append(dict(body))
+        return {
+            "ok": True,
+            "reply": json.dumps({
+                "position": "meeting scoped",
+                "reasoning": "uses the executable meeting conversation",
+                "disagreements": [],
+                "questions": [],
+                "suggestedNextStep": "continue",
+                "confidence": "high",
+            }),
+            "sessionId": "hermes-session-meeting",
+            "conversationId": body.get("conversationId") or "",
+        }
+
+    server._office_agent_lookup = fake_lookup
+    server._handle_hermes_chat = fake_chat
+    try:
+        meeting = {"id": "m-hermes-scope"}
+        result = server._meeting_call_provider(meeting, "hermes-default", "meeting prompt")
+        expected = "meeting:m-hermes-scope:participant:hermes-default"
+        assert result["ok"] is True
+        assert result["conversationId"] == expected
+        assert result["providerRef"]["conversationId"] == expected
+        assert result["providerRef"]["sessionId"] == "hermes-session-meeting"
+        assert calls[0]["conversationId"] == expected
+        assert calls[0]["fromType"] == "agent"
+    finally:
+        server._office_agent_lookup = old_lookup
+        server._handle_hermes_chat = old_chat
+
+
+def test_meeting_mixed_openclaw_hermes_codex_participants_use_provider_dispatch():
+    with tempfile.TemporaryDirectory() as status_dir:
+        old_store = with_meeting_store(status_dir)
+        old_lookup = server._office_agent_lookup
+        old_codex = server._handle_codex_chat
+        old_hermes = server._handle_hermes_chat
+        old_wf = server._wf_call_agent
+        calls = []
+
+        def fake_lookup(agent_id):
+            providers = {
+                "main": "openclaw",
+                "hermes-default": "hermes",
+                "codex-local": "codex",
+            }
+            return {
+                "id": agent_id,
+                "statusKey": agent_id,
+                "providerAgentId": agent_id.replace("hermes-", "").replace("codex-", ""),
+                "providerKind": providers.get(agent_id, "openclaw"),
+            }
+
+        def fake_codex(body):
+            calls.append(("codex", body.get("agentId"), body.get("conversationId"), body.get("fromType")))
+            return {
+                "ok": True,
+                "reply": "Position: Codex can participate.\nReasoning: native app-server meeting dispatch works.\nSuggested next step: continue.",
+                "threadId": "codex-thread-meeting",
+                "turnId": "codex-turn-meeting",
+            }
+
+        def fake_hermes(body):
+            calls.append(("hermes", body.get("agentId"), body.get("conversationId"), body.get("fromType")))
+            return {
+                "ok": True,
+                "reply": "Position: Hermes can participate.\nReasoning: native API meeting dispatch works.\nSuggested next step: continue.",
+                "sessionId": "hermes-session-meeting",
+            }
+
+        def fake_wf(agent_id, message, timeout=600, project_id=None, task_id=None):
+            calls.append(("openclaw", agent_id, task_id, project_id))
+            return "Position: OpenClaw can participate.\nReasoning: workflow meeting dispatch works.\nSuggested next step: continue."
+
+        server._office_agent_lookup = fake_lookup
+        server._handle_codex_chat = fake_codex
+        server._handle_hermes_chat = fake_hermes
+        server._wf_call_agent = fake_wf
+        try:
+            created = create_meeting(maxRounds=1, idempotencyKey="mixed-provider-meeting")
+            assert created["ok"] is True
+            ran = server._handle_executable_meeting_run(created["meeting"]["id"])
+            assert ran["ok"] is True
+            turns = [
+                event["payload"]
+                for event in ran["events"]
+                if event["type"] == "participant_turn"
+                and (event.get("payload") or {}).get("stage") == "active_opening"
+            ]
+            assert [turn["speaker"] for turn in turns] == ["main", "hermes-default", "codex-local"]
+            refs = {turn["speaker"]: turn["providerRef"] for turn in turns}
+            assert refs["main"]["providerKind"] == "openclaw"
+            assert refs["main"]["conversationId"] == f"meeting:{created['meeting']['id']}:participant:main"
+            assert refs["hermes-default"]["providerKind"] == "hermes"
+            assert refs["hermes-default"]["sessionId"] == "hermes-session-meeting"
+            assert refs["codex-local"]["providerKind"] == "codex"
+            assert refs["codex-local"]["threadId"] == "codex-thread-meeting"
+            assert refs["codex-local"]["turnId"] == "codex-turn-meeting"
+            assert ("codex", "codex-local", f"meeting:{created['meeting']['id']}:participant:codex-local", "agent") in calls
+            assert ("hermes", "hermes-default", f"meeting:{created['meeting']['id']}:participant:hermes-default", "agent") in calls
+            assert ("openclaw", "main", f"meeting:{created['meeting']['id']}:participant:main", "meeting-for-ai") in calls
+        finally:
+            server._office_agent_lookup = old_lookup
+            server._handle_codex_chat = old_codex
+            server._handle_hermes_chat = old_hermes
+            server._wf_call_agent = old_wf
+            restore_meeting_store(old_store)
+
+
 def test_executable_meeting_create_persists_events_and_projects_active():
     with tempfile.TemporaryDirectory() as status_dir:
         old = with_meeting_store(status_dir)
@@ -1462,10 +1583,16 @@ def test_phase3_executable_end_uses_moderator_summary_without_manual_summary():
             )
             meeting_id = created["meeting"]["id"]
             server._handle_executable_meeting_transition(meeting_id, {"action": "start", "expectedVersion": 1})
-            ended = server._handle_meeting_end({"id": meeting_id, "endedBy": "user"})
+            ended = server._handle_meeting_end({
+                "id": meeting_id,
+                "endedBy": "user",
+                "summary": "Manual text must not bypass the moderator JSON result prompt.",
+                "resolution": "Manual resolution must not become the executable meeting result.",
+            })
             assert ended["ok"] is True
             assert ended["meeting"]["stage"] == "completed"
             assert ended["meeting"]["result"]["summary"] == "Moderator generated summary."
+            assert ended["meeting"]["result"]["decision"] == "Proceed with the accepted direction."
             assert ended["meeting"]["result"]["actionItems"] == [{"owner": "main", "item": "Publish meeting notes"}]
             events = ended["events"]
             assert any(e["type"] == "provider_call_started" and (e["payload"] or {}).get("purpose") == "meeting_result" for e in events)

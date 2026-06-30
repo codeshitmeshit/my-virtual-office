@@ -14,11 +14,11 @@ import shutil
 import subprocess
 import time
 import json
-import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from urllib.parse import urljoin
 from typing import Any
+from urllib.parse import urljoin
 
 
 @dataclass

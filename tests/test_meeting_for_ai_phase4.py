@@ -51,6 +51,27 @@ def create_project_and_task():
     return project, task
 
 
+def create_high_priority_confirmation_project_and_task():
+    project = server._handle_project_create({
+        "title": "High Priority AI Meeting Confirmation Project",
+        "description": "Project level context should be retained.",
+        "projectExecutionEnabled": False,
+        "highPriorityAiMeetingAutoApprove": True,
+    })["project"]
+    task = server._handle_task_create(project["id"], {
+        "title": "Resolve high priority blocker",
+        "description": "The executor needs a fast AI meeting.",
+        "assignee": "executor",
+        "executorAgentId": "executor",
+    })["task"]
+    server._handle_task_create(project["id"], {
+        "title": "Related high priority implementation task",
+        "description": "Same high priority project related context.",
+        "assignee": "reviewer",
+    })
+    return project, task
+
+
 def valid_request_body(**overrides):
     body = {
         "requestingAgentId": "executor",
@@ -73,7 +94,7 @@ def test_phase4_request_quality_gate_and_pending_safety():
     with tempfile.TemporaryDirectory() as status_dir:
         old = with_store(status_dir)
         try:
-            project, task = create_project_and_task()
+            project, task = create_high_priority_confirmation_project_and_task()
 
             missing_goal = server._handle_meeting_request_create(project["id"], task["id"], valid_request_body(goal=""))
             assert missing_goal["_status"] == 400
@@ -112,7 +133,7 @@ def test_phase4_request_rejects_archive_manager_participant():
     with tempfile.TemporaryDirectory() as status_dir:
         old = with_store(status_dir)
         try:
-            project, task = create_project_and_task()
+            project, task = create_high_priority_confirmation_project_and_task()
             blocked = server._handle_meeting_request_create(
                 project["id"],
                 task["id"],
@@ -176,11 +197,115 @@ def test_phase4_high_urgency_auto_confirms_agent_request():
             restore_store(old)
 
 
-def test_phase4_reject_feedback_and_illegal_confirm():
+def test_phase4_high_priority_project_requires_user_confirmation_for_ai_request():
+    with tempfile.TemporaryDirectory() as status_dir:
+        old = with_store(status_dir)
+        try:
+            project, task = create_high_priority_confirmation_project_and_task()
+            selected = [f"task:{task['id']}"]
+
+            created = server._handle_meeting_request_create(
+                project["id"],
+                task["id"],
+                valid_request_body(
+                    idempotencyKey="phase4-high-priority-auto",
+                    urgency=3,
+                    selectedContextIds=selected,
+                    supplementalContext="AI supplied supplemental context.",
+                ),
+            )
+            assert created["ok"] is True
+            assert created.get("autoConfirmed") is None
+            assert created["request"]["status"] == "pending"
+            assert created["request"]["review"] == {}
+            assert created["request"]["conversion"] == {}
+
+            repeated = server._handle_meeting_request_create(
+                project["id"],
+                task["id"],
+                valid_request_body(idempotencyKey="phase4-high-priority-auto", urgency=3),
+            )
+            assert repeated["idempotent"] is True
+            assert repeated["request"]["status"] == "pending"
+
+            detail = server._handle_meeting_request_detail(created["request"]["id"])
+            assert detail["request"]["review"] == {}
+
+            confirmed = server._handle_meeting_request_confirm(created["request"]["id"], {
+                "confirmedBy": "user",
+                "selectedContextIds": selected,
+                "supplementalContext": "User approved supplemental context.",
+                "idempotencyKey": "phase4-high-priority-user-confirm",
+            })
+            assert confirmed["ok"] is True
+            assert confirmed["request"]["status"] == "confirmed"
+            assert confirmed["request"]["review"]["autoConfirmed"] is False
+            assert confirmed["meeting"]["createdByType"] == "user"
+            assert confirmed["meeting"]["source"]["autoConfirmed"] is False
+            assert "User approved supplemental context" in confirmed["meeting"]["context"]
+            assert "Resolve high priority blocker" in confirmed["meeting"]["context"]
+
+            project_after = server._handle_project_get(project["id"])["project"]
+            assert project_after["highPriorityAiMeetingAutoApprove"] is True
+
+            stored = server._load_projects()["projects"][0]
+            assert stored["highPriorityAiMeetingAutoApprove"] is True
+        finally:
+            restore_store(old)
+
+
+def test_phase4_high_priority_project_confirmation_overrides_high_urgency():
+    with tempfile.TemporaryDirectory() as status_dir:
+        old = with_store(status_dir)
+        try:
+            project, task = create_high_priority_confirmation_project_and_task()
+            created = server._handle_meeting_request_create(
+                project["id"],
+                task["id"],
+                valid_request_body(idempotencyKey="phase4-high-priority-urgent", urgency=4),
+            )
+            assert created["ok"] is True
+            assert created.get("autoConfirmed") is None
+            assert created["request"]["status"] == "pending"
+            assert created["request"]["urgency"] == 4
+            assert created["request"]["review"] == {}
+            assert created["request"]["conversion"] == {}
+        finally:
+            restore_store(old)
+
+
+def test_phase4_project_auto_approve_flag_defaults_false_and_update_persists():
     with tempfile.TemporaryDirectory() as status_dir:
         old = with_store(status_dir)
         try:
             project, task = create_project_and_task()
+            assert project.get("highPriorityAiMeetingAutoApprove") is False
+
+            req = server._handle_meeting_request_create(
+                project["id"],
+                task["id"],
+                valid_request_body(idempotencyKey="phase4-default-non-auto", urgency=3),
+            )
+            assert req["ok"] is True
+            assert req["autoConfirmed"] is True
+            assert req["request"]["status"] == "confirmed"
+            assert req["request"]["review"]["autoConfirmReason"] == "standard_project_ai_meeting_auto_approve"
+            assert req["request"]["review"]["autoConfirmLabel"] == "已按普通项目自动批准"
+
+            updated = server._handle_project_update(project["id"], {"highPriorityAiMeetingAutoApprove": True})
+            assert updated["ok"] is True
+            assert updated["project"]["highPriorityAiMeetingAutoApprove"] is True
+            stored = server._load_projects()["projects"][0]
+            assert stored["highPriorityAiMeetingAutoApprove"] is True
+        finally:
+            restore_store(old)
+
+
+def test_phase4_reject_feedback_and_illegal_confirm():
+    with tempfile.TemporaryDirectory() as status_dir:
+        old = with_store(status_dir)
+        try:
+            project, task = create_high_priority_confirmation_project_and_task()
             req = server._handle_meeting_request_create(project["id"], task["id"], valid_request_body())["request"]
 
             rejected = server._handle_meeting_request_reject(req["id"], {"reason": "Continue without a meeting."})
@@ -202,7 +327,7 @@ def test_phase4_confirm_creates_once_with_selected_context_snapshot():
     with tempfile.TemporaryDirectory() as status_dir:
         old = with_store(status_dir)
         try:
-            project, task = create_project_and_task()
+            project, task = create_high_priority_confirmation_project_and_task()
             req = server._handle_meeting_request_create(project["id"], task["id"], valid_request_body())["request"]
             selected = [c["id"] for c in req["contextCandidates"] if c["sourceKind"] == "task"]
 
@@ -221,7 +346,7 @@ def test_phase4_confirm_creates_once_with_selected_context_snapshot():
             assert meeting["topic"] == "Edited architecture meeting"
             assert meeting["source"]["meetingRequestId"] == req["id"]
             assert "User approved supplemental context" in meeting["context"]
-            assert "Resolve architecture blocker" in meeting["context"]
+            assert "Resolve high priority blocker" in meeting["context"]
             assert "Project level context should be a candidate" not in meeting["context"]
             assert meeting["participantState"]["executor"]["status"] == "reserved"
             assert meeting["resolutionPolicy"] == "moderator_decision"
@@ -242,6 +367,9 @@ def test_phase4_confirm_creates_once_with_selected_context_snapshot():
 if __name__ == "__main__":
     test_phase4_request_quality_gate_and_pending_safety()
     test_phase4_high_urgency_auto_confirms_agent_request()
+    test_phase4_high_priority_project_requires_user_confirmation_for_ai_request()
+    test_phase4_high_priority_project_confirmation_overrides_high_urgency()
+    test_phase4_project_auto_approve_flag_defaults_false_and_update_persists()
     test_phase4_reject_feedback_and_illegal_confirm()
     test_phase4_confirm_creates_once_with_selected_context_snapshot()
     print("test_meeting_for_ai_phase4.py passed")

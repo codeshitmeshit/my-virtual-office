@@ -22,6 +22,7 @@ from project_store import MarkdownProjectStore
 AGENTS = [
     {"id": "executor", "statusKey": "executor", "providerAgentId": "executor", "providerKind": "openclaw", "name": "Executor"},
     {"id": "reviewer", "statusKey": "reviewer", "providerAgentId": "reviewer", "providerKind": "openclaw", "name": "Reviewer"},
+    {"id": "other-agent", "statusKey": "other-agent", "providerAgentId": "other-agent", "providerKind": "openclaw", "name": "Other Agent"},
 ]
 
 
@@ -224,6 +225,9 @@ def test_meeting_result_approved_releases_task_and_no_consensus_blocks():
             assert task["executionState"] == "backlog"
             assert task["columnId"] == next(c["id"] for c in project["columns"] if c["title"] == "Backlog")
             assert task["meetingBlocker"]["status"] == "resolved_continue"
+            assert len(task["meetingRecords"]) == 1
+            assert task["meetingRecords"][0]["outcome"] == "approved"
+            assert task["meetingRecords"][0]["decision"] == "Consensus reached."
             assert started and started[-1][1] == task["id"]
 
             project2, task2 = create_fixture_project(status_dir)
@@ -234,6 +238,151 @@ def test_meeting_result_approved_releases_task_and_no_consensus_blocks():
             project2, task2 = reload_task(project2["id"], task2["id"])
             assert task2["executionState"] == "blocked"
             assert "No consensus" in task2["blockedReason"]
+            assert len(task2["meetingRecords"]) == 1
+            assert task2["meetingRecords"][0]["outcome"] == "no_consensus"
+            assert task2["meetingRecords"][0]["decision"] == "No consensus."
+
+            project3, task3 = create_fixture_project(status_dir)
+            req3 = server._handle_meeting_request_create(project3["id"], task3["id"], meeting_request_body("needs decision"))["request"]
+            meeting3 = {"id": "m-user", "projectId": project3["id"], "source": {"meetingRequestId": req3["id"], "projectId": project3["id"], "taskId": task3["id"]}, "stage": "completed", "result": {"outcome": "needs_user_decision", "summary": "User must decide whether to continue."}}
+            applied3 = server._project_execution_apply_meeting_result(meeting3)
+            assert applied3["ok"] is True
+            project3, task3 = reload_task(project3["id"], task3["id"])
+            assert task3["executionState"] == "awaiting_meeting_resolution"
+            assert task3["meetingRecords"][0]["outcome"] == "needs_user_decision"
+            assert task3["meetingRecords"][0]["summary"] == "User must decide whether to continue."
         finally:
             server._handle_project_execution_start = old_start
+            restore_store(old)
+
+
+def test_approved_meeting_applies_action_items_before_original_task_resumes():
+    with tempfile.TemporaryDirectory() as status_dir:
+        old = with_store(status_dir)
+        old_thread = server.threading.Thread
+        started = []
+        try:
+            class SyncThread:
+                def __init__(self, target=None, args=(), kwargs=None, daemon=None):
+                    self.target = target
+                    self.args = args
+                    self.kwargs = kwargs or {}
+                def start(self):
+                    if self.target:
+                        self.target(*self.args, **self.kwargs)
+
+            def fake_start(project_id, task_id, body=None):
+                started.append((project_id, task_id, body or {}))
+                return {"ok": True, "status": "started", "taskId": task_id}
+
+            server.threading.Thread = SyncThread
+            project, task = create_fixture_project(status_dir)
+            req = server._handle_meeting_request_create(project["id"], task["id"], meeting_request_body("action items"))["request"]
+            meeting = {
+                "id": "m-actions",
+                "projectId": project["id"],
+                "source": {"meetingRequestId": req["id"], "projectId": project["id"], "taskId": task["id"]},
+                "stage": "completed",
+                "result": {
+                    "outcome": "approved",
+                    "summary": "Consensus reached with follow-up work.",
+                    "decision": "Use the smaller API surface.",
+                    "actionItems": [
+                        {"title": "Update the active implementation plan", "owner": "executor", "priority": None},
+                        {"title": "Review copy changes", "owner": "other-agent"},
+                    ],
+                    "risks": ["Regression around meeting resume order"],
+                },
+            }
+
+            applied = server._project_execution_apply_meeting_result(meeting)
+            assert applied["ok"] is True
+            assert applied["appliedMeetingResult"]["applied"] == 2
+            assert applied["appliedMeetingResult"]["linked"] == 0
+            assert applied["appliedMeetingResult"]["checklistSeeded"] is True
+            assert applied["appliedMeetingResult"]["pendingRequired"] is True
+            project, task = reload_task(project["id"], task["id"])
+            assert len(task["meetingActionItems"]) == 2
+            current_item = next(i for i in task["meetingActionItems"] if i["owner"] == "executor")
+            delegated_item = next(i for i in task["meetingActionItems"] if i["owner"] == "other-agent")
+            assert current_item["status"] == "pending"
+            assert current_item["requiredForResume"] is True
+            assert current_item["id"].endswith(":action:ai-1")
+            assert current_item["priority"] == "medium"
+            assert delegated_item["status"] == "pending"
+            assert delegated_item["requiredForResume"] is True
+            assert delegated_item["id"].endswith(":action:ai-2")
+            assert not delegated_item.get("linkedTaskId")
+            assert len(project["tasks"]) == 1
+            acceptance_items = [c for c in task["checklist"] if c.get("source") == "project_execution_acceptance"]
+            assert len(acceptance_items) >= 2
+            assert any("完成任务目标" in c.get("text", "") for c in acceptance_items)
+            assert not any(c.get("source") == "meeting_action_item" for c in task["checklist"])
+            assert not any(c.get("source") == "meeting_risk" for c in task["checklist"])
+            assert any(c.get("source") == "meeting_risk" and "Regression around meeting resume order" in c.get("text", "") for c in task["comments"])
+            assert task["meetingDecisionHistory"][0]["decision"] == "Use the smaller API surface."
+            assert task["meetingRecords"][0]["actionItemCount"] == 2
+            assert task["meetingRecords"][0]["risks"] == ["Regression around meeting resume order"]
+            assert started and started[-1][1] == task["id"]
+
+            repeated = server._project_execution_apply_meeting_result(meeting)
+            assert repeated["ok"] is True
+            assert repeated["appliedMeetingResult"]["checklistSeeded"] is False
+            project, task = reload_task(project["id"], task["id"])
+            assert len(task["meetingActionItems"]) == 2
+            assert len(task["meetingRecords"]) == 1
+            assert len([c for c in task["checklist"] if c.get("source") == "project_execution_acceptance"]) == len(acceptance_items)
+            assert len([c for c in task["checklist"] if c.get("source") == "meeting_action_item"]) == 0
+            assert len([c for c in task["comments"] if c.get("source") == "meeting_risk"]) == 1
+        finally:
+            server.threading.Thread = old_thread
+            restore_store(old)
+
+
+def test_meeting_action_phase_checks_items_then_restarts_original_task():
+    with tempfile.TemporaryDirectory() as status_dir:
+        old = with_store(status_dir)
+        old_executor = server._project_execution_call_executor
+        old_thread = server.threading.Thread
+        try:
+            class SyncThread:
+                def __init__(self, target=None, args=(), kwargs=None, daemon=None):
+                    self.target = target
+                    self.args = args
+                    self.kwargs = kwargs or {}
+                def start(self):
+                    if self.target:
+                        self.target(*self.args, **self.kwargs)
+
+            calls = []
+            def fake_executor(executor, prompt, workspace, attempt_id, project_id=None, task_id=None, timeout=600):
+                calls.append({"attemptId": attempt_id, "prompt": prompt})
+                return {"ok": True, "reply": "Completed meeting action item.", "status": "completed", "modifiedFiles": []}
+
+            server.threading.Thread = SyncThread
+            server._project_execution_call_executor = fake_executor
+            project, task = create_fixture_project(status_dir)
+            task["meetingActionItems"] = [{
+                "id": "meeting:m1:action:a1",
+                "meetingId": "m1",
+                "requestId": "req1",
+                "title": "Apply meeting decision",
+                "owner": "executor",
+                "status": "pending",
+                "requiredForResume": True,
+            }]
+            task["checklist"] = [{"id": "c1", "text": "Original deliverable remains valid", "done": False}]
+            server._save_projects({"projects": [project]})
+
+            first = server._handle_project_execution_start(project["id"], task["id"], {"projectStart": True, "autoReviewAfterExecution": True})
+            assert first["ok"] is True
+            project, task = reload_task(project["id"], task["id"])
+            assert task["meetingActionItems"][0]["status"] == "completed"
+            assert task["checklist"][0]["done"] is False
+            assert len(calls) >= 2
+            assert "MEETING ACTION ITEM PHASE" in calls[0]["prompt"]
+            assert "MEETING ACTION ITEM PHASE" not in calls[1]["prompt"]
+        finally:
+            server._project_execution_call_executor = old_executor
+            server.threading.Thread = old_thread
             restore_store(old)

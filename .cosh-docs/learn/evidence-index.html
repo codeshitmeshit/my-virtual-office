@@ -1,0 +1,94 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>证据索引</title><link rel="stylesheet" href="../asset/reverse-tutorial.css"><style>
+:root {
+  --card: #ffffff;
+  --text: #1f2937;
+  --muted: #64748b;
+  --primary: #2563eb;
+  --soft: #dbeafe;
+  --border: #e2e8f0;
+  --shadow: 0 18px 45px rgba(15, 23, 42, 0.08);
+  --radius: 20px;
+  --green: #15803d;
+  --amber: #b45309;
+  --red: #b91c1c;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+  background: linear-gradient(180deg, #f8fbff 0%, #eef2f7 100%);
+  color: var(--text);
+  line-height: 1.8;
+}
+a { color: inherit; }
+.container { max-width: 1120px; margin: 0 auto; padding: 34px 24px 72px; }
+.hero, .card, .toc, .guide-card, .diagram, .step, .mini-card {
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+.hero { padding: 38px; margin-bottom: 22px; }
+.back {
+  display: inline-flex;
+  margin-bottom: 18px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(255,255,255,0.8);
+  text-decoration: none;
+  font-weight: 700;
+  font-size: 14px;
+}
+.eyebrow { display: inline-flex; margin-bottom: 16px; padding: 6px 12px; border-radius: 999px; background: var(--soft); color: var(--primary); font-size: 13px; font-weight: 800; }
+h1 { margin: 0 0 16px; font-size: clamp(32px, 5vw, 54px); line-height: 1.1; letter-spacing: 0; }
+h2 { margin: 0 0 18px; font-size: 26px; line-height: 1.35; }
+h3 { margin: 0 0 8px; font-size: 19px; line-height: 1.4; }
+p { margin: 0; color: #475569; }
+.hero p { max-width: 850px; font-size: 17px; color: var(--muted); }
+.meta, .toc-links, .tags { display: flex; flex-wrap: wrap; gap: 10px; }
+.meta, .tags { margin-top: 18px; }
+.tag { padding: 5px 11px; border-radius: 999px; background: #f1f5f9; color: #475569; font-size: 12px; font-weight: 800; }
+.toc { padding: 20px 24px; margin: 22px 0; }
+.toc strong { display: block; margin-bottom: 10px; }
+.toc a { padding: 7px 11px; border-radius: 10px; background: #f8fafc; color: #334155; text-decoration: none; font-size: 14px; font-weight: 700; }
+.card { padding: 30px; margin-top: 22px; }
+.prose { display: grid; gap: 14px; margin-top: 16px; }
+.grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-top: 18px; }
+.guide-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin-top: 18px; }
+.guide-card { display: flex; flex-direction: column; justify-content: space-between; min-height: 230px; padding: 24px; text-decoration: none; }
+.guide-card:hover { border-color: rgba(37,99,235,0.42); transform: translateY(-2px); transition: 0.2s ease; }
+.mini-card { box-shadow: none; padding: 18px; background: #f8fafc; }
+.mini-card strong { display: block; margin-bottom: 6px; color: var(--text); }
+.mini-card span { color: var(--muted); font-size: 14px; }
+.steps { display: grid; gap: 14px; margin-top: 18px; }
+.step { display: flex; gap: 18px; padding: 20px; box-shadow: none; background: #fff; }
+.step-number { width: 48px; height: 48px; flex: 0 0 48px; display: grid; place-items: center; border-radius: 14px; background: var(--soft); color: var(--primary); font-weight: 900; }
+.flow-step { display: grid; grid-template-columns: 160px minmax(0,1fr); gap: 16px; padding: 18px; border: 1px solid var(--border); border-radius: 16px; background: #fff; }
+.flow-step strong { color: var(--text); }
+.flow-step span { display: block; color: var(--muted); font-size: 14px; }
+.diagram { margin-top: 18px; padding: 16px; background: #fff; overflow-x: auto; }
+.diagram img { display: block; width: 100%; min-width: 640px; border-radius: 18px; border: 1px solid var(--border); }
+.caption { margin-top: 10px; font-size: 14px; text-align: center; color: var(--muted); }
+pre { overflow-x: auto; margin: 18px 0 0; padding: 20px; border-radius: 16px; background: #0f172a; color: #e5e7eb; font-size: 14px; line-height: 1.7; }
+code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.code-card { margin-top: 18px; padding: 18px; border: 1px solid var(--border); border-radius: 16px; background: #fff; }
+.code-meta { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.code-meta span { padding: 4px 9px; border-radius: 999px; background: #f1f5f9; color: #475569; font-size: 12px; font-weight: 800; }
+table { width: 100%; border-collapse: collapse; margin-top: 16px; font-size: 14px; }
+th, td { padding: 12px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+th { background: #f8fafc; color: #334155; }
+.note { border-left: 4px solid var(--primary); padding: 14px 16px; background: #eff6ff; border-radius: 12px; color: #334155; }
+.risk { border-left-color: var(--amber); background: #fffbeb; }
+@media (max-width: 860px) {
+  .grid, .guide-grid { grid-template-columns: 1fr; }
+  .flow-step { grid-template-columns: 1fr; }
+}
+@media (max-width: 560px) {
+  .container { padding: 28px 16px 52px; }
+  .hero, .card, .toc, .guide-card { padding: 22px; border-radius: 18px; }
+  .step { flex-direction: column; }
+}
+
+</style></head><body><main class="container"><a class="back" href="../guide.html">返回教程目录</a><section class="hero"><span class="eyebrow">主 Agent 质量闸门</span><h1>证据索引</h1><p>本页把教程中的核心结论映射到代码、配置、函数或 commit。它也是质量闸门记录：哪些检查通过，哪些内容降级，哪些命令没有运行。</p><div class="meta"><span class="tag">证据矩阵</span><span class="tag">复核入口</span></div></section><section class="card"><h2>证据矩阵</h2><table><tr><th>页面</th><th>核心结论</th><th>证据</th><th>置信度</th></tr><tr><td>结构页</td><td>项目是静态前端 + Python 单体服务 + 本地状态 + provider adapter。</td><td>`README.md`、`start.sh`、`app/server.py`、`app/discovery.py`、`app/providers/*`、`app/project_store.py`</td><td>高</td></tr><tr><td>Happy Path</td><td>Project Execution 是当前主业务总线。</td><td>`README.md` 项目与任务执行；`app/projects.js:326-352`；`app/server.py:15736-15860`</td><td>高</td></tr><tr><td>前端启动</td><td>项目级启动先选择 next task，再复用任务级 start handler。</td><td>`app/projects.js:330/3443`；`app/server.py:15809/15736`</td><td>高</td></tr><tr><td>Attempt 运行</td><td>attempt 承载执行证据和状态转移。</td><td>`app/server.py:15301`、`15398`、`15624`、`15792`</td><td>高</td></tr><tr><td>Provider 调用</td><td>不同 provider 返回值被归一化后进入同一状态机。</td><td>`app/server.py:5060/16864`；当前现场 `app/provider_execution.py:37`</td><td>高，历史中等</td></tr><tr><td>评审验收</td><td>review pass 后仍可能等待用户验收。</td><td>`app/server.py:15520`、`15981`；`app/projects.js:3638`</td><td>高</td></tr><tr><td>会议阻塞</td><td>meeting request 会阻塞源任务，拒绝后也不自动继续。</td><td>`app/server.py:6362`、`11809`、`16087`；`app/projects.js:1908`</td><td>高</td></tr><tr><td>历史页</td><td>Projects & Tasks 来自 `be6ff12`，meeting blocker 来自 `f73f92e`。</td><td>`git show --stat be6ff12`、`git show --stat f73f92e`、`git blame app/project_store.py`</td><td>高</td></tr></table></section><section class="card"><h2>交叉质询结果</h2><div class="prose"><p>结构结论和链路结论一致：`app/server.py` 是单体汇聚层，业务链路必须按函数切片读，不能用“后端处理”泛称跳过。</p><p>链路结论和历史结论一致：project execution 先于 meeting blocker 出现；meeting blocker 是 `f73f92e` 对项目任务的阻塞机制扩展，而不是会议系统早期功能。</p><p>历史 Subagent 指出当前存在未提交 provider runtime 文件。相关页面已把它们标为“当前现场代码”，没有写成可验证 Git 演进。</p></div></section><section class="card"><h2>质量闸门记录</h2><table><tr><th>检查项</th><th>结果</th></tr><tr><td>实际使用 Subagent</td><td>通过：结构、链路发现、历史、链路深挖均有独立输出。</td></tr><tr><td>至少 6 个 HTML 页面</td><td>通过：目录页 + 11 个 learn 页面。</td></tr><tr><td>每条重点链路独立页面</td><td>通过：5 条链路各自成页。</td></tr><tr><td>链路含入口、终止点、连续步骤、分支、失败路径</td><td>通过：详情页均包含连续叙事和分支说明。</td></tr><tr><td>概念下标回填</td><td>降级处理：正文未保留概念占位符，改为每页“关键概念补充”小节，无空下标。</td></tr><tr><td>运行测试</td><td>未运行：本次是文档逆向生成，未启动服务或外部 provider。</td></tr><tr><td>Git 历史</td><td>部分通过：commit sequence 高可信；未提交文件和大型批量提交的设计动机已降级。</td></tr></table></section><section class="card"><h2>后续复核入口</h2><div class="grid"><div class="mini-card"><strong>代码入口</strong><span>`app/server.py`、`app/projects.js`、`app/project_store.py`、`app/discovery.py`、`app/providers/*`。</span></div><div class="mini-card"><strong>历史入口</strong><span>`git log --oneline -- app/server.py app/projects.js app/project_store.py app/providers`。</span></div><div class="mini-card"><strong>测试入口</strong><span>`tests/test_project_execution.py`、`tests/test_meeting_request_blocks_task.py`、provider 相关测试。</span></div></div></section></main></body></html>

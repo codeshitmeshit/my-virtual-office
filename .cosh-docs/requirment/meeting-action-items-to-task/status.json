@@ -1,0 +1,33 @@
+{
+  "name": "meeting-action-items-to-task",
+  "stage": "implementation_done",
+  "waiting_for_user": false,
+  "updated_at": "2026-06-25T23:30:54+08:00",
+  "confirmed": {
+    "checklist": true,
+    "tested": false,
+    "done": false
+  },
+  "confirmations": {
+    "checklist": {
+      "item": "checklist",
+      "confirmed_at": "2026-06-23T21:13:52+08:00",
+      "by": "user",
+      "summary": "pass"
+    },
+    "tested": null,
+    "done": null
+  },
+  "files": {
+    "requirement": "requirement.md",
+    "review": "review.md",
+    "checklist": "checklist.md",
+    "todolist": "todolist.md"
+  },
+  "notes": [
+    "Checklist confirmed by user with summary: pass.",
+    "Todolist created after checklist confirmation.",
+    "Implementation and automated/UI verification completed. Waiting for user confirmation of tested/done.",
+    "2026-06-25T23:30:54+08:00: Fixed empty acceptance checklist after meeting action items are applied; related regression test passed."
+  ]
+}

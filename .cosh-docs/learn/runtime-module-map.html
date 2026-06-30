@@ -1,0 +1,94 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>运行时模块地图与依赖方向</title><link rel="stylesheet" href="../asset/reverse-tutorial.css"><style>
+:root {
+  --card: #ffffff;
+  --text: #1f2937;
+  --muted: #64748b;
+  --primary: #2563eb;
+  --soft: #dbeafe;
+  --border: #e2e8f0;
+  --shadow: 0 18px 45px rgba(15, 23, 42, 0.08);
+  --radius: 20px;
+  --green: #15803d;
+  --amber: #b45309;
+  --red: #b91c1c;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+  background: linear-gradient(180deg, #f8fbff 0%, #eef2f7 100%);
+  color: var(--text);
+  line-height: 1.8;
+}
+a { color: inherit; }
+.container { max-width: 1120px; margin: 0 auto; padding: 34px 24px 72px; }
+.hero, .card, .toc, .guide-card, .diagram, .step, .mini-card {
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+.hero { padding: 38px; margin-bottom: 22px; }
+.back {
+  display: inline-flex;
+  margin-bottom: 18px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(255,255,255,0.8);
+  text-decoration: none;
+  font-weight: 700;
+  font-size: 14px;
+}
+.eyebrow { display: inline-flex; margin-bottom: 16px; padding: 6px 12px; border-radius: 999px; background: var(--soft); color: var(--primary); font-size: 13px; font-weight: 800; }
+h1 { margin: 0 0 16px; font-size: clamp(32px, 5vw, 54px); line-height: 1.1; letter-spacing: 0; }
+h2 { margin: 0 0 18px; font-size: 26px; line-height: 1.35; }
+h3 { margin: 0 0 8px; font-size: 19px; line-height: 1.4; }
+p { margin: 0; color: #475569; }
+.hero p { max-width: 850px; font-size: 17px; color: var(--muted); }
+.meta, .toc-links, .tags { display: flex; flex-wrap: wrap; gap: 10px; }
+.meta, .tags { margin-top: 18px; }
+.tag { padding: 5px 11px; border-radius: 999px; background: #f1f5f9; color: #475569; font-size: 12px; font-weight: 800; }
+.toc { padding: 20px 24px; margin: 22px 0; }
+.toc strong { display: block; margin-bottom: 10px; }
+.toc a { padding: 7px 11px; border-radius: 10px; background: #f8fafc; color: #334155; text-decoration: none; font-size: 14px; font-weight: 700; }
+.card { padding: 30px; margin-top: 22px; }
+.prose { display: grid; gap: 14px; margin-top: 16px; }
+.grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-top: 18px; }
+.guide-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin-top: 18px; }
+.guide-card { display: flex; flex-direction: column; justify-content: space-between; min-height: 230px; padding: 24px; text-decoration: none; }
+.guide-card:hover { border-color: rgba(37,99,235,0.42); transform: translateY(-2px); transition: 0.2s ease; }
+.mini-card { box-shadow: none; padding: 18px; background: #f8fafc; }
+.mini-card strong { display: block; margin-bottom: 6px; color: var(--text); }
+.mini-card span { color: var(--muted); font-size: 14px; }
+.steps { display: grid; gap: 14px; margin-top: 18px; }
+.step { display: flex; gap: 18px; padding: 20px; box-shadow: none; background: #fff; }
+.step-number { width: 48px; height: 48px; flex: 0 0 48px; display: grid; place-items: center; border-radius: 14px; background: var(--soft); color: var(--primary); font-weight: 900; }
+.flow-step { display: grid; grid-template-columns: 160px minmax(0,1fr); gap: 16px; padding: 18px; border: 1px solid var(--border); border-radius: 16px; background: #fff; }
+.flow-step strong { color: var(--text); }
+.flow-step span { display: block; color: var(--muted); font-size: 14px; }
+.diagram { margin-top: 18px; padding: 16px; background: #fff; overflow-x: auto; }
+.diagram img { display: block; width: 100%; min-width: 640px; border-radius: 18px; border: 1px solid var(--border); }
+.caption { margin-top: 10px; font-size: 14px; text-align: center; color: var(--muted); }
+pre { overflow-x: auto; margin: 18px 0 0; padding: 20px; border-radius: 16px; background: #0f172a; color: #e5e7eb; font-size: 14px; line-height: 1.7; }
+code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.code-card { margin-top: 18px; padding: 18px; border: 1px solid var(--border); border-radius: 16px; background: #fff; }
+.code-meta { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.code-meta span { padding: 4px 9px; border-radius: 999px; background: #f1f5f9; color: #475569; font-size: 12px; font-weight: 800; }
+table { width: 100%; border-collapse: collapse; margin-top: 16px; font-size: 14px; }
+th, td { padding: 12px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+th { background: #f8fafc; color: #334155; }
+.note { border-left: 4px solid var(--primary); padding: 14px 16px; background: #eff6ff; border-radius: 12px; color: #334155; }
+.risk { border-left-color: var(--amber); background: #fffbeb; }
+@media (max-width: 860px) {
+  .grid, .guide-grid { grid-template-columns: 1fr; }
+  .flow-step { grid-template-columns: 1fr; }
+}
+@media (max-width: 560px) {
+  .container { padding: 28px 16px 52px; }
+  .hero, .card, .toc, .guide-card { padding: 22px; border-radius: 18px; }
+  .step { flex-direction: column; }
+}
+
+</style></head><body><main class="container"><a class="back" href="../guide.html">返回教程目录</a><section class="hero"><span class="eyebrow">结构分析 Subagent</span><h1>运行时模块地图与依赖方向</h1><p>本页回答一个实际读代码问题：一个页面动作如何穿过静态前端、Python 服务、状态存储和外部 Agent provider。它不深挖某条业务链路，而是把模块之间的方向讲清楚。</p><div class="meta"><span class="tag">依赖方向</span><span class="tag">运行时</span></div></section><nav class="toc"><strong>本页目录</strong><div class="toc-links"><a href="#runtime">运行时分层</a><a href="#flow">模块穿透</a><a href="#store">状态落点</a><a href="#evidence">证据</a><a href="#concept-notes">概念</a></div></nav><section id="runtime" class="card"><h2>运行时分层</h2><div class="prose"><p>浏览器层只拿到静态 HTML/CSS/JS。`game.js` 负责办公室画布和状态刷新，`chat.js` 负责聊天与 provider 面板，`projects.js` 负责项目看板、任务执行、评审和验收。</p><p>服务层是 `OfficeHandler`。它既继承 `SimpleHTTPRequestHandler` 服务静态资源，也手写大量 API 路由。这个选择让本地部署简单，但也让 `server.py` 成为最需要分段阅读的文件。</p><p>外部能力层由 provider adapter、OpenClaw gateway、Hermes CLI/API、Codex app-server bridge、Claude Code runtime、浏览器 CDP 组成。主服务通过 adapter 和 helper 函数访问它们，前端只看到归一化 API。</p></div><div class="diagram"><img src="../asset/module-dependencies.svg" alt="模块依赖图"><p class="caption">依赖图强调单向调用：Browser UI -> OfficeHandler -> store/presence/provider/external runtime。</p></div></section><section id="flow" class="card"><h2>连续模块穿透叙事</h2><div class="steps"><div class="step"><div class="step-number">1</div><div><h3>页面动作</h3><p>用户在项目页点击按钮，`projects.js` 调用 `ProjectApi` 方法发出 fetch 请求，输入是 projectId、taskId、mode、dirtyFingerprint 等 UI 状态。</p></div></div><div class="step"><div class="step-number">2</div><div><h3>路由分发</h3><p>`OfficeHandler.do_POST` 解析路径。请求不会进入框架路由表，而是在长条件分支里转给 `_handle_project_execution_*`、`_handle_meeting_*`、`_handle_codex_*` 等函数。</p></div></div><div class="step"><div class="step-number">3</div><div><h3>业务函数读写项目</h3><p>项目相关函数通过 `_load_projects()`、`_save_projects()` 间接访问 `PROJECT_STORE`，最终落到 `VO_STATUS_DIR/projects-md/`。</p></div></div><div class="step"><div class="step-number">4</div><div><h3>Agent roster 和 presence</h3><p>`get_roster()` 通过 `discovery.py` 合并 OpenClaw、Hermes、Codex、Claude Code；`gateway_presence` 把运行态投影成前端能渲染的状态。</p></div></div><div class="step"><div class="step-number">5</div><div><h3>provider 调用</h3><p>任务执行或 A2A 通信根据 `providerKind` 调用 Codex/Hermes/Claude/OpenClaw 路径，再把结果归一化给项目状态机。</p></div></div><div class="step"><div class="step-number">6</div><div><h3>前端刷新</h3><p>前端通过 polling、SSE 或重新 fetch 读取状态，更新项目卡片、画布状态、聊天气泡和会议提示。</p></div></div></div></section><section id="store" class="card"><h2>状态落点</h2><div class="grid"><div class="mini-card"><strong>项目</strong><span>`MarkdownProjectStore` 写 `projects-md/`，复杂字段以 JSON frontmatter 保存。</span></div><div class="mini-card"><strong>presence</strong><span>`gateway_presence` 维护内存状态和 snapshot。</span></div><div class="mini-card"><strong>provider history</strong><span>Codex/Hermes/Claude 路径有各自 history、thread、run 或 bridge 状态。</span></div></div></section><section id="evidence" class="card"><h2>证据清单</h2><table><tr><th>模块</th><th>路径</th></tr><tr><td>前端入口</td><td>`app/index.html`、`app/game.js`、`app/chat.js`、`app/projects.js`</td></tr><tr><td>路由和业务</td><td>`app/server.py:OfficeHandler`、`do_GET`、`do_POST`</td></tr><tr><td>Agent discovery</td><td>`app/discovery.py:discover_all_agents`</td></tr><tr><td>provider runtime</td><td>`app/providers/codex.py`、`app/providers/hermes.py`、当前未跟踪的 `app/provider_execution.py`</td></tr></table></section><section id="concept-notes" class="card"><h2>关键概念补充</h2><h3 id="concept-presence-projection">1. Presence Projection</h3><p><strong>出现位置：</strong>`app/server.py`、`app/gateway_presence.py`。它把 gateway、provider discovery、会议和旧 status 文件合并成 `working/idle/meeting/offline` 等画布状态。</p><h3 id="concept-markdown-project-store">2. Markdown Project Store</h3><p><strong>出现位置：</strong>`app/project_store.py`。项目和任务不再只是单个 JSON，而是写入 `VO_STATUS_DIR/projects-md/` 的 Markdown/frontmatter 目录。</p></section></main></body></html>

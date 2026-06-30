@@ -1,0 +1,103 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>AI 会议请求阻塞与恢复链路</title><link rel="stylesheet" href="../asset/reverse-tutorial.css"><style>
+:root {
+  --card: #ffffff;
+  --text: #1f2937;
+  --muted: #64748b;
+  --primary: #2563eb;
+  --soft: #dbeafe;
+  --border: #e2e8f0;
+  --shadow: 0 18px 45px rgba(15, 23, 42, 0.08);
+  --radius: 20px;
+  --green: #15803d;
+  --amber: #b45309;
+  --red: #b91c1c;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+  background: linear-gradient(180deg, #f8fbff 0%, #eef2f7 100%);
+  color: var(--text);
+  line-height: 1.8;
+}
+a { color: inherit; }
+.container { max-width: 1120px; margin: 0 auto; padding: 34px 24px 72px; }
+.hero, .card, .toc, .guide-card, .diagram, .step, .mini-card {
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+.hero { padding: 38px; margin-bottom: 22px; }
+.back {
+  display: inline-flex;
+  margin-bottom: 18px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(255,255,255,0.8);
+  text-decoration: none;
+  font-weight: 700;
+  font-size: 14px;
+}
+.eyebrow { display: inline-flex; margin-bottom: 16px; padding: 6px 12px; border-radius: 999px; background: var(--soft); color: var(--primary); font-size: 13px; font-weight: 800; }
+h1 { margin: 0 0 16px; font-size: clamp(32px, 5vw, 54px); line-height: 1.1; letter-spacing: 0; }
+h2 { margin: 0 0 18px; font-size: 26px; line-height: 1.35; }
+h3 { margin: 0 0 8px; font-size: 19px; line-height: 1.4; }
+p { margin: 0; color: #475569; }
+.hero p { max-width: 850px; font-size: 17px; color: var(--muted); }
+.meta, .toc-links, .tags { display: flex; flex-wrap: wrap; gap: 10px; }
+.meta, .tags { margin-top: 18px; }
+.tag { padding: 5px 11px; border-radius: 999px; background: #f1f5f9; color: #475569; font-size: 12px; font-weight: 800; }
+.toc { padding: 20px 24px; margin: 22px 0; }
+.toc strong { display: block; margin-bottom: 10px; }
+.toc a { padding: 7px 11px; border-radius: 10px; background: #f8fafc; color: #334155; text-decoration: none; font-size: 14px; font-weight: 700; }
+.card { padding: 30px; margin-top: 22px; }
+.prose { display: grid; gap: 14px; margin-top: 16px; }
+.grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-top: 18px; }
+.guide-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin-top: 18px; }
+.guide-card { display: flex; flex-direction: column; justify-content: space-between; min-height: 230px; padding: 24px; text-decoration: none; }
+.guide-card:hover { border-color: rgba(37,99,235,0.42); transform: translateY(-2px); transition: 0.2s ease; }
+.mini-card { box-shadow: none; padding: 18px; background: #f8fafc; }
+.mini-card strong { display: block; margin-bottom: 6px; color: var(--text); }
+.mini-card span { color: var(--muted); font-size: 14px; }
+.steps { display: grid; gap: 14px; margin-top: 18px; }
+.step { display: flex; gap: 18px; padding: 20px; box-shadow: none; background: #fff; }
+.step-number { width: 48px; height: 48px; flex: 0 0 48px; display: grid; place-items: center; border-radius: 14px; background: var(--soft); color: var(--primary); font-weight: 900; }
+.flow-step { display: grid; grid-template-columns: 160px minmax(0,1fr); gap: 16px; padding: 18px; border: 1px solid var(--border); border-radius: 16px; background: #fff; }
+.flow-step strong { color: var(--text); }
+.flow-step span { display: block; color: var(--muted); font-size: 14px; }
+.diagram { margin-top: 18px; padding: 16px; background: #fff; overflow-x: auto; }
+.diagram img { display: block; width: 100%; min-width: 640px; border-radius: 18px; border: 1px solid var(--border); }
+.caption { margin-top: 10px; font-size: 14px; text-align: center; color: var(--muted); }
+pre { overflow-x: auto; margin: 18px 0 0; padding: 20px; border-radius: 16px; background: #0f172a; color: #e5e7eb; font-size: 14px; line-height: 1.7; }
+code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.code-card { margin-top: 18px; padding: 18px; border: 1px solid var(--border); border-radius: 16px; background: #fff; }
+.code-meta { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.code-meta span { padding: 4px 9px; border-radius: 999px; background: #f1f5f9; color: #475569; font-size: 12px; font-weight: 800; }
+table { width: 100%; border-collapse: collapse; margin-top: 16px; font-size: 14px; }
+th, td { padding: 12px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+th { background: #f8fafc; color: #334155; }
+.note { border-left: 4px solid var(--primary); padding: 14px 16px; background: #eff6ff; border-radius: 12px; color: #334155; }
+.risk { border-left-color: var(--amber); background: #fffbeb; }
+@media (max-width: 860px) {
+  .grid, .guide-grid { grid-template-columns: 1fr; }
+  .flow-step { grid-template-columns: 1fr; }
+}
+@media (max-width: 560px) {
+  .container { padding: 28px 16px 52px; }
+  .hero, .card, .toc, .guide-card { padding: 22px; border-radius: 18px; }
+  .step { flex-direction: column; }
+}
+
+</style></head><body><main class="container"><a class="back" href="../guide.html">返回教程目录</a><section class="hero"><span class="eyebrow">链路深挖 Subagent</span><h1>AI 会议请求阻塞与恢复链路</h1><p>AI 会议不是普通聊天入口。执行 Agent 认为需要跨 Agent 对齐时，会创建 meeting request；这个 request 会阻塞源项目任务，直到用户确认、拒绝、恢复执行、重开会议或标记阻塞。</p><div class="meta"><span class="tag">Meeting for AI</span><span class="tag">Project Execution 分支</span></div></section><nav class="toc"><strong>本页目录</strong><div class="toc-links"><a href="#flow">详细链路</a><a href="#diagram">图</a><a href="#code">代码摘录</a><a href="#branches">分支</a><a href="#concept-notes">概念</a></div></nav><section id="flow" class="card"><h2>详细链路说明</h2><div class="steps"><div class="step"><div class="step-number">1</div><div><h3>prompt 中的行为合同</h3><p>`_project_execution_build_prompt` 指示 Agent 必要时 POST meeting-requests，并明确不要自行 confirm/reject。输出是 Agent 可执行的协作约束。</p></div></div><div class="step"><div class="step-number">2</div><div><h3>`_handle_meeting_request_create`</h3><p>输入 requester、goal、expectedOutcome、participants、urgency；动作是创建 pending request 和 taskBlocker。</p></div></div><div class="step"><div class="step-number">3</div><div><h3>`_project_execution_block_for_meeting_request`</h3><p>取消 active attempt，写 `task.meetingBlocker`，状态转为 awaiting_meeting_resolution，项目执行停止推进。</p></div></div><div class="step"><div class="step-number">4</div><div><h3>`_handle_meeting_request_confirm`</h3><p>用户确认后，选择上下文并转换为 executable meeting，request 记录 confirmed/conversion.meetingId。</p></div></div><div class="step"><div class="step-number">5</div><div><h3>`_handle_meeting_request_reject`</h3><p>拒绝 request 会让 meetingBlocker 标记 awaitingUserDecision，任务不会自动继续。</p></div></div><div class="step"><div class="step-number">6</div><div><h3>前端展示 blocker</h3><p>`renderProjectExecutionBlockedReason` 读取 task.meetingBlocker，展示 View、Continue、Mark blocked、Reopen 等动作。</p></div></div><div class="step"><div class="step-number">7</div><div><h3>`projectExecutionMeetingBlockerAction`</h3><p>前端把用户选择 POST 到 `/project-execution/meeting-blocker`，输入 action 和 feedback。</p></div></div><div class="step"><div class="step-number">8</div><div><h3>`_handle_project_execution_meeting_blocker_action`</h3><p>continue_execution 清除 blocker 并重新 `_handle_project_execution_start`；mark_blocked 写 blocked；reopen_meeting 回到 backlog/待处理。</p></div></div></div></section><section id="diagram" class="card"><h2>阻塞恢复图</h2><div class="diagram"><img src="../asset/chain-executable-meeting.svg" alt="会议阻塞与恢复链路"><p class="caption">会议申请先变成 pending request，再影响 project execution 状态；未确认申请不会直接开会。</p></div></section><section id="code" class="card"><h2>关键代码摘录</h2><div class="code-card"><h3>会议申请阻塞任务</h3><div class="code-meta"><span>app/server.py</span><span>_project_execution_block_for_meeting_request</span></div><pre><code>task["meetingBlocker"] = {
+    "requestId": request.get("id"),
+    "status": "pending",
+    "awaitingUserDecision": False,
+}
+project["workflowPhase"] = "awaiting_meeting_resolution"</code></pre><p>meeting request 会停止当前 attempt，并让任务进入等待会议解决状态。</p></div><div class="code-card"><h3>会议阻塞恢复入口</h3><div class="code-meta"><span>app/server.py</span><span>_handle_project_execution_meeting_blocker_action</span></div><pre><code>if action == "mark_blocked":
+    ...
+if action == "reopen_meeting":
+    ...
+start_result = _handle_project_execution_start(project_id, task_id, {...})</code></pre><p>用户可以标记阻塞、回到会议流程，或清除 blocker 后继续执行。</p></div></section><section id="branches" class="card"><h2>分支、失败路径和数据变化</h2><table><tr><th>类型</th><th>说明</th></tr><tr><td>分支</td><td>已有 unresolved request 幂等返回、按 urgency 自动确认、confirm、reject、continue_execution、mark_blocked、reopen_meeting、restart start_failed。</td></tr><tr><td>失败路径</td><td>invalid action 返回 400；任务不在 awaiting_meeting_resolution 返回 409；无 unresolved blocker 返回 409；确认已拒绝 request 返回 409。</td></tr><tr><td>数据流</td><td>agent meeting payload -> meeting request store -> task.meetingBlocker -> executable meeting conversion/rejection -> blocker UI -> blocker resolution -> new attempt/backlog/blocked。</td></tr></table></section><section id="concept-notes" class="card"><h2>关键概念补充</h2><h3 id="concept-meeting-blocker">1. meetingBlocker</h3><p><strong>出现位置：</strong>`app/project_store.py`、`app/server.py`。它记录任务因会议请求而暂停的状态、requestId、决策和恢复信息。</p><h3 id="concept-awaiting-meeting-resolution">2. awaiting_meeting_resolution</h3><p><strong>出现位置：</strong>project workflowPhase/task state。它表示执行链路停在会议解决点，不能当成普通 blocked。</p></section></main></body></html>

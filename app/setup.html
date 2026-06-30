@@ -36,6 +36,13 @@
         label { display: block; font-size: 14px; color: #ccc; margin-bottom: 6px; margin-top: 16px; }
         input[type=text], input[type=password], input[type=number], select { width: 100%; padding: 12px 16px; background: #0d0d1e; border: 1px solid #2a2a4e; border-radius: 8px; color: #e8e8f0; font-size: 15px; outline: none; }
         input:focus { border-color: #ffd700; }
+        .weather-row { display: grid; grid-template-columns: minmax(0, 1fr) 110px; gap: 8px; align-items: start; }
+        .weather-row input[type=text] { min-width: 0; }
+        .weather-actions { margin-top: 8px; }
+        .weather-actions button { width: 100%; white-space: nowrap; padding-left: 16px; padding-right: 16px; }
+        @media (max-width: 560px) {
+            .weather-row { grid-template-columns: minmax(0, 1fr) 100px; }
+        }
         .btn-row { display: flex; justify-content: space-between; margin-top: 28px; gap: 12px; }
         button { padding: 12px 28px; border: 2px solid #ffd700; background: #1a1a2e; color: #ffd700; font-family: 'Press Start 2P', cursive; font-size: 10px; border-radius: 8px; cursor: pointer; transition: all 0.2s; }
         button:hover { background: #ffd700; color: #0a0a0f; }
@@ -126,10 +133,14 @@
             <label data-i18n="office_name">Office Name</label>
             <input type="text" id="s-name" value="My Virtual Office" placeholder="e.g. Acme Corp HQ" data-i18n-placeholder="office_name">
             <label data-i18n="weather_location">Weather Location <span style="color:#666;font-size:12px" data-i18n="weather_optional">(optional)</span></label>
-            <div style="display:flex;gap:8px">
-                <input type="text" id="s-weather-city" value="" placeholder="e.g. Miami" data-i18n-placeholder="weather_location" style="flex:2">
-                <input type="text" id="s-weather-state" value="" placeholder="e.g. FL" data-i18n-placeholder="weather_optional" style="flex:1">
+            <div class="weather-row">
+                <input type="text" id="s-weather-city" value="" placeholder="Beijing" data-i18n-placeholder="weather_city_placeholder">
+                <input type="text" id="s-weather-state" value="" placeholder="Optional" data-i18n-placeholder="weather_region_placeholder">
             </div>
+            <div class="weather-actions">
+                <button type="button" class="secondary" onclick="testSetupWeather()" data-i18n="test_weather">🔍 Test</button>
+            </div>
+            <div id="s-weather-status"></div>
             <div class="btn-row">
                 <button class="secondary" onclick="nextStep(0)" data-i18n="back">← BACK</button>
                 <button onclick="nextStep(2)" data-i18n="next">NEXT →</button>
@@ -208,6 +219,13 @@
                     <input type="text" id="s-hermes-home" placeholder="/home/youruser/.hermes" data-i18n-placeholder="hermes_home_dir">
                     <label data-i18n="hermes_cli_path">Hermes CLI Path</label>
                     <input type="text" id="s-hermes-bin" placeholder="/home/youruser/.local/bin/hermes" data-i18n-placeholder="hermes_cli_path">
+                    <label style="display:flex;align-items:center;gap:8px;margin-top:8px;">
+                        <input type="checkbox" id="s-hermes-api-enable"> <span>Use Hermes native API</span>
+                    </label>
+                    <label>Hermes API URL</label>
+                    <input type="text" id="s-hermes-api-url" placeholder="http://127.0.0.1:8642">
+                    <label>Hermes API Key</label>
+                    <input type="password" id="s-hermes-api-key" placeholder="Leave blank to keep existing key" autocomplete="off">
                     <div style="font-size:12px;color:#666;margin:6px 0 12px;line-height:1.5;" data-i18n="hermes_docker_hint_setup">Running in Docker? Mount the Hermes home/CLI into the container and enter the mounted paths.</div>
                     <button onclick="testHermesConnection()" style="margin:0 0 12px;padding:8px 16px;font-size:9px;" data-i18n="test_hermes_btn">🔍 TEST HERMES</button>
                     <div id="hermes-test-status"></div>
@@ -217,18 +235,18 @@
             <div style="border-top:1px solid #333;padding-top:16px;margin-top:18px;">
                 <div style="font-size:13px;color:#ffd700;font-weight:bold;margin-bottom:8px;">⌘ Codex CLI Agents</div>
                 <label style="display:flex;align-items:center;gap:8px;margin-top:8px;">
-                    <input type="checkbox" id="s-codex-enable" checked> Auto-detect Codex CLI Agents
+                    <input type="checkbox" id="s-codex-enable"> <span>Auto-detect Codex CLI Agents</span>
                 </label>
                 <div style="font-size:13px;color:#999;margin:6px 0 10px;line-height:1.5;">
-                    Virtual Office can create and chat with Codex-backed workspace agents through the native Codex CLI app-server protocol.
+                    Virtual Office can discover, create, and chat with Codex-backed workspace agents through the native Codex app-server bridge.
                 </div>
-                <div id="codex-fields" style="margin-top:10px;">
+                <div id="codex-fields" style="display:none;margin-top:10px;">
                     <label>Codex Home Directory</label>
                     <input type="text" id="s-codex-home" placeholder="/home/youruser/.codex">
                     <label>Codex CLI Path</label>
-                    <input type="text" id="s-codex-bin" placeholder="codex or /home/youruser/.local/bin/codex">
+                    <input type="text" id="s-codex-bin" placeholder="codex or /path/to/codex">
                     <label>Codex Workspace Root</label>
-                    <input type="text" id="s-codex-workspace" placeholder="/data/codex-agents">
+                    <input type="text" id="s-codex-workspace-root" placeholder="/data/codex-agents">
                     <label>Codex Main Workspace</label>
                     <input type="text" id="s-codex-main-workspace" placeholder="/data/codex-main">
                     <label>Default Model <span style="color:#666;font-size:12px">(optional)</span></label>
@@ -249,6 +267,15 @@
                     <label style="display:flex;align-items:center;gap:8px;margin-top:10px;">
                         <input type="checkbox" id="s-codex-appserver" checked> Prefer app-server protocol
                     </label>
+                    <label style="display:flex;align-items:center;gap:8px;margin-top:10px;">
+                        <input type="checkbox" id="s-codex-main" checked> Show Codex Main agent
+                    </label>
+                    <label style="display:flex;align-items:center;gap:8px;margin-top:10px;">
+                        <input type="checkbox" id="s-codex-native" checked> Discover native Codex agents
+                    </label>
+                    <label style="display:flex;align-items:center;gap:8px;margin-top:10px;">
+                        <input type="checkbox" id="s-codex-register" checked> Register new standard agents in native Codex
+                    </label>
                     <button onclick="testCodexConnection()" style="margin:0 0 12px;padding:8px 16px;font-size:9px;">🔍 TEST CODEX</button>
                     <div id="codex-test-status"></div>
                 </div>
@@ -257,18 +284,18 @@
             <div style="border-top:1px solid #333;padding-top:16px;margin-top:18px;">
                 <div style="font-size:13px;color:#ffd700;font-weight:bold;margin-bottom:8px;">◇ Claude Code Agents</div>
                 <label style="display:flex;align-items:center;gap:8px;margin-top:8px;">
-                    <input type="checkbox" id="s-claude-enable" checked> Auto-detect Claude Code Agents
+                    <input type="checkbox" id="s-claude-enable"> <span>Auto-detect Claude Code Agents</span>
                 </label>
                 <div style="font-size:13px;color:#999;margin:6px 0 10px;line-height:1.5;">
-                    Virtual Office can create and chat with Claude Code-backed workspace agents through the native Claude Code CLI stream-json protocol.
+                    Virtual Office can discover, create, and chat with Claude Code-backed workspace agents through the native Claude Code CLI stream-json protocol.
                 </div>
-                <div id="claude-fields" style="margin-top:10px;">
+                <div id="claude-fields" style="display:none;margin-top:10px;">
                     <label>Claude Config Directory</label>
                     <input type="text" id="s-claude-home" placeholder="/home/youruser/.claude">
                     <label>Claude CLI Path</label>
-                    <input type="text" id="s-claude-bin" placeholder="claude or /home/youruser/.local/bin/claude">
+                    <input type="text" id="s-claude-bin" placeholder="claude or /path/to/claude">
                     <label>Claude Workspace Root</label>
-                    <input type="text" id="s-claude-workspace" placeholder="/data/claude-code-agents">
+                    <input type="text" id="s-claude-workspace-root" placeholder="/data/claude-code-agents">
                     <label>Claude Main Workspace</label>
                     <input type="text" id="s-claude-main-workspace" placeholder="/data/claude-code-main">
                     <label>Default Model <span style="color:#666;font-size:12px">(optional)</span></label>
@@ -552,13 +579,9 @@
         document.getElementById('s-hermes-enable').addEventListener('change', function() {
             document.getElementById('hermes-fields').style.display = this.checked ? 'block' : 'none';
         });
-
-        // Codex enable toggle
         document.getElementById('s-codex-enable').addEventListener('change', function() {
             document.getElementById('codex-fields').style.display = this.checked ? 'block' : 'none';
         });
-
-        // Claude Code enable toggle
         document.getElementById('s-claude-enable').addEventListener('change', function() {
             document.getElementById('claude-fields').style.display = this.checked ? 'block' : 'none';
         });
@@ -569,60 +592,45 @@
             var hEnable = document.getElementById('s-hermes-enable');
             var hHome = document.getElementById('s-hermes-home');
             var hBin = document.getElementById('s-hermes-bin');
+            var hApiEnable = document.getElementById('s-hermes-api-enable');
             var hApiUrl = document.getElementById('s-hermes-api-url');
-            var hApiKey = document.getElementById('s-hermes-api-key');
             if (hEnable) hEnable.checked = h.enabled !== false;
             if (hHome && h.homePath) hHome.value = h.homePath;
             if (hBin && h.binary) hBin.value = h.binary;
+            if (hApiEnable) hApiEnable.checked = h.apiEnabled === true || h.preferApi === true;
             if (hApiUrl && h.apiUrl) hApiUrl.value = h.apiUrl;
-            if (hApiKey && h.apiKeyConfigured) hApiKey.placeholder = 'Configured - leave blank to keep';
             var hFields = document.getElementById('hermes-fields');
             if (hFields && hEnable) hFields.style.display = hEnable.checked ? 'block' : 'none';
             var c = cfg.codex || {};
             var cEnable = document.getElementById('s-codex-enable');
+            if (cEnable) cEnable.checked = c.enabled === true;
+            if (document.getElementById('s-codex-home')) document.getElementById('s-codex-home').value = c.homePath || '';
+            if (document.getElementById('s-codex-bin')) document.getElementById('s-codex-bin').value = c.binary || '';
+            if (document.getElementById('s-codex-workspace-root')) document.getElementById('s-codex-workspace-root').value = c.workspaceRoot || '';
+            if (document.getElementById('s-codex-main-workspace')) document.getElementById('s-codex-main-workspace').value = c.mainWorkspace || '';
+            if (document.getElementById('s-codex-model')) document.getElementById('s-codex-model').value = c.model || '';
+            if (document.getElementById('s-codex-sandbox')) document.getElementById('s-codex-sandbox').value = c.sandbox || 'workspace-write';
+            if (document.getElementById('s-codex-approval')) document.getElementById('s-codex-approval').value = c.approvalPolicy || 'never';
+            if (document.getElementById('s-codex-main')) document.getElementById('s-codex-main').checked = c.includeMain !== false;
+            if (document.getElementById('s-codex-native')) document.getElementById('s-codex-native').checked = c.includeNativeAgents !== false;
+            if (document.getElementById('s-codex-register')) document.getElementById('s-codex-register').checked = c.registerNativeAgents !== false;
+            if (document.getElementById('s-codex-appserver')) document.getElementById('s-codex-appserver').checked = c.preferAppServer !== false;
             var cFields = document.getElementById('codex-fields');
-            if (cEnable) cEnable.checked = c.enabled !== false;
             if (cFields && cEnable) cFields.style.display = cEnable.checked ? 'block' : 'none';
-            var cHome = document.getElementById('s-codex-home');
-            var cBin = document.getElementById('s-codex-bin');
-            var cWorkspace = document.getElementById('s-codex-workspace');
-            var cMainWorkspace = document.getElementById('s-codex-main-workspace');
-            var cModel = document.getElementById('s-codex-model');
-            var cSandbox = document.getElementById('s-codex-sandbox');
-            var cApproval = document.getElementById('s-codex-approval');
-            var cAppServer = document.getElementById('s-codex-appserver');
-            if (cHome && c.homePath) cHome.value = c.homePath;
-            if (cBin && c.binary) cBin.value = c.binary;
-            if (cWorkspace && c.workspaceRoot) cWorkspace.value = c.workspaceRoot;
-            if (cMainWorkspace && c.mainWorkspace) cMainWorkspace.value = c.mainWorkspace;
-            if (cModel && c.model) cModel.value = c.model;
-            if (cSandbox && c.sandbox) cSandbox.value = c.sandbox;
-            if (cApproval && c.approvalPolicy) cApproval.value = c.approvalPolicy;
-            if (cAppServer) cAppServer.checked = c.preferAppServer !== false;
-
-            var cl = cfg.claudeCode || {};
-            var clEnable = document.getElementById('s-claude-enable');
-            var clFields = document.getElementById('claude-fields');
-            if (clEnable) clEnable.checked = cl.enabled !== false;
-            if (clFields && clEnable) clFields.style.display = clEnable.checked ? 'block' : 'none';
-            var clHome = document.getElementById('s-claude-home');
-            var clBin = document.getElementById('s-claude-bin');
-            var clWorkspace = document.getElementById('s-claude-workspace');
-            var clMainWorkspace = document.getElementById('s-claude-main-workspace');
-            var clModel = document.getElementById('s-claude-model');
-            var clPermission = document.getElementById('s-claude-permission');
-            var clMain = document.getElementById('s-claude-main');
-            var clNative = document.getElementById('s-claude-native');
-            var clRegister = document.getElementById('s-claude-register');
-            if (clHome && cl.homePath) clHome.value = cl.homePath;
-            if (clBin && cl.binary) clBin.value = cl.binary;
-            if (clWorkspace && cl.workspaceRoot) clWorkspace.value = cl.workspaceRoot;
-            if (clMainWorkspace && cl.mainWorkspace) clMainWorkspace.value = cl.mainWorkspace;
-            if (clModel && cl.model) clModel.value = cl.model;
-            if (clPermission && cl.permissionMode) clPermission.value = cl.permissionMode;
-            if (clMain) clMain.checked = cl.includeMain !== false;
-            if (clNative) clNative.checked = cl.includeNativeAgents !== false;
-            if (clRegister) clRegister.checked = cl.registerNativeAgents !== false;
+            var cc = cfg.claudeCode || {};
+            var ccEnable = document.getElementById('s-claude-enable');
+            if (ccEnable) ccEnable.checked = cc.enabled === true;
+            if (document.getElementById('s-claude-home')) document.getElementById('s-claude-home').value = cc.homePath || '';
+            if (document.getElementById('s-claude-bin')) document.getElementById('s-claude-bin').value = cc.binary || '';
+            if (document.getElementById('s-claude-workspace-root')) document.getElementById('s-claude-workspace-root').value = cc.workspaceRoot || '';
+            if (document.getElementById('s-claude-main-workspace')) document.getElementById('s-claude-main-workspace').value = cc.mainWorkspace || '';
+            if (document.getElementById('s-claude-model')) document.getElementById('s-claude-model').value = cc.model || '';
+            if (document.getElementById('s-claude-permission')) document.getElementById('s-claude-permission').value = cc.permissionMode || 'acceptEdits';
+            if (document.getElementById('s-claude-main')) document.getElementById('s-claude-main').checked = cc.includeMain !== false;
+            if (document.getElementById('s-claude-native')) document.getElementById('s-claude-native').checked = cc.includeNativeAgents !== false;
+            if (document.getElementById('s-claude-register')) document.getElementById('s-claude-register').checked = cc.registerNativeAgents !== false;
+            var ccFields = document.getElementById('claude-fields');
+            if (ccFields && ccEnable) ccFields.style.display = ccEnable.checked ? 'block' : 'none';
         }).catch(function(){});
 
         function testPcMetrics() {
@@ -660,6 +668,7 @@
             var enabled = document.getElementById('s-hermes-enable').checked;
             var homePath = document.getElementById('s-hermes-home').value.trim();
             var binary = document.getElementById('s-hermes-bin').value.trim();
+            var apiEnabled = document.getElementById('s-hermes-api-enable').checked;
             var apiUrl = document.getElementById('s-hermes-api-url').value.trim();
             var apiKey = document.getElementById('s-hermes-api-key').value.trim();
             var statusEl = document.getElementById('hermes-test-status');
@@ -668,20 +677,24 @@
                 return;
             }
             statusEl.innerHTML = '<div class="status-box info">' + _t('testing_hermes') + '</div>';
+            var hermesSave = { enabled: enabled, homePath: homePath || null, binary: binary || null, apiEnabled: apiEnabled, preferApi: apiEnabled, apiUrl: apiUrl || null };
+            if (apiKey) hermesSave.apiKey = apiKey;
             fetch('/setup/save', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ hermes: hermesPayload })
+                body: JSON.stringify({ hermes: hermesSave })
             }).then(function() {
                 return fetch('/api/hermes/test', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ homePath: homePath || null, binary: binary || null })
+                    body: JSON.stringify({ homePath: homePath || null, binary: binary || null, apiEnabled: apiEnabled, preferApi: apiEnabled, apiUrl: apiUrl || null, apiKey: apiKey || undefined })
                 });
             }).then(function(r) { return r.json(); }).then(function(d) {
                 if (d.ok) {
                     var agents = d.agents || [];
-                    var html = '<div class="status-box success">' + _t('hermes_connected_profiles', { count: agents.length }) + '</div>';
+                    var api = d.api || {};
+                    var apiLine = apiEnabled ? '<br>Native API: ' + (api.ok ? 'connected' : ('unavailable' + (api.error ? ' · ' + _esc(api.error) : ''))) : '';
+                    var html = '<div class="status-box success">' + _t('hermes_connected_profiles', { count: agents.length }) + apiLine + '</div>';
                     if (agents.length) {
                         html += '<div class="agent-list-preview">';
                         agents.slice(0, 10).forEach(function(a) {
@@ -695,6 +708,98 @@
                 }
             }).catch(function(e) {
                 statusEl.innerHTML = '<div class="status-box error">' + _t('error') + ': ' + e.message + '</div>';
+            });
+        }
+
+        function codexPayloadFromSetup() {
+            return {
+                enabled: document.getElementById('s-codex-enable').checked,
+                homePath: document.getElementById('s-codex-home').value.trim() || null,
+                binary: document.getElementById('s-codex-bin').value.trim() || null,
+                workspaceRoot: document.getElementById('s-codex-workspace-root').value.trim() || null,
+                mainWorkspace: document.getElementById('s-codex-main-workspace').value.trim() || null,
+                model: document.getElementById('s-codex-model').value.trim() || '',
+                sandbox: document.getElementById('s-codex-sandbox').value || 'workspace-write',
+                approvalPolicy: document.getElementById('s-codex-approval').value || 'never',
+                preferAppServer: document.getElementById('s-codex-appserver').checked,
+                includeMain: document.getElementById('s-codex-main').checked,
+                includeNativeAgents: document.getElementById('s-codex-native').checked,
+                registerNativeAgents: document.getElementById('s-codex-register').checked
+            };
+        }
+
+        function claudeCodePayloadFromSetup() {
+            return {
+                enabled: document.getElementById('s-claude-enable').checked,
+                homePath: document.getElementById('s-claude-home').value.trim() || null,
+                binary: document.getElementById('s-claude-bin').value.trim() || null,
+                workspaceRoot: document.getElementById('s-claude-workspace-root').value.trim() || null,
+                mainWorkspace: document.getElementById('s-claude-main-workspace').value.trim() || null,
+                model: document.getElementById('s-claude-model').value.trim() || '',
+                permissionMode: document.getElementById('s-claude-permission').value || 'acceptEdits',
+                includeMain: document.getElementById('s-claude-main').checked,
+                includeNativeAgents: document.getElementById('s-claude-native').checked,
+                registerNativeAgents: document.getElementById('s-claude-register').checked
+            };
+        }
+
+        function testCodexConnection() {
+            var payload = codexPayloadFromSetup();
+            var statusEl = document.getElementById('codex-test-status');
+            if (!payload.enabled) {
+                statusEl.innerHTML = '<div class="status-box info">Codex auto-detect is disabled.</div>';
+                return;
+            }
+            statusEl.innerHTML = '<div class="status-box info">Saving and testing Codex...</div>';
+            fetch('/setup/save', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ codex: payload })
+            }).then(function() {
+                return fetch('/api/codex/test', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+            }).then(function(r) { return r.json(); }).then(function(d) {
+                if (d.ok) {
+                    var agents = d.agents || [];
+                    statusEl.innerHTML = '<div class="status-box success">✅ Codex connected — ' + _esc(d.protocol || 'codex') + ' · found ' + agents.length + ' agent' + (agents.length === 1 ? '' : 's') + '</div>';
+                } else {
+                    statusEl.innerHTML = '<div class="status-box error">❌ Codex not reachable: ' + _esc(d.error || 'unknown error') + '</div>';
+                }
+            }).catch(function(e) {
+                statusEl.innerHTML = '<div class="status-box error">Error: ' + _esc(e.message) + '</div>';
+            });
+        }
+
+        function testClaudeCodeConnection() {
+            var payload = claudeCodePayloadFromSetup();
+            var statusEl = document.getElementById('claude-test-status');
+            if (!payload.enabled) {
+                statusEl.innerHTML = '<div class="status-box info">Claude Code auto-detect is disabled.</div>';
+                return;
+            }
+            statusEl.innerHTML = '<div class="status-box info">Saving and testing Claude Code...</div>';
+            fetch('/setup/save', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ claudeCode: payload })
+            }).then(function() {
+                return fetch('/api/claude-code/test', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+            }).then(function(r) { return r.json(); }).then(function(d) {
+                if (d.ok) {
+                    var agents = d.agents || [];
+                    statusEl.innerHTML = '<div class="status-box success">✅ Claude Code connected — found ' + agents.length + ' agent' + (agents.length === 1 ? '' : 's') + '</div>';
+                } else {
+                    statusEl.innerHTML = '<div class="status-box error">❌ Claude Code not reachable: ' + _esc(d.error || 'unknown error') + '</div>';
+                }
+            }).catch(function(e) {
+                statusEl.innerHTML = '<div class="status-box error">Error: ' + _esc(e.message) + '</div>';
             });
         }
 
@@ -861,6 +966,31 @@
             return state ? city.replace(/ /g, '+') + ',' + state.replace(/ /g, '+') : city.replace(/ /g, '+');
         }
 
+        function testSetupWeather() {
+            var statusEl = document.getElementById('s-weather-status');
+            var location = _buildWeatherLocation(
+                document.getElementById('s-weather-city').value,
+                document.getElementById('s-weather-state').value
+            );
+            if (!location) {
+                statusEl.innerHTML = '<div class="status-box error">' + _t('weather_test_location_required') + '</div>';
+                return;
+            }
+            statusEl.innerHTML = '<div class="status-box info">' + _t('testing_weather') + '</div>';
+            fetch('/api/weather/test?location=' + encodeURIComponent(location))
+                .then(function(r) { return r.json().then(function(d) { d._httpOk = r.ok; return d; }); })
+                .then(function(d) {
+                    if (!d.ok) {
+                        statusEl.innerHTML = '<div class="status-box error">❌ ' + _t('weather_test_failed') + ': ' + _esc(d.error || _t('unknown')) + '</div>';
+                        return;
+                    }
+                    var details = _esc(d.resolvedLocation || location) + ' · ' + _esc(d.weather || '') + ' · ' + _esc(String(d.tempF || '?')) + '°F / ' + _esc(String(d.tempC || '?')) + '°C';
+                    statusEl.innerHTML = '<div class="status-box success">✅ ' + _t('weather_test_ok') + '<br>' + details + '</div>';
+                }).catch(function(e) {
+                    statusEl.innerHTML = '<div class="status-box error">❌ ' + _t('weather_test_failed') + ': ' + _esc(e.message) + '</div>';
+                });
+        }
+
         function finishSetup() {
             var browserEnabled = document.getElementById('s-browser-enable').checked;
             var smsEnabled = document.getElementById('s-sms-enable').checked;
@@ -891,12 +1021,14 @@
                     url: document.getElementById('s-pcmetrics-url').value.trim() || null
                 } : {},
                 hermes: (function() {
+                    var apiEnabled = document.getElementById('s-hermes-api-enable').checked;
                     var h = {
                         enabled: hermesEnabled,
                         homePath: document.getElementById('s-hermes-home').value.trim() || null,
                         binary: document.getElementById('s-hermes-bin').value.trim() || null,
-                        apiUrl: document.getElementById('s-hermes-api-url').value.trim() || null,
-                        preferApi: true
+                        apiEnabled: apiEnabled,
+                        preferApi: apiEnabled,
+                        apiUrl: document.getElementById('s-hermes-api-url').value.trim() || null
                     };
                     var apiKey = document.getElementById('s-hermes-api-key').value.trim();
                     if (apiKey) h.apiKey = apiKey;

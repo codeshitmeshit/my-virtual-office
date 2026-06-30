@@ -23,6 +23,31 @@
   "office_section": "🏢 办公室",
   "office_name": "办公室名称",
   "weather_location": "天气位置",
+  "weather_city_placeholder": "城市，例如 Beijing",
+  "weather_region_placeholder": "地区，可选",
+  "test_weather": "🔍 检测",
+  "testing_weather": "正在检测天气...",
+  "weather_test_ok": "天气位置可用",
+  "weather_test_failed": "天气检测失败",
+  "weather_test_location_required": "请先输入天气位置",
+  "weather_location_unconfigured": "未配置",
+  "weather_label": "天气",
+  "weather_condition_clear": "晴朗",
+  "weather_condition_sunny": "晴天",
+  "weather_condition_partly_cloudy": "局部多云",
+  "weather_condition_cloudy": "多云",
+  "weather_condition_overcast": "阴天",
+  "weather_condition_foggy": "有雾",
+  "weather_condition_drizzle": "毛毛雨",
+  "weather_condition_light_rain": "小雨",
+  "weather_condition_rain": "雨",
+  "weather_condition_heavy_rain": "大雨",
+  "weather_condition_thunderstorm": "雷暴",
+  "weather_condition_light_snow": "小雪",
+  "weather_condition_snow": "雪",
+  "weather_condition_snow_storm": "暴雪",
+  "weather_condition_sleet": "雨夹雪",
+  "weather_condition_unknown": "未知",
   "display_section": "🖥️ 显示",
   "show_chat_bubbles": "显示聊天气泡",
   "internal_bubble_timeout": "内部状态气泡自动收起（秒）",
@@ -461,6 +486,10 @@
   "chat_hermes_error": "Hermes 错误",
   "chat_hermes_ready": "Hermes 就绪",
   "chat_hermes_send_failed": "Hermes 发送失败",
+  "claude_code_error": "Claude Code 错误",
+  "claude_code_ready": "Claude Code 已就绪",
+  "claude_code_send_failed": "Claude Code 发送失败",
+  "claude_code_working": "Claude Code 工作中...",
   "chat_hermes_stream_active": "Hermes 流活跃中...",
   "chat_hermes_is_running": "正在运行 Hermes",
   "chat_hermes_queued": "已排队消息",
@@ -470,6 +499,16 @@
   "chat_hermes_approval_required": "需要 Hermes 审批",
   "chat_hermes_needs_approval": "Hermes 需要用户审批才能继续。",
   "chat_approval_gated_command": "需审批的 Hermes 命令",
+  "chat_codex_approval_required": "需要 Codex 审批",
+  "chat_codex_needs_approval": "Codex 需要用户审批才能继续。",
+  "chat_codex_approval_gated_action": "需审批的 Codex 操作",
+  "chat_codex_approval_allow_hint": "批准本轮 Codex 操作",
+  "chat_codex_approval_cancel_hint": "取消这次 Codex 审批请求",
+  "chat_cancelling_approval": "正在取消审批...",
+  "chat_cancelled_status": "已取消",
+  "chat_codex_approval_cancelled": "Codex 审批已取消。",
+  "chat_codex_approval_failed": "Codex 审批失败",
+  "chat_codex_error": "Codex 错误",
   "chat_allow_once": "允许一次",
   "chat_deny": "拒绝",
   "chat_approving_once": "批准中...",
@@ -528,7 +567,6 @@
   "agents_title": "代理",
   "close_btn": "关闭",
   "new_agent": "新建代理",
-  "save": "保存",
   "edit_label": "编辑标签",
   "assign_agent": "分配代理到此工位",
   "assigned_to": "已分配给",
@@ -536,6 +574,15 @@
   "branch_label": "分支",
   "window_settings": "窗户设置（天气/太阳）",
   "weather_window_settings": "天气窗户设置",
+  "floor_window_settings": "落地窗设置",
+  "weather_effects_label": "显示天气效果",
+  "weather_effects_desc": "在玻璃上显示雨、雪、云、雾等动画",
+  "sun_moon_label": "显示太阳 / 月亮",
+  "sun_moon_desc": "白天显示动态太阳，夜晚显示月亮",
+  "weather_effects_on": "天气效果开启",
+  "weather_effects_off": "天气效果关闭",
+  "sun_moon_on": "太阳/月亮开启",
+  "sun_moon_off": "太阳/月亮关闭",
   "weather_window_label": "天气窗户",
   "change_couch_color": "更改沙发颜色",
   "rotate_90": "旋转90度",
@@ -752,6 +799,27 @@
   "proj_save": "保存",
   "proj_checklist": "检查清单",
   "proj_add_checklist_item": "添加检查项…",
+  "proj_meeting_action_items": "会议行动项",
+  "proj_meeting_action_status_pending": "待处理",
+  "proj_meeting_action_status_completed": "已完成",
+  "proj_meeting_action_status_linked": "已加入当前任务",
+  "proj_meeting_action_owner": "负责人",
+  "proj_meeting_action_source": "会议",
+  "proj_meeting_action_linked_task": "来源任务",
+  "proj_meeting_records": "会议记录",
+  "proj_meeting_record_kind_decision": "会议结论",
+  "proj_meeting_record_kind_risk": "风险",
+  "proj_meeting_record_kind_note": "要点",
+  "proj_meeting_record_status_approved": "已达成结论",
+  "proj_meeting_record_status_no_consensus": "未达成共识",
+  "proj_meeting_record_status_rejected": "未通过",
+  "proj_meeting_record_status_needs_user_decision": "需要用户决策",
+  "proj_meeting_record_status_unknown": "会议",
+  "proj_meeting_record_no_summary": "暂无会议摘要",
+  "proj_meeting_record_risks": "风险：",
+  "proj_meeting_record_actions": "行动项：",
+  "proj_meeting_record_meeting": "会议",
+  "proj_meeting_record_request": "申请",
   "proj_comments": "评论",
   "proj_no_comments": "暂无评论",
   "proj_comments_expand": "展开全部（还有 {{count}} 条）",
@@ -917,10 +985,37 @@
   "proj_exec_state_awaiting_meeting_resolution": "等待会议结论",
   "proj_exec_state_blocked": "阻塞",
   "proj_exec_state_done": "已完成",
+  "proj_exec_panel_title": "项目执行与审查",
+  "proj_exec_executor_agent": "执行 Agent",
+  "proj_exec_reviewer": "审查人",
+  "proj_exec_start_task": "启动此任务",
+  "proj_exec_start_review": "启动审查",
+  "proj_exec_rerun": "重新执行",
+  "proj_exec_accept": "验收通过",
+  "proj_exec_rework_skipped": "退回返工",
+  "proj_exec_rework_rejected": "拒绝返工",
+  "proj_exec_mark_blocked": "标记阻塞",
+  "proj_exec_requires_user_acceptance": "需要人工验收",
+  "proj_exec_requires_user_acceptance_hint": "关闭后，审查通过会直接完成；连续启动任务模式会继续下一个任务。",
+  "proj_exec_allow_reviewerless": "允许没有 Reviewer 时跳过独立审查",
+  "proj_exec_allow_reviewerless_hint": "开启后，如果任务和项目都没有配置 Reviewer，启动任务或项目流水线时会直接执行，不再弹出跳过审查确认。",
+  "proj_exec_user_acceptance_required_badge": "需要人工验收",
+  "proj_exec_user_acceptance_not_required_badge": "无需人工验收",
+  "proj_exec_summary_title": "执行总结",
+  "proj_exec_changed_files": "修改文件",
+  "proj_exec_test_results": "测试结果",
+  "proj_exec_duration": "耗时",
+  "proj_exec_evidence_pending": "执行证据将在任务结束后显示。执行完成后需要独立审查和用户验收。",
+  "proj_exec_rework_feedback": "返工反馈",
+  "proj_exec_review_status_pass": "已通过",
+  "proj_exec_review_status_skipped": "已跳过",
+  "proj_exec_review_status_needs_more_work": "需要返工",
+  "proj_exec_review_status_blocked": "已阻塞",
   "proj_meeting_blocker_title": "等待会议结论",
   "proj_meeting_blocker_body": "任务存在需要开会统一的问题。会议明确达成一致前，项目执行不会继续推进此任务。",
   "proj_meeting_blocker_rejected_title": "会议申请已拒绝，等待用户处理",
   "proj_meeting_blocker_rejected_body": "会议申请被拒绝后，任务不会自动继续。请选择继续执行、标记阻塞或重新申请会议。",
+  "proj_meeting_blocker_view": "查看会议",
   "proj_meeting_blocker_continue": "继续执行",
   "proj_meeting_blocker_mark_blocked": "标记阻塞",
   "proj_meeting_blocker_reopen": "重新申请会议",
@@ -935,6 +1030,8 @@
   "proj_meeting_blocker_continue_failed": "已退出会议等待，但任务启动失败",
   "proj_meeting_blocker_updated": "会议等待状态已更新",
   "proj_exec_last_error_title": "任务启动失败",
+  "proj_exec_error_previous_not_resumable": "服务重启后无法恢复上一次执行。",
+  "proj_exec_error_checklist_incomplete": "验收清单尚未完成。请先继续处理未完成的清单项，再标记任务完成。",
   "proj_no_active_projects": "暂无进行中的项目",
   "proj_template_choose": "选择一个模板来创建新项目，或将当前项目保存为模板。",
   "proj_use_template": "使用模板",
@@ -1275,6 +1372,7 @@
   "new_session_confirm": "为 {{agent}} 开始新会话？这会清除对话历史。",
   "new_codex_session": "新的 Codex 会话已开始",
   "new_hermes_session": "新的 Hermes 会话已开始",
+  "new_claude_code_session": "新的 Claude Code 会话已开始",
   "compress_context_confirm": "压缩当前 Codex 上下文？可见聊天记录将保留。",
   "compressing_codex_context": "正在压缩 Codex 上下文...",
   "codex_compression_failed": "Codex 上下文压缩失败",
@@ -1302,7 +1400,6 @@
   "saving_testing": "正在保存并测试...",
   "unexpected_response": "响应格式异常",
   "hermes_disabled": "Hermes 自动检测已禁用。",
-  "testing_hermes": "正在保存并测试 Hermes...",
   "hermes_connected_profiles": "✅ Hermes 已连接，共发现 {{count}} 个配置",
   "hermes_not_reachable": "无法连接 Hermes",
   "enter_cdp_url": "请输入 CDP 地址",
@@ -1326,7 +1423,6 @@
   "back_office_short": "← 办公室",
   "website_title": "你的虚拟办公室 — AI 代理可视化工作空间",
   "preview_chat_message": "Moe：Mike，请检查收件箱中的 SR 985 提交文件...",
-  "hermes_test_failed": "Hermes 测试失败",
   "enter_cdp_first": "请先输入 CDP 地址",
   "cdp_connected_tabs": "✅ CDP 已连接！当前打开 {{count}} 个标签页",
   "cdp_reachable": "✅ CDP 可访问",
@@ -1355,6 +1451,7 @@
   "emoji_prompt": "表情：",
   "failed_create_agent": "创建代理失败",
   "error_create_agent": "创建代理时出错",
+  "agent_error_main_reserved": "main 是系统保留名称，请换一个代理名称。",
   "delete_agent_confirm": "从 {{provider}} 删除代理“{{name}}”？其工作区文件、记忆和会话历史将永久删除。",
   "failed_delete_agent": "删除代理失败",
   "error_delete_agent": "删除代理时出错",
@@ -1446,6 +1543,7 @@
   ,"furniture_meeting_table": "会议桌"
   ,"furniture_window": "窗户"
   ,"furniture_weather_window": "天气窗户"
+  ,"furniture_floor_window": "落地窗"
   ,"furniture_clock": "时钟"
   ,"furniture_floor_lamp": "落地灯"
   ,"furniture_custom_text": "自定义文字"
@@ -1557,6 +1655,8 @@
   ,"gateway_token_failed": "Gateway 令牌认证失败"
   ,"gateway_agents_connected": "已连接 {{count}} 个代理"
   ,"agent_platform_prompt": "代理平台："
+  ,"agent_create_title": "新建代理"
+  ,"agent_create_submit": "创建代理"
   ,"creating_agent_platform": "正在 {{platform}} 中创建代理..."
   ,"agent_created_platform": "已在 {{platform}} 中创建代理“{{name}}”。"
   ,"agent_deleted": "已删除代理“{{name}}”"
@@ -1663,20 +1763,98 @@
   ,"meeting_project": "项目"
   ,"meeting_project_none": "不绑定项目"
   ,"meeting_action_drafts": "行动项草稿"
-  ,"meeting_action_drafts_hint": "确认后才会创建项目任务，草稿不会自动执行。"
+  ,"meeting_action_drafts_hint": "确认后会加入来源任务的会议行动项，草稿不会自动执行。"
   ,"meeting_action_untitled": "未命名行动项"
   ,"meeting_action_status_draft": "待确认"
-  ,"meeting_action_status_confirmed": "已创建任务"
+  ,"meeting_action_status_confirmed": "已加入当前任务"
   ,"meeting_action_status_rejected": "已拒绝"
   ,"meeting_action_status_kept": "仅保存"
+  ,"meeting_action_edit": "编辑"
   ,"meeting_action_owner": "负责人"
   ,"meeting_action_title": "任务标题"
   ,"meeting_action_description": "说明"
   ,"meeting_action_save_draft": "保存草稿"
-  ,"meeting_action_confirm_task": "创建任务"
+  ,"meeting_action_confirm_task": "加入当前任务"
   ,"meeting_action_keep": "仅保存"
   ,"meeting_action_reject": "拒绝"
-  ,"meeting_action_open_task": "打开任务"
-  ,"meeting_action_task_created": "任务已创建"
+  ,"meeting_action_open_task": "打开来源任务"
+  ,"meeting_action_task_created": "已加入来源任务"
   ,"meeting_action_rejected_by_user": "用户拒绝"
+  ,"use_hermes_native_api": "使用 Hermes 原生 API"
+  ,"hermes_api_url": "Hermes API 地址"
+  ,"hermes_api_key": "Hermes API 密钥"
+  ,"leave_blank_keep_key": "留空以保留已有密钥"
+  ,"native_agent_providers": "🤖 原生 Agent 提供商"
+  ,"enable_codex": "启用 Codex"
+  ,"codex_workspace": "Codex 工作区"
+  ,"codex_agent_root": "Codex Agent 根目录"
+  ,"codex_main_workspace": "Codex Main 工作区"
+  ,"codex_model": "Codex 模型"
+  ,"codex_bridge_url": "Codex Bridge 地址"
+  ,"optional_app_server_bridge_url": "可选 app-server bridge 地址"
+  ,"show_codex_main_agent": "显示 Codex Main agent"
+  ,"discover_native_codex_agents": "发现原生 Codex agents"
+  ,"test_codex": "🔍 测试 Codex"
+  ,"enable_claude_code": "启用 Claude Code"
+  ,"claude_code_home": "Claude Code 主目录"
+  ,"claude_code_cli": "Claude Code CLI"
+  ,"claude_code_workspace": "Claude Code 工作区"
+  ,"claude_code_agent_root": "Claude Code Agent 根目录"
+  ,"claude_code_main_workspace": "Claude Code Main 工作区"
+  ,"claude_code_model": "Claude Code 模型"
+  ,"show_claude_code_main_agent": "显示 Claude Code Main agent"
+  ,"discover_native_claude_code_agents": "发现原生 Claude Code agents"
+  ,"register_new_standard_agents_natively": "以原生方式注册新的标准 agents"
+  ,"test_claude_code": "🔍 测试 Claude Code"
+  ,"native_status_available": "可用"
+  ,"native_status_configured_not_detected": "已配置，未检测到"
+  ,"native_status_disabled": "已禁用"
+  ,"native_status_not_detected": "未检测到"
+  ,"native_status_unavailable": "不可用"
+  ,"native_model": "模型"
+  ,"native_workspace": "工作区"
+  ,"native_workspace_root": "工作区根目录"
+  ,"native_main_workspace": "Main 工作区"
+  ,"native_api": "原生 API"
+  ,"native_configure_runtime_here": "可在此处或办公室设置菜单中配置此运行时。"
+  ,"enable_hermes_agents": "启用 Hermes agents"
+  ,"native_home": "主目录"
+  ,"native_cli": "CLI"
+  ,"native_api_url": "API 地址"
+  ,"native_api_key": "API 密钥"
+  ,"save": "保存"
+  ,"test": "测试"
+  ,"enable_codex_agents": "启用 Codex agents"
+  ,"register_new_standard_agents_in_native_codex": "在原生 Codex 中注册新的标准 agents"
+  ,"prefer_app_server_protocol": "优先使用 app-server 协议"
+  ,"native_agent_root": "Agent 根目录"
+  ,"native_main": "Main"
+  ,"optional": "可选"
+  ,"native_sandbox": "沙箱"
+  ,"native_approval": "审批"
+  ,"enable_claude_code_agents": "启用 Claude Code agents"
+  ,"discover_native_claude_code_subagents": "发现原生 Claude Code subagents"
+  ,"register_new_standard_agents_in_native_claude_code": "在原生 Claude Code 中注册新的标准 agents"
+  ,"native_config": "配置目录"
+  ,"native_mode": "模式"
+  ,"native_setup_guide": "原生设置指南"
+  ,"native_setup_guide_desc": "OpenClaw 云提供商使用认证配置和模型提供商条目。Hermes profiles 使用 CLI profile 配置，也可启用原生 API。Codex agents 使用 <code>$CODEX_HOME/agents/*.toml</code>。Claude Code subagents 使用 <code>$CLAUDE_CONFIG_DIR/agents/*.md</code>。"
+  ,"native_agents_tab": "🤖 原生 Agents"
+  ,"loading_native_agent_runtimes": "正在加载原生 Agent 运行时..."
+  ,"hermes_setup_saved": "Hermes 设置已保存"
+  ,"testing_hermes": "正在测试 Hermes..."
+  ,"hermes_connected": "Hermes 已连接"
+  ,"hermes_test_failed": "Hermes 测试失败"
+  ,"codex_setup_saved": "Codex 设置已保存"
+  ,"testing_codex": "正在测试 Codex..."
+  ,"codex_connected": "Codex 已连接"
+  ,"claude_code_setup_saved": "Claude Code 设置已保存"
+  ,"testing_claude_code": "正在测试 Claude Code..."
+  ,"claude_code_connected": "Claude Code 已连接"
+  ,"agent_singular": "agent"
+  ,"agent_plural": "agents"
+  ,"claude_code_stream_active": "Claude Code 流已连接..."
+  ,"claude_code_stream_failed": "Claude Code 流失败"
+  ,"claude_code_run_failed": "Claude Code 运行失败"
+  ,"claude_code_stream_disconnected": "Claude Code 事件流已断开"
 }

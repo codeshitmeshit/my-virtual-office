@@ -1,0 +1,94 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Virtual Office Happy Path 总线</title><link rel="stylesheet" href="../asset/reverse-tutorial.css"><style>
+:root {
+  --card: #ffffff;
+  --text: #1f2937;
+  --muted: #64748b;
+  --primary: #2563eb;
+  --soft: #dbeafe;
+  --border: #e2e8f0;
+  --shadow: 0 18px 45px rgba(15, 23, 42, 0.08);
+  --radius: 20px;
+  --green: #15803d;
+  --amber: #b45309;
+  --red: #b91c1c;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+  background: linear-gradient(180deg, #f8fbff 0%, #eef2f7 100%);
+  color: var(--text);
+  line-height: 1.8;
+}
+a { color: inherit; }
+.container { max-width: 1120px; margin: 0 auto; padding: 34px 24px 72px; }
+.hero, .card, .toc, .guide-card, .diagram, .step, .mini-card {
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+.hero { padding: 38px; margin-bottom: 22px; }
+.back {
+  display: inline-flex;
+  margin-bottom: 18px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(255,255,255,0.8);
+  text-decoration: none;
+  font-weight: 700;
+  font-size: 14px;
+}
+.eyebrow { display: inline-flex; margin-bottom: 16px; padding: 6px 12px; border-radius: 999px; background: var(--soft); color: var(--primary); font-size: 13px; font-weight: 800; }
+h1 { margin: 0 0 16px; font-size: clamp(32px, 5vw, 54px); line-height: 1.1; letter-spacing: 0; }
+h2 { margin: 0 0 18px; font-size: 26px; line-height: 1.35; }
+h3 { margin: 0 0 8px; font-size: 19px; line-height: 1.4; }
+p { margin: 0; color: #475569; }
+.hero p { max-width: 850px; font-size: 17px; color: var(--muted); }
+.meta, .toc-links, .tags { display: flex; flex-wrap: wrap; gap: 10px; }
+.meta, .tags { margin-top: 18px; }
+.tag { padding: 5px 11px; border-radius: 999px; background: #f1f5f9; color: #475569; font-size: 12px; font-weight: 800; }
+.toc { padding: 20px 24px; margin: 22px 0; }
+.toc strong { display: block; margin-bottom: 10px; }
+.toc a { padding: 7px 11px; border-radius: 10px; background: #f8fafc; color: #334155; text-decoration: none; font-size: 14px; font-weight: 700; }
+.card { padding: 30px; margin-top: 22px; }
+.prose { display: grid; gap: 14px; margin-top: 16px; }
+.grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-top: 18px; }
+.guide-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin-top: 18px; }
+.guide-card { display: flex; flex-direction: column; justify-content: space-between; min-height: 230px; padding: 24px; text-decoration: none; }
+.guide-card:hover { border-color: rgba(37,99,235,0.42); transform: translateY(-2px); transition: 0.2s ease; }
+.mini-card { box-shadow: none; padding: 18px; background: #f8fafc; }
+.mini-card strong { display: block; margin-bottom: 6px; color: var(--text); }
+.mini-card span { color: var(--muted); font-size: 14px; }
+.steps { display: grid; gap: 14px; margin-top: 18px; }
+.step { display: flex; gap: 18px; padding: 20px; box-shadow: none; background: #fff; }
+.step-number { width: 48px; height: 48px; flex: 0 0 48px; display: grid; place-items: center; border-radius: 14px; background: var(--soft); color: var(--primary); font-weight: 900; }
+.flow-step { display: grid; grid-template-columns: 160px minmax(0,1fr); gap: 16px; padding: 18px; border: 1px solid var(--border); border-radius: 16px; background: #fff; }
+.flow-step strong { color: var(--text); }
+.flow-step span { display: block; color: var(--muted); font-size: 14px; }
+.diagram { margin-top: 18px; padding: 16px; background: #fff; overflow-x: auto; }
+.diagram img { display: block; width: 100%; min-width: 640px; border-radius: 18px; border: 1px solid var(--border); }
+.caption { margin-top: 10px; font-size: 14px; text-align: center; color: var(--muted); }
+pre { overflow-x: auto; margin: 18px 0 0; padding: 20px; border-radius: 16px; background: #0f172a; color: #e5e7eb; font-size: 14px; line-height: 1.7; }
+code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.code-card { margin-top: 18px; padding: 18px; border: 1px solid var(--border); border-radius: 16px; background: #fff; }
+.code-meta { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.code-meta span { padding: 4px 9px; border-radius: 999px; background: #f1f5f9; color: #475569; font-size: 12px; font-weight: 800; }
+table { width: 100%; border-collapse: collapse; margin-top: 16px; font-size: 14px; }
+th, td { padding: 12px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+th { background: #f8fafc; color: #334155; }
+.note { border-left: 4px solid var(--primary); padding: 14px 16px; background: #eff6ff; border-radius: 12px; color: #334155; }
+.risk { border-left-color: var(--amber); background: #fffbeb; }
+@media (max-width: 860px) {
+  .grid, .guide-grid { grid-template-columns: 1fr; }
+  .flow-step { grid-template-columns: 1fr; }
+}
+@media (max-width: 560px) {
+  .container { padding: 28px 16px 52px; }
+  .hero, .card, .toc, .guide-card { padding: 22px; border-radius: 18px; }
+  .step { flex-direction: column; }
+}
+
+</style></head><body><main class="container"><a class="back" href="../guide.html">返回教程目录</a><section class="hero"><span class="eyebrow">链路发现 Subagent</span><h1>Virtual Office Happy Path 总线</h1><p>主 Happy Path 是：本地启动 Virtual Office，浏览器打开项目看板，用户启动项目或任务执行，后端创建 attempt，在线程中调用 provider，保存证据，再进入评审、验收、会议阻塞或连续下一任务。</p><div class="meta"><span class="tag">主流程</span><span class="tag">置信度高</span></div></section><nav class="toc"><strong>本页目录</strong><div class="toc-links"><a href="#skeleton">主流程骨架</a><a href="#diagram">总线图</a><a href="#inventory">链路清单</a><a href="#evidence">证据</a><a href="#concept-notes">概念</a></div></nav><section id="skeleton" class="card"><h2>详细主链路说明</h2><div class="steps"><div class="step"><div class="step-number">1</div><div><h3>`start.sh:start_local`</h3><p>输入是本地 shell 环境和 `.env`；动作是设置端口、状态目录、gateway URL；输出是可以运行 `app/server.py` 的环境。</p></div></div><div class="step"><div class="step-number">2</div><div><h3>`server.py:__main__`</h3><p>启动后台线程和 HTTP server，presence 在服务启动时绑定 roster 和 snapshot。</p></div></div><div class="step"><div class="step-number">3</div><div><h3>`projects.js:ProjectApi`</h3><p>前端把用户点击转成项目级或任务级 `project-execution/start` 请求。</p></div></div><div class="step"><div class="step-number">4</div><div><h3>`OfficeHandler.do_POST`</h3><p>路由层按路径分发到 `_handle_project_execution_project_start` 或 `_handle_project_execution_start`。</p></div></div><div class="step"><div class="step-number">5</div><div><h3>`_handle_project_execution_start`</h3><p>校验 Project Execution 开关、workspace、executor/reviewer、active task、dirty worktree，并创建 attempt。</p></div></div><div class="step"><div class="step-number">6</div><div><h3>`_project_execution_run_attempt`</h3><p>后台线程构造 prompt，调用 `_project_execution_call_executor`，保存 evidence，并按结果进入 review、done、blocked 或 acceptance。</p></div></div></div></section><section id="diagram" class="card"><h2>总线图</h2><div class="diagram"><img src="../asset/happy-path-bus.svg" alt="Happy Path 总线图"><p class="caption">图中的关键边均可追溯到 `start.sh`、`app/projects.js`、`app/server.py` 和 `app/provider_execution.py`。</p></div></section><section id="inventory" class="card"><h2>链路清单和筛选</h2><table><tr><th>链路</th><th>入口</th><th>终止点</th><th>深挖</th></tr><tr><td>前端项目执行启动</td><td>`projects.js` projectExecutionStart</td><td>`_handle_project_execution_start` 返回 started/confirmation/error</td><td>是</td></tr><tr><td>Attempt 运行</td><td>`_project_execution_run_attempt`</td><td>evidence/stateHistory 持久化</td><td>是</td></tr><tr><td>Provider-neutral 调用</td><td>`_project_execution_call_executor`</td><td>统一 result 返回 attempt</td><td>是</td></tr><tr><td>评审/返工/验收</td><td>`_handle_project_execution_review_start`</td><td>done/reworking/blocked</td><td>是</td></tr><tr><td>会议阻塞</td><td>`/meeting-requests`</td><td>恢复执行或 blocked</td><td>是</td></tr><tr><td>项目定时任务派发</td><td>`scheduled-cron` API</td><td>启动项目执行或 skipped</td><td>延伸阅读</td></tr></table></section><section id="evidence" class="card"><h2>证据清单</h2><table><tr><th>结论</th><th>路径</th></tr><tr><td>项目执行是主业务总线</td><td>`README.md` 项目与任务执行；`app/projects.js:326-352`；`app/server.py:15736-15860`</td></tr><tr><td>provider 差异被压到 adapter</td><td>`app/server.py:15398-15420`；`app/provider_execution.py:28-82`</td></tr><tr><td>会议是阻塞分支</td><td>`app/server.py:6362-6497`；`app/server.py:16087`</td></tr></table></section><section id="concept-notes" class="card"><h2>关键概念补充</h2><h3 id="concept-project-execution-attempt">1. Project Execution attempt</h3><p><strong>出现位置：</strong>`app/server.py:15786-15806`。一次任务执行尝试，后续 evidence、review、rework 都挂在 attempt 上。</p><h3 id="concept-provider-neutral-result">2. Provider-neutral result</h3><p><strong>出现位置：</strong>`app/provider_execution.py:28-82`。把不同 provider 的 reply、状态、工具、文件变化和人工介入信号整理成统一结构。</p><h3 id="concept-meeting-blocker">3. Meeting request blocker</h3><p><strong>出现位置：</strong>`app/server.py:6362-6497`。当 Agent 认为需要会议才能继续，任务会进入等待会议解决的状态。</p></section></main></body></html>

@@ -47,7 +47,15 @@ def create_project(title="Phase 6 Project"):
     return server._handle_project_create({"title": title, "createdBy": "tester"})["project"]
 
 
-def create_completed_task_meeting(project_id=""):
+def create_project_task(project):
+    return server._handle_task_create(project["id"], {
+        "title": "Source task",
+        "description": "Task that requested the meeting.",
+        "assignee": "codex",
+    })["task"]
+
+
+def create_completed_task_meeting(project_id="", task_id=""):
     created = server._handle_executable_meeting_create({
         "topic": "Phase 6 Task Meeting",
         "purpose": "Turn meeting output into project tasks.",
@@ -55,6 +63,7 @@ def create_completed_task_meeting(project_id=""):
         "participants": ["codex", "hermes"],
         "moderator": "codex",
         "projectId": project_id,
+        "source": {"projectId": project_id, "taskId": task_id, "meetingRequestId": "req-phase6"} if project_id and task_id else {},
         "allowConflicts": True,
         "idempotencyKey": "phase6-meeting",
     })["meeting"]
@@ -85,18 +94,19 @@ def create_completed_task_meeting(project_id=""):
     return completed["meeting"]
 
 
-def test_phase6_project_bound_meeting_creates_drafts_not_tasks_until_confirmed():
+def test_phase6_project_bound_meeting_adds_action_to_source_task_without_backlog():
     with tempfile.TemporaryDirectory() as status_dir:
         old = with_store(status_dir)
         try:
             project = create_project()
-            meeting = create_completed_task_meeting(project["id"])
+            source_task = create_project_task(project)
+            meeting = create_completed_task_meeting(project["id"], source_task["id"])
             assert meeting["projectId"] == project["id"]
             drafts = meeting["actionItemDrafts"]
             assert len(drafts) == 2
             assert drafts[0]["status"] == "draft"
             assert drafts[0]["targetProjectId"] == project["id"]
-            assert server._handle_project_get(project["id"])["project"]["tasks"] == []
+            assert len(server._handle_project_get(project["id"])["project"]["tasks"]) == 1
 
             confirmed = server._handle_executable_meeting_action_item(meeting["id"], drafts[0]["id"], {
                 "action": "confirm",
@@ -104,12 +114,14 @@ def test_phase6_project_bound_meeting_creates_drafts_not_tasks_until_confirmed()
             })
             assert confirmed["ok"] is True
             task = confirmed["task"]
-            assert task["source"]["meetingId"] == meeting["id"]
-            assert task["source"]["actionItemId"] == drafts[0]["id"]
+            assert task["id"] == source_task["id"]
+            assert confirmed["meetingActionItem"]["meetingId"] == meeting["id"]
+            assert confirmed["meetingActionItem"]["sourceActionItemId"] == drafts[0]["id"]
 
             project_after = server._handle_project_get(project["id"])["project"]
             assert len(project_after["tasks"]) == 1
-            assert project_after["tasks"][0]["source"]["kind"] == "meeting_action_item"
+            assert project_after["tasks"][0]["id"] == source_task["id"]
+            assert project_after["tasks"][0]["meetingActionItems"][0]["status"] == "pending"
         finally:
             restore_store(old)
 
@@ -158,7 +170,7 @@ def test_phase6_unbound_meeting_requires_target_project_or_keep():
                 "idempotencyKey": "missing-project",
             })
             assert denied["_status"] == 400
-            assert denied["code"] == "target_project_required"
+            assert denied["code"] == "source_task_required"
 
             kept = server._handle_executable_meeting_action_item(meeting["id"], draft["id"], {
                 "action": "keep",
@@ -174,7 +186,8 @@ def test_phase6_edit_reject_and_confirm_are_idempotent():
         old = with_store(status_dir)
         try:
             project = create_project()
-            meeting = create_completed_task_meeting(project["id"])
+            source_task = create_project_task(project)
+            meeting = create_completed_task_meeting(project["id"], source_task["id"])
             first, second = meeting["actionItemDrafts"]
 
             updated = server._handle_executable_meeting_action_item(meeting["id"], first["id"], {
@@ -206,12 +219,13 @@ def test_phase6_edit_reject_and_confirm_are_idempotent():
             assert repeated["taskId"] == confirmed["taskId"]
             project_after = server._handle_project_get(project["id"])["project"]
             assert len(project_after["tasks"]) == 1
+            assert project_after["tasks"][0]["meetingActionItems"][0]["title"] == "Edited action item title"
         finally:
             restore_store(old)
 
 
 if __name__ == "__main__":
-    test_phase6_project_bound_meeting_creates_drafts_not_tasks_until_confirmed()
+    test_phase6_project_bound_meeting_adds_action_to_source_task_without_backlog()
     test_phase6_unbound_meeting_requires_target_project_or_keep()
     test_phase6_edit_reject_and_confirm_are_idempotent()
     print("test_meeting_for_ai_phase6.py passed")

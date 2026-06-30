@@ -40,8 +40,9 @@
         // Fallback: fetch from locales/ directory
         var script = document.querySelector('script[src$="i18n.js"]');
         var base = script && script.src ? script.src : window.location.href;
-        var url = new URL('locales/' + lang + '.json', base).toString();
-        fetch(url).then(function (r) {
+        var version = (window.APP_VERSION || document.querySelector('meta[name="app-version"]')?.content || Date.now());
+        var url = new URL('locales/' + lang + '.json?v=' + encodeURIComponent(version), base).toString();
+        fetch(url, { cache: 'no-store' }).then(function (r) {
             if (!r.ok) throw new Error('Failed to load ' + url);
             return r.json();
         }).then(function (data) {

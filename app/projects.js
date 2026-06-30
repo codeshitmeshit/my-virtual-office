@@ -48,6 +48,90 @@
         return currentLang().startsWith('zh') ? `展开全部（还有 ${hiddenCount} 条）` : `Show all (${hiddenCount} more)`;
     }
 
+    function meetingActionStatusLabel(status) {
+        const key = {
+            pending: 'proj_meeting_action_status_pending',
+            completed: 'proj_meeting_action_status_completed',
+            external_task_created: 'proj_meeting_action_status_linked'
+        }[status || 'pending'];
+        return key ? _t(key) : (status || 'pending');
+    }
+
+    function meetingDiscussionKindLabel(kind) {
+        const key = {
+            decision: 'proj_meeting_record_kind_decision',
+            risk: 'proj_meeting_record_kind_risk',
+            note: 'proj_meeting_record_kind_note'
+        }[kind || 'note'];
+        return key ? _t(key) : (kind || _t('proj_meeting_record_kind_note'));
+    }
+
+    function meetingRecordStatusLabel(status) {
+        const key = {
+            approved: 'proj_meeting_record_status_approved',
+            no_consensus: 'proj_meeting_record_status_no_consensus',
+            rejected: 'proj_meeting_record_status_rejected',
+            needs_user_decision: 'proj_meeting_record_status_needs_user_decision'
+        }[status || ''];
+        return key ? _t(key) : (status || _t('proj_meeting_record_status_unknown'));
+    }
+
+    function statusClassName(value, fallback = 'unknown') {
+        return String(value || fallback)
+            .toLowerCase()
+            .replace(/[^a-z0-9_-]+/g, '-')
+            .replace(/^-+|-+$/g, '') || fallback;
+    }
+
+    function taskMeetingRecords(task, discussionPoints, actionItems) {
+        const explicit = Array.isArray(task && task.meetingRecords) ? task.meetingRecords : [];
+        if (explicit.length) {
+            return explicit.slice().sort((a, b) => String(a.appliedAt || a.createdAt || '').localeCompare(String(b.appliedAt || b.createdAt || '')));
+        }
+        const grouped = {};
+        (discussionPoints || []).forEach(item => {
+            const meetingId = item.meetingId || 'task-context';
+            if (!grouped[meetingId]) {
+                grouped[meetingId] = {
+                    id: 'legacy-' + meetingId,
+                    meetingId,
+                    requestId: item.requestId || '',
+                    outcome: item.kind === 'risk' ? 'needs_user_decision' : 'approved',
+                    status: item.kind === 'risk' ? 'needs_user_decision' : 'approved',
+                    decision: '',
+                    summary: '',
+                    risks: [],
+                    actionItems: [],
+                    createdAt: item.createdAt || '',
+                    appliedAt: item.createdAt || ''
+                };
+            }
+            if (item.kind === 'risk') grouped[meetingId].risks.push(item.text || '');
+            else if (!grouped[meetingId].decision) grouped[meetingId].decision = item.text || '';
+            if (item.createdAt && (!grouped[meetingId].appliedAt || item.createdAt < grouped[meetingId].appliedAt)) grouped[meetingId].appliedAt = item.createdAt;
+        });
+        (actionItems || []).forEach(item => {
+            const meetingId = item.meetingId || 'task-context';
+            if (!grouped[meetingId]) {
+                grouped[meetingId] = {
+                    id: 'legacy-' + meetingId,
+                    meetingId,
+                    requestId: item.requestId || '',
+                    outcome: 'approved',
+                    status: 'approved',
+                    decision: '',
+                    summary: '',
+                    risks: [],
+                    actionItems: [],
+                    createdAt: item.createdAt || '',
+                    appliedAt: item.createdAt || ''
+                };
+            }
+            grouped[meetingId].actionItems.push({ title: item.title || '', owner: item.owner || '' });
+        });
+        return Object.values(grouped).sort((a, b) => String(a.appliedAt || a.createdAt || '').localeCompare(String(b.appliedAt || b.createdAt || '')));
+    }
+
     // ── DEFAULT TEMPLATES ─────────────────────────────────────────
     const DEFAULT_TEMPLATES = [
         {
@@ -240,7 +324,7 @@
             return r.json();
         },
         async projectExecutionStart(projectId, taskId, dirtyFingerprint, opts = {}) {
-            const r = await fetch(`/api/projects/${projectId}/tasks/${taskId}/project-execution/start`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dirtyFingerprint: dirtyFingerprint || '', skipReviewConfirmed: !!opts.skipReviewConfirmed }) });
+            const r = await fetch(`/api/projects/${projectId}/tasks/${taskId}/project-execution/start`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dirtyFingerprint: dirtyFingerprint || '', skipReviewConfirmed: !!opts.skipReviewConfirmed, resetExecutionContext: opts.resetExecutionContext === true }) });
             return r.json();
         },
         async projectExecutionProjectStart(projectId, mode, dirtyFingerprint, opts = {}) {
@@ -486,6 +570,9 @@
     function escHtml(s) {
         if (!s) return '';
         return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+    function jsArg(value) {
+        return JSON.stringify(value == null ? '' : String(value)).replace(/</g, '\\u003c');
     }
     function simpleMarkdown(text) {
         if (!text) return '';
@@ -924,7 +1011,7 @@
         const pc = priorityColor(task.priority);
         const due = task.dueDate;
         const overdue = due && !task.completedAt && isOverdue(due);
-        const checklist = task.checklist || [];
+        const checklist = (task.checklist || []).filter(c => c && c.source !== 'meeting_action_item' && c.source !== 'meeting_risk');
         const checkDone = checklist.filter(c => c.done).length;
         const hasCheck = checklist.length > 0;
         const comments = (task.comments || []).length;
@@ -939,8 +1026,7 @@
             draggable="true"
             ondragstart="ProjMgr.onDragStart(event, '${task.id}')"
             ondragend="ProjMgr.onDragEnd(event)"
-            ontouchstart="ProjMgr.onTouchStart(event, '${task.id}')"
-            onclick="ProjMgr.openTaskDetail('${task.id}')">
+            ontouchstart="ProjMgr.onTouchStart(event, '${task.id}')">
             <div class="proj-task-title">${escHtml(task.title)}</div>
             <div class="proj-task-meta">
                 ${task.priority !== 'medium' ? `<span class="proj-badge badge-${task.priority}" style="font-size:9px">${priorityLabel}</span>` : ''}
@@ -962,6 +1048,20 @@
     function bindBoardEvents() {
         // Quick add key handler
         document.addEventListener('keydown', handleGlobalKeys);
+        const board = document.querySelector('.proj-board-body');
+        if (board && board.dataset.taskClickBound !== '1') {
+            board.dataset.taskClickBound = '1';
+            board.addEventListener('click', (event) => {
+                const card = event.target && event.target.closest ? event.target.closest('.proj-task-card') : null;
+                if (!card || !board.contains(card)) return;
+                if (Date.now() - Number(board.dataset.lastTaskDragAt || 0) < 250) return;
+                const interactive = event.target.closest('button,input,select,textarea,a,[contenteditable="true"]');
+                if (interactive) return;
+                event.preventDefault();
+                event.stopPropagation();
+                openTaskDetail(card.dataset.taskId);
+            });
+        }
     }
 
     // ── DRAG & DROP (HTML5) ───────────────────────────────────────
@@ -983,6 +1083,8 @@
     }
 
     function onDragEnd(e) {
+        const board = document.querySelector('.proj-board-body');
+        if (board) board.dataset.lastTaskDragAt = String(Date.now());
         if (_dragTaskId) {
             const card = document.getElementById(`task-${_dragTaskId}`);
             if (card) card.classList.remove('dragging');
@@ -1281,9 +1383,22 @@
         if (panel) panel.classList.remove('open');
     }
 
-    function renderDetailPanel(task) {
+    function detailPanelActiveEditor() {
+        const active = document.activeElement;
+        return !!(active && active.closest && active.closest('#proj-detail-panel') && ['INPUT', 'TEXTAREA', 'SELECT'].includes(active.tagName));
+    }
+
+    function renderDetailPanel(task, opts = {}) {
         const panel = document.getElementById('proj-detail-panel');
         if (!panel) return;
+        const existingBody = panel.querySelector('.proj-detail-body');
+        const preserveScroll = opts.preserveScroll === true;
+        const previousScrollTop = preserveScroll && existingBody ? existingBody.scrollTop : 0;
+        const previousScrollHeight = preserveScroll && existingBody ? existingBody.scrollHeight : 0;
+        const previousClientHeight = preserveScroll && existingBody ? existingBody.clientHeight : 0;
+        const wasNearBottom = preserveScroll && existingBody
+            ? previousScrollTop + previousClientHeight >= previousScrollHeight - 24
+            : false;
         // Preserve unsaved description text from textarea before re-render
         const existingDescEl = document.getElementById('detail-desc');
         if (existingDescEl && task && existingDescEl.dataset.taskId === task.id) {
@@ -1292,7 +1407,7 @@
         const p = state.currentProject;
         const cols = (p && p.columns) || [];
         const agents = state.agentRoster;
-        const checklist = task.checklist || [];
+        const checklist = visibleChecklistItems(task).map(entry => entry.item);
         const checkDone = checklist.filter(c => c.done).length;
         const comments = task.comments || [];
         const commentsExpanded = !!state.expandedCommentTasks[task.id];
@@ -1303,13 +1418,16 @@
         const activity = (p && p.activity || []).filter(a => a.taskId === task.id).slice().reverse().slice(0, 20);
         const meetingRequests = activeTaskMeetingRequests(task, state.meetingRequestsByTask[task.id] || []);
         const projectExecution = !!(p && p.projectExecutionEnabled);
+        const meetingActionItems = Array.isArray(task.meetingActionItems) ? task.meetingActionItems : [];
+        const meetingDiscussionPoints = Array.isArray(task.meetingDiscussionPoints) ? task.meetingDiscussionPoints : [];
+        const meetingRecords = taskMeetingRecords(task, meetingDiscussionPoints, meetingActionItems);
         const evidence = task.evidence || {};
         const reviewResult = task.reviewResult || {};
         const attemptId = task.activeAttemptId || (task.attempts && task.attempts.length ? task.attempts[task.attempts.length - 1].id : '');
         const evidenceAttemptId = evidence.attemptId || attemptId;
         const projectExecutionReviewHtml = reviewResult.status ? `
             <div class="proj-exec-review state-${escHtml(reviewResult.status)}">
-                <div><strong>Reviewer</strong> ${escHtml(reviewResult.status)}</div>
+                <div><strong>${escHtml(_tf('proj_exec_reviewer', 'Reviewer', '审查人'))}</strong> ${escHtml(projectExecutionReviewStatusLabel(reviewResult.status))}</div>
                 ${reviewResult.summary ? `<div class="proj-exec-summary">${escHtml(reviewResult.summary)}</div>` : ''}
                 ${reviewResult.rationale ? `<div class="proj-exec-meta">${escHtml(reviewResult.rationale)}</div>` : ''}
                 ${(reviewResult.items || []).slice(0, 12).map(item => `<code>${escHtml(typeof item === 'string' ? item : (item.text || item.summary || JSON.stringify(item)))}</code>`).join('')}
@@ -1319,16 +1437,18 @@
             if (task.executionState === 'reviewing') return `<button class="proj-btn proj-btn-sm" disabled>审查中</button>`;
             if (task.executionState === 'awaiting_meeting_resolution') return `<button class="proj-btn proj-btn-sm" disabled>${escHtml(projectExecutionStateLabel(task))}</button>`;
             if (task.executionState === 'execution_complete') return `
-                <button class="proj-btn proj-btn-sm proj-btn-start" onclick="ProjMgr.projectExecutionReviewStart('${task.id}', '${escHtml(evidenceAttemptId)}')">启动审查</button>
-                <button class="proj-btn proj-btn-sm" onclick="ProjMgr.projectExecutionStart('${task.id}')">重新执行</button>`;
+                <button class="proj-btn proj-btn-sm proj-btn-start" onclick="ProjMgr.projectExecutionReviewStart('${task.id}', '${escHtml(evidenceAttemptId)}')">${escHtml(_tf('proj_exec_start_review', 'Start review', '启动审查'))}</button>
+                <button class="proj-btn proj-btn-sm" onclick="ProjMgr.projectExecutionStart('${task.id}', '', { resetExecutionContext: true })">${escHtml(_tf('proj_exec_rerun', 'Run again', '重新执行'))}</button>`;
             if (task.executionState === 'awaiting_user_acceptance') {
-                const rejectLabel = reviewResult.status === 'skipped' ? '退回返工' : '拒绝返工';
+                const rejectLabel = reviewResult.status === 'skipped'
+                    ? _tf('proj_exec_rework_skipped', 'Return for rework', '退回返工')
+                    : _tf('proj_exec_rework_rejected', 'Reject for rework', '拒绝返工');
                 return `
-                <button class="proj-btn proj-btn-sm proj-btn-start" onclick="ProjMgr.projectExecutionAccept('${task.id}', 'accept', '${escHtml(reviewResult.attemptId || evidenceAttemptId)}')">验收通过</button>
-                <button class="proj-btn proj-btn-sm" onclick="ProjMgr.projectExecutionAccept('${task.id}', 'reject_and_rework', '${escHtml(reviewResult.attemptId || evidenceAttemptId)}')">${rejectLabel}</button>
-                <button class="proj-btn proj-btn-sm proj-btn-stop" onclick="ProjMgr.projectExecutionAccept('${task.id}', 'mark_blocked', '${escHtml(reviewResult.attemptId || evidenceAttemptId)}')">标记阻塞</button>`;
+                <button class="proj-btn proj-btn-sm proj-btn-start" onclick="ProjMgr.projectExecutionAccept('${task.id}', 'accept', '${escHtml(reviewResult.attemptId || evidenceAttemptId)}')">${escHtml(_tf('proj_exec_accept', 'Accept', '验收通过'))}</button>
+                <button class="proj-btn proj-btn-sm" onclick="ProjMgr.projectExecutionAccept('${task.id}', 'reject_and_rework', '${escHtml(reviewResult.attemptId || evidenceAttemptId)}')">${escHtml(rejectLabel)}</button>
+                <button class="proj-btn proj-btn-sm proj-btn-stop" onclick="ProjMgr.projectExecutionAccept('${task.id}', 'mark_blocked', '${escHtml(reviewResult.attemptId || evidenceAttemptId)}')">${escHtml(_tf('proj_exec_mark_blocked', 'Mark blocked', '标记阻塞'))}</button>`;
             }
-            return `<button class="proj-btn proj-btn-sm proj-btn-start" onclick="ProjMgr.projectExecutionStart('${task.id}')">启动此任务</button>`;
+            return `<button class="proj-btn proj-btn-sm proj-btn-start" onclick="ProjMgr.projectExecutionStart('${task.id}', '', { resetExecutionContext: true })">${escHtml(_tf('proj_exec_start_task', 'Start this task', '启动此任务'))}</button>`;
         })();
 
         panel.innerHTML = `
@@ -1378,20 +1498,20 @@
                 </div>
                 ${projectExecution ? `<div style="display:flex;gap:8px">
                     <div class="proj-field" style="flex:1">
-                        <label class="proj-field-label">执行 Agent</label>
-                        <select class="proj-detail-select" onchange="ProjMgr.updateTaskField('executorAgentId', this.value || null)">${projectExecutionAgentOptions(task.executorAgentId || task.assignee || '')}</select>
+                        <label class="proj-field-label">${escHtml(_tf('proj_exec_executor_agent', 'Executor agent', '执行 Agent'))}</label>
+                        <select class="proj-detail-select" id="detail-executor-agent" onchange="ProjMgr.updateTaskField('executorAgentId', this.value || null)">${projectExecutionAgentOptions(task.executorAgentId || task.assignee || '')}</select>
                     </div>
                     <div class="proj-field" style="flex:1">
-                        <label class="proj-field-label">Reviewer</label>
+                        <label class="proj-field-label">${escHtml(_tf('proj_exec_reviewer', 'Reviewer', '审查人'))}</label>
                         <select class="proj-detail-select" onchange="ProjMgr.updateTaskField('reviewerAgentId', this.value || null)">${projectExecutionAgentOptions(task.reviewerAgentId || '')}</select>
                     </div>
                 </div>` : ''}
                 ${projectExecution ? `<div class="proj-field">
                     <label class="proj-form-label" style="display:flex;align-items:center;gap:6px">
                         <input type="checkbox" ${task.requiresUserAcceptance === true ? 'checked' : ''} onchange="ProjMgr.updateTaskField('requiresUserAcceptance', this.checked)">
-                        需要人工验收
+                        ${escHtml(_tf('proj_exec_requires_user_acceptance', 'Require user acceptance', '需要人工验收'))}
                     </label>
-                    <div class="proj-exec-meta">关闭后，审查通过会直接完成；连续启动任务模式会继续下一个任务。</div>
+                    <div class="proj-exec-meta">${escHtml(_tf('proj_exec_requires_user_acceptance_hint', 'When disabled, a passed review completes the task directly and continuous mode moves to the next task.', '关闭后，审查通过会直接完成；连续启动任务模式会继续下一个任务。'))}</div>
                 </div>` : ''}
                 <div class="proj-field">
                     <label class="proj-form-label" style="display:flex;align-items:center;gap:6px">
@@ -1403,9 +1523,9 @@
                 ${projectExecution ? `<div class="proj-field">
                     <label class="proj-form-label" style="display:flex;align-items:center;gap:6px">
                         <input type="checkbox" ${task.allowReviewerlessExecution === true ? 'checked' : ''} onchange="ProjMgr.updateTaskField('allowReviewerlessExecution', this.checked)">
-                        允许没有 Reviewer 时跳过独立审查
+                        ${escHtml(_tf('proj_exec_allow_reviewerless', 'Allow skipping independent review when no reviewer is configured', '允许没有 Reviewer 时跳过独立审查'))}
                     </label>
-                    <div class="proj-exec-meta">开启后，如果任务和项目都没有配置 Reviewer，启动任务或项目流水线时会直接执行，不再弹出跳过审查确认。</div>
+                    <div class="proj-exec-meta">${escHtml(_tf('proj_exec_allow_reviewerless_hint', 'When enabled, tasks without a configured reviewer run without the skip-review confirmation.', '开启后，如果任务和项目都没有配置 Reviewer，启动任务或项目流水线时会直接执行，不再弹出跳过审查确认。'))}</div>
                 </div>` : ''}
                 <div class="proj-field">
                     <label class="proj-field-label">${_t('proj_tags')}</label>
@@ -1417,22 +1537,74 @@
             </div>
 
             ${projectExecution ? `<div class="proj-section proj-exec-panel">
-                <div class="proj-section-header"><span class="proj-section-title">Project Execution 执行与审查</span><span class="proj-exec-state state-${escHtml(task.executionState || 'backlog')}">${task.requiresUserAcceptance === true ? '需要人工验收 · ' : '无需人工验收 · '}${escHtml(projectExecutionStateLabel(task))}</span></div>
+                <div class="proj-section-header"><span class="proj-section-title">${escHtml(_tf('proj_exec_panel_title', 'Project Execution', '项目执行与审查'))}</span><span class="proj-exec-state state-${escHtml(task.executionState || 'backlog')}">${task.requiresUserAcceptance === true ? escHtml(_tf('proj_exec_user_acceptance_required_badge', 'User acceptance required', '需要人工验收')) + ' · ' : escHtml(_tf('proj_exec_user_acceptance_not_required_badge', 'No user acceptance', '无需人工验收')) + ' · '}${escHtml(projectExecutionStateLabel(task))}</span></div>
                 <div class="proj-exec-actions">
                     ${projectExecutionActionsHtml}
                 </div>
                 ${renderMeetingBlocker(task)}
                 ${renderProjectExecutionError(task)}
-                ${task.blockedReason ? `<div class="proj-exec-warning">${escHtml(task.blockedReason)}</div>` : ''}
+                ${renderProjectExecutionBlockedReason(task)}
                 ${evidence.capturedAt ? `<div class="proj-exec-evidence">
-                    <div><strong>执行总结</strong></div><div class="proj-exec-summary">${escHtml(evidence.executorSummary || '无')}</div>
-                    <div><strong>修改文件</strong> ${(evidence.changedFiles || []).length}</div>
+                    <div><strong>${escHtml(_tf('proj_exec_summary_title', 'Execution summary', '执行总结'))}</strong></div><div class="proj-exec-summary">${escHtml(evidence.executorSummary || _tf('proj_none', 'None', '无'))}</div>
+                    <div><strong>${escHtml(_tf('proj_exec_changed_files', 'Changed files', '修改文件'))}</strong> ${(evidence.changedFiles || []).length}</div>
                     ${(evidence.changedFiles || []).slice(0, 20).map(f => `<code>${escHtml(f)}</code>`).join('')}
-                    ${(evidence.testResults || []).length ? `<div><strong>测试结果</strong></div>${evidence.testResults.slice(0, 20).map(t => `<code>${escHtml(t)}</code>`).join('')}` : ''}
-                    <div class="proj-exec-meta">耗时 ${Math.round((evidence.durationMs || 0) / 1000)}s · ${escHtml(evidence.providerStatus || '')}</div>
-                </div>` : '<div class="proj-exec-meta">执行证据将在任务结束后显示。执行完成后需要独立审查和用户验收。</div>'}
+                    ${renderProjectExecutionTestResults(evidence.testResults)}
+                    <div class="proj-exec-meta">${escHtml(_tf('proj_exec_duration', 'Duration', '耗时'))} ${Math.round((evidence.durationMs || 0) / 1000)}s · ${escHtml(evidence.providerStatus || '')}</div>
+                </div>` : `<div class="proj-exec-meta">${escHtml(_tf('proj_exec_evidence_pending', 'Execution evidence will appear after the task finishes. Completed execution requires independent review and user acceptance.', '执行证据将在任务结束后显示。执行完成后需要独立审查和用户验收。'))}</div>`}
                 ${projectExecutionReviewHtml}
-                ${task.reworkFeedback ? `<div class="proj-exec-meta">返工反馈：${escHtml(task.reworkFeedback)}</div>` : ''}
+                ${task.reworkFeedback ? `<div class="proj-exec-meta">${escHtml(_tf('proj_exec_rework_feedback', 'Rework feedback', '返工反馈'))}：${escHtml(task.reworkFeedback)}</div>` : ''}
+            </div>` : ''}
+
+            ${meetingRecords.length ? `<div class="proj-section proj-meeting-discussion-panel">
+                <div class="proj-section-header">
+                    <span class="proj-section-title">${escHtml(_t('proj_meeting_records'))}</span>
+                    <span style="font-size:10px;color:#888">${meetingRecords.length}</span>
+                </div>
+                <div class="proj-meeting-action-list">
+                    ${meetingRecords.map(record => {
+                        const risks = Array.isArray(record.risks) ? record.risks.filter(Boolean) : [];
+                        const actions = Array.isArray(record.actionItems) ? record.actionItems.filter(a => a && (a.title || a.item)) : [];
+                        const decisionText = record.decision || record.summary || '';
+                        const statusClass = statusClassName(record.status || record.outcome || 'note');
+                        return `
+                    <div class="proj-meeting-action-item status-${escHtml(statusClass)}">
+                        <div class="proj-meeting-action-top">
+                            <span class="proj-meeting-action-title">${escHtml(decisionText || _t('proj_meeting_record_no_summary'))}</span>
+                            <span class="proj-meeting-action-badge">${escHtml(meetingRecordStatusLabel(record.status || record.outcome))}</span>
+                        </div>
+                        ${record.summary && record.summary !== decisionText ? `<div class="proj-exec-meta">${escHtml(record.summary)}</div>` : ''}
+                        ${risks.length ? `<div class="proj-exec-meta"><strong>${escHtml(_t('proj_meeting_record_risks'))}</strong> ${risks.map(r => escHtml(r)).join('；')}</div>` : ''}
+                        ${actions.length ? `<div class="proj-exec-meta"><strong>${escHtml(_t('proj_meeting_record_actions'))}</strong> ${actions.map(a => escHtml(a.title || a.item || '') + (a.owner ? ` (${escHtml(a.owner)})` : '')).join('；')}</div>` : ''}
+                        <div class="proj-exec-meta">
+                            ${record.meetingId ? `${escHtml(_t('proj_meeting_record_meeting'))}: ${escHtml(record.meetingId)}` : ''}
+                            ${record.requestId ? `${record.meetingId ? ' · ' : ''}${escHtml(_t('proj_meeting_record_request'))}: ${escHtml(record.requestId)}` : ''}
+                            ${(record.appliedAt || record.createdAt) ? `${(record.meetingId || record.requestId) ? ' · ' : ''}${timeAgo(record.appliedAt || record.createdAt)}` : ''}
+                        </div>
+                    </div>`; }).join('')}
+                </div>
+            </div>` : ''}
+
+            ${meetingActionItems.length ? `<div class="proj-section proj-meeting-action-panel">
+                <div class="proj-section-header">
+                    <span class="proj-section-title">${escHtml(_t('proj_meeting_action_items'))}</span>
+                    <span style="font-size:10px;color:#888">${meetingActionItems.filter(a => a.status === 'completed').length}/${meetingActionItems.length}</span>
+                </div>
+                <div class="proj-meeting-action-list">
+                    ${meetingActionItems.map(item => {
+                        const statusClass = statusClassName(item.status || 'pending');
+                        return `
+                    <div class="proj-meeting-action-item status-${escHtml(statusClass)}">
+                        <div class="proj-meeting-action-top">
+                            <span class="proj-meeting-action-title">${escHtml(item.title || '')}</span>
+                            <span class="proj-meeting-action-badge">${escHtml(meetingActionStatusLabel(item.status))}</span>
+                        </div>
+                        ${item.description ? `<div class="proj-exec-meta">${escHtml(item.description)}</div>` : ''}
+                        <div class="proj-exec-meta">
+                            ${escHtml(_t('proj_meeting_action_owner'))}: ${escHtml(item.owner || _t('proj_unassigned'))}
+                            ${item.meetingId ? ` · ${escHtml(_t('proj_meeting_action_source'))}: ${escHtml(item.meetingId)}` : ''}
+                        </div>
+                    </div>`; }).join('')}
+                </div>
             </div>` : ''}
 
             <div class="proj-section">
@@ -1577,6 +1749,14 @@
                 saveDescription();
             };
         }
+        if (preserveScroll) {
+            const nextBody = panel.querySelector('.proj-detail-body');
+            if (nextBody) {
+                nextBody.scrollTop = wasNearBottom
+                    ? nextBody.scrollHeight
+                    : Math.min(previousScrollTop, Math.max(0, nextBody.scrollHeight - nextBody.clientHeight));
+            }
+        }
     }
 
     function toggleCommentsAction(taskId) {
@@ -1599,6 +1779,9 @@
             const status = req.status || 'pending';
             const statusText = status === 'confirmed' ? '已确认' : (status === 'rejected' ? '已拒绝' : '待确认');
             const rejectReason = req.review && req.review.rejectionReason ? `<div class="proj-exec-warning">${escHtml(req.review.rejectionReason)}</div>` : '';
+            const autoConfirmReason = req.review && req.review.autoConfirmed
+                ? `<div class="proj-exec-meta">${escHtml(req.review.autoConfirmLabel || req.review.autoConfirmReason || '已自动批准')}</div>`
+                : '';
             return `
             <div class="proj-meeting-request state-${escHtml(status)}">
                 <div class="proj-meeting-request-head">
@@ -1607,6 +1790,7 @@
                 </div>
                 <div class="proj-exec-meta">请求 AI：${escHtml(req.requestingAgentId || '')}</div>
                 <div class="proj-exec-summary">${escHtml(proposal.cannotCompleteAloneReason || '')}</div>
+                ${autoConfirmReason}
                 ${rejectReason}
                 <button class="proj-btn proj-btn-sm" onclick="ProjMgr.openMeetingRequestsQueue()">打开会议申请队列</button>
             </div>`;
@@ -1665,6 +1849,55 @@
         return label;
     }
 
+    function projectExecutionReviewStatusLabel(status) {
+        const raw = String(status || '').trim();
+        const labels = {
+            pass: _tf('proj_exec_review_status_pass', 'Passed', '已通过'),
+            skipped: _tf('proj_exec_review_status_skipped', 'Skipped', '已跳过'),
+            needs_more_work: _tf('proj_exec_review_status_needs_more_work', 'Needs more work', '需要返工'),
+            blocked: _tf('proj_exec_review_status_blocked', 'Blocked', '已阻塞'),
+        };
+        return labels[raw] || raw;
+    }
+
+    function compactProjectExecutionEvidenceLine(value, maxLen = 260) {
+        let text = '';
+        if (typeof value === 'string') {
+            text = value;
+        } else if (value && typeof value === 'object') {
+            text = value.name || value.title || value.command || value.text || value.summary || value.status || '';
+            const status = value.status || value.result || value.outcome || '';
+            if (status && !String(text).includes(String(status))) text = `${text} · ${status}`;
+            if (!text) text = '结构化结果';
+        } else {
+            text = String(value == null ? '' : value);
+        }
+        text = String(text || '').trim();
+        if ((text.startsWith('{') && text.endsWith('}')) || (text.startsWith('[') && text.endsWith(']'))) {
+            try {
+                const parsed = JSON.parse(text);
+                if (parsed && typeof parsed === 'object') {
+                    text = parsed.finalAssistantVisibleText || parsed.summary || parsed.text || parsed.message || '';
+                    const tests = Array.isArray(parsed.tests) ? parsed.tests : (Array.isArray(parsed.testResults) ? parsed.testResults : []);
+                    if (!text && tests.length) text = `测试结果：${tests.length} 项`;
+                    if (!text) text = '结构化执行结果';
+                }
+            } catch (e) { /* keep original text */ }
+        }
+        text = text.replace(/\s+/g, ' ').trim();
+        if (text.length > maxLen) text = text.slice(0, maxLen).trimEnd() + '...[truncated]';
+        return text;
+    }
+
+    function renderProjectExecutionTestResults(results) {
+        const items = (Array.isArray(results) ? results : [])
+            .map(item => compactProjectExecutionEvidenceLine(item))
+            .filter(Boolean)
+            .slice(0, 20);
+        if (!items.length) return '';
+        return `<div><strong>${escHtml(_tf('proj_exec_test_results', 'Test results', '测试结果'))}</strong></div>${items.map(t => `<code>${escHtml(t)}</code>`).join('')}`;
+    }
+
     function renderMeetingBlocker(task) {
         const blocker = task && task.meetingBlocker;
         if (!blocker || task.executionState !== 'awaiting_meeting_resolution') return '';
@@ -1686,6 +1919,7 @@
                     ${blocker.rejectionReason ? `<span>${escHtml(blocker.rejectionReason)}</span>` : ''}
                 </div>
                 <div class="proj-exec-actions">
+                    <button class="proj-btn proj-btn-sm" onclick="ProjMgr.viewMeetingBlocker(${jsArg(blocker.requestId || '')}, ${jsArg(blocker.meetingId || '')})">${escHtml(_tf('proj_meeting_blocker_view', 'View meeting', '查看会议'))}</button>
                     <button class="proj-btn proj-btn-sm proj-btn-start" onclick="ProjMgr.projectExecutionMeetingBlocker('${task.id}', 'continue_execution')">${escHtml(_tf('proj_meeting_blocker_continue', 'Continue execution', '继续执行'))}</button>
                     <button class="proj-btn proj-btn-sm proj-btn-stop" onclick="ProjMgr.projectExecutionMeetingBlocker('${task.id}', 'mark_blocked')">${escHtml(_tf('proj_meeting_blocker_mark_blocked', 'Mark blocked', '标记阻塞'))}</button>
                     <button class="proj-btn proj-btn-sm" onclick="ProjMgr.projectExecutionMeetingBlocker('${task.id}', 'reopen_meeting')">${escHtml(_tf('proj_meeting_blocker_reopen', 'Request new meeting', '重新申请会议'))}</button>
@@ -1696,11 +1930,66 @@
     function renderProjectExecutionError(task) {
         const err = task && task.lastError ? String(task.lastError).trim() : '';
         if (!err) return '';
+        const text = projectExecutionErrorText(err);
         return `
             <div class="proj-exec-warning">
                 <strong>${escHtml(_tf('proj_exec_last_error_title', 'Task start failed', '任务启动失败'))}</strong>
-                <div>${escHtml(err)}</div>
+                <div>${escHtml(text)}</div>
             </div>`;
+    }
+
+    function renderProjectExecutionBlockedReason(task) {
+        const reason = task && task.blockedReason ? String(task.blockedReason).trim() : '';
+        if (!reason) return '';
+        const text = projectExecutionReasonText(reason);
+        return `
+            <div class="proj-exec-warning">
+                <strong>${escHtml(_tf('proj_exec_blocked_reason_title', 'Blocked reason', '阻塞原因'))}</strong>
+                <div>${escHtml(text)}</div>
+            </div>`;
+    }
+
+    function projectExecutionErrorText(err) {
+        return projectExecutionReasonText(err);
+    }
+
+    function projectExecutionReasonText(err) {
+        const raw = String(err || '').trim();
+        if (!raw) return '';
+        const normalized = raw.toLowerCase();
+        if (normalized === 'previous_execution_not_resumable' || normalized === 'the previous execution could not be resumed after service restart.') {
+            return _tf(
+                'proj_exec_error_previous_not_resumable',
+                'The previous execution could not be resumed after the service restarted. Start the task again to create a new execution attempt.',
+                '服务重启后无法恢复上一次执行。请重新启动任务，创建新的执行尝试。'
+            );
+        }
+        if (normalized === 'checklist_incomplete' || normalized === 'checklist is incomplete; finish all acceptance checklist items before marking the task done.') {
+            return _tf(
+                'proj_exec_error_checklist_incomplete',
+                'The acceptance checklist is incomplete. Continue working on the unfinished checklist items before marking the task done.',
+                '验收清单尚未完成。请先继续处理未完成的清单项，再标记任务完成。'
+            );
+        }
+        if (normalized === 'executor_required' || normalized === 'a valid executor agent is required') {
+            return _tf(
+                'proj_exec_error_executor_required',
+                'Set an Executor Agent on this task or configure a default executor for the project before starting Project Execution.',
+                '请先在任务详情里设置“执行 Agent”，或在项目里配置默认执行 Agent，然后再启动任务。'
+            );
+        }
+        return raw;
+    }
+
+    function projectExecutionApiErrorText(response) {
+        const code = response && response.code ? String(response.code) : '';
+        const raw = response && response.error ? String(response.error) : code;
+        let text = projectExecutionReasonText(code || raw);
+        const unfinished = response && Array.isArray(response.unfinishedChecklist) ? response.unfinishedChecklist : [];
+        if (code === 'checklist_incomplete' && unfinished.length) {
+            text += '\n' + unfinished.slice(0, 8).map(item => `- ${item && item.text ? item.text : ''}`).filter(Boolean).join('\n');
+        }
+        return text;
     }
 
     async function loadProjectMeetingRequests() {
@@ -1741,6 +2030,14 @@
     function openMeetingRequestsQueue() {
         if (typeof openMeetingsDashboard === 'function') openMeetingsDashboard();
         if (typeof switchMtgTab === 'function') switchMtgTab('requests');
+    }
+
+    function viewMeetingBlocker(requestId, meetingId) {
+        if (typeof openMeetingReference === 'function') {
+            openMeetingReference({ requestId, meetingId });
+            return;
+        }
+        openMeetingRequestsQueue();
     }
 
     function switchDescTab(tab) {
@@ -1809,7 +2106,10 @@
         }
         task[field] = value;
         try {
-            await api.updateTask(p.id, task.id, { [field]: value });
+            const result = await api.updateTask(p.id, task.id, { [field]: value });
+            if (result && result.task) {
+                Object.assign(task, result.task);
+            }
             // Re-render board card
             const cardEl = document.getElementById(`task-${task.id}`);
             if (cardEl) {
@@ -1823,6 +2123,12 @@
 
     async function updateTaskField(field, value) {
         await saveTaskField(field, value);
+        if (field === 'assignee') {
+            const executorSelect = document.getElementById('detail-executor-agent');
+            if (executorSelect && state.currentTask && state.currentTask.executorAgentId) {
+                executorSelect.value = state.currentTask.executorAgentId;
+            }
+        }
         if (field === 'columnId') {
             // Re-render board
             const mc = getMainContent();
@@ -1834,10 +2140,22 @@
     }
 
     // Checklist
+    function visibleChecklistItems(task) {
+        return ((task && task.checklist) || [])
+            .map((item, index) => ({ item, index }))
+            .filter(entry => entry.item && entry.item.source !== 'meeting_action_item' && entry.item.source !== 'meeting_risk');
+    }
+
+    function visibleChecklistSourceIndexes(task) {
+        return visibleChecklistItems(task).map(entry => entry.index);
+    }
+
     async function toggleChecklistItem(idx, done) {
         const task = state.currentTask;
         if (!task || !task.checklist) return;
-        task.checklist[idx].done = done;
+        const sourceIdx = visibleChecklistSourceIndexes(task)[idx];
+        if (sourceIdx === undefined || !task.checklist[sourceIdx]) return;
+        task.checklist[sourceIdx].done = done;
         const li = document.querySelectorAll('#detail-checklist .proj-checklist-item')[idx];
         if (li) li.classList.toggle('done', done);
         await saveTaskField('checklist', task.checklist);
@@ -1846,7 +2164,9 @@
     async function deleteChecklistItem(idx) {
         const task = state.currentTask;
         if (!task || !task.checklist) return;
-        task.checklist.splice(idx, 1);
+        const sourceIdx = visibleChecklistSourceIndexes(task)[idx];
+        if (sourceIdx === undefined) return;
+        task.checklist.splice(sourceIdx, 1);
         await saveTaskField('checklist', task.checklist);
         renderDetailPanel(task);
     }
@@ -1865,8 +2185,10 @@
 
     function editChecklistItem(idx) {
         const task = state.currentTask;
-        if (!task || !task.checklist || !task.checklist[idx]) return;
-        const item = task.checklist[idx];
+        if (!task || !task.checklist) return;
+        const sourceIdx = visibleChecklistSourceIndexes(task)[idx];
+        if (sourceIdx === undefined || !task.checklist[sourceIdx]) return;
+        const item = task.checklist[sourceIdx];
         const li = document.querySelectorAll('#detail-checklist .proj-checklist-item')[idx];
         if (!li) return;
         const textSpan = li.querySelector('.proj-checklist-item-text');
@@ -2045,6 +2367,13 @@
                     </label>
                     <div style="font-size:10px;color:#888;margin-top:4px">${_t('proj_long_term_project_hint')}</div>
                 </div>
+                <div class="proj-form-group">
+                    <label class="proj-form-label">
+                        <input type="checkbox" id="pf-high-priority-ai-meeting-auto-approve">
+                        ${_tf('proj_high_priority_ai_meeting_auto_approve', 'Require confirmation for high-priority project AI meeting requests', '高优项目 AI 会议申请需要确认')}
+                    </label>
+                    <div style="font-size:10px;color:#888;margin-top:4px">${_tf('proj_high_priority_ai_meeting_auto_approve_hint', 'When enabled, AI-originated meeting requests for this project require confirmation. Other projects are approved automatically.', '开启后该项目 AI 发起的会议申请需要确认；其他项目的 AI 会议申请会自动通过。')}</div>
+                </div>
                 <div class="proj-form-group" id="pf-workspace-group">
                     <label class="proj-form-label">Project Execution 工作区路径</label>
                     <input class="proj-form-input" id="pf-workspace" type="text" placeholder="留空自动创建项目工作区">
@@ -2121,6 +2450,13 @@
                         ${_t('proj_long_term_project')}
                     </label>
                     <div style="font-size:10px;color:#888;margin-top:4px">${_t('proj_long_term_project_hint')}</div>
+                </div>
+                <div class="proj-form-group">
+                    <label class="proj-form-label">
+                        <input type="checkbox" id="pf-high-priority-ai-meeting-auto-approve" ${data.highPriorityAiMeetingAutoApprove ? 'checked' : ''}>
+                        ${_tf('proj_high_priority_ai_meeting_auto_approve', 'Require confirmation for high-priority project AI meeting requests', '高优项目 AI 会议申请需要确认')}
+                    </label>
+                    <div style="font-size:10px;color:#888;margin-top:4px">${_tf('proj_high_priority_ai_meeting_auto_approve_hint', 'When enabled, AI-originated meeting requests for this project require confirmation. Other projects are approved automatically.', '开启后该项目 AI 发起的会议申请需要确认；其他项目的 AI 会议申请会自动通过。')}</div>
                 </div>
                 <div class="proj-form-group">
                     <label class="proj-form-label">Project Execution 工作区路径</label>
@@ -2274,6 +2610,7 @@
         return new Promise(resolve => {
             const cancelText = opts.cancelText || _tf('proj_cancel', 'Cancel', '取消');
             const confirmText = opts.confirmText || _tf('proj_confirm', 'Confirm', '确认');
+            const showCancel = opts.cancelText !== null && opts.cancelText !== false;
             const tone = opts.tone === 'danger' ? ' proj-confirm-danger' : '';
             const done = confirmed => {
                 hideFormModal();
@@ -2288,7 +2625,7 @@
                     ${opts.message ? `<div class="proj-confirm-message">${escHtml(opts.message)}</div>` : ''}
                     ${opts.detail ? `<div class="proj-confirm-detail">${escHtml(opts.detail)}</div>` : ''}
                     <div class="proj-form-actions">
-                        <button class="proj-btn" onclick="ProjMgr.resolveConfirm(false)">${escHtml(cancelText)}</button>
+                        ${showCancel ? `<button class="proj-btn" onclick="ProjMgr.resolveConfirm(false)">${escHtml(cancelText)}</button>` : ''}
                         <button class="proj-btn ${opts.tone === 'danger' ? 'proj-btn-stop' : 'proj-btn-primary'}" onclick="ProjMgr.resolveConfirm(true)">${escHtml(confirmText)}</button>
                     </div>
                 </div>
@@ -2442,6 +2779,7 @@
             dueDate: (document.getElementById('pf-due') || {}).value ? new Date(document.getElementById('pf-due').value).toISOString() : null,
             tags: ((document.getElementById('pf-tags') || {}).value || '').split(',').map(t => t.trim()).filter(Boolean),
             longTermProject: !!((document.getElementById('pf-long-term-project') || {}).checked),
+            highPriorityAiMeetingAutoApprove: !!((document.getElementById('pf-high-priority-ai-meeting-auto-approve') || {}).checked),
             projectExecutionEnabled,
             workspacePath: ((document.getElementById('pf-workspace') || {}).value || '').trim() || null,
             defaultExecutorAgentId: (document.getElementById('pf-executor') || {}).value || null,
@@ -2483,13 +2821,14 @@
             dueDate: (document.getElementById('pf-due') || {}).value ? new Date(document.getElementById('pf-due').value).toISOString() : null,
             tags: ((document.getElementById('pf-tags') || {}).value || '').split(',').map(t => t.trim()).filter(Boolean),
             longTermProject: !!((document.getElementById('pf-long-term-project') || {}).checked),
+            highPriorityAiMeetingAutoApprove: !!((document.getElementById('pf-high-priority-ai-meeting-auto-approve') || {}).checked),
             workspacePath: ((document.getElementById('pf-workspace') || {}).value || '').trim() || null,
             defaultExecutorAgentId: (document.getElementById('pf-executor') || {}).value || null,
             defaultReviewerAgentId: (document.getElementById('pf-reviewer') || {}).value || null,
         };
         try {
             const d = await api.updateProject(id, body);
-            if (d.error) { toast(d.error, 'error'); return; }
+            if (d.error) { toast(projectExecutionApiErrorText(d), 'error'); return; }
             if (body.projectExecutionEnabled) {
                 const validation = await api.projectExecutionValidateWorkspace(id, body.workspacePath);
                 if (validation.error) { toast(validation.error, 'error'); return; }
@@ -2525,7 +2864,7 @@
         }
         try {
             const d = await api.deleteProject(id, { deleteWorkspace });
-            if (d.error) { toast(d.error, 'error'); return; }
+            if (d.error) { toast(projectExecutionApiErrorText(d), 'error'); return; }
             if (d.workspaceDeleteError) toast(`项目已删除，但工作区删除失败：${d.workspaceDeleteError}`, 'error');
             toast(_t('proj_deleted'), 'success');
             showListView();
@@ -3039,20 +3378,45 @@
             if (d.confirmationRequired) {
                 if (d.code === 'reviewer_skip_confirmation_required') {
                     const task = (p.tasks || []).find(t => t.id === taskId) || {};
-                    const message = `当前项目/任务没有配置 Reviewer。\n${task.title ? `任务：${task.title}\n` : ''}是否确认跳过独立审查并继续执行？`;
-                    if (confirm(message)) {
+                    const confirmed = await showConfirmDialog({
+                        title: '确认跳过审查',
+                        message: '当前项目/任务没有配置 Reviewer。是否确认跳过独立审查并继续执行？',
+                        detail: task.title ? `任务：${task.title}` : '',
+                        confirmText: '跳过审查并继续',
+                    });
+                    if (confirmed) {
                         return projectExecutionStartAction(taskId, confirmedDirtyFingerprint, { ...opts, dirtyFingerprint: confirmedDirtyFingerprint, skipReviewConfirmed: true });
                     }
                     await refreshProjectExecutionProject(taskId);
                     return;
                 }
                 const files = (d.dirtyFiles || []).slice(0, 12).join('\n');
-                if (confirm(_t('proj_dirty_workspace_confirm', { files: files + (d.truncated ? '\n...' : '') }))) {
+                const confirmed = await showConfirmDialog({
+                    title: '确认工作区变更',
+                    message: '检测到项目工作区存在未提交变更，确认后会继续启动任务。',
+                    detail: files + (d.truncated ? '\n...' : ''),
+                    confirmText: '继续启动',
+                });
+                if (confirmed) {
                     return projectExecutionStartAction(taskId, d.dirtyFingerprint, { ...opts, dirtyFingerprint: d.dirtyFingerprint });
                 }
                 return;
             }
-            if (d.error) { toast(d.error, 'error'); return; }
+            if (d.error) {
+                const text = projectExecutionApiErrorText(d);
+                if (d.code === 'executor_required') {
+                    await showConfirmDialog({
+                        title: '需要设置执行 Agent',
+                        message: text,
+                        confirmText: '知道了',
+                        cancelText: null,
+                    });
+                    await refreshProjectExecutionProject(taskId);
+                } else {
+                    toast(text, 'error');
+                }
+                return;
+            }
         toast(_t('proj_task_execution_started'), 'success');
             state.workflow.active = true;
             state.workflow.phase = 'executing';
@@ -3087,20 +3451,46 @@
             if (d.confirmationRequired) {
                 if (d.code === 'reviewer_skip_confirmation_required') {
                     const taskTitle = (d.selectedTask || {}).title || '';
-                    const message = `当前项目/任务没有配置 Reviewer。\n${taskTitle ? `任务：${taskTitle}\n` : ''}是否确认跳过独立审查并继续执行？`;
-                    if (confirm(message)) {
+                    const confirmed = await showConfirmDialog({
+                        title: '确认跳过审查',
+                        message: '当前项目/任务没有配置 Reviewer。是否确认跳过独立审查并继续执行？',
+                        detail: taskTitle ? `任务：${taskTitle}` : '',
+                        confirmText: '跳过审查并继续',
+                    });
+                    if (confirmed) {
                         return projectExecutionProjectStartAction(confirmedDirtyFingerprint, { ...opts, dirtyFingerprint: confirmedDirtyFingerprint, skipReviewConfirmed: true });
                     }
                     await refreshProjectExecutionProject((d.selectedTask || {}).id || d.taskId);
                     return;
                 }
                 const files = (d.dirtyFiles || []).slice(0, 12).join('\n');
-                if (confirm(_t('proj_dirty_workspace_confirm', { files: files + (d.truncated ? '\n...' : '') }))) {
+                const confirmed = await showConfirmDialog({
+                    title: '确认工作区变更',
+                    message: '检测到项目工作区存在未提交变更，确认后会继续启动项目任务流。',
+                    detail: files + (d.truncated ? '\n...' : ''),
+                    confirmText: '继续启动',
+                });
+                if (confirmed) {
                     return projectExecutionProjectStartAction(d.dirtyFingerprint, { ...opts, dirtyFingerprint: d.dirtyFingerprint });
                 }
                 return;
             }
-            if (d.error) { toast(d.error, 'error'); return; }
+            if (d.error) {
+                const text = projectExecutionApiErrorText(d);
+                const selectedTaskId = (d.selectedTask || {}).id || d.taskId;
+                if (d.code === 'executor_required') {
+                    await showConfirmDialog({
+                        title: '需要设置执行 Agent',
+                        message: text,
+                        confirmText: '知道了',
+                        cancelText: null,
+                    });
+                    await refreshProjectExecutionProject(selectedTaskId);
+                } else {
+                    toast(text, 'error');
+                }
+                return;
+            }
             toast(restartPipeline ? `项目流水线已重启，已重置 ${d.resetTaskCount || 0} 个任务` : (mode === 'continuous' ? '项目连续任务流已启动' : '项目任务已启动'), 'success');
             state.workflow.active = true;
             state.workflow.phase = 'executing';
@@ -3123,7 +3513,12 @@
             toast('只有项目内所有任务都允许重新触发时，才能重启流水线', 'error');
             return;
         }
-        const confirmed = opts.confirmed === true || confirm('重启流水线会把项目内所有任务恢复到待执行状态，然后重新启动项目。任务历史会保留。是否继续？');
+        const confirmed = opts.confirmed === true || await showConfirmDialog({
+            title: '重启流水线',
+            message: '重启流水线会把项目内所有任务恢复到待执行状态，然后重新启动项目。',
+            detail: '任务历史会保留。',
+            confirmText: '重启流水线',
+        });
         if (!confirmed) return;
         return projectExecutionProjectStartAction(dirtyFingerprint, { ...opts, restartPipeline: true, confirmed: true });
     }
@@ -3359,7 +3754,7 @@
             bindBoardEvents();
             populateBoardScoreboard();
         }
-        if (state.currentTask) renderDetailPanel(state.currentTask);
+        if (state.currentTask && !detailPanelActiveEditor()) renderDetailPanel(state.currentTask, { preserveScroll: opts.lightweight === true });
         updateWorkflowUI();
     }
 
@@ -3375,7 +3770,8 @@
                 state.workflow.currentTaskId = d.currentTaskId;
                 state.workflow.startMode = d.startMode || 'continuous';
                 state.workflow.flowStopReason = d.flowStopReason || null;
-                await refreshProjectExecutionProject(d.currentTaskId, { lightweight: true });
+                const openTaskId = state.currentTask && state.currentTask.id;
+                await refreshProjectExecutionProject(openTaskId || null, { lightweight: true });
                 pollWorkflowChat();
                 if (!d.active) stopWorkflowPolling();
             } catch (e) { /* keep the last visible state */ }
@@ -3541,7 +3937,7 @@
                         const liveTask = fresh.project.tasks.find(t => t.id === state.currentTask.id);
                         if (liveTask) {
                             state.currentTask = liveTask;
-                            renderDetailPanel(liveTask);
+                            if (!detailPanelActiveEditor()) renderDetailPanel(liveTask, { preserveScroll: true });
                         }
                     }
                     const mc = getMainContent();
@@ -3899,6 +4295,7 @@
         copyWorkspacePath: copyWorkspacePathAction,
         projectExecutionCancel: projectExecutionCancelAction,
         projectExecutionMeetingBlocker: projectExecutionMeetingBlockerAction,
+        viewMeetingBlocker,
         projectExecutionReviewStart: projectExecutionReviewStartAction,
         projectExecutionAccept: projectExecutionAcceptAction,
         submitProjectExecutionFeedback: submitProjectExecutionFeedbackAction,

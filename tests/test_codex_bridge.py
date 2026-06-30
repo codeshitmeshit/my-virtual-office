@@ -14,10 +14,12 @@ if APP_DIR not in sys.path:
     sys.path.insert(0, APP_DIR)
 
 from providers.codex_bridge import CodexAppServerClient
+from providers.codex_app_server import CodexAppServerClient as CodexAppServerClientImpl
 
 
 FAKE_SERVER = r'''#!/usr/bin/env python3
 import json
+import os
 import sys
 
 thread_id = "thr_fake"
@@ -32,10 +34,21 @@ for raw in sys.stdin:
     request_id = msg.get("id")
     params = msg.get("params") or {}
     if method == "initialize":
+        if not params.get("capabilities", {}).get("experimentalApi"):
+            send({"id": request_id, "error": {"message": "experimental api capability missing"}})
+            continue
         send({"id": request_id, "result": {"userAgent": "fake"}})
     elif method == "initialized":
         pass
     elif method == "thread/start":
+        flaky_path = os.environ.get("FAKE_CODEX_FLAKY_THREAD_START")
+        if flaky_path:
+            try:
+                with open(flaky_path, "x") as marker:
+                    marker.write("seen")
+                continue
+            except FileExistsError:
+                pass
         send({"id": request_id, "result": {"thread": {"id": thread_id}}})
     elif method == "thread/resume":
         send({"id": request_id, "result": {"thread": {"id": params["threadId"]}}})
@@ -48,11 +61,13 @@ for raw in sys.stdin:
             send({"id": request_id, "result": {"turn": {"id": "turn_hang"}}})
             send({"method": "turn/started", "params": {"threadId": params["threadId"], "turn": {"id": "turn_hang"}}})
             continue
-        turn_id = "turn_approval" if "approval" in prompt else "turn_input" if "question" in prompt else "turn_ok"
+        turn_id = "turn_permissions" if "permissions" in prompt else "turn_approval" if "approval" in prompt else "turn_input" if "question" in prompt else "turn_ok"
         send({"id": request_id, "result": {"turn": {"id": turn_id}}})
         send({"method": "turn/started", "params": {"threadId": params["threadId"], "turn": {"id": turn_id}}})
         if "approval" in prompt:
             send({"id": 900, "method": "item/commandExecution/requestApproval", "params": {"threadId": params["threadId"], "turnId": turn_id, "itemId": "cmd_1"}})
+        elif "permissions" in prompt:
+            send({"id": 902, "method": "item/permissions/requestApproval", "params": {"threadId": params["threadId"], "turnId": turn_id, "itemId": "perm_1", "permissions": {"fileSystem": {"write": ["/tmp/project"]}, "network": False}}})
         elif "question" in prompt:
             send({"id": 901, "method": "item/tool/requestUserInput", "params": {"threadId": params["threadId"], "turnId": turn_id, "itemId": "question_1", "questions": [{"id": "name", "label": "Name"}]}})
         else:
@@ -74,10 +89,11 @@ for raw in sys.stdin:
             command["status"] = "completed"
             send({"method": "item/completed", "params": {"threadId": params["threadId"], "turnId": turn_id, "item": command}})
             item = {"id": "msg_1", "type": "agentMessage", "text": "real fake reply"}
-            change = {"id": "file_1", "type": "fileChange", "status": "completed", "changes": [{"path": "app/demo.py", "kind": "update", "diff": ""}]}
+            change = {"id": "file_1", "type": "fileChange", "status": "completed", "changes": [{"path": "app/demo.py", "kind": "update", "diff": ""}, {"file": "app/legacy.py"}, {"uri": "file:///tmp/out.txt"}]}
             send({"method": "item/completed", "params": {"threadId": params["threadId"], "turnId": turn_id, "item": item}})
             send({"method": "item/completed", "params": {"threadId": params["threadId"], "turnId": turn_id, "item": change}})
             send({"method": "turn/completed", "params": {"threadId": params["threadId"], "turn": {"id": turn_id, "status": "completed", "items": [item, change]}}})
+            send({"method": "thread/tokenUsage/updated", "params": {"threadId": params["threadId"], "tokenUsage": {"input_tokens": 11, "output_tokens": 7, "total_tokens": 18}}})
     elif request_id == 900:
         if msg.get("result", {}).get("decision") in ("accept", "acceptForSession"):
             item = {"id": "msg_approval", "type": "agentMessage", "text": "approved reply"}
@@ -90,6 +106,14 @@ for raw in sys.stdin:
         item = {"id": "msg_input", "type": "agentMessage", "text": "hello " + answer}
         send({"method": "item/completed", "params": {"threadId": thread_id, "turnId": "turn_input", "item": item}})
         send({"method": "turn/completed", "params": {"threadId": thread_id, "turn": {"id": "turn_input", "status": "completed", "items": [item]}}})
+    elif request_id == 902:
+        permissions = msg.get("result", {}).get("permissions", {})
+        if permissions.get("fileSystem") and permissions.get("network") is False:
+            item = {"id": "msg_permissions", "type": "agentMessage", "text": "permissions approved"}
+            send({"method": "item/completed", "params": {"threadId": thread_id, "turnId": "turn_permissions", "item": item}})
+            send({"method": "turn/completed", "params": {"threadId": thread_id, "turn": {"id": "turn_permissions", "status": "completed", "items": [item]}}})
+        else:
+            send({"method": "turn/completed", "params": {"threadId": thread_id, "turn": {"id": "turn_permissions", "status": "interrupted", "items": []}}})
     elif method == "thread/compact/start":
         send({"id": request_id, "result": {}})
         send({"method": "thread/compacted", "params": {"threadId": params["threadId"]}})
@@ -105,6 +129,31 @@ def make_fake_codex(tmp):
         f.write(FAKE_SERVER)
     os.chmod(path, os.stat(path).st_mode | stat.S_IXUSR)
     return path
+
+
+def test_thread_start_timeout_restarts_app_server_once():
+    with tempfile.TemporaryDirectory() as tmp:
+        marker = os.path.join(tmp, "flaky-thread-start")
+        old = os.environ.get("FAKE_CODEX_FLAKY_THREAD_START")
+        old_timeout = os.environ.get("VO_CODEX_START_TIMEOUT_SEC")
+        os.environ["FAKE_CODEX_FLAKY_THREAD_START"] = marker
+        os.environ["VO_CODEX_START_TIMEOUT_SEC"] = "0.2"
+        client = CodexAppServerClient(tmp, binary=make_fake_codex(tmp))
+        try:
+            result = client.execute("change one file", timeout_sec=5)
+            assert result["ok"] is True
+            assert result["reply"] == "real fake reply"
+            assert os.path.exists(marker)
+        finally:
+            client.close()
+            if old is None:
+                os.environ.pop("FAKE_CODEX_FLAKY_THREAD_START", None)
+            else:
+                os.environ["FAKE_CODEX_FLAKY_THREAD_START"] = old
+            if old_timeout is None:
+                os.environ.pop("VO_CODEX_START_TIMEOUT_SEC", None)
+            else:
+                os.environ["VO_CODEX_START_TIMEOUT_SEC"] = old_timeout
 
 
 def test_reasoning_summary_defaults_to_detailed():
@@ -131,11 +180,28 @@ def test_execute_collects_reply_files_and_thread():
             assert result["threadId"] == "thr_fake"
             assert result["turnId"] == "turn_ok"
             assert result["reply"] == "real fake reply"
-            assert result["modifiedFiles"] == ["app/demo.py"]
+            assert result["modifiedFiles"] == ["app/demo.py", "app/legacy.py", "file:///tmp/out.txt"]
 
             resumed = client.execute("continue", thread_id=result["threadId"], timeout_sec=5)
             assert resumed["ok"] is True
             assert resumed["threadId"] == result["threadId"]
+        finally:
+            client.close()
+
+
+def test_execute_exposes_run_state_tools_thinking_and_token_usage():
+    with tempfile.TemporaryDirectory() as tmp:
+        client = CodexAppServerClient(tmp, binary=make_fake_codex(tmp))
+        try:
+            result = client.execute("change one file", timeout_sec=5)
+            assert result["ok"] is True
+            assert result["sessionId"] == "thr_fake"
+            assert result["runId"] == "turn_ok"
+            assert result["reply"] == "real fake reply"
+            assert "raw-supported" in result["thinking"]
+            assert any(tool["id"] == "cmd_1" and tool["name"] == "shell" for tool in result["tools"])
+            assert any(tool["name"] == "file changes" for tool in result["tools"])
+            assert result["tokenUsage"] == {"input_tokens": 11, "output_tokens": 7, "total_tokens": 18}
         finally:
             client.close()
 
@@ -230,13 +296,97 @@ def test_interactive_approval_continues_original_turn():
                 pending = next((event for event in events if event.get("status") == "pending"), None)
                 time.sleep(0.02)
             assert pending
+            provider_pending = client.pending_approval()
+            assert provider_pending["pending_count"] == 1
+            assert provider_pending["pending"]["status"] == "pending"
             assert client.respond("thr_fake", pending["interactionId"], "acceptForSession") is True
             worker.join(3)
             assert result["ok"] is True
             assert result["turnId"] == "turn_approval"
             assert result["reply"] == "approved reply"
+            assert client.pending_approval()["pending_count"] == 0
         finally:
             client.close()
+
+
+def test_reference_style_approval_response_continues_turn():
+    with tempfile.TemporaryDirectory() as tmp:
+        events = []
+        result = {}
+        client = CodexAppServerClient(tmp, binary=make_fake_codex(tmp))
+        worker = threading.Thread(target=lambda: result.update(client.execute(
+            "needs approval", timeout_sec=5, event_callback=events.append, allow_interaction=True
+        )))
+        try:
+            worker.start()
+            deadline = time.time() + 3
+            pending = None
+            while time.time() < deadline and not pending:
+                pending_result = client.pending_approval()
+                pending = pending_result.get("pending")
+                time.sleep(0.02)
+            assert pending
+            submitted = client.respond_approval(pending["id"], "approve")
+            assert submitted["ok"] is True
+            assert submitted["choice"] == "approve"
+            worker.join(3)
+            assert result["ok"] is True
+            assert result["reply"] == "approved reply"
+            assert result["approval"]["status"] == "approved"
+        finally:
+            client.close()
+
+
+def test_interactive_permissions_approval_continues_original_turn():
+    with tempfile.TemporaryDirectory() as tmp:
+        events = []
+        result = {}
+        client = CodexAppServerClient(tmp, binary=make_fake_codex(tmp))
+        worker = threading.Thread(target=lambda: result.update(client.execute(
+            "needs permissions", timeout_sec=5, event_callback=events.append, allow_interaction=True
+        )))
+        try:
+            worker.start()
+            deadline = time.time() + 3
+            pending = None
+            while time.time() < deadline and not pending:
+                pending = client.pending_approval().get("pending")
+                time.sleep(0.02)
+            assert pending
+            assert pending["kind"] == "permissions"
+            submitted = client.respond_approval(pending["id"], "approve")
+            assert submitted["ok"] is True
+            assert submitted["response"] == {"permissions": {"fileSystem": {"write": ["/tmp/project"]}, "network": False}, "scope": "turn"}
+            worker.join(3)
+            assert result["ok"] is True
+            assert result["reply"] == "permissions approved"
+            assert result["approval"]["status"] == "approved"
+        finally:
+            client.close()
+
+
+def test_approval_response_mapping_covers_reference_shapes():
+    command_accept = CodexAppServerClientImpl._approval_response("item/commandExecution/requestApproval", {}, "approve")
+    command_cancel = CodexAppServerClientImpl._approval_response("item/commandExecution/requestApproval", {}, "cancel")
+    file_accept = CodexAppServerClientImpl._approval_response("item/fileChange/requestApproval", {}, "approve")
+    permissions_accept = CodexAppServerClientImpl._approval_response(
+        "item/permissions/requestApproval",
+        {"permissions": {"fileSystem": {"write": ["/tmp/project"]}, "network": True, "other": "ignored"}},
+        "approve",
+    )
+    permissions_cancel = CodexAppServerClientImpl._approval_response(
+        "item/permissions/requestApproval",
+        {"permissions": {"fileSystem": {"write": ["/tmp/project"]}, "network": True}},
+        "cancel",
+    )
+    legacy_patch = CodexAppServerClientImpl._approval_response("applyPatchApproval", {}, "approve")
+
+    assert command_accept == {"decision": "accept"}
+    assert command_cancel == {"decision": "cancel"}
+    assert file_accept == {"decision": "accept"}
+    assert permissions_accept == {"permissions": {"fileSystem": {"write": ["/tmp/project"]}, "network": True}, "scope": "turn"}
+    assert permissions_cancel == {"permissions": {"fileSystem": None, "network": None}, "scope": "turn"}
+    assert legacy_patch == {"decision": "approved"}
 
 
 def test_interactive_user_input_continues_original_turn():
@@ -265,11 +415,15 @@ def test_interactive_user_input_continues_original_turn():
 
 if __name__ == "__main__":
     test_execute_collects_reply_files_and_thread()
+    test_execute_exposes_run_state_tools_thinking_and_token_usage()
     test_approval_request_fails_closed()
     test_manual_compaction_keeps_thread()
     test_timeout_returns_terminal_result()
     test_activity_events_are_incremental_and_correlated()
     test_reasoning_events_are_distinct_and_sectioned()
     test_interactive_approval_continues_original_turn()
+    test_reference_style_approval_response_continues_turn()
+    test_interactive_permissions_approval_continues_original_turn()
+    test_approval_response_mapping_covers_reference_shapes()
     test_interactive_user_input_continues_original_turn()
     print("ok")
