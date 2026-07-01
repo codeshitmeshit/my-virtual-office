@@ -7,5 +7,6 @@ data/
 *.bak3
 .env
 .DS_Store
+.tmp-acceptance-status/
 app/vo-config.json
 app/default-office-config.json.bak
