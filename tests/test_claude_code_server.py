@@ -4,6 +4,7 @@
 import os
 import sys
 import tempfile
+import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 APP_DIR = os.path.join(ROOT, "app")
@@ -48,6 +49,71 @@ def test_claude_code_chat_saves_isolated_history():
         assert [m["role"] for m in history_a] == ["user", "assistant"]
         assert history_a[-1]["text"] == "ack from claude server"
         assert history_b == []
+    finally:
+        server.get_roster = old_roster
+
+
+def test_claude_code_history_endpoint_source_is_conversation_scoped():
+    server._save_claude_code_history("local", [
+        {"role": "user", "text": "conv-a only", "ts": 1000, "agentId": "claude-code-local"},
+    ], "conv-a", "session-a")
+    server._save_claude_code_history("local", [
+        {"role": "user", "text": "conv-b only", "ts": 2000, "agentId": "claude-code-local"},
+    ], "conv-b", "session-b")
+
+    messages = server._filter_recoverable_provider_progress_messages(
+        server._sanitize_claude_code_history_messages(server._load_claude_code_history("local", "conv-b"))
+    )
+    assert [m.get("text") for m in messages] == ["conv-b only"]
+    assert server._get_claude_code_session_id("local", "conv-b") == "session-b"
+
+
+def test_claude_code_history_clear_is_conversation_scoped():
+    server._save_claude_code_history("local", [{"role": "user", "text": "a"}], "conv-a", "session-a")
+    server._save_claude_code_history("local", [{"role": "user", "text": "b"}], "conv-b", "session-b")
+
+    old_roster = server.get_roster
+    server.get_roster = lambda: [AGENT]
+    try:
+        result = server._handle_claude_code_history_clear({"agentId": "claude-code-local", "conversationId": "conv-a"})
+    finally:
+        server.get_roster = old_roster
+
+    assert result["ok"] is True
+    assert result["sessionId"] == "session-a"
+    assert result["conversationId"] == "conv-a"
+    assert server._load_claude_code_history("local", "conv-a") == []
+    assert server._get_claude_code_session_id("local", "conv-a") == ""
+    assert server._load_claude_code_history("local", "conv-b") == [{"role": "user", "text": "b"}]
+    assert server._get_claude_code_session_id("local", "conv-b") == "session-b"
+
+
+def test_claude_code_run_start_idempotency_reuses_existing_run():
+    old_roster = server.get_roster
+    server.get_roster = lambda: [AGENT]
+    server.STATUS_DIR = tempfile.mkdtemp(prefix="vo-claude-code-run-idempotency-")
+    try:
+        body = {
+            "agentId": "claude-code-local",
+            "message": "hello idem",
+            "conversationId": "conv-claude-idem",
+            "idempotencyKey": "same-click",
+        }
+        first = server._handle_claude_code_run_start(body)
+        second = server._handle_claude_code_run_start(body)
+        assert first["ok"] is True
+        assert second["ok"] is True
+        assert second["status"] == "duplicate"
+        assert second["runId"] == first["runId"]
+
+        deadline = time.time() + 2
+        while time.time() < deadline:
+            meta = server.PROVIDER_RUN_BRIDGE.get(first["runId"])
+            if meta and meta.get("done"):
+                break
+            time.sleep(0.02)
+        history = server._load_claude_code_history("local", "conv-claude-idem")
+        assert len([msg for msg in history if msg.get("role") == "user" and msg.get("text") == "hello idem"]) == 1
     finally:
         server.get_roster = old_roster
 
@@ -190,6 +256,9 @@ def test_claude_code_agent_create_delete_handlers_use_native_provider():
 
 if __name__ == "__main__":
     test_claude_code_chat_saves_isolated_history()
+    test_claude_code_history_endpoint_source_is_conversation_scoped()
+    test_claude_code_history_clear_is_conversation_scoped()
+    test_claude_code_run_start_idempotency_reuses_existing_run()
     test_claude_code_conversation_history_feeds_map_bubbles()
     test_project_execution_dispatches_to_claude_code_executor()
     test_meeting_dispatches_to_claude_code_provider()

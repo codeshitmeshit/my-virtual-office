@@ -32,8 +32,10 @@ AGENTS = [{
 class FakeCodexProvider:
     def __init__(self, workspace):
         self.workspace = workspace
+        self.calls = 0
 
     def send_message(self, message, conversation_id="", timeout_sec=None, thread_id="", event_callback=None, allow_interaction=False):
+        self.calls += 1
         assert message == "hello"
         assert conversation_id == "conv-run"
         assert callable(event_callback)
@@ -171,6 +173,81 @@ def test_codex_progress_history_is_recoverable_while_run_active_and_upserts():
         server.STATUS_DIR, server.get_roster = old
 
 
+def test_provider_progress_filters_stale_and_terminal_entries():
+    now_ms = int(time.time() * 1000)
+    fresh = {"ephemeral": "claude-code-progress", "progressId": "fresh", "status": "running", "ts": now_ms}
+    stale = {"ephemeral": "claude-code-progress", "progressId": "stale", "status": "running", "ts": now_ms - server.PROVIDER_PROGRESS_MAX_AGE_MS - 1000}
+    terminal = {"ephemeral": "hermes-progress", "progressId": "done", "status": "completed", "ts": now_ms}
+    active_stale = {
+        "ephemeral": "codex-progress",
+        "progressId": "active-stale",
+        "status": "running",
+        "ts": now_ms - server.PROVIDER_PROGRESS_MAX_AGE_MS - 1000,
+        "active": True,
+    }
+    normal = {"role": "assistant", "text": "final", "ts": now_ms}
+
+    messages = server._filter_recoverable_provider_progress_messages([fresh, stale, terminal, active_stale, normal])
+    assert messages == [fresh, active_stale, normal]
+
+    events = server._filter_recoverable_comm_progress_events([
+        {"id": "fresh-event", "metadata": {"ephemeral": "codex-progress", "progress": fresh}},
+        {"id": "stale-event", "metadata": {"ephemeral": "codex-progress", "progress": stale}},
+        {"id": "terminal-event", "metadata": {"ephemeral": "codex-progress", "progress": terminal}},
+        {"id": "active-stale-event", "metadata": {"ephemeral": "codex-progress", "progress": active_stale}},
+        {"id": "normal-event", "text": "done"},
+    ])
+    assert [event["id"] for event in events] == ["fresh-event", "active-stale-event", "normal-event"]
+
+
+def test_codex_run_start_idempotency_reuses_existing_run():
+    old = (server.STATUS_DIR, server.get_roster, server._codex_provider_from_config)
+    server.STATUS_DIR = tempfile.mkdtemp(prefix="vo-codex-run-idempotency-")
+    server.get_roster = lambda: AGENTS
+    with tempfile.TemporaryDirectory() as workspace:
+        provider = FakeCodexProvider(workspace)
+        server._codex_provider_from_config = lambda: provider
+        try:
+            body = {
+                "agentId": "codex-local",
+                "message": "hello",
+                "conversationId": "conv-run",
+                "idempotencyKey": "same-click",
+            }
+            first = server._handle_codex_run_start(body)
+            second = server._handle_codex_run_start(body)
+            assert first["ok"] is True
+            assert second["ok"] is True
+            assert second["status"] == "duplicate"
+            assert second["runId"] == first["runId"]
+
+            deadline = time.time() + 2
+            while time.time() < deadline:
+                meta = server.PROVIDER_RUN_BRIDGE.get(first["runId"])
+                if meta and meta.get("done"):
+                    break
+                time.sleep(0.02)
+            assert provider.calls == 1
+            history = server._load_comm_history(limit=20, conversation_id="conv-run", agent_id="codex-local")
+            assert len([event for event in history if event.get("direction") == "request" and event.get("text") == "hello"]) == 1
+        finally:
+            server.STATUS_DIR, server.get_roster, server._codex_provider_from_config = old
+
+
+def test_visible_comm_history_keeps_distinct_same_text_requests():
+    first = {
+        "id": "req-1",
+        "direction": "request",
+        "conversationId": "conv",
+        "from": {"id": "user"},
+        "to": {"id": "codex-local"},
+        "text": "你好",
+    }
+    second = {**first, "id": "req-2"}
+    deduped = server._dedupe_visible_comm_history([first, second, first])
+    assert [event["id"] for event in deduped] == ["req-1", "req-2"]
+
+
 def test_codex_run_stop_uses_existing_cancel_and_emits_terminal_event():
     old = (server.STATUS_DIR, server.get_roster, server._codex_provider_from_config)
     server.STATUS_DIR = STATUS_DIR
@@ -212,5 +289,8 @@ def test_codex_run_stop_uses_existing_cancel_and_emits_terminal_event():
 if __name__ == "__main__":
     test_codex_run_start_publishes_bridge_events_and_keeps_activity()
     test_codex_progress_history_is_recoverable_while_run_active_and_upserts()
+    test_provider_progress_filters_stale_and_terminal_entries()
+    test_codex_run_start_idempotency_reuses_existing_run()
+    test_visible_comm_history_keeps_distinct_same_text_requests()
     test_codex_run_stop_uses_existing_cancel_and_emits_terminal_event()
     print("test_codex_runs_sse.py passed")

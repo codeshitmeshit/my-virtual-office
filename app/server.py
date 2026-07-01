@@ -4244,252 +4244,6 @@ def _handle_hermes_api_chat(agent, profile, delivery_message, original_message, 
     }
 
 
-def _handle_hermes_run_start(body):
-    """Start a native Hermes API run and return the run id for browser SSE attach."""
-    message = (body.get("message") or "").strip()
-    agent_key = body.get("agentId") or body.get("key") or body.get("sessionKey") or "hermes-default"
-    if not message:
-        return {"ok": False, "error": "message is required", "_status": 400}
-
-    agent = _get_hermes_agent(agent_key)
-    if not agent:
-        return {"ok": False, "error": f"Hermes agent '{agent_key}' not found", "_status": 404}
-
-    hermes_cfg = VO_CONFIG.get("hermes", {})
-    if not hermes_cfg.get("preferApi", True):
-        return {"ok": False, "fallback": True, "error": "Hermes native API is disabled by configuration", "_status": 409}
-
-    timeout = int(body.get("timeoutSec") or hermes_cfg.get("timeoutSec") or 600)
-    profile = agent.get("profile") or agent.get("providerAgentId") or "default"
-    client = _hermes_api_client_for_profile(profile)
-    if not client.is_available():
-        return {"ok": False, "fallback": True, "error": "Hermes API Server is not available", "_status": 409}
-
-    delivery = _build_hermes_delivery_message(agent, agent_key, message, body)
-    now_ms = int(time.time() * 1000)
-    history = _load_hermes_history(profile)
-    history.append({
-        "role": "user",
-        "text": message,
-        "ts": now_ms,
-        "agentId": agent.get("id"),
-        "from": delivery["senderName"] if delivery["isHumanSource"] else "You",
-        "fromType": delivery["fromType"] or "",
-        "sourceApp": delivery["sourceApp"] if delivery["isHumanSource"] else "",
-        "sourceSurface": delivery["sourceSurface"] if delivery["isHumanSource"] else "",
-        "sourceLabel": delivery["sourceLabel"] if delivery["isHumanSource"] else "",
-        "attachments": delivery["attachments"],
-    })
-    _save_hermes_history(profile, history)
-
-    session_id = _get_hermes_session_id(profile) or f"vo-hermes-{HermesProvider._safe_suffix(profile)}"
-    session_key = f"virtual-office:hermes:{profile}"
-    started = client.start_run(delivery["deliveryMessage"], session_id=session_id, session_key=session_key)
-    run_id = started.get("run_id") or started.get("runId") or started.get("id")
-    if not run_id:
-        return {"ok": False, "fallback": True, "error": started.get("error") or "Hermes API did not return a run_id", "_status": 502}
-
-    _set_hermes_session_id(profile, session_id)
-    _remember_hermes_active_run({
-        "runId": run_id,
-        "sessionId": session_id,
-        "agentId": agent.get("id") or agent_key,
-        "agentKey": agent_key,
-        "statusKey": agent.get("statusKey") or agent.get("id") or agent_key,
-        "profile": profile,
-        "message": message,
-        "deliveryMessage": delivery["deliveryMessage"],
-        "timeoutSec": timeout,
-        "startedAt": now_ms,
-    })
-    gateway_presence.set_provider_event(agent.get("statusKey") or agent.get("id"), "hermes", {"event": "run.started", "run_id": run_id})
-    _publish_hermes_api_progress(profile, agent.get("id") or agent_key, run_id, tools=[], reasoning_parts=[], reply="")
-    return {
-        "ok": True,
-        "providerPath": "api",
-        "runId": run_id,
-        "sessionId": session_id,
-        "agent": {"id": agent.get("id"), "name": agent.get("name"), "providerKind": "hermes", "profile": profile},
-    }
-
-
-def _handle_hermes_run_events(handler, run_id):
-    """Proxy Hermes' native run SSE stream to the browser and persist final history."""
-    meta = _get_hermes_active_run(run_id)
-    if not meta:
-        handler.send_response(404)
-        handler.send_header("Content-Type", "application/json")
-        handler.send_header("Access-Control-Allow-Origin", "*")
-        handler.end_headers()
-        handler.wfile.write(json.dumps({"ok": False, "error": f"Hermes run '{run_id}' not found"}).encode())
-        return
-
-    profile = meta.get("profile") or "default"
-    agent = _get_hermes_agent(meta.get("agentId") or meta.get("agentKey") or f"hermes-{profile}") or {}
-    agent_id = agent.get("id") or meta.get("agentId") or "hermes-default"
-    status_key = agent.get("statusKey") or meta.get("statusKey") or agent_id
-    session_id = meta.get("sessionId") or _get_hermes_session_id(profile) or ""
-    original_message = meta.get("message") or ""
-    timeout = int(meta.get("timeoutSec") or VO_CONFIG.get("hermes", {}).get("timeoutSec") or 600)
-    client = _hermes_api_client_for_profile(profile)
-
-    handler.send_response(200)
-    handler.send_header("Content-Type", "text/event-stream")
-    handler.send_header("Cache-Control", "no-cache")
-    handler.send_header("Access-Control-Allow-Origin", "*")
-    handler.send_header("X-Accel-Buffering", "no")
-    handler.end_headers()
-
-    client_connected = True
-
-    def send_sse(event_name, payload):
-        nonlocal client_connected
-        if not client_connected:
-            return False
-        data = dict(payload or {})
-        data.setdefault("event", event_name)
-        data.setdefault("runId", run_id)
-        data.setdefault("sessionId", session_id)
-        try:
-            handler.wfile.write(f"event: {event_name}\ndata: {json.dumps(data)}\n\n".encode("utf-8"))
-            handler.wfile.flush()
-            return True
-        except (BrokenPipeError, ConnectionResetError, OSError):
-            client_connected = False
-            return False
-
-    reply = ""
-    reasoning_parts = []
-    tools = []
-    started_tools = {}
-    started_tool_keys = {}
-    tool_seq = 0
-    approval = None
-    terminal_event = None
-    error_text = ""
-    last_progress_publish = 0.0
-
-    def publish_progress(force=False):
-        nonlocal last_progress_publish
-        now = time.time()
-        if force or now - last_progress_publish >= 0.25:
-            _publish_hermes_api_progress(profile, agent_id, run_id, tools=tools, reasoning_parts=reasoning_parts, reply=reply)
-            last_progress_publish = now
-
-    def finalize_history(ok=False):
-        history = _remove_hermes_progress_messages(_load_hermes_history(profile))
-        final_ts = int(time.time() * 1000)
-        history.extend(_hermes_tool_activity_messages(
-            tools,
-            agent_id=agent_id,
-            run_id=run_id,
-            base_ts=final_ts,
-            coerce_complete=bool(ok) and not approval,
-        ))
-        history.append({
-            "role": "assistant",
-            "text": reply,
-            "ts": final_ts + len(tools),
-            "agentId": agent_id,
-            "exitCode": 0 if ok else 1,
-            "sessionId": session_id,
-            "runId": run_id,
-            "tools": [],
-            "thinking": "" if "\n\n".join(reasoning_parts).strip() == reply.strip() else "\n\n".join(reasoning_parts),
-            "reasoningTokens": 0,
-            "approval": approval,
-            "error": error_text or None,
-        })
-        _save_hermes_history(profile, history)
-        _clear_hermes_active_run(run_id)
-
-    send_sse("run.started", {"ok": True, "agentId": agent_id, "profile": profile})
-    publish_progress(force=True)
-
-    try:
-        for event in client.stream_run_events(run_id, timeout_sec=timeout + 30):
-            gateway_presence.set_provider_event(status_key, "hermes", event)
-            event_name = str(event.get("event") or "").lower() or "event"
-            payload = {**event, "agentId": agent_id, "profile": profile}
-            if event_name == "message.delta":
-                delta = str(event.get("delta") or "")
-                reply += delta
-                payload["reply"] = reply
-                publish_progress()
-            elif event_name == "reasoning.available":
-                text = str(event.get("text") or "")
-                if text:
-                    reasoning_parts.append(text)
-                    payload["thinking"] = "\n\n".join(reasoning_parts)
-                    publish_progress(force=True)
-            elif event_name == "tool.started":
-                tool_seq += 1
-                fallback_id = f"{run_id}:tool:{tool_seq}"
-                card = _hermes_event_tool_card(event, "running", fallback_id=fallback_id)
-                event_tool_key = f"{event.get('tool') or event.get('name') or 'tool'}:{event.get('preview') or event.get('label') or ''}"
-                started_tool_keys[event_tool_key] = card["id"]
-                started_tools[card["id"]] = card
-                tools.append(card)
-                payload["toolCard"] = card
-                publish_progress(force=True)
-            elif event_name in {"tool.completed", "tool.failed"}:
-                event_tool_key = f"{event.get('tool') or event.get('name') or 'tool'}:{event.get('preview') or event.get('label') or ''}"
-                fallback_id = started_tool_keys.get(event_tool_key)
-                if not fallback_id:
-                    matching_id = next((tid for tid, item in reversed(list(started_tools.items())) if item.get("name") == (event.get("tool") or event.get("name"))), "")
-                    fallback_id = matching_id or f"{run_id}:tool:{len(started_tools) + 1}"
-                card = _hermes_event_tool_card(event, "done" if event_name == "tool.completed" else "error", fallback_id=fallback_id)
-                if card["id"] in started_tools:
-                    started_tools[card["id"]].update(card)
-                    card = started_tools[card["id"]]
-                else:
-                    tools.append(card)
-                payload["toolCard"] = card
-                publish_progress(force=True)
-            elif event_name == "approval.request":
-                approval = _remember_hermes_approval_pending(
-                    _hermes_api_approval_from_event(event, agent_id=agent_id, profile=profile, session_id=session_id, original_message=original_message),
-                    agent_id=agent_id,
-                    profile=profile,
-                    session_id=session_id,
-                )
-                payload["approval"] = approval
-                publish_progress(force=True)
-            elif event_name in {"run.completed", "run.failed", "run.cancelled", "run.canceled"}:
-                terminal_event = event
-                if event.get("output"):
-                    reply = str(event.get("output") or reply)
-                if event.get("error"):
-                    error_text = str(event.get("error") or "")
-                if event_name == "run.completed":
-                    approval = None
-                payload.update({
-                    "reply": reply,
-                    "tools": tools,
-                    "approval": approval,
-                    "error": error_text or None,
-                })
-                publish_progress(force=True)
-                send_sse(event_name, payload)
-                break
-            send_sse(event_name, payload)
-    except Exception as exc:
-        error_text = str(exc)
-        terminal_event = {"event": "run.failed", "error": error_text}
-        gateway_presence.set_provider_event(status_key, "hermes", {"event": "run.failed", "run_id": run_id, "error": error_text})
-        send_sse("run.failed", {"ok": False, "error": error_text, "reply": reply, "tools": tools})
-
-    terminal_name = str((terminal_event or {}).get("event") or "").lower()
-    ok = terminal_name == "run.completed"
-    if approval:
-        ok = False
-        error_text = error_text or "Hermes is waiting for approval."
-    elif terminal_name in {"run.failed", "run.cancelled", "run.canceled"}:
-        ok = False
-        error_text = error_text or terminal_name.replace("run.", "Hermes run ")
-    finalize_history(ok=ok)
-
-
 def _handle_hermes_interrupt(body):
     agent_key = body.get("agentId") or body.get("key") or "hermes-default"
     run_id = str(body.get("runId") or body.get("run_id") or "").strip()
@@ -4730,177 +4484,6 @@ def _handle_hermes_chat(body):
         return {"ok": False, "error": str(e), "conversationId": conversation_id, "_status": 500}
 
 
-def _handle_codex_chat(body):
-    """Send one message to a local Codex app-server-backed agent."""
-    message = (body.get("message") or "").strip()
-    agent_key = body.get("agentId") or body.get("key") or body.get("sessionKey") or "codex-default"
-    if not message:
-        return {"ok": False, "error": "message is required", "_status": 400}
-
-    agent = _get_codex_agent(agent_key)
-    if not agent:
-        return {"ok": False, "error": f"Codex agent '{agent_key}' not found", "_status": 404}
-
-    codex_cfg = VO_CONFIG.get("codex", {})
-    timeout = int(body.get("timeoutSec") or codex_cfg.get("timeoutSec") or 900)
-    profile = agent.get("profile") or agent.get("providerAgentId") or "default"
-    stream_run_id = str(body.get("_streamRunId") or "").strip()
-    stream_progress_id = str(body.get("_streamProgressId") or "").strip()
-    stream_progress_cb = body.get("_onProgress") if callable(body.get("_onProgress")) else None
-    from_type = str(body.get("fromType") or body.get("senderType") or "").strip().lower()
-    is_human_source = from_type in {"human", "user", "chat", "ui"}
-    attachments = body.get("attachments") if isinstance(body.get("attachments"), list) else []
-    sender_name = str(body.get("fromDisplayName") or body.get("displayName") or body.get("fromName") or "User").strip() or "User"
-
-    delivery_message = message
-    if is_human_source:
-        delivery_message = (
-            f"Message from {sender_name} via Virtual Office Chat.\n\n"
-            f"{message}\n\n"
-            "Reply directly to the user. Do not assume the user's name unless they identify themselves."
-        )
-    if attachments:
-        file_lines = []
-        for item in attachments:
-            if isinstance(item, dict):
-                file_lines.append(f"- {item.get('name') or 'attachment'}: {item.get('path') or item.get('url') or ''}".strip())
-        if file_lines:
-            delivery_message += "\n\nAttached files uploaded through Virtual Office:\n" + "\n".join(file_lines)
-
-    now_ms = int(time.time() * 1000)
-    history = _load_codex_history(profile)
-    history.append({
-        "role": "user",
-        "text": message,
-        "ts": now_ms,
-        "agentId": agent.get("id"),
-        "from": sender_name if is_human_source else "You",
-        "fromType": from_type or "",
-        "attachments": attachments,
-    })
-    progress_id = stream_progress_id or f"codex-progress-{now_ms}"
-    history.append({
-        "role": "assistant",
-        "text": "",
-        "ts": int(time.time() * 1000),
-        "agentId": agent.get("id"),
-        "ephemeral": "codex-progress",
-        "progressId": progress_id,
-        "runId": stream_run_id,
-        "tools": [],
-        "thinking": "Starting Codex app-server.",
-        "reasoningTokens": 0,
-    })
-    _save_codex_history(profile, history)
-
-    try:
-        provider = _codex_provider()
-        provider.model = agent.get("model") or provider.model or ""
-        requested_approval_policy = str(body.get("approvalPolicy") or body.get("codexApprovalPolicy") or "").strip()
-        if requested_approval_policy in {"untrusted", "on-request", "on-failure", "never"}:
-            provider.approval_policy = requested_approval_policy
-        session_id = _get_codex_session_id(profile)
-        status_key = agent.get("statusKey") or agent.get("id")
-        gateway_presence.set_manual_override(status_key, "working", "Codex task")
-
-        def on_progress(run_state):
-            gateway_presence.set_provider_event(status_key, "codex", {
-                "event": "turn.progress",
-                "thread_id": run_state.get("threadId") or "",
-                "turn_id": run_state.get("turnId") or run_state.get("runId") or "",
-                "status": run_state.get("status") or "",
-            })
-            _publish_codex_progress(profile, agent.get("id"), progress_id, run_state)
-            if stream_progress_cb:
-                try:
-                    stream_progress_cb(run_state)
-                except Exception:
-                    pass
-
-        result = provider.send_chat_message(profile, delivery_message, session_id=session_id, timeout_sec=timeout, on_progress=on_progress)
-        active_session_id = result.get("sessionId") or session_id
-        if active_session_id:
-            _set_codex_session_id(profile, active_session_id)
-        if result.get("runId"):
-            _set_codex_active_run(profile, active_session_id, result.get("runId"))
-
-        reply = result.get("reply", "")
-        stderr = result.get("stderr", "")
-        exit_code = result.get("exitCode")
-        history = _remove_codex_progress_messages(_load_codex_history(profile))
-        final_ts = int(time.time() * 1000)
-        tools = result.get("tools") or []
-        approval = result.get("approval") if isinstance(result.get("approval"), dict) else None
-        approval_id = (approval or {}).get("approval_id") or (approval or {}).get("id") or ""
-        token_usage = result.get("tokenUsage") if isinstance(result.get("tokenUsage"), dict) else {}
-        context_used = _codex_context_used_from_token_usage(token_usage)
-        token_context_window = _codex_context_window_from_token_usage(token_usage)
-        if token_usage:
-            _set_codex_token_usage(profile, token_usage)
-        if tools:
-            history.append({
-                "role": "assistant",
-                "text": "",
-                "ts": final_ts,
-                "agentId": agent.get("id"),
-                "source": "codex-tool-activity",
-                "tools": tools,
-            })
-        history.append({
-            "role": "assistant",
-            "text": reply,
-            "ts": final_ts + (1 if tools else 0),
-            "agentId": agent.get("id"),
-            "exitCode": exit_code,
-            "sessionId": active_session_id,
-            "runId": result.get("runId"),
-            "tools": [],
-            "thinking": result.get("thinking") or "",
-            "reasoningTokens": 0,
-            "error": result.get("error") or None,
-            "interrupted": bool(result.get("interrupted")),
-            "approval": approval if approval and not _history_has_approval(history, approval_id) else None,
-            "tokenUsage": token_usage or None,
-            "contextUsed": context_used,
-            "contextWindow": token_context_window or None,
-        })
-        _save_codex_history(profile, history)
-        gateway_presence.set_manual_override(agent.get("statusKey") or agent.get("id"), "idle" if result.get("ok") else "offline", "")
-        return {
-            "ok": bool(result.get("ok")),
-            "reply": reply,
-            "stderr": stderr[:2000],
-            "exitCode": exit_code,
-            "sessionId": active_session_id,
-            "runId": result.get("runId"),
-            "providerPath": result.get("providerPath") or "app-server",
-            "tools": tools,
-            "thinking": result.get("thinking") or "",
-            "reasoningTokens": 0,
-            "approval": approval,
-            "tokenUsage": token_usage,
-            "contextUsed": context_used,
-            "contextWindow": token_context_window,
-            "interrupted": bool(result.get("interrupted")),
-            "error": result.get("error"),
-            "agent": {"id": agent.get("id"), "name": agent.get("name"), "providerKind": "codex", "profile": profile},
-        }
-    except Exception as e:
-        history = _remove_codex_progress_messages(_load_codex_history(profile))
-        history.append({
-            "role": "assistant",
-            "text": "",
-            "ts": int(time.time() * 1000),
-            "agentId": agent.get("id"),
-            "tools": [{"id": "codex-error", "name": "codex", "status": "error", "arguments": {}, "error": str(e)}],
-            "thinking": "",
-            "reasoningTokens": 0,
-        })
-        _save_codex_history(profile, history)
-        gateway_presence.set_manual_override(agent.get("statusKey") or agent.get("id"), "offline", "Codex error")
-        return {"ok": False, "error": str(e), "_status": 500}
-
-
 def _handle_codex_interrupt(body):
     agent_key = body.get("agentId") or body.get("key") or body.get("sessionKey") or "codex-default"
     agent = _get_codex_agent(agent_key)
@@ -5005,204 +4588,6 @@ def _handle_codex_test(body=None):
         include_native_agents=cfg.get("includeNativeAgents", True),
         register_native_agents=cfg.get("registerNativeAgents", True),
     ).test()
-    return result
-
-
-def _handle_claude_code_chat(body):
-    """Send one message to a local Claude Code CLI-backed agent."""
-    message = (body.get("message") or "").strip()
-    agent_key = body.get("agentId") or body.get("key") or body.get("sessionKey") or "claude-code-main"
-    if not message:
-        return {"ok": False, "error": "message is required", "_status": 400}
-
-    agent = _get_claude_code_agent(agent_key)
-    if not agent:
-        return {"ok": False, "error": f"Claude Code agent '{agent_key}' not found", "_status": 404}
-
-    claude_cfg = VO_CONFIG.get("claudeCode", {})
-    timeout = int(body.get("timeoutSec") or claude_cfg.get("timeoutSec") or 900)
-    profile = agent.get("profile") or agent.get("providerAgentId") or "main"
-    stream_run_id = str(body.get("_streamRunId") or "").strip()
-    stream_progress_id = str(body.get("_streamProgressId") or "").strip()
-    stream_progress_cb = body.get("_onProgress") if callable(body.get("_onProgress")) else None
-    from_type = str(body.get("fromType") or body.get("senderType") or "").strip().lower()
-    is_human_source = from_type in {"human", "user", "chat", "ui"}
-    attachments = body.get("attachments") if isinstance(body.get("attachments"), list) else []
-    sender_name = str(body.get("fromDisplayName") or body.get("displayName") or body.get("fromName") or "User").strip() or "User"
-
-    delivery_message = message
-    if is_human_source:
-        delivery_message = (
-            f"Message from {sender_name} via Virtual Office Chat.\n\n"
-            f"{message}\n\n"
-            "Reply directly to the user. Do not assume the user's name unless they identify themselves."
-        )
-    if attachments:
-        file_lines = []
-        for item in attachments:
-            if isinstance(item, dict):
-                file_lines.append(f"- {item.get('name') or 'attachment'}: {item.get('path') or item.get('url') or ''}".strip())
-        if file_lines:
-            delivery_message += "\n\nAttached files uploaded through Virtual Office:\n" + "\n".join(file_lines)
-
-    now_ms = int(time.time() * 1000)
-    history = _load_claude_code_history(profile)
-    history.append({
-        "role": "user",
-        "text": message,
-        "ts": now_ms,
-        "agentId": agent.get("id"),
-        "from": sender_name if is_human_source else "You",
-        "fromType": from_type or "",
-        "attachments": attachments,
-    })
-    progress_id = stream_progress_id or f"claude-code-progress-{now_ms}"
-    history.append({
-        "role": "assistant",
-        "text": "",
-        "ts": int(time.time() * 1000),
-        "agentId": agent.get("id"),
-        "ephemeral": "claude-code-progress",
-        "progressId": progress_id,
-        "runId": stream_run_id,
-        "tools": [],
-        "thinking": "Starting Claude Code.",
-        "reasoningTokens": 0,
-    })
-    _save_claude_code_history(profile, history)
-
-    try:
-        provider = _claude_code_provider()
-        agent_model = agent.get("model") or ""
-        if agent_model and agent_model != "inherit":
-            provider.model = agent_model
-        requested_permission_mode = str(body.get("permissionMode") or body.get("claudePermissionMode") or "").strip()
-        if requested_permission_mode in {"default", "acceptEdits", "auto", "dontAsk", "plan", "bypassPermissions"}:
-            provider.permission_mode = requested_permission_mode
-        session_id = _get_claude_code_session_id(profile)
-        status_key = agent.get("statusKey") or agent.get("id")
-        gateway_presence.set_manual_override(status_key, "working", "Claude Code task")
-
-        def on_progress(run_state):
-            run_state = run_state if isinstance(run_state, dict) else {}
-            usage = run_state.get("usage") if isinstance(run_state.get("usage"), dict) else {}
-            token_usage = provider._usage_to_token_usage(usage)
-            if token_usage:
-                run_state = dict(run_state)
-                run_state["tokenUsage"] = token_usage
-            gateway_presence.set_provider_event(status_key, "claude-code", {
-                "event": "turn.progress",
-                "session_id": run_state.get("sessionId") or run_state.get("threadId") or "",
-                "status": run_state.get("status") or "",
-            })
-            _publish_claude_code_progress(profile, agent.get("id"), progress_id, run_state)
-            if stream_progress_cb:
-                try:
-                    stream_progress_cb(run_state)
-                except Exception:
-                    pass
-
-        result = provider.send_chat_message(profile, delivery_message, session_id=session_id, timeout_sec=timeout, on_progress=on_progress)
-        active_session_id = result.get("sessionId") or session_id
-        if active_session_id:
-            _set_claude_code_session_id(profile, active_session_id)
-            _set_claude_code_active_run(profile, active_session_id, result.get("runId") or active_session_id)
-
-        reply = result.get("reply", "")
-        stderr = result.get("stderr", "")
-        exit_code = result.get("exitCode")
-        history = _remove_claude_code_progress_messages(_load_claude_code_history(profile))
-        final_ts = int(time.time() * 1000)
-        tools = result.get("tools") or []
-        token_usage = result.get("tokenUsage") if isinstance(result.get("tokenUsage"), dict) else {}
-        context_used = _codex_context_used_from_token_usage(token_usage)
-        token_context_window = _codex_context_window_from_token_usage(token_usage)
-        if token_usage:
-            _set_claude_code_token_usage(profile, token_usage)
-        if tools:
-            history.append({
-                "role": "assistant",
-                "text": "",
-                "ts": final_ts,
-                "agentId": agent.get("id"),
-                "source": "claude-code-tool-activity",
-                "tools": tools,
-            })
-        history.append({
-            "role": "assistant",
-            "text": reply,
-            "ts": final_ts + (1 if tools else 0),
-            "agentId": agent.get("id"),
-            "exitCode": exit_code,
-            "sessionId": active_session_id,
-            "runId": result.get("runId") or active_session_id,
-            "tools": [],
-            "thinking": result.get("thinking") or "",
-            "reasoningTokens": 0,
-            "error": result.get("error") or None,
-            "tokenUsage": token_usage or None,
-            "contextUsed": context_used,
-            "contextWindow": token_context_window or None,
-        })
-        _save_claude_code_history(profile, history)
-        gateway_presence.set_manual_override(agent.get("statusKey") or agent.get("id"), "idle" if result.get("ok") else "offline", "")
-        return {
-            "ok": bool(result.get("ok")),
-            "reply": reply,
-            "stderr": stderr[:2000],
-            "exitCode": exit_code,
-            "sessionId": active_session_id,
-            "runId": result.get("runId") or active_session_id,
-            "providerPath": result.get("providerPath") or "claude-code-cli",
-            "tools": tools,
-            "thinking": result.get("thinking") or "",
-            "reasoningTokens": 0,
-            "tokenUsage": token_usage,
-            "contextUsed": context_used,
-            "contextWindow": token_context_window,
-            "error": result.get("error"),
-            "agent": {"id": agent.get("id"), "name": agent.get("name"), "providerKind": "claude-code", "profile": profile},
-        }
-    except Exception as e:
-        history = _remove_claude_code_progress_messages(_load_claude_code_history(profile))
-        history.append({
-            "role": "assistant",
-            "text": "",
-            "ts": int(time.time() * 1000),
-            "agentId": agent.get("id"),
-            "tools": [{"id": "claude-code-error", "name": "claude-code", "status": "error", "arguments": {}, "error": str(e)}],
-            "thinking": "",
-            "reasoningTokens": 0,
-        })
-        _save_claude_code_history(profile, history)
-        gateway_presence.set_manual_override(agent.get("statusKey") or agent.get("id"), "offline", "Claude Code error")
-        return {"ok": False, "error": str(e), "_status": 500}
-
-
-def _handle_claude_code_interrupt(body):
-    agent_key = body.get("agentId") or body.get("key") or body.get("sessionKey") or "claude-code-main"
-    agent = _get_claude_code_agent(agent_key)
-    if not agent:
-        return {"ok": False, "error": f"Claude Code agent '{agent_key}' not found", "_status": 404}
-    profile = agent.get("profile") or agent.get("providerAgentId") or "main"
-    result = _claude_code_provider().interrupt(profile)
-    if result.get("ok"):
-        history = _load_claude_code_history(profile)
-        history.append({
-            "role": "assistant",
-            "text": "Claude Code run interrupted.",
-            "ts": int(time.time() * 1000),
-            "agentId": agent.get("id"),
-            "ephemeral": "claude-code-progress",
-            "progressId": f"claude-code-interrupt-{int(time.time() * 1000)}",
-            "sessionId": _get_claude_code_session_id(profile),
-            "runId": body.get("runId") or "",
-            "thinking": "Interrupted by user.",
-        })
-        _save_claude_code_history(profile, history)
-        gateway_presence.set_manual_override(agent.get("statusKey") or agent.get("id"), "idle", "")
-    else:
-        result["_status"] = 409
     return result
 
 
@@ -5325,8 +4710,18 @@ def _handle_hermes_run_start(body):
         return {"ok": False, "error": f"Hermes agent '{agent_key}' not found", "_status": 404}
 
     profile = agent.get("profile") or agent.get("providerAgentId") or "default"
-    run_id = f"hermes-{int(time.time() * 1000)}-{str(uuid.uuid4())[:8]}"
     conversation_id = str(body.get("conversationId") or body.get("threadId") or "").strip()
+    agent_id = agent.get("id") or agent_key
+    idempotency_key = _provider_run_idempotency_key(body)
+    idempotency_scope = _provider_run_idempotency_scope("hermes", agent_id, conversation_id, idempotency_key) if idempotency_key else ""
+    if idempotency_scope:
+        with _CODEX_ACTIVE_LOCK:
+            _prune_provider_run_idempotency()
+            existing = _PROVIDER_RUN_IDEMPOTENCY.get(idempotency_scope)
+            if existing:
+                return _provider_run_duplicate_response("hermes", conversation_id, idempotency_key, existing)
+
+    run_id = f"hermes-{int(time.time() * 1000)}-{str(uuid.uuid4())[:8]}"
     status_key = agent.get("statusKey") or agent.get("id")
     events = queue.Queue()
     meta = {
@@ -5340,8 +4735,10 @@ def _handle_hermes_run_start(body):
         "startedAt": int(time.time() * 1000),
         "done": False,
         "result": None,
+        "idempotencyKey": idempotency_key,
     }
     PROVIDER_RUN_BRIDGE.remember(meta)
+    _register_provider_run_idempotency(idempotency_scope, run_id, "hermes", agent_id, conversation_id, idempotency_key, "api")
 
     def enqueue(event_name, payload=None):
         PROVIDER_RUN_BRIDGE.emit(run_id, event_name, payload)
@@ -5423,6 +4820,7 @@ def _handle_hermes_run_start(body):
             sessionId=result.get("sessionId") or "",
             turnId=result.get("runId") or run_id,
         )
+        _finish_provider_run_idempotency(idempotency_scope, result)
         terminal_payload = _hermes_stream_event_payload(run_id, agent, profile, result, conversationId=conversation_id)
         if result.get("approval"):
             enqueue("approval.required", terminal_payload)
@@ -5446,6 +4844,8 @@ def _handle_hermes_run_start(body):
         "ok": True,
         "runId": run_id,
         "providerPath": "api",
+        "conversationId": conversation_id,
+        "idempotencyKey": idempotency_key,
         "agent": {"id": agent.get("id"), "name": agent.get("name"), "providerKind": "hermes", "profile": profile},
     }
 
@@ -5569,6 +4969,10 @@ _CODEX_THREAD_STATE_LOCK = threading.Lock()
 _CODEX_ACTIVITY_LOCK = threading.Lock()
 _CODEX_ACTIVE_LOCK = threading.Lock()
 _CODEX_ACTIVE_OPERATIONS = {}
+_CODEX_RUN_IDEMPOTENCY = {}
+_CODEX_RUN_IDEMPOTENCY_TTL_MS = 10 * 60 * 1000
+_PROVIDER_RUN_IDEMPOTENCY = {}
+_PROVIDER_RUN_IDEMPOTENCY_TTL_MS = 10 * 60 * 1000
 
 _CODEX_SECRET_KEYS = {"authorization", "cookie", "token", "api_key", "apikey", "password", "secret", "access_token", "refresh_token"}
 _CODEX_MAX_EVENT_TEXT = 12000
@@ -5718,6 +5122,93 @@ def _codex_operation_lock(agent_id):
         return _CODEX_OPERATION_LOCKS.setdefault(agent_id, threading.Lock())
 
 
+def _codex_idempotency_key(body):
+    value = str((body or {}).get("idempotencyKey") or (body or {}).get("requestId") or "").strip()
+    if not value:
+        return ""
+    return value[:200]
+
+
+def _codex_idempotency_scope(agent_id, conversation_id, key):
+    return f"{agent_id}\n{conversation_id}\n{key}"
+
+
+def _prune_codex_idempotency(now_ms=None):
+    now_ms = int(now_ms or time.time() * 1000)
+    for key, entry in list(_CODEX_RUN_IDEMPOTENCY.items()):
+        if now_ms - int((entry or {}).get("ts") or 0) > _CODEX_RUN_IDEMPOTENCY_TTL_MS:
+            _CODEX_RUN_IDEMPOTENCY.pop(key, None)
+
+
+def _provider_run_idempotency_key(body):
+    value = str((body or {}).get("idempotencyKey") or (body or {}).get("requestId") or "").strip()
+    if not value:
+        return ""
+    return value[:200]
+
+
+def _provider_run_idempotency_scope(provider_kind, agent_id, conversation_id, key):
+    return f"{provider_kind}\n{agent_id}\n{conversation_id}\n{key}"
+
+
+def _prune_provider_run_idempotency(now_ms=None):
+    now_ms = int(now_ms or time.time() * 1000)
+    for key, entry in list(_PROVIDER_RUN_IDEMPOTENCY.items()):
+        if now_ms - int((entry or {}).get("ts") or 0) > _PROVIDER_RUN_IDEMPOTENCY_TTL_MS:
+            _PROVIDER_RUN_IDEMPOTENCY.pop(key, None)
+
+
+def _provider_run_duplicate_response(provider_kind, conversation_id, idempotency_key, entry):
+    entry = entry if isinstance(entry, dict) else {}
+    provider_path = entry.get("providerPath") or provider_kind
+    if not entry.get("done") and entry.get("runId"):
+        return {
+            "ok": True,
+            "status": "duplicate",
+            "runId": entry.get("runId"),
+            "conversationId": conversation_id,
+            "idempotencyKey": idempotency_key,
+            "providerPath": provider_path,
+        }
+    return {
+        "ok": True,
+        "status": "duplicate_completed",
+        "runId": entry.get("runId") or "",
+        "conversationId": conversation_id,
+        "idempotencyKey": idempotency_key,
+        "result": entry.get("result") or {},
+        "providerPath": provider_path,
+    }
+
+
+def _register_provider_run_idempotency(scope, run_id, provider_kind, agent_id, conversation_id, idempotency_key, provider_path):
+    if not scope:
+        return
+    with _CODEX_ACTIVE_LOCK:
+        _PROVIDER_RUN_IDEMPOTENCY[scope] = {
+            "runId": run_id,
+            "providerKind": provider_kind,
+            "agentId": agent_id,
+            "conversationId": conversation_id,
+            "idempotencyKey": idempotency_key,
+            "providerPath": provider_path,
+            "ts": int(time.time() * 1000),
+            "done": False,
+            "result": None,
+        }
+
+
+def _finish_provider_run_idempotency(scope, result):
+    if not scope:
+        return
+    with _CODEX_ACTIVE_LOCK:
+        entry = _PROVIDER_RUN_IDEMPOTENCY.get(scope)
+        if entry:
+            entry["done"] = True
+            entry["result"] = result if isinstance(result, dict) else {}
+            entry["ts"] = int(time.time() * 1000)
+
+
 def _codex_git_paths(workspace):
     try:
         result = subprocess.run(
@@ -5755,6 +5246,9 @@ def _append_codex_user_comm_event(agent, agent_id, conversation_id, message, bod
     }
     if source_label:
         metadata["sourceLabel"] = source_label
+    idempotency_key = _codex_idempotency_key(body)
+    if idempotency_key:
+        metadata["idempotencyKey"] = idempotency_key
     return _append_comm_event({
         "type": "message",
         "direction": "request",
@@ -5983,6 +5477,33 @@ def _handle_codex_run_start(body):
     if not conversation_id:
         return {"ok": False, "status": "invalid_request", "error": "conversationId is required", "_status": 400}
 
+    agent_id = agent.get("id") or agent_key
+    idempotency_key = _codex_idempotency_key(body)
+    idempotency_scope = _codex_idempotency_scope(agent_id, conversation_id, idempotency_key) if idempotency_key else ""
+    if idempotency_scope:
+        with _CODEX_ACTIVE_LOCK:
+            _prune_codex_idempotency()
+            existing = _CODEX_RUN_IDEMPOTENCY.get(idempotency_scope)
+            if existing:
+                if not existing.get("done") and existing.get("runId"):
+                    return {
+                        "ok": True,
+                        "status": "duplicate",
+                        "runId": existing.get("runId"),
+                        "conversationId": conversation_id,
+                        "idempotencyKey": idempotency_key,
+                        "providerPath": "codex-app-server",
+                    }
+                return {
+                    "ok": True,
+                    "status": "duplicate_completed",
+                    "runId": existing.get("runId") or "",
+                    "conversationId": conversation_id,
+                    "idempotencyKey": idempotency_key,
+                    "result": existing.get("result") or {},
+                    "providerPath": "codex-app-server",
+                }
+
     run_id = f"codex-{int(time.time() * 1000)}-{str(uuid.uuid4())[:8]}"
     profile = agent.get("profile") or agent.get("providerAgentId") or "local"
     status_key = agent.get("statusKey") or agent.get("id")
@@ -5998,8 +5519,20 @@ def _handle_codex_run_start(body):
         "startedAt": int(time.time() * 1000),
         "done": False,
         "result": None,
+        "idempotencyKey": idempotency_key,
     }
     PROVIDER_RUN_BRIDGE.remember(meta)
+    if idempotency_scope:
+        with _CODEX_ACTIVE_LOCK:
+            _CODEX_RUN_IDEMPOTENCY[idempotency_scope] = {
+                "runId": run_id,
+                "agentId": agent_id,
+                "conversationId": conversation_id,
+                "idempotencyKey": idempotency_key,
+                "ts": int(time.time() * 1000),
+                "done": False,
+                "result": None,
+            }
 
     def enqueue(event_name, payload=None):
         PROVIDER_RUN_BRIDGE.emit(run_id, event_name, payload)
@@ -6056,6 +5589,13 @@ def _handle_codex_run_start(body):
         except Exception as exc:
             result = {"ok": False, "status": "execution_failed", "error": str(exc), "_status": 500}
         PROVIDER_RUN_BRIDGE.update(run_id, done=True, result=result)
+        if idempotency_scope:
+            with _CODEX_ACTIVE_LOCK:
+                entry = _CODEX_RUN_IDEMPOTENCY.get(idempotency_scope)
+                if entry:
+                    entry["done"] = True
+                    entry["result"] = result
+                    entry["ts"] = int(time.time() * 1000)
         _remove_comm_progress_events("codex-progress", progress_id, conversation_id)
         terminal_payload = _codex_stream_event_payload(run_id, agent, result=result, conversationId=conversation_id)
         status = str(result.get("status") or "").lower()
@@ -6078,6 +5618,8 @@ def _handle_codex_run_start(body):
         "ok": True,
         "runId": run_id,
         "providerPath": "codex-app-server",
+        "conversationId": conversation_id,
+        "idempotencyKey": idempotency_key,
         "agent": {"id": agent.get("id"), "name": agent.get("name"), "providerKind": "codex", "profile": profile},
     }
 
@@ -6692,6 +6234,61 @@ def _provider_visible_thinking(provider_kind, run_state):
     return thinking
 
 
+PROVIDER_PROGRESS_MAX_AGE_MS = 120000
+PROVIDER_PROGRESS_TERMINAL_STATUSES = {"completed", "complete", "done", "success", "failed", "error", "execution_failed", "cancelled", "canceled"}
+
+
+def _provider_progress_status(progress):
+    progress = progress if isinstance(progress, dict) else {}
+    status = str(progress.get("status") or "").strip().lower()
+    if not status and progress.get("error"):
+        status = "failed"
+    return status
+
+
+def _is_recoverable_provider_progress(progress, now_ms=None):
+    progress = progress if isinstance(progress, dict) else {}
+    if _provider_progress_status(progress) in PROVIDER_PROGRESS_TERMINAL_STATUSES:
+        return False
+    if progress.get("active") or progress.get("activeRunId") or progress.get("runActive") or progress.get("activeConversationId"):
+        return True
+    try:
+        ts = int(progress.get("ts") or progress.get("epochMs") or progress.get("updatedAt") or progress.get("startedAt") or 0)
+    except (TypeError, ValueError):
+        ts = 0
+    if ts > 0 and int(now_ms or time.time() * 1000) - ts > PROVIDER_PROGRESS_MAX_AGE_MS:
+        return False
+    return True
+
+
+def _filter_recoverable_provider_progress_messages(messages):
+    result = []
+    now_ms = int(time.time() * 1000)
+    for msg in messages or []:
+        if not isinstance(msg, dict):
+            continue
+        marker = msg.get("ephemeral")
+        if marker in {"codex-progress", "claude-code-progress", "hermes-progress"} and not _is_recoverable_provider_progress(msg, now_ms):
+            continue
+        result.append(msg)
+    return result
+
+
+def _filter_recoverable_comm_progress_events(events):
+    result = []
+    now_ms = int(time.time() * 1000)
+    for event in events or []:
+        if not isinstance(event, dict):
+            continue
+        metadata = event.get("metadata") if isinstance(event.get("metadata"), dict) else {}
+        marker = metadata.get("ephemeral") or event.get("ephemeral")
+        progress = metadata.get("progress") if isinstance(metadata.get("progress"), dict) else event
+        if marker in {"codex-progress", "claude-code-progress", "hermes-progress"} and not _is_recoverable_provider_progress(progress, now_ms):
+            continue
+        result.append(event)
+    return result
+
+
 def _provider_progress_message(
     provider_kind,
     agent_id,
@@ -6981,11 +6578,21 @@ def _handle_claude_code_run_start(body):
         return {"ok": False, "error": f"Claude Code agent '{agent_key}' not found", "_status": 404}
 
     profile = agent.get("profile") or agent.get("providerAgentId") or "local"
+    conversation_id = str(body.get("conversationId") or body.get("threadId") or "").strip()
+    agent_id = agent.get("id") or agent_key
+    idempotency_key = _provider_run_idempotency_key(body)
+    idempotency_scope = _provider_run_idempotency_scope("claude-code", agent_id, conversation_id, idempotency_key) if idempotency_key else ""
+    if idempotency_scope:
+        with _CODEX_ACTIVE_LOCK:
+            _prune_provider_run_idempotency()
+            existing = _PROVIDER_RUN_IDEMPOTENCY.get(idempotency_scope)
+            if existing:
+                return _provider_run_duplicate_response("claude-code", conversation_id, idempotency_key, existing)
+
     run_id = f"claude-code-{int(time.time() * 1000)}-{str(uuid.uuid4())[:8]}"
     progress_id = f"claude-code-progress-{run_id}"
     events = queue.Queue()
     status_key = agent.get("statusKey") or agent.get("id")
-    conversation_id = str(body.get("conversationId") or body.get("threadId") or "").strip()
     meta = {
         "runId": run_id,
         "agentId": agent.get("id"),
@@ -6997,8 +6604,10 @@ def _handle_claude_code_run_start(body):
         "startedAt": int(time.time() * 1000),
         "done": False,
         "result": None,
+        "idempotencyKey": idempotency_key,
     }
     _remember_claude_code_stream_run(meta)
+    _register_provider_run_idempotency(idempotency_scope, run_id, "claude-code", agent_id, conversation_id, idempotency_key, "claude-code-cli")
 
     def enqueue(event_name, payload=None):
         PROVIDER_RUN_BRIDGE.emit(run_id, event_name, payload)
@@ -7085,6 +6694,7 @@ def _handle_claude_code_run_start(body):
         history = _remove_claude_code_progress_messages(_load_claude_code_history(profile, conversation_id))
         _save_claude_code_history(profile, history, conversation_id, result.get("sessionId") or _get_claude_code_session_id(profile, conversation_id) or "")
         PROVIDER_RUN_BRIDGE.update(run_id, done=True, result=result)
+        _finish_provider_run_idempotency(idempotency_scope, result)
         token_usage = result.get("tokenUsage") if isinstance(result.get("tokenUsage"), dict) else {}
         payload = {
             "runId": run_id,
@@ -7116,6 +6726,8 @@ def _handle_claude_code_run_start(body):
         "ok": True,
         "runId": run_id,
         "providerPath": "claude-code-cli",
+        "conversationId": conversation_id,
+        "idempotencyKey": idempotency_key,
         "agent": {"id": agent.get("id"), "name": agent.get("name"), "providerKind": "claude-code", "profile": profile},
     }
 
@@ -7125,13 +6737,15 @@ def _handle_claude_code_run_events(handler, run_id):
 
 
 def _handle_claude_code_interrupt(body):
+    body = body or {}
     agent_key = body.get("agentId") or body.get("key") or body.get("sessionKey") or "claude-code-local"
+    conversation_id = str(body.get("conversationId") or body.get("threadId") or "").strip()
     agent = _get_claude_code_agent(agent_key)
     if not agent:
         return {"ok": False, "error": f"Claude Code agent '{agent_key}' not found", "_status": 404}
     result = _handle_claude_code_cancel(body)
     profile = agent.get("profile") or agent.get("providerAgentId") or "local"
-    history = _load_claude_code_history(profile, body.get("conversationId") or "")
+    history = _load_claude_code_history(profile, conversation_id)
     history.append({
         "role": "assistant",
         "text": "Claude Code run interrupted.",
@@ -7141,8 +6755,26 @@ def _handle_claude_code_interrupt(body):
         "progressId": f"claude-code-interrupt-{int(time.time() * 1000)}",
         "error": result.get("error") or "",
     })
-    _save_claude_code_history(profile, history, body.get("conversationId") or "", _get_claude_code_session_id(profile, body.get("conversationId") or ""))
+    _save_claude_code_history(profile, history, conversation_id, _get_claude_code_session_id(profile, conversation_id))
     return result
+
+
+def _handle_claude_code_history_clear(body):
+    body = body or {}
+    agent = _get_claude_code_agent(body.get("agentId") or body.get("key") or "claude-code-main") or {}
+    profile = agent.get("profile") or agent.get("providerAgentId") or "main"
+    conversation_id = str(body.get("conversationId") or "").strip()
+    session_id = _get_claude_code_session_id(profile, conversation_id)
+    _save_claude_code_history(profile, [], conversation_id, "")
+    _set_claude_code_session_id(profile, "", conversation_id)
+    _clear_claude_code_token_usage(profile, conversation_id)
+    return {
+        "ok": True,
+        "clearedClaudeCodeSession": bool(session_id),
+        "sessionId": session_id,
+        "conversationId": conversation_id,
+        "profile": profile,
+    }
 
 
 def _handle_claude_code_chat(body):
@@ -7521,6 +7153,14 @@ def _dedupe_visible_comm_history(events):
     seen = set()
     for event in events or []:
         if _is_a2a_envelope_text(event.get("text") if isinstance(event, dict) else ""):
+            continue
+        event_id = event.get("id") or ""
+        if event_id:
+            key = ("id", event_id)
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(event)
             continue
         direction = event.get("direction") or ""
         key = (
@@ -22789,24 +22429,28 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(json.dumps({
                 "ok": True,
-                "messages": _load_hermes_history(profile, conversation_id),
+                "messages": _filter_recoverable_provider_progress_messages(_load_hermes_history(profile, conversation_id)),
                 "sessionId": _get_hermes_session_id(profile, conversation_id),
                 "conversationId": conversation_id,
             }).encode())
         elif self.path == "/api/codex/history" or self.path.startswith("/api/codex/history?"):
             qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             agent_key = (qs.get("agentId") or qs.get("key") or ["codex-default"])[0]
+            conversation_id = (qs.get("conversationId") or [""])[0]
             agent = _get_codex_agent(agent_key)
             profile = (agent or {}).get("profile") or (agent or {}).get("providerAgentId") or "default"
             state = _load_codex_state(profile)
             token_usage = _get_codex_token_usage(profile)
+            messages = _filter_recoverable_provider_progress_messages(_load_codex_history(profile))
+            events = _filter_recoverable_comm_progress_events(_dedupe_visible_comm_history(_load_comm_history(limit=500, conversation_id=conversation_id, agent_id=agent_key)))
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(json.dumps({
                 "ok": True,
-                "messages": _load_codex_history(profile),
+                "events": events,
+                "messages": messages,
                 "sessionId": _get_codex_session_id(profile),
                 "tokenUsage": token_usage,
                 "contextUsed": _codex_context_used_from_token_usage(token_usage) or _codex_int(state.get("contextUsed"), 0),
@@ -22815,18 +22459,20 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
         elif self.path == "/api/claude-code/history" or self.path.startswith("/api/claude-code/history?"):
             qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             agent_key = (qs.get("agentId") or qs.get("key") or ["claude-code-main"])[0]
+            conversation_id = (qs.get("conversationId") or [""])[0]
             agent = _get_claude_code_agent(agent_key)
             profile = (agent or {}).get("profile") or (agent or {}).get("providerAgentId") or "main"
-            state = _load_claude_code_state(profile)
-            token_usage = _get_claude_code_token_usage(profile)
+            state = _load_claude_code_state(profile, conversation_id)
+            token_usage = _get_claude_code_token_usage(profile, conversation_id)
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(json.dumps({
                 "ok": True,
-                "messages": _load_claude_code_history(profile),
-                "sessionId": _get_claude_code_session_id(profile),
+                "messages": _filter_recoverable_provider_progress_messages(_sanitize_claude_code_history_messages(_load_claude_code_history(profile, conversation_id))),
+                "sessionId": _get_claude_code_session_id(profile, conversation_id),
+                "conversationId": conversation_id,
                 "tokenUsage": token_usage,
                 "contextUsed": _codex_context_used_from_token_usage(token_usage) or _codex_int(state.get("contextUsed"), 0),
                 "contextWindow": _codex_context_window_from_token_usage(token_usage) or _codex_int(state.get("contextWindow"), 0),
@@ -22891,16 +22537,6 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(json.dumps(result).encode())
-        elif self.path == "/api/codex/history" or self.path.startswith("/api/codex/history?"):
-            qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
-            conversation_id = (qs.get("conversationId") or [""])[0]
-            agent_id = (qs.get("agentId") or ["codex-local"])[0]
-            events = _dedupe_visible_comm_history(_load_comm_history(limit=500, conversation_id=conversation_id, agent_id=agent_id))
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.end_headers()
-            self.wfile.write(json.dumps({"ok": True, "events": events}).encode())
         elif self.path == "/api/codex/activity" or self.path.startswith("/api/codex/activity?"):
             qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             result = _handle_codex_activity(qs)
@@ -22919,18 +22555,6 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
         elif request_path.startswith("/api/codex/runs/") and request_path.endswith("/events"):
             run_id = urllib.parse.unquote(request_path[len("/api/codex/runs/"):-len("/events")].strip("/"))
             _handle_codex_run_events(self, run_id)
-        elif self.path == "/api/claude-code/history" or self.path.startswith("/api/claude-code/history?"):
-            qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
-            agent_key = (qs.get("agentId") or qs.get("key") or ["claude-code-local"])[0]
-            conversation_id = (qs.get("conversationId") or [""])[0]
-            agent = _get_claude_code_agent(agent_key)
-            profile = (agent or {}).get("profile") or (agent or {}).get("providerAgentId") or "local"
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.end_headers()
-            messages = _sanitize_claude_code_history_messages(_load_claude_code_history(profile, conversation_id))
-            self.wfile.write(json.dumps({"ok": True, "messages": messages}).encode())
         elif request_path.startswith("/api/claude-code/runs/") and request_path.endswith("/events"):
             run_id = urllib.parse.unquote(request_path[len("/api/claude-code/runs/"):-len("/events")].strip("/"))
             _handle_claude_code_run_events(self, run_id)
@@ -25127,8 +24751,8 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             run_id = urllib.parse.unquote(request_path[len("/api/hermes/runs/"):-len("/stop")].strip("/"))
             length = int(self.headers.get('Content-Length', 0))
             body = json.loads(self.rfile.read(length)) if length else {}
-            body["runId"] = run_id
-            result = _handle_hermes_interrupt(body)
+            body["runId"] = body.get("runId") or run_id
+            result = _handle_hermes_run_stop(body)
             self.send_response(result.get("_status", 200))
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
@@ -25173,8 +24797,8 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             run_id = urllib.parse.unquote(request_path[len("/api/codex/runs/"):-len("/stop")].strip("/"))
             length = int(self.headers.get('Content-Length', 0))
             body = json.loads(self.rfile.read(length)) if length else {}
-            body["runId"] = run_id
-            result = _handle_codex_interrupt(body)
+            body["runId"] = body.get("runId") or run_id
+            result = _handle_codex_run_stop(body)
             self.send_response(result.get("_status", 200))
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
@@ -25261,28 +24885,6 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             result.pop("_status", None)
             self.wfile.write(json.dumps(result).encode())
             return
-        elif self.path == "/api/hermes/runs":
-            length = int(self.headers.get('Content-Length', 0))
-            body = json.loads(self.rfile.read(length)) if length else {}
-            result = _handle_hermes_run_start(body)
-            self.send_response(result.pop("_status", 200))
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.end_headers()
-            self.wfile.write(json.dumps(result).encode())
-            return
-        elif request_path.startswith("/api/hermes/runs/") and request_path.endswith("/stop"):
-            run_id = urllib.parse.unquote(request_path[len("/api/hermes/runs/"):-len("/stop")].strip("/"))
-            length = int(self.headers.get('Content-Length', 0))
-            body = json.loads(self.rfile.read(length)) if length else {}
-            body["runId"] = body.get("runId") or run_id
-            result = _handle_hermes_run_stop(body)
-            self.send_response(result.pop("_status", 200))
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.end_headers()
-            self.wfile.write(json.dumps(result).encode())
-            return
         elif self.path == "/api/hermes/history/clear":
             length = int(self.headers.get('Content-Length', 0))
             body = json.loads(self.rfile.read(length)) if length else {}
@@ -25311,17 +24913,12 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
         elif self.path == "/api/claude-code/history/clear":
             length = int(self.headers.get('Content-Length', 0))
             body = json.loads(self.rfile.read(length)) if length else {}
-            agent = _get_claude_code_agent(body.get("agentId") or body.get("key") or "claude-code-main") or {}
-            profile = agent.get("profile") or agent.get("providerAgentId") or "main"
-            session_id = _get_claude_code_session_id(profile)
-            _save_claude_code_history(profile, [])
-            _set_claude_code_session_id(profile, "")
-            _clear_claude_code_token_usage(profile)
+            result = _handle_claude_code_history_clear(body)
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
-            self.wfile.write(json.dumps({"ok": True, "clearedClaudeCodeSession": bool(session_id), "sessionId": session_id}).encode())
+            self.wfile.write(json.dumps(result).encode())
             return
         elif self.path == "/api/hermes/test":
             length = int(self.headers.get('Content-Length', 0))
@@ -25404,74 +25001,6 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(json.dumps(result).encode())
             return
-        elif self.path == "/api/codex/runs":
-            length = int(self.headers.get('Content-Length', 0))
-            body = json.loads(self.rfile.read(length)) if length else {}
-            result = _handle_codex_run_start(body)
-            self.send_response(result.pop("_status", 200))
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.end_headers()
-            self.wfile.write(json.dumps(result).encode())
-            return
-        elif request_path.startswith("/api/codex/runs/") and request_path.endswith("/stop"):
-            run_id = urllib.parse.unquote(request_path[len("/api/codex/runs/"):-len("/stop")].strip("/"))
-            length = int(self.headers.get('Content-Length', 0))
-            body = json.loads(self.rfile.read(length)) if length else {}
-            body["runId"] = body.get("runId") or run_id
-            result = _handle_codex_run_stop(body)
-            self.send_response(result.pop("_status", 200))
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.end_headers()
-            self.wfile.write(json.dumps(result).encode())
-            return
-        elif self.path == "/api/claude-code/chat":
-            length = int(self.headers.get('Content-Length', 0))
-            body = json.loads(self.rfile.read(length)) if length else {}
-            result = _handle_claude_code_chat(body)
-            self.send_response(result.get("_status", 200))
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.end_headers()
-            result.pop("_status", None)
-            self.wfile.write(json.dumps(result).encode())
-            return
-        elif self.path == "/api/claude-code/runs":
-            length = int(self.headers.get('Content-Length', 0))
-            body = json.loads(self.rfile.read(length)) if length else {}
-            result = _handle_claude_code_run_start(body)
-            self.send_response(result.pop("_status", 200))
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.end_headers()
-            self.wfile.write(json.dumps(result).encode())
-            return
-        elif request_path.startswith("/api/claude-code/runs/") and request_path.endswith("/stop"):
-            run_id = urllib.parse.unquote(request_path[len("/api/claude-code/runs/"):-len("/stop")].strip("/"))
-            length = int(self.headers.get('Content-Length', 0))
-            body = json.loads(self.rfile.read(length)) if length else {}
-            body["runId"] = body.get("runId") or run_id
-            result = _handle_claude_code_interrupt(body)
-            self.send_response(result.pop("_status", 200))
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.end_headers()
-            self.wfile.write(json.dumps(result).encode())
-            return
-        elif self.path == "/api/claude-code/history/clear":
-            length = int(self.headers.get('Content-Length', 0))
-            body = json.loads(self.rfile.read(length)) if length else {}
-            agent = _get_claude_code_agent(body.get("agentId") or body.get("key") or "claude-code-local") or {}
-            profile = agent.get("profile") or agent.get("providerAgentId") or "local"
-            conversation_id = str(body.get("conversationId") or "").strip()
-            _save_claude_code_history(profile, [], conversation_id, "")
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.end_headers()
-            self.wfile.write(json.dumps({"ok": True, "clearedClaudeCodeSession": True, "profile": profile, "conversationId": conversation_id}).encode())
-            return
         elif self.path == "/api/claude-code/test":
             length = int(self.headers.get('Content-Length', 0))
             body = json.loads(self.rfile.read(length)) if length else {}
@@ -25486,16 +25015,6 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             length = int(self.headers.get('Content-Length', 0))
             body = json.loads(self.rfile.read(length)) if length else {}
             result = _handle_claude_code_cancel(body)
-            self.send_response(result.pop("_status", 200))
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.end_headers()
-            self.wfile.write(json.dumps(result).encode())
-            return
-        elif self.path == "/api/claude-code/interrupt":
-            length = int(self.headers.get('Content-Length', 0))
-            body = json.loads(self.rfile.read(length)) if length else {}
-            result = _handle_claude_code_interrupt(body)
             self.send_response(result.pop("_status", 200))
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")

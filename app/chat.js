@@ -20,6 +20,7 @@
   const MAX_LIVE_TOOL_CARDS = 40;
   const MAX_TOOL_PAYLOAD_CHARS = 6000;
   const ACTIVE_RUN_RECOVERY_MS = 15000;
+  const PROVIDER_PROGRESS_MAX_AGE_MS = 120000;
   const HERMES_APPROVAL_POLL_MS = 1500;
   const chatConfirmLabel = () => {
     const label = _ct('confirm');
@@ -34,6 +35,19 @@
     if (providerKind === 'claude-code' && ['claude code completed.', 'claude code completed'].includes(normalized)) return '';
     if (providerKind === 'codex' && ['codex run 已完成', 'codex run 未完成', 'codex run 正在执行', 'codex run 正在取消', 'waiting for codex run events.'].includes(normalized)) return '';
     return text;
+  }
+  function providerProgressStatus(progress) {
+    return String(progress?.status || progress?.error && 'failed' || '').toLowerCase();
+  }
+  function isTerminalProviderProgress(progress) {
+    return ['completed', 'complete', 'done', 'success', 'failed', 'error', 'execution_failed', 'cancelled', 'canceled'].includes(providerProgressStatus(progress));
+  }
+  function isRecoverableProviderProgress(progress) {
+    if (!progress || typeof progress !== 'object' || isTerminalProviderProgress(progress)) return false;
+    if (progress.active || progress.activeRunId || progress.runActive || progress.activeConversationId) return true;
+    const ts = Number(progress.ts || progress.epochMs || progress.updatedAt || progress.startedAt || 0);
+    if (ts > 0 && Date.now() - ts > PROVIDER_PROGRESS_MAX_AGE_MS) return false;
+    return true;
   }
   function showChatConfirmDialog(options = {}) {
     return new Promise((resolve) => {
@@ -94,6 +108,7 @@
     _ct('hermes_step_render_reply')
   ];
   const secondarySlotButtons = Array.from(document.querySelectorAll('[data-chat-slot-toggle]'));
+  const CHAT_SELECTION_STORAGE_KEY = 'vo-chat-selections';
   let activeSecondarySlot = null;
   const secondaryPanelPlaceholders = {
     1: document.getElementById('chat-secondary-1'),
@@ -157,16 +172,20 @@
       this.hermesProgressTimers = [];
       this.hermesHistoryPollTimer = null;
       this.hermesEventSource = null;
+      this.hermesStreamCancel = null;
       this.hermesSendStartedAt = 0;
       this.hermesCompletedToolKeys = new Set();
       this.codexHistoryPollTimer = null;
       this.codexEventSource = null;
+      this.codexStreamCancel = null;
       this.codexCompletedToolKeys = new Set();
       this.claudeCodeHistoryPollTimer = null;
       this.claudeCodeEventSource = null;
+      this.claudeCodeStreamCancel = null;
       this.claudeCodeCompletedToolKeys = new Set();
       this.hermesApprovalPollTimer = null;
       this.hermesApprovalLastId = '';
+      this.sendInFlight = false;
       this.codexBusy = false;
       this.codexRequestInFlight = false;
       this.codexActivityTimer = null;
@@ -264,8 +283,12 @@
 
     resetConversation(systemText) {
       this.closeCodexEventSource();
+      this.closeHermesEventSource();
       this.closeClaudeCodeEventSource();
       this.stopCodexActivityPolling();
+      this.stopHermesHistoryPolling();
+      this.stopCodexHistoryPolling();
+      this.stopClaudeCodeHistoryPolling();
       this.messages.innerHTML = '';
       this.streamingMsg = null;
       this.pendingStreamContent = '';
@@ -382,6 +405,18 @@
       this.saveSelection();
       this.currentRunId = null;
       this.streamingMsg = null;
+      this.sendInFlight = false;
+      this.codexBusy = false;
+      this.codexRequestInFlight = false;
+      this.closeCodexEventSource();
+      this.closeHermesEventSource();
+      this.closeClaudeCodeEventSource();
+      this.stopCodexActivityPolling();
+      this.stopHermesHistoryPolling();
+      this.stopCodexHistoryPolling();
+      this.stopClaudeCodeHistoryPolling();
+      this.stopHermesProgressTimers();
+      this.removeTypingIndicator();
       this.syncAgentSelect();
       this.resetConversation(`${systemPrefix} ${opt.textContent.trim()}`);
       this.appendSystem(typeof i18n !== 'undefined' ? i18n.t('chat_loading_history') : 'Loading chat history...');
@@ -543,6 +578,12 @@
       return value;
     }
 
+    rotateProviderConversationId(providerKind) {
+      const value = `${providerKind}-${this.slotId}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      localStorage.setItem(this.providerConversationStorageKey(providerKind), value);
+      return value;
+    }
+
     startHermesApprovalPolling() {
       if (!this.isHermesSelected() || this.hermesApprovalPollTimer) return;
       this.pollHermesApproval().catch(() => {});
@@ -566,61 +607,6 @@
       const data = await res.json();
       if (!data.ok || !data.pending) return;
       this.appendHermesPendingApproval(data.pending, data.pending_count || 1);
-    }
-
-    startCodexApprovalPolling() {
-      if (!this.isCodexSelected() || this.codexApprovalPollTimer) return;
-      this.pollCodexApproval().catch(() => {});
-      this.codexApprovalPollTimer = setInterval(() => {
-        this.pollCodexApproval().catch(() => {});
-      }, HERMES_APPROVAL_POLL_MS);
-    }
-
-    stopCodexApprovalPolling() {
-      if (this.codexApprovalPollTimer) {
-        clearInterval(this.codexApprovalPollTimer);
-        this.codexApprovalPollTimer = null;
-      }
-      this.codexApprovalLastId = '';
-    }
-
-    async pollCodexApproval() {
-      if (!this.isCodexSelected() || !this.isVisibleForPolling()) return;
-      const agentId = this.getSelectedAgentId() || this.selectedAgentKey;
-      const res = await fetch('/api/codex/approval/pending?agentId=' + encodeURIComponent(agentId));
-      const data = await res.json();
-      if (!data.ok || !data.pending) return;
-      this.appendCodexPendingApproval(data.pending, data.pending_count || 1);
-    }
-
-    appendCodexPendingApproval(approval, pendingCount = 1) {
-      if (!approval) return;
-      const approvalId = approval.approval_id || approval.id || '';
-      if (approvalId) {
-        const existing = [...this.messages.querySelectorAll('[data-approval-id]')].find(el => el.dataset.approvalId === approvalId);
-        if (existing) return;
-      }
-      const enriched = {
-        ...approval,
-        id: approvalId || approval.id,
-        approval_id: approvalId || approval.approval_id,
-        pending_count: pendingCount,
-        provider: approval.provider || 'codex-app-server'
-      };
-      this.codexApprovalLastId = enriched.id || '';
-      this.appendMessage(
-        'assistant',
-        '',
-        Date.now(),
-        [],
-        {
-          label: this.agentSelect.selectedOptions[0]?.textContent.trim() || 'Codex',
-          kind: 'agent',
-          approval: enriched
-        },
-        []
-      );
-      this.scrollBottom();
     }
 
     appendHermesPendingApproval(approval, pendingCount = 1) {
@@ -793,9 +779,10 @@
                 text += '\n\n' + _ct('modified_files') + ':\n' + codexMeta.modifiedFiles.map(path => '- ' + path).join('\n');
               }
               const historyKey = [
+                event.id || event.commEventId || '',
                 role,
                 text,
-                role === 'assistant' ? '' : event.inReplyTo || '',
+                event.inReplyTo || '',
                 (event.from && event.from.id) || '',
                 (event.to && event.to.id) || ''
               ].join('\u0001');
@@ -932,9 +919,10 @@
       }
       if (this.isHermesSelected() || this.isClaudeCodeSelected()) {
         try {
-          const providerPath = this.isClaudeCodeSelected() ? 'claude-code' : 'hermes';
+          const providerKind = this.isClaudeCodeSelected() ? 'claude-code' : 'hermes';
+          const providerPath = providerKind;
           const clearBody = { agentId: this.getSelectedAgentId() || this.selectedAgentKey };
-          clearBody.conversationId = this.getProviderConversationId(this.isClaudeCodeSelected() ? 'claude-code' : 'hermes');
+          clearBody.conversationId = this.getProviderConversationId(providerKind);
           const res = await fetch('/api/' + providerPath + '/history/clear', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -942,6 +930,7 @@
           });
           const data = await res.json();
           if (!data.ok) throw new Error(data.error || 'clear failed');
+          this.rotateProviderConversationId(providerKind);
           this.resetConversation(this.isClaudeCodeSelected() ? _ct('new_claude_code_session') : _ct('new_hermes_session'));
         } catch (e) {
           this.appendSystem(_ct('chat_reset_error') + ': ' + e.message);
@@ -1024,13 +1013,8 @@
       }
     }
 
-    isTerminalProviderProgress(progress) {
-      const status = String(progress?.status || progress?.error && 'failed' || '').toLowerCase();
-      return ['completed', 'done', 'failed', 'error', 'execution_failed', 'cancelled', 'canceled'].includes(status);
-    }
-
     restoreProviderProgress(progress, providerKind) {
-      if (!progress || typeof progress !== 'object' || this.isTerminalProviderProgress(progress)) return;
+      if (!isRecoverableProviderProgress(progress)) return;
       const runId = progress.runId || progress.turnId || progress.sessionId || progress.progressId || (providerKind + '-progress');
       const label = resolveMessageSender(progress, this).label || (
         providerKind === 'codex' ? 'Codex' : providerKind === 'claude-code' ? 'Claude Code' : 'Hermes'
@@ -1086,7 +1070,8 @@
     async sendMessage() {
       let text = this.input.value.trim();
       const hasAttachments = this.pendingAttachments.length > 0;
-      if ((!text && !hasAttachments) || (!connected && !this.isHermesSelected() && !this.isCodexSelected() && !this.isClaudeCodeSelected()) || this.codexBusy) return;
+      if (this.sendInFlight || (!text && !hasAttachments) || (!connected && !this.isHermesSelected() && !this.isCodexSelected() && !this.isClaudeCodeSelected()) || this.codexBusy) return;
+      this.sendInFlight = true;
 
       this.input.value = '';
       this.input.style.height = 'auto';
@@ -1096,10 +1081,11 @@
       const imageDataUrls = this.pendingAttachments.filter(a => a.mimeType.startsWith('image/')).map(a => a.dataUrl);
       const nonImageNames = this.pendingAttachments.filter(a => !a.mimeType.startsWith('image/')).map(a => a.name);
       if (nonImageNames.length) displayText += (displayText ? '\n' : '') + '📎 ' + nonImageNames.join(', ');
-      this.appendMessage('user', displayText, Date.now(), imageDataUrls, { label: _ct('chat_you_label'), kind: 'human' });
+      const localUserMessage = this.appendMessage('user', displayText, Date.now(), imageDataUrls, { label: _ct('chat_you_label'), kind: 'human' });
       this.scrollBottom();
 
       if (this.isArchiveManagerSelected() && !this.isArchiveRelatedMessage(text || displayText)) {
+        this.sendInFlight = false;
         this.pendingAttachments = [];
         this.renderAttachmentPreviews();
         this.appendMessage('assistant', this.archiveManagerBoundaryReply(), Date.now(), [], {
@@ -1167,20 +1153,7 @@
               this.appendSystem('❌ ' + (typeof i18n !== 'undefined' ? i18n.t('chat_transcription_error_label') : 'Transcription error') + ': ' + e.message);
             }
           } else {
-            try {
-              const b64 = a.dataUrl.split(',')[1];
-              const resp = await fetch(UPLOAD_URL, {
-                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ filename: a.name, content: b64 })
-              });
-              if (resp.ok) {
-                const result = await resp.json();
-                docPaths.push(result.path);
-              } else {
-                this.appendSystem((typeof i18n !== 'undefined' ? i18n.t('chat_upload_failed') : 'Upload failed for') + ' ' + a.name + ': ' + resp.statusText);
-              }
-            } catch (e) {
-              this.appendSystem((typeof i18n !== 'undefined' ? i18n.t('chat_upload_failed') : 'Upload failed for') + ' ' + a.name + ': ' + e.message);
-            }
+            // Non-image files were already uploaded above and are passed by path note.
           }
         }
 
@@ -1194,12 +1167,15 @@
       this.pendingAttachments = [];
       this.renderAttachmentPreviews();
 
-      const params = { sessionKey: this.sessionKey, message: text || '(attached files)', idempotencyKey: `office-${Date.now()}-${Math.random().toString(36).slice(2)}` };
+      const idempotencyKey = `office-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const params = { sessionKey: this.sessionKey, message: text || '(attached files)', idempotencyKey };
       if (attachments?.length) params.attachments = attachments;
 
       if (this.isCodexSelected()) {
         const label = this.agentSelect.selectedOptions[0]?.textContent.trim() || 'Codex';
         const codexSendStartedAt = Date.now();
+        let finalStatusText = _ct('codex_ready');
+        let finalStatusClass = 'connected';
         const codexBody = {
           agentId: this.getSelectedAgentId() || this.selectedAgentKey,
           message: text || '(attached files)',
@@ -1208,7 +1184,8 @@
           fromDisplayName: 'User',
           sourceApp: 'virtual-office',
           sourceSurface: 'chat-window',
-          sourceLabel: 'Virtual Office Chat'
+          sourceLabel: 'Virtual Office Chat',
+          idempotencyKey
         };
         this.codexBusy = true;
         this.codexRequestInFlight = true;
@@ -1224,8 +1201,11 @@
           });
           const data = await resp.json();
           if (data.status === 'busy') {
+            localUserMessage?.remove?.();
             this.appendCodexActiveConversationNotice(data.activeConversationId || '', data.activeStatus || 'running');
-            this.setStatus(_ct('codex_working'), 'connecting');
+            finalStatusText = _ct('codex_working');
+            finalStatusClass = 'connecting';
+            this.setStatus(finalStatusText, finalStatusClass);
             return;
           }
           if (!resp.ok || data.ok === false || !data.runId) {
@@ -1235,23 +1215,36 @@
           this.currentRunId = data.runId || null;
           await this.streamCodexRunEvents(data.runId, label);
           this.removeTypingIndicator();
-          this.setStatus(_ct('codex_ready'), 'connected');
+          finalStatusText = _ct('codex_ready');
+          finalStatusClass = 'connected';
+          this.setStatus(finalStatusText, finalStatusClass);
         } catch (e) {
           this.closeCodexEventSource();
           this.removeTypingIndicator();
-          try {
+          if (e?.cancelledByUi) {
+            finalStatusText = '';
+            finalStatusClass = '';
+          } else if (e?.providerBusy) {
+            localUserMessage?.remove?.();
+            finalStatusText = _ct('codex_working');
+            finalStatusClass = 'connecting';
+            this.setStatus(finalStatusText, finalStatusClass);
+          } else try {
             await this.sendCodexBlockingMessage(codexBody, codexSendStartedAt, label);
           } catch (fallbackError) {
             await this.loadHistory({ recoverFinal: true, startedAt: codexSendStartedAt }).catch(() => {});
             this.appendSystem(_ct('chat_failed_to_send') + ': ' + fallbackError.message);
-            this.setStatus(_ct('codex_error'), 'disconnected');
+            finalStatusText = _ct('codex_error');
+            finalStatusClass = 'disconnected';
+            this.setStatus(finalStatusText, finalStatusClass);
           }
         } finally {
           this.codexBusy = false;
           this.codexRequestInFlight = false;
+          this.sendInFlight = false;
           this.sendBtn.disabled = false;
           this.removeTypingIndicator();
-          this.setStatus(_ct('codex_ready'), 'connected');
+          if (finalStatusText) this.setStatus(finalStatusText, finalStatusClass);
           this.stopCodexActivityPolling();
           this.scrollBottom();
         }
@@ -1270,6 +1263,7 @@
           sourceApp: 'virtual-office',
           sourceSurface: 'chat-window',
           sourceLabel: 'Virtual Office Chat',
+          idempotencyKey,
           attachments: attachments || []
         };
         this.updateTypingIndicator(providerLabel + ' ' + _ct('working'));
@@ -1298,9 +1292,13 @@
         } catch (e) {
           this.closeClaudeCodeEventSource();
           this.removeTypingIndicator();
-          await this.loadHistory({ recoverFinal: true, startedAt: claudeSendStartedAt }).catch(() => {});
-          this.appendSystem(_ct('claude_code_send_failed') + ': ' + e.message);
-          this.setStatus(_ct('claude_code_error'), 'disconnected');
+          if (!e?.cancelledByUi) {
+            await this.loadHistory({ recoverFinal: true, startedAt: claudeSendStartedAt }).catch(() => {});
+            this.appendSystem(_ct('claude_code_send_failed') + ': ' + e.message);
+            this.setStatus(_ct('claude_code_error'), 'disconnected');
+          }
+        } finally {
+          this.sendInFlight = false;
         }
         return;
       }
@@ -1318,6 +1316,7 @@
           sourceApp: 'virtual-office',
           sourceSurface: 'chat-window',
           sourceLabel: 'Virtual Office Chat',
+          idempotencyKey,
           attachments: attachments || []
         };
         const hermesProgress = this.startHermesProgress(providerLabel);
@@ -1344,101 +1343,12 @@
         } catch (e) {
           this.closeHermesEventSource();
           this.removeTypingIndicator();
-          this.appendSystem((typeof i18n !== 'undefined' ? i18n.t('chat_hermes_send_failed') : 'Hermes send failed') + ': ' + e.message);
-          this.setStatus(typeof i18n !== 'undefined' ? i18n.t('chat_hermes_error') : 'Hermes error', 'disconnected');
-        }
-        return;
-      }
-
-      if (this.isCodexSelected()) {
-        const codexLabel = this.agentSelect.selectedOptions[0]?.textContent.trim() || 'Codex';
-        const codexSendStartedAt = Date.now();
-        const codexBody = {
-          agentId: this.getSelectedAgentId() || this.selectedAgentKey,
-          message: text || '(attached files)',
-          fromType: 'human',
-          fromDisplayName: 'User',
-          sourceApp: 'virtual-office',
-          sourceSurface: 'chat-window',
-          sourceLabel: 'Virtual Office Chat',
-          attachments: uploadedFiles
-        };
-        this.updateTypingIndicator(codexLabel + ' is running Codex');
-        this.setStatus('Codex running...', 'connecting');
-        try {
-          const resp = await fetch('/api/codex/runs', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(codexBody)
-          });
-          const data = await resp.json();
-          if (!resp.ok || data.ok === false) {
-            if (data.fallback) {
-              await this.sendCodexBlockingMessage(codexBody, codexSendStartedAt);
-              return;
-            }
-            throw new Error(data.error || data.reply || resp.statusText);
+          if (!e?.cancelledByUi) {
+            this.appendSystem((typeof i18n !== 'undefined' ? i18n.t('chat_hermes_send_failed') : 'Hermes send failed') + ': ' + e.message);
+            this.setStatus(typeof i18n !== 'undefined' ? i18n.t('chat_hermes_error') : 'Hermes error', 'disconnected');
           }
-          this.currentRunId = data.runId || null;
-          await this.fetchSessionInfo();
-          await this.streamCodexRunEvents(data.runId);
-          this.removeTypingIndicator();
-          await this.loadHistory({ recoverFinal: true, startedAt: codexSendStartedAt });
-          await this.fetchSessionInfo();
-          await this.pollCodexApproval().catch(() => {});
-          this.setStatus('Codex ready', 'connected');
-        } catch (e) {
-          this.closeCodexEventSource();
-          this.removeTypingIndicator();
-          await this.loadHistory({ recoverFinal: true, startedAt: codexSendStartedAt }).catch(() => {});
-          this.appendSystem('Codex send failed: ' + e.message);
-          this.setStatus('Codex error', 'disconnected');
-        }
-        return;
-      }
-
-      if (this.isClaudeCodeSelected()) {
-        const claudeLabel = this.agentSelect.selectedOptions[0]?.textContent.trim() || 'Claude Code';
-        const claudeSendStartedAt = Date.now();
-        const claudeBody = {
-          agentId: this.getSelectedAgentId() || this.selectedAgentKey,
-          message: text || '(attached files)',
-          fromType: 'human',
-          fromDisplayName: 'User',
-          sourceApp: 'virtual-office',
-          sourceSurface: 'chat-window',
-          sourceLabel: 'Virtual Office Chat',
-          attachments: uploadedFiles
-        };
-        this.updateTypingIndicator(claudeLabel + ' is running Claude Code');
-        this.setStatus('Claude Code running...', 'connecting');
-        try {
-          const resp = await fetch('/api/claude-code/runs', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(claudeBody)
-          });
-          const data = await resp.json();
-          if (!resp.ok || data.ok === false) {
-            if (data.fallback) {
-              await this.sendClaudeCodeBlockingMessage(claudeBody, claudeSendStartedAt);
-              return;
-            }
-            throw new Error(data.error || data.reply || resp.statusText);
-          }
-          this.currentRunId = data.runId || null;
-          await this.fetchSessionInfo();
-          await this.streamClaudeCodeRunEvents(data.runId);
-          this.removeTypingIndicator();
-          await this.loadHistory({ recoverFinal: true, startedAt: claudeSendStartedAt });
-          await this.fetchSessionInfo();
-          this.setStatus('Claude Code ready', 'connected');
-        } catch (e) {
-          this.closeClaudeCodeEventSource();
-          this.removeTypingIndicator();
-          await this.loadHistory({ recoverFinal: true, startedAt: claudeSendStartedAt }).catch(() => {});
-          this.appendSystem('Claude Code send failed: ' + e.message);
-          this.setStatus('Claude Code error', 'disconnected');
+        } finally {
+          this.sendInFlight = false;
         }
         return;
       }
@@ -1451,7 +1361,12 @@
           this.ensureRecoveryWatchdog();
           runOwners.set(res.payload.runId, { slotId: this.slotId, sessionKey: sendSessionKey });
         }
-      }).catch(e => this.appendSystem((typeof i18n !== 'undefined' ? i18n.t('chat_failed_to_send') : 'Failed to send') + ': ' + e.message));
+      }).catch(e => {
+        localUserMessage?.remove?.();
+        this.appendSystem((typeof i18n !== 'undefined' ? i18n.t('chat_failed_to_send') : 'Failed to send') + ': ' + e.message);
+      }).finally(() => {
+        this.sendInFlight = false;
+      });
     }
 
     async compactCodexContext() {
@@ -1494,17 +1409,19 @@
     async sendStop() {
       try {
         if (this.isClaudeCodeSelected()) {
+          const agentId = this.getSelectedAgentId() || this.selectedAgentKey;
+          const conversationId = this.getProviderConversationId('claude-code');
           if (this.currentRunId) {
             await fetch('/api/claude-code/runs/' + encodeURIComponent(this.currentRunId) + '/stop', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ agentId: this.getSelectedAgentId() || this.selectedAgentKey })
+              body: JSON.stringify({ agentId, conversationId })
             }).catch(() => {});
           } else {
             await fetch('/api/claude-code/cancel', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ agentId: this.getSelectedAgentId() || this.selectedAgentKey })
+              body: JSON.stringify({ agentId, conversationId })
             }).catch(() => {});
           }
           this.closeClaudeCodeEventSource();
@@ -1581,24 +1498,22 @@
       const data = await resp.json();
       this.removeTypingIndicator();
       let reply = data.reply || data.error || '';
+      if (data.status === 'busy') {
+        if (data.activeConversationId) {
+          this.appendCodexActiveConversationNotice(data.activeConversationId, data.activeStatus);
+        }
+        const err = new Error(data.error || data.status || resp.statusText);
+        err.providerBusy = true;
+        throw err;
+      }
       if (Array.isArray(data.modifiedFiles) && data.modifiedFiles.length) {
         reply += '\n\n' + _ct('modified_files') + ':\n' + data.modifiedFiles.map(path => '- ' + path).join('\n');
       }
       if (data.needsHumanIntervention) reply += '\n\n' + _ct('human_intervention_required');
       if (reply) this.appendMessage('assistant', reply, Date.now(), [], { label: label || 'Codex', kind: 'agent' });
-      if (data.status === 'busy' && data.activeConversationId) {
-        this.appendCodexActiveConversationNotice(data.activeConversationId, data.activeStatus);
-      }
       if (data.status !== 'cancelled' && (!resp.ok || data.ok === false)) throw new Error(data.error || data.status || resp.statusText);
       await this.loadHistory({ recoverFinal: true, startedAt }).catch(() => {});
       this.setStatus(_ct('codex_ready'), 'connected');
-    }
-
-    closeCodexEventSource() {
-      if (this.codexEventSource) {
-        this.codexEventSource.close();
-        this.codexEventSource = null;
-      }
     }
 
     streamCodexRunEvents(runId, label) {
@@ -1614,8 +1529,10 @@
         let settled = false;
         const source = new EventSource(url);
         this.codexEventSource = source;
+        this.codexStreamCancel = (err) => finish(false, err);
         const cleanup = () => {
           if (this.codexEventSource === source) this.codexEventSource = null;
+          if (this.codexStreamCancel) this.codexStreamCancel = null;
           source.close();
         };
         const finish = (ok, value) => {
@@ -1758,13 +1675,6 @@
       }
     }
 
-    closeClaudeCodeEventSource() {
-      if (this.claudeCodeEventSource) {
-        this.claudeCodeEventSource.close();
-        this.claudeCodeEventSource = null;
-      }
-    }
-
     streamClaudeCodeRunEvents(runId) {
       if (!runId) return Promise.reject(new Error('Claude Code run did not return a run id'));
       this.closeClaudeCodeEventSource();
@@ -1778,8 +1688,10 @@
         let settled = false;
         const source = new EventSource(url);
         this.claudeCodeEventSource = source;
+        this.claudeCodeStreamCancel = (err) => finish(false, err);
         const cleanup = () => {
           if (this.claudeCodeEventSource === source) this.claudeCodeEventSource = null;
+          if (this.claudeCodeStreamCancel) this.claudeCodeStreamCancel = null;
           source.close();
         };
         const finish = (ok, value) => {
@@ -2475,6 +2387,7 @@
       div.appendChild(bubble);
       this.removeTypingIndicator();
       this.messages.appendChild(div);
+      return div;
     }
 
     appendStreamingMessage() {
@@ -2549,25 +2462,40 @@
 
     clearActivityFeed() { this.messages.querySelectorAll('.chat-activity').forEach(el => el.remove()); }
 
+    makeStreamCancelledError(providerKind) {
+      const err = new Error(providerKind + ' stream cancelled');
+      err.cancelledByUi = true;
+      return err;
+    }
+
     closeHermesEventSource() {
+      const cancel = this.hermesStreamCancel;
+      this.hermesStreamCancel = null;
       if (this.hermesEventSource) {
         try { this.hermesEventSource.close(); } catch (_) {}
         this.hermesEventSource = null;
       }
+      if (cancel) cancel(this.makeStreamCancelledError('Hermes'));
     }
 
     closeCodexEventSource() {
+      const cancel = this.codexStreamCancel;
+      this.codexStreamCancel = null;
       if (this.codexEventSource) {
         try { this.codexEventSource.close(); } catch (_) {}
         this.codexEventSource = null;
       }
+      if (cancel) cancel(this.makeStreamCancelledError('Codex'));
     }
 
     closeClaudeCodeEventSource() {
+      const cancel = this.claudeCodeStreamCancel;
+      this.claudeCodeStreamCancel = null;
       if (this.claudeCodeEventSource) {
         try { this.claudeCodeEventSource.close(); } catch (_) {}
         this.claudeCodeEventSource = null;
       }
+      if (cancel) cancel(this.makeStreamCancelledError('Claude Code'));
     }
 
     async sendHermesBlockingMessage(hermesBody, hermesProgress, hermesSendStartedAt) {
@@ -2599,61 +2527,6 @@
       }
     }
 
-    async sendCodexBlockingMessage(codexBody, codexSendStartedAt) {
-      this.startCodexHistoryPolling();
-      try {
-        const resp = await fetch('/api/codex/chat', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(codexBody)
-        });
-        const data = await resp.json();
-        this.stopCodexHistoryPolling();
-        this.removeTypingIndicator();
-        if (!resp.ok || data.ok === false) throw new Error(data.error || data.reply || resp.statusText);
-        if (this.streamingMsg) {
-          this.pendingStreamContent = data.reply || this.pendingStreamContent || this.streamingMsg.content || '';
-          this.flushStreamingRender(true);
-          const existing = this.messages.querySelector('.streaming-msg');
-          if (existing) existing.remove();
-          this.streamingMsg = null;
-        }
-        await this.loadHistory({ recoverFinal: true, startedAt: codexSendStartedAt });
-        await this.pollCodexApproval().catch(() => {});
-        this.setStatus('Codex ready', 'connected');
-      } catch (e) {
-        this.stopCodexHistoryPolling();
-        throw e;
-      }
-    }
-
-    async sendClaudeCodeBlockingMessage(claudeBody, claudeSendStartedAt) {
-      this.startClaudeCodeHistoryPolling();
-      try {
-        const resp = await fetch('/api/claude-code/chat', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(claudeBody)
-        });
-        const data = await resp.json();
-        this.stopClaudeCodeHistoryPolling();
-        this.removeTypingIndicator();
-        if (!resp.ok || data.ok === false) throw new Error(data.error || data.reply || resp.statusText);
-        if (this.streamingMsg) {
-          this.pendingStreamContent = data.reply || this.pendingStreamContent || this.streamingMsg.content || '';
-          this.flushStreamingRender(true);
-          const existing = this.messages.querySelector('.streaming-msg');
-          if (existing) existing.remove();
-          this.streamingMsg = null;
-        }
-        await this.loadHistory({ recoverFinal: true, startedAt: claudeSendStartedAt });
-        this.setStatus('Claude Code ready', 'connected');
-      } catch (e) {
-        this.stopClaudeCodeHistoryPolling();
-        throw e;
-      }
-    }
-
     streamHermesRunEvents(runId, hermesProgress, startedAt = 0) {
       if (!runId) return Promise.reject(new Error('Hermes run did not return a run id'));
       this.closeHermesEventSource();
@@ -2668,8 +2541,10 @@
         let settled = false;
         const source = new EventSource(url);
         this.hermesEventSource = source;
+        this.hermesStreamCancel = (err) => finish(false, err);
         const cleanup = () => {
           if (this.hermesEventSource === source) this.hermesEventSource = null;
+          if (this.hermesStreamCancel) this.hermesStreamCancel = null;
           source.close();
         };
         const finish = (ok, value) => {
@@ -2796,271 +2671,6 @@
       }
     }
 
-    streamCodexRunEvents(runId) {
-      if (!runId) return Promise.reject(new Error('Codex run did not return a run id'));
-      this.closeCodexEventSource();
-      this.codexCompletedToolKeys = new Set();
-      this.currentRunId = runId;
-      this.setStatus('Codex stream active...', 'connecting');
-      this.markLiveEvent();
-      const agentId = this.getSelectedAgentId() || this.selectedAgentKey || '';
-      const url = '/api/codex/runs/' + encodeURIComponent(runId) + '/events?agentId=' + encodeURIComponent(agentId);
-      return new Promise((resolve, reject) => {
-        let settled = false;
-        const source = new EventSource(url);
-        this.codexEventSource = source;
-        const cleanup = () => {
-          if (this.codexEventSource === source) this.codexEventSource = null;
-          source.close();
-        };
-        const finish = (ok, value) => {
-          if (settled) return;
-          settled = true;
-          cleanup();
-          if (ok) resolve(value);
-          else reject(value instanceof Error ? value : new Error(String(value || 'Codex stream failed')));
-        };
-        const handle = (eventName, evt) => {
-          let data = {};
-          try { data = JSON.parse(evt.data || '{}'); } catch (_) {}
-          this.handleCodexNativeEvent(eventName, data);
-          if (['run.completed', 'run.failed', 'run.cancelled', 'run.canceled'].includes(eventName)) {
-            finish(eventName === 'run.completed', eventName === 'run.completed' ? data : new Error(data.error || eventName));
-          }
-        };
-        [
-          'run.started',
-          'session.metrics',
-          'message.delta',
-          'reasoning.available',
-          'tool.started',
-          'tool.completed',
-          'tool.failed',
-          'approval.request',
-          'run.completed',
-          'run.failed',
-          'run.cancelled',
-          'run.canceled'
-        ].forEach(name => source.addEventListener(name, evt => handle(name, evt)));
-        source.onmessage = evt => handle('message', evt);
-        source.onerror = () => {
-          if (!settled) finish(false, new Error('Codex native stream disconnected'));
-        };
-      });
-    }
-
-    handleCodexNativeEvent(eventName, data) {
-      this.markLiveEvent();
-      this.applySessionMetrics(data);
-      const runId = data?.runId || this.currentRunId || '';
-      if (runId) this.currentRunId = runId;
-
-      if (eventName === 'run.started') {
-        this.updateTypingIndicator('Codex is running...');
-        this.fetchSessionInfo().catch(() => {});
-        return;
-      }
-
-      if (eventName === 'message.delta') {
-        if (!this.streamingMsg || this.streamingMsg.id !== runId) {
-          this.streamingMsg = { id: runId, role: 'assistant', content: '' };
-          this.pendingStreamContent = '';
-          this.appendStreamingMessage();
-        }
-        if (data.reply) this.pendingStreamContent = data.reply;
-        else if (data.delta) this.pendingStreamContent += String(data.delta || '');
-        this.scheduleStreamingRender();
-        return;
-      }
-
-      if (eventName === 'reasoning.available') {
-        this.updateTypingIndicator('Codex is reasoning...');
-        return;
-      }
-
-      if (eventName === 'approval.request') {
-        if (data.approval) this.appendCodexPendingApproval(data.approval, data.pending_count || 1);
-        this.updateTypingIndicator('Codex is waiting for approval...');
-        return;
-      }
-
-      if (eventName === 'tool.started' || eventName === 'tool.completed' || eventName === 'tool.failed') {
-        const card = data.toolCard || {};
-        const isTerminal = eventName !== 'tool.started';
-        const payload = {
-          runId,
-          data: {
-            toolCallId: card.id || data.toolCallId || data.id || '',
-            phase: isTerminal ? 'result' : 'start',
-            name: card.name || data.tool || data.name || 'Codex tool',
-            args: card.arguments || (card.args_preview ? { command: card.args_preview } : (data.preview ? { command: data.preview } : {})),
-            result: card.result || data.result || data.output || '',
-            isError: eventName === 'tool.failed' || card.status === 'error' || !!data.error,
-            error: data.error || card.error || ''
-          }
-        };
-        const label = formatToolLabel(payload.data.name, coerceToolArgs(payload.data.args));
-        this.updateTypingIndicator(isTerminal ? 'Processing...' : label);
-        if (isTerminal) {
-          if (!this.liveToolCards.has(this.toolKey(payload))) {
-            this.appendToolCall({ ...payload, data: { ...payload.data, phase: 'start' } });
-          }
-          this.finishToolCall(payload);
-          this.codexCompletedToolKeys.add(`${runId}:${payload.data.toolCallId}`);
-        } else {
-          this.updateToolCall(payload);
-        }
-        return;
-      }
-
-      if (['run.completed', 'run.failed', 'run.cancelled', 'run.canceled'].includes(eventName)) {
-        const finalText = data.reply || data.output || this.pendingStreamContent || (this.streamingMsg ? this.streamingMsg.content : '');
-        this.flushStreamingRender(true);
-        this.flushToolEvents(true);
-        this.clearActivityFeed();
-        this.removeTypingIndicator();
-        if (this.streamingMsg) {
-          this.finalizeStreamingMessage(finalText);
-          this.streamingMsg = null;
-        } else if (finalText) {
-          this.appendMessage('assistant', finalText);
-        }
-        if (runId) this.finalizeRunToolCards(runId);
-        this.currentRunId = null;
-        this.stopRecoveryWatchdog();
-        this.fetchSessionInfo().catch(() => {});
-      }
-    }
-
-    streamClaudeCodeRunEvents(runId) {
-      if (!runId) return Promise.reject(new Error('Claude Code run did not return a run id'));
-      this.closeClaudeCodeEventSource();
-      this.claudeCodeCompletedToolKeys = new Set();
-      this.currentRunId = runId;
-      this.setStatus('Claude Code stream active...', 'connecting');
-      this.markLiveEvent();
-      const agentId = this.getSelectedAgentId() || this.selectedAgentKey || '';
-      const url = '/api/claude-code/runs/' + encodeURIComponent(runId) + '/events?agentId=' + encodeURIComponent(agentId);
-      return new Promise((resolve, reject) => {
-        let settled = false;
-        const source = new EventSource(url);
-        this.claudeCodeEventSource = source;
-        const cleanup = () => {
-          if (this.claudeCodeEventSource === source) this.claudeCodeEventSource = null;
-          source.close();
-        };
-        const finish = (ok, value) => {
-          if (settled) return;
-          settled = true;
-          cleanup();
-          if (ok) resolve(value);
-          else reject(value instanceof Error ? value : new Error(String(value || 'Claude Code stream failed')));
-        };
-        const handle = (eventName, evt) => {
-          let data = {};
-          try { data = JSON.parse(evt.data || '{}'); } catch (_) {}
-          this.handleClaudeCodeNativeEvent(eventName, data);
-          if (['run.completed', 'run.failed', 'run.cancelled', 'run.canceled'].includes(eventName)) {
-            finish(eventName === 'run.completed', eventName === 'run.completed' ? data : new Error(data.error || eventName));
-          }
-        };
-        [
-          'run.started',
-          'session.metrics',
-          'message.delta',
-          'reasoning.available',
-          'tool.started',
-          'tool.completed',
-          'tool.failed',
-          'run.completed',
-          'run.failed',
-          'run.cancelled',
-          'run.canceled'
-        ].forEach(name => source.addEventListener(name, evt => handle(name, evt)));
-        source.onmessage = evt => handle('message', evt);
-        source.onerror = () => {
-          if (!settled) finish(false, new Error('Claude Code native stream disconnected'));
-        };
-      });
-    }
-
-    handleClaudeCodeNativeEvent(eventName, data) {
-      this.markLiveEvent();
-      this.applySessionMetrics(data);
-      const runId = data?.runId || this.currentRunId || '';
-      if (runId) this.currentRunId = runId;
-
-      if (eventName === 'run.started') {
-        this.updateTypingIndicator('Claude Code is running...');
-        this.fetchSessionInfo().catch(() => {});
-        return;
-      }
-
-      if (eventName === 'message.delta') {
-        if (!this.streamingMsg || this.streamingMsg.id !== runId) {
-          this.streamingMsg = { id: runId, role: 'assistant', content: '' };
-          this.pendingStreamContent = '';
-          this.appendStreamingMessage();
-        }
-        if (data.reply) this.pendingStreamContent = data.reply;
-        else if (data.delta) this.pendingStreamContent += String(data.delta || '');
-        this.scheduleStreamingRender();
-        return;
-      }
-
-      if (eventName === 'reasoning.available') {
-        this.updateTypingIndicator('Claude Code is reasoning...');
-        return;
-      }
-
-      if (eventName === 'tool.started' || eventName === 'tool.completed' || eventName === 'tool.failed') {
-        const card = data.toolCard || {};
-        const isTerminal = eventName !== 'tool.started';
-        const payload = {
-          runId,
-          data: {
-            toolCallId: card.id || data.toolCallId || data.id || '',
-            phase: isTerminal ? 'result' : 'start',
-            name: card.name || data.tool || data.name || 'Claude Code tool',
-            args: card.arguments || (card.args_preview ? { command: card.args_preview } : (data.preview ? { command: data.preview } : {})),
-            result: card.result || data.result || data.output || '',
-            isError: eventName === 'tool.failed' || card.status === 'error' || !!data.error,
-            error: data.error || card.error || ''
-          }
-        };
-        const label = formatToolLabel(payload.data.name, coerceToolArgs(payload.data.args));
-        this.updateTypingIndicator(isTerminal ? 'Processing...' : label);
-        if (isTerminal) {
-          if (!this.liveToolCards.has(this.toolKey(payload))) {
-            this.appendToolCall({ ...payload, data: { ...payload.data, phase: 'start' } });
-          }
-          this.finishToolCall(payload);
-          this.claudeCodeCompletedToolKeys.add(`${runId}:${payload.data.toolCallId}`);
-        } else {
-          this.updateToolCall(payload);
-        }
-        return;
-      }
-
-      if (['run.completed', 'run.failed', 'run.cancelled', 'run.canceled'].includes(eventName)) {
-        const finalText = data.reply || data.output || this.pendingStreamContent || (this.streamingMsg ? this.streamingMsg.content : '');
-        this.flushStreamingRender(true);
-        this.flushToolEvents(true);
-        this.clearActivityFeed();
-        this.removeTypingIndicator();
-        if (this.streamingMsg) {
-          this.finalizeStreamingMessage(finalText);
-          this.streamingMsg = null;
-        } else if (finalText) {
-          this.appendMessage('assistant', finalText);
-        }
-        if (runId) this.finalizeRunToolCards(runId);
-        this.currentRunId = null;
-        this.stopRecoveryWatchdog();
-        this.fetchSessionInfo().catch(() => {});
-      }
-    }
-
     stopHermesProgressTimers() {
       if (!this.hermesProgressTimers?.length) return;
       for (const timer of this.hermesProgressTimers) clearTimeout(timer);
@@ -3112,13 +2722,15 @@
     async pollClaudeCodeLiveActivity() {
       if (!this.isClaudeCodeSelected()) return;
       const agentId = this.getSelectedAgentId() || this.selectedAgentKey;
-      const res = await fetch('/api/claude-code/history?agentId=' + encodeURIComponent(agentId));
+      const conversationId = this.getProviderConversationId('claude-code');
+      const query = new URLSearchParams({ agentId, conversationId });
+      const res = await fetch('/api/claude-code/history?' + query.toString());
       const data = await res.json();
       if (!data.ok || !Array.isArray(data.messages)) return;
       const progress = [...data.messages].reverse().find(msg =>
         msg && msg.role === 'assistant' && msg.ephemeral === 'claude-code-progress'
       );
-      if (!progress) return;
+      if (!isRecoverableProviderProgress(progress)) return;
 
       this.applySessionMetrics(progress);
 
@@ -3169,13 +2781,15 @@
     async pollCodexLiveActivity() {
       if (!this.isCodexSelected()) return;
       const agentId = this.getSelectedAgentId() || this.selectedAgentKey;
-      const res = await fetch('/api/codex/history?agentId=' + encodeURIComponent(agentId));
+      const conversationId = this.getCodexConversationId();
+      const query = new URLSearchParams({ agentId, conversationId });
+      const res = await fetch('/api/codex/history?' + query.toString());
       const data = await res.json();
       if (!data.ok || !Array.isArray(data.messages)) return;
       const progress = [...data.messages].reverse().find(msg =>
         msg && msg.role === 'assistant' && msg.ephemeral === 'codex-progress'
       );
-      if (!progress) return;
+      if (!isRecoverableProviderProgress(progress)) return;
 
       this.applySessionMetrics(progress);
 
@@ -3228,13 +2842,15 @@
     async pollHermesLiveActivity() {
       if (!this.isHermesSelected()) return;
       const agentId = this.getSelectedAgentId() || this.selectedAgentKey;
-      const res = await fetch('/api/hermes/history?agentId=' + encodeURIComponent(agentId));
+      const conversationId = this.getProviderConversationId('hermes');
+      const query = new URLSearchParams({ agentId, conversationId });
+      const res = await fetch('/api/hermes/history?' + query.toString());
       const data = await res.json();
       if (!data.ok || !Array.isArray(data.messages)) return;
       const progress = [...data.messages].reverse().find(msg =>
         msg && msg.role === 'assistant' && msg.ephemeral === 'hermes-progress'
       );
-      if (!progress) return;
+      if (!isRecoverableProviderProgress(progress)) return;
       const runId = progress.runId || progress.progressId || this.currentRunId || '';
       if (progress.text) {
         if (!this.streamingMsg || this.streamingMsg.id !== runId) {
@@ -3280,8 +2896,10 @@
       if (!this.isHermesSelected()) return false;
       const deadline = Date.now() + timeoutMs;
       const agentId = this.getSelectedAgentId() || this.selectedAgentKey;
+      const conversationId = this.getProviderConversationId('hermes');
       while (Date.now() < deadline) {
-        const res = await fetch('/api/hermes/history?agentId=' + encodeURIComponent(agentId));
+        const query = new URLSearchParams({ agentId, conversationId });
+        const res = await fetch('/api/hermes/history?' + query.toString());
         const data = await res.json();
         if (data.ok && Array.isArray(data.messages)) {
           const finalMsg = [...data.messages].reverse().find(msg =>

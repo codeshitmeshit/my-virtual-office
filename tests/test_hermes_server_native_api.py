@@ -312,6 +312,35 @@ def test_hermes_run_start_publishes_provider_bridge_events():
         restore_native_fakes(old)
 
 
+def test_hermes_run_start_idempotency_reuses_existing_run():
+    old = install_native_fakes("success")
+    try:
+        body = {
+            "agentId": "hermes-default",
+            "message": "hello idem",
+            "conversationId": "conv-hermes-idem",
+            "idempotencyKey": "same-click",
+        }
+        first = server._handle_hermes_run_start(body)
+        second = server._handle_hermes_run_start(body)
+        assert first["ok"] is True
+        assert second["ok"] is True
+        assert second["status"] == "duplicate"
+        assert second["runId"] == first["runId"]
+
+        deadline = time.time() + 2
+        while time.time() < deadline:
+            meta = server.PROVIDER_RUN_BRIDGE.get(first["runId"])
+            if meta and meta.get("done"):
+                break
+            time.sleep(0.02)
+        history = server._load_hermes_history("default", "conv-hermes-idem")
+        assert len([msg for msg in history if msg.get("role") == "user" and msg.get("text") == "hello idem"]) == 1
+        server.PROVIDER_RUN_BRIDGE.clear(first["runId"])
+    finally:
+        restore_native_fakes(old)
+
+
 def test_hermes_progress_history_is_recoverable_while_run_active():
     old = install_native_fakes("success")
     try:
@@ -440,6 +469,7 @@ if __name__ == "__main__":
     test_hermes_chat_falls_back_to_cli_when_native_api_unavailable()
     test_hermes_history_clear_is_conversation_scoped()
     test_hermes_run_start_publishes_provider_bridge_events()
+    test_hermes_run_start_idempotency_reuses_existing_run()
     test_hermes_progress_history_is_recoverable_while_run_active()
     test_hermes_run_events_replays_terminal_for_late_sse_connection()
     test_hermes_run_start_publishes_approval_event_before_failure_terminal()
