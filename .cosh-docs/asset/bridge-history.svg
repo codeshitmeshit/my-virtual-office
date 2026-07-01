@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="360" viewBox="0 0 1120 360" role="img" aria-label="Codex bridge history timeline">
+  <rect width="1120" height="360" fill="#f8fafc"/>
+  <style>.h{font:700 20px Arial;fill:#0f172a}.t{font:14px Arial;fill:#334155}.dot{fill:#2563eb}.line{stroke:#2563eb;stroke-width:4}.card{fill:#fff;stroke:#cbd5e1;stroke-width:2;rx:12}</style>
+  <text x="48" y="46" class="h">Codex Bridge 可验证演进时间线</text>
+  <line x1="90" y1="150" x2="1030" y2="150" class="line"/>
+  <g><circle cx="120" cy="150" r="10" class="dot"/><rect x="60" y="188" width="150" height="98" class="card"/><text x="78" y="218" class="h">0d01111</text><text x="78" y="246" class="t">Codex CLI support</text><text x="78" y="270" class="t">新增 provider</text></g>
+  <g><circle cx="300" cy="150" r="10" class="dot"/><rect x="240" y="50" width="160" height="82" class="card"/><text x="258" y="80" class="h">02c7363</text><text x="258" y="108" class="t">Phase 4 harness</text></g>
+  <g><circle cx="480" cy="150" r="10" class="dot"/><rect x="420" y="188" width="170" height="98" class="card"/><text x="438" y="218" class="h">6565821</text><text x="438" y="246" class="t">Phase 5 live bridge</text><text x="438" y="270" class="t">codex_bridge.py</text></g>
+  <g><circle cx="660" cy="150" r="10" class="dot"/><rect x="600" y="50" width="170" height="82" class="card"/><text x="618" y="80" class="h">ffa33e7</text><text x="618" y="108" class="t">activity / approval</text></g>
+  <g><circle cx="830" cy="150" r="10" class="dot"/><rect x="770" y="188" width="160" height="98" class="card"/><text x="788" y="218" class="h">c818925</text><text x="788" y="246" class="t">reasoning summary</text></g>
+  <g><circle cx="1010" cy="150" r="10" class="dot"/><rect x="940" y="50" width="150" height="100" class="card"/><text x="958" y="80" class="h">e33ae31</text><text x="958" y="108" class="t">native runtime</text><text x="958" y="132" class="t">shim + common</text></g>
+</svg>

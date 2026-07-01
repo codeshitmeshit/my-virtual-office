@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="560" viewBox="0 0 1120 560" role="img" aria-label="ProviderRunBridge SSE flow">
+  <rect width="1120" height="560" fill="#f8fafc"/>
+  <style>.lane{fill:#fff;stroke:#cbd5e1;stroke-width:2;rx:12}.h{font:700 19px Arial;fill:#0f172a}.t{font:14px Arial;fill:#334155}.n{fill:#dbeafe;stroke:#2563eb;stroke-width:2;rx:10}.line{stroke:#2563eb;stroke-width:3;fill:none;marker-end:url(#a)}</style>
+  <defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0l10 5-10 5z" fill="#2563eb"/></marker></defs>
+  <text x="48" y="46" class="h">/api/{provider}/runs 到 SSE 的统一总线</text>
+  <rect x="48" y="86" width="184" height="70" class="n"/><text x="70" y="116" class="h">1. HTTP POST</text><text x="70" y="140" class="t">message + agentId</text>
+  <rect x="284" y="86" width="200" height="70" class="n"/><text x="306" y="116" class="h">2. remember(meta)</text><text x="306" y="140" class="t">runId + Queue</text>
+  <rect x="536" y="86" width="214" height="70" class="n"/><text x="558" y="116" class="h">3. worker thread</text><text x="558" y="140" class="t">调用 _handle_*_chat</text>
+  <rect x="802" y="86" width="238" height="70" class="n"/><text x="824" y="116" class="h">4. provider adapter</text><text x="824" y="140" class="t">app-server / CLI / API</text>
+  <path d="M232 121H284" class="line"/><path d="M484 121H536" class="line"/><path d="M750 121H802" class="line"/>
+  <rect x="158" y="246" width="238" height="70" class="n"/><text x="180" y="276" class="h">5. progress callback</text><text x="180" y="300" class="t">activity / snapshot / native event</text>
+  <rect x="446" y="246" width="240" height="70" class="n"/><text x="468" y="276" class="h">6. emit(event)</text><text x="468" y="300" class="t">message.delta, tool.*, approval</text>
+  <rect x="736" y="246" width="238" height="70" class="n"/><text x="758" y="276" class="h">7. stream_events</text><text x="758" y="300" class="t">text/event-stream</text>
+  <path d="M921 156C921 206 277 196 277 246" class="line"/><path d="M396 281H446" class="line"/><path d="M686 281H736" class="line"/>
+  <rect x="246" y="402" width="628" height="78" class="lane"/><text x="276" y="434" class="h">Terminal cleanup</text><text x="276" y="460" class="t">done=True + result 后输出 run.completed / run.failed / run.cancelled；完成后 clear(runId)</text>
+  <path d="M855 316C855 376 560 360 560 402" class="line"/>
+</svg>

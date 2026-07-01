@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="600" viewBox="0 0 1120 600" role="img" aria-label="Codex app-server JSONL bridge">
+  <rect width="1120" height="600" fill="#f8fafc"/>
+  <style>.b{fill:#fff;stroke:#cbd5e1;stroke-width:2;rx:12}.p{fill:#ecfdf5;stroke:#16a34a;stroke-width:2;rx:12}.h{font:700 19px Arial;fill:#0f172a}.t{font:14px Arial;fill:#334155}.line{stroke:#16a34a;stroke-width:3;fill:none;marker-end:url(#a)}</style>
+  <defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0l10 5-10 5z" fill="#16a34a"/></marker></defs>
+  <text x="48" y="48" class="h">Codex app-server JSONL RPC 链路</text>
+  <rect x="70" y="90" width="220" height="70" class="b"/><text x="92" y="120" class="h">CodexProvider</text><text x="92" y="144" class="t">send_message / send_chat</text>
+  <rect x="350" y="90" width="250" height="70" class="p"/><text x="372" y="120" class="h">CodexAppServerClient</text><text x="372" y="144" class="t">execute / send_chat_message</text>
+  <rect x="660" y="90" width="250" height="70" class="p"/><text x="682" y="120" class="h">JsonlAppServerRuntime</text><text x="682" y="144" class="t">request / reader loop</text>
+  <path d="M290 125H350" class="line"/><path d="M600 125H660" class="line"/>
+  <rect x="350" y="230" width="250" height="92" class="b"/><text x="372" y="262" class="h">initialize + thread</text><text x="372" y="288" class="t">initialize, initialized</text><text x="372" y="310" class="t">thread/start 或 thread/resume</text>
+  <rect x="660" y="230" width="250" height="92" class="b"/><text x="682" y="262" class="h">turn/start</text><text x="682" y="288" class="t">cwd, model, sandbox</text><text x="682" y="310" class="t">approvalPolicy, summary</text>
+  <path d="M475 160V230" class="line"/><path d="M600 276H660" class="line"/>
+  <rect x="160" y="392" width="230" height="88" class="b"/><text x="182" y="424" class="h">notifications</text><text x="182" y="450" class="t">reasoning/tool/file/message</text>
+  <rect x="445" y="392" width="230" height="88" class="b"/><text x="467" y="424" class="h">CodexAppRunState</text><text x="467" y="450" class="t">reply/tools/thinking/usage</text>
+  <rect x="730" y="392" width="230" height="88" class="b"/><text x="752" y="424" class="h">server request</text><text x="752" y="450" class="t">approval/input fail-closed</text>
+  <path d="M785 322C785 366 275 352 275 392" class="line"/><path d="M390 436H445" class="line"/><path d="M785 322V392" class="line"/>
+  <text x="108" y="540" class="t">证据：app/providers/codex_app_server.py、app/provider_app_server.py、tests/test_codex_bridge.py</text>
+</svg>

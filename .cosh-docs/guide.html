@@ -116,6 +116,17 @@ th { background: #f8fafc; color: #334155; }
     <section class="card">
       <h2>建议阅读顺序</h2>
       <div class="guide-grid">
+        <a class="guide-card" href="./learn/bridge-overview.html"><h3>Bridge 专题 1. 30 分钟总览</h3><p>介绍 VO 里每个 bridge 的构成、作用和核心 Happy Path。</p><div class="tags"><span class="tag">Bridge</span><span class="tag">总览</span></div></a>
+        <a class="guide-card" href="./learn/bridge-architecture.html"><h3>Bridge 专题 2. Provider Bridge 结构</h3><p>拆清 Codex、Claude Code、Hermes、ProviderRunBridge 和结果合同的边界。</p><div class="tags"><span class="tag">Bridge</span><span class="tag">结构</span></div></a>
+        <a class="guide-card" href="./learn/bridge-happy-path.html"><h3>Bridge 专题 3. Happy Path 总线</h3><p>从 `/api/{provider}/runs` 追到后台 worker、provider adapter 和 SSE terminal event。</p><div class="tags"><span class="tag">Bridge</span><span class="tag">Happy Path</span></div></a>
+        <a class="guide-card" href="./learn/bridge-provider-run-sse.html"><h3>Bridge 专题 4. ProviderRunBridge</h3><p>深挖 run registry、事件队列、SSE 输出、terminal fallback 和清理逻辑。</p><div class="tags"><span class="tag">Bridge</span><span class="tag">SSE</span></div></a>
+        <a class="guide-card" href="./learn/bridge-codex-app-server.html"><h3>Bridge 专题 5. Codex app-server</h3><p>解释 Codex JSONL RPC、thread/turn、notification、state 聚合和 shim 兼容。</p><div class="tags"><span class="tag">Bridge</span><span class="tag">Codex</span></div></a>
+        <a class="guide-card" href="./learn/bridge-codex-approval.html"><h3>Bridge 专题 6. Codex Approval</h3><p>深挖 Codex server request、pending approval、人工响应和 fail-closed 边界。</p><div class="tags"><span class="tag">Bridge</span><span class="tag">Approval</span></div></a>
+        <a class="guide-card" href="./learn/bridge-claude-code-stream.html"><h3>Bridge 专题 7. Claude Code Stream</h3><p>说明 Claude CLI stream-json、snapshot diffing 和 ProviderRunBridge 事件输出。</p><div class="tags"><span class="tag">Bridge</span><span class="tag">Claude Code</span></div></a>
+        <a class="guide-card" href="./learn/bridge-hermes-runtime.html"><h3>Bridge 专题 8. Hermes Runtime</h3><p>区分 Hermes native API run/SSE/approval/stop 与 CLI fallback。</p><div class="tags"><span class="tag">Bridge</span><span class="tag">Hermes</span></div></a>
+        <a class="guide-card" href="./learn/bridge-history.html"><h3>Bridge 专题 9. Git 历史溯源</h3><p>用真实 commit 解释 Codex bridge 如何从 harness 演进到 native runtime。</p><div class="tags"><span class="tag">Bridge</span><span class="tag">Git 历史</span></div></a>
+        <a class="guide-card" href="./learn/bridge-verification.html"><h3>Bridge 专题 10. 验证与调试</h3><p>列出已跑通的最小测试、fixture、断点和常见失败检查点。</p><div class="tags"><span class="tag">Bridge</span><span class="tag">验证</span></div></a>
+        <a class="guide-card" href="./learn/bridge-evidence-index.html"><h3>Bridge 专题 11. 证据索引</h3><p>把核心结论映射到源码、测试、commit 和置信边界。</p><div class="tags"><span class="tag">Bridge</span><span class="tag">证据</span></div></a>
         <a class="guide-card" href="./learn/reverse-overview.html"><h3>1. 30 分钟快速总览</h3><p>先建立项目定位、核心 Happy Path、重点链路和风险边界。</p><div class="tags"><span class="tag">总览</span><span class="tag">入口</span></div></a>
         <a class="guide-card" href="./learn/project-structure-overview.html"><h3>2. 项目全景与模块边界</h3><p>理解仓库目录、单体后端、静态前端、provider adapter 和本地状态边界。</p><div class="tags"><span class="tag">结构</span></div></a>
         <a class="guide-card" href="./learn/runtime-module-map.html"><h3>3. 运行时模块地图</h3><p>从启动入口穿过前端、OfficeHandler、discovery、presence、store 和 provider。</p><div class="tags"><span class="tag">依赖方向</span></div></a>

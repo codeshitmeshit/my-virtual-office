@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="620" viewBox="0 0 1120 620" role="img" aria-label="VO provider bridge architecture">
+  <rect width="1120" height="620" fill="#f8fafc"/>
+  <style>
+    .box{fill:#fff;stroke:#cbd5e1;stroke-width:2;rx:14}.head{font:700 22px Arial;fill:#0f172a}.txt{font:15px Arial;fill:#334155}.small{font:13px Arial;fill:#64748b}.line{stroke:#2563eb;stroke-width:3;fill:none;marker-end:url(#arrow)}.muted{stroke:#94a3b8;stroke-width:2;fill:none;marker-end:url(#arrow)}
+  </style>
+  <defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0l10 5-10 5z" fill="#2563eb"/></marker></defs>
+  <text x="48" y="50" class="head">VO Provider Bridge 分层图</text>
+  <rect x="52" y="90" width="260" height="118" class="box"/><text x="76" y="126" class="head">VO HTTP 路由</text><text x="76" y="158" class="txt">app/server.py</text><text x="76" y="184" class="small">/api/codex|claude-code|hermes</text>
+  <rect x="430" y="90" width="260" height="118" class="box"/><text x="454" y="126" class="head">Provider Adapter</text><text x="454" y="158" class="txt">app/providers/*.py</text><text x="454" y="184" class="small">发现 agent、chat、history、result</text>
+  <rect x="810" y="90" width="250" height="118" class="box"/><text x="834" y="126" class="head">Runtime Bridge</text><text x="834" y="158" class="txt">CLI / API / app-server</text><text x="834" y="184" class="small">provider 原生协议</text>
+  <path d="M312 149H430" class="line"/><path d="M690 149H810" class="line"/>
+  <rect x="92" y="300" width="230" height="166" class="box"/><text x="116" y="336" class="head">Codex</text><text x="116" y="368" class="txt">CodexProvider</text><text x="116" y="394" class="txt">CodexAppServerClient</text><text x="116" y="420" class="small">codex app-server --stdio</text><text x="116" y="446" class="small">codex_bridge.py 是 shim</text>
+  <rect x="445" y="300" width="230" height="166" class="box"/><text x="469" y="336" class="head">Claude Code</text><text x="469" y="368" class="txt">ClaudeCodeProvider</text><text x="469" y="394" class="txt">_ClaudeStreamState</text><text x="469" y="420" class="small">claude -p stream-json</text><text x="469" y="446" class="small">adapter + harness 同文件</text>
+  <rect x="798" y="300" width="230" height="166" class="box"/><text x="822" y="336" class="head">Hermes</text><text x="822" y="368" class="txt">HermesProvider</text><text x="822" y="394" class="txt">HermesApiClient</text><text x="822" y="420" class="small">/v1/runs SSE</text><text x="822" y="446" class="small">CLI fallback: hermes chat</text>
+  <rect x="290" y="512" width="540" height="72" class="box"/><text x="318" y="548" class="head">ProviderRunBridge + provider_execution.py</text><text x="318" y="572" class="small">后台 run/SSE 分发 + ok/status/reply/thread/session/run/tools/thinking 的统一合同</text>
+  <path d="M207 466V512H430" class="muted"/><path d="M560 466V512" class="muted"/><path d="M913 466V512H690" class="muted"/>
+</svg>

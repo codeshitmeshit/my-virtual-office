@@ -824,8 +824,9 @@
                     <button class="proj-btn proj-btn-sm proj-btn-stop hidden" id="proj-exec-stop-btn" onclick="ProjMgr.projectExecutionCancelActive()">停止当前任务</button>
                 </div>
                 <span class="proj-wf-status ${p.workflowActive ? 'wf-active' : ''}" id="wf-status-badge">${escHtml(p.workflowPhase || '')}</span>
-                <span class="proj-exec-workspace" title="${escHtml(p.workspacePath || '')}"><span>${p.workspaceKind === 'git' ? 'Git' : 'DIR'} · </span><span class="proj-exec-workspace-path">${escHtml(p.workspacePath || '未配置工作区')}</span></span>
-                ${p.workspacePath ? `<button class="proj-btn proj-btn-sm" title="复制工作区路径" onclick="ProjMgr.copyWorkspacePath(event, '${escHtml(p.workspacePath)}')">📋</button>` : ''}
+                ${p.workspacePath
+                    ? `<button class="proj-exec-workspace" title="点击复制：${escHtml(p.workspacePath)}" onclick="ProjMgr.copyWorkspacePath(event, '${escHtml(p.workspacePath)}')"><span>${p.workspaceKind === 'git' ? 'Git' : 'DIR'} · </span><span class="proj-exec-workspace-path">${escHtml(p.workspacePath)}</span></button>`
+                    : `<span class="proj-exec-workspace"><span>${p.workspaceKind === 'git' ? 'Git' : 'DIR'} · </span><span class="proj-exec-workspace-path">未配置工作区</span></span>`}
             </div>` : `<div class="proj-workflow-controls" id="proj-wf-controls">
                 <button class="proj-btn proj-btn-sm proj-btn-start" id="wf-start-btn" onclick="ProjMgr.workflowStart()" title="${_t('proj_workflow_start')}">▶ ${_t('proj_workflow_start')}</button>
                 <button class="proj-btn proj-btn-sm proj-btn-stop hidden" id="wf-stop-btn" onclick="ProjMgr.workflowStop()" title="${_t('proj_workflow_stop')}">⏹ ${_t('proj_workflow_stop')}</button>
