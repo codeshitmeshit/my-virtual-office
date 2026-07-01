@@ -157,6 +157,7 @@
       this.hermesProgressTimers = [];
       this.hermesHistoryPollTimer = null;
       this.hermesEventSource = null;
+      this.hermesSendStartedAt = 0;
       this.hermesCompletedToolKeys = new Set();
       this.codexHistoryPollTimer = null;
       this.codexEventSource = null;
@@ -1307,6 +1308,7 @@
       if (this.isHermesSelected()) {
         const providerLabel = this.agentSelect.selectedOptions[0]?.textContent.trim() || 'Hermes';
         const hermesSendStartedAt = Date.now();
+        this.hermesSendStartedAt = hermesSendStartedAt;
         const hermesBody = {
           agentId: this.getSelectedAgentId() || this.selectedAgentKey,
           message: text || '(attached files)',
@@ -1334,7 +1336,7 @@
             throw new Error(data.error || data.reply || resp.statusText);
           }
           this.currentRunId = data.runId || null;
-          await this.streamHermesRunEvents(data.runId, hermesProgress);
+          await this.streamHermesRunEvents(data.runId, hermesProgress, hermesSendStartedAt);
           this.removeTypingIndicator();
           await this.loadHistory({ recoverFinal: true, startedAt: hermesSendStartedAt });
           await this.pollHermesApproval().catch(() => {});
@@ -2652,7 +2654,7 @@
       }
     }
 
-    streamHermesRunEvents(runId, hermesProgress) {
+    streamHermesRunEvents(runId, hermesProgress, startedAt = 0) {
       if (!runId) return Promise.reject(new Error('Hermes run did not return a run id'));
       this.closeHermesEventSource();
       this.hermesCompletedToolKeys = new Set();
@@ -2661,6 +2663,7 @@
       this.markLiveEvent();
       const agentId = this.getSelectedAgentId() || this.selectedAgentKey || '';
       const url = '/api/hermes/runs/' + encodeURIComponent(runId) + '/events?agentId=' + encodeURIComponent(agentId);
+      let completed = false;
       return new Promise((resolve, reject) => {
         let settled = false;
         const source = new EventSource(url);
@@ -2672,6 +2675,7 @@
         const finish = (ok, value) => {
           if (settled) return;
           settled = true;
+          completed = !!ok;
           cleanup();
           if (ok) resolve(value);
           else reject(value instanceof Error ? value : new Error(String(value || 'Hermes stream failed')));
@@ -2701,8 +2705,15 @@
         source.onerror = () => {
           if (!settled) finish(false, new Error('Hermes native stream disconnected'));
         };
+      }).catch(async err => {
+        const recovered = await this.recoverHermesFinalFromHistory(startedAt || this.hermesSendStartedAt, 8000).catch(() => false);
+        if (recovered) {
+          completed = true;
+          return { ok: true, recovered: true };
+        }
+        throw err;
       }).finally(() => {
-        this.finishHermesProgress(hermesProgress, true);
+        this.finishHermesProgress(hermesProgress, completed);
       });
     }
 

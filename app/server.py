@@ -15539,6 +15539,43 @@ def _artifact_context_delete(context, rel_path):
     return {"ok": True, "deleted": rel}
 
 
+def _artifact_context_delete_dir(context, rel_dir):
+    root = os.path.realpath(context.get("root") or "")
+    if not root or not os.path.isdir(root):
+        return {"error": "Artifact root is not accessible", "_status": 409}
+    if rel_dir:
+        full_path, rel = _artifact_safe_path(root, rel_dir)
+        if not full_path:
+            return {"error": "Artifact path is outside the artifact root", "_status": 403}
+        if not os.path.isdir(full_path):
+            return {"error": "Artifact directory not found", "_status": 404}
+    else:
+        full_path, rel = root, ""
+    deleted = 0
+    try:
+        for current_root, dirs, files in os.walk(full_path, topdown=False):
+            current_real = os.path.realpath(current_root)
+            if not (current_real == root or current_real.startswith(root + os.sep)):
+                continue
+            for name in files:
+                file_path = os.path.realpath(os.path.join(current_root, name))
+                if not (file_path == root or file_path.startswith(root + os.sep)):
+                    continue
+                file_rel = os.path.relpath(file_path, root).replace(os.sep, "/")
+                if os.path.splitext(file_rel)[1].lower() not in _ARTIFACT_ALLOWED_EXTENSIONS:
+                    continue
+                os.remove(file_path)
+                deleted += 1
+            if current_real != root:
+                try:
+                    os.rmdir(current_real)
+                except OSError:
+                    pass
+    except OSError as exc:
+        return {"error": f"Unable to delete artifact directory: {exc}", "_status": 500}
+    return {"ok": True, "deletedDir": rel, "deleted": deleted}
+
+
 def _project_artifact_source_records(project):
     sources_by_path = {}
     workspace_root = project.get("workspacePath") or ""
@@ -15684,7 +15721,10 @@ def _handle_project_artifact_delete(project_id, query_string=""):
     context = _project_artifact_context(project)
     if not context.get("ok"):
         return context
-    params = urllib.parse.parse_qs(query_string or "")
+    params = urllib.parse.parse_qs(query_string or "", keep_blank_values=True)
+    if "dir" in params:
+        rel_dir = (params.get("dir") or [""])[0]
+        return _artifact_context_delete_dir(context, rel_dir)
     rel_path = (params.get("path") or [""])[0]
     return _artifact_context_delete(context, rel_path)
 
@@ -22812,6 +22852,28 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             event_name = "approval" if result.get("pending") else "idle"
             payload = json.dumps(result)
             self.wfile.write(f"event: {event_name}\ndata: {payload}\n\n".encode("utf-8"))
+        elif request_path == "/api/sse/test":
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-cache, no-transform")
+            self.send_header("Connection", "keep-alive")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("X-Accel-Buffering", "no")
+            self.end_headers()
+
+            def send_sse(event_name, payload):
+                data = json.dumps(payload, ensure_ascii=False)
+                self.wfile.write(f"event: {event_name}\ndata: {data}\n\n".encode("utf-8"))
+                self.wfile.flush()
+
+            test_id = str(uuid.uuid4())[:8]
+            started = time.time()
+            send_sse("sse.test.start", {"ok": True, "testId": test_id, "seq": 0, "serverElapsedMs": 0})
+            for seq in (1, 2):
+                time.sleep(0.45)
+                send_sse("sse.test.tick", {"ok": True, "testId": test_id, "seq": seq, "serverElapsedMs": int((time.time() - started) * 1000)})
+            time.sleep(0.45)
+            send_sse("sse.test.done", {"ok": True, "testId": test_id, "seq": 3, "serverElapsedMs": int((time.time() - started) * 1000)})
         elif request_path.startswith("/api/hermes/runs/") and request_path.endswith("/events"):
             run_id = urllib.parse.unquote(request_path[len("/api/hermes/runs/"):-len("/events")].strip("/"))
             _handle_hermes_run_events(self, run_id)

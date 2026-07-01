@@ -1384,6 +1384,43 @@
     font-size: 10px;
     color: #888;
 }
+.proj-artifact-list-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+.proj-artifact-list-head .proj-chart-title {
+    margin-bottom: 0;
+}
+.proj-artifact-tools {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+.proj-artifact-tool {
+    min-height: 24px;
+    padding: 0 8px;
+    border: 1px solid #33345d;
+    border-radius: 4px;
+    background: #1a1a36;
+    color: #d7d7e8;
+    font-size: 11px;
+    cursor: pointer;
+    white-space: nowrap;
+}
+.proj-artifact-tool:hover {
+    border-color: #ffd700;
+    color: #ffd700;
+}
+.proj-artifact-tool.danger:hover {
+    border-color: rgba(244, 67, 54, 0.48);
+    background: rgba(244, 67, 54, 0.16);
+    color: #f87171;
+}
 .proj-artifact-row {
     width: 100%;
     display: block;
@@ -1473,6 +1510,41 @@
     border-radius: 4px;
     padding: 1px 5px;
     font-size: 10px;
+}
+.proj-artifact-dir-name {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+.proj-artifact-dir-delete {
+    flex: 0 0 auto;
+    min-width: 42px;
+    height: 22px;
+    padding: 0 6px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    background: transparent;
+    color: #7f8599;
+    font-size: 11px;
+    line-height: 1;
+    white-space: nowrap;
+    cursor: pointer;
+    opacity: 0.72;
+}
+.proj-artifact-dir-delete span {
+    font-size: 14px;
+    line-height: 1;
+}
+.proj-artifact-dir summary:hover .proj-artifact-dir-delete {
+    opacity: 1;
+}
+.proj-artifact-dir-delete:hover {
+    background: rgba(244, 67, 54, 0.16);
+    border-color: rgba(244, 67, 54, 0.38);
+    color: #f87171;
 }
 .proj-artifact-row:hover,
 .proj-artifact-row.active {
@@ -1568,6 +1640,13 @@
     .proj-artifact-viewer-head {
         flex-direction: column;
         align-items: stretch;
+    }
+    .proj-artifact-list-head {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+    .proj-artifact-tools {
+        justify-content: flex-start;
     }
 }
 

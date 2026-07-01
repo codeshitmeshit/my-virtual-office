@@ -14196,6 +14196,80 @@ function mmTestHermes() {
     });
 }
 
+function mmTestSse() {
+    var statusEl = document.getElementById('mm-sse-status') || document.getElementById('mm-hermes-status');
+    if (!statusEl) return;
+    var startedAt = Date.now();
+    var firstAt = 0;
+    var events = [];
+    var done = false;
+    var source = null;
+    var timeout = null;
+
+    function render(cls, text) {
+        statusEl.innerHTML = '<div class="mm-status ' + cls + '">' + text + '</div>';
+    }
+    function close() {
+        if (timeout) clearTimeout(timeout);
+        timeout = null;
+        if (source) {
+            try { source.close(); } catch (_) {}
+            source = null;
+        }
+    }
+    function record(eventName, evt) {
+        var data = {};
+        try { data = JSON.parse(evt.data || '{}'); } catch (e) {
+            render('err', '❌ ' + _tr('sse_test_invalid_json') + ': ' + escHtml(e.message));
+            close();
+            done = true;
+            return;
+        }
+        if (!firstAt) firstAt = Date.now();
+        events.push({ event: eventName, data: data, at: Date.now() });
+        render('info', _tr('sse_testing') + '<br>' + escHtml(_tr('sse_events_received', { count: events.length })));
+        if (eventName === 'sse.test.done') {
+            done = true;
+            var firstMs = firstAt ? firstAt - startedAt : 0;
+            var totalMs = Date.now() - startedAt;
+            var serverMs = Number(data.serverElapsedMs || 0);
+            var lagHint = firstMs > 2500 || totalMs > 4500
+                ? '<br>' + escHtml(_tr('sse_test_slow_hint'))
+                : '';
+            render('ok', '✅ ' + _tr('sse_test_ok') + '<br>' + escHtml(_tr('sse_test_timing', {
+                count: events.length,
+                firstMs: firstMs,
+                totalMs: totalMs,
+                serverMs: serverMs
+            })) + lagHint);
+            close();
+        }
+    }
+
+    render('info', _tr('sse_testing'));
+    try {
+        source = new EventSource('/api/sse/test?ts=' + encodeURIComponent(String(Date.now())));
+        ['sse.test.start', 'sse.test.tick', 'sse.test.done'].forEach(function(name) {
+            source.addEventListener(name, function(evt) { record(name, evt); });
+        });
+        source.onerror = function() {
+            if (done) return;
+            render('err', '❌ ' + _tr('sse_test_failed') + '<br>' + escHtml(_tr('sse_test_html_hint')));
+            close();
+            done = true;
+        };
+        timeout = setTimeout(function() {
+            if (done) return;
+            render('err', '❌ ' + _tr('sse_test_timeout') + '<br>' + escHtml(_tr('sse_test_proxy_hint')));
+            close();
+            done = true;
+        }, 8000);
+    } catch (e) {
+        render('err', '❌ ' + _tr('sse_test_failed') + ': ' + escHtml(e.message));
+        close();
+    }
+}
+
 function mmTestCodex() {
     var statusEl = document.getElementById('mm-codex-status');
     if (!statusEl) return;

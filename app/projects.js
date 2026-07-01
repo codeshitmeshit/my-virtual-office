@@ -364,6 +364,10 @@
             const r = await fetch(`/api/projects/${projectId}/artifacts?path=${encodeURIComponent(path)}`, { method: 'DELETE' });
             return r.json();
         },
+        async deleteArtifactDir(projectId, dir) {
+            const r = await fetch(`/api/projects/${projectId}/artifacts?dir=${encodeURIComponent(dir || '')}`, { method: 'DELETE' });
+            return r.json();
+        },
         async listMeetingRequests(projectId, taskId) {
             const qs = taskId ? `?projectId=${encodeURIComponent(projectId)}&taskId=${encodeURIComponent(taskId)}` : `?projectId=${encodeURIComponent(projectId)}`;
             const r = await fetch(`/api/meetings/requests${qs}`);
@@ -3064,6 +3068,14 @@
         return root;
     }
 
+    function artifactDirFileCount(node) {
+        let count = node.files.length;
+        node.dirs.forEach(child => {
+            count += artifactDirFileCount(child);
+        });
+        return count;
+    }
+
     function renderArtifactTreeNode(node, model, selected, depth = 0) {
         const dirs = Array.from(node.dirs.values()).sort((a, b) => a.name.localeCompare(b.name));
         const files = node.files.slice().sort((a, b) => (b.modifiedAt || '').localeCompare(a.modifiedAt || '') || String(a.name || a.path).localeCompare(String(b.name || b.path)));
@@ -3084,9 +3096,15 @@
             </div>`).join('');
         const dirHtml = dirs.map(dir => {
             const containsSelected = !!(selected && selected.path && (selected.path === dir.path || selected.path.startsWith(dir.path + '/')));
+            const fileCount = artifactDirFileCount(dir);
             return `
             <details class="proj-artifact-dir" style="--artifact-depth:${depth}" ${depth === 0 || containsSelected ? 'open' : ''}>
-                <summary><span class="proj-artifact-dir-icon">▸</span><span>${escHtml(dir.name)}</span><code>${dir.files.length + dir.dirs.size}</code></summary>
+                <summary>
+                    <span class="proj-artifact-dir-icon">▸</span>
+                    <span class="proj-artifact-dir-name">${escHtml(dir.name)}</span>
+                    <code>${fileCount}</code>
+                    <button class="proj-artifact-dir-delete" title="${escHtml(_tf('proj_delete_artifact_dir', 'Delete directory artifacts', '删除目录产物'))}" onclick="ProjMgr.deleteArtifactDir('${model.projectId}', decodeURIComponent('${encodeURIComponent(dir.path)}'), event)"><span>×</span>${escHtml(_tf('proj_delete', 'Delete', '删除'))}</button>
+                </summary>
                 ${renderArtifactTreeNode(dir, model, selected, depth + 1)}
             </details>`;
         }).join('');
@@ -3107,6 +3125,7 @@
         const title = context.title || labels.contextFallback || 'Project';
         const itemLabel = labels.itemPlural || 'Markdown 产物';
         const artifactTree = buildArtifactTree(artifacts);
+        const hasArtifacts = artifacts.length > 0;
         return `
         <div class="proj-toolbar">
             <button class="proj-btn" onclick="ProjMgr.openProject('${model.projectId}')">${_t('proj_back')}</button>
@@ -3117,7 +3136,15 @@
         <div class="proj-artifacts-body">
             ${model.error ? `<div class="proj-artifact-error">${escHtml(model.error)}</div>` : ''}
             <div class="proj-artifacts-list">
-                <div class="proj-chart-title">${escHtml(itemLabel)} ${model.truncated ? '<span class="proj-artifact-warn">已截断</span>' : ''}</div>
+                <div class="proj-artifact-list-head">
+                    <div class="proj-chart-title">${escHtml(itemLabel)} ${model.truncated ? '<span class="proj-artifact-warn">已截断</span>' : ''}</div>
+                    ${hasArtifacts ? `
+                    <div class="proj-artifact-tools">
+                        <button class="proj-artifact-tool" onclick="ProjMgr.setArtifactDirs(true)">${escHtml(_tf('proj_expand_all_artifacts', 'Expand', '展开'))}</button>
+                        <button class="proj-artifact-tool" onclick="ProjMgr.setArtifactDirs(false)">${escHtml(_tf('proj_collapse_all_artifacts', 'Collapse', '折叠'))}</button>
+                        <button class="proj-artifact-tool danger" onclick="ProjMgr.deleteArtifactDir('${model.projectId}', '', event)">${escHtml(_tf('proj_delete_all_artifacts', 'Delete', '删除'))}</button>
+                    </div>` : ''}
+                </div>
                 ${!model.error && artifacts.length === 0 ? `<div class="proj-artifact-empty">${escHtml(labels.empty || '当前上下文没有 Markdown 产物。')}</div>` : ''}
                 ${renderArtifactTreeNode(artifactTree, model, selected)}
             </div>
@@ -3172,6 +3199,37 @@
         mc.innerHTML = renderArtifactManager(state._artifactModel);
     }
 
+    function setArtifactDirs(open) {
+        const mc = getMainContent();
+        if (!mc) return;
+        mc.querySelectorAll('.proj-artifact-dir').forEach(detail => {
+            detail.open = !!open;
+        });
+    }
+
+    async function refreshArtifactModel(projectId, removedPathPrefix = '') {
+        const list = await api.listArtifacts(projectId);
+        const previous = state._artifactModel || {};
+        const selectedPath = previous.selected && previous.selected.path;
+        const removed = !selectedPath ? false : (
+            !removedPathPrefix ||
+            selectedPath === removedPathPrefix ||
+            selectedPath.startsWith(removedPathPrefix + '/')
+        );
+        const selected = selectedPath && !removed ? (list.artifacts || []).find(a => a.path === selectedPath) : null;
+        state._artifactModel = {
+            projectId,
+            context: list.context || {},
+            artifacts: list.artifacts || [],
+            truncated: !!list.truncated,
+            selected,
+            selectedContent: selected ? previous.selectedContent : '',
+            sourceMode: previous.sourceMode || 'preview',
+        };
+        const mc = getMainContent();
+        if (mc) mc.innerHTML = renderArtifactManager(state._artifactModel);
+    }
+
     async function deleteArtifactAction(projectId, path, event) {
         if (event) {
             event.preventDefault();
@@ -3191,21 +3249,39 @@
         try {
             const d = await api.deleteArtifact(projectId, path);
             if (!d.ok) throw new Error(d.error || 'delete failed');
-            const list = await api.listArtifacts(projectId);
-            const selectedPath = state._artifactModel && state._artifactModel.selected && state._artifactModel.selected.path;
-            const keepSelected = selectedPath && selectedPath !== path;
-            const selected = keepSelected ? (list.artifacts || []).find(a => a.path === selectedPath) : null;
-            state._artifactModel = {
-                projectId,
-                context: list.context || {},
-                artifacts: list.artifacts || [],
-                truncated: !!list.truncated,
-                selected,
-                selectedContent: selected && keepSelected ? state._artifactModel.selectedContent : '',
-                sourceMode: state._artifactModel ? state._artifactModel.sourceMode : 'preview',
-            };
-            if (mc) mc.innerHTML = renderArtifactManager(state._artifactModel);
+            await refreshArtifactModel(projectId, path);
             toast(_tf('proj_artifact_deleted', 'Artifact deleted', '产物已删除'), 'success');
+        } catch (e) {
+            toast(_tf('proj_failed_delete_artifact', `Failed to delete artifact: ${String(e.message || e)}`, `删除产物失败：${String(e.message || e)}`, { message: String(e.message || e) }), 'error');
+        }
+    }
+
+    async function deleteArtifactDirAction(projectId, dir, event) {
+        if (event) {
+            event.preventDefault();
+            event.stopPropagation();
+        }
+        const isRoot = !dir;
+        const title = isRoot
+            ? _tf('proj_delete_all_artifacts', 'Delete all artifacts', '删除全部产物')
+            : _tf('proj_delete_artifact_dir', 'Delete directory artifacts', '删除目录产物');
+        const message = isRoot
+            ? _tf('proj_delete_all_artifacts_confirm', 'All artifacts under the project workspace will be deleted.', '项目工作区下的全部产物都会被删除。')
+            : _tf('proj_delete_artifact_dir_confirm', 'All artifacts in this directory will be deleted.', '这个目录下的全部产物都会被删除。');
+        const confirmed = await showConfirmDialog({
+            title,
+            message,
+            detail: isRoot ? (state._artifactModel && state._artifactModel.context && state._artifactModel.context.root) || '' : dir,
+            confirmText: _tf('proj_delete', 'Delete', '删除'),
+            cancelText: _tf('proj_cancel', 'Cancel', '取消'),
+            tone: 'danger',
+        });
+        if (!confirmed) return;
+        try {
+            const d = await api.deleteArtifactDir(projectId, dir || '');
+            if (!d.ok) throw new Error(d.error || 'delete failed');
+            await refreshArtifactModel(projectId, dir || '');
+            toast(_tf('proj_artifact_dir_deleted', 'Artifacts deleted', '产物已删除'), 'success');
         } catch (e) {
             toast(_tf('proj_failed_delete_artifact', `Failed to delete artifact: ${String(e.message || e)}`, `删除产物失败：${String(e.message || e)}`, { message: String(e.message || e) }), 'error');
         }
@@ -4266,7 +4342,9 @@
         showArtifacts,
         openArtifact,
         switchArtifactMode,
+        setArtifactDirs,
         deleteArtifact: deleteArtifactAction,
+        deleteArtifactDir: deleteArtifactDirAction,
         exportReport,
         saveAsTemplateDialog,
         submitSaveTemplate,
