@@ -8877,6 +8877,11 @@ def _send_meeting_request_notification(req, state="pending", *, summary="", acti
                 "text": "拒绝",
                 "value": {"action": "reject_meeting_request", "request_id": req.get("id")},
             },
+            {
+                "category": "jump",
+                "text": "查看详情",
+                "url": "/#projects",
+            },
         ],
         "target": "feishu-meeting-request",
     }
@@ -9030,7 +9035,7 @@ def _feishu_card_action_value(event):
     return value
 
 
-def _record_feishu_card_action(body, event, value):
+def _record_feishu_card_action(body, event, value, outcome=None):
     record = {
         "id": str(uuid.uuid4()),
         "receivedAt": _exec_meeting_now(),
@@ -9041,12 +9046,83 @@ def _record_feishu_card_action(body, event, value):
         "requestId": str(value.get("request_id") or ""),
         "user": _feishu_card_action_user(event),
         "messageId": str(event.get("open_message_id") or event.get("message_id") or ""),
+        "chatId": str(event.get("open_chat_id") or event.get("chat_id") or ""),
         "value": value,
     }
+    if isinstance(outcome, dict):
+        record["outcome"] = outcome
     os.makedirs(os.path.dirname(_feishu_card_action_log_path()), exist_ok=True)
     with open(_feishu_card_action_log_path(), "a", encoding="utf-8") as f:
         f.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
     return record
+
+
+def _feishu_card_action_success(content):
+    return {"type": "success", "content": content}
+
+
+def _feishu_card_action_error(content):
+    return {"type": "error", "content": content}
+
+
+def _feishu_meeting_action_actor(event, fallback="feishu"):
+    user = _feishu_card_action_user(event)
+    return user.get("userId") or user.get("openId") or user.get("unionId") or fallback
+
+
+def _dispatch_feishu_meeting_request_action(action, request_id, event):
+    if action not in {"confirm_meeting_request", "reject_meeting_request"}:
+        return {"handled": False}
+    if not request_id:
+        return {
+            "handled": True,
+            "ok": False,
+            "businessStatus": "missing_request_id",
+            "toast": _feishu_card_action_error("会议申请缺少 request_id，无法处理"),
+        }
+    actor = _feishu_meeting_action_actor(event)
+    if action == "confirm_meeting_request":
+        result = _handle_meeting_request_confirm(request_id, {
+            "confirmedBy": actor,
+            "idempotencyKey": f"feishu-confirm:{request_id}",
+        })
+        if result.get("ok"):
+            idempotent = bool(result.get("idempotent"))
+            return {
+                "handled": True,
+                "ok": True,
+                "businessStatus": "confirmed",
+                "idempotent": idempotent,
+                "meetingId": str(result.get("meetingId") or ""),
+                "toast": _feishu_card_action_success("会议申请已同意" + ("（已处理）" if idempotent else "")),
+            }
+        return {
+            "handled": True,
+            "ok": False,
+            "businessStatus": str(result.get("code") or result.get("status") or "confirm_failed"),
+            "businessError": str(result.get("error") or "会议申请无法同意"),
+            "toast": _feishu_card_action_error(str(result.get("error") or "会议申请无法同意")),
+        }
+    result = _handle_meeting_request_reject(request_id, {
+        "rejectedBy": actor,
+        "reason": "Rejected from Feishu",
+    })
+    if result.get("ok"):
+        idempotent = bool(result.get("idempotent"))
+        return {
+            "handled": True,
+            "ok": True,
+            "businessStatus": "rejected",
+            "idempotent": idempotent,
+            "toast": _feishu_card_action_success("会议申请已拒绝" + ("（已处理）" if idempotent else "")),
+        }
+    return {
+        "handled": True,
+        "ok": False,
+        "businessStatus": str(result.get("code") or result.get("status") or "reject_failed"),
+        "businessError": str(result.get("error") or "会议申请无法拒绝"),
+        "toast": _feishu_card_action_error(str(result.get("error") or "会议申请无法拒绝")),
+    }
 
 
 def _handle_feishu_card_action(body):
@@ -9058,7 +9134,17 @@ def _handle_feishu_card_action(body):
 
     event = body.get("event") if isinstance(body.get("event"), dict) else body
     value = _feishu_card_action_value(event)
-    record = _record_feishu_card_action(body, event, value)
+    action = str(value.get("action") or "").strip()
+    meeting_outcome = _dispatch_feishu_meeting_request_action(action, str(value.get("request_id") or "").strip(), event)
+    outcome = meeting_outcome if meeting_outcome.get("handled") else None
+    record = _record_feishu_card_action(body, event, value, outcome=outcome)
+    if meeting_outcome.get("handled"):
+        return {
+            "ok": bool(meeting_outcome.get("ok")),
+            "toast": meeting_outcome.get("toast") or _feishu_card_action_success("操作已收到"),
+            "recordId": record["id"],
+            "outcome": {k: v for k, v in meeting_outcome.items() if k not in {"toast"}},
+        }
     return {
         "ok": True,
         "toast": {"type": "success", "content": "操作已收到"},

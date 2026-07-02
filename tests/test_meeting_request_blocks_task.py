@@ -4,6 +4,7 @@
 import os
 import sys
 import tempfile
+import json
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 APP_DIR = os.path.join(ROOT, "app")
@@ -142,6 +143,102 @@ def test_meeting_request_confirm_reject_and_user_takeover_paths():
             assert task2["executionState"] == "awaiting_meeting_resolution"
             assert task2["meetingBlocker"]["status"] == "rejected"
             assert task2["meetingBlocker"]["awaitingUserDecision"] is True
+        finally:
+            restore_store(old)
+
+
+def read_feishu_action_records(status_dir):
+    path = os.path.join(status_dir, "feishu-card-actions.jsonl")
+    with open(path, "r", encoding="utf-8") as f:
+        return [json.loads(line) for line in f if line.strip()]
+
+
+def feishu_meeting_action_payload(action, request_id, open_id="ou_feishu_user"):
+    return {
+        "schema": "2.0",
+        "header": {"event_type": "card.action.trigger"},
+        "event": {
+            "operator": {"open_id": open_id},
+            "open_message_id": "om_meeting_request",
+            "open_chat_id": "oc_meeting_chat",
+            "action": {"value": {"action": action, "request_id": request_id}},
+        },
+    }
+
+
+def test_feishu_meeting_request_card_actions_confirm_and_reject():
+    with tempfile.TemporaryDirectory() as status_dir:
+        old = with_store(status_dir)
+        try:
+            project, task = create_fixture_project(status_dir)
+            req = server._handle_meeting_request_create(project["id"], task["id"], meeting_request_body("feishu confirm"))["request"]
+            sent_intents = []
+            old_send = server.send_feishu_notification
+            try:
+                def fake_send(intent, **kwargs):
+                    sent_intents.append(intent)
+                    return {"ok": True, "record": {"type": intent["type"]}}
+
+                server.send_feishu_notification = fake_send
+                meeting_notification = server._send_meeting_request_notification(req)
+            finally:
+                server.send_feishu_notification = old_send
+            assert meeting_notification["record"]["type"] == "application_form"
+            assert [a["text"] for a in sent_intents[-1]["actions"]] == ["同意", "拒绝", "查看详情"]
+            assert sent_intents[-1]["actions"][2]["url"] == "/#projects"
+
+            result = server._handle_feishu_card_action(feishu_meeting_action_payload("confirm_meeting_request", req["id"]))
+            assert result["ok"] is True
+            assert result["toast"]["content"].startswith("会议申请已同意")
+            detail = server._handle_meeting_request_detail(req["id"])
+            assert detail["request"]["status"] == "confirmed"
+            assert detail["request"]["review"]["confirmedBy"] == "ou_feishu_user"
+
+            project2, task2 = create_fixture_project(status_dir)
+            req2 = server._handle_meeting_request_create(project2["id"], task2["id"], meeting_request_body("feishu reject"))["request"]
+            result2 = server._handle_feishu_card_action(feishu_meeting_action_payload("reject_meeting_request", req2["id"]))
+            assert result2["ok"] is True
+            assert result2["toast"]["content"].startswith("会议申请已拒绝")
+            detail2 = server._handle_meeting_request_detail(req2["id"])
+            assert detail2["request"]["status"] == "rejected"
+            assert detail2["request"]["review"]["rejectedBy"] == "ou_feishu_user"
+            assert detail2["request"]["review"]["rejectionReason"] == "Rejected from Feishu"
+
+            rows = read_feishu_action_records(status_dir)
+            outcomes = [row.get("outcome", {}) for row in rows if row.get("requestId") in {req["id"], req2["id"]}]
+            assert {o.get("businessStatus") for o in outcomes} >= {"confirmed", "rejected"}
+        finally:
+            restore_store(old)
+
+
+def test_feishu_meeting_request_card_actions_reject_invalid_states():
+    with tempfile.TemporaryDirectory() as status_dir:
+        old = with_store(status_dir)
+        try:
+            project, task = create_fixture_project(status_dir)
+            req = server._handle_meeting_request_create(project["id"], task["id"], meeting_request_body("stale"))["request"]
+            confirmed = server._handle_meeting_request_confirm(req["id"], {"confirmedBy": "user"})
+            assert confirmed["ok"] is True
+
+            rejected_after_confirm = server._handle_feishu_card_action(feishu_meeting_action_payload("reject_meeting_request", req["id"]))
+            assert rejected_after_confirm["ok"] is False
+            assert "cannot be rejected" in rejected_after_confirm["toast"]["content"]
+            detail = server._handle_meeting_request_detail(req["id"])
+            assert detail["request"]["status"] == "confirmed"
+
+            missing = server._handle_feishu_card_action(feishu_meeting_action_payload("confirm_meeting_request", "missing-request"))
+            assert missing["ok"] is False
+            assert "not found" in missing["toast"]["content"]
+
+            malformed = server._handle_feishu_card_action(feishu_meeting_action_payload("confirm_meeting_request", ""))
+            assert malformed["ok"] is False
+            assert "request_id" in malformed["toast"]["content"]
+
+            rows = read_feishu_action_records(status_dir)
+            statuses = [row.get("outcome", {}).get("businessStatus") for row in rows]
+            assert "request_confirmed" in statuses
+            assert "request_not_found" in statuses
+            assert "missing_request_id" in statuses
         finally:
             restore_store(old)
 
