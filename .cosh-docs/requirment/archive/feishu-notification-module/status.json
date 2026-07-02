@@ -1,12 +1,12 @@
 {
   "name": "feishu-notification-module",
-  "stage": "implementation_done",
+  "stage": "done",
   "waiting_for_user": false,
-  "updated_at": "2026-07-02T02:20:17+08:00",
+  "updated_at": "2026-07-02T21:39:49+08:00",
   "confirmed": {
     "checklist": true,
-    "tested": false,
-    "done": false
+    "tested": true,
+    "done": true
   },
   "confirmations": {
     "checklist": {
@@ -14,8 +14,16 @@
       "confirmed_at": "2026-07-02T02:03:12+08:00",
       "summary": "User confirmed checklist with: pass."
     },
-    "tested": null,
-    "done": null
+    "tested": {
+      "item": "tested",
+      "confirmed_at": "2026-07-02T21:39:49+08:00",
+      "summary": "User accepted the Feishu notification module after production Feishu card and long-connection button verification."
+    },
+    "done": {
+      "item": "done",
+      "confirmed_at": "2026-07-02T21:39:49+08:00",
+      "summary": "User requested final acceptance for the requirement: 可以，那先验收这个需求吧."
+    }
   },
   "files": {
     "requirement": "requirement.md",
@@ -28,6 +36,7 @@
     "Checklist confirmed by user and todolist created.",
     "The concrete Feishu webhook URL must be treated as a secret and must not be committed into implementation files.",
     "Implementation completed. Focused Feishu notification and meeting request regression tests passed. Manual Feishu send verification was not executed in this run.",
-    "Extended test_project_execution.py still fails at an isolated pre-existing project execution wait_for timeout unrelated to the new notification path."
+    "Extended test_project_execution.py still fails at an isolated pre-existing project execution wait_for timeout unrelated to the new notification path.",
+    "Final production acceptance passed: Feishu test cards were delivered and application form button clicks returned the expected Operation received toast via long connection."
   ]
 }

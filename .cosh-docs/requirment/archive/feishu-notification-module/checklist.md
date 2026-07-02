@@ -103,3 +103,10 @@
 - 2026-07-02T02:20:17+08:00 - CHK-001 至 CHK-013 自动化验证通过。覆盖测试：`.venv/bin/python tests/test_feishu_notifications.py`、`.venv/bin/python tests/test_feishu_sync.py`、`.venv/bin/python tests/test_meeting_request_blocks_task.py`、`.venv/bin/python tests/test_meeting_for_ai_phase4.py`、`.venv/bin/python -m py_compile app/feishu_notifications.py app/server.py tests/test_feishu_notifications.py tests/test_meeting_for_ai_phase4.py`、`git diff --check`。
 - 2026-07-02T02:20:17+08:00 - CHK-014 手动飞书验收未执行。本次实现未使用真实 webhook 发送消息；真实 webhook 只允许通过 `VO_FEISHU_NOTIFICATION_WEBHOOK` 环境变量配置。
 - 2026-07-02T02:20:17+08:00 - CHK-015 会议申请相关回归通过。扩展项目执行回归 `.venv/bin/python tests/test_project_execution.py` 在既有 `test_project_level_start_selects_first_eligible_and_auto_reviews_to_done_by_default` 等待点超时；隔离运行该测试同样超时，失败路径未经过本次新增 Feishu 通知模块或会议申请通知接入。
+- 2026-07-02T21:39:49+08:00 - CHK-001 至 CHK-015 最终验收通过。自动化验证覆盖：`.venv/bin/python tests/test_feishu_notifications.py`、`.venv/bin/python -m py_compile app/server.py app/feishu_notifications.py app/feishu_long_connection.py tests/test_feishu_notifications.py`、`node --check app/game.js`、`bash -n start.sh`、`git diff --cached --check`。
+- 2026-07-02T21:39:49+08:00 - CHK-014 生产飞书验收通过。用户在生产飞书群中验证四类测试卡片可发送，申请表单按钮点击后通过长连接返回“操作已收到”toast。
+
+## 最终验收记录
+
+- 2026-07-02T21:39:49+08:00 - 测试通过确认。用户确认摘要：可以，那先验收这个需求吧。
+- 2026-07-02T21:39:49+08:00 - 最终 done 确认。用户确认摘要：可以，那先验收这个需求吧。
