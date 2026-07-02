@@ -1802,7 +1802,6 @@
                 <div class="proj-exec-summary">${escHtml(proposal.cannotCompleteAloneReason || '')}</div>
                 ${autoConfirmReason}
                 ${rejectReason}
-                <button class="proj-btn proj-btn-sm" onclick="ProjMgr.openMeetingRequestsQueue()">打开会议申请队列</button>
             </div>`;
         }).join('');
     }
