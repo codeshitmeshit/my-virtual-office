@@ -4362,11 +4362,25 @@ button:active { transform: translateY(3px); box-shadow: none; }
 
 .mtg-participants { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
 .mtg-participant { display: flex; align-items: center; gap: 6px; background: #12121e; border: 1px solid #2a2a4e; border-radius: 6px; padding: 5px 10px; }
-.mtg-participant-emoji { font-size: 16px; }
+.mtg-participants-block { margin-bottom: 10px; }
+.mtg-participants-title { font-size: 8px; color: var(--gold); margin: 0 0 6px; font-weight: bold; }
+.mtg-participants-list { display: flex; flex-direction: column; flex-wrap: nowrap; gap: 6px; max-width: 540px; }
+.mtg-participant-row { min-width: 0; display: grid; grid-template-columns: 22px minmax(72px, max-content) minmax(0, 1fr); align-items: baseline; gap: 8px; background: #12121e; border: 1px solid #2a2a4e; border-radius: 6px; padding: 7px 10px; }
+.mtg-participant-emoji { font-size: 16px; line-height: 1; text-align: center; }
 .mtg-participant-info { display: flex; flex-direction: column; gap: 1px; }
-.mtg-participant-name { font-size: 9px; font-weight: bold; color: #ddd; line-height: 1.2; }
-.mtg-participant-role { font-size: 7px; color: #888; line-height: 1.2; }
+.mtg-participant-main { min-width: 0; display: contents; }
+.mtg-participant-name { min-width: 0; font-size: 9px; font-weight: bold; color: #ddd; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mtg-participant-role { min-width: 0; font-size: 7px; color: #888; line-height: 1.2; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mtg-participant-actions { font-size: 8px; color: #52b788; margin-top: 2px; }
+.mtg-participants-extra { display: none; flex-direction: column; gap: 6px; }
+.mtg-participants-extra.open { display: flex; }
+.mtg-participants-toggle { align-self: flex-start; border: 1px solid #2a2a4e; background: transparent; color: var(--gold); border-radius: 6px; padding: 5px 9px; font-size: 8px; cursor: pointer; }
+.mtg-participants-toggle:hover { background: rgba(255, 215, 0, 0.08); }
+@media (max-width: 720px) {
+  .mtg-participants-list { max-width: none; }
+  .mtg-participant-row { grid-template-columns: 22px minmax(0, 1fr); align-items: center; }
+  .mtg-participant-main { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; }
+}
 
 .mtg-responses { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
 .mtg-response { background: #12121e; border: 1px solid #2a2a4e; border-radius: 6px; padding: 10px; }

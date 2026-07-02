@@ -17655,27 +17655,11 @@ function _mtgRender() {
         }
 
         // Participants
-        html += '<div class="mtg-participants">';
-        participants.forEach(function(pKey) {
-            var info = _mtgAgentMap[pKey] || { emoji: '🤖', name: pKey, role: '' };
-            html += '<div class="mtg-participant">';
-            html += '<span class="mtg-participant-emoji">' + info.emoji + '</span>';
-            html += '<div class="mtg-participant-info">';
-            html += '<div class="mtg-participant-name">' + _escMtg(info.name) + '</div>';
-            if (info.role) html += '<div class="mtg-participant-role">' + _escMtg(info.role) + '</div>';
-            if (!isActive && m.actionItems && m.actionItems.length) {
-                var agentActions = m.actionItems.filter(function(item) {
-                    var text = _mtgActionText(item).toLowerCase();
-                    return text.indexOf(info.name.toLowerCase()) >= 0 ||
-                           text.indexOf(pKey.toLowerCase()) >= 0;
-                });
-                if (agentActions.length) {
-                    html += '<div class="mtg-participant-actions">→ ' + agentActions.map(function(item) { return _escMtg(_mtgActionText(item)); }).join('<br>→ ') + '</div>';
-                }
-            }
-            html += '</div></div>';
+        html += _mtgRenderParticipants(participants, m, {
+            id: 'card-' + m.id,
+            limit: 3,
+            showActions: !isActive
         });
-        html += '</div>';
 
         if (isActive && m.executableMeeting) {
             if ((m.executionStage || '') === 'awaiting_user_decision') {
@@ -17769,6 +17753,60 @@ function _mtgRender() {
         html += '</div>';  // close mtg-card
         return html;
     }).join('');
+}
+
+function _mtgParticipantDescription(info) {
+    if (!info) return '';
+    return String(info.role || '').trim();
+}
+
+function _mtgRenderParticipantRow(pKey, meeting, opts) {
+    opts = opts || {};
+    var info = _mtgAgentMap[pKey] || { emoji: '🤖', name: pKey, role: '' };
+    var desc = _mtgParticipantDescription(info);
+    var html = '<div class="mtg-participant-row">';
+    html += '<span class="mtg-participant-emoji">' + _escMtg(info.emoji || '🤖') + '</span>';
+    html += '<div class="mtg-participant-main">';
+    html += '<div class="mtg-participant-name">' + _escMtg(info.name || pKey) + '</div>';
+    if (desc) html += '<div class="mtg-participant-role" title="' + _escMtg(desc) + '">' + _escMtg(desc) + '</div>';
+    if (opts.showActions && meeting && meeting.actionItems && meeting.actionItems.length) {
+        var agentActions = meeting.actionItems.filter(function(item) {
+            var text = _mtgActionText(item).toLowerCase();
+            var name = String(info.name || '').toLowerCase();
+            return (name && text.indexOf(name) >= 0) || text.indexOf(String(pKey || '').toLowerCase()) >= 0;
+        });
+        if (agentActions.length) {
+            html += '<div class="mtg-participant-actions">→ ' + agentActions.map(function(item) { return _escMtg(_mtgActionText(item)); }).join('<br>→ ') + '</div>';
+        }
+    }
+    html += '</div></div>';
+    return html;
+}
+
+function _mtgRenderParticipants(participants, meeting, opts) {
+    participants = participants || [];
+    opts = opts || {};
+    var limit = Number(opts.limit || 3);
+    var id = String(opts.id || (meeting && meeting.id) || 'meeting').replace(/[^a-zA-Z0-9_-]/g, '-');
+    var canCollapse = participants.length > limit;
+    var visible = canCollapse ? participants.slice(0, limit) : participants;
+    var hidden = canCollapse ? participants.slice(limit) : [];
+    var html = '<div class="mtg-participants-block">';
+    html += '<div class="mtg-participants-title">' + _escMtg(_mtgT('meeting_participants', 'Participants')) + '</div>';
+    html += '<div class="mtg-participants mtg-participants-list" id="mtg-participants-' + _escMtg(id) + '">';
+    visible.forEach(function(pKey) {
+        html += _mtgRenderParticipantRow(pKey, meeting, opts);
+    });
+    if (hidden.length) {
+        html += '<div class="mtg-participants-extra" id="mtg-participants-extra-' + _escMtg(id) + '">';
+        hidden.forEach(function(pKey) {
+            html += _mtgRenderParticipantRow(pKey, meeting, opts);
+        });
+        html += '</div>';
+        html += '<button type="button" class="mtg-participants-toggle" data-expanded="0" data-total="' + _escMtg(String(participants.length)) + '" onclick="toggleMtgParticipants(\'' + _escMtg(id) + '\', this)">查看全部 ' + _escMtg(String(participants.length)) + '</button>';
+    }
+    html += '</div></div>';
+    return html;
 }
 
 function _mtgRequestStatusLabel(status) {
@@ -19637,6 +19675,14 @@ function toggleMtgResponse(respId, btn) {
     }
 }
 
+function toggleMtgParticipants(id, btn) {
+    var extra = document.getElementById('mtg-participants-extra-' + id);
+    if (!extra || !btn) return;
+    var expanded = extra.classList.toggle('open');
+    btn.dataset.expanded = expanded ? '1' : '0';
+    btn.textContent = expanded ? _tr('collapse') : ('查看全部 ' + String(btn.dataset.total || ''));
+}
+
 function _mtgFindMeeting(meetingId) {
     return (_mtgData.active || []).concat(_mtgData.history || []).find(function(m) {
         return m && m.id === meetingId;
@@ -19790,15 +19836,10 @@ function _mtgRenderMeetingDetail(m) {
     if (ts) rightMeta.push('🕐 ' + new Date(ts).toLocaleString());
     html += _mtgRenderMetaColumns(leftMeta, rightMeta);
 
-    html += '<div class="mtg-participants">';
-    participants.forEach(function(pKey) {
-        var info = _mtgAgentMap[pKey] || { emoji: '🤖', name: pKey, role: '' };
-        html += '<div class="mtg-participant"><span class="mtg-participant-emoji">' + info.emoji + '</span><div class="mtg-participant-info">';
-        html += '<div class="mtg-participant-name">' + _escMtg(info.name) + '</div>';
-        if (info.role) html += '<div class="mtg-participant-role">' + _escMtg(info.role) + '</div>';
-        html += '</div></div>';
+    html += _mtgRenderParticipants(participants, m, {
+        id: 'detail-' + m.id,
+        limit: 3
     });
-    html += '</div>';
 
     html += _mtgRenderResultSummary(m);
     html += _mtgRenderActionItemDrafts(m);
