@@ -418,6 +418,16 @@ def test_feishu_long_connection_event_conversion():
     assert body["event"]["action"]["value"]["action"] == "acceptance_approve"
 
 
+def test_feishu_long_connection_response_uses_plain_toast_dict():
+    from lark_oapi.core.json import JSON
+    from lark_oapi.event.callback.model.p2_card_action_trigger import P2CardActionTriggerResponse
+
+    response = P2CardActionTriggerResponse({"toast": {"type": "success", "content": "操作已收到"}})
+    serialized = JSON.marshal(response)
+    assert '"toast"' in serialized
+    assert "操作已收到" in serialized
+
+
 if __name__ == "__main__":
     test_four_notification_types_render_interactive_cards()
     test_application_form_actions_and_states_are_validated()
@@ -433,4 +443,5 @@ if __name__ == "__main__":
     test_manual_test_intents_cover_all_notification_types()
     test_feishu_card_action_challenge_and_recording()
     test_feishu_long_connection_event_conversion()
+    test_feishu_long_connection_response_uses_plain_toast_dict()
     print("test_feishu_notifications.py passed")

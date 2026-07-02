@@ -54,19 +54,28 @@ class FeishuLongConnectionReceiver:
         try:
             import lark_oapi as lark
             from lark_oapi.event.callback.model.p2_card_action_trigger import (
-                CallBackToast,
                 P2CardActionTrigger,
                 P2CardActionTriggerResponse,
             )
 
             def on_card_action(data: P2CardActionTrigger) -> P2CardActionTriggerResponse:
-                body = self._event_to_body(data)
-                result = self.action_handler(body)
-                self._set_status(status="running", running=True, lastEventAt=int(time.time()), lastError="")
-                toast = result.get("toast") if isinstance(result, dict) else None
-                if not isinstance(toast, dict):
-                    toast = {"type": "success", "content": "操作已收到"}
-                return P2CardActionTriggerResponse({"toast": CallBackToast(toast)})
+                try:
+                    body = self._event_to_body(data)
+                    result = self.action_handler(body)
+                    self._set_status(status="running", running=True, lastEventAt=int(time.time()), lastError="")
+                    toast = result.get("toast") if isinstance(result, dict) else None
+                    if not isinstance(toast, dict):
+                        toast = {"type": "success", "content": "操作已收到"}
+                    return P2CardActionTriggerResponse({"toast": toast})
+                except Exception as exc:
+                    self._set_status(
+                        status="handler_error",
+                        running=True,
+                        lastEventAt=int(time.time()),
+                        lastError=f"{type(exc).__name__}: {exc}",
+                    )
+                    print(f"[FeishuLongConnection] card action handler failed: {type(exc).__name__}: {exc}")
+                    return P2CardActionTriggerResponse({"toast": {"type": "warning", "content": "操作已收到，后台处理中"}})
 
             handler = (
                 lark.EventDispatcherHandler.builder("", "", lark.LogLevel.INFO)
