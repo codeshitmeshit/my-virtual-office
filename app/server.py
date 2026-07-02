@@ -11563,8 +11563,7 @@ def _meeting_extract_payload_text(obj):
         return ""
     result = obj.get("result")
     candidates = []
-    if isinstance(result, dict):
-        payload = result.get("payload")
+    def add_payload_items(payload):
         if isinstance(payload, list):
             for item in payload:
                 if isinstance(item, dict):
@@ -11575,9 +11574,14 @@ def _meeting_extract_payload_text(obj):
             candidates.append(payload.get("text") or payload.get("content") or payload.get("message") or "")
         elif isinstance(payload, str):
             candidates.append(payload)
+    if isinstance(result, dict):
+        add_payload_items(result.get("payload"))
+        add_payload_items(result.get("payloads"))
         for key in ("text", "reply", "message", "content"):
             if result.get(key):
                 candidates.append(result.get(key))
+    add_payload_items(obj.get("payload"))
+    add_payload_items(obj.get("payloads"))
     for key in ("text", "reply", "message", "content"):
         if obj.get(key):
             candidates.append(obj.get(key))

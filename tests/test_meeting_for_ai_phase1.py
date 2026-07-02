@@ -1489,6 +1489,28 @@ def test_phase3_provider_envelope_is_unwrapped_and_structured_turn_is_projected(
     assert "runId" not in normalized["text"]
 
 
+def test_phase3_openclaw_payloads_envelope_is_unwrapped():
+    envelope = {
+        "runId": "d71f2829-af2c-46d3-8edf-16a5e562f483",
+        "status": "ok",
+        "summary": "completed",
+        "result": {
+            "payloads": [{
+                "text": "各位好，我是风控管理委员会 agent。\n\n我的角色是评估交易方案的风险边界。",
+                "mediaUrl": None,
+            }],
+        },
+        "meta": {"durationMs": 29933},
+    }
+    normalized = server._meeting_normalize_provider_reply(json.dumps(envelope, ensure_ascii=False))
+    assert normalized["text"].startswith("各位好，我是风控管理委员会 agent。")
+    assert "风险边界" in normalized["text"]
+    assert "runId" in normalized["providerRaw"]
+    assert "payloads" in normalized["providerRaw"]
+    assert "d71f2829" not in normalized["text"]
+    assert '"status"' not in normalized["text"]
+
+
 def test_phase3_structured_provider_output_is_saved_without_raw_envelope_in_transcript():
     with tempfile.TemporaryDirectory() as status_dir:
         old = with_meeting_store(status_dir)
