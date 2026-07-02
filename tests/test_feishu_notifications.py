@@ -303,26 +303,46 @@ def test_feishu_config_save_returns_app_mask_and_clears_webhook():
     os.environ["VO_STATUS_DIR"] = status_dir
     import server
 
+    class FakeReceiver:
+        def __init__(self, app_id="", app_secret="", action_handler=None):
+            self.app_id = app_id
+            self.app_secret = app_secret
+            self.action_handler = action_handler
+
+        def start(self):
+            return {"enabled": True, "running": True, "status": "running"}
+
+        def status(self):
+            return {"enabled": True, "running": True, "status": "running"}
+
+    previous_receiver_cls = server.FeishuLongConnectionReceiver
+    previous_receiver = server._FEISHU_LONG_CONNECTION_RECEIVER
+    server.FeishuLongConnectionReceiver = FakeReceiver
+    server._FEISHU_LONG_CONNECTION_RECEIVER = None
     server._persist_setup_payload({
         "notifications": {
             "feishuWebhook": "https://open.feishu.cn/open-apis/bot/v2/hook/old-token",
             "feishuEnabled": True,
         }
     })
-    result = server._save_feishu_notification_config({
-        "feishuEnabled": True,
-        "feishuAppId": "cli_demo_app",
-        "feishuAppSecret": "secret-should-not-return",
-        "feishuReceiveIdType": "chat_id",
-        "feishuReceiveId": "oc_demo_chat",
-        "clearWebhook": True,
-    })
+    try:
+        result = server._save_feishu_notification_config({
+            "feishuEnabled": True,
+            "feishuAppId": "cli_demo_app",
+            "feishuAppSecret": "secret-should-not-return",
+            "feishuReceiveIdType": "chat_id",
+            "feishuReceiveId": "oc_demo_chat",
+            "clearWebhook": True,
+        })
+    finally:
+        server.FeishuLongConnectionReceiver = previous_receiver_cls
+        server._FEISHU_LONG_CONNECTION_RECEIVER = previous_receiver
     assert result["ok"] is True
     assert result["feishuAppConfigured"] is True
     assert result["maskedFeishuAppId"]
     assert result["maskedFeishuReceiveId"]
-    assert result["feishuCardActionPath"] == "/api/feishu/card-action"
-    assert result["feishuVerificationConfigured"] is False
+    assert result["feishuCallbackMode"] == "long_connection"
+    assert result["feishuLongConnection"]["status"] == "running"
     serialized = json.dumps(result, ensure_ascii=False)
     assert "secret-should-not-return" not in serialized
     with open(os.path.join(status_dir, "vo-config.json"), "r", encoding="utf-8") as f:
@@ -349,10 +369,6 @@ def test_feishu_card_action_challenge_and_recording():
 
     previous_status_dir = server.STATUS_DIR
     server.STATUS_DIR = status_dir
-    health = server._feishu_card_action_health()
-    assert health["ok"] is True
-    assert health["status"] == "online"
-    assert health["path"] == "/api/feishu/card-action"
     assert server._handle_feishu_card_action({"challenge": "abc123"}) == {"challenge": "abc123"}
     try:
         result = server._handle_feishu_card_action({
@@ -380,22 +396,26 @@ def test_feishu_card_action_challenge_and_recording():
     assert rows[0]["user"]["openId"] == "ou_demo"
 
 
-def test_feishu_card_action_verification_token_rejects_mismatch():
-    os.environ.setdefault("VO_HERMES_ENABLED", "0")
-    os.environ.setdefault("VO_CODEX_ENABLED", "0")
-    os.environ["VO_STATUS_DIR"] = tempfile.mkdtemp(prefix="vo-feishu-card-token-")
-    import server
+def test_feishu_long_connection_event_conversion():
+    from feishu_long_connection import FeishuLongConnectionReceiver
 
-    previous = server.VO_CONFIG.setdefault("notifications", {}).get("feishuVerificationToken")
-    try:
-        server.VO_CONFIG.setdefault("notifications", {})["feishuVerificationToken"] = "expected-token"
-        result = server._handle_feishu_card_action({
-            "header": {"token": "wrong-token", "event_type": "card.action.trigger"},
-            "event": {"action": {"value": {"action": "acceptance_approve"}}},
-        })
-        assert result["_status"] == 401
-    finally:
-        server.VO_CONFIG.setdefault("notifications", {})["feishuVerificationToken"] = previous or ""
+    class Obj:
+        def __init__(self, **kwargs):
+            self.__dict__.update(kwargs)
+
+    data = Obj(
+        header=Obj(event_id="evt_demo"),
+        event=Obj(
+            operator=Obj(open_id="ou_demo", user_id="u_demo", union_id="on_demo"),
+            context=Obj(open_message_id="om_demo", open_chat_id="oc_demo"),
+            action=Obj(value={"action": "acceptance_approve"}, tag="button", option="", name="approve"),
+        ),
+    )
+    body = FeishuLongConnectionReceiver._event_to_body(data)
+    assert body["header"]["event_type"] == "card.action.trigger"
+    assert body["event"]["operator"]["open_id"] == "ou_demo"
+    assert body["event"]["open_message_id"] == "om_demo"
+    assert body["event"]["action"]["value"]["action"] == "acceptance_approve"
 
 
 if __name__ == "__main__":
@@ -412,5 +432,5 @@ if __name__ == "__main__":
     test_feishu_config_save_returns_app_mask_and_clears_webhook()
     test_manual_test_intents_cover_all_notification_types()
     test_feishu_card_action_challenge_and_recording()
-    test_feishu_card_action_verification_token_rejects_mismatch()
+    test_feishu_long_connection_event_conversion()
     print("test_feishu_notifications.py passed")

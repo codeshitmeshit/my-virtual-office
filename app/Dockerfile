@@ -3,7 +3,7 @@ FROM python:3.12-slim
 WORKDIR /app
 
 # Install dependencies
-RUN pip install --no-cache-dir websockets
+RUN pip install --no-cache-dir websockets "lark-oapi>=1.7,<2"
 
 # Copy application files
 COPY . .

@@ -14515,26 +14515,26 @@ function mmIsMaskedFeishuValue(value) {
     return String(value || '').indexOf('••••') >= 0;
 }
 
-function mmFeishuCallbackUrl(path) {
-    path = path || '/api/feishu/card-action';
-    if (/^https?:\/\//.test(path)) return path;
-    return window.location.origin + path;
-}
-
 function mmFillFeishuMaskedInputs(cfg) {
     cfg = cfg || {};
     var appIdEl = document.getElementById('mm-feishu-app-id');
     var appSecretEl = document.getElementById('mm-feishu-app-secret');
     var receiveIdEl = document.getElementById('mm-feishu-receive-id');
     var receiveIdTypeEl = document.getElementById('mm-feishu-receive-id-type');
-    var cardActionUrlEl = document.getElementById('mm-feishu-card-action-url');
-    var verificationTokenEl = document.getElementById('mm-feishu-verification-token');
     if (appIdEl) appIdEl.value = cfg.maskedFeishuAppId || '';
     if (appSecretEl) appSecretEl.value = cfg.feishuAppConfigured ? '••••••••' : '';
     if (receiveIdEl) receiveIdEl.value = cfg.maskedFeishuReceiveId || '';
     if (receiveIdTypeEl) receiveIdTypeEl.value = cfg.feishuReceiveIdType || 'chat_id';
-    if (cardActionUrlEl) cardActionUrlEl.value = mmFeishuCallbackUrl(cfg.feishuCardActionPath);
-    if (verificationTokenEl) verificationTokenEl.value = cfg.feishuVerificationConfigured ? '••••••••' : '';
+    mmRenderFeishuLongConnectionStatus(cfg);
+}
+
+function mmRenderFeishuLongConnectionStatus(cfg) {
+    var el = document.getElementById('mm-feishu-long-connection-status');
+    if (!el) return;
+    var lc = (cfg || {}).feishuLongConnection || {};
+    var status = lc.status || 'not_started';
+    el.textContent = _tr('feishu_long_connection_status', { status: status });
+    el.style.color = lc.running ? '#81c784' : (status === 'error' ? '#ff8a80' : '#888');
 }
 
 function mmSaveFeishuWebhook() {
@@ -14543,7 +14543,6 @@ function mmSaveFeishuWebhook() {
     var appSecretEl = document.getElementById('mm-feishu-app-secret');
     var receiveIdTypeEl = document.getElementById('mm-feishu-receive-id-type');
     var receiveIdEl = document.getElementById('mm-feishu-receive-id');
-    var verificationTokenEl = document.getElementById('mm-feishu-verification-token');
     var statusEl = document.getElementById('mm-feishu-status');
     if (!statusEl) return;
     var enabled = enabledEl ? enabledEl.checked : true;
@@ -14551,7 +14550,6 @@ function mmSaveFeishuWebhook() {
     var appSecret = (appSecretEl ? appSecretEl.value : '').trim();
     var receiveId = (receiveIdEl ? receiveIdEl.value : '').trim();
     var receiveIdType = (receiveIdTypeEl ? receiveIdTypeEl.value : 'chat_id') || 'chat_id';
-    var verificationToken = (verificationTokenEl ? verificationTokenEl.value : '').trim();
     var appConfigured = mmIsMaskedFeishuValue(appId) && mmIsMaskedFeishuValue(appSecret) && mmIsMaskedFeishuValue(receiveId);
     if (!(appConfigured || (appId && appSecret && receiveId))) {
         statusEl.innerHTML = '<div class="mm-status err">' + escHtml(_tr('feishu_save_requires_config')) + '</div>';
@@ -14567,7 +14565,6 @@ function mmSaveFeishuWebhook() {
             feishuAppSecret: mmIsMaskedFeishuValue(appSecret) ? '' : appSecret,
             feishuReceiveIdType: receiveIdType,
             feishuReceiveId: mmIsMaskedFeishuValue(receiveId) ? '' : receiveId,
-            feishuVerificationToken: mmIsMaskedFeishuValue(verificationToken) ? '' : verificationToken,
             clearWebhook: true
         })
     }).then(function(r) {

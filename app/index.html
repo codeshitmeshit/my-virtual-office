@@ -263,11 +263,7 @@
                             </select>
                             <label class="mm-label" data-i18n="feishu_receive_id">Receive ID</label>
                             <input type="text" id="mm-feishu-receive-id" class="mm-input" placeholder="oc_xxx / ou_xxx / user@example.com" autocomplete="off">
-                            <label class="mm-label" data-i18n="feishu_card_action_callback">Card Action Callback</label>
-                            <input type="text" id="mm-feishu-card-action-url" class="mm-input" value="/api/feishu/card-action" readonly>
-                            <div style="font-size:9px;color:#666;margin:2px 0 6px;line-height:1.4;" data-i18n="feishu_card_action_note">Set this path under your production HTTPS domain in Feishu Open Platform so card buttons can call back.</div>
-                            <label class="mm-label" data-i18n="feishu_verification_token">Verification Token</label>
-                            <input type="password" id="mm-feishu-verification-token" class="mm-input" placeholder="optional callback token" autocomplete="off">
+                            <div id="mm-feishu-long-connection-status" style="font-size:9px;color:#888;margin:4px 0 8px;line-height:1.4;" data-i18n="feishu_long_connection_pending">Long connection starts after saving config.</div>
                             <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
                                 <button class="mm-btn mm-btn-primary" onclick="mmSaveFeishuWebhook()" data-i18n="feishu_save_config">Save Config</button>
                                 <button class="mm-btn" onclick="mmTestFeishuNotification()" data-i18n="feishu_send_test_cards">Send Test Cards</button>

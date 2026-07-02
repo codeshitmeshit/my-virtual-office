@@ -405,6 +405,25 @@ start_local() {
     fi
     echo -e "  ${GREEN}✓${NC} websockets 可用"
 
+    if ! "$python_bin" -c "import lark_oapi" 2>/dev/null; then
+        echo -e "  ${YELLOW}⚠ lark-oapi 未安装，正在安装飞书长连接 SDK...${NC}"
+        if [ ! -x "$SCRIPT_DIR/.venv/bin/python" ]; then
+            python3 -m venv "$SCRIPT_DIR/.venv" || {
+                echo -e "${RED}✗ 创建 Python 虚拟环境失败${NC}"
+                echo "请安装 python3-venv，或手动创建 .venv 后安装: python -m pip install 'lark-oapi>=1.7,<2'"
+                exit 1
+            }
+        fi
+        python_bin="$SCRIPT_DIR/.venv/bin/python"
+        "$python_bin" -m pip install 'lark-oapi>=1.7,<2' 2>&1 | tail -1
+        if ! "$python_bin" -c "import lark_oapi" 2>/dev/null; then
+            echo -e "${RED}✗ lark-oapi 安装失败${NC}"
+            echo "请手动运行: $python_bin -m pip install 'lark-oapi>=1.7,<2'"
+            exit 1
+        fi
+    fi
+    echo -e "  ${GREEN}✓${NC} lark-oapi 可用"
+
     setup_env
 
     echo -e "${CYAN}[2/3] 准备数据目录...${NC}"

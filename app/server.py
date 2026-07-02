@@ -40,6 +40,11 @@ from provider_execution import (
     provider_http_status,
 )
 from feishu_notifications import send_feishu_notification
+from feishu_long_connection import FeishuLongConnectionReceiver
+
+
+_FEISHU_LONG_CONNECTION_RECEIVER = None
+_FEISHU_LONG_CONNECTION_LOCK = threading.Lock()
 
 
 def _normalize_presence_entry(entry):
@@ -327,8 +332,6 @@ def _load_vo_config():
             "feishuAppSecret": _env_or("VO_FEISHU_APP_SECRET", notifications_cfg.get("feishuAppSecret", "")),
             "feishuReceiveIdType": _env_or("VO_FEISHU_RECEIVE_ID_TYPE", notifications_cfg.get("feishuReceiveIdType", "chat_id")),
             "feishuReceiveId": _env_or("VO_FEISHU_RECEIVE_ID", notifications_cfg.get("feishuReceiveId", "")),
-            "feishuVerificationToken": _env_or("VO_FEISHU_VERIFICATION_TOKEN", notifications_cfg.get("feishuVerificationToken", "")),
-            "feishuEncryptKey": _env_or("VO_FEISHU_ENCRYPT_KEY", notifications_cfg.get("feishuEncryptKey", "")),
         },
         "hermes": {
             "enabled": str(_env_or("VO_HERMES_ENABLED", hermes_cfg.get("enabled", True))).lower() not in ("0", "false", "no", "off"),
@@ -377,7 +380,7 @@ def _load_vo_config():
         },
     }
 
-_SETUP_SECRET_KEYS = {"apiKey", "gatewayToken", "twilioAuthToken", "feishuWebhook", "feishuAppSecret", "feishuVerificationToken", "feishuEncryptKey"}
+_SETUP_SECRET_KEYS = {"apiKey", "gatewayToken", "twilioAuthToken", "feishuWebhook", "feishuAppSecret"}
 
 
 def _mask_feishu_webhook(value):
@@ -8887,6 +8890,7 @@ def _send_meeting_request_notification(req, state="pending", *, summary="", acti
 
 def _feishu_notification_config_response():
     cfg = VO_CONFIG.get("notifications", {}) or {}
+    receiver = _get_feishu_long_connection_receiver()
     return {
         "ok": True,
         "feishuEnabled": cfg.get("feishuEnabled", True),
@@ -8895,8 +8899,8 @@ def _feishu_notification_config_response():
         "maskedFeishuAppId": _mask_secret_value(cfg.get("feishuAppId"), 5, 4),
         "feishuReceiveIdType": cfg.get("feishuReceiveIdType") or "chat_id",
         "maskedFeishuReceiveId": _mask_secret_value(cfg.get("feishuReceiveId"), 5, 4),
-        "feishuCardActionPath": "/api/feishu/card-action",
-        "feishuVerificationConfigured": bool(str(cfg.get("feishuVerificationToken") or "").strip()),
+        "feishuCallbackMode": "long_connection",
+        "feishuLongConnection": receiver.status() if receiver else {"enabled": False, "running": False, "status": "not_started"},
     }
 
 
@@ -8907,8 +8911,6 @@ def _save_feishu_notification_config(body):
     app_secret = str((body or {}).get("feishuAppSecret") or "").strip()
     receive_id_type = str((body or {}).get("feishuReceiveIdType") or "chat_id").strip() or "chat_id"
     receive_id = str((body or {}).get("feishuReceiveId") or "").strip()
-    verification_token = str((body or {}).get("feishuVerificationToken") or "").strip()
-    encrypt_key = str((body or {}).get("feishuEncryptKey") or "").strip()
     if webhook and not re.match(r"^https://open\.(feishu|larksuite)\.cn/open-apis/bot/v2/hook/[A-Za-z0-9_-]+$", webhook):
         return {"ok": False, "error": "Invalid Feishu webhook URL", "code": "invalid_webhook", "_status": 400}
     if receive_id_type not in {"open_id", "user_id", "union_id", "email", "chat_id"}:
@@ -8922,16 +8924,13 @@ def _save_feishu_notification_config(body):
         notifications["feishuAppSecret"] = app_secret
     if receive_id or (body or {}).get("clearApp"):
         notifications["feishuReceiveId"] = receive_id
-    if verification_token:
-        notifications["feishuVerificationToken"] = verification_token
-    if encrypt_key:
-        notifications["feishuEncryptKey"] = encrypt_key
     payload = {"notifications": notifications}
     if (body or {}).get("clearWebhook"):
         payload.setdefault("_clearSecrets", []).append("notifications.feishuWebhook")
     result = _persist_setup_payload(payload)
     if not result.get("ok"):
         return result
+    _start_feishu_long_connection()
     return _feishu_notification_config_response()
 
 
@@ -9057,14 +9056,6 @@ def _handle_feishu_card_action(body):
     if isinstance(challenge, str) and challenge:
         return {"challenge": challenge}
 
-    cfg = VO_CONFIG.get("notifications", {}) or {}
-    expected_token = str(cfg.get("feishuVerificationToken") or "").strip()
-    actual_token = str(body.get("token") or body.get("header", {}).get("token") or "").strip()
-    if expected_token and actual_token and actual_token != expected_token:
-        return {"ok": False, "error": "Invalid Feishu verification token", "_status": 401}
-    if expected_token and not actual_token:
-        return {"ok": False, "error": "Missing Feishu verification token", "_status": 401}
-
     event = body.get("event") if isinstance(body.get("event"), dict) else body
     value = _feishu_card_action_value(event)
     record = _record_feishu_card_action(body, event, value)
@@ -9075,14 +9066,30 @@ def _handle_feishu_card_action(body):
     }
 
 
-def _feishu_card_action_health():
+def _get_feishu_long_connection_receiver():
+    global _FEISHU_LONG_CONNECTION_RECEIVER
+    return _FEISHU_LONG_CONNECTION_RECEIVER
+
+
+def _start_feishu_long_connection():
+    global _FEISHU_LONG_CONNECTION_RECEIVER
     cfg = VO_CONFIG.get("notifications", {}) or {}
-    return {
-        "ok": True,
-        "status": "online",
-        "path": "/api/feishu/card-action",
-        "verificationConfigured": bool(str(cfg.get("feishuVerificationToken") or "").strip()),
-    }
+    if cfg.get("feishuEnabled", True) is False:
+        return {"enabled": False, "running": False, "status": "disabled"}
+    app_id = str(cfg.get("feishuAppId") or "").strip()
+    app_secret = str(cfg.get("feishuAppSecret") or "").strip()
+    if not app_id or not app_secret:
+        return {"enabled": False, "running": False, "status": "missing_app_credentials"}
+    with _FEISHU_LONG_CONNECTION_LOCK:
+        existing = _FEISHU_LONG_CONNECTION_RECEIVER
+        if existing and existing.app_id == app_id and existing.app_secret == app_secret:
+            return existing.start()
+        _FEISHU_LONG_CONNECTION_RECEIVER = FeishuLongConnectionReceiver(
+            app_id=app_id,
+            app_secret=app_secret,
+            action_handler=_handle_feishu_card_action,
+        )
+        return _FEISHU_LONG_CONNECTION_RECEIVER.start()
 
 
 def _handle_meeting_request_create(project_id, task_id, body):
@@ -23156,12 +23163,6 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(json.dumps(_feishu_notification_config_response()).encode())
-        elif self.path == "/api/feishu/card-action":
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.end_headers()
-            self.wfile.write(json.dumps(_feishu_card_action_health()).encode())
         elif self.path == "/api/gateway/test":
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -24789,22 +24790,6 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             self.end_headers()
             result.pop("_status", None)
             self.wfile.write(json.dumps(result).encode())
-            return
-        elif self.path == "/api/feishu/card-action":
-            length = int(self.headers.get('Content-Length', 0))
-            try:
-                body = json.loads(self.rfile.read(length)) if length else {}
-                result = _handle_feishu_card_action(body)
-            except json.JSONDecodeError as e:
-                result = {"ok": False, "error": f"Invalid JSON: {str(e)}", "_status": 400}
-            except Exception as e:
-                result = {"ok": False, "error": str(e), "_status": 500}
-            self.send_response(result.get("_status", 200))
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.end_headers()
-            result.pop("_status", None)
-            self.wfile.write(json.dumps(result, ensure_ascii=False).encode())
             return
         # --- OFFICE CONFIG PERSISTENCE ---
         elif self.path == "/api/office-config":
@@ -26963,6 +26948,9 @@ if __name__ == "__main__":
     archive_manager_thread.start()
     archive_inspection_thread = threading.Thread(target=_archive_manager_startup_inspection, daemon=True, name="archive-manager-startup-inspection")
     archive_inspection_thread.start()
+
+    feishu_status = _start_feishu_long_connection()
+    print(f"📣 Feishu long connection: {feishu_status.get('status')}")
 
     # Start HTTP server in main thread
     start_http_server()
