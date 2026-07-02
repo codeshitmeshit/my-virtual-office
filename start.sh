@@ -245,7 +245,8 @@ start_browser_service() {
     docker compose build agent-browser
 
     echo -e "${CYAN}[4/5] 启动代理浏览器...${NC}"
-    docker compose up -d agent-browser
+    # Force recreation so old containers cannot keep stale images or legacy bind mounts.
+    docker compose up -d --force-recreate agent-browser
 
     echo -e "${CYAN}[5/5] 等待代理浏览器 CDP 就绪...${NC}"
     local max_wait=30

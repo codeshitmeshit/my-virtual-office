@@ -3,7 +3,11 @@ FROM kasmweb/chromium:1.17.0
 USER root
 
 RUN mkdir -p /opt/agent-browser /home/kasm-user/.config/chromium \
-    && chown -R 1000:1000 /home/kasm-user/.config
+    && chown -R 1000:1000 /home/kasm-user/.config \
+    && if [ -x /usr/bin/chromium ] && [ ! -e /usr/bin/chromium-orig ]; then \
+        cp -a /usr/bin/chromium /usr/bin/chromium-orig; \
+    fi \
+    && test -x /usr/bin/chromium-orig
 
 COPY --chmod=0755 chromium-browser /usr/bin/chromium
 COPY --chmod=0755 cdp-proxy.py /opt/agent-browser/cdp-proxy.py
