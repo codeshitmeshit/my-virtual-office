@@ -40,6 +40,8 @@
         .weather-row input[type=text] { min-width: 0; }
         .weather-actions { margin-top: 8px; }
         .weather-actions button { width: 100%; white-space: nowrap; padding-left: 16px; padding-right: 16px; }
+        .secret-row { display: grid; grid-template-columns: minmax(0, 1fr) 120px; gap: 8px; align-items: start; }
+        .secret-row input { min-width: 0; }
         @media (max-width: 560px) {
             .weather-row { grid-template-columns: minmax(0, 1fr) 100px; }
         }
@@ -400,6 +402,34 @@
                 <div style="font-size:12px;color:#666;margin:8px 0 4px;" data-i18n="twilio_required">All three Twilio fields are required for sending SMS.</div>
             </div>
 
+            <div style="border-top:1px solid #333;padding-top:16px;margin-top:18px;">
+                <div style="font-size:13px;color:#ffd700;font-weight:bold;margin-bottom:8px;" data-i18n="feishu_notifications_section">📣 Feishu Notifications</div>
+                <label style="display:flex;align-items:center;gap:8px;margin-top:8px;">
+                    <input type="checkbox" id="s-feishu-enable" checked> <span data-i18n="feishu_enable_webhook">Enable Feishu notification webhook</span>
+                </label>
+                <div id="feishu-webhook-mask" style="font-size:12px;color:#888;margin:6px 0 10px;" data-i18n="feishu_not_configured">Not configured</div>
+                <label data-i18n="feishu_app_id">Feishu App ID</label>
+                <input type="text" id="s-feishu-app-id" placeholder="cli_xxx" autocomplete="off">
+                <label data-i18n="feishu_app_secret">Feishu App Secret</label>
+                <input type="password" id="s-feishu-app-secret" placeholder="app secret" autocomplete="off">
+                <label data-i18n="feishu_receive_id_type">Receive ID Type</label>
+                <select id="s-feishu-receive-id-type">
+                    <option value="chat_id">chat_id</option>
+                    <option value="open_id">open_id</option>
+                    <option value="user_id">user_id</option>
+                    <option value="union_id">union_id</option>
+                    <option value="email">email</option>
+                </select>
+                <label data-i18n="feishu_receive_id">Receive ID</label>
+                <input type="text" id="s-feishu-receive-id" placeholder="oc_xxx / ou_xxx / user@example.com" autocomplete="off">
+                <button type="button" class="secondary" onclick="saveFeishuWebhook()" style="margin:0 0 12px;padding:8px 16px;font-size:9px;" data-i18n="feishu_save_config">SAVE</button>
+                <button type="button" onclick="testFeishuNotification()" style="margin:0 0 12px;padding:8px 16px;font-size:9px;" data-i18n="feishu_send_test_cards">SEND TEST CARDS</button>
+                <div id="feishu-test-status"></div>
+                <div class="note" data-i18n="feishu_secret_note_setup">
+                    The full webhook is stored server-side and never shown back in the browser. Leave the field blank to keep the existing saved webhook.
+                </div>
+            </div>
+
             <div class="note" data-i18n-html="setup_sms_note">
                 <b data-i18n="what_is_sms">What is this?</b> The SMS Panel lets you send and receive text messages through an AI agent in your office.<br><br>
                 <b>What you need:</b><br>
@@ -631,7 +661,111 @@
             if (document.getElementById('s-claude-register')) document.getElementById('s-claude-register').checked = cc.registerNativeAgents !== false;
             var ccFields = document.getElementById('claude-fields');
             if (ccFields && ccEnable) ccFields.style.display = ccEnable.checked ? 'block' : 'none';
+            var n = cfg.notifications || {};
+            var fEnable = document.getElementById('s-feishu-enable');
+            if (fEnable) fEnable.checked = n.feishuEnabled !== false;
+            fillFeishuMaskedInputs(n);
+            renderFeishuWebhookMask(n);
         }).catch(function(){});
+
+        function isMaskedFeishuValue(value) {
+            return String(value || '').indexOf('••••') >= 0;
+        }
+
+        function fillFeishuMaskedInputs(cfg) {
+            cfg = cfg || {};
+            if (document.getElementById('s-feishu-app-id')) document.getElementById('s-feishu-app-id').value = cfg.maskedFeishuAppId || '';
+            if (document.getElementById('s-feishu-app-secret')) document.getElementById('s-feishu-app-secret').value = cfg.feishuAppConfigured ? '••••••••' : '';
+            if (document.getElementById('s-feishu-receive-id')) document.getElementById('s-feishu-receive-id').value = cfg.maskedFeishuReceiveId || '';
+            if (document.getElementById('s-feishu-receive-id-type')) document.getElementById('s-feishu-receive-id-type').value = cfg.feishuReceiveIdType || 'chat_id';
+        }
+
+        function renderFeishuWebhookMask(cfg) {
+            var el = document.getElementById('feishu-webhook-mask');
+            if (!el) return;
+            cfg = cfg || {};
+            if (cfg.feishuAppConfigured) {
+                el.textContent = _t('feishu_configured_app', {
+                    appId: cfg.maskedFeishuAppId || '••••••••',
+                    receiveIdType: cfg.feishuReceiveIdType || 'chat_id',
+                    receiveId: cfg.maskedFeishuReceiveId || '••••••••'
+                });
+                el.style.color = '#81c784';
+            } else {
+                el.textContent = _t('feishu_not_configured');
+                el.style.color = '#888';
+            }
+        }
+
+        function loadFeishuWebhookConfig() {
+            fetch('/api/feishu-notification/config').then(function(r) { return r.json(); }).then(function(d) {
+                if (document.getElementById('s-feishu-enable')) document.getElementById('s-feishu-enable').checked = d.feishuEnabled !== false;
+                fillFeishuMaskedInputs(d);
+                renderFeishuWebhookMask(d);
+            }).catch(function(){});
+        }
+        loadFeishuWebhookConfig();
+
+        function saveFeishuWebhook() {
+            var enabled = document.getElementById('s-feishu-enable').checked;
+            var appId = document.getElementById('s-feishu-app-id').value.trim();
+            var appSecret = document.getElementById('s-feishu-app-secret').value.trim();
+            var receiveIdType = document.getElementById('s-feishu-receive-id-type').value || 'chat_id';
+            var receiveId = document.getElementById('s-feishu-receive-id').value.trim();
+            var statusEl = document.getElementById('feishu-test-status');
+            var appConfigured = isMaskedFeishuValue(appId) && isMaskedFeishuValue(appSecret) && isMaskedFeishuValue(receiveId);
+            if (!(appConfigured || (appId && appSecret && receiveId))) {
+                statusEl.innerHTML = '<div class="status-box error">' + _esc(_t('feishu_save_requires_config')) + '</div>';
+                return;
+            }
+            statusEl.innerHTML = '<div class="status-box info">' + _esc(_t('feishu_saving_config')) + '</div>';
+            fetch('/api/feishu-notification/config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    feishuEnabled: enabled,
+                    feishuAppId: isMaskedFeishuValue(appId) ? '' : appId,
+                    feishuAppSecret: isMaskedFeishuValue(appSecret) ? '' : appSecret,
+                    feishuReceiveIdType: receiveIdType,
+                    feishuReceiveId: isMaskedFeishuValue(receiveId) ? '' : receiveId,
+                    clearWebhook: true
+                })
+            }).then(function(r) { return r.json().then(function(d) { d._httpOk = r.ok; return d; }); }).then(function(d) {
+                if (!d.ok) {
+                    statusEl.innerHTML = '<div class="status-box error">❌ ' + _esc(d.error || _t('feishu_save_failed')) + '</div>';
+                    return;
+                }
+                fillFeishuMaskedInputs(d);
+                renderFeishuWebhookMask(d);
+                statusEl.innerHTML = '<div class="status-box success">✅ ' + _esc(_t('feishu_config_saved')) + '</div>';
+            }).catch(function(e) {
+                statusEl.innerHTML = '<div class="status-box error">Error: ' + _esc(e.message) + '</div>';
+            });
+        }
+
+        function testFeishuNotification() {
+            var statusEl = document.getElementById('feishu-test-status');
+            statusEl.innerHTML = '<div class="status-box info">' + _esc(_t('feishu_sending_test_cards')) + '</div>';
+            fetch('/api/feishu-notification/test', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: '{}'
+            }).then(function(r) { return r.json().then(function(d) { d._httpOk = r.ok; return d; }); }).then(function(d) {
+                if (!d.ok) {
+                    var detail = d.error || '';
+                    if (!detail && d.results && d.results.length) {
+                        var failed = d.results.find(function(r) { return !r.ok; }) || d.results[0];
+                        detail = failed.message || failed.error || failed.status || '';
+                        if (failed.code !== undefined && failed.code !== '') detail += ' (code: ' + failed.code + ')';
+                    }
+                    statusEl.innerHTML = '<div class="status-box error">❌ ' + _esc(detail || _t('feishu_test_failed')) + '</div>';
+                    return;
+                }
+                statusEl.innerHTML = '<div class="status-box success">✅ ' + _esc(_t('feishu_test_cards_sent')) + '</div>';
+            }).catch(function(e) {
+                statusEl.innerHTML = '<div class="status-box error">Error: ' + _esc(e.message) + '</div>';
+            });
+        }
 
         function testPcMetrics() {
             var url = document.getElementById('s-pcmetrics-url').value.trim();
@@ -997,6 +1131,9 @@
             var pcMetricsEnabled = document.getElementById('s-pcmetrics-enable').checked;
             var hermesEnabled = document.getElementById('s-hermes-enable').checked;
             var gwToken = (document.getElementById('s-gateway-token') || {}).value || '';
+            var feishuAppId = document.getElementById('s-feishu-app-id').value.trim();
+            var feishuAppSecret = document.getElementById('s-feishu-app-secret').value.trim();
+            var feishuReceiveId = document.getElementById('s-feishu-receive-id').value.trim();
             var config = {
                 office: { name: document.getElementById('s-name').value || 'Virtual Office' },
                 weather: { location: _buildWeatherLocation(document.getElementById('s-weather-city').value, document.getElementById('s-weather-state').value) },
@@ -1020,6 +1157,16 @@
                 pcMetrics: pcMetricsEnabled ? {
                     url: document.getElementById('s-pcmetrics-url').value.trim() || null
                 } : {},
+                notifications: (function() {
+                    var n = {
+                        feishuEnabled: document.getElementById('s-feishu-enable').checked,
+                        feishuReceiveIdType: document.getElementById('s-feishu-receive-id-type').value || 'chat_id'
+                    };
+                    if (feishuAppId && !isMaskedFeishuValue(feishuAppId)) n.feishuAppId = feishuAppId;
+                    if (feishuAppSecret && !isMaskedFeishuValue(feishuAppSecret)) n.feishuAppSecret = feishuAppSecret;
+                    if (feishuReceiveId && !isMaskedFeishuValue(feishuReceiveId)) n.feishuReceiveId = feishuReceiveId;
+                    return n;
+                })(),
                 hermes: (function() {
                     var apiEnabled = document.getElementById('s-hermes-api-enable').checked;
                     var h = {

@@ -755,7 +755,6 @@
   "text_color_label": "文本颜色",
   "font_size_label": "字体大小",
   "label_default": "标签",
-
   "proj_title": "项目",
   "proj_new_project": "新建项目",
   "proj_create_project": "创建项目",
@@ -1139,10 +1138,9 @@
   "api_usage_month": "月",
   "api_usage_daily_limit_reached": "日限额已用尽",
   "api_usage_weekly_limit_reached": "周限额已用尽",
-  "api_usage_configured_no_windows": "\u2713 已配置 \u2014 无配额窗口",
+  "api_usage_configured_no_windows": "✓ 已配置 — 无配额窗口",
   "api_usage_updated": "更新于",
   "api_usage_pct_left": "% 剩余",
-
   "site_logo_text": "你的虚拟办公室",
   "nav_features": "功能",
   "nav_demo": "演示",
@@ -1493,388 +1491,416 @@
   "error_deleting_skill": "删除技能时出错",
   "hide_secondary_chat": "隐藏辅助聊天窗口 {{slot}}",
   "retry_hermes_allow_hint": "仅本次调用绕过审批并重试 Hermes 操作",
-  "retry_hermes_deny_hint": "不重试被阻止的 Hermes 命令"
-  ,"proj_dirty_workspace_confirm": "工作区存在未提交修改。继续执行不会自动回滚这些修改。\n\n{{files}}"
-  ,"proj_task_execution_started": "项目任务执行已启动"
-  ,"proj_start_task_failed": "启动任务失败"
-  ,"proj_stopping_task": "正在停止任务，已有文件修改会保留"
-  ,"proj_stop_task_failed": "停止任务失败"
-  ,"proj_review_started": "独立审查已启动"
-  ,"proj_start_review_failed": "启动审查失败"
-  ,"proj_feedback_required": "需要填写反馈"
-  ,"proj_accept_confirm": "确认验收通过并移动到 Done？"
-  ,"proj_accept_action_failed": "提交验收动作失败"
-  ,"setup_license_note": "<b>演示模式：</b>最多可免费使用 3 个代理，部分功能受限。<br><br><b>完整许可证：</b>无限代理并解锁全部功能。<br><b>早鸟版：</b>功能相同，享受限时首发价格。<br><br>前往 <a href=\"https://myvirtualoffice.ai\" target=\"_blank\">myvirtualoffice.ai</a> 获取密钥"
-  ,"setup_browser_note": "<b>这是什么？</b>代理浏览器通过 CDP 控制浏览器，并通过 VNC 显示实时画面。<br><br><b>项目代理浏览器 Docker 配置：</b><br><code>./start.sh --browser</code><br><br>该命令只启动代理浏览器 Docker 服务；主应用请另开终端运行 <code>./start.sh</code>。<br><br>CDP：<code>http://127.0.0.1:9224</code><br>查看器：<code>https://127.0.0.1:6901</code><br><br>可以跳过此步骤，稍后再配置。"
-  ,"setup_sms_note": "<b>所需内容：</b>Twilio 账户、电话号码、Account SID 和 Auth Token。<br><br>配置凭据后可以显示收到的 MMS。发送附件需要 Twilio 能访问的公开 HTTPS 媒体地址；纯文本短信不需要该地址。<br><br>可以跳过此步骤，稍后再配置。"
-  ,"setup_metrics_note": "<b>工作原理：</b>在需要监控的电脑上运行项目自带的指标服务器。<br><br><code>pip install psutil</code><br><code>python pc-metrics-server.py 8099</code><br><br>本机使用 <code>http://127.0.0.1:8099</code>，远程电脑使用其局域网或 Tailscale 地址。NVIDIA 显卡监控还需要安装 <code>pynvml</code>。"
-  ,"setup_done_note": "<b>你可以：</b><br>• 编辑办公室布局和颜色<br>• 自定义代理并分配工位<br>• 与代理聊天<br>• 修改连接设置并导入或导出配置<br><br><b>实时状态：</b>长时间运行的代理工作会持续显示到完成。<br><br><b>API 用量：</b>系统会自动从 OpenClaw 检测提供商用量和凭据状态。"
-  ,"select_agent": "选择代理..."
-  ,"delete_branch_confirm": "删除分支“{{name}}”？代理将移到未分配分支。"
-  ,"message_target_prompt": "→ 发送给谁？（留空表示所有人）"
-  ,"enter_label_text": "输入标签文字："
-  ,"branch_change_title": "分支：{{name}}（点击更改）"
-  ,"catalog_office": "办公"
-  ,"catalog_comfort": "休闲"
-  ,"catalog_functional": "功能性家具"
-  ,"catalog_kitchen": "茶水间"
-  ,"catalog_fun": "娱乐"
-  ,"catalog_structure": "建筑"
-  ,"catalog_labels": "标签"
-  ,"catalog_walls": "墙体"
-  ,"furniture_desk": "办公桌"
-  ,"furniture_boss_desk": "主管桌"
-  ,"furniture_trash_can": "垃圾桶"
-  ,"furniture_filing_cabinet": "文件柜"
-  ,"furniture_whiteboard": "白板"
-  ,"furniture_l_couch": "L 形沙发"
-  ,"furniture_straight_couch": "直排沙发"
-  ,"furniture_coffee_table": "茶几"
-  ,"furniture_tv": "电视"
-  ,"furniture_bookshelf": "书架"
-  ,"furniture_functional_bookshelf": "档案书架"
-  ,"furniture_meeting_table_4": "四人会议桌"
-  ,"furniture_meeting_table_6": "六人会议桌"
-  ,"furniture_meeting_room": "会议室"
-  ,"meeting_space_idle": "当前没有会议"
-  ,"meeting_space_view_all": "查看所有会议"
-  ,"meeting_space_view_current": "查看当前会议"
-  ,"bookshelf_view_archive": "查看档案"
-  ,"bookshelf_bind_archive": "绑定档案"
-  ,"bookshelf_change_archive": "更换档案"
-  ,"bookshelf_unbound": "未绑定档案"
-  ,"bookshelf_unbound_hint": "请先绑定档案"
-  ,"bookshelf_loading_archives": "正在加载档案..."
-  ,"bookshelf_no_archives": "暂无可绑定档案"
-  ,"bookshelf_archive_load_failed": "档案加载失败"
-  ,"bookshelf_archive_unavailable": "档案室不可用"
-  ,"bookshelf_bound_archive": "已绑定档案：{{name}}"
-  ,"furniture_plant": "绿植"
-  ,"furniture_tall_plant": "高株绿植"
-  ,"furniture_end_table_plant": "边桌和绿植"
-  ,"furniture_kitchen_counter": "茶水台"
-  ,"furniture_coffee_maker": "咖啡机"
-  ,"furniture_vending_machine": "自动售货机"
-  ,"furniture_water_cooler": "饮水机"
-  ,"furniture_microwave": "微波炉"
-  ,"furniture_toaster": "烤面包机"
-  ,"furniture_ping_pong_table": "乒乓球桌"
-  ,"furniture_dart_board": "飞镖盘"
-  ,"furniture_meeting_table": "会议桌"
-  ,"furniture_window": "窗户"
-  ,"furniture_weather_window": "天气窗户"
-  ,"furniture_floor_window": "落地窗"
-  ,"furniture_clock": "时钟"
-  ,"furniture_floor_lamp": "落地灯"
-  ,"furniture_custom_text": "自定义文字"
-  ,"furniture_wall_segment": "墙段"
-  ,"furniture_door_opening": "门或开口"
-  ,"agent_identity": "身份"
-  ,"agent_role": "角色"
-  ,"agent_emoji": "表情"
-  ,"agent_gender": "性别"
-  ,"agent_colors": "颜色"
-  ,"agent_shirt": "上衣"
-  ,"agent_skin": "肤色"
-  ,"agent_hair": "发型"
-  ,"agent_style": "样式"
-  ,"color_field": "颜色"
-  ,"agent_highlight": "挑染"
-  ,"agent_face": "面部"
-  ,"agent_eyebrows": "眉毛"
-  ,"agent_eye_color": "眼睛颜色"
-  ,"agent_facial_hair": "胡须"
-  ,"agent_beard_color": "胡须颜色"
-  ,"agent_costumes": "服装"
-  ,"agent_costume": "服装"
-  ,"agent_accessories": "配饰"
-  ,"agent_headwear": "头饰"
-  ,"agent_hat_color": "帽子颜色"
-  ,"agent_glasses": "眼镜"
-  ,"agent_lens_color": "镜片颜色"
-  ,"agent_items": "物品"
-  ,"agent_held_item": "手持物品"
-  ,"agent_desk_item": "桌面物品"
-  ,"agent_assignment": "分配"
-  ,"branch_field": "分支"
-  ,"openclaw_agent": "OpenClaw 代理"
-  ,"assigned_to_agent": "已分配给 {{name}}"
-  ,"option_none": "无"
-  ,"option_bald": "光头"
-  ,"option_buzz": "寸头"
-  ,"option_short": "短发"
-  ,"option_medium": "中发"
-  ,"option_long": "长发"
-  ,"option_curly": "卷发"
-  ,"option_wavy": "波浪发"
-  ,"option_spiky": "刺猬头"
-  ,"option_bun": "发髻"
-  ,"option_ponytail": "马尾"
-  ,"option_mohawk": "莫西干"
-  ,"option_thin": "细眉"
-  ,"option_thick": "浓眉"
-  ,"option_angular": "棱角眉"
-  ,"option_arched": "弯眉"
-  ,"option_stubble": "胡茬"
-  ,"option_beard": "络腮胡"
-  ,"option_goatee": "山羊胡"
-  ,"option_mustache": "八字胡"
-  ,"option_lobster": "龙虾"
-  ,"option_chicken": "小鸡"
-  ,"option_hardhat": "安全帽"
-  ,"option_cap": "鸭舌帽"
-  ,"option_crown": "皇冠"
-  ,"option_tiara": "头冠"
-  ,"option_headband": "发带"
-  ,"option_goggles": "护目镜"
-  ,"option_headset": "耳机"
-  ,"option_beanie": "针织帽"
-  ,"option_round": "圆框"
-  ,"option_square": "方框"
-  ,"option_sunglasses": "太阳镜"
-  ,"option_tablet": "平板电脑"
-  ,"option_wrench": "扳手"
-  ,"option_coffee": "咖啡"
-  ,"option_clipboard": "写字板"
-  ,"option_pen": "钢笔"
-  ,"option_hammer": "锤子"
-  ,"option_testTube": "试管"
-  ,"option_book": "书"
-  ,"option_anvil": "铁砧"
-  ,"option_trophy": "奖杯"
-  ,"option_calendar": "日历"
-  ,"option_envelope": "信封"
-  ,"option_money": "现金"
-  ,"option_ruler": "尺子"
-  ,"option_marker": "记号笔"
-  ,"option_chart": "图表"
-  ,"option_plans": "规划图"
-  ,"option_checklist": "检查清单"
-  ,"option_microscope": "显微镜"
-  ,"option_shield": "盾牌"
-  ,"option_phone": "电话"
-  ,"option_files": "文件"
-  ,"snap_center": "⊙ 居中"
-  ,"snap_top_left": "↖ 左上"
-  ,"snap_top_right": "↗ 右上"
-  ,"snap_bottom_left": "↙ 左下"
-  ,"snap_bottom_right": "↘ 右下"
-  ,"setup_openclaw_path_note": "<b>📁 在哪里找到它：</b><br><br><b>Linux/Mac（最常见）：</b><br><code>/home/youruser/.openclaw</code><br><br><b>在 Docker 中运行 Virtual Office？</b><br>使用通过 <code>-v</code> 挂载的路径。例如：<br><code>docker run -v /home/eli/.openclaw:/openclaw ...</code><br>此时填写 <code>/openclaw</code>。<br><br><b>不确定？</b>运行 <code>ls ~/.openclaw/openclaw.json</code>。如果输出路径，请填写其所在文件夹。"
-  ,"setup_no_agents_note": "<b>🔧 未找到代理？请检查以下内容：</b><br><br><b>1. 路径是否正确？</b>文件夹应包含 <code>openclaw.json</code> 和 <code>agents/</code> 目录。<br><br><b>2. 是否已配置代理？</b>打开 <code>openclaw.json</code> 并检查 <code>agents → list</code>。每个代理都需要工作区目录。<br><br><b>3. 在 Docker 中运行？</b>请将 OpenClaw 目录挂载到容器：<br><code>docker run -v /path/to/.openclaw:/openclaw ...</code><br><br><b>4. 权限问题？</b>服务器需要拥有 <code>agents/</code> 文件夹的读取权限。<br><br><b>仍未解决？</b>可以跳过此步骤，稍后从 ☰ 菜单配置路径。"
-  ,"skill_applied": "已将 {{skill}} 应用到 {{agent}}"
-  ,"apply_failed": "应用失败"
-  ,"failed_load_skill": "加载技能失败"
-  ,"upload_failed": "上传失败"
-  ,"license_active": "✅ {{tier}} 许可证已激活"
-  ,"gateway_origin_added": "已将当前来源加入允许列表。"
-  ,"gateway_origin_exists": "当前来源已在允许列表中。"
-  ,"gateway_reachable": "Gateway 可访问"
-  ,"gateway_unreachable": "Gateway 不可访问"
-  ,"gateway_running_hint": "请确认 OpenClaw Gateway 正在运行。Virtual Office 需要通过其 WebSocket 连接显示代理实时状态并启用聊天。"
-  ,"gateway_token_found": "已找到 Gateway 令牌"
-  ,"gateway_token_failed": "Gateway 令牌认证失败"
-  ,"gateway_agents_connected": "已连接 {{count}} 个代理"
-  ,"agent_platform_prompt": "代理平台："
-  ,"agent_create_title": "新建代理"
-  ,"agent_create_submit": "创建代理"
-  ,"creating_agent_platform": "正在 {{platform}} 中创建代理..."
-  ,"agent_created_platform": "已在 {{platform}} 中创建代理“{{name}}”。"
-  ,"agent_deleted": "已删除代理“{{name}}”"
-  ,"compression_failed_detail": "压缩失败"
-  ,"codex_context_compressed": "Codex 上下文已压缩。"
-  ,"cancel_failed_detail": "取消失败"
-  ,"resolved": "已处理"
-  ,"codex_interaction_unavailable": "此 Codex 交互已无法继续。"
-  ,"modified_files": "已修改文件"
-  ,"interaction_failed_detail": "交互失败"
-  ,"busy": "忙碌"
-  ,"codex_busy_other_conversation": "Codex 正在另一个会话中处于{{status}}状态。"
-  ,"opened_active_codex_conversation": "已打开进行中的 Codex 会话"
-  ,"hermes_step_receive": "接收 Virtual Office 消息"
-  ,"hermes_step_load_profile": "加载 Hermes 配置和当前会话"
-  ,"hermes_step_run_loop": "运行 Hermes CLI 代理循环"
-  ,"hermes_step_wait_updates": "等待模型、工具和任务更新"
-  ,"hermes_step_export_activity": "导出公开会话活动"
-  ,"hermes_step_render_reply": "渲染回复、工具调用和任务摘要"
-  ,"hermes_task_breakdown": "Hermes 任务分解"
-  ,"hermes_queued_waiting": "已在 Virtual Office 排队，等待 Hermes 启动。"
-  ,"hermes_running_step": "正在执行第 {{current}}/{{total}} 步：{{step}}"
-  ,"hermes_review_error": "在聊天中查看 Hermes 错误"
-  ,"hermes_reply_collected": "已收集 Hermes 回复和会话活动。"
-  ,"hermes_request_failed": "Hermes 请求失败。"
-  ,"human_intervention_required": "需要人工介入。"
-  ,"hermes_task_plan": "任务计划"
-  ,"hermes_steps_complete": "已完成 {{count}} 步"
-  ,"hermes_plan_preview": "接收 · 运行 · 导出 · 渲染"
-  ,"meeting_ai_requests": "AI 申请"
-  ,"meeting_request_empty": "暂无 AI 会议申请"
-  ,"meeting_request_title": "AI 会议申请"
-  ,"meeting_request_detail_title": "AI 会议申请"
-  ,"meeting_request_view_detail": "查看详情/处理"
-  ,"meeting_request_status_pending": "待确认"
-  ,"meeting_request_status_rejected": "已拒绝"
-  ,"meeting_request_status_confirmed": "已确认"
-  ,"meeting_request_goal": "目标"
-  ,"meeting_request_expected": "期望产物"
-  ,"meeting_request_reason": "为什么需要会议"
-  ,"meeting_request_context_candidates": "上下文候选"
-  ,"meeting_request_no_context": "暂无上下文候选。"
-  ,"meeting_request_reject_reason": "拒绝原因"
-  ,"meeting_request_reject_reason_required": "请输入拒绝原因。"
-  ,"meeting_request_confirm_start": "确认并开始"
-  ,"meeting_request_reject": "拒绝"
-  ,"meeting_request_created_meeting": "已创建会议"
-  ,"meeting_request_pending_prompt": "有 AI 会议申请需要确认"
-  ,"meeting_urgency": "紧急程度"
-  ,"meeting_requesting_agent": "申请 AI"
-  ,"meeting_auto_start_high_urgency": "高紧急度自动召开"
-  ,"meeting_created_by_user": "人工召开"
-  ,"meeting_created_by_agent": "AI 召开"
-  ,"meeting_context_source_project": "项目"
-  ,"meeting_context_source_task": "任务"
-  ,"meeting_context_source_related_task": "相关任务"
-  ,"meeting_context_source_meeting": "会议"
-  ,"meeting_context_source_supplemental": "补充上下文"
-  ,"meeting_fixture_user_requested_ai_meeting": "用户请求的 AI 会议"
-  ,"meeting_fixture_invite_gg_urgency_3": "邀请 gg 参加紧急程度 3 的 AI 会议"
-  ,"meeting_fixture_invite_gg_urgency_3_summary": "用户要求 Codex 发起一个紧急程度 3 的 AI 会议并邀请 gg。该任务作为会议申请所需的项目任务来源。"
-  ,"meeting_conflicts": "参会冲突"
-  ,"meeting_conflict_estimated": "预计可用"
-  ,"meeting_pause_capability": "暂停能力"
-  ,"meeting_advisory": "建议"
-  ,"meeting_advisory_source": "来源"
-  ,"meeting_advisory_source_agent": "忙碌 Agent 建议"
-  ,"meeting_advisory_source_local": "本地兜底"
-  ,"meeting_advisory_source_local_failed": "AI 建议失败，本地兜底"
-  ,"meeting_unknown": "未知"
-  ,"meeting_conflict_idle": "空闲"
-  ,"meeting_conflict_provider_call": "模型调用进行中"
-  ,"meeting_conflict_already_in_meeting": "已在会议中：{topic}"
-  ,"meeting_conflict_risk_high": "高风险"
-  ,"meeting_conflict_risk_medium": "中风险"
-  ,"meeting_conflict_risk_low": "低风险"
-  ,"meeting_conflict_risk_busy": "忙碌"
-  ,"meeting_conflict_risk_idle": "空闲"
-  ,"meeting_pause_unavailable": "不可暂停"
-  ,"meeting_pause_logical": "逻辑暂停"
-  ,"meeting_pause_none": "无需暂停"
-  ,"meeting_recommend_wait": "等待"
-  ,"meeting_recommend_reserve": "稍后再试"
-  ,"meeting_recommend_replace": "更换"
-  ,"meeting_recommend_force_join": "强制加入"
-  ,"meeting_conflict_risk_meeting_occupied": "该 Agent 已在另一场进行中的会议里。除非先取消已有会议，否则不建议强制加入。"
-  ,"meeting_conflict_resume_none": "该会议冲突没有可恢复的原任务。"
-  ,"meeting_conflict_risk_provider_call": "模型调用正在进行中，打断可能丢失正在生成的回复。"
-  ,"meeting_conflict_resume_provider_call": "等待模型调用完成后，再重新处理冲突。"
-  ,"meeting_conflict_risk_logical_pause": "当前任务只能逻辑暂停；模型进程不一定会立即停止。"
-  ,"meeting_conflict_resume_logical_pause": "保存当前任务上下文，会议结束后从记录的任务状态恢复。"
-  ,"meeting_conflict_risk_uncertain": "暂停安全性不确定。"
-  ,"meeting_conflict_resume_recheck": "强制开会前请重新检查 Agent 状态。"
-  ,"meeting_conflict_wait": "等待"
-  ,"meeting_conflict_reserve": "稍后再试"
-  ,"meeting_conflict_replace": "更换"
-  ,"meeting_conflict_force": "强制加入"
-  ,"meeting_conflict_refresh": "重新检查冲突"
-  ,"meeting_reservation_notice": "预约只是提醒；会议开始前会重新检查冲突。"
-  ,"meeting_conflict_failed": "冲突处理失败"
-  ,"meeting_conflict_reserve_prompt": "将根据该 Agent 的可用性在空闲后提醒/重试。"
-  ,"meeting_conflict_replace_prompt": "替换 Agent ID"
-  ,"meeting_conflict_force_confirm": "强制加入可能打断当前工作。是否继续？"
-  ,"meeting_project": "项目"
-  ,"meeting_project_none": "不绑定项目"
-  ,"meeting_action_drafts": "行动项草稿"
-  ,"meeting_action_drafts_hint": "确认后会加入来源任务的会议行动项，草稿不会自动执行。"
-  ,"meeting_action_untitled": "未命名行动项"
-  ,"meeting_action_status_draft": "待确认"
-  ,"meeting_action_status_confirmed": "已加入当前任务"
-  ,"meeting_action_status_rejected": "已拒绝"
-  ,"meeting_action_status_kept": "仅保存"
-  ,"meeting_action_edit": "编辑"
-  ,"meeting_action_owner": "负责人"
-  ,"meeting_action_title": "任务标题"
-  ,"meeting_action_description": "说明"
-  ,"meeting_action_save_draft": "保存草稿"
-  ,"meeting_action_confirm_task": "加入当前任务"
-  ,"meeting_action_keep": "仅保存"
-  ,"meeting_action_reject": "拒绝"
-  ,"meeting_action_open_task": "打开来源任务"
-  ,"meeting_action_task_created": "已加入来源任务"
-  ,"meeting_action_rejected_by_user": "用户拒绝"
-  ,"use_hermes_native_api": "使用 Hermes 原生 API"
-  ,"hermes_api_url": "Hermes API 地址"
-  ,"hermes_api_key": "Hermes API 密钥"
-  ,"leave_blank_keep_key": "留空以保留已有密钥"
-  ,"native_agent_providers": "🤖 原生 Agent 提供商"
-  ,"enable_codex": "启用 Codex"
-  ,"codex_workspace": "Codex 工作区"
-  ,"codex_agent_root": "Codex Agent 根目录"
-  ,"codex_main_workspace": "Codex Main 工作区"
-  ,"codex_model": "Codex 模型"
-  ,"codex_bridge_url": "Codex Bridge 地址"
-  ,"optional_app_server_bridge_url": "可选 app-server bridge 地址"
-  ,"show_codex_main_agent": "显示 Codex Main agent"
-  ,"discover_native_codex_agents": "发现原生 Codex agents"
-  ,"test_codex": "🔍 测试 Codex"
-  ,"enable_claude_code": "启用 Claude Code"
-  ,"claude_code_home": "Claude Code 主目录"
-  ,"claude_code_cli": "Claude Code CLI"
-  ,"claude_code_workspace": "Claude Code 工作区"
-  ,"claude_code_agent_root": "Claude Code Agent 根目录"
-  ,"claude_code_main_workspace": "Claude Code Main 工作区"
-  ,"claude_code_model": "Claude Code 模型"
-  ,"show_claude_code_main_agent": "显示 Claude Code Main agent"
-  ,"discover_native_claude_code_agents": "发现原生 Claude Code agents"
-  ,"register_new_standard_agents_natively": "以原生方式注册新的标准 agents"
-  ,"test_claude_code": "🔍 测试 Claude Code"
-  ,"native_status_available": "可用"
-  ,"native_status_configured_not_detected": "已配置，未检测到"
-  ,"native_status_disabled": "已禁用"
-  ,"native_status_not_detected": "未检测到"
-  ,"native_status_unavailable": "不可用"
-  ,"native_model": "模型"
-  ,"native_workspace": "工作区"
-  ,"native_workspace_root": "工作区根目录"
-  ,"native_main_workspace": "Main 工作区"
-  ,"native_api": "原生 API"
-  ,"native_configure_runtime_here": "可在此处或办公室设置菜单中配置此运行时。"
-  ,"enable_hermes_agents": "启用 Hermes agents"
-  ,"native_home": "主目录"
-  ,"native_cli": "CLI"
-  ,"native_api_url": "API 地址"
-  ,"native_api_key": "API 密钥"
-  ,"save": "保存"
-  ,"test": "测试"
-  ,"enable_codex_agents": "启用 Codex agents"
-  ,"register_new_standard_agents_in_native_codex": "在原生 Codex 中注册新的标准 agents"
-  ,"prefer_app_server_protocol": "优先使用 app-server 协议"
-  ,"native_agent_root": "Agent 根目录"
-  ,"native_main": "Main"
-  ,"optional": "可选"
-  ,"native_sandbox": "沙箱"
-  ,"native_approval": "审批"
-  ,"enable_claude_code_agents": "启用 Claude Code agents"
-  ,"discover_native_claude_code_subagents": "发现原生 Claude Code subagents"
-  ,"register_new_standard_agents_in_native_claude_code": "在原生 Claude Code 中注册新的标准 agents"
-  ,"native_config": "配置目录"
-  ,"native_mode": "模式"
-  ,"native_setup_guide": "原生设置指南"
-  ,"native_setup_guide_desc": "OpenClaw 云提供商使用认证配置和模型提供商条目。Hermes profiles 使用 CLI profile 配置，也可启用原生 API。Codex agents 使用 <code>$CODEX_HOME/agents/*.toml</code>。Claude Code subagents 使用 <code>$CLAUDE_CONFIG_DIR/agents/*.md</code>。"
-  ,"native_agents_tab": "🤖 原生 Agents"
-  ,"loading_native_agent_runtimes": "正在加载原生 Agent 运行时..."
-  ,"hermes_setup_saved": "Hermes 设置已保存"
-  ,"testing_hermes": "正在测试 Hermes..."
-  ,"hermes_connected": "Hermes 已连接"
-  ,"hermes_test_failed": "Hermes 测试失败"
-  ,"codex_setup_saved": "Codex 设置已保存"
-  ,"testing_codex": "正在测试 Codex..."
-  ,"codex_connected": "Codex 已连接"
-  ,"claude_code_setup_saved": "Claude Code 设置已保存"
-  ,"testing_claude_code": "正在测试 Claude Code..."
-  ,"claude_code_connected": "Claude Code 已连接"
-  ,"agent_singular": "agent"
-  ,"agent_plural": "agents"
-  ,"claude_code_stream_active": "Claude Code 流已连接..."
-  ,"claude_code_stream_failed": "Claude Code 流失败"
-  ,"claude_code_run_failed": "Claude Code 运行失败"
-  ,"claude_code_stream_disconnected": "Claude Code 事件流已断开"
+  "retry_hermes_deny_hint": "不重试被阻止的 Hermes 命令",
+  "proj_dirty_workspace_confirm": "工作区存在未提交修改。继续执行不会自动回滚这些修改。\n\n{{files}}",
+  "proj_task_execution_started": "项目任务执行已启动",
+  "proj_start_task_failed": "启动任务失败",
+  "proj_stopping_task": "正在停止任务，已有文件修改会保留",
+  "proj_stop_task_failed": "停止任务失败",
+  "proj_review_started": "独立审查已启动",
+  "proj_start_review_failed": "启动审查失败",
+  "proj_feedback_required": "需要填写反馈",
+  "proj_accept_confirm": "确认验收通过并移动到 Done？",
+  "proj_accept_action_failed": "提交验收动作失败",
+  "setup_license_note": "<b>演示模式：</b>最多可免费使用 3 个代理，部分功能受限。<br><br><b>完整许可证：</b>无限代理并解锁全部功能。<br><b>早鸟版：</b>功能相同，享受限时首发价格。<br><br>前往 <a href=\"https://myvirtualoffice.ai\" target=\"_blank\">myvirtualoffice.ai</a> 获取密钥",
+  "setup_browser_note": "<b>这是什么？</b>代理浏览器通过 CDP 控制浏览器，并通过 VNC 显示实时画面。<br><br><b>项目代理浏览器 Docker 配置：</b><br><code>./start.sh --browser</code><br><br>该命令只启动代理浏览器 Docker 服务；主应用请另开终端运行 <code>./start.sh</code>。<br><br>CDP：<code>http://127.0.0.1:9224</code><br>查看器：<code>https://127.0.0.1:6901</code><br><br>可以跳过此步骤，稍后再配置。",
+  "setup_sms_note": "<b>所需内容：</b>Twilio 账户、电话号码、Account SID 和 Auth Token。<br><br>配置凭据后可以显示收到的 MMS。发送附件需要 Twilio 能访问的公开 HTTPS 媒体地址；纯文本短信不需要该地址。<br><br>可以跳过此步骤，稍后再配置。",
+  "setup_metrics_note": "<b>工作原理：</b>在需要监控的电脑上运行项目自带的指标服务器。<br><br><code>pip install psutil</code><br><code>python pc-metrics-server.py 8099</code><br><br>本机使用 <code>http://127.0.0.1:8099</code>，远程电脑使用其局域网或 Tailscale 地址。NVIDIA 显卡监控还需要安装 <code>pynvml</code>。",
+  "setup_done_note": "<b>你可以：</b><br>• 编辑办公室布局和颜色<br>• 自定义代理并分配工位<br>• 与代理聊天<br>• 修改连接设置并导入或导出配置<br><br><b>实时状态：</b>长时间运行的代理工作会持续显示到完成。<br><br><b>API 用量：</b>系统会自动从 OpenClaw 检测提供商用量和凭据状态。",
+  "select_agent": "选择代理...",
+  "delete_branch_confirm": "删除分支“{{name}}”？代理将移到未分配分支。",
+  "message_target_prompt": "→ 发送给谁？（留空表示所有人）",
+  "enter_label_text": "输入标签文字：",
+  "branch_change_title": "分支：{{name}}（点击更改）",
+  "catalog_office": "办公",
+  "catalog_comfort": "休闲",
+  "catalog_functional": "功能性家具",
+  "catalog_kitchen": "茶水间",
+  "catalog_fun": "娱乐",
+  "catalog_structure": "建筑",
+  "catalog_labels": "标签",
+  "catalog_walls": "墙体",
+  "furniture_desk": "办公桌",
+  "furniture_boss_desk": "主管桌",
+  "furniture_trash_can": "垃圾桶",
+  "furniture_filing_cabinet": "文件柜",
+  "furniture_whiteboard": "白板",
+  "furniture_l_couch": "L 形沙发",
+  "furniture_straight_couch": "直排沙发",
+  "furniture_coffee_table": "茶几",
+  "furniture_tv": "电视",
+  "furniture_bookshelf": "书架",
+  "furniture_functional_bookshelf": "档案书架",
+  "furniture_meeting_table_4": "四人会议桌",
+  "furniture_meeting_table_6": "六人会议桌",
+  "furniture_meeting_room": "会议室",
+  "meeting_space_idle": "当前没有会议",
+  "meeting_space_view_all": "查看所有会议",
+  "meeting_space_view_current": "查看当前会议",
+  "bookshelf_view_archive": "查看档案",
+  "bookshelf_bind_archive": "绑定档案",
+  "bookshelf_change_archive": "更换档案",
+  "bookshelf_unbound": "未绑定档案",
+  "bookshelf_unbound_hint": "请先绑定档案",
+  "bookshelf_loading_archives": "正在加载档案...",
+  "bookshelf_no_archives": "暂无可绑定档案",
+  "bookshelf_archive_load_failed": "档案加载失败",
+  "bookshelf_archive_unavailable": "档案室不可用",
+  "bookshelf_bound_archive": "已绑定档案：{{name}}",
+  "furniture_plant": "绿植",
+  "furniture_tall_plant": "高株绿植",
+  "furniture_end_table_plant": "边桌和绿植",
+  "furniture_kitchen_counter": "茶水台",
+  "furniture_coffee_maker": "咖啡机",
+  "furniture_vending_machine": "自动售货机",
+  "furniture_water_cooler": "饮水机",
+  "furniture_microwave": "微波炉",
+  "furniture_toaster": "烤面包机",
+  "furniture_ping_pong_table": "乒乓球桌",
+  "furniture_dart_board": "飞镖盘",
+  "furniture_meeting_table": "会议桌",
+  "furniture_window": "窗户",
+  "furniture_weather_window": "天气窗户",
+  "furniture_floor_window": "落地窗",
+  "furniture_clock": "时钟",
+  "furniture_floor_lamp": "落地灯",
+  "furniture_custom_text": "自定义文字",
+  "furniture_wall_segment": "墙段",
+  "furniture_door_opening": "门或开口",
+  "agent_identity": "身份",
+  "agent_role": "角色",
+  "agent_emoji": "表情",
+  "agent_gender": "性别",
+  "agent_colors": "颜色",
+  "agent_shirt": "上衣",
+  "agent_skin": "肤色",
+  "agent_hair": "发型",
+  "agent_style": "样式",
+  "color_field": "颜色",
+  "agent_highlight": "挑染",
+  "agent_face": "面部",
+  "agent_eyebrows": "眉毛",
+  "agent_eye_color": "眼睛颜色",
+  "agent_facial_hair": "胡须",
+  "agent_beard_color": "胡须颜色",
+  "agent_costumes": "服装",
+  "agent_costume": "服装",
+  "agent_accessories": "配饰",
+  "agent_headwear": "头饰",
+  "agent_hat_color": "帽子颜色",
+  "agent_glasses": "眼镜",
+  "agent_lens_color": "镜片颜色",
+  "agent_items": "物品",
+  "agent_held_item": "手持物品",
+  "agent_desk_item": "桌面物品",
+  "agent_assignment": "分配",
+  "branch_field": "分支",
+  "openclaw_agent": "OpenClaw 代理",
+  "assigned_to_agent": "已分配给 {{name}}",
+  "option_none": "无",
+  "option_bald": "光头",
+  "option_buzz": "寸头",
+  "option_short": "短发",
+  "option_medium": "中发",
+  "option_long": "长发",
+  "option_curly": "卷发",
+  "option_wavy": "波浪发",
+  "option_spiky": "刺猬头",
+  "option_bun": "发髻",
+  "option_ponytail": "马尾",
+  "option_mohawk": "莫西干",
+  "option_thin": "细眉",
+  "option_thick": "浓眉",
+  "option_angular": "棱角眉",
+  "option_arched": "弯眉",
+  "option_stubble": "胡茬",
+  "option_beard": "络腮胡",
+  "option_goatee": "山羊胡",
+  "option_mustache": "八字胡",
+  "option_lobster": "龙虾",
+  "option_chicken": "小鸡",
+  "option_hardhat": "安全帽",
+  "option_cap": "鸭舌帽",
+  "option_crown": "皇冠",
+  "option_tiara": "头冠",
+  "option_headband": "发带",
+  "option_goggles": "护目镜",
+  "option_headset": "耳机",
+  "option_beanie": "针织帽",
+  "option_round": "圆框",
+  "option_square": "方框",
+  "option_sunglasses": "太阳镜",
+  "option_tablet": "平板电脑",
+  "option_wrench": "扳手",
+  "option_coffee": "咖啡",
+  "option_clipboard": "写字板",
+  "option_pen": "钢笔",
+  "option_hammer": "锤子",
+  "option_testTube": "试管",
+  "option_book": "书",
+  "option_anvil": "铁砧",
+  "option_trophy": "奖杯",
+  "option_calendar": "日历",
+  "option_envelope": "信封",
+  "option_money": "现金",
+  "option_ruler": "尺子",
+  "option_marker": "记号笔",
+  "option_chart": "图表",
+  "option_plans": "规划图",
+  "option_checklist": "检查清单",
+  "option_microscope": "显微镜",
+  "option_shield": "盾牌",
+  "option_phone": "电话",
+  "option_files": "文件",
+  "snap_center": "⊙ 居中",
+  "snap_top_left": "↖ 左上",
+  "snap_top_right": "↗ 右上",
+  "snap_bottom_left": "↙ 左下",
+  "snap_bottom_right": "↘ 右下",
+  "setup_openclaw_path_note": "<b>📁 在哪里找到它：</b><br><br><b>Linux/Mac（最常见）：</b><br><code>/home/youruser/.openclaw</code><br><br><b>在 Docker 中运行 Virtual Office？</b><br>使用通过 <code>-v</code> 挂载的路径。例如：<br><code>docker run -v /home/eli/.openclaw:/openclaw ...</code><br>此时填写 <code>/openclaw</code>。<br><br><b>不确定？</b>运行 <code>ls ~/.openclaw/openclaw.json</code>。如果输出路径，请填写其所在文件夹。",
+  "setup_no_agents_note": "<b>🔧 未找到代理？请检查以下内容：</b><br><br><b>1. 路径是否正确？</b>文件夹应包含 <code>openclaw.json</code> 和 <code>agents/</code> 目录。<br><br><b>2. 是否已配置代理？</b>打开 <code>openclaw.json</code> 并检查 <code>agents → list</code>。每个代理都需要工作区目录。<br><br><b>3. 在 Docker 中运行？</b>请将 OpenClaw 目录挂载到容器：<br><code>docker run -v /path/to/.openclaw:/openclaw ...</code><br><br><b>4. 权限问题？</b>服务器需要拥有 <code>agents/</code> 文件夹的读取权限。<br><br><b>仍未解决？</b>可以跳过此步骤，稍后从 ☰ 菜单配置路径。",
+  "skill_applied": "已将 {{skill}} 应用到 {{agent}}",
+  "apply_failed": "应用失败",
+  "failed_load_skill": "加载技能失败",
+  "upload_failed": "上传失败",
+  "license_active": "✅ {{tier}} 许可证已激活",
+  "gateway_origin_added": "已将当前来源加入允许列表。",
+  "gateway_origin_exists": "当前来源已在允许列表中。",
+  "gateway_reachable": "Gateway 可访问",
+  "gateway_unreachable": "Gateway 不可访问",
+  "gateway_running_hint": "请确认 OpenClaw Gateway 正在运行。Virtual Office 需要通过其 WebSocket 连接显示代理实时状态并启用聊天。",
+  "gateway_token_found": "已找到 Gateway 令牌",
+  "gateway_token_failed": "Gateway 令牌认证失败",
+  "gateway_agents_connected": "已连接 {{count}} 个代理",
+  "agent_platform_prompt": "代理平台：",
+  "agent_create_title": "新建代理",
+  "agent_create_submit": "创建代理",
+  "creating_agent_platform": "正在 {{platform}} 中创建代理...",
+  "agent_created_platform": "已在 {{platform}} 中创建代理“{{name}}”。",
+  "agent_deleted": "已删除代理“{{name}}”",
+  "compression_failed_detail": "压缩失败",
+  "codex_context_compressed": "Codex 上下文已压缩。",
+  "cancel_failed_detail": "取消失败",
+  "resolved": "已处理",
+  "codex_interaction_unavailable": "此 Codex 交互已无法继续。",
+  "modified_files": "已修改文件",
+  "interaction_failed_detail": "交互失败",
+  "busy": "忙碌",
+  "codex_busy_other_conversation": "Codex 正在另一个会话中处于{{status}}状态。",
+  "opened_active_codex_conversation": "已打开进行中的 Codex 会话",
+  "hermes_step_receive": "接收 Virtual Office 消息",
+  "hermes_step_load_profile": "加载 Hermes 配置和当前会话",
+  "hermes_step_run_loop": "运行 Hermes CLI 代理循环",
+  "hermes_step_wait_updates": "等待模型、工具和任务更新",
+  "hermes_step_export_activity": "导出公开会话活动",
+  "hermes_step_render_reply": "渲染回复、工具调用和任务摘要",
+  "hermes_task_breakdown": "Hermes 任务分解",
+  "hermes_queued_waiting": "已在 Virtual Office 排队，等待 Hermes 启动。",
+  "hermes_running_step": "正在执行第 {{current}}/{{total}} 步：{{step}}",
+  "hermes_review_error": "在聊天中查看 Hermes 错误",
+  "hermes_reply_collected": "已收集 Hermes 回复和会话活动。",
+  "hermes_request_failed": "Hermes 请求失败。",
+  "human_intervention_required": "需要人工介入。",
+  "hermes_task_plan": "任务计划",
+  "hermes_steps_complete": "已完成 {{count}} 步",
+  "hermes_plan_preview": "接收 · 运行 · 导出 · 渲染",
+  "meeting_ai_requests": "AI 申请",
+  "meeting_request_empty": "暂无 AI 会议申请",
+  "meeting_request_title": "AI 会议申请",
+  "meeting_request_detail_title": "AI 会议申请",
+  "meeting_request_view_detail": "查看详情/处理",
+  "meeting_request_status_pending": "待确认",
+  "meeting_request_status_rejected": "已拒绝",
+  "meeting_request_status_confirmed": "已确认",
+  "meeting_request_goal": "目标",
+  "meeting_request_expected": "期望产物",
+  "meeting_request_reason": "为什么需要会议",
+  "meeting_request_context_candidates": "上下文候选",
+  "meeting_request_no_context": "暂无上下文候选。",
+  "meeting_request_reject_reason": "拒绝原因",
+  "meeting_request_reject_reason_required": "请输入拒绝原因。",
+  "meeting_request_confirm_start": "确认并开始",
+  "meeting_request_reject": "拒绝",
+  "meeting_request_created_meeting": "已创建会议",
+  "meeting_request_pending_prompt": "有 AI 会议申请需要确认",
+  "meeting_urgency": "紧急程度",
+  "meeting_requesting_agent": "申请 AI",
+  "meeting_auto_start_high_urgency": "高紧急度自动召开",
+  "meeting_created_by_user": "人工召开",
+  "meeting_created_by_agent": "AI 召开",
+  "meeting_context_source_project": "项目",
+  "meeting_context_source_task": "任务",
+  "meeting_context_source_related_task": "相关任务",
+  "meeting_context_source_meeting": "会议",
+  "meeting_context_source_supplemental": "补充上下文",
+  "meeting_fixture_user_requested_ai_meeting": "用户请求的 AI 会议",
+  "meeting_fixture_invite_gg_urgency_3": "邀请 gg 参加紧急程度 3 的 AI 会议",
+  "meeting_fixture_invite_gg_urgency_3_summary": "用户要求 Codex 发起一个紧急程度 3 的 AI 会议并邀请 gg。该任务作为会议申请所需的项目任务来源。",
+  "meeting_conflicts": "参会冲突",
+  "meeting_conflict_estimated": "预计可用",
+  "meeting_pause_capability": "暂停能力",
+  "meeting_advisory": "建议",
+  "meeting_advisory_source": "来源",
+  "meeting_advisory_source_agent": "忙碌 Agent 建议",
+  "meeting_advisory_source_local": "本地兜底",
+  "meeting_advisory_source_local_failed": "AI 建议失败，本地兜底",
+  "meeting_unknown": "未知",
+  "meeting_conflict_idle": "空闲",
+  "meeting_conflict_provider_call": "模型调用进行中",
+  "meeting_conflict_already_in_meeting": "已在会议中：{topic}",
+  "meeting_conflict_risk_high": "高风险",
+  "meeting_conflict_risk_medium": "中风险",
+  "meeting_conflict_risk_low": "低风险",
+  "meeting_conflict_risk_busy": "忙碌",
+  "meeting_conflict_risk_idle": "空闲",
+  "meeting_pause_unavailable": "不可暂停",
+  "meeting_pause_logical": "逻辑暂停",
+  "meeting_pause_none": "无需暂停",
+  "meeting_recommend_wait": "等待",
+  "meeting_recommend_reserve": "稍后再试",
+  "meeting_recommend_replace": "更换",
+  "meeting_recommend_force_join": "强制加入",
+  "meeting_conflict_risk_meeting_occupied": "该 Agent 已在另一场进行中的会议里。除非先取消已有会议，否则不建议强制加入。",
+  "meeting_conflict_resume_none": "该会议冲突没有可恢复的原任务。",
+  "meeting_conflict_risk_provider_call": "模型调用正在进行中，打断可能丢失正在生成的回复。",
+  "meeting_conflict_resume_provider_call": "等待模型调用完成后，再重新处理冲突。",
+  "meeting_conflict_risk_logical_pause": "当前任务只能逻辑暂停；模型进程不一定会立即停止。",
+  "meeting_conflict_resume_logical_pause": "保存当前任务上下文，会议结束后从记录的任务状态恢复。",
+  "meeting_conflict_risk_uncertain": "暂停安全性不确定。",
+  "meeting_conflict_resume_recheck": "强制开会前请重新检查 Agent 状态。",
+  "meeting_conflict_wait": "等待",
+  "meeting_conflict_reserve": "稍后再试",
+  "meeting_conflict_replace": "更换",
+  "meeting_conflict_force": "强制加入",
+  "meeting_conflict_refresh": "重新检查冲突",
+  "meeting_reservation_notice": "预约只是提醒；会议开始前会重新检查冲突。",
+  "meeting_conflict_failed": "冲突处理失败",
+  "meeting_conflict_reserve_prompt": "将根据该 Agent 的可用性在空闲后提醒/重试。",
+  "meeting_conflict_replace_prompt": "替换 Agent ID",
+  "meeting_conflict_force_confirm": "强制加入可能打断当前工作。是否继续？",
+  "meeting_project": "项目",
+  "meeting_project_none": "不绑定项目",
+  "meeting_action_drafts": "行动项草稿",
+  "meeting_action_drafts_hint": "确认后会加入来源任务的会议行动项，草稿不会自动执行。",
+  "meeting_action_untitled": "未命名行动项",
+  "meeting_action_status_draft": "待确认",
+  "meeting_action_status_confirmed": "已加入当前任务",
+  "meeting_action_status_rejected": "已拒绝",
+  "meeting_action_status_kept": "仅保存",
+  "meeting_action_edit": "编辑",
+  "meeting_action_owner": "负责人",
+  "meeting_action_title": "任务标题",
+  "meeting_action_description": "说明",
+  "meeting_action_save_draft": "保存草稿",
+  "meeting_action_confirm_task": "加入当前任务",
+  "meeting_action_keep": "仅保存",
+  "meeting_action_reject": "拒绝",
+  "meeting_action_open_task": "打开来源任务",
+  "meeting_action_task_created": "已加入来源任务",
+  "meeting_action_rejected_by_user": "用户拒绝",
+  "use_hermes_native_api": "使用 Hermes 原生 API",
+  "hermes_api_url": "Hermes API 地址",
+  "hermes_api_key": "Hermes API 密钥",
+  "leave_blank_keep_key": "留空以保留已有密钥",
+  "native_agent_providers": "🤖 原生 Agent 提供商",
+  "enable_codex": "启用 Codex",
+  "codex_workspace": "Codex 工作区",
+  "codex_agent_root": "Codex Agent 根目录",
+  "codex_main_workspace": "Codex Main 工作区",
+  "codex_model": "Codex 模型",
+  "codex_bridge_url": "Codex Bridge 地址",
+  "optional_app_server_bridge_url": "可选 app-server bridge 地址",
+  "show_codex_main_agent": "显示 Codex Main agent",
+  "discover_native_codex_agents": "发现原生 Codex agents",
+  "test_codex": "🔍 测试 Codex",
+  "enable_claude_code": "启用 Claude Code",
+  "claude_code_home": "Claude Code 主目录",
+  "claude_code_cli": "Claude Code CLI",
+  "claude_code_workspace": "Claude Code 工作区",
+  "claude_code_agent_root": "Claude Code Agent 根目录",
+  "claude_code_main_workspace": "Claude Code Main 工作区",
+  "claude_code_model": "Claude Code 模型",
+  "show_claude_code_main_agent": "显示 Claude Code Main agent",
+  "discover_native_claude_code_agents": "发现原生 Claude Code agents",
+  "register_new_standard_agents_natively": "以原生方式注册新的标准 agents",
+  "test_claude_code": "🔍 测试 Claude Code",
+  "native_status_available": "可用",
+  "native_status_configured_not_detected": "已配置，未检测到",
+  "native_status_disabled": "已禁用",
+  "native_status_not_detected": "未检测到",
+  "native_status_unavailable": "不可用",
+  "native_model": "模型",
+  "native_workspace": "工作区",
+  "native_workspace_root": "工作区根目录",
+  "native_main_workspace": "Main 工作区",
+  "native_api": "原生 API",
+  "native_configure_runtime_here": "可在此处或办公室设置菜单中配置此运行时。",
+  "enable_hermes_agents": "启用 Hermes agents",
+  "native_home": "主目录",
+  "native_cli": "CLI",
+  "native_api_url": "API 地址",
+  "native_api_key": "API 密钥",
+  "save": "保存",
+  "test": "测试",
+  "enable_codex_agents": "启用 Codex agents",
+  "register_new_standard_agents_in_native_codex": "在原生 Codex 中注册新的标准 agents",
+  "prefer_app_server_protocol": "优先使用 app-server 协议",
+  "native_agent_root": "Agent 根目录",
+  "native_main": "Main",
+  "optional": "可选",
+  "native_sandbox": "沙箱",
+  "native_approval": "审批",
+  "enable_claude_code_agents": "启用 Claude Code agents",
+  "discover_native_claude_code_subagents": "发现原生 Claude Code subagents",
+  "register_new_standard_agents_in_native_claude_code": "在原生 Claude Code 中注册新的标准 agents",
+  "native_config": "配置目录",
+  "native_mode": "模式",
+  "native_setup_guide": "原生设置指南",
+  "native_setup_guide_desc": "OpenClaw 云提供商使用认证配置和模型提供商条目。Hermes profiles 使用 CLI profile 配置，也可启用原生 API。Codex agents 使用 <code>$CODEX_HOME/agents/*.toml</code>。Claude Code subagents 使用 <code>$CLAUDE_CONFIG_DIR/agents/*.md</code>。",
+  "native_agents_tab": "🤖 原生 Agents",
+  "loading_native_agent_runtimes": "正在加载原生 Agent 运行时...",
+  "hermes_setup_saved": "Hermes 设置已保存",
+  "testing_hermes": "正在测试 Hermes...",
+  "hermes_connected": "Hermes 已连接",
+  "hermes_test_failed": "Hermes 测试失败",
+  "codex_setup_saved": "Codex 设置已保存",
+  "testing_codex": "正在测试 Codex...",
+  "codex_connected": "Codex 已连接",
+  "claude_code_setup_saved": "Claude Code 设置已保存",
+  "testing_claude_code": "正在测试 Claude Code...",
+  "claude_code_connected": "Claude Code 已连接",
+  "agent_singular": "agent",
+  "agent_plural": "agents",
+  "claude_code_stream_active": "Claude Code 流已连接...",
+  "claude_code_stream_failed": "Claude Code 流失败",
+  "claude_code_run_failed": "Claude Code 运行失败",
+  "claude_code_stream_disconnected": "Claude Code 事件流已断开",
+  "feishu_notifications_section": "📣 飞书通知",
+  "feishu_enable_webhook": "启用飞书应用通知",
+  "feishu_bot_webhook": "飞书机器人 Webhook",
+  "feishu_not_configured": "未配置",
+  "feishu_configured": "已配置：{{value}}",
+  "feishu_save_webhook": "保存 Webhook",
+  "feishu_send_test_cards": "发送测试卡片",
+  "feishu_secret_note": "使用飞书 App ID、App Secret 和接收 ID 发送通知。密钥只保存在服务端，保存后仅显示掩码。",
+  "feishu_secret_note_setup": "使用飞书 App ID、App Secret 和接收 ID 发送通知。密钥只保存在服务端，不会回显到浏览器。",
+  "feishu_save_requires_webhook": "请输入要保存的飞书 Webhook。使用“保存全部设置”时留空会保留已有值。",
+  "feishu_save_requires_webhook_setup": "请输入要保存的飞书 Webhook。安装配置中留空会保留已有值。",
+  "feishu_saving_webhook": "正在保存飞书 Webhook...",
+  "feishu_webhook_saved": "飞书 Webhook 已保存，完整值已隐藏。",
+  "feishu_sending_test_cards": "正在发送飞书测试卡片...",
+  "feishu_test_cards_sent": "已发送申请表单、通知、警告、错误四类测试卡片。",
+  "feishu_save_failed": "保存失败",
+  "feishu_test_failed": "测试失败",
+  "feishu_save_config": "保存配置",
+  "feishu_app_id": "飞书 App ID",
+  "feishu_app_secret": "飞书 App Secret",
+  "feishu_receive_id_type": "接收 ID 类型",
+  "feishu_receive_id": "接收 ID",
+  "feishu_configured_app": "已配置应用：{{appId}}，{{receiveIdType}} {{receiveId}}",
+  "feishu_configured_webhook": "已配置 Webhook：{{value}}",
+  "feishu_configured_app_webhook": "已配置应用：{{appId}}，{{receiveIdType}} {{receiveId}}；Webhook 备用：{{webhook}}",
+  "feishu_save_requires_config": "请输入飞书 App ID、App Secret 和接收 ID。",
+  "feishu_config_saved": "飞书应用通知配置已保存，密钥已隐藏。",
+  "feishu_saving_config": "正在保存飞书通知配置..."
 }

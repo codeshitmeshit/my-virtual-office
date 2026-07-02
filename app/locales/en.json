@@ -559,7 +559,7 @@
   "chat_image_alt": "image",
   "chat_task_updates": "task updates",
   "chat_steps_complete": "steps complete",
-  "chat_receive_run_export_render": "receive \u00b7 run \u00b7 export \u00b7 render",
+  "chat_receive_run_export_render": "receive · run · export · render",
   "chat_you_label": "You",
   "chat_assistant_label": "Assistant",
   "chat_processing": "Processing...",
@@ -755,7 +755,6 @@
   "text_color_label": "Text Color",
   "font_size_label": "Font Size",
   "label_default": "Label",
-
   "proj_title": "Projects",
   "proj_new_project": "New Project",
   "proj_create_project": "Create Project",
@@ -1139,10 +1138,9 @@
   "api_usage_month": "MONTH",
   "api_usage_daily_limit_reached": "DAILY LIMIT REACHED",
   "api_usage_weekly_limit_reached": "WEEKLY LIMIT REACHED",
-  "api_usage_configured_no_windows": "\u2713 Configured \u2014 no quota windows",
+  "api_usage_configured_no_windows": "✓ Configured — no quota windows",
   "api_usage_updated": "Updated",
   "api_usage_pct_left": "% left",
-
   "site_logo_text": "Your Virtual Office",
   "nav_features": "Features",
   "nav_demo": "Demo",
@@ -1493,388 +1491,416 @@
   "error_deleting_skill": "Error deleting skill",
   "hide_secondary_chat": "Hide secondary chat window {{slot}}",
   "retry_hermes_allow_hint": "Retry this Hermes turn with approval bypass for this invocation only",
-  "retry_hermes_deny_hint": "Do not retry this blocked Hermes command"
-  ,"proj_dirty_workspace_confirm": "The workspace has uncommitted changes. Continuing will not roll them back.\n\n{{files}}"
-  ,"proj_task_execution_started": "Project task execution started"
-  ,"proj_start_task_failed": "Failed to start task"
-  ,"proj_stopping_task": "Stopping task; existing file changes will be kept"
-  ,"proj_stop_task_failed": "Failed to stop task"
-  ,"proj_review_started": "Independent review started"
-  ,"proj_start_review_failed": "Failed to start review"
-  ,"proj_feedback_required": "Feedback is required"
-  ,"proj_accept_confirm": "Accept and move to Done?"
-  ,"proj_accept_action_failed": "Failed to submit acceptance action"
-  ,"setup_license_note": "<b>Demo mode:</b> Free for up to 3 agents; some features are locked.<br><br><b>Full license:</b> Unlimited agents and all features.<br><b>Early bird:</b> Same features at a limited-time launch price.<br><br>Get your key at <a href=\"https://myvirtualoffice.ai\" target=\"_blank\">myvirtualoffice.ai</a>"
-  ,"setup_browser_note": "<b>What is this?</b> Agent Browser provides a live browser controlled through CDP and viewed through VNC.<br><br><b>Project Agent Browser Docker setup:</b><br><code>./start.sh --browser</code><br><br>This command starts only the Agent Browser Docker service; run the main app separately with <code>./start.sh</code> in another terminal.<br><br>CDP: <code>http://127.0.0.1:9224</code><br>Viewer: <code>https://127.0.0.1:6901</code><br><br>You can skip this and configure it later."
-  ,"setup_sms_note": "<b>What you need:</b> A Twilio account, phone number, Account SID, and Auth Token.<br><br>Incoming MMS can display when credentials are configured. Outgoing attachments require a public HTTPS media URL that Twilio can access. Text-only SMS works without one.<br><br>You can skip this and configure it later."
-  ,"setup_metrics_note": "<b>How it works:</b> Run the included metrics server on the computer to monitor.<br><br><code>pip install psutil</code><br><code>python pc-metrics-server.py 8099</code><br><br>Use <code>http://127.0.0.1:8099</code> locally or the computer's LAN/Tailscale address remotely. NVIDIA GPU monitoring also requires <code>pynvml</code>."
-  ,"setup_done_note": "<b>What you can do:</b><br>• Edit the office layout and colors<br>• Customize agents and assign desks<br>• Chat with agents<br>• Change connection settings and export/import configuration<br><br><b>Live presence:</b> Long-running agent work remains visible until it finishes.<br><br><b>API usage:</b> Provider usage and credential health are detected from OpenClaw automatically."
-  ,"select_agent": "Select an agent..."
-  ,"delete_branch_confirm": "Delete branch \"{{name}}\"? Agents will be moved to Unassigned."
-  ,"message_target_prompt": "→ To whom? (leave blank for general)"
-  ,"enter_label_text": "Enter label text:"
-  ,"branch_change_title": "Branch: {{name}} (click to change)"
-  ,"catalog_office": "Office"
-  ,"catalog_comfort": "Comfort"
-  ,"catalog_functional": "Functional Furniture"
-  ,"catalog_kitchen": "Kitchen"
-  ,"catalog_fun": "Fun"
-  ,"catalog_structure": "Structure"
-  ,"catalog_labels": "Labels"
-  ,"catalog_walls": "Walls"
-  ,"furniture_desk": "Desk"
-  ,"furniture_boss_desk": "Boss Desk"
-  ,"furniture_trash_can": "Trash Can"
-  ,"furniture_filing_cabinet": "Filing Cabinet"
-  ,"furniture_whiteboard": "Whiteboard"
-  ,"furniture_l_couch": "L-Couch"
-  ,"furniture_straight_couch": "Straight Couch"
-  ,"furniture_coffee_table": "Coffee Table"
-  ,"furniture_tv": "TV"
-  ,"furniture_bookshelf": "Bookshelf"
-  ,"furniture_functional_bookshelf": "Archive Bookshelf"
-  ,"furniture_meeting_table_4": "4-Person Meeting Table"
-  ,"furniture_meeting_table_6": "6-Person Meeting Table"
-  ,"furniture_meeting_room": "Meeting Room"
-  ,"meeting_space_idle": "No meeting is running"
-  ,"meeting_space_view_all": "View All Meetings"
-  ,"meeting_space_view_current": "View Current Meeting"
-  ,"bookshelf_view_archive": "View Archive"
-  ,"bookshelf_bind_archive": "Bind Archive"
-  ,"bookshelf_change_archive": "Change Archive"
-  ,"bookshelf_unbound": "No archive bound"
-  ,"bookshelf_unbound_hint": "Bind an archive first"
-  ,"bookshelf_loading_archives": "Loading archives..."
-  ,"bookshelf_no_archives": "No archives available"
-  ,"bookshelf_archive_load_failed": "Failed to load archives"
-  ,"bookshelf_archive_unavailable": "Archive Room is unavailable"
-  ,"bookshelf_bound_archive": "Bound archive: {{name}}"
-  ,"furniture_plant": "Plant"
-  ,"furniture_tall_plant": "Tall Plant"
-  ,"furniture_end_table_plant": "End Table + Plant"
-  ,"furniture_kitchen_counter": "Kitchen Counter"
-  ,"furniture_coffee_maker": "Coffee Maker"
-  ,"furniture_vending_machine": "Vending Machine"
-  ,"furniture_water_cooler": "Water Cooler"
-  ,"furniture_microwave": "Microwave"
-  ,"furniture_toaster": "Toaster"
-  ,"furniture_ping_pong_table": "Ping Pong Table"
-  ,"furniture_dart_board": "Dart Board"
-  ,"furniture_meeting_table": "Meeting Table"
-  ,"furniture_window": "Window"
-  ,"furniture_weather_window": "Weather Window"
-  ,"furniture_floor_window": "Floor Window"
-  ,"furniture_clock": "Clock"
-  ,"furniture_floor_lamp": "Floor Lamp"
-  ,"furniture_custom_text": "Custom Text"
-  ,"furniture_wall_segment": "Wall Segment"
-  ,"furniture_door_opening": "Door/Opening"
-  ,"agent_identity": "Identity"
-  ,"agent_role": "Role"
-  ,"agent_emoji": "Emoji"
-  ,"agent_gender": "Gender"
-  ,"agent_colors": "Colors"
-  ,"agent_shirt": "Shirt"
-  ,"agent_skin": "Skin"
-  ,"agent_hair": "Hair"
-  ,"agent_style": "Style"
-  ,"color_field": "Color"
-  ,"agent_highlight": "Highlight"
-  ,"agent_face": "Face"
-  ,"agent_eyebrows": "Eyebrows"
-  ,"agent_eye_color": "Eye Color"
-  ,"agent_facial_hair": "Facial Hair"
-  ,"agent_beard_color": "Beard Color"
-  ,"agent_costumes": "Costumes"
-  ,"agent_costume": "Costume"
-  ,"agent_accessories": "Accessories"
-  ,"agent_headwear": "Headwear"
-  ,"agent_hat_color": "Hat Color"
-  ,"agent_glasses": "Glasses"
-  ,"agent_lens_color": "Lens Color"
-  ,"agent_items": "Items"
-  ,"agent_held_item": "Held Item"
-  ,"agent_desk_item": "Desk Item"
-  ,"agent_assignment": "Assignment"
-  ,"branch_field": "Branch"
-  ,"openclaw_agent": "OpenClaw Agent"
-  ,"assigned_to_agent": "assigned to {{name}}"
-  ,"option_none": "none"
-  ,"option_bald": "bald"
-  ,"option_buzz": "buzz"
-  ,"option_short": "short"
-  ,"option_medium": "medium"
-  ,"option_long": "long"
-  ,"option_curly": "curly"
-  ,"option_wavy": "wavy"
-  ,"option_spiky": "spiky"
-  ,"option_bun": "bun"
-  ,"option_ponytail": "ponytail"
-  ,"option_mohawk": "mohawk"
-  ,"option_thin": "thin"
-  ,"option_thick": "thick"
-  ,"option_angular": "angular"
-  ,"option_arched": "arched"
-  ,"option_stubble": "stubble"
-  ,"option_beard": "beard"
-  ,"option_goatee": "goatee"
-  ,"option_mustache": "mustache"
-  ,"option_lobster": "lobster"
-  ,"option_chicken": "chicken"
-  ,"option_hardhat": "hardhat"
-  ,"option_cap": "cap"
-  ,"option_crown": "crown"
-  ,"option_tiara": "tiara"
-  ,"option_headband": "headband"
-  ,"option_goggles": "goggles"
-  ,"option_headset": "headset"
-  ,"option_beanie": "beanie"
-  ,"option_round": "round"
-  ,"option_square": "square"
-  ,"option_sunglasses": "sunglasses"
-  ,"option_tablet": "tablet"
-  ,"option_wrench": "wrench"
-  ,"option_coffee": "coffee"
-  ,"option_clipboard": "clipboard"
-  ,"option_pen": "pen"
-  ,"option_hammer": "hammer"
-  ,"option_testTube": "test tube"
-  ,"option_book": "book"
-  ,"option_anvil": "anvil"
-  ,"option_trophy": "trophy"
-  ,"option_calendar": "calendar"
-  ,"option_envelope": "envelope"
-  ,"option_money": "money"
-  ,"option_ruler": "ruler"
-  ,"option_marker": "marker"
-  ,"option_chart": "chart"
-  ,"option_plans": "plans"
-  ,"option_checklist": "checklist"
-  ,"option_microscope": "microscope"
-  ,"option_shield": "shield"
-  ,"option_phone": "phone"
-  ,"option_files": "files"
-  ,"snap_center": "⊙ Center"
-  ,"snap_top_left": "↖ Top-Left"
-  ,"snap_top_right": "↗ Top-Right"
-  ,"snap_bottom_left": "↙ Bottom-Left"
-  ,"snap_bottom_right": "↘ Bottom-Right"
-  ,"setup_openclaw_path_note": "<b>📁 Where to find it:</b><br><br><b>Linux/Mac (most common):</b><br><code>/home/youruser/.openclaw</code><br><br><b>Running Virtual Office in Docker?</b><br>Use the path mounted with <code>-v</code>. Example:<br><code>docker run -v /home/eli/.openclaw:/openclaw ...</code><br>Enter <code>/openclaw</code>.<br><br><b>Not sure?</b> Run <code>ls ~/.openclaw/openclaw.json</code>. If it prints a path, use its folder."
-  ,"setup_no_agents_note": "<b>🔧 No agents found? Check the following:</b><br><br><b>1. Is the path correct?</b> The folder should contain <code>openclaw.json</code> and an <code>agents/</code> directory.<br><br><b>2. Are agents configured?</b> Open <code>openclaw.json</code> and check <code>agents → list</code>. Each agent needs a workspace directory.<br><br><b>3. Running in Docker?</b> Mount the OpenClaw directory into the container:<br><code>docker run -v /path/to/.openclaw:/openclaw ...</code><br><br><b>4. Permissions?</b> The server needs read access to the <code>agents/</code> folder.<br><br><b>Still stuck?</b> Skip this step and configure the path later from ☰ Menu."
-  ,"skill_applied": "Applied {{skill}} to {{agent}}"
-  ,"apply_failed": "Apply failed"
-  ,"failed_load_skill": "Failed to load skill"
-  ,"upload_failed": "Upload failed"
-  ,"license_active": "✅ {{tier}} license active"
-  ,"gateway_origin_added": "Origin added to the allowed list."
-  ,"gateway_origin_exists": "Origin is already allowed."
-  ,"gateway_reachable": "Gateway reachable"
-  ,"gateway_unreachable": "Gateway unreachable"
-  ,"gateway_running_hint": "Make sure the OpenClaw Gateway is running. Virtual Office needs its WebSocket connection for live agent status and chat."
-  ,"gateway_token_found": "Gateway token found"
-  ,"gateway_token_failed": "Gateway token authentication failed"
-  ,"gateway_agents_connected": "{{count}} agents connected"
-  ,"agent_platform_prompt": "Agent platform:"
-  ,"agent_create_title": "New Agent"
-  ,"agent_create_submit": "Create Agent"
-  ,"creating_agent_platform": "Creating agent in {{platform}}..."
-  ,"agent_created_platform": "Agent \"{{name}}\" created in {{platform}}."
-  ,"agent_deleted": "Agent \"{{name}}\" deleted"
-  ,"compression_failed_detail": "compression failed"
-  ,"codex_context_compressed": "Codex context compressed."
-  ,"cancel_failed_detail": "cancel failed"
-  ,"resolved": "resolved"
-  ,"codex_interaction_unavailable": "This Codex interaction can no longer be resumed."
-  ,"modified_files": "Modified files"
-  ,"interaction_failed_detail": "interaction failed"
-  ,"busy": "busy"
-  ,"codex_busy_other_conversation": "Codex is {{status}} in another conversation."
-  ,"opened_active_codex_conversation": "Opened active Codex conversation"
-  ,"hermes_step_receive": "Receive message from Virtual Office"
-  ,"hermes_step_load_profile": "Load Hermes profile and current session"
-  ,"hermes_step_run_loop": "Run Hermes CLI agent loop"
-  ,"hermes_step_wait_updates": "Wait for model, tools, and task updates"
-  ,"hermes_step_export_activity": "Export public session activity"
-  ,"hermes_step_render_reply": "Render reply, tool calls, and task summary"
-  ,"hermes_task_breakdown": "Hermes task breakdown"
-  ,"hermes_queued_waiting": "Queued in Virtual Office. Waiting for Hermes to start."
-  ,"hermes_running_step": "Running step {{current}} of {{total}}: {{step}}"
-  ,"hermes_review_error": "Review the Hermes error in chat"
-  ,"hermes_reply_collected": "Hermes reply and session activity collected."
-  ,"hermes_request_failed": "Hermes request failed."
-  ,"human_intervention_required": "Human intervention required."
-  ,"hermes_task_plan": "task plan"
-  ,"hermes_steps_complete": "{{count}} steps complete"
-  ,"hermes_plan_preview": "receive · run · export · render"
-  ,"meeting_ai_requests": "AI Requests"
-  ,"meeting_request_empty": "No AI meeting requests"
-  ,"meeting_request_title": "AI meeting request"
-  ,"meeting_request_detail_title": "AI Meeting Request"
-  ,"meeting_request_view_detail": "View details / handle"
-  ,"meeting_request_status_pending": "Pending"
-  ,"meeting_request_status_rejected": "Rejected"
-  ,"meeting_request_status_confirmed": "Confirmed"
-  ,"meeting_request_goal": "Goal"
-  ,"meeting_request_expected": "Expected outcome"
-  ,"meeting_request_reason": "Why meeting is needed"
-  ,"meeting_request_context_candidates": "Context candidates"
-  ,"meeting_request_no_context": "No context candidates."
-  ,"meeting_request_reject_reason": "Reject reason"
-  ,"meeting_request_reject_reason_required": "Enter a rejection reason."
-  ,"meeting_request_confirm_start": "Confirm and start"
-  ,"meeting_request_reject": "Reject"
-  ,"meeting_request_created_meeting": "Created meeting"
-  ,"meeting_request_pending_prompt": "AI meeting requests need confirmation"
-  ,"meeting_urgency": "Urgency"
-  ,"meeting_requesting_agent": "Requesting AI"
-  ,"meeting_auto_start_high_urgency": "High urgency auto-starts"
-  ,"meeting_created_by_user": "User started"
-  ,"meeting_created_by_agent": "AI started"
-  ,"meeting_context_source_project": "Project"
-  ,"meeting_context_source_task": "Task"
-  ,"meeting_context_source_related_task": "Related task"
-  ,"meeting_context_source_meeting": "Meeting"
-  ,"meeting_context_source_supplemental": "Supplemental context"
-  ,"meeting_fixture_user_requested_ai_meeting": "User requested AI meeting"
-  ,"meeting_fixture_invite_gg_urgency_3": "Invite gg to urgency 3 AI meeting"
-  ,"meeting_fixture_invite_gg_urgency_3_summary": "User requested Codex to start an urgency 3 AI meeting and invite gg. This task exists as the required project-task source for the meeting request."
-  ,"meeting_conflicts": "Participant conflicts"
-  ,"meeting_conflict_estimated": "Availability"
-  ,"meeting_pause_capability": "Pause"
-  ,"meeting_advisory": "Advisory recommendation"
-  ,"meeting_advisory_source": "Source"
-  ,"meeting_advisory_source_agent": "Busy agent advisory"
-  ,"meeting_advisory_source_local": "Local fallback"
-  ,"meeting_advisory_source_local_failed": "AI advisory failed; local fallback"
-  ,"meeting_unknown": "unknown"
-  ,"meeting_conflict_idle": "Idle"
-  ,"meeting_conflict_provider_call": "Provider call in progress"
-  ,"meeting_conflict_already_in_meeting": "Already in meeting: {topic}"
-  ,"meeting_conflict_risk_high": "high"
-  ,"meeting_conflict_risk_medium": "medium"
-  ,"meeting_conflict_risk_low": "low"
-  ,"meeting_conflict_risk_busy": "busy"
-  ,"meeting_conflict_risk_idle": "idle"
-  ,"meeting_pause_unavailable": "unavailable"
-  ,"meeting_pause_logical": "logical pause"
-  ,"meeting_pause_none": "none"
-  ,"meeting_recommend_wait": "wait"
-  ,"meeting_recommend_reserve": "try later"
-  ,"meeting_recommend_replace": "replace"
-  ,"meeting_recommend_force_join": "force join"
-  ,"meeting_conflict_risk_meeting_occupied": "Agent is already in another active meeting. Do not force join unless the existing meeting is cancelled."
-  ,"meeting_conflict_resume_none": "No original task can be resumed from this meeting conflict."
-  ,"meeting_conflict_risk_provider_call": "A provider call is in progress. Interrupting can lose an in-flight response."
-  ,"meeting_conflict_resume_provider_call": "Wait for the provider call to finish, then retry conflict handling."
-  ,"meeting_conflict_risk_logical_pause": "The current task can only be logically paused; the provider process may not stop immediately."
-  ,"meeting_conflict_resume_logical_pause": "Save current task context and resume from the recorded task state after the meeting."
-  ,"meeting_conflict_risk_uncertain": "Pause safety is uncertain."
-  ,"meeting_conflict_resume_recheck": "Recheck the agent state before forcing a meeting."
-  ,"meeting_conflict_wait": "Wait"
-  ,"meeting_conflict_reserve": "Try later"
-  ,"meeting_conflict_replace": "Replace"
-  ,"meeting_conflict_force": "Force join"
-  ,"meeting_conflict_refresh": "Recheck conflicts"
-  ,"meeting_reservation_notice": "Reservations are reminders only; conflicts are rechecked before the meeting starts."
-  ,"meeting_conflict_failed": "Conflict handling failed"
-  ,"meeting_conflict_reserve_prompt": "Reminder timing is based on the agent's availability."
-  ,"meeting_conflict_replace_prompt": "Replacement agent ID"
-  ,"meeting_conflict_force_confirm": "Force join can interrupt current work. Continue?"
-  ,"meeting_project": "Project"
-  ,"meeting_project_none": "No project"
-  ,"meeting_action_drafts": "Action item drafts"
-  ,"meeting_action_drafts_hint": "Confirming adds the item to the source task. Drafts do not execute automatically."
-  ,"meeting_action_untitled": "Untitled action item"
-  ,"meeting_action_status_draft": "Draft"
-  ,"meeting_action_status_confirmed": "Added to source task"
-  ,"meeting_action_status_rejected": "Rejected"
-  ,"meeting_action_status_kept": "Kept only"
-  ,"meeting_action_edit": "Edit"
-  ,"meeting_action_owner": "Owner"
-  ,"meeting_action_title": "Task title"
-  ,"meeting_action_description": "Description"
-  ,"meeting_action_save_draft": "Save draft"
-  ,"meeting_action_confirm_task": "Add to source task"
-  ,"meeting_action_keep": "Keep only"
-  ,"meeting_action_reject": "Reject"
-  ,"meeting_action_open_task": "Open source task"
-  ,"meeting_action_task_created": "Added to source task"
-  ,"meeting_action_rejected_by_user": "Rejected by user"
-  ,"use_hermes_native_api": "Use Hermes native API"
-  ,"hermes_api_url": "Hermes API URL"
-  ,"hermes_api_key": "Hermes API Key"
-  ,"leave_blank_keep_key": "Leave blank to keep existing key"
-  ,"native_agent_providers": "🤖 Native Agent Providers"
-  ,"enable_codex": "Enable Codex"
-  ,"codex_workspace": "Codex Workspace"
-  ,"codex_agent_root": "Codex Agent Root"
-  ,"codex_main_workspace": "Codex Main Workspace"
-  ,"codex_model": "Codex Model"
-  ,"codex_bridge_url": "Codex Bridge URL"
-  ,"optional_app_server_bridge_url": "Optional app-server bridge URL"
-  ,"show_codex_main_agent": "Show Codex Main agent"
-  ,"discover_native_codex_agents": "Discover native Codex agents"
-  ,"test_codex": "🔍 Test Codex"
-  ,"enable_claude_code": "Enable Claude Code"
-  ,"claude_code_home": "Claude Code Home"
-  ,"claude_code_cli": "Claude Code CLI"
-  ,"claude_code_workspace": "Claude Code Workspace"
-  ,"claude_code_agent_root": "Claude Code Agent Root"
-  ,"claude_code_main_workspace": "Claude Code Main Workspace"
-  ,"claude_code_model": "Claude Code Model"
-  ,"show_claude_code_main_agent": "Show Claude Code Main agent"
-  ,"discover_native_claude_code_agents": "Discover native Claude Code agents"
-  ,"register_new_standard_agents_natively": "Register new standard agents natively"
-  ,"test_claude_code": "🔍 Test Claude Code"
-  ,"native_status_available": "available"
-  ,"native_status_configured_not_detected": "configured, not detected"
-  ,"native_status_disabled": "disabled"
-  ,"native_status_not_detected": "not detected"
-  ,"native_status_unavailable": "unavailable"
-  ,"native_model": "model"
-  ,"native_workspace": "workspace"
-  ,"native_workspace_root": "workspace root"
-  ,"native_main_workspace": "main workspace"
-  ,"native_api": "native API"
-  ,"native_configure_runtime_here": "Configure this runtime here or from the office settings menu."
-  ,"enable_hermes_agents": "Enable Hermes agents"
-  ,"native_home": "Home"
-  ,"native_cli": "CLI"
-  ,"native_api_url": "API URL"
-  ,"native_api_key": "API Key"
-  ,"save": "Save"
-  ,"test": "Test"
-  ,"enable_codex_agents": "Enable Codex agents"
-  ,"register_new_standard_agents_in_native_codex": "Register new standard agents in native Codex"
-  ,"prefer_app_server_protocol": "Prefer app-server protocol"
-  ,"native_agent_root": "Agent Root"
-  ,"native_main": "Main"
-  ,"optional": "optional"
-  ,"native_sandbox": "Sandbox"
-  ,"native_approval": "Approval"
-  ,"enable_claude_code_agents": "Enable Claude Code agents"
-  ,"discover_native_claude_code_subagents": "Discover native Claude Code subagents"
-  ,"register_new_standard_agents_in_native_claude_code": "Register new standard agents in native Claude Code"
-  ,"native_config": "Config"
-  ,"native_mode": "Mode"
-  ,"native_setup_guide": "Native Setup Guide"
-  ,"native_setup_guide_desc": "OpenClaw cloud providers use auth profiles and model provider entries. Hermes profiles use CLI profile config plus optional native API. Codex agents use <code>$CODEX_HOME/agents/*.toml</code>. Claude Code subagents use <code>$CLAUDE_CONFIG_DIR/agents/*.md</code>."
-  ,"native_agents_tab": "🤖 Native Agents"
-  ,"loading_native_agent_runtimes": "Loading native agent runtimes..."
-  ,"hermes_setup_saved": "Hermes setup saved"
-  ,"testing_hermes": "Testing Hermes..."
-  ,"hermes_connected": "Hermes connected"
-  ,"hermes_test_failed": "Hermes test failed"
-  ,"codex_setup_saved": "Codex setup saved"
-  ,"testing_codex": "Testing Codex..."
-  ,"codex_connected": "Codex connected"
-  ,"claude_code_setup_saved": "Claude Code setup saved"
-  ,"testing_claude_code": "Testing Claude Code..."
-  ,"claude_code_connected": "Claude Code connected"
-  ,"agent_singular": "agent"
-  ,"agent_plural": "agents"
-  ,"claude_code_stream_active": "Claude Code stream active..."
-  ,"claude_code_stream_failed": "Claude Code stream failed"
-  ,"claude_code_run_failed": "Claude Code run failed"
-  ,"claude_code_stream_disconnected": "Claude Code event stream disconnected"
+  "retry_hermes_deny_hint": "Do not retry this blocked Hermes command",
+  "proj_dirty_workspace_confirm": "The workspace has uncommitted changes. Continuing will not roll them back.\n\n{{files}}",
+  "proj_task_execution_started": "Project task execution started",
+  "proj_start_task_failed": "Failed to start task",
+  "proj_stopping_task": "Stopping task; existing file changes will be kept",
+  "proj_stop_task_failed": "Failed to stop task",
+  "proj_review_started": "Independent review started",
+  "proj_start_review_failed": "Failed to start review",
+  "proj_feedback_required": "Feedback is required",
+  "proj_accept_confirm": "Accept and move to Done?",
+  "proj_accept_action_failed": "Failed to submit acceptance action",
+  "setup_license_note": "<b>Demo mode:</b> Free for up to 3 agents; some features are locked.<br><br><b>Full license:</b> Unlimited agents and all features.<br><b>Early bird:</b> Same features at a limited-time launch price.<br><br>Get your key at <a href=\"https://myvirtualoffice.ai\" target=\"_blank\">myvirtualoffice.ai</a>",
+  "setup_browser_note": "<b>What is this?</b> Agent Browser provides a live browser controlled through CDP and viewed through VNC.<br><br><b>Project Agent Browser Docker setup:</b><br><code>./start.sh --browser</code><br><br>This command starts only the Agent Browser Docker service; run the main app separately with <code>./start.sh</code> in another terminal.<br><br>CDP: <code>http://127.0.0.1:9224</code><br>Viewer: <code>https://127.0.0.1:6901</code><br><br>You can skip this and configure it later.",
+  "setup_sms_note": "<b>What you need:</b> A Twilio account, phone number, Account SID, and Auth Token.<br><br>Incoming MMS can display when credentials are configured. Outgoing attachments require a public HTTPS media URL that Twilio can access. Text-only SMS works without one.<br><br>You can skip this and configure it later.",
+  "setup_metrics_note": "<b>How it works:</b> Run the included metrics server on the computer to monitor.<br><br><code>pip install psutil</code><br><code>python pc-metrics-server.py 8099</code><br><br>Use <code>http://127.0.0.1:8099</code> locally or the computer's LAN/Tailscale address remotely. NVIDIA GPU monitoring also requires <code>pynvml</code>.",
+  "setup_done_note": "<b>What you can do:</b><br>• Edit the office layout and colors<br>• Customize agents and assign desks<br>• Chat with agents<br>• Change connection settings and export/import configuration<br><br><b>Live presence:</b> Long-running agent work remains visible until it finishes.<br><br><b>API usage:</b> Provider usage and credential health are detected from OpenClaw automatically.",
+  "select_agent": "Select an agent...",
+  "delete_branch_confirm": "Delete branch \"{{name}}\"? Agents will be moved to Unassigned.",
+  "message_target_prompt": "→ To whom? (leave blank for general)",
+  "enter_label_text": "Enter label text:",
+  "branch_change_title": "Branch: {{name}} (click to change)",
+  "catalog_office": "Office",
+  "catalog_comfort": "Comfort",
+  "catalog_functional": "Functional Furniture",
+  "catalog_kitchen": "Kitchen",
+  "catalog_fun": "Fun",
+  "catalog_structure": "Structure",
+  "catalog_labels": "Labels",
+  "catalog_walls": "Walls",
+  "furniture_desk": "Desk",
+  "furniture_boss_desk": "Boss Desk",
+  "furniture_trash_can": "Trash Can",
+  "furniture_filing_cabinet": "Filing Cabinet",
+  "furniture_whiteboard": "Whiteboard",
+  "furniture_l_couch": "L-Couch",
+  "furniture_straight_couch": "Straight Couch",
+  "furniture_coffee_table": "Coffee Table",
+  "furniture_tv": "TV",
+  "furniture_bookshelf": "Bookshelf",
+  "furniture_functional_bookshelf": "Archive Bookshelf",
+  "furniture_meeting_table_4": "4-Person Meeting Table",
+  "furniture_meeting_table_6": "6-Person Meeting Table",
+  "furniture_meeting_room": "Meeting Room",
+  "meeting_space_idle": "No meeting is running",
+  "meeting_space_view_all": "View All Meetings",
+  "meeting_space_view_current": "View Current Meeting",
+  "bookshelf_view_archive": "View Archive",
+  "bookshelf_bind_archive": "Bind Archive",
+  "bookshelf_change_archive": "Change Archive",
+  "bookshelf_unbound": "No archive bound",
+  "bookshelf_unbound_hint": "Bind an archive first",
+  "bookshelf_loading_archives": "Loading archives...",
+  "bookshelf_no_archives": "No archives available",
+  "bookshelf_archive_load_failed": "Failed to load archives",
+  "bookshelf_archive_unavailable": "Archive Room is unavailable",
+  "bookshelf_bound_archive": "Bound archive: {{name}}",
+  "furniture_plant": "Plant",
+  "furniture_tall_plant": "Tall Plant",
+  "furniture_end_table_plant": "End Table + Plant",
+  "furniture_kitchen_counter": "Kitchen Counter",
+  "furniture_coffee_maker": "Coffee Maker",
+  "furniture_vending_machine": "Vending Machine",
+  "furniture_water_cooler": "Water Cooler",
+  "furniture_microwave": "Microwave",
+  "furniture_toaster": "Toaster",
+  "furniture_ping_pong_table": "Ping Pong Table",
+  "furniture_dart_board": "Dart Board",
+  "furniture_meeting_table": "Meeting Table",
+  "furniture_window": "Window",
+  "furniture_weather_window": "Weather Window",
+  "furniture_floor_window": "Floor Window",
+  "furniture_clock": "Clock",
+  "furniture_floor_lamp": "Floor Lamp",
+  "furniture_custom_text": "Custom Text",
+  "furniture_wall_segment": "Wall Segment",
+  "furniture_door_opening": "Door/Opening",
+  "agent_identity": "Identity",
+  "agent_role": "Role",
+  "agent_emoji": "Emoji",
+  "agent_gender": "Gender",
+  "agent_colors": "Colors",
+  "agent_shirt": "Shirt",
+  "agent_skin": "Skin",
+  "agent_hair": "Hair",
+  "agent_style": "Style",
+  "color_field": "Color",
+  "agent_highlight": "Highlight",
+  "agent_face": "Face",
+  "agent_eyebrows": "Eyebrows",
+  "agent_eye_color": "Eye Color",
+  "agent_facial_hair": "Facial Hair",
+  "agent_beard_color": "Beard Color",
+  "agent_costumes": "Costumes",
+  "agent_costume": "Costume",
+  "agent_accessories": "Accessories",
+  "agent_headwear": "Headwear",
+  "agent_hat_color": "Hat Color",
+  "agent_glasses": "Glasses",
+  "agent_lens_color": "Lens Color",
+  "agent_items": "Items",
+  "agent_held_item": "Held Item",
+  "agent_desk_item": "Desk Item",
+  "agent_assignment": "Assignment",
+  "branch_field": "Branch",
+  "openclaw_agent": "OpenClaw Agent",
+  "assigned_to_agent": "assigned to {{name}}",
+  "option_none": "none",
+  "option_bald": "bald",
+  "option_buzz": "buzz",
+  "option_short": "short",
+  "option_medium": "medium",
+  "option_long": "long",
+  "option_curly": "curly",
+  "option_wavy": "wavy",
+  "option_spiky": "spiky",
+  "option_bun": "bun",
+  "option_ponytail": "ponytail",
+  "option_mohawk": "mohawk",
+  "option_thin": "thin",
+  "option_thick": "thick",
+  "option_angular": "angular",
+  "option_arched": "arched",
+  "option_stubble": "stubble",
+  "option_beard": "beard",
+  "option_goatee": "goatee",
+  "option_mustache": "mustache",
+  "option_lobster": "lobster",
+  "option_chicken": "chicken",
+  "option_hardhat": "hardhat",
+  "option_cap": "cap",
+  "option_crown": "crown",
+  "option_tiara": "tiara",
+  "option_headband": "headband",
+  "option_goggles": "goggles",
+  "option_headset": "headset",
+  "option_beanie": "beanie",
+  "option_round": "round",
+  "option_square": "square",
+  "option_sunglasses": "sunglasses",
+  "option_tablet": "tablet",
+  "option_wrench": "wrench",
+  "option_coffee": "coffee",
+  "option_clipboard": "clipboard",
+  "option_pen": "pen",
+  "option_hammer": "hammer",
+  "option_testTube": "test tube",
+  "option_book": "book",
+  "option_anvil": "anvil",
+  "option_trophy": "trophy",
+  "option_calendar": "calendar",
+  "option_envelope": "envelope",
+  "option_money": "money",
+  "option_ruler": "ruler",
+  "option_marker": "marker",
+  "option_chart": "chart",
+  "option_plans": "plans",
+  "option_checklist": "checklist",
+  "option_microscope": "microscope",
+  "option_shield": "shield",
+  "option_phone": "phone",
+  "option_files": "files",
+  "snap_center": "⊙ Center",
+  "snap_top_left": "↖ Top-Left",
+  "snap_top_right": "↗ Top-Right",
+  "snap_bottom_left": "↙ Bottom-Left",
+  "snap_bottom_right": "↘ Bottom-Right",
+  "setup_openclaw_path_note": "<b>📁 Where to find it:</b><br><br><b>Linux/Mac (most common):</b><br><code>/home/youruser/.openclaw</code><br><br><b>Running Virtual Office in Docker?</b><br>Use the path mounted with <code>-v</code>. Example:<br><code>docker run -v /home/eli/.openclaw:/openclaw ...</code><br>Enter <code>/openclaw</code>.<br><br><b>Not sure?</b> Run <code>ls ~/.openclaw/openclaw.json</code>. If it prints a path, use its folder.",
+  "setup_no_agents_note": "<b>🔧 No agents found? Check the following:</b><br><br><b>1. Is the path correct?</b> The folder should contain <code>openclaw.json</code> and an <code>agents/</code> directory.<br><br><b>2. Are agents configured?</b> Open <code>openclaw.json</code> and check <code>agents → list</code>. Each agent needs a workspace directory.<br><br><b>3. Running in Docker?</b> Mount the OpenClaw directory into the container:<br><code>docker run -v /path/to/.openclaw:/openclaw ...</code><br><br><b>4. Permissions?</b> The server needs read access to the <code>agents/</code> folder.<br><br><b>Still stuck?</b> Skip this step and configure the path later from ☰ Menu.",
+  "skill_applied": "Applied {{skill}} to {{agent}}",
+  "apply_failed": "Apply failed",
+  "failed_load_skill": "Failed to load skill",
+  "upload_failed": "Upload failed",
+  "license_active": "✅ {{tier}} license active",
+  "gateway_origin_added": "Origin added to the allowed list.",
+  "gateway_origin_exists": "Origin is already allowed.",
+  "gateway_reachable": "Gateway reachable",
+  "gateway_unreachable": "Gateway unreachable",
+  "gateway_running_hint": "Make sure the OpenClaw Gateway is running. Virtual Office needs its WebSocket connection for live agent status and chat.",
+  "gateway_token_found": "Gateway token found",
+  "gateway_token_failed": "Gateway token authentication failed",
+  "gateway_agents_connected": "{{count}} agents connected",
+  "agent_platform_prompt": "Agent platform:",
+  "agent_create_title": "New Agent",
+  "agent_create_submit": "Create Agent",
+  "creating_agent_platform": "Creating agent in {{platform}}...",
+  "agent_created_platform": "Agent \"{{name}}\" created in {{platform}}.",
+  "agent_deleted": "Agent \"{{name}}\" deleted",
+  "compression_failed_detail": "compression failed",
+  "codex_context_compressed": "Codex context compressed.",
+  "cancel_failed_detail": "cancel failed",
+  "resolved": "resolved",
+  "codex_interaction_unavailable": "This Codex interaction can no longer be resumed.",
+  "modified_files": "Modified files",
+  "interaction_failed_detail": "interaction failed",
+  "busy": "busy",
+  "codex_busy_other_conversation": "Codex is {{status}} in another conversation.",
+  "opened_active_codex_conversation": "Opened active Codex conversation",
+  "hermes_step_receive": "Receive message from Virtual Office",
+  "hermes_step_load_profile": "Load Hermes profile and current session",
+  "hermes_step_run_loop": "Run Hermes CLI agent loop",
+  "hermes_step_wait_updates": "Wait for model, tools, and task updates",
+  "hermes_step_export_activity": "Export public session activity",
+  "hermes_step_render_reply": "Render reply, tool calls, and task summary",
+  "hermes_task_breakdown": "Hermes task breakdown",
+  "hermes_queued_waiting": "Queued in Virtual Office. Waiting for Hermes to start.",
+  "hermes_running_step": "Running step {{current}} of {{total}}: {{step}}",
+  "hermes_review_error": "Review the Hermes error in chat",
+  "hermes_reply_collected": "Hermes reply and session activity collected.",
+  "hermes_request_failed": "Hermes request failed.",
+  "human_intervention_required": "Human intervention required.",
+  "hermes_task_plan": "task plan",
+  "hermes_steps_complete": "{{count}} steps complete",
+  "hermes_plan_preview": "receive · run · export · render",
+  "meeting_ai_requests": "AI Requests",
+  "meeting_request_empty": "No AI meeting requests",
+  "meeting_request_title": "AI meeting request",
+  "meeting_request_detail_title": "AI Meeting Request",
+  "meeting_request_view_detail": "View details / handle",
+  "meeting_request_status_pending": "Pending",
+  "meeting_request_status_rejected": "Rejected",
+  "meeting_request_status_confirmed": "Confirmed",
+  "meeting_request_goal": "Goal",
+  "meeting_request_expected": "Expected outcome",
+  "meeting_request_reason": "Why meeting is needed",
+  "meeting_request_context_candidates": "Context candidates",
+  "meeting_request_no_context": "No context candidates.",
+  "meeting_request_reject_reason": "Reject reason",
+  "meeting_request_reject_reason_required": "Enter a rejection reason.",
+  "meeting_request_confirm_start": "Confirm and start",
+  "meeting_request_reject": "Reject",
+  "meeting_request_created_meeting": "Created meeting",
+  "meeting_request_pending_prompt": "AI meeting requests need confirmation",
+  "meeting_urgency": "Urgency",
+  "meeting_requesting_agent": "Requesting AI",
+  "meeting_auto_start_high_urgency": "High urgency auto-starts",
+  "meeting_created_by_user": "User started",
+  "meeting_created_by_agent": "AI started",
+  "meeting_context_source_project": "Project",
+  "meeting_context_source_task": "Task",
+  "meeting_context_source_related_task": "Related task",
+  "meeting_context_source_meeting": "Meeting",
+  "meeting_context_source_supplemental": "Supplemental context",
+  "meeting_fixture_user_requested_ai_meeting": "User requested AI meeting",
+  "meeting_fixture_invite_gg_urgency_3": "Invite gg to urgency 3 AI meeting",
+  "meeting_fixture_invite_gg_urgency_3_summary": "User requested Codex to start an urgency 3 AI meeting and invite gg. This task exists as the required project-task source for the meeting request.",
+  "meeting_conflicts": "Participant conflicts",
+  "meeting_conflict_estimated": "Availability",
+  "meeting_pause_capability": "Pause",
+  "meeting_advisory": "Advisory recommendation",
+  "meeting_advisory_source": "Source",
+  "meeting_advisory_source_agent": "Busy agent advisory",
+  "meeting_advisory_source_local": "Local fallback",
+  "meeting_advisory_source_local_failed": "AI advisory failed; local fallback",
+  "meeting_unknown": "unknown",
+  "meeting_conflict_idle": "Idle",
+  "meeting_conflict_provider_call": "Provider call in progress",
+  "meeting_conflict_already_in_meeting": "Already in meeting: {topic}",
+  "meeting_conflict_risk_high": "high",
+  "meeting_conflict_risk_medium": "medium",
+  "meeting_conflict_risk_low": "low",
+  "meeting_conflict_risk_busy": "busy",
+  "meeting_conflict_risk_idle": "idle",
+  "meeting_pause_unavailable": "unavailable",
+  "meeting_pause_logical": "logical pause",
+  "meeting_pause_none": "none",
+  "meeting_recommend_wait": "wait",
+  "meeting_recommend_reserve": "try later",
+  "meeting_recommend_replace": "replace",
+  "meeting_recommend_force_join": "force join",
+  "meeting_conflict_risk_meeting_occupied": "Agent is already in another active meeting. Do not force join unless the existing meeting is cancelled.",
+  "meeting_conflict_resume_none": "No original task can be resumed from this meeting conflict.",
+  "meeting_conflict_risk_provider_call": "A provider call is in progress. Interrupting can lose an in-flight response.",
+  "meeting_conflict_resume_provider_call": "Wait for the provider call to finish, then retry conflict handling.",
+  "meeting_conflict_risk_logical_pause": "The current task can only be logically paused; the provider process may not stop immediately.",
+  "meeting_conflict_resume_logical_pause": "Save current task context and resume from the recorded task state after the meeting.",
+  "meeting_conflict_risk_uncertain": "Pause safety is uncertain.",
+  "meeting_conflict_resume_recheck": "Recheck the agent state before forcing a meeting.",
+  "meeting_conflict_wait": "Wait",
+  "meeting_conflict_reserve": "Try later",
+  "meeting_conflict_replace": "Replace",
+  "meeting_conflict_force": "Force join",
+  "meeting_conflict_refresh": "Recheck conflicts",
+  "meeting_reservation_notice": "Reservations are reminders only; conflicts are rechecked before the meeting starts.",
+  "meeting_conflict_failed": "Conflict handling failed",
+  "meeting_conflict_reserve_prompt": "Reminder timing is based on the agent's availability.",
+  "meeting_conflict_replace_prompt": "Replacement agent ID",
+  "meeting_conflict_force_confirm": "Force join can interrupt current work. Continue?",
+  "meeting_project": "Project",
+  "meeting_project_none": "No project",
+  "meeting_action_drafts": "Action item drafts",
+  "meeting_action_drafts_hint": "Confirming adds the item to the source task. Drafts do not execute automatically.",
+  "meeting_action_untitled": "Untitled action item",
+  "meeting_action_status_draft": "Draft",
+  "meeting_action_status_confirmed": "Added to source task",
+  "meeting_action_status_rejected": "Rejected",
+  "meeting_action_status_kept": "Kept only",
+  "meeting_action_edit": "Edit",
+  "meeting_action_owner": "Owner",
+  "meeting_action_title": "Task title",
+  "meeting_action_description": "Description",
+  "meeting_action_save_draft": "Save draft",
+  "meeting_action_confirm_task": "Add to source task",
+  "meeting_action_keep": "Keep only",
+  "meeting_action_reject": "Reject",
+  "meeting_action_open_task": "Open source task",
+  "meeting_action_task_created": "Added to source task",
+  "meeting_action_rejected_by_user": "Rejected by user",
+  "use_hermes_native_api": "Use Hermes native API",
+  "hermes_api_url": "Hermes API URL",
+  "hermes_api_key": "Hermes API Key",
+  "leave_blank_keep_key": "Leave blank to keep existing key",
+  "native_agent_providers": "🤖 Native Agent Providers",
+  "enable_codex": "Enable Codex",
+  "codex_workspace": "Codex Workspace",
+  "codex_agent_root": "Codex Agent Root",
+  "codex_main_workspace": "Codex Main Workspace",
+  "codex_model": "Codex Model",
+  "codex_bridge_url": "Codex Bridge URL",
+  "optional_app_server_bridge_url": "Optional app-server bridge URL",
+  "show_codex_main_agent": "Show Codex Main agent",
+  "discover_native_codex_agents": "Discover native Codex agents",
+  "test_codex": "🔍 Test Codex",
+  "enable_claude_code": "Enable Claude Code",
+  "claude_code_home": "Claude Code Home",
+  "claude_code_cli": "Claude Code CLI",
+  "claude_code_workspace": "Claude Code Workspace",
+  "claude_code_agent_root": "Claude Code Agent Root",
+  "claude_code_main_workspace": "Claude Code Main Workspace",
+  "claude_code_model": "Claude Code Model",
+  "show_claude_code_main_agent": "Show Claude Code Main agent",
+  "discover_native_claude_code_agents": "Discover native Claude Code agents",
+  "register_new_standard_agents_natively": "Register new standard agents natively",
+  "test_claude_code": "🔍 Test Claude Code",
+  "native_status_available": "available",
+  "native_status_configured_not_detected": "configured, not detected",
+  "native_status_disabled": "disabled",
+  "native_status_not_detected": "not detected",
+  "native_status_unavailable": "unavailable",
+  "native_model": "model",
+  "native_workspace": "workspace",
+  "native_workspace_root": "workspace root",
+  "native_main_workspace": "main workspace",
+  "native_api": "native API",
+  "native_configure_runtime_here": "Configure this runtime here or from the office settings menu.",
+  "enable_hermes_agents": "Enable Hermes agents",
+  "native_home": "Home",
+  "native_cli": "CLI",
+  "native_api_url": "API URL",
+  "native_api_key": "API Key",
+  "save": "Save",
+  "test": "Test",
+  "enable_codex_agents": "Enable Codex agents",
+  "register_new_standard_agents_in_native_codex": "Register new standard agents in native Codex",
+  "prefer_app_server_protocol": "Prefer app-server protocol",
+  "native_agent_root": "Agent Root",
+  "native_main": "Main",
+  "optional": "optional",
+  "native_sandbox": "Sandbox",
+  "native_approval": "Approval",
+  "enable_claude_code_agents": "Enable Claude Code agents",
+  "discover_native_claude_code_subagents": "Discover native Claude Code subagents",
+  "register_new_standard_agents_in_native_claude_code": "Register new standard agents in native Claude Code",
+  "native_config": "Config",
+  "native_mode": "Mode",
+  "native_setup_guide": "Native Setup Guide",
+  "native_setup_guide_desc": "OpenClaw cloud providers use auth profiles and model provider entries. Hermes profiles use CLI profile config plus optional native API. Codex agents use <code>$CODEX_HOME/agents/*.toml</code>. Claude Code subagents use <code>$CLAUDE_CONFIG_DIR/agents/*.md</code>.",
+  "native_agents_tab": "🤖 Native Agents",
+  "loading_native_agent_runtimes": "Loading native agent runtimes...",
+  "hermes_setup_saved": "Hermes setup saved",
+  "testing_hermes": "Testing Hermes...",
+  "hermes_connected": "Hermes connected",
+  "hermes_test_failed": "Hermes test failed",
+  "codex_setup_saved": "Codex setup saved",
+  "testing_codex": "Testing Codex...",
+  "codex_connected": "Codex connected",
+  "claude_code_setup_saved": "Claude Code setup saved",
+  "testing_claude_code": "Testing Claude Code...",
+  "claude_code_connected": "Claude Code connected",
+  "agent_singular": "agent",
+  "agent_plural": "agents",
+  "claude_code_stream_active": "Claude Code stream active...",
+  "claude_code_stream_failed": "Claude Code stream failed",
+  "claude_code_run_failed": "Claude Code run failed",
+  "claude_code_stream_disconnected": "Claude Code event stream disconnected",
+  "feishu_notifications_section": "📣 Feishu Notifications",
+  "feishu_enable_webhook": "Enable Feishu app notifications",
+  "feishu_bot_webhook": "Feishu Bot Webhook",
+  "feishu_not_configured": "Not configured",
+  "feishu_configured": "Configured: {{value}}",
+  "feishu_save_webhook": "Save Webhook",
+  "feishu_send_test_cards": "Send Test Cards",
+  "feishu_secret_note": "Uses Feishu App ID, App Secret, and Receive ID to send notifications. Secrets are stored server-side and shown only as masks after saving.",
+  "feishu_secret_note_setup": "Uses Feishu App ID, App Secret, and Receive ID to send notifications. Secrets are stored server-side and never shown back in the browser.",
+  "feishu_save_requires_webhook": "Enter a Feishu webhook to save. Blank keeps the existing saved value when saving all settings.",
+  "feishu_save_requires_webhook_setup": "Enter a Feishu webhook to save. Blank keeps the existing saved value during setup.",
+  "feishu_saving_webhook": "Saving Feishu webhook...",
+  "feishu_webhook_saved": "Feishu webhook saved. Full value is hidden.",
+  "feishu_sending_test_cards": "Sending Feishu test cards...",
+  "feishu_test_cards_sent": "Sent application-form, notification, warning, and error test cards.",
+  "feishu_save_failed": "Save failed",
+  "feishu_test_failed": "Test failed",
+  "feishu_save_config": "Save Config",
+  "feishu_app_id": "Feishu App ID",
+  "feishu_app_secret": "Feishu App Secret",
+  "feishu_receive_id_type": "Receive ID Type",
+  "feishu_receive_id": "Receive ID",
+  "feishu_configured_app": "App configured: {{appId}}, {{receiveIdType}} {{receiveId}}",
+  "feishu_configured_webhook": "Webhook configured: {{value}}",
+  "feishu_configured_app_webhook": "App configured: {{appId}}, {{receiveIdType}} {{receiveId}}; webhook fallback: {{webhook}}",
+  "feishu_save_requires_config": "Enter Feishu App ID, App Secret, and Receive ID.",
+  "feishu_config_saved": "Feishu app notification config saved. Secrets are hidden.",
+  "feishu_saving_config": "Saving Feishu notification config..."
 }

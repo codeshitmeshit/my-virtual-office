@@ -14025,6 +14025,11 @@ function _mmLoadCurrentSettings() {
         var claudeCodeIncludeNative = document.getElementById('mm-claude-code-include-native');
         var claudeCodeRegisterNative = document.getElementById('mm-claude-code-register-native');
         var meetingPreparingTimeout = document.getElementById('mm-meeting-preparing-timeout');
+        var feishuEnabled = document.getElementById('mm-feishu-enable');
+        var feishuAppId = document.getElementById('mm-feishu-app-id');
+        var feishuAppSecret = document.getElementById('mm-feishu-app-secret');
+        var feishuReceiveIdType = document.getElementById('mm-feishu-receive-id-type');
+        var feishuReceiveId = document.getElementById('mm-feishu-receive-id');
         if (gwInput) gwInput.value = (cfg.openclaw || {}).gatewayUrl || '';
         if (nameInput) nameInput.value = (cfg.office || {}).name || '';
         // Parse "City,State" or "City+Name,State" back into separate fields
@@ -14094,6 +14099,10 @@ function _mmLoadCurrentSettings() {
         if (meetingPreparingTimeout) {
             meetingPreparingTimeout.value = String(_mtgNormalizePreparingTimeoutSec((cfg.meetings || {}).preparingTimeoutSec));
         }
+        var notificationCfg = cfg.notifications || {};
+        if (feishuEnabled) feishuEnabled.checked = notificationCfg.feishuEnabled !== false;
+        mmFillFeishuMaskedInputs(notificationCfg);
+        mmRenderFeishuMask(notificationCfg);
     }).catch(function(){});
     // Load display prefs from localStorage
     var prefs = {};
@@ -14485,6 +14494,111 @@ function mmTestWeather() {
         });
 }
 
+function mmRenderFeishuMask(cfg) {
+    var el = document.getElementById('mm-feishu-mask');
+    if (!el) return;
+    cfg = cfg || {};
+    if (cfg.feishuAppConfigured) {
+        el.textContent = _tr('feishu_configured_app', {
+            appId: cfg.maskedFeishuAppId || '••••••••',
+            receiveIdType: cfg.feishuReceiveIdType || 'chat_id',
+            receiveId: cfg.maskedFeishuReceiveId || '••••••••'
+        });
+        el.style.color = '#81c784';
+    } else {
+        el.textContent = _tr('feishu_not_configured');
+        el.style.color = '#888';
+    }
+}
+
+function mmIsMaskedFeishuValue(value) {
+    return String(value || '').indexOf('••••') >= 0;
+}
+
+function mmFillFeishuMaskedInputs(cfg) {
+    cfg = cfg || {};
+    var appIdEl = document.getElementById('mm-feishu-app-id');
+    var appSecretEl = document.getElementById('mm-feishu-app-secret');
+    var receiveIdEl = document.getElementById('mm-feishu-receive-id');
+    var receiveIdTypeEl = document.getElementById('mm-feishu-receive-id-type');
+    if (appIdEl) appIdEl.value = cfg.maskedFeishuAppId || '';
+    if (appSecretEl) appSecretEl.value = cfg.feishuAppConfigured ? '••••••••' : '';
+    if (receiveIdEl) receiveIdEl.value = cfg.maskedFeishuReceiveId || '';
+    if (receiveIdTypeEl) receiveIdTypeEl.value = cfg.feishuReceiveIdType || 'chat_id';
+}
+
+function mmSaveFeishuWebhook() {
+    var enabledEl = document.getElementById('mm-feishu-enable');
+    var appIdEl = document.getElementById('mm-feishu-app-id');
+    var appSecretEl = document.getElementById('mm-feishu-app-secret');
+    var receiveIdTypeEl = document.getElementById('mm-feishu-receive-id-type');
+    var receiveIdEl = document.getElementById('mm-feishu-receive-id');
+    var statusEl = document.getElementById('mm-feishu-status');
+    if (!statusEl) return;
+    var enabled = enabledEl ? enabledEl.checked : true;
+    var appId = (appIdEl ? appIdEl.value : '').trim();
+    var appSecret = (appSecretEl ? appSecretEl.value : '').trim();
+    var receiveId = (receiveIdEl ? receiveIdEl.value : '').trim();
+    var receiveIdType = (receiveIdTypeEl ? receiveIdTypeEl.value : 'chat_id') || 'chat_id';
+    var appConfigured = mmIsMaskedFeishuValue(appId) && mmIsMaskedFeishuValue(appSecret) && mmIsMaskedFeishuValue(receiveId);
+    if (!(appConfigured || (appId && appSecret && receiveId))) {
+        statusEl.innerHTML = '<div class="mm-status err">' + escHtml(_tr('feishu_save_requires_config')) + '</div>';
+        return;
+    }
+    statusEl.innerHTML = '<div class="mm-status info">' + escHtml(_tr('feishu_saving_config')) + '</div>';
+    fetch('/api/feishu-notification/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            feishuEnabled: enabled,
+            feishuAppId: mmIsMaskedFeishuValue(appId) ? '' : appId,
+            feishuAppSecret: mmIsMaskedFeishuValue(appSecret) ? '' : appSecret,
+            feishuReceiveIdType: receiveIdType,
+            feishuReceiveId: mmIsMaskedFeishuValue(receiveId) ? '' : receiveId,
+            clearWebhook: true
+        })
+    }).then(function(r) {
+        return r.json().then(function(d) { d._httpOk = r.ok; return d; });
+        }).then(function(d) {
+        if (!d.ok) {
+            statusEl.innerHTML = '<div class="mm-status err">❌ ' + escHtml(d.error || _tr('feishu_save_failed')) + '</div>';
+            return;
+        }
+        mmFillFeishuMaskedInputs(d);
+        mmRenderFeishuMask(d);
+        statusEl.innerHTML = '<div class="mm-status ok">✅ ' + escHtml(_tr('feishu_config_saved')) + '</div>';
+    }).catch(function(e) {
+        statusEl.innerHTML = '<div class="mm-status err">❌ ' + escHtml(e.message) + '</div>';
+    });
+}
+
+function mmTestFeishuNotification() {
+    var statusEl = document.getElementById('mm-feishu-status');
+    if (!statusEl) return;
+    statusEl.innerHTML = '<div class="mm-status info">' + escHtml(_tr('feishu_sending_test_cards')) + '</div>';
+    fetch('/api/feishu-notification/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}'
+    }).then(function(r) {
+        return r.json().then(function(d) { d._httpOk = r.ok; return d; });
+        }).then(function(d) {
+        if (!d.ok) {
+            var detail = d.error || '';
+            if (!detail && d.results && d.results.length) {
+                var failed = d.results.find(function(r) { return !r.ok; }) || d.results[0];
+                detail = failed.message || failed.error || failed.status || '';
+                if (failed.code !== undefined && failed.code !== '') detail += ' (code: ' + failed.code + ')';
+            }
+            statusEl.innerHTML = '<div class="mm-status err">❌ ' + escHtml(detail || _tr('feishu_test_failed')) + '</div>';
+            return;
+        }
+        statusEl.innerHTML = '<div class="mm-status ok">✅ ' + escHtml(_tr('feishu_test_cards_sent')) + '</div>';
+    }).catch(function(e) {
+        statusEl.innerHTML = '<div class="mm-status err">❌ ' + escHtml(e.message) + '</div>';
+    });
+}
+
 function mmSaveSettings() {
     var gwUrl = document.getElementById('mm-gateway-url').value;
     var officeName = document.getElementById('mm-office-name').value;
@@ -14602,6 +14716,19 @@ function mmSaveSettings() {
             cdpUrl: (_brCdp ? _brCdp.value.trim() : "") || null,
             viewerUrl: (_brViewer ? _brViewer.value.trim() : "") || null
         };
+    }
+    var _feishuCb = document.getElementById('mm-feishu-enable');
+    if (_feishuCb) {
+        config.notifications = {
+            feishuEnabled: _feishuCb.checked,
+            feishuReceiveIdType: ((document.getElementById('mm-feishu-receive-id-type') || {}).value || 'chat_id')
+        };
+        var _feishuAppIdValue = ((document.getElementById('mm-feishu-app-id') || {}).value || '').trim();
+        var _feishuAppSecretValue = ((document.getElementById('mm-feishu-app-secret') || {}).value || '').trim();
+        var _feishuReceiveIdValue = ((document.getElementById('mm-feishu-receive-id') || {}).value || '').trim();
+        if (_feishuAppIdValue && !mmIsMaskedFeishuValue(_feishuAppIdValue)) config.notifications.feishuAppId = _feishuAppIdValue;
+        if (_feishuAppSecretValue && !mmIsMaskedFeishuValue(_feishuAppSecretValue)) config.notifications.feishuAppSecret = _feishuAppSecretValue;
+        if (_feishuReceiveIdValue && !mmIsMaskedFeishuValue(_feishuReceiveIdValue)) config.notifications.feishuReceiveId = _feishuReceiveIdValue;
     }
 
     fetch('/setup/save', {

@@ -4,6 +4,7 @@
 import os
 import sys
 import tempfile
+import json
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 APP_DIR = os.path.join(ROOT, "app")
@@ -102,6 +103,7 @@ def test_phase4_request_quality_gate_and_pending_safety():
 
             request = server._handle_meeting_request_create(project["id"], task["id"], valid_request_body())
             assert request["ok"] is True
+            assert request["notification"]["status"] == "skipped_missing_webhook"
             req = request["request"]
             assert req["status"] == "pending"
             assert req["sourceType"] == "project_task"
@@ -125,6 +127,12 @@ def test_phase4_request_quality_gate_and_pending_safety():
             assert aggregate["requests"][0]["id"] == req["id"]
             task_requests = server._meeting_request_list_filtered(f"projectId={project['id']}&taskId={task['id']}")
             assert task_requests["requests"][0]["id"] == req["id"]
+            records_path = os.path.join(status_dir, "feishu-notification-records.jsonl")
+            with open(records_path, "r", encoding="utf-8") as f:
+                records = [json.loads(line) for line in f if line.strip()]
+            assert records[-1]["type"] == "application_form"
+            assert records[-1]["related"]["id"] == req["id"]
+            assert records[-1]["status"] == "skipped_missing_webhook"
         finally:
             restore_store(old)
 

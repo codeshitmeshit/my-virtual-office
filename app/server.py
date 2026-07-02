@@ -39,6 +39,7 @@ from provider_execution import (
     normalize_provider_result,
     provider_http_status,
 )
+from feishu_notifications import send_feishu_notification
 
 
 def _normalize_presence_entry(entry):
@@ -249,6 +250,7 @@ def _load_vo_config():
     meetings_cfg = cfg.get("meetings") or {}
     weather_cfg = cfg.get("weather") or {}
     sms_cfg = cfg.get("sms") or {}
+    notifications_cfg = cfg.get("notifications") or {}
     hermes_cfg = cfg.get("hermes") or {}
     codex_cfg = cfg.get("codex") or {}
     claude_code_cfg = cfg.get("claudeCode") or cfg.get("claude_code") or {}
@@ -318,6 +320,16 @@ def _load_vo_config():
             "twilioAuthToken": _env_or("VO_TWILIO_AUTH_TOKEN", sms_cfg.get("twilioAuthToken")),
             "fromNumber": _env_or("VO_TWILIO_FROM_NUMBER", sms_cfg.get("fromNumber")),
         },
+        "notifications": {
+            "feishuWebhook": _env_or("VO_FEISHU_NOTIFICATION_WEBHOOK", notifications_cfg.get("feishuWebhook", "")),
+            "feishuEnabled": _env_bool("VO_FEISHU_NOTIFICATION_ENABLED", notifications_cfg.get("feishuEnabled", True)),
+            "feishuAppId": _env_or("VO_FEISHU_APP_ID", notifications_cfg.get("feishuAppId", "")),
+            "feishuAppSecret": _env_or("VO_FEISHU_APP_SECRET", notifications_cfg.get("feishuAppSecret", "")),
+            "feishuReceiveIdType": _env_or("VO_FEISHU_RECEIVE_ID_TYPE", notifications_cfg.get("feishuReceiveIdType", "chat_id")),
+            "feishuReceiveId": _env_or("VO_FEISHU_RECEIVE_ID", notifications_cfg.get("feishuReceiveId", "")),
+            "feishuVerificationToken": _env_or("VO_FEISHU_VERIFICATION_TOKEN", notifications_cfg.get("feishuVerificationToken", "")),
+            "feishuEncryptKey": _env_or("VO_FEISHU_ENCRYPT_KEY", notifications_cfg.get("feishuEncryptKey", "")),
+        },
         "hermes": {
             "enabled": str(_env_or("VO_HERMES_ENABLED", hermes_cfg.get("enabled", True))).lower() not in ("0", "false", "no", "off"),
             "homePath": _env_or("VO_HERMES_HOME", hermes_cfg.get("homePath", os.path.expanduser("~/.hermes"))),
@@ -365,7 +377,45 @@ def _load_vo_config():
         },
     }
 
-_SETUP_SECRET_KEYS = {"apiKey", "gatewayToken", "twilioAuthToken"}
+_SETUP_SECRET_KEYS = {"apiKey", "gatewayToken", "twilioAuthToken", "feishuWebhook", "feishuAppSecret", "feishuVerificationToken", "feishuEncryptKey"}
+
+
+def _mask_feishu_webhook(value):
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    prefix = 38
+    suffix = 8
+    if len(text) <= prefix + suffix:
+        return text[:2] + "••••"
+    return text[:prefix] + "••••••••" + text[-suffix:]
+
+
+def _mask_secret_value(value, prefix=6, suffix=4):
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if len(text) <= prefix + suffix:
+        return text[:2] + "••••"
+    return text[:prefix] + "••••••••" + text[-suffix:]
+
+
+def _feishu_app_configured(cfg):
+    return bool(
+        (cfg or {}).get("feishuAppId")
+        and (cfg or {}).get("feishuAppSecret")
+        and (cfg or {}).get("feishuReceiveId")
+    )
+
+
+def _feishu_app_send_config(cfg):
+    cfg = cfg or {}
+    return {
+        "appId": cfg.get("feishuAppId") or "",
+        "appSecret": cfg.get("feishuAppSecret") or "",
+        "receiveIdType": cfg.get("feishuReceiveIdType") or "chat_id",
+        "receiveId": cfg.get("feishuReceiveId") or "",
+    }
 
 
 def _merge_setup_config(existing, incoming):
@@ -394,6 +444,63 @@ def _merge_setup_config(existing, incoming):
     return merged
 
 
+def _clear_setup_secret_paths(config, paths):
+    allowed = {"notifications.feishuWebhook"}
+    if not isinstance(config, dict) or not isinstance(paths, list):
+        return
+    for path in paths:
+        if path not in allowed:
+            continue
+        node = config
+        parts = path.split(".")
+        for part in parts[:-1]:
+            next_node = node.get(part)
+            if not isinstance(next_node, dict):
+                node = None
+                break
+            node = next_node
+        if isinstance(node, dict):
+            node[parts[-1]] = ""
+
+
+def _persist_setup_payload(body):
+    cfg_path = _resolve_config_path()
+    data_dir = os.environ.get("VO_STATUS_DIR", "/data")
+    persistent_path = os.path.join(data_dir, "vo-config.json")
+    if os.path.isdir(data_dir) and cfg_path != persistent_path:
+        cfg_path = persistent_path
+    existing = {}
+    for try_path in [cfg_path, os.path.join(os.path.dirname(__file__), "vo-config.json")]:
+        try:
+            with open(try_path, "r", encoding="utf-8") as f:
+                existing = json.load(f)
+            break
+        except (FileNotFoundError, json.JSONDecodeError):
+            continue
+    existing = _merge_setup_config(existing, body)
+    _clear_setup_secret_paths(existing, body.get("_clearSecrets") if isinstance(body, dict) else None)
+    existing["_setupComplete"] = True
+    os.makedirs(os.path.dirname(cfg_path), exist_ok=True)
+    with open(cfg_path, "w", encoding="utf-8") as f:
+        json.dump(existing, f, indent=2)
+
+    global VO_CONFIG, WORKSPACE_BASE, _discovered_roster, _discovered_at
+    old_gw = GATEWAY_URL
+    old_token = _get_gateway_token()
+    VO_CONFIG = _load_vo_config()
+    WORKSPACE_BASE = VO_CONFIG["openclaw"]["homePath"]
+    _reload_gateway_globals()
+    _discovered_roster = _discover_roster()
+    _discovered_at = time.time()
+    refresh_agent_maps()
+    new_token = _get_gateway_token()
+    if GATEWAY_URL != old_gw or new_token != old_token:
+        gateway_presence.stop()
+        if new_token:
+            gateway_presence.start(GATEWAY_URL, new_token, port=PORT, client_version=_get_openclaw_version())
+    return {"ok": True}
+
+
 def _build_safe_vo_config():
     lic = get_license_status()
     hermes_test = _handle_hermes_test()
@@ -410,6 +517,14 @@ def _build_safe_vo_config():
         "browser": {
             "cdpUrl": VO_CONFIG.get("browser", {}).get("cdpUrl"),
             "viewerUrl": VO_CONFIG.get("browser", {}).get("viewerUrl"),
+        },
+        "notifications": {
+            "feishuEnabled": VO_CONFIG.get("notifications", {}).get("feishuEnabled", True),
+            "feishuConfigured": _feishu_app_configured(VO_CONFIG.get("notifications", {})),
+            "feishuAppConfigured": _feishu_app_configured(VO_CONFIG.get("notifications", {})),
+            "maskedFeishuAppId": _mask_secret_value(VO_CONFIG.get("notifications", {}).get("feishuAppId"), 5, 4),
+            "feishuReceiveIdType": VO_CONFIG.get("notifications", {}).get("feishuReceiveIdType") or "chat_id",
+            "maskedFeishuReceiveId": _mask_secret_value(VO_CONFIG.get("notifications", {}).get("feishuReceiveId"), 5, 4),
         },
         "hermes": {
             "enabled": VO_CONFIG.get("hermes", {}).get("enabled", True),
@@ -8704,6 +8819,260 @@ def _meeting_request_log_auto_confirm_activity(req, meeting, reason):
     _save_projects(data)
 
 
+def _meeting_request_notification_related(req):
+    source = (req or {}).get("source") if isinstance((req or {}).get("source"), dict) else {}
+    return {
+        "type": "meeting_request",
+        "id": (req or {}).get("id") or "",
+        "title": ((req or {}).get("originalProposal") or {}).get("topic") or source.get("taskTitle") or "Meeting request",
+    }
+
+
+def _meeting_request_notification_details(req):
+    proposal = (req or {}).get("originalProposal") if isinstance((req or {}).get("originalProposal"), dict) else {}
+    source = (req or {}).get("source") if isinstance((req or {}).get("source"), dict) else {}
+    return [
+        ("项目", source.get("projectTitle") or source.get("projectId") or "-"),
+        ("任务", source.get("taskTitle") or source.get("taskId") or "-"),
+        ("申请人", (req or {}).get("requestingAgentId") or "-"),
+        ("目标", proposal.get("goal") or "-"),
+        ("期望结果", proposal.get("expectedOutcome") or "-"),
+        ("紧急度", (req or {}).get("urgency") or "-"),
+    ]
+
+
+def _send_meeting_request_notification(req, state="pending", *, summary="", actions=None, details=None):
+    if not isinstance(req, dict):
+        return {"ok": True, "status": "skipped_invalid_request"}
+    proposal = req.get("originalProposal") if isinstance(req.get("originalProposal"), dict) else {}
+    title_prefix = {
+        "pending": "会议申请待处理",
+        "approved": "会议申请已同意",
+        "rejected": "会议申请已拒绝",
+        "processing": "会议申请处理中",
+        "cancelled": "会议申请已取消",
+        "expired": "会议申请已过期",
+        "no_longer_actionable": "会议申请不再可处理",
+    }.get(state, "会议申请通知")
+    intent = {
+        "id": f"meeting-request:{req.get('id')}:{state}",
+        "type": "application_form",
+        "title": f"{title_prefix}: {proposal.get('topic') or req.get('id')}",
+        "summary": summary or proposal.get("purpose") or proposal.get("goal") or "会议申请状态已更新。",
+        "state": state,
+        "multi_participant": False,
+        "related": _meeting_request_notification_related(req),
+        "details": details if details is not None else _meeting_request_notification_details(req),
+        "actions": actions if actions is not None else [
+            {
+                "category": "confirm",
+                "text": "同意",
+                "value": {"action": "confirm_meeting_request", "request_id": req.get("id")},
+            },
+            {
+                "category": "cancel",
+                "text": "拒绝",
+                "value": {"action": "reject_meeting_request", "request_id": req.get("id")},
+            },
+        ],
+        "target": "feishu-meeting-request",
+    }
+    return send_feishu_notification(
+        intent,
+        webhook_url=VO_CONFIG.get("notifications", {}).get("feishuWebhook") or None,
+        app_config=_feishu_app_send_config(VO_CONFIG.get("notifications", {})),
+        status_dir=STATUS_DIR,
+    )
+
+
+def _feishu_notification_config_response():
+    cfg = VO_CONFIG.get("notifications", {}) or {}
+    return {
+        "ok": True,
+        "feishuEnabled": cfg.get("feishuEnabled", True),
+        "feishuConfigured": _feishu_app_configured(cfg),
+        "feishuAppConfigured": _feishu_app_configured(cfg),
+        "maskedFeishuAppId": _mask_secret_value(cfg.get("feishuAppId"), 5, 4),
+        "feishuReceiveIdType": cfg.get("feishuReceiveIdType") or "chat_id",
+        "maskedFeishuReceiveId": _mask_secret_value(cfg.get("feishuReceiveId"), 5, 4),
+    }
+
+
+def _save_feishu_notification_config(body):
+    webhook = str((body or {}).get("feishuWebhook") or "").strip()
+    enabled = bool((body or {}).get("feishuEnabled", True))
+    app_id = str((body or {}).get("feishuAppId") or "").strip()
+    app_secret = str((body or {}).get("feishuAppSecret") or "").strip()
+    receive_id_type = str((body or {}).get("feishuReceiveIdType") or "chat_id").strip() or "chat_id"
+    receive_id = str((body or {}).get("feishuReceiveId") or "").strip()
+    verification_token = str((body or {}).get("feishuVerificationToken") or "").strip()
+    encrypt_key = str((body or {}).get("feishuEncryptKey") or "").strip()
+    if webhook and not re.match(r"^https://open\.(feishu|larksuite)\.cn/open-apis/bot/v2/hook/[A-Za-z0-9_-]+$", webhook):
+        return {"ok": False, "error": "Invalid Feishu webhook URL", "code": "invalid_webhook", "_status": 400}
+    if receive_id_type not in {"open_id", "user_id", "union_id", "email", "chat_id"}:
+        return {"ok": False, "error": "Invalid Feishu receive ID type", "code": "invalid_receive_id_type", "_status": 400}
+    notifications = {"feishuEnabled": enabled, "feishuReceiveIdType": receive_id_type}
+    if webhook or (body or {}).get("clearWebhook"):
+        notifications["feishuWebhook"] = webhook
+    if app_id or (body or {}).get("clearApp"):
+        notifications["feishuAppId"] = app_id
+    if app_secret or (body or {}).get("clearApp"):
+        notifications["feishuAppSecret"] = app_secret
+    if receive_id or (body or {}).get("clearApp"):
+        notifications["feishuReceiveId"] = receive_id
+    if verification_token:
+        notifications["feishuVerificationToken"] = verification_token
+    if encrypt_key:
+        notifications["feishuEncryptKey"] = encrypt_key
+    payload = {"notifications": notifications}
+    if (body or {}).get("clearWebhook"):
+        payload.setdefault("_clearSecrets", []).append("notifications.feishuWebhook")
+    result = _persist_setup_payload(payload)
+    if not result.get("ok"):
+        return result
+    return _feishu_notification_config_response()
+
+
+def _feishu_notification_test_intents():
+    now = int(time.time())
+    common = {
+        "target": "feishu-manual-acceptance",
+        "related": {"type": "acceptance", "id": "feishu-notification-module", "title": "Feishu notification module"},
+    }
+    return {
+        "notification": {
+            **common,
+            "id": f"manual-test:notification:{now}",
+            "type": "notification",
+            "title": "VO 飞书通知验收",
+            "summary": "这是一条来自 Virtual Office 的普通通知验收卡片。",
+            "details": {"模块": "Feishu notification module", "类型": "notification"},
+        },
+        "application_form": {
+            **common,
+            "id": f"manual-test:application-form:{now}",
+            "type": "application_form",
+            "title": "VO 飞书申请表单验收",
+            "summary": "这是一条申请表单验收卡片，按钮仅用于展示通用动作语义。",
+            "state": "pending",
+            "details": {"模块": "Feishu notification module", "处理模式": "单人最终决策"},
+            "actions": [
+                {"category": "confirm", "text": "同意", "value": {"action": "acceptance_approve"}},
+                {"category": "cancel", "text": "拒绝", "value": {"action": "acceptance_reject"}},
+            ],
+        },
+        "warning": {
+            **common,
+            "id": f"manual-test:warning:{now}",
+            "type": "warning",
+            "title": "VO 飞书警告验收",
+            "summary": "这是一条来自 Virtual Office 的警告验收卡片，用于提示需要关注但未阻断的情况。",
+            "details": {"模块": "Feishu notification module", "类型": "warning", "建议": "请关注后续处理状态"},
+        },
+        "error": {
+            **common,
+            "id": f"manual-test:error:{now}",
+            "type": "error",
+            "title": "VO 飞书错误验收",
+            "summary": "这是一条来自 Virtual Office 的错误验收卡片，用于提示需要处理的失败状态。",
+            "details": {"模块": "Feishu notification module", "类型": "error", "影响": "示例错误，不影响当前系统"},
+            "error_variant": "user_facing",
+        },
+    }
+
+
+def _send_feishu_notification_test_cards(kind=None):
+    cfg = VO_CONFIG.get("notifications", {}) or {}
+    webhook = cfg.get("feishuWebhook") or ""
+    if not webhook and not _feishu_app_configured(cfg):
+        return {"ok": False, "error": "Feishu notification app or webhook is not configured", "code": "missing_feishu_config", "_status": 400}
+    intents = _feishu_notification_test_intents()
+    selected = [kind] if kind in intents else ["application_form", "notification", "warning", "error"]
+    results = []
+    for selected_kind in selected:
+        results.append(send_feishu_notification(
+            intents[selected_kind],
+            webhook_url=webhook,
+            app_config=_feishu_app_send_config(cfg),
+            status_dir=STATUS_DIR,
+            timeout=20,
+        ))
+    ok = bool(results and all(r.get("ok") for r in results))
+    response = {"ok": ok, "results": results}
+    if not ok:
+        failed = next((r for r in results if not r.get("ok")), {})
+        detail = failed.get("message") or failed.get("error") or failed.get("status") or "Feishu test failed"
+        if failed.get("code") not in ("", None):
+            detail = f"{detail} (code: {failed.get('code')})"
+        response["error"] = detail
+    return response
+
+
+def _feishu_card_action_log_path():
+    return os.path.join(STATUS_DIR, "feishu-card-actions.jsonl")
+
+
+def _feishu_card_action_user(event):
+    user = event.get("operator") or event.get("user") or {}
+    if not isinstance(user, dict):
+        return {}
+    return {
+        "openId": str(user.get("open_id") or user.get("openId") or "").strip(),
+        "userId": str(user.get("user_id") or user.get("userId") or "").strip(),
+        "unionId": str(user.get("union_id") or user.get("unionId") or "").strip(),
+    }
+
+
+def _feishu_card_action_value(event):
+    action = event.get("action") if isinstance(event.get("action"), dict) else {}
+    value = action.get("value") if isinstance(action.get("value"), dict) else {}
+    return value
+
+
+def _record_feishu_card_action(body, event, value):
+    record = {
+        "id": str(uuid.uuid4()),
+        "receivedAt": _exec_meeting_now(),
+        "schema": str(body.get("schema") or ""),
+        "type": str(body.get("type") or body.get("header", {}).get("event_type") or ""),
+        "action": str(value.get("action") or value.get("action_category") or ""),
+        "notificationId": str(value.get("notification_id") or ""),
+        "requestId": str(value.get("request_id") or ""),
+        "user": _feishu_card_action_user(event),
+        "messageId": str(event.get("open_message_id") or event.get("message_id") or ""),
+        "value": value,
+    }
+    os.makedirs(os.path.dirname(_feishu_card_action_log_path()), exist_ok=True)
+    with open(_feishu_card_action_log_path(), "a", encoding="utf-8") as f:
+        f.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
+    return record
+
+
+def _handle_feishu_card_action(body):
+    if not isinstance(body, dict):
+        return {"ok": False, "error": "Invalid Feishu callback body", "_status": 400}
+    challenge = body.get("challenge")
+    if isinstance(challenge, str) and challenge:
+        return {"challenge": challenge}
+
+    cfg = VO_CONFIG.get("notifications", {}) or {}
+    expected_token = str(cfg.get("feishuVerificationToken") or "").strip()
+    actual_token = str(body.get("token") or body.get("header", {}).get("token") or "").strip()
+    if expected_token and actual_token and actual_token != expected_token:
+        return {"ok": False, "error": "Invalid Feishu verification token", "_status": 401}
+    if expected_token and not actual_token:
+        return {"ok": False, "error": "Missing Feishu verification token", "_status": 401}
+
+    event = body.get("event") if isinstance(body.get("event"), dict) else body
+    value = _feishu_card_action_value(event)
+    record = _record_feishu_card_action(body, event, value)
+    return {
+        "ok": True,
+        "toast": {"type": "success", "content": "操作已收到"},
+        "recordId": record["id"],
+    }
+
+
 def _handle_meeting_request_create(project_id, task_id, body):
     project, task = _meeting_request_find_project_task(project_id, task_id)
     if not project:
@@ -8788,6 +9157,7 @@ def _handle_meeting_request_create(project_id, task_id, body):
     blocked = _project_execution_block_for_meeting_request(project_id, task_id, request, "AI meeting requested; waiting for meeting resolution.")
     if not blocked.get("ok"):
         return blocked
+    notification = _send_meeting_request_notification(request, "pending")
     auto_confirm_reason = _meeting_request_auto_confirm_reason(project, urgency)
     if auto_confirm_reason:
         auto = _handle_meeting_request_confirm(request_id, {
@@ -8800,9 +9170,10 @@ def _handle_meeting_request_create(project_id, task_id, body):
         })
         if auto.get("ok"):
             auto["autoConfirmed"] = True
+            auto["notification"] = notification
             return auto
-        return {"ok": True, "request": _meeting_request_public(request), "autoConfirmError": auto}
-    return {"ok": True, "request": _meeting_request_public(request)}
+        return {"ok": True, "request": _meeting_request_public(request), "autoConfirmError": auto, "notification": notification}
+    return {"ok": True, "request": _meeting_request_public(request), "notification": notification}
 
 
 def _meeting_request_list_filtered(query_string=""):
@@ -8990,10 +9361,30 @@ def _handle_meeting_request_confirm(request_id, body):
             result = {"ok": True, "request": _meeting_request_public(req), "meeting": created["meeting"], "meetingId": created["meeting"]["id"], "idempotent": bool(created.get("idempotent"))}
             if auto_run_summary:
                 result["autoRun"] = auto_run_summary
+            result["notification"] = _send_meeting_request_notification(
+                req,
+                "approved",
+                summary=f"会议申请已同意，会议 ID：{created['meeting']['id']}",
+                actions=[{
+                    "category": "jump",
+                    "text": "查看会议",
+                    "url": f"/#meeting={urllib.parse.quote(created['meeting']['id'])}",
+                }],
+            )
             return result
     result = {"ok": True, "meeting": created["meeting"], "meetingId": created["meeting"]["id"]}
     if auto_run_summary:
         result["autoRun"] = auto_run_summary
+    result["notification"] = _send_meeting_request_notification(
+        req,
+        "approved",
+        summary=f"会议申请已同意，会议 ID：{created['meeting']['id']}",
+        actions=[{
+            "category": "jump",
+            "text": "查看会议",
+            "url": f"/#meeting={urllib.parse.quote(created['meeting']['id'])}",
+        }],
+    )
     return result
 
 
@@ -9022,7 +9413,14 @@ def _handle_meeting_request_reject(request_id, body):
         "author": "meeting-request",
         "text": f"AI meeting request rejected: {reason}",
     })
-    return {"ok": True, "request": _meeting_request_public(req)}
+    notification = _send_meeting_request_notification(
+        req,
+        "rejected",
+        summary=f"会议申请已拒绝：{reason}",
+        actions=[],
+        details=_meeting_request_notification_details(req) + [("拒绝原因", reason)],
+    )
+    return {"ok": True, "request": _meeting_request_public(req), "notification": notification}
 
 
 def _exec_meeting_clean_participants(raw):
@@ -22740,6 +23138,12 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(json.dumps(safe_config).encode())
+        elif self.path == "/api/feishu-notification/config":
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps(_feishu_notification_config_response()).encode())
         elif self.path == "/api/gateway/test":
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -24325,56 +24729,64 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(json.dumps({"ok": False, "error": f"Invalid JSON: {str(e)}"}).encode())
                 return
-            cfg_path = _resolve_config_path()
-            # Always save to persistent volume if available (survives container recreation)
-            data_dir = os.environ.get("VO_STATUS_DIR", "/data")
-            persistent_path = os.path.join(data_dir, "vo-config.json")
-            if os.path.isdir(data_dir) and cfg_path != persistent_path:
-                cfg_path = persistent_path
             try:
-                # Merge with existing config — read from resolved path first, fall back to app default
-                existing = {}
-                for try_path in [cfg_path, os.path.join(os.path.dirname(__file__), "vo-config.json")]:
-                    try:
-                        with open(try_path, "r") as f:
-                            existing = json.load(f)
-                        break
-                    except (FileNotFoundError, json.JSONDecodeError):
-                        continue
-                existing = _merge_setup_config(existing, body)
-                existing["_setupComplete"] = True
-                with open(cfg_path, "w") as f:
-                    json.dump(existing, f, indent=2)
-                # Reload config and re-discover if path or gateway changed
-                global VO_CONFIG, WORKSPACE_BASE, _discovered_roster, _discovered_at
-                old_path = WORKSPACE_BASE
-                old_gw = GATEWAY_URL
-                old_token = _get_gateway_token()
-                VO_CONFIG = _load_vo_config()
-                WORKSPACE_BASE = VO_CONFIG["openclaw"]["homePath"]
-                # Always reload gateway globals (URL, host header, config path)
-                _reload_gateway_globals()
-                _discovered_roster = _discover_roster()
-                _discovered_at = time.time()
-                refresh_agent_maps()
-                # Restart gateway presence listener only when gateway settings actually changed
-                new_token = _get_gateway_token()
-                gateway_changed = GATEWAY_URL != old_gw
-                token_changed = new_token != old_token
-                if gateway_changed or token_changed:
-                    gateway_presence.stop()
-                    if new_token:
-                        gateway_presence.start(GATEWAY_URL, new_token, port=PORT, client_version=_get_openclaw_version())
+                result = _persist_setup_payload(body)
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Access-Control-Allow-Origin", "*")
                 self.end_headers()
-                self.wfile.write(json.dumps({"ok": True}).encode())
+                self.wfile.write(json.dumps(result).encode())
             except Exception as e:
                 self.send_response(500)
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()
                 self.wfile.write(json.dumps({"ok": False, "error": str(e)}).encode())
+            return
+        elif self.path == "/api/feishu-notification/config":
+            length = int(self.headers.get('Content-Length', 0))
+            try:
+                body = json.loads(self.rfile.read(length)) if length else {}
+                result = _save_feishu_notification_config(body)
+            except json.JSONDecodeError as e:
+                result = {"ok": False, "error": f"Invalid JSON: {str(e)}", "_status": 400}
+            self.send_response(result.get("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            result.pop("_status", None)
+            self.wfile.write(json.dumps(result).encode())
+            return
+        elif self.path == "/api/feishu-notification/test":
+            length = int(self.headers.get('Content-Length', 0))
+            try:
+                body = json.loads(self.rfile.read(length)) if length else {}
+            except json.JSONDecodeError as e:
+                body = {}
+                result = {"ok": False, "error": f"Invalid JSON: {str(e)}", "_status": 400}
+            else:
+                result = _send_feishu_notification_test_cards(str((body or {}).get("kind") or ""))
+            self.send_response(result.get("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            result.pop("_status", None)
+            self.wfile.write(json.dumps(result).encode())
+            return
+        elif self.path == "/api/feishu/card-action":
+            length = int(self.headers.get('Content-Length', 0))
+            try:
+                body = json.loads(self.rfile.read(length)) if length else {}
+                result = _handle_feishu_card_action(body)
+            except json.JSONDecodeError as e:
+                result = {"ok": False, "error": f"Invalid JSON: {str(e)}", "_status": 400}
+            except Exception as e:
+                result = {"ok": False, "error": str(e), "_status": 500}
+            self.send_response(result.get("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            result.pop("_status", None)
+            self.wfile.write(json.dumps(result, ensure_ascii=False).encode())
             return
         # --- OFFICE CONFIG PERSISTENCE ---
         elif self.path == "/api/office-config":
