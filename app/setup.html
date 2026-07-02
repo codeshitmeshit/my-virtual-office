@@ -422,6 +422,11 @@
                 </select>
                 <label data-i18n="feishu_receive_id">Receive ID</label>
                 <input type="text" id="s-feishu-receive-id" placeholder="oc_xxx / ou_xxx / user@example.com" autocomplete="off">
+                <label data-i18n="feishu_card_action_callback">Card Action Callback</label>
+                <input type="text" id="s-feishu-card-action-url" value="/api/feishu/card-action" readonly>
+                <div style="font-size:12px;color:#666;margin:4px 0 10px;" data-i18n="feishu_card_action_note">Set this path under your production HTTPS domain in Feishu Open Platform so card buttons can call back.</div>
+                <label data-i18n="feishu_verification_token">Verification Token</label>
+                <input type="password" id="s-feishu-verification-token" placeholder="optional callback token" autocomplete="off">
                 <button type="button" class="secondary" onclick="saveFeishuWebhook()" style="margin:0 0 12px;padding:8px 16px;font-size:9px;" data-i18n="feishu_save_config">SAVE</button>
                 <button type="button" onclick="testFeishuNotification()" style="margin:0 0 12px;padding:8px 16px;font-size:9px;" data-i18n="feishu_send_test_cards">SEND TEST CARDS</button>
                 <div id="feishu-test-status"></div>
@@ -672,12 +677,20 @@
             return String(value || '').indexOf('••••') >= 0;
         }
 
+        function feishuCallbackUrl(path) {
+            path = path || '/api/feishu/card-action';
+            if (/^https?:\/\//.test(path)) return path;
+            return window.location.origin + path;
+        }
+
         function fillFeishuMaskedInputs(cfg) {
             cfg = cfg || {};
             if (document.getElementById('s-feishu-app-id')) document.getElementById('s-feishu-app-id').value = cfg.maskedFeishuAppId || '';
             if (document.getElementById('s-feishu-app-secret')) document.getElementById('s-feishu-app-secret').value = cfg.feishuAppConfigured ? '••••••••' : '';
             if (document.getElementById('s-feishu-receive-id')) document.getElementById('s-feishu-receive-id').value = cfg.maskedFeishuReceiveId || '';
             if (document.getElementById('s-feishu-receive-id-type')) document.getElementById('s-feishu-receive-id-type').value = cfg.feishuReceiveIdType || 'chat_id';
+            if (document.getElementById('s-feishu-card-action-url')) document.getElementById('s-feishu-card-action-url').value = feishuCallbackUrl(cfg.feishuCardActionPath);
+            if (document.getElementById('s-feishu-verification-token')) document.getElementById('s-feishu-verification-token').value = cfg.feishuVerificationConfigured ? '••••••••' : '';
         }
 
         function renderFeishuWebhookMask(cfg) {
@@ -712,6 +725,8 @@
             var appSecret = document.getElementById('s-feishu-app-secret').value.trim();
             var receiveIdType = document.getElementById('s-feishu-receive-id-type').value || 'chat_id';
             var receiveId = document.getElementById('s-feishu-receive-id').value.trim();
+            var verificationToken = (document.getElementById('s-feishu-verification-token') || {}).value || '';
+            verificationToken = verificationToken.trim();
             var statusEl = document.getElementById('feishu-test-status');
             var appConfigured = isMaskedFeishuValue(appId) && isMaskedFeishuValue(appSecret) && isMaskedFeishuValue(receiveId);
             if (!(appConfigured || (appId && appSecret && receiveId))) {
@@ -728,6 +743,7 @@
                     feishuAppSecret: isMaskedFeishuValue(appSecret) ? '' : appSecret,
                     feishuReceiveIdType: receiveIdType,
                     feishuReceiveId: isMaskedFeishuValue(receiveId) ? '' : receiveId,
+                    feishuVerificationToken: isMaskedFeishuValue(verificationToken) ? '' : verificationToken,
                     clearWebhook: true
                 })
             }).then(function(r) { return r.json().then(function(d) { d._httpOk = r.ok; return d; }); }).then(function(d) {
@@ -1134,6 +1150,8 @@
             var feishuAppId = document.getElementById('s-feishu-app-id').value.trim();
             var feishuAppSecret = document.getElementById('s-feishu-app-secret').value.trim();
             var feishuReceiveId = document.getElementById('s-feishu-receive-id').value.trim();
+            var feishuVerificationToken = (document.getElementById('s-feishu-verification-token') || {}).value || '';
+            feishuVerificationToken = feishuVerificationToken.trim();
             var config = {
                 office: { name: document.getElementById('s-name').value || 'Virtual Office' },
                 weather: { location: _buildWeatherLocation(document.getElementById('s-weather-city').value, document.getElementById('s-weather-state').value) },
@@ -1165,6 +1183,7 @@
                     if (feishuAppId && !isMaskedFeishuValue(feishuAppId)) n.feishuAppId = feishuAppId;
                     if (feishuAppSecret && !isMaskedFeishuValue(feishuAppSecret)) n.feishuAppSecret = feishuAppSecret;
                     if (feishuReceiveId && !isMaskedFeishuValue(feishuReceiveId)) n.feishuReceiveId = feishuReceiveId;
+                    if (feishuVerificationToken && !isMaskedFeishuValue(feishuVerificationToken)) n.feishuVerificationToken = feishuVerificationToken;
                     return n;
                 })(),
                 hermes: (function() {

@@ -8895,6 +8895,8 @@ def _feishu_notification_config_response():
         "maskedFeishuAppId": _mask_secret_value(cfg.get("feishuAppId"), 5, 4),
         "feishuReceiveIdType": cfg.get("feishuReceiveIdType") or "chat_id",
         "maskedFeishuReceiveId": _mask_secret_value(cfg.get("feishuReceiveId"), 5, 4),
+        "feishuCardActionPath": "/api/feishu/card-action",
+        "feishuVerificationConfigured": bool(str(cfg.get("feishuVerificationToken") or "").strip()),
     }
 
 
@@ -9070,6 +9072,16 @@ def _handle_feishu_card_action(body):
         "ok": True,
         "toast": {"type": "success", "content": "操作已收到"},
         "recordId": record["id"],
+    }
+
+
+def _feishu_card_action_health():
+    cfg = VO_CONFIG.get("notifications", {}) or {}
+    return {
+        "ok": True,
+        "status": "online",
+        "path": "/api/feishu/card-action",
+        "verificationConfigured": bool(str(cfg.get("feishuVerificationToken") or "").strip()),
     }
 
 
@@ -23144,6 +23156,12 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(json.dumps(_feishu_notification_config_response()).encode())
+        elif self.path == "/api/feishu/card-action":
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps(_feishu_card_action_health()).encode())
         elif self.path == "/api/gateway/test":
             self.send_response(200)
             self.send_header("Content-Type", "application/json")

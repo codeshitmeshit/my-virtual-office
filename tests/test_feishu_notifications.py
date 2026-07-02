@@ -321,6 +321,8 @@ def test_feishu_config_save_returns_app_mask_and_clears_webhook():
     assert result["feishuAppConfigured"] is True
     assert result["maskedFeishuAppId"]
     assert result["maskedFeishuReceiveId"]
+    assert result["feishuCardActionPath"] == "/api/feishu/card-action"
+    assert result["feishuVerificationConfigured"] is False
     serialized = json.dumps(result, ensure_ascii=False)
     assert "secret-should-not-return" not in serialized
     with open(os.path.join(status_dir, "vo-config.json"), "r", encoding="utf-8") as f:
@@ -347,6 +349,10 @@ def test_feishu_card_action_challenge_and_recording():
 
     previous_status_dir = server.STATUS_DIR
     server.STATUS_DIR = status_dir
+    health = server._feishu_card_action_health()
+    assert health["ok"] is True
+    assert health["status"] == "online"
+    assert health["path"] == "/api/feishu/card-action"
     assert server._handle_feishu_card_action({"challenge": "abc123"}) == {"challenge": "abc123"}
     try:
         result = server._handle_feishu_card_action({
