@@ -9088,13 +9088,40 @@ def _dispatch_feishu_meeting_request_action(action, request_id, event):
         })
         if result.get("ok"):
             idempotent = bool(result.get("idempotent"))
+            meeting_id = str(result.get("meetingId") or "")
+            run_result = None
+            run_summary = {}
+            if meeting_id:
+                run_result = _handle_executable_meeting_run(meeting_id, {
+                    "action": "start",
+                    "actorId": actor,
+                    "actorType": "user",
+                })
+                run_summary = {
+                    "attempted": True,
+                    "ok": bool(run_result.get("ok")) if isinstance(run_result, dict) else False,
+                    "stage": ((run_result or {}).get("meeting") or {}).get("stage") if isinstance(run_result, dict) else "",
+                    "error": (run_result or {}).get("error") if isinstance(run_result, dict) else "Meeting start failed",
+                }
+            if run_summary.get("attempted") and not run_summary.get("ok"):
+                return {
+                    "handled": True,
+                    "ok": True,
+                    "businessStatus": "confirmed_start_failed",
+                    "businessError": str(run_summary.get("error") or "会议启动失败"),
+                    "idempotent": idempotent,
+                    "meetingId": meeting_id,
+                    "run": run_summary,
+                    "toast": _feishu_card_action_error(f"会议申请已同意，但启动会议失败：{run_summary.get('error') or '未知错误'}"),
+                }
             return {
                 "handled": True,
                 "ok": True,
-                "businessStatus": "confirmed",
+                "businessStatus": "confirmed_started" if run_summary.get("attempted") else "confirmed",
                 "idempotent": idempotent,
-                "meetingId": str(result.get("meetingId") or ""),
-                "toast": _feishu_card_action_success("会议申请已同意" + ("（已处理）" if idempotent else "")),
+                "meetingId": meeting_id,
+                "run": run_summary,
+                "toast": _feishu_card_action_success("会议申请已同意，会议已开始" + ("（已处理）" if idempotent else "")),
             }
         return {
             "handled": True,

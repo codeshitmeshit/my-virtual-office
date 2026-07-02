@@ -26,7 +26,7 @@
 
 - 关联需求点：飞书可直接完成常见同意决策。
 - 验证方法：创建 pending meeting request，模拟 Feishu `confirm_meeting_request` card action。
-- 预期结果：请求状态变为 confirmed/approved 等现有 VO 成功状态；返回 Feishu 成功 toast；不会绕过现有确认规则。
+- 预期结果：请求状态变为 confirmed/approved 等现有 VO 成功状态，并启动转换后的 executable meeting；返回 Feishu 成功 toast；不会绕过现有确认规则。
 
 ### CHK-004 - Reject from Feishu rejects the VO meeting request
 
@@ -91,3 +91,4 @@
 - 2026-07-02T22:23:32+08:00 - CHK-001、CHK-001A、CHK-002、CHK-003、CHK-004、CHK-006、CHK-007、CHK-008、CHK-009、CHK-010、CHK-011 自动化验证通过。覆盖测试：`.venv/bin/python tests/test_feishu_notifications.py`、`.venv/bin/python tests/test_meeting_request_blocks_task.py`、`.venv/bin/python tests/test_meeting_for_ai_phase4.py`、`.venv/bin/python -m py_compile app/server.py app/feishu_notifications.py app/feishu_long_connection.py tests/test_meeting_request_blocks_task.py tests/test_feishu_notifications.py`。
 - 2026-07-02T22:23:32+08:00 - CHK-005 使用 `/#projects` 等价项目入口作为查看详情降级路径；未新增网站深链系统，符合本期“不改变原网站会议申请逻辑”的约束。
 - 2026-07-02T22:23:32+08:00 - CHK-012 待生产人工验收。需要在生产飞书中触发一个真实需要人工确认的会议申请，验证网站仍展示原申请、飞书同时收到卡片、按钮可更新 VO 状态。
+- 2026-07-02T22:58:47+08:00 - CHK-003 补充验证通过：飞书同意按钮会在确认申请后调用 executable meeting run 入口，返回“会议申请已同意，会议已开始”，并在 action outcome 中记录 `confirmed_started` 和 run stage；网站内原确认接口仍只确认/转换，不被改成自动启动。

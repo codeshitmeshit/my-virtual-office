@@ -187,12 +187,26 @@ def test_feishu_meeting_request_card_actions_confirm_and_reject():
             assert [a["text"] for a in sent_intents[-1]["actions"]] == ["同意", "拒绝", "查看详情"]
             assert sent_intents[-1]["actions"][2]["url"] == "/#projects"
 
-            result = server._handle_feishu_card_action(feishu_meeting_action_payload("confirm_meeting_request", req["id"]))
+            run_calls = []
+            old_run = server._handle_executable_meeting_run
+            try:
+                def fake_run(meeting_id, body=None):
+                    run_calls.append({"meetingId": meeting_id, "body": body or {}})
+                    return {"ok": True, "meeting": {"id": meeting_id, "stage": "active_opening"}}
+
+                server._handle_executable_meeting_run = fake_run
+                result = server._handle_feishu_card_action(feishu_meeting_action_payload("confirm_meeting_request", req["id"]))
+            finally:
+                server._handle_executable_meeting_run = old_run
             assert result["ok"] is True
-            assert result["toast"]["content"].startswith("会议申请已同意")
+            assert result["toast"]["content"].startswith("会议申请已同意，会议已开始")
             detail = server._handle_meeting_request_detail(req["id"])
             assert detail["request"]["status"] == "confirmed"
             assert detail["request"]["review"]["confirmedBy"] == "ou_feishu_user"
+            assert run_calls == [{
+                "meetingId": detail["request"]["conversion"]["meetingId"],
+                "body": {"action": "start", "actorId": "ou_feishu_user", "actorType": "user"},
+            }]
 
             project2, task2 = create_fixture_project(status_dir)
             req2 = server._handle_meeting_request_create(project2["id"], task2["id"], meeting_request_body("feishu reject"))["request"]
@@ -206,7 +220,10 @@ def test_feishu_meeting_request_card_actions_confirm_and_reject():
 
             rows = read_feishu_action_records(status_dir)
             outcomes = [row.get("outcome", {}) for row in rows if row.get("requestId") in {req["id"], req2["id"]}]
-            assert {o.get("businessStatus") for o in outcomes} >= {"confirmed", "rejected"}
+            assert {o.get("businessStatus") for o in outcomes} >= {"confirmed_started", "rejected"}
+            confirmed_outcome = next(o for o in outcomes if o.get("businessStatus") == "confirmed_started")
+            assert confirmed_outcome["run"]["ok"] is True
+            assert confirmed_outcome["run"]["stage"] == "active_opening"
         finally:
             restore_store(old)
 
