@@ -4105,6 +4105,113 @@ def _format_hermes_attachment_context(attachments):
     return "\n".join(lines) if len(lines) > 2 else ""
 
 
+def _hermes_run_history_limits():
+    hermes_cfg = VO_CONFIG.get("hermes", {}) if isinstance(VO_CONFIG.get("hermes", {}), dict) else {}
+
+    def _bounded_int(key, default, minimum, maximum):
+        try:
+            value = int(hermes_cfg.get(key, default))
+        except (TypeError, ValueError):
+            value = default
+        return max(minimum, min(maximum, value))
+
+    return {
+        "maxMessages": _bounded_int("runHistoryMaxMessages", 160, 0, 500),
+        "maxChars": _bounded_int("runHistoryMaxChars", 240000, 10000, 1000000),
+        "maxMessageChars": _bounded_int("runHistoryMaxMessageChars", 24000, 1000, 200000),
+    }
+
+
+def _flatten_hermes_history_content(content):
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for part in content:
+            if isinstance(part, str):
+                parts.append(part)
+            elif isinstance(part, dict):
+                part_type = str(part.get("type") or "").strip().lower()
+                if part_type in {"text", "input_text", "output_text"}:
+                    parts.append(str(part.get("text") or ""))
+                elif isinstance(part.get("content"), str):
+                    parts.append(part.get("content") or "")
+        return "\n".join(p.strip() for p in parts if str(p or "").strip())
+    try:
+        return json.dumps(content, ensure_ascii=False, default=str)
+    except Exception:
+        return str(content)
+
+
+def _normalize_hermes_run_history_message(message, max_message_chars):
+    if not isinstance(message, dict):
+        return None
+    role = str(message.get("role") or "").strip().lower()
+    if role not in {"user", "assistant"}:
+        return None
+    content = _flatten_hermes_history_content(message.get("content")).strip()
+    if not content:
+        return None
+    if len(content) > max_message_chars:
+        content = content[:max_message_chars].rstrip() + "\n[truncated]"
+    return {"role": role, "content": content}
+
+
+def _limit_hermes_run_history(messages, max_messages, max_chars):
+    if max_messages <= 0 or max_chars <= 0:
+        return []
+    tail = messages[-max_messages:]
+    selected = []
+    total_chars = 0
+    for item in reversed(tail):
+        content = str(item.get("content") or "")
+        item_chars = len(content)
+        if selected and total_chars + item_chars > max_chars:
+            break
+        if not selected and item_chars > max_chars:
+            item = {**item, "content": content[:max_chars].rstrip() + "\n[truncated]"}
+            item_chars = len(item["content"])
+        selected.append(item)
+        total_chars += item_chars
+    selected.reverse()
+    return selected
+
+
+def _load_hermes_run_conversation_history(client, session_id):
+    """Load persisted Hermes context for /v1/runs without reading private state.db."""
+    session_id = str(session_id or "").strip()
+    if not session_id:
+        return [], ""
+
+    try:
+        result = client.get_session_messages(session_id)
+    except Exception as exc:
+        print(f"[HERMES] Failed to load run history for {session_id}: {exc}")
+        return [], session_id
+
+    if not result.get("ok"):
+        if not result.get("notFound"):
+            print(f"[HERMES] Failed to load run history for {session_id}: {result.get('error') or 'unknown error'}")
+        return [], session_id
+
+    raw_messages = result.get("data") if isinstance(result.get("data"), list) else []
+    limits = _hermes_run_history_limits()
+    normalized = [
+        item for item in (
+            _normalize_hermes_run_history_message(msg, limits["maxMessageChars"])
+            for msg in raw_messages
+        )
+        if item
+    ]
+    history = _limit_hermes_run_history(normalized, limits["maxMessages"], limits["maxChars"])
+    resolved_session_id = str(result.get("session_id") or session_id).strip() or session_id
+    if history:
+        print(f"[HERMES] Loaded {len(history)} prior run-history messages for session {resolved_session_id}")
+    return history, resolved_session_id
+
+
 def _hermes_tool_activity_messages(tools, agent_id="", run_id="", base_ts=None, coerce_complete=False):
     """Store Hermes tools like OpenClaw recovered activity: one tool-only message per card."""
     if not isinstance(tools, list) or not tools:
@@ -4528,7 +4635,13 @@ def _handle_hermes_api_chat(agent, profile, delivery_message, original_message, 
 
     session_id = _get_hermes_session_id(profile) or f"vo-hermes-{HermesProvider._safe_suffix(profile)}"
     session_key = f"virtual-office:hermes:{profile}"
-    started = client.start_run(delivery_message, session_id=session_id, session_key=session_key)
+    conversation_history, session_id = _load_hermes_run_conversation_history(client, session_id)
+    started = client.start_run(
+        delivery_message,
+        session_id=session_id,
+        session_key=session_key,
+        conversation_history=conversation_history,
+    )
     run_id = started.get("run_id")
     if not run_id:
         return {"ok": False, "fallback": True, "error": started.get("error") or "Hermes API did not return a run_id"}
@@ -4681,7 +4794,13 @@ def _handle_hermes_run_start(body):
 
     session_id = _get_hermes_session_id(profile) or f"vo-hermes-{HermesProvider._safe_suffix(profile)}"
     session_key = f"virtual-office:hermes:{profile}"
-    started = client.start_run(delivery["deliveryMessage"], session_id=session_id, session_key=session_key)
+    conversation_history, session_id = _load_hermes_run_conversation_history(client, session_id)
+    started = client.start_run(
+        delivery["deliveryMessage"],
+        session_id=session_id,
+        session_key=session_key,
+        conversation_history=conversation_history,
+    )
     run_id = started.get("run_id") or started.get("runId") or started.get("id")
     if not run_id:
         return {"ok": False, "fallback": True, "error": started.get("error") or "Hermes API did not return a run_id", "_status": 502}

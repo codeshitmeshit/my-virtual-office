@@ -17,7 +17,7 @@ import json
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
-from urllib.parse import urljoin
+from urllib.parse import quote, urljoin
 from typing import Any
 
 
@@ -611,6 +611,29 @@ class HermesApiClient:
             body["conversation_history"] = conversation_history
         headers = {"X-Hermes-Session-Key": session_key} if session_key and self.api_key else None
         return self._json_request("POST", "/v1/runs", body, headers=headers)
+
+    def get_session_messages(self, session_id: str) -> dict[str, Any]:
+        """Fetch a persisted Hermes session transcript through the public API."""
+        session_id = str(session_id or "").strip()
+        if not session_id:
+            return {"ok": False, "error": "session_id is required", "data": []}
+        try:
+            result = self._json_request("GET", f"/api/sessions/{quote(session_id, safe='')}/messages")
+            result["ok"] = True
+            return result
+        except urllib.error.HTTPError as exc:
+            body = ""
+            try:
+                body = exc.read().decode("utf-8", errors="replace")
+            except Exception:
+                body = ""
+            return {
+                "ok": False,
+                "status": exc.code,
+                "notFound": exc.code == 404,
+                "error": body[:1000] or str(exc),
+                "data": [],
+            }
 
     def get_run(self, run_id: str) -> dict[str, Any]:
         return self._json_request("GET", f"/v1/runs/{run_id}")
