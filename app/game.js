@@ -14382,8 +14382,11 @@ function mmTestViewer() {
             browser: { cdpUrl: cdpUrl || null, viewerUrl: viewerUrl }
         })
     }).then(function() {
-        return fetch(viewerUrl.replace(/\/$/, ''), { mode: 'no-cors', cache: 'no-store' });
-    }).then(function() {
+        return fetch('/browser-viewer-status');
+    }).then(function(r) { return r.json(); }).then(function(status) {
+        if (!status.ok) {
+            throw new Error(status.error || _tr('viewer_not_reachable'));
+        }
             statusEl.innerHTML = '<div class="mm-status ok">' + _tr('viewer_reachable') + '</div>';
     }).catch(function(e) {
             statusEl.innerHTML = '<div class="mm-status err">\u274c ' + _tr('viewer_not_reachable') + ': ' + escHtml(e.message) + '</div>';

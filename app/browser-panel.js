@@ -130,15 +130,18 @@
     }
 
     // Load browser viewer
-    if (!browserFrame.src || browserFrame.src === 'about:blank') {
-      if (BROWSER_VIEW_URL) {
-        browserFrame.src = window.buildBrowserViewerUrl(
-          BROWSER_VIEW_URL,
-          window.location.href
-        );
-      } else {
-        browserFrame.srcdoc = `<html><body style="background:#0a0a0f;color:#888;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;text-align:center"><div><h2 style="color:#ffd700">${_t('browser_not_configured_title')}</h2><p>${_t('browser_not_configured_msg')}</p></div></body></html>`;
+    if (BROWSER_VIEW_URL) {
+      const viewerSrc = window.buildBrowserViewerUrl(
+        BROWSER_VIEW_URL,
+        window.location.href
+      );
+      if (browserFrame.src !== viewerSrc) {
+        browserFrame.removeAttribute('srcdoc');
+        browserFrame.src = 'about:blank';
+        setTimeout(() => { browserFrame.src = viewerSrc; }, 0);
       }
+    } else if (!browserFrame.src || browserFrame.src === 'about:blank') {
+      browserFrame.srcdoc = `<html><body style="background:#0a0a0f;color:#888;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;text-align:center"><div><h2 style="color:#ffd700">${_t('browser_not_configured_title')}</h2><p>${_t('browser_not_configured_msg')}</p></div></body></html>`;
     }
     pollCurrentUrl();
   }

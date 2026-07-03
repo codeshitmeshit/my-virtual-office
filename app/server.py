@@ -26,6 +26,7 @@ import email.utils
 import re
 import shutil
 import signal
+import ssl
 import sqlite3
 import subprocess
 import time
@@ -22799,6 +22800,75 @@ class ApiUsageCollector:
 _api_usage_collector = ApiUsageCollector(AUTH_PROFILES_PATH)
 
 
+def _browser_viewer_probe(viewer_url):
+    if not viewer_url:
+        return {"ok": False, "error": "Viewer URL is not configured"}
+    try:
+        parsed = urllib.parse.urlparse(viewer_url)
+        if parsed.scheme not in ("http", "https") or not parsed.hostname:
+            return {"ok": False, "error": "Viewer URL must be http(s)"}
+
+        path = parsed.path or "/"
+        query = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
+        if "path" not in query:
+            base_path = path.strip("/")
+            query["path"] = [(base_path + "/" if base_path else "") + "websockify"]
+        query.setdefault("resize", ["scale"])
+        query.setdefault("autoconnect", ["1"])
+
+        host = parsed.hostname
+        if ":" in host and not host.startswith("["):
+            host = "[" + host + "]"
+        if parsed.port:
+            host = f"{host}:{parsed.port}"
+        probe_url = urllib.parse.urlunparse((
+            parsed.scheme,
+            host,
+            path,
+            "",
+            urllib.parse.urlencode(query, doseq=True),
+            "",
+        ))
+        headers = {"User-Agent": "VirtualOffice/1.0"}
+        if parsed.username is not None:
+            username = urllib.parse.unquote(parsed.username or "")
+            password = urllib.parse.unquote(parsed.password or "")
+            token = base64.b64encode(f"{username}:{password}".encode("utf-8")).decode("ascii")
+            headers["Authorization"] = "Basic " + token
+        req = urllib.request.Request(probe_url, headers=headers, method="GET")
+        context = ssl._create_unverified_context() if parsed.scheme == "https" else None
+        with urllib.request.urlopen(req, timeout=4, context=context) as resp:
+            return {"ok": 200 <= resp.status < 400, "status": resp.status}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+def _browser_viewer_upstream_parts():
+    viewer_url = VO_CONFIG.get("browser", {}).get("viewerUrl")
+    if not viewer_url:
+        return None, None
+    parsed = urllib.parse.urlparse(viewer_url)
+    headers = {"User-Agent": "VirtualOffice/1.0"}
+    if parsed.username is not None:
+        username = urllib.parse.unquote(parsed.username or "")
+        password = urllib.parse.unquote(parsed.password or "")
+        token = base64.b64encode(f"{username}:{password}".encode("utf-8")).decode("ascii")
+        headers["Authorization"] = "Basic " + token
+    clean_netloc = parsed.hostname or ""
+    if ":" in clean_netloc and not clean_netloc.startswith("["):
+        clean_netloc = "[" + clean_netloc + "]"
+    if parsed.port:
+        clean_netloc = f"{clean_netloc}:{parsed.port}"
+    clean_base = urllib.parse.urlunparse((parsed.scheme, clean_netloc, "", "", "", ""))
+    return clean_base.rstrip("/"), headers
+
+
+def _browser_viewer_password():
+    viewer_url = VO_CONFIG.get("browser", {}).get("viewerUrl") or ""
+    parsed = urllib.parse.urlparse(viewer_url)
+    return urllib.parse.unquote(parsed.password or "")
+
+
 class OfficeHandler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=APP_DIR, **kwargs)
@@ -22824,6 +22894,34 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(content)
 
+    def _serve_browser_viewer_asset(self, request_path, parsed_url):
+        upstream_base, headers = _browser_viewer_upstream_parts()
+        if not upstream_base:
+            self.send_error(404, "Browser viewer is not configured")
+            return
+        relative_path = request_path[len("/browser-viewer/"):].lstrip("/")
+        upstream_path = "/" + relative_path if relative_path else "/"
+        upstream_url = upstream_base + upstream_path
+        if parsed_url.query:
+            upstream_url += "?" + parsed_url.query
+        try:
+            req = urllib.request.Request(upstream_url, headers=headers, method="GET")
+            context = ssl._create_unverified_context() if upstream_url.startswith("https://") else None
+            with urllib.request.urlopen(req, timeout=8, context=context) as resp:
+                content = resp.read()
+                content_type = resp.headers.get("Content-Type") or "application/octet-stream"
+            self.send_response(200)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(content)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(content)
+        except Exception as e:
+            self.send_response(502)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps({"ok": False, "error": str(e)}).encode())
+
     def do_GET(self):
         parsed_url = urllib.parse.urlparse(self.path)
         request_path = parsed_url.path
@@ -22835,6 +22933,20 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             return
         if request_path.startswith("/website/"):
             self._serve_website_asset(request_path)
+            return
+        if request_path in ("/browser-viewer", "/browser-viewer/") and not parsed_url.query:
+            password = urllib.parse.quote(_browser_viewer_password(), safe="")
+            location = (
+                f"/browser-viewer/?host={urllib.parse.quote(self.headers.get('Host', '').split(':')[0] or 'localhost', safe='')}"
+                f"&port={WS_PORT}&path=browser-viewer-websockify&password={password}"
+                f"&resize=scale&autoconnect=1&_vo_embed=1"
+            )
+            self.send_response(302)
+            self.send_header("Location", location)
+            self.end_headers()
+            return
+        if request_path.startswith("/browser-viewer/"):
+            self._serve_browser_viewer_asset(request_path, parsed_url)
             return
         # Setup wizard page
         if self.path == "/setup":
@@ -23145,6 +23257,13 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                 "viewerUrl": viewer_url,
                 "cdpUrl": cdp_url
             }).encode())
+        elif self.path == "/browser-viewer-status":
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            viewer_url = VO_CONFIG.get("browser", {}).get("viewerUrl")
+            self.wfile.write(json.dumps(_browser_viewer_probe(viewer_url)).encode())
         elif self.path == "/browser-tabs":
             # Proxy CDP tab list for browser URL bar
             self.send_response(200)
@@ -27276,9 +27395,81 @@ async def try_connect_gateway():
     return None
 
 
+async def browser_viewer_ws_proxy(client_ws):
+    """Proxy the embedded Kasm viewer websocket through the VO websocket port."""
+    upstream_base, headers = _browser_viewer_upstream_parts()
+    if not upstream_base:
+        await client_ws.close(1011, "Browser viewer is not configured")
+        return
+
+    parsed = urllib.parse.urlparse(upstream_base)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        await client_ws.close(1011, "Browser viewer URL is invalid")
+        return
+
+    ws_scheme = "wss" if parsed.scheme == "https" else "ws"
+    upstream_url = urllib.parse.urlunparse((ws_scheme, parsed.netloc, "/websockify", "", "", ""))
+    upstream_headers = dict(headers)
+    upstream_headers.setdefault("Sec-WebSocket-Origin", upstream_base)
+    connect_kwargs = {
+        "max_size": 10 * 1024 * 1024,
+        "additional_headers": upstream_headers,
+        "origin": upstream_base,
+        "subprotocols": ["binary", "base64"],
+    }
+    if ws_scheme == "wss":
+        connect_kwargs["ssl"] = ssl._create_unverified_context()
+
+    try:
+        upstream_ws = await ws_connect(upstream_url, **connect_kwargs)
+    except Exception as e:
+        print(f"⚠️  Browser viewer WS proxy failed: {e}")
+        await client_ws.close(1011, "Cannot reach browser viewer websocket")
+        return
+
+    async def client_to_upstream():
+        try:
+            async for msg in client_ws:
+                await upstream_ws.send(msg)
+        except websockets.exceptions.ConnectionClosed:
+            pass
+        except Exception:
+            pass
+        finally:
+            try:
+                await upstream_ws.close()
+            except Exception:
+                pass
+
+    async def upstream_to_client():
+        try:
+            async for msg in upstream_ws:
+                await client_ws.send(msg)
+        except websockets.exceptions.ConnectionClosed:
+            pass
+        except Exception:
+            pass
+        finally:
+            try:
+                await client_ws.close()
+            except Exception:
+                pass
+
+    await asyncio.gather(client_to_upstream(), upstream_to_client())
+
+
 async def ws_proxy(client_ws):
     """Proxy a browser WebSocket connection to the OpenClaw gateway."""
     global _ws_proxy_connected_logged, _ws_proxy_failed_logged
+    try:
+        req = getattr(client_ws, "request", None)
+        ws_path = getattr(req, "path", "") or getattr(client_ws, "path", "") or ""
+    except Exception:
+        ws_path = ""
+    if urllib.parse.urlparse(ws_path).path == "/browser-viewer-websockify":
+        await browser_viewer_ws_proxy(client_ws)
+        return
+
     gw = await try_connect_gateway()
     if not gw:
         await client_ws.close(1011, "Cannot reach gateway")
@@ -27322,9 +27513,24 @@ async def ws_proxy(client_ws):
     await asyncio.gather(client_to_gw(), gw_to_client(), ping_loop())
 
 
+def select_ws_subprotocol(_connection, offered):
+    if "binary" in offered:
+        return "binary"
+    if "base64" in offered:
+        return "base64"
+    return None
+
+
 async def run_ws_server():
     """Run the WebSocket proxy server."""
-    async with websockets.serve(ws_proxy, "0.0.0.0", WS_PORT, max_size=10 * 1024 * 1024):
+    async with websockets.serve(
+        ws_proxy,
+        "0.0.0.0",
+        WS_PORT,
+        max_size=10 * 1024 * 1024,
+        subprotocols=["binary", "base64"],
+        select_subprotocol=select_ws_subprotocol,
+    ):
         print(f"🔌 WebSocket proxy on :{WS_PORT} → gateway")
         await asyncio.Future()  # run forever
 
