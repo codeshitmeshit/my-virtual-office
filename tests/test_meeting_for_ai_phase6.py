@@ -94,13 +94,24 @@ def create_completed_task_meeting(project_id="", task_id=""):
     return completed["meeting"]
 
 
+def fake_feishu_sender(calls):
+    def _send(intent, **kwargs):
+        calls.append({"intent": intent, "kwargs": kwargs})
+        return {"ok": True, "status": "sent", "channel": "test", "record": {"id": intent.get("id")}}
+    return _send
+
+
 def test_phase6_project_bound_meeting_adds_action_to_source_task_without_backlog():
     with tempfile.TemporaryDirectory() as status_dir:
         old = with_store(status_dir)
+        old_send = server.send_feishu_notification
+        feishu_calls = []
+        server.send_feishu_notification = fake_feishu_sender(feishu_calls)
         try:
             project = create_project()
             source_task = create_project_task(project)
             meeting = create_completed_task_meeting(project["id"], source_task["id"])
+            assert not [c for c in feishu_calls if c["intent"]["target"] == "feishu-meeting-failure"]
             assert meeting["projectId"] == project["id"]
             drafts = meeting["actionItemDrafts"]
             assert len(drafts) == 2
@@ -123,6 +134,57 @@ def test_phase6_project_bound_meeting_adds_action_to_source_task_without_backlog
             assert project_after["tasks"][0]["id"] == source_task["id"]
             assert project_after["tasks"][0]["meetingActionItems"][0]["status"] == "pending"
         finally:
+            server.send_feishu_notification = old_send
+            restore_store(old)
+
+
+def test_phase6_moderator_failure_sends_feishu_notification_once():
+    with tempfile.TemporaryDirectory() as status_dir:
+        old = with_store(status_dir)
+        old_send = server.send_feishu_notification
+        old_call = server._meeting_call_provider
+        feishu_calls = []
+        server.send_feishu_notification = fake_feishu_sender(feishu_calls)
+        server._meeting_call_provider = lambda meeting, speaker, prompt: {
+            "ok": False,
+            "reply": "password=hunter2 moderator failed",
+            "error": "password=hunter2 moderator failed",
+            "durationMs": 10,
+        }
+        try:
+            created = server._handle_executable_meeting_create({
+                "topic": "Failing moderator meeting",
+                "purpose": "Exercise moderator failure notification.",
+                "meetingType": "discussion",
+                "participants": ["codex", "hermes"],
+                "moderator": "codex",
+                "allowConflicts": True,
+                "idempotencyKey": "phase6-moderator-failure",
+            })["meeting"]
+            opened = server._handle_executable_meeting_transition(created["id"], {
+                "stage": "active_opening",
+                "expectedVersion": created["version"],
+                "idempotencyKey": "phase6-failure-open",
+            })["meeting"]
+            summarizing = server._handle_executable_meeting_transition(created["id"], {
+                "stage": "summarizing",
+                "expectedVersion": opened["version"],
+                "idempotencyKey": "phase6-failure-summarize",
+            })["meeting"]
+            result = server._handle_executable_meeting_end_with_moderator(summarizing["id"])
+            assert result["ok"] is False
+            failure_calls = [c for c in feishu_calls if c["intent"]["target"] == "feishu-meeting-failure"]
+            assert len(failure_calls) == 1
+            assert failure_calls[0]["intent"]["type"] == "error"
+            assert failure_calls[0]["intent"]["actions"][0]["url"].startswith("http://")
+            assert "/#meeting=" in failure_calls[0]["intent"]["actions"][0]["url"]
+            assert "hunter2" not in str(failure_calls[0]["intent"])
+            duplicate = server._send_meeting_failure_notification(result["meeting"], result["moderatorFailure"])
+            assert duplicate["status"] == "skipped_duplicate"
+            assert len([c for c in feishu_calls if c["intent"]["target"] == "feishu-meeting-failure"]) == 1
+        finally:
+            server._meeting_call_provider = old_call
+            server.send_feishu_notification = old_send
             restore_store(old)
 
 
@@ -226,6 +288,7 @@ def test_phase6_edit_reject_and_confirm_are_idempotent():
 
 if __name__ == "__main__":
     test_phase6_project_bound_meeting_adds_action_to_source_task_without_backlog()
+    test_phase6_moderator_failure_sends_feishu_notification_once()
     test_phase6_unbound_meeting_requires_target_project_or_keep()
     test_phase6_edit_reject_and_confirm_are_idempotent()
     print("test_meeting_for_ai_phase6.py passed")

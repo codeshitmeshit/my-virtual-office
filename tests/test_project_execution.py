@@ -19,6 +19,7 @@ IMPORT_STATUS_DIR = tempfile.mkdtemp(prefix="vo-project-execution-import-")
 os.environ["VO_STATUS_DIR"] = IMPORT_STATUS_DIR
 
 import server
+from feishu_notifications import build_feishu_card
 from project_store import MarkdownProjectStore
 
 
@@ -57,6 +58,18 @@ def restore_store(old):
 def restore_attrs(pairs):
     for owner, name, value in pairs:
         setattr(owner, name, value)
+
+
+def fake_feishu_sender(calls):
+    def _send(intent, **kwargs):
+        calls.append({"intent": intent, "kwargs": kwargs})
+        return {
+            "ok": True,
+            "status": "sent",
+            "channel": "test",
+            "record": {"id": intent.get("id"), "type": intent.get("type"), "title": intent.get("title")},
+        }
+    return _send
 
 
 def create_project_execution_project(workspace):
@@ -1520,6 +1533,9 @@ def test_reviewer_pass_uses_attempt_acceptance_snapshot():
 def test_project_level_start_skips_done_columns_and_reports_no_eligible_task():
     with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as workspace:
         old = with_store(status_dir)
+        old_send = server.send_feishu_notification
+        feishu_calls = []
+        server.send_feishu_notification = fake_feishu_sender(feishu_calls)
         try:
             empty = server._handle_project_create({
                 "title": "Empty",
@@ -1531,6 +1547,7 @@ def test_project_level_start_skips_done_columns_and_reports_no_eligible_task():
             no_task = server._handle_project_execution_project_start(empty["id"], {"mode": "continuous"})
             assert no_task["_status"] == 409
             assert no_task["code"] == "no_eligible_task"
+            assert not [c for c in feishu_calls if c["intent"]["target"] == "feishu-project-execution-complete"]
 
             project, task = create_project_execution_project(workspace)
             done_col = next(c for c in project["columns"] if c["title"] == "Done")
@@ -1543,7 +1560,14 @@ def test_project_level_start_skips_done_columns_and_reports_no_eligible_task():
             no_eligible = server._handle_project_execution_project_start(project["id"], {"mode": "continuous"})
             assert no_eligible["_status"] == 409
             assert no_eligible["code"] == "no_eligible_task"
+            complete_calls = [c for c in feishu_calls if c["intent"]["target"] == "feishu-project-execution-complete"]
+            assert len(complete_calls) == 1
+            assert complete_calls[0]["intent"]["type"] == "notification"
+            repeated = server._handle_project_execution_project_start(project["id"], {"mode": "continuous"})
+            assert repeated["code"] == "no_eligible_task"
+            assert len([c for c in feishu_calls if c["intent"]["target"] == "feishu-project-execution-complete"]) == 1
         finally:
+            server.send_feishu_notification = old_send
             restore_store(old)
 
 
@@ -2051,6 +2075,9 @@ def test_execution_failure_blocks_with_redacted_bounded_evidence():
     with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as workspace:
         old = with_store(status_dir)
         old_call = server._project_execution_call_executor
+        old_send = server.send_feishu_notification
+        feishu_calls = []
+        server.send_feishu_notification = fake_feishu_sender(feishu_calls)
         secret = "api_key=SECRET_VALUE"
         long_reply = "x" * (server._PROJECT_EXECUTION_MAX_TEXT + 50)
         server._project_execution_call_executor = lambda executor, prompt, workspace, attempt_id, project_id=None, task_id=None, timeout=600: {
@@ -2081,7 +2108,18 @@ def test_execution_failure_blocks_with_redacted_bounded_evidence():
             assert "hunter2" not in evidence["error"]
             assert "SHOULD_HIDE" not in "\n".join(evidence["testResults"])
             assert "...[truncated]" in evidence["executorSummary"]
+            intervention_calls = [c for c in feishu_calls if c["intent"]["target"] == "feishu-project-execution-intervention"]
+            assert len(intervention_calls) == 1
+            assert intervention_calls[0]["intent"]["type"] == "error"
+            assert "hunter2" not in json.dumps(intervention_calls[0]["intent"], ensure_ascii=False)
+            project = server._handle_project_get(project["id"])["project"]
+            duplicate = server._send_project_execution_intervention_notification(
+                project, project["tasks"][0], project["tasks"][0]["blockedReason"], evidence["attemptId"], kind="error"
+            )
+            assert duplicate["status"] == "skipped_duplicate"
+            assert len([c for c in feishu_calls if c["intent"]["target"] == "feishu-project-execution-intervention"]) == 1
         finally:
+            server.send_feishu_notification = old_send
             server._project_execution_call_executor = old_call
             restore_store(old)
 
@@ -2091,6 +2129,9 @@ def test_transient_gateway_timeout_retries_once_before_blocking():
         old = with_store(status_dir)
         old_call = server._project_execution_call_executor
         old_sleep = server.time.sleep
+        old_send = server.send_feishu_notification
+        feishu_calls = []
+        server.send_feishu_notification = fake_feishu_sender(feishu_calls)
         calls = {"executor": 0}
 
         def flaky_executor(executor, prompt, workspace, attempt_id, project_id=None, task_id=None, timeout=600):
@@ -2113,7 +2154,7 @@ def test_transient_gateway_timeout_retries_once_before_blocking():
             assert started["ok"] is True
 
             current_task = wait_for(lambda: server._handle_project_get(project["id"])["project"]["tasks"][0]
-                                    if calls["executor"] >= 2 else None)
+                                    if server._handle_project_get(project["id"])["project"]["tasks"][0].get("executionState") == "execution_complete" else None)
             assert calls["executor"] == 2
             assert current_task.get("executionState") == "execution_complete"
             assert current_task.get("blockedReason") in (None, "")
@@ -2122,9 +2163,33 @@ def test_transient_gateway_timeout_retries_once_before_blocking():
             assert attempts[0]["retryReason"] in {"llm request timed out", "gatewayclientrequesterror", "failovererror", "timed out", "timeout"}
             assert attempts[1]["transientRetry"] is True
             assert attempts[1]["retryFromAttemptId"] == attempts[0]["id"]
+            assert not [c for c in feishu_calls if c["intent"]["target"] == "feishu-project-execution-intervention"]
         finally:
+            server.send_feishu_notification = old_send
             server.time.sleep = old_sleep
             server._project_execution_call_executor = old_call
+            restore_store(old)
+
+
+def test_feishu_start_failure_notification_dedupes_after_persisted_reload():
+    with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as workspace:
+        old = with_store(status_dir)
+        old_send = server.send_feishu_notification
+        feishu_calls = []
+        server.send_feishu_notification = fake_feishu_sender(feishu_calls)
+        try:
+            project, task = create_project_execution_project(workspace)
+            server._handle_task_update(project["id"], task["id"], {"executorAgentId": "missing-agent"})
+            first = server._handle_project_execution_start(project["id"], task["id"], {})
+            assert first["_status"] == 409
+            assert len([c for c in feishu_calls if c["intent"]["target"] == "feishu-project-execution-intervention"]) == 1
+
+            # Reload through the markdown store to prove task-level dedupe markers persist.
+            second = server._handle_project_execution_start(project["id"], task["id"], {})
+            assert second["_status"] == 409
+            assert len([c for c in feishu_calls if c["intent"]["target"] == "feishu-project-execution-intervention"]) == 1
+        finally:
+            server.send_feishu_notification = old_send
             restore_store(old)
 
 
@@ -2462,6 +2527,174 @@ def test_independent_review_pass_waits_for_user_acceptance_then_done():
             restore_store(old)
 
 
+def test_feishu_acceptance_notification_and_card_actions():
+    with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as workspace:
+        old = with_store(status_dir)
+        old_executor = server._project_execution_call_executor
+        old_reviewer = server._project_execution_call_reviewer
+        old_send = server.send_feishu_notification
+        feishu_calls = []
+        server.send_feishu_notification = fake_feishu_sender(feishu_calls)
+        server._project_execution_call_executor = lambda executor, prompt, workspace, attempt_id, project_id=None, task_id=None, timeout=600: {
+            "ok": True, "status": "completed", "reply": "implemented", "modifiedFiles": [],
+            "checklistUpdates": [{"id": "done", "text": "Complete implementation", "done": True}],
+        }
+        server._project_execution_call_reviewer = lambda reviewer, prompt, review_id, project_id=None, task_id=None, timeout=600: {
+            "ok": True, "status": "completed", "reply": '{"status":"pass","summary":"ready","rationale":"ok","items":[]}',
+        }
+        try:
+            project, task = create_project_execution_project(workspace)
+            server._handle_task_update(project["id"], task["id"], {"requiresUserAcceptance": True})
+            task = complete_project_task_execution(project["id"], task["id"])
+            task = review_project_execution_task(project["id"], task["id"])
+            assert len(feishu_calls) == 1
+            intent = feishu_calls[0]["intent"]
+            assert intent["type"] == "application_form"
+            assert intent["target"] == "feishu-project-execution-acceptance"
+            assert intent["inputs"][0]["name"] == "feedback"
+            assert intent["actions"][0]["value"]["action"] == "project_execution_accept"
+            assert intent["actions"][1]["value"]["action"] == "project_execution_rework"
+            assert intent["actions"][2]["url"].startswith("http://")
+            assert "/#projects?projectId=" in intent["actions"][2]["url"]
+            rendered = build_feishu_card(intent)
+            rendered_elements = rendered["card"]["body"]["elements"]
+            form = next(element for element in rendered_elements if element["tag"] == "form")
+            feedback_input = next(element for element in form["elements"] if element["tag"] == "input")
+            button_row = next(element for element in form["elements"] if element["tag"] == "column_set")
+            buttons = [column["elements"][0] for column in button_row["columns"]]
+            accept_button = next(button for button in buttons if button["text"]["content"] == "接受")
+            rework_button = next(button for button in buttons if button["text"]["content"] == "要求返工")
+            jump_button = next(button for button in buttons if button["text"]["content"] == "打开任务")
+            assert rendered["card"]["schema"] == "2.0"
+            assert feedback_input["name"] == "feedback"
+            assert [button["text"]["content"] for button in buttons] == ["接受", "要求返工", "打开任务"]
+            assert rework_button["text"]["content"] == "要求返工"
+            assert rework_button["form_action_type"] == "submit"
+            assert rework_button["behaviors"][0]["value"]["action"] == "project_execution_rework"
+            assert accept_button["behaviors"][0]["value"]["action"] == "project_execution_accept"
+            assert jump_button["behaviors"][0]["type"] == "open_url"
+
+            duplicate = server._send_project_execution_acceptance_notification(
+                server._handle_project_get(project["id"])["project"],
+                task,
+                task["reviewResult"]["attemptId"],
+            )
+            assert duplicate["status"] == "skipped_duplicate"
+            assert len(feishu_calls) == 1
+
+            stale = server._handle_feishu_card_action({
+                "event": {"operator": {"open_id": "ou_demo"}, "action": {"value": {
+                    "action": "project_execution_accept",
+                    "project_id": project["id"],
+                    "task_id": task["id"],
+                    "attempt_id": "wrong",
+                }}}
+            })
+            assert stale["ok"] is False
+            assert stale["outcome"]["businessStatus"] == "project_execution_action_failed"
+
+            accepted = server._handle_feishu_card_action({
+                "event": {"operator": {"open_id": "ou_demo"}, "action": {"value": {
+                    "action": "project_execution_accept",
+                    "project_id": project["id"],
+                    "task_id": task["id"],
+                    "attempt_id": task["reviewResult"]["attemptId"],
+                }}}
+            })
+            assert accepted["ok"] is True
+            assert accepted["outcome"]["businessStatus"] == "done"
+            current = server._handle_project_get(project["id"])["project"]["tasks"][0]
+            assert current["executionState"] == "done"
+        finally:
+            server.send_feishu_notification = old_send
+            server._project_execution_call_executor = old_executor
+            server._project_execution_call_reviewer = old_reviewer
+            restore_store(old)
+
+
+def test_feishu_acceptance_rework_uses_default_feedback():
+    with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as workspace:
+        old = with_store(status_dir)
+        old_executor = server._project_execution_call_executor
+        old_reviewer = server._project_execution_call_reviewer
+        old_send = server.send_feishu_notification
+        feishu_calls = []
+        server.send_feishu_notification = fake_feishu_sender(feishu_calls)
+        server._project_execution_call_executor = lambda executor, prompt, workspace, attempt_id, project_id=None, task_id=None, timeout=600: {
+            "ok": True, "status": "completed", "reply": "implemented", "modifiedFiles": [],
+            "checklistUpdates": [{"id": "done", "text": "Complete implementation", "done": True}],
+        }
+        server._project_execution_call_reviewer = lambda reviewer, prompt, review_id, project_id=None, task_id=None, timeout=600: {
+            "ok": True, "status": "completed", "reply": '{"status":"pass","summary":"ready","rationale":"ok","items":[]}',
+        }
+        try:
+            project, task = create_project_execution_project(workspace)
+            server._handle_task_update(project["id"], task["id"], {"requiresUserAcceptance": True})
+            task = complete_project_task_execution(project["id"], task["id"])
+            task = review_project_execution_task(project["id"], task["id"])
+            result = server._handle_feishu_card_action({
+                "event": {"operator": {"open_id": "ou_demo"}, "action": {"value": {
+                    "action": "project_execution_rework",
+                    "project_id": project["id"],
+                    "task_id": task["id"],
+                    "attempt_id": task["reviewResult"]["attemptId"],
+                }}}
+            })
+            assert result["ok"] is True
+            assert result["outcome"]["businessStatus"] == "reworking"
+            current = server._handle_project_get(project["id"])["project"]["tasks"][0]
+            assert current["executionState"] == "reworking"
+            assert current["reworkFeedback"] == server._PROJECT_EXECUTION_FEISHU_REWORK_FEEDBACK
+        finally:
+            server.send_feishu_notification = old_send
+            server._project_execution_call_executor = old_executor
+            server._project_execution_call_reviewer = old_reviewer
+            restore_store(old)
+
+
+def test_feishu_acceptance_rework_uses_card_feedback_input():
+    with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as workspace:
+        old = with_store(status_dir)
+        old_executor = server._project_execution_call_executor
+        old_reviewer = server._project_execution_call_reviewer
+        old_send = server.send_feishu_notification
+        feishu_calls = []
+        server.send_feishu_notification = fake_feishu_sender(feishu_calls)
+        server._project_execution_call_executor = lambda executor, prompt, workspace, attempt_id, project_id=None, task_id=None, timeout=600: {
+            "ok": True, "status": "completed", "reply": "implemented", "modifiedFiles": [],
+            "checklistUpdates": [{"id": "done", "text": "Complete implementation", "done": True}],
+        }
+        server._project_execution_call_reviewer = lambda reviewer, prompt, review_id, project_id=None, task_id=None, timeout=600: {
+            "ok": True, "status": "completed", "reply": '{"status":"pass","summary":"ready","rationale":"ok","items":[]}',
+        }
+        try:
+            project, task = create_project_execution_project(workspace)
+            server._handle_task_update(project["id"], task["id"], {"requiresUserAcceptance": True})
+            task = complete_project_task_execution(project["id"], task["id"])
+            task = review_project_execution_task(project["id"], task["id"])
+            result = server._handle_feishu_card_action({
+                "event": {"operator": {"open_id": "ou_demo"}, "action": {
+                    "value": {
+                        "action": "project_execution_rework",
+                        "project_id": project["id"],
+                        "task_id": task["id"],
+                        "attempt_id": task["reviewResult"]["attemptId"],
+                    },
+                    "form_value": {"feedback": "请补充 README 的验收说明"},
+                }}
+            })
+            assert result["ok"] is True
+            assert result["outcome"]["businessStatus"] == "reworking"
+            current = server._handle_project_get(project["id"])["project"]["tasks"][0]
+            assert current["executionState"] == "reworking"
+            assert current["reworkFeedback"] == "请补充 README 的验收说明"
+        finally:
+            server.send_feishu_notification = old_send
+            server._project_execution_call_executor = old_executor
+            server._project_execution_call_reviewer = old_reviewer
+            restore_store(old)
+
+
 def test_acceptance_reject_and_mark_blocked_require_feedback_and_invalidate_pass():
     with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as workspace:
         old = with_store(status_dir)
@@ -2656,12 +2889,16 @@ if __name__ == "__main__":
     test_start_rejects_when_another_task_is_reviewing()
     test_execution_failure_blocks_with_redacted_bounded_evidence()
     test_cancel_active_execution_blocks_and_preserves_evidence()
+    test_feishu_start_failure_notification_dedupes_after_persisted_reload()
     test_status_reconciles_stale_active_execution_after_restart()
     test_reviewer_provider_matrix_receives_read_only_evidence_packet()
     test_malformed_reviewer_result_blocks_instead_of_passing()
     test_reviewer_needs_more_work_auto_reworks_and_rechecks_to_done_by_default()
     test_reviewer_needs_more_work_blocks_after_three_rework_cycles()
     test_independent_review_pass_waits_for_user_acceptance_then_done()
+    test_feishu_acceptance_notification_and_card_actions()
+    test_feishu_acceptance_rework_uses_default_feedback()
+    test_feishu_acceptance_rework_uses_card_feedback_input()
     test_acceptance_reject_and_mark_blocked_require_feedback_and_invalidate_pass()
     test_acceptance_reject_can_rework_skipped_review_result()
     test_acceptance_reject_starts_rework_execution_before_returning_to_review()

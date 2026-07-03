@@ -35,6 +35,9 @@ _TYPE_TEMPLATE = {
     "warning": "orange",
     "error": "red",
 }
+_APPLICATION_STATE_TEMPLATE = {
+    "approved": "green",
+}
 _STATE_LABELS = {
     "pending": "待处理",
     "submitted": "已提交处理",
@@ -133,6 +136,175 @@ def _button_style(category: str) -> str:
     return "default"
 
 
+def _button_style_v2(category: str) -> str:
+    if category == "confirm":
+        return "primary_filled"
+    if category == "cancel":
+        return "danger"
+    return "default"
+
+
+def _callback_value(normalized: dict[str, Any], action: dict[str, Any]) -> dict[str, Any]:
+    return {
+        **action["value"],
+        "notification_id": normalized["id"],
+        "action_category": action["category"],
+        "callback_status": "not_implemented",
+    }
+
+
+def _plain_text(content: str) -> dict[str, str]:
+    return {"tag": "plain_text", "content": content}
+
+
+def _legacy_text_block(content: str) -> dict[str, Any]:
+    return {"tag": "div", "text": {"tag": "lark_md", "content": content}}
+
+
+def _v2_markdown(content: str) -> dict[str, Any]:
+    return {"tag": "markdown", "content": content}
+
+
+def _base_content_elements(normalized: dict[str, Any], *, v2: bool = False) -> list[dict[str, Any]]:
+    kind = normalized["type"]
+    text_block = _v2_markdown if v2 else _legacy_text_block
+    elements: list[dict[str, Any]] = [
+        text_block(f"**类型**：{_CATEGORY_LABELS[kind]}\n**摘要**：{normalized['summary']}")
+    ]
+    if kind == "application_form":
+        state_line = f"**状态**：{_STATE_LABELS[normalized['state']]}"
+        if normalized["multi_participant"]:
+            state_line += "\n**处理模式**：多人参与"
+        else:
+            state_line += "\n**处理模式**：单人最终决策"
+        elements.append(text_block(state_line))
+    if kind == "error":
+        if normalized["error_variant"] == "admin_facing" and normalized["diagnostic"]:
+            elements.append(text_block(f"**诊断摘要**：{normalized['diagnostic']}"))
+        elif normalized["error_variant"] == "user_facing":
+            elements.append(text_block("请根据提示重试，或联系管理员查看系统诊断信息。"))
+
+    related = normalized["related"]
+    if related:
+        related_lines = []
+        if related.get("type"):
+            related_lines.append(f"**对象类型**：{related['type']}")
+        if related.get("id"):
+            related_lines.append(f"**对象 ID**：{related['id']}")
+        if related.get("title"):
+            related_lines.append(f"**对象标题**：{related['title']}")
+        elements.append(text_block("\n".join(related_lines)))
+
+    for label, value in normalized["details"]:
+        elements.append(text_block(f"**{label}**：{value}"))
+    return elements
+
+
+def _safe_component_name(prefix: str, value: str) -> str:
+    safe = re.sub(r"[^A-Za-z0-9_]", "_", value)[:12] or "item"
+    return f"{prefix}_{safe}"
+
+
+def _v2_button(
+    normalized: dict[str, Any],
+    action: dict[str, Any],
+    *,
+    form_submit: bool = False,
+    in_form: bool = False,
+    component_name: str = "",
+) -> dict[str, Any]:
+    button: dict[str, Any] = {
+        "tag": "button",
+        "text": _plain_text(action["text"]),
+        "type": _button_style_v2(action["category"]),
+        "width": "default",
+    }
+    if action["category"] == "jump":
+        button["behaviors"] = [{"type": "open_url", "default_url": action["url"]}]
+    else:
+        button["behaviors"] = [{"type": "callback", "value": _callback_value(normalized, action)}]
+    if in_form or form_submit:
+        button["name"] = component_name or _safe_component_name("Button", action["category"])
+    if form_submit:
+        button["form_action_type"] = "submit"
+        button["action_type"] = "form_submit"
+    return button
+
+
+def _v2_button_column(button: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "tag": "column",
+        "width": "auto",
+        "elements": [button],
+        "padding": "0px 0px 0px 0px",
+        "vertical_spacing": "8px",
+    }
+
+
+def _v2_button_row(buttons: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "tag": "column_set",
+        "flex_mode": "flow",
+        "horizontal_spacing": "8px",
+        "horizontal_align": "left",
+        "columns": [_v2_button_column(button) for button in buttons],
+    }
+
+
+def _v2_input_form(normalized: dict[str, Any], actions: list[dict[str, Any]]) -> dict[str, Any]:
+    elements: list[dict[str, Any]] = []
+    for item in normalized["inputs"]:
+        label = item["label"] + (" *" if item["required"] else "")
+        elements.append({
+            "tag": "input",
+            "name": item["name"],
+            "input_type": "multiline_text" if item["multiline"] else "text",
+            "rows": 3 if item["multiline"] else 1,
+            "auto_resize": bool(item["multiline"]),
+            "required": bool(item["required"]),
+            "label": _plain_text(label),
+            "placeholder": _plain_text(item["placeholder"] or "请输入"),
+            "default_value": item["default_value"],
+            "width": "fill",
+        })
+    if actions:
+        buttons = []
+        for idx, action in enumerate(actions):
+            buttons.append(_v2_button(
+                normalized,
+                action,
+                form_submit=action["category"] != "jump",
+                in_form=True,
+                component_name=f"Button_{idx}_{action['category']}",
+            ))
+        elements.append(_v2_button_row(buttons))
+    return {
+        "tag": "form",
+        "name": _safe_component_name("Form", normalized["id"]),
+        "direction": "vertical",
+        "vertical_spacing": "8px",
+        "elements": elements,
+    }
+
+
+def _build_feishu_card_v2_with_inputs(normalized: dict[str, Any], header_template: str) -> dict[str, Any]:
+    elements = _base_content_elements(normalized, v2=True)
+    if normalized["actions"]:
+        elements.append(_v2_input_form(normalized, normalized["actions"]))
+    return {
+        "msg_type": "interactive",
+        "card": {
+            "schema": "2.0",
+            "config": {"wide_screen_mode": True},
+            "header": {
+                "template": header_template,
+                "title": _plain_text(normalized["title"]),
+            },
+            "body": {"elements": elements},
+        },
+    }
+
+
 def validate_notification_intent(intent: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(intent, dict):
         raise FeishuNotificationError("notification intent must be a dict")
@@ -158,6 +330,24 @@ def validate_notification_intent(intent: dict[str, Any]) -> dict[str, Any]:
         raise FeishuNotificationError(f"unsupported application form state: {state}")
     if kind != "application_form":
         state = ""
+
+    inputs = []
+    for idx, item in enumerate(intent.get("inputs") or []):
+        if not isinstance(item, dict):
+            raise FeishuNotificationError(f"input {idx} must be a dict")
+        if kind != "application_form":
+            raise FeishuNotificationError("only application forms support inputs")
+        name = _string(item.get("name") or item.get("key"), 80)
+        if not name:
+            raise FeishuNotificationError(f"input {idx} name is required")
+        inputs.append({
+            "name": name,
+            "label": _string(item.get("label") or name, 80),
+            "placeholder": _string(item.get("placeholder") or "", 200),
+            "multiline": bool(item.get("multiline", True)),
+            "required": bool(item.get("required")),
+            "default_value": _string(item.get("default_value") or item.get("defaultValue") or "", 500),
+        })
 
     actions = []
     for idx, action in enumerate(intent.get("actions") or []):
@@ -196,6 +386,7 @@ def validate_notification_intent(intent: dict[str, Any]) -> dict[str, Any]:
         "state": state,
         "multi_participant": bool(intent.get("multi_participant")),
         "target": _string(intent.get("target") or "feishu-webhook", 160),
+        "inputs": inputs,
         "actions": actions,
         "diagnostic": redact_sensitive(intent.get("diagnostic") or ""),
     }
@@ -204,49 +395,23 @@ def validate_notification_intent(intent: dict[str, Any]) -> dict[str, Any]:
 def build_feishu_card(intent: dict[str, Any]) -> dict[str, Any]:
     normalized = validate_notification_intent(intent)
     kind = normalized["type"]
-    elements: list[dict[str, Any]] = [
-        {
-            "tag": "div",
-            "text": {
-                "tag": "lark_md",
-                "content": f"**类型**：{_CATEGORY_LABELS[kind]}\n**摘要**：{normalized['summary']}",
-            },
-        }
-    ]
+    header_template = _TYPE_TEMPLATE[kind]
     if kind == "application_form":
-        state_line = f"**状态**：{_STATE_LABELS[normalized['state']]}"
-        if normalized["multi_participant"]:
-            state_line += "\n**处理模式**：多人参与"
-        else:
-            state_line += "\n**处理模式**：单人最终决策"
-        elements.append({"tag": "div", "text": {"tag": "lark_md", "content": state_line}})
-    if kind == "error":
-        if normalized["error_variant"] == "admin_facing" and normalized["diagnostic"]:
-            elements.append({
-                "tag": "div",
-                "text": {"tag": "lark_md", "content": f"**诊断摘要**：{normalized['diagnostic']}"},
-            })
-        elif normalized["error_variant"] == "user_facing":
-            elements.append({
-                "tag": "div",
-                "text": {"tag": "lark_md", "content": "请根据提示重试，或联系管理员查看系统诊断信息。"},
-            })
+        header_template = _APPLICATION_STATE_TEMPLATE.get(normalized["state"], header_template)
+    if normalized["inputs"]:
+        return _build_feishu_card_v2_with_inputs(normalized, header_template)
 
-    related = normalized["related"]
-    if related:
-        related_lines = []
-        if related.get("type"):
-            related_lines.append(f"**对象类型**：{related['type']}")
-        if related.get("id"):
-            related_lines.append(f"**对象 ID**：{related['id']}")
-        if related.get("title"):
-            related_lines.append(f"**对象标题**：{related['title']}")
-        elements.append({"tag": "div", "text": {"tag": "lark_md", "content": "\n".join(related_lines)}})
+    elements = _base_content_elements(normalized)
 
-    for label, value in normalized["details"]:
+    for item in normalized["inputs"]:
+        label = item["label"] + (" *" if item["required"] else "")
         elements.append({
-            "tag": "div",
-            "text": {"tag": "lark_md", "content": f"**{label}**：{value}"},
+            "tag": "input",
+            "name": item["name"],
+            "input_type": "multiline_text" if item["multiline"] else "text",
+            "label": {"tag": "plain_text", "content": label},
+            "placeholder": {"tag": "plain_text", "content": item["placeholder"] or "请输入"},
+            "default_value": item["default_value"],
         })
 
     action_buttons = []
@@ -259,12 +424,7 @@ def build_feishu_card(intent: dict[str, Any]) -> dict[str, Any]:
         if action["category"] == "jump":
             button["url"] = action["url"]
         else:
-            button["value"] = {
-                **action["value"],
-                "notification_id": normalized["id"],
-                "action_category": action["category"],
-                "callback_status": "not_implemented",
-            }
+            button["value"] = _callback_value(normalized, action)
         action_buttons.append(button)
     if action_buttons:
         elements.append({"tag": "action", "actions": action_buttons[:6]})
@@ -274,7 +434,7 @@ def build_feishu_card(intent: dict[str, Any]) -> dict[str, Any]:
         "card": {
             "config": {"wide_screen_mode": True},
             "header": {
-                "template": _TYPE_TEMPLATE[kind],
+                "template": header_template,
                 "title": {"tag": "plain_text", "content": normalized["title"]},
             },
             "elements": elements,

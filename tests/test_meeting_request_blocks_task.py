@@ -185,7 +185,8 @@ def test_feishu_meeting_request_card_actions_confirm_and_reject():
                 server.send_feishu_notification = old_send
             assert meeting_notification["record"]["type"] == "application_form"
             assert [a["text"] for a in sent_intents[-1]["actions"]] == ["同意", "拒绝", "查看详情"]
-            assert sent_intents[-1]["actions"][2]["url"] == "/#projects"
+            assert sent_intents[-1]["actions"][2]["url"].endswith("/#projects")
+            assert sent_intents[-1]["actions"][2]["url"].startswith("http://")
 
             run_calls = []
             old_run = server._handle_executable_meeting_run

@@ -289,16 +289,29 @@ def test_phase4_project_auto_approve_flag_defaults_false_and_update_persists():
             project, task = create_project_and_task()
             assert project.get("highPriorityAiMeetingAutoApprove") is False
 
-            req = server._handle_meeting_request_create(
-                project["id"],
-                task["id"],
-                valid_request_body(idempotencyKey="phase4-default-non-auto", urgency=3),
-            )
+            sent_intents = []
+            old_send = server.send_feishu_notification
+            old_run = server._handle_executable_meeting_run
+            try:
+                server.send_feishu_notification = lambda intent, **kwargs: sent_intents.append(intent) or {"ok": True, "record": {"type": intent["type"]}}
+                server._handle_executable_meeting_run = lambda meeting_id, body=None: {"ok": True, "meeting": {"id": meeting_id, "stage": "active_opening"}}
+                req = server._handle_meeting_request_create(
+                    project["id"],
+                    task["id"],
+                    valid_request_body(idempotencyKey="phase4-default-non-auto", urgency=3),
+                )
+            finally:
+                server.send_feishu_notification = old_send
+                server._handle_executable_meeting_run = old_run
             assert req["ok"] is True
             assert req["autoConfirmed"] is True
             assert req["request"]["status"] == "confirmed"
             assert req["request"]["review"]["autoConfirmReason"] == "standard_project_ai_meeting_auto_approve"
             assert req["request"]["review"]["autoConfirmLabel"] == "已按普通项目自动批准"
+            assert [intent["state"] for intent in sent_intents] == ["approved"]
+            assert sent_intents[0]["title"].startswith("会议申请已同意")
+            assert ("同意方式", "AI 自动同意") in sent_intents[0]["details"]
+            assert ("自动同意原因", "已按普通项目自动批准") in sent_intents[0]["details"]
 
             updated = server._handle_project_update(project["id"], {"highPriorityAiMeetingAutoApprove": True})
             assert updated["ok"] is True
@@ -306,6 +319,41 @@ def test_phase4_project_auto_approve_flag_defaults_false_and_update_persists():
             stored = server._load_projects()["projects"][0]
             assert stored["highPriorityAiMeetingAutoApprove"] is True
         finally:
+            restore_store(old)
+
+
+def test_phase4_auto_approve_sends_green_card_before_auto_run_returns():
+    with tempfile.TemporaryDirectory() as status_dir:
+        old = with_store(status_dir)
+        old_send = server.send_feishu_notification
+        old_run = server._handle_executable_meeting_run
+        try:
+            project, task = create_project_and_task()
+            sent_intents = []
+
+            def fake_send(intent, **kwargs):
+                sent_intents.append(intent)
+                return {"ok": True, "record": {"type": intent["type"]}}
+
+            def fake_run(meeting_id, body=None):
+                assert [intent["state"] for intent in sent_intents] == ["approved"]
+                return {"ok": True, "meeting": {"id": meeting_id, "stage": "active_opening"}}
+
+            server.send_feishu_notification = fake_send
+            server._handle_executable_meeting_run = fake_run
+            result = server._handle_meeting_request_create(
+                project["id"],
+                task["id"],
+                valid_request_body(idempotencyKey="phase4-auto-card-before-run", urgency=3),
+            )
+
+            assert result["ok"] is True
+            assert result["autoConfirmed"] is True
+            assert [intent["state"] for intent in sent_intents] == ["approved"]
+            assert sent_intents[0]["title"].startswith("会议申请已同意")
+        finally:
+            server.send_feishu_notification = old_send
+            server._handle_executable_meeting_run = old_run
             restore_store(old)
 
 
@@ -378,6 +426,7 @@ if __name__ == "__main__":
     test_phase4_high_priority_project_requires_user_confirmation_for_ai_request()
     test_phase4_high_priority_project_confirmation_overrides_high_urgency()
     test_phase4_project_auto_approve_flag_defaults_false_and_update_persists()
+    test_phase4_auto_approve_sends_green_card_before_auto_run_returns()
     test_phase4_reject_feedback_and_illegal_confirm()
     test_phase4_confirm_creates_once_with_selected_context_snapshot()
     print("test_meeting_for_ai_phase4.py passed")

@@ -54,6 +54,12 @@ def test_application_form_actions_and_states_are_validated():
     intent.update({
         "state": "expired",
         "multi_participant": True,
+        "inputs": [{
+            "name": "feedback",
+            "label": "返工原因",
+            "placeholder": "说明需要调整的内容",
+            "multiline": True,
+        }],
         "actions": [
             {"category": "confirm", "text": "同意", "value": {"action": "approve"}},
             {"category": "cancel", "text": "拒绝", "value": {"action": "reject"}},
@@ -61,10 +67,22 @@ def test_application_form_actions_and_states_are_validated():
         ],
     })
     card = build_feishu_card(intent)
-    action_block = card["card"]["elements"][-1]
-    assert action_block["tag"] == "action"
-    assert [button["text"]["content"] for button in action_block["actions"]] == ["同意", "拒绝", "查看详情"]
-    assert action_block["actions"][0]["value"]["callback_status"] == "not_implemented"
+    assert card["card"]["schema"] == "2.0"
+    elements = card["card"]["body"]["elements"]
+    form = next(element for element in elements if element["tag"] == "form")
+    input_block = next(element for element in form["elements"] if element["tag"] == "input")
+    assert input_block["name"] == "feedback"
+    assert input_block["input_type"] == "multiline_text"
+    button_row = next(element for element in form["elements"] if element["tag"] == "column_set")
+    buttons = [column["elements"][0] for column in button_row["columns"]]
+    assert [button["text"]["content"] for button in buttons] == ["同意", "拒绝", "查看详情"]
+    assert buttons[0]["form_action_type"] == "submit"
+    assert buttons[0]["action_type"] == "form_submit"
+    assert buttons[0]["behaviors"][0]["value"]["callback_status"] == "not_implemented"
+    assert buttons[1]["form_action_type"] == "submit"
+    assert buttons[1]["action_type"] == "form_submit"
+    assert buttons[1]["behaviors"][0]["value"]["callback_status"] == "not_implemented"
+    assert buttons[2]["behaviors"][0]["default_url"] == "/detail"
 
     bad = dict(intent, state="unknown")
     try:
@@ -73,6 +91,19 @@ def test_application_form_actions_and_states_are_validated():
         assert "unsupported application form state" in str(exc)
     else:
         raise AssertionError("invalid application form state should fail")
+
+
+def test_approved_application_form_uses_green_card_header():
+    intent = base_intent("application_form")
+    intent.update({
+        "state": "approved",
+        "title": "会议申请已同意: Demo meeting",
+        "actions": [{"category": "jump", "text": "查看会议", "url": "/#meeting=m-1"}],
+    })
+
+    card = build_feishu_card(intent)
+
+    assert card["card"]["header"]["template"] == "green"
 
 
 def test_non_application_notifications_only_allow_jump_actions():

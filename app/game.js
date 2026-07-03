@@ -17934,13 +17934,15 @@ function _mtgRenderMetaColumns(itemsLeft, itemsRight) {
     var row1 = left.slice();
     var row2 = [];
     var row3 = [];
+    var row4 = [];
     right.forEach(function(item) {
         var text = String(item || '');
         if (text.indexOf('📋') === 0) row1.push(item);
-        else if (text.indexOf('⚙️') === 0 || text.indexOf('🔁') === 0 || text.indexOf('🧭') === 0 || text.indexOf('🎙️') === 0 || text.indexOf('🗣️') === 0 || text.indexOf('📝') === 0) row2.push(item);
+        else if (text.indexOf('🆔') === 0) row4.push(item);
+        else if (text.indexOf('⚙️') === 0 || text.indexOf('🔁') === 0 || text.indexOf('🧭') === 0 || text.indexOf('🔢') === 0 || text.indexOf('🎙️') === 0 || text.indexOf('🗣️') === 0 || text.indexOf('📝') === 0) row2.push(item);
         else row3.push(item);
     });
-    var rows = [row1, row2, row3].filter(function(row) { return row.length; });
+    var rows = [row1, row2, row3, row4].filter(function(row) { return row.length; });
     return '<div class="mtg-meta mtg-meta-grid">' + rows.map(function(items) {
         return '<div class="mtg-meta-row">' + items.map(function(item) {
             return '<div class="mtg-meta-item">' + item + '</div>';
@@ -18433,6 +18435,7 @@ function _mtgT(key, fallback) {
         meeting_preparing_timeout_remaining: '{seconds} 秒后自动释放',
         meeting_preparing_timeout_released: '准备超时已释放',
         meeting_version: '版本',
+        meeting_id: '会议ID',
         meeting_round: '轮次',
         meeting_moderator: '主持人',
         meeting_context_mode: '上下文模式',
@@ -19824,6 +19827,8 @@ function _mtgRenderMeetingDetail(m) {
     var rightMeta = [];
     if (m.executableMeeting) {
         rightMeta.push('⚙️ ' + _escMtg(_mtgT('meeting_stage', 'Stage')) + ': ' + _escMtg(_mtgMeetingStageLabel(m.executionStage || m.status || '')));
+        if (m.maxRounds) rightMeta.push('🔢 ' + _escMtg(_mtgT('meeting_max_rounds', 'Max discussion rounds')) + ': ' + _escMtg(m.maxRounds));
+        if (m.id) rightMeta.push('🆔 ' + _escMtg(_mtgT('meeting_id', 'Meeting ID')) + ': ' + _escMtg(m.id));
         if (m.moderator) rightMeta.push('🎙️ ' + _escMtg(_mtgT('meeting_moderator', 'Moderator')) + ': ' + _escMtg(m.moderator));
         if (m.contextMode) rightMeta.push('🧩 ' + _escMtg(_mtgT('meeting_context_mode', 'Context')) + ': ' + _escMtg(m.contextMode));
         if (m.resolutionPolicy) rightMeta.push('⚖️ ' + _escMtg(_mtgT('meeting_resolution_policy', 'Resolution policy')) + ': ' + _escMtg(_mtgResolutionPolicyLabel(m.resolutionPolicy)));

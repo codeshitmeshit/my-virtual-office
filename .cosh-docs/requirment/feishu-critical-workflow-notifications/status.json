@@ -1,0 +1,34 @@
+{
+  "name": "feishu-critical-workflow-notifications",
+  "stage": "implementation_done",
+  "waiting_for_user": true,
+  "updated_at": "2026-07-03T07:33:32+08:00",
+  "confirmed": {
+    "checklist": true,
+    "tested": false,
+    "done": false
+  },
+  "confirmations": {
+    "checklist": {
+      "item": "checklist",
+      "confirmed_at": "2026-07-03T01:08:55+08:00",
+      "summary": "用户回复 `continue`，视为确认当前 checklist 并继续生成 todolist。"
+    },
+    "tested": null,
+    "done": null
+  },
+  "files": {
+    "requirement": "requirement.md",
+    "review": "review.md",
+    "checklist": "checklist.md",
+    "todolist": "todolist.md"
+  },
+  "notes": [
+    "Product clarification completed before archival.",
+    "Checklist was confirmed by user response `continue`.",
+    "Todolist created after checklist confirmation.",
+    "Implementation completed and automated/focused tests recorded in checklist.md.",
+    "Added Project Execution project-level completion notification after no eligible tasks remain.",
+    "Waiting for user confirmation of tested status and final done before archiving."
+  ]
+}

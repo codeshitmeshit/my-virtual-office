@@ -609,6 +609,7 @@
   "meeting_executable": "Executable",
   "meeting_stage": "Stage",
   "meeting_version": "Version",
+  "meeting_id": "Meeting ID",
   "meeting_round": "Round",
   "meeting_moderator": "Moderator",
   "new_meeting": "New Meeting",

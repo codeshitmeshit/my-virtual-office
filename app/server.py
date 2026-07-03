@@ -8880,7 +8880,7 @@ def _send_meeting_request_notification(req, state="pending", *, summary="", acti
             {
                 "category": "jump",
                 "text": "查看详情",
-                "url": "/#projects",
+                "url": _vo_public_url("/#projects"),
             },
         ],
         "target": "feishu-meeting-request",
@@ -8916,6 +8916,21 @@ def _send_feishu_workflow_notification(intent):
     )
 
 
+def _vo_public_url(path=""):
+    base = str(os.environ.get("VO_PUBLIC_URL") or os.environ.get("VO_LIVE_URL") or "").strip()
+    if not base:
+        base = f"http://localhost:{PORT}"
+    if not re.match(r"^[a-z][a-z0-9+.-]*://", base, re.I):
+        base = f"http://{base}"
+    base = base.rstrip("/")
+    path = str(path or "").strip()
+    if not path:
+        return base + "/"
+    if re.match(r"^[a-z][a-z0-9+.-]*://", path, re.I) or path.startswith("lark://"):
+        return path
+    return base + (path if path.startswith("/") else "/" + path)
+
+
 def _feishu_notification_marker(container, key):
     if not isinstance(container, dict) or not key:
         return {}
@@ -8923,7 +8938,10 @@ def _feishu_notification_marker(container, key):
     if not isinstance(markers, dict):
         markers = {}
         container["feishuNotifications"] = markers
-    return markers.get(key) if isinstance(markers.get(key), dict) else {}
+    marker = markers.get(key)
+    if not isinstance(marker, dict):
+        return {}
+    return marker if marker.get("ok") is True else {}
 
 
 def _mark_feishu_notification(container, key, result):
@@ -8961,8 +8979,8 @@ def _project_execution_open_url(project_id="", task_id=""):
     project_id = urllib.parse.quote(str(project_id or ""))
     task_id = urllib.parse.quote(str(task_id or ""))
     if project_id and task_id:
-        return f"/#projects?projectId={project_id}&taskId={task_id}"
-    return "/#projects"
+        return _vo_public_url(f"/#projects?projectId={project_id}&taskId={task_id}")
+    return _vo_public_url("/#projects")
 
 
 def _send_project_execution_acceptance_notification(project, task, attempt_id, reason=""):
@@ -9102,7 +9120,7 @@ def _send_project_execution_project_complete_notification(project, reason=""):
 
 def _meeting_open_url(meeting_id):
     meeting_id = urllib.parse.quote(str(meeting_id or ""))
-    return f"/#meeting={meeting_id}" if meeting_id else "/#meetings"
+    return _vo_public_url(f"/#meeting={meeting_id}" if meeting_id else "/#meetings")
 
 
 def _send_meeting_failure_notification(meeting, failure=None):
@@ -9282,6 +9300,11 @@ def _feishu_card_action_user(event):
 def _feishu_card_action_value(event):
     action = event.get("action") if isinstance(event.get("action"), dict) else {}
     value = action.get("value") if isinstance(action.get("value"), dict) else {}
+    if not value:
+        for behavior in action.get("behaviors") or []:
+            if isinstance(behavior, dict) and behavior.get("type") == "callback" and isinstance(behavior.get("value"), dict):
+                value = behavior["value"]
+                break
     return value
 
 
@@ -9292,6 +9315,8 @@ def _feishu_card_action_form_values(event):
         action.get("formValue"),
         action.get("form_values"),
         action.get("formValues"),
+        action.get("form_value_map"),
+        action.get("formValueMap"),
         event.get("form_value"),
         event.get("formValue"),
     ]
@@ -9778,6 +9803,7 @@ def _handle_meeting_request_confirm(request_id, body):
     if not created.get("ok"):
         return created
     converted_at = _exec_meeting_now()
+    confirmed_req = None
     with _MEETING_REQUEST_LOCK:
         store = _load_meeting_request_store()
         req = store.get("requests", {}).get(request_id)
@@ -9791,6 +9817,20 @@ def _handle_meeting_request_confirm(request_id, body):
             _project_execution_update_meeting_blocker(source.get("projectId"), source.get("taskId"), req.get("id"), status="confirmed", meetingId=created["meeting"]["id"], awaitingUserDecision=False)
             if body.get("autoConfirmed"):
                 _meeting_request_log_auto_confirm_activity(req, created["meeting"], body.get("autoConfirmReason"))
+            confirmed_req = _meeting_request_public(req)
+    approved_notification = None
+    if confirmed_req:
+        approved_notification = _send_meeting_request_notification(
+            confirmed_req,
+            "approved",
+            summary=f"会议申请已同意，会议 ID：{created['meeting']['id']}",
+            details=_meeting_request_approved_notification_details(confirmed_req),
+            actions=[{
+                "category": "jump",
+                "text": "查看会议",
+                "url": _meeting_open_url(created["meeting"]["id"]),
+            }],
+        )
     auto_run_result = None
     auto_run_summary = {}
     if body.get("autoConfirmed"):
@@ -9820,22 +9860,12 @@ def _handle_meeting_request_confirm(request_id, body):
             result = {"ok": True, "request": _meeting_request_public(req), "meeting": created["meeting"], "meetingId": created["meeting"]["id"], "idempotent": bool(created.get("idempotent"))}
             if auto_run_summary:
                 result["autoRun"] = auto_run_summary
-            result["notification"] = _send_meeting_request_notification(
-                req,
-                "approved",
-                summary=f"会议申请已同意，会议 ID：{created['meeting']['id']}",
-                details=_meeting_request_approved_notification_details(req),
-                actions=[{
-                    "category": "jump",
-                    "text": "查看会议",
-                    "url": f"/#meeting={urllib.parse.quote(created['meeting']['id'])}",
-                }],
-            )
+            result["notification"] = approved_notification
             return result
     result = {"ok": True, "meeting": created["meeting"], "meetingId": created["meeting"]["id"]}
     if auto_run_summary:
         result["autoRun"] = auto_run_summary
-    result["notification"] = _send_meeting_request_notification(
+    result["notification"] = approved_notification or _send_meeting_request_notification(
         req,
         "approved",
         summary=f"会议申请已同意，会议 ID：{created['meeting']['id']}",
@@ -9843,7 +9873,7 @@ def _handle_meeting_request_confirm(request_id, body):
         actions=[{
             "category": "jump",
             "text": "查看会议",
-            "url": f"/#meeting={urllib.parse.quote(created['meeting']['id'])}",
+            "url": _meeting_open_url(created["meeting"]["id"]),
         }],
     )
     return result

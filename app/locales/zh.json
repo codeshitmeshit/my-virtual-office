@@ -609,6 +609,7 @@
   "meeting_executable": "可执行会议",
   "meeting_stage": "阶段",
   "meeting_version": "版本",
+  "meeting_id": "会议ID",
   "meeting_round": "轮次",
   "meeting_moderator": "主持人",
   "new_meeting": "新建会议",

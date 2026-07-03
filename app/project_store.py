@@ -18,7 +18,7 @@ COMPLEX_JSON_FIELDS = {
     "acceptanceHistory_json", "stateHistory_json", "source_json",
     "meetingBlocker_json", "meetingBlockerHistory_json",
     "meetingActionItems_json", "meetingDecisionHistory_json", "meetingDiscussionPoints_json", "meetingRecords_json",
-    "scheduledCronHistory_json", "archiveMaintenance_json",
+    "scheduledCronHistory_json", "archiveMaintenance_json", "feishuNotifications_json",
 }
 
 
@@ -284,6 +284,7 @@ class MarkdownProjectStore:
             "scheduledCronHistory_json": project.get("scheduledCronHistory", []),
             "executionPolicy_json": project.get("executionPolicy", {"maxActiveTasks": 1}),
             "executionDirtyConfirmations_json": project.get("executionDirtyConfirmations", []),
+            "feishuNotifications_json": project.get("feishuNotifications", {}),
             "workflowActive": project.get("workflowActive", False),
             "workflowPhase": project.get("workflowPhase", "idle"),
             "activeTaskId": project.get("activeTaskId"),
@@ -346,6 +347,7 @@ class MarkdownProjectStore:
             "meetingDecisionHistory_json": task.get("meetingDecisionHistory", []),
             "meetingDiscussionPoints_json": task.get("meetingDiscussionPoints", []),
             "meetingRecords_json": task.get("meetingRecords", []),
+            "feishuNotifications_json": task.get("feishuNotifications", {}),
             "reworkCount": task.get("reworkCount", 0),
             "stateHistory_json": task.get("stateHistory", []),
             "blockedReason": task.get("blockedReason"),
@@ -438,6 +440,7 @@ class MarkdownProjectStore:
             "scheduledCronHistory": meta.get("scheduledCronHistory_json", []),
             "executionPolicy": meta.get("executionPolicy_json", {"maxActiveTasks": 1}),
             "executionDirtyConfirmations": meta.get("executionDirtyConfirmations_json", []),
+            "feishuNotifications": meta.get("feishuNotifications_json", {}),
             "columns": meta.get("columns_json", []),
             "workflowActive": meta.get("workflowActive", False),
             "workflowPhase": meta.get("workflowPhase", "idle"),
@@ -491,6 +494,7 @@ class MarkdownProjectStore:
             "meetingDecisionHistory": meta.get("meetingDecisionHistory_json", []),
             "meetingDiscussionPoints": meta.get("meetingDiscussionPoints_json", []),
             "meetingRecords": meta.get("meetingRecords_json", []),
+            "feishuNotifications": meta.get("feishuNotifications_json", {}),
             "reworkCount": meta.get("reworkCount", 0),
             "stateHistory": meta.get("stateHistory_json", []),
             "blockedReason": meta.get("blockedReason"),
