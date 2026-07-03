@@ -8893,6 +8893,256 @@ def _send_meeting_request_notification(req, state="pending", *, summary="", acti
     )
 
 
+def _meeting_request_approved_notification_details(req):
+    details = _meeting_request_notification_details(req)
+    review = req.get("review") if isinstance(req.get("review"), dict) else {}
+    if review.get("autoConfirmed"):
+        details.append(("同意方式", "AI 自动同意"))
+        label = review.get("autoConfirmLabel") or _meeting_request_auto_confirm_label(review.get("autoConfirmReason"))
+        if label:
+            details.append(("自动同意原因", label))
+    return details
+
+
+_PROJECT_EXECUTION_FEISHU_REWORK_FEEDBACK = "Requested rework from Feishu"
+
+
+def _send_feishu_workflow_notification(intent):
+    return send_feishu_notification(
+        intent,
+        webhook_url=VO_CONFIG.get("notifications", {}).get("feishuWebhook") or None,
+        app_config=_feishu_app_send_config(VO_CONFIG.get("notifications", {})),
+        status_dir=STATUS_DIR,
+    )
+
+
+def _feishu_notification_marker(container, key):
+    if not isinstance(container, dict) or not key:
+        return {}
+    markers = container.setdefault("feishuNotifications", {})
+    if not isinstance(markers, dict):
+        markers = {}
+        container["feishuNotifications"] = markers
+    return markers.get(key) if isinstance(markers.get(key), dict) else {}
+
+
+def _mark_feishu_notification(container, key, result):
+    if not isinstance(container, dict) or not key:
+        return
+    markers = container.setdefault("feishuNotifications", {})
+    if not isinstance(markers, dict):
+        markers = {}
+        container["feishuNotifications"] = markers
+    markers[key] = {
+        "sentAt": _exec_meeting_now(),
+        "ok": bool((result or {}).get("ok")),
+        "status": str((result or {}).get("status") or (result or {}).get("code") or ""),
+        "recordId": str((((result or {}).get("record") or {}).get("id")) or ""),
+    }
+
+
+def _project_execution_related(project, task):
+    return {
+        "type": "project_task",
+        "id": f"{(project or {}).get('id') or ''}:{(task or {}).get('id') or ''}",
+        "title": (task or {}).get("title") or (project or {}).get("title") or "Project Execution task",
+    }
+
+
+def _project_execution_notification_container(task, attempt_id=None):
+    if isinstance(task, dict) and attempt_id:
+        attempt = _project_execution_attempt(task, attempt_id)
+        if isinstance(attempt, dict):
+            return attempt
+    return task
+
+
+def _project_execution_open_url(project_id="", task_id=""):
+    project_id = urllib.parse.quote(str(project_id or ""))
+    task_id = urllib.parse.quote(str(task_id or ""))
+    if project_id and task_id:
+        return f"/#projects?projectId={project_id}&taskId={task_id}"
+    return "/#projects"
+
+
+def _send_project_execution_acceptance_notification(project, task, attempt_id, reason=""):
+    if not isinstance(project, dict) or not isinstance(task, dict) or not attempt_id:
+        return {"ok": True, "status": "skipped_invalid_project_task"}
+    key = f"project-acceptance:{attempt_id}"
+    marker_container = _project_execution_notification_container(task, attempt_id)
+    if _feishu_notification_marker(marker_container, key):
+        return {"ok": True, "status": "skipped_duplicate", "dedupeKey": key}
+    project_id = project.get("id") or ""
+    task_id = task.get("id") or ""
+    intent = {
+        "id": key,
+        "type": "application_form",
+        "title": f"项目任务等待验收: {task.get('title') or task_id}",
+        "summary": reason or "Project Execution 已完成并通过 Review，等待用户验收。",
+        "state": "pending",
+        "multi_participant": False,
+        "related": _project_execution_related(project, task),
+        "details": [
+            ("项目", project.get("title") or project_id or "-"),
+            ("任务", task.get("title") or task_id or "-"),
+            ("Attempt", attempt_id),
+            ("Review", ((task.get("reviewResult") or {}).get("summary") or "-")),
+        ],
+        "inputs": [{
+            "name": "feedback",
+            "label": "返工原因",
+            "placeholder": "点击“要求返工”前填写需要补充或重做的内容",
+            "multiline": True,
+            "required": False,
+        }],
+        "actions": [
+            {
+                "category": "confirm",
+                "text": "接受",
+                "value": {
+                    "action": "project_execution_accept",
+                    "project_id": project_id,
+                    "task_id": task_id,
+                    "attempt_id": attempt_id,
+                },
+            },
+            {
+                "category": "cancel",
+                "text": "要求返工",
+                "value": {
+                    "action": "project_execution_rework",
+                    "project_id": project_id,
+                    "task_id": task_id,
+                    "attempt_id": attempt_id,
+                },
+            },
+            {
+                "category": "jump",
+                "text": "打开任务",
+                "url": _project_execution_open_url(project_id, task_id),
+            },
+        ],
+        "target": "feishu-project-execution-acceptance",
+    }
+    result = _send_feishu_workflow_notification(intent)
+    _mark_feishu_notification(marker_container, key, result)
+    return result
+
+
+def _send_project_execution_intervention_notification(project, task, reason="", attempt_id=None, *, event="blocked", kind="warning"):
+    if not isinstance(project, dict) or not isinstance(task, dict):
+        return {"ok": True, "status": "skipped_invalid_project_task"}
+    reason = _project_execution_redact(reason or task.get("blockedReason") or task.get("lastError") or "Project Execution needs user intervention.")
+    key_seed = attempt_id or task.get("activeAttemptId") or ((task.get("evidence") or {}).get("attemptId")) or ""
+    key = f"project-intervention:{event}:{key_seed or task.get('id')}"
+    marker_container = _project_execution_notification_container(task, key_seed)
+    if _feishu_notification_marker(marker_container, key):
+        return {"ok": True, "status": "skipped_duplicate", "dedupeKey": key}
+    project_id = project.get("id") or ""
+    task_id = task.get("id") or ""
+    intent = {
+        "id": key,
+        "type": kind if kind in {"warning", "error"} else "warning",
+        "title": f"项目任务需要处理: {task.get('title') or task_id}",
+        "summary": reason,
+        "related": _project_execution_related(project, task),
+        "details": [
+            ("项目", project.get("title") or project_id or "-"),
+            ("任务", task.get("title") or task_id or "-"),
+            ("状态", task.get("executionState") or event),
+            ("Attempt", key_seed or "-"),
+        ],
+        "actions": [{
+            "category": "jump",
+            "text": "打开任务",
+            "url": _project_execution_open_url(project_id, task_id),
+        }],
+        "target": "feishu-project-execution-intervention",
+    }
+    result = _send_feishu_workflow_notification(intent)
+    _mark_feishu_notification(marker_container, key, result)
+    return result
+
+
+def _project_execution_completed_task_count(project):
+    return sum(1 for task in (project or {}).get("tasks", []) if task.get("executionState") == "done" or task.get("completedAt"))
+
+
+def _send_project_execution_project_complete_notification(project, reason=""):
+    if not isinstance(project, dict):
+        return {"ok": True, "status": "skipped_invalid_project"}
+    completed = _project_execution_completed_task_count(project)
+    if completed <= 0:
+        return {"ok": True, "status": "skipped_no_completed_tasks"}
+    key = f"project-complete:{project.get('id') or ''}:{completed}"
+    if _feishu_notification_marker(project, key):
+        return {"ok": True, "status": "skipped_duplicate", "dedupeKey": key}
+    intent = {
+        "id": key,
+        "type": "notification",
+        "title": f"项目执行完成: {project.get('title') or project.get('id') or 'Untitled project'}",
+        "summary": reason or f"Project Execution 已完成，当前没有可继续执行的任务。已完成任务数：{completed}。",
+        "related": {"type": "project", "id": project.get("id") or "", "title": project.get("title") or "Project"},
+        "details": [
+            ("项目", project.get("title") or project.get("id") or "-"),
+            ("已完成任务数", completed),
+            ("总任务数", len(project.get("tasks") or [])),
+        ],
+        "actions": [{
+            "category": "jump",
+            "text": "打开项目",
+            "url": _project_execution_open_url(project.get("id") or "", ""),
+        }],
+        "target": "feishu-project-execution-complete",
+    }
+    result = _send_feishu_workflow_notification(intent)
+    _mark_feishu_notification(project, key, result)
+    return result
+
+
+def _meeting_open_url(meeting_id):
+    meeting_id = urllib.parse.quote(str(meeting_id or ""))
+    return f"/#meeting={meeting_id}" if meeting_id else "/#meetings"
+
+
+def _send_meeting_failure_notification(meeting, failure=None):
+    if not isinstance(meeting, dict):
+        return {"ok": True, "status": "skipped_invalid_meeting"}
+    failure = failure if isinstance(failure, dict) else {}
+    meeting_id = meeting.get("id") or ""
+    sequence = failure.get("failedAtSequence") or meeting.get("lastEventSequence") or ""
+    key = f"meeting-failure:{meeting_id}:{sequence or failure.get('reason') or meeting.get('stage') or 'failed'}"
+    if _feishu_notification_marker(meeting, key):
+        return {"ok": True, "status": "skipped_duplicate", "dedupeKey": key}
+    summary = _project_execution_redact(_meeting_truncate_text(
+        failure.get("error") or meeting.get("error") or "AI meeting failed and needs user attention.",
+        1000,
+    ))
+    intent = {
+        "id": key,
+        "type": "error",
+        "title": f"AI 会议失败: {meeting.get('topic') or meeting_id}",
+        "summary": summary,
+        "error_variant": "user_facing",
+        "related": {"type": "meeting", "id": meeting_id, "title": meeting.get("topic") or "AI meeting"},
+        "details": [
+            ("会议", meeting.get("topic") or meeting_id or "-"),
+            ("阶段", meeting.get("stage") or "-"),
+            ("主持人", failure.get("moderator") or meeting.get("moderator") or "-"),
+            ("原因", failure.get("reason") or "meeting_failed"),
+        ],
+        "actions": [{
+            "category": "jump",
+            "text": "打开会议",
+            "url": _meeting_open_url(meeting_id),
+        }],
+        "target": "feishu-meeting-failure",
+    }
+    result = _send_feishu_workflow_notification(intent)
+    _mark_feishu_notification(meeting, key, result)
+    return result
+
+
 def _feishu_notification_config_response():
     cfg = VO_CONFIG.get("notifications", {}) or {}
     receiver = _get_feishu_long_connection_receiver()
@@ -9035,6 +9285,37 @@ def _feishu_card_action_value(event):
     return value
 
 
+def _feishu_card_action_form_values(event):
+    action = event.get("action") if isinstance(event.get("action"), dict) else {}
+    candidates = [
+        action.get("form_value"),
+        action.get("formValue"),
+        action.get("form_values"),
+        action.get("formValues"),
+        event.get("form_value"),
+        event.get("formValue"),
+    ]
+    for candidate in candidates:
+        if isinstance(candidate, dict):
+            return candidate
+    return {}
+
+
+def _feishu_card_action_form_text(event, *names):
+    values = _feishu_card_action_form_values(event)
+    for name in names:
+        if name in values:
+            value = values.get(name)
+            if isinstance(value, dict):
+                value = value.get("value") or value.get("text") or value.get("content")
+            if isinstance(value, list):
+                value = "\n".join(str(item) for item in value if item is not None)
+            text = str(value or "").strip()
+            if text:
+                return text
+    return ""
+
+
 def _record_feishu_card_action(body, event, value, outcome=None):
     record = {
         "id": str(uuid.uuid4()),
@@ -9152,6 +9433,44 @@ def _dispatch_feishu_meeting_request_action(action, request_id, event):
     }
 
 
+def _dispatch_feishu_project_execution_action(action, value, event):
+    if action not in {"project_execution_accept", "project_execution_rework"}:
+        return {"handled": False}
+    project_id = str(value.get("project_id") or value.get("projectId") or "").strip()
+    task_id = str(value.get("task_id") or value.get("taskId") or "").strip()
+    attempt_id = str(value.get("attempt_id") or value.get("attemptId") or "").strip()
+    if not project_id or not task_id or not attempt_id:
+        return {
+            "handled": True,
+            "ok": False,
+            "businessStatus": "missing_project_execution_context",
+            "toast": _feishu_card_action_error("项目任务验收缺少上下文，无法处理"),
+        }
+    actor = _feishu_meeting_action_actor(event)
+    body = {
+        "action": "accept" if action == "project_execution_accept" else "reject_and_rework",
+        "attemptId": attempt_id,
+        "actor": actor,
+    }
+    if action == "project_execution_rework":
+        body["feedback"] = _feishu_card_action_form_text(event, "feedback", "rework_feedback", "reason") or _PROJECT_EXECUTION_FEISHU_REWORK_FEEDBACK
+    result = _handle_project_execution_acceptance(project_id, task_id, body)
+    if result.get("ok"):
+        return {
+            "handled": True,
+            "ok": True,
+            "businessStatus": str(result.get("status") or "accepted"),
+            "toast": _feishu_card_action_success("项目任务已接受" if action == "project_execution_accept" else "已要求任务返工"),
+        }
+    return {
+        "handled": True,
+        "ok": False,
+        "businessStatus": str(result.get("code") or result.get("status") or "project_execution_action_failed"),
+        "businessError": str(result.get("error") or "项目任务验收操作失败"),
+        "toast": _feishu_card_action_error(str(result.get("error") or "项目任务验收操作失败")),
+    }
+
+
 def _handle_feishu_card_action(body):
     if not isinstance(body, dict):
         return {"ok": False, "error": "Invalid Feishu callback body", "_status": 400}
@@ -9163,7 +9482,8 @@ def _handle_feishu_card_action(body):
     value = _feishu_card_action_value(event)
     action = str(value.get("action") or "").strip()
     meeting_outcome = _dispatch_feishu_meeting_request_action(action, str(value.get("request_id") or "").strip(), event)
-    outcome = meeting_outcome if meeting_outcome.get("handled") else None
+    project_outcome = {"handled": False} if meeting_outcome.get("handled") else _dispatch_feishu_project_execution_action(action, value, event)
+    outcome = meeting_outcome if meeting_outcome.get("handled") else (project_outcome if project_outcome.get("handled") else None)
     record = _record_feishu_card_action(body, event, value, outcome=outcome)
     if meeting_outcome.get("handled"):
         return {
@@ -9171,6 +9491,13 @@ def _handle_feishu_card_action(body):
             "toast": meeting_outcome.get("toast") or _feishu_card_action_success("操作已收到"),
             "recordId": record["id"],
             "outcome": {k: v for k, v in meeting_outcome.items() if k not in {"toast"}},
+        }
+    if project_outcome.get("handled"):
+        return {
+            "ok": bool(project_outcome.get("ok")),
+            "toast": project_outcome.get("toast") or _feishu_card_action_success("操作已收到"),
+            "recordId": record["id"],
+            "outcome": {k: v for k, v in project_outcome.items() if k not in {"toast"}},
         }
     return {
         "ok": True,
@@ -9289,7 +9616,6 @@ def _handle_meeting_request_create(project_id, task_id, body):
     blocked = _project_execution_block_for_meeting_request(project_id, task_id, request, "AI meeting requested; waiting for meeting resolution.")
     if not blocked.get("ok"):
         return blocked
-    notification = _send_meeting_request_notification(request, "pending")
     auto_confirm_reason = _meeting_request_auto_confirm_reason(project, urgency)
     if auto_confirm_reason:
         auto = _handle_meeting_request_confirm(request_id, {
@@ -9302,9 +9628,10 @@ def _handle_meeting_request_create(project_id, task_id, body):
         })
         if auto.get("ok"):
             auto["autoConfirmed"] = True
-            auto["notification"] = notification
             return auto
+        notification = _send_meeting_request_notification(request, "pending")
         return {"ok": True, "request": _meeting_request_public(request), "autoConfirmError": auto, "notification": notification}
+    notification = _send_meeting_request_notification(request, "pending")
     return {"ok": True, "request": _meeting_request_public(request), "notification": notification}
 
 
@@ -9497,6 +9824,7 @@ def _handle_meeting_request_confirm(request_id, body):
                 req,
                 "approved",
                 summary=f"会议申请已同意，会议 ID：{created['meeting']['id']}",
+                details=_meeting_request_approved_notification_details(req),
                 actions=[{
                     "category": "jump",
                     "text": "查看会议",
@@ -9511,6 +9839,7 @@ def _handle_meeting_request_confirm(request_id, body):
         req,
         "approved",
         summary=f"会议申请已同意，会议 ID：{created['meeting']['id']}",
+        details=_meeting_request_approved_notification_details(req),
         actions=[{
             "category": "jump",
             "text": "查看会议",
@@ -11823,6 +12152,7 @@ def _handle_executable_meeting_end_with_moderator(meeting_id, body=None):
             meeting["decisionWindowSec"] = meeting.get("decisionWindowSec") or _meeting_decision_window_sec()
             _append_exec_meeting_event(store, meeting, "moderator_failure", actor={"type": "agent", "id": moderator}, payload=meeting["moderatorFailure"])
             _append_exec_meeting_event(store, meeting, "meeting_transitioned", actor={"type": "agent", "id": moderator}, payload={"from": previous, "to": "awaiting_user_decision", "reason": "moderator_failed"})
+            _send_meeting_failure_notification(meeting, meeting["moderatorFailure"])
             _save_exec_meeting_store(store)
             return {"ok": False, "meeting": meeting, "events": store.get("events", {}).get(meeting_id, []), "moderatorFailure": meeting["moderatorFailure"]}
         events = list(store.get("events", {}).get(meeting_id, []))
@@ -13197,6 +13527,11 @@ def _handle_project_scheduled_cron_dispatch(project_id, cron_id, source="manual"
         binding = _load_project_cron_bindings().get("bindings", {}).get(str(cron_id))
     if not binding or binding.get("projectId") != project_id:
         return {"error": "Project scheduled cron not found", "_status": 404}
+
+    # ── Pre-dispatch idempotency: skip if last status was completion-disengage ──
+    if binding.get("lastStatus") in ("disengaged_completed",):
+        return {"ok": True, "status": "skipped", "reason": "pre_check_disengaged", "projectId": project_id, "id": cron_id, "idempotent": True}
+
     data, project = _project_find(project_id)
     if not project:
         _project_cron_update_binding_status(cron_id, "missing_project", "Project not found")
@@ -13222,10 +13557,18 @@ def _handle_project_scheduled_cron_dispatch(project_id, cron_id, source="manual"
             _project_cron_update_binding_status(cron_id, "missing_target", "Task not found")
             record("skipped", "task_missing")
             return {"ok": True, "status": "skipped", "reason": "task_missing", "projectId": project_id, "id": cron_id}
-        if task.get("completedAt") and task.get("scheduledRepeatEnabled") is not True:
-            _project_cron_update_binding_status(cron_id, "skipped_completed_task", "Task is completed and scheduled repeat is not enabled")
-            record("skipped", "task_completed_repeat_disabled")
-            return {"ok": True, "status": "skipped", "reason": "task_completed_repeat_disabled", "projectId": project_id, "id": cron_id, "taskId": task_id}
+        if task.get("completedAt"):
+            if task.get("scheduledRepeatEnabled") is not True:
+                # ── Task is done and not repeatable: auto-disengage cron ──
+                _project_cron_update_binding_status(cron_id, "disengaged_completed", "Task completed, cron disengaged")
+                record("skipped", "task_completed_cron_disengaged")
+                try:
+                    _gateway_rpc_call("cron.update", {"id": cron_id, "patch": {"enabled": False}}, timeout=5)
+                except Exception:
+                    pass
+                return {"ok": True, "status": "skipped", "reason": "task_completed_cron_disengaged", "projectId": project_id, "id": cron_id, "taskId": task_id}
+            # Repeatable task: reopen and restart below (normal repeat flow)
+        # Falls through: task not completed, or is repeatable and should be reopened
         reopened = _project_execution_reopen_completed_task(project, task, actor="project-cron")
         if reopened:
             data["projects"] = [project if p.get("id") == project_id else p for p in data.get("projects", [])]
@@ -13247,14 +13590,20 @@ def _handle_project_scheduled_cron_dispatch(project_id, cron_id, source="manual"
                 all_completed = True
 
         if all_completed:
-            _project_cron_update_binding_status(cron_id, "skipped_completed_project", "All tasks completed; project cron dispatch skipped")
+            # ── Auto-disengage cron when all tasks completed ──
+            _project_cron_update_binding_status(cron_id, "disengaged_completed", "All tasks completed; cron disengaged")
             record("skipped", "project_all_tasks_completed")
-            # ── Alert on repeated skipped-due-to-completion ──
+            try:
+                _gateway_rpc_call("cron.update", {"id": cron_id, "patch": {"enabled": False}}, timeout=5)
+            except Exception:
+                pass
+            # ── Alert on repeated dispatch attempt ──
             history = project.get("scheduledCronHistory", []) or []
             recent_same = [h for h in history[-10:] if h.get("reason") == "project_all_tasks_completed"]
             if len(recent_same) >= 2:
-                _gateway_rpc_call("cron.alert", {"id": cron_id, "message": f"P0 cron 重复触发缺陷告警：项目 {project_id} 的所有任务已完成，但定时任务被重复触发（最近 10 次中有 {len(recent_same)} 次因 '项目已完成' 跳过）。请检查 cron 绑定配置或关闭该定时任务。"}, timeout=10)
-            return {"ok": True, "status": "skipped", "reason": "project_all_tasks_completed", "projectId": project_id, "id": cron_id, "allCompleted": True}
+                _gateway_rpc_call("cron.alert", {"id": cron_id, "message": f"P0 cron 重复触发缺陷告警：项目 {project_id} 的所有任务已完成，但定时任务被重复触发（最近 10 次中有 {len(recent_same)} 次因 '项目已完成' 跳过）。已自动暂停该定时任务。请确认是否有残留缺陷。"}, timeout=10)
+            # ── Also update with completion disengage reason ──
+            return {"ok": True, "status": "skipped", "reason": "project_all_tasks_completed", "projectId": project_id, "id": cron_id, "allCompleted": True, "cronDisabled": True}
 
         if _project_execution_enabled(project):
             result = _handle_project_execution_project_start(project_id, {"mode": project.get("projectExecutionStartMode") or "continuous", "by": "project-cron", "source": source, "skipReviewConfirmed": True})
@@ -18595,6 +18944,7 @@ def _project_execution_run_review(project_id, task_id, attempt_id, review_id):
                 project["projectExecutionFlowActive"] = False
                 project["projectExecutionFlowStopReason"] = "awaiting_user_acceptance"
                 _project_execution_transition(project, task, "awaiting_user_acceptance", reviewer.get("id") or "reviewer", "Reviewer passed; waiting for explicit user acceptance.", attempt_id)
+                _send_project_execution_acceptance_notification(project, task, attempt_id, "Reviewer passed; waiting for explicit user acceptance.")
             else:
                 done_result = _project_execution_mark_done(project, task, reviewer.get("id") or "reviewer", "Reviewer passed; task does not require user acceptance.", attempt_id)
                 if not done_result.get("ok"):
@@ -18603,6 +18953,7 @@ def _project_execution_run_review(project_id, task_id, attempt_id, review_id):
                         return
                     task["blockedReason"] = done_result.get("error")
                     _project_execution_transition(project, task, "blocked", "system", task["blockedReason"], attempt_id)
+                    _send_project_execution_intervention_notification(project, task, task["blockedReason"], attempt_id, event="blocked", kind="warning")
                 elif attempt.get("projectFlow") or project.get("projectExecutionFlowActive"):
                     project["projectExecutionFlowActive"] = True
                     project["projectExecutionFlowStopReason"] = None
@@ -18615,6 +18966,7 @@ def _project_execution_run_review(project_id, task_id, attempt_id, review_id):
                 task["blockedReason"] = "Reviewer still requested more work after three rework cycles."
                 task["reworkFeedback"] = feedback
                 _project_execution_transition(project, task, "blocked", reviewer.get("id") or "reviewer", task["blockedReason"], attempt_id)
+                _send_project_execution_intervention_notification(project, task, task["blockedReason"], attempt_id, event="blocked", kind="warning")
             else:
                 task["reworkCount"] = prior_reworks + 1
                 task["blockedReason"] = None
@@ -18625,6 +18977,7 @@ def _project_execution_run_review(project_id, task_id, attempt_id, review_id):
                 if not roles.get("ok") or not workspace.get("ok"):
                     task["blockedReason"] = roles.get("error") if not roles.get("ok") else workspace.get("error")
                     _project_execution_transition(project, task, "blocked", "system", task["blockedReason"], attempt_id)
+                    _send_project_execution_intervention_notification(project, task, task["blockedReason"], attempt_id, event="blocked", kind="warning")
                 else:
                     rework_attempt_id = str(uuid.uuid4())
                     rework_attempt = {
@@ -18661,6 +19014,7 @@ def _project_execution_run_review(project_id, task_id, attempt_id, review_id):
             attempt["status"] = "review_blocked"
             task["blockedReason"] = review["summary"] or "Reviewer marked the task blocked."
             _project_execution_transition(project, task, "blocked", reviewer.get("id") or "reviewer", task["blockedReason"], attempt_id)
+            _send_project_execution_intervention_notification(project, task, task["blockedReason"], attempt_id, event="blocked", kind="warning")
         project["workflowPhase"] = task["executionState"]
         _save_projects(data)
     finally:
@@ -18709,6 +19063,7 @@ def _project_execution_run_attempt(project_id, task_id, attempt_id, cancel_flag)
         attempt["status"] = "cancelled"
         task["blockedReason"] = "Execution was cancelled. Existing workspace changes were not rolled back."
         _project_execution_transition(project, task, "blocked", "user", task["blockedReason"], attempt_id)
+        _send_project_execution_intervention_notification(project, task, task["blockedReason"], attempt_id, event="blocked", kind="warning")
     elif result.get("ok"):
         attempt["status"] = "execution_complete"
         task.update({"blockedReason": None, "lastError": None})
@@ -18751,6 +19106,7 @@ def _project_execution_run_attempt(project_id, task_id, attempt_id, cancel_flag)
                 project["projectExecutionFlowActive"] = False
                 project["projectExecutionFlowStopReason"] = "awaiting_user_acceptance"
                 _project_execution_transition(project, task, "awaiting_user_acceptance", "system", "Review skipped by user confirmation; waiting for user acceptance.", attempt_id)
+                _send_project_execution_acceptance_notification(project, task, attempt_id, "Review skipped by user confirmation; waiting for user acceptance.")
             else:
                 done_result = _project_execution_mark_done(project, task, "system", "Review skipped by user confirmation; task does not require user acceptance.", attempt_id)
                 if not done_result.get("ok"):
@@ -18761,6 +19117,7 @@ def _project_execution_run_attempt(project_id, task_id, attempt_id, cancel_flag)
                         return
                     task["blockedReason"] = done_result.get("error")
                     _project_execution_transition(project, task, "blocked", "system", task["blockedReason"], attempt_id)
+                    _send_project_execution_intervention_notification(project, task, task["blockedReason"], attempt_id, event="blocked", kind="warning")
                 elif attempt.get("projectFlow") or project.get("projectExecutionFlowActive"):
                     project["projectExecutionFlowActive"] = True
                     project["projectExecutionFlowStopReason"] = None
@@ -18777,6 +19134,7 @@ def _project_execution_run_attempt(project_id, task_id, attempt_id, cancel_flag)
         task["lastError"] = evidence["error"] or "Executor failed"
         task["blockedReason"] = task["lastError"]
         _project_execution_transition(project, task, "blocked", executor.get("id") or "executor", task["blockedReason"], attempt_id)
+        _send_project_execution_intervention_notification(project, task, task["blockedReason"], attempt_id, event="blocked", kind="error")
     project["workflowPhase"] = task["executionState"]
     _save_projects(data)
     with _PROJECT_EXECUTION_LOCK:
@@ -18795,6 +19153,7 @@ def _handle_project_execution_start(project_id, task_id, body):
     workspace = _project_execution_validate_workspace(project.get("workspacePath"))
     if not workspace.get("ok"):
         project["workspaceStatus"] = workspace
+        _send_project_execution_intervention_notification(project, task, workspace.get("error") or "Project workspace is not available.", task.get("activeAttemptId"), event="start_failed", kind="error")
         _save_projects(data)
         return {**workspace, "_status": 409}
     roles = _project_execution_resolve_start_roles(
@@ -18804,6 +19163,8 @@ def _handle_project_execution_start(project_id, task_id, body):
     )
     if not roles.get("ok"):
         payload = {**roles, "_status": 409}
+        _send_project_execution_intervention_notification(project, task, roles.get("error") or "Project Execution role configuration needs user attention.", task.get("activeAttemptId"), event="start_failed", kind="error")
+        _save_projects(data)
         if roles.get("confirmationRequired"):
             payload.update({
                 "taskId": task_id,
@@ -18889,6 +19250,7 @@ def _handle_project_execution_project_start(project_id, body=None):
         project["workflowActive"] = False
         project["workflowPhase"] = "no_eligible_task"
         project["updatedAt"] = _proj_now()
+        _send_project_execution_project_complete_notification(project, "Project Execution 已完成，当前没有可继续执行的任务。")
         _save_projects(data)
         return {"error": "No eligible task to start", "code": "no_eligible_task", "_status": 409}
     mode = _project_execution_start_mode(project, body)
@@ -18978,6 +19340,7 @@ def _handle_project_execution_cancel(project_id, task_id, body=None):
     task["blockedReason"] = "Execution was stopped by user. Existing workspace changes were not rolled back."
     task["lastError"] = None
     _project_execution_transition(project, task, "blocked", "user", task["blockedReason"], attempt_id)
+    _send_project_execution_intervention_notification(project, task, task["blockedReason"], attempt_id, event="blocked", kind="warning")
     project.update({
         "workflowActive": False,
         "workflowPhase": "blocked",
@@ -19086,6 +19449,7 @@ def _handle_project_execution_acceptance(project_id, task_id, body=None):
         if not workspace.get("ok"):
             task["blockedReason"] = workspace.get("error") or "Project workspace is not available for rework."
             _project_execution_transition(project, task, "blocked", "system", task["blockedReason"], review.get("attemptId"))
+            _send_project_execution_intervention_notification(project, task, task["blockedReason"], review.get("attemptId"), event="blocked", kind="error")
             project.update({"workspaceStatus": workspace, "workflowActive": False, "workflowPhase": "blocked", "activeTaskId": None, "activeAgent": None, "updatedAt": _proj_now()})
             _save_projects(data)
             return {**workspace, "_status": 409}
@@ -19138,6 +19502,7 @@ def _handle_project_execution_acceptance(project_id, task_id, body=None):
         return {"ok": True, "status": "reworking", "task": task, "attemptId": rework_attempt_id}
     task["blockedReason"] = _project_execution_redact(feedback)
     _project_execution_transition(project, task, "blocked", "user", feedback, review.get("attemptId"))
+    _send_project_execution_intervention_notification(project, task, task["blockedReason"], review.get("attemptId"), event="blocked", kind="warning")
     project.update({"workflowActive": False, "workflowPhase": "blocked", "activeTaskId": None, "activeAgent": None, "updatedAt": _proj_now()})
     _save_projects(data)
     return {"ok": True, "status": "blocked", "task": task}
