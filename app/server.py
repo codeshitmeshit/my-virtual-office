@@ -509,7 +509,7 @@ def _load_vo_config():
             "mainWorkspace": _env_or("VO_CODEX_MAIN_WORKSPACE", codex_cfg.get("mainWorkspace", codex_workspace)),
             "name": _env_or("VO_CODEX_AGENT_NAME", codex_cfg.get("name", "Codex")),
             "agentId": _env_or("VO_CODEX_AGENT_ID", codex_cfg.get("agentId", "local")),
-            "model": _env_or("VO_CODEX_MODEL", codex_cfg.get("model", os.environ.get("OPENAI_MODEL", ""))),
+            "model": _env_or("VO_CODEX_MODEL", codex_cfg.get("model") or os.environ.get("OPENAI_MODEL") or "gpt-5.5"),
             "replyText": codex_reply_text,
             "bridgeUrl": _env_or("VO_CODEX_BRIDGE_URL", codex_cfg.get("bridgeUrl")),
             "sandbox": _env_or("VO_CODEX_SANDBOX", codex_cfg.get("sandbox", "workspace-write")),
@@ -6774,7 +6774,7 @@ def _vo_usage_record_id(record):
 def _vo_usage_default_model(provider_kind):
     provider_kind = str(provider_kind or "").strip()
     if provider_kind == "codex":
-        return (VO_CONFIG.get("codex") or {}).get("model") or "gpt-5-codex"
+        return (VO_CONFIG.get("codex") or {}).get("model") or "gpt-5.5"
     if provider_kind == "claude-code":
         return (VO_CONFIG.get("claudeCode") or {}).get("model") or ""
     return ""

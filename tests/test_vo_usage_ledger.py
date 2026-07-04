@@ -177,9 +177,9 @@ def test_codex_missing_model_uses_codex_default_label():
             })
             summary = server._get_vo_usage_summary()
 
-            assert record["model"] == "gpt-5-codex"
-            assert summary["byModel"][0]["model"] == "gpt-5-codex"
-            assert summary["recent"][0]["model"] == "gpt-5-codex"
+            assert record["model"] == "gpt-5.5"
+            assert summary["byModel"][0]["model"] == "gpt-5.5"
+            assert summary["recent"][0]["model"] == "gpt-5.5"
         finally:
             server.STATUS_DIR = old_status_dir
 
