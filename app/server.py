@@ -13861,7 +13861,7 @@ def _handle_projects_list(query_string=""):
     for p in projects:
         tasks = p.get("tasks", [])
         total = len(tasks)
-        done = sum(1 for t in tasks if t.get("completedAt"))
+        done = sum(1 for t in tasks if _project_task_is_done(t))
         execution_summary = _project_execution_project_summary(p)
         summaries.append({
             "id": p["id"],
@@ -13897,6 +13897,12 @@ def _handle_projects_list(query_string=""):
     return {"ok": True, "projects": summaries}
 
 
+def _project_task_is_done(task):
+    if not isinstance(task, dict):
+        return False
+    return bool(task.get("completedAt")) or str(task.get("executionState") or "").strip().lower() == "done"
+
+
 def _handle_project_get(project_id):
     """GET /api/projects/{id} — return full project."""
     data = _load_projects()
@@ -13923,7 +13929,7 @@ def _handle_project_report(project_id):
     now_str = _proj_now()
     def _is_overdue(t):
         dd = t.get("dueDate")
-        if not dd or t.get("completedAt"):
+        if not dd or _project_task_is_done(t):
             return False
         try:
             due = datetime.fromisoformat(dd.replace("Z", "+00:00"))
@@ -13931,7 +13937,7 @@ def _handle_project_report(project_id):
         except Exception:
             return False
     total = len(tasks)
-    done = sum(1 for t in tasks if t.get("completedAt"))
+    done = sum(1 for t in tasks if _project_task_is_done(t))
     in_progress_cols = [c["id"] for c in p.get("columns", []) if "progress" in c.get("title", "").lower() or "doing" in c.get("title", "").lower()]
     in_progress = sum(1 for t in tasks if t.get("columnId") in in_progress_cols)
     overdue = sum(1 for t in tasks if _is_overdue(t))
@@ -17992,7 +17998,7 @@ def _archive_apply_authority(item, authority=None, actor=None):
 def _archive_task_counts(project):
     tasks = project.get("tasks", []) or []
     total = len(tasks)
-    done = sum(1 for t in tasks if t.get("completedAt"))
+    done = sum(1 for t in tasks if _project_task_is_done(t))
     active_states = {"validating", "executing", "reviewing", "reworking", "running"}
     active_ai = sorted({
         str(t.get("executorAgentId") or t.get("assignee") or "").strip()

@@ -103,3 +103,37 @@ def test_project_list_summary_exposes_active_execution():
         assert summary["activeTaskCount"] == 1
     finally:
         restore_project_fixture(old)
+
+
+def test_project_list_summary_counts_execution_state_done_tasks():
+    project = fake_project()
+    project["workflowActive"] = False
+    project["workflowPhase"] = "idle"
+    project["activeTaskId"] = ""
+    project["activeAgent"] = ""
+    project["tasks"] = [
+        {
+            "id": "t-1",
+            "title": "已完成但没有 completedAt",
+            "executionState": "done",
+            "completedAt": None,
+        },
+        {
+            "id": "t-2",
+            "title": "仍在执行",
+            "executionState": "executing",
+            "executorAgentId": "codex-local",
+            "activeAttemptId": "a-2",
+        },
+    ]
+    old = install_project_fixture(project)
+    try:
+        result = server._handle_projects_list("status=active")
+        summary = result["projects"][0]
+
+        assert summary["taskCount"] == 2
+        assert summary["taskDone"] == 1
+        assert summary["projectExecutionActive"] is True
+        assert summary["activeTaskTitle"] == "仍在执行"
+    finally:
+        restore_project_fixture(old)

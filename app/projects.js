@@ -887,7 +887,7 @@
         if (job.targetType !== 'projectTask') return null;
         const task = (p.tasks || []).find(t => t.id === job.taskId);
         if (!task) return { state: 'missing', label: _t('proj_scheduled_cron_repeat_gate_missing') };
-        const isDone = !!task.completedAt;
+        const isDone = !!task.completedAt || String(task.executionState || '').toLowerCase() === 'done';
         const repeatEnabled = task.scheduledRepeatEnabled === true;
         if (!isDone) return { state: 'open', label: _t('proj_scheduled_cron_repeat_gate_open') };
         if (repeatEnabled) return { state: 'enabled', label: _t('proj_scheduled_cron_repeat_gate_enabled') };
