@@ -597,6 +597,10 @@ def _feishu_chat_app_send_config(cfg=None):
 def _feishu_chat_config_response(include_ok=True):
     cfg = _feishu_chat_app_config()
     receiver = _get_feishu_chat_long_connection_receiver()
+    if cfg.get("enabled", False) is False:
+        long_connection = {"enabled": False, "running": False, "status": "disabled"}
+    else:
+        long_connection = receiver.status() if receiver else {"enabled": False, "running": False, "status": "not_started"}
     result = {
         "enabled": bool(cfg.get("enabled", False)),
         "configured": _feishu_chat_app_configured(cfg),
@@ -606,7 +610,7 @@ def _feishu_chat_config_response(include_ok=True):
         "requireBoundVoUser": False,
         "allowedChatTypes": ["p2p"],
         "replyMode": "same_chat",
-        "longConnection": receiver.status() if receiver else {"enabled": False, "running": False, "status": "not_started"},
+        "longConnection": long_connection,
     }
     if include_ok:
         result["ok"] = True
@@ -10009,6 +10013,24 @@ def _get_feishu_chat_long_connection_receiver():
     return _FEISHU_CHAT_LONG_CONNECTION_RECEIVER
 
 
+def _stop_feishu_chat_long_connection(status="disabled"):
+    global _FEISHU_CHAT_LONG_CONNECTION_RECEIVER
+    with _FEISHU_CHAT_LONG_CONNECTION_LOCK:
+        existing = _FEISHU_CHAT_LONG_CONNECTION_RECEIVER
+        _FEISHU_CHAT_LONG_CONNECTION_RECEIVER = None
+    if existing:
+        try:
+            stopped = existing.stop()
+            if isinstance(stopped, dict):
+                stopped["status"] = status
+                stopped["running"] = False
+                stopped["enabled"] = False
+                return stopped
+        except Exception as exc:
+            return {"enabled": False, "running": False, "status": "stop_error", "lastError": f"{type(exc).__name__}: {exc}"}
+    return {"enabled": False, "running": False, "status": status}
+
+
 def _start_feishu_long_connection():
     global _FEISHU_LONG_CONNECTION_RECEIVER
     cfg = VO_CONFIG.get("notifications", {}) or {}
@@ -10034,11 +10056,11 @@ def _start_feishu_chat_long_connection():
     global _FEISHU_CHAT_LONG_CONNECTION_RECEIVER
     cfg = _feishu_chat_app_config()
     if cfg.get("enabled", False) is False:
-        return {"enabled": False, "running": False, "status": "disabled"}
+        return _stop_feishu_chat_long_connection("disabled")
     app_id = str(cfg.get("appId") or "").strip()
     app_secret = str(cfg.get("appSecret") or "").strip()
     if not app_id or not app_secret:
-        return {"enabled": False, "running": False, "status": "missing_app_credentials"}
+        return _stop_feishu_chat_long_connection("missing_app_credentials")
     with _FEISHU_CHAT_LONG_CONNECTION_LOCK:
         existing = _FEISHU_CHAT_LONG_CONNECTION_RECEIVER
         if existing and existing.app_id == app_id and existing.app_secret == app_secret:

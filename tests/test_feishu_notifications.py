@@ -684,6 +684,59 @@ def test_feishu_chat_config_is_separate_from_notification_app():
     assert saved["feishu"]["chatApp"]["appSecret"] == "chat-secret"
 
 
+def test_disabling_feishu_chat_config_stops_existing_long_connection():
+    os.environ.setdefault("VO_HERMES_ENABLED", "0")
+    os.environ.setdefault("VO_CODEX_ENABLED", "0")
+    status_dir = tempfile.mkdtemp(prefix="vo-feishu-chat-disable-")
+    os.environ["VO_STATUS_DIR"] = status_dir
+    import server
+
+    class FakeRunningReceiver:
+        app_id = "cli_chat"
+        app_secret = "chat-secret"
+
+        def __init__(self):
+            self.stopped = False
+
+        def status(self):
+            return {"enabled": True, "running": True, "status": "running"}
+
+        def stop(self):
+            self.stopped = True
+            return {"enabled": False, "running": False, "status": "stopped"}
+
+    previous_status_dir = server.STATUS_DIR
+    previous_config = server.VO_CONFIG
+    previous_receiver = server._FEISHU_CHAT_LONG_CONNECTION_RECEIVER
+    receiver = FakeRunningReceiver()
+    server.STATUS_DIR = status_dir
+    server.VO_CONFIG = {
+        **previous_config,
+        "feishu": {
+            "chatApp": {
+                "enabled": True,
+                "appId": "cli_chat",
+                "appSecret": "chat-secret",
+                "representativeAgentId": "hermes-default",
+            },
+            "bindings": {},
+        },
+    }
+    server._FEISHU_CHAT_LONG_CONNECTION_RECEIVER = receiver
+    try:
+        result = server._save_feishu_chat_config({"enabled": False})
+    finally:
+        server.STATUS_DIR = previous_status_dir
+        server.VO_CONFIG = previous_config
+        server._FEISHU_CHAT_LONG_CONNECTION_RECEIVER = previous_receiver
+
+    assert result["ok"] is True
+    assert result["enabled"] is False
+    assert result["longConnection"]["running"] is False
+    assert result["longConnection"]["status"] == "disabled"
+    assert receiver.stopped is True
+
+
 def test_feishu_chat_config_rejects_unknown_representative_agent():
     os.environ.setdefault("VO_HERMES_ENABLED", "0")
     os.environ.setdefault("VO_CODEX_ENABLED", "0")

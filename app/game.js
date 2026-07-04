@@ -14760,9 +14760,22 @@ function mmSaveFeishuChatConfig() {
             return;
         }
         mmFillFeishuChatMaskedInputs(d);
+        mmNotifyFeishuChatConfigChanged();
         if (statusEl) statusEl.innerHTML = '<div class="mm-status ok">✅ ' + escHtml(_tr('feishu_chat_config_saved')) + '</div>';
     }).catch(function(e) {
         if (statusEl) statusEl.innerHTML = '<div class="mm-status err">❌ ' + escHtml(e.message) + '</div>';
+    });
+}
+
+function mmNotifyFeishuChatConfigChanged() {
+    var windows = window.__voChatWindows || [];
+    windows.forEach(function(chatWindow) {
+        if (!chatWindow) return;
+        if (typeof chatWindow.updateFeishuEventSource === 'function') {
+            chatWindow.updateFeishuEventSource();
+        } else if (typeof chatWindow.closeFeishuEventSource === 'function') {
+            chatWindow.closeFeishuEventSource();
+        }
     });
 }
 

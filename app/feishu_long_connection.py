@@ -25,6 +25,7 @@ class FeishuLongConnectionReceiver:
         self.message_handler = message_handler
         self.name = str(name or "feishu-long-connection")
         self._thread: threading.Thread | None = None
+        self._client: Any | None = None
         self._lock = threading.Lock()
         self._status: dict[str, Any] = {
             "enabled": False,
@@ -52,6 +53,21 @@ class FeishuLongConnectionReceiver:
         self._set_status(enabled=True, running=True, status="starting", startedAt=int(time.time()), lastError="")
         self._thread = threading.Thread(target=self._run, daemon=True, name=self.name)
         self._thread.start()
+        return self.status()
+
+    def stop(self) -> dict[str, Any]:
+        with self._lock:
+            client = self._client
+            self._status.update(enabled=False, running=False, status="stopped", lastError="")
+        for method_name in ("stop", "close", "shutdown", "disconnect"):
+            method = getattr(client, method_name, None)
+            if not callable(method):
+                continue
+            try:
+                method()
+                break
+            except Exception as exc:
+                self._set_status(lastError=f"{type(exc).__name__}: {exc}")
         return self.status()
 
     def _handle_card_action_event(self, data: Any) -> dict[str, Any]:
@@ -112,6 +128,7 @@ class FeishuLongConnectionReceiver:
             handler = builder.build()
             self._set_status(status="connecting", running=True, lastError="")
             client = lark.ws.Client(self.app_id, self.app_secret, event_handler=handler)
+            self._client = client
             self._set_status(status="running", running=True, lastError="")
             client.start()
         except Exception as exc:
@@ -122,6 +139,8 @@ class FeishuLongConnectionReceiver:
                 traceback=traceback.format_exc(limit=5),
             )
             print(f"[FeishuLongConnection] stopped: {type(exc).__name__}: {exc}")
+        finally:
+            self._client = None
 
     @staticmethod
     def _event_to_body(data: Any) -> dict[str, Any]:
