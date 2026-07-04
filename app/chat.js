@@ -889,14 +889,15 @@
 
     setFeishuLiveStatus(state, detail = '') {
       if (!this.feishuLiveStatus) return;
+      const t = (key, fallback) => (typeof i18n !== 'undefined' && i18n && typeof i18n.t === 'function') ? i18n.t(key) : fallback;
       const labels = {
-        connecting: '飞书实时: 连接中',
-        connected: '飞书实时: 已连接',
-        disconnected: '飞书实时: 已断开'
+        connecting: t('chat_feishu_live_connecting', 'Feishu live: connecting'),
+        connected: t('chat_feishu_live_connected', 'Feishu live: connected'),
+        disconnected: t('chat_feishu_live_disconnected', 'Feishu live: disconnected')
       };
       if (!state || state === 'hidden') {
         this.feishuLiveStatus.hidden = true;
-        this.feishuLiveStatus.textContent = '飞书实时: 未连接';
+        this.feishuLiveStatus.textContent = labels.disconnected;
         this.feishuLiveStatus.className = 'chat-feishu-live-status';
         this.feishuLiveStatus.title = '';
         return;

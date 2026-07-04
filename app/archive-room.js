@@ -31,8 +31,34 @@
             .replace(/'/g, '&#39;');
     }
 
+    function tr(key, fallback, params) {
+        if (window.i18n && typeof window.i18n.t === 'function') {
+            const translated = window.i18n.t(key, params);
+            if (translated && translated !== key) return translated;
+        }
+        let msg = fallback;
+        if (params) {
+            Object.keys(params).forEach(k => {
+                msg = String(msg).replace(new RegExp('\\{\\{' + k + '\\}\\}', 'g'), params[k]);
+            });
+        }
+        return msg;
+    }
+
+    function trCount(key, fallback, count) {
+        return tr(key, fallback, { count });
+    }
+
+    function noneText() {
+        return tr('archive_room_none', 'None');
+    }
+
+    function noRecordText() {
+        return tr('archive_room_no_record', 'No record');
+    }
+
     function formatDate(value) {
-        if (!value) return '未知';
+        if (!value) return tr('unknown', 'Unknown');
         const d = new Date(value);
         if (isNaN(d.getTime())) return String(value);
         return d.toLocaleString();
@@ -97,12 +123,12 @@
     async function parseJsonResponse(response) {
         const text = await response.text();
         if (!text.trim()) {
-            throw new Error(`服务返回空响应，请确认系统已启动并刷新页面。HTTP ${response.status || 0}`);
+            throw new Error(tr('archive_room_empty_response_error', 'Service returned an empty response. Confirm the system is running and refresh the page. HTTP {{status}}', { status: response.status || 0 }));
         }
         try {
             return JSON.parse(text);
         } catch (e) {
-            throw new Error(`服务返回了无法解析的数据，请刷新后重试。HTTP ${response.status || 0}`);
+            throw new Error(tr('archive_room_parse_response_error', 'Service returned data that could not be parsed. Refresh and try again. HTTP {{status}}', { status: response.status || 0 }));
         }
     }
 
@@ -131,7 +157,7 @@
     async function loadOverview() {
         const el = content();
         if (!el) return;
-        el.innerHTML = '<div class="archive-room-loading">正在加载档案室...</div>';
+        el.innerHTML = `<div class="archive-room-loading">${escHtml(tr('archive_room_loading', 'Loading archive room...'))}</div>`;
         try {
             const d = await fetchJson('/api/archive-room');
             state.projects = d.projects || [];
@@ -142,7 +168,7 @@
             render();
             if (state.selectedId) loadProject(state.selectedId);
         } catch (e) {
-            el.innerHTML = `<div class="archive-room-error">档案室加载失败：${escHtml(e.message || e)}</div>`;
+            el.innerHTML = `<div class="archive-room-error">${escHtml(tr('archive_room_load_failed', 'Failed to load archive room'))}: ${escHtml(e.message || e)}</div>`;
         }
     }
 
@@ -197,7 +223,7 @@
         const el = content();
         if (!el) return;
         if (!state.projects.length) {
-            el.innerHTML = '<div class="archive-room-empty">暂无项目档案。创建项目后，档案室会显示项目概览。</div>';
+            el.innerHTML = `<div class="archive-room-empty">${escHtml(tr('archive_room_empty_overview', 'No project archives yet. Create a project and the archive room will show the project overview.'))}</div>`;
             return;
         }
         el.innerHTML = `
@@ -235,36 +261,38 @@
                             <div id="archive-governance-dialog-title" class="archive-governance-dialog-title">${escHtml(dialog.title)}</div>
                             <div class="archive-governance-dialog-subtitle">${escHtml(dialog.itemTitle)}</div>
                         </div>
-                        <button class="archive-icon-btn" ${state.governanceBusy ? 'disabled' : ''} onclick="ArchiveRoom.closeGovernanceDialog()" aria-label="关闭">×</button>
+                        <button class="archive-icon-btn" ${state.governanceBusy ? 'disabled' : ''} onclick="ArchiveRoom.closeGovernanceDialog()" aria-label="${escHtml(tr('archive_artifact_close', 'Close'))}">×</button>
                     </div>
                     <div class="archive-governance-dialog-body">
                         ${dialog.error ? `<div class="archive-governance-dialog-error">${escHtml(dialog.error)}</div>` : ''}
                         ${isEdit ? `
                             <label class="archive-governance-field">
-                                <span>确认内容</span>
+                                <span>${escHtml(tr('archive_governance_confirm_content', 'Content to confirm'))}</span>
                                 <textarea id="archive-governance-dialog-text" rows="7">${escHtml(dialog.text || '')}</textarea>
                             </label>` : `
                             <div class="archive-governance-review">
-                                <span>${isConfirm ? '确认后，这条内容会作为人工确认档案保存。' : (isReject ? '拒绝后，这条建议不会作为有效档案上下文。' : '暂缓后，这条建议会保留在治理记录中，等待后续处理。')}</span>
+                                <span>${escHtml(isConfirm ? tr('archive_governance_confirm_hint', 'After confirmation, this content will be saved as a human-confirmed archive entry.') : (isReject ? tr('archive_governance_reject_hint', 'After rejection, this suggestion will not be used as valid archive context.') : tr('archive_governance_defer_hint', 'After deferring, this suggestion will remain in governance history for later handling.')))}</span>
                                 <p>${escHtml(dialog.text || '')}</p>
                             </div>`}
                         ${(isReject || isDefer) ? `
                             <label class="archive-governance-field">
-                                <span>${isReject ? '拒绝原因（可选）' : '暂缓原因（可选）'}</span>
+                                <span>${escHtml(isReject ? tr('archive_governance_reject_reason_optional', 'Rejection reason (optional)') : tr('archive_governance_defer_reason_optional', 'Deferral reason (optional)'))}</span>
                                 <textarea id="archive-governance-dialog-reason" rows="3">${escHtml(dialog.reason || '')}</textarea>
                             </label>` : ''}
                     </div>
                     <div class="archive-governance-dialog-actions">
-                        <button class="archive-secondary-btn" ${state.governanceBusy ? 'disabled' : ''} onclick="ArchiveRoom.closeGovernanceDialog()">取消</button>
-                        <button class="${isReject ? 'archive-secondary-btn danger' : 'archive-primary-btn'}" ${state.governanceBusy ? 'disabled' : ''} onclick="ArchiveRoom.submitGovernanceDialog()">${state.governanceBusy ? '处理中...' : (isEdit ? '确认入档' : dialog.title)}</button>
+                        <button class="archive-secondary-btn" ${state.governanceBusy ? 'disabled' : ''} onclick="ArchiveRoom.closeGovernanceDialog()">${escHtml(tr('cancel', 'Cancel'))}</button>
+                        <button class="${isReject ? 'archive-secondary-btn danger' : 'archive-primary-btn'}" ${state.governanceBusy ? 'disabled' : ''} onclick="ArchiveRoom.submitGovernanceDialog()">${escHtml(state.governanceBusy ? tr('archive_processing', 'Processing...') : (isEdit ? tr('archive_governance_confirm_archive', 'Confirm into archive') : dialog.title))}</button>
                     </div>
                 </section>
             </div>`;
     }
 
     function managerHeaderText(mgr) {
-        if (!mgr) return '🗄️ 档案管理员：未接入';
-        return `${mgr.emoji || '🗄️'} ${mgr.name || '档案管理员'}：${mgr.label || mgr.status || '未接入'}`;
+        const name = tr('archive_manager_default_name', 'Archive Manager');
+        const unavailable = tr('archive_manager_not_connected', 'Not connected');
+        if (!mgr) return `🗄️ ${name}: ${unavailable}`;
+        return `${mgr.emoji || '🗄️'} ${mgr.name || name}: ${mgr.label || mgr.status || unavailable}`;
     }
 
     function managerStatusClass(mgr) {
@@ -280,24 +308,25 @@
         const activity = (mgr.recentActivity || []).slice().reverse();
         const paused = !!mgr.paused;
         const error = mgr.lastError || '';
-        const created = mgr.autoCreated && mgr.createdAt ? `已自动创建 · ${formatDate(mgr.createdAt)}` : (mgr.autoCreated ? '已自动创建' : '全局档案管理员');
+        const autoCreated = tr('archive_manager_auto_created', 'Auto-created');
+        const created = mgr.autoCreated && mgr.createdAt ? `${autoCreated} · ${formatDate(mgr.createdAt)}` : (mgr.autoCreated ? autoCreated : tr('archive_manager_global', 'Global archive manager'));
         return `
             <div class="archive-manager-panel ${managerStatusClass(mgr)}">
                 <div class="archive-manager-main">
                     <div class="archive-manager-avatar">${escHtml(mgr.emoji || '🗄️')}</div>
                     <div class="archive-manager-copy">
-                        <div class="archive-manager-title">${escHtml(mgr.name || '档案管理员')}</div>
-                        <div class="archive-manager-meta">${escHtml(mgr.label || '未接入')} · ${escHtml(created)}</div>
+                        <div class="archive-manager-title">${escHtml(mgr.name || tr('archive_manager_default_name', 'Archive Manager'))}</div>
+                        <div class="archive-manager-meta">${escHtml(mgr.label || tr('archive_manager_not_connected', 'Not connected'))} · ${escHtml(created)}</div>
                         ${error ? `<div class="archive-manager-error">${escHtml(error)}</div>` : ''}
                     </div>
                 </div>
                 <div class="archive-manager-actions">
-                    <button class="archive-secondary-btn" ${state.managerBusy ? 'disabled' : ''} onclick="ArchiveRoom.auditArchiveCount()">${state.managerBusy ? '检查中...' : '检查档案数目'}</button>
-                    <button class="archive-secondary-btn" onclick="ArchiveRoom.openManagerActivity()">查看动态${activity.length ? ` (${activity.length})` : ''}</button>
-                    <button class="archive-secondary-btn" ${state.managerBusy ? 'disabled' : ''} onclick="ArchiveRoom.refresh()">刷新</button>
+                    <button class="archive-secondary-btn" ${state.managerBusy ? 'disabled' : ''} onclick="ArchiveRoom.auditArchiveCount()">${escHtml(state.managerBusy ? tr('archive_manager_checking', 'Checking...') : tr('archive_manager_check_count', 'Check archive count'))}</button>
+                    <button class="archive-secondary-btn" onclick="ArchiveRoom.openManagerActivity()">${escHtml(tr('archive_manager_view_activity', 'View activity'))}${activity.length ? ` (${activity.length})` : ''}</button>
+                    <button class="archive-secondary-btn" ${state.managerBusy ? 'disabled' : ''} onclick="ArchiveRoom.refresh()">${escHtml(tr('refresh', 'Refresh'))}</button>
                     ${paused
-                        ? `<button class="archive-primary-btn" ${state.managerBusy ? 'disabled' : ''} onclick="ArchiveRoom.setManagerPaused(false)">恢复</button>`
-                        : `<button class="archive-secondary-btn" ${state.managerBusy ? 'disabled' : ''} onclick="ArchiveRoom.setManagerPaused(true)">暂停</button>`}
+                        ? `<button class="archive-primary-btn" ${state.managerBusy ? 'disabled' : ''} onclick="ArchiveRoom.setManagerPaused(false)">${escHtml(tr('archive_manager_resume', 'Resume'))}</button>`
+                        : `<button class="archive-secondary-btn" ${state.managerBusy ? 'disabled' : ''} onclick="ArchiveRoom.setManagerPaused(true)">${escHtml(tr('archive_manager_pause', 'Pause'))}</button>`}
                 </div>
             </div>`;
     }
@@ -310,13 +339,13 @@
             <section class="archive-manager-activity-dialog" role="dialog" aria-modal="true" aria-labelledby="archive-manager-activity-title">
                 <div class="archive-manager-activity-head">
                     <div>
-                        <div id="archive-manager-activity-title" class="archive-manager-activity-title">档案管理员动态</div>
-                        <div class="archive-manager-activity-subtitle">全局活动记录，不限定当前档案。</div>
+                        <div id="archive-manager-activity-title" class="archive-manager-activity-title">${escHtml(tr('archive_manager_activity_title', 'Archive manager activity'))}</div>
+                        <div class="archive-manager-activity-subtitle">${escHtml(tr('archive_manager_activity_subtitle', 'Global activity log, not limited to the current archive.'))}</div>
                     </div>
-                    <button class="archive-icon-btn" onclick="ArchiveRoom.closeManagerActivity()" aria-label="关闭">×</button>
+                    <button class="archive-icon-btn" onclick="ArchiveRoom.closeManagerActivity()" aria-label="${escHtml(tr('archive_artifact_close', 'Close'))}">×</button>
                 </div>
                 <div class="archive-manager-activity-list">
-                    ${activity.length ? activity.map(renderManagerActivity).join('') : '<div class="archive-manager-activity-empty">暂无维护活动</div>'}
+                    ${activity.length ? activity.map(renderManagerActivity).join('') : `<div class="archive-manager-activity-empty">${escHtml(tr('archive_manager_no_activity', 'No maintenance activity yet'))}</div>`}
                 </div>
             </section>
         </div>`;
@@ -398,22 +427,22 @@
         return `
             <div class="archive-room-list">
                 <div class="archive-room-list-head">
-                    <div class="archive-room-title">项目关注列表</div>
-                    <div class="archive-room-count">${projects.length} / ${state.projects.length} 个项目</div>
+                    <div class="archive-room-title">${escHtml(tr('archive_project_watchlist', 'Project watchlist'))}</div>
+                    <div class="archive-room-count">${escHtml(tr('archive_project_count', '{{shown}} / {{total}} projects', { shown: projects.length, total: state.projects.length }))}</div>
                 </div>
                 <div class="archive-list-controls">
                     <div class="archive-filter-group">
-                        ${listFilterButton('all', '全部')}
-                        ${listFilterButton('pending', '待确认')}
-                        ${listFilterButton('risk', '风险')}
+                        ${listFilterButton('all', tr('archive_filter_all', 'All'))}
+                        ${listFilterButton('pending', tr('archive_filter_pending', 'Pending'))}
+                        ${listFilterButton('risk', tr('archive_filter_risk', 'Risk'))}
                     </div>
-                    <div class="archive-sort-group" aria-label="项目排序">
-                        <span>排序</span>
-                        ${listSortButton('priority', '优先')}
-                        ${listSortButton('recent', '最近')}
+                    <div class="archive-sort-group" aria-label="${escHtml(tr('archive_project_sort', 'Project sort'))}">
+                        <span>${escHtml(tr('archive_sort', 'Sort'))}</span>
+                        ${listSortButton('priority', tr('archive_sort_priority', 'Priority'))}
+                        ${listSortButton('recent', tr('archive_sort_recent', 'Recent'))}
                     </div>
                 </div>
-                ${projects.map(renderProjectCard).join('') || '<div class="archive-room-empty compact">没有匹配项目。</div>'}
+                ${projects.map(renderProjectCard).join('') || `<div class="archive-room-empty compact">${escHtml(tr('archive_no_matching_projects', 'No matching projects.'))}</div>`}
             </div>`;
     }
 
@@ -455,15 +484,15 @@
         const active = p.id === state.selectedId ? 'active' : '';
         return `
             <button class="archive-project-card ${active}" data-project-id="${escHtml(p.id)}" onclick="ArchiveRoom.openProject('${escHtml(p.id)}')">
-                <div class="archive-project-name">${escHtml(p.title || '未命名项目')}</div>
-                <div class="archive-project-desc">${escHtml(p.description || '暂无项目描述。')}</div>
+                <div class="archive-project-name">${escHtml(p.title || tr('archive_untitled_project', 'Untitled project'))}</div>
+                <div class="archive-project-desc">${escHtml(p.description || tr('archive_no_project_description', 'No project description.'))}</div>
                 <div class="archive-metrics">
-                    <div class="archive-metric"><strong>${escHtml(m.riskCount || 0)}</strong><span>风险</span></div>
-                    <div class="archive-metric"><strong>${escHtml(m.pendingConfirmationCount || 0)}</strong><span>待确认</span></div>
-                    <div class="archive-metric"><strong>${escHtml(m.completionRate || 0)}%</strong><span>完成</span></div>
-                    <div class="archive-metric"><strong>${escHtml(m.artifactCount || 0)}</strong><span>产物</span></div>
+                    <div class="archive-metric"><strong>${escHtml(m.riskCount || 0)}</strong><span>${escHtml(tr('archive_metric_risk', 'Risk'))}</span></div>
+                    <div class="archive-metric"><strong>${escHtml(m.pendingConfirmationCount || 0)}</strong><span>${escHtml(tr('archive_metric_pending', 'Pending'))}</span></div>
+                    <div class="archive-metric"><strong>${escHtml(m.completionRate || 0)}%</strong><span>${escHtml(tr('archive_metric_done', 'Done'))}</span></div>
+                    <div class="archive-metric"><strong>${escHtml(m.artifactCount || 0)}</strong><span>${escHtml(tr('archive_metric_artifacts', 'Artifacts'))}</span></div>
                 </div>
-                <div class="archive-artifact-meta">更新于 ${escHtml(formatDate(p.updatedAt))}</div>
+                <div class="archive-artifact-meta">${escHtml(tr('archive_updated_at', 'Updated at {{date}}', { date: formatDate(p.updatedAt) }))}</div>
             </button>`;
     }
 
@@ -478,7 +507,7 @@
             return `<div class="archive-room-detail"><div class="archive-room-error">${escHtml(state.error)}</div></div>`;
         }
         if (!state.detail) {
-            return '<div class="archive-room-detail"><div class="archive-room-loading">正在加载项目档案...</div></div>';
+            return `<div class="archive-room-detail"><div class="archive-room-loading">${escHtml(tr('archive_project_loading', 'Loading project archive...'))}</div></div>`;
         }
         const p = state.detail;
         const m = p.metrics || {};
@@ -487,46 +516,46 @@
         const maintenance = p.archiveMaintenance || {};
         return `
             <div class="archive-room-detail">
-                ${state.detailLoading ? '<div class="archive-detail-loading-mask">正在加载项目档案...</div>' : ''}
+                ${state.detailLoading ? `<div class="archive-detail-loading-mask">${escHtml(tr('archive_project_loading', 'Loading project archive...'))}</div>` : ''}
                 <div class="archive-detail-head">
                     <div>
-                        <h2 class="archive-detail-title">${escHtml(p.title || '未命名项目')}</h2>
-                        <div class="archive-detail-subtitle">档案更新于 ${escHtml(formatDate(p.archiveUpdatedAt))}</div>
+                        <h2 class="archive-detail-title">${escHtml(p.title || tr('archive_untitled_project', 'Untitled project'))}</h2>
+                        <div class="archive-detail-subtitle">${escHtml(tr('archive_detail_updated_at', 'Archive updated at {{date}}', { date: formatDate(p.archiveUpdatedAt) }))}</div>
                     </div>
                     <div class="archive-detail-actions">
-                        <div class="archive-status-pill">${escHtml(manager.label || '未接入')}</div>
-                        <button class="archive-primary-btn" ${state.managerBusy ? 'disabled' : ''} onclick="ArchiveRoom.maintainCurrentProject()">${state.managerBusy ? '刷新中...' : '刷新当前档案'}</button>
-                        <button class="archive-secondary-btn" ${state.managerBusy ? 'disabled' : ''} onclick="ArchiveRoom.refineCurrentProjectWithAi()">${state.managerBusy ? '处理中...' : 'AI 精整档案'}</button>
+                        <div class="archive-status-pill">${escHtml(manager.label || tr('archive_manager_not_connected', 'Not connected'))}</div>
+                        <button class="archive-primary-btn" ${state.managerBusy ? 'disabled' : ''} onclick="ArchiveRoom.maintainCurrentProject()">${escHtml(state.managerBusy ? tr('archive_refreshing', 'Refreshing...') : tr('archive_refresh_current', 'Refresh current archive'))}</button>
+                        <button class="archive-secondary-btn" ${state.managerBusy ? 'disabled' : ''} onclick="ArchiveRoom.refineCurrentProjectWithAi()">${escHtml(state.managerBusy ? tr('archive_processing', 'Processing...') : tr('archive_ai_refine', 'AI refine archive'))}</button>
                     </div>
                 </div>
-                ${manager.paused ? '<div class="archive-paused-notice">档案管理员已暂停，档案不会主动更新；你仍可以手动整理当前项目。</div>' : ''}
+                ${manager.paused ? `<div class="archive-paused-notice">${escHtml(tr('archive_manager_paused_notice', 'The archive manager is paused. Archives will not update automatically, but you can still maintain the current project manually.'))}</div>` : ''}
                 ${renderArchiveIntro(p)}
                 ${renderProjectBasicInfo(p)}
                 ${renderMaintenanceControl(p, maintenance)}
                 ${renderGovernanceSection(p)}
                 <section class="archive-section">
-                    <h3>关键摘要</h3>
+                    <h3>${escHtml(tr('archive_key_summary', 'Key summary'))}</h3>
                     <div class="archive-section-body archive-summary-grid">
-                        ${summaryItem('目标', s.goal || p.description || '暂无目标记录。')}
-                        ${summaryItem('当前状态', s.currentState || `${m.taskDone || 0} / ${m.taskCount || 0} 个任务完成`)}
-                        ${summaryItem('下一步', s.nextStep || '暂无下一步记录。')}
+                        ${summaryItem(tr('archive_goal', 'Goal'), s.goal || p.description || tr('archive_no_goal', 'No goal recorded.'))}
+                        ${summaryItem(tr('archive_current_state', 'Current state'), s.currentState || tr('archive_task_progress_done', '{{done}} / {{total}} tasks complete', { done: m.taskDone || 0, total: m.taskCount || 0 }))}
+                        ${summaryItem(tr('archive_next_step', 'Next step'), s.nextStep || tr('archive_no_next_step', 'No next step recorded.'))}
                     </div>
                 </section>
                 <section class="archive-section">
-                    <h3>上下文目录</h3>
+                    <h3>${escHtml(tr('archive_context_catalog', 'Context catalog'))}</h3>
                     <div class="archive-section-body">
-                        ${(p.entries || []).map(renderEntry).join('') || '<div class="archive-room-empty">暂无档案条目。</div>'}
+                        ${(p.entries || []).map(renderEntry).join('') || `<div class="archive-room-empty">${escHtml(tr('archive_no_entries', 'No archive entries yet.'))}</div>`}
                     </div>
                 </section>
                 <section class="archive-section">
-                    <h3>AI 入场包</h3>
+                    <h3>${escHtml(tr('archive_onboarding_package', 'AI onboarding package'))}</h3>
                     <div class="archive-section-body">
                         <textarea id="archive-onboarding-text" class="archive-onboarding" readonly>${escHtml((p.onboardingPackage || {}).copyText || '')}</textarea>
-                        <button class="archive-copy-btn" onclick="ArchiveRoom.copyOnboarding()">复制 AI 入场包</button>
+                        <button class="archive-copy-btn" onclick="ArchiveRoom.copyOnboarding()">${escHtml(tr('archive_copy_onboarding', 'Copy AI onboarding package'))}</button>
                     </div>
                 </section>
                 <section class="archive-section">
-                    <h3>任务产物</h3>
+                    <h3>${escHtml(tr('archive_task_artifacts', 'Task artifacts'))}</h3>
                     <div class="archive-section-body">
                         ${renderArtifactLauncher(p)}
                     </div>
@@ -543,24 +572,24 @@
         const artifactCount = (p.artifacts || []).length || Number((p.metrics || {}).artifactCount || 0);
         return `<section class="archive-hero">
             <div class="archive-hero-main">
-                <div class="archive-hero-eyebrow">项目档案</div>
-                <h3>${escHtml(intro.title || `${p.title || '项目'} 的项目档案`)}</h3>
-                <p class="archive-hero-brief">${escHtml(intro.brief || p.description || '暂无项目简介。')}</p>
+                <div class="archive-hero-eyebrow">${escHtml(tr('archive_project_archive', 'Project archive'))}</div>
+                <h3>${escHtml(intro.title || tr('archive_project_archive_title', '{{name}} project archive', { name: p.title || tr('project', 'Project') }))}</h3>
+                <p class="archive-hero-brief">${escHtml(intro.brief || p.description || tr('archive_no_project_intro', 'No project introduction.'))}</p>
                 <div class="archive-hero-actions">
-                    <span>${escHtml(readiness.label || '可用')}</span>
+                    <span>${escHtml(readiness.label || tr('archive_available', 'Available'))}</span>
                     <span>${escHtml(readiness.summary || '')}</span>
-                    <button class="archive-hero-artifact-btn" ${artifactCount ? '' : 'disabled'} onclick="ArchiveRoom.openProjectArtifacts()">查看项目产物</button>
+                    <button class="archive-hero-artifact-btn" ${artifactCount ? '' : 'disabled'} onclick="ArchiveRoom.openProjectArtifacts()">${escHtml(tr('archive_view_project_artifacts', 'View project artifacts'))}</button>
                 </div>
             </div>
             <div class="archive-hero-side">
-                <div class="archive-hero-side-title">这个档案里有什么</div>
-                <div class="archive-mini-tags">${contains.slice(0, 8).map(x => `<span>${escHtml(x)}</span>`).join('') || '<span>暂无记录</span>'}</div>
-                <div class="archive-hero-side-title muted">待补充</div>
-                <div class="archive-mini-tags muted">${missing.slice(0, 6).map(x => `<span>${escHtml(x)}</span>`).join('') || '<span>暂无</span>'}</div>
+                <div class="archive-hero-side-title">${escHtml(tr('archive_contains_title', 'What this archive contains'))}</div>
+                <div class="archive-mini-tags">${contains.slice(0, 8).map(x => `<span>${escHtml(x)}</span>`).join('') || `<span>${escHtml(noRecordText())}</span>`}</div>
+                <div class="archive-hero-side-title muted">${escHtml(tr('archive_missing_title', 'To supplement'))}</div>
+                <div class="archive-mini-tags muted">${missing.slice(0, 6).map(x => `<span>${escHtml(x)}</span>`).join('') || `<span>${escHtml(noneText())}</span>`}</div>
             </div>
         </section>
         <section class="archive-section">
-            <h3>档案索引</h3>
+            <h3>${escHtml(tr('archive_index', 'Archive index'))}</h3>
             <div class="archive-section-body">
                 ${renderArchiveIndex(p)}
             </div>
@@ -576,12 +605,12 @@
                 ${attention.map(item => `<div class="archive-index-signal ${escHtml(item.level || '')}">
                     <strong>${escHtml(item.label || '')}</strong>
                     <span>${escHtml(item.text || '')}</span>
-                </div>`).join('') || '<div class="archive-room-empty">暂无需要优先关注的档案信息。</div>'}
+                </div>`).join('') || `<div class="archive-room-empty">${escHtml(tr('archive_no_priority_info', 'No archive information needs priority attention.'))}</div>`}
             </div>
             <div class="archive-index-grid">
                 ${sections.map(renderArchiveIndexSection).join('')}
             </div>
-            <div class="archive-index-footer">${escHtml(index.footer || '索引由当前项目档案实时派生。')}</div>
+            <div class="archive-index-footer">${escHtml(index.footer || tr('archive_index_footer', 'The index is derived live from the current project archive.'))}</div>
         </div>`;
     }
 
@@ -590,7 +619,7 @@
         return `<div class="archive-index-section">
             <div class="archive-index-section-title">${escHtml(section.label || '')}</div>
             <div class="archive-index-items">
-                ${items.map(renderArchiveIndexItem).join('') || `<div class="archive-index-empty">${escHtml(section.emptyText || '暂无记录')}</div>`}
+                ${items.map(renderArchiveIndexItem).join('') || `<div class="archive-index-empty">${escHtml(section.emptyText || noRecordText())}</div>`}
             </div>
         </div>`;
     }
@@ -598,7 +627,7 @@
     function renderArchiveIndexItem(item) {
         const meta = [item.kind, item.confidence, item.status, item.assignee].filter(Boolean).join(' · ');
         return `<div class="archive-index-item">
-            <strong>${escHtml(item.title || item.path || '未命名')}</strong>
+            <strong>${escHtml(item.title || item.path || tr('archive_untitled', 'Untitled'))}</strong>
             ${item.summary ? `<span>${escHtml(item.summary)}</span>` : ''}
             ${meta ? `<em>${escHtml(meta)}</em>` : ''}
         </div>`;
@@ -610,8 +639,8 @@
             <div class="archive-map-items">
                 ${(items || []).map(item => `<div class="archive-map-item ${item.present === false || item.available === false ? 'missing' : 'present'}">
                     <strong>${escHtml(item.label || item.key || '')}</strong>
-                    <span>${escHtml(item.summary || (item.present === false || item.available === false ? '暂无记录' : '可用'))}</span>
-                </div>`).join('') || '<div class="archive-room-empty">暂无信息地图。</div>'}
+                    <span>${escHtml(item.summary || (item.present === false || item.available === false ? noRecordText() : tr('archive_available', 'Available')))}</span>
+                </div>`).join('') || `<div class="archive-room-empty">${escHtml(tr('archive_no_info_map', 'No information map yet.'))}</div>`}
             </div>
         </div>`;
     }
@@ -619,17 +648,17 @@
     function renderProjectBasicInfo(p) {
         const info = p.projectBasicInfo || {};
         return `<section class="archive-section">
-            <h3>项目基础信息</h3>
+            <h3>${escHtml(tr('archive_project_basic_info', 'Project basic information'))}</h3>
             <div class="archive-section-body archive-basic-grid">
-                ${summaryItem('项目名称', info.name || p.title || '未命名项目')}
-                ${summaryItem('项目描述', info.description || '未记录')}
-                ${summaryItem('项目状态', info.status || p.status || 'active')}
-                ${summaryItem('任务进度', `${info.taskProgress || '0 / 0'} · ${escHtml(String(info.completionRate || 0))}%`)}
-                ${summaryItem('长期维护', info.maintenanceLabel || '未记录')}
-                ${summaryItem('活跃 AI/参与者', info.participantsLabel || '暂无活跃 AI')}
-                ${summaryItem('项目产物', `${info.artifactCount || 0} 个`)}
-                ${summaryItem('待确认', `${info.pendingConfirmationCount || 0} 个`)}
-                ${summaryItem('主要来源', info.sourceTypesLabel || '暂无来源记录')}
+                ${summaryItem(tr('archive_project_name', 'Project name'), info.name || p.title || tr('archive_untitled_project', 'Untitled project'))}
+                ${summaryItem(tr('archive_project_description', 'Project description'), info.description || tr('archive_not_recorded', 'Not recorded'))}
+                ${summaryItem(tr('archive_project_status', 'Project status'), info.status || p.status || 'active')}
+                ${summaryItem(tr('archive_task_progress', 'Task progress'), `${info.taskProgress || '0 / 0'} · ${escHtml(String(info.completionRate || 0))}%`)}
+                ${summaryItem(tr('archive_long_term_maintenance', 'Long-term maintenance'), info.maintenanceLabel || tr('archive_not_recorded', 'Not recorded'))}
+                ${summaryItem(tr('archive_active_participants', 'Active AI / participants'), info.participantsLabel || tr('archive_no_active_ai', 'No active AI'))}
+                ${summaryItem(tr('archive_project_artifacts_label', 'Project artifacts'), trCount('archive_artifact_count', '{{count}} artifacts', info.artifactCount || 0))}
+                ${summaryItem(tr('archive_pending_label', 'Pending'), trCount('archive_pending_count', '{{count}} pending', info.pendingConfirmationCount || 0))}
+                ${summaryItem(tr('archive_primary_sources', 'Primary sources'), info.sourceTypesLabel || tr('archive_no_source_record', 'No source record'))}
             </div>
         </section>`;
     }
@@ -641,35 +670,35 @@
         const notices = (p.automaticGovernanceNotices || []).slice().reverse().slice(0, 5);
         return `<section class="archive-maintenance-control ${enabled ? 'enabled' : 'disabled'}">
             <div>
-                <div class="archive-maintenance-title">${enabled ? '长期维护已开启' : '长期维护已关闭'}</div>
+                <div class="archive-maintenance-title">${escHtml(enabled ? tr('archive_maintenance_enabled', 'Long-term maintenance enabled') : tr('archive_maintenance_disabled', 'Long-term maintenance disabled'))}</div>
                 <div class="archive-maintenance-copy">${enabled
-                    ? '启动/每日巡检会补漏维护这个项目，高价值事件会自动归档。'
-                    : '定时巡检和低价值事件会跳过，高价值事件仍会归档。'}</div>
-                <div class="archive-maintenance-copy">默认：${maintenance.defaultEnabled ? '按当前状态开启' : '按当前状态关闭'} · 最近巡检：${escHtml(lastInspection ? formatDate(lastInspection) : '暂无')}</div>
+                    ? escHtml(tr('archive_maintenance_enabled_desc', 'Startup and scheduled inspections will maintain this project; high-value events are archived automatically.'))
+                    : escHtml(tr('archive_maintenance_disabled_desc', 'Scheduled inspections and low-value events are skipped; high-value events are still archived.'))}</div>
+                <div class="archive-maintenance-copy">${escHtml(tr('archive_maintenance_default_recent', 'Default: {{state}} · Recent inspection: {{date}}', { state: maintenance.defaultEnabled ? tr('archive_default_enabled', 'enabled for current status') : tr('archive_default_disabled', 'disabled for current status'), date: lastInspection ? formatDate(lastInspection) : noneText() }))}</div>
                 <div class="archive-maintenance-schedule ${enabled ? '' : 'disabled'}">
                     <div class="archive-maintenance-schedule-main">
-                        <strong>${escHtml(maintenance.frequencyLabel || '事件触发 + 每日巡检')}</strong>
-                        <span>下次计划：${escHtml(maintenance.nextScheduledAt ? formatDate(maintenance.nextScheduledAt) : '无')} · 上次计划：${escHtml(maintenance.lastScheduledAt ? formatDate(maintenance.lastScheduledAt) : '暂无')} · 上次事件：${escHtml(maintenance.lastEventTriggeredAt ? formatDate(maintenance.lastEventTriggeredAt) : '暂无')}</span>
-                        ${maintenance.lastSkippedReason ? `<em>最近跳过：${escHtml(maintenance.lastSkippedReason)} ${maintenance.lastSkippedAt ? `· ${escHtml(formatDate(maintenance.lastSkippedAt))}` : ''}</em>` : ''}
+                        <strong>${escHtml(maintenance.frequencyLabel || tr('archive_schedule_daily_label', 'Event-triggered + daily inspection'))}</strong>
+                        <span>${escHtml(tr('archive_schedule_times', 'Next: {{next}} · Last scheduled: {{last}} · Last event: {{event}}', { next: maintenance.nextScheduledAt ? formatDate(maintenance.nextScheduledAt) : noneText(), last: maintenance.lastScheduledAt ? formatDate(maintenance.lastScheduledAt) : noneText(), event: maintenance.lastEventTriggeredAt ? formatDate(maintenance.lastEventTriggeredAt) : noneText() }))}</span>
+                        ${maintenance.lastSkippedReason ? `<em>${escHtml(tr('archive_recently_skipped', 'Recently skipped: {{reason}}', { reason: maintenance.lastSkippedReason }))}${maintenance.lastSkippedAt ? ` · ${escHtml(formatDate(maintenance.lastSkippedAt))}` : ''}</em>` : ''}
                     </div>
-                    <button type="button" class="archive-secondary-btn" ${state.managerBusy || !enabled ? 'disabled' : ''} onclick="ArchiveRoom.toggleSchedulePanel()">${state.schedulePanelOpen ? '收起调整' : '调整频率'}</button>
+                    <button type="button" class="archive-secondary-btn" ${state.managerBusy || !enabled ? 'disabled' : ''} onclick="ArchiveRoom.toggleSchedulePanel()">${escHtml(state.schedulePanelOpen ? tr('archive_collapse_adjustment', 'Collapse adjustment') : tr('archive_adjust_frequency', 'Adjust frequency'))}</button>
                 </div>
                 ${state.schedulePanelOpen ? renderSchedulePanel(p, maintenance, enabled) : ''}
                 ${notices.length ? `<div class="archive-auto-governance">
-                    <div class="archive-auto-governance-title">管理员自动治理</div>
+                    <div class="archive-auto-governance-title">${escHtml(tr('archive_auto_governance', 'Manager auto-governance'))}</div>
                     ${notices.map(renderAutoGovernanceNotice).join('')}
                 </div>` : ''}
             </div>
-            <button type="button" class="archive-maintenance-toggle ${enabled ? 'archive-secondary-btn' : 'archive-primary-btn'}" ${state.managerBusy ? 'disabled' : ''} onclick="ArchiveRoom.setProjectMaintenance('${escHtml(p.projectId)}', ${enabled ? 'false' : 'true'})">${enabled ? '关闭长期维护' : '开启长期维护'}</button>
+            <button type="button" class="archive-maintenance-toggle ${enabled ? 'archive-secondary-btn' : 'archive-primary-btn'}" ${state.managerBusy ? 'disabled' : ''} onclick="ArchiveRoom.setProjectMaintenance('${escHtml(p.projectId)}', ${enabled ? 'false' : 'true'})">${escHtml(enabled ? tr('archive_disable_maintenance', 'Disable long-term maintenance') : tr('archive_enable_maintenance', 'Enable long-term maintenance'))}</button>
         </section>`;
     }
 
     function renderSchedulePanel(p, maintenance, enabled) {
         const mode = maintenance.scheduleMode || maintenance.frequency || 'daily';
         const options = [
-            ['event_only', '仅事件触发', '只在任务、会议、重要消息等事件发生时整理。'],
-            ['daily', '事件触发 + 每日巡检', '默认策略，每天补漏一次。'],
-            ['weekly', '事件触发 + 每周巡检', '更轻量，适合变化较少的项目。'],
+            ['event_only', tr('archive_schedule_event_only_label', 'Event-triggered only'), tr('archive_schedule_event_only_desc', 'Maintain only when tasks, meetings, important messages, or other events occur.')],
+            ['daily', tr('archive_schedule_daily_label', 'Event-triggered + daily inspection'), tr('archive_schedule_daily_desc', 'Default strategy, with one daily catch-up inspection.')],
+            ['weekly', tr('archive_schedule_weekly_label', 'Event-triggered + weekly inspection'), tr('archive_schedule_weekly_desc', 'Lighter strategy for projects that change less often.')],
         ];
         return `<div class="archive-schedule-panel ${enabled ? '' : 'disabled'}">
             ${options.map(([value, label, desc]) => `<button type="button" class="archive-schedule-option ${mode === value ? 'active' : ''}" ${state.managerBusy || !enabled ? 'disabled' : ''} onclick="ArchiveRoom.setProjectMaintenanceSchedule('${escHtml(p.projectId)}', '${escHtml(value)}')">
@@ -682,10 +711,10 @@
     function renderAutoGovernanceNotice(item) {
         const cmp = item.sourceComparison || {};
         return `<div class="archive-auto-governance-item">
-            <strong>${escHtml(item.title || item.action || '自动治理')}</strong>
+            <strong>${escHtml(item.title || item.action || tr('archive_auto_governance_item', 'Auto-governance'))}</strong>
             <span>${escHtml(item.summary || '')}</span>
             ${cmp.managerJudgment ? `<em>${escHtml(cmp.managerJudgment)}</em>` : ''}
-            ${(cmp.oldSourceLabel || cmp.newSourceLabel) ? `<small>旧：${escHtml(cmp.oldSourceLabel || '无')} · 新：${escHtml(cmp.newSourceLabel || '无')}</small>` : ''}
+            ${(cmp.oldSourceLabel || cmp.newSourceLabel) ? `<small>${escHtml(tr('archive_old_source', 'Old'))}: ${escHtml(cmp.oldSourceLabel || noneText())} · ${escHtml(tr('archive_new_source', 'New'))}: ${escHtml(cmp.newSourceLabel || noneText())}</small>` : ''}
         </div>`;
     }
 
@@ -693,7 +722,7 @@
         const history = (p.managerMaintenance || []).slice().reverse().slice(0, 8);
         if (!history.length) return '';
         return `<section class="archive-section">
-            <h3>档案整理记录</h3>
+            <h3>${escHtml(tr('archive_maintenance_history', 'Archive maintenance history'))}</h3>
             <div class="archive-section-body archive-maintenance-list">
                 ${history.map(item => `<div class="archive-maintenance-item">
                     <div><strong>${escHtml(item.status || 'ok')}</strong><span>${escHtml(formatDate(item.at))}</span></div>
@@ -711,8 +740,8 @@
         state.managerBusy = true;
         state.managerNotice = {
             status: 'running',
-            title: '档案管理员正在刷新当前档案',
-            message: '已调派档案管理员根据当前项目、任务和产物记录刷新档案。',
+            title: tr('archive_notice_refreshing_title', 'Archive manager is refreshing the current archive'),
+            message: tr('archive_notice_refreshing_message', 'The archive manager is refreshing the archive from the current project, tasks, and artifact records.'),
         };
         renderDetailOnly();
         restoreScrollState(scrollState);
@@ -727,13 +756,13 @@
             const latest = ((state.detail || {}).managerMaintenance || []).slice(-1)[0] || {};
             state.managerNotice = {
                 status: latest.status === 'error' ? 'error' : 'ok',
-                title: latest.status === 'error' ? '档案刷新失败' : '档案刷新完成',
-                message: latest.summary || ((latest.output || {}).summary) || '当前项目档案已刷新。',
+                title: latest.status === 'error' ? tr('archive_notice_refresh_failed_title', 'Archive refresh failed') : tr('archive_notice_refresh_done_title', 'Archive refresh complete'),
+                message: latest.summary || ((latest.output || {}).summary) || tr('archive_notice_refresh_done_message', 'The current project archive has been refreshed.'),
             };
         } catch (e) {
             state.managerNotice = {
                 status: 'error',
-                title: '档案刷新失败',
+                title: tr('archive_notice_refresh_failed_title', 'Archive refresh failed'),
                 message: e.message || String(e),
             };
         } finally {
@@ -750,8 +779,8 @@
         state.managerBusy = true;
         state.managerNotice = {
             status: 'running',
-            title: '已委派档案管理员 AI 精整档案',
-            message: '档案管理员正在阅读项目、任务、产物、待确认项和现有档案，并返回稳定 JSON 用于入档。',
+            title: tr('archive_notice_ai_refine_title', 'Archive manager AI refine requested'),
+            message: tr('archive_notice_ai_refine_message', 'The archive manager is reading the project, tasks, artifacts, pending items, and existing archive, then returning stable JSON for archiving.'),
         };
         renderDetailOnly();
         restoreScrollState(scrollState);
@@ -764,13 +793,13 @@
             const latest = d.maintenance || ((state.detail || {}).managerMaintenance || []).slice(-1)[0] || {};
             state.managerNotice = {
                 status: latest.status === 'error' ? 'error' : 'ok',
-                title: latest.status === 'error' ? 'AI 精整失败' : 'AI 精整完成',
-                message: latest.summary || ((latest.output || {}).summary) || '档案管理员 AI 已完成精整并入档。',
+                title: latest.status === 'error' ? tr('archive_notice_ai_refine_failed_title', 'AI refine failed') : tr('archive_notice_ai_refine_done_title', 'AI refine complete'),
+                message: latest.summary || ((latest.output || {}).summary) || tr('archive_notice_ai_refine_done_message', 'Archive manager AI has refined and saved the archive.'),
             };
         } catch (e) {
             state.managerNotice = {
                 status: 'error',
-                title: 'AI 精整失败',
+                title: tr('archive_notice_ai_refine_failed_title', 'AI refine failed'),
                 message: e.message || String(e),
             };
         } finally {
@@ -846,7 +875,7 @@
             <div class="archive-entry ${entry.stale ? 'stale' : ''}">
                 <div class="archive-entry-title">${escHtml(entry.title || entry.id || 'Entry')}</div>
                 <div class="archive-entry-text">${escHtml(entry.text || '')}</div>
-                ${entry.staleReason ? `<div class="archive-entry-stale">已过期：${escHtml(entry.staleReason)}</div>` : ''}
+                ${entry.staleReason ? `<div class="archive-entry-stale">${escHtml(tr('archive_stale_reason', 'Stale: {{reason}}', { reason: entry.staleReason }))}</div>` : ''}
                 ${renderSourceComparison(entry.sourceComparison)}
                 <div class="archive-tags">${tags.map(t => `<span class="archive-tag">${escHtml(t)}</span>`).join('')}</div>
             </div>`;
@@ -855,49 +884,49 @@
     function renderSourceComparison(cmp) {
         if (!cmp || (!cmp.oldSourceLabel && !cmp.newSourceLabel && !cmp.managerJudgment)) return '';
         return `<div class="archive-source-comparison">
-            <div><label>旧来源</label><span>${escHtml(cmp.oldSourceLabel || cmp.oldTitle || '无')}</span></div>
-            <div><label>新来源</label><span>${escHtml(cmp.newSourceLabel || cmp.newTitle || '无')}</span></div>
+            <div><label>${escHtml(tr('archive_old_source', 'Old source'))}</label><span>${escHtml(cmp.oldSourceLabel || cmp.oldTitle || noneText())}</span></div>
+            <div><label>${escHtml(tr('archive_new_source', 'New source'))}</label><span>${escHtml(cmp.newSourceLabel || cmp.newTitle || noneText())}</span></div>
             ${cmp.managerJudgment ? `<p>${escHtml(cmp.managerJudgment)}</p>` : ''}
         </div>`;
     }
 
     function authorityLabel(value) {
         const map = {
-            human_confirmed: '人工确认',
-            system_confirmed: '系统确认',
-            source_confirmed: '来源确认',
-            archive_manager_confirmed: '管理员确认',
-            pending_human_confirmation: '待人工确认',
-            deferred: '已暂缓',
-            rejected: '已拒绝',
-            confirmed_fact: '已确认',
-            ai_inference: 'AI整理',
-            pending_confirmation_suggestion: '待确认',
+            human_confirmed: tr('archive_authority_human_confirmed', 'Human confirmed'),
+            system_confirmed: tr('archive_authority_system_confirmed', 'System confirmed'),
+            source_confirmed: tr('archive_authority_source_confirmed', 'Source confirmed'),
+            archive_manager_confirmed: tr('archive_authority_manager_confirmed', 'Manager confirmed'),
+            pending_human_confirmation: tr('archive_authority_pending_human', 'Pending human confirmation'),
+            deferred: tr('archive_authority_deferred', 'Deferred'),
+            rejected: tr('archive_authority_rejected', 'Rejected'),
+            confirmed_fact: tr('archive_authority_confirmed_fact', 'Confirmed'),
+            ai_inference: tr('archive_authority_ai_inference', 'AI organized'),
+            pending_confirmation_suggestion: tr('archive_authority_pending_suggestion', 'Pending confirmation'),
         };
-        return map[value] || value || '未知';
+        return map[value] || value || tr('unknown', 'unknown');
     }
 
     function renderGovernanceSection(p) {
         const pending = p.pendingConfirmations || [];
         const history = (p.processedGovernance || []).slice().reverse().slice(0, 8);
         return `<section class="archive-section archive-governance-section">
-            <h3>档案治理</h3>
+            <h3>${escHtml(tr('archive_governance', 'Archive governance'))}</h3>
             <div class="archive-section-body">
                 <div class="archive-governance-head">
                     <div>
-                        <strong>${escHtml(pending.filter(x => (x.authority || x.status) !== 'deferred').length)} 个待人工确认</strong>
-                        <span>长期规则、高影响建议和冲突会进入这里；客观事实和低风险管理员整理不会打扰人工队列。</span>
+                        <strong>${escHtml(tr('archive_pending_human_count', '{{count}} pending human confirmations', { count: pending.filter(x => (x.authority || x.status) !== 'deferred').length }))}</strong>
+                        <span>${escHtml(tr('archive_governance_desc', 'Long-term rules, high-impact suggestions, and conflicts appear here; objective facts and low-risk manager organization will not interrupt the human queue.'))}</span>
                     </div>
                     <div class="archive-authority-legend">
-                        <span>系统/来源确认</span><span>管理员确认</span><span>人工确认</span>
+                        <span>${escHtml(tr('archive_legend_system_source', 'System/source confirmed'))}</span><span>${escHtml(tr('archive_legend_manager', 'Manager confirmed'))}</span><span>${escHtml(tr('archive_legend_human', 'Human confirmed'))}</span>
                     </div>
                 </div>
                 <div class="archive-pending-list">
-                    ${pending.map(renderPendingItem).join('') || '<div class="archive-room-empty compact">暂无待确认治理项。</div>'}
+                    ${pending.map(renderPendingItem).join('') || `<div class="archive-room-empty compact">${escHtml(tr('archive_no_pending_governance', 'No pending governance items.'))}</div>`}
                 </div>
                 <div class="archive-history-block">
-                    <div class="archive-history-title">处理历史</div>
-                    ${history.map(renderGovernanceHistory).join('') || '<div class="archive-room-empty compact">暂无处理历史。</div>'}
+                    <div class="archive-history-title">${escHtml(tr('archive_processing_history', 'Processing history'))}</div>
+                    ${history.map(renderGovernanceHistory).join('') || `<div class="archive-room-empty compact">${escHtml(tr('archive_no_processing_history', 'No processing history.'))}</div>`}
                 </div>
             </div>
         </section>`;
@@ -907,29 +936,29 @@
         const authority = item.authority || item.status || 'pending_human_confirmation';
         const deferred = authority === 'deferred' || item.status === 'deferred';
         const sources = (item.sources || []).map(s => s.title || s.id || s.type || s.sourceType).filter(Boolean).slice(0, 3).join(' · ');
-        const conflict = item.conflictSummary || (item.conflict && '与已确认内容冲突');
+        const conflict = item.conflictSummary || (item.conflict && tr('archive_conflict_with_confirmed', 'Conflicts with confirmed content'));
         const encodedId = encodeURIComponent(item.id || '');
         return `<div class="archive-pending-item ${deferred ? 'deferred' : ''} ${conflict ? 'conflict' : ''}">
             <div class="archive-pending-main">
                 <div class="archive-pending-title-row">
-                    <strong>${escHtml(item.title || '待确认项')}</strong>
+                    <strong>${escHtml(item.title || tr('archive_pending_item', 'Pending item'))}</strong>
                     <span class="archive-authority-pill">${escHtml(authorityLabel(authority))}</span>
                     ${item.impact ? `<span class="archive-impact-pill">${escHtml(item.impact)}</span>` : ''}
                 </div>
                 ${conflict ? `<div class="archive-conflict-summary">${escHtml(conflict)}</div>` : ''}
                 <p>${escHtml(item.text || '')}</p>
                 <div class="archive-pending-meta">
-                    ${item.reason ? `<span>原因：${escHtml(item.reason)}</span>` : ''}
-                    ${sources ? `<span>来源：${escHtml(sources)}</span>` : '<span>来源不可用</span>'}
+                    ${item.reason ? `<span>${escHtml(tr('archive_reason_label', 'Reason'))}: ${escHtml(item.reason)}</span>` : ''}
+                    ${sources ? `<span>${escHtml(tr('archive_source_label', 'Source'))}: ${escHtml(sources)}</span>` : `<span>${escHtml(tr('archive_source_unavailable', 'Source unavailable'))}</span>`}
                     <span>${escHtml(formatDate(item.createdAt))}</span>
                 </div>
                 ${renderConflictSides(item)}
             </div>
             <div class="archive-pending-actions">
-                <button class="archive-primary-btn" ${state.governanceBusy ? 'disabled' : ''} onclick="ArchiveRoom.handleGovernance(decodeURIComponent('${encodedId}'), 'confirm')">确认</button>
-                <button class="archive-secondary-btn" ${state.governanceBusy ? 'disabled' : ''} onclick="ArchiveRoom.handleGovernance(decodeURIComponent('${encodedId}'), 'edit_confirm')">编辑确认</button>
-                <button class="archive-secondary-btn" ${state.governanceBusy ? 'disabled' : ''} onclick="ArchiveRoom.handleGovernance(decodeURIComponent('${encodedId}'), 'defer')">暂缓</button>
-                <button class="archive-secondary-btn danger" ${state.governanceBusy ? 'disabled' : ''} onclick="ArchiveRoom.handleGovernance(decodeURIComponent('${encodedId}'), 'reject')">拒绝</button>
+                <button class="archive-primary-btn" ${state.governanceBusy ? 'disabled' : ''} onclick="ArchiveRoom.handleGovernance(decodeURIComponent('${encodedId}'), 'confirm')">${escHtml(tr('archive_confirm', 'Confirm'))}</button>
+                <button class="archive-secondary-btn" ${state.governanceBusy ? 'disabled' : ''} onclick="ArchiveRoom.handleGovernance(decodeURIComponent('${encodedId}'), 'edit_confirm')">${escHtml(tr('archive_edit_confirm', 'Edit and confirm'))}</button>
+                <button class="archive-secondary-btn" ${state.governanceBusy ? 'disabled' : ''} onclick="ArchiveRoom.handleGovernance(decodeURIComponent('${encodedId}'), 'defer')">${escHtml(tr('archive_defer', 'Defer'))}</button>
+                <button class="archive-secondary-btn danger" ${state.governanceBusy ? 'disabled' : ''} onclick="ArchiveRoom.handleGovernance(decodeURIComponent('${encodedId}'), 'reject')">${escHtml(tr('archive_reject', 'Reject'))}</button>
             </div>
         </div>`;
     }
@@ -939,15 +968,15 @@
         const confirmed = item.confirmedSide || {};
         const suggested = item.suggestedSide || {};
         return `<div class="archive-conflict-sides">
-            <div><label>已确认</label><span>${escHtml(confirmed.text || confirmed.title || '未提供')}</span></div>
-            <div><label>新建议</label><span>${escHtml(suggested.text || suggested.title || item.text || '')}</span></div>
+            <div><label>${escHtml(tr('archive_confirmed', 'Confirmed'))}</label><span>${escHtml(confirmed.text || confirmed.title || tr('archive_not_provided', 'Not provided'))}</span></div>
+            <div><label>${escHtml(tr('archive_new_suggestion', 'New suggestion'))}</label><span>${escHtml(suggested.text || suggested.title || item.text || '')}</span></div>
         </div>`;
     }
 
     function renderGovernanceHistory(item) {
         const meta = [authorityLabel(item.status || item.action), item.actor || '', formatDate(item.at)].filter(Boolean).join(' · ');
         return `<div class="archive-history-item">
-            <strong>${escHtml(item.title || item.pendingId || '治理记录')}</strong>
+            <strong>${escHtml(item.title || item.pendingId || tr('archive_governance_record', 'Governance record'))}</strong>
             <span>${escHtml(meta)}</span>
             ${item.reason ? `<p>${escHtml(item.reason)}</p>` : ''}
         </div>`;
@@ -962,7 +991,7 @@
             itemId,
             action,
             title: governanceActionTitle(action),
-            itemTitle: item.title || '待确认项',
+            itemTitle: item.title || tr('archive_pending_item', 'Pending item'),
             text: item.text || '',
             reason: '',
             error: '',
@@ -972,11 +1001,11 @@
     }
 
     function governanceActionTitle(action) {
-        if (action === 'confirm') return '确认入档';
-        if (action === 'edit_confirm') return '编辑后确认';
-        if (action === 'defer') return '暂缓处理';
-        if (action === 'reject') return '拒绝建议';
-        return '处理档案治理项';
+        if (action === 'confirm') return tr('archive_governance_confirm_archive', 'Confirm into archive');
+        if (action === 'edit_confirm') return tr('archive_governance_edit_confirm', 'Edit then confirm');
+        if (action === 'defer') return tr('archive_governance_defer', 'Defer handling');
+        if (action === 'reject') return tr('archive_governance_reject', 'Reject suggestion');
+        return tr('archive_governance_handle_item', 'Handle archive governance item');
     }
 
     function closeGovernanceDialog() {
@@ -998,7 +1027,7 @@
         if (dialog.action === 'edit_confirm') {
             body.text = textEl ? textEl.value : dialog.text;
             if (!String(body.text || '').trim()) {
-                state.governanceDialog = { ...dialog, error: '确认内容不能为空。' };
+                state.governanceDialog = { ...dialog, error: tr('archive_governance_content_required', 'Confirmation content cannot be empty.') };
                 render();
                 restoreScrollState(scrollState);
                 return;
@@ -1026,7 +1055,7 @@
     function renderArtifactLauncher(p) {
         const artifacts = p.artifacts || [];
         if (!artifacts.length) {
-            const msg = p.artifactError || '暂无明确关联的任务产物。';
+            const msg = p.artifactError || tr('archive_no_explicit_artifacts', 'No explicitly associated task artifacts.');
             return `<div class="archive-room-empty">${escHtml(msg)}</div>`;
         }
         const byKind = artifacts.reduce((acc, item) => {
@@ -1038,17 +1067,17 @@
         return `
             <div class="archive-artifact-launcher">
                 <div>
-                    <div class="archive-artifact-launcher-title">${escHtml(artifacts.length)} 个项目产物</div>
+                    <div class="archive-artifact-launcher-title">${escHtml(trCount('archive_project_artifacts_count', '{{count}} project artifacts', artifacts.length))}</div>
                     <div class="archive-artifact-launcher-meta">${escHtml(kindText)}</div>
                 </div>
-                <button class="archive-primary-btn" onclick="ArchiveRoom.openProjectArtifacts()">查看项目产物</button>
+                <button class="archive-primary-btn" onclick="ArchiveRoom.openProjectArtifacts()">${escHtml(tr('archive_view_project_artifacts', 'View project artifacts'))}</button>
             </div>`;
     }
 
     function renderArtifacts(p, mode) {
         const artifacts = p.artifacts || [];
         if (!artifacts.length) {
-            const msg = p.artifactError || '暂无明确关联的任务产物。';
+            const msg = p.artifactError || tr('archive_no_explicit_artifacts', 'No explicitly associated task artifacts.');
             return `<div class="archive-room-empty">${escHtml(msg)}</div>`;
         }
         const gridClass = mode === 'browser' ? '' : ' archive-artifact-list-grid';
@@ -1060,23 +1089,23 @@
 
     function renderArtifactBrowser(p) {
         const a = state.selectedArtifact;
-        const meta = a ? `${a.kind || 'file'} · ${formatBytes(a.size)} · ${a.path}` : '选择一个产物查看预览';
+        const meta = a ? `${a.kind || 'file'} · ${formatBytes(a.size)} · ${a.path}` : tr('archive_select_artifact_preview', 'Select an artifact to preview');
         const source = a ? artifactSourceText(a) : '';
         return `
             <div class="archive-artifact-browser">
                 <aside class="archive-artifact-browser-sidebar">
                     <div class="archive-artifact-browser-label">
-                        <span>产物目录</span>
+                        <span>${escHtml(tr('archive_artifact_directory', 'Artifact directory'))}</span>
                         <div class="archive-artifact-view-tabs">
-                            ${artifactViewTab('source', '按来源')}
-                            ${artifactViewTab('path', '按路径')}
+                            ${artifactViewTab('source', tr('archive_artifact_by_source', 'By source'))}
+                            ${artifactViewTab('path', tr('archive_artifact_by_path', 'By path'))}
                         </div>
                     </div>
                     ${renderArtifactDirectory(p)}
                 </aside>
                 <section class="archive-artifact-browser-preview">
                     <div class="archive-artifact-preview-head">
-                        <div class="archive-artifact-preview-title">${escHtml((a && (a.name || a.path)) || '产物预览')}</div>
+                        <div class="archive-artifact-preview-title">${escHtml((a && (a.name || a.path)) || tr('archive_artifact_preview', 'Artifact preview'))}</div>
                         <div class="archive-artifact-preview-meta">${escHtml(meta)}</div>
                         ${source ? `<div class="archive-artifact-source-line">${escHtml(source)}</div>` : ''}
                     </div>
@@ -1103,7 +1132,7 @@
             const key = s.taskId || s.taskTitle || 'unknown-source';
             if (!groups.has(key)) {
                 groups.set(key, {
-                    title: s.taskTitle || '来源不可用',
+                    title: s.taskTitle || tr('archive_source_unavailable', 'Source unavailable'),
                     meta: [s.agentId || s.providerKind || '', s.capturedAt ? formatDate(s.capturedAt) : ''].filter(Boolean).join(' · '),
                     artifacts: [],
                 });
@@ -1114,7 +1143,7 @@
             <div class="archive-artifact-group">
                 <div class="archive-artifact-group-head">
                     <div class="archive-artifact-group-title">${escHtml(group.title)}</div>
-                    <div class="archive-artifact-group-meta">${escHtml(group.artifacts.length)} 个产物${group.meta ? ` · ${escHtml(group.meta)}` : ''}</div>
+                    <div class="archive-artifact-group-meta">${escHtml(trCount('archive_artifact_count', '{{count}} artifacts', group.artifacts.length))}${group.meta ? ` · ${escHtml(group.meta)}` : ''}</div>
                 </div>
                 <div class="archive-artifact-group-items">
                     ${group.artifacts.map(a => renderArtifactRow(p.projectId, a)).join('')}
@@ -1157,7 +1186,7 @@
             <button class="archive-artifact-row ${active}" onclick="ArchiveRoom.openArtifact('${escHtml(projectId)}', decodeURIComponent('${encodeURIComponent(a.path)}'))">
                 <div class="archive-artifact-name">${escHtml(a.name || a.path)}</div>
                 <div class="archive-artifact-meta">${escHtml(a.kind || 'file')} · ${escHtml(formatBytes(a.size))}</div>
-                ${source ? `<div class="archive-artifact-source">${escHtml(source)}</div>` : '<div class="archive-artifact-source muted">来源不可用</div>'}
+                ${source ? `<div class="archive-artifact-source">${escHtml(source)}</div>` : `<div class="archive-artifact-source muted">${escHtml(tr('archive_source_unavailable', 'Source unavailable'))}</div>`}
                 <div class="archive-artifact-meta">${escHtml(a.path)}</div>
             </button>`;
     }
@@ -1168,12 +1197,12 @@
         if (!s) return '';
         const parts = [];
         const task = s.taskTitle || s.taskId || '';
-        if (task) parts.push(`来源任务：${task}`);
+        if (task) parts.push(tr('archive_artifact_source_task', 'Source task: {{task}}', { task }));
         const agent = s.agentId || s.providerKind || '';
-        if (agent) parts.push(`AI：${agent}`);
-        if (s.capturedAt) parts.push(`时间：${formatDate(s.capturedAt)}`);
-        if (!parts.length && s.sourceType) parts.push(`来源：${s.sourceType}`);
-        if (sources.length > 1) parts.push(`另有 ${sources.length - 1} 条来源`);
+        if (agent) parts.push(tr('archive_artifact_ai', 'AI: {{agent}}', { agent }));
+        if (s.capturedAt) parts.push(tr('archive_artifact_time', 'Time: {{time}}', { time: formatDate(s.capturedAt) }));
+        if (!parts.length && s.sourceType) parts.push(tr('archive_source_label', 'Source') + `: ${s.sourceType}`);
+        if (sources.length > 1) parts.push(tr('archive_additional_sources', '{{count}} more sources', { count: sources.length - 1 }));
         return parts.join(' · ');
     }
 
@@ -1184,22 +1213,22 @@
 
     function renderPreview(projectId) {
         const a = state.selectedArtifact;
-        if (!a) return '<div class="archive-room-empty">选择一个产物查看预览。</div>';
+        if (!a) return `<div class="archive-room-empty">${escHtml(tr('archive_select_artifact_preview', 'Select an artifact to preview'))}</div>`;
         const url = `/api/projects/${encodeURIComponent(projectId)}/artifacts/file?path=${encodeURIComponent(a.path)}`;
         const kind = a.kind || '';
         if (kind === 'markdown' || kind === 'text') {
-            return `<pre>${escHtml(state.selectedText || '正在加载...')}</pre><a class="archive-open-link" href="${escHtml(url)}" target="_blank" rel="noopener">打开文件</a>`;
+            return `<pre>${escHtml(state.selectedText || tr('loading', 'Loading...'))}</pre><a class="archive-open-link" href="${escHtml(url)}" target="_blank" rel="noopener">${escHtml(tr('archive_open_file', 'Open file'))}</a>`;
         }
         if (kind === 'image') {
-            return `<img src="${escHtml(url)}" alt="${escHtml(a.name || a.path)}"><a class="archive-open-link" href="${escHtml(url)}" target="_blank" rel="noopener">打开图片</a>`;
+            return `<img src="${escHtml(url)}" alt="${escHtml(a.name || a.path)}"><a class="archive-open-link" href="${escHtml(url)}" target="_blank" rel="noopener">${escHtml(tr('archive_open_image', 'Open image'))}</a>`;
         }
         if (kind === 'video') {
-            return `<video src="${escHtml(url)}" controls></video><a class="archive-open-link" href="${escHtml(url)}" target="_blank" rel="noopener">打开视频</a>`;
+            return `<video src="${escHtml(url)}" controls></video><a class="archive-open-link" href="${escHtml(url)}" target="_blank" rel="noopener">${escHtml(tr('archive_open_video', 'Open video'))}</a>`;
         }
         if (kind === 'audio') {
-            return `<audio src="${escHtml(url)}" controls></audio><a class="archive-open-link" href="${escHtml(url)}" target="_blank" rel="noopener">打开音频</a>`;
+            return `<audio src="${escHtml(url)}" controls></audio><a class="archive-open-link" href="${escHtml(url)}" target="_blank" rel="noopener">${escHtml(tr('archive_open_audio', 'Open audio'))}</a>`;
         }
-        return `<div class="archive-room-empty">这个产物暂不支持内嵌预览。</div><a class="archive-open-link" href="${escHtml(url)}" target="_blank" rel="noopener">打开或下载</a>`;
+        return `<div class="archive-room-empty">${escHtml(tr('archive_preview_unsupported', 'This artifact does not support inline preview yet.'))}</div><a class="archive-open-link" href="${escHtml(url)}" target="_blank" rel="noopener">${escHtml(tr('archive_open_or_download', 'Open or download'))}</a>`;
     }
 
     async function openArtifact(projectId, path) {
@@ -1223,7 +1252,7 @@
                     showArtifactModal(projectId);
                 }
             } catch (e) {
-                state.selectedText = `无法读取产物：${e.message || e}`;
+                state.selectedText = tr('archive_read_failed', 'Unable to read artifact: {{error}}', { error: e.message || e });
                 if (state.artifactBrowserOpen) {
                     showProjectArtifactsModal();
                 } else {
@@ -1250,7 +1279,7 @@
                 state.selectedText = (d.artifact && d.artifact.content) || '';
                 if (state.artifactBrowserOpen) showProjectArtifactsModal();
             } catch (e) {
-                state.selectedText = `无法读取产物：${e.message || e}`;
+                state.selectedText = tr('archive_read_failed', 'Unable to read artifact: {{error}}', { error: e.message || e });
                 if (state.artifactBrowserOpen) showProjectArtifactsModal();
             }
         }
@@ -1265,9 +1294,9 @@
         const body = document.getElementById('archive-artifact-modal-body');
         const open = document.getElementById('archive-artifact-open-link');
         if (!overlay || !title || !meta || !body || !open) return;
-        title.textContent = '项目产物';
+        title.textContent = tr('archive_project_artifacts_title', 'Project artifacts');
         const count = (detail.artifacts || []).length;
-        meta.textContent = `${detail.title || '未命名项目'} · ${count} 个产物`;
+        meta.textContent = `${detail.title || tr('archive_untitled_project', 'Untitled project')} · ${trCount('archive_artifact_count', '{{count}} artifacts', count)}`;
         const a = state.selectedArtifact;
         if (a) {
             open.href = `/api/projects/${encodeURIComponent(detail.projectId)}/artifacts/file?path=${encodeURIComponent(a.path)}`;
@@ -1296,7 +1325,7 @@
         state.artifactBrowserOpen = false;
         const url = `/api/projects/${encodeURIComponent(projectId)}/artifacts/file?path=${encodeURIComponent(a.path)}`;
         title.textContent = a.name || a.path;
-        meta.textContent = `${a.kind || '文件'} · ${formatBytes(a.size)} · ${a.path}`;
+        meta.textContent = `${a.kind || tr('archive_file_kind', 'file')} · ${formatBytes(a.size)} · ${a.path}`;
         open.href = url;
         open.style.display = '';
         body.innerHTML = renderPreview(projectId);

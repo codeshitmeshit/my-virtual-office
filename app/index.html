@@ -790,8 +790,8 @@
                         <div id="archive-artifact-modal-meta" class="archive-artifact-modal-meta"></div>
                     </div>
                     <div class="archive-artifact-modal-actions">
-                        <a id="archive-artifact-open-link" class="archive-open-link" href="#" target="_blank" rel="noopener">打开</a>
-                        <button class="archive-copy-btn" onclick="ArchiveRoom.closeArtifact()">关闭</button>
+                        <a id="archive-artifact-open-link" class="archive-open-link" href="#" target="_blank" rel="noopener" data-i18n="archive_artifact_open">Open</a>
+                        <button class="archive-copy-btn" onclick="ArchiveRoom.closeArtifact()" data-i18n="archive_artifact_close">Close</button>
                     </div>
                 </div>
                 <div id="archive-artifact-modal-body" class="archive-artifact-modal-body"></div>
@@ -888,7 +888,7 @@
                 <option value="main" data-emoji="🤖" data-name="Main Agent" selected>🤖 Main Agent</option>
             </select>
             <span id="chat-status" class="chat-status" data-i18n="offline_status">Offline</span>
-            <span class="chat-feishu-live-status" hidden>飞书实时: 未连接</span>
+            <span class="chat-feishu-live-status" data-i18n="chat_feishu_live_disconnected" hidden>Feishu live: disconnected</span>
             <span style="flex:1"></span>
             <div class="chat-header-btns">
                 <button id="chat-compact-context" class="chat-compact-context" title="Compress Codex context" style="display:none" data-i18n-title="compress_codex_context">🗜</button>
