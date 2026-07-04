@@ -1,12 +1,12 @@
 {
   "name": "feishu-ceo-agent-chat-sync",
-  "stage": "implementation_done",
-  "waiting_for_user": true,
-  "updated_at": "2026-07-04T19:22:16+08:00",
+  "stage": "done",
+  "waiting_for_user": false,
+  "updated_at": "2026-07-05T01:18:00+08:00",
   "confirmed": {
     "checklist": true,
-    "tested": false,
-    "done": false
+    "tested": true,
+    "done": true
   },
   "confirmations": {
     "checklist": {
@@ -14,8 +14,16 @@
       "confirmed_at": "2026-07-04T18:23:13+08:00",
       "summary": "用户回复“可以出 todolist 了”，视为确认当前 checklist 并继续生成 todolist。"
     },
-    "tested": null,
-    "done": null
+    "tested": {
+      "item": "tested",
+      "confirmed_at": "2026-07-05T01:18:00+08:00",
+      "summary": "用户已在本地 http://localhost:8090/ 完成飞书聊天通道验收，并确认“这个需求我验收过了”。"
+    },
+    "done": {
+      "item": "done",
+      "confirmed_at": "2026-07-05T01:18:00+08:00",
+      "summary": "用户确认需求已验收并要求 push；需求闭环完成，归档到 archive。"
+    }
   },
   "files": {
     "requirement": "requirement.md",
@@ -58,6 +66,8 @@
     "Added direct Feishu text sender coverage for chat app credential flow, /im/v1/messages text payload, and secret redaction.",
     "Added acceptance-audit.md mapping CHK-001 through CHK-022 to current evidence and remaining real Feishu end-to-end gates.",
     "Added read-only /api/feishu-chat/records route and test to support VO-side acceptance inspection of Feishu channel records.",
-    "Blocked from final tested/done closure because CHK-022 requires real Feishu chat app credentials, long-connection event delivery, and Feishu client reply evidence; current environment has no VO_FEISHU_CHAT_APP_ID/VO_FEISHU_CHAT_APP_SECRET."
+    "Blocked from final tested/done closure because CHK-022 requires real Feishu chat app credentials, long-connection event delivery, and Feishu client reply evidence; current environment has no VO_FEISHU_CHAT_APP_ID/VO_FEISHU_CHAT_APP_SECRET.",
+    "User completed local Feishu chat acceptance on 2026-07-05 and confirmed the requirement is accepted.",
+    "Requirement marked done and archived after final user confirmation."
   ]
 }
