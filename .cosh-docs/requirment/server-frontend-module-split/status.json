@@ -1,0 +1,62 @@
+{
+  "name": "server-frontend-module-split",
+  "stage": "implementation_done",
+  "waiting_for_user": false,
+  "updated_at": "2026-07-04T10:28:30+08:00",
+  "confirmed": {
+    "checklist": true,
+    "tested": false,
+    "done": false
+  },
+  "confirmations": {
+    "checklist": {
+      "item": "phase2_checklist",
+      "confirmed_at": "2026-07-03T22:27:36+08:00",
+      "summary": "用户回复“可以根据 todolist 执行 phase2 了”并随后提供“PLEASE IMPLEMENT THIS PLAN”，确认 Phase 2 增量 checklist 和 todolist 可执行。"
+    },
+    "tested": null,
+    "done": null
+  },
+  "files": {
+    "requirement": "requirement.md",
+    "review": "review.md",
+    "checklist": "checklist.md",
+    "todolist": "todolist.md"
+  },
+  "notes": [
+    "Checklist confirmed by user and todolist.md generated.",
+    "Implementation completed: server_routes package, settings modules, dispatch hooks, and structural split test added.",
+    "Retest completed: fixed project task delete route parsing and added dispatch-level route tests; migration checks pass.",
+    "Testing not confirmed: targeted migration, Node, provider, Feishu, and meeting tests passed; full Python regression still has business-handler/shared-state failures recorded in checklist.md.",
+    "Existing split-game-js requirement is related but narrower; this requirement covers backend routes and frontend settings modules.",
+    "Phase 2 scope added on 2026-07-03T22:11:43+08:00: real migration of setup inline settings, game.js main-menu settings, and duplicate server.py route branches.",
+    "Phase 2 checklist confirmed and implemented on 2026-07-03T22:27:36+08:00.",
+    "Phase 2 migration checks pass: setup/main-menu logic moved, duplicate server.py route branches removed, structural and route tests pass.",
+    "Testing not confirmed: project execution/cron business-handler failures and one combined phase4 notification-state failure remain recorded in checklist.md.",
+    "Phase 3-7 game.js split roadmap recorded on 2026-07-03T22:32:03+08:00: Agent Creator Panel, Layout Editor, Environment Rendering, Agents/Bubbles/Animations, then Meetings/Sidebar/Workspace/Skills bootstrap cleanup.",
+    "Phase 3-7 roadmap updated on 2026-07-03T22:35:37+08:00 to add mandatory test gate TODOs between implementation phases; next phase cannot start until the previous test gate passes or is explicitly recorded.",
+    "Phase 3-7 implemented on 2026-07-03T22:55:20+08:00: game.js split into focused modules and reduced to about 1340 lines; per-phase gates and targeted regression passed.",
+    "Browser smoke found and fixed pollAgentChat startup-order/cache-bust issue; service smoke passed for /health, /api/license, and /browser-status.",
+    "Testing still not confirmed: full related Python regression has existing project execution/cron and meeting notification-state failures recorded in checklist.md; requirement remains implementation_done, not tested/done.",
+    "Phase 8-11 Python service split roadmap recorded on 2026-07-03T22:59:07+08:00: Projects, Meetings, Providers, and Notifications will move from server.py into app/server_services with mandatory test gates between every phase.",
+    "No Phase 8-11 implementation has started yet; docs now require one split followed by one test gate before the next split.",
+    "Phase 8-11 implemented on 2026-07-03T23:18:13+08:00: Projects, Meetings, Providers, and Notifications business functions moved from server.py into app/server_services; routes now call service modules directly while server.py keeps compatibility exports.",
+    "Phase 8-11 migration checks pass: py_compile, enhanced structural check, route tests, meeting/provider/notification targeted tests, Node targeted checks, and service smoke passed.",
+    "Testing still not confirmed: full related Python regression remains 129 passed, 7 failed, 1 warning due to existing project execution/cron assertions, one combined cron temp cleanup failure, and one combined Feishu notification-state difference recorded in checklist.md.",
+    "Phase 8-11 final retest completed on 2026-07-03T23:28:36+08:00: fixed project/task reference compatibility, cron repeat-disabled reason, isolated Feishu config leakage, and drained project workflow background threads during tests.",
+    "Phase 8-11 final checks are green: full related Python subset is 136 passed, 1 warning; structural Node check, targeted Node checks, py_compile, and service smoke all passed.",
+    "Requirement remains implementation_done with tested/done awaiting user confirmation before archive.",
+    "Overall acceptance completed on 2026-07-04T00:27:02+08:00: split structure passes, py_compile/node --check/structural check/E2E workflow/shell CRUD/service smoke pass, but full pytest-compatible suite is 290 passed and 12 failed, and Node/browser suite is 19 passed and 17 failed or timed out. Do not mark tested/done until these failures are resolved or explicitly accepted.",
+    "Full regression repair completed on 2026-07-04T02:27:27+08:00: pytest-compatible suite is 302 passed, 1 warning; workflow e2e script is 20/20 passed; Node/browser suite is 36/36 passed; py_compile/node --check/service smoke passed. Requirement remains implementation_done and awaits user confirmation for tested/done.",
+    "Overall acceptance rerun completed on 2026-07-04T02:36:19+08:00: split structure and file responsibilities pass; pytest-compatible suite is 302 passed, 1 warning; workflow e2e script is 20/20 passed after service startup; CRUD shell is 5 passed, 0 failed against 127.0.0.1; Node/browser suite is 36/36 passed; service smoke passed. Requirement remains implementation_done and awaits user confirmation for tested/done.",
+    "Final acceptance rerun completed on 2026-07-04T02:48:11+08:00 after fixing workflow provider activity list handling and updating workflow e2e phase acceptance: py_compile passed; pytest-compatible suite is 302 passed, 1 warning; workflow e2e script is 20/20 passed; Node/browser suite is 36/36 passed; CRUD shell is 5/5 passed; service smoke passed. Requirement remains implementation_done and awaits user confirmation for tested/done.",
+    "Final overall acceptance completed on 2026-07-04T02:56:21+08:00: split structure and file responsibilities pass; py_compile/node --check/structural split checks pass; pytest-compatible suite is 302 passed, 1 warning; workflow e2e script is 20/20 passed; CRUD shell is 5/5 passed; service smoke passed; Node/browser suite is 36/36 passed. No failing tests remain. Requirement remains implementation_done and awaits user confirmation for tested/done.",
+    "Phase 12-17 Python main-service slimming roadmap recorded on 2026-07-04T09:12:48+08:00: Workflow, Archive Room, Agent Provider Bridge, Agent Workspace/Skills, Browser/Config/Status, then final server.py compatibility cleanup and full regression. Docs require one migration followed by one test gate before the next phase; no Phase 12-17 implementation has started yet.",
+    "Phase 12 completed on 2026-07-04T09:28:30+08:00: workflow engine and workflow API routes moved to server_services/workflow.py and server_routes/workflow.py; Phase 12 gate passed with py_compile, structural check, route tests, project/cron subset 98 passed, start payload check, and workflow e2e 20/20 passed.",
+    "Phase 13 completed on 2026-07-04T09:38:30+08:00: archive room domain logic and API routes moved to server_services/archive_room.py and server_routes/archive_room.py; Phase 13 gate passed with py_compile, structural check, route tests, archive pytest subset 28 passed, and seven archive browser/Node checks.",
+    "Phase 14 completed on 2026-07-04T09:55:30+08:00: Hermes/Codex/Claude Code provider bridge logic and routes moved to server_services/agent_bridges.py and server_routes/agent_bridges.py; Phase 14 gate passed with py_compile, structural check, route tests 8 passed, provider bridge pytest subset 52 passed, and Codex/Claude Node bridge/i18n checks.",
+    "Phase 15 completed on 2026-07-04T09:57:30+08:00: agent workspace/platform communication/lifecycle and skills-library/workshop logic moved to server_services/agents.py, server_services/skills.py, server_routes/agents.py, and server_routes/skills.py; Phase 15 gate passed with py_compile, structural check, route tests 10 passed, related pytest subset 27 passed, readonly UI check, JS syntax checks, and live smoke for /api/agents, /api/skills-library, and /api/agent-platform-communications endpoints.",
+    "Phase 16 completed on 2026-07-04T10:04:30+08:00: browser runtime and config/status endpoints moved to server_services/browser_runtime.py, server_services/config_runtime.py, server_routes/browser.py, and server_routes/config.py; Phase 16 gate passed with py_compile, structural check, route tests 12 passed, browser/weather/i18n/provider UI Node checks, and live smoke for /health, /api/license, /browser-status, /browser-tabs, and /vo-config. /api/gateway/test was restored in config route after migration cleanup.",
+    "Phase 17 completed on 2026-07-04T10:28:30+08:00: server.py compatibility layer finalized at 7341 lines with top defs 124/functions total 227, config runtime global sync and agent bridge monkeypatch restore issues fixed, pytest-compatible suite is 309 passed with 1 third-party warning, workflow e2e is 20/20 passed, CRUD shell is 5/5 passed, smoke endpoints passed, and full Node/browser suite passed after one flaky CDP item was rerun and then passed in a complete second run. Requirement remains implementation_done and awaits user confirmation for tested/done."
+  ]
+}

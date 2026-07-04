@@ -1898,6 +1898,8 @@
   "feishu_app_secret": "Feishu App Secret",
   "feishu_receive_id_type": "Receive ID Type",
   "feishu_receive_id": "Receive ID",
+  "feishu_long_connection_pending": "Long connection starts after saving config.",
+  "feishu_long_connection_status": "Long connection status: {{status}}",
   "feishu_configured_app": "App configured: {{appId}}, {{receiveIdType}} {{receiveId}}",
   "feishu_configured_webhook": "Webhook configured: {{value}}",
   "feishu_configured_app_webhook": "App configured: {{appId}}, {{receiveIdType}} {{receiveId}}; webhook fallback: {{webhook}}",

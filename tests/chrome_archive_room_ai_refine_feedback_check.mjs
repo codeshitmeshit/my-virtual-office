@@ -1,8 +1,21 @@
 import fs from 'node:fs';
+import { spawnSync } from 'node:child_process';
 
 const archiveRoomJs = fs.readFileSync('app/archive-room.js', 'utf8');
 const archiveRoomCss = fs.readFileSync('app/archive-room.css', 'utf8');
-const overview = await (await fetch('http://127.0.0.1:8090/api/archive-room')).json();
+
+async function loadOverviewWithFixture() {
+  let data = await (await fetch('http://127.0.0.1:8090/api/archive-room')).json();
+  if ((data.projects || []).length) return data;
+  const python = fs.existsSync('.venv/bin/python') ? '.venv/bin/python' : 'python3';
+  const seeded = spawnSync(python, ['tests/seed_archive_room_phase7_fixture.py'], { encoding: 'utf8', env: { ...process.env, VO_STATUS_DIR: `${process.cwd()}/data` } });
+  if (seeded.status !== 0) throw new Error(`Failed to seed archive room fixture: ${seeded.stderr || seeded.stdout}`);
+  data = await (await fetch('http://127.0.0.1:8090/api/archive-room')).json();
+  if (!(data.projects || []).length) throw new Error('Archive room fixture did not create a visible project');
+  return data;
+}
+
+const overview = await loadOverviewWithFixture();
 const projectId = (overview.projects || [])[0]?.id;
 const project = await (await fetch(`http://127.0.0.1:8090/api/archive-room/projects/${projectId}`)).json();
 const refined = {

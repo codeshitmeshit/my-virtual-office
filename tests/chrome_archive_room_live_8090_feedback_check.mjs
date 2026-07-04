@@ -1,4 +1,17 @@
-const liveUrl = 'http://10.110.139.216:8090/';
+import fs from 'node:fs';
+import { spawnSync } from 'node:child_process';
+
+const liveUrl = process.env.VO_LIVE_URL || 'http://host.docker.internal:8090/';
+
+async function ensureArchiveFixture() {
+  const overview = await (await fetch('http://127.0.0.1:8090/api/archive-room')).json();
+  if ((overview.projects || []).length) return;
+  const python = fs.existsSync('.venv/bin/python') ? '.venv/bin/python' : 'python3';
+  const seeded = spawnSync(python, ['tests/seed_archive_room_phase7_fixture.py'], { encoding: 'utf8', env: { ...process.env, VO_STATUS_DIR: `${process.cwd()}/data` } });
+  if (seeded.status !== 0) throw new Error(`Failed to seed archive room fixture: ${seeded.stderr || seeded.stdout}`);
+}
+
+await ensureArchiveFixture();
 const pageInfo = await (await fetch(`http://127.0.0.1:9224/json/new?${encodeURIComponent(`${liveUrl}?live-feedback=${Date.now()}`)}`, { method: 'PUT' })).json();
 const created = true;
 

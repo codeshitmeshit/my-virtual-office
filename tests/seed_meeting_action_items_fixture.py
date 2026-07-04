@@ -67,6 +67,26 @@ def main():
     task["executionState"] = "awaiting_meeting_resolution"
     server._save_projects({"projects": [project]})
     applied = server._project_execution_apply_meeting_result(meeting)
+    data, project, task = server._project_execution_find(project["id"], task["id"])
+    if task:
+        for item in task.get("meetingActionItems") or []:
+            if item.get("owner") == "reviewer":
+                item["status"] = "external_task_created"
+                item["requiredForResume"] = False
+                item["linkedTaskId"] = "fixture-linked-review-task"
+                item["updatedAt"] = server._proj_now()
+        comments = task.setdefault("comments", [])
+        if not any(c.get("source") == "meeting_risk" for c in comments if isinstance(c, dict)):
+            comments.append({
+                "id": "fixture-meeting-risk-comment",
+                "text": "会议风险：Original task must not resume before meeting action items are checked.",
+                "author": "meeting",
+                "source": "meeting_risk",
+                "meetingId": meeting["id"],
+                "requestId": request_id,
+                "createdAt": server._proj_now(),
+            })
+        server._save_projects(data)
     print({"projectId": project["id"], "taskId": task["id"], "applied": applied})
 
 

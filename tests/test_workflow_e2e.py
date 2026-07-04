@@ -109,7 +109,7 @@ moved_to_inprogress = False
 while time.time() - start_time < MAX_WAIT:
     status = api_get(f"/{PROJECT_ID}/workflow/status")
     phase = status.get("phase", "")
-    if phase in ("in_progress", "reviewing", "reworking", "task_done", "awaiting_user_review"):
+    if phase in ("in_progress", "reviewing", "reworking", "task_done", "awaiting_user_review", "awaiting_human_intervention"):
         moved_to_inprogress = True
         break
     if phase in ("error", "stopped"):
@@ -175,14 +175,18 @@ import inspect
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + "/app")
 
 # Check server.py source for hardcoded personal values
-server_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "app", "server.py")
+app_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "app")
+server_path = os.path.join(app_dir, "server.py")
+workflow_path = os.path.join(app_dir, "server_services", "workflow.py")
 with open(server_path, "r") as f:
     server_src = f.read()
+with open(workflow_path, "r") as f:
+    workflow_src = f.read()
 
 # Check workflow-related functions for hardcoded values
-workflow_section_start = server_src.find("# Background thread-based workflow")
-workflow_section_end = server_src.find("WORKFLOW_STATE_FILE =", workflow_section_start)
-workflow_code = server_src[workflow_section_start:workflow_section_end] if workflow_section_start >= 0 else ""
+workflow_section_start = workflow_src.find("# Background thread-based workflow")
+workflow_section_end = workflow_src.find("WORKFLOW_STATE_FILE =", workflow_section_start)
+workflow_code = workflow_src[workflow_section_start:workflow_section_end] if workflow_section_start >= 0 else workflow_src
 
 hardcoded_patterns = [
     ("eliubuntu", "Hardcoded username"),
@@ -215,12 +219,12 @@ check("Agent calls use portable methods",
 
 # Check column matching is flexible
 check("Column matching supports partial match",
-      "title_lower in col.get" in server_src,
+      "title_lower in col.get" in workflow_src,
       "Handles 'Code Review' matching 'review'")
 
 # Verify no hardcoded timezone in workflow display
 check("No hardcoded timezone",
-      "America/New_York" not in server_src,
+      "America/New_York" not in server_src and "America/New_York" not in workflow_src,
       "Uses system local timezone")
 
 # Check the review parser handles status keywords correctly
@@ -228,7 +232,7 @@ check("No hardcoded timezone",
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "app"))
 # Import won't work easily due to server-side dependencies, so test the logic pattern
 check("Review parser orders longest-first",
-      server_src.find("did_not_pass") < server_src.find('"pass", "pass"'),
+      workflow_src.find("did_not_pass") < workflow_src.find('"pass", "pass"'),
       "Prevents 'pass' matching 'did_not_pass'")
 
 # ── Test: Review check API ──

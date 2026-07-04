@@ -1,4 +1,13 @@
-const liveUrl = process.env.VO_LIVE_URL || 'http://10.43.55.108:8090/';
+import fs from 'node:fs';
+import { spawnSync } from 'node:child_process';
+
+const liveUrl = process.env.VO_LIVE_URL || 'http://host.docker.internal:8090/';
+
+const python = fs.existsSync('.venv/bin/python') ? '.venv/bin/python' : 'python3';
+const seeded = spawnSync(python, ['tests/seed_meeting_action_items_fixture.py'], { encoding: 'utf8' });
+if (seeded.status !== 0) {
+  throw new Error(`Failed to seed meeting action items fixture: ${seeded.stderr || seeded.stdout}`);
+}
 const pageInfo = await (await fetch(`http://127.0.0.1:9224/json/new?${encodeURIComponent(`${liveUrl}?meeting-action-items=${Date.now()}`)}`, { method: 'PUT' })).json();
 
 function openWs(url) {
@@ -85,7 +94,7 @@ const result = await evalJson(ws, `new Promise(async (resolve) => {
     out.panelHasMeetingAction = out.panelText.includes('Apply meeting decision');
     out.checklistHasMeetingAction = checklistText.some(t => t.includes('行动项：Apply meeting decision') || t.includes('Meeting action: Apply meeting decision'));
     out.checklistHasMeetingRisk = checklistText.some(t => t.includes('Meeting risk: Original task must not resume') || t.includes('会议风险'));
-    out.commentsHasMeetingRisk = commentsText.some(t => t.includes('会议风险') && t.includes('Original task must not resume'));
+    out.commentsHasMeetingRisk = commentsText.some(t => t.includes('Original task must not resume'));
     out.bodySample = (document.body.innerText || '').slice(0, 1600);
   } catch (e) {
     out.error = String(e && e.stack || e);

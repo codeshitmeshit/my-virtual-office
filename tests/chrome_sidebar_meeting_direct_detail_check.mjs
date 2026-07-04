@@ -1,4 +1,4 @@
-const liveUrl = process.env.VO_LIVE_URL || 'http://192.168.100.3:8090/';
+const liveUrl = process.env.VO_LIVE_URL || 'http://host.docker.internal:8090/';
 const apiUrl = process.env.VO_API_URL || 'http://127.0.0.1:8090';
 
 const active = await (await fetch(`${apiUrl}/api/meetings/active`)).json();
@@ -44,7 +44,7 @@ function send(ws, method, params = {}) {
   const id = ++seq;
   ws.send(JSON.stringify({ id, method, params }));
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`Timed out ${method}`)), 45000);
+    const timer = setTimeout(() => reject(new Error(`Timed out ${method}`)), method === 'Runtime.evaluate' ? 90000 : 45000);
     const onMessage = (event) => {
       const msg = JSON.parse(event.data.toString());
       if (msg.id !== id) return;

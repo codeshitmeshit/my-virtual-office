@@ -4,6 +4,8 @@ import path from 'path';
 
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const server = fs.readFileSync(path.join(root, 'app', 'server.py'), 'utf8');
+const bridgeService = fs.readFileSync(path.join(root, 'app', 'server_services', 'agent_bridges.py'), 'utf8');
+const bridgeRoute = fs.readFileSync(path.join(root, 'app', 'server_routes', 'agent_bridges.py'), 'utf8');
 const chat = fs.readFileSync(path.join(root, 'app', 'chat.js'), 'utf8');
 const style = fs.readFileSync(path.join(root, 'app', 'style.css'), 'utf8');
 
@@ -17,17 +19,22 @@ const required = [
   'def _codex_activity_bridge_event_name',
   'body.get("_onActivity")',
   '"/api/codex/runs"',
-  '"/api/codex/runs/") and request_path.endswith("/events")',
-  '"/api/codex/runs/") and request_path.endswith("/stop")',
+  'path.startswith("/api/codex/runs/") and path.endswith("/events")',
+  'path.startswith("/api/codex/runs/") and path.endswith("/stop")',
 ];
 
-for (const needle of required) {
-  if (!server.includes(needle)) {
+for (const needle of required.slice(0, 8)) {
+  if (!bridgeService.includes(needle)) {
     throw new Error(`missing Codex bridge source marker: ${needle}`);
   }
 }
+for (const needle of required.slice(8)) {
+  if (!bridgeRoute.includes(needle)) {
+    throw new Error(`missing Codex bridge route marker: ${needle}`);
+  }
+}
 
-const runStart = server.slice(server.indexOf('def _handle_codex_run_start'), server.indexOf('def _handle_codex_run_events'));
+const runStart = bridgeService.slice(bridgeService.indexOf('def _handle_codex_run_start'), bridgeService.indexOf('def _handle_codex_run_events'));
 if (!runStart.includes('PROVIDER_RUN_BRIDGE.remember(meta)') || !runStart.includes('PROVIDER_RUN_BRIDGE.emit(run_id')) {
   throw new Error('Codex runs should use ProviderRunBridge for registry and event emission');
 }
@@ -35,7 +42,7 @@ if (!runStart.includes('_handle_codex_chat(run_body)')) {
   throw new Error('Codex runs should reuse existing _handle_codex_chat');
 }
 
-const chatHandler = server.slice(server.indexOf('def _handle_codex_chat'), server.indexOf('def _handle_codex_activity'));
+const chatHandler = bridgeService.slice(bridgeService.indexOf('def _handle_codex_chat'), bridgeService.indexOf('def _handle_codex_activity'));
 if (!chatHandler.includes('_append_codex_activity(agent_id, conversation_id, event)')) {
   throw new Error('Codex chat should still append legacy activity');
 }
@@ -49,11 +56,10 @@ if (!chatHandler.includes('"direction": "reply"') || !chatHandler.includes('"inR
   throw new Error('Codex chat should persist replies linked to the human message');
 }
 
-const codexChatRoute = server.slice(server.indexOf('elif self.path == "/api/codex/chat"'), server.indexOf('elif self.path == "/api/codex/reset"'));
-if (!codexChatRoute.includes('result = _handle_codex_chat(body)')) {
+if (!bridgeRoute.includes('service._handle_codex_chat')) {
   throw new Error('Codex chat fallback should call _handle_codex_chat directly');
 }
-if (codexChatRoute.includes('_handle_agent_platform_comm_send(body)')) {
+if (bridgeRoute.includes('_handle_agent_platform_comm_send(body)')) {
   throw new Error('Codex chat fallback should not wrap chat-window messages as agent-platform A2A envelopes');
 }
 

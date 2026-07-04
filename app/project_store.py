@@ -15,7 +15,7 @@ COMPLEX_JSON_FIELDS = {
     "checklist_json", "tags_json", "attachments_json", "workspaceStatus_json",
     "executionPolicy_json", "executionDirtyConfirmations_json", "attempts_json",
     "evidence_json", "reviewResult_json", "reviewHistory_json",
-    "acceptanceHistory_json", "stateHistory_json", "source_json",
+    "acceptanceHistory_json", "stateHistory_json", "source_json", "comments_json",
     "meetingBlocker_json", "meetingBlockerHistory_json",
     "meetingActionItems_json", "meetingDecisionHistory_json", "meetingDiscussionPoints_json", "meetingRecords_json",
     "scheduledCronHistory_json", "archiveMaintenance_json", "feishuNotifications_json",
@@ -356,6 +356,7 @@ class MarkdownProjectStore:
             "dueDate": task.get("dueDate"),
             "tags_json": task.get("tags", []),
             "checklist_json": task.get("checklist", []),
+            "comments_json": comments,
             "attachments_json": attachments,
             "reviewCheck_json": review_check or [],
             "lastReviewCheck_json": last_review_check or [],
@@ -466,7 +467,9 @@ class MarkdownProjectStore:
         with open(path, "r", encoding="utf-8") as f:
             meta, body = _parse_frontmatter(f.read())
         description = self._extract_section(body, "Description")
-        comments = self._parse_comments(self._extract_section(body, "Comments"))
+        comments = meta.get("comments_json")
+        if not isinstance(comments, list):
+            comments = self._parse_comments(self._extract_section(body, "Comments"))
         task = {
             "id": meta.get("id") or self.new_id(),
             "title": meta.get("title", ""),

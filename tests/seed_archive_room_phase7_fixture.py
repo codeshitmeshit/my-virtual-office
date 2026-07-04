@@ -12,6 +12,31 @@ if APP_DIR not in sys.path:
 import server
 
 
+def install_fake_gateway():
+    oc_home = os.path.join(server.STATUS_DIR, "openclaw-fixture")
+    os.makedirs(oc_home, exist_ok=True)
+    server.WORKSPACE_BASE = oc_home
+    server._discovered_roster = []
+    server._discovered_at = 0
+
+    def fake_rpc(method, params=None, timeout=20):
+        params = params or {}
+        if method == "agents.list":
+            return {"ok": True, "agents": [{"id": "main", "model": "fake-model"}]}
+        if method == "agents.create":
+            agent_id = "archive-manager"
+            workspace = params.get("workspace") or os.path.join(oc_home, "workspace-archive-manager")
+            os.makedirs(os.path.join(oc_home, "agents", agent_id, "sessions"), exist_ok=True)
+            os.makedirs(workspace, exist_ok=True)
+            cfg_path = os.path.join(oc_home, "openclaw.json")
+            with open(cfg_path, "w", encoding="utf-8") as f:
+                __import__("json").dump({"agents": {"list": [{"id": agent_id, "name": agent_id, "workspace": workspace, "model": "fake-model"}]}}, f)
+            return {"ok": True, "agentId": agent_id}
+        return {"ok": True}
+
+    server._gateway_rpc_call = fake_rpc
+
+
 def write_file(path, data, binary=False):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     mode = "wb" if binary else "w"
@@ -21,6 +46,7 @@ def write_file(path, data, binary=False):
 
 
 def main():
+    install_fake_gateway()
     workspace = os.path.join(server.STATUS_DIR, "project-workspaces", "archive-room-phase7-governance-acceptance")
     os.makedirs(workspace, exist_ok=True)
     write_file(os.path.join(workspace, "reports", "governance-summary.md"), "# Governance Summary\n\nPhase 7 archive governance fixture.\n")

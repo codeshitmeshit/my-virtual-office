@@ -375,6 +375,7 @@ def test_approved_meeting_applies_action_items_before_original_task_resumes():
     with tempfile.TemporaryDirectory() as status_dir:
         old = with_store(status_dir)
         old_thread = server.threading.Thread
+        old_start = server._handle_project_execution_start
         started = []
         try:
             class SyncThread:
@@ -391,6 +392,7 @@ def test_approved_meeting_applies_action_items_before_original_task_resumes():
                 return {"ok": True, "status": "started", "taskId": task_id}
 
             server.threading.Thread = SyncThread
+            server._handle_project_execution_start = fake_start
             project, task = create_fixture_project(status_dir)
             req = server._handle_meeting_request_create(project["id"], task["id"], meeting_request_body("action items"))["request"]
             meeting = {
@@ -451,6 +453,7 @@ def test_approved_meeting_applies_action_items_before_original_task_resumes():
             assert len([c for c in task["comments"] if c.get("source") == "meeting_risk"]) == 1
         finally:
             server.threading.Thread = old_thread
+            server._handle_project_execution_start = old_start
             restore_store(old)
 
 

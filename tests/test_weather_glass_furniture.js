@@ -3,21 +3,26 @@ const fs = require('fs');
 const path = require('path');
 
 const root = path.resolve(__dirname, '..');
+const layout = fs.readFileSync(path.join(root, 'app', 'office-layout-editor.js'), 'utf8');
+const rendering = fs.readFileSync(path.join(root, 'app', 'office-rendering.js'), 'utf8');
+const weather = fs.readFileSync(path.join(root, 'app', 'weather-rendering.js'), 'utf8');
+const loop = fs.readFileSync(path.join(root, 'app', 'office-loop.js'), 'utf8');
 const game = fs.readFileSync(path.join(root, 'app', 'game.js'), 'utf8');
+const source = [layout, rendering, weather, loop, game].join('\n');
 
 assert.ok(
-  game.includes("'floorWindow':   { w: 80,  h: 80,  ox: 0,    oy: 0    }"),
+  layout.includes("'floorWindow':   { w: 80,  h: 80,  ox: 0,    oy: 0    }"),
   'floorWindow should have 2x2 tile furniture bounds'
 );
 
-const functionalCatalog = game.match(/\{ key: 'catalog_functional', items: \[[\s\S]*?\]\}/);
+const functionalCatalog = layout.match(/\{ key: 'catalog_functional', items: \[[\s\S]*?\]\}/);
 assert.ok(functionalCatalog, 'catalog_functional should be present');
 assert.ok(
   functionalCatalog[0].includes("{ type: 'floorWindow',   key: 'furniture_floor_window'"),
   'floorWindow should appear in Functional Furniture'
 );
 
-const structureCatalog = game.match(/\{ key: 'catalog_structure', items: \[[\s\S]*?\]\}/);
+const structureCatalog = layout.match(/\{ key: 'catalog_structure', items: \[[\s\S]*?\]\}/);
 assert.ok(structureCatalog, 'catalog_structure should be present');
 assert.ok(
   !structureCatalog[0].includes("type: 'floorWindow'"),
@@ -25,17 +30,17 @@ assert.ok(
 );
 
 assert.ok(
-  game.includes("case 'floorWindow':   drawFloorWindow(item); break;"),
+  rendering.includes("case 'floorWindow':   drawFloorWindow(item); break;"),
   'drawFurnitureItem should dispatch floorWindow to drawFloorWindow'
 );
 
-const drawFloorWindow = game.match(/function drawFloorWindow\(item\) \{[\s\S]*?\n\}/);
+const drawFloorWindow = rendering.match(/function drawFloorWindow\(item\) \{[\s\S]*?\n\}/);
 assert.ok(drawFloorWindow, 'drawFloorWindow should be implemented');
 assert.ok(
-  game.includes('function _getConnectedFloorWindowRun(item)') &&
-  game.includes("return f.type === 'floorWindow' && Math.abs(f.y - item.y) < 1;") &&
-  game.includes('Math.abs(f.x + b.w - left) < 1') &&
-  game.includes('Math.abs(f.x - right) < 1'),
+  rendering.includes('function _getConnectedFloorWindowRun(item)') &&
+  rendering.includes("return f.type === 'floorWindow' && Math.abs(f.y - item.y) < 1;") &&
+  rendering.includes('Math.abs(f.x + b.w - left) < 1') &&
+  rendering.includes('Math.abs(f.x - right) < 1'),
   'floorWindow should detect horizontally connected adjacent panes'
 );
 assert.ok(
@@ -48,10 +53,10 @@ assert.ok(
   'floorWindow should default weather and sun effects on'
 );
 assert.ok(
-  game.includes('function _drawFloorWindowSunMoon(sceneX, sceneY, sceneW, sceneH)') &&
+  rendering.includes('function _drawFloorWindowSunMoon(sceneX, sceneY, sceneW, sceneH)') &&
   drawFloorWindow[0].includes('_drawFloorWindowSunMoon(sceneX, sceneY, sceneW, sceneH);') &&
-  game.includes('ctx.arc(cx, cy, pulse, 0, Math.PI * 2);') &&
-  game.includes('ctx.arc(cx, cy, 7, 0, Math.PI * 2);'),
+  rendering.includes('ctx.arc(cx, cy, pulse, 0, Math.PI * 2);') &&
+  rendering.includes('ctx.arc(cx, cy, 7, 0, Math.PI * 2);'),
   'floorWindow should draw its own visible sun or moon when enabled'
 );
 assert.ok(
@@ -75,40 +80,40 @@ assert.ok(
 );
 
 assert.ok(
-  game.includes("if (type === 'window' || type === 'interactiveWindow' || type === 'floorWindow')"),
+  layout.includes("if (type === 'window' || type === 'interactiveWindow' || type === 'floorWindow')"),
   'placement should treat floorWindow as a top-wall window'
 );
 assert.ok(
-  game.includes("dragItem.type === 'window' || dragItem.type === 'interactiveWindow' || dragItem.type === 'floorWindow'"),
+  layout.includes("dragItem.type === 'window' || dragItem.type === 'interactiveWindow' || dragItem.type === 'floorWindow'"),
   'drag constraints should treat floorWindow as a top-wall window'
 );
 assert.ok(
-  game.includes("item.type !== 'interactiveWindow' && item.type !== 'floorWindow'") &&
-  game.includes("selItem.type === 'interactiveWindow' || selItem.type === 'floorWindow'"),
+  layout.includes("item.type !== 'interactiveWindow' && item.type !== 'floorWindow'") &&
+  layout.includes("selItem.type === 'interactiveWindow' || selItem.type === 'floorWindow'"),
   'floating toolbar settings should support interactiveWindow and floorWindow'
 );
 assert.ok(
-  game.includes("var titleKey = item.type === 'floorWindow' ? 'floor_window_settings' : 'weather_window_settings';") &&
-  game.includes("i18n.t('weather_effects_label')") &&
-  game.includes("i18n.t('weather_effects_desc')") &&
-  game.includes("i18n.t('sun_moon_label')") &&
-  game.includes("i18n.t('sun_moon_desc')") &&
-  game.includes("i18n.t('weather_effects_on')") &&
-  game.includes("i18n.t('sun_moon_off')"),
+  rendering.includes("var titleKey = item.type === 'floorWindow' ? 'floor_window_settings' : 'weather_window_settings';") &&
+  rendering.includes("i18n.t('weather_effects_label')") &&
+  rendering.includes("i18n.t('weather_effects_desc')") &&
+  rendering.includes("i18n.t('sun_moon_label')") &&
+  rendering.includes("i18n.t('sun_moon_desc')") &&
+  rendering.includes("i18n.t('weather_effects_on')") &&
+  rendering.includes("i18n.t('sun_moon_off')"),
   'weather/floor window settings editor should use i18n strings'
 );
 assert.ok(
-  game.includes('var _floorWindowTooltip = null;') &&
-  game.includes('function _getFloorWindowWeatherTooltipLines()') &&
-  game.includes('function _getWeatherTemperatureC()') &&
-  game.includes("i18n.t('weather_location')") &&
-  game.includes("i18n.t('weather_label')") &&
-  game.includes("i18n.t('temperature')") &&
-  game.includes("_getWeatherTemperatureC() + '°C'") &&
-  !game.includes("weatherData.temp + '°F'") &&
+  weather.includes('var _floorWindowTooltip = null;') &&
+  weather.includes('function _getFloorWindowWeatherTooltipLines()') &&
+  weather.includes('function _getWeatherTemperatureC()') &&
+  weather.includes("i18n.t('weather_location')") &&
+  weather.includes("i18n.t('weather_label')") &&
+  weather.includes("i18n.t('temperature')") &&
+  weather.includes("_getWeatherTemperatureC() + '°C'") &&
+  !source.includes("weatherData.temp + '°F'") &&
   game.includes("item.type !== 'floorWindow'") &&
   game.includes('_floorWindowTooltip = {') &&
-  game.includes('fwLines = _floorWindowTooltip.lines || []'),
+  loop.includes('fwLines = _floorWindowTooltip.lines || []'),
   'floorWindow hover should show weather location, condition, and temperature tooltip'
 );
 

@@ -1,10 +1,24 @@
 import fs from 'node:fs';
+import { spawnSync } from 'node:child_process';
 
 const browserVersion = await (await fetch('http://127.0.0.1:9224/json/version')).json();
 const archiveRoomJs = fs.readFileSync('app/archive-room.js', 'utf8');
 const archiveRoomCss = fs.readFileSync('app/archive-room.css', 'utf8');
-const phase8ProjectId = '7e8fb87a-bff6-4442-9854-c761e8c97532';
-const realOverview = await (await fetch('http://127.0.0.1:8090/api/archive-room')).json();
+
+async function loadPhase8Overview() {
+  let data = await (await fetch('http://127.0.0.1:8090/api/archive-room')).json();
+  const python = fs.existsSync('.venv/bin/python') ? '.venv/bin/python' : 'python3';
+  const seeded = spawnSync(python, ['tests/seed_archive_room_phase8_fixture.py'], { encoding: 'utf8', env: { ...process.env, VO_STATUS_DIR: `${process.cwd()}/data` } });
+  if (seeded.status !== 0) throw new Error(`Failed to seed archive room phase8 fixture: ${seeded.stderr || seeded.stdout}`);
+  data = await (await fetch('http://127.0.0.1:8090/api/archive-room')).json();
+  const matches = (data.projects || []).filter((p) => p.title === 'Archive Room Phase 8 Frequency Governance Acceptance');
+  const target = matches.sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')))[0];
+  if (!target) throw new Error('Archive room phase8 fixture did not create a visible project');
+  return { data, target };
+}
+
+const { data: realOverview, target: phase8Project } = await loadPhase8Overview();
+const phase8ProjectId = phase8Project.id;
 const realProject = await (await fetch(`http://127.0.0.1:8090/api/archive-room/projects/${phase8ProjectId}`)).json();
 const realMarkdown = await (await fetch(`http://127.0.0.1:8090/api/projects/${phase8ProjectId}/artifacts/read?archive=1&path=docs%2Fphase8%2Fgovernance%2Fsource-comparison.md`)).json();
 if (Array.isArray(realOverview.projects)) {

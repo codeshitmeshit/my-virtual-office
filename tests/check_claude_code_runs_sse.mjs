@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 const server = fs.readFileSync('app/server.py', 'utf8');
+const bridgeService = fs.readFileSync('app/server_services/agent_bridges.py', 'utf8');
+const bridgeRoute = fs.readFileSync('app/server_routes/agent_bridges.py', 'utf8');
 const chat = fs.readFileSync('app/chat.js', 'utf8');
 const gatewayPresence = fs.readFileSync('app/gateway_presence.py', 'utf8');
 
@@ -15,19 +17,24 @@ for (const token of [
   'def _handle_claude_code_interrupt',
   'ephemeral": "claude-code-progress"',
   'gateway_presence.set_provider_event(status_key, "claude-code"',
-  '"/api/claude-code/runs"',
-  '"/api/claude-code/runs/") and request_path.endswith("/events")',
-  '"/api/claude-code/runs/") and request_path.endswith("/stop")',
 ]) {
-  assert.ok(server.includes(token), `server.py missing ${token}`);
+  assert.ok(bridgeService.includes(token), `agent_bridges.py missing ${token}`);
+}
+
+for (const token of [
+  '"/api/claude-code/runs"',
+  'path.startswith("/api/claude-code/runs/") and path.endswith("/events")',
+  'path.startswith("/api/claude-code/runs/") and path.endswith("/stop")',
+]) {
+  assert.ok(bridgeRoute.includes(token), `agent_bridges route missing ${token}`);
 }
 
 assert.ok(
-  server.includes('def _remember_claude_code_stream_run(meta):\n    PROVIDER_RUN_BRIDGE.remember(meta)'),
+  bridgeService.includes('def _remember_claude_code_stream_run(meta):\n    PROVIDER_RUN_BRIDGE.remember(meta)'),
   'Claude Code run registry should delegate to ProviderRunBridge'
 );
 assert.ok(
-  server.includes('PROVIDER_RUN_BRIDGE.stream_events(handler, run_id, "Claude Code")'),
+  bridgeService.includes('PROVIDER_RUN_BRIDGE.stream_events(handler, run_id, "Claude Code")'),
   'Claude Code SSE should delegate to ProviderRunBridge'
 );
 

@@ -281,9 +281,34 @@ def test_load_vo_config_accepts_hermes_prefer_api_alias_and_env_override():
                     os.environ[key] = value
 
 
+def test_codex_test_body_enabled_overrides_disabled_environment():
+    old_config = server.VO_CONFIG
+    server.VO_CONFIG = {
+        **server.VO_CONFIG,
+        "codex": {
+            **(server.VO_CONFIG.get("codex") or {}),
+            "enabled": False,
+        },
+    }
+    try:
+        result = server._handle_codex_test({
+            "enabled": True,
+            "workspace": tempfile.mkdtemp(prefix="vo-codex-body-workspace-"),
+            "workspaceRoot": tempfile.mkdtemp(prefix="vo-codex-body-agents-"),
+            "includeMain": False,
+            "replyText": "codex body enabled",
+        })
+    finally:
+        server.VO_CONFIG = old_config
+    assert result["ok"] is True
+    assert result["protocol"] == "reply-text"
+    assert result["agents"]
+
+
 if __name__ == "__main__":
     test_setup_config_merge_preserves_provider_secrets_and_unknown_fields()
     test_safe_vo_config_round_trips_provider_fields_without_secret_exposure()
     test_model_provider_config_includes_safe_native_runtime_status()
     test_load_vo_config_accepts_hermes_prefer_api_alias_and_env_override()
+    test_codex_test_body_enabled_overrides_disabled_environment()
     print("ok")

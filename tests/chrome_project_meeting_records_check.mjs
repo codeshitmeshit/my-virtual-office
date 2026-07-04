@@ -1,5 +1,5 @@
-const liveUrl = process.env.VO_LIVE_URL || 'http://10.43.55.108:8090/';
-const apiUrl = process.env.VO_API_URL || 'http://10.43.55.108:8090';
+const liveUrl = process.env.VO_LIVE_URL || 'http://host.docker.internal:8090/';
+const apiUrl = process.env.VO_API_URL || 'http://127.0.0.1:8090';
 const pageInfo = await (await fetch(`http://127.0.0.1:9224/json/new?${encodeURIComponent(`${liveUrl}?meeting-records=${Date.now()}`)}`, { method: 'PUT' })).json();
 
 function openWs(url) {

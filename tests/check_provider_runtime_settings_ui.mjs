@@ -9,6 +9,7 @@ const root = path.resolve(__dirname, '..');
 const indexHtml = fs.readFileSync(path.join(root, 'app', 'index.html'), 'utf8');
 const setupHtml = fs.readFileSync(path.join(root, 'app', 'setup.html'), 'utf8');
 const gameJs = fs.readFileSync(path.join(root, 'app', 'game.js'), 'utf8');
+const mainMenuSettingsJs = fs.readFileSync(path.join(root, 'app', 'main-menu-settings.js'), 'utf8');
 const modelsHtml = fs.readFileSync(path.join(root, 'app', 'models.html'), 'utf8');
 const enJson = fs.readFileSync(path.join(root, 'app', 'locales', 'en.json'), 'utf8');
 const zhJson = fs.readFileSync(path.join(root, 'app', 'locales', 'zh.json'), 'utf8');
@@ -121,7 +122,7 @@ function assertContains(source, needle, label) {
 
 for (const id of requiredIndexIds) assertContains(indexHtml, `id="${id}"`, 'index.html');
 for (const id of requiredSetupIds) assertContains(setupHtml, `id="${id}"`, 'setup.html');
-for (const snippet of requiredGameSnippets) assertContains(gameJs, snippet, 'game.js');
+for (const snippet of requiredGameSnippets) assertContains(mainMenuSettingsJs, snippet, 'main-menu-settings.js');
 for (const snippet of requiredModelSnippets) assertContains(modelsHtml, snippet, 'models.html');
 for (const snippet of requiredLocaleSnippets) assertContains(enJson + zhJson, snippet, 'locale json');
 

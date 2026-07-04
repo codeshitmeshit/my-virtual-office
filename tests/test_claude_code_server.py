@@ -31,6 +31,16 @@ AGENT = {
 }
 
 
+server.VO_CONFIG = {
+    **server.VO_CONFIG,
+    "claudeCode": {
+        **(server.VO_CONFIG.get("claudeCode") or {}),
+        "enabled": True,
+        "replyText": os.environ["VO_CLAUDE_CODE_REPLY_TEXT"],
+    },
+}
+
+
 def test_claude_code_chat_saves_isolated_history():
     old_roster = server.get_roster
     server.get_roster = lambda: [AGENT]
