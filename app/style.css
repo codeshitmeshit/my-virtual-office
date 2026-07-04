@@ -1477,6 +1477,42 @@ button:active { transform: translateY(3px); box-shadow: none; }
     flex-direction: column;
     gap: 8px;
 }
+.api-usage-tabs {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 4px;
+    margin: 2px 0 4px;
+}
+.api-usage-tab {
+    min-width: 0;
+    height: 24px;
+    padding: 0 4px;
+    border: 1px solid #333;
+    border-radius: 4px;
+    background: #111;
+    color: #999;
+    font-size: 6px;
+    font-family: 'Press Start 2P', monospace;
+    line-height: 1.2;
+    cursor: pointer;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.api-usage-tab.active {
+    background: #263238;
+    color: #fff;
+    border-color: #44545a;
+}
+.vo-usage-summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 5px 8px;
+}
+.vo-usage-summary .pc-value {
+    margin-left: 6px;
+}
 .api-auth-tag {
     font-size: 5px;
     padding: 1px 4px;

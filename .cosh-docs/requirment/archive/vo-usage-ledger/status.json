@@ -1,0 +1,46 @@
+{
+  "name": "vo-usage-ledger",
+  "stage": "done",
+  "waiting_for_user": false,
+  "updated_at": "2026-07-05T02:53:18+08:00",
+  "confirmed": {
+    "checklist": true,
+    "tested": true,
+    "done": true
+  },
+  "confirmations": {
+    "checklist": {
+      "item": "checklist",
+      "confirmed_at": "2026-07-04T20:16:01+08:00",
+      "summary": "User typed `continue`; treated as confirmation of checklist and approval to create todolist."
+    },
+    "tested": {
+      "item": "tested",
+      "confirmed_at": "2026-07-05T02:53:18+08:00",
+      "summary": "User confirmed acceptance with `这个需求我验收没问题了`; treated as test and product acceptance."
+    },
+    "done": {
+      "item": "done",
+      "confirmed_at": "2026-07-05T02:53:18+08:00",
+      "summary": "User asked to mark the requirement accepted and push; requirement considered closed."
+    }
+  },
+  "files": {
+    "requirement": "requirement.md",
+    "review": "review.md",
+    "checklist": "checklist.md",
+    "todolist": "todolist.md"
+  },
+  "notes": [
+    "Product clarification completed before archive.",
+    "Checklist confirmed by user and todolist generated.",
+    "Implementation completed with automated checks passing; waiting for user acceptance of test results before marking tested.",
+    "Verification audit reran the focused Python, JavaScript, and locale checks at 2026-07-04T20:28:48+08:00.",
+    "Runtime verification completed on a temporary current-code service at 8190/8191: /api/vo-usage returned empty and populated summaries, and the in-app browser confirmed Account Limits / VO Usage tabs plus empty and populated VO Usage UI.",
+    "Added focused automated coverage for privacy boundaries and agent/model filters; regression checks passed at 2026-07-04T21:02:07+08:00.",
+    "Patched handler-level Hermes and Claude Code exception paths to record unavailable usage; added a Claude Code exception regression test and reran targeted checks at 2026-07-04T21:04:47+08:00.",
+    "Broadened regression pass at 2026-07-04T21:07:08+08:00 with provider runtime config, Feishu notification tests, and compileall checks passing.",
+    "Formal 8090 validation completed; user accepted the requirement at 2026-07-05T02:53:18+08:00.",
+    "Marked tested and done; requirement directory will be archived under .cosh-docs/requirment/archive/vo-usage-ledger/."
+  ]
+}

@@ -4663,6 +4663,8 @@ def _handle_hermes_chat(body):
     timeout = int(body.get("timeoutSec") or hermes_cfg.get("timeoutSec") or 600)
     profile = agent.get("profile") or agent.get("providerAgentId") or "default"
     used_api = False
+    active_session_id = ""
+    session_id = ""
 
     from_type = str(body.get("fromType") or body.get("senderType") or "").strip().lower()
     is_human_source = from_type in {"human", "user", "chat", "ui"}
@@ -4753,7 +4755,7 @@ def _handle_hermes_chat(body):
                 _save_hermes_history(profile, history, conversation_id)
                 state = "idle" if api_result.get("ok") else ("working" if api_result.get("approval") else "offline")
                 gateway_presence.set_manual_override(agent.get("statusKey") or agent.get("id"), state, "")
-                return {
+                normalized = {
                     "ok": bool(api_result.get("ok")),
                     "reply": reply,
                     "stderr": "",
@@ -4769,6 +4771,8 @@ def _handle_hermes_chat(body):
                     "conversationId": conversation_id,
                     "agent": {"id": agent.get("id"), "name": agent.get("name"), "providerKind": "hermes", "profile": profile},
                 }
+                _append_vo_usage_record("hermes", agent, normalized, conversation_id=conversation_id, session_id=active_session_id, run_id=api_result.get("runId") or "")
+                return normalized
 
         provider = HermesProvider(
             home_path=hermes_cfg.get("homePath"),
@@ -4822,7 +4826,7 @@ def _handle_hermes_chat(body):
         _save_hermes_history(profile, history, conversation_id)
         state = "idle" if result.get("ok") else "offline"
         gateway_presence.set_manual_override(agent.get("statusKey") or agent.get("id"), state, "")
-        return {
+        normalized = {
             "ok": bool(result.get("ok")),
             "reply": reply,
             "stderr": stderr[:2000],
@@ -4838,6 +4842,8 @@ def _handle_hermes_chat(body):
             "conversationId": conversation_id,
             "agent": {"id": agent.get("id"), "name": agent.get("name"), "providerKind": "hermes", "profile": profile},
         }
+        _append_vo_usage_record("hermes", agent, normalized, conversation_id=conversation_id, session_id=active_session_id, run_id=result.get("runId") or active_session_id)
+        return normalized
     except Exception as e:
         history = _remove_hermes_progress_messages(_load_hermes_history(profile, conversation_id))
         history.append({
@@ -4852,6 +4858,16 @@ def _handle_hermes_chat(body):
         })
         _save_hermes_history(profile, history, conversation_id)
         gateway_presence.set_manual_override(agent.get("statusKey") or agent.get("id"), "offline", "Hermes CLI error")
+        _append_vo_usage_record("hermes", agent, {
+            "ok": False,
+            "status": "execution_failed",
+            "error": str(e),
+            "conversationId": conversation_id,
+            "sessionId": active_session_id or session_id,
+            "runId": active_session_id or session_id,
+            "providerPath": "api" if used_api else "cli",
+            "tokenUsage": {},
+        }, conversation_id=conversation_id, session_id=active_session_id or session_id)
         return {"ok": False, "error": str(e), "conversationId": conversation_id, "_status": 500}
 
 
@@ -5803,6 +5819,15 @@ def _handle_codex_chat(body):
         modified_files=modified_files,
         extra={"recoveredFromArchivedThread": result.get("recoveredFromArchivedThread")},
     )
+    _append_vo_usage_record(
+        "codex",
+        agent,
+        normalized,
+        conversation_id=conversation_id,
+        thread_id=thread_id,
+        turn_id=normalized.get("turnId") or result.get("turnId", ""),
+        run_id=normalized.get("runId") or result.get("runId", ""),
+    )
     if inbound_event and normalized.get("reply"):
         append_reply_event(normalized.get("reply") or "", {
             "threadId": normalized.get("threadId") or thread_id,
@@ -6597,6 +6622,9 @@ def _codex_int(value, default=0):
 def _provider_context_used_from_token_usage(token_usage):
     if not isinstance(token_usage, dict):
         return 0
+    normalized = _normalize_vo_usage_counters(token_usage)
+    if normalized.get("totalTokens"):
+        return int(normalized["totalTokens"])
     for key in ("total_tokens", "totalTokens", "tokens", "contextUsed"):
         value = token_usage.get(key)
         if isinstance(value, (int, float)):
@@ -6612,11 +6640,348 @@ def _provider_context_used_from_token_usage(token_usage):
 def _provider_context_window_from_token_usage(token_usage):
     if not isinstance(token_usage, dict):
         return 0
+    normalized = _normalize_vo_usage_counters(token_usage)
+    if normalized.get("contextWindow"):
+        return int(normalized["contextWindow"])
     for key in ("context_window", "contextWindow", "max_context_tokens", "maxContextTokens"):
         value = token_usage.get(key)
         if isinstance(value, (int, float)):
             return int(value)
     return 0
+
+
+_VO_USAGE_LEDGER_LOCK = threading.Lock()
+
+
+def _vo_usage_dir():
+    return os.path.join(STATUS_DIR, "vo-usage")
+
+
+def _vo_usage_local_dt(ts_ms=None):
+    if ts_ms:
+        try:
+            return datetime.fromtimestamp(float(ts_ms) / 1000).astimezone()
+        except Exception:
+            pass
+    return datetime.now().astimezone()
+
+
+def _vo_usage_month_path(dt=None):
+    dt = dt or _vo_usage_local_dt()
+    return os.path.join(_vo_usage_dir(), f"{dt.strftime('%Y-%m')}.jsonl")
+
+
+def _vo_usage_int(value, default=0):
+    try:
+        if value is None or value == "":
+            return default
+        return int(value)
+    except (TypeError, ValueError):
+        try:
+            return int(float(value))
+        except (TypeError, ValueError):
+            return default
+
+
+def _vo_usage_pick(data, *keys):
+    data = data if isinstance(data, dict) else {}
+    for key in keys:
+        if key in data and data.get(key) is not None:
+            return data.get(key)
+    return None
+
+
+def _normalize_vo_usage_counters(token_usage):
+    """Normalize provider-reported usage/tokenUsage into VO usage counters."""
+    token_usage = token_usage if isinstance(token_usage, dict) else {}
+    usage = token_usage.get("last") if isinstance(token_usage.get("last"), dict) else token_usage
+    total_usage = token_usage.get("total") if isinstance(token_usage.get("total"), dict) else {}
+    prompt_details = usage.get("prompt_tokens_details") if isinstance(usage.get("prompt_tokens_details"), dict) else {}
+    completion_details = usage.get("completion_tokens_details") if isinstance(usage.get("completion_tokens_details"), dict) else {}
+
+    cache_read = _vo_usage_int(_vo_usage_pick(
+        usage,
+        "cache_read_input_tokens",
+        "cacheReadInputTokens",
+        "cacheReadTokens",
+        "cached_tokens",
+        "cachedTokens",
+    ))
+    cache_read += _vo_usage_int(_vo_usage_pick(prompt_details, "cached_tokens", "cachedTokens"))
+
+    cache_write = _vo_usage_int(_vo_usage_pick(
+        usage,
+        "cache_creation_input_tokens",
+        "cacheCreationInputTokens",
+        "cache_write_input_tokens",
+        "cacheWriteInputTokens",
+        "cacheWriteTokens",
+    ))
+
+    input_tokens = _vo_usage_int(_vo_usage_pick(
+        usage,
+        "input_tokens",
+        "inputTokens",
+        "prompt_tokens",
+        "promptTokens",
+    ))
+    output_tokens = _vo_usage_int(_vo_usage_pick(
+        usage,
+        "output_tokens",
+        "outputTokens",
+        "completion_tokens",
+        "completionTokens",
+    ))
+    reasoning_tokens = _vo_usage_int(_vo_usage_pick(usage, "reasoning_tokens", "reasoningTokens"))
+    reasoning_tokens += _vo_usage_int(_vo_usage_pick(completion_details, "reasoning_tokens", "reasoningTokens"))
+
+    total_tokens = _vo_usage_int(_vo_usage_pick(usage, "total_tokens", "totalTokens", "tokens", "contextUsed"))
+    if not total_tokens:
+        total_tokens = _vo_usage_int(_vo_usage_pick(total_usage, "total_tokens", "totalTokens", "tokens", "contextUsed"))
+    if not total_tokens:
+        total_tokens = input_tokens + output_tokens + cache_read + cache_write
+
+    context_window = _vo_usage_int(_vo_usage_pick(usage, "context_window", "contextWindow", "max_context_tokens", "maxContextTokens"))
+    if not context_window:
+        context_window = _vo_usage_int(_vo_usage_pick(total_usage, "context_window", "contextWindow", "max_context_tokens", "maxContextTokens"))
+
+    return {
+        "inputTokens": input_tokens,
+        "outputTokens": output_tokens,
+        "cacheReadTokens": cache_read,
+        "cacheWriteTokens": cache_write,
+        "reasoningTokens": reasoning_tokens,
+        "totalTokens": total_tokens,
+        "contextWindow": context_window,
+    }
+
+
+def _vo_usage_record_id(record):
+    raw = "|".join(str(record.get(key) or "") for key in (
+        "providerKind",
+        "agentId",
+        "conversationId",
+        "sessionId",
+        "threadId",
+        "turnId",
+        "runId",
+    ))
+    if not raw.strip("|"):
+        raw = json.dumps(record, sort_keys=True, default=str)
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:18]
+
+
+def _vo_usage_default_model(provider_kind):
+    provider_kind = str(provider_kind or "").strip()
+    if provider_kind == "codex":
+        return (VO_CONFIG.get("codex") or {}).get("model") or "gpt-5-codex"
+    if provider_kind == "claude-code":
+        return (VO_CONFIG.get("claudeCode") or {}).get("model") or ""
+    return ""
+
+
+def _vo_usage_effective_model(provider_kind, agent=None, result=None):
+    agent = agent if isinstance(agent, dict) else {}
+    result = result if isinstance(result, dict) else {}
+    model = agent.get("model") or result.get("model") or ""
+    return model or _vo_usage_default_model(provider_kind)
+
+
+def _append_vo_usage_record(provider_kind, agent, result, *, conversation_id="", thread_id="", session_id="", turn_id="", run_id="", source="provider_result"):
+    result = result if isinstance(result, dict) else {}
+    agent = agent if isinstance(agent, dict) else {}
+    token_usage = result.get("tokenUsage") if isinstance(result.get("tokenUsage"), dict) else {}
+    counters = _normalize_vo_usage_counters(token_usage)
+    usage_available = bool(counters.get("totalTokens"))
+    now_ms = int(time.time() * 1000)
+    model = _vo_usage_effective_model(provider_kind, agent, result)
+    record = {
+        "schemaVersion": 1,
+        "ts": now_ms,
+        "timestamp": _vo_usage_local_dt(now_ms).isoformat(),
+        "providerKind": provider_kind or result.get("providerKind") or "",
+        "provider": agent.get("provider") or result.get("provider") or "",
+        "providerPath": result.get("providerPath") or "",
+        "agentId": agent.get("id") or result.get("agentId") or "",
+        "agentName": agent.get("name") or "",
+        "profile": agent.get("profile") or agent.get("providerAgentId") or result.get("profile") or "",
+        "model": model,
+        "conversationId": conversation_id or result.get("conversationId") or "",
+        "threadId": thread_id or result.get("threadId") or "",
+        "sessionId": session_id or result.get("sessionId") or "",
+        "turnId": turn_id or result.get("turnId") or "",
+        "runId": run_id or result.get("runId") or "",
+        "status": result.get("status") or "",
+        "ok": bool(result.get("ok")),
+        "source": source,
+        "usageStatus": "recorded" if usage_available else "unavailable",
+        "missingReason": "" if usage_available else "provider_usage_unavailable",
+        "confidence": "provider_reported" if usage_available else "unavailable",
+        **counters,
+    }
+    record["id"] = _vo_usage_record_id(record)
+    try:
+        os.makedirs(_vo_usage_dir(), exist_ok=True)
+        path = _vo_usage_month_path(_vo_usage_local_dt(now_ms))
+        with _VO_USAGE_LEDGER_LOCK:
+            if os.path.exists(path):
+                with open(path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        try:
+                            existing = json.loads(line)
+                        except Exception:
+                            continue
+                        if existing.get("id") == record["id"]:
+                            return None
+            with open(path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
+        return record
+    except Exception as e:
+        print(f"[VO-USAGE] Failed to append usage record: {e}")
+        return None
+
+
+def _vo_usage_parse_day(value, default_dt):
+    raw = str(value or "").strip()
+    if not raw:
+        return default_dt
+    try:
+        return datetime.strptime(raw[:10], "%Y-%m-%d").replace(tzinfo=default_dt.tzinfo)
+    except ValueError:
+        return default_dt
+
+
+def _vo_usage_months_between(start_dt, end_dt):
+    months = []
+    current = start_dt.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    end_month = end_dt.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    while current <= end_month and len(months) < 36:
+        months.append(current)
+        year = current.year + (1 if current.month == 12 else 0)
+        month = 1 if current.month == 12 else current.month + 1
+        current = current.replace(year=year, month=month)
+    return months
+
+
+def _read_vo_usage_records(start_dt=None, end_dt=None, limit=10000):
+    now = _vo_usage_local_dt()
+    start_dt = start_dt or now.replace(hour=0, minute=0, second=0, microsecond=0)
+    end_dt = end_dt or now
+    start_ms = int(start_dt.timestamp() * 1000)
+    end_ms = int(end_dt.timestamp() * 1000)
+    records = []
+    for month_dt in _vo_usage_months_between(start_dt, end_dt):
+        path = _vo_usage_month_path(month_dt)
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                for line in f:
+                    try:
+                        item = json.loads(line)
+                    except Exception:
+                        continue
+                    if not isinstance(item, dict):
+                        continue
+                    ts = _vo_usage_int(item.get("ts"), 0)
+                    if ts and start_ms <= ts <= end_ms:
+                        records.append(item)
+        except FileNotFoundError:
+            continue
+        except OSError as e:
+            print(f"[VO-USAGE] Failed to read usage ledger {path}: {e}")
+    records.sort(key=lambda item: _vo_usage_int(item.get("ts"), 0))
+    return records[-max(1, min(_vo_usage_int(limit, 10000), 50000)):]
+
+
+def _vo_usage_bucket(records, key):
+    buckets = {}
+    for record in records:
+        group = str(record.get(key) or "unknown")
+        bucket = buckets.setdefault(group, {
+            key: group,
+            "runs": 0,
+            "recordedRuns": 0,
+            "missingRuns": 0,
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0,
+            "reasoningTokens": 0,
+            "totalTokens": 0,
+        })
+        bucket["runs"] += 1
+        if record.get("usageStatus") == "recorded":
+            bucket["recordedRuns"] += 1
+        else:
+            bucket["missingRuns"] += 1
+        for metric in ("inputTokens", "outputTokens", "cacheReadTokens", "cacheWriteTokens", "reasoningTokens", "totalTokens"):
+            bucket[metric] += _vo_usage_int(record.get(metric))
+    return sorted(buckets.values(), key=lambda item: (item.get("totalTokens", 0), item.get("recordedRuns", 0)), reverse=True)
+
+
+def _normalize_vo_usage_record_for_summary(record):
+    normalized = dict(record)
+    if not normalized.get("model"):
+        normalized["model"] = _vo_usage_default_model(normalized.get("providerKind")) or ""
+    return normalized
+
+
+def _get_vo_usage_summary(query=None):
+    query = query if isinstance(query, dict) else {}
+    now = _vo_usage_local_dt()
+    default_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    start_dt = _vo_usage_parse_day((query.get("from") or [""])[0] if isinstance(query.get("from"), list) else query.get("from"), default_start)
+    to_value = (query.get("to") or [""])[0] if isinstance(query.get("to"), list) else query.get("to")
+    end_dt = _vo_usage_parse_day(to_value, now)
+    if to_value:
+        end_dt = end_dt.replace(hour=23, minute=59, second=59, microsecond=999000)
+    limit = _vo_usage_int((query.get("limit") or ["10000"])[0] if isinstance(query.get("limit"), list) else query.get("limit"), 10000)
+    records = [_normalize_vo_usage_record_for_summary(r) for r in _read_vo_usage_records(start_dt, end_dt, limit=limit)]
+    agent_filter = str((query.get("agentId") or [""])[0] if isinstance(query.get("agentId"), list) else query.get("agentId") or "").strip()
+    model_filter = str((query.get("model") or [""])[0] if isinstance(query.get("model"), list) else query.get("model") or "").strip()
+    if agent_filter:
+        records = [r for r in records if str(r.get("agentId") or "") == agent_filter]
+    if model_filter:
+        records = [r for r in records if str(r.get("model") or "") == model_filter]
+    total_runs = len(records)
+    recorded_runs = sum(1 for r in records if r.get("usageStatus") == "recorded")
+    missing_runs = total_runs - recorded_runs
+    totals = {
+        "runs": total_runs,
+        "recordedRuns": recorded_runs,
+        "missingRuns": missing_runs,
+        "coveragePct": round((recorded_runs / total_runs) * 100, 1) if total_runs else 0,
+        "inputTokens": sum(_vo_usage_int(r.get("inputTokens")) for r in records),
+        "outputTokens": sum(_vo_usage_int(r.get("outputTokens")) for r in records),
+        "cacheReadTokens": sum(_vo_usage_int(r.get("cacheReadTokens")) for r in records),
+        "cacheWriteTokens": sum(_vo_usage_int(r.get("cacheWriteTokens")) for r in records),
+        "reasoningTokens": sum(_vo_usage_int(r.get("reasoningTokens")) for r in records),
+        "totalTokens": sum(_vo_usage_int(r.get("totalTokens")) for r in records),
+    }
+    by_day = {}
+    for record in records:
+        day = _vo_usage_local_dt(record.get("ts")).strftime("%Y-%m-%d")
+        bucket = by_day.setdefault(day, {"day": day, "runs": 0, "recordedRuns": 0, "missingRuns": 0, "totalTokens": 0})
+        bucket["runs"] += 1
+        if record.get("usageStatus") == "recorded":
+            bucket["recordedRuns"] += 1
+        else:
+            bucket["missingRuns"] += 1
+        bucket["totalTokens"] += _vo_usage_int(record.get("totalTokens"))
+    recent = sorted(records, key=lambda item: _vo_usage_int(item.get("ts"), 0), reverse=True)[:100]
+    return {
+        "ok": True,
+        "source": "vo-usage-ledger",
+        "range": {
+            "from": start_dt.isoformat(),
+            "to": end_dt.isoformat(),
+        },
+        "totals": totals,
+        "byAgent": _vo_usage_bucket(records, "agentId"),
+        "byModel": _vo_usage_bucket(records, "model"),
+        "byProviderKind": _vo_usage_bucket(records, "providerKind"),
+        "byDay": sorted(by_day.values(), key=lambda item: item["day"], reverse=True),
+        "recent": recent,
+    }
 
 
 def _codex_context_used_from_token_usage(token_usage):
@@ -7229,12 +7594,26 @@ def _handle_claude_code_chat(body):
     _save_claude_code_history(profile, history, conversation_id, _get_claude_code_session_id(profile, conversation_id))
     gateway_presence.set_manual_override(agent.get("statusKey") or agent.get("id"), "working", "Claude Code task")
     session_id = _get_claude_code_session_id(profile, conversation_id)
-    result = provider.send_chat_message(
-        message,
-        conversation_id=conversation_id,
-        timeout_sec=int(body.get("timeoutSec") or cfg.get("timeoutSec") or 900),
-        session_id=session_id,
-    )
+    try:
+        result = provider.send_chat_message(
+            message,
+            conversation_id=conversation_id,
+            timeout_sec=int(body.get("timeoutSec") or cfg.get("timeoutSec") or 900),
+            session_id=session_id,
+        )
+    except Exception as exc:
+        gateway_presence.set_manual_override(agent.get("statusKey") or agent.get("id"), "offline", "Claude Code error")
+        _append_vo_usage_record("claude-code", agent, {
+            "ok": False,
+            "status": "execution_failed",
+            "error": str(exc),
+            "conversationId": conversation_id,
+            "sessionId": session_id or "",
+            "runId": session_id or "",
+            "providerPath": "claude-code-cli",
+            "tokenUsage": {},
+        }, conversation_id=conversation_id, session_id=session_id or "", run_id=session_id or "")
+        return {"ok": False, "error": str(exc), "conversationId": conversation_id, "_status": 500}
     active_session_id = result.get("sessionId") or session_id
     progress_state = {
         "reply": result.get("reply") or "",
@@ -7277,6 +7656,14 @@ def _handle_claude_code_chat(body):
         session_id=active_session_id,
         run_id=result.get("runId") or active_session_id,
         modified_files=result.get("modifiedFiles") or [],
+    )
+    _append_vo_usage_record(
+        "claude-code",
+        agent,
+        normalized,
+        conversation_id=conversation_id,
+        session_id=active_session_id,
+        run_id=normalized.get("runId") or result.get("runId") or active_session_id,
     )
     normalized["_status"] = provider_http_status(normalized)
     return normalized
@@ -24243,6 +24630,14 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             data = self._get_api_usage()
+            self.wfile.write(json.dumps(data).encode())
+        elif self.path == "/api/vo-usage" or self.path.startswith("/api/vo-usage?"):
+            qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            data = _get_vo_usage_summary(qs)
             self.wfile.write(json.dumps(data).encode())
         elif self.path.startswith("/agent-bio/"):
             agent_key = self.path.split("/agent-bio/")[1]

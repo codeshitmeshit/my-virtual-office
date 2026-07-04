@@ -9,7 +9,7 @@
     <link rel="apple-touch-icon" href="icon-192.png">
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#1a1a2e">
-    <link rel="stylesheet" href="style.css?v=1783185400-feishu-chat-sse-status">
+    <link rel="stylesheet" href="style.css?v=1783190741-usage-tabs">
     <link rel="stylesheet" href="projects.css?v=1783041181-meeting-request-status-colors">
     <link rel="stylesheet" href="archive-room.css?v=1783041181-phase13">
     <link rel="stylesheet" href="fonts.css?v=1783041181.05.07">
@@ -331,7 +331,7 @@
                 <a href="/models.html" style="text-decoration:none"><button title="Model & Provider Settings" data-i18n="models" data-i18n-title="model_settings_title">⚙️ Models</button></a>
                 <a href="/cron.html" style="text-decoration:none"><button title="Cron Job Manager" data-i18n="cron" data-i18n-title="cron_manager_title">⏰ Cron</button></a>
                 <button title="Project Manager" onclick="openProjectsManager()" data-i18n="projects" data-i18n-title="projects_title">📋 Projects</button>
-                <button title="Archive Room" onclick="openArchiveRoom()" data-i18n="archive_room" data-i18n-title="archive_room">🗄️ 档案室</button>
+                <button title="Archive Room" onclick="openArchiveRoom()" data-i18n="archive_room" data-i18n-title="archive_room">🗄️ Archive Room</button>
                 <button title="Reset canvas zoom" onclick="resetCamera()" data-i18n="reset_zoom" data-i18n-title="reset_zoom">🔍 Reset</button>
                 <button id="sms-toggle" title="SMS/Phone Panel" data-i18n="sms" data-i18n-title="sms_phone_panel">📞 SMS</button>
                 <button id="browser-toggle" title="Agent Browser" class="browser-toggle-btn" data-i18n="browser" data-i18n-title="agent_browser_title">🌐 Browser</button>
@@ -397,9 +397,11 @@
                     <span id="api-status-dot" class="pc-dot offline" data-i18n-title="loading" title="Loading..."></span>
                 </h4>
                 <div id="api-usage-body" class="api-usage-body" style="display:none">
-                    <div class="api-usage-tabs" style="display:flex;gap:4px;margin:4px 0 6px;">
-                        <button id="api-account-tab" onclick="setApiUsageTab('account')" data-i18n="account_limits" style="flex:1;font-size:9px;padding:4px;border:1px solid #333;background:#222;color:#ddd;border-radius:4px;">Account Limits</button>
-                        <button id="api-vo-tab" onclick="setApiUsageTab('vo')" data-i18n="vo_usage" style="flex:1;font-size:9px;padding:4px;border:1px solid #333;background:#111;color:#999;border-radius:4px;">VO Usage</button>
+                    <div class="api-usage-tabs">
+                        <button id="api-account-tab" class="api-usage-tab" onclick="setApiUsageTab('account')" data-i18n="account_limits">Account Limits</button>
+                        <button id="api-agent-tab" class="api-usage-tab" onclick="setApiUsageTab('agent')" data-i18n="vo_usage_by_agent">Usage by Agent</button>
+                        <button id="api-model-tab" class="api-usage-tab" onclick="setApiUsageTab('model')" data-i18n="vo_usage_by_model">Usage by Model</button>
+                        <button id="api-records-tab" class="api-usage-tab" onclick="setApiUsageTab('records')" data-i18n="vo_usage_records">Usage Records</button>
                     </div>
                     <div id="api-usage-cards"></div>
                     <div id="vo-usage-cards" style="display:none"></div>
@@ -772,8 +774,8 @@
         <div class="modal-content archive-room-modal-content">
             <div class="modal-header archive-room-header">
                 <span class="modal-emoji">🗄️</span>
-                <h2>档案室</h2>
-                <span class="archive-room-manager" id="archive-room-manager">后续阶段启用</span>
+                <h2 data-i18n="archive_room_title">Archive Room</h2>
+                <span class="archive-room-manager" id="archive-room-manager" data-i18n="archive_room_manager_pending">Manager pending</span>
                 <span class="close-btn" onclick="closeArchiveRoom()">&times;</span>
             </div>
             <div id="archive-room-content" class="archive-room-content">
@@ -784,7 +786,7 @@
             <div class="archive-artifact-modal">
                 <div class="archive-artifact-modal-head">
                     <div>
-                        <div id="archive-artifact-modal-title" class="archive-artifact-modal-title">产物</div>
+                        <div id="archive-artifact-modal-title" class="archive-artifact-modal-title" data-i18n="archive_artifact_title">Artifact</div>
                         <div id="archive-artifact-modal-meta" class="archive-artifact-modal-meta"></div>
                     </div>
                     <div class="archive-artifact-modal-actions">
@@ -1264,7 +1266,7 @@
     <script src="chat.js?v=1783185400-feishu-chat-sse-status"></script>
     <script src="sms-panel.js?v=1783041181"></script>
     <script src="pc-monitor.js?v=1783041181"></script>
-    <script src="api-usage.js?v=1783041181"></script>
+    <script src="api-usage.js?v=1783190741-usage-tabs"></script>
     <script>
     // License check — demo watermark + feature gates
     (function() {
