@@ -80,6 +80,13 @@
         if (typeof window._updateSidebarMeetings === 'function') window._updateSidebarMeetings();
     }
 
+    function applyProjects(projects) {
+        if (!Array.isArray(projects)) return;
+        if (typeof window.dashboardApplyProjectSummaries === 'function') {
+            window.dashboardApplyProjectSummaries(projects);
+        }
+    }
+
     function actionText(action) {
         var title = action.title || 'Action required';
         var text = action.text ? ': ' + action.text : '';
@@ -153,6 +160,7 @@
         if (!payload) return;
         applyStatus(payload.status);
         applyMeetings(payload.meetings);
+        applyProjects(payload.projects);
         applyActions(payload.actions);
     }
 
@@ -166,7 +174,8 @@
             var statusPromise = fetch('/status').then(function (r) { return r.json(); });
             var meetingsPromise = fetch('/api/meetings/active').then(function (r) { return r.json(); });
             var requestsPromise = fetch('/api/meetings/requests?status=pending').then(function (r) { return r.json(); });
-            var results = await Promise.all([statusPromise, meetingsPromise, requestsPromise]);
+            var projectsPromise = fetch('/api/projects?status=active').then(function (r) { return r.json(); });
+            var results = await Promise.all([statusPromise, meetingsPromise, requestsPromise, projectsPromise]);
             if (typeof window.dashboardApplyStatusSnapshot === 'function') {
                 window.dashboardApplyStatusSnapshot(results[0], { logRoutine: false });
             }
@@ -174,6 +183,7 @@
                 active: (results[1] || {}).meetings || [],
                 pendingRequests: (results[2] || {}).requests || []
             });
+            applyProjects((results[3] || {}).projects || []);
             applyActions(actionsFromFallback((results[1] || {}).meetings || [], (results[2] || {}).requests || []));
         } catch (_) {}
     }
@@ -227,6 +237,11 @@
             stopFallback();
             setMode('sse');
             applyMeetings(parse(evt).meetings);
+        });
+        source.addEventListener('dashboard.projects', function (evt) {
+            stopFallback();
+            setMode('sse');
+            applyProjects(parse(evt).projects);
         });
         source.addEventListener('dashboard.actions', function (evt) {
             applyActions(parse(evt).actions);

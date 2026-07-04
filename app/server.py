@@ -191,16 +191,22 @@ def _project_execution_task_agent_id(project, task):
     state = str((task or {}).get("executionState") or "").strip()
     if state == "reviewing":
         return str(task.get("reviewerAgentId") or project.get("defaultReviewerAgentId") or "").strip()
-    return str(task.get("executorAgentId") or task.get("assignee") or project.get("defaultExecutorAgentId") or "").strip()
+    agent_id = str(task.get("executorAgentId") or task.get("assignee") or project.get("defaultExecutorAgentId") or "").strip()
+    if not agent_id and task and task.get("id") == project.get("activeTaskId"):
+        agent_id = str(project.get("activeAgent") or "").strip()
+    return agent_id
 
 
 def _project_execution_task_dashboard_items(project):
     if not _project_execution_enabled(project):
         return []
     items = []
+    active_task = None
     for task in project.get("tasks", []) or []:
         if not isinstance(task, dict):
             continue
+        if task.get("id") == project.get("activeTaskId"):
+            active_task = task
         state = str(task.get("executionState") or "").strip()
         if state not in _PROJECT_EXECUTION_WORKING_STATES:
             continue
@@ -219,6 +225,29 @@ def _project_execution_task_dashboard_items(project):
             "agentId": agent_id,
             "agentKey": agent_key,
         })
+    if items:
+        return items
+    if not project.get("workflowActive") or not project.get("activeAgent"):
+        return items
+    if active_task is None and project.get("activeTaskId"):
+        active_task = next((t for t in project.get("tasks", []) or [] if isinstance(t, dict) and t.get("id") == project.get("activeTaskId")), None)
+    phase = str(project.get("workflowPhase") or (active_task or {}).get("executionState") or "").strip()
+    if phase in {"idle", "done", "blocked", "stopped", "no_eligible_task", "awaiting_user_acceptance", "awaiting_meeting_resolution"}:
+        return items
+    agent_id = str(project.get("activeAgent") or "").strip()
+    agent_key = _project_execution_agent_key(agent_id)
+    if not agent_key:
+        return items
+    items.append({
+        "projectId": project.get("id", ""),
+        "projectTitle": project.get("title", ""),
+        "taskId": (active_task or {}).get("id") or project.get("activeTaskId") or "",
+        "taskTitle": (active_task or {}).get("title") or "",
+        "state": phase or "executing",
+        "attemptId": str((active_task or {}).get("activeAttemptId") or "").strip(),
+        "agentId": agent_id,
+        "agentKey": agent_key,
+    })
     return items
 
 
@@ -23107,6 +23136,7 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                 status_loader=_get_normalized_presence_state,
                 meetings_loader=_meeting_active_projection,
                 requests_loader=lambda: _meeting_request_list_filtered("status=pending").get("requests", []),
+                projects_loader=lambda: _handle_projects_list("status=active").get("projects", []),
             ).stream(self)
         elif self.path == "/agents-list":
             self.send_response(200)

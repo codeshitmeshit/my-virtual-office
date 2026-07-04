@@ -141,19 +141,48 @@ def _action_required_items(meetings: list[Any], requests: list[Any]) -> list[Jso
     return sorted(items, key=lambda item: (item.get("type", ""), item.get("id", "")))
 
 
-def build_dashboard_snapshot(status: JsonDict, meetings: list[Any], requests: list[Any]) -> JsonDict:
+def _project_summary_projection(projects: list[Any]) -> list[JsonDict]:
+    projected: list[JsonDict] = []
+    for project in projects:
+        if not isinstance(project, dict):
+            continue
+        projected.append({
+            "id": project.get("id") or "",
+            "title": project.get("title") or "",
+            "status": project.get("status") or "active",
+            "priority": project.get("priority") or "medium",
+            "updatedAt": project.get("updatedAt") or "",
+            "taskCount": int(project.get("taskCount") or 0),
+            "taskDone": int(project.get("taskDone") or 0),
+            "projectExecutionActive": bool(project.get("projectExecutionActive")),
+            "projectExecutionFlowActive": bool(project.get("projectExecutionFlowActive")),
+            "projectExecutionPhase": project.get("projectExecutionPhase") or "",
+            "activeTaskId": project.get("activeTaskId") or "",
+            "activeTaskTitle": project.get("activeTaskTitle") or "",
+            "activeAgent": project.get("activeAgent") or "",
+            "activeTaskCount": int(project.get("activeTaskCount") or 0),
+            "scheduledCronAlertCount": int(project.get("scheduledCronAlertCount") or 0),
+            "scheduledCronAlerts": project.get("scheduledCronAlerts") if isinstance(project.get("scheduledCronAlerts"), list) else [],
+        })
+    return projected
+
+
+def build_dashboard_snapshot(status: JsonDict, meetings: list[Any], requests: list[Any], projects: list[Any] | None = None) -> JsonDict:
     status_projection = _agent_status_projection(status if isinstance(status, dict) else {})
     meeting_projection = _meeting_summary_projection(meetings if isinstance(meetings, list) else [], requests if isinstance(requests, list) else [])
+    project_projection = _project_summary_projection(projects if isinstance(projects, list) else [])
     actions = _action_required_items(meeting_projection["active"], meeting_projection["pendingRequests"])
     snapshot = {
         "ts": int(time.time() * 1000),
         "status": status_projection,
         "meetings": meeting_projection,
+        "projects": project_projection,
         "actions": actions,
     }
     snapshot["signatures"] = {
         "status": _signature(status_projection),
         "meetings": _signature(meeting_projection),
+        "projects": _signature(project_projection),
         "actions": _signature(actions),
     }
     return snapshot
@@ -169,6 +198,8 @@ def diff_dashboard_events(previous: JsonDict | None, current: JsonDict) -> list[
         events.append(("dashboard.status", {"ts": current.get("ts"), "status": current.get("status"), "signature": curr_sig.get("status")}))
     if prev_sig.get("meetings") != curr_sig.get("meetings"):
         events.append(("dashboard.meetings", {"ts": current.get("ts"), "meetings": current.get("meetings"), "signature": curr_sig.get("meetings")}))
+    if prev_sig.get("projects") != curr_sig.get("projects"):
+        events.append(("dashboard.projects", {"ts": current.get("ts"), "projects": current.get("projects"), "signature": curr_sig.get("projects")}))
     if prev_sig.get("actions") != curr_sig.get("actions"):
         events.append(("dashboard.actions", {"ts": current.get("ts"), "actions": current.get("actions"), "signature": curr_sig.get("actions")}))
     return events
@@ -179,6 +210,7 @@ class DashboardRealtimeStream:
     status_loader: Callable[[], JsonDict]
     meetings_loader: Callable[[], list[Any]]
     requests_loader: Callable[[], list[Any]]
+    projects_loader: Callable[[], list[Any]] | None = None
     interval_sec: float = 1.0
     heartbeat_sec: float = 15.0
 
@@ -187,6 +219,7 @@ class DashboardRealtimeStream:
             self.status_loader() or {},
             self.meetings_loader() or [],
             self.requests_loader() or [],
+            self.projects_loader() if self.projects_loader else [],
         )
 
     def _send_event(self, handler: Any, event_name: str, payload: JsonDict) -> bool:

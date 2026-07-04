@@ -64,6 +64,27 @@ def test_dashboard_diff_emits_only_changed_sections():
     assert [name for name, _ in events] == ["dashboard.status"]
 
 
+def test_dashboard_diff_emits_projects_when_project_progress_changes():
+    before = build_dashboard_snapshot(
+        {"agent-a": {"state": "idle", "task": ""}},
+        [],
+        [],
+        [{"id": "p-1", "title": "Project", "taskCount": 2, "taskDone": 0, "projectExecutionActive": True, "projectExecutionPhase": "executing"}],
+    )
+    after = build_dashboard_snapshot(
+        {"agent-a": {"state": "idle", "task": ""}},
+        [],
+        [],
+        [{"id": "p-1", "title": "Project", "taskCount": 2, "taskDone": 1, "projectExecutionActive": True, "projectExecutionPhase": "executing"}],
+    )
+
+    events = diff_dashboard_events(before, after)
+
+    assert [name for name, _ in events] == ["dashboard.projects"]
+    assert events[0][1]["projects"][0]["taskDone"] == 1
+    assert events[0][1]["projects"][0]["taskCount"] == 2
+
+
 def test_dashboard_diff_emits_meetings_and_actions_when_needed():
     before = build_dashboard_snapshot(
         {"agent-a": {"state": "idle", "task": ""}},

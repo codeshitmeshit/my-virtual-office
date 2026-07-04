@@ -773,6 +773,26 @@
 
     function bindListEvents() { /* events bound via inline handlers */ }
 
+    function applyProjectSummaries(projects) {
+        if (!Array.isArray(projects)) return;
+        const byId = {};
+        state.projects.forEach(p => { if (p && p.id) byId[p.id] = p; });
+        projects.forEach(summary => {
+            if (!summary || !summary.id) return;
+            byId[summary.id] = { ...(byId[summary.id] || {}), ...summary };
+        });
+        state.projects = Object.values(byId);
+        updateSidebar();
+        if (state.view === 'list') {
+            const mc = getMainContent();
+            if (mc) {
+                mc.innerHTML = renderListView();
+                bindListEvents();
+            }
+        }
+    }
+    window.dashboardApplyProjectSummaries = applyProjectSummaries;
+
     // ── PROJECT BOARD ─────────────────────────────────────────────
     async function openProject(id) {
         state.view = 'board';

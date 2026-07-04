@@ -89,6 +89,48 @@ def test_project_execution_merges_agent_presence_as_working():
         restore_project_fixture(old)
 
 
+def test_project_execution_presence_uses_project_active_agent_when_task_state_lags():
+    project = fake_project()
+    project["workflowPhase"] = "executing"
+    project["activeAgent"] = "codex-local"
+    project["tasks"][0]["executionState"] = "backlog"
+    project["tasks"][0]["executorAgentId"] = ""
+    project["tasks"][0]["assignee"] = ""
+    old = install_project_fixture(project)
+    try:
+        state = {
+            "codex-local": {"state": "idle", "task": "", "updated": 1, "source": "snapshot"},
+            "_meetings": [],
+        }
+        server._merge_project_execution_presence(state)
+
+        assert state["codex-local"]["state"] == "working"
+        assert state["codex-local"]["source"] == "project-execution"
+        assert state["codex-local"]["projectExecutionState"] == "executing"
+        assert "实现验收项" in state["codex-local"]["task"]
+    finally:
+        restore_project_fixture(old)
+
+
+def test_project_execution_presence_does_not_mark_waiting_user_acceptance_as_working():
+    project = fake_project()
+    project["workflowPhase"] = "awaiting_user_acceptance"
+    project["activeAgent"] = "codex-local"
+    project["tasks"][0]["executionState"] = "awaiting_user_acceptance"
+    old = install_project_fixture(project)
+    try:
+        state = {
+            "codex-local": {"state": "idle", "task": "", "updated": 1, "source": "snapshot"},
+            "_meetings": [],
+        }
+        server._merge_project_execution_presence(state)
+
+        assert state["codex-local"]["state"] == "idle"
+        assert state["codex-local"]["source"] == "snapshot"
+    finally:
+        restore_project_fixture(old)
+
+
 def test_project_list_summary_exposes_active_execution():
     old = install_project_fixture(fake_project())
     try:
