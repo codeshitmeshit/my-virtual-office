@@ -1841,6 +1841,27 @@
         });
     }
 
+    function projectExecutionSummaryLabel(project) {
+        const phase = String(project && (project.projectExecutionPhase || project.workflowPhase || '') || '').trim();
+        const active = !!(project && project.projectExecutionActive);
+        if (!active) return '';
+        const labels = {
+            validating: _tf('proj_exec_state_validating', 'Validating', '校验中'),
+            executing: _tf('proj_exec_state_executing', 'Executing', '执行中'),
+            retrying: _tf('proj_exec_state_retrying', 'Retrying', '重试中'),
+            reworking: _tf('proj_exec_state_reworking', 'Reworking', '返工中'),
+            reviewing: _tf('proj_exec_state_reviewing', 'Reviewing', '审查中'),
+            execution_complete: _tf('proj_exec_state_execution_complete', 'Execution complete', '执行完成'),
+            awaiting_user_acceptance: _tf('proj_exec_state_awaiting_user_acceptance', 'Awaiting user acceptance', '等待用户验收'),
+            awaiting_meeting_resolution: _tf('proj_exec_state_awaiting_meeting_resolution', 'Awaiting meeting resolution', '等待会议结论'),
+            blocked: _tf('proj_exec_state_blocked', 'Blocked', '阻塞'),
+            done: _tf('proj_exec_state_done', 'Done', '已完成'),
+        };
+        if (labels[phase]) return labels[phase];
+        if (active) return _tf('proj_workflow_in_progress', 'Agent working...', '代理工作中...');
+        return phase;
+    }
+
     function projectExecutionStateLabel(task) {
         const state = task && (task.executionState || 'backlog');
         const labels = {
@@ -3444,11 +3465,13 @@
             const pct = p.taskCount > 0 ? Math.round(p.taskDone / p.taskCount * 100) : 0;
             const alerts = Array.isArray(p.scheduledCronAlerts) ? p.scheduledCronAlerts : [];
             const latestAlert = alerts[0] || null;
+            const execLabel = projectExecutionSummaryLabel(p);
+            const execTitle = p.activeTaskTitle ? `${execLabel}: ${p.activeTaskTitle}` : execLabel;
             return `
             <div class="sidebar-proj-item" onclick="ProjMgr.openProjectsManager();ProjMgr.openProject('${p.id}')">
                 <div class="proj-dot" style="background:${priorityColor(p.priority)}"></div>
                 <span class="proj-name">${escHtml(p.title)}</span>
-                <span class="proj-progress-mini">${pct}%</span>
+                ${execLabel ? `<span class="sidebar-proj-exec" title="${escHtml(execTitle)}">${escHtml(execLabel)}</span>` : `<span class="proj-progress-mini">${pct}%</span>`}
                 ${latestAlert ? `<span class="sidebar-proj-cron-alert" title="${escHtml(latestAlert.message || latestAlert.reason || latestAlert.error || _t('proj_scheduled_cron_alert_title'))}">${_t('proj_scheduled_cron_alert_badge')}</span>` : ''}
             </div>`;
         }).join('');

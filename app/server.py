@@ -162,6 +162,7 @@ def _get_normalized_presence_state():
             "source": f"{provider_kind}-discovery",
             "providerKind": provider_kind,
         }
+    _merge_project_execution_presence(state)
     return state
 
 
@@ -174,6 +175,107 @@ def _status_meeting_projection(legacy_meetings):
         if meeting_id:
             by_id[meeting_id] = meeting
     return list(by_id.values())
+
+
+_PROJECT_EXECUTION_WORKING_STATES = {"validating", "executing", "retrying", "reworking", "reviewing"}
+
+
+def _project_execution_agent_key(agent_id):
+    agent = _office_agent_lookup(agent_id)
+    if not agent:
+        return str(agent_id or "").strip()
+    return str(agent.get("statusKey") or agent.get("key") or agent.get("id") or agent_id).strip()
+
+
+def _project_execution_task_agent_id(project, task):
+    state = str((task or {}).get("executionState") or "").strip()
+    if state == "reviewing":
+        return str(task.get("reviewerAgentId") or project.get("defaultReviewerAgentId") or "").strip()
+    return str(task.get("executorAgentId") or task.get("assignee") or project.get("defaultExecutorAgentId") or "").strip()
+
+
+def _project_execution_task_dashboard_items(project):
+    if not _project_execution_enabled(project):
+        return []
+    items = []
+    for task in project.get("tasks", []) or []:
+        if not isinstance(task, dict):
+            continue
+        state = str(task.get("executionState") or "").strip()
+        if state not in _PROJECT_EXECUTION_WORKING_STATES:
+            continue
+        attempt_id = str(task.get("activeAttemptId") or "").strip()
+        agent_id = _project_execution_task_agent_id(project, task)
+        agent_key = _project_execution_agent_key(agent_id)
+        if not agent_key:
+            continue
+        items.append({
+            "projectId": project.get("id", ""),
+            "projectTitle": project.get("title", ""),
+            "taskId": task.get("id", ""),
+            "taskTitle": task.get("title", ""),
+            "state": state,
+            "attemptId": attempt_id,
+            "agentId": agent_id,
+            "agentKey": agent_key,
+        })
+    return items
+
+
+def _project_execution_dashboard_items():
+    try:
+        data = _load_projects()
+    except Exception:
+        return []
+    items = []
+    for project in data.get("projects", []) or []:
+        if not isinstance(project, dict) or project.get("status") != "active":
+            continue
+        items.extend(_project_execution_task_dashboard_items(project))
+    return items
+
+
+def _project_execution_project_summary(project):
+    active_items = _project_execution_task_dashboard_items(project)
+    active_task_ids = {item.get("taskId") for item in active_items if item.get("taskId")}
+    active_task = None
+    if project.get("activeTaskId"):
+        active_task = next((t for t in project.get("tasks", []) or [] if t.get("id") == project.get("activeTaskId")), None)
+    if not active_task and active_items:
+        active_task = next((t for t in project.get("tasks", []) or [] if t.get("id") == active_items[0].get("taskId")), None)
+    phase = project.get("workflowPhase") or ((active_task or {}).get("executionState") if active_task else "")
+    return {
+        "projectExecutionActive": bool(project.get("workflowActive") or active_items),
+        "projectExecutionFlowActive": bool(project.get("projectExecutionFlowActive")),
+        "projectExecutionPhase": phase or "",
+        "activeTaskId": (active_task or {}).get("id") or project.get("activeTaskId") or "",
+        "activeTaskTitle": (active_task or {}).get("title") or "",
+        "activeAgent": project.get("activeAgent") or (active_items[0].get("agentKey") if active_items else ""),
+        "activeTaskCount": len(active_task_ids),
+    }
+
+
+def _merge_project_execution_presence(state):
+    now = int(time.time())
+    for item in _project_execution_dashboard_items():
+        key = item.get("agentKey")
+        if not key:
+            continue
+        existing = state.setdefault(key, {"state": "idle", "task": "", "updated": now, "source": "project-execution"})
+        existing_state = str(existing.get("state") or "").strip().lower()
+        if existing_state == "meeting":
+            continue
+        existing.update({
+            "state": "working",
+            "task": f"Project: {item.get('projectTitle') or ''} / {item.get('taskTitle') or ''}".strip(" /"),
+            "updated": now,
+            "source": "project-execution",
+            "projectId": item.get("projectId", ""),
+            "projectTitle": item.get("projectTitle", ""),
+            "projectTaskId": item.get("taskId", ""),
+            "projectTaskTitle": item.get("taskTitle", ""),
+            "projectExecutionState": item.get("state", ""),
+        })
 
 
 # ─── CONFIGURATION ───────────────────────────────────────────────
@@ -13760,6 +13862,7 @@ def _handle_projects_list(query_string=""):
         tasks = p.get("tasks", [])
         total = len(tasks)
         done = sum(1 for t in tasks if t.get("completedAt"))
+        execution_summary = _project_execution_project_summary(p)
         summaries.append({
             "id": p["id"],
             "title": p.get("title", ""),
@@ -13786,6 +13889,7 @@ def _handle_projects_list(query_string=""):
             "columns": p.get("columns", []),
             "taskCount": total,
             "taskDone": done,
+            **execution_summary,
             "scheduledCronAlertCount": len(_project_cron_alerts(p, limit=1000)),
             "scheduledCronAlerts": _project_cron_alerts(p, limit=3),
             "template": p.get("template", False),
