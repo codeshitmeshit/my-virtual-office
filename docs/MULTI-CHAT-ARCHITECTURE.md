@@ -1,3 +1,5 @@
+> 中文版: [MULTI-CHAT-ARCHITECTURE.cn.md](MULTI-CHAT-ARCHITECTURE.cn.md)
+
 # Multi-Chat Window Architecture
 
 Status: approved architecture plan for the existing Virtual Office chat UI

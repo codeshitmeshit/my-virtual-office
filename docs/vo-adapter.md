@@ -1,3 +1,5 @@
+> 中文版: [vo-adapter.cn.md](vo-adapter.cn.md)
+
 # Virtual Office Provider Adapter Guide
 
 Status: implementation guide for new CLI/runtime providers

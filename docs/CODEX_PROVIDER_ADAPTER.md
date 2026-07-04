@@ -1,3 +1,5 @@
+> 中文版: [CODEX_PROVIDER_ADAPTER.cn.md](CODEX_PROVIDER_ADAPTER.cn.md)
+
 # Codex Provider Adapter
 
 Status: live bridge and project-execution provider

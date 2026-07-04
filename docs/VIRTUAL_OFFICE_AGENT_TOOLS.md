@@ -1,3 +1,5 @@
+> 中文版: [VIRTUAL_OFFICE_AGENT_TOOLS.cn.md](VIRTUAL_OFFICE_AGENT_TOOLS.cn.md)
+
 # Virtual Office Agent Tools
 
 Status: canonical agent-facing tool index  

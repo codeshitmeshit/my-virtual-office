@@ -1,3 +1,5 @@
+> 中文版: [SKILLS-LIBRARY-SPEC.cn.md](SKILLS-LIBRARY-SPEC.cn.md)
+
 # Skills Library Feature Spec
 
 ## Overview

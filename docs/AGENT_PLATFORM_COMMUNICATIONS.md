@@ -1,3 +1,5 @@
+> 中文版: [AGENT_PLATFORM_COMMUNICATIONS.cn.md](AGENT_PLATFORM_COMMUNICATIONS.cn.md)
+
 # AgentPlatform-to-AgentPlatform Communications
 
 Status: first working implementation

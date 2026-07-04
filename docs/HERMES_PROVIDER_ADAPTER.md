@@ -1,3 +1,5 @@
+> 中文版: [HERMES_PROVIDER_ADAPTER.cn.md](HERMES_PROVIDER_ADAPTER.cn.md)
+
 # Hermes Provider Adapter
 
 Status: native API client plus opt-in server-side run/event integration

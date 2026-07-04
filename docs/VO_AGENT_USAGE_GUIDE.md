@@ -1,3 +1,5 @@
+> 中文版: [VO_AGENT_USAGE_GUIDE.cn.md](VO_AGENT_USAGE_GUIDE.cn.md)
+
 # Virtual Office Agent Usage Guide
 
 Status: agent-facing operating guide  
