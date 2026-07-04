@@ -40,6 +40,9 @@
         if (value && value !== key) return value;
         return currentLang().startsWith('zh') ? fallbackZh : fallbackEn;
     }
+    function formatTextTemplate(text, params) {
+        return String(text || '').replace(/\{(\w+)\}/g, (_, key) => params && params[key] != null ? String(params[key]) : '');
+    }
 
     function commentsToggleLabel(expanded, hiddenCount) {
         if (expanded) return _t('proj_comments_collapse');
@@ -737,6 +740,11 @@
         const done = p.taskDone || 0;
         const total = p.taskCount || 0;
         const pct = total > 0 ? Math.round(done / total * 100) : 0;
+        const remaining = Math.max(0, total - done);
+        const progressTitle = formatTextTemplate(
+            _tf('proj_progress_remaining_title', 'Done {done}/{total}, {remaining} remaining', '已完成 {done}/{total}，剩余 {remaining} 个', { done, total, remaining }),
+            { done, total, remaining }
+        );
         const overdue = p.dueDate && isOverdue(p.dueDate);
         return `
         <div class="proj-card" onclick="ProjMgr.openProject('${p.id}')">
@@ -757,7 +765,7 @@
             </div>
             <div class="proj-progress-row">
                 <div class="proj-progress-track"><div class="proj-progress-bar" style="width:${pct}%"></div></div>
-                <span class="proj-progress-label">${done}/${total}</span>
+                <span class="proj-progress-label" title="${escHtml(progressTitle)}">${done}/${total} · ${pct}%</span>
             </div>
             ${p.dueDate ? `<div style="font-size:10px;color:${overdue ? '#f87171' : '#888'}">📅 ${overdue ? '⚠️ ' + _t('proj_overdue') + ': ' : _t('proj_due') + ': '}${formatDate(p.dueDate)}</div>` : ''}
         </div>`;
@@ -3523,16 +3531,32 @@
             return;
         }
         el.innerHTML = active.map(p => {
+            const done = p.taskDone || 0;
+            const total = p.taskCount || 0;
             const pct = p.taskCount > 0 ? Math.round(p.taskDone / p.taskCount * 100) : 0;
+            const remaining = Math.max(0, total - done);
             const alerts = Array.isArray(p.scheduledCronAlerts) ? p.scheduledCronAlerts : [];
             const latestAlert = alerts[0] || null;
             const execLabel = projectExecutionSummaryLabel(p);
-            const execTitle = p.activeTaskTitle ? `${execLabel}: ${p.activeTaskTitle}` : execLabel;
+            const progressLabel = `${done}/${total} ${pct}%`;
+            const progressTitle = formatTextTemplate(
+                _tf(
+                    'proj_progress_remaining_title',
+                    'Done {done}/{total}, {remaining} remaining',
+                    '已完成 {done}/{total}，剩余 {remaining} 个',
+                    { done, total, remaining }
+                ),
+                { done, total, remaining }
+            );
+            const execProgressLabel = execLabel ? `${execLabel} ${progressLabel}` : '';
+            const execTitleParts = execLabel ? [execLabel, progressTitle] : [progressTitle];
+            if (p.activeTaskTitle) execTitleParts.push(`${_tf('proj_active_task_title', 'Current task', '当前任务')}: ${p.activeTaskTitle}`);
+            const execTitle = execTitleParts.join(' · ');
             return `
             <div class="sidebar-proj-item" onclick="ProjMgr.openProjectsManager();ProjMgr.openProject('${p.id}')">
                 <div class="proj-dot" style="background:${priorityColor(p.priority)}"></div>
                 <span class="proj-name">${escHtml(p.title)}</span>
-                ${execLabel ? `<span class="sidebar-proj-exec" title="${escHtml(execTitle)}">${escHtml(execLabel)}</span>` : `<span class="proj-progress-mini">${pct}%</span>`}
+                ${execLabel ? `<span class="sidebar-proj-exec" title="${escHtml(execTitle)}">${escHtml(execProgressLabel)}</span>` : `<span class="proj-progress-mini" title="${escHtml(progressTitle)}">${pct}%</span>`}
                 ${latestAlert ? `<span class="sidebar-proj-cron-alert" title="${escHtml(latestAlert.message || latestAlert.reason || latestAlert.error || _t('proj_scheduled_cron_alert_title'))}">${_t('proj_scheduled_cron_alert_badge')}</span>` : ''}
             </div>`;
         }).join('');

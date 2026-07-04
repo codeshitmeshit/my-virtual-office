@@ -1819,7 +1819,7 @@
     white-space: nowrap;
 }
 .sidebar-proj-item .sidebar-proj-exec {
-    max-width: 78px;
+    max-width: 128px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
