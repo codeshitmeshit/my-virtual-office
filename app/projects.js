@@ -775,27 +775,64 @@
             const d = await api.getProject(id);
             if (!d.project) throw new Error('Not found');
             state.currentProject = d.project;
-            await loadScheduledCronForCurrentProject();
-            await loadProjectMeetingRequests();
+            state.currentProject.scheduledCronLoading = true;
+            state.meetingRequestsByTask = {};
+            state.workflow.active = !!state.currentProject.workflowActive;
+            state.workflow.phase = state.currentProject.workflowPhase || 'idle';
+            state.workflow.currentTaskId = state.currentProject.activeTaskId || null;
+            state.workflow.startMode = state.currentProject.projectExecutionStartMode || state.workflow.startMode || 'continuous';
+            state.workflow.flowStopReason = state.currentProject.projectExecutionFlowStopReason || null;
             mc.innerHTML = renderBoardView();
             bindBoardEvents();
             populateBoardScoreboard();
-            checkWorkflowOnOpen();
+            loadProjectBoardAuxiliaryData(id);
         } catch (e) {
             mc.innerHTML = `<div class="proj-loading">${_t('proj_failed_to_load_project')}</div>`;
         }
     }
 
-    async function loadScheduledCronForCurrentProject() {
+    async function loadProjectBoardAuxiliaryData(projectId) {
         const p = state.currentProject;
-        if (!p) return;
+        if (!p || p.id !== projectId) return;
+        const jobs = [
+            loadScheduledCronForCurrentProject(projectId),
+            loadProjectMeetingRequests(projectId),
+            checkWorkflowOnOpen(projectId)
+        ];
+        await Promise.allSettled(jobs);
+        if (!state.currentProject || state.currentProject.id !== projectId || state.view !== 'board') return;
+        rerenderProjectBoard({ lightweight: true });
+    }
+
+    function rerenderProjectBoard(opts = {}) {
+        const mc = getMainContent();
+        if (!mc || state.view !== 'board' || !state.currentProject) return;
+        const selectedTaskId = state.currentTask && state.currentTask.id;
+        mc.innerHTML = renderBoardView();
+        bindBoardEvents();
+        populateBoardScoreboard();
+        if (selectedTaskId) {
+            state.currentTask = (state.currentProject.tasks || []).find(t => t.id === selectedTaskId) || null;
+        }
+        if (state.currentTask && !detailPanelActiveEditor()) renderDetailPanel(state.currentTask, { preserveScroll: opts.lightweight === true });
+        updateWorkflowUI();
+    }
+
+    async function loadScheduledCronForCurrentProject(projectId) {
+        const p = state.currentProject;
+        if (!p || (projectId && p.id !== projectId)) return;
+        p.scheduledCronLoading = true;
         try {
             const d = await api.listScheduledCron(p.id);
+            if (!state.currentProject || state.currentProject.id !== p.id) return;
             p.scheduledCronJobs = d.jobs || [];
             p.scheduledCronLoadError = d.error || '';
         } catch (e) {
+            if (!state.currentProject || state.currentProject.id !== p.id) return;
             p.scheduledCronJobs = [];
             p.scheduledCronLoadError = e.message || 'load failed';
+        } finally {
+            if (state.currentProject && state.currentProject.id === p.id) p.scheduledCronLoading = false;
         }
     }
 
@@ -913,6 +950,17 @@
     }
 
     function renderScheduledCronHistoryPanel(p) {
+        if (p.scheduledCronLoading) {
+            return `<div class="proj-scheduled-history-panel">
+                <div class="proj-section-header">
+                    <div>
+                        <div class="proj-section-title">${_t('proj_scheduled_cron_history_title')}</div>
+                        <div class="proj-scheduled-cron-subtitle">${_t('proj_loading_projects')}</div>
+                    </div>
+                </div>
+                <div class="proj-scheduled-cron-empty">${_t('proj_loading_projects')}</div>
+            </div>`;
+        }
         const history = Array.isArray(p.scheduledCronHistory) ? p.scheduledCronHistory.slice() : [];
         history.sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
         const recent = history.slice(0, 20);
@@ -937,6 +985,17 @@
     }
 
     function renderScheduledCronPanel(p) {
+        if (p.scheduledCronLoading) {
+            return `<div class="proj-scheduled-cron-panel">
+                <div class="proj-section-header">
+                    <div>
+                        <div class="proj-section-title">${_t('proj_scheduled_cron_title')}</div>
+                        <div class="proj-scheduled-cron-subtitle">${_t('proj_loading_projects')}</div>
+                    </div>
+                </div>
+                <div class="proj-scheduled-cron-empty">${_t('proj_loading_projects')}</div>
+            </div>`;
+        }
         const jobs = p.scheduledCronJobs || [];
         const paused = !!p.scheduledCronPaused;
         const showRecommendation = !!p.longTermProject && jobs.length === 0;
@@ -2049,11 +2108,12 @@
         return text;
     }
 
-    async function loadProjectMeetingRequests() {
+    async function loadProjectMeetingRequests(projectId) {
         const p = state.currentProject;
-        if (!p) return;
+        if (!p || (projectId && p.id !== projectId)) return;
         try {
             const d = await api.listMeetingRequests(p.id);
+            if (!state.currentProject || state.currentProject.id !== p.id) return;
             const grouped = {};
             (d.requests || []).forEach(req => {
                 const taskId = req.source && req.source.taskId;
@@ -2062,6 +2122,7 @@
             });
             state.meetingRequestsByTask = grouped;
         } catch (e) {
+            if (!state.currentProject || state.currentProject.id !== p.id) return;
             state.meetingRequestsByTask = {};
         }
     }
@@ -3876,19 +3937,26 @@
         const oldSignature = projectExecutionBoardSignature(p);
         const fresh = await api.getProject(p.id);
         if (!fresh.project) return;
-        state.currentProject = fresh.project;
-        await loadProjectMeetingRequests();
+        state.currentProject = {
+            ...fresh.project,
+            scheduledCronJobs: p.scheduledCronJobs,
+            scheduledCronLoadError: p.scheduledCronLoadError,
+            scheduledCronLoading: p.scheduledCronLoading,
+        };
         const taskId = selectedTaskId || (state.currentTask && state.currentTask.id);
-        if (taskId) state.currentTask = fresh.project.tasks.find(t => t.id === taskId) || null;
+        if (taskId) state.currentTask = (state.currentProject.tasks || []).find(t => t.id === taskId) || null;
         const mc = getMainContent();
-        const newSignature = projectExecutionBoardSignature(fresh.project);
+        const newSignature = projectExecutionBoardSignature(state.currentProject);
         if (mc && state.view === 'board' && (!opts.lightweight || oldSignature !== newSignature)) {
-            mc.innerHTML = renderBoardView();
-            bindBoardEvents();
-            populateBoardScoreboard();
+            rerenderProjectBoard({ lightweight: opts.lightweight === true });
         }
         if (state.currentTask && !detailPanelActiveEditor()) renderDetailPanel(state.currentTask, { preserveScroll: opts.lightweight === true });
         updateWorkflowUI();
+        loadProjectMeetingRequests(state.currentProject.id).then(function () {
+            if (state.currentProject && state.currentProject.id === p.id && state.view === 'board') {
+                rerenderProjectBoard({ lightweight: true });
+            }
+        });
     }
 
     function startProjectExecutionPolling() {
@@ -4303,12 +4371,13 @@
     }
 
     // Check workflow status when opening a board (handles page refresh)
-    async function checkWorkflowOnOpen() {
+    async function checkWorkflowOnOpen(projectId) {
         const p = state.currentProject;
-        if (!p) return;
+        if (!p || (projectId && p.id !== projectId)) return;
         if (p.projectExecutionEnabled) {
             try {
                 const d = await api.projectExecutionStatus(p.id);
+                if (!state.currentProject || state.currentProject.id !== p.id) return;
                 state.workflow.active = d.active;
                 state.workflow.phase = d.phase || 'idle';
                 state.workflow.currentTaskId = d.currentTaskId;
@@ -4322,6 +4391,7 @@
         }
         try {
             const d = await api.workflowStatus(p.id);
+            if (!state.currentProject || state.currentProject.id !== p.id) return;
             state.workflow.active = d.active;
             state.workflow.autoMode = d.autoMode;
             state.workflow.phase = d.phase || 'idle';
