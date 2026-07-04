@@ -31,6 +31,7 @@ import sqlite3
 import subprocess
 import time
 import difflib
+import feishu_chat_channel
 import gateway_presence
 from dashboard_realtime import DashboardRealtimeStream
 from zoneinfo import ZoneInfo
@@ -41,12 +42,19 @@ from provider_execution import (
     normalize_provider_result,
     provider_http_status,
 )
-from feishu_notifications import send_feishu_notification
+from feishu_notifications import add_feishu_message_reaction, delete_feishu_message_reaction, recall_feishu_message, send_feishu_markdown_message, send_feishu_notification, send_feishu_text_message
 from feishu_long_connection import FeishuLongConnectionReceiver
 
 
 _FEISHU_LONG_CONNECTION_RECEIVER = None
+_FEISHU_CHAT_LONG_CONNECTION_RECEIVER = None
 _FEISHU_LONG_CONNECTION_LOCK = threading.Lock()
+_FEISHU_CHAT_LONG_CONNECTION_LOCK = threading.Lock()
+_FEISHU_CHANNEL_LOCKS = {}
+_FEISHU_CHANNEL_LOCKS_LOCK = threading.Lock()
+_FEISHU_CHANNEL_RECORD_LOCK = threading.Lock()
+_FEISHU_CHAT_EVENT_SUBSCRIBERS = {}
+_FEISHU_CHAT_EVENT_SUBSCRIBERS_LOCK = threading.Lock()
 
 
 def _normalize_presence_entry(entry):
@@ -389,6 +397,8 @@ def _load_vo_config():
     weather_cfg = cfg.get("weather") or {}
     sms_cfg = cfg.get("sms") or {}
     notifications_cfg = cfg.get("notifications") or {}
+    feishu_cfg = cfg.get("feishu") or {}
+    feishu_chat_cfg = feishu_cfg.get("chatApp") if isinstance(feishu_cfg.get("chatApp"), dict) else {}
     hermes_cfg = cfg.get("hermes") or {}
     codex_cfg = cfg.get("codex") or {}
     claude_code_cfg = cfg.get("claudeCode") or cfg.get("claude_code") or {}
@@ -466,6 +476,19 @@ def _load_vo_config():
             "feishuReceiveIdType": _env_or("VO_FEISHU_RECEIVE_ID_TYPE", notifications_cfg.get("feishuReceiveIdType", "chat_id")),
             "feishuReceiveId": _env_or("VO_FEISHU_RECEIVE_ID", notifications_cfg.get("feishuReceiveId", "")),
         },
+        "feishu": {
+            "chatApp": {
+                "enabled": _env_bool("VO_FEISHU_CHAT_ENABLED", feishu_chat_cfg.get("enabled", False)),
+                "appId": _env_or("VO_FEISHU_CHAT_APP_ID", feishu_chat_cfg.get("appId", "")),
+                "appSecret": _env_or("VO_FEISHU_CHAT_APP_SECRET", feishu_chat_cfg.get("appSecret", "")),
+                "receiveMode": "long_connection",
+                "representativeAgentId": _env_or("VO_FEISHU_CHAT_AGENT_ID", feishu_chat_cfg.get("representativeAgentId", "")),
+                "requireBoundVoUser": False,
+                "allowedChatTypes": ["p2p"],
+                "replyMode": "same_chat",
+            },
+            "bindings": feishu_cfg.get("bindings", {}) if isinstance(feishu_cfg.get("bindings"), dict) else {},
+        },
         "hermes": {
             "enabled": str(_env_or("VO_HERMES_ENABLED", hermes_cfg.get("enabled", True))).lower() not in ("0", "false", "no", "off"),
             "homePath": _env_or("VO_HERMES_HOME", hermes_cfg.get("homePath", os.path.expanduser("~/.hermes"))),
@@ -513,7 +536,7 @@ def _load_vo_config():
         },
     }
 
-_SETUP_SECRET_KEYS = {"apiKey", "gatewayToken", "twilioAuthToken", "feishuWebhook", "feishuAppSecret"}
+_SETUP_SECRET_KEYS = {"apiKey", "gatewayToken", "twilioAuthToken", "feishuWebhook", "feishuAppSecret", "appSecret"}
 
 
 def _mask_feishu_webhook(value):
@@ -554,6 +577,82 @@ def _feishu_app_send_config(cfg):
     }
 
 
+def _feishu_chat_app_config():
+    return ((VO_CONFIG.get("feishu") or {}).get("chatApp") or {})
+
+
+def _feishu_chat_app_configured(cfg=None):
+    cfg = cfg if isinstance(cfg, dict) else _feishu_chat_app_config()
+    return bool(cfg.get("appId") and cfg.get("appSecret"))
+
+
+def _feishu_chat_app_send_config(cfg=None):
+    cfg = cfg if isinstance(cfg, dict) else _feishu_chat_app_config()
+    return {
+        "appId": cfg.get("appId") or "",
+        "appSecret": cfg.get("appSecret") or "",
+    }
+
+
+def _feishu_chat_config_response(include_ok=True):
+    cfg = _feishu_chat_app_config()
+    receiver = _get_feishu_chat_long_connection_receiver()
+    result = {
+        "enabled": bool(cfg.get("enabled", False)),
+        "configured": _feishu_chat_app_configured(cfg),
+        "maskedAppId": _mask_secret_value(cfg.get("appId"), 5, 4),
+        "receiveMode": "long_connection",
+        "representativeAgentId": cfg.get("representativeAgentId") or "",
+        "requireBoundVoUser": False,
+        "allowedChatTypes": ["p2p"],
+        "replyMode": "same_chat",
+        "longConnection": receiver.status() if receiver else {"enabled": False, "running": False, "status": "not_started"},
+    }
+    if include_ok:
+        result["ok"] = True
+    return result
+
+
+def _feishu_chat_bindings_response(include_ok=True):
+    bindings = ((VO_CONFIG.get("feishu") or {}).get("bindings") or {})
+    if not isinstance(bindings, dict):
+        bindings = {}
+    result = {
+        "bindings": bindings,
+        "count": len(bindings),
+    }
+    if include_ok:
+        result["ok"] = True
+    return result
+
+
+def _save_feishu_chat_bindings_config(body):
+    body = body or {}
+    bindings = body.get("bindings")
+    if not isinstance(bindings, dict):
+        return {"ok": False, "error": "bindings must be an object", "code": "invalid_bindings", "_status": 400}
+    clean = {}
+    for raw_key, raw_value in bindings.items():
+        key = str(raw_key or "").strip()
+        if not key:
+            continue
+        value = raw_value
+        if isinstance(value, dict):
+            value = value.get("voUserId") or value.get("userId") or value.get("id")
+        value = str(value or "").strip()
+        if not value:
+            continue
+        clean[key] = value
+    result = _persist_setup_payload({"feishu": {"bindings": clean}})
+    if not result.get("ok"):
+        return result
+    return _feishu_chat_bindings_response()
+
+
+def _chat_source_metadata(body):
+    return feishu_chat_channel.chat_source_metadata(body)
+
+
 def _merge_setup_config(existing, incoming):
     """Merge setup/settings payloads without erasing saved secrets with empty fields."""
     merged = copy.deepcopy(existing) if isinstance(existing, dict) else {}
@@ -581,7 +680,7 @@ def _merge_setup_config(existing, incoming):
 
 
 def _clear_setup_secret_paths(config, paths):
-    allowed = {"notifications.feishuWebhook"}
+    allowed = {"notifications.feishuWebhook", "feishu.chatApp.appSecret"}
     if not isinstance(config, dict) or not isinstance(paths, list):
         return
     for path in paths:
@@ -661,6 +760,9 @@ def _build_safe_vo_config():
             "maskedFeishuAppId": _mask_secret_value(VO_CONFIG.get("notifications", {}).get("feishuAppId"), 5, 4),
             "feishuReceiveIdType": VO_CONFIG.get("notifications", {}).get("feishuReceiveIdType") or "chat_id",
             "maskedFeishuReceiveId": _mask_secret_value(VO_CONFIG.get("notifications", {}).get("feishuReceiveId"), 5, 4),
+        },
+        "feishu": {
+            "chatApp": _feishu_chat_config_response(include_ok=False),
         },
         "hermes": {
             "enabled": VO_CONFIG.get("hermes", {}).get("enabled", True),
@@ -4534,7 +4636,15 @@ def _handle_hermes_chat(body):
         profile = agent.get("profile") or agent.get("providerAgentId") or "default"
         now_ms = int(time.time() * 1000)
         history = _load_hermes_history(profile, conversation_id)
-        history.append({"role": "user", "text": message, "ts": now_ms, "agentId": agent.get("id"), "from": "User", "fromType": body.get("fromType") or ""})
+        history.append({
+            "role": "user",
+            "text": message,
+            "ts": now_ms,
+            "agentId": agent.get("id"),
+            "from": body.get("fromDisplayName") or "User",
+            "fromType": body.get("fromType") or "",
+            **_chat_source_metadata(body),
+        })
         history.append({"role": "assistant", "text": archive_guard["reply"], "ts": int(time.time() * 1000), "agentId": agent.get("id")})
         _save_hermes_history(profile, history, conversation_id)
         return {**archive_guard, "conversationId": conversation_id}
@@ -4579,6 +4689,7 @@ def _handle_hermes_chat(body):
         "sourceSurface": source_surface if is_human_source else "",
         "sourceLabel": source_label if is_human_source else "",
         "conversationId": conversation_id,
+        **(_chat_source_metadata(body) if is_human_source else {}),
     })
     _save_hermes_history(profile, history, conversation_id)
 
@@ -5494,13 +5605,19 @@ def _append_codex_user_comm_event(agent, agent_id, conversation_id, message, bod
         "sourceApp": source_app,
         "sourceSurface": source_surface,
         "fromType": from_type,
+        **_chat_source_metadata(body),
     }
     if source_label:
         metadata["sourceLabel"] = source_label
     idempotency_key = _codex_idempotency_key(body)
     if idempotency_key:
         metadata["idempotencyKey"] = idempotency_key
-    return _append_comm_event({
+    source_message_id = metadata.get("sourceMessageId")
+    if source_message_id:
+        existing = _find_comm_request_by_source_message(source_message_id)
+        if existing:
+            return existing
+    event = _append_comm_event({
         "type": "message",
         "direction": "request",
         "conversationId": conversation_id,
@@ -5518,6 +5635,8 @@ def _append_codex_user_comm_event(agent, agent_id, conversation_id, message, bod
         "metadata": metadata,
         "visibleInOffice": True,
     })
+    _publish_feishu_chat_comm_event(event, "message")
+    return event
 
 
 def _handle_codex_chat(body):
@@ -5574,7 +5693,15 @@ def _handle_codex_chat(body):
         if not inbound_event or not text or reply_event_appended["done"]:
             return
         meta = metadata if isinstance(metadata, dict) else {}
-        _append_comm_event({
+        source_metadata = _comm_metadata(inbound_event)
+        source_metadata = {
+            k: v for k, v in source_metadata.items()
+            if k in {"sourceApp", "sourceSurface", "sourceLabel", "channel", "sourceMessageId", "feishuChatId", "representativeAgentId", "fromType"}
+        }
+        if _find_comm_reply_for_request(inbound_event):
+            reply_event_appended["done"] = True
+            return
+        event = _append_comm_event({
             "type": "message",
             "direction": "reply",
             "conversationId": conversation_id,
@@ -5584,6 +5711,7 @@ def _handle_codex_chat(body):
             "inReplyTo": inbound_event.get("id"),
             "metadata": {
                 "providerKind": "codex",
+                **source_metadata,
                 "threadId": meta.get("threadId") or "",
                 "turnId": meta.get("turnId") or "",
                 "modifiedFiles": meta.get("modifiedFiles") or [],
@@ -5592,6 +5720,7 @@ def _handle_codex_chat(body):
             "visibleInOffice": True,
             "ok": bool(ok),
         })
+        _publish_feishu_chat_comm_event(event, "message")
         reply_event_appended["done"] = True
 
     def on_event(event):
@@ -7065,6 +7194,7 @@ def _handle_claude_code_chat(body):
         "from": body.get("fromDisplayName") or "User",
         "fromType": body.get("fromType") or "",
         "conversationId": conversation_id,
+        **_chat_source_metadata(body),
     })
     _save_claude_code_history(profile, history, conversation_id, _get_claude_code_session_id(profile, conversation_id))
     gateway_presence.set_manual_override(agent.get("statusKey") or agent.get("id"), "working", "Claude Code task")
@@ -7270,6 +7400,179 @@ def _append_comm_event(event):
     except OSError as e:
         print(f"[COMM] Failed to append communication event: {e}")
     return event
+
+
+def _comm_metadata(event):
+    metadata = (event or {}).get("metadata")
+    return metadata if isinstance(metadata, dict) else {}
+
+
+def _comm_source_message_id(event):
+    metadata = _comm_metadata(event)
+    return str(metadata.get("sourceMessageId") or (event or {}).get("sourceMessageId") or "").strip()
+
+
+def _comm_is_feishu(event):
+    event = event if isinstance(event, dict) else {}
+    metadata = _comm_metadata(event)
+    from_ref = event.get("from") if isinstance(event.get("from"), dict) else {}
+    to_ref = event.get("to") if isinstance(event.get("to"), dict) else {}
+    return (
+        metadata.get("sourceApp") == "feishu"
+        or metadata.get("channel") == "feishu"
+        or from_ref.get("sourceApp") == "feishu"
+        or to_ref.get("sourceApp") == "feishu"
+        or str(event.get("conversationId") or "").startswith("feishu-dm:")
+    )
+
+
+def _find_comm_request_by_source_message(source_message_id, *, limit=1000):
+    source_message_id = str(source_message_id or "").strip()
+    if not source_message_id:
+        return None
+    for event in reversed(_load_comm_history(limit=limit)):
+        if event.get("direction") == "request" and _comm_source_message_id(event) == source_message_id:
+            return event
+    return None
+
+
+def _find_comm_reply_for_request(request_event, *, limit=1000):
+    request_event = request_event if isinstance(request_event, dict) else {}
+    request_id = request_event.get("id") or ""
+    conversation_id = request_event.get("conversationId") or ""
+    if not request_id and not conversation_id:
+        return None
+    for event in reversed(_load_comm_history(limit=limit, conversation_id=conversation_id or None)):
+        if event.get("direction") != "reply":
+            continue
+        if request_id and event.get("inReplyTo") == request_id:
+            return event
+    return None
+
+
+def _append_feishu_delivery_comm_event(record):
+    record = record if isinstance(record, dict) else {}
+    source_message_id = str(record.get("sourceMessageId") or "").strip()
+    if not source_message_id:
+        return None
+    send_result = record.get("sendResult") if isinstance(record.get("sendResult"), dict) else {}
+    for event in reversed(_load_comm_history(limit=1000, conversation_id=record.get("conversationId") or None)):
+        metadata = _comm_metadata(event)
+        if (
+            event.get("type") == "operation"
+            and event.get("operation") == "feishu_delivery"
+            and metadata.get("sourceMessageId") == source_message_id
+        ):
+            return event
+    return _append_comm_event({
+        "type": "operation",
+        "operation": "feishu_delivery",
+        "direction": "delivery",
+        "conversationId": record.get("conversationId") or "",
+        "from": _office_agent_ref(record.get("representativeAgentId") or ""),
+        "to": {
+            "id": str(record.get("voUserId") or "feishu-user"),
+            "providerKind": "human",
+            "name": "Feishu User",
+            "sourceApp": "feishu",
+            "sourceSurface": "feishu-dm",
+            "sourceLabel": "Feishu DM",
+        },
+        "text": "",
+        "metadata": {
+            "sourceApp": "feishu",
+            "sourceSurface": "feishu-dm",
+            "sourceLabel": "Feishu DM",
+            "channel": "feishu",
+            "sourceMessageId": source_message_id,
+            "feishuChatId": record.get("feishuChatId") or "",
+            "representativeAgentId": record.get("representativeAgentId") or "",
+            "feishuSendResult": send_result,
+        },
+        "visibleInOffice": False,
+        "ok": bool(send_result.get("ok")),
+    })
+
+
+def _feishu_chat_event_agent_ids(event):
+    event = event if isinstance(event, dict) else {}
+    metadata = _comm_metadata(event)
+    ids = set()
+    for ref_key in ("from", "to"):
+        ref = event.get(ref_key) if isinstance(event.get(ref_key), dict) else {}
+        if ref.get("providerKind") != "human" and ref.get("id"):
+            ids.add(str(ref.get("id")))
+    if metadata.get("representativeAgentId"):
+        ids.add(str(metadata.get("representativeAgentId")))
+    return ids
+
+
+def _publish_feishu_chat_comm_event(event, event_name="message"):
+    event = event if isinstance(event, dict) else {}
+    if not event or not _comm_is_feishu(event):
+        return
+    agent_ids = _feishu_chat_event_agent_ids(event)
+    if not agent_ids:
+        return
+    payload = {
+        "ok": True,
+        "event": event_name,
+        "commEvent": event,
+        "conversationId": event.get("conversationId") or "",
+        "ts": int(time.time() * 1000),
+    }
+    with _FEISHU_CHAT_EVENT_SUBSCRIBERS_LOCK:
+        targets = []
+        for agent_id in agent_ids:
+            queues = _FEISHU_CHAT_EVENT_SUBSCRIBERS.get(agent_id) or []
+            targets.extend(queues)
+    for q in targets:
+        try:
+            q.put_nowait(payload)
+        except Exception:
+            pass
+
+
+def _feishu_chat_stream_events(handler, agent_id):
+    agent_id = str(agent_id or "").strip()
+    if not agent_id:
+        handler.send_response(400)
+        handler.send_header("Content-Type", "text/event-stream")
+        handler.send_header("Cache-Control", "no-cache")
+        handler.send_header("Access-Control-Allow-Origin", "*")
+        handler.end_headers()
+        handler.wfile.write(b'event: error\ndata: {"ok": false, "error": "agentId is required"}\n\n')
+        return
+    q = queue.Queue(maxsize=100)
+    with _FEISHU_CHAT_EVENT_SUBSCRIBERS_LOCK:
+        _FEISHU_CHAT_EVENT_SUBSCRIBERS.setdefault(agent_id, []).append(q)
+    handler.send_response(200)
+    handler.send_header("Content-Type", "text/event-stream")
+    handler.send_header("Cache-Control", "no-cache, no-transform")
+    handler.send_header("Connection", "keep-alive")
+    handler.send_header("Access-Control-Allow-Origin", "*")
+    handler.send_header("X-Accel-Buffering", "no")
+    handler.end_headers()
+
+    def send_sse(event_name, payload):
+        data = json.dumps(payload, ensure_ascii=False)
+        handler.wfile.write(f"event: {event_name}\ndata: {data}\n\n".encode("utf-8"))
+        handler.wfile.flush()
+
+    try:
+        send_sse("ready", {"ok": True, "agentId": agent_id, "ts": int(time.time() * 1000)})
+        while True:
+            try:
+                item = q.get(timeout=15)
+                send_sse(str(item.get("event") or "message"), item)
+            except queue.Empty:
+                send_sse("keepalive", {"ok": True, "agentId": agent_id, "ts": int(time.time() * 1000)})
+    except (BrokenPipeError, ConnectionResetError):
+        pass
+    finally:
+        with _FEISHU_CHAT_EVENT_SUBSCRIBERS_LOCK:
+            queues = _FEISHU_CHAT_EVENT_SUBSCRIBERS.get(agent_id) or []
+            _FEISHU_CHAT_EVENT_SUBSCRIBERS[agent_id] = [item for item in queues if item is not q]
 
 
 def _rewrite_comm_events(events):
@@ -7586,6 +7889,7 @@ def _handle_agent_platform_comm_send(body):
     metadata = dict(metadata)
     metadata.setdefault("sourceApp", source_app)
     metadata.setdefault("sourceSurface", source_surface)
+    metadata.update({k: v for k, v in _chat_source_metadata(body).items() if v})
     if source_label:
         metadata.setdefault("sourceLabel", source_label)
     timeout = int(body.get("timeoutSec") or body.get("timeout") or 600)
@@ -9340,6 +9644,37 @@ def _save_feishu_notification_config(body):
     return _feishu_notification_config_response()
 
 
+def _save_feishu_chat_config(body):
+    body = body or {}
+    enabled = bool(body.get("enabled", True))
+    app_id = str(body.get("appId") or "").strip()
+    app_secret = str(body.get("appSecret") or "").strip()
+    representative_agent_id = str(body.get("representativeAgentId") or "").strip()
+    if representative_agent_id and not _find_agent_record(representative_agent_id):
+        return {"ok": False, "error": "Representative agent not found", "code": "agent_not_found", "_status": 404}
+    chat_app = {
+        "enabled": enabled,
+        "receiveMode": "long_connection",
+        "requireBoundVoUser": False,
+        "allowedChatTypes": ["p2p"],
+        "replyMode": "same_chat",
+    }
+    if app_id or body.get("clearApp"):
+        chat_app["appId"] = app_id
+    if app_secret or body.get("clearApp"):
+        chat_app["appSecret"] = app_secret
+    if "representativeAgentId" in body or body.get("clearRepresentativeAgent"):
+        chat_app["representativeAgentId"] = representative_agent_id
+    payload = {"feishu": {"chatApp": chat_app}}
+    if body.get("clearApp"):
+        payload.setdefault("_clearSecrets", []).append("feishu.chatApp.appSecret")
+    result = _persist_setup_payload(payload)
+    if not result.get("ok"):
+        return result
+    _start_feishu_chat_long_connection()
+    return _feishu_chat_config_response()
+
+
 def _feishu_notification_test_intents():
     now = int(time.time())
     common = {
@@ -9669,6 +10004,11 @@ def _get_feishu_long_connection_receiver():
     return _FEISHU_LONG_CONNECTION_RECEIVER
 
 
+def _get_feishu_chat_long_connection_receiver():
+    global _FEISHU_CHAT_LONG_CONNECTION_RECEIVER
+    return _FEISHU_CHAT_LONG_CONNECTION_RECEIVER
+
+
 def _start_feishu_long_connection():
     global _FEISHU_LONG_CONNECTION_RECEIVER
     cfg = VO_CONFIG.get("notifications", {}) or {}
@@ -9688,6 +10028,362 @@ def _start_feishu_long_connection():
             action_handler=_handle_feishu_card_action,
         )
         return _FEISHU_LONG_CONNECTION_RECEIVER.start()
+
+
+def _start_feishu_chat_long_connection():
+    global _FEISHU_CHAT_LONG_CONNECTION_RECEIVER
+    cfg = _feishu_chat_app_config()
+    if cfg.get("enabled", False) is False:
+        return {"enabled": False, "running": False, "status": "disabled"}
+    app_id = str(cfg.get("appId") or "").strip()
+    app_secret = str(cfg.get("appSecret") or "").strip()
+    if not app_id or not app_secret:
+        return {"enabled": False, "running": False, "status": "missing_app_credentials"}
+    with _FEISHU_CHAT_LONG_CONNECTION_LOCK:
+        existing = _FEISHU_CHAT_LONG_CONNECTION_RECEIVER
+        if existing and existing.app_id == app_id and existing.app_secret == app_secret:
+            return existing.start()
+        _FEISHU_CHAT_LONG_CONNECTION_RECEIVER = FeishuLongConnectionReceiver(
+            app_id=app_id,
+            app_secret=app_secret,
+            message_handler=_handle_feishu_chat_message_event,
+            name="feishu-chat-long-connection",
+        )
+        return _FEISHU_CHAT_LONG_CONNECTION_RECEIVER.start()
+
+
+def _feishu_channel_record_path():
+    return feishu_chat_channel.channel_record_path(STATUS_DIR)
+
+
+def _record_feishu_channel_event(record):
+    item = feishu_chat_channel.record_channel_event(
+        STATUS_DIR,
+        record,
+        now=_exec_meeting_now,
+        lock=_FEISHU_CHANNEL_RECORD_LOCK,
+    )
+    _sync_feishu_channel_record_to_comm_ledger(item)
+    return item
+
+
+def _sync_feishu_channel_record_to_comm_ledger(record):
+    record = record if isinstance(record, dict) else {}
+    event_name = str(record.get("event") or "").strip()
+    source_message_id = str(record.get("sourceMessageId") or "").strip()
+    conversation_id = str(record.get("conversationId") or "").strip()
+    if not source_message_id or not conversation_id:
+        return None
+    representative_agent_id = str(record.get("representativeAgentId") or "").strip()
+    metadata = {
+        "providerKind": (_office_agent_ref(representative_agent_id).get("providerKind") or ""),
+        "sourceApp": "feishu",
+        "sourceSurface": "feishu-dm",
+        "sourceLabel": "Feishu DM",
+        "channel": "feishu",
+        "sourceMessageId": source_message_id,
+        "feishuChatId": record.get("feishuChatId") or "",
+        "representativeAgentId": representative_agent_id,
+        "chatType": record.get("chatType") or "",
+        "messageType": record.get("messageType") or "",
+    }
+    if event_name == "user_message":
+        existing = _find_comm_request_by_source_message(source_message_id)
+        if existing:
+            return existing
+        sender = record.get("sender") if isinstance(record.get("sender"), dict) else {}
+        sender_name = (
+            sender.get("openId")
+            or sender.get("userId")
+            or sender.get("unionId")
+            or record.get("voUserId")
+            or "Feishu User"
+        )
+        comm_event = _append_comm_event({
+            "type": "message",
+            "direction": "request",
+            "conversationId": conversation_id,
+            "from": {
+                "id": "user",
+                "providerKind": "human",
+                "name": str(sender_name),
+                "emoji": "",
+                "sourceApp": "feishu",
+                "sourceSurface": "feishu-dm",
+                "sourceLabel": "Feishu DM",
+            },
+            "to": _office_agent_ref(representative_agent_id),
+            "text": record.get("text") or "",
+            "metadata": metadata,
+            "visibleInOffice": True,
+        })
+        _publish_feishu_chat_comm_event(comm_event, "message")
+        return comm_event
+    if event_name == "turn_completed":
+        request_event = _find_comm_request_by_source_message(source_message_id)
+        if not request_event:
+            request_event = _sync_feishu_channel_record_to_comm_ledger({**record, "event": "user_message"})
+        reply_event = _find_comm_reply_for_request(request_event)
+        if not reply_event and str(record.get("reply") or "").strip():
+            reply_event = _append_comm_event({
+                "type": "message",
+                "direction": "reply",
+                "conversationId": conversation_id,
+                "from": _office_agent_ref(representative_agent_id),
+                "to": (request_event or {}).get("from") or {
+                    "id": "user",
+                    "providerKind": "human",
+                    "name": "Feishu User",
+                    "sourceApp": "feishu",
+                    "sourceSurface": "feishu-dm",
+                    "sourceLabel": "Feishu DM",
+                },
+                "text": record.get("reply") or "",
+                "inReplyTo": (request_event or {}).get("id") or "",
+                "metadata": metadata,
+                "visibleInOffice": True,
+                "ok": bool(((record.get("agentResult") or {}) if isinstance(record.get("agentResult"), dict) else {}).get("ok", True)),
+            })
+            _publish_feishu_chat_comm_event(reply_event, "message")
+        delivery_event = _append_feishu_delivery_comm_event(record)
+        if delivery_event:
+            _publish_feishu_chat_comm_event(delivery_event, "delivery")
+        return reply_event
+    return None
+
+
+def _load_feishu_channel_records(limit=500):
+    audit_records = feishu_chat_channel.load_channel_records(STATUS_DIR, limit=limit)
+    ledger_records = _load_feishu_channel_records_from_comm(limit=limit)
+    return (audit_records + ledger_records)[-max(1, min(int(limit or 500), 2000)):]
+
+
+def _load_feishu_channel_records_from_comm(limit=500):
+    rows = []
+    for event in _load_comm_history(limit=1000):
+        if event.get("direction") != "request" or not _comm_is_feishu(event):
+            continue
+        source_message_id = _comm_source_message_id(event)
+        if not source_message_id:
+            continue
+        reply = _find_comm_reply_for_request(event)
+        if not reply:
+            continue
+        metadata = _comm_metadata(event)
+        rows.append({
+            "event": "turn_completed",
+            "sourceMessageId": source_message_id,
+            "conversationId": event.get("conversationId") or "",
+            "feishuChatId": metadata.get("feishuChatId") or "",
+            "representativeAgentId": metadata.get("representativeAgentId") or (event.get("to") or {}).get("id") or "",
+            "reply": reply.get("text") or "",
+            "feishuReply": reply.get("text") or "",
+            "sendResult": _latest_feishu_delivery_result(source_message_id, event.get("conversationId") or ""),
+            "commRequestId": event.get("id") or "",
+            "commReplyId": reply.get("id") or "",
+        })
+    return rows[-max(1, min(int(limit or 500), 2000)):]
+
+
+def _latest_feishu_delivery_result(source_message_id, conversation_id=""):
+    source_message_id = str(source_message_id or "").strip()
+    for event in reversed(_load_comm_history(limit=1000, conversation_id=conversation_id or None)):
+        metadata = _comm_metadata(event)
+        if (
+            event.get("type") == "operation"
+            and event.get("operation") == "feishu_delivery"
+            and metadata.get("sourceMessageId") == source_message_id
+        ):
+            return metadata.get("feishuSendResult") or {}
+    return {}
+
+
+def _feishu_channel_records_response(limit=500):
+    return feishu_chat_channel.channel_records_response(STATUS_DIR, limit=limit)
+
+
+def _feishu_channel_idempotency_hit(source_message_id):
+    return feishu_chat_channel.channel_idempotency_hit(_load_feishu_channel_records, source_message_id)
+
+
+def _feishu_channel_lock(key):
+    key = str(key or "default")
+    with _FEISHU_CHANNEL_LOCKS_LOCK:
+        lock = _FEISHU_CHANNEL_LOCKS.get(key)
+        if not lock:
+            lock = threading.Lock()
+            _FEISHU_CHANNEL_LOCKS[key] = lock
+        return lock
+
+
+def _feishu_sender_identity(event):
+    return feishu_chat_channel.sender_identity(event)
+
+
+def _feishu_binding_key_candidates(identity, chat_id=""):
+    return feishu_chat_channel.binding_key_candidates(identity, chat_id)
+
+
+def _find_feishu_bound_user(identity, chat_id=""):
+    bindings = (VO_CONFIG.get("feishu") or {}).get("bindings") or {}
+    return feishu_chat_channel.find_bound_user(bindings, identity, chat_id)
+
+
+def _feishu_chat_app_text_send(chat_id, text, urlopen=None):
+    return send_feishu_markdown_message(
+        text,
+        app_config=_feishu_chat_app_send_config(),
+        receive_id=chat_id,
+        receive_id_type="chat_id",
+        urlopen=urlopen,
+        timeout=20,
+    )
+
+
+def _feishu_chat_app_receipt_send(chat_id, text, urlopen=None):
+    return send_feishu_text_message(
+        text,
+        app_config=_feishu_chat_app_send_config(),
+        receive_id=chat_id,
+        receive_id_type="chat_id",
+        urlopen=urlopen,
+        timeout=10,
+    )
+
+
+def _feishu_chat_app_message_recall(message_id, urlopen=None):
+    return recall_feishu_message(
+        message_id,
+        app_config=_feishu_chat_app_send_config(),
+        urlopen=urlopen,
+        timeout=10,
+    )
+
+
+def _feishu_chat_app_reaction_add(message_id, emoji_type, urlopen=None):
+    return add_feishu_message_reaction(
+        message_id,
+        emoji_type,
+        app_config=_feishu_chat_app_send_config(),
+        urlopen=urlopen,
+        timeout=10,
+    )
+
+
+def _feishu_chat_app_reaction_delete(message_id, reaction_id, urlopen=None):
+    return delete_feishu_message_reaction(
+        message_id,
+        reaction_id,
+        app_config=_feishu_chat_app_send_config(),
+        urlopen=urlopen,
+        timeout=10,
+    )
+
+
+def _feishu_representative_conversation_id(vo_user_id, chat_id):
+    return feishu_chat_channel.representative_conversation_id(vo_user_id, chat_id)
+
+
+def _feishu_representative_display_reply(agent_id, reply):
+    return feishu_chat_channel.representative_display_reply(agent_id, reply, find_agent=_find_agent_record)
+
+
+def _dispatch_representative_agent_message(agent_id, message, conversation_id, source_meta):
+    agent = _find_agent_record(agent_id)
+    if not agent:
+        return {"ok": False, "error": f"Representative agent '{agent_id}' not found", "_status": 404}
+    provider_kind = agent.get("providerKind", "openclaw")
+    body = {
+        "agentId": agent_id,
+        "message": message,
+        "conversationId": conversation_id,
+        "fromType": "human",
+        "fromDisplayName": source_meta.get("senderName") or "Feishu User",
+        "sourceApp": "feishu",
+        "sourceSurface": "feishu-dm",
+        "sourceLabel": "Feishu DM",
+        "channel": "feishu",
+        "sourceMessageId": source_meta.get("sourceMessageId") or "",
+        "feishuChatId": source_meta.get("feishuChatId") or "",
+        "representativeAgentId": agent_id,
+    }
+    if provider_kind == "hermes":
+        return _handle_hermes_chat(body)
+    if provider_kind == "codex":
+        return _handle_codex_chat(body)
+    if provider_kind == "claude-code":
+        return _handle_claude_code_chat(body)
+    reply = _wf_call_agent(agent_id, message, timeout=int(VO_CONFIG.get("openclaw", {}).get("timeoutSec") or 600), task_id=conversation_id)
+    ok = not str(reply or "").startswith("[ERROR]")
+    return {
+        "ok": ok,
+        "reply": reply,
+        "error": "" if ok else reply,
+        "conversationId": conversation_id,
+        "agent": {"id": agent.get("id"), "name": agent.get("name"), "providerKind": provider_kind},
+    }
+
+
+def _handle_feishu_chat_message_event(body, *, send_text=None):
+    return feishu_chat_channel.handle_message_event(
+        body,
+        cfg=_feishu_chat_app_config(),
+        bindings=(VO_CONFIG.get("feishu") or {}).get("bindings") or {},
+        load_records=_load_feishu_channel_records,
+        record_event=_record_feishu_channel_event,
+        lock_for=_feishu_channel_lock,
+        dispatch_agent=_dispatch_representative_agent_message,
+        send_text=send_text or _feishu_chat_app_text_send,
+        send_receipt=None if send_text else _feishu_chat_app_receipt_send,
+        recall_message=None if send_text else _feishu_chat_app_message_recall,
+        add_reaction=None if send_text else _feishu_chat_app_reaction_add,
+        delete_reaction=None if send_text else _feishu_chat_app_reaction_delete,
+        find_agent=_find_agent_record,
+    )
+
+
+def _test_feishu_chat_channel(body=None):
+    body = body or {}
+    cfg = _feishu_chat_app_config()
+    start_status = _start_feishu_chat_long_connection()
+    if cfg.get("enabled", False) is False:
+        return {"ok": False, "status": "disabled", "error": "Feishu chat channel is disabled", "longConnection": start_status, "config": _feishu_chat_config_response(), "_status": 400}
+    if not _feishu_chat_app_configured(cfg):
+        return {"ok": False, "status": "missing_chat_app_credentials", "error": "Feishu chat App ID or App Secret is missing", "longConnection": start_status, "config": _feishu_chat_config_response(), "_status": 400}
+    representative_agent_id = str(cfg.get("representativeAgentId") or "").strip()
+    if not representative_agent_id:
+        return {"ok": False, "status": "missing_representative_agent", "error": "Representative agent is not selected", "longConnection": start_status, "config": _feishu_chat_config_response(), "_status": 400}
+    if not _find_agent_record(representative_agent_id):
+        return {"ok": False, "status": "agent_not_found", "error": "Representative agent not found", "longConnection": start_status, "config": _feishu_chat_config_response(), "_status": 404}
+    sent = []
+
+    def fake_send(chat_id, text, urlopen=None):
+        result = {"ok": True, "status": "self_test_skipped_real_feishu_send", "channel": "fake"}
+        sent.append({"chatId": chat_id, "text": text, **result})
+        return result
+
+    now = int(time.time() * 1000)
+    text = str(body.get("text") or "VO Feishu chat self-test").strip() or "VO Feishu chat self-test"
+    result = _handle_feishu_chat_message_event({
+        "event": {
+            "sender": {"sender_id": {"open_id": "ou_vo_self_test"}},
+            "message": {
+                "message_id": f"om_vo_self_test_{now}",
+                "chat_id": "oc_vo_self_test",
+                "chat_type": "p2p",
+                "message_type": "text",
+                "text": text,
+            },
+        }
+    }, send_text=fake_send)
+    result = dict(result or {})
+    result["longConnection"] = _feishu_chat_config_response().get("longConnection") or start_status
+    result["config"] = _feishu_chat_config_response()
+    result["selfTest"] = True
+    result["sent"] = sent
+    if not result.get("ok"):
+        result.setdefault("_status", result.get("_status", 500))
+    return result
 
 
 def _handle_meeting_request_create(project_id, task_id, body):
@@ -23952,6 +24648,33 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(json.dumps(_feishu_notification_config_response()).encode())
+        elif self.path == "/api/feishu-chat/config":
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps(_feishu_chat_config_response()).encode())
+        elif request_path == "/api/feishu-chat/events":
+            agent_id = (query_params.get("agentId") or query_params.get("agent") or [""])[0]
+            _feishu_chat_stream_events(self, agent_id)
+        elif self.path == "/api/feishu-chat/bindings":
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps(_feishu_chat_bindings_response()).encode())
+        elif self.path == "/api/feishu-chat/records" or self.path.startswith("/api/feishu-chat/records?"):
+            parsed = urllib.parse.urlparse(self.path)
+            query = urllib.parse.parse_qs(parsed.query or "")
+            try:
+                limit = int((query.get("limit") or ["500"])[0])
+            except (TypeError, ValueError):
+                limit = 500
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps(_feishu_channel_records_response(limit), ensure_ascii=False).encode())
         elif self.path == "/api/gateway/test":
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -25563,6 +26286,62 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             self.end_headers()
             result.pop("_status", None)
             self.wfile.write(json.dumps(result).encode())
+            return
+        elif self.path == "/api/feishu-chat/config":
+            length = int(self.headers.get('Content-Length', 0))
+            try:
+                body = json.loads(self.rfile.read(length)) if length else {}
+                result = _save_feishu_chat_config(body)
+            except json.JSONDecodeError as e:
+                result = {"ok": False, "error": f"Invalid JSON: {str(e)}", "_status": 400}
+            self.send_response(result.get("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            result.pop("_status", None)
+            self.wfile.write(json.dumps(result).encode())
+            return
+        elif self.path == "/api/feishu-chat/bindings":
+            length = int(self.headers.get('Content-Length', 0))
+            try:
+                body = json.loads(self.rfile.read(length)) if length else {}
+                result = _save_feishu_chat_bindings_config(body)
+            except json.JSONDecodeError as e:
+                result = {"ok": False, "error": f"Invalid JSON: {str(e)}", "_status": 400}
+            self.send_response(result.get("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            result.pop("_status", None)
+            self.wfile.write(json.dumps(result).encode())
+            return
+        elif self.path == "/api/feishu-chat/inbound-test":
+            length = int(self.headers.get('Content-Length', 0))
+            try:
+                body = json.loads(self.rfile.read(length)) if length else {}
+                result = _handle_feishu_chat_message_event(body)
+            except json.JSONDecodeError as e:
+                result = {"ok": False, "error": f"Invalid JSON: {str(e)}", "_status": 400}
+            self.send_response(result.get("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            result.pop("_status", None)
+            self.wfile.write(json.dumps(result, ensure_ascii=False).encode())
+            return
+        elif self.path == "/api/feishu-chat/self-test":
+            length = int(self.headers.get('Content-Length', 0))
+            try:
+                body = json.loads(self.rfile.read(length)) if length else {}
+                result = _test_feishu_chat_channel(body)
+            except json.JSONDecodeError as e:
+                result = {"ok": False, "error": f"Invalid JSON: {str(e)}", "_status": 400}
+            self.send_response(result.get("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            result.pop("_status", None)
+            self.wfile.write(json.dumps(result, ensure_ascii=False).encode())
             return
         elif self.path == "/api/feishu-notification/test":
             length = int(self.headers.get('Content-Length', 0))
@@ -27827,6 +28606,8 @@ if __name__ == "__main__":
 
     feishu_status = _start_feishu_long_connection()
     print(f"📣 Feishu long connection: {feishu_status.get('status')}")
+    feishu_chat_status = _start_feishu_chat_long_connection()
+    print(f"💬 Feishu chat long connection: {feishu_chat_status.get('status')}")
 
     # Start HTTP server in main thread
     start_http_server()

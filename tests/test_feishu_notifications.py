@@ -1,7 +1,9 @@
+import io
 import json
 import os
 import sys
 import tempfile
+import types
 import urllib.error
 
 
@@ -13,7 +15,9 @@ if APP_DIR not in sys.path:
 from feishu_notifications import (  # noqa: E402
     FeishuNotificationError,
     build_feishu_card,
+    send_feishu_markdown_message,
     send_feishu_notification,
+    send_feishu_text_message,
     validate_notification_intent,
 )
 
@@ -32,6 +36,35 @@ def read_records(status_dir):
     path = os.path.join(status_dir, "feishu-notification-records.jsonl")
     with open(path, "r", encoding="utf-8") as f:
         return [json.loads(line) for line in f if line.strip()]
+
+
+def call_office_handler(server, method, path, body=None):
+    payload = json.dumps(body).encode("utf-8") if body is not None else b""
+    handler = server.OfficeHandler.__new__(server.OfficeHandler)
+    handler.path = path
+    handler.headers = {"Content-Length": str(len(payload))}
+    handler.rfile = io.BytesIO(payload)
+    handler.wfile = io.BytesIO()
+    handler._status = None
+    handler._headers = []
+
+    def send_response(self, status, message=None):
+        self._status = status
+
+    def send_header(self, key, value):
+        self._headers.append((key, value))
+
+    def end_headers(self):
+        return None
+
+    handler.send_response = types.MethodType(send_response, handler)
+    handler.send_header = types.MethodType(send_header, handler)
+    handler.end_headers = types.MethodType(end_headers, handler)
+    if method == "POST":
+        server.OfficeHandler.do_POST(handler)
+    else:
+        server.OfficeHandler.do_GET(handler)
+    return handler._status, json.loads(handler.wfile.getvalue().decode("utf-8"))
 
 
 def test_four_notification_types_render_interactive_cards():
@@ -223,6 +256,83 @@ def test_sender_uses_app_credentials_and_records_success_without_leaking_secret(
         assert records[0]["appFingerprint"]
         assert "app-secret-should-not-leak" not in serialized
         assert "tenant-token-secret" not in serialized
+
+
+def test_text_sender_uses_chat_app_credentials_without_leaking_secret():
+    calls = []
+
+    def fake_urlopen(request, timeout=0):
+        calls.append((request.full_url, dict(request.header_items()), request.data.decode("utf-8")))
+        if "/auth/v3/tenant_access_token/internal" in request.full_url:
+            body = json.loads(request.data.decode("utf-8"))
+            assert body["app_id"] == "cli_chat"
+            assert body["app_secret"] == "chat-secret-should-not-leak"
+            return FakeResponse('{"code":0,"msg":"ok","tenant_access_token":"tenant-token-secret","expire":7200}')
+        if "/im/v1/messages" in request.full_url:
+            assert "receive_id_type=chat_id" in request.full_url
+            assert any(k.lower() == "authorization" and v == "Bearer tenant-token-secret" for k, v in request.header_items())
+            body = json.loads(request.data.decode("utf-8"))
+            assert body["receive_id"] == "oc_chat"
+            assert body["msg_type"] == "text"
+            sent_text = json.loads(body["content"])["text"]
+            assert sent_text == "CEO (by Hermes): hello"
+            return FakeResponse('{"code":0,"msg":"success","data":{"message_id":"om_text_1"}}')
+        raise AssertionError("unexpected URL: " + request.full_url)
+
+    result = send_feishu_text_message(
+        "CEO (by Hermes):\nhello",
+        app_config={
+            "appId": "cli_chat",
+            "appSecret": "chat-secret-should-not-leak",
+        },
+        receive_id="oc_chat",
+        receive_id_type="chat_id",
+        urlopen=fake_urlopen,
+    )
+
+    assert result["ok"] is True
+    assert result["status"] == "sent"
+    assert result["channel"] == "app_text"
+    assert result["messageId"] == "om_text_1"
+    serialized = json.dumps(result, ensure_ascii=False)
+    assert "chat-secret-should-not-leak" not in serialized
+    assert "tenant-token-secret" not in serialized
+    assert len(calls) == 2
+
+
+def test_markdown_sender_preserves_markdown_without_prefix():
+    markdown = "当前 VO 里有 2 个 agent:\n\n| id | 名称 |\n|---|---|\n| `codex-local` | Codex |"
+
+    def fake_urlopen(request, timeout=0):
+        if "/auth/v3/tenant_access_token/internal" in request.full_url:
+            return FakeResponse('{"code":0,"msg":"ok","tenant_access_token":"tenant-token-secret","expire":7200}')
+        if "/im/v1/messages" in request.full_url:
+            body = json.loads(request.data.decode("utf-8"))
+            assert body["receive_id"] == "oc_chat"
+            assert body["msg_type"] == "interactive"
+            card = json.loads(body["content"])
+            content = card["body"]["elements"][0]["content"]
+            assert content == markdown
+            assert not content.startswith("CEO (by")
+            assert "\n|---|---|" in content
+            return FakeResponse('{"code":0,"msg":"success","data":{"message_id":"om_markdown_1"}}')
+        raise AssertionError("unexpected URL: " + request.full_url)
+
+    result = send_feishu_markdown_message(
+        markdown,
+        app_config={
+            "appId": "cli_chat",
+            "appSecret": "chat-secret-should-not-leak",
+        },
+        receive_id="oc_chat",
+        receive_id_type="chat_id",
+        urlopen=fake_urlopen,
+    )
+
+    assert result["ok"] is True
+    assert result["status"] == "sent"
+    assert result["channel"] == "app_markdown"
+    assert result["messageId"] == "om_markdown_1"
 
 
 def test_sender_surfaces_feishu_app_http_error_body():
@@ -449,6 +559,1338 @@ def test_feishu_long_connection_event_conversion():
     assert body["event"]["action"]["value"]["action"] == "acceptance_approve"
 
 
+def test_feishu_long_connection_message_event_conversion():
+    from feishu_long_connection import FeishuLongConnectionReceiver
+
+    class Obj:
+        def __init__(self, **kwargs):
+            self.__dict__.update(kwargs)
+
+    data = Obj(
+        header=Obj(event_id="evt_msg"),
+        event=Obj(
+            sender=Obj(sender_id=Obj(open_id="ou_sender", user_id="u_sender", union_id="on_sender")),
+            message=Obj(
+                message_id="om_demo",
+                chat_id="oc_demo",
+                chat_type="p2p",
+                message_type="text",
+                content=json.dumps({"text": "hello from feishu"}),
+            ),
+        ),
+    )
+    body = FeishuLongConnectionReceiver._message_event_to_body(data)
+    assert body["header"]["event_type"] == "im.message.receive_v1"
+    assert body["event"]["sender"]["sender_id"]["open_id"] == "ou_sender"
+    assert body["event"]["message"]["message_id"] == "om_demo"
+    assert body["event"]["message"]["chat_id"] == "oc_demo"
+    assert body["event"]["message"]["text"] == "hello from feishu"
+
+
+def test_feishu_long_connection_message_handler_is_invoked():
+    from feishu_long_connection import FeishuLongConnectionReceiver
+
+    class Obj:
+        def __init__(self, **kwargs):
+            self.__dict__.update(kwargs)
+
+    calls = []
+    receiver = FeishuLongConnectionReceiver(
+        app_id="cli_demo",
+        app_secret="secret",
+        message_handler=lambda body: calls.append(body),
+        name="test-feishu-chat-receiver",
+    )
+    data = Obj(
+        header=Obj(event_id="evt_msg_handler"),
+        event=Obj(
+            sender=Obj(sender_id=Obj(open_id="ou_sender")),
+            message=Obj(
+                message_id="om_handler",
+                chat_id="oc_handler",
+                chat_type="p2p",
+                message_type="text",
+                content=json.dumps({"text": "handler hello"}),
+            ),
+        ),
+    )
+
+    receiver._handle_message_event(data)
+
+    assert len(calls) == 1
+    assert calls[0]["header"]["event_type"] == "im.message.receive_v1"
+    assert calls[0]["event"]["sender"]["sender_id"]["open_id"] == "ou_sender"
+    assert calls[0]["event"]["message"]["message_id"] == "om_handler"
+    assert calls[0]["event"]["message"]["text"] == "handler hello"
+    status = receiver.status()
+    assert status["running"] is True
+    assert status["status"] == "running"
+    assert status["lastEventAt"] > 0
+
+
+def test_feishu_chat_config_is_separate_from_notification_app():
+    os.environ.setdefault("VO_HERMES_ENABLED", "0")
+    os.environ.setdefault("VO_CODEX_ENABLED", "0")
+    status_dir = tempfile.mkdtemp(prefix="vo-feishu-chat-config-")
+    os.environ["VO_STATUS_DIR"] = status_dir
+    import server
+
+    class FakeReceiver:
+        def __init__(self, app_id="", app_secret="", action_handler=None, message_handler=None, name=""):
+            self.app_id = app_id
+            self.app_secret = app_secret
+            self.action_handler = action_handler
+            self.message_handler = message_handler
+            self.name = name
+
+        def start(self):
+            return {"enabled": True, "running": True, "status": "running"}
+
+        def status(self):
+            return {"enabled": True, "running": True, "status": "running"}
+
+    previous_receiver_cls = server.FeishuLongConnectionReceiver
+    previous_chat_receiver = server._FEISHU_CHAT_LONG_CONNECTION_RECEIVER
+    server.FeishuLongConnectionReceiver = FakeReceiver
+    server._FEISHU_CHAT_LONG_CONNECTION_RECEIVER = None
+    server._persist_setup_payload({
+        "notifications": {
+            "feishuEnabled": True,
+            "feishuAppId": "cli_notification",
+            "feishuAppSecret": "notification-secret",
+            "feishuReceiveId": "oc_notification",
+        }
+    })
+    try:
+        result = server._save_feishu_chat_config({
+            "enabled": True,
+            "appId": "cli_chat",
+            "appSecret": "chat-secret",
+        })
+    finally:
+        server.FeishuLongConnectionReceiver = previous_receiver_cls
+        server._FEISHU_CHAT_LONG_CONNECTION_RECEIVER = previous_chat_receiver
+
+    assert result["ok"] is True
+    assert result["configured"] is True
+    assert result["longConnection"]["status"] == "running"
+    serialized = json.dumps(result, ensure_ascii=False)
+    assert "chat-secret" not in serialized
+    with open(os.path.join(status_dir, "vo-config.json"), "r", encoding="utf-8") as f:
+        saved = json.load(f)
+    assert saved["notifications"]["feishuAppId"] == "cli_notification"
+    assert saved["notifications"]["feishuAppSecret"] == "notification-secret"
+    assert saved["feishu"]["chatApp"]["appId"] == "cli_chat"
+    assert saved["feishu"]["chatApp"]["appSecret"] == "chat-secret"
+
+
+def test_feishu_chat_config_rejects_unknown_representative_agent():
+    os.environ.setdefault("VO_HERMES_ENABLED", "0")
+    os.environ.setdefault("VO_CODEX_ENABLED", "0")
+    status_dir = tempfile.mkdtemp(prefix="vo-feishu-chat-invalid-agent-")
+    os.environ["VO_STATUS_DIR"] = status_dir
+    import server
+
+    result = server._save_feishu_chat_config({
+        "enabled": True,
+        "appId": "cli_chat",
+        "appSecret": "chat-secret",
+        "representativeAgentId": "definitely-missing-agent",
+    })
+
+    assert result["ok"] is False
+    assert result["code"] == "agent_not_found"
+    assert result["_status"] == 404
+
+
+def test_feishu_channel_adapter_records_and_dedupes():
+    os.environ.setdefault("VO_HERMES_ENABLED", "0")
+    os.environ.setdefault("VO_CODEX_ENABLED", "0")
+    status_dir = tempfile.mkdtemp(prefix="vo-feishu-channel-")
+    os.environ["VO_STATUS_DIR"] = status_dir
+    import server
+
+    previous_status_dir = server.STATUS_DIR
+    previous_config = server.VO_CONFIG
+    previous_dispatch = server._dispatch_representative_agent_message
+    server.STATUS_DIR = status_dir
+    server.VO_CONFIG = {
+        **previous_config,
+        "feishu": {
+            "chatApp": {
+                "enabled": True,
+                "appId": "cli_chat",
+                "appSecret": "chat-secret",
+                "representativeAgentId": "hermes-default",
+            },
+            "bindings": {"open_id:ou_bound": "user-1"},
+        },
+    }
+    calls = []
+    sends = []
+
+    def fake_dispatch(agent_id, message, conversation_id, source_meta):
+        calls.append({
+            "agent_id": agent_id,
+            "message": message,
+            "conversation_id": conversation_id,
+            "source_meta": source_meta,
+        })
+        return {"ok": True, "reply": "CEO reply", "conversationId": conversation_id}
+
+    def fake_send(chat_id, text):
+        sends.append({"chat_id": chat_id, "text": text})
+        return {"ok": True, "status": "sent", "channel": "fake"}
+
+    body = {
+        "event": {
+            "sender": {"sender_id": {"open_id": "ou_bound"}},
+            "message": {
+                "message_id": "om_1",
+                "chat_id": "oc_1",
+                "chat_type": "p2p",
+                "message_type": "text",
+                "content": {"text": "hello"},
+                "text": "hello",
+            },
+        }
+    }
+    try:
+        server._dispatch_representative_agent_message = fake_dispatch
+        result = server._handle_feishu_chat_message_event(body, send_text=fake_send)
+        duplicate = server._handle_feishu_chat_message_event(body, send_text=fake_send)
+    finally:
+        server._dispatch_representative_agent_message = previous_dispatch
+        server.STATUS_DIR = previous_status_dir
+        server.VO_CONFIG = previous_config
+
+    assert result["ok"] is True
+    assert result["reply"] == "CEO reply"
+    assert duplicate["idempotent"] is True
+    assert len(calls) == 1
+    assert calls[0]["agent_id"] == "hermes-default"
+    assert calls[0]["source_meta"]["sourceMessageId"] == "om_1"
+    assert sends == [{"chat_id": "oc_1", "text": "CEO reply"}]
+    with open(os.path.join(status_dir, "feishu-channel-records.jsonl"), "r", encoding="utf-8") as f:
+        rows = [json.loads(line) for line in f if line.strip()]
+    assert {row["event"] for row in rows} >= {"user_message", "turn_completed"}
+    completed = [row for row in rows if row["event"] == "turn_completed"][0]
+    assert completed["sourceMessageId"] == "om_1"
+    assert completed["representativeAgentId"] == "hermes-default"
+    assert completed["reply"] == "CEO reply"
+    assert completed["feishuReply"] == "CEO reply"
+    with open(os.path.join(status_dir, "agent-platform-communications.jsonl"), "r", encoding="utf-8") as f:
+        comm_rows = [json.loads(line) for line in f if line.strip()]
+    visible_rows = [row for row in comm_rows if row.get("visibleInOffice", True)]
+    assert [row["direction"] for row in visible_rows] == ["request", "reply"]
+    assert visible_rows[0]["metadata"]["sourceApp"] == "feishu"
+    assert visible_rows[0]["metadata"]["sourceMessageId"] == "om_1"
+    assert visible_rows[1]["text"] == "CEO reply"
+    delivery_rows = [row for row in comm_rows if row.get("operation") == "feishu_delivery"]
+    assert delivery_rows[0]["metadata"]["feishuSendResult"]["status"] == "sent"
+
+
+def test_feishu_channel_adds_and_deletes_message_reaction_receipt():
+    os.environ.setdefault("VO_HERMES_ENABLED", "0")
+    os.environ.setdefault("VO_CODEX_ENABLED", "0")
+    status_dir = tempfile.mkdtemp(prefix="vo-feishu-channel-receipt-")
+    os.environ["VO_STATUS_DIR"] = status_dir
+    import server
+
+    previous_status_dir = server.STATUS_DIR
+    previous_config = server.VO_CONFIG
+    previous_dispatch = server._dispatch_representative_agent_message
+    previous_send = server._feishu_chat_app_text_send
+    previous_receipt = server._feishu_chat_app_receipt_send
+    previous_recall = server._feishu_chat_app_message_recall
+    previous_reaction_add = server._feishu_chat_app_reaction_add
+    previous_reaction_delete = server._feishu_chat_app_reaction_delete
+    server.STATUS_DIR = status_dir
+    server.VO_CONFIG = {
+        **previous_config,
+        "feishu": {
+            "chatApp": {
+                "enabled": True,
+                "appId": "cli_chat",
+                "appSecret": "chat-secret",
+                "representativeAgentId": "codex-local",
+            },
+            "bindings": {"open_id:ou_receipt": "user-1"},
+        },
+    }
+    operations = []
+
+    def fake_dispatch(agent_id, message, conversation_id, source_meta):
+        operations.append({"op": "dispatch", "agent_id": agent_id, "message": message})
+        return {"ok": True, "reply": "正式回复", "conversationId": conversation_id}
+
+    def fake_send(chat_id, text):
+        operations.append({"op": "send", "chat_id": chat_id, "text": text})
+        return {"ok": True, "status": "sent", "messageId": "om_final"}
+
+    def fake_receipt(chat_id, text):
+        operations.append({"op": "receipt", "chat_id": chat_id, "text": text})
+        return {"ok": True, "status": "sent", "messageId": "om_receipt"}
+
+    def fake_recall(message_id):
+        operations.append({"op": "recall", "message_id": message_id})
+        return {"ok": True, "status": "recalled", "messageId": message_id}
+
+    def fake_reaction_add(message_id, emoji_type):
+        operations.append({"op": "reaction_add", "message_id": message_id, "emoji_type": emoji_type})
+        return {"ok": True, "status": "added", "reactionId": "reaction_1", "emojiType": emoji_type}
+
+    def fake_reaction_delete(message_id, reaction_id):
+        operations.append({"op": "reaction_delete", "message_id": message_id, "reaction_id": reaction_id})
+        return {"ok": True, "status": "deleted", "reactionId": reaction_id}
+
+    body = {
+        "event": {
+            "sender": {"sender_id": {"open_id": "ou_receipt"}},
+            "message": {
+                "message_id": "om_receipt_source",
+                "chat_id": "oc_receipt",
+                "chat_type": "p2p",
+                "message_type": "text",
+                "content": {"text": "hello"},
+            },
+        }
+    }
+    try:
+        server._dispatch_representative_agent_message = fake_dispatch
+        server._feishu_chat_app_text_send = fake_send
+        server._feishu_chat_app_receipt_send = fake_receipt
+        server._feishu_chat_app_message_recall = fake_recall
+        server._feishu_chat_app_reaction_add = fake_reaction_add
+        server._feishu_chat_app_reaction_delete = fake_reaction_delete
+        result = server._handle_feishu_chat_message_event(body)
+    finally:
+        server._dispatch_representative_agent_message = previous_dispatch
+        server._feishu_chat_app_text_send = previous_send
+        server._feishu_chat_app_receipt_send = previous_receipt
+        server._feishu_chat_app_message_recall = previous_recall
+        server._feishu_chat_app_reaction_add = previous_reaction_add
+        server._feishu_chat_app_reaction_delete = previous_reaction_delete
+        server.STATUS_DIR = previous_status_dir
+        server.VO_CONFIG = previous_config
+
+    assert result["ok"] is True
+    assert [item["op"] for item in operations] == ["reaction_add", "dispatch", "send", "reaction_delete"]
+    assert operations[0]["message_id"] == "om_receipt_source"
+    assert operations[0]["emoji_type"] == "LGTM"
+    assert operations[2]["text"] == "正式回复"
+    assert operations[3]["message_id"] == "om_receipt_source"
+    assert operations[3]["reaction_id"] == "reaction_1"
+    completed = result["record"]
+    assert completed["reactionResult"]["reactionId"] == "reaction_1"
+    assert completed["reactionDeleteResult"]["status"] == "deleted"
+    assert completed["receiptResult"] == {}
+
+
+def test_feishu_channel_falls_back_to_temporary_receipt_when_reaction_fails():
+    os.environ.setdefault("VO_HERMES_ENABLED", "0")
+    os.environ.setdefault("VO_CODEX_ENABLED", "0")
+    status_dir = tempfile.mkdtemp(prefix="vo-feishu-channel-receipt-fallback-")
+    os.environ["VO_STATUS_DIR"] = status_dir
+    import server
+
+    previous_status_dir = server.STATUS_DIR
+    previous_config = server.VO_CONFIG
+    previous_dispatch = server._dispatch_representative_agent_message
+    previous_send = server._feishu_chat_app_text_send
+    previous_receipt = server._feishu_chat_app_receipt_send
+    previous_recall = server._feishu_chat_app_message_recall
+    previous_reaction_add = server._feishu_chat_app_reaction_add
+    previous_reaction_delete = server._feishu_chat_app_reaction_delete
+    server.STATUS_DIR = status_dir
+    server.VO_CONFIG = {
+        **previous_config,
+        "feishu": {
+            "chatApp": {
+                "enabled": True,
+                "appId": "cli_chat",
+                "appSecret": "chat-secret",
+                "representativeAgentId": "codex-local",
+            },
+            "bindings": {"open_id:ou_receipt_fallback": "user-1"},
+        },
+    }
+    operations = []
+
+    def fake_dispatch(agent_id, message, conversation_id, source_meta):
+        operations.append({"op": "dispatch"})
+        return {"ok": True, "reply": "正式回复", "conversationId": conversation_id}
+
+    def fake_send(chat_id, text):
+        operations.append({"op": "send", "text": text})
+        return {"ok": True, "status": "sent", "messageId": "om_final"}
+
+    def fake_receipt(chat_id, text):
+        operations.append({"op": "receipt", "chat_id": chat_id, "text": text})
+        return {"ok": True, "status": "sent", "messageId": "om_receipt"}
+
+    def fake_recall(message_id):
+        operations.append({"op": "recall", "message_id": message_id})
+        return {"ok": True, "status": "recalled", "messageId": message_id}
+
+    def fake_reaction_add(message_id, emoji_type):
+        operations.append({"op": "reaction_add", "message_id": message_id, "emoji_type": emoji_type})
+        return {"ok": False, "status": "feishu_error", "code": 999}
+
+    def fake_reaction_delete(message_id, reaction_id):
+        operations.append({"op": "reaction_delete", "message_id": message_id, "reaction_id": reaction_id})
+        return {"ok": True, "status": "deleted", "reactionId": reaction_id}
+
+    body = {
+        "event": {
+            "sender": {"sender_id": {"open_id": "ou_receipt_fallback"}},
+            "message": {
+                "message_id": "om_receipt_fallback_source",
+                "chat_id": "oc_receipt_fallback",
+                "chat_type": "p2p",
+                "message_type": "text",
+                "content": {"text": "hello"},
+            },
+        }
+    }
+    try:
+        server._dispatch_representative_agent_message = fake_dispatch
+        server._feishu_chat_app_text_send = fake_send
+        server._feishu_chat_app_receipt_send = fake_receipt
+        server._feishu_chat_app_message_recall = fake_recall
+        server._feishu_chat_app_reaction_add = fake_reaction_add
+        server._feishu_chat_app_reaction_delete = fake_reaction_delete
+        result = server._handle_feishu_chat_message_event(body)
+    finally:
+        server._dispatch_representative_agent_message = previous_dispatch
+        server._feishu_chat_app_text_send = previous_send
+        server._feishu_chat_app_receipt_send = previous_receipt
+        server._feishu_chat_app_message_recall = previous_recall
+        server._feishu_chat_app_reaction_add = previous_reaction_add
+        server._feishu_chat_app_reaction_delete = previous_reaction_delete
+        server.STATUS_DIR = previous_status_dir
+        server.VO_CONFIG = previous_config
+
+    assert result["ok"] is True
+    assert [item["op"] for item in operations] == ["reaction_add", "receipt", "dispatch", "send", "recall"]
+    assert operations[1]["text"]
+    assert operations[4]["message_id"] == "om_receipt"
+    completed = result["record"]
+    assert completed["reactionResult"]["ok"] is False
+    assert completed["receiptResult"]["messageId"] == "om_receipt"
+    assert completed["receiptRecallResult"]["status"] == "recalled"
+
+
+def test_feishu_channel_missing_representative_agent_does_not_dispatch():
+    os.environ.setdefault("VO_HERMES_ENABLED", "0")
+    os.environ.setdefault("VO_CODEX_ENABLED", "0")
+    status_dir = tempfile.mkdtemp(prefix="vo-feishu-channel-missing-rep-")
+    os.environ["VO_STATUS_DIR"] = status_dir
+    import server
+
+    previous_status_dir = server.STATUS_DIR
+    previous_config = server.VO_CONFIG
+    previous_dispatch = server._dispatch_representative_agent_message
+    server.STATUS_DIR = status_dir
+    server.VO_CONFIG = {
+        **previous_config,
+        "feishu": {
+            "chatApp": {
+                "enabled": True,
+                "appId": "cli_chat",
+                "appSecret": "chat-secret",
+                "representativeAgentId": "",
+            },
+            "bindings": {"open_id:ou_bound": "user-1"},
+        },
+    }
+    calls = []
+    sends = []
+
+    def fake_dispatch(*args, **kwargs):
+        calls.append((args, kwargs))
+        return {"ok": True, "reply": "should not happen"}
+
+    def fake_send(chat_id, text):
+        sends.append({"chat_id": chat_id, "text": text})
+        return {"ok": True, "status": "sent", "channel": "fake"}
+
+    try:
+        server._dispatch_representative_agent_message = fake_dispatch
+        result = server._handle_feishu_chat_message_event({
+            "event": {
+                "sender": {"sender_id": {"open_id": "ou_bound"}},
+                "message": {
+                    "message_id": "om_missing_rep",
+                    "chat_id": "oc_missing_rep",
+                    "chat_type": "p2p",
+                    "message_type": "text",
+                    "text": "hello",
+                },
+            }
+        }, send_text=fake_send)
+    finally:
+        server._dispatch_representative_agent_message = previous_dispatch
+        server.STATUS_DIR = previous_status_dir
+        server.VO_CONFIG = previous_config
+
+    assert result["ok"] is False
+    assert result["status"] == "missing_representative_agent"
+    assert calls == []
+    assert sends and "CEO Agent" in sends[0]["text"]
+    with open(os.path.join(status_dir, "feishu-channel-records.jsonl"), "r", encoding="utf-8") as f:
+        rows = [json.loads(line) for line in f if line.strip()]
+    assert rows[0]["event"] == "rejected"
+    assert rows[0]["reason"] == "missing_representative_agent"
+    assert rows[0]["voUserId"] == "user-1"
+
+
+def test_feishu_channel_representative_agent_change_affects_future_messages():
+    os.environ.setdefault("VO_HERMES_ENABLED", "0")
+    os.environ.setdefault("VO_CODEX_ENABLED", "0")
+    status_dir = tempfile.mkdtemp(prefix="vo-feishu-channel-agent-switch-")
+    os.environ["VO_STATUS_DIR"] = status_dir
+    import server
+
+    previous_status_dir = server.STATUS_DIR
+    previous_config = server.VO_CONFIG
+    previous_dispatch = server._dispatch_representative_agent_message
+    server.STATUS_DIR = status_dir
+    server.VO_CONFIG = {
+        **previous_config,
+        "feishu": {
+            "chatApp": {
+                "enabled": True,
+                "appId": "cli_chat",
+                "appSecret": "chat-secret",
+                "representativeAgentId": "agent-a",
+            },
+            "bindings": {"open_id:ou_bound": "user-1"},
+        },
+    }
+    calls = []
+    sends = []
+
+    def fake_dispatch(agent_id, message, conversation_id, source_meta):
+        calls.append({"agentId": agent_id, "message": message, "conversationId": conversation_id})
+        return {"ok": True, "reply": f"reply from {agent_id}", "conversationId": conversation_id}
+
+    def fake_send(chat_id, text):
+        sends.append({"chatId": chat_id, "text": text})
+        return {"ok": True, "status": "sent", "channel": "fake"}
+
+    def body(message_id, text):
+        return {
+            "event": {
+                "sender": {"sender_id": {"open_id": "ou_bound"}},
+                "message": {
+                    "message_id": message_id,
+                    "chat_id": "oc_1",
+                    "chat_type": "p2p",
+                    "message_type": "text",
+                    "text": text,
+                },
+            }
+        }
+
+    try:
+        server._dispatch_representative_agent_message = fake_dispatch
+        first = server._handle_feishu_chat_message_event(body("om_agent_a", "hello A"), send_text=fake_send)
+        server.VO_CONFIG = {
+            **server.VO_CONFIG,
+            "feishu": {
+                **(server.VO_CONFIG.get("feishu") or {}),
+                "chatApp": {
+                    **((server.VO_CONFIG.get("feishu") or {}).get("chatApp") or {}),
+                    "representativeAgentId": "agent-b",
+                },
+            },
+        }
+        second = server._handle_feishu_chat_message_event(body("om_agent_b", "hello B"), send_text=fake_send)
+    finally:
+        server._dispatch_representative_agent_message = previous_dispatch
+        server.STATUS_DIR = previous_status_dir
+        server.VO_CONFIG = previous_config
+
+    assert first["ok"] is True
+    assert second["ok"] is True
+    assert [call["agentId"] for call in calls] == ["agent-a", "agent-b"]
+    assert [send["text"] for send in sends] == [
+        "reply from agent-a",
+        "reply from agent-b",
+    ]
+    with open(os.path.join(status_dir, "feishu-channel-records.jsonl"), "r", encoding="utf-8") as f:
+        rows = [json.loads(line) for line in f if line.strip()]
+    completed = [row for row in rows if row.get("event") == "turn_completed"]
+    assert [row["representativeAgentId"] for row in completed] == ["agent-a", "agent-b"]
+    assert [row["sourceMessageId"] for row in completed] == ["om_agent_a", "om_agent_b"]
+
+
+def test_feishu_channel_consecutive_messages_keep_order_and_conversation():
+    os.environ.setdefault("VO_HERMES_ENABLED", "0")
+    os.environ.setdefault("VO_CODEX_ENABLED", "0")
+    status_dir = tempfile.mkdtemp(prefix="vo-feishu-channel-order-")
+    os.environ["VO_STATUS_DIR"] = status_dir
+    import server
+
+    previous_status_dir = server.STATUS_DIR
+    previous_config = server.VO_CONFIG
+    previous_dispatch = server._dispatch_representative_agent_message
+    server.STATUS_DIR = status_dir
+    server.VO_CONFIG = {
+        **previous_config,
+        "feishu": {
+            "chatApp": {
+                "enabled": True,
+                "appId": "cli_chat",
+                "appSecret": "chat-secret",
+                "representativeAgentId": "hermes-default",
+            },
+            "bindings": {"open_id:ou_bound": "user-1"},
+        },
+    }
+    calls = []
+    sends = []
+
+    def fake_dispatch(agent_id, message, conversation_id, source_meta):
+        calls.append({
+            "agentId": agent_id,
+            "message": message,
+            "conversationId": conversation_id,
+            "sourceMessageId": source_meta.get("sourceMessageId"),
+        })
+        return {"ok": True, "reply": f"reply to {message}", "conversationId": conversation_id}
+
+    def fake_send(chat_id, text):
+        sends.append({"chatId": chat_id, "text": text})
+        return {"ok": True, "status": "sent", "channel": "fake"}
+
+    def body(message_id, text):
+        return {
+            "event": {
+                "sender": {"sender_id": {"open_id": "ou_bound"}},
+                "message": {
+                    "message_id": message_id,
+                    "chat_id": "oc_order",
+                    "chat_type": "p2p",
+                    "message_type": "text",
+                    "text": text,
+                },
+            }
+        }
+
+    try:
+        server._dispatch_representative_agent_message = fake_dispatch
+        first = server._handle_feishu_chat_message_event(body("om_order_1", "first"), send_text=fake_send)
+        second = server._handle_feishu_chat_message_event(body("om_order_2", "second"), send_text=fake_send)
+    finally:
+        server._dispatch_representative_agent_message = previous_dispatch
+        server.STATUS_DIR = previous_status_dir
+        server.VO_CONFIG = previous_config
+
+    assert first["ok"] is True
+    assert second["ok"] is True
+    assert [call["sourceMessageId"] for call in calls] == ["om_order_1", "om_order_2"]
+    assert [call["message"] for call in calls] == ["first", "second"]
+    assert calls[0]["conversationId"] == calls[1]["conversationId"]
+    assert len(sends) == 2
+    with open(os.path.join(status_dir, "feishu-channel-records.jsonl"), "r", encoding="utf-8") as f:
+        rows = [json.loads(line) for line in f if line.strip()]
+    assert [row["event"] for row in rows] == ["user_message", "turn_completed", "user_message", "turn_completed"]
+    assert [row["sourceMessageId"] for row in rows] == ["om_order_1", "om_order_1", "om_order_2", "om_order_2"]
+    assert rows[0]["conversationId"] == rows[1]["conversationId"] == rows[2]["conversationId"] == rows[3]["conversationId"]
+
+
+def test_feishu_channel_unavailable_representative_agent_records_failure():
+    os.environ.setdefault("VO_HERMES_ENABLED", "0")
+    os.environ.setdefault("VO_CODEX_ENABLED", "0")
+    status_dir = tempfile.mkdtemp(prefix="vo-feishu-channel-missing-agent-")
+    os.environ["VO_STATUS_DIR"] = status_dir
+    import server
+
+    previous_status_dir = server.STATUS_DIR
+    previous_config = server.VO_CONFIG
+    server.STATUS_DIR = status_dir
+    server.VO_CONFIG = {
+        **previous_config,
+        "feishu": {
+            "chatApp": {
+                "enabled": True,
+                "appId": "cli_chat",
+                "appSecret": "chat-secret",
+                "representativeAgentId": "missing-agent",
+            },
+            "bindings": {"open_id:ou_bound": "user-1"},
+        },
+    }
+    sends = []
+
+    def fake_send(chat_id, text):
+        sends.append({"chatId": chat_id, "text": text})
+        return {"ok": True, "status": "sent", "channel": "fake"}
+
+    try:
+        result = server._handle_feishu_chat_message_event({
+            "event": {
+                "sender": {"sender_id": {"open_id": "ou_bound"}},
+                "message": {
+                    "message_id": "om_missing_agent",
+                    "chat_id": "oc_missing_agent",
+                    "chat_type": "p2p",
+                    "message_type": "text",
+                    "text": "hello missing agent",
+                },
+            }
+        }, send_text=fake_send)
+    finally:
+        server.STATUS_DIR = previous_status_dir
+        server.VO_CONFIG = previous_config
+
+    assert result["ok"] is False
+    assert result["status"] == "agent_failed"
+    assert sends and not sends[0]["text"].startswith("CEO (by")
+    assert "Representative agent 'missing-agent' not found" in sends[0]["text"]
+    with open(os.path.join(status_dir, "feishu-channel-records.jsonl"), "r", encoding="utf-8") as f:
+        rows = [json.loads(line) for line in f if line.strip()]
+    assert [row["event"] for row in rows] == ["user_message", "turn_completed"]
+    completed = rows[-1]
+    assert completed["representativeAgentId"] == "missing-agent"
+    assert completed["agentResult"]["ok"] is False
+    assert completed["agentResult"]["_status"] == 404
+    assert completed["sendResult"]["ok"] is True
+
+
+def test_feishu_channel_recording_is_mandatory_even_if_disabled_in_config():
+    os.environ.setdefault("VO_HERMES_ENABLED", "0")
+    os.environ.setdefault("VO_CODEX_ENABLED", "0")
+    status_dir = tempfile.mkdtemp(prefix="vo-feishu-channel-mandatory-recording-")
+    os.environ["VO_STATUS_DIR"] = status_dir
+    import server
+
+    previous_status_dir = server.STATUS_DIR
+    previous_config = server.VO_CONFIG
+    previous_dispatch = server._dispatch_representative_agent_message
+    server.STATUS_DIR = status_dir
+    server.VO_CONFIG = {
+        **previous_config,
+        "feishu": {
+            "chatApp": {
+                "enabled": True,
+                "appId": "cli_chat",
+                "appSecret": "chat-secret",
+                "representativeAgentId": "hermes-default",
+                "recordMessages": False,
+            },
+            "bindings": {"open_id:ou_bound": "user-1"},
+        },
+    }
+    sends = []
+
+    def fake_dispatch(agent_id, message, conversation_id, source_meta):
+        return {"ok": True, "reply": "mandatory record reply", "conversationId": conversation_id}
+
+    def fake_send(chat_id, text):
+        sends.append({"chatId": chat_id, "text": text})
+        return {"ok": True, "status": "sent", "channel": "fake"}
+
+    try:
+        server._dispatch_representative_agent_message = fake_dispatch
+        result = server._handle_feishu_chat_message_event({
+            "event": {
+                "sender": {"sender_id": {"open_id": "ou_bound"}},
+                "message": {
+                    "message_id": "om_recording_forced",
+                    "chat_id": "oc_recording_forced",
+                    "chat_type": "p2p",
+                    "message_type": "text",
+                    "text": "record this",
+                },
+            }
+        }, send_text=fake_send)
+    finally:
+        server._dispatch_representative_agent_message = previous_dispatch
+        server.STATUS_DIR = previous_status_dir
+        server.VO_CONFIG = previous_config
+
+    assert result["ok"] is True
+    assert sends
+    with open(os.path.join(status_dir, "feishu-channel-records.jsonl"), "r", encoding="utf-8") as f:
+        rows = [json.loads(line) for line in f if line.strip()]
+    assert [row["event"] for row in rows] == ["user_message", "turn_completed"]
+    assert rows[-1]["sourceMessageId"] == "om_recording_forced"
+    assert rows[-1]["reply"] == "mandatory record reply"
+
+
+def test_feishu_channel_metadata_is_written_to_hermes_history():
+    os.environ.setdefault("VO_CODEX_ENABLED", "0")
+    status_dir = tempfile.mkdtemp(prefix="vo-feishu-history-metadata-")
+    os.environ["VO_STATUS_DIR"] = status_dir
+    import server
+
+    previous_status_dir = server.STATUS_DIR
+    previous_config = server.VO_CONFIG
+    previous_get_agent = server._get_hermes_agent
+    previous_api_chat = server._handle_hermes_api_chat
+    server.STATUS_DIR = status_dir
+    server.VO_CONFIG = {
+        **previous_config,
+        "hermes": {
+            **(previous_config.get("hermes") or {}),
+            "apiEnabled": True,
+            "timeoutSec": 10,
+        },
+    }
+
+    def fake_get_agent(agent_key):
+        return {
+            "id": agent_key,
+            "name": "Hermes",
+            "profile": "feishu-history-profile",
+            "providerKind": "hermes",
+            "statusKey": agent_key,
+        }
+
+    def fake_api_chat(agent, profile, delivery_message, original_message, conversation_id=None, timeout=None, on_event=None):
+        return {"ok": True, "reply": "history reply", "sessionId": "sess-history", "exitCode": 0}
+
+    try:
+        server._get_hermes_agent = fake_get_agent
+        server._handle_hermes_api_chat = fake_api_chat
+        result = server._handle_hermes_chat({
+            "agentId": "hermes-default",
+            "message": "hello from feishu",
+            "conversationId": "feishu-dm:history",
+            "fromType": "human",
+            "fromDisplayName": "Feishu User",
+            "sourceApp": "feishu",
+            "sourceSurface": "feishu-dm",
+            "sourceLabel": "Feishu DM",
+            "channel": "feishu",
+            "sourceMessageId": "om_history",
+            "feishuChatId": "oc_history",
+            "representativeAgentId": "hermes-default",
+        })
+        history = server._load_hermes_history("feishu-history-profile", "feishu-dm:history")
+    finally:
+        server._get_hermes_agent = previous_get_agent
+        server._handle_hermes_api_chat = previous_api_chat
+        server.STATUS_DIR = previous_status_dir
+        server.VO_CONFIG = previous_config
+
+    user_message = next(item for item in history if item.get("role") == "user")
+    assert result["ok"] is True
+    assert user_message["sourceApp"] == "feishu"
+    assert user_message["sourceSurface"] == "feishu-dm"
+    assert user_message["sourceMessageId"] == "om_history"
+    assert user_message["feishuChatId"] == "oc_history"
+    assert user_message["representativeAgentId"] == "hermes-default"
+    assert user_message["channel"] == "feishu"
+
+
+def test_feishu_chat_inbound_test_route_dispatches_and_records():
+    os.environ.setdefault("VO_HERMES_ENABLED", "0")
+    os.environ.setdefault("VO_CODEX_ENABLED", "0")
+    status_dir = tempfile.mkdtemp(prefix="vo-feishu-inbound-route-")
+    os.environ["VO_STATUS_DIR"] = status_dir
+    import server
+
+    previous_status_dir = server.STATUS_DIR
+    previous_config = server.VO_CONFIG
+    previous_dispatch = server._dispatch_representative_agent_message
+    previous_send = server._feishu_chat_app_text_send
+    server.STATUS_DIR = status_dir
+    server.VO_CONFIG = {
+        **previous_config,
+        "feishu": {
+            "chatApp": {
+                "enabled": True,
+                "appId": "cli_chat",
+                "appSecret": "chat-secret",
+                "representativeAgentId": "hermes-default",
+            },
+            "bindings": {"open_id:ou_route": "user-route"},
+        },
+    }
+    calls = []
+    sends = []
+
+    def fake_dispatch(agent_id, message, conversation_id, source_meta):
+        calls.append({
+            "agentId": agent_id,
+            "message": message,
+            "conversationId": conversation_id,
+            "sourceMeta": source_meta,
+        })
+        return {"ok": True, "reply": "route reply", "conversationId": conversation_id}
+
+    def fake_send(chat_id, text, urlopen=None):
+        sends.append({"chatId": chat_id, "text": text})
+        return {"ok": True, "status": "sent", "channel": "fake"}
+
+    body = {
+        "event": {
+            "sender": {"sender_id": {"open_id": "ou_route"}},
+            "message": {
+                "message_id": "om_route",
+                "chat_id": "oc_route",
+                "chat_type": "p2p",
+                "message_type": "text",
+                "text": "hello route",
+            },
+        }
+    }
+    try:
+        server._dispatch_representative_agent_message = fake_dispatch
+        server._feishu_chat_app_text_send = fake_send
+        status, result = call_office_handler(server, "POST", "/api/feishu-chat/inbound-test", body)
+    finally:
+        server._dispatch_representative_agent_message = previous_dispatch
+        server._feishu_chat_app_text_send = previous_send
+        server.STATUS_DIR = previous_status_dir
+        server.VO_CONFIG = previous_config
+
+    assert status == 200
+    assert result["ok"] is True
+    assert result["status"] == "completed"
+    assert result["reply"] == "route reply"
+    assert calls and calls[0]["agentId"] == "hermes-default"
+    assert calls[0]["sourceMeta"]["sourceMessageId"] == "om_route"
+    assert sends == [{"chatId": "oc_route", "text": "route reply"}]
+    with open(os.path.join(status_dir, "feishu-channel-records.jsonl"), "r", encoding="utf-8") as f:
+        rows = [json.loads(line) for line in f if line.strip()]
+    assert [row["event"] for row in rows] == ["user_message", "turn_completed"]
+    assert rows[-1]["sourceMessageId"] == "om_route"
+    assert rows[-1]["voUserId"] == "user-route"
+    assert rows[-1]["representativeAgentId"] == "hermes-default"
+
+
+def test_feishu_chat_self_test_route_dispatches_without_real_feishu_send():
+    os.environ.setdefault("VO_HERMES_ENABLED", "0")
+    os.environ.setdefault("VO_CODEX_ENABLED", "0")
+    status_dir = tempfile.mkdtemp(prefix="vo-feishu-self-test-route-")
+    os.environ["VO_STATUS_DIR"] = status_dir
+    import server
+
+    previous_status_dir = server.STATUS_DIR
+    previous_config = server.VO_CONFIG
+    previous_dispatch = server._dispatch_representative_agent_message
+    previous_start = server._start_feishu_chat_long_connection
+    previous_find_agent = server._find_agent_record
+    server.STATUS_DIR = status_dir
+    server.VO_CONFIG = {
+        **previous_config,
+        "feishu": {
+            "chatApp": {
+                "enabled": True,
+                "appId": "cli_chat",
+                "appSecret": "chat-secret",
+                "representativeAgentId": "hermes-default",
+            },
+            "bindings": {},
+        },
+    }
+    calls = []
+
+    def fake_dispatch(agent_id, message, conversation_id, source_meta):
+        calls.append({
+            "agentId": agent_id,
+            "message": message,
+            "conversationId": conversation_id,
+            "sourceMeta": source_meta,
+        })
+        return {"ok": True, "reply": "self-test reply", "conversationId": conversation_id}
+
+    try:
+        server._dispatch_representative_agent_message = fake_dispatch
+        server._start_feishu_chat_long_connection = lambda: {"enabled": True, "running": True, "status": "running"}
+        server._find_agent_record = lambda agent_id: {"id": agent_id, "name": "Hermes", "providerKind": "hermes"} if agent_id == "hermes-default" else None
+        status, result = call_office_handler(server, "POST", "/api/feishu-chat/self-test", {"text": "ping"})
+    finally:
+        server._dispatch_representative_agent_message = previous_dispatch
+        server._start_feishu_chat_long_connection = previous_start
+        server._find_agent_record = previous_find_agent
+        server.STATUS_DIR = previous_status_dir
+        server.VO_CONFIG = previous_config
+
+    assert status == 200
+    assert result["ok"] is True
+    assert result["selfTest"] is True
+    assert result["status"] == "completed"
+    assert calls and calls[0]["agentId"] == "hermes-default"
+    assert calls[0]["message"] == "ping"
+    assert result["sent"][0]["channel"] == "fake"
+    assert result["sent"][0]["status"] == "self_test_skipped_real_feishu_send"
+    assert "self-test reply" in result["sent"][0]["text"]
+
+
+def test_feishu_chat_bindings_config_is_persisted_and_lookupable():
+    os.environ.setdefault("VO_HERMES_ENABLED", "0")
+    os.environ.setdefault("VO_CODEX_ENABLED", "0")
+    status_dir = tempfile.mkdtemp(prefix="vo-feishu-bindings-")
+    os.environ["VO_STATUS_DIR"] = status_dir
+    import server
+
+    previous_config = server.VO_CONFIG
+    try:
+        server.VO_CONFIG = {
+            **previous_config,
+            "feishu": {
+                **(previous_config.get("feishu") or {}),
+                "bindings": {},
+            },
+        }
+        result = server._save_feishu_chat_bindings_config({
+            "bindings": {
+                "open_id:ou_bound": "user-1",
+                "union_id:on_bound": {"voUserId": "user-2"},
+                "empty": "",
+            }
+        })
+        server.VO_CONFIG = {
+            **server.VO_CONFIG,
+            "feishu": {
+                **(server.VO_CONFIG.get("feishu") or {}),
+                "bindings": result["bindings"],
+            },
+        }
+        found_open = server._find_feishu_bound_user({"openId": "ou_bound"}, "")
+        found_union = server._find_feishu_bound_user({"unionId": "on_bound"}, "")
+    finally:
+        server.VO_CONFIG = previous_config
+
+    assert result["ok"] is True
+    assert result["count"] == 2
+    assert result["bindings"]["open_id:ou_bound"] == "user-1"
+    assert result["bindings"]["union_id:on_bound"] == "user-2"
+    assert found_open == "user-1"
+    assert found_union == "user-2"
+
+
+def test_feishu_chat_bindings_http_routes_persist_and_read():
+    os.environ.setdefault("VO_HERMES_ENABLED", "0")
+    os.environ.setdefault("VO_CODEX_ENABLED", "0")
+    status_dir = tempfile.mkdtemp(prefix="vo-feishu-bindings-http-")
+    previous_status_dir_env = os.environ.get("VO_STATUS_DIR")
+    os.environ["VO_STATUS_DIR"] = status_dir
+    import server
+
+    previous_config = server.VO_CONFIG
+    previous_status_dir = server.STATUS_DIR
+    try:
+        server.STATUS_DIR = status_dir
+        server.VO_CONFIG = {
+            **previous_config,
+            "feishu": {
+                **(previous_config.get("feishu") or {}),
+                "bindings": {},
+            },
+        }
+        post_status, posted = call_office_handler(server, "POST", "/api/feishu-chat/bindings", {"bindings": {"open_id:ou_http": "user-http"}})
+        get_status, fetched = call_office_handler(server, "GET", "/api/feishu-chat/bindings")
+    finally:
+        server.STATUS_DIR = previous_status_dir
+        server.VO_CONFIG = previous_config
+        if previous_status_dir_env is None:
+            os.environ.pop("VO_STATUS_DIR", None)
+        else:
+            os.environ["VO_STATUS_DIR"] = previous_status_dir_env
+
+    assert post_status == 200
+    assert posted["ok"] is True
+    assert posted["bindings"] == {"open_id:ou_http": "user-http"}
+    assert get_status == 200
+    assert fetched["ok"] is True
+    assert fetched["bindings"] == {"open_id:ou_http": "user-http"}
+    with open(os.path.join(status_dir, "vo-config.json"), "r", encoding="utf-8") as f:
+        saved = json.load(f)
+    assert saved["feishu"]["bindings"] == {"open_id:ou_http": "user-http"}
+
+
+def test_feishu_chat_records_route_reads_recent_channel_records():
+    os.environ.setdefault("VO_HERMES_ENABLED", "0")
+    os.environ.setdefault("VO_CODEX_ENABLED", "0")
+    status_dir = tempfile.mkdtemp(prefix="vo-feishu-records-http-")
+    os.environ["VO_STATUS_DIR"] = status_dir
+    import server
+
+    previous_status_dir = server.STATUS_DIR
+    server.STATUS_DIR = status_dir
+    try:
+        server._record_feishu_channel_event({"event": "user_message", "sourceMessageId": "om_old"})
+        server._record_feishu_channel_event({"event": "user_message", "sourceMessageId": "om_keep_1"})
+        server._record_feishu_channel_event({"event": "turn_completed", "sourceMessageId": "om_keep_2"})
+        status, result = call_office_handler(server, "GET", "/api/feishu-chat/records?limit=2")
+    finally:
+        server.STATUS_DIR = previous_status_dir
+
+    assert status == 200
+    assert result["ok"] is True
+    assert result["count"] == 2
+    assert [row["sourceMessageId"] for row in result["records"]] == ["om_keep_1", "om_keep_2"]
+    assert [row["event"] for row in result["records"]] == ["user_message", "turn_completed"]
+
+
+def test_feishu_channel_missing_chat_credentials_rejects_before_dispatch():
+    os.environ.setdefault("VO_HERMES_ENABLED", "0")
+    os.environ.setdefault("VO_CODEX_ENABLED", "0")
+    status_dir = tempfile.mkdtemp(prefix="vo-feishu-channel-missing-creds-")
+    os.environ["VO_STATUS_DIR"] = status_dir
+    import server
+
+    previous_status_dir = server.STATUS_DIR
+    previous_config = server.VO_CONFIG
+    previous_dispatch = server._dispatch_representative_agent_message
+    server.STATUS_DIR = status_dir
+    server.VO_CONFIG = {
+        **previous_config,
+        "feishu": {
+            "chatApp": {
+                "enabled": True,
+                "representativeAgentId": "hermes-default",
+            },
+            "bindings": {"open_id:ou_bound": "user-1"},
+        },
+    }
+    calls = []
+    sends = []
+
+    def fake_dispatch(*args, **kwargs):
+        calls.append((args, kwargs))
+        return {"ok": True, "reply": "should not happen"}
+
+    def fake_send(chat_id, text):
+        sends.append({"chat_id": chat_id, "text": text})
+        return {"ok": True, "status": "sent", "channel": "fake"}
+
+    try:
+        server._dispatch_representative_agent_message = fake_dispatch
+        result = server._handle_feishu_chat_message_event({
+            "event": {
+                "sender": {"sender_id": {"open_id": "ou_bound"}},
+                "message": {
+                    "message_id": "om_missing_creds",
+                    "chat_id": "oc_missing_creds",
+                    "chat_type": "p2p",
+                    "message_type": "text",
+                    "text": "hello",
+                },
+            }
+        }, send_text=fake_send)
+    finally:
+        server._dispatch_representative_agent_message = previous_dispatch
+        server.STATUS_DIR = previous_status_dir
+        server.VO_CONFIG = previous_config
+
+    assert result["ok"] is False
+    assert result["status"] == "missing_chat_app_credentials"
+    assert calls == []
+    assert sends == []
+    with open(os.path.join(status_dir, "feishu-channel-records.jsonl"), "r", encoding="utf-8") as f:
+        rows = [json.loads(line) for line in f if line.strip()]
+    assert rows[0]["reason"] == "missing_chat_app_credentials"
+
+
+def test_feishu_channel_empty_text_is_ignored_before_dispatch():
+    os.environ.setdefault("VO_HERMES_ENABLED", "0")
+    os.environ.setdefault("VO_CODEX_ENABLED", "0")
+    status_dir = tempfile.mkdtemp(prefix="vo-feishu-channel-empty-text-")
+    os.environ["VO_STATUS_DIR"] = status_dir
+    import server
+
+    previous_status_dir = server.STATUS_DIR
+    previous_config = server.VO_CONFIG
+    previous_dispatch = server._dispatch_representative_agent_message
+    server.STATUS_DIR = status_dir
+    server.VO_CONFIG = {
+        **previous_config,
+        "feishu": {
+            "chatApp": {
+                "enabled": True,
+                "appId": "cli_chat",
+                "appSecret": "chat-secret",
+                "representativeAgentId": "hermes-default",
+            },
+            "bindings": {"open_id:ou_bound": "user-1"},
+        },
+    }
+    calls = []
+    sends = []
+
+    def fake_dispatch(*args, **kwargs):
+        calls.append((args, kwargs))
+        return {"ok": True, "reply": "should not happen"}
+
+    def fake_send(chat_id, text):
+        sends.append({"chat_id": chat_id, "text": text})
+        return {"ok": True, "status": "sent", "channel": "fake"}
+
+    try:
+        server._dispatch_representative_agent_message = fake_dispatch
+        result = server._handle_feishu_chat_message_event({
+            "event": {
+                "sender": {"sender_id": {"open_id": "ou_bound"}},
+                "message": {
+                    "message_id": "om_empty_text",
+                    "chat_id": "oc_empty_text",
+                    "chat_type": "p2p",
+                    "message_type": "text",
+                    "text": "   ",
+                },
+            }
+        }, send_text=fake_send)
+    finally:
+        server._dispatch_representative_agent_message = previous_dispatch
+        server.STATUS_DIR = previous_status_dir
+        server.VO_CONFIG = previous_config
+
+    assert result["ok"] is True
+    assert result["status"] == "ignored_empty_text"
+    assert calls == []
+    assert sends == []
+    with open(os.path.join(status_dir, "feishu-channel-records.jsonl"), "r", encoding="utf-8") as f:
+        rows = [json.loads(line) for line in f if line.strip()]
+    assert rows[0]["reason"] == "empty_text"
+
+
+def test_feishu_channel_unsupported_chat_or_message_type_is_ignored():
+    os.environ.setdefault("VO_HERMES_ENABLED", "0")
+    os.environ.setdefault("VO_CODEX_ENABLED", "0")
+    status_dir = tempfile.mkdtemp(prefix="vo-feishu-channel-unsupported-")
+    os.environ["VO_STATUS_DIR"] = status_dir
+    import server
+
+    previous_status_dir = server.STATUS_DIR
+    previous_config = server.VO_CONFIG
+    previous_dispatch = server._dispatch_representative_agent_message
+    server.STATUS_DIR = status_dir
+    server.VO_CONFIG = {
+        **previous_config,
+        "feishu": {
+            "chatApp": {
+                "enabled": True,
+                "appId": "cli_chat",
+                "appSecret": "chat-secret",
+                "representativeAgentId": "hermes-default",
+            },
+            "bindings": {"open_id:ou_bound": "user-1"},
+        },
+    }
+    calls = []
+    sends = []
+
+    def fake_dispatch(*args, **kwargs):
+        calls.append((args, kwargs))
+        return {"ok": True, "reply": "should not happen"}
+
+    def fake_send(chat_id, text):
+        sends.append({"chat_id": chat_id, "text": text})
+        return {"ok": True, "status": "sent", "channel": "fake"}
+
+    try:
+        server._dispatch_representative_agent_message = fake_dispatch
+        group_result = server._handle_feishu_chat_message_event({
+            "event": {
+                "sender": {"sender_id": {"open_id": "ou_bound"}},
+                "message": {
+                    "message_id": "om_group",
+                    "chat_id": "oc_group",
+                    "chat_type": "group",
+                    "message_type": "text",
+                    "text": "hello group",
+                },
+            }
+        }, send_text=fake_send)
+        image_result = server._handle_feishu_chat_message_event({
+            "event": {
+                "sender": {"sender_id": {"open_id": "ou_bound"}},
+                "message": {
+                    "message_id": "om_image",
+                    "chat_id": "oc_1",
+                    "chat_type": "p2p",
+                    "message_type": "image",
+                    "text": "",
+                },
+            }
+        }, send_text=fake_send)
+    finally:
+        server._dispatch_representative_agent_message = previous_dispatch
+        server.STATUS_DIR = previous_status_dir
+        server.VO_CONFIG = previous_config
+
+    assert group_result["ok"] is True
+    assert group_result["status"] == "ignored_unsupported_chat_type"
+    assert image_result["ok"] is True
+    assert image_result["status"] == "ignored_unsupported_message_type"
+    assert calls == []
+    assert sends == []
+    with open(os.path.join(status_dir, "feishu-channel-records.jsonl"), "r", encoding="utf-8") as f:
+        rows = [json.loads(line) for line in f if line.strip()]
+    assert [row["reason"] for row in rows] == ["unsupported_chat_type", "unsupported_message_type"]
+
+
+def test_feishu_channel_unbound_user_dispatches_with_feishu_source_identity():
+    os.environ.setdefault("VO_HERMES_ENABLED", "0")
+    os.environ.setdefault("VO_CODEX_ENABLED", "0")
+    status_dir = tempfile.mkdtemp(prefix="vo-feishu-channel-unbound-")
+    os.environ["VO_STATUS_DIR"] = status_dir
+    import server
+
+    previous_status_dir = server.STATUS_DIR
+    previous_config = server.VO_CONFIG
+    previous_dispatch = server._dispatch_representative_agent_message
+    server.STATUS_DIR = status_dir
+    server.VO_CONFIG = {
+        **previous_config,
+        "feishu": {
+            "chatApp": {
+                "enabled": True,
+                "appId": "cli_chat",
+                "appSecret": "chat-secret",
+                "representativeAgentId": "hermes-default",
+            },
+            "bindings": {},
+        },
+    }
+    calls = []
+    sends = []
+
+    def fake_dispatch(*args, **kwargs):
+        calls.append((args, kwargs))
+        return {"ok": True, "reply": "hello from agent"}
+
+    def fake_send(chat_id, text):
+        sends.append({"chat_id": chat_id, "text": text})
+        return {"ok": True, "status": "sent", "channel": "fake"}
+
+    try:
+        server._dispatch_representative_agent_message = fake_dispatch
+        result = server._handle_feishu_chat_message_event({
+            "event": {
+                "sender": {"sender_id": {"open_id": "ou_unbound"}},
+                "message": {
+                    "message_id": "om_unbound",
+                    "chat_id": "oc_unbound",
+                    "chat_type": "p2p",
+                    "message_type": "text",
+                    "text": "hello",
+                },
+            }
+        }, send_text=fake_send)
+    finally:
+        server._dispatch_representative_agent_message = previous_dispatch
+        server.STATUS_DIR = previous_status_dir
+        server.VO_CONFIG = previous_config
+
+    assert result["ok"] is True
+    assert result["status"] == "completed"
+    assert len(calls) == 1
+    assert calls[0][0][1] == "hello"
+    assert result["record"]["voUserId"] == "feishu:open_id:ou_unbound"
+    assert result["record"]["conversationId"].startswith("feishu-dm:")
+    assert sends and sends[0]["chat_id"] == "oc_unbound"
+    assert "hello from agent" in sends[0]["text"]
+
+
 def test_feishu_long_connection_response_uses_plain_toast_dict():
     from lark_oapi.core.json import JSON
     from lark_oapi.event.callback.model.p2_card_action_trigger import P2CardActionTriggerResponse
@@ -466,6 +1908,8 @@ if __name__ == "__main__":
     test_error_variants_do_not_leak_secrets_to_user_card()
     test_sender_uses_fake_http_and_records_success_without_leaking_webhook()
     test_sender_uses_app_credentials_and_records_success_without_leaking_secret()
+    test_text_sender_uses_chat_app_credentials_without_leaking_secret()
+    test_markdown_sender_preserves_markdown_without_prefix()
     test_sender_surfaces_feishu_app_http_error_body()
     test_sender_records_non_success_network_failure_and_missing_webhook()
     test_invalid_intent_records_structured_error()
@@ -474,5 +1918,27 @@ if __name__ == "__main__":
     test_manual_test_intents_cover_all_notification_types()
     test_feishu_card_action_challenge_and_recording()
     test_feishu_long_connection_event_conversion()
+    test_feishu_long_connection_message_event_conversion()
+    test_feishu_long_connection_message_handler_is_invoked()
+    test_feishu_chat_config_is_separate_from_notification_app()
+    test_feishu_chat_config_rejects_unknown_representative_agent()
+    test_feishu_channel_adapter_records_and_dedupes()
+    test_feishu_channel_adds_and_deletes_message_reaction_receipt()
+    test_feishu_channel_falls_back_to_temporary_receipt_when_reaction_fails()
+    test_feishu_channel_missing_representative_agent_does_not_dispatch()
+    test_feishu_channel_representative_agent_change_affects_future_messages()
+    test_feishu_channel_consecutive_messages_keep_order_and_conversation()
+    test_feishu_channel_unavailable_representative_agent_records_failure()
+    test_feishu_channel_recording_is_mandatory_even_if_disabled_in_config()
+    test_feishu_channel_metadata_is_written_to_hermes_history()
+    test_feishu_chat_inbound_test_route_dispatches_and_records()
+    test_feishu_chat_self_test_route_dispatches_without_real_feishu_send()
+    test_feishu_chat_bindings_config_is_persisted_and_lookupable()
+    test_feishu_chat_bindings_http_routes_persist_and_read()
+    test_feishu_chat_records_route_reads_recent_channel_records()
+    test_feishu_channel_missing_chat_credentials_rejects_before_dispatch()
+    test_feishu_channel_empty_text_is_ignored_before_dispatch()
+    test_feishu_channel_unsupported_chat_or_message_type_is_ignored()
+    test_feishu_channel_unbound_user_dispatches_with_feishu_source_identity()
     test_feishu_long_connection_response_uses_plain_toast_dict()
     print("test_feishu_notifications.py passed")

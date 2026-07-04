@@ -1,4 +1,4 @@
-"""Feishu long-connection card action receiver."""
+"""Feishu long-connection card action and chat message receiver."""
 
 from __future__ import annotations
 
@@ -15,11 +15,15 @@ class FeishuLongConnectionReceiver:
         *,
         app_id: str,
         app_secret: str,
-        action_handler: Callable[[dict[str, Any]], dict[str, Any]],
+        action_handler: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+        message_handler: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+        name: str = "feishu-long-connection",
     ) -> None:
         self.app_id = str(app_id or "").strip()
         self.app_secret = str(app_secret or "").strip()
         self.action_handler = action_handler
+        self.message_handler = message_handler
+        self.name = str(name or "feishu-long-connection")
         self._thread: threading.Thread | None = None
         self._lock = threading.Lock()
         self._status: dict[str, Any] = {
@@ -46,9 +50,24 @@ class FeishuLongConnectionReceiver:
         if self._thread and self._thread.is_alive():
             return self.status()
         self._set_status(enabled=True, running=True, status="starting", startedAt=int(time.time()), lastError="")
-        self._thread = threading.Thread(target=self._run, daemon=True, name="feishu-long-connection")
+        self._thread = threading.Thread(target=self._run, daemon=True, name=self.name)
         self._thread.start()
         return self.status()
+
+    def _handle_card_action_event(self, data: Any) -> dict[str, Any]:
+        body = self._event_to_body(data)
+        result = self.action_handler(body) if self.action_handler else {"ok": True}
+        self._set_status(status="running", running=True, lastEventAt=int(time.time()), lastError="")
+        toast = result.get("toast") if isinstance(result, dict) else None
+        if not isinstance(toast, dict):
+            toast = {"type": "success", "content": "操作已收到"}
+        return toast
+
+    def _handle_message_event(self, data: Any) -> None:
+        body = self._message_event_to_body(data)
+        if self.message_handler:
+            self.message_handler(body)
+        self._set_status(status="running", running=True, lastEventAt=int(time.time()), lastError="")
 
     def _run(self) -> None:
         try:
@@ -60,12 +79,7 @@ class FeishuLongConnectionReceiver:
 
             def on_card_action(data: P2CardActionTrigger) -> P2CardActionTriggerResponse:
                 try:
-                    body = self._event_to_body(data)
-                    result = self.action_handler(body)
-                    self._set_status(status="running", running=True, lastEventAt=int(time.time()), lastError="")
-                    toast = result.get("toast") if isinstance(result, dict) else None
-                    if not isinstance(toast, dict):
-                        toast = {"type": "success", "content": "操作已收到"}
+                    toast = self._handle_card_action_event(data)
                     return P2CardActionTriggerResponse({"toast": toast})
                 except Exception as exc:
                     self._set_status(
@@ -77,11 +91,25 @@ class FeishuLongConnectionReceiver:
                     print(f"[FeishuLongConnection] card action handler failed: {type(exc).__name__}: {exc}")
                     return P2CardActionTriggerResponse({"toast": {"type": "warning", "content": "操作已收到，后台处理中"}})
 
-            handler = (
-                lark.EventDispatcherHandler.builder("", "", lark.LogLevel.INFO)
-                .register_p2_card_action_trigger(on_card_action)
-                .build()
-            )
+            builder = lark.EventDispatcherHandler.builder("", "", lark.LogLevel.INFO)
+            if self.action_handler:
+                builder = builder.register_p2_card_action_trigger(on_card_action)
+            if self.message_handler and hasattr(builder, "register_p2_im_message_receive_v1"):
+                def on_message(data: Any) -> None:
+                    try:
+                        self._handle_message_event(data)
+                    except Exception as exc:
+                        self._set_status(
+                            status="handler_error",
+                            running=True,
+                            lastEventAt=int(time.time()),
+                            lastError=f"{type(exc).__name__}: {exc}",
+                        )
+                        print(f"[FeishuLongConnection] message handler failed: {type(exc).__name__}: {exc}")
+                builder = builder.register_p2_im_message_receive_v1(on_message)
+            elif self.message_handler:
+                self._set_status(status="missing_message_event_handler", running=True, lastError="register_p2_im_message_receive_v1 is unavailable")
+            handler = builder.build()
             self._set_status(status="connecting", running=True, lastError="")
             client = lark.ws.Client(self.app_id, self.app_secret, event_handler=handler)
             self._set_status(status="running", running=True, lastError="")
@@ -130,6 +158,52 @@ class FeishuLongConnectionReceiver:
                     "option": str(getattr(action, "option", "") or ""),
                     "name": str(getattr(action, "name", "") or ""),
                     "form_value": getattr(action, "form_value", None) or {},
+                },
+            },
+        }
+
+    @staticmethod
+    def _message_event_to_body(data: Any) -> dict[str, Any]:
+        event = getattr(data, "event", None)
+        header = getattr(data, "header", None)
+        message = getattr(event, "message", None)
+        sender = getattr(event, "sender", None)
+        sender_id = getattr(sender, "sender_id", None)
+        chat_type = str(getattr(message, "chat_type", "") or "")
+        message_type = str(getattr(message, "message_type", "") or getattr(message, "msg_type", "") or "")
+        content = getattr(message, "content", None) or ""
+        text = ""
+        parsed_content: Any = content
+        if isinstance(content, str):
+            try:
+                parsed_content = json.loads(content) if content else {}
+            except json.JSONDecodeError:
+                parsed_content = {"text": content}
+        if isinstance(parsed_content, dict):
+            text = str(parsed_content.get("text") or parsed_content.get("content") or "")
+        else:
+            text = str(parsed_content or "")
+        return {
+            "schema": "2.0",
+            "header": {
+                "event_type": "im.message.receive_v1",
+                "event_id": str(getattr(header, "event_id", "") or ""),
+            },
+            "event": {
+                "sender": {
+                    "sender_id": {
+                        "open_id": str(getattr(sender_id, "open_id", "") or ""),
+                        "user_id": str(getattr(sender_id, "user_id", "") or ""),
+                        "union_id": str(getattr(sender_id, "union_id", "") or ""),
+                    }
+                },
+                "message": {
+                    "message_id": str(getattr(message, "message_id", "") or ""),
+                    "chat_id": str(getattr(message, "chat_id", "") or ""),
+                    "chat_type": chat_type,
+                    "message_type": message_type,
+                    "content": parsed_content,
+                    "text": text,
                 },
             },
         }

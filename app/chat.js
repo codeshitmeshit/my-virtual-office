@@ -174,6 +174,8 @@
       this.hermesEventSource = null;
       this.hermesStreamCancel = null;
       this.hermesSendStartedAt = 0;
+      this.feishuEventSource = null;
+      this.feishuHistoryRefreshTimer = null;
       this.hermesCompletedToolKeys = new Set();
       this.codexHistoryPollTimer = null;
       this.codexEventSource = null;
@@ -206,6 +208,7 @@
 
       this.messages = root.querySelector('.chat-messages');
       this.status = root.querySelector('.chat-status');
+      this.feishuLiveStatus = root.querySelector('.chat-feishu-live-status');
       this.agentSelect = root.querySelector('.chat-agent-select');
       this.modelName = root.querySelector('.chat-model-name, #chat-model-name');
       this.contextInfo = root.querySelector('.chat-context-info, #chat-context-info');
@@ -285,6 +288,7 @@
       this.closeCodexEventSource();
       this.closeHermesEventSource();
       this.closeClaudeCodeEventSource();
+      this.closeFeishuEventSource();
       this.stopCodexActivityPolling();
       this.stopHermesHistoryPolling();
       this.stopCodexHistoryPolling();
@@ -396,7 +400,11 @@
           this.hasExplicitAgentSelection = true;
           this.saveSelection();
         }
-        if (connected || this.isHermesSelected() || this.isCodexSelected() || this.isClaudeCodeSelected()) this.fetchSessionInfo();
+        if (connected || this.isHermesSelected() || this.isCodexSelected() || this.isClaudeCodeSelected()) {
+          this.fetchSessionInfo();
+          this.updateFeishuEventSource();
+          this.loadHistory();
+        }
         return;
       }
       this.selectedAgentKey = newAgentKey;
@@ -411,6 +419,7 @@
       this.closeCodexEventSource();
       this.closeHermesEventSource();
       this.closeClaudeCodeEventSource();
+      this.closeFeishuEventSource();
       this.stopCodexActivityPolling();
       this.stopHermesHistoryPolling();
       this.stopCodexHistoryPolling();
@@ -425,6 +434,7 @@
       else this.stopHermesApprovalPolling();
       if (this.isCodexSelected()) this.startCodexApprovalPolling();
       else this.stopCodexApprovalPolling();
+      this.updateFeishuEventSource();
       this.loadHistory();
       if (connected || this.isHermesSelected() || this.isCodexSelected() || this.isClaudeCodeSelected()) {
         this.fetchSessionInfo();
@@ -461,6 +471,7 @@
         }
         this.syncAgentSelect();
         this.updateProviderControls();
+        this.updateFeishuEventSource();
       } catch (e) {
         console.warn('[chat] Failed to load agent list:', e);
       }
@@ -795,6 +806,7 @@
             for (const progress of progressById.values()) {
               this.restoreProviderProgress(progress, 'codex');
             }
+            await this.appendFeishuChannelHistory(agentId, renderedHistoryKeys);
             this.scrollBottom();
             this.setStatus(_ct('codex_ready'), 'connected');
           }
@@ -828,6 +840,7 @@
                 this.appendMessage(msg.role, msg.text || '', msg.ts || Date.now(), [], meta, normalizeHermesTools(msg.tools || []));
               }
             }
+            await this.appendFeishuChannelHistory(this.getSelectedAgentId() || this.selectedAgentKey);
             this.scrollBottomAfterLayout();
           }
           if (this.isHermesSelected()) await this.pollHermesApproval().catch(() => {});
@@ -871,6 +884,71 @@
           this.messages.innerHTML = '';
           this.appendSystem(typeof i18n !== 'undefined' ? i18n.t('chat_history_unavailable') : 'Chat history is unavailable right now.');
         }
+      }
+    }
+
+    setFeishuLiveStatus(state, detail = '') {
+      if (!this.feishuLiveStatus) return;
+      const labels = {
+        connecting: '飞书实时: 连接中',
+        connected: '飞书实时: 已连接',
+        disconnected: '飞书实时: 已断开'
+      };
+      if (!state || state === 'hidden') {
+        this.feishuLiveStatus.hidden = true;
+        this.feishuLiveStatus.textContent = '飞书实时: 未连接';
+        this.feishuLiveStatus.className = 'chat-feishu-live-status';
+        this.feishuLiveStatus.title = '';
+        return;
+      }
+      this.feishuLiveStatus.hidden = false;
+      this.feishuLiveStatus.textContent = labels[state] || labels.disconnected;
+      this.feishuLiveStatus.className = 'chat-feishu-live-status ' + state;
+      this.feishuLiveStatus.title = detail || '';
+    }
+
+    async appendFeishuChannelHistory(agentId, renderedHistoryKeys = new Set()) {
+      agentId = String(agentId || '').trim();
+      if (!agentId) return;
+      try {
+        const query = new URLSearchParams({ agentId, limit: '500' });
+        const res = await fetch('/api/agent-platform-communications/history?' + query.toString());
+        const data = await res.json();
+        if (!data.ok || !Array.isArray(data.events)) return;
+        const rows = data.events.filter(event => {
+          const meta = event && typeof event.metadata === 'object' ? event.metadata : {};
+          const fromRef = event && typeof event.from === 'object' ? event.from : {};
+          const toRef = event && typeof event.to === 'object' ? event.to : {};
+          return event && event.visibleInOffice !== false && (
+            meta.sourceApp === 'feishu' ||
+            meta.channel === 'feishu' ||
+            fromRef.sourceApp === 'feishu' ||
+            toRef.sourceApp === 'feishu' ||
+            String(event.conversationId || '').startsWith('feishu-dm:')
+          );
+        }).sort((a, b) => Number(a.ts || 0) - Number(b.ts || 0));
+        for (const event of rows) {
+          if (!event.text) continue;
+          const fromId = event.from?.id || '';
+          const role = fromId === agentId ? 'assistant' : 'user';
+          const text = String(event.text || '');
+          const historyKey = [
+            event.id || '',
+            role,
+            text,
+            event.inReplyTo || '',
+            (event.from && event.from.id) || '',
+            (event.to && event.to.id) || ''
+          ].join('\u0001');
+          if (renderedHistoryKeys.has(historyKey)) continue;
+          renderedHistoryKeys.add(historyKey);
+          const meta = role === 'assistant'
+            ? { label: this.agentSelect.selectedOptions[0]?.textContent.trim() || agentId, kind: 'agent' }
+            : { label: event.from?.name || 'Feishu', kind: 'human' };
+          this.appendMessage(role, text, event.ts || Date.now(), [], meta);
+        }
+      } catch (e) {
+        console.warn('[chat] Failed to load Feishu channel history:', e);
       }
     }
 
@@ -2498,6 +2576,73 @@
       if (cancel) cancel(this.makeStreamCancelledError('Claude Code'));
     }
 
+    closeFeishuEventSource() {
+      if (this.feishuHistoryRefreshTimer) {
+        clearTimeout(this.feishuHistoryRefreshTimer);
+        this.feishuHistoryRefreshTimer = null;
+      }
+      if (this.feishuEventSource) {
+        try { this.feishuEventSource.close(); } catch (_) {}
+        this.feishuEventSource = null;
+      }
+      this.setFeishuLiveStatus('hidden');
+    }
+
+    scheduleFeishuHistoryRefresh() {
+      if (this.feishuHistoryRefreshTimer) return;
+      this.feishuHistoryRefreshTimer = setTimeout(() => {
+        this.feishuHistoryRefreshTimer = null;
+        if (!this.root.classList.contains('open')) return;
+        this.loadHistory({ showError: false }).catch(() => {});
+      }, 120);
+    }
+
+    async updateFeishuEventSource() {
+      if (!this.root.classList.contains('open')) {
+        this.closeFeishuEventSource();
+        return;
+      }
+      const agentId = this.getSelectedAgentId() || this.selectedAgentKey || '';
+      if (!agentId) {
+        this.closeFeishuEventSource();
+        return;
+      }
+      try {
+        const res = await fetch('/api/feishu-chat/config');
+        const cfg = await res.json();
+        const representativeAgentId = String(cfg.representativeAgentId || '').trim();
+        const shouldSubscribe = !!(cfg.enabled && representativeAgentId && representativeAgentId === agentId);
+        if (!shouldSubscribe) {
+          this.closeFeishuEventSource();
+          return;
+        }
+        if (this.feishuEventSource && this.feishuEventSource.__agentId === agentId) return;
+        this.closeFeishuEventSource();
+        const source = new EventSource('/api/feishu-chat/events?agentId=' + encodeURIComponent(agentId));
+        source.__agentId = agentId;
+        this.feishuEventSource = source;
+        this.setFeishuLiveStatus('connecting', agentId);
+        source.addEventListener('open', () => {
+          if (this.feishuEventSource === source) this.setFeishuLiveStatus('connected', agentId);
+        });
+        source.addEventListener('ready', () => {
+          if (this.feishuEventSource === source) this.setFeishuLiveStatus('connected', agentId);
+        });
+        source.addEventListener('message', () => this.scheduleFeishuHistoryRefresh());
+        source.addEventListener('delivery', () => this.scheduleFeishuHistoryRefresh());
+        source.onerror = () => {
+          if (this.feishuEventSource === source && this.root.classList.contains('open')) {
+            this.setFeishuLiveStatus('disconnected', agentId);
+          }
+          if (!this.root.classList.contains('open') && this.feishuEventSource === source) {
+            this.closeFeishuEventSource();
+          }
+        };
+      } catch (e) {
+        this.closeFeishuEventSource();
+      }
+    }
+
     async sendHermesBlockingMessage(hermesBody, hermesProgress, hermesSendStartedAt) {
       this.startHermesHistoryPolling();
       try {
@@ -3410,6 +3555,7 @@
         windowInstance?.loadHistory();
         windowInstance?.fetchSessionInfo();
       }
+      windowInstance?.updateFeishuEventSource();
       windowInstance?.input?.focus();
     } else {
       panel.dataset.hiddenByUser = 'true';
@@ -3418,6 +3564,7 @@
         windowInstance.streamingMsg = null;
       }
       windowInstance?.removeTypingIndicator();
+      windowInstance?.closeFeishuEventSource();
     }
     syncSecondaryChatControls();
   }
@@ -4343,6 +4490,7 @@
     chatWindows.push(w);
     chatWindowsByRoot.set(panel, w);
   });
+  window.__voChatWindows = chatWindows;
 
   chatWindows.forEach(w => w.loadAgentList());
   window.__voChatWindows = chatWindows;
@@ -4421,7 +4569,9 @@
         primaryWindow.loadHistory();
         primaryWindow.fetchSessionInfo();
       }
+      primaryWindow.updateFeishuEventSource();
     } else {
+      primaryWindow.closeFeishuEventSource();
       closeAllSecondaryPanels();
     }
   }

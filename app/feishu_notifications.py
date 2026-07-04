@@ -9,6 +9,7 @@ import re
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 from typing import Any, Callable
@@ -92,6 +93,17 @@ def redact_sensitive(value: Any) -> str:
 
 def _string(value: Any, limit: int = 300) -> str:
     return _compact_text(value, limit)
+
+
+def _preserve_text(value: Any, limit: int = 12000) -> str:
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        value = json.dumps(value, ensure_ascii=False, sort_keys=True)
+    text = value.strip()
+    if len(text) <= limit:
+        return text
+    return text[:limit].rstrip() + "\n\n...[truncated]"
 
 
 def _normalize_details(raw: Any) -> list[tuple[str, str]]:
@@ -609,6 +621,16 @@ def _feishu_request(url: str, body: dict[str, Any], *, headers: dict[str, str] |
         return _parse_json_response(response)
 
 
+def _feishu_empty_request(url: str, *, method: str, headers: dict[str, str] | None = None, urlopen: Callable[..., Any], timeout: int) -> dict[str, Any]:
+    request = urllib.request.Request(
+        url,
+        headers={"Content-Type": "application/json", **(headers or {})},
+        method=method,
+    )
+    with urlopen(request, timeout=timeout) as response:
+        return _parse_json_response(response)
+
+
 def _get_tenant_access_token(app_cfg: dict[str, Any], *, urlopen: Callable[..., Any], timeout: int) -> dict[str, Any]:
     app_id = _string(app_cfg.get("appId"), 160)
     app_secret = _string(app_cfg.get("appSecret"), 300)
@@ -695,5 +717,389 @@ def _send_feishu_app_message(payload: dict[str, Any], app_cfg: dict[str, Any], *
             "status": "network_error",
             "channel": "app",
             "error": redact_sensitive(str(exc)),
+            "appFingerprint": _secret_fingerprint(app_id),
+        }
+
+
+def send_feishu_text_message(
+    text: Any,
+    *,
+    app_config: dict[str, Any] | None = None,
+    receive_id: str = "",
+    receive_id_type: str = "chat_id",
+    urlopen: Callable[..., Any] | None = None,
+    timeout: int = 10,
+) -> dict[str, Any]:
+    app_cfg = app_config or {}
+    app_id = _string(app_cfg.get("appId"), 160)
+    target = _string(receive_id or app_cfg.get("receiveId"), 300)
+    target_type = _string(receive_id_type or app_cfg.get("receiveIdType") or "chat_id", 40)
+    if target_type not in {"open_id", "user_id", "union_id", "email", "chat_id"}:
+        return {
+            "ok": False,
+            "status": "invalid_app_config",
+            "channel": "app_text",
+            "error": f"unsupported receiveIdType: {target_type}",
+            "appFingerprint": _secret_fingerprint(app_id),
+        }
+    if not app_id or not app_cfg.get("appSecret") or not target:
+        return {
+            "ok": False,
+            "status": "missing_app_config",
+            "channel": "app_text",
+            "error": "appId, appSecret, and receive_id are required",
+            "appFingerprint": _secret_fingerprint(app_id),
+        }
+    opener = urlopen or urllib.request.urlopen
+    try:
+        token_result = _get_tenant_access_token(app_cfg, urlopen=opener, timeout=timeout)
+        if not token_result.get("ok"):
+            return token_result
+        parsed = _feishu_request(
+            f"https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type={target_type}",
+            {
+                "receive_id": target,
+                "msg_type": "text",
+                "content": json.dumps({"text": _string(text, 4000)}, ensure_ascii=False),
+            },
+            headers={"Authorization": f"Bearer {token_result['token']}"},
+            urlopen=opener,
+            timeout=timeout,
+        )
+        success = parsed.get("code") == 0
+        return {
+            "ok": bool(success),
+            "status": "sent" if success else "feishu_error",
+            "channel": "app_text",
+            "code": parsed.get("code", ""),
+            "message": redact_sensitive(parsed.get("msg") or parsed.get("message") or parsed.get("raw") or ""),
+            "messageId": _string((parsed.get("data") or {}).get("message_id"), 200) if isinstance(parsed.get("data"), dict) else "",
+            "appFingerprint": token_result.get("appFingerprint") or _secret_fingerprint(app_id),
+        }
+    except urllib.error.HTTPError as exc:
+        try:
+            parsed = _parse_json_response(exc)
+            message = parsed.get("msg") or parsed.get("message") or parsed.get("raw") or str(exc)
+            code = parsed.get("code", exc.code)
+        except Exception:
+            message = str(exc)
+            code = getattr(exc, "code", "")
+        return {
+            "ok": False,
+            "status": "feishu_error",
+            "channel": "app_text",
+            "code": code,
+            "message": redact_sensitive(message),
+            "appFingerprint": _secret_fingerprint(app_id),
+        }
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        return {
+            "ok": False,
+            "status": "network_error",
+            "channel": "app_text",
+            "error": redact_sensitive(str(exc)),
+            "appFingerprint": _secret_fingerprint(app_id),
+        }
+
+
+def send_feishu_markdown_message(
+    text: Any,
+    *,
+    app_config: dict[str, Any] | None = None,
+    receive_id: str = "",
+    receive_id_type: str = "chat_id",
+    urlopen: Callable[..., Any] | None = None,
+    timeout: int = 10,
+) -> dict[str, Any]:
+    app_cfg = app_config or {}
+    app_id = _string(app_cfg.get("appId"), 160)
+    target = _string(receive_id or app_cfg.get("receiveId"), 300)
+    target_type = _string(receive_id_type or app_cfg.get("receiveIdType") or "chat_id", 40)
+    if target_type not in {"open_id", "user_id", "union_id", "email", "chat_id"}:
+        return {
+            "ok": False,
+            "status": "invalid_app_config",
+            "channel": "app_markdown",
+            "error": f"unsupported receiveIdType: {target_type}",
+            "appFingerprint": _secret_fingerprint(app_id),
+        }
+    if not app_id or not app_cfg.get("appSecret") or not target:
+        return {
+            "ok": False,
+            "status": "missing_app_config",
+            "channel": "app_markdown",
+            "error": "appId, appSecret, and receive_id are required",
+            "appFingerprint": _secret_fingerprint(app_id),
+        }
+    markdown = _preserve_text(text, 12000) or "处理完成，但没有可发送的文本回复。"
+    card = {
+        "schema": "2.0",
+        "config": {"wide_screen_mode": True},
+        "body": {"elements": [{"tag": "markdown", "content": markdown}]},
+    }
+    opener = urlopen or urllib.request.urlopen
+    try:
+        token_result = _get_tenant_access_token(app_cfg, urlopen=opener, timeout=timeout)
+        if not token_result.get("ok"):
+            return token_result
+        parsed = _feishu_request(
+            f"https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type={target_type}",
+            {
+                "receive_id": target,
+                "msg_type": "interactive",
+                "content": json.dumps(card, ensure_ascii=False),
+            },
+            headers={"Authorization": f"Bearer {token_result['token']}"},
+            urlopen=opener,
+            timeout=timeout,
+        )
+        success = parsed.get("code") == 0
+        return {
+            "ok": bool(success),
+            "status": "sent" if success else "feishu_error",
+            "channel": "app_markdown",
+            "code": parsed.get("code", ""),
+            "message": redact_sensitive(parsed.get("msg") or parsed.get("message") or parsed.get("raw") or ""),
+            "messageId": _string((parsed.get("data") or {}).get("message_id"), 200) if isinstance(parsed.get("data"), dict) else "",
+            "appFingerprint": token_result.get("appFingerprint") or _secret_fingerprint(app_id),
+        }
+    except urllib.error.HTTPError as exc:
+        try:
+            parsed = _parse_json_response(exc)
+            message = parsed.get("msg") or parsed.get("message") or parsed.get("raw") or str(exc)
+            code = parsed.get("code", exc.code)
+        except Exception:
+            message = str(exc)
+            code = getattr(exc, "code", "")
+        return {
+            "ok": False,
+            "status": "feishu_error",
+            "channel": "app_markdown",
+            "code": code,
+            "message": redact_sensitive(message),
+            "appFingerprint": _secret_fingerprint(app_id),
+        }
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        return {
+            "ok": False,
+            "status": "network_error",
+            "channel": "app_markdown",
+            "error": redact_sensitive(str(exc)),
+            "appFingerprint": _secret_fingerprint(app_id),
+        }
+
+
+def recall_feishu_message(
+    message_id: str,
+    *,
+    app_config: dict[str, Any] | None = None,
+    urlopen: Callable[..., Any] | None = None,
+    timeout: int = 10,
+) -> dict[str, Any]:
+    app_cfg = app_config or {}
+    app_id = _string(app_cfg.get("appId"), 160)
+    target_message_id = _string(message_id, 300)
+    if not app_id or not app_cfg.get("appSecret") or not target_message_id:
+        return {
+            "ok": False,
+            "status": "missing_app_config",
+            "channel": "app_message_recall",
+            "error": "appId, appSecret, and message_id are required",
+            "appFingerprint": _secret_fingerprint(app_id),
+        }
+    opener = urlopen or urllib.request.urlopen
+    try:
+        token_result = _get_tenant_access_token(app_cfg, urlopen=opener, timeout=timeout)
+        if not token_result.get("ok"):
+            return token_result
+        parsed = _feishu_empty_request(
+            f"https://open.feishu.cn/open-apis/im/v1/messages/{urllib.parse.quote(target_message_id, safe='')}",
+            method="DELETE",
+            headers={"Authorization": f"Bearer {token_result['token']}"},
+            urlopen=opener,
+            timeout=timeout,
+        )
+        success = parsed.get("code") == 0
+        return {
+            "ok": bool(success),
+            "status": "recalled" if success else "feishu_error",
+            "channel": "app_message_recall",
+            "code": parsed.get("code", ""),
+            "message": redact_sensitive(parsed.get("msg") or parsed.get("message") or parsed.get("raw") or ""),
+            "messageId": target_message_id,
+            "appFingerprint": token_result.get("appFingerprint") or _secret_fingerprint(app_id),
+        }
+    except urllib.error.HTTPError as exc:
+        try:
+            parsed = _parse_json_response(exc)
+            message = parsed.get("msg") or parsed.get("message") or parsed.get("raw") or str(exc)
+            code = parsed.get("code", exc.code)
+        except Exception:
+            message = str(exc)
+            code = getattr(exc, "code", "")
+        return {
+            "ok": False,
+            "status": "feishu_error",
+            "channel": "app_message_recall",
+            "code": code,
+            "message": redact_sensitive(message),
+            "messageId": target_message_id,
+            "appFingerprint": _secret_fingerprint(app_id),
+        }
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        return {
+            "ok": False,
+            "status": "network_error",
+            "channel": "app_message_recall",
+            "error": redact_sensitive(str(exc)),
+            "messageId": target_message_id,
+            "appFingerprint": _secret_fingerprint(app_id),
+        }
+
+
+def add_feishu_message_reaction(
+    message_id: str,
+    emoji_type: str,
+    *,
+    app_config: dict[str, Any] | None = None,
+    urlopen: Callable[..., Any] | None = None,
+    timeout: int = 10,
+) -> dict[str, Any]:
+    app_cfg = app_config or {}
+    app_id = _string(app_cfg.get("appId"), 160)
+    target_message_id = _string(message_id, 300)
+    target_emoji_type = _string(emoji_type or "OK", 80)
+    if not app_id or not app_cfg.get("appSecret") or not target_message_id:
+        return {
+            "ok": False,
+            "status": "missing_app_config",
+            "channel": "app_message_reaction",
+            "error": "appId, appSecret, and message_id are required",
+            "appFingerprint": _secret_fingerprint(app_id),
+        }
+    opener = urlopen or urllib.request.urlopen
+    try:
+        token_result = _get_tenant_access_token(app_cfg, urlopen=opener, timeout=timeout)
+        if not token_result.get("ok"):
+            return token_result
+        parsed = _feishu_request(
+            f"https://open.feishu.cn/open-apis/im/v1/messages/{urllib.parse.quote(target_message_id, safe='')}/reactions",
+            {"reaction_type": {"emoji_type": target_emoji_type}},
+            headers={"Authorization": f"Bearer {token_result['token']}"},
+            urlopen=opener,
+            timeout=timeout,
+        )
+        data = parsed.get("data") if isinstance(parsed.get("data"), dict) else {}
+        success = parsed.get("code") == 0
+        return {
+            "ok": bool(success),
+            "status": "added" if success else "feishu_error",
+            "channel": "app_message_reaction",
+            "code": parsed.get("code", ""),
+            "message": redact_sensitive(parsed.get("msg") or parsed.get("message") or parsed.get("raw") or ""),
+            "messageId": target_message_id,
+            "reactionId": _string(data.get("reaction_id"), 200),
+            "emojiType": target_emoji_type,
+            "appFingerprint": token_result.get("appFingerprint") or _secret_fingerprint(app_id),
+        }
+    except urllib.error.HTTPError as exc:
+        try:
+            parsed = _parse_json_response(exc)
+            message = parsed.get("msg") or parsed.get("message") or parsed.get("raw") or str(exc)
+            code = parsed.get("code", exc.code)
+        except Exception:
+            message = str(exc)
+            code = getattr(exc, "code", "")
+        return {
+            "ok": False,
+            "status": "feishu_error",
+            "channel": "app_message_reaction",
+            "code": code,
+            "message": redact_sensitive(message),
+            "messageId": target_message_id,
+            "emojiType": target_emoji_type,
+            "appFingerprint": _secret_fingerprint(app_id),
+        }
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        return {
+            "ok": False,
+            "status": "network_error",
+            "channel": "app_message_reaction",
+            "error": redact_sensitive(str(exc)),
+            "messageId": target_message_id,
+            "emojiType": target_emoji_type,
+            "appFingerprint": _secret_fingerprint(app_id),
+        }
+
+
+def delete_feishu_message_reaction(
+    message_id: str,
+    reaction_id: str,
+    *,
+    app_config: dict[str, Any] | None = None,
+    urlopen: Callable[..., Any] | None = None,
+    timeout: int = 10,
+) -> dict[str, Any]:
+    app_cfg = app_config or {}
+    app_id = _string(app_cfg.get("appId"), 160)
+    target_message_id = _string(message_id, 300)
+    target_reaction_id = _string(reaction_id, 300)
+    if not app_id or not app_cfg.get("appSecret") or not target_message_id or not target_reaction_id:
+        return {
+            "ok": False,
+            "status": "missing_app_config",
+            "channel": "app_message_reaction_delete",
+            "error": "appId, appSecret, message_id, and reaction_id are required",
+            "appFingerprint": _secret_fingerprint(app_id),
+        }
+    opener = urlopen or urllib.request.urlopen
+    try:
+        token_result = _get_tenant_access_token(app_cfg, urlopen=opener, timeout=timeout)
+        if not token_result.get("ok"):
+            return token_result
+        parsed = _feishu_empty_request(
+            f"https://open.feishu.cn/open-apis/im/v1/messages/{urllib.parse.quote(target_message_id, safe='')}/reactions/{urllib.parse.quote(target_reaction_id, safe='')}",
+            method="DELETE",
+            headers={"Authorization": f"Bearer {token_result['token']}"},
+            urlopen=opener,
+            timeout=timeout,
+        )
+        success = parsed.get("code") == 0
+        return {
+            "ok": bool(success),
+            "status": "deleted" if success else "feishu_error",
+            "channel": "app_message_reaction_delete",
+            "code": parsed.get("code", ""),
+            "message": redact_sensitive(parsed.get("msg") or parsed.get("message") or parsed.get("raw") or ""),
+            "messageId": target_message_id,
+            "reactionId": target_reaction_id,
+            "appFingerprint": token_result.get("appFingerprint") or _secret_fingerprint(app_id),
+        }
+    except urllib.error.HTTPError as exc:
+        try:
+            parsed = _parse_json_response(exc)
+            message = parsed.get("msg") or parsed.get("message") or parsed.get("raw") or str(exc)
+            code = parsed.get("code", exc.code)
+        except Exception:
+            message = str(exc)
+            code = getattr(exc, "code", "")
+        return {
+            "ok": False,
+            "status": "feishu_error",
+            "channel": "app_message_reaction_delete",
+            "code": code,
+            "message": redact_sensitive(message),
+            "messageId": target_message_id,
+            "reactionId": target_reaction_id,
+            "appFingerprint": _secret_fingerprint(app_id),
+        }
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        return {
+            "ok": False,
+            "status": "network_error",
+            "channel": "app_message_reaction_delete",
+            "error": redact_sensitive(str(exc)),
+            "messageId": target_message_id,
+            "reactionId": target_reaction_id,
             "appFingerprint": _secret_fingerprint(app_id),
         }

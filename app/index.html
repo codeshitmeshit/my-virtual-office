@@ -9,7 +9,7 @@
     <link rel="apple-touch-icon" href="icon-192.png">
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#1a1a2e">
-    <link rel="stylesheet" href="style.css?v=1783041181-meeting-participants-list">
+    <link rel="stylesheet" href="style.css?v=1783185400-feishu-chat-sse-status">
     <link rel="stylesheet" href="projects.css?v=1783041181-meeting-request-status-colors">
     <link rel="stylesheet" href="archive-room.css?v=1783041181-phase13">
     <link rel="stylesheet" href="fonts.css?v=1783041181.05.07">
@@ -270,6 +270,27 @@
                             </div>
                             <div id="mm-feishu-status"></div>
                             <div style="font-size:9px;color:#666;margin:6px 0 0;line-height:1.4;" data-i18n="feishu_secret_note">The full webhook is stored server-side and only shown as a mask here. Leave the field blank to keep the saved value.</div>
+                            <div style="height:1px;background:#2b2b3f;margin:12px 0;"></div>
+                            <div class="mm-section-title" style="font-size:10px;margin:0 0 8px;" data-i18n="feishu_chat_app_section">💬 Feishu Chat App</div>
+                            <label class="mm-label" style="display:flex;align-items:center;gap:6px;">
+                                <input type="checkbox" id="mm-feishu-chat-enable"> <span data-i18n="feishu_chat_enable">Enable Feishu chat channel</span>
+                            </label>
+                            <div id="mm-feishu-chat-mask" style="font-size:10px;color:#888;margin:4px 0 8px;" data-i18n="feishu_not_configured">Not configured</div>
+                            <label class="mm-label" data-i18n="feishu_chat_app_id">Chat App ID</label>
+                            <input type="text" id="mm-feishu-chat-app-id" class="mm-input" placeholder="cli_xxx" autocomplete="off">
+                            <label class="mm-label" data-i18n="feishu_chat_app_secret">Chat App Secret</label>
+                            <input type="password" id="mm-feishu-chat-app-secret" class="mm-input" placeholder="app secret" autocomplete="off">
+                            <label class="mm-label" data-i18n="feishu_representative_agent">Representative Agent ID</label>
+                            <select id="mm-feishu-chat-agent-id" class="mm-input">
+                                <option value="" data-i18n="feishu_chat_select_agent">Select an agent...</option>
+                            </select>
+                            <div id="mm-feishu-chat-long-connection-status" style="font-size:9px;color:#888;margin:4px 0 8px;line-height:1.4;" data-i18n="feishu_long_connection_pending">Long connection starts after saving config.</div>
+                            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+                                <button class="mm-btn mm-btn-primary" onclick="mmSaveFeishuChatConfig()" data-i18n="feishu_chat_save_config">Save Chat App</button>
+                                <button class="mm-btn" onclick="mmTestFeishuChatChannel()" data-i18n="feishu_chat_test_channel">Test Chat</button>
+                            </div>
+                            <button class="mm-btn" onclick="mmRefreshFeishuChatStatus()" data-i18n="feishu_chat_check_status">Check Status</button>
+                            <div id="mm-feishu-chat-status"></div>
                         </div>
                         <!-- Actions -->
                         <div class="mm-section">
@@ -372,11 +393,16 @@
 
             <div class="api-usage-monitor" id="api-usage-monitor" style="display:none">
                 <h4 class="api-usage-toggle" onclick="toggleApiUsage()">
-                    <span id="api-toggle-arrow">▶</span> <span data-i18n="api_usage">☁️ API USAGE</span>
+                    <span id="api-toggle-arrow">▶</span> <span data-i18n="resource_usage">☁️ RESOURCE USAGE</span>
                     <span id="api-status-dot" class="pc-dot offline" data-i18n-title="loading" title="Loading..."></span>
                 </h4>
                 <div id="api-usage-body" class="api-usage-body" style="display:none">
+                    <div class="api-usage-tabs" style="display:flex;gap:4px;margin:4px 0 6px;">
+                        <button id="api-account-tab" onclick="setApiUsageTab('account')" data-i18n="account_limits" style="flex:1;font-size:9px;padding:4px;border:1px solid #333;background:#222;color:#ddd;border-radius:4px;">Account Limits</button>
+                        <button id="api-vo-tab" onclick="setApiUsageTab('vo')" data-i18n="vo_usage" style="flex:1;font-size:9px;padding:4px;border:1px solid #333;background:#111;color:#999;border-radius:4px;">VO Usage</button>
+                    </div>
                     <div id="api-usage-cards"></div>
+                    <div id="vo-usage-cards" style="display:none"></div>
                 </div>
             </div>
 
@@ -860,6 +886,7 @@
                 <option value="main" data-emoji="🤖" data-name="Main Agent" selected>🤖 Main Agent</option>
             </select>
             <span id="chat-status" class="chat-status" data-i18n="offline_status">Offline</span>
+            <span class="chat-feishu-live-status" hidden>飞书实时: 未连接</span>
             <span style="flex:1"></span>
             <div class="chat-header-btns">
                 <button id="chat-compact-context" class="chat-compact-context" title="Compress Codex context" style="display:none" data-i18n-title="compress_codex_context">🗜</button>
@@ -1004,7 +1031,7 @@
     }
     </script>
     <script src="internal-bubble.js?v=1783041181"></script>
-    <script src="game.js?v=1783078010-viewer-status"></script>
+    <script src="game.js?v=1783180100-feishu-chat-status-cleanup"></script>
     <script src="dashboard-realtime.js?v=1783120000-dashboard-realtime"></script>
     <script src="browser-viewer-url.js?v=1783080200-viewer-proxy"></script>
     <script src="browser-panel.js?v=1783078720-viewer-reload"></script>
@@ -1234,7 +1261,7 @@
     <!-- marked.js v15.0.12 - bundled locally for airgapped/offline use -->
     <script src="marked.min.js"></script>
     <script src="codex-reasoning.js?v=1783041181"></script>
-    <script src="chat.js?v=1783041181-reasoning-summary"></script>
+    <script src="chat.js?v=1783185400-feishu-chat-sse-status"></script>
     <script src="sms-panel.js?v=1783041181"></script>
     <script src="pc-monitor.js?v=1783041181"></script>
     <script src="api-usage.js?v=1783041181"></script>

@@ -14113,6 +14113,8 @@ function _mmLoadCurrentSettings() {
         if (feishuEnabled) feishuEnabled.checked = notificationCfg.feishuEnabled !== false;
         mmFillFeishuMaskedInputs(notificationCfg);
         mmRenderFeishuMask(notificationCfg);
+        var chatCfg = ((cfg.feishu || {}).chatApp) || {};
+        mmFillFeishuChatMaskedInputs(chatCfg);
     }).catch(function(){});
     // Load display prefs from localStorage
     var prefs = {};
@@ -14550,6 +14552,136 @@ function mmRenderFeishuLongConnectionStatus(cfg) {
     el.style.color = lc.running ? '#81c784' : (status === 'error' ? '#ff8a80' : '#888');
 }
 
+function mmRenderFeishuChatMask(cfg) {
+    var el = document.getElementById('mm-feishu-chat-mask');
+    if (!el) return;
+    cfg = cfg || {};
+    if (cfg.configured) {
+        el.textContent = _tr('feishu_chat_configured_app', {
+            appId: cfg.maskedAppId || '••••••••',
+            agentId: cfg.representativeAgentId || _tr('feishu_chat_no_representative_agent')
+        });
+        el.style.color = '#81c784';
+    } else {
+        el.textContent = _tr('feishu_not_configured');
+        el.style.color = '#888';
+    }
+}
+
+function mmRenderFeishuChatLongConnectionStatus(cfg) {
+    var el = document.getElementById('mm-feishu-chat-long-connection-status');
+    if (!el) return;
+    var lc = (cfg || {}).longConnection || {};
+    var status = lc.status || 'not_started';
+    el.textContent = _tr('feishu_long_connection_status', { status: status });
+    el.style.color = lc.running ? '#81c784' : (status === 'error' ? '#ff8a80' : '#888');
+}
+
+function mmClearMisplacedFeishuChatStatus() {
+    var notificationStatusEl = document.getElementById('mm-feishu-status');
+    if (!notificationStatusEl) return;
+    var text = String(notificationStatusEl.textContent || '');
+    if (text.indexOf('飞书聊天') >= 0 || text.indexOf('Feishu chat') >= 0) {
+        notificationStatusEl.innerHTML = '';
+    }
+}
+
+var _feishuChatAgentSelectLoading = false;
+
+function mmFeishuChatAgentOptionValue(agent) {
+    agent = agent || {};
+    return String(agent.statusKey || agent.id || agent.agentId || agent.providerAgentId || '').trim();
+}
+
+function mmFeishuChatAgentOptionLabel(agent) {
+    agent = agent || {};
+    var value = mmFeishuChatAgentOptionValue(agent);
+    var name = String(agent.name || value || '').trim();
+    var emoji = String(agent.emoji || '').trim();
+    var provider = String(agent.providerKind || agent.provider || '').trim();
+    var label = (emoji ? emoji + ' ' : '') + (name || value);
+    if (value && value !== name) label += ' (' + value + ')';
+    if (provider) label += ' · ' + provider;
+    return label;
+}
+
+function mmNormalizeFeishuChatAgents(rawAgents) {
+    return (rawAgents || []).map(function(agent) {
+        agent = agent || {};
+        return {
+            id: agent.id || agent.statusKey || agent.agentId || agent.providerAgentId || '',
+            statusKey: agent.statusKey || agent.id || agent.agentId || agent.providerAgentId || '',
+            agentId: agent.agentId || agent.id || '',
+            providerAgentId: agent.providerAgentId || agent.profile || '',
+            providerKind: agent.providerKind || agent.provider || 'openclaw',
+            provider: agent.provider || '',
+            name: agent.name || agent.id || agent.statusKey || '',
+            emoji: agent.emoji || ''
+        };
+    }).filter(function(agent) {
+        return !!mmFeishuChatAgentOptionValue(agent);
+    });
+}
+
+function mmPopulateFeishuChatAgentSelect(selectedId, agents) {
+    var select = document.getElementById('mm-feishu-chat-agent-id');
+    if (!select) return;
+    selectedId = String(selectedId || select.value || '').trim();
+    if (!agents && AGENT_DEFS && AGENT_DEFS.length) {
+        agents = AGENT_DEFS;
+    }
+    agents = mmNormalizeFeishuChatAgents(agents || []);
+    select.innerHTML = '';
+    var emptyOpt = document.createElement('option');
+    emptyOpt.value = '';
+    emptyOpt.textContent = _tr('feishu_chat_select_agent');
+    select.appendChild(emptyOpt);
+    var seen = {};
+    agents.forEach(function(agent) {
+        var value = mmFeishuChatAgentOptionValue(agent);
+        if (!value || seen[value]) return;
+        seen[value] = true;
+        var opt = document.createElement('option');
+        opt.value = value;
+        opt.textContent = mmFeishuChatAgentOptionLabel(agent);
+        select.appendChild(opt);
+    });
+    if (selectedId && !seen[selectedId]) {
+        var currentOpt = document.createElement('option');
+        currentOpt.value = selectedId;
+        currentOpt.textContent = _tr('feishu_chat_current_agent_missing', { agentId: selectedId });
+        select.appendChild(currentOpt);
+    }
+    select.value = selectedId || '';
+    if (!agents.length && !_feishuChatAgentSelectLoading) {
+        _feishuChatAgentSelectLoading = true;
+        fetch('/api/agents')
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                _feishuChatAgentSelectLoading = false;
+                mmPopulateFeishuChatAgentSelect(selectedId, data.agents || []);
+            })
+            .catch(function() {
+                _feishuChatAgentSelectLoading = false;
+            });
+    }
+}
+
+function mmFillFeishuChatMaskedInputs(cfg) {
+    cfg = cfg || {};
+    mmClearMisplacedFeishuChatStatus();
+    var enabledEl = document.getElementById('mm-feishu-chat-enable');
+    var appIdEl = document.getElementById('mm-feishu-chat-app-id');
+    var appSecretEl = document.getElementById('mm-feishu-chat-app-secret');
+    var agentEl = document.getElementById('mm-feishu-chat-agent-id');
+    if (enabledEl) enabledEl.checked = cfg.enabled === true;
+    if (appIdEl) appIdEl.value = cfg.maskedAppId || '';
+    if (appSecretEl) appSecretEl.value = cfg.configured ? '••••••••' : '';
+    if (agentEl) mmPopulateFeishuChatAgentSelect(cfg.representativeAgentId || '');
+    mmRenderFeishuChatMask(cfg);
+    mmRenderFeishuChatLongConnectionStatus(cfg);
+}
+
 function mmSaveFeishuWebhook() {
     var enabledEl = document.getElementById('mm-feishu-enable');
     var appIdEl = document.getElementById('mm-feishu-app-id');
@@ -14594,6 +14726,93 @@ function mmSaveFeishuWebhook() {
         statusEl.innerHTML = '<div class="mm-status err">❌ ' + escHtml(e.message) + '</div>';
     });
 }
+
+function mmSaveFeishuChatConfig() {
+    var enabledEl = document.getElementById('mm-feishu-chat-enable');
+    var appIdEl = document.getElementById('mm-feishu-chat-app-id');
+    var appSecretEl = document.getElementById('mm-feishu-chat-app-secret');
+    var agentEl = document.getElementById('mm-feishu-chat-agent-id');
+    var statusEl = document.getElementById('mm-feishu-chat-status');
+    var enabled = enabledEl ? enabledEl.checked : true;
+    var appId = (appIdEl ? appIdEl.value : '').trim();
+    var appSecret = (appSecretEl ? appSecretEl.value : '').trim();
+    var agentId = (agentEl ? agentEl.value : '').trim();
+    var appConfigured = mmIsMaskedFeishuValue(appId) && mmIsMaskedFeishuValue(appSecret);
+    if (!(appConfigured || (appId && appSecret))) {
+        if (statusEl) statusEl.innerHTML = '<div class="mm-status err">' + escHtml(_tr('feishu_chat_save_requires_config')) + '</div>';
+        return;
+    }
+    if (statusEl) statusEl.innerHTML = '<div class="mm-status info">' + escHtml(_tr('feishu_chat_saving_config')) + '</div>';
+    fetch('/api/feishu-chat/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            enabled: enabled,
+            appId: mmIsMaskedFeishuValue(appId) ? '' : appId,
+            appSecret: mmIsMaskedFeishuValue(appSecret) ? '' : appSecret,
+            representativeAgentId: agentId
+        })
+    }).then(function(r) {
+        return r.json().then(function(d) { d._httpOk = r.ok; return d; });
+    }).then(function(d) {
+        if (!d.ok) {
+            if (statusEl) statusEl.innerHTML = '<div class="mm-status err">❌ ' + escHtml(d.error || _tr('feishu_save_failed')) + '</div>';
+            return;
+        }
+        mmFillFeishuChatMaskedInputs(d);
+        if (statusEl) statusEl.innerHTML = '<div class="mm-status ok">✅ ' + escHtml(_tr('feishu_chat_config_saved')) + '</div>';
+    }).catch(function(e) {
+        if (statusEl) statusEl.innerHTML = '<div class="mm-status err">❌ ' + escHtml(e.message) + '</div>';
+    });
+}
+
+function mmRefreshFeishuChatStatus() {
+    var statusEl = document.getElementById('mm-feishu-chat-status');
+    if (statusEl) statusEl.innerHTML = '<div class="mm-status info">' + escHtml(_tr('feishu_chat_checking_status')) + '</div>';
+    fetch('/api/feishu-chat/config')
+        .then(function(r) { return r.json().then(function(d) { d._httpOk = r.ok; return d; }); })
+        .then(function(d) {
+            if (!d.ok) {
+                if (statusEl) statusEl.innerHTML = '<div class="mm-status err">❌ ' + escHtml(d.error || _tr('feishu_test_failed')) + '</div>';
+                return;
+            }
+            mmFillFeishuChatMaskedInputs(d);
+            var lc = d.longConnection || {};
+            var detail = _tr('feishu_chat_status_checked', { status: lc.status || 'not_started' });
+            if (lc.lastError) detail += ' · ' + lc.lastError;
+            if (statusEl) statusEl.innerHTML = '<div class="mm-status ' + (lc.running ? 'ok' : 'info') + '">' + escHtml(detail) + '</div>';
+        })
+        .catch(function(e) {
+            if (statusEl) statusEl.innerHTML = '<div class="mm-status err">❌ ' + escHtml(e.message) + '</div>';
+        });
+}
+
+function mmTestFeishuChatChannel() {
+    var statusEl = document.getElementById('mm-feishu-chat-status');
+    if (statusEl) statusEl.innerHTML = '<div class="mm-status info">' + escHtml(_tr('feishu_chat_testing_channel')) + '</div>';
+    fetch('/api/feishu-chat/self-test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: _tr('feishu_chat_test_message') })
+    }).then(function(r) {
+        return r.json().then(function(d) { d._httpOk = r.ok; return d; });
+    }).then(function(d) {
+        if (!d.ok) {
+            var failedDetail = d.error || d.status || _tr('feishu_test_failed');
+            if (d.longConnection && d.longConnection.lastError) failedDetail += ' · ' + d.longConnection.lastError;
+            if (statusEl) statusEl.innerHTML = '<div class="mm-status err">❌ ' + escHtml(failedDetail) + '</div>';
+            return;
+        }
+        if (d.config) mmFillFeishuChatMaskedInputs(d.config);
+        var reply = d.reply ? (' · ' + d.reply) : '';
+        if (statusEl) statusEl.innerHTML = '<div class="mm-status ok">✅ ' + escHtml(_tr('feishu_chat_test_passed', { status: d.status || 'completed' }) + reply) + '</div>';
+    }).catch(function(e) {
+        if (statusEl) statusEl.innerHTML = '<div class="mm-status err">❌ ' + escHtml(e.message) + '</div>';
+    });
+}
+
+window.mmRefreshFeishuChatStatus = mmRefreshFeishuChatStatus;
+window.mmTestFeishuChatChannel = mmTestFeishuChatChannel;
 
 function mmTestFeishuNotification() {
     var statusEl = document.getElementById('mm-feishu-status');
@@ -14752,6 +14971,24 @@ function mmSaveSettings() {
         if (_feishuAppIdValue && !mmIsMaskedFeishuValue(_feishuAppIdValue)) config.notifications.feishuAppId = _feishuAppIdValue;
         if (_feishuAppSecretValue && !mmIsMaskedFeishuValue(_feishuAppSecretValue)) config.notifications.feishuAppSecret = _feishuAppSecretValue;
         if (_feishuReceiveIdValue && !mmIsMaskedFeishuValue(_feishuReceiveIdValue)) config.notifications.feishuReceiveId = _feishuReceiveIdValue;
+    }
+    var _feishuChatCb = document.getElementById('mm-feishu-chat-enable');
+    if (_feishuChatCb) {
+        var _feishuChatAppIdValue = ((document.getElementById('mm-feishu-chat-app-id') || {}).value || '').trim();
+        var _feishuChatAppSecretValue = ((document.getElementById('mm-feishu-chat-app-secret') || {}).value || '').trim();
+        var _feishuChatAgentValue = ((document.getElementById('mm-feishu-chat-agent-id') || {}).value || '').trim();
+        config.feishu = {
+            chatApp: {
+                enabled: _feishuChatCb.checked,
+                receiveMode: 'long_connection',
+                requireBoundVoUser: false,
+                allowedChatTypes: ['p2p'],
+                replyMode: 'same_chat',
+                representativeAgentId: _feishuChatAgentValue
+            }
+        };
+        if (_feishuChatAppIdValue && !mmIsMaskedFeishuValue(_feishuChatAppIdValue)) config.feishu.chatApp.appId = _feishuChatAppIdValue;
+        if (_feishuChatAppSecretValue && !mmIsMaskedFeishuValue(_feishuChatAppSecretValue)) config.feishu.chatApp.appSecret = _feishuChatAppSecretValue;
     }
 
     fetch('/setup/save', {

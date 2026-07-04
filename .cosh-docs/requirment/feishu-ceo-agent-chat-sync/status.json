@@ -1,0 +1,63 @@
+{
+  "name": "feishu-ceo-agent-chat-sync",
+  "stage": "implementation_done",
+  "waiting_for_user": true,
+  "updated_at": "2026-07-04T19:22:16+08:00",
+  "confirmed": {
+    "checklist": true,
+    "tested": false,
+    "done": false
+  },
+  "confirmations": {
+    "checklist": {
+      "item": "checklist",
+      "confirmed_at": "2026-07-04T18:23:13+08:00",
+      "summary": "用户回复“可以出 todolist 了”，视为确认当前 checklist 并继续生成 todolist。"
+    },
+    "tested": null,
+    "done": null
+  },
+  "files": {
+    "requirement": "requirement.md",
+    "review": "review.md",
+    "checklist": "checklist.md",
+    "todolist": "todolist.md",
+    "manualAcceptance": "manual-acceptance.md",
+    "acceptanceAudit": "acceptance-audit.md"
+  },
+  "notes": [
+    "Product clarification completed before archival.",
+    "Checklist drafted and waiting for user confirmation before creating todolist.",
+    "Updated VO-side scope to reuse existing chat with a CEO marker and add CEO agent assignment in settings, instead of creating a separate CEO private-chat panel.",
+    "Simplified assignment-change scope: old CEO-marked conversations require no special handling; the main goal is selecting one VO agent to represent VO in Feishu private chat.",
+    "Updated technical scope to reuse the existing message module and add Feishu channel input/output adapters instead of a separate CEO messaging path.",
+    "Restricted Feishu channel input/output to long connection only for the first version.",
+    "Made VO-side recording mandatory for all Feishu-channel inbound and outbound messages; no recordMessages off switch.",
+    "Separated Feishu configuration into existing notification app and new chat app; this requirement uses the chat app long connection.",
+    "Checklist confirmed by user request to create todolist.",
+    "Todolist created after checklist confirmation.",
+    "Implementation completed for dual Feishu app config, chat app long connection adapter, existing message pipeline dispatch, mandatory VO records, idempotency, and focused tests.",
+    "Waiting for user confirmation of tested status and final done before archiving.",
+    "Added Feishu chat bindings API and missing chat-app credential guard; updated focused tests and checklist evidence.",
+    "Focused Feishu channel, Feishu sync, syntax, self-executing meeting request, and Project Execution Feishu regression checks pass.",
+    "Full pytest baseline excluding workflow e2e currently has unrelated failures outside this Feishu chat requirement, so final tested/done confirmation remains pending.",
+    "Added main settings UI for Feishu chat bindings so bound/unbound user acceptance can be configured without editing config files.",
+    "Added empty-text Feishu message guard and focused test; Feishu channel ignores empty text without dispatching an Agent or sending a reply.",
+    "Added HTTP route-level coverage for /api/feishu-chat/bindings POST/GET persistence and readback.",
+    "Added source metadata persistence for existing provider history/comm events and verified Feishu metadata in Hermes history.",
+    "Added direct Feishu long-connection message handler callback coverage while keeping SDK registration path unchanged.",
+    "Added route-level inbound-test coverage proving simulated Feishu private-chat payloads traverse HTTP handler, binding lookup, representative dispatch, reply send adapter, and VO channel records.",
+    "Feishu success replies now include CEO role and representative Agent display text while preserving raw reply plus feishuReply in VO records.",
+    "Added manual-acceptance.md with real Feishu chat app long-connection end-to-end acceptance steps and failure triage.",
+    "Added representative Agent switch coverage proving future Feishu messages use the new representativeAgentId without migrating old records.",
+    "Added unavailable representative Agent coverage proving safe agent_failed behavior, Feishu failure reply, and VO failure record.",
+    "Added unsupported chat type/message type coverage proving group and non-text events are ignored without dispatch or reply.",
+    "Added mandatory recording coverage proving recordMessages=false-like config cannot disable Feishu channel VO records.",
+    "Added missing/invalid representative Agent coverage for config save and inbound handling without dispatch.",
+    "Added consecutive message ordering coverage proving stable conversationId and ordered VO channel records for rapid Feishu messages.",
+    "Added direct Feishu text sender coverage for chat app credential flow, /im/v1/messages text payload, and secret redaction.",
+    "Added acceptance-audit.md mapping CHK-001 through CHK-022 to current evidence and remaining real Feishu end-to-end gates.",
+    "Added read-only /api/feishu-chat/records route and test to support VO-side acceptance inspection of Feishu channel records.",
+    "Blocked from final tested/done closure because CHK-022 requires real Feishu chat app credentials, long-connection event delivery, and Feishu client reply evidence; current environment has no VO_FEISHU_CHAT_APP_ID/VO_FEISHU_CHAT_APP_SECRET."
+  ]
+}
