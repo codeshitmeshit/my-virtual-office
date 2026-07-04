@@ -4571,11 +4571,21 @@ button:active { transform: translateY(3px); box-shadow: none; }
 .mtg-intervention .mtg-textarea,
 .mtg-intervention .skl-input,
 .mtg-decision-window .mtg-textarea,
-.mtg-decision-window .skl-input {
+.mtg-decision-window .skl-input,
+.mtg-moderator-takeover .mtg-textarea,
+.mtg-moderator-takeover .skl-input {
     display: block;
     width: 100%;
     max-width: 100%;
     box-sizing: border-box;
+}
+.mtg-moderator-takeover {
+    display: grid;
+    gap: 7px;
+    align-items: stretch;
+}
+.mtg-moderator-takeover .mtg-textarea {
+    min-height: 72px;
 }
 .mtg-decision-window {
     display: grid;
@@ -5029,4 +5039,42 @@ button:active { transform: translateY(3px); box-shadow: none; }
     .proj-exec-mode-group {
         display: none;
     }
+}
+.dashboard-realtime-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 10px 0;
+    padding: 8px 10px;
+    border: 1px solid #2f3150;
+    border-radius: 4px;
+    background: rgba(9, 10, 24, 0.75);
+    color: #d7d9ff;
+    font-size: 11px;
+    line-height: 1.25;
+}
+
+.dashboard-realtime-status .drt-dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: #777;
+    box-shadow: 0 0 8px rgba(255, 255, 255, 0.2);
+    flex: 0 0 auto;
+}
+
+.dashboard-realtime-status.sse .drt-dot {
+    background: #34d058;
+    box-shadow: 0 0 10px rgba(52, 208, 88, 0.65);
+}
+
+.dashboard-realtime-status.reconnecting .drt-dot,
+.dashboard-realtime-status.starting .drt-dot {
+    background: #ffd33d;
+    box-shadow: 0 0 10px rgba(255, 211, 61, 0.65);
+}
+
+.dashboard-realtime-status.polling .drt-dot {
+    background: #ff8c42;
+    box-shadow: 0 0 10px rgba(255, 140, 66, 0.65);
 }

@@ -106,6 +106,8 @@ def test_archive_intro_basic_info_and_maps():
 
         intro = detail["archiveIntroduction"]
         assert "档案" in intro["title"]
+        assert intro["brief"]
+        assert len(intro["brief"]) <= 39
         assert "人类" in intro["purpose"]
         assert "AI" in intro["aiUse"]
 

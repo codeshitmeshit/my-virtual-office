@@ -5074,11 +5074,13 @@ function _meetingShouldSuppressRandomTalk(agent) {
     return !!(state && state.hasSpeaker && state.role !== 'speaker');
 }
 
-function processMeetings(meetingsData) {
+function processMeetings(meetingsData, opts) {
+    opts = opts || {};
+    const logRoutine = opts.logRoutine !== false;
     if (!meetingsData || !Array.isArray(meetingsData)) {
         // No meetings — end any active ones
         for (const mid of Object.keys(activeMeetings)) {
-            endMeeting(mid);
+            endMeeting(mid, opts);
         }
         return;
     }
@@ -5087,7 +5089,7 @@ function processMeetings(meetingsData) {
 
     // End meetings no longer in the data
     for (const mid of Object.keys(activeMeetings)) {
-        if (!newIds.has(mid)) endMeeting(mid);
+        if (!newIds.has(mid)) endMeeting(mid, opts);
     }
 
     const occupiedSpaceIds = new Set();
@@ -5151,17 +5153,18 @@ function processMeetings(meetingsData) {
             host.visitTarget = visitor.id;
             host.addIntent(`Meeting with ${visitor.name}: ${topic}`);
             activeMeetings[m.id] = { id: m.id, agents: meetingAgents, participantKeys, raw: m, topic, purpose, type, organizer: m.organizer || participantKeys[0] || '', kind: m.kind || 'discussion', rules: m.rules || null };
-            addGlobalLog(`🤝 ${visitor.name} → ${host.name}: ${topic}`);
+            if (logRoutine) addGlobalLog(`🤝 ${visitor.name} → ${host.name}: ${topic}`);
         } else {
             // Group meeting — prefer functional meeting spaces, then fall back to the legacy meeting table/cluster behavior.
             const assignment = _applyGroupMeetingAssignment(m.id, m, meetingAgents, topic, occupiedSpaceIds);
             activeMeetings[m.id] = { id: m.id, agents: meetingAgents, participantKeys, raw: m, topic, purpose, type, organizer: m.organizer || participantKeys[0] || '', kind: m.kind || 'discussion', rules: m.rules || null, slotAssignments: assignment.slotAssignments, meetingSpaceId: assignment.space ? assignment.space.id : null, meetingSpaceType: assignment.space ? assignment.space.type : null, meetingSpaceCapacity: assignment.space ? _meetingSpaceCapacity(assignment.space) : null, meetingSpaceName: assignment.space ? _meetingSpaceDisplayName(assignment.space) : '' };
-            addGlobalLog(`📊 ` + (typeof i18n !== 'undefined' ? i18n.t('meeting_prefix') : 'Meeting') + `: ${meetingAgents.map(a => a.name).join(', ')} — ${topic}`);
+            if (logRoutine) addGlobalLog(`📊 ` + (typeof i18n !== 'undefined' ? i18n.t('meeting_prefix') : 'Meeting') + `: ${meetingAgents.map(a => a.name).join(', ')} — ${topic}`);
         }
     }
 }
 
-function endMeeting(meetingId) {
+function endMeeting(meetingId, opts) {
+    opts = opts || {};
     const meeting = activeMeetings[meetingId];
     if (!meeting) return;
     meeting.agents.forEach(agent => {
@@ -5170,86 +5173,93 @@ function endMeeting(meetingId) {
         }
     });
     delete activeMeetings[meetingId];
-    addGlobalLog(`✅ ` + (typeof i18n !== 'undefined' ? i18n.t('meeting_ended') : 'Meeting ended') + `: ${meeting.topic}`);
+    if (opts.logRoutine !== false) addGlobalLog(`✅ ` + (typeof i18n !== 'undefined' ? i18n.t('meeting_ended') : 'Meeting ended') + `: ${meeting.topic}`);
 }
 
 // --- STATUS POLLING ---
+function applyStatusSnapshot(data, opts) {
+    opts = opts || {};
+    const logRoutine = opts.logRoutine === true;
+    if (!data) return;
+    // Process meetings first
+    processMeetings(data._meetings, { logRoutine: logRoutine });
+
+    agents.forEach(agent => {
+        const entry = data[agent.statusKey];
+        if (!entry) return;
+
+        // Don't override state if agent is in an active meeting
+        if (agent.meetingId || agent.state === 'visiting') {
+            // Still update bubbles though
+        } else {
+            const newState = entry.state || 'idle';
+            const newTask = entry.task || '';
+            if (newState !== agent.state || newTask !== agent.task) {
+                agent.task = newTask;
+                if (newState !== agent.state) {
+                    agent.moveTo(newState);
+                    if (logRoutine) addGlobalLog(`${agent.emoji} ${agent.name}: ${newState}${newTask ? ' — ' + newTask : ''}`);
+                }
+            }
+        }
+
+        // Thought bubble
+        const newThought = entry.thought || '';
+        if (newThought && newThought !== agent.lastThought) {
+            agent.thought = newThought;
+            agent.lastThought = newThought;
+            agent.thoughtChars = 0;
+            agent.thoughtAge = 0;
+            agent.thoughtUpdatedAt = Date.now();
+            // Auto-expand if minimized
+            getBubbleMinState(agent).thought = false;
+            if (logRoutine) addGlobalLog(`💭 ${agent.name} ${(typeof i18n !== 'undefined' ? i18n.t('chat_thinking') : 'Thinking')}: ${newThought.substring(0, 40)}...`);
+        } else if (!newThought && agent.thought) {
+            agent.thought = '';
+        }
+
+        // Speech bubble
+        const newSpeech = entry.speech || '';
+        const newTarget = entry.speechTarget || '';
+        if (newSpeech && newSpeech !== agent.speech) {
+            agent.speech = newSpeech;
+            agent.speechTarget = newTarget;
+            agent.lastSpeech = newSpeech;
+            agent.lastSpeechTarget = newTarget;
+            agent.speechChars = 0;
+            agent.speechAge = 0;
+            agent.talkTimer = 60;
+            // Auto-expand if minimized
+            getBubbleMinState(agent).speech = false;
+            if (logRoutine) addGlobalLog(`💬 ${agent.name}${newTarget ? ' → ' + newTarget : ''}: ${newSpeech.substring(0, 40)}...`);
+        } else if (!newSpeech && agent.speech) {
+            agent.speech = '';
+            agent.speechTarget = '';
+        }
+
+        // Notification + Task I/O
+        if (entry.notify) {
+            if (!agent.notify && !dismissedNotify.has(agent.statusKey)) {
+                agent.notify = true;
+                if (logRoutine) addGlobalLog(`🔔 ${agent.name} ` + (typeof i18n !== 'undefined' ? i18n.t('has_response') : 'has a response') + `!`);
+            }
+        } else {
+            // Server confirmed cleared — remove from dismissed set
+            agent.notify = false;
+            dismissedNotify.delete(agent.statusKey);
+        }
+        if (entry.lastInput) agent.lastInput = entry.lastInput;
+        if (entry.lastOutput) agent.lastOutput = entry.lastOutput;
+    });
+}
+window.dashboardApplyStatusSnapshot = applyStatusSnapshot;
+
 async function pollStatus() {
     try {
         const res = await fetch('/status');
         if (!res.ok) throw new Error();
         const data = await res.json();
-
-        // Process meetings first
-        processMeetings(data._meetings);
-
-        agents.forEach(agent => {
-            const entry = data[agent.statusKey];
-            if (!entry) return;
-
-            // Don't override state if agent is in an active meeting
-            if (agent.meetingId || agent.state === 'visiting') {
-                // Still update bubbles though
-            } else {
-                const newState = entry.state || 'idle';
-                const newTask = entry.task || '';
-                if (newState !== agent.state || newTask !== agent.task) {
-                    agent.task = newTask;
-                    if (newState !== agent.state) {
-                        agent.moveTo(newState);
-                        addGlobalLog(`${agent.emoji} ${agent.name}: ${newState}${newTask ? ' — ' + newTask : ''}`);
-                    }
-                }
-            }
-
-            // Thought bubble
-            const newThought = entry.thought || '';
-            if (newThought && newThought !== agent.lastThought) {
-                agent.thought = newThought;
-                agent.lastThought = newThought;
-                agent.thoughtChars = 0;
-                agent.thoughtAge = 0;
-                agent.thoughtUpdatedAt = Date.now();
-                // Auto-expand if minimized
-                getBubbleMinState(agent).thought = false;
-                addGlobalLog(`💭 ${agent.name} ${(typeof i18n !== 'undefined' ? i18n.t('chat_thinking') : 'Thinking')}: ${newThought.substring(0, 40)}...`);
-            } else if (!newThought && agent.thought) {
-                agent.thought = '';
-            }
-
-            // Speech bubble
-            const newSpeech = entry.speech || '';
-            const newTarget = entry.speechTarget || '';
-            if (newSpeech && newSpeech !== agent.speech) {
-                agent.speech = newSpeech;
-                agent.speechTarget = newTarget;
-                agent.lastSpeech = newSpeech;
-                agent.lastSpeechTarget = newTarget;
-                agent.speechChars = 0;
-                agent.speechAge = 0;
-                agent.talkTimer = 60;
-                // Auto-expand if minimized
-                getBubbleMinState(agent).speech = false;
-                addGlobalLog(`💬 ${agent.name}${newTarget ? ' → ' + newTarget : ''}: ${newSpeech.substring(0, 40)}...`);
-            } else if (!newSpeech && agent.speech) {
-                agent.speech = '';
-                agent.speechTarget = '';
-            }
-
-            // Notification + Task I/O
-            if (entry.notify) {
-                if (!agent.notify && !dismissedNotify.has(agent.statusKey)) {
-                    agent.notify = true;
-                    addGlobalLog(`🔔 ${agent.name} ` + (typeof i18n !== 'undefined' ? i18n.t('has_response') : 'has a response') + `!`);
-                }
-            } else {
-                // Server confirmed cleared — remove from dismissed set
-                agent.notify = false;
-                dismissedNotify.delete(agent.statusKey);
-            }
-            if (entry.lastInput) agent.lastInput = entry.lastInput;
-            if (entry.lastOutput) agent.lastOutput = entry.lastOutput;
-        });
+        applyStatusSnapshot(data, { logRoutine: false });
     } catch (e) { /* Status unavailable */ }
 }
 setInterval(pollStatus, 5000);

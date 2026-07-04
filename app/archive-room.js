@@ -545,7 +545,7 @@
             <div class="archive-hero-main">
                 <div class="archive-hero-eyebrow">项目档案</div>
                 <h3>${escHtml(intro.title || `${p.title || '项目'} 的项目档案`)}</h3>
-                <p>${escHtml(intro.purpose || '这个档案用于沉淀项目长期上下文，帮助人类和 AI 快速理解项目。')}</p>
+                <p class="archive-hero-brief">${escHtml(intro.brief || p.description || '暂无项目简介。')}</p>
                 <div class="archive-hero-actions">
                     <span>${escHtml(readiness.label || '可用')}</span>
                     <span>${escHtml(readiness.summary || '')}</span>

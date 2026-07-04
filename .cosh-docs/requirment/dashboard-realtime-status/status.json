@@ -1,0 +1,40 @@
+{
+  "name": "dashboard-realtime-status",
+  "stage": "implementation_done",
+  "waiting_for_user": true,
+  "updated_at": "2026-07-04T13:30:38+08:00",
+  "confirmed": {
+    "checklist": true,
+    "tested": false,
+    "done": false
+  },
+  "confirmations": {
+    "checklist": {
+      "item": "checklist",
+      "confirmed_at": "2026-07-04T13:12:52+08:00",
+      "summary": "User replied \"pass\", confirming the checklist is accepted for todolist creation."
+    },
+    "tested": null,
+    "done": null
+  },
+  "files": {
+    "requirement": "requirement.md",
+    "review": "review.md",
+    "checklist": "checklist.md",
+    "todolist": "todolist.md"
+  },
+  "notes": [
+    "Requirement directory name was generated from the product concept because the user did not provide an explicit requirement name.",
+    "Product clarification round 1 is recorded.",
+    "Product clarification round 2 answers were received: B, A, B, B, A+B.",
+    "Review completed with no blocking product or technical issue. Checklist is drafted and waiting for user confirmation.",
+    "User added implementation packaging constraint: prefer a new JS file and a new Python file, keeping existing large files limited to thin integration hooks.",
+    "User added UI visibility constraint: the control panel should show whether it is using SSE, reconnecting SSE, or polling fallback.",
+    "Checklist confirmed by user reply \"pass\" and todolist was created.",
+    "Implementation completed with focused app/dashboard_realtime.py and app/dashboard-realtime.js modules.",
+    "Automated checks passed; waiting for user test acceptance confirmation before marking tested.",
+    "Temporary local service and in-app browser validation confirmed /api/dashboard/events snapshot+heartbeat and visible SSE connected indicator.",
+    "After stopping the temporary local service, in-app browser validation confirmed the dashboard switches to the visible polling fallback indicator.",
+    "Additional automated coverage now verifies meetings/actions diff events and filters routine/resolved/approved items out of action-required events."
+  ]
+}

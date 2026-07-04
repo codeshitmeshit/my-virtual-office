@@ -32,6 +32,7 @@ import subprocess
 import time
 import difflib
 import gateway_presence
+from dashboard_realtime import DashboardRealtimeStream
 from zoneinfo import ZoneInfo
 from provider_execution import (
     collect_modified_files,
@@ -17917,6 +17918,16 @@ def _archive_display_value(value, missing="未记录"):
     return text if text else missing
 
 
+def _archive_project_brief(project, limit=36):
+    title = _archive_display_value(project.get("title"), "项目")
+    description = str(project.get("description") or "").strip()
+    text = " ".join(description.split()) if description else f"{title} 的项目背景与目标概览"
+    text = text.strip(" \t\r\n#*-·。；;，,")
+    if len(text) > limit:
+        text = text[:limit].rstrip(" \t\r\n#*-·。；;，,") + "..."
+    return text or f"{title} 的项目背景与目标概览"
+
+
 def _archive_tasks(project):
     tasks = project.get("tasks") if isinstance(project.get("tasks"), list) else []
     return [t for t in tasks if isinstance(t, dict)]
@@ -18018,6 +18029,7 @@ def _archive_archive_introduction(project, counts, entries, artifacts, pending):
     missing = [item["label"] for item in _archive_content_presence(project, entries, artifacts, pending) if not item["present"]]
     return {
         "title": f"{title} 的项目档案",
+        "brief": _archive_project_brief(project),
         "purpose": "这个档案用于沉淀项目长期上下文，帮助人类验收、追踪和交接，也帮助新加入的 AI 快速获得项目背景。",
         "currentlyContains": present,
         "missingOrSparse": missing,
@@ -22980,6 +22992,12 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             self.end_headers()
             state = _get_normalized_presence_state()
             self.wfile.write(json.dumps(state).encode())
+        elif request_path == "/api/dashboard/events":
+            DashboardRealtimeStream(
+                status_loader=_get_normalized_presence_state,
+                meetings_loader=_meeting_active_projection,
+                requests_loader=lambda: _meeting_request_list_filtered("status=pending").get("requests", []),
+            ).stream(self)
         elif self.path == "/agents-list":
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
