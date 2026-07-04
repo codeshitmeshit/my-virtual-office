@@ -12264,11 +12264,11 @@ def _meeting_provider_ref(agent_id):
 
 
 def _meeting_provider_timeout():
-    raw = os.environ.get("VO_MEETING_PROVIDER_TIMEOUT_SEC") or "120"
+    raw = os.environ.get("VO_MEETING_PROVIDER_TIMEOUT_SEC") or "300"
     try:
         value = int(raw)
     except (TypeError, ValueError):
-        value = 120
+        value = 300
     return max(5, min(value, 600))
 
 

@@ -273,7 +273,7 @@ http://localhost:8090/setup
 | `VO_PROJECT_ROOTS` | 空 | 允许手动绑定的项目工作区根目录列表，按系统路径分隔符分隔 |
 | `VO_MEETING_DECISION_WINDOW_SEC` | `20` | AI 会议冲突/紧急程度决策窗口 |
 | `VO_MEETING_ADVISORY_TIMEOUT_SEC` | `45` | 会议 busy advisory 超时时间 |
-| `VO_MEETING_PROVIDER_TIMEOUT_SEC` | `120` | 会议 provider 调用超时时间 |
+| `VO_MEETING_PROVIDER_TIMEOUT_SEC` | `300` | 会议 provider 调用超时时间 |
 | `VO_PC_METRICS_ENABLED` | `true` | 是否启用本机性能面板 |
 | `VO_PC_METRICS_URL` | `http://127.0.0.1:8099` | 性能监控服务地址 |
 | `VO_API_USAGE` | `false` | 是否启用 API usage 面板 |
