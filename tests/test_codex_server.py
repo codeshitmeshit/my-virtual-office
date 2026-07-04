@@ -197,6 +197,59 @@ def test_thread_mapping_persists_and_resets():
             server.STATUS_DIR = old_status_dir
 
 
+def test_archived_codex_thread_mapping_is_reset_and_retried():
+    old_status_dir = server.STATUS_DIR
+    old_roster = server.get_roster
+    old_provider = server._codex_provider_from_config
+
+    class ArchivedThenOkProvider:
+        def __init__(self, workspace):
+            self.workspace = workspace
+            self.calls = []
+
+        def send_message(self, message, conversation_id="", timeout_sec=None, thread_id="", event_callback=None, allow_interaction=False):
+            self.calls.append(thread_id)
+            if thread_id == "thr-archived":
+                return {
+                    "ok": False,
+                    "status": "execution_failed",
+                    "error": "session thr-archived is archived. Run `codex unarchive thr-archived` to unarchive it first.",
+                    "threadId": "thr-archived",
+                    "modifiedFiles": [],
+                }
+            return {
+                "ok": True,
+                "status": "completed",
+                "reply": "fresh thread reply",
+                "threadId": "thr-fresh",
+                "turnId": "turn-fresh",
+                "modifiedFiles": [],
+            }
+
+    with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as workspace:
+        provider = ArchivedThenOkProvider(workspace)
+        server.STATUS_DIR = status_dir
+        server.get_roster = lambda: [AGENT]
+        server._codex_provider_from_config = lambda: provider
+        try:
+            server._set_codex_thread_id("codex-local", "conv-archived", "thr-archived")
+            result = server._handle_codex_chat({
+                "agentId": "codex-local",
+                "message": "hello",
+                "conversationId": "conv-archived",
+            })
+            assert result["ok"] is True
+            assert result["reply"] == "fresh thread reply"
+            assert result["threadId"] == "thr-fresh"
+            assert result["recoveredFromArchivedThread"] == "thr-archived"
+            assert provider.calls == ["thr-archived", ""]
+            assert server._get_codex_thread_id("codex-local", "conv-archived") == "thr-fresh"
+        finally:
+            server.STATUS_DIR = old_status_dir
+            server.get_roster = old_roster
+            server._codex_provider_from_config = old_provider
+
+
 def test_codex_test_exposes_safe_native_bridge_metadata():
     old_provider = server._codex_provider_from_config
 
@@ -436,6 +489,7 @@ if __name__ == "__main__":
     test_busy_rejects_second_request_and_releases_lock()
     test_provider_exception_clears_active_operation()
     test_thread_mapping_persists_and_resets()
+    test_archived_codex_thread_mapping_is_reset_and_retried()
     test_codex_test_exposes_safe_native_bridge_metadata()
     test_activity_persists_redacted_and_reports_active_conversation()
     test_codex_agent_create_delete_handlers_use_native_provider()

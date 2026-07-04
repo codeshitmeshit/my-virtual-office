@@ -419,6 +419,7 @@ def _load_vo_config():
         pass
     default_gateway_url = f"ws://127.0.0.1:{gateway_port}"
     default_gateway_http = f"http://127.0.0.1:{gateway_port}"
+    codex_reply_text = os.environ.get("VO_CODEX_REPLY_TEXT")
 
     return {
         "office": {
@@ -509,7 +510,7 @@ def _load_vo_config():
             "name": _env_or("VO_CODEX_AGENT_NAME", codex_cfg.get("name", "Codex")),
             "agentId": _env_or("VO_CODEX_AGENT_ID", codex_cfg.get("agentId", "local")),
             "model": _env_or("VO_CODEX_MODEL", codex_cfg.get("model", os.environ.get("OPENAI_MODEL", ""))),
-            "replyText": _env_or("VO_CODEX_REPLY_TEXT", codex_cfg.get("replyText")),
+            "replyText": codex_reply_text,
             "bridgeUrl": _env_or("VO_CODEX_BRIDGE_URL", codex_cfg.get("bridgeUrl")),
             "sandbox": _env_or("VO_CODEX_SANDBOX", codex_cfg.get("sandbox", "workspace-write")),
             "approvalPolicy": _env_or("VO_CODEX_APPROVAL_POLICY", codex_cfg.get("approvalPolicy", "never")),
@@ -680,6 +681,10 @@ def _merge_setup_config(existing, incoming):
             if key in _SETUP_SECRET_KEYS and value in ("", None):
                 continue
             merged[key] = value
+    if isinstance(merged.get("codex"), dict):
+        # Keep deterministic Codex replies as an explicit env-only test hook.
+        # Persisting it in normal setup config silently disables live Codex.
+        merged["codex"].pop("replyText", None)
     return merged
 
 
@@ -5483,6 +5488,16 @@ def _reset_codex_thread_id(agent_id, conversation_id):
     return bool(removed)
 
 
+def _codex_result_is_archived_session(result):
+    if not isinstance(result, dict):
+        return False
+    text = " ".join(
+        str(result.get(key) or "")
+        for key in ("error", "reply", "message", "status")
+    ).lower()
+    return "is archived" in text and ("session" in text or "thread" in text or "codex unarchive" in text)
+
+
 def _codex_operation_lock(agent_id):
     with _CODEX_OPERATION_LOCKS_GUARD:
         return _CODEX_OPERATION_LOCKS.setdefault(agent_id, threading.Lock())
@@ -5743,15 +5758,25 @@ def _handle_codex_chat(body):
             except Exception:
                 pass
 
-    try:
-        result = provider.send_message(
+    initial_thread_id = _get_codex_thread_id(agent_id, conversation_id)
+
+    def send_to_provider(thread_id):
+        return provider.send_message(
             message,
             conversation_id=conversation_id,
             timeout_sec=int(body.get("timeoutSec") or 600),
-            thread_id=_get_codex_thread_id(agent_id, conversation_id),
+            thread_id=thread_id,
             event_callback=on_event,
             allow_interaction=allow_interaction,
         )
+
+    try:
+        result = send_to_provider(initial_thread_id)
+        if initial_thread_id and _codex_result_is_archived_session(result):
+            _reset_codex_thread_id(agent_id, conversation_id)
+            result = send_to_provider("")
+            if isinstance(result, dict):
+                result["recoveredFromArchivedThread"] = initial_thread_id
     except Exception as exc:
         result = {
             "ok": False,
@@ -5776,6 +5801,7 @@ def _handle_codex_chat(body):
         thread_id=thread_id,
         turn_id=result.get("turnId", ""),
         modified_files=modified_files,
+        extra={"recoveredFromArchivedThread": result.get("recoveredFromArchivedThread")},
     )
     if inbound_event and normalized.get("reply"):
         append_reply_event(normalized.get("reply") or "", {

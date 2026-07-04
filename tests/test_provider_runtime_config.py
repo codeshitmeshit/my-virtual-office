@@ -20,7 +20,7 @@ os.environ["VO_CLAUDE_CODE_ENABLED"] = "0"
 import server
 
 
-def test_setup_config_merge_preserves_provider_secrets_and_unknown_fields():
+def test_setup_config_merge_preserves_provider_secrets_and_strips_codex_demo_reply():
     existing = {
         "hermes": {
             "enabled": True,
@@ -53,7 +53,7 @@ def test_setup_config_merge_preserves_provider_secrets_and_unknown_fields():
     assert merged["hermes"]["customField"] == "keep"
     assert merged["codex"]["workspace"] == "/new/workspace"
     assert merged["codex"]["workspaceRoot"] == "/new/codex-agents"
-    assert merged["codex"]["replyText"] == "demo"
+    assert "replyText" not in merged["codex"]
     assert merged["codex"]["model"] == "gpt-5-codex"
     assert merged["claudeCode"]["enabled"] is True
     assert merged["claudeCode"]["workspaceRoot"] == "/new/claude-agents"
@@ -281,9 +281,33 @@ def test_load_vo_config_accepts_hermes_prefer_api_alias_and_env_override():
                     os.environ[key] = value
 
 
+def test_load_vo_config_ignores_persisted_codex_reply_text_unless_env_set():
+    old_env = {key: os.environ.get(key) for key in ("VO_CONFIG", "VO_CODEX_REPLY_TEXT")}
+    with tempfile.TemporaryDirectory(prefix="vo-codex-reply-config-") as tmp:
+        cfg_path = os.path.join(tmp, "vo-config.json")
+        with open(cfg_path, "w", encoding="utf-8") as f:
+            json.dump({"codex": {"enabled": True, "replyText": "stale fixture"}}, f)
+        try:
+            os.environ["VO_CONFIG"] = cfg_path
+            os.environ.pop("VO_CODEX_REPLY_TEXT", None)
+            cfg = server._load_vo_config()
+            assert cfg["codex"]["replyText"] is None
+
+            os.environ["VO_CODEX_REPLY_TEXT"] = "explicit fixture"
+            cfg = server._load_vo_config()
+            assert cfg["codex"]["replyText"] == "explicit fixture"
+        finally:
+            for key, value in old_env.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+
+
 if __name__ == "__main__":
-    test_setup_config_merge_preserves_provider_secrets_and_unknown_fields()
+    test_setup_config_merge_preserves_provider_secrets_and_strips_codex_demo_reply()
     test_safe_vo_config_round_trips_provider_fields_without_secret_exposure()
     test_model_provider_config_includes_safe_native_runtime_status()
     test_load_vo_config_accepts_hermes_prefer_api_alias_and_env_override()
+    test_load_vo_config_ignores_persisted_codex_reply_text_unless_env_set()
     print("ok")
