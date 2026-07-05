@@ -849,6 +849,8 @@ def _persist_setup_payload(body):
         gateway_presence.stop()
         if new_token:
             gateway_presence.start(GATEWAY_URL, new_token, port=PORT, client_version=_get_openclaw_version())
+    if isinstance(body, dict) and isinstance(body.get("feishu"), dict) and "chatApp" in body.get("feishu", {}):
+        _start_feishu_chat_long_connection()
     return {"ok": True}
 
 
