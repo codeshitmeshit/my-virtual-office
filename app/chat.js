@@ -825,6 +825,18 @@
           const data = await res.json();
           if (!isCurrentHistoryRequest()) return;
           if (data.ok && Array.isArray(data.messages)) {
+            const hasFreshFinal = !opts.recoverFinal || !opts.startedAt || data.messages.some(msg => (
+              msg &&
+              msg.role === 'assistant' &&
+              msg.ephemeral !== 'hermes-progress' &&
+              msg.ephemeral !== 'claude-code-progress' &&
+              Number(msg.ts || 0) >= Number(opts.startedAt || 0) &&
+              (msg.text || msg.thinking || msg.approval || (Array.isArray(msg.tools) && msg.tools.length))
+            ));
+            if (!hasFreshFinal) {
+              this.scrollBottomAfterLayout();
+              return;
+            }
             this.applySessionMetrics(data);
             this.messages.innerHTML = '';
             for (const msg of data.messages) {
