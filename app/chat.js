@@ -511,6 +511,11 @@
       return opt?.dataset?.providerKind || 'openclaw';
     }
 
+    getSelectedProviderKindStrict() {
+      const opt = this.agentSelect?.selectedOptions?.[0];
+      return opt?.dataset?.providerKind || '';
+    }
+
     isHermesSelected() {
       return this.getSelectedProviderKind() === 'hermes' || String(this.sessionKey || '').startsWith('hermes:');
     }
@@ -555,9 +560,11 @@
       if (this.compactContextBtn) this.compactContextBtn.style.display = this.isCodexSelected() ? '' : 'none';
       if (this.stopBtn) this.stopBtn.style.display = '';
       if (!this.currentRunId && !this.streamingMsg) {
-        if (this.isHermesSelected()) this.setStatus(typeof i18n !== 'undefined' ? i18n.t('chat_hermes_ready') : 'Hermes ready', 'connected');
-        else if (this.isClaudeCodeSelected()) this.setStatus(_ct('claude_code_ready'), 'connected');
-        else if (this.isCodexSelected()) this.setStatus(_ct('codex_ready'), 'connected');
+        const providerKind = this.getSelectedProviderKindStrict();
+        if (providerKind === 'hermes') this.setStatus(typeof i18n !== 'undefined' ? i18n.t('chat_hermes_ready') : 'Hermes ready', 'connected');
+        else if (providerKind === 'claude-code') this.setStatus(_ct('claude_code_ready'), 'connected');
+        else if (providerKind === 'codex') this.setStatus(_ct('codex_ready'), 'connected');
+        else this.setStatus(connected ? ((typeof i18n !== 'undefined' ? i18n.t('connected') : 'Connected') + ' ⚡') : (typeof i18n !== 'undefined' ? i18n.t('chat_disconnected_label') : 'Disconnected'), connected ? 'connected' : 'disconnected');
       }
     }
 
