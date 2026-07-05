@@ -43,11 +43,38 @@ def _write_status(**updates: Any) -> None:
         pass
 
 
+def _log(message: str) -> None:
+    print(f"[FeishuChatWorker] {message}", flush=True)
+
+
 def _callback_url() -> str:
     return (os.environ.get("VO_FEISHU_CHAT_WORKER_CALLBACK_URL") or "http://127.0.0.1:8090/api/feishu-chat/inbound-worker").strip()
 
 
+def _parent_pid() -> int:
+    try:
+        return int(os.environ.get("VO_FEISHU_CHAT_PARENT_PID") or "0")
+    except (TypeError, ValueError):
+        return 0
+
+
+def _process_alive(pid: int) -> bool:
+    if pid <= 0:
+        return True
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except Exception:
+        return True
+
+
 def _post_message(body: dict[str, Any]) -> None:
+    message = ((body.get("event") or {}).get("message") or {}) if isinstance(body, dict) else {}
+    _log(f"received message event message_id={message.get('message_id') or ''} type={message.get('message_type') or ''} chat_type={message.get('chat_type') or ''}")
     data = json.dumps(body, ensure_ascii=False).encode("utf-8")
     req = urllib.request.Request(
         _callback_url(),
@@ -63,6 +90,7 @@ def _post_message(body: dict[str, Any]) -> None:
             raw = resp.read(4096)
             if resp.status >= 300:
                 raise RuntimeError(f"callback status {resp.status}: {raw[:200]!r}")
+        _log("callback delivered to VO")
         _write_status(running=True, status="running", lastEventAt=int(time.time()), lastError="")
     except urllib.error.HTTPError as exc:
         detail = exc.read(4096)
@@ -78,6 +106,7 @@ def main() -> int:
         _write_status(enabled=False, running=False, status="missing_app_credentials")
         return 2
 
+    _log(f"starting pid={os.getpid()} parent_pid={_parent_pid()} callback={_callback_url()}")
     _write_status(running=True, status="starting", lastError="")
     receiver = FeishuLongConnectionReceiver(
         app_id=app_id,
@@ -88,7 +117,13 @@ def main() -> int:
     try:
         status = receiver.start()
         _write_status(**status, pid=os.getpid())
+        parent_pid = _parent_pid()
         while True:
+            if not _process_alive(parent_pid):
+                _log(f"parent exited parent_pid={parent_pid}; stopping")
+                receiver.stop()
+                _write_status(enabled=False, running=False, status="orphaned_parent_exited", pid=os.getpid())
+                return 0
             current = receiver.status()
             _write_status(**current, pid=os.getpid())
             if current.get("running") is False and current.get("status") not in {"starting", "connecting", "running"}:

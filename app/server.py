@@ -91,6 +91,32 @@ class FeishuChatWorkerProcess:
             "mode": "subprocess",
         }
 
+    def _terminate_stale_workers(self):
+        current_pid = os.getpid()
+        try:
+            result = subprocess.run(
+                ["pgrep", "-f", "feishu_chat_worker.py"],
+                capture_output=True,
+                text=True,
+                timeout=3,
+            )
+        except Exception:
+            return
+        for raw in (result.stdout or "").splitlines():
+            raw = raw.strip()
+            if not raw.isdigit():
+                continue
+            pid = int(raw)
+            if pid == current_pid:
+                continue
+            proc = self._process
+            if proc and proc.poll() is None and pid == proc.pid:
+                continue
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except Exception:
+                continue
+
     def start(self):
         if not self.app_id or not self.app_secret:
             return self._base_status("missing_app_credentials", running=False, enabled=False)
@@ -104,10 +130,12 @@ class FeishuChatWorkerProcess:
             "VO_FEISHU_CHAT_APP_SECRET": self.app_secret,
             "VO_FEISHU_CHAT_WORKER_CALLBACK_URL": self.callback_url,
             "VO_FEISHU_CHAT_WORKER_TOKEN": _FEISHU_CHAT_WORKER_TOKEN,
+            "VO_FEISHU_CHAT_PARENT_PID": str(os.getpid()),
         })
         worker_path = os.path.join(os.path.dirname(__file__), "feishu_chat_worker.py")
         os.makedirs(self.status_dir, exist_ok=True)
         log_path = os.path.join(self.status_dir, "feishu-chat-worker.log")
+        self._terminate_stale_workers()
         try:
             os.remove(self._status_path())
         except FileNotFoundError:
