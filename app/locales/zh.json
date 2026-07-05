@@ -73,6 +73,8 @@
   "ui_font_size": "界面字体大小",
   "ui_font_size_hint": "仅缩放界面面板，画布标签保持不变。",
   "show_agent_names": "显示代理名称",
+  "shift_enter_to_send": "使用 Shift+回车发送消息",
+  "shift_enter_to_send_hint": "开启后，回车换行；关闭时，回车发送，Shift+回车换行。",
   "api_usage_section": "☁️ 资源用量",
   "show_api_usage": "显示资源用量面板",
   "api_usage_desc": "显示 OpenClaw 账号额度状态，以及 VO 本地记录的 Agent run token 用量。",

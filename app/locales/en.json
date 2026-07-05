@@ -73,6 +73,8 @@
   "ui_font_size": "UI font size",
   "ui_font_size_hint": "Scales interface panels only. Canvas labels stay unchanged.",
   "show_agent_names": "Show agent names",
+  "shift_enter_to_send": "Use Shift+Enter to send messages",
+  "shift_enter_to_send_hint": "When enabled, Enter inserts a new line. When disabled, Enter sends and Shift+Enter inserts a new line.",
   "api_usage_section": "☁️ Resource Usage",
   "show_api_usage": "Show Resource Usage Panel",
   "api_usage_desc": "Shows provider account limits from OpenClaw and VO-recorded token usage from local agent runs.",

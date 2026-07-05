@@ -580,6 +580,7 @@ def _load_vo_config():
             "browserPanel": _env_bool("VO_BROWSER_PANEL", features.get("browserPanel", False)),
             "whisper": features.get("whisper", False),
             "apiUsage": features.get("apiUsage", False),
+            "shiftEnterToSend": features.get("shiftEnterToSend", False),
         },
         "pcMetrics": {
             "url": pc_metrics.get("url"),

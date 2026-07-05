@@ -9,6 +9,7 @@
   let _chatWsPath = '/ws';
   let GATEWAY_CLIENT_VERSION = 'unknown';
   let _modelBarInterval = null;
+  let _shiftEnterToSend = false;
   let _sessionsListCache = { at: 0, promise: null, payload: null };
   const runOwners = new Map();
   const _ct = (key, params) => typeof i18n !== 'undefined' ? i18n.t(key, params) : key;
@@ -22,6 +23,14 @@
   const ACTIVE_RUN_RECOVERY_MS = 15000;
   const PROVIDER_PROGRESS_MAX_AGE_MS = 120000;
   const HERMES_APPROVAL_POLL_MS = 1500;
+  function setVoChatShiftEnterToSend(value) {
+    _shiftEnterToSend = value === true;
+  }
+  window.setVoChatShiftEnterToSend = setVoChatShiftEnterToSend;
+  fetch('/vo-config')
+    .then((r) => r.json())
+    .then((cfg) => setVoChatShiftEnterToSend((cfg.features || {}).shiftEnterToSend === true))
+    .catch(() => {});
   const chatConfirmLabel = () => {
     const label = _ct('confirm');
     return label === 'confirm' ? '确认' : label;
@@ -240,7 +249,8 @@
       this.sendBtn?.addEventListener('click', () => this.sendMessage());
       this.stopBtn?.addEventListener('click', () => this.sendStop());
       this.input?.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' && !e.shiftKey) {
+        const shouldSendOnEnter = _shiftEnterToSend ? e.shiftKey : !e.shiftKey;
+        if (e.key === 'Enter' && shouldSendOnEnter) {
           e.preventDefault();
           this.sendMessage();
         }

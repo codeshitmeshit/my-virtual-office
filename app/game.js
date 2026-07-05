@@ -14094,6 +14094,9 @@ function _mmLoadCurrentSettings() {
         // API Usage
         var apiUsageCb = document.getElementById("mm-apiusage-enable");
         if (apiUsageCb) apiUsageCb.checked = (cfg.features || {}).apiUsage === true;
+        // Chat input behavior
+        var shiftEnterToSendCb = document.getElementById("mm-shift-enter-send");
+        if (shiftEnterToSendCb) shiftEnterToSendCb.checked = (cfg.features || {}).shiftEnterToSend === true;
         // Browser
         var brEnabled = ((cfg.features || {}).browserPanel) || false;
         var brCdp = ((cfg.browser || {}).cdpUrl) || DEFAULT_BROWSER_CDP_URL;
@@ -14960,6 +14963,12 @@ function mmSaveSettings() {
         if (!config.features) config.features = {};
         config.features.apiUsage = _apiCb.checked;
     }
+    // Chat input behavior
+    var _shiftEnterToSendCb = document.getElementById("mm-shift-enter-send");
+    if (_shiftEnterToSendCb) {
+        if (!config.features) config.features = {};
+        config.features.shiftEnterToSend = _shiftEnterToSendCb.checked;
+    }
     // Browser
     var _brCb = document.getElementById("mm-browser-enable");
     var _brCdp = document.getElementById("mm-cdp-url");
@@ -15022,6 +15031,9 @@ function mmSaveSettings() {
             }
             if (typeof window.setApiUsageEnabled === 'function' && config.features && Object.prototype.hasOwnProperty.call(config.features, 'apiUsage')) {
                 window.setApiUsageEnabled(config.features.apiUsage === true);
+            }
+            if (typeof window.setVoChatShiftEnterToSend === 'function' && config.features && Object.prototype.hasOwnProperty.call(config.features, 'shiftEnterToSend')) {
+                window.setVoChatShiftEnterToSend(config.features.shiftEnterToSend === true);
             }
         } else {
             _acpShowToast('❌ Save failed');
