@@ -838,14 +838,30 @@
           const data = await res.json();
           if (!isCurrentHistoryRequest()) return;
           if (data.ok && Array.isArray(data.messages)) {
+            let providerMessages = data.messages;
+            let usingMergedAgentHistory = false;
+            try {
+              const agentId = this.getSelectedAgentId() || this.selectedAgentKey;
+              const mergedQuery = new URLSearchParams({ agentId, limit: '500' });
+              const mergedRes = await fetch('/agent-chat?' + mergedQuery.toString());
+              const mergedData = await mergedRes.json();
+              const mergedRows = Array.isArray(mergedData?.[agentId]) ? mergedData[agentId] : [];
+              const newest = (rows) => Math.max(0, ...(rows || []).map(row => Number(row.epochMs || row.ts || 0)));
+              if (mergedRows.length && newest(mergedRows) >= newest(providerMessages)) {
+                providerMessages = mergedRows;
+                usingMergedAgentHistory = true;
+              }
+            } catch (e) {
+              console.warn('[chat] Failed to load merged provider history:', e);
+            }
             const providerKind = this.isClaudeCodeSelected() ? 'claude-code' : 'hermes';
             const recoveryStartedAt = Number(opts.startedAt || (providerKind === 'claude-code' ? this.claudeCodeSendStartedAt : this.hermesSendStartedAt) || 0);
-            const hasFreshFinal = !opts.recoverFinal || !recoveryStartedAt || data.messages.some(msg => (
+            const hasFreshFinal = !opts.recoverFinal || !recoveryStartedAt || providerMessages.some(msg => (
               msg &&
               msg.role === 'assistant' &&
               msg.ephemeral !== 'hermes-progress' &&
               msg.ephemeral !== 'claude-code-progress' &&
-              Number(msg.ts || 0) >= recoveryStartedAt &&
+              Number(msg.epochMs || msg.ts || 0) >= recoveryStartedAt &&
               (msg.text || msg.thinking || msg.approval || (Array.isArray(msg.tools) && msg.tools.length))
             ));
             if (!hasFreshFinal) {
@@ -854,19 +870,34 @@
             }
             this.applySessionMetrics(data);
             this.messages.innerHTML = '';
-            for (const msg of data.messages) {
+            const renderedHistoryKeys = new Set();
+            for (const msg of providerMessages) {
               if (msg.ephemeral === 'hermes-progress' || msg.ephemeral === 'claude-code-progress') {
                 this.restoreProviderProgress(msg, this.isClaudeCodeSelected() ? 'claude-code' : 'hermes');
                 continue;
               }
-              if (msg.text || msg.thinking || msg.approval || (Array.isArray(msg.tools) && msg.tools.length)) {
-                const meta = msg.role === 'assistant'
-                  ? { ...resolveMessageSender(msg, this), thinking: visibleProviderThinking(providerKind, msg.thinking, msg.status), reasoningTokens: msg.reasoningTokens || 0, approval: msg.approval || null }
-                  : { label: _ct('chat_you_label'), kind: 'human' };
-                this.appendMessage(msg.role, msg.text || '', msg.ts || Date.now(), [], meta, normalizeHermesTools(msg.tools || []));
+              const attachments = Array.isArray(msg.attachments) ? msg.attachments : [];
+              if (msg.text || attachments.length || msg.thinking || msg.approval || (Array.isArray(msg.tools) && msg.tools.length)) {
+                const role = msg.role || 'assistant';
+                const text = String(msg.text || '');
+                const historyKey = [
+                  msg.commEventId || msg.id || '',
+                  role,
+                  text,
+                  msg.conversationId || '',
+                  msg.fromAgentId || '',
+                  msg.toAgentId || '',
+                  attachments.map(item => item && (item.path || item.url || item.fileKey || item.name || '')).join('|')
+                ].join('\u0001');
+                if (renderedHistoryKeys.has(historyKey)) continue;
+                renderedHistoryKeys.add(historyKey);
+                const meta = role === 'assistant'
+                  ? { ...resolveMessageSender(msg, this), label: msg.from || resolveMessageSender(msg, this).label, thinking: visibleProviderThinking(providerKind, msg.thinking, msg.status), reasoningTokens: msg.reasoningTokens || 0, approval: msg.approval || null }
+                  : { label: msg.from || _ct('chat_you_label'), kind: msg.fromAgentId && msg.fromAgentId !== 'user' ? 'agent' : 'human' };
+                this.appendMessage(role, text, msg.epochMs || msg.ts || Date.now(), attachments, meta, normalizeHermesTools(msg.tools || []));
               }
             }
-            await this.appendFeishuChannelHistory(this.getSelectedAgentId() || this.selectedAgentKey);
+            if (!usingMergedAgentHistory) await this.appendFeishuChannelHistory(this.getSelectedAgentId() || this.selectedAgentKey, renderedHistoryKeys);
             this.scrollBottomAfterLayout();
           }
           if (this.isHermesSelected()) await this.pollHermesApproval().catch(() => {});

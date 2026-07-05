@@ -8260,10 +8260,14 @@ def _comm_event_to_chat_message(event, agent_key):
     """Convert a communication event into the existing bubble message shape."""
     from_ref = event.get("from") or {}
     to_ref = event.get("to") or {}
+    metadata = event.get("metadata") if isinstance(event.get("metadata"), dict) else {}
+    attachments = event.get("attachments") if isinstance(event.get("attachments"), list) else []
+    if not attachments and isinstance(metadata.get("attachments"), list):
+        attachments = metadata.get("attachments")
     from_id = from_ref.get("id", "")
     to_id = to_ref.get("id", "")
     text = _extract_openclaw_text(event.get("text", ""))
-    if not text:
+    if not text and not attachments:
         return None
     from_label = (from_ref.get("name") or from_id or "Agent").strip()
     to_label = (to_ref.get("name") or to_id or "Agent").strip()
@@ -8282,6 +8286,7 @@ def _comm_event_to_chat_message(event, agent_key):
         "conversationId": event.get("conversationId", ""),
         "source": "agent-platform-communications",
         "commEventId": event.get("id", ""),
+        "attachments": attachments,
     }
 
 
@@ -24470,28 +24475,37 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             limit = max(1, min(120, limit))
             messages = _session_trajectory_messages(session_key, max_tools=limit)
             self.wfile.write(json.dumps({"ok": True, "messages": messages}).encode())
-        elif self.path == "/agent-chat":
+        elif request_path == "/agent-chat":
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
+            requested_agent = str((query_params.get("agentId") or query_params.get("agent") or [""])[0] or "").strip()
+            try:
+                per_agent_limit = max(1, min(500, int((query_params.get("limit") or ["500"])[0] or 500)))
+            except Exception:
+                per_agent_limit = 500
             result = {}
             for agent_key in AGENT_SESSION_IDS:
+                if requested_agent and requested_agent not in {agent_key, AGENT_SESSION_IDS.get(agent_key)}:
+                    continue
                 if _is_hermes_agent(agent_key):
                     agent = _get_hermes_agent(agent_key) or {}
                     profile = agent.get("profile") or agent.get("providerAgentId") or "default"
-                    msgs = _load_provider_histories_for_bubbles("hermes", profile, 500)
+                    msgs = _load_provider_histories_for_bubbles("hermes", profile, per_agent_limit)
                 elif _is_codex_agent(agent_key):
                     msgs = []
                 elif _is_claude_code_agent(agent_key):
                     agent = _get_claude_code_agent(agent_key) or {}
                     profile = agent.get("profile") or agent.get("providerAgentId") or "local"
-                    msgs = _load_provider_histories_for_bubbles("claude-code", profile, 500)
+                    msgs = _load_provider_histories_for_bubbles("claude-code", profile, per_agent_limit)
                 else:
-                    msgs = get_agent_messages(agent_key, max_messages=500)
+                    msgs = get_agent_messages(agent_key, max_messages=per_agent_limit)
                 if msgs:
                     result[agent_key] = msgs
-            result = _merge_comm_events_into_agent_chat(result)
+            result = _merge_comm_events_into_agent_chat(result, per_agent_limit=per_agent_limit)
+            if requested_agent:
+                result = {key: value for key, value in result.items() if requested_agent in {key, AGENT_SESSION_IDS.get(key)}}
             # Build project-work map: which agents are currently working on project tasks
             # Primary detection: check each agent's most recently active session key
             # for the "wf-" prefix (workflow sessions created by the project system).
