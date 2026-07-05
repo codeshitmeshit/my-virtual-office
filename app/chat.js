@@ -929,7 +929,11 @@
           );
         }).sort((a, b) => Number(a.ts || 0) - Number(b.ts || 0));
         for (const event of rows) {
-          if (!event.text) continue;
+          const eventMeta = event && typeof event.metadata === 'object' ? event.metadata : {};
+          const attachments = Array.isArray(event.attachments)
+            ? event.attachments
+            : (Array.isArray(eventMeta.attachments) ? eventMeta.attachments : []);
+          if (!event.text && !attachments.length) continue;
           const fromId = event.from?.id || '';
           const role = fromId === agentId ? 'assistant' : 'user';
           const text = String(event.text || '');
@@ -939,14 +943,15 @@
             text,
             event.inReplyTo || '',
             (event.from && event.from.id) || '',
-            (event.to && event.to.id) || ''
+            (event.to && event.to.id) || '',
+            attachments.map(item => item && (item.path || item.url || item.fileKey || item.name || '')).join('|')
           ].join('\u0001');
           if (renderedHistoryKeys.has(historyKey)) continue;
           renderedHistoryKeys.add(historyKey);
           const meta = role === 'assistant'
             ? { label: this.agentSelect.selectedOptions[0]?.textContent.trim() || agentId, kind: 'agent' }
             : { label: event.from?.name || 'Feishu', kind: 'human' };
-          this.appendMessage(role, text, event.ts || Date.now(), [], meta);
+          this.appendMessage(role, text, event.ts || Date.now(), attachments, meta);
         }
       } catch (e) {
         console.warn('[chat] Failed to load Feishu channel history:', e);

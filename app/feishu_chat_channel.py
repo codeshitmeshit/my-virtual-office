@@ -163,6 +163,62 @@ def _message_text(message):
     return text
 
 
+def _message_content_dict(message):
+    content = message.get("content")
+    if isinstance(content, dict):
+        return content
+    if isinstance(content, str) and content.strip():
+        try:
+            parsed = json.loads(content)
+            return parsed if isinstance(parsed, dict) else {}
+        except json.JSONDecodeError:
+            return {}
+    return {}
+
+
+def _message_image_key(message):
+    content = _message_content_dict(message)
+    for key in ("image_key", "imageKey", "file_key", "fileKey"):
+        value = str(content.get(key) or message.get(key) or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _normalize_attachment(result, *, fallback_name=""):
+    result = result if isinstance(result, dict) else {}
+    item = {
+        "type": "image",
+        "resourceType": result.get("resourceType") or "image",
+        "name": result.get("name") or fallback_name or result.get("fileKey") or "feishu-image",
+        "path": result.get("path") or "",
+        "url": result.get("url") or "",
+        "mimeType": result.get("mimeType") or result.get("contentType") or "image/*",
+        "contentType": result.get("contentType") or result.get("mimeType") or "image/*",
+        "size": result.get("size") or 0,
+        "fileKey": result.get("fileKey") or "",
+        "messageId": result.get("messageId") or "",
+    }
+    return {k: v for k, v in item.items() if v not in ("", None)}
+
+
+def _image_prompt_text(text, attachment_result, image_key):
+    attachment_result = attachment_result if isinstance(attachment_result, dict) else {}
+    base = text or "用户通过飞书发送了一张图片。"
+    if attachment_result.get("ok"):
+        details = [
+            "图片附件已同步到 VO。",
+            f"文件名：{attachment_result.get('name') or image_key}",
+        ]
+        if attachment_result.get("path"):
+            details.append(f"本地路径：{attachment_result.get('path')}")
+        if attachment_result.get("url"):
+            details.append(f"预览 URL：{attachment_result.get('url')}")
+        return base + "\n\n" + "\n".join(details)
+    reason = attachment_result.get("message") or attachment_result.get("error") or attachment_result.get("status") or "unknown_error"
+    return base + f"\n\n图片附件暂时无法下载，飞书 image_key：{image_key}，错误：{reason}"
+
+
 def _safe_channel_call(func, *args):
     if not func:
         return {}
@@ -201,6 +257,7 @@ def handle_message_event(
     delete_reaction=None,
     choose_receipt=random_ack_emoji,
     choose_reaction=ack_reaction_emoji_type,
+    download_image=None,
 ):
     event = (body or {}).get("event") if isinstance((body or {}).get("event"), dict) else {}
     message = event.get("message") if isinstance(event.get("message"), dict) else {}
@@ -229,12 +286,30 @@ def handle_message_event(
     if chat_type != "p2p":
         record = record_event({**base_record, "event": "ignored", "reason": "unsupported_chat_type"})
         return {"ok": True, "status": "ignored_unsupported_chat_type", "record": record}
-    if message_type and message_type != "text":
-        record = record_event({**base_record, "event": "ignored", "reason": "unsupported_message_type"})
-        return {"ok": True, "status": "ignored_unsupported_message_type", "record": record}
     if not source_message_id:
         record = record_event({**base_record, "event": "rejected", "reason": "missing_message_id"})
         return {"ok": False, "status": "missing_message_id", "record": record, "_status": 400}
+    if message_type and message_type not in {"text", "image"}:
+        record = record_event({**base_record, "event": "ignored", "reason": "unsupported_message_type"})
+        return {"ok": True, "status": "ignored_unsupported_message_type", "record": record}
+    attachments = []
+    attachment_result = {}
+    image_key = ""
+    if message_type == "image":
+        image_key = _message_image_key(message)
+        if not image_key:
+            record = record_event({**base_record, "event": "rejected", "reason": "missing_image_key"})
+            return {"ok": False, "status": "missing_image_key", "record": record, "_status": 400}
+        attachment_result = _safe_channel_call(download_image, source_message_id, image_key) if download_image else {
+            "ok": False,
+            "status": "image_download_unavailable",
+            "fileKey": image_key,
+            "messageId": source_message_id,
+            "resourceType": "image",
+        }
+        if attachment_result.get("ok"):
+            attachments = [_normalize_attachment(attachment_result, fallback_name=image_key)]
+        text = _image_prompt_text(text, attachment_result, image_key)
     if not text:
         record = record_event({**base_record, "event": "ignored", "reason": "empty_text"})
         return {"ok": True, "status": "ignored_empty_text", "record": record}
@@ -268,6 +343,9 @@ def handle_message_event(
             "representativeAgentId": representative_agent_id,
             "conversationId": conversation_id,
             "text": text,
+            "attachments": attachments,
+            "attachmentResult": attachment_result if message_type == "image" else {},
+            "imageKey": image_key,
         })
         receipt_text = ""
         receipt_result = {}
@@ -287,6 +365,7 @@ def handle_message_event(
                 "sourceMessageId": source_message_id,
                 "feishuChatId": chat_id,
                 "senderName": identity.get("openId") or identity.get("userId") or "Feishu User",
+                "attachments": attachments,
             },
         )
         reply = str(result.get("reply") or result.get("error") or "").strip() or "处理完成，但没有可发送的文本回复。"
@@ -303,6 +382,9 @@ def handle_message_event(
             "text": text,
             "reply": reply,
             "feishuReply": feishu_reply,
+            "attachments": attachments,
+            "attachmentResult": attachment_result if message_type == "image" else {},
+            "imageKey": image_key,
             "agentResult": {k: v for k, v in result.items() if k not in {"tools", "thinking"}},
             "sendResult": send_result,
             "reactionType": reaction_type,

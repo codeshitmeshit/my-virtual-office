@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import mimetypes
 import os
 import re
 import threading
@@ -631,6 +632,22 @@ def _feishu_empty_request(url: str, *, method: str, headers: dict[str, str] | No
         return _parse_json_response(response)
 
 
+def _feishu_binary_request(url: str, *, headers: dict[str, str] | None = None, urlopen: Callable[..., Any], timeout: int) -> dict[str, Any]:
+    request = urllib.request.Request(
+        url,
+        headers=headers or {},
+        method="GET",
+    )
+    with urlopen(request, timeout=timeout) as response:
+        data = response.read()
+        content_type = ""
+        try:
+            content_type = response.getheader("Content-Type") or ""
+        except Exception:
+            content_type = ""
+        return {"ok": True, "data": data, "contentType": content_type}
+
+
 def _get_tenant_access_token(app_cfg: dict[str, Any], *, urlopen: Callable[..., Any], timeout: int) -> dict[str, Any]:
     app_id = _string(app_cfg.get("appId"), 160)
     app_secret = _string(app_cfg.get("appSecret"), 300)
@@ -657,6 +674,123 @@ def _get_tenant_access_token(app_cfg: dict[str, Any], *, urlopen: Callable[..., 
     expire = int(parsed.get("expire") or 7200)
     _TOKEN_CACHE[cache_key] = {"token": token, "expiresAt": time.time() + max(60, expire)}
     return {"ok": True, "token": token, "appFingerprint": _secret_fingerprint(app_id)}
+
+
+def _safe_resource_filename(message_id: str, file_key: str, content_type: str = "") -> str:
+    seed = f"{message_id}:{file_key}"
+    digest = hashlib.sha1(seed.encode("utf-8")).hexdigest()[:16]
+    suffix = mimetypes.guess_extension((content_type or "").split(";")[0].strip()) or ".bin"
+    if suffix == ".jpe":
+        suffix = ".jpg"
+    return f"feishu-{digest}{suffix}"
+
+
+def download_feishu_message_resource(
+    message_id: str,
+    file_key: str,
+    *,
+    resource_type: str = "image",
+    app_config: dict[str, Any] | None = None,
+    status_dir: str = "",
+    urlopen: Callable[..., Any] | None = None,
+    timeout: int = 20,
+) -> dict[str, Any]:
+    app_cfg = app_config or {}
+    app_id = _string(app_cfg.get("appId"), 160)
+    target_message_id = _string(message_id, 300)
+    target_file_key = _string(file_key, 500)
+    target_resource_type = _string(resource_type or "image", 80)
+    if not app_id or not app_cfg.get("appSecret") or not target_message_id or not target_file_key:
+        return {
+            "ok": False,
+            "status": "missing_app_config",
+            "channel": "app_message_resource",
+            "error": "appId, appSecret, message_id, and file_key are required",
+            "messageId": target_message_id,
+            "fileKey": target_file_key,
+            "resourceType": target_resource_type,
+            "appFingerprint": _secret_fingerprint(app_id),
+        }
+    opener = urlopen or urllib.request.urlopen
+    try:
+        token_result = _get_tenant_access_token(app_cfg, urlopen=opener, timeout=timeout)
+        if not token_result.get("ok"):
+            return token_result
+        url = (
+            "https://open.feishu.cn/open-apis/im/v1/messages/"
+            f"{urllib.parse.quote(target_message_id, safe='')}/resources/"
+            f"{urllib.parse.quote(target_file_key, safe='')}?type={urllib.parse.quote(target_resource_type, safe='')}"
+        )
+        response = _feishu_binary_request(
+            url,
+            headers={"Authorization": f"Bearer {token_result['token']}"},
+            urlopen=opener,
+            timeout=timeout,
+        )
+        data = response.get("data") or b""
+        content_type = _string(response.get("contentType") or "application/octet-stream", 120)
+        if not data:
+            return {
+                "ok": False,
+                "status": "empty_resource",
+                "channel": "app_message_resource",
+                "messageId": target_message_id,
+                "fileKey": target_file_key,
+                "resourceType": target_resource_type,
+                "contentType": content_type,
+                "appFingerprint": token_result.get("appFingerprint") or _secret_fingerprint(app_id),
+            }
+        root = os.path.join(status_dir or os.getcwd(), "feishu-chat-attachments")
+        os.makedirs(root, exist_ok=True)
+        filename = _safe_resource_filename(target_message_id, target_file_key, content_type)
+        path = os.path.join(root, filename)
+        with open(path, "wb") as f:
+            f.write(data)
+        return {
+            "ok": True,
+            "status": "downloaded",
+            "channel": "app_message_resource",
+            "messageId": target_message_id,
+            "fileKey": target_file_key,
+            "resourceType": target_resource_type,
+            "name": filename,
+            "path": path,
+            "url": "/chat-media?path=" + urllib.parse.quote(path),
+            "contentType": content_type,
+            "mimeType": content_type,
+            "size": len(data),
+            "appFingerprint": token_result.get("appFingerprint") or _secret_fingerprint(app_id),
+        }
+    except urllib.error.HTTPError as exc:
+        try:
+            parsed = _parse_json_response(exc)
+            message = parsed.get("msg") or parsed.get("message") or parsed.get("raw") or str(exc)
+            code = parsed.get("code", exc.code)
+        except Exception:
+            message = str(exc)
+            code = getattr(exc, "code", "")
+        return {
+            "ok": False,
+            "status": "feishu_error",
+            "channel": "app_message_resource",
+            "code": code,
+            "message": redact_sensitive(message),
+            "messageId": target_message_id,
+            "fileKey": target_file_key,
+            "resourceType": target_resource_type,
+            "appFingerprint": _secret_fingerprint(app_id),
+        }
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        return {
+            "ok": False,
+            "status": "network_error",
+            "channel": "app_message_resource",
+            "error": redact_sensitive(str(exc)),
+            "messageId": target_message_id,
+            "fileKey": target_file_key,
+            "resourceType": target_resource_type,
+            "appFingerprint": _secret_fingerprint(app_id),
+        }
 
 
 def _send_feishu_app_message(payload: dict[str, Any], app_cfg: dict[str, Any], *, urlopen: Callable[..., Any], timeout: int) -> dict[str, Any]:

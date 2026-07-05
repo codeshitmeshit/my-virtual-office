@@ -42,7 +42,7 @@ from provider_execution import (
     normalize_provider_result,
     provider_http_status,
 )
-from feishu_notifications import add_feishu_message_reaction, delete_feishu_message_reaction, recall_feishu_message, send_feishu_markdown_message, send_feishu_notification, send_feishu_text_message
+from feishu_notifications import add_feishu_message_reaction, delete_feishu_message_reaction, download_feishu_message_resource, recall_feishu_message, send_feishu_markdown_message, send_feishu_notification, send_feishu_text_message
 from feishu_long_connection import FeishuLongConnectionReceiver
 
 
@@ -10630,6 +10630,9 @@ def _sync_feishu_channel_record_to_comm_ledger(record):
         "chatType": record.get("chatType") or "",
         "messageType": record.get("messageType") or "",
     }
+    attachments = record.get("attachments") if isinstance(record.get("attachments"), list) else []
+    if attachments:
+        metadata["attachments"] = attachments
     if event_name == "user_message":
         existing = _find_comm_request_by_source_message(source_message_id)
         if existing:
@@ -10657,6 +10660,7 @@ def _sync_feishu_channel_record_to_comm_ledger(record):
             },
             "to": _office_agent_ref(representative_agent_id),
             "text": record.get("text") or "",
+            "attachments": attachments,
             "metadata": metadata,
             "visibleInOffice": True,
         })
@@ -10823,6 +10827,18 @@ def _feishu_chat_app_reaction_delete(message_id, reaction_id, urlopen=None):
     )
 
 
+def _feishu_chat_app_image_download(message_id, image_key, urlopen=None):
+    return download_feishu_message_resource(
+        message_id,
+        image_key,
+        resource_type="image",
+        app_config=_feishu_chat_app_send_config(),
+        status_dir=STATUS_DIR,
+        urlopen=urlopen,
+        timeout=20,
+    )
+
+
 def _feishu_representative_conversation_id(vo_user_id, chat_id):
     return feishu_chat_channel.representative_conversation_id(vo_user_id, chat_id)
 
@@ -10850,6 +10866,9 @@ def _dispatch_representative_agent_message(agent_id, message, conversation_id, s
         "feishuChatId": source_meta.get("feishuChatId") or "",
         "representativeAgentId": agent_id,
     }
+    attachments = source_meta.get("attachments") if isinstance(source_meta.get("attachments"), list) else []
+    if attachments:
+        body["attachments"] = attachments
     if provider_kind == "hermes":
         return _handle_hermes_chat(body)
     if provider_kind == "codex":
@@ -10867,7 +10886,7 @@ def _dispatch_representative_agent_message(agent_id, message, conversation_id, s
     }
 
 
-def _handle_feishu_chat_message_event(body, *, send_text=None):
+def _handle_feishu_chat_message_event(body, *, send_text=None, download_image=None):
     return feishu_chat_channel.handle_message_event(
         body,
         cfg=_feishu_chat_app_config(),
@@ -10882,6 +10901,7 @@ def _handle_feishu_chat_message_event(body, *, send_text=None):
         add_reaction=None if send_text else _feishu_chat_app_reaction_add,
         delete_reaction=None if send_text else _feishu_chat_app_reaction_delete,
         find_agent=_find_agent_record,
+        download_image=download_image if download_image is not None else (None if send_text else _feishu_chat_app_image_download),
     )
 
 

@@ -1928,14 +1928,14 @@ def test_feishu_channel_unsupported_chat_or_message_type_is_ignored():
                 },
             }
         }, send_text=fake_send)
-        image_result = server._handle_feishu_chat_message_event({
+        file_result = server._handle_feishu_chat_message_event({
             "event": {
                 "sender": {"sender_id": {"open_id": "ou_bound"}},
                 "message": {
-                    "message_id": "om_image",
+                    "message_id": "om_file",
                     "chat_id": "oc_1",
                     "chat_type": "p2p",
-                    "message_type": "image",
+                    "message_type": "file",
                     "text": "",
                 },
             }
@@ -1947,13 +1947,114 @@ def test_feishu_channel_unsupported_chat_or_message_type_is_ignored():
 
     assert group_result["ok"] is True
     assert group_result["status"] == "ignored_unsupported_chat_type"
-    assert image_result["ok"] is True
-    assert image_result["status"] == "ignored_unsupported_message_type"
+    assert file_result["ok"] is True
+    assert file_result["status"] == "ignored_unsupported_message_type"
     assert calls == []
     assert sends == []
     with open(os.path.join(status_dir, "feishu-channel-records.jsonl"), "r", encoding="utf-8") as f:
         rows = [json.loads(line) for line in f if line.strip()]
     assert [row["reason"] for row in rows] == ["unsupported_chat_type", "unsupported_message_type"]
+
+
+def test_feishu_channel_image_message_downloads_records_and_dispatches():
+    os.environ.setdefault("VO_HERMES_ENABLED", "0")
+    os.environ.setdefault("VO_CODEX_ENABLED", "0")
+    status_dir = tempfile.mkdtemp(prefix="vo-feishu-channel-image-")
+    os.environ["VO_STATUS_DIR"] = status_dir
+    import server
+
+    previous_status_dir = server.STATUS_DIR
+    previous_config = server.VO_CONFIG
+    previous_dispatch = server._dispatch_representative_agent_message
+    server.STATUS_DIR = status_dir
+    server.VO_CONFIG = {
+        **previous_config,
+        "feishu": {
+            "chatApp": {
+                "enabled": True,
+                "appId": "cli_chat",
+                "appSecret": "chat-secret",
+                "representativeAgentId": "hermes-default",
+            },
+            "bindings": {"open_id:ou_bound": "user-1"},
+        },
+    }
+    calls = []
+    sends = []
+    downloads = []
+
+    def fake_dispatch(agent_id, message, conversation_id, source_meta):
+        calls.append({
+            "agent_id": agent_id,
+            "message": message,
+            "conversation_id": conversation_id,
+            "source_meta": source_meta,
+        })
+        return {"ok": True, "reply": "收到图片了"}
+
+    def fake_send(chat_id, text):
+        sends.append({"chat_id": chat_id, "text": text})
+        return {"ok": True, "status": "sent", "channel": "fake"}
+
+    def fake_download(message_id, image_key):
+        downloads.append({"message_id": message_id, "image_key": image_key})
+        path = os.path.join(status_dir, "feishu-chat-attachments", "image.png")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as f:
+            f.write(b"fake")
+        return {
+            "ok": True,
+            "status": "downloaded",
+            "resourceType": "image",
+            "messageId": message_id,
+            "fileKey": image_key,
+            "name": "image.png",
+            "path": path,
+            "url": "/chat-media?path=" + path,
+            "mimeType": "image/png",
+            "contentType": "image/png",
+            "size": 4,
+        }
+
+    try:
+        server._dispatch_representative_agent_message = fake_dispatch
+        result = server._handle_feishu_chat_message_event({
+            "event": {
+                "sender": {"sender_id": {"open_id": "ou_bound"}},
+                "message": {
+                    "message_id": "om_image",
+                    "chat_id": "oc_1",
+                    "chat_type": "p2p",
+                    "message_type": "image",
+                    "content": {"image_key": "img_123"},
+                },
+            }
+        }, send_text=fake_send, download_image=fake_download)
+    finally:
+        server._dispatch_representative_agent_message = previous_dispatch
+        server.STATUS_DIR = previous_status_dir
+        server.VO_CONFIG = previous_config
+
+    assert result["ok"] is True
+    assert result["status"] == "completed"
+    assert downloads == [{"message_id": "om_image", "image_key": "img_123"}]
+    assert len(calls) == 1
+    assert calls[0]["agent_id"] == "hermes-default"
+    assert "图片附件已同步到 VO" in calls[0]["message"]
+    assert calls[0]["source_meta"]["attachments"][0]["fileKey"] == "img_123"
+    assert sends == [{"chat_id": "oc_1", "text": "收到图片了"}]
+    with open(os.path.join(status_dir, "feishu-channel-records.jsonl"), "r", encoding="utf-8") as f:
+        rows = [json.loads(line) for line in f if line.strip()]
+    user_row = next(row for row in rows if row["event"] == "user_message")
+    done_row = next(row for row in rows if row["event"] == "turn_completed")
+    assert user_row["messageType"] == "image"
+    assert user_row["attachments"][0]["mimeType"] == "image/png"
+    assert done_row["attachments"][0]["fileKey"] == "img_123"
+    with open(os.path.join(status_dir, "agent-platform-communications.jsonl"), "r", encoding="utf-8") as f:
+        comm_rows = [json.loads(line) for line in f if line.strip()]
+    request = next(row for row in comm_rows if row["direction"] == "request")
+    assert request["attachments"][0]["name"] == "image.png"
+    assert request["metadata"]["attachments"][0]["fileKey"] == "img_123"
 
 
 def test_feishu_channel_unbound_user_dispatches_with_feishu_source_identity():
