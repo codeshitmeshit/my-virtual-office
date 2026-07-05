@@ -55,6 +55,113 @@ _FEISHU_CHANNEL_LOCKS_LOCK = threading.Lock()
 _FEISHU_CHANNEL_RECORD_LOCK = threading.Lock()
 _FEISHU_CHAT_EVENT_SUBSCRIBERS = {}
 _FEISHU_CHAT_EVENT_SUBSCRIBERS_LOCK = threading.Lock()
+_FEISHU_CHAT_WORKER_TOKEN = uuid.uuid4().hex
+
+
+class FeishuChatWorkerProcess:
+    def __init__(self, *, app_id, app_secret, callback_url, status_dir):
+        self.app_id = str(app_id or "").strip()
+        self.app_secret = str(app_secret or "").strip()
+        self.callback_url = str(callback_url or "").strip()
+        self.status_dir = str(status_dir or "")
+        self._process = None
+        self._started_at = 0
+
+    def _status_path(self):
+        return os.path.join(self.status_dir, "feishu-chat-worker-status.json")
+
+    def _read_worker_status(self):
+        try:
+            with open(self._status_path(), "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return data if isinstance(data, dict) else {}
+        except FileNotFoundError:
+            return {}
+        except Exception as exc:
+            return {"lastError": f"{type(exc).__name__}: {exc}"}
+
+    def _base_status(self, status="not_started", running=False, enabled=True):
+        return {
+            "enabled": bool(enabled),
+            "running": bool(running),
+            "status": status,
+            "startedAt": self._started_at,
+            "lastEventAt": 0,
+            "lastError": "",
+            "mode": "subprocess",
+        }
+
+    def start(self):
+        if not self.app_id or not self.app_secret:
+            return self._base_status("missing_app_credentials", running=False, enabled=False)
+        if self._process and self._process.poll() is None:
+            return self.status()
+        self._started_at = int(time.time())
+        env = os.environ.copy()
+        env.update({
+            "VO_STATUS_DIR": self.status_dir,
+            "VO_FEISHU_CHAT_APP_ID": self.app_id,
+            "VO_FEISHU_CHAT_APP_SECRET": self.app_secret,
+            "VO_FEISHU_CHAT_WORKER_CALLBACK_URL": self.callback_url,
+            "VO_FEISHU_CHAT_WORKER_TOKEN": _FEISHU_CHAT_WORKER_TOKEN,
+        })
+        worker_path = os.path.join(os.path.dirname(__file__), "feishu_chat_worker.py")
+        os.makedirs(self.status_dir, exist_ok=True)
+        log_path = os.path.join(self.status_dir, "feishu-chat-worker.log")
+        try:
+            os.remove(self._status_path())
+        except FileNotFoundError:
+            pass
+        except Exception:
+            pass
+        log_file = open(log_path, "a", encoding="utf-8")
+        self._process = subprocess.Popen(
+            [sys.executable, worker_path],
+            cwd=os.path.dirname(__file__),
+            env=env,
+            stdout=log_file,
+            stderr=log_file,
+            start_new_session=True,
+        )
+        return self.status()
+
+    def stop(self):
+        proc = self._process
+        self._process = None
+        if proc and proc.poll() is None:
+            try:
+                proc.terminate()
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+            except Exception:
+                pass
+        return self._base_status("stopped", running=False, enabled=False)
+
+    def status(self):
+        proc = self._process
+        worker_status = self._read_worker_status()
+        if proc and proc.poll() is None:
+            result = self._base_status("starting", running=True, enabled=True)
+            result.update(worker_status)
+            result["running"] = True
+            result["enabled"] = True
+            result["startedAt"] = self._started_at
+            result["mode"] = "subprocess"
+            return result
+        if proc:
+            result = self._base_status("error", running=False, enabled=True)
+            result.update(worker_status)
+            result["running"] = False
+            result["status"] = worker_status.get("status") or "exited"
+            result["returnCode"] = proc.returncode
+            result["mode"] = "subprocess"
+            return result
+        result = self._base_status("not_started", running=False, enabled=False)
+        result.update(worker_status)
+        result["running"] = False
+        result["mode"] = "subprocess"
+        return result
 
 
 def _normalize_presence_entry(entry):
@@ -10478,11 +10585,12 @@ def _start_feishu_chat_long_connection():
         existing = _FEISHU_CHAT_LONG_CONNECTION_RECEIVER
         if existing and existing.app_id == app_id and existing.app_secret == app_secret:
             return existing.start()
-        _FEISHU_CHAT_LONG_CONNECTION_RECEIVER = FeishuLongConnectionReceiver(
+        callback_url = f"http://127.0.0.1:{PORT}/api/feishu-chat/inbound-worker"
+        _FEISHU_CHAT_LONG_CONNECTION_RECEIVER = FeishuChatWorkerProcess(
             app_id=app_id,
             app_secret=app_secret,
-            message_handler=_handle_feishu_chat_message_event,
-            name="feishu-chat-long-connection",
+            callback_url=callback_url,
+            status_dir=STATUS_DIR,
         )
         return _FEISHU_CHAT_LONG_CONNECTION_RECEIVER.start()
 
@@ -26765,6 +26873,26 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                 result = _handle_feishu_chat_message_event(body)
             except json.JSONDecodeError as e:
                 result = {"ok": False, "error": f"Invalid JSON: {str(e)}", "_status": 400}
+            self.send_response(result.get("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            result.pop("_status", None)
+            self.wfile.write(json.dumps(result, ensure_ascii=False).encode())
+            return
+        elif self.path == "/api/feishu-chat/inbound-worker":
+            token = self.headers.get("X-VO-Feishu-Chat-Worker-Token") or ""
+            length = int(self.headers.get('Content-Length', 0))
+            try:
+                body = json.loads(self.rfile.read(length)) if length else {}
+            except json.JSONDecodeError as e:
+                body = {}
+                result = {"ok": False, "error": f"Invalid JSON: {str(e)}", "_status": 400}
+            else:
+                if not token or token != _FEISHU_CHAT_WORKER_TOKEN:
+                    result = {"ok": False, "error": "Invalid Feishu chat worker token", "_status": 403}
+                else:
+                    result = _handle_feishu_chat_message_event(body)
             self.send_response(result.get("_status", 200))
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")

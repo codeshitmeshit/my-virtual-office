@@ -38,11 +38,11 @@ def read_records(status_dir):
         return [json.loads(line) for line in f if line.strip()]
 
 
-def call_office_handler(server, method, path, body=None):
+def call_office_handler(server, method, path, body=None, headers=None):
     payload = json.dumps(body).encode("utf-8") if body is not None else b""
     handler = server.OfficeHandler.__new__(server.OfficeHandler)
     handler.path = path
-    handler.headers = {"Content-Length": str(len(payload))}
+    handler.headers = {"Content-Length": str(len(payload)), **(headers or {})}
     handler.rfile = io.BytesIO(payload)
     handler.wfile = io.BytesIO()
     handler._status = None
@@ -635,23 +635,22 @@ def test_feishu_chat_config_is_separate_from_notification_app():
     os.environ["VO_STATUS_DIR"] = status_dir
     import server
 
-    class FakeReceiver:
-        def __init__(self, app_id="", app_secret="", action_handler=None, message_handler=None, name=""):
+    class FakeChatWorker:
+        def __init__(self, app_id="", app_secret="", callback_url="", status_dir=""):
             self.app_id = app_id
             self.app_secret = app_secret
-            self.action_handler = action_handler
-            self.message_handler = message_handler
-            self.name = name
+            self.callback_url = callback_url
+            self.status_dir = status_dir
 
         def start(self):
-            return {"enabled": True, "running": True, "status": "running"}
+            return {"enabled": True, "running": True, "status": "running", "mode": "subprocess"}
 
         def status(self):
-            return {"enabled": True, "running": True, "status": "running"}
+            return {"enabled": True, "running": True, "status": "running", "mode": "subprocess"}
 
-    previous_receiver_cls = server.FeishuLongConnectionReceiver
+    previous_worker_cls = server.FeishuChatWorkerProcess
     previous_chat_receiver = server._FEISHU_CHAT_LONG_CONNECTION_RECEIVER
-    server.FeishuLongConnectionReceiver = FakeReceiver
+    server.FeishuChatWorkerProcess = FakeChatWorker
     server._FEISHU_CHAT_LONG_CONNECTION_RECEIVER = None
     server._persist_setup_payload({
         "notifications": {
@@ -668,12 +667,13 @@ def test_feishu_chat_config_is_separate_from_notification_app():
             "appSecret": "chat-secret",
         })
     finally:
-        server.FeishuLongConnectionReceiver = previous_receiver_cls
+        server.FeishuChatWorkerProcess = previous_worker_cls
         server._FEISHU_CHAT_LONG_CONNECTION_RECEIVER = previous_chat_receiver
 
     assert result["ok"] is True
     assert result["configured"] is True
     assert result["longConnection"]["status"] == "running"
+    assert result["longConnection"]["mode"] == "subprocess"
     serialized = json.dumps(result, ensure_ascii=False)
     assert "chat-secret" not in serialized
     with open(os.path.join(status_dir, "vo-config.json"), "r", encoding="utf-8") as f:
@@ -1515,6 +1515,81 @@ def test_feishu_chat_inbound_test_route_dispatches_and_records():
     assert rows[-1]["sourceMessageId"] == "om_route"
     assert rows[-1]["voUserId"] == "user-route"
     assert rows[-1]["representativeAgentId"] == "hermes-default"
+
+
+def test_feishu_chat_worker_route_requires_token_and_dispatches():
+    os.environ.setdefault("VO_HERMES_ENABLED", "0")
+    os.environ.setdefault("VO_CODEX_ENABLED", "0")
+    status_dir = tempfile.mkdtemp(prefix="vo-feishu-worker-route-")
+    os.environ["VO_STATUS_DIR"] = status_dir
+    import server
+
+    previous_status_dir = server.STATUS_DIR
+    previous_config = server.VO_CONFIG
+    previous_dispatch = server._dispatch_representative_agent_message
+    previous_send = server._feishu_chat_app_text_send
+    previous_token = server._FEISHU_CHAT_WORKER_TOKEN
+    server.STATUS_DIR = status_dir
+    server._FEISHU_CHAT_WORKER_TOKEN = "worker-token"
+    server.VO_CONFIG = {
+        **previous_config,
+        "feishu": {
+            "chatApp": {
+                "enabled": True,
+                "appId": "cli_chat",
+                "appSecret": "chat-secret",
+                "representativeAgentId": "hermes-default",
+            },
+            "bindings": {"open_id:ou_worker": "user-worker"},
+        },
+    }
+    calls = []
+
+    def fake_dispatch(agent_id, message, conversation_id, source_meta):
+        calls.append({"agentId": agent_id, "message": message, "sourceMeta": source_meta})
+        return {"ok": True, "reply": "worker reply", "conversationId": conversation_id}
+
+    def fake_send(chat_id, text, urlopen=None):
+        return {"ok": True, "status": "sent", "channel": "fake"}
+
+    body = {
+        "event": {
+            "sender": {"sender_id": {"open_id": "ou_worker"}},
+            "message": {
+                "message_id": "om_worker",
+                "chat_id": "oc_worker",
+                "chat_type": "p2p",
+                "message_type": "text",
+                "text": "hello worker",
+            },
+        }
+    }
+    try:
+        server._dispatch_representative_agent_message = fake_dispatch
+        server._feishu_chat_app_text_send = fake_send
+        denied_status, denied = call_office_handler(server, "POST", "/api/feishu-chat/inbound-worker", body)
+        ok_status, ok = call_office_handler(
+            server,
+            "POST",
+            "/api/feishu-chat/inbound-worker",
+            body,
+            headers={"X-VO-Feishu-Chat-Worker-Token": "worker-token"},
+        )
+    finally:
+        server._dispatch_representative_agent_message = previous_dispatch
+        server._feishu_chat_app_text_send = previous_send
+        server._FEISHU_CHAT_WORKER_TOKEN = previous_token
+        server.STATUS_DIR = previous_status_dir
+        server.VO_CONFIG = previous_config
+
+    assert denied_status == 403
+    assert denied["ok"] is False
+    assert ok_status == 200
+    assert ok["ok"] is True
+    assert len(calls) == 1
+    assert calls[0]["agentId"] == "hermes-default"
+    assert calls[0]["message"] == "hello worker"
+    assert calls[0]["sourceMeta"]["sourceMessageId"] == "om_worker"
 
 
 def test_feishu_chat_self_test_route_dispatches_without_real_feishu_send():
