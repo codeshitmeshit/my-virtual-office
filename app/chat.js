@@ -554,6 +554,11 @@
     updateProviderControls() {
       if (this.compactContextBtn) this.compactContextBtn.style.display = this.isCodexSelected() ? '' : 'none';
       if (this.stopBtn) this.stopBtn.style.display = '';
+      if (!this.currentRunId && !this.streamingMsg) {
+        if (this.isHermesSelected()) this.setStatus(typeof i18n !== 'undefined' ? i18n.t('chat_hermes_ready') : 'Hermes ready', 'connected');
+        else if (this.isClaudeCodeSelected()) this.setStatus(_ct('claude_code_ready'), 'connected');
+        else if (this.isCodexSelected()) this.setStatus(_ct('codex_ready'), 'connected');
+      }
     }
 
     codexConversationStorageKey() {
