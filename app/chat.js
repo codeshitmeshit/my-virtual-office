@@ -184,6 +184,7 @@
       this.claudeCodeHistoryPollTimer = null;
       this.claudeCodeEventSource = null;
       this.claudeCodeStreamCancel = null;
+      this.claudeCodeSendStartedAt = 0;
       this.claudeCodeCompletedToolKeys = new Set();
       this.hermesApprovalPollTimer = null;
       this.hermesApprovalLastId = '';
@@ -825,12 +826,14 @@
           const data = await res.json();
           if (!isCurrentHistoryRequest()) return;
           if (data.ok && Array.isArray(data.messages)) {
-            const hasFreshFinal = !opts.recoverFinal || !opts.startedAt || data.messages.some(msg => (
+            const providerKind = this.isClaudeCodeSelected() ? 'claude-code' : 'hermes';
+            const recoveryStartedAt = Number(opts.startedAt || (providerKind === 'claude-code' ? this.claudeCodeSendStartedAt : this.hermesSendStartedAt) || 0);
+            const hasFreshFinal = !opts.recoverFinal || !recoveryStartedAt || data.messages.some(msg => (
               msg &&
               msg.role === 'assistant' &&
               msg.ephemeral !== 'hermes-progress' &&
               msg.ephemeral !== 'claude-code-progress' &&
-              Number(msg.ts || 0) >= Number(opts.startedAt || 0) &&
+              Number(msg.ts || 0) >= recoveryStartedAt &&
               (msg.text || msg.thinking || msg.approval || (Array.isArray(msg.tools) && msg.tools.length))
             ));
             if (!hasFreshFinal) {
@@ -845,7 +848,6 @@
                 continue;
               }
               if (msg.text || msg.thinking || msg.approval || (Array.isArray(msg.tools) && msg.tools.length)) {
-                const providerKind = this.isClaudeCodeSelected() ? 'claude-code' : 'hermes';
                 const meta = msg.role === 'assistant'
                   ? { ...resolveMessageSender(msg, this), thinking: visibleProviderThinking(providerKind, msg.thinking, msg.status), reasoningTokens: msg.reasoningTokens || 0, approval: msg.approval || null }
                   : { label: _ct('chat_you_label'), kind: 'human' };
@@ -1350,6 +1352,7 @@
       if (this.isClaudeCodeSelected()) {
         const providerLabel = this.agentSelect.selectedOptions[0]?.textContent.trim() || 'Claude Code';
         const claudeSendStartedAt = Date.now();
+        this.claudeCodeSendStartedAt = claudeSendStartedAt;
         const claudeBody = {
           agentId: this.getSelectedAgentId() || this.selectedAgentKey,
           message: text || '(attached files)',
@@ -2406,7 +2409,9 @@
         if (!connected) return;
         if (Date.now() - this.lastLiveEventAt > ACTIVE_RUN_RECOVERY_MS) {
           this.lastLiveEventAt = Date.now();
-          this.loadHistory({ recoverFinal: true }).catch(() => {});
+          const providerKind = this.isClaudeCodeSelected() ? 'claude-code' : (this.isHermesSelected() ? 'hermes' : '');
+          const startedAt = providerKind === 'claude-code' ? this.claudeCodeSendStartedAt : (providerKind === 'hermes' ? this.hermesSendStartedAt : 0);
+          this.loadHistory({ recoverFinal: true, startedAt }).catch(() => {});
         }
       }, ACTIVE_RUN_RECOVERY_MS);
     }
@@ -2421,7 +2426,9 @@
       const role = msg?.role || payload?.role || '';
       if (role === 'assistant') {
         this.markLiveEvent();
-        this.loadHistory({ recoverFinal: true });
+        const providerKind = this.isClaudeCodeSelected() ? 'claude-code' : (this.isHermesSelected() ? 'hermes' : '');
+        const startedAt = providerKind === 'claude-code' ? this.claudeCodeSendStartedAt : (providerKind === 'hermes' ? this.hermesSendStartedAt : 0);
+        this.loadHistory({ recoverFinal: true, startedAt });
       } else if (role === 'user') {
         this.markLiveEvent();
       }
@@ -3078,7 +3085,7 @@
               if (existing) existing.remove();
               this.streamingMsg = null;
             }
-            await this.loadHistory({ recoverFinal: true });
+            await this.loadHistory({ recoverFinal: true, startedAt });
             return true;
           }
         }
