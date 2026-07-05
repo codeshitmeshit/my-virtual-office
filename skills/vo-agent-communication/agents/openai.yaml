@@ -1,0 +1,4 @@
+interface:
+  display_name: "Virtual Office Agent 通信"
+  short_description: "通过 Virtual Office 联系办公室 Agent 并返回真实响应"
+  default_prompt: "Use $vo-agent-communication to contact another office agent through Virtual Office and return its traceable response."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Virtual Office Agent Workspace"
+  short_description: "读取和维护 VO Agent workspace、公告、任务、笔记、文件和技能"
+  default_prompt: "Use $vo-agent-workspace to inspect or update a Virtual Office agent workspace while respecting provider-specific limits."

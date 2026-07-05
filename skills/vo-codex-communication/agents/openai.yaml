@@ -1,0 +1,4 @@
+interface:
+  display_name: "Virtual Office Codex 通信"
+  short_description: "供任意 CLI 通过 Virtual Office 联系 Codex 并处理结果"
+  default_prompt: "Use $vo-codex-communication to contact the Codex collaborator through Virtual Office and continue the appropriate conversation."

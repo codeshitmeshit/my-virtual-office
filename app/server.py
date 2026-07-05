@@ -887,6 +887,11 @@ def _build_safe_vo_config():
     hermes_test = _handle_hermes_test()
     return {
         "office": VO_CONFIG["office"],
+        "skills": {
+            "basePath": "/skills",
+            "index": "/skills/index.md",
+            "catalog": "/skills/catalog.md",
+        },
         "features": VO_CONFIG["features"],
         "weather": VO_CONFIG["weather"],
         "openclaw": {
@@ -24367,10 +24372,69 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(json.dumps({"ok": False, "error": str(e)}).encode())
 
+    def _serve_vo_skill_file(self, request_path):
+        rel = urllib.parse.unquote(request_path[len("/skills/"):]).strip("/")
+        parts = [part for part in rel.split("/") if part]
+        project_root = os.path.dirname(APP_DIR)
+        skills_root = os.path.join(project_root, "skills")
+
+        target = None
+        if parts == ["index.md"]:
+            target = os.path.join(skills_root, "vo-operating-guidelines", "SKILL.md")
+        elif parts == ["catalog.md"]:
+            target = os.path.join(skills_root, "catalog.md")
+        elif len(parts) == 2 and re.fullmatch(r"vo-[a-z0-9-]+", parts[0]) and parts[1] == "SKILL.md":
+            target = os.path.join(skills_root, parts[0], "SKILL.md")
+        elif (
+            len(parts) == 3
+            and re.fullmatch(r"vo-[a-z0-9-]+", parts[0])
+            and parts[1] == "references"
+            and re.fullmatch(r"[A-Za-z0-9_.-]+\.md", parts[2])
+        ):
+            target = os.path.join(skills_root, parts[0], "references", parts[2])
+
+        if not target:
+            self.send_response(404)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps({"error": "Skill file not found"}).encode())
+            return
+
+        root_real = os.path.realpath(skills_root)
+        target_real = os.path.realpath(target)
+        if not target_real.startswith(root_real + os.sep) or not os.path.isfile(target_real):
+            self.send_response(404)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps({"error": "Skill file not found"}).encode())
+            return
+
+        try:
+            with open(target_real, "rb") as f:
+                content = f.read()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/markdown; charset=utf-8")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(content)))
+            self.end_headers()
+            self.wfile.write(content)
+        except Exception as e:
+            self.send_response(500)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps({"error": str(e)}).encode())
+
     def do_GET(self):
         parsed_url = urllib.parse.urlparse(self.path)
         request_path = parsed_url.path
         query_params = urllib.parse.parse_qs(parsed_url.query)
+        if request_path.startswith("/skills/"):
+            self._serve_vo_skill_file(request_path)
+            return
         if request_path == "/website":
             self.send_response(301)
             self.send_header("Location", "/website/")

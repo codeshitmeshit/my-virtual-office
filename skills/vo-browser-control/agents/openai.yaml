@@ -1,0 +1,4 @@
+interface:
+  display_name: "Virtual Office 浏览器状态"
+  short_description: "读取 VO 浏览器状态，并在权限阻塞时请求用户介入"
+  default_prompt: "Use $vo-browser-control to inspect the Virtual Office shared browser status, tabs, and controller, and request user intervention for login, permission, captcha, MFA, payment, or sensitive-action blockers without taking unsupported browser actions."

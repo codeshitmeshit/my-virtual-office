@@ -1,0 +1,4 @@
+interface:
+  display_name: "Virtual Office 会议执行"
+  short_description: "操作已确认的 VO executable meeting、冲突处理和行动项草稿"
+  default_prompt: "Use $vo-meeting-execution to inspect or advance an already confirmed Virtual Office executable meeting."

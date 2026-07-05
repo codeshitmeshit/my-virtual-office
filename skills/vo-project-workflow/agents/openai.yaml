@@ -1,0 +1,4 @@
+interface:
+  display_name: "Virtual Office 项目工作流"
+  short_description: "按当前 VO 项目执行 API 推进任务、review、验收和 artifact 查看"
+  default_prompt: "Use $vo-project-workflow to inspect or advance a Virtual Office project task through execution, review, acceptance, or artifact review."
