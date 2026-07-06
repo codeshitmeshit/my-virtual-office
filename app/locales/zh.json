@@ -48,6 +48,8 @@
   "weather_test_location_required": "请先输入天气位置",
   "weather_location_unconfigured": "未配置",
   "weather_label": "天气",
+  "weather_updated_at": "更新时间",
+  "weather_updated_never": "未更新",
   "weather_condition_clear": "晴朗",
   "weather_condition_sunny": "晴天",
   "weather_condition_partly_cloudy": "局部多云",

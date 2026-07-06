@@ -32,6 +32,8 @@ assert.ok(game.includes('var _voWeatherLocation =') && game.includes('function _
 assert.ok(game.includes('function _applyWeatherTestResult(location, result)'), 'weather test should have an in-page apply helper');
 assert.ok(game.includes('officeConfig.weather.location = location || result.location'), 'weather test should update current office weather location');
 assert.ok(game.includes('weatherData.description = result.weather ||'), 'weather test should update current weather description');
+assert.ok(game.includes('weatherData.updatedAt = parseInt(result.updatedAt, 10) || Date.now();'), 'weather test should store weather update time');
+assert.ok(game.includes('updatedAt: Date.now()'), 'weather polling should store weather update time');
 assert.ok(game.includes('_applyWeatherTestResult(location, d);'), 'successful main-menu weather test should immediately update hover data');
 assert.ok(setupHtml.includes('function testSetupWeather()'), 'setup wizard should implement weather test handler');
 assert.ok(setupHtml.includes("fetch('/api/weather/test?location=' + encodeURIComponent(location))"), 'setup wizard weather test should call weather test API');
@@ -40,6 +42,7 @@ assert.ok(server.includes('"/api/weather/test"'), 'server should expose weather 
 assert.ok(server.includes('wttr.in/{_wloc_encoded}?format=j1'), 'weather test endpoint should use existing wttr pipeline');
 assert.ok(server.includes('"resolvedLocation"'), 'weather test endpoint should return resolved location');
 assert.ok(server.includes('"tempF"') && server.includes('"tempC"'), 'weather test endpoint should return temperatures');
+assert.ok(server.includes('"updatedAt": int(time.time() * 1000)'), 'weather test endpoint should return collection update time');
 
 assert.strictEqual(en.test_weather, '🔍 Test');
 assert.strictEqual(zh.test_weather, '🔍 检测');
@@ -47,5 +50,7 @@ assert.strictEqual(zh.weather_city_placeholder, '城市，例如 Beijing');
 assert.strictEqual(zh.weather_region_placeholder, '地区，可选');
 assert.strictEqual(zh.weather_test_ok, '天气位置可用');
 assert.strictEqual(zh.weather_test_location_required, '请先输入天气位置');
+assert.strictEqual(en.weather_updated_at, 'Updated at');
+assert.strictEqual(zh.weather_updated_at, '更新时间');
 
 console.log('weather location test UI checks passed');

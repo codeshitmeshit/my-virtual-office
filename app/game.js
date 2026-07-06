@@ -685,7 +685,7 @@ function releaseObjectServiceQueueForAgent(agent, reason) {
 // ============================================================
 // REAL WEATHER SYSTEM — fetches weather for configured location, renders on windows
 // ============================================================
-var weatherData = { condition: 'clear', description: '', code: 113, temp: 0, tempC: null, wind: 0, humidity: 0, feelsLike: 0, uvIndex: 0, visibility: 0, precipMM: 0, cloudcover: 0 };
+var weatherData = { condition: 'clear', description: '', code: 113, temp: 0, tempC: null, wind: 0, humidity: 0, feelsLike: 0, uvIndex: 0, visibility: 0, precipMM: 0, cloudcover: 0, updatedAt: 0 };
 var _displayPrefs = { showBubbles: true, showWeather: true, showNames: true, internalBubbleTimeoutSec: 60, fontScale: 1 };
 try {
     var _dp = JSON.parse(localStorage.getItem("vo-display-prefs") || "{}");
@@ -766,7 +766,8 @@ function pollWeather() {
             uvIndex: parseInt(c.uvIndex) || 0,
             visibility: parseInt(c.visibility) || 10,
             precipMM: parseFloat(c.precipMM) || 0,
-            cloudcover: parseInt(c.cloudcover) || 0
+            cloudcover: parseInt(c.cloudcover) || 0,
+            updatedAt: Date.now()
         };
         // Reset droplets/accumulation on condition change
         _rainDroplets = [];
@@ -818,11 +819,24 @@ function _getWeatherTemperatureC() {
     return 0;
 }
 
+function _formatWeatherUpdatedAt() {
+    var ts = parseInt(weatherData.updatedAt, 10);
+    if (!Number.isFinite(ts) || ts <= 0) {
+        return typeof i18n !== 'undefined' ? i18n.t('weather_updated_never') : 'Not updated';
+    }
+    try {
+        return new Date(ts).toLocaleString();
+    } catch(e) {
+        return String(ts);
+    }
+}
+
 function _getFloorWindowWeatherTooltipLines() {
     return [
         (typeof i18n !== 'undefined' ? i18n.t('weather_location') : 'Weather Location') + ': ' + _getWeatherLocationLabel(),
         (typeof i18n !== 'undefined' ? i18n.t('weather_label') : 'Weather') + ': ' + (weatherData.description || _formatWeatherConditionLabel(weatherData.condition)),
-        (typeof i18n !== 'undefined' ? i18n.t('temperature') : 'Temperature') + ': ' + _getWeatherTemperatureC() + '°C'
+        (typeof i18n !== 'undefined' ? i18n.t('temperature') : 'Temperature') + ': ' + _getWeatherTemperatureC() + '°C',
+        (typeof i18n !== 'undefined' ? i18n.t('weather_updated_at') : 'Updated at') + ': ' + _formatWeatherUpdatedAt()
     ];
 }
 
@@ -851,6 +865,7 @@ function _applyWeatherTestResult(location, result) {
     weatherData.description = result.weather || '';
     weatherData.temp = parseInt(result.tempF) || weatherData.temp || 0;
     weatherData.tempC = Number.isFinite(parseInt(result.tempC)) ? parseInt(result.tempC) : weatherData.tempC;
+    weatherData.updatedAt = parseInt(result.updatedAt, 10) || Date.now();
 }
 
 // --- Helper: pseudo-random from seed ---
@@ -1808,7 +1823,7 @@ canvas.addEventListener('mousemove', function(e) {
     var run = _getConnectedFloorWindowRun(item);
     _floorWindowTooltip = {
         x: Math.max(0, Math.min(W - 150, world.x + 10)),
-        y: Math.max(0, run.y - 44),
+        y: Math.max(0, run.y - 55),
         lines: _getFloorWindowWeatherTooltipLines()
     };
 }, { passive: true });

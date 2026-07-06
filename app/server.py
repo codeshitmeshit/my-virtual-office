@@ -25662,6 +25662,7 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                     "weather": desc,
                     "tempF": current.get("temp_F"),
                     "tempC": current.get("temp_C"),
+                    "updatedAt": int(time.time() * 1000),
                 }
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")

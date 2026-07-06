@@ -48,6 +48,8 @@
   "weather_test_location_required": "Enter a weather location first",
   "weather_location_unconfigured": "Not configured",
   "weather_label": "Weather",
+  "weather_updated_at": "Updated at",
+  "weather_updated_never": "Not updated",
   "weather_condition_clear": "Clear",
   "weather_condition_sunny": "Sunny",
   "weather_condition_partly_cloudy": "Partly cloudy",
