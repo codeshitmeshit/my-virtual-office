@@ -22,9 +22,9 @@ For Docker deployments, mount your OpenClaw home directory into the container an
 
 ### Hermes Agents
 
-Virtual Office can discover local Hermes Agent profiles as first-class office agents when the Hermes CLI and home directory are available to the app. It uses conservative Hermes CLI surfaces for discovery and status, sends chat messages through `hermes -z` with the selected profile, captures replies from stdout, and stores local Virtual Office history under `VO_STATUS_DIR`.
+Virtual Office can connect Hermes as a first-class office agent through the Hermes App/API server, with the Hermes CLI/home directory as an optional fallback for profile discovery and profile management. Native chat uses Hermes' `/v1/runs` and SSE event stream when the API server is available, and stores local Virtual Office history under `VO_STATUS_DIR`.
 
-For Docker deployments, mount or otherwise expose the Hermes home directory and CLI path to the container, then set `VO_HERMES_HOME` and `VO_HERMES_BIN` accordingly. Hermes secrets, private memory files, raw logs, and config internals are not read or exposed by default.
+For Docker deployments, point `VO_HERMES_API_URL` at the host gateway, usually `http://host.docker.internal:8642`, and set `VO_HERMES_API_KEY` to the Hermes `API_SERVER_KEY`. Mount or otherwise expose the Hermes home directory and CLI path only when you want CLI fallback/profile management. Hermes secrets, private memory files, raw logs, and config internals are not read or exposed by default.
 
 ### Codex
 
@@ -217,10 +217,12 @@ All settings live in `vo-config.json`. Environment variables override config val
 | `VO_GATEWAY_URL` | ws://127.0.0.1:18789 | OpenClaw gateway WebSocket URL |
 | `VO_GATEWAY_HTTP` | http://127.0.0.1:18789 | OpenClaw gateway HTTP URL |
 | `VO_OPENCLAW_PATH` | ~/.openclaw | Path to OpenClaw home directory |
-| `VO_HERMES_ENABLED` | true | Enable discovery of local Hermes Agent profiles when Hermes is available |
-| `VO_HERMES_HOME` | ~/.hermes | Path to the Hermes home/profile root directory |
-| `VO_HERMES_BIN` | ~/.local/bin/hermes | Hermes CLI binary used for discovery and safe request/response chat calls |
-| `VO_HERMES_TIMEOUT_SEC` | 600 | Timeout for Hermes CLI chat calls |
+| `VO_HERMES_ENABLED` | true | Enable Hermes App/API and optional CLI discovery |
+| `VO_HERMES_API_URL` | http://127.0.0.1:8642, or http://host.docker.internal:8642 in Docker | Hermes App/API server URL |
+| `VO_HERMES_API_KEY` | *(none)* | Hermes `API_SERVER_KEY` for `/v1/*` requests |
+| `VO_HERMES_HOME` | ~/.hermes | Optional Hermes home/profile root directory for CLI fallback |
+| `VO_HERMES_BIN` | ~/.local/bin/hermes | Optional Hermes CLI binary for profile discovery/management and fallback chat |
+| `VO_HERMES_TIMEOUT_SEC` | 600 | Timeout for Hermes API/CLI chat calls |
 | `VO_STATUS_DIR` | /data | Directory for presence/status data inside the container. By default this is backed by the `vo-data` Docker volume. |
 | `VO_WEATHER_LOCATION` | *(none)* | Weather location for window display |
 

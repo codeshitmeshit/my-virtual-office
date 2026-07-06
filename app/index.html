@@ -44,21 +44,21 @@
                         <div class="mm-section">
                             <div class="mm-section-title">⚕️ Hermes Agent Connection</div>
                             <label class="mm-label" style="display:flex;align-items:center;gap:6px;">
-                                <input type="checkbox" id="mm-hermes-enable" checked> Auto-detect Hermes Agents
+                                <input type="checkbox" id="mm-hermes-enable" checked> Auto-detect Hermes App and CLI
                             </label>
                             <div style="font-size:9px;color:#666;margin:4px 0 8px;line-height:1.4;">
-                                Connects local Hermes Agent profiles as first-class office agents. Virtual Office uses the Hermes CLI and safe status/session surfaces — not raw secrets or private memory files.
+                                Connects the Hermes App/API server first, then optional mounted CLI profiles for fallback and profile management. Virtual Office does not read raw secrets or private memory files.
                             </div>
                             <div id="mm-hermes-fields" style="margin-top:8px;">
-                                <label class="mm-label">Hermes Home <span style="color:#666;font-size:9px">server-side</span></label>
-                                <input type="text" id="mm-hermes-home" class="mm-input" placeholder="/home/user/.hermes">
-                                <label class="mm-label">Hermes CLI <span style="color:#666;font-size:9px">server-side</span></label>
-                                <input type="text" id="mm-hermes-bin" class="mm-input" placeholder="/home/user/.local/bin/hermes">
-                                <label class="mm-label">Hermes API URL <span style="color:#666;font-size:9px">native presence</span></label>
-                                <input type="text" id="mm-hermes-api-url" class="mm-input" placeholder="http://127.0.0.1:8642">
-                                <label class="mm-label">Hermes API Key <span style="color:#666;font-size:9px">server-side</span></label>
+                                <label class="mm-label">Hermes App/API URL <span style="color:#666;font-size:9px">preferred</span></label>
+                                <input type="text" id="mm-hermes-api-url" class="mm-input" placeholder="http://host.docker.internal:8642">
+                                <label class="mm-label">Hermes App/API Key <span style="color:#666;font-size:9px">API_SERVER_KEY</span></label>
                                 <input type="password" id="mm-hermes-api-key" class="mm-input" placeholder="API_SERVER_KEY">
-                                <div style="font-size:9px;color:#666;margin:4px 0 8px;">For Docker, mount Hermes home/CLI into the container. Native live presence uses the Hermes API Server when available, with CLI fallback.</div>
+                                <label class="mm-label">Hermes Home <span style="color:#666;font-size:9px">optional CLI fallback</span></label>
+                                <input type="text" id="mm-hermes-home" class="mm-input" placeholder="/home/user/.hermes or /root/.hermes">
+                                <label class="mm-label">Hermes CLI <span style="color:#666;font-size:9px">optional CLI fallback</span></label>
+                                <input type="text" id="mm-hermes-bin" class="mm-input" placeholder="hermes or /home/user/.local/bin/hermes">
+                                <div style="font-size:9px;color:#666;margin:4px 0 8px;">Docker usually uses the App/API URL. CLI detection only works when Hermes CLI and home are installed or mounted inside the container.</div>
                                 <button class="mm-btn mm-btn-primary" onclick="mmTestHermes()">🔍 Test Hermes</button>
                                 <div id="mm-hermes-status"></div>
                             </div>

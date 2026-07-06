@@ -15,7 +15,8 @@ Path: `app/providers/hermes.py`
 The adapter exposes:
 
 - `discover_agents()` — returns Hermes profiles as normalized office agents
-- `test()` — checks the configured Hermes CLI/home and returns detected profiles
+- `discover_api_agents()` — returns an API-backed `hermes-default` agent when the Hermes App/API server is reachable
+- `test()` — checks Hermes App/API and CLI/home separately and returns detected agents/modes
 - `send_message(profile, message)` — sends a one-shot Hermes message through the public CLI and returns stdout
 - `send_chat_message(profile, message, session_id)` — CLI chat fallback for installs without the native API server
 - `HermesApiClient` — talks to Hermes' native API server for runs, SSE events, approvals, and stops
@@ -34,10 +35,12 @@ It uses safe public Hermes surfaces only:
 - `GET /v1/runs/{run_id}/events`
 - `POST /v1/runs/{run_id}/approval`
 - `POST /v1/runs/{run_id}/stop`
+- `GET /v1/capabilities`
+- `GET /v1/models`
 
 ## Native streaming
 
-The chat UI uses Hermes' native run flow when `preferApi` is enabled and the API server is available:
+The chat UI uses Hermes' native run flow when `preferApi` is enabled and the App/API server is available:
 
 1. `POST /api/hermes/runs` validates the selected office agent, starts a Hermes run through `POST /v1/runs`, stores only the run metadata needed by Virtual Office, and returns `runId`.
 2. The browser opens `EventSource("/api/hermes/runs/{runId}/events")`.
@@ -45,7 +48,7 @@ The chat UI uses Hermes' native run flow when `preferApi` is enabled and the API
 4. The browser renders `message.delta`, `tool.started`, `tool.completed`, `tool.failed`, `approval.request`, and terminal run events directly.
 5. History is saved for reloads and transcript views, but `/api/hermes/history` is not the live transport for native API runs.
 
-If the native API server is unavailable, `/api/hermes/chat` remains as a CLI compatibility fallback.
+If the native API server is unavailable, `/api/hermes/chat` remains as a CLI compatibility fallback when the CLI is installed or mounted into the Virtual Office container.
 
 ## Configuration
 
@@ -62,6 +65,8 @@ Hermes integration is product-neutral and configured through `vo-config.json` or
 - `hermes.apiProfiles.<profile>` for profile-specific API URL/key/auto-start overrides
 
 Virtual Office only auto-starts local Hermes API servers for local URLs such as `127.0.0.1` or `localhost`, and only when an API key is configured. Remote/user-managed API URLs are detected and used, not overwritten.
+
+For Docker-hosted Virtual Office, the preferred setup is API-only: configure `VO_HERMES_API_URL=http://host.docker.internal:8642` and `VO_HERMES_API_KEY` to match Hermes' `API_SERVER_KEY`. CLI paths are optional and only needed for fallback chat, profile discovery beyond the default API agent, or create/delete profile operations.
 
 It does **not** read or expose:
 

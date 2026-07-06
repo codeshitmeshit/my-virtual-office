@@ -173,21 +173,21 @@
             <div style="border-top:1px solid #333;padding-top:16px;margin-top:18px;">
                 <div style="font-size:13px;color:#ffd700;font-weight:bold;margin-bottom:8px;">⚕️ Hermes Agents</div>
                 <label style="display:flex;align-items:center;gap:8px;margin-top:8px;">
-                    <input type="checkbox" id="s-hermes-enable" checked> Auto-detect local Hermes Agents
+                    <input type="checkbox" id="s-hermes-enable" checked> Auto-detect Hermes App and CLI
                 </label>
                 <div style="font-size:13px;color:#999;margin:6px 0 10px;line-height:1.5;">
-                    Virtual Office can also discover Hermes Agent profiles and show them beside OpenClaw agents. It uses the Hermes CLI/status surfaces and does not read Hermes secrets or private memory files.
+                    Virtual Office connects to the Hermes App/API server first and can also detect mounted Hermes CLI profiles for fallback and profile management.
                 </div>
                 <div id="hermes-fields" style="margin-top:10px;">
-                    <label>Hermes Home Directory</label>
-                    <input type="text" id="s-hermes-home" placeholder="/home/youruser/.hermes">
-                    <label>Hermes CLI Path</label>
-                    <input type="text" id="s-hermes-bin" placeholder="/home/youruser/.local/bin/hermes">
-                    <label>Hermes API URL</label>
-                    <input type="text" id="s-hermes-api-url" placeholder="http://127.0.0.1:8642">
-                    <label>Hermes API Key</label>
+                    <label>Hermes App/API URL</label>
+                    <input type="text" id="s-hermes-api-url" placeholder="http://host.docker.internal:8642">
+                    <label>Hermes App/API Key</label>
                     <input type="password" id="s-hermes-api-key" placeholder="API_SERVER_KEY">
-                    <div style="font-size:12px;color:#666;margin:6px 0 12px;line-height:1.5;">Running in Docker? Mount the Hermes home/CLI into the container and enter the mounted paths. Native live presence uses the Hermes API Server when available, with CLI fallback.</div>
+                    <label>Hermes Home Directory <span style="color:#666;font-size:12px">(optional CLI fallback)</span></label>
+                    <input type="text" id="s-hermes-home" placeholder="/home/youruser/.hermes or /root/.hermes">
+                    <label>Hermes CLI Path <span style="color:#666;font-size:12px">(optional CLI fallback)</span></label>
+                    <input type="text" id="s-hermes-bin" placeholder="hermes or /home/youruser/.local/bin/hermes">
+                    <div style="font-size:12px;color:#666;margin:6px 0 12px;line-height:1.5;">For Docker, use the App/API URL such as <code style="color:#90caf9;">http://host.docker.internal:8642</code>. CLI detection only works if Hermes CLI and home are installed or mounted inside the container.</div>
                     <button onclick="testHermesConnection()" style="margin:0 0 12px;padding:8px 16px;font-size:9px;">🔍 TEST HERMES</button>
                     <div id="hermes-test-status"></div>
                 </div>
@@ -640,20 +640,30 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ hermes: hermesPayload })
             }).then(function() {
+                var testPayload = { homePath: homePath || null, binary: binary || null, apiUrl: apiUrl || null };
+                if (apiKey) testPayload.apiKey = apiKey;
                 return fetch('/api/hermes/test', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ homePath: homePath || null, binary: binary || null })
+                    body: JSON.stringify(testPayload)
                 });
             }).then(function(r) { return r.json(); }).then(function(d) {
                 if (d.ok) {
                     var agents = d.agents || [];
                     var api = d.api || {};
-                    var html = '<div class="status-box success">✅ Hermes connected — found ' + agents.length + ' profile' + (agents.length === 1 ? '' : 's') + '<br>Native API: ' + (api.ok ? 'connected' : 'unavailable') + '</div>';
+                    var cli = d.cli || {};
+                    var apiLine = api.ok
+                        ? 'App/API: connected' + (api.model ? ' · ' + escapeHtml(api.model) : '') + '<br><span style="color:#9bb;">' + escapeHtml(api.url || '') + '</span>'
+                        : 'App/API: unavailable' + (api.error ? ' — ' + escapeHtml(api.error) : '');
+                    var cliLine = cli.ok
+                        ? 'CLI: connected' + (cli.agents ? ' · ' + cli.agents.length + ' profile' + (cli.agents.length === 1 ? '' : 's') : '')
+                        : 'CLI fallback: unavailable' + (cli.error ? ' — ' + escapeHtml(cli.error) : '');
+                    var html = '<div class="status-box success">✅ Hermes connected<br>' + apiLine + '<br>' + cliLine + '<br>Office agents: ' + agents.length + '</div>';
                     if (agents.length) {
                         html += '<div class="agent-list-preview">';
                         agents.slice(0, 10).forEach(function(a) {
-                            html += '<div class="agent-row"><span class="emoji">' + escapeHtml(a.emoji || '⚕️') + '</span><span class="name">' + escapeHtml(a.name) + '</span><span class="role">' + escapeHtml(a.model || a.providerAgentId || 'Hermes') + '</span></div>';
+                            var modes = (a.connectionModes || []).join('+') || (a.apiAvailable ? 'api' : 'cli');
+                            html += '<div class="agent-row"><span class="emoji">' + escapeHtml(a.emoji || '⚕️') + '</span><span class="name">' + escapeHtml(a.name) + '</span><span class="role">' + escapeHtml((a.model || a.providerAgentId || 'Hermes') + ' · ' + modes) + '</span></div>';
                         });
                         html += '</div>';
                     }

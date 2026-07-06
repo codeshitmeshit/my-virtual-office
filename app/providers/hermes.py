@@ -101,6 +101,9 @@ class HermesProvider:
                 "binary": self.binary,
                 "lastActiveAt": self._last_active(scan_home),
                 "capabilities": ["chat", "status", "sessions"],
+                "connectionModes": ["cli"],
+                "cliAvailable": True,
+                "apiAvailable": False,
             })
         return agents
 
@@ -582,6 +585,9 @@ class HermesApiClient:
     def health(self) -> dict[str, Any]:
         return self._json_request("GET", "/health", timeout_sec=min(self.timeout_sec, 5))
 
+    def models(self) -> dict[str, Any]:
+        return self._json_request("GET", "/v1/models")
+
     def is_available(self) -> bool:
         try:
             health = self.health()
@@ -670,3 +676,61 @@ class HermesApiClient:
                     continue
                 if line.startswith("data:"):
                     data_lines.append(line[5:].lstrip())
+
+
+def discover_api_agents(
+    api_url: str | None = None,
+    api_key: str | None = None,
+    *,
+    enabled: bool = True,
+    timeout_sec: int = 5,
+) -> list[dict[str, Any]]:
+    """Return an API-backed Hermes agent when the Hermes App/API server is reachable."""
+    if not enabled:
+        return []
+
+    client = HermesApiClient(base_url=api_url, api_key=api_key, timeout_sec=timeout_sec)
+    try:
+        health = client.health()
+        if health.get("status") not in {"ok", "healthy"}:
+            return []
+        caps = client.capabilities()
+        features = caps.get("features") if isinstance(caps.get("features"), dict) else {}
+        if not (features.get("run_submission") and features.get("run_events_sse")):
+            return []
+        model = caps.get("model") or caps.get("model_name") or ""
+        try:
+            models = client.models()
+            data = models.get("data") if isinstance(models.get("data"), list) else []
+            if not model and data:
+                first = data[0] if isinstance(data[0], dict) else {}
+                model = first.get("id") or first.get("name") or ""
+        except Exception:
+            pass
+    except Exception:
+        return []
+
+    model = model or "hermes-agent"
+    return [{
+        "id": "hermes-default",
+        "statusKey": "hermes-default",
+        "providerKind": "hermes",
+        "providerType": "runtime",
+        "providerAgentId": "default",
+        "profile": "default",
+        "name": "Hermes App",
+        "emoji": os.environ.get("VO_HERMES_AGENT_EMOJI", "⚕️"),
+        "role": "Hermes Agent",
+        "model": model,
+        "provider": "Hermes API",
+        "gateway": "api",
+        "workspace": "",
+        "home": "",
+        "binary": "",
+        "apiUrl": client.base_url,
+        "lastActiveAt": int(time.time()),
+        "capabilities": ["chat", "status", "sessions", "api"],
+        "connectionModes": ["api"],
+        "cliAvailable": False,
+        "apiAvailable": True,
+    }]

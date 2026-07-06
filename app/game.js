@@ -12792,20 +12792,31 @@ function mmTestHermes() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ hermes: hermesPayload })
     }).then(function() {
+        var testPayload = { homePath: homePath || null, binary: binary || null, apiUrl: apiUrl || null };
+        if (apiKey) testPayload.apiKey = apiKey;
         return fetch('/api/hermes/test', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ homePath: homePath || null, binary: binary || null })
+            body: JSON.stringify(testPayload)
         });
     }).then(function(r) { return r.json().then(function(d){ d._httpOk = r.ok; return d; }); }).then(function(d) {
         if (d.ok) {
             var count = (d.agents || []).length;
-            var names = (d.agents || []).slice(0, 5).map(function(a){ return (a.emoji || '⚕️') + ' ' + a.name + (a.model ? ' · ' + a.model : ''); }).join('<br>');
             var api = d.api || {};
-            var apiLine = api.ok ? '<br>Native API: connected' : '<br>Native API: unavailable' + (api.error ? ' — ' + api.error : '');
-            statusEl.innerHTML = '<div class="mm-status ok">✅ Hermes connected — ' + count + ' profile' + (count === 1 ? '' : 's') + ' found' + apiLine + (names ? '<br>' + names : '') + '</div>';
+            var cli = d.cli || {};
+            var apiLine = api.ok
+                ? '<br>App/API: connected' + (api.model ? ' · ' + escHtml(api.model) : '') + '<br><span style="color:#9bb;">' + escHtml(api.url || '') + '</span>'
+                : '<br>App/API: unavailable' + (api.error ? ' — ' + escHtml(api.error) : '');
+            var cliLine = cli.ok
+                ? '<br>CLI: connected' + (cli.agents ? ' · ' + cli.agents.length + ' profile' + (cli.agents.length === 1 ? '' : 's') : '')
+                : '<br>CLI fallback: unavailable' + (cli.error ? ' — ' + escHtml(cli.error) : '');
+            var names = (d.agents || []).slice(0, 5).map(function(a){
+                var modes = (a.connectionModes || []).join('+') || (a.apiAvailable ? 'api' : 'cli');
+                return (a.emoji || '⚕️') + ' ' + escHtml(a.name) + (a.model ? ' · ' + escHtml(a.model) : '') + ' · ' + escHtml(modes);
+            }).join('<br>');
+            statusEl.innerHTML = '<div class="mm-status ok">✅ Hermes connected — ' + count + ' office agent' + (count === 1 ? '' : 's') + apiLine + cliLine + (names ? '<br>' + names : '') + '</div>';
         } else {
-            statusEl.innerHTML = '<div class="mm-status err">❌ Hermes not reachable: ' + (d.error || 'unknown error') + '</div>';
+            statusEl.innerHTML = '<div class="mm-status err">❌ Hermes not reachable: ' + escHtml(d.error || 'unknown error') + '</div>';
         }
     }).catch(function(e) {
         statusEl.innerHTML = '<div class="mm-status err">❌ Hermes test failed: ' + e.message + '</div>';

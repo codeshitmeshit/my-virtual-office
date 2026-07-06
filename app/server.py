@@ -139,6 +139,12 @@ def _env_or(key, fallback):
     val = os.environ.get(key)
     return val if val else fallback
 
+def _running_in_docker():
+    return os.path.exists("/.dockerenv") or bool(os.environ.get("VO_STATUS_DIR") == "/data")
+
+def _default_hermes_api_url():
+    return "http://host.docker.internal:8642" if _running_in_docker() else "http://127.0.0.1:8642"
+
 def _resolve_config_path():
     """Return path to vo-config.json — prefers /data/ (persistent volume) over /app/ (container layer)."""
     if os.environ.get("VO_CONFIG"):
@@ -268,7 +274,7 @@ def _load_vo_config():
             "homePath": _env_or("VO_HERMES_HOME", hermes_cfg.get("homePath", os.path.expanduser("~/.hermes"))),
             "binary": _env_or("VO_HERMES_BIN", hermes_cfg.get("binary", os.path.expanduser("~/.local/bin/hermes"))),
             "timeoutSec": int(_env_or("VO_HERMES_TIMEOUT_SEC", hermes_cfg.get("timeoutSec", 600))),
-            "apiUrl": _env_or("VO_HERMES_API_URL", hermes_cfg.get("apiUrl", "http://127.0.0.1:8642")),
+            "apiUrl": _env_or("VO_HERMES_API_URL", hermes_cfg.get("apiUrl") or _default_hermes_api_url()),
             "apiKey": _env_or("VO_HERMES_API_KEY", hermes_cfg.get("apiKey", "")),
             "preferApi": str(_env_or("VO_HERMES_PREFER_API", hermes_cfg.get("preferApi", True))).lower() not in ("0", "false", "no", "off"),
             "autoStartProfileApis": str(_env_or("VO_HERMES_AUTO_START_PROFILE_APIS", hermes_cfg.get("autoStartProfileApis", True))).lower() not in ("0", "false", "no", "off"),
@@ -1604,7 +1610,7 @@ def _save_openclaw_api_key(provider, api_key, profile_id=""):
     return {"ok": True, "provider": provider, "profileId": profile_id, "maskedKey": _mask_secret(api_key)}
 
 # ─── DYNAMIC AGENT DISCOVERY ─────────────────────────────────
-from discovery import discover_all_agents, get_agent_workspace_dir, get_agent_session_id
+from discovery import discover_all_agents, discover_hermes_agents, get_agent_workspace_dir, get_agent_session_id
 from providers.codex import CodexProvider
 from providers.claude_code import ClaudeCodeProvider
 from providers.hermes import HermesApiClient, HermesProvider
@@ -2490,6 +2496,10 @@ def _discover_roster():
         hermes_home=hermes.get("homePath"),
         hermes_bin=hermes.get("binary"),
         hermes_enabled=hermes.get("enabled", True),
+        hermes_api_url=hermes.get("apiUrl"),
+        hermes_api_key=hermes.get("apiKey"),
+        hermes_prefer_api=hermes.get("preferApi", True),
+        hermes_timeout_sec=int(hermes.get("timeoutSec") or 600),
         codex_home=codex.get("homePath"),
         codex_bin=codex.get("binary"),
         codex_workspace_root=codex.get("workspaceRoot"),
@@ -5761,30 +5771,92 @@ def _handle_hermes_approval_respond(body):
     return result
 
 
-def _handle_hermes_test(body=None):
-    """Test the configured Hermes installation without changing Hermes state."""
-    body = body or {}
-    hermes_cfg = VO_CONFIG.get("hermes", {})
-    hermes_bin = os.path.expanduser(body.get("binary") or hermes_cfg.get("binary") or "~/.local/bin/hermes")
-    hermes_home = os.path.expanduser(body.get("homePath") or hermes_cfg.get("homePath") or "~/.hermes")
-    result = HermesProvider(home_path=hermes_home, binary=hermes_bin, enabled=True).test()
-    api = _hermes_api_client_for_profile("default")
+def _test_hermes_api(api_url=None, api_key=None):
+    api = HermesApiClient(
+        base_url=api_url,
+        api_key=api_key,
+        timeout_sec=min(int(VO_CONFIG.get("hermes", {}).get("timeoutSec") or 600), 10),
+    )
+    result = {"ok": False, "url": api.base_url, "features": {}}
     try:
+        health = api.health()
+        result["health"] = health.get("status") or ""
         caps = api.capabilities()
         features = caps.get("features") if isinstance(caps.get("features"), dict) else {}
-        result["api"] = {
+        result.update({
             "ok": bool(features.get("run_submission") and features.get("run_events_sse")),
-            "url": api.base_url,
+            "model": caps.get("model") or caps.get("model_name") or "",
             "features": {
                 "runSubmission": bool(features.get("run_submission")),
                 "runEventsSse": bool(features.get("run_events_sse")),
                 "runApprovalResponse": bool(features.get("run_approval_response")),
             },
-        }
+        })
+        try:
+            models = api.models()
+            data = models.get("data") if isinstance(models.get("data"), list) else []
+            result["models"] = [
+                (item.get("id") or item.get("name"))
+                for item in data[:8]
+                if isinstance(item, dict) and (item.get("id") or item.get("name"))
+            ]
+            if not result.get("model") and result["models"]:
+                result["model"] = result["models"][0]
+        except Exception:
+            pass
+        if not result["ok"] and not result.get("error"):
+            result["error"] = "Hermes API is reachable but missing run/SSE capabilities"
+    except urllib.error.HTTPError as exc:
+        body = ""
+        try:
+            body = exc.read().decode("utf-8", errors="replace")
+        except Exception:
+            body = ""
+        result["status"] = exc.code
+        result["error"] = body[:500] or str(exc)
     except Exception as exc:
-        result["api"] = {"ok": False, "url": api.base_url, "error": str(exc)[:500]}
+        result["error"] = str(exc)[:500]
+    return result
+
+
+def _handle_hermes_test(body=None):
+    """Test configured Hermes App/API and CLI connections without changing Hermes state."""
+    body = body or {}
+    hermes_cfg = VO_CONFIG.get("hermes", {})
+    hermes_bin = os.path.expanduser(body.get("binary") or hermes_cfg.get("binary") or "~/.local/bin/hermes")
+    hermes_home = os.path.expanduser(body.get("homePath") or hermes_cfg.get("homePath") or "~/.hermes")
+    api_url = body.get("apiUrl") or hermes_cfg.get("apiUrl") or _default_hermes_api_url()
+    api_key = body.get("apiKey") or hermes_cfg.get("apiKey") or ""
+
+    cli = HermesProvider(home_path=hermes_home, binary=hermes_bin, enabled=True).test()
+    api_status = _test_hermes_api(api_url=api_url, api_key=api_key)
+    agents = discover_hermes_agents(
+        hermes_home=hermes_home,
+        hermes_bin=hermes_bin,
+        enabled=True,
+        api_url=api_url,
+        api_key=api_key,
+        prefer_api=hermes_cfg.get("preferApi", True),
+        timeout_sec=int(hermes_cfg.get("timeoutSec") or 600),
+    )
+
+    result = {
+        "ok": bool(api_status.get("ok") or cli.get("ok")),
+        "agents": agents,
+        "api": api_status,
+        "cli": {
+            "ok": bool(cli.get("ok")),
+            "binary": hermes_bin,
+            "homePath": hermes_home,
+            "agents": cli.get("agents") or [],
+            "error": "" if cli.get("ok") else cli.get("error", "Hermes CLI is not available"),
+        },
+    }
+    if not result["ok"]:
+        result["error"] = api_status.get("error") or result["cli"].get("error") or "Hermes is not available"
+
     profile_apis = {}
-    for agent in result.get("agents") or []:
+    for agent in agents:
         profile = agent.get("profile") or agent.get("providerAgentId") or "default"
         try:
             profile_api = _hermes_api_client_for_profile(profile)
@@ -5809,11 +5881,8 @@ def _handle_hermes_test(body=None):
 def _handle_agent_platforms():
     """Return agent platforms available to the New Agent workflow."""
     hermes_cfg = VO_CONFIG.get("hermes", {})
-    hermes_status = HermesProvider(
-        home_path=hermes_cfg.get("homePath"),
-        binary=hermes_cfg.get("binary"),
-        enabled=hermes_cfg.get("enabled", True),
-    ).test()
+    hermes_status = _handle_hermes_test()
+    hermes_cli_ok = bool((hermes_status.get("cli") or {}).get("ok"))
     codex_cfg = VO_CONFIG.get("codex", {})
     codex_status = _codex_provider().test()
     codex_home = codex_status.get("homePath") or codex_cfg.get("homePath") or ""
@@ -5835,12 +5904,16 @@ def _handle_agent_platforms():
             {
                 "id": "hermes",
                 "label": "Hermes",
-                "description": "Hermes profile-backed agent",
+                "description": "Hermes App/API agent with optional CLI profile management",
                 "providerType": "runtime",
                 "available": bool(hermes_status.get("ok")),
-                "create": bool(hermes_status.get("ok")),
-                "delete": bool(hermes_status.get("ok")),
+                "create": hermes_cli_ok,
+                "delete": hermes_cli_ok,
                 "error": "" if hermes_status.get("ok") else hermes_status.get("error", "Hermes is not available"),
+                "hermes": {
+                    "api": hermes_status.get("api") or {},
+                    "cli": hermes_status.get("cli") or {},
+                },
             },
             {
                 "id": "codex",
