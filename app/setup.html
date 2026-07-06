@@ -184,12 +184,16 @@
                     <label>Hermes API Server Key</label>
                     <input type="password" id="s-hermes-api-key" placeholder="API_SERVER_KEY">
                     <label>Hermes Desktop Backend URL <span style="color:#666;font-size:12px">(optional)</span></label>
-                    <input type="text" id="s-hermes-desktop-url" placeholder="http://host.docker.internal:9119">
+                    <input type="text" id="s-hermes-desktop-url" placeholder="http://127.0.0.1:62353">
+                    <label>Desktop TCP Host <span style="color:#666;font-size:12px">(optional Docker route)</span></label>
+                    <input type="text" id="s-hermes-desktop-tcp-host" placeholder="host.docker.internal">
+                    <label>Desktop Host Header <span style="color:#666;font-size:12px">(optional logical host)</span></label>
+                    <input type="text" id="s-hermes-desktop-host-header" placeholder="127.0.0.1:62353">
                     <label>Hermes Home Directory <span style="color:#666;font-size:12px">(optional CLI fallback)</span></label>
                     <input type="text" id="s-hermes-home" placeholder="/home/youruser/.hermes or /root/.hermes">
                     <label>Hermes CLI Path <span style="color:#666;font-size:12px">(optional CLI fallback)</span></label>
                     <input type="text" id="s-hermes-bin" placeholder="hermes or /home/youruser/.local/bin/hermes">
-                    <div style="font-size:12px;color:#666;margin:6px 0 12px;line-height:1.5;">For Docker, use the API Server URL such as <code style="color:#90caf9;">http://host.docker.internal:8642</code>. Desktop Backend needs a reachable <code style="color:#90caf9;">hermes serve</code> URL. CLI detection only works if Hermes CLI and home are installed or mounted inside the container.</div>
+                    <div style="font-size:12px;color:#666;margin:6px 0 12px;line-height:1.5;">For the already-open Desktop app, paste its loopback URL. In Docker, Virtual Office will route loopback Desktop URLs through <code style="color:#90caf9;">host.docker.internal</code> while keeping Hermes' expected <code style="color:#90caf9;">127.0.0.1:&lt;port&gt;</code> identity.</div>
                     <button onclick="testHermesConnection()" style="margin:0 0 12px;padding:8px 16px;font-size:9px;">🔍 TEST HERMES</button>
                     <div id="hermes-test-status"></div>
                 </div>
@@ -539,11 +543,15 @@
             var hApiUrl = document.getElementById('s-hermes-api-url');
             var hApiKey = document.getElementById('s-hermes-api-key');
             var hDesktopUrl = document.getElementById('s-hermes-desktop-url');
+            var hDesktopTcpHost = document.getElementById('s-hermes-desktop-tcp-host');
+            var hDesktopHostHeader = document.getElementById('s-hermes-desktop-host-header');
             if (hEnable) hEnable.checked = h.enabled !== false;
             if (hHome && h.homePath) hHome.value = h.homePath;
             if (hBin && h.binary) hBin.value = h.binary;
             if (hApiUrl && h.apiUrl) hApiUrl.value = h.apiUrl;
             if (hDesktopUrl && h.desktopUrl) hDesktopUrl.value = h.desktopUrl;
+            if (hDesktopTcpHost && h.desktopTcpHost) hDesktopTcpHost.value = h.desktopTcpHost;
+            if (hDesktopHostHeader && h.desktopHostHeader) hDesktopHostHeader.value = h.desktopHostHeader;
             if (hApiKey && h.apiKeyConfigured) hApiKey.placeholder = 'Configured - leave blank to keep';
             var hFields = document.getElementById('hermes-fields');
             if (hFields && hEnable) hFields.style.display = hEnable.checked ? 'block' : 'none';
@@ -632,20 +640,22 @@
             var apiUrl = document.getElementById('s-hermes-api-url').value.trim();
             var apiKey = document.getElementById('s-hermes-api-key').value.trim();
             var desktopUrl = document.getElementById('s-hermes-desktop-url').value.trim();
+            var desktopTcpHost = document.getElementById('s-hermes-desktop-tcp-host').value.trim();
+            var desktopHostHeader = document.getElementById('s-hermes-desktop-host-header').value.trim();
             var statusEl = document.getElementById('hermes-test-status');
             if (!enabled) {
                 statusEl.innerHTML = '<div class="status-box info">Hermes auto-detect is disabled.</div>';
                 return;
             }
             statusEl.innerHTML = '<div class="status-box info">Saving and testing Hermes...</div>';
-            var hermesPayload = { enabled: enabled, homePath: homePath || null, binary: binary || null, apiUrl: apiUrl || null, desktopUrl: desktopUrl || null, preferApi: true };
+            var hermesPayload = { enabled: enabled, homePath: homePath || null, binary: binary || null, apiUrl: apiUrl || null, desktopUrl: desktopUrl || null, desktopTcpHost: desktopTcpHost || null, desktopHostHeader: desktopHostHeader || null, preferApi: true };
             if (apiKey) hermesPayload.apiKey = apiKey;
             fetch('/setup/save', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ hermes: hermesPayload })
             }).then(function() {
-                var testPayload = { homePath: homePath || null, binary: binary || null, apiUrl: apiUrl || null, desktopUrl: desktopUrl || null };
+                var testPayload = { homePath: homePath || null, binary: binary || null, apiUrl: apiUrl || null, desktopUrl: desktopUrl || null, desktopTcpHost: desktopTcpHost || null, desktopHostHeader: desktopHostHeader || null };
                 if (apiKey) testPayload.apiKey = apiKey;
                 return fetch('/api/hermes/test', {
                     method: 'POST',
@@ -653,21 +663,24 @@
                     body: JSON.stringify(testPayload)
                 });
             }).then(function(r) { return r.json(); }).then(function(d) {
+                var agents = d.agents || [];
+                var api = d.api || {};
+                var desktop = d.desktop || {};
+                var cli = d.cli || {};
+                var apiLine = api.ok
+                    ? 'API Server: connected' + (api.model ? ' · ' + escapeHtml(api.model) : '') + '<br><span style="color:#9bb;">' + escapeHtml(api.url || '') + '</span>'
+                    : 'API Server: unavailable' + (api.error ? ' — ' + escapeHtml(api.error) : '');
+                var desktopLine = desktop.chatReady
+                    ? 'Desktop Backend: connected<br><span style="color:#9bb;">' + escapeHtml(desktop.logicalUrl || desktop.url || '') + '</span>'
+                    : 'Desktop Backend: unavailable' + (desktop.error ? ' — ' + escapeHtml(desktop.error) : '');
+                var routeLine = desktop.tcpHost
+                    ? '<br><span style="color:#9bb;">Desktop route: ' + escapeHtml(desktop.tcpHost + (desktop.tcpPort ? ':' + desktop.tcpPort : '')) + ' · Host ' + escapeHtml(desktop.hostHeader || '') + '</span>'
+                    : '';
+                var cliLine = cli.ok
+                    ? 'CLI: connected' + (cli.agents ? ' · ' + cli.agents.length + ' profile' + (cli.agents.length === 1 ? '' : 's') : '')
+                    : 'CLI fallback: unavailable' + (cli.error ? ' — ' + escapeHtml(cli.error) : '');
                 if (d.ok) {
-                    var agents = d.agents || [];
-                    var api = d.api || {};
-                    var desktop = d.desktop || {};
-                    var cli = d.cli || {};
-                    var apiLine = api.ok
-                        ? 'API Server: connected' + (api.model ? ' · ' + escapeHtml(api.model) : '') + '<br><span style="color:#9bb;">' + escapeHtml(api.url || '') + '</span>'
-                        : 'API Server: unavailable' + (api.error ? ' — ' + escapeHtml(api.error) : '');
-                    var desktopLine = desktop.chatReady
-                        ? 'Desktop Backend: connected<br><span style="color:#9bb;">' + escapeHtml(desktop.url || '') + '</span>'
-                        : 'Desktop Backend: unavailable' + (desktop.error ? ' — ' + escapeHtml(desktop.error) : '');
-                    var cliLine = cli.ok
-                        ? 'CLI: connected' + (cli.agents ? ' · ' + cli.agents.length + ' profile' + (cli.agents.length === 1 ? '' : 's') : '')
-                        : 'CLI fallback: unavailable' + (cli.error ? ' — ' + escapeHtml(cli.error) : '');
-                    var html = '<div class="status-box success">✅ Hermes connected<br>' + apiLine + '<br>' + desktopLine + '<br>' + cliLine + '<br>Office agents: ' + agents.length + '</div>';
+                    var html = '<div class="status-box success">✅ Hermes connected<br>' + apiLine + '<br>' + desktopLine + routeLine + '<br>' + cliLine + '<br>Office agents: ' + agents.length + '</div>';
                     if (agents.length) {
                         html += '<div class="agent-list-preview">';
                         agents.slice(0, 10).forEach(function(a) {
@@ -678,7 +691,7 @@
                     }
                     statusEl.innerHTML = html;
                 } else {
-                    statusEl.innerHTML = '<div class="status-box error">❌ Hermes not reachable: ' + escapeHtml(d.error || 'unknown error') + '</div>';
+                    statusEl.innerHTML = '<div class="status-box error">❌ Hermes not reachable: ' + escapeHtml(d.error || 'unknown error') + '<br>' + apiLine + '<br>' + desktopLine + routeLine + '<br>' + cliLine + '</div>';
                 }
             }).catch(function(e) {
                 statusEl.innerHTML = '<div class="status-box error">Error: ' + escapeHtml(e.message) + '</div>';
@@ -989,6 +1002,8 @@
                         binary: document.getElementById('s-hermes-bin').value.trim() || null,
                         apiUrl: document.getElementById('s-hermes-api-url').value.trim() || null,
                         desktopUrl: document.getElementById('s-hermes-desktop-url').value.trim() || null,
+                        desktopTcpHost: document.getElementById('s-hermes-desktop-tcp-host').value.trim() || null,
+                        desktopHostHeader: document.getElementById('s-hermes-desktop-host-header').value.trim() || null,
                         preferApi: true
                     };
                     var apiKey = document.getElementById('s-hermes-api-key').value.trim();

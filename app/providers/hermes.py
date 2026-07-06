@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 import re
 import shutil
+import socket
 import subprocess
 import threading
 import time
@@ -688,6 +689,8 @@ class HermesDesktopBackendClient:
     base_url: str | None = None
     token: str | None = None
     host_header: str | None = None
+    tcp_host: str | None = None
+    tcp_port: int | str | None = None
     timeout_sec: int = 10
 
     def __post_init__(self) -> None:
@@ -698,11 +701,97 @@ class HermesDesktopBackendClient:
         ).rstrip("/")
         self.token = self.token if self.token is not None else os.environ.get("VO_HERMES_DESKTOP_TOKEN", "")
         self.host_header = self.host_header if self.host_header is not None else os.environ.get("VO_HERMES_DESKTOP_HOST_HEADER", "")
+        self.tcp_host = self.tcp_host if self.tcp_host is not None else os.environ.get("VO_HERMES_DESKTOP_TCP_HOST", "")
+        self.tcp_port = self.tcp_port if self.tcp_port is not None else os.environ.get("VO_HERMES_DESKTOP_TCP_PORT", "")
+        try:
+            self.tcp_port = int(self.tcp_port) if str(self.tcp_port or "").strip() else None
+        except Exception:
+            self.tcp_port = None
+
+        parsed = self._parsed_base_url()
+        if parsed and self.host_header and not self.tcp_host and self.host_header != parsed.netloc:
+            self.tcp_host = parsed.hostname or ""
+        if parsed and self._is_loopback_host(parsed.hostname) and self._running_in_docker() and not self.tcp_host:
+            self.tcp_host = os.environ.get("VO_HERMES_DESKTOP_DOCKER_HOST", "host.docker.internal")
+        if parsed and self.tcp_host and not self.tcp_port:
+            self.tcp_port = parsed.port
+        if parsed and self._uses_tcp_override() and not self.host_header:
+            self.host_header = parsed.netloc
 
     def _url(self, path: str) -> str:
+        return self._logical_url(path)
+
+    @staticmethod
+    def _running_in_docker() -> bool:
+        if os.path.exists("/.dockerenv"):
+            return True
+        try:
+            with open("/proc/1/cgroup", "r", encoding="utf-8", errors="ignore") as f:
+                return any(token in f.read() for token in ("docker", "containerd", "kubepods"))
+        except Exception:
+            return False
+
+    @staticmethod
+    def _is_loopback_host(hostname: str | None) -> bool:
+        host = (hostname or "").strip().lower().strip("[]")
+        return host in {"127.0.0.1", "localhost", "::1"}
+
+    def _parsed_base_url(self):
+        if not self.base_url:
+            return None
+        return urllib.parse.urlparse(self.base_url)
+
+    def _logical_netloc(self) -> str:
+        parsed = self._parsed_base_url()
+        if not parsed:
+            return ""
+        return (self.host_header or parsed.netloc or "").strip()
+
+    def _uses_tcp_override(self) -> bool:
+        return bool(str(self.tcp_host or "").strip())
+
+    def _resolve_tcp_host_ipv4(self, host: str, port: int | None) -> str:
+        if not host:
+            return host
+        try:
+            socket.inet_aton(host)
+            return host
+        except OSError:
+            pass
+        try:
+            infos = socket.getaddrinfo(host, int(port or 0), family=socket.AF_INET, type=socket.SOCK_STREAM)
+            if infos:
+                return infos[0][4][0]
+        except Exception:
+            pass
+        return host
+
+    def _logical_url(self, path: str) -> str:
         if not self.base_url:
             return ""
-        return self.base_url.rstrip("/") + "/" + path.lstrip("/")
+        parsed = urllib.parse.urlparse(self.base_url.rstrip("/") + "/" + path.lstrip("/"))
+        logical_netloc = self._logical_netloc()
+        if logical_netloc:
+            parsed = parsed._replace(netloc=logical_netloc)
+        return urllib.parse.urlunparse(parsed)
+
+    def _connect_netloc(self) -> str:
+        parsed = self._parsed_base_url()
+        if not parsed:
+            return ""
+        port = int(self.tcp_port or parsed.port or (443 if parsed.scheme == "https" else 80))
+        host = self._resolve_tcp_host_ipv4(str(self.tcp_host or parsed.hostname or ""), port)
+        if ":" in host and not host.startswith("["):
+            host = f"[{host}]"
+        return f"{host}:{port}"
+
+    def _connect_url(self, path: str) -> str:
+        if not self.base_url:
+            return ""
+        parsed = urllib.parse.urlparse(self.base_url.rstrip("/") + "/" + path.lstrip("/"))
+        if self._uses_tcp_override():
+            parsed = parsed._replace(netloc=self._connect_netloc())
+        return urllib.parse.urlunparse(parsed)
 
     def _headers(self, extra: dict[str, str] | None = None) -> dict[str, str]:
         headers = {"Accept": "application/json"}
@@ -717,7 +806,7 @@ class HermesDesktopBackendClient:
     def _json_request(self, method: str, path: str, timeout_sec: int | None = None) -> dict[str, Any]:
         if not self.base_url:
             raise ValueError("Hermes Desktop Backend URL is not configured")
-        req = urllib.request.Request(self._url(path), headers=self._headers(), method=method.upper())
+        req = urllib.request.Request(self._connect_url(path), headers=self._headers(), method=method.upper())
         with urllib.request.urlopen(req, timeout=int(timeout_sec or self.timeout_sec)) as resp:
             raw = resp.read().decode("utf-8", errors="replace")
             parsed = json.loads(raw) if raw.strip() else {}
@@ -732,7 +821,7 @@ class HermesDesktopBackendClient:
     def _dashboard_index_html(self) -> str:
         if not self.base_url:
             return ""
-        req = urllib.request.Request(self._url("/"), headers={"Accept": "text/html", **({"Host": self.host_header} if self.host_header else {})}, method="GET")
+        req = urllib.request.Request(self._connect_url("/"), headers={"Accept": "text/html", **({"Host": self.host_header} if self.host_header else {})}, method="GET")
         with urllib.request.urlopen(req, timeout=min(int(self.timeout_sec), 5)) as resp:
             return resp.read().decode("utf-8", errors="replace")
 
@@ -773,10 +862,15 @@ class HermesDesktopBackendClient:
         except Exception:
             from websockets import connect as ws_connect  # type: ignore
         headers = {}
-        if self.host_header:
+        if self.host_header and not self._uses_tcp_override():
             headers["Host"] = self.host_header
         timeout = min(int(self.timeout_sec), 30)
         kwargs = {"open_timeout": timeout, "close_timeout": 1}
+        parsed = urllib.parse.urlparse(ws_url)
+        if self._uses_tcp_override():
+            port = int(self.tcp_port or parsed.port or (443 if parsed.scheme == "wss" else 80))
+            kwargs["host"] = self._resolve_tcp_host_ipv4(str(self.tcp_host or ""), port)
+            kwargs["port"] = port
         try:
             return ws_connect(ws_url, additional_headers=headers or None, **kwargs)
         except TypeError:
@@ -952,7 +1046,12 @@ class HermesDesktopBackendClient:
         result: dict[str, Any] = {
             "ok": False,
             "url": self.base_url,
-            "statusEndpoint": self._url("/api/status") if self.base_url else "",
+            "logicalUrl": self._logical_url("/") if self.base_url else "",
+            "connectUrl": self._connect_url("/") if self.base_url else "",
+            "tcpHost": self.tcp_host or "",
+            "tcpPort": self.tcp_port or "",
+            "hostHeader": self.host_header or "",
+            "statusEndpoint": self._logical_url("/api/status") if self.base_url else "",
             "websocketUrl": "",
             "authRequired": False,
             "chatReady": False,
@@ -1062,6 +1161,8 @@ def discover_desktop_agents(
     desktop_url: str | None = None,
     desktop_token: str | None = None,
     desktop_host_header: str | None = None,
+    desktop_tcp_host: str | None = None,
+    desktop_tcp_port: int | str | None = None,
     *,
     enabled: bool = True,
     timeout_sec: int = 5,
@@ -1074,6 +1175,8 @@ def discover_desktop_agents(
         base_url=desktop_url,
         token=desktop_token,
         host_header=desktop_host_header,
+        tcp_host=desktop_tcp_host,
+        tcp_port=desktop_tcp_port,
         timeout_sec=timeout_sec,
     )
     status = client.test(verify_ws=False)
@@ -1097,6 +1200,10 @@ def discover_desktop_agents(
         "home": status.get("hermesHome") or "",
         "binary": "",
         "desktopUrl": client.base_url,
+        "desktopLogicalUrl": status.get("logicalUrl") or "",
+        "desktopTcpHost": status.get("tcpHost") or "",
+        "desktopTcpPort": status.get("tcpPort") or "",
+        "desktopHostHeader": status.get("hostHeader") or "",
         "lastActiveAt": int(time.time()),
         "capabilities": ["chat", "status", "sessions", "desktop"],
         "connectionModes": ["desktop"],

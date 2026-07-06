@@ -55,12 +55,16 @@
                                 <label class="mm-label">Hermes API Server Key <span style="color:#666;font-size:9px">API_SERVER_KEY</span></label>
                                 <input type="password" id="mm-hermes-api-key" class="mm-input" placeholder="API_SERVER_KEY">
                                 <label class="mm-label">Hermes Desktop Backend URL <span style="color:#666;font-size:9px">optional /api/ws</span></label>
-                                <input type="text" id="mm-hermes-desktop-url" class="mm-input" placeholder="http://host.docker.internal:9119">
+                                <input type="text" id="mm-hermes-desktop-url" class="mm-input" placeholder="http://127.0.0.1:62353">
+                                <label class="mm-label">Desktop TCP Host <span style="color:#666;font-size:9px">optional Docker route</span></label>
+                                <input type="text" id="mm-hermes-desktop-tcp-host" class="mm-input" placeholder="host.docker.internal">
+                                <label class="mm-label">Desktop Host Header <span style="color:#666;font-size:9px">optional logical host</span></label>
+                                <input type="text" id="mm-hermes-desktop-host-header" class="mm-input" placeholder="127.0.0.1:62353">
                                 <label class="mm-label">Hermes Home <span style="color:#666;font-size:9px">optional CLI fallback</span></label>
                                 <input type="text" id="mm-hermes-home" class="mm-input" placeholder="/home/user/.hermes or /root/.hermes">
                                 <label class="mm-label">Hermes CLI <span style="color:#666;font-size:9px">optional CLI fallback</span></label>
                                 <input type="text" id="mm-hermes-bin" class="mm-input" placeholder="hermes or /home/user/.local/bin/hermes">
-                                <div style="font-size:9px;color:#666;margin:4px 0 8px;">Docker usually uses the API Server URL. Desktop Backend needs a reachable <code>hermes serve</code> URL. CLI detection only works when Hermes CLI and home are installed or mounted inside the container.</div>
+                                <div style="font-size:9px;color:#666;margin:4px 0 8px;">For the already-open Desktop app, paste its loopback URL. In Docker, Virtual Office will route loopback Desktop URLs through <code>host.docker.internal</code> while keeping Hermes' expected <code>127.0.0.1:&lt;port&gt;</code> identity.</div>
                                 <button class="mm-btn mm-btn-primary" onclick="mmTestHermes()">🔍 Test Hermes</button>
                                 <div id="mm-hermes-status"></div>
                             </div>

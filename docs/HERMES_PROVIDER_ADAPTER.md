@@ -65,6 +65,8 @@ Hermes integration is product-neutral and configured through `vo-config.json` or
 - `VO_HERMES_DESKTOP_URL` / `hermes.desktopUrl`
 - `VO_HERMES_DESKTOP_TOKEN` / `hermes.desktopToken`
 - `VO_HERMES_DESKTOP_HOST_HEADER` / `hermes.desktopHostHeader`
+- `VO_HERMES_DESKTOP_TCP_HOST` / `hermes.desktopTcpHost`
+- `VO_HERMES_DESKTOP_TCP_PORT` / `hermes.desktopTcpPort`
 - `VO_HERMES_PREFER_API` / `hermes.preferApi`
 - `VO_HERMES_AUTO_START_PROFILE_APIS` / `hermes.autoStartProfileApis`
 - `VO_HERMES_AUTO_START_DEFAULT_API` / `hermes.autoStartDefaultApi`
@@ -73,7 +75,7 @@ Hermes integration is product-neutral and configured through `vo-config.json` or
 
 Virtual Office only auto-starts local Hermes API servers for local URLs such as `127.0.0.1` or `localhost`, and only when an API key is configured. Remote/user-managed API URLs are detected and used, not overwritten.
 
-For Docker-hosted Virtual Office, the preferred setup is API Server mode: configure `VO_HERMES_API_URL=http://host.docker.internal:8642` and `VO_HERMES_API_KEY` to match Hermes' `API_SERVER_KEY`. To use Desktop Backend mode instead, configure `VO_HERMES_DESKTOP_URL` to a reachable `hermes serve` backend such as `http://host.docker.internal:9119`; the random local port used by the Desktop app is not auto-discovered from inside Docker. CLI paths are optional and only needed for fallback chat, profile discovery beyond the default API/Desktop agent, or create/delete profile operations.
+For Docker-hosted Virtual Office, API Server mode uses `VO_HERMES_API_URL=http://host.docker.internal:8642` and `VO_HERMES_API_KEY` to match Hermes' `API_SERVER_KEY`. Desktop Backend mode can also target the already-open Desktop app: configure `VO_HERMES_DESKTOP_URL` to the loopback URL that Desktop's `hermes serve` backend is bound to, such as `http://127.0.0.1:62353`. When running in Docker, Virtual Office automatically routes loopback Desktop URLs through `host.docker.internal` while keeping the logical Host identity as `127.0.0.1:<port>`. If needed, override this with `VO_HERMES_DESKTOP_TCP_HOST`, `VO_HERMES_DESKTOP_TCP_PORT`, and `VO_HERMES_DESKTOP_HOST_HEADER`. The random local port used by the Desktop app is not auto-discovered from inside Docker. CLI paths are optional and only needed for fallback chat, profile discovery beyond the default API/Desktop agent, or create/delete profile operations.
 
 It does **not** read or expose:
 

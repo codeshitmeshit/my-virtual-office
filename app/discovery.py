@@ -144,7 +144,7 @@ def _merge_hermes_agent_modes(cli_agents, api_agents, desktop_agents=None, prefe
     return [merged[key] for key in order]
 
 
-def discover_hermes_agents(hermes_home=None, hermes_bin=None, enabled=True, api_url=None, api_key=None, desktop_url=None, desktop_token=None, desktop_host_header=None, prefer_api=True, timeout_sec=600):
+def discover_hermes_agents(hermes_home=None, hermes_bin=None, enabled=True, api_url=None, api_key=None, desktop_url=None, desktop_token=None, desktop_host_header=None, desktop_tcp_host=None, desktop_tcp_port=None, prefer_api=True, timeout_sec=600):
     """Discover Hermes API Server, Desktop Backend, and local CLI profiles as Virtual Office agents.
 
     This intentionally uses public Hermes surfaces instead of reading private
@@ -160,6 +160,8 @@ def discover_hermes_agents(hermes_home=None, hermes_bin=None, enabled=True, api_
         desktop_url=desktop_url,
         desktop_token=desktop_token,
         desktop_host_header=desktop_host_header,
+        desktop_tcp_host=desktop_tcp_host,
+        desktop_tcp_port=desktop_tcp_port,
         enabled=enabled,
         timeout_sec=min(int(timeout_sec or 600), 10),
     )
@@ -203,7 +205,7 @@ def discover_claude_code_agents(claude_home=None, claude_bin=None, workspace_roo
     ).discover_agents()
 
 
-def discover_all_agents(oc_home, hermes_home=None, hermes_bin=None, hermes_enabled=True, hermes_api_url=None, hermes_api_key=None, hermes_desktop_url=None, hermes_desktop_token=None, hermes_desktop_host_header=None, hermes_prefer_api=True, hermes_timeout_sec=600, codex_home=None, codex_bin=None, codex_workspace_root=None, codex_enabled=True, codex_model="", codex_sandbox="workspace-write", codex_approval_policy="never", codex_prefer_app_server=True, codex_timeout_sec=900, codex_main_workspace=None, codex_include_main=True, codex_include_native_agents=True, codex_register_native_agents=True, claude_home=None, claude_bin=None, claude_workspace_root=None, claude_enabled=True, claude_model="", claude_permission_mode="acceptEdits", claude_timeout_sec=900, claude_main_workspace=None, claude_include_main=True, claude_include_native_agents=True, claude_register_native_agents=True):
+def discover_all_agents(oc_home, hermes_home=None, hermes_bin=None, hermes_enabled=True, hermes_api_url=None, hermes_api_key=None, hermes_desktop_url=None, hermes_desktop_token=None, hermes_desktop_host_header=None, hermes_desktop_tcp_host=None, hermes_desktop_tcp_port=None, hermes_prefer_api=True, hermes_timeout_sec=600, codex_home=None, codex_bin=None, codex_workspace_root=None, codex_enabled=True, codex_model="", codex_sandbox="workspace-write", codex_approval_policy="never", codex_prefer_app_server=True, codex_timeout_sec=900, codex_main_workspace=None, codex_include_main=True, codex_include_native_agents=True, codex_register_native_agents=True, claude_home=None, claude_bin=None, claude_workspace_root=None, claude_enabled=True, claude_model="", claude_permission_mode="acceptEdits", claude_timeout_sec=900, claude_main_workspace=None, claude_include_main=True, claude_include_native_agents=True, claude_register_native_agents=True):
     """Discover OpenClaw agents plus optional local Hermes, Codex, and Claude Code agents."""
     agents = discover_agents(oc_home)
     agents.extend(discover_hermes_agents(
@@ -215,6 +217,8 @@ def discover_all_agents(oc_home, hermes_home=None, hermes_bin=None, hermes_enabl
         desktop_url=hermes_desktop_url,
         desktop_token=hermes_desktop_token,
         desktop_host_header=hermes_desktop_host_header,
+        desktop_tcp_host=hermes_desktop_tcp_host,
+        desktop_tcp_port=hermes_desktop_tcp_port,
         prefer_api=hermes_prefer_api,
         timeout_sec=hermes_timeout_sec,
     ))

@@ -24,7 +24,7 @@ For Docker deployments, mount your OpenClaw home directory into the container an
 
 Virtual Office can connect Hermes as a first-class office agent through the Hermes API Server, a reachable Hermes Desktop Backend, or the Hermes CLI/home directory as an optional fallback for profile discovery and profile management. Native API chat uses Hermes' `/v1/runs` and SSE event stream when the API server is available. Desktop Backend chat uses the documented `hermes serve` TUI-gateway JSON-RPC/WebSocket surface. Local Virtual Office history is stored under `VO_STATUS_DIR`.
 
-For Docker deployments, point `VO_HERMES_API_URL` at the host gateway, usually `http://host.docker.internal:8642`, and set `VO_HERMES_API_KEY` to the Hermes `API_SERVER_KEY`. If using Desktop Backend mode instead, set `VO_HERMES_DESKTOP_URL` to a reachable `hermes serve` backend such as `http://host.docker.internal:9119`; Docker cannot reliably auto-discover the Desktop app's random local backend port. Mount or otherwise expose the Hermes home directory and CLI path only when you want CLI fallback/profile management. Hermes secrets, private memory files, raw logs, and config internals are not read or exposed by default.
+For Docker deployments, point `VO_HERMES_API_URL` at the host gateway, usually `http://host.docker.internal:8642`, and set `VO_HERMES_API_KEY` to the Hermes `API_SERVER_KEY`. If using Desktop Backend mode with an already-open Desktop app, set `VO_HERMES_DESKTOP_URL` to the loopback URL that Desktop's `hermes serve` backend is bound to, such as `http://127.0.0.1:62353`. Docker-hosted Virtual Office routes loopback Desktop URLs through `host.docker.internal` while preserving Hermes' expected `127.0.0.1:<port>` Host identity. Docker still cannot reliably auto-discover the Desktop app's random local backend port. Mount or otherwise expose the Hermes home directory and CLI path only when you want CLI fallback/profile management. Hermes secrets, private memory files, raw logs, and config internals are not read or exposed by default.
 
 ### Codex
 
@@ -221,6 +221,8 @@ All settings live in `vo-config.json`. Environment variables override config val
 | `VO_HERMES_API_URL` | http://127.0.0.1:8642, or http://host.docker.internal:8642 in Docker | Hermes API Server URL |
 | `VO_HERMES_API_KEY` | *(none)* | Hermes `API_SERVER_KEY` for `/v1/*` requests |
 | `VO_HERMES_DESKTOP_URL` | *(none)* | Optional reachable Hermes Desktop Backend / `hermes serve` URL |
+| `VO_HERMES_DESKTOP_TCP_HOST` | *(auto for loopback Docker URLs)* | Optional physical TCP host used when Docker must reach a loopback-bound Desktop backend |
+| `VO_HERMES_DESKTOP_HOST_HEADER` | *(auto for TCP overrides)* | Optional logical Host header expected by a loopback-bound Desktop backend |
 | `VO_HERMES_HOME` | ~/.hermes | Optional Hermes home/profile root directory for CLI fallback |
 | `VO_HERMES_BIN` | ~/.local/bin/hermes | Optional Hermes CLI binary for profile discovery/management and fallback chat |
 | `VO_HERMES_TIMEOUT_SEC` | 600 | Timeout for Hermes API/CLI chat calls |

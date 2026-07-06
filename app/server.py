@@ -284,6 +284,8 @@ def _load_vo_config():
             "desktopUrl": _env_or("VO_HERMES_DESKTOP_URL", hermes_cfg.get("desktopUrl") or _default_hermes_desktop_url()),
             "desktopToken": _env_or("VO_HERMES_DESKTOP_TOKEN", hermes_cfg.get("desktopToken", "")),
             "desktopHostHeader": _env_or("VO_HERMES_DESKTOP_HOST_HEADER", hermes_cfg.get("desktopHostHeader", "")),
+            "desktopTcpHost": _env_or("VO_HERMES_DESKTOP_TCP_HOST", hermes_cfg.get("desktopTcpHost", "")),
+            "desktopTcpPort": _env_or("VO_HERMES_DESKTOP_TCP_PORT", hermes_cfg.get("desktopTcpPort", "")),
             "preferApi": str(_env_or("VO_HERMES_PREFER_API", hermes_cfg.get("preferApi", True))).lower() not in ("0", "false", "no", "off"),
             "autoStartProfileApis": str(_env_or("VO_HERMES_AUTO_START_PROFILE_APIS", hermes_cfg.get("autoStartProfileApis", True))).lower() not in ("0", "false", "no", "off"),
             "autoStartDefaultApi": str(_env_or("VO_HERMES_AUTO_START_DEFAULT_API", hermes_cfg.get("autoStartDefaultApi", hermes_cfg.get("autoStartProfileApis", True)))).lower() not in ("0", "false", "no", "off"),
@@ -2509,6 +2511,8 @@ def _discover_roster():
         hermes_desktop_url=hermes.get("desktopUrl"),
         hermes_desktop_token=hermes.get("desktopToken"),
         hermes_desktop_host_header=hermes.get("desktopHostHeader"),
+        hermes_desktop_tcp_host=hermes.get("desktopTcpHost"),
+        hermes_desktop_tcp_port=hermes.get("desktopTcpPort"),
         hermes_prefer_api=hermes.get("preferApi", True),
         hermes_timeout_sec=int(hermes.get("timeoutSec") or 600),
         codex_home=codex.get("homePath"),
@@ -4435,6 +4439,8 @@ def _hermes_desktop_client():
         base_url=hermes_cfg.get("desktopUrl"),
         token=hermes_cfg.get("desktopToken"),
         host_header=hermes_cfg.get("desktopHostHeader"),
+        tcp_host=hermes_cfg.get("desktopTcpHost"),
+        tcp_port=hermes_cfg.get("desktopTcpPort"),
         timeout_sec=min(int(hermes_cfg.get("timeoutSec") or 600), 60),
     )
 
@@ -4796,6 +4802,8 @@ def _handle_hermes_desktop_chat(agent, profile, delivery_message, timeout):
         base_url=desktop_url,
         token=hermes_cfg.get("desktopToken"),
         host_header=hermes_cfg.get("desktopHostHeader"),
+        tcp_host=hermes_cfg.get("desktopTcpHost"),
+        tcp_port=hermes_cfg.get("desktopTcpPort"),
         timeout_sec=min(int(timeout or hermes_cfg.get("timeoutSec") or 600), 60),
     )
     status = client.test(verify_ws=False)
@@ -5881,11 +5889,13 @@ def _test_hermes_api(api_url=None, api_key=None):
     return result
 
 
-def _test_hermes_desktop(desktop_url=None, desktop_token=None, desktop_host_header=None):
+def _test_hermes_desktop(desktop_url=None, desktop_token=None, desktop_host_header=None, desktop_tcp_host=None, desktop_tcp_port=None):
     client = HermesDesktopBackendClient(
         base_url=desktop_url,
         token=desktop_token,
         host_header=desktop_host_header,
+        tcp_host=desktop_tcp_host,
+        tcp_port=desktop_tcp_port,
         timeout_sec=min(int(VO_CONFIG.get("hermes", {}).get("timeoutSec") or 600), 10),
     )
     return client.test(verify_ws=True)
@@ -5902,6 +5912,8 @@ def _handle_hermes_test(body=None):
     desktop_url = body.get("desktopUrl") or hermes_cfg.get("desktopUrl") or _default_hermes_desktop_url()
     desktop_token = body.get("desktopToken") or hermes_cfg.get("desktopToken") or ""
     desktop_host_header = body.get("desktopHostHeader") or hermes_cfg.get("desktopHostHeader") or ""
+    desktop_tcp_host = body.get("desktopTcpHost") or hermes_cfg.get("desktopTcpHost") or ""
+    desktop_tcp_port = body.get("desktopTcpPort") or hermes_cfg.get("desktopTcpPort") or ""
 
     cli = HermesProvider(home_path=hermes_home, binary=hermes_bin, enabled=True).test()
     api_status = _test_hermes_api(api_url=api_url, api_key=api_key)
@@ -5909,6 +5921,8 @@ def _handle_hermes_test(body=None):
         desktop_url=desktop_url,
         desktop_token=desktop_token,
         desktop_host_header=desktop_host_header,
+        desktop_tcp_host=desktop_tcp_host,
+        desktop_tcp_port=desktop_tcp_port,
     )
     agents = discover_hermes_agents(
         hermes_home=hermes_home,
@@ -5919,6 +5933,8 @@ def _handle_hermes_test(body=None):
         desktop_url=desktop_url,
         desktop_token=desktop_token,
         desktop_host_header=desktop_host_header,
+        desktop_tcp_host=desktop_tcp_host,
+        desktop_tcp_port=desktop_tcp_port,
         prefer_api=hermes_cfg.get("preferApi", True),
         timeout_sec=int(hermes_cfg.get("timeoutSec") or 600),
     )
@@ -5937,7 +5953,12 @@ def _handle_hermes_test(body=None):
         },
     }
     if not result["ok"]:
-        result["error"] = api_status.get("error") or desktop_status.get("error") or result["cli"].get("error") or "Hermes is not available"
+        if desktop_url and desktop_status.get("error"):
+            result["error"] = desktop_status.get("error")
+        elif api_url and api_status.get("error"):
+            result["error"] = api_status.get("error")
+        else:
+            result["error"] = result["cli"].get("error") or "Hermes is not available"
 
     profile_apis = {}
     for agent in agents:
@@ -11990,6 +12011,8 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                     "desktopUrl": VO_CONFIG.get("hermes", {}).get("desktopUrl"),
                     "desktopTokenConfigured": bool(VO_CONFIG.get("hermes", {}).get("desktopToken")),
                     "desktopHostHeader": VO_CONFIG.get("hermes", {}).get("desktopHostHeader"),
+                    "desktopTcpHost": VO_CONFIG.get("hermes", {}).get("desktopTcpHost"),
+                    "desktopTcpPort": VO_CONFIG.get("hermes", {}).get("desktopTcpPort"),
                     "preferApi": VO_CONFIG.get("hermes", {}).get("preferApi", True),
                     "detected": bool(_handle_hermes_test().get("ok")),
                 },
@@ -13349,6 +13372,12 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                             hermes_body.pop("apiUrl", None)
                         if not hermes_body.get("desktopUrl") and existing[key].get("desktopUrl"):
                             hermes_body.pop("desktopUrl", None)
+                        if not hermes_body.get("desktopHostHeader") and existing[key].get("desktopHostHeader"):
+                            hermes_body.pop("desktopHostHeader", None)
+                        if not hermes_body.get("desktopTcpHost") and existing[key].get("desktopTcpHost"):
+                            hermes_body.pop("desktopTcpHost", None)
+                        if not hermes_body.get("desktopTcpPort") and existing[key].get("desktopTcpPort"):
+                            hermes_body.pop("desktopTcpPort", None)
                         existing[key].update(hermes_body)
                         continue
                     if isinstance(body[key], dict) and isinstance(existing.get(key), dict):
