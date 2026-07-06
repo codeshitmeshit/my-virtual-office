@@ -44,21 +44,23 @@
                         <div class="mm-section">
                             <div class="mm-section-title">⚕️ Hermes Agent Connection</div>
                             <label class="mm-label" style="display:flex;align-items:center;gap:6px;">
-                                <input type="checkbox" id="mm-hermes-enable" checked> Auto-detect Hermes App and CLI
+                                <input type="checkbox" id="mm-hermes-enable" checked> Auto-detect Hermes API, Desktop Backend, and CLI
                             </label>
                             <div style="font-size:9px;color:#666;margin:4px 0 8px;line-height:1.4;">
-                                Connects the Hermes App/API server first, then optional mounted CLI profiles for fallback and profile management. Virtual Office does not read raw secrets or private memory files.
+                                Connects the Hermes API Server first, can use a reachable Desktop Backend, then optional mounted CLI profiles for fallback and profile management. Virtual Office does not read raw secrets or private memory files.
                             </div>
                             <div id="mm-hermes-fields" style="margin-top:8px;">
-                                <label class="mm-label">Hermes App/API URL <span style="color:#666;font-size:9px">preferred</span></label>
+                                <label class="mm-label">Hermes API Server URL <span style="color:#666;font-size:9px">/v1 runs</span></label>
                                 <input type="text" id="mm-hermes-api-url" class="mm-input" placeholder="http://host.docker.internal:8642">
-                                <label class="mm-label">Hermes App/API Key <span style="color:#666;font-size:9px">API_SERVER_KEY</span></label>
+                                <label class="mm-label">Hermes API Server Key <span style="color:#666;font-size:9px">API_SERVER_KEY</span></label>
                                 <input type="password" id="mm-hermes-api-key" class="mm-input" placeholder="API_SERVER_KEY">
+                                <label class="mm-label">Hermes Desktop Backend URL <span style="color:#666;font-size:9px">optional /api/ws</span></label>
+                                <input type="text" id="mm-hermes-desktop-url" class="mm-input" placeholder="http://host.docker.internal:9119">
                                 <label class="mm-label">Hermes Home <span style="color:#666;font-size:9px">optional CLI fallback</span></label>
                                 <input type="text" id="mm-hermes-home" class="mm-input" placeholder="/home/user/.hermes or /root/.hermes">
                                 <label class="mm-label">Hermes CLI <span style="color:#666;font-size:9px">optional CLI fallback</span></label>
                                 <input type="text" id="mm-hermes-bin" class="mm-input" placeholder="hermes or /home/user/.local/bin/hermes">
-                                <div style="font-size:9px;color:#666;margin:4px 0 8px;">Docker usually uses the App/API URL. CLI detection only works when Hermes CLI and home are installed or mounted inside the container.</div>
+                                <div style="font-size:9px;color:#666;margin:4px 0 8px;">Docker usually uses the API Server URL. Desktop Backend needs a reachable <code>hermes serve</code> URL. CLI detection only works when Hermes CLI and home are installed or mounted inside the container.</div>
                                 <button class="mm-btn mm-btn-primary" onclick="mmTestHermes()">🔍 Test Hermes</button>
                                 <div id="mm-hermes-status"></div>
                             </div>
@@ -1025,7 +1027,7 @@
     </script>
     <!-- marked.js v15.0.12 - bundled locally for airgapped/offline use -->
     <script src="marked.min.js"></script>
-    <script src="chat.js?v=20260617-codex-context-compact"></script>
+    <script src="chat.js?v=20260702-gateway-protocol4"></script>
     <script src="sms-panel.js?v=7"></script>
     <script src="pc-monitor.js?v=0"></script>
     <script src="api-usage.js?v=20260610-native-usage"></script>

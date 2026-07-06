@@ -7,6 +7,7 @@
   let pendingCallbacks = {};
   let _chatWsPort = 8091;
   let GATEWAY_CLIENT_VERSION = 'unknown';
+  let GATEWAY_PROTOCOL_VERSION = 4;
   let _modelBarInterval = null;
   let _sessionsListCache = { at: 0, promise: null, payload: null };
   const runOwners = new Map();
@@ -2643,7 +2644,7 @@
     const msg = {
       type: 'req', id, method: 'connect',
       params: {
-        minProtocol: 4, maxProtocol: 4,
+        minProtocol: GATEWAY_PROTOCOL_VERSION, maxProtocol: GATEWAY_PROTOCOL_VERSION,
         client: { id: 'openclaw-control-ui', version: GATEWAY_CLIENT_VERSION || 'unknown', platform: 'web', mode: 'webchat' },
         role: 'operator', scopes: ['operator.read', 'operator.write', 'operator.admin'], caps: ['tool-events'], commands: [], permissions: {},
         auth: { token: GATEWAY_TOKEN }, locale: 'en-US', userAgent: 'virtual-office-chat/1.0'
@@ -3460,6 +3461,7 @@
     if (d.wsPort) _chatWsPort = d.wsPort;
     if (d.token) GATEWAY_TOKEN = d.token;
     if (d.openclawVersion) GATEWAY_CLIENT_VERSION = d.openclawVersion;
+    if (d.gatewayProtocol) GATEWAY_PROTOCOL_VERSION = Number(d.gatewayProtocol) || 4;
   }).catch(() => {});
 
   // --- MOVE / SNAP SYSTEM (primary window only) ---

@@ -14,7 +14,7 @@ import glob
 import time
 from providers.codex import CodexProvider
 from providers.claude_code import ClaudeCodeProvider
-from providers.hermes import HermesProvider, discover_api_agents
+from providers.hermes import HermesProvider, discover_api_agents, discover_desktop_agents
 
 def discover_agents(oc_home):
     """
@@ -95,13 +95,31 @@ def discover_agents(oc_home):
     return roster
 
 
-def _merge_hermes_agent_modes(cli_agents, api_agents, prefer_api=True):
+def _merge_hermes_agent_modes(cli_agents, api_agents, desktop_agents=None, prefer_api=True):
     merged = {}
     order = []
+    desktop_agents = desktop_agents or []
     for agent in cli_agents:
         key = agent.get("id") or f"hermes-{agent.get('profile') or agent.get('providerAgentId') or 'default'}"
         merged[key] = dict(agent)
         order.append(key)
+
+    for desktop_agent in desktop_agents:
+        key = desktop_agent.get("id") or "hermes-default"
+        if key not in merged:
+            merged[key] = dict(desktop_agent)
+            order.append(key)
+            continue
+
+        existing = merged[key]
+        existing["desktopAvailable"] = True
+        existing["desktopUrl"] = desktop_agent.get("desktopUrl") or existing.get("desktopUrl") or ""
+        existing["connectionModes"] = list(dict.fromkeys((existing.get("connectionModes") or []) + (desktop_agent.get("connectionModes") or ["desktop"])))
+        existing["capabilities"] = list(dict.fromkeys((existing.get("capabilities") or []) + (desktop_agent.get("capabilities") or [])))
+        if not prefer_api:
+            existing["gateway"] = "desktop+cli" if existing.get("cliAvailable") else "desktop"
+            existing["provider"] = existing.get("provider") or desktop_agent.get("provider") or "Hermes Desktop Backend"
+            existing["model"] = existing.get("model") or desktop_agent.get("model") or ""
 
     for api_agent in api_agents:
         key = api_agent.get("id") or "hermes-default"
@@ -126,19 +144,27 @@ def _merge_hermes_agent_modes(cli_agents, api_agents, prefer_api=True):
     return [merged[key] for key in order]
 
 
-def discover_hermes_agents(hermes_home=None, hermes_bin=None, enabled=True, api_url=None, api_key=None, prefer_api=True, timeout_sec=600):
-    """Discover Hermes App/API and local Hermes CLI profiles as Virtual Office agents.
+def discover_hermes_agents(hermes_home=None, hermes_bin=None, enabled=True, api_url=None, api_key=None, desktop_url=None, desktop_token=None, desktop_host_header=None, prefer_api=True, timeout_sec=600):
+    """Discover Hermes API Server, Desktop Backend, and local CLI profiles as Virtual Office agents.
 
     This intentionally uses public Hermes surfaces instead of reading private
     config/auth/memory files. API discovery supports Docker-hosted Virtual
-    Office with the Hermes App/gateway on the host. CLI discovery remains
+    Office with a reachable Hermes API Server. Desktop discovery uses the
+    documented `hermes serve` TUI-gateway backend. CLI discovery remains
     available for mounted or container-installed Hermes profiles.
     """
     if not enabled:
         return []
     cli_agents = HermesProvider(home_path=hermes_home, binary=hermes_bin, enabled=enabled).discover_agents()
+    desktop_agents = discover_desktop_agents(
+        desktop_url=desktop_url,
+        desktop_token=desktop_token,
+        desktop_host_header=desktop_host_header,
+        enabled=enabled,
+        timeout_sec=min(int(timeout_sec or 600), 10),
+    )
     api_agents = discover_api_agents(api_url=api_url, api_key=api_key, enabled=enabled, timeout_sec=min(int(timeout_sec or 600), 10))
-    return _merge_hermes_agent_modes(cli_agents, api_agents, prefer_api=prefer_api)
+    return _merge_hermes_agent_modes(cli_agents, api_agents, desktop_agents=desktop_agents, prefer_api=prefer_api)
 
 
 def discover_codex_agents(codex_home=None, codex_bin=None, workspace_root=None, enabled=True, model="", sandbox="workspace-write", approval_policy="never", prefer_app_server=True, timeout_sec=900, main_workspace=None, include_main=True, include_native_agents=True, register_native_agents=True):
@@ -177,7 +203,7 @@ def discover_claude_code_agents(claude_home=None, claude_bin=None, workspace_roo
     ).discover_agents()
 
 
-def discover_all_agents(oc_home, hermes_home=None, hermes_bin=None, hermes_enabled=True, hermes_api_url=None, hermes_api_key=None, hermes_prefer_api=True, hermes_timeout_sec=600, codex_home=None, codex_bin=None, codex_workspace_root=None, codex_enabled=True, codex_model="", codex_sandbox="workspace-write", codex_approval_policy="never", codex_prefer_app_server=True, codex_timeout_sec=900, codex_main_workspace=None, codex_include_main=True, codex_include_native_agents=True, codex_register_native_agents=True, claude_home=None, claude_bin=None, claude_workspace_root=None, claude_enabled=True, claude_model="", claude_permission_mode="acceptEdits", claude_timeout_sec=900, claude_main_workspace=None, claude_include_main=True, claude_include_native_agents=True, claude_register_native_agents=True):
+def discover_all_agents(oc_home, hermes_home=None, hermes_bin=None, hermes_enabled=True, hermes_api_url=None, hermes_api_key=None, hermes_desktop_url=None, hermes_desktop_token=None, hermes_desktop_host_header=None, hermes_prefer_api=True, hermes_timeout_sec=600, codex_home=None, codex_bin=None, codex_workspace_root=None, codex_enabled=True, codex_model="", codex_sandbox="workspace-write", codex_approval_policy="never", codex_prefer_app_server=True, codex_timeout_sec=900, codex_main_workspace=None, codex_include_main=True, codex_include_native_agents=True, codex_register_native_agents=True, claude_home=None, claude_bin=None, claude_workspace_root=None, claude_enabled=True, claude_model="", claude_permission_mode="acceptEdits", claude_timeout_sec=900, claude_main_workspace=None, claude_include_main=True, claude_include_native_agents=True, claude_register_native_agents=True):
     """Discover OpenClaw agents plus optional local Hermes, Codex, and Claude Code agents."""
     agents = discover_agents(oc_home)
     agents.extend(discover_hermes_agents(
@@ -186,6 +212,9 @@ def discover_all_agents(oc_home, hermes_home=None, hermes_bin=None, hermes_enabl
         enabled=hermes_enabled,
         api_url=hermes_api_url,
         api_key=hermes_api_key,
+        desktop_url=hermes_desktop_url,
+        desktop_token=hermes_desktop_token,
+        desktop_host_header=hermes_desktop_host_header,
         prefer_api=hermes_prefer_api,
         timeout_sec=hermes_timeout_sec,
     ))

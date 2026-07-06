@@ -12,9 +12,12 @@ import os
 import re
 import shutil
 import subprocess
+import threading
 import time
 import json
+import asyncio
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from urllib.parse import quote, urljoin
@@ -678,6 +681,325 @@ class HermesApiClient:
                     data_lines.append(line[5:].lstrip())
 
 
+@dataclass
+class HermesDesktopBackendClient:
+    """Client for Hermes Desktop's `hermes serve` TUI-gateway backend."""
+
+    base_url: str | None = None
+    token: str | None = None
+    host_header: str | None = None
+    timeout_sec: int = 10
+
+    def __post_init__(self) -> None:
+        self.base_url = (
+            self.base_url
+            or os.environ.get("VO_HERMES_DESKTOP_URL")
+            or ""
+        ).rstrip("/")
+        self.token = self.token if self.token is not None else os.environ.get("VO_HERMES_DESKTOP_TOKEN", "")
+        self.host_header = self.host_header if self.host_header is not None else os.environ.get("VO_HERMES_DESKTOP_HOST_HEADER", "")
+
+    def _url(self, path: str) -> str:
+        if not self.base_url:
+            return ""
+        return self.base_url.rstrip("/") + "/" + path.lstrip("/")
+
+    def _headers(self, extra: dict[str, str] | None = None) -> dict[str, str]:
+        headers = {"Accept": "application/json"}
+        if self.host_header:
+            headers["Host"] = self.host_header
+        if self.token:
+            headers["X-Hermes-Session-Token"] = self.token
+        if extra:
+            headers.update({k: v for k, v in extra.items() if v is not None})
+        return headers
+
+    def _json_request(self, method: str, path: str, timeout_sec: int | None = None) -> dict[str, Any]:
+        if not self.base_url:
+            raise ValueError("Hermes Desktop Backend URL is not configured")
+        req = urllib.request.Request(self._url(path), headers=self._headers(), method=method.upper())
+        with urllib.request.urlopen(req, timeout=int(timeout_sec or self.timeout_sec)) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+            parsed = json.loads(raw) if raw.strip() else {}
+            if isinstance(parsed, dict):
+                parsed["_status"] = getattr(resp, "status", 200)
+                return parsed
+            return {"data": parsed, "_status": getattr(resp, "status", 200)}
+
+    def status(self) -> dict[str, Any]:
+        return self._json_request("GET", "/api/status", timeout_sec=min(self.timeout_sec, 5))
+
+    def _dashboard_index_html(self) -> str:
+        if not self.base_url:
+            return ""
+        req = urllib.request.Request(self._url("/"), headers={"Accept": "text/html", **({"Host": self.host_header} if self.host_header else {})}, method="GET")
+        with urllib.request.urlopen(req, timeout=min(int(self.timeout_sec), 5)) as resp:
+            return resp.read().decode("utf-8", errors="replace")
+
+    def _served_dashboard_token(self) -> str:
+        if self.token:
+            return self.token
+        try:
+            html = self._dashboard_index_html()
+        except Exception:
+            return ""
+        match = re.search(r"window\.__HERMES_SESSION_TOKEN__\s*=\s*(\"(?:\\.|[^\"\\])*\")", html)
+        if not match:
+            return ""
+        try:
+            token = json.loads(match.group(1))
+            return token if isinstance(token, str) else ""
+        except Exception:
+            return ""
+
+    def _ws_url(self) -> str:
+        if not self.base_url:
+            return ""
+        parsed = urllib.parse.urlparse(self._url("/api/ws"))
+        scheme = "wss" if parsed.scheme == "https" else "ws"
+        query = parsed.query
+        token = self._served_dashboard_token()
+        if token and "token=" not in query:
+            token_q = urllib.parse.urlencode({"token": token})
+            query = f"{query}&{token_q}" if query else token_q
+        return urllib.parse.urlunparse(parsed._replace(scheme=scheme, query=query))
+
+    def _connect_ws(self):
+        ws_url = self._ws_url()
+        if not ws_url:
+            raise ValueError("Hermes Desktop Backend URL is not configured")
+        try:
+            from websockets.asyncio.client import connect as ws_connect
+        except Exception:
+            from websockets import connect as ws_connect  # type: ignore
+        headers = {}
+        if self.host_header:
+            headers["Host"] = self.host_header
+        timeout = min(int(self.timeout_sec), 30)
+        kwargs = {"open_timeout": timeout, "close_timeout": 1}
+        try:
+            return ws_connect(ws_url, additional_headers=headers or None, **kwargs)
+        except TypeError:
+            return ws_connect(ws_url, extra_headers=headers or None, **kwargs)
+
+    async def _recv_json(self, ws, timeout_sec: float) -> dict[str, Any]:
+        raw = await asyncio.wait_for(ws.recv(), timeout=max(timeout_sec, 0.1))
+        data = json.loads(str(raw).strip())
+        return data if isinstance(data, dict) else {"data": data}
+
+    async def _rpc(self, ws, method: str, params: dict[str, Any] | None = None, timeout_sec: int | None = None) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        rid = f"vo-{int(time.time() * 1000)}-{os.getpid()}"
+        await ws.send(json.dumps({"jsonrpc": "2.0", "id": rid, "method": method, "params": params or {}}))
+        deadline = time.monotonic() + int(timeout_sec or self.timeout_sec)
+        events: list[dict[str, Any]] = []
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError(f"Hermes Desktop Backend RPC timed out: {method}")
+            item = await self._recv_json(ws, remaining)
+            if item.get("id") == rid:
+                if item.get("error"):
+                    err = item.get("error") if isinstance(item.get("error"), dict) else {"message": str(item.get("error"))}
+                    raise RuntimeError(err.get("message") or f"Hermes Desktop Backend RPC failed: {method}")
+                result = item.get("result")
+                return (result if isinstance(result, dict) else {"value": result}, events)
+            if item.get("method") == "event":
+                params_obj = item.get("params") if isinstance(item.get("params"), dict) else {}
+                events.append(params_obj)
+
+    def _run_async(self, coro):
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(coro)
+
+        result: dict[str, Any] = {}
+        error: list[BaseException] = []
+
+        def worker() -> None:
+            try:
+                result["value"] = asyncio.run(coro)
+            except BaseException as exc:
+                error.append(exc)
+
+        thread = threading.Thread(target=worker, daemon=True)
+        thread.start()
+        thread.join()
+        if error:
+            raise error[0]
+        return result.get("value")
+
+    def rpc_call(self, method: str, params: dict[str, Any] | None = None, timeout_sec: int | None = None) -> dict[str, Any]:
+        async def run() -> dict[str, Any]:
+            async with self._connect_ws() as ws:
+                result, events = await self._rpc(ws, method, params, timeout_sec=timeout_sec)
+                return {"ok": True, "result": result, "events": events, "websocketUrl": self._ws_url()}
+
+        return self._run_async(run())
+
+    def send_chat_message(self, message: str, session_id: str | None = None, timeout_sec: int | None = None) -> dict[str, Any]:
+        async def run() -> dict[str, Any]:
+            async with self._connect_ws() as ws:
+                stored_session_id = str(session_id or "").strip()
+                live_session_id = ""
+                if stored_session_id:
+                    try:
+                        resumed, _ = await self._rpc(ws, "session.resume", {"session_id": stored_session_id, "source": "virtual-office"}, timeout_sec=min(int(timeout_sec or self.timeout_sec), 30))
+                        live_session_id = str(resumed.get("session_id") or "")
+                        stored_session_id = str(resumed.get("session_key") or resumed.get("resumed") or stored_session_id)
+                    except Exception:
+                        live_session_id = ""
+                if not live_session_id:
+                    created, _ = await self._rpc(ws, "session.create", {"source": "virtual-office"}, timeout_sec=min(int(timeout_sec or self.timeout_sec), 30))
+                    live_session_id = str(created.get("session_id") or "")
+                    stored_session_id = str(created.get("stored_session_id") or created.get("session_key") or live_session_id)
+                if not live_session_id:
+                    raise RuntimeError("Hermes Desktop Backend did not return a live session id")
+
+                await self._rpc(ws, "prompt.submit", {"session_id": live_session_id, "text": message}, timeout_sec=min(int(timeout_sec or self.timeout_sec), 30))
+
+                reply_parts: list[str] = []
+                reasoning_parts: list[str] = []
+                tools: list[dict[str, Any]] = []
+                tools_by_id: dict[str, dict[str, Any]] = {}
+                terminal_error = ""
+                deadline = time.monotonic() + int(timeout_sec or self.timeout_sec)
+                while True:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise TimeoutError("Hermes Desktop Backend chat timed out")
+                    item = await self._recv_json(ws, remaining)
+                    if item.get("method") != "event":
+                        continue
+                    params_obj = item.get("params") if isinstance(item.get("params"), dict) else {}
+                    event_type = str(params_obj.get("type") or "").lower()
+                    payload = params_obj.get("payload") if isinstance(params_obj.get("payload"), dict) else {}
+                    event_session = str(params_obj.get("session_id") or payload.get("session_id") or "")
+                    if event_session and event_session != live_session_id:
+                        continue
+                    if event_type in {"message.delta", "thinking.delta", "reasoning.delta"}:
+                        text = str(payload.get("text") or payload.get("delta") or "")
+                        if event_type == "message.delta":
+                            reply_parts.append(text)
+                        elif text:
+                            reasoning_parts.append(text)
+                    elif event_type == "tool.start":
+                        tool_id = str(payload.get("tool_id") or payload.get("toolCallId") or f"desktop-tool-{len(tools) + 1}")
+                        card = {
+                            "id": tool_id,
+                            "name": str(payload.get("name") or "Hermes tool"),
+                            "status": "running",
+                            "args_preview": str(payload.get("context") or payload.get("preview") or ""),
+                            "result": "Running",
+                        }
+                        tools_by_id[tool_id] = card
+                        tools.append(card)
+                    elif event_type == "tool.complete":
+                        tool_id = str(payload.get("tool_id") or payload.get("toolCallId") or "")
+                        card = tools_by_id.get(tool_id) if tool_id else None
+                        if not card:
+                            card = {"id": tool_id or f"desktop-tool-{len(tools) + 1}", "name": str(payload.get("name") or "Hermes tool")}
+                            tools.append(card)
+                        card.update({
+                            "status": "done",
+                            "result": str(payload.get("summary") or "Completed"),
+                        })
+                    elif event_type in {"approval.request", "clarify.request", "sudo.request", "secret.request"}:
+                        terminal_error = "Hermes Desktop Backend is waiting for interactive input that Virtual Office cannot answer yet."
+                        break
+                    elif event_type == "error":
+                        terminal_error = str(payload.get("message") or payload.get("error") or "Hermes Desktop Backend error")
+                        break
+                    elif event_type == "message.complete":
+                        text = str(payload.get("text") or "")
+                        status = str(payload.get("status") or "complete")
+                        final_reply = text or "".join(reply_parts)
+                        return {
+                            "ok": status not in {"error", "interrupted"} and not terminal_error,
+                            "reply": final_reply,
+                            "stderr": terminal_error,
+                            "exitCode": 0 if status not in {"error", "interrupted"} and not terminal_error else 1,
+                            "sessionId": stored_session_id,
+                            "liveSessionId": live_session_id,
+                            "providerPath": "desktop",
+                            "tools": tools,
+                            "thinking": "\n".join(reasoning_parts).strip(),
+                            "reasoningTokens": 0,
+                            "error": terminal_error or (status if status in {"error", "interrupted"} else None),
+                        }
+                return {
+                    "ok": False,
+                    "reply": "".join(reply_parts),
+                    "stderr": terminal_error,
+                    "exitCode": 1,
+                    "sessionId": stored_session_id,
+                    "liveSessionId": live_session_id,
+                    "providerPath": "desktop",
+                    "tools": tools,
+                    "thinking": "\n".join(reasoning_parts).strip(),
+                    "reasoningTokens": 0,
+                    "error": terminal_error or "Hermes Desktop Backend chat ended without a final message.",
+                }
+
+        if not message.strip():
+            return {"ok": False, "error": "message is required", "reply": "", "exitCode": None, "sessionId": session_id or ""}
+        try:
+            return self._run_async(run())
+        except Exception as exc:
+            return {"ok": False, "error": str(exc), "reply": "", "stderr": str(exc)[:2000], "exitCode": None, "sessionId": session_id or "", "providerPath": "desktop"}
+
+    def test(self, verify_ws: bool = True) -> dict[str, Any]:
+        result: dict[str, Any] = {
+            "ok": False,
+            "url": self.base_url,
+            "statusEndpoint": self._url("/api/status") if self.base_url else "",
+            "websocketUrl": "",
+            "authRequired": False,
+            "chatReady": False,
+            "features": {"tuiGatewayJsonRpc": False},
+        }
+        if not self.base_url:
+            result["error"] = "Hermes Desktop Backend URL is not configured"
+            return result
+        try:
+            status = self.status()
+            auth_required = bool(status.get("auth_required"))
+            result.update({
+                "ok": True,
+                "status": status.get("status") or "ok",
+                "version": status.get("version") or "",
+                "activeSessions": status.get("active_sessions"),
+                "authRequired": auth_required,
+                "authProviders": status.get("auth_providers") or [],
+                "hermesHome": status.get("hermes_home") or "",
+                "websocketUrl": self._ws_url(),
+            })
+            if auth_required:
+                result["error"] = "Hermes Desktop Backend is reachable but requires dashboard authentication."
+                return result
+            if verify_ws:
+                rpc = self.rpc_call("session.active_list", {}, timeout_sec=min(int(self.timeout_sec), 5))
+                result["websocketOk"] = bool(rpc.get("ok"))
+                result["features"]["tuiGatewayJsonRpc"] = bool(rpc.get("ok"))
+                result["chatReady"] = bool(rpc.get("ok"))
+                if not rpc.get("ok"):
+                    result["error"] = rpc.get("error") or "Hermes Desktop Backend WebSocket did not accept JSON-RPC."
+            else:
+                result["chatReady"] = True
+                result["features"]["tuiGatewayJsonRpc"] = True
+        except urllib.error.HTTPError as exc:
+            body = ""
+            try:
+                body = exc.read().decode("utf-8", errors="replace")
+            except Exception:
+                body = ""
+            result["status"] = exc.code
+            result["error"] = body[:500] or str(exc)
+        except Exception as exc:
+            result["error"] = str(exc)[:500]
+        return result
+
+
 def discover_api_agents(
     api_url: str | None = None,
     api_key: str | None = None,
@@ -685,7 +1007,7 @@ def discover_api_agents(
     enabled: bool = True,
     timeout_sec: int = 5,
 ) -> list[dict[str, Any]]:
-    """Return an API-backed Hermes agent when the Hermes App/API server is reachable."""
+    """Return an API-backed Hermes agent when the Hermes API Server is reachable."""
     if not enabled:
         return []
 
@@ -718,7 +1040,7 @@ def discover_api_agents(
         "providerType": "runtime",
         "providerAgentId": "default",
         "profile": "default",
-        "name": "Hermes App",
+        "name": "Hermes API",
         "emoji": os.environ.get("VO_HERMES_AGENT_EMOJI", "⚕️"),
         "role": "Hermes Agent",
         "model": model,
@@ -733,4 +1055,52 @@ def discover_api_agents(
         "connectionModes": ["api"],
         "cliAvailable": False,
         "apiAvailable": True,
+    }]
+
+
+def discover_desktop_agents(
+    desktop_url: str | None = None,
+    desktop_token: str | None = None,
+    desktop_host_header: str | None = None,
+    *,
+    enabled: bool = True,
+    timeout_sec: int = 5,
+) -> list[dict[str, Any]]:
+    """Return a Desktop Backend-backed Hermes agent when `hermes serve` is reachable."""
+    if not enabled or not desktop_url:
+        return []
+
+    client = HermesDesktopBackendClient(
+        base_url=desktop_url,
+        token=desktop_token,
+        host_header=desktop_host_header,
+        timeout_sec=timeout_sec,
+    )
+    status = client.test(verify_ws=False)
+    if not status.get("ok") or status.get("authRequired"):
+        return []
+
+    return [{
+        "id": "hermes-default",
+        "statusKey": "hermes-default",
+        "providerKind": "hermes",
+        "providerType": "runtime",
+        "providerAgentId": "default",
+        "profile": "default",
+        "name": "Hermes Desktop",
+        "emoji": os.environ.get("VO_HERMES_AGENT_EMOJI", "⚕️"),
+        "role": "Hermes Agent",
+        "model": status.get("model") or "Hermes Desktop",
+        "provider": "Hermes Desktop Backend",
+        "gateway": "desktop",
+        "workspace": "",
+        "home": status.get("hermesHome") or "",
+        "binary": "",
+        "desktopUrl": client.base_url,
+        "lastActiveAt": int(time.time()),
+        "capabilities": ["chat", "status", "sessions", "desktop"],
+        "connectionModes": ["desktop"],
+        "cliAvailable": False,
+        "apiAvailable": False,
+        "desktopAvailable": True,
     }]

@@ -12687,6 +12687,7 @@ function _mmLoadCurrentSettings() {
         var hermesBin = document.getElementById('mm-hermes-bin');
         var hermesApiUrl = document.getElementById('mm-hermes-api-url');
         var hermesApiKey = document.getElementById('mm-hermes-api-key');
+        var hermesDesktopUrl = document.getElementById('mm-hermes-desktop-url');
         if (gwInput) gwInput.value = (cfg.openclaw || {}).gatewayUrl || '';
         if (nameInput) nameInput.value = (cfg.office || {}).name || '';
         // Parse "City,State" or "City+Name,State" back into separate fields
@@ -12702,6 +12703,7 @@ function _mmLoadCurrentSettings() {
         if (hermesHome) hermesHome.value = hermesCfg.homePath || '';
         if (hermesBin) hermesBin.value = hermesCfg.binary || '';
         if (hermesApiUrl) hermesApiUrl.value = hermesCfg.apiUrl || '';
+        if (hermesDesktopUrl) hermesDesktopUrl.value = hermesCfg.desktopUrl || '';
         if (hermesApiKey && hermesCfg.apiKeyConfigured) hermesApiKey.placeholder = 'Configured - leave blank to keep';
         // Auto-populate token from /gateway-info (shows current effective token)
         if (tokenInput) {
@@ -12779,20 +12781,21 @@ function mmTestHermes() {
     var homePath = (document.getElementById('mm-hermes-home') || {}).value || '';
     var binary = (document.getElementById('mm-hermes-bin') || {}).value || '';
     var apiUrl = (document.getElementById('mm-hermes-api-url') || {}).value || '';
+    var desktopUrl = (document.getElementById('mm-hermes-desktop-url') || {}).value || '';
     var apiKey = ((document.getElementById('mm-hermes-api-key') || {}).value || '').trim();
     if (!enabled) {
         statusEl.innerHTML = '<div class="mm-status info">Hermes auto-detect is disabled.</div>';
         return;
     }
     statusEl.innerHTML = '<div class="mm-status info">Saving and testing Hermes...</div>';
-    var hermesPayload = { enabled: enabled, homePath: homePath || null, binary: binary || null, apiUrl: apiUrl || null, preferApi: true };
+    var hermesPayload = { enabled: enabled, homePath: homePath || null, binary: binary || null, apiUrl: apiUrl || null, desktopUrl: desktopUrl || null, preferApi: true };
     if (apiKey) hermesPayload.apiKey = apiKey;
     fetch('/setup/save', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ hermes: hermesPayload })
     }).then(function() {
-        var testPayload = { homePath: homePath || null, binary: binary || null, apiUrl: apiUrl || null };
+        var testPayload = { homePath: homePath || null, binary: binary || null, apiUrl: apiUrl || null, desktopUrl: desktopUrl || null };
         if (apiKey) testPayload.apiKey = apiKey;
         return fetch('/api/hermes/test', {
             method: 'POST',
@@ -12803,10 +12806,14 @@ function mmTestHermes() {
         if (d.ok) {
             var count = (d.agents || []).length;
             var api = d.api || {};
+            var desktop = d.desktop || {};
             var cli = d.cli || {};
             var apiLine = api.ok
-                ? '<br>App/API: connected' + (api.model ? ' · ' + escHtml(api.model) : '') + '<br><span style="color:#9bb;">' + escHtml(api.url || '') + '</span>'
-                : '<br>App/API: unavailable' + (api.error ? ' — ' + escHtml(api.error) : '');
+                ? '<br>API Server: connected' + (api.model ? ' · ' + escHtml(api.model) : '') + '<br><span style="color:#9bb;">' + escHtml(api.url || '') + '</span>'
+                : '<br>API Server: unavailable' + (api.error ? ' — ' + escHtml(api.error) : '');
+            var desktopLine = desktop.chatReady
+                ? '<br>Desktop Backend: connected<br><span style="color:#9bb;">' + escHtml(desktop.url || '') + '</span>'
+                : '<br>Desktop Backend: unavailable' + (desktop.error ? ' — ' + escHtml(desktop.error) : '');
             var cliLine = cli.ok
                 ? '<br>CLI: connected' + (cli.agents ? ' · ' + cli.agents.length + ' profile' + (cli.agents.length === 1 ? '' : 's') : '')
                 : '<br>CLI fallback: unavailable' + (cli.error ? ' — ' + escHtml(cli.error) : '');
@@ -12814,7 +12821,7 @@ function mmTestHermes() {
                 var modes = (a.connectionModes || []).join('+') || (a.apiAvailable ? 'api' : 'cli');
                 return (a.emoji || '⚕️') + ' ' + escHtml(a.name) + (a.model ? ' · ' + escHtml(a.model) : '') + ' · ' + escHtml(modes);
             }).join('<br>');
-            statusEl.innerHTML = '<div class="mm-status ok">✅ Hermes connected — ' + count + ' office agent' + (count === 1 ? '' : 's') + apiLine + cliLine + (names ? '<br>' + names : '') + '</div>';
+            statusEl.innerHTML = '<div class="mm-status ok">✅ Hermes connected — ' + count + ' office agent' + (count === 1 ? '' : 's') + apiLine + desktopLine + cliLine + (names ? '<br>' + names : '') + '</div>';
         } else {
             statusEl.innerHTML = '<div class="mm-status err">❌ Hermes not reachable: ' + escHtml(d.error || 'unknown error') + '</div>';
         }
@@ -12990,12 +12997,14 @@ function mmSaveSettings() {
     var _hBin = document.getElementById('mm-hermes-bin');
     var _hApiUrl = document.getElementById('mm-hermes-api-url');
     var _hApiKey = document.getElementById('mm-hermes-api-key');
+    var _hDesktopUrl = document.getElementById('mm-hermes-desktop-url');
     if (_hCb) {
         var hermesSettings = {
             enabled: _hCb.checked,
             homePath: (_hHome ? _hHome.value.trim() : '') || null,
             binary: (_hBin ? _hBin.value.trim() : '') || null,
             apiUrl: (_hApiUrl ? _hApiUrl.value.trim() : '') || null,
+            desktopUrl: (_hDesktopUrl ? _hDesktopUrl.value.trim() : '') || null,
             preferApi: true
         };
         var hermesApiKey = (_hApiKey ? _hApiKey.value.trim() : '');

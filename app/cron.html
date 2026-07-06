@@ -283,6 +283,7 @@ a:hover { text-decoration: underline; }
 
 <script>
 let GATEWAY_TOKEN = '';
+let GATEWAY_PROTOCOL_VERSION = 4;
 let AGENTS = [];
 let _cronWsPort = 0; // 0 = not yet loaded
 
@@ -293,6 +294,7 @@ let _cronWsPort = 0; // 0 = not yet loaded
     const info = await infoRes.json();
     if (info.token) GATEWAY_TOKEN = info.token;
     if (info.wsPort) _cronWsPort = info.wsPort;
+    if (info.gatewayProtocol) GATEWAY_PROTOCOL_VERSION = Number(info.gatewayProtocol) || 4;
   } catch(e) {
     console.warn('Failed to fetch /gateway-info:', e);
   }
@@ -386,7 +388,7 @@ function sendConnect() {
   ws.send(JSON.stringify({
     type:'req', id, method:'connect',
     params: {
-      minProtocol:4, maxProtocol:4,
+      minProtocol:GATEWAY_PROTOCOL_VERSION, maxProtocol:GATEWAY_PROTOCOL_VERSION,
       client:{id:'openclaw-control-ui',version:'2026.5.27',platform:'web',mode:'webchat'},
       role:'operator', scopes:['operator.read','operator.write','operator.admin'],
       caps:[], commands:[], permissions:{},

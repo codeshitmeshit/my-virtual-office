@@ -35,6 +35,8 @@ try:
 except Exception:
     yaml = None
 
+GATEWAY_PROTOCOL_VERSION = 4
+
 
 def _normalize_presence_entry(entry):
     """Normalize transient gateway/presence state aliases for UI rendering."""
@@ -144,6 +146,9 @@ def _running_in_docker():
 
 def _default_hermes_api_url():
     return "http://host.docker.internal:8642" if _running_in_docker() else "http://127.0.0.1:8642"
+
+def _default_hermes_desktop_url():
+    return ""
 
 def _resolve_config_path():
     """Return path to vo-config.json — prefers /data/ (persistent volume) over /app/ (container layer)."""
@@ -276,6 +281,9 @@ def _load_vo_config():
             "timeoutSec": int(_env_or("VO_HERMES_TIMEOUT_SEC", hermes_cfg.get("timeoutSec", 600))),
             "apiUrl": _env_or("VO_HERMES_API_URL", hermes_cfg.get("apiUrl") or _default_hermes_api_url()),
             "apiKey": _env_or("VO_HERMES_API_KEY", hermes_cfg.get("apiKey", "")),
+            "desktopUrl": _env_or("VO_HERMES_DESKTOP_URL", hermes_cfg.get("desktopUrl") or _default_hermes_desktop_url()),
+            "desktopToken": _env_or("VO_HERMES_DESKTOP_TOKEN", hermes_cfg.get("desktopToken", "")),
+            "desktopHostHeader": _env_or("VO_HERMES_DESKTOP_HOST_HEADER", hermes_cfg.get("desktopHostHeader", "")),
             "preferApi": str(_env_or("VO_HERMES_PREFER_API", hermes_cfg.get("preferApi", True))).lower() not in ("0", "false", "no", "off"),
             "autoStartProfileApis": str(_env_or("VO_HERMES_AUTO_START_PROFILE_APIS", hermes_cfg.get("autoStartProfileApis", True))).lower() not in ("0", "false", "no", "off"),
             "autoStartDefaultApi": str(_env_or("VO_HERMES_AUTO_START_DEFAULT_API", hermes_cfg.get("autoStartDefaultApi", hermes_cfg.get("autoStartProfileApis", True)))).lower() not in ("0", "false", "no", "off"),
@@ -1613,7 +1621,7 @@ def _save_openclaw_api_key(provider, api_key, profile_id=""):
 from discovery import discover_all_agents, discover_hermes_agents, get_agent_workspace_dir, get_agent_session_id
 from providers.codex import CodexProvider
 from providers.claude_code import ClaudeCodeProvider
-from providers.hermes import HermesApiClient, HermesProvider
+from providers.hermes import HermesApiClient, HermesDesktopBackendClient, HermesProvider
 from license import get_license_status, activate_license, deactivate_license, check_feature, get_agent_limit
 from project_store import MarkdownProjectStore
 
@@ -2498,6 +2506,9 @@ def _discover_roster():
         hermes_enabled=hermes.get("enabled", True),
         hermes_api_url=hermes.get("apiUrl"),
         hermes_api_key=hermes.get("apiKey"),
+        hermes_desktop_url=hermes.get("desktopUrl"),
+        hermes_desktop_token=hermes.get("desktopToken"),
+        hermes_desktop_host_header=hermes.get("desktopHostHeader"),
         hermes_prefer_api=hermes.get("preferApi", True),
         hermes_timeout_sec=int(hermes.get("timeoutSec") or 600),
         codex_home=codex.get("homePath"),
@@ -4418,6 +4429,16 @@ def _hermes_api_client():
     )
 
 
+def _hermes_desktop_client():
+    hermes_cfg = VO_CONFIG.get("hermes", {})
+    return HermesDesktopBackendClient(
+        base_url=hermes_cfg.get("desktopUrl"),
+        token=hermes_cfg.get("desktopToken"),
+        host_header=hermes_cfg.get("desktopHostHeader"),
+        timeout_sec=min(int(hermes_cfg.get("timeoutSec") or 600), 60),
+    )
+
+
 HERMES_PROFILE_API_LOCK = threading.Lock()
 HERMES_PROFILE_API_PROCESSES = {}
 
@@ -4762,6 +4783,35 @@ def _handle_hermes_api_chat(agent, profile, delivery_message, original_message, 
         "error": error_text or None,
         "providerPath": "api",
     }
+
+
+def _handle_hermes_desktop_chat(agent, profile, delivery_message, timeout):
+    """Run a Hermes turn through Desktop's `hermes serve` TUI-gateway backend."""
+    hermes_cfg = VO_CONFIG.get("hermes", {})
+    desktop_url = agent.get("desktopUrl") or hermes_cfg.get("desktopUrl")
+    if not desktop_url:
+        return {"ok": False, "fallback": True, "error": "Hermes Desktop Backend URL is not configured"}
+
+    client = HermesDesktopBackendClient(
+        base_url=desktop_url,
+        token=hermes_cfg.get("desktopToken"),
+        host_header=hermes_cfg.get("desktopHostHeader"),
+        timeout_sec=min(int(timeout or hermes_cfg.get("timeoutSec") or 600), 60),
+    )
+    status = client.test(verify_ws=False)
+    if not status.get("ok"):
+        return {"ok": False, "fallback": True, "error": status.get("error") or "Hermes Desktop Backend is not reachable"}
+    if status.get("authRequired"):
+        return {"ok": False, "fallback": True, "error": "Hermes Desktop Backend is reachable but requires dashboard authentication"}
+
+    result = client.send_chat_message(
+        delivery_message,
+        session_id=_get_hermes_session_id(profile),
+        timeout_sec=int(timeout or hermes_cfg.get("timeoutSec") or 600),
+    )
+    result["providerPath"] = "desktop"
+    result["fallback"] = bool((not result.get("ok")) and (not result.get("reply")))
+    return result
 
 
 def _handle_hermes_run_start(body):
@@ -5117,21 +5167,33 @@ def _handle_hermes_chat(body):
 
         result = None
         used_api = False
+        used_desktop = False
+        desktop_error = ""
         if hermes_cfg.get("preferApi", True) and not yolo_once:
             api_result = _handle_hermes_api_chat(agent, profile, delivery_message, message, timeout)
             if not api_result.get("fallback"):
                 result = api_result
                 used_api = True
 
+        if result is None and not yolo_once and (agent.get("desktopAvailable") or hermes_cfg.get("desktopUrl")):
+            desktop_result = _handle_hermes_desktop_chat(agent, profile, delivery_message, timeout)
+            if not desktop_result.get("fallback"):
+                result = desktop_result
+                used_desktop = True
+            else:
+                desktop_error = desktop_result.get("error") or ""
+
         if result is None:
             gateway_presence.set_manual_override(agent.get("statusKey") or agent.get("id"), "working", "Hermes CLI task")
             result = provider.send_chat_message(profile, delivery_message, session_id=session_id, timeout_sec=timeout, yolo_once=yolo_once)
+            if desktop_error and not result.get("ok"):
+                result["error"] = f"{desktop_error}; {result.get('error') or result.get('stderr') or 'Hermes CLI fallback failed'}"
 
         if result.get("sessionId"):
             _set_hermes_session_id(profile, result.get("sessionId"))
         activity = {"tools": result.get("tools") or [], "thinking": result.get("thinking") or "", "reasoningTokens": result.get("reasoningTokens") or 0}
         active_session_id = result.get("sessionId") or session_id
-        if not used_api and active_session_id:
+        if not used_api and not used_desktop and active_session_id:
             exported = provider.export_session(profile, active_session_id)
             if exported.get("ok"):
                 activity = _extract_hermes_turn_activity(exported.get("session"), delivery_message)
@@ -5140,7 +5202,7 @@ def _handle_hermes_chat(body):
         exit_code = result.get("exitCode")
         task_status = "done" if result.get("ok") else "error"
         task_result = "Hermes reply and session activity collected." if result.get("ok") else (result.get("error") or stderr or "Hermes request failed.")
-        task_tools = [] if used_api else [_hermes_task_breakdown_tool(task_status, task_result)]
+        task_tools = [] if (used_api or used_desktop) else [_hermes_task_breakdown_tool(task_status, task_result)]
         visible_tools = task_tools + (activity.get("tools") or [])
         approval = result.get("approval")
         if not approval:
@@ -5819,31 +5881,53 @@ def _test_hermes_api(api_url=None, api_key=None):
     return result
 
 
+def _test_hermes_desktop(desktop_url=None, desktop_token=None, desktop_host_header=None):
+    client = HermesDesktopBackendClient(
+        base_url=desktop_url,
+        token=desktop_token,
+        host_header=desktop_host_header,
+        timeout_sec=min(int(VO_CONFIG.get("hermes", {}).get("timeoutSec") or 600), 10),
+    )
+    return client.test(verify_ws=True)
+
+
 def _handle_hermes_test(body=None):
-    """Test configured Hermes App/API and CLI connections without changing Hermes state."""
+    """Test configured Hermes API Server, Desktop Backend, and CLI connections."""
     body = body or {}
     hermes_cfg = VO_CONFIG.get("hermes", {})
     hermes_bin = os.path.expanduser(body.get("binary") or hermes_cfg.get("binary") or "~/.local/bin/hermes")
     hermes_home = os.path.expanduser(body.get("homePath") or hermes_cfg.get("homePath") or "~/.hermes")
     api_url = body.get("apiUrl") or hermes_cfg.get("apiUrl") or _default_hermes_api_url()
     api_key = body.get("apiKey") or hermes_cfg.get("apiKey") or ""
+    desktop_url = body.get("desktopUrl") or hermes_cfg.get("desktopUrl") or _default_hermes_desktop_url()
+    desktop_token = body.get("desktopToken") or hermes_cfg.get("desktopToken") or ""
+    desktop_host_header = body.get("desktopHostHeader") or hermes_cfg.get("desktopHostHeader") or ""
 
     cli = HermesProvider(home_path=hermes_home, binary=hermes_bin, enabled=True).test()
     api_status = _test_hermes_api(api_url=api_url, api_key=api_key)
+    desktop_status = _test_hermes_desktop(
+        desktop_url=desktop_url,
+        desktop_token=desktop_token,
+        desktop_host_header=desktop_host_header,
+    )
     agents = discover_hermes_agents(
         hermes_home=hermes_home,
         hermes_bin=hermes_bin,
         enabled=True,
         api_url=api_url,
         api_key=api_key,
+        desktop_url=desktop_url,
+        desktop_token=desktop_token,
+        desktop_host_header=desktop_host_header,
         prefer_api=hermes_cfg.get("preferApi", True),
         timeout_sec=int(hermes_cfg.get("timeoutSec") or 600),
     )
 
     result = {
-        "ok": bool(api_status.get("ok") or cli.get("ok")),
+        "ok": bool(api_status.get("ok") or desktop_status.get("chatReady") or cli.get("ok")),
         "agents": agents,
         "api": api_status,
+        "desktop": desktop_status,
         "cli": {
             "ok": bool(cli.get("ok")),
             "binary": hermes_bin,
@@ -5853,10 +5937,12 @@ def _handle_hermes_test(body=None):
         },
     }
     if not result["ok"]:
-        result["error"] = api_status.get("error") or result["cli"].get("error") or "Hermes is not available"
+        result["error"] = api_status.get("error") or desktop_status.get("error") or result["cli"].get("error") or "Hermes is not available"
 
     profile_apis = {}
     for agent in agents:
+        if not agent.get("apiAvailable"):
+            continue
         profile = agent.get("profile") or agent.get("providerAgentId") or "default"
         try:
             profile_api = _hermes_api_client_for_profile(profile)
@@ -5904,7 +5990,7 @@ def _handle_agent_platforms():
             {
                 "id": "hermes",
                 "label": "Hermes",
-                "description": "Hermes App/API agent with optional CLI profile management",
+                "description": "Hermes API Server or Desktop Backend agent with optional CLI profile management",
                 "providerType": "runtime",
                 "available": bool(hermes_status.get("ok")),
                 "create": hermes_cli_ok,
@@ -5912,6 +5998,7 @@ def _handle_agent_platforms():
                 "error": "" if hermes_status.get("ok") else hermes_status.get("error", "Hermes is not available"),
                 "hermes": {
                     "api": hermes_status.get("api") or {},
+                    "desktop": hermes_status.get("desktop") or {},
                     "cli": hermes_status.get("cli") or {},
                 },
             },
@@ -6361,8 +6448,8 @@ async def _gateway_rpc_call_async(method, params=None, timeout=20):
             "id": connect_id,
             "method": "connect",
             "params": {
-                "minProtocol": 4,
-                "maxProtocol": 4,
+                "minProtocol": GATEWAY_PROTOCOL_VERSION,
+                "maxProtocol": GATEWAY_PROTOCOL_VERSION,
                 "client": {"id": "openclaw-control-ui", "version": _get_openclaw_version(), "platform": "server", "mode": "webchat"},
                 "role": "operator",
                 "scopes": ["operator.read", "operator.write", "operator.admin"],
@@ -8554,7 +8641,7 @@ def _wf_abort_task_session(session_key):
                         "id": "wf-abort-1",
                         "method": "connect",
                         "params": {
-                            "minProtocol": 4, "maxProtocol": 4,
+                            "minProtocol": GATEWAY_PROTOCOL_VERSION, "maxProtocol": GATEWAY_PROTOCOL_VERSION,
                             "client": {"id": "vo-workflow", "version": "1.0", "platform": "server", "mode": "webchat"},
                             "role": "operator",
                             "scopes": ["operator.read", "operator.write"],
@@ -8644,7 +8731,7 @@ def _wf_delete_session_via_gateway(session_key):
                         "id": "wf-cleanup-1",
                         "method": "connect",
                         "params": {
-                            "minProtocol": 4, "maxProtocol": 4,
+                            "minProtocol": GATEWAY_PROTOCOL_VERSION, "maxProtocol": GATEWAY_PROTOCOL_VERSION,
                             "client": {"id": "vo-workflow", "version": "1.0", "platform": "server", "mode": "webchat"},
                             "role": "operator",
                             "scopes": ["operator.read", "operator.write"],
@@ -8854,8 +8941,8 @@ def _wf_call_agent_ws(agent_id, message, timeout, session_key=None):
                 "id": connect_id,
                 "method": "connect",
                 "params": {
-                    "minProtocol": 4,
-                    "maxProtocol": 4,
+                    "minProtocol": GATEWAY_PROTOCOL_VERSION,
+                    "maxProtocol": GATEWAY_PROTOCOL_VERSION,
                     "client": {"id": "openclaw-control-ui", "version": _get_openclaw_version(), "platform": "web", "mode": "webchat"},
                     "role": "operator",
                     "scopes": ["operator.read", "operator.write", "operator.admin"],
@@ -11228,6 +11315,7 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                 "wsPort": WS_PORT,
                 "token": _get_gateway_token(),
                 "openclawVersion": _get_openclaw_version(),
+                "gatewayProtocol": GATEWAY_PROTOCOL_VERSION,
             }).encode())
         elif request_path == "/api/session-activity":
             self.send_response(200)
@@ -11899,6 +11987,9 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                     "timeoutSec": VO_CONFIG.get("hermes", {}).get("timeoutSec", 600),
                     "apiUrl": VO_CONFIG.get("hermes", {}).get("apiUrl"),
                     "apiKeyConfigured": bool(VO_CONFIG.get("hermes", {}).get("apiKey")),
+                    "desktopUrl": VO_CONFIG.get("hermes", {}).get("desktopUrl"),
+                    "desktopTokenConfigured": bool(VO_CONFIG.get("hermes", {}).get("desktopToken")),
+                    "desktopHostHeader": VO_CONFIG.get("hermes", {}).get("desktopHostHeader"),
                     "preferApi": VO_CONFIG.get("hermes", {}).get("preferApi", True),
                     "detected": bool(_handle_hermes_test().get("ok")),
                 },
@@ -13252,8 +13343,12 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                         # native Hermes API auth.
                         if not hermes_body.get("apiKey") and existing[key].get("apiKey"):
                             hermes_body.pop("apiKey", None)
+                        if not hermes_body.get("desktopToken") and existing[key].get("desktopToken"):
+                            hermes_body.pop("desktopToken", None)
                         if not hermes_body.get("apiUrl") and existing[key].get("apiUrl"):
                             hermes_body.pop("apiUrl", None)
+                        if not hermes_body.get("desktopUrl") and existing[key].get("desktopUrl"):
+                            hermes_body.pop("desktopUrl", None)
                         existing[key].update(hermes_body)
                         continue
                     if isinstance(body[key], dict) and isinstance(existing.get(key), dict):
@@ -14204,7 +14299,7 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                             "id": "gw-test-1",
                             "method": "connect",
                             "params": {
-                                "minProtocol": 4, "maxProtocol": 4,
+                                "minProtocol": GATEWAY_PROTOCOL_VERSION, "maxProtocol": GATEWAY_PROTOCOL_VERSION,
                                 "client": {"id": "openclaw-control-ui", "version": _get_openclaw_version(), "platform": "server", "mode": "webchat"},
                                 "role": "operator",
                                 "scopes": ["operator.read"],
