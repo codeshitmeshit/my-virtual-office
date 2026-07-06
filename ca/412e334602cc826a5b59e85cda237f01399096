@@ -1,0 +1,21 @@
+app/chat.js
+  s_e06cfbea6b95ec::t_4dfccfdf77775c 1082-1089
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "ca412e334602cc826a5b59e85cda237f01399096",
+  "prompts": {},
+  "sessions": {
+    "s_e06cfbea6b95ec": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f3713-e932-7e01-9821-02146559c30c",
+        "model": "unknown"
+      },
+      "human_author": "codeshitmeshit <codeshitmeshit@126.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
