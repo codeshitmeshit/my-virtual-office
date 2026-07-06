@@ -66,7 +66,8 @@ const requiredSetupIds = [
 ];
 
 const requiredGameSnippets = [
-  'config.hermes.apiKey',
+  'hermesSettings.apiKey',
+  'config.hermes = hermesSettings',
   'config.codex = {',
   'config.claudeCode = {',
   "fetch('/api/codex/test'",

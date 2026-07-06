@@ -847,7 +847,7 @@ def _persist_setup_payload(body):
     cfg_path = _resolve_config_path()
     data_dir = os.environ.get("VO_STATUS_DIR", "/data")
     persistent_path = os.path.join(data_dir, "vo-config.json")
-    if os.path.isdir(data_dir) and cfg_path != persistent_path:
+    if not os.environ.get("VO_CONFIG") and os.path.isdir(data_dir) and cfg_path != persistent_path:
         cfg_path = persistent_path
     existing = {}
     for try_path in [cfg_path, os.path.join(os.path.dirname(__file__), "vo-config.json")]:

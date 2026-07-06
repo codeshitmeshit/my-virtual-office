@@ -62,6 +62,59 @@ def test_setup_config_merge_preserves_provider_secrets_and_strips_codex_demo_rep
     assert "_ignored" not in merged
 
 
+def test_persist_setup_payload_writes_explicit_vo_config_path_for_feature_settings():
+    old_env_config = os.environ.get("VO_CONFIG")
+    old_env_status = os.environ.get("VO_STATUS_DIR")
+    old_config = server.VO_CONFIG
+    old_workspace_base = server.WORKSPACE_BASE
+    old_discover = server._discover_roster
+    old_refresh = server.refresh_agent_maps
+    old_gateway_stop = server.gateway_presence.stop
+    old_gateway_start = server.gateway_presence.start
+    with tempfile.TemporaryDirectory(prefix="vo-explicit-config-") as tmp:
+        explicit_dir = os.path.join(tmp, "explicit")
+        status_dir = os.path.join(tmp, "status")
+        os.makedirs(explicit_dir)
+        os.makedirs(status_dir)
+        explicit_path = os.path.join(explicit_dir, "vo-config.json")
+        status_path = os.path.join(status_dir, "vo-config.json")
+        with open(explicit_path, "w", encoding="utf-8") as f:
+            json.dump({
+                "_setupComplete": True,
+                "openclaw": {"homePath": "/tmp/openclaw"},
+                "features": {"shiftEnterToSend": False},
+            }, f)
+        os.environ["VO_CONFIG"] = explicit_path
+        os.environ["VO_STATUS_DIR"] = status_dir
+        server._discover_roster = lambda: []
+        server.refresh_agent_maps = lambda: None
+        server.gateway_presence.stop = lambda: None
+        server.gateway_presence.start = lambda *args, **kwargs: None
+        try:
+            result = server._persist_setup_payload({"features": {"shiftEnterToSend": True}})
+            assert result["ok"] is True
+            with open(explicit_path, "r", encoding="utf-8") as f:
+                explicit_saved = json.load(f)
+            assert explicit_saved["features"]["shiftEnterToSend"] is True
+            assert not os.path.exists(status_path)
+            assert server.VO_CONFIG["features"]["shiftEnterToSend"] is True
+        finally:
+            if old_env_config is None:
+                os.environ.pop("VO_CONFIG", None)
+            else:
+                os.environ["VO_CONFIG"] = old_env_config
+            if old_env_status is None:
+                os.environ.pop("VO_STATUS_DIR", None)
+            else:
+                os.environ["VO_STATUS_DIR"] = old_env_status
+            server.VO_CONFIG = old_config
+            server.WORKSPACE_BASE = old_workspace_base
+            server._discover_roster = old_discover
+            server.refresh_agent_maps = old_refresh
+            server.gateway_presence.stop = old_gateway_stop
+            server.gateway_presence.start = old_gateway_start
+
+
 def test_safe_vo_config_round_trips_provider_fields_without_secret_exposure():
     old_config = server.VO_CONFIG
     old_license = server.get_license_status
@@ -306,6 +359,7 @@ def test_load_vo_config_ignores_persisted_codex_reply_text_unless_env_set():
 
 if __name__ == "__main__":
     test_setup_config_merge_preserves_provider_secrets_and_strips_codex_demo_reply()
+    test_persist_setup_payload_writes_explicit_vo_config_path_for_feature_settings()
     test_safe_vo_config_round_trips_provider_fields_without_secret_exposure()
     test_model_provider_config_includes_safe_native_runtime_status()
     test_load_vo_config_accepts_hermes_prefer_api_alias_and_env_override()

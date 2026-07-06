@@ -14911,7 +14911,9 @@ function mmSaveSettings() {
             apiEnabled: _hApiEnabled ? _hApiEnabled.checked : false,
             apiUrl: (_hApiUrl ? _hApiUrl.value.trim() : '') || null
         };
-        if (_hApiKey && _hApiKey.value.trim()) config.hermes.apiKey = _hApiKey.value.trim();
+        var hermesApiKey = (_hApiKey ? _hApiKey.value.trim() : '');
+        if (hermesApiKey) hermesSettings.apiKey = hermesApiKey;
+        config.hermes = hermesSettings;
     }
     var _codexCb = document.getElementById('mm-codex-enable');
     if (_codexCb) {
@@ -14940,9 +14942,6 @@ function mmSaveSettings() {
             includeNativeAgents: !!(document.getElementById('mm-claude-code-include-native') || {}).checked,
             registerNativeAgents: !!(document.getElementById('mm-claude-code-register-native') || {}).checked
         };
-        var hermesApiKey = (_hApiKey ? _hApiKey.value.trim() : '');
-        if (hermesApiKey) hermesSettings.apiKey = hermesApiKey;
-        config.hermes = hermesSettings;
     }
     config.office = { name: officeName || 'Virtual Office' };
     config.weather = { location: weather || null };

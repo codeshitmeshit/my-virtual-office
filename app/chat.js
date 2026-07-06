@@ -787,6 +787,7 @@
             this.codexRunStatusCards.clear();
             const progressById = new Map();
             const renderedHistoryKeys = new Set();
+            const renderQueue = [];
             for (const event of data.events) {
               const codexMeta = event.metadata?.codex || event.metadata || {};
               if (codexMeta.ephemeral === 'codex-progress') {
@@ -822,14 +823,21 @@
               ].join('\u0001');
               if (renderedHistoryKeys.has(historyKey)) continue;
               renderedHistoryKeys.add(historyKey);
-              this.appendMessage(role, text, event.ts || Date.now(), [], role === 'assistant'
+              const ts = Number(event.ts || Date.now());
+              const meta = role === 'assistant'
                 ? { label: this.agentSelect.selectedOptions[0]?.textContent.trim() || 'Codex', kind: 'agent' }
-                : { label: event.from?.name || _ct('chat_you_label'), kind: 'human' });
+                : { label: event.from?.name || _ct('chat_you_label'), kind: 'human' };
+              renderQueue.push({
+                ts,
+                render: () => this.appendMessage(role, text, ts, [], meta)
+              });
             }
+            renderQueue.push(...await this.collectFeishuChannelHistory(agentId, renderedHistoryKeys));
+            renderQueue.sort((a, b) => Number(a.ts || 0) - Number(b.ts || 0));
+            for (const item of renderQueue) item.render();
             for (const progress of progressById.values()) {
               this.restoreProviderProgress(progress, 'codex');
             }
-            await this.appendFeishuChannelHistory(agentId, renderedHistoryKeys);
             this.scrollBottom();
             this.setStatus(_ct('codex_ready'), 'connected');
           }
@@ -881,6 +889,7 @@
             this.applySessionMetrics(data);
             this.messages.innerHTML = '';
             const renderedHistoryKeys = new Set();
+            const renderQueue = [];
             for (const msg of providerMessages) {
               if (msg.ephemeral === 'hermes-progress' || msg.ephemeral === 'claude-code-progress') {
                 this.restoreProviderProgress(msg, this.isClaudeCodeSelected() ? 'claude-code' : 'hermes');
@@ -904,10 +913,17 @@
                 const meta = role === 'assistant'
                   ? { ...resolveMessageSender(msg, this), label: msg.from || resolveMessageSender(msg, this).label, thinking: visibleProviderThinking(providerKind, msg.thinking, msg.status), reasoningTokens: msg.reasoningTokens || 0, approval: msg.approval || null }
                   : { label: msg.from || _ct('chat_you_label'), kind: msg.fromAgentId && msg.fromAgentId !== 'user' ? 'agent' : 'human' };
-                this.appendMessage(role, text, msg.epochMs || msg.ts || Date.now(), attachments, meta, normalizeHermesTools(msg.tools || []));
+                const ts = Number(msg.epochMs || msg.ts || Date.now());
+                const tools = normalizeHermesTools(msg.tools || []);
+                renderQueue.push({
+                  ts,
+                  render: () => this.appendMessage(role, text, ts, attachments, meta, tools)
+                });
               }
             }
-            if (!usingMergedAgentHistory) await this.appendFeishuChannelHistory(this.getSelectedAgentId() || this.selectedAgentKey, renderedHistoryKeys);
+            if (!usingMergedAgentHistory) renderQueue.push(...await this.collectFeishuChannelHistory(this.getSelectedAgentId() || this.selectedAgentKey, renderedHistoryKeys));
+            renderQueue.sort((a, b) => Number(a.ts || 0) - Number(b.ts || 0));
+            for (const item of renderQueue) item.render();
             this.scrollBottomAfterLayout();
           }
           if (this.isHermesSelected()) await this.pollHermesApproval().catch(() => {});
@@ -975,14 +991,14 @@
       this.feishuLiveStatus.title = detail || '';
     }
 
-    async appendFeishuChannelHistory(agentId, renderedHistoryKeys = new Set()) {
+    async collectFeishuChannelHistory(agentId, renderedHistoryKeys = new Set()) {
       agentId = String(agentId || '').trim();
-      if (!agentId) return;
+      if (!agentId) return [];
       try {
         const query = new URLSearchParams({ agentId, limit: '500' });
         const res = await fetch('/api/agent-platform-communications/history?' + query.toString());
         const data = await res.json();
-        if (!data.ok || !Array.isArray(data.events)) return;
+        if (!data.ok || !Array.isArray(data.events)) return [];
         const rows = data.events.filter(event => {
           const meta = event && typeof event.metadata === 'object' ? event.metadata : {};
           const fromRef = event && typeof event.from === 'object' ? event.from : {};
@@ -995,6 +1011,7 @@
             String(event.conversationId || '').startsWith('feishu-dm:')
           );
         }).sort((a, b) => Number(a.ts || 0) - Number(b.ts || 0));
+        const items = [];
         for (const event of rows) {
           const eventMeta = event && typeof event.metadata === 'object' ? event.metadata : {};
           const attachments = Array.isArray(event.attachments)
@@ -1018,11 +1035,23 @@
           const meta = role === 'assistant'
             ? { label: this.agentSelect.selectedOptions[0]?.textContent.trim() || agentId, kind: 'agent' }
             : { label: event.from?.name || 'Feishu', kind: 'human' };
-          this.appendMessage(role, text, event.ts || Date.now(), attachments, meta);
+          const ts = Number(event.ts || Date.now());
+          items.push({
+            ts,
+            render: () => this.appendMessage(role, text, ts, attachments, meta)
+          });
         }
+        return items;
       } catch (e) {
         console.warn('[chat] Failed to load Feishu channel history:', e);
+        return [];
       }
+    }
+
+    async appendFeishuChannelHistory(agentId, renderedHistoryKeys = new Set()) {
+      const items = await this.collectFeishuChannelHistory(agentId, renderedHistoryKeys);
+      items.sort((a, b) => Number(a.ts || 0) - Number(b.ts || 0));
+      for (const item of items) item.render();
     }
 
     async loadRecoveredActivity(seenToolKeys = new Set()) {
