@@ -6,6 +6,8 @@ import sys
 import tempfile
 import time
 import io
+import json
+import types
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 APP_DIR = os.path.join(ROOT, "app")
@@ -19,6 +21,35 @@ os.environ["VO_CODEX_ENABLED"] = "0"
 os.environ["VO_CLAUDE_CODE_ENABLED"] = "0"
 
 import server
+
+
+def call_office_handler(server, method, path, body=None, headers=None):
+    payload = json.dumps(body).encode("utf-8") if body is not None else b""
+    handler = server.OfficeHandler.__new__(server.OfficeHandler)
+    handler.path = path
+    handler.headers = {"Content-Length": str(len(payload)), **(headers or {})}
+    handler.rfile = io.BytesIO(payload)
+    handler.wfile = io.BytesIO()
+    handler._status = None
+    handler._headers = []
+
+    def send_response(self, status, message=None):
+        self._status = status
+
+    def send_header(self, key, value):
+        self._headers.append((key, value))
+
+    def end_headers(self):
+        return None
+
+    handler.send_response = types.MethodType(send_response, handler)
+    handler.send_header = types.MethodType(send_header, handler)
+    handler.end_headers = types.MethodType(end_headers, handler)
+    if method == "POST":
+        server.OfficeHandler.do_POST(handler)
+    else:
+        server.OfficeHandler.do_GET(handler)
+    return handler._status, json.loads(handler.wfile.getvalue().decode("utf-8"))
 
 
 class FakeHermesProvider:
@@ -110,6 +141,7 @@ def install_native_fakes(api_mode="success"):
         "config": server.VO_CONFIG,
         "roster": server.get_roster,
         "status_dir": server.STATUS_DIR,
+        "license": server.get_license_status,
     }
     FakeHermesProvider.chats = []
     FakeHermesApiClient.calls = []
@@ -120,6 +152,7 @@ def install_native_fakes(api_mode="success"):
     server.HermesProvider = FakeHermesProvider
     server.HermesApiClient = FakeHermesApiClient
     server.get_roster = lambda: [AGENT]
+    server.get_license_status = lambda: {"licensed": True, "tier": "DEV", "tierName": "Developer Mode", "demo": False, "limits": None}
     server.VO_CONFIG = {
         **server.VO_CONFIG,
         "hermes": {
@@ -141,6 +174,7 @@ def restore_native_fakes(old):
     server.VO_CONFIG = old["config"]
     server.get_roster = old["roster"]
     server.STATUS_DIR = old["status_dir"]
+    server.get_license_status = old["license"]
 
 
 def test_hermes_test_reports_native_api_without_exposing_key():
@@ -303,6 +337,82 @@ def test_feishu_card_action_can_approve_hermes_native_approval():
         assert pending["pending"] is None
     finally:
         server.send_feishu_notification = old_send
+        restore_native_fakes(old)
+
+
+def test_hermes_feishu_e2e_routes_create_and_approve_via_http():
+    old = install_native_fakes("success")
+    old_send = server.send_feishu_notification
+    sent = []
+    try:
+        def fake_send(intent, **kwargs):
+            sent.append({"intent": intent, "kwargs": kwargs})
+            return {"ok": True, "status": "sent", "record": {"id": intent["id"]}}
+
+        server.send_feishu_notification = fake_send
+        status, created = call_office_handler(server, "POST", "/api/hermes/approval/feishu-e2e-create", {
+            "agentId": "hermes-default",
+            "suffix": "route-http",
+            "command": "touch /tmp/vo-hermes-feishu-e2e-route-http",
+        })
+        assert status == 200
+        assert created["ok"] is True
+        approval = created["approval"]
+        assert approval["approval_id"] == "hermes-feishu-e2e-route-http"
+        assert approval["feishuNotification"]["status"] == "sent"
+        assert sent[0]["intent"]["target"] == "feishu-hermes-approval"
+
+        status, action = call_office_handler(server, "POST", "/api/hermes/approval/feishu-e2e-action", {
+            "schema": "2.0",
+            "header": {"event_type": "card.action.trigger"},
+            "event": {
+                "operator": {"open_id": "ou_route_approver"},
+                "open_message_id": "om_route_approval",
+                "action": {
+                    "value": {
+                        "action": "hermes_approval_approve_once",
+                        "approval_id": approval["approval_id"],
+                        "agent_id": "hermes-default",
+                        "session_id": approval["session_id"],
+                        "run_id": approval["runId"],
+                    }
+                },
+            },
+        })
+        assert status == 200
+        assert action["ok"] is True
+        assert action["outcome"]["businessStatus"] == "approved_once"
+        assert {"respond_approval": approval["runId"], "choice": "once"} in FakeHermesApiClient.calls
+        pending = server._get_hermes_approval_pending("hermes-default", approval["session_id"])
+        assert pending["pending"] is None
+
+        with open(os.path.join(server.STATUS_DIR, "feishu-card-actions.jsonl"), "r", encoding="utf-8") as f:
+            rows = [json.loads(line) for line in f if line.strip()]
+        assert rows[-1]["action"] == "hermes_approval_approve_once"
+        assert rows[-1]["outcome"]["businessStatus"] == "approved_once"
+    finally:
+        server.send_feishu_notification = old_send
+        restore_native_fakes(old)
+
+
+def test_hermes_feishu_e2e_action_route_rejects_non_test_approval_ids():
+    old = install_native_fakes("success")
+    try:
+        status, result = call_office_handler(server, "POST", "/api/hermes/approval/feishu-e2e-action", {
+            "schema": "2.0",
+            "event": {
+                "action": {
+                    "value": {
+                        "action": "hermes_approval_approve_once",
+                        "approval_id": "real-approval-id",
+                        "agent_id": "hermes-default",
+                    }
+                }
+            },
+        })
+        assert status == 403
+        assert result["ok"] is False
+    finally:
         restore_native_fakes(old)
 
 
@@ -535,6 +645,8 @@ if __name__ == "__main__":
     test_hermes_chat_native_approval_records_pending_without_cli_fallback()
     test_hermes_native_approval_sends_feishu_notification_once()
     test_feishu_card_action_can_approve_hermes_native_approval()
+    test_hermes_feishu_e2e_routes_create_and_approve_via_http()
+    test_hermes_feishu_e2e_action_route_rejects_non_test_approval_ids()
     test_hermes_chat_falls_back_to_cli_when_native_api_unavailable()
     test_hermes_history_clear_is_conversation_scoped()
     test_hermes_run_start_publishes_provider_bridge_events()

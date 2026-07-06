@@ -4322,6 +4322,81 @@ def _send_hermes_approval_feishu_notification(approval):
     )
 
 
+def _hermes_feishu_e2e_routes_enabled():
+    if str(os.environ.get("VO_ENABLE_E2E_TEST_ROUTES") or "").strip() == "1":
+        return True
+    try:
+        status = get_license_status()
+        return str(status.get("tier") or "").upper() == "DEV" or str(status.get("tierName") or "").lower().startswith("developer")
+    except Exception:
+        return False
+
+
+def _handle_hermes_approval_feishu_e2e_create(body):
+    if not _hermes_feishu_e2e_routes_enabled():
+        return {"ok": False, "error": "Hermes Feishu approval e2e test route is disabled", "_status": 403}
+    body = body if isinstance(body, dict) else {}
+    agent_key = str(body.get("agentId") or body.get("agent_id") or "hermes-default").strip()
+    agent = _get_hermes_agent(agent_key)
+    if not agent:
+        return {"ok": False, "error": f"Hermes agent '{agent_key}' not found", "_status": 404}
+    profile = agent.get("profile") or agent.get("providerAgentId") or "default"
+    suffix = str(body.get("suffix") or uuid.uuid4().hex[:10]).strip()
+    suffix = re.sub(r"[^A-Za-z0-9_.-]+", "-", suffix).strip("-.")[:48] or uuid.uuid4().hex[:10]
+    approval_id = f"hermes-feishu-e2e-{suffix}"
+    run_id = str(body.get("runId") or body.get("run_id") or f"run-{approval_id}").strip()
+    session_id = str(body.get("sessionId") or body.get("session_id") or f"session-{approval_id}").strip()
+    command = str(body.get("command") or "touch /tmp/vo-hermes-feishu-approval-e2e-marker").strip()
+    approval = _remember_hermes_approval_pending(
+        {
+            "id": approval_id,
+            "approval_id": approval_id,
+            "provider": "hermes-api",
+            "kind": "dangerous_command",
+            "title": "Hermes dangerous command approval test",
+            "description": "Hermes dangerous command approval Feishu e2e test.",
+            "command": command,
+            "message": str(body.get("message") or "Hermes Feishu approval e2e test").strip(),
+            "agentId": agent.get("id") or agent_key,
+            "profile": profile,
+            "session_id": session_id,
+            "runId": run_id,
+            "choices": ["once", "deny"],
+            "status": "pending",
+            "createdAt": int(time.time() * 1000),
+            "e2eTest": True,
+        },
+        agent_id=agent.get("id") or agent_key,
+        profile=profile,
+        session_id=session_id,
+    )
+    return {
+        "ok": True,
+        "approval": approval,
+        "agentId": agent.get("id") or agent_key,
+        "profile": profile,
+        "sessionId": session_id,
+        "runId": run_id,
+        "feishuNotification": (approval or {}).get("feishuNotification"),
+    }
+
+
+def _handle_hermes_approval_feishu_e2e_action(body):
+    if not _hermes_feishu_e2e_routes_enabled():
+        return {"ok": False, "error": "Hermes Feishu approval e2e test route is disabled", "_status": 403}
+    if not isinstance(body, dict):
+        return {"ok": False, "error": "Invalid Feishu callback body", "_status": 400}
+    event = body.get("event") if isinstance(body.get("event"), dict) else body
+    value = _feishu_card_action_value(event)
+    action = str(value.get("action") or "").strip()
+    approval_id = str(value.get("approval_id") or value.get("approvalId") or "").strip()
+    if action not in {"hermes_approval_approve_once", "hermes_approval_deny"}:
+        return {"ok": False, "error": "Only Hermes approval actions are allowed", "_status": 400}
+    if not approval_id.startswith("hermes-feishu-e2e-"):
+        return {"ok": False, "error": "Only Hermes Feishu e2e approvals can use this test route", "_status": 403}
+    return _handle_feishu_card_action(body)
+
+
 def _remember_hermes_approval_pending(approval, agent_id="", profile="", session_id=""):
     if not isinstance(approval, dict):
         return None
@@ -27696,6 +27771,34 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             self.end_headers()
             result.pop("_status", None)
             self.wfile.write(json.dumps(result).encode())
+            return
+        elif self.path == "/api/hermes/approval/feishu-e2e-create":
+            length = int(self.headers.get('Content-Length', 0))
+            try:
+                body = json.loads(self.rfile.read(length)) if length else {}
+                result = _handle_hermes_approval_feishu_e2e_create(body)
+            except json.JSONDecodeError as e:
+                result = {"ok": False, "error": f"Invalid JSON: {str(e)}", "_status": 400}
+            self.send_response(result.get("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            result.pop("_status", None)
+            self.wfile.write(json.dumps(result, ensure_ascii=False).encode())
+            return
+        elif self.path == "/api/hermes/approval/feishu-e2e-action":
+            length = int(self.headers.get('Content-Length', 0))
+            try:
+                body = json.loads(self.rfile.read(length)) if length else {}
+                result = _handle_hermes_approval_feishu_e2e_action(body)
+            except json.JSONDecodeError as e:
+                result = {"ok": False, "error": f"Invalid JSON: {str(e)}", "_status": 400}
+            self.send_response(result.get("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            result.pop("_status", None)
+            self.wfile.write(json.dumps(result, ensure_ascii=False).encode())
             return
         elif self.path == "/api/hermes/history/clear":
             length = int(self.headers.get('Content-Length', 0))
