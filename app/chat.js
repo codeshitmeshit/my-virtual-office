@@ -1079,7 +1079,14 @@
 
     async newSession() {
       const agentName = this.agentSelect.selectedOptions[0]?.textContent.trim() || 'this agent';
-      if (!confirm(_ct('new_session_confirm', { agent: agentName }))) return;
+      const shouldStart = await showChatConfirmDialog({
+        title: _ct('chat_new_session'),
+        message: _ct('new_session_confirm', { agent: agentName }),
+        confirmLabel: _ct('chat_new_session'),
+        cancelLabel: _ct('cancel'),
+        emoji: '🔄'
+      });
+      if (!shouldStart) return;
       if (this.isCodexSelected()) {
         const oldConversationId = this.getCodexConversationId();
         try {
