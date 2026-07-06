@@ -4044,7 +4044,7 @@ def _hermes_api_approval_from_event(event, agent_id="", profile="", session_id="
         "profile": profile or "default",
         "session_id": session_id or "",
         "runId": run_id,
-        "choices": event.get("choices") or ["approve_once", "deny"],
+        "choices": event.get("choices") or ["once", "session", "always", "deny"],
     }
 
 
@@ -4243,12 +4243,24 @@ def _hermes_approval_key(agent_id="", profile="", session_id=""):
 def _normalize_hermes_approval_choice(choice):
     choice = str(choice or "").strip().lower()
     return {
-        "once": "approve_once",
-        "allow_once": "approve_once",
-        "approve": "approve_once",
-        "approved_once": "approve_once",
+        "approve_once": "once",
+        "allow_once": "once",
+        "approved_once": "once",
+        "approve": "once",
+        "allow": "once",
+        "yes": "once",
+        "ok": "once",
+        "allow_session": "session",
+        "approve_session": "session",
+        "session_allow": "session",
+        "allow_always": "always",
+        "approve_always": "always",
+        "permanent": "always",
+        "forever": "always",
         "no": "deny",
         "denied": "deny",
+        "reject": "deny",
+        "cancel": "deny",
     }.get(choice, choice)
 
 
@@ -4286,9 +4298,31 @@ def _send_hermes_approval_feishu_notification(approval):
         "actions": [
             {
                 "category": "confirm",
-                "text": "同意本次",
+                "text": "允许一次",
                 "value": {
-                    "action": "hermes_approval_approve_once",
+                    "action": "hermes_approval_once",
+                    "approval_id": approval_id,
+                    "agent_id": agent_id,
+                    "session_id": session_id,
+                    "run_id": run_id,
+                },
+            },
+            {
+                "category": "confirm",
+                "text": "本会话允许",
+                "value": {
+                    "action": "hermes_approval_session",
+                    "approval_id": approval_id,
+                    "agent_id": agent_id,
+                    "session_id": session_id,
+                    "run_id": run_id,
+                },
+            },
+            {
+                "category": "confirm",
+                "text": "永久允许",
+                "value": {
+                    "action": "hermes_approval_always",
                     "approval_id": approval_id,
                     "agent_id": agent_id,
                     "session_id": session_id,
@@ -4361,7 +4395,7 @@ def _handle_hermes_approval_feishu_e2e_create(body):
             "profile": profile,
             "session_id": session_id,
             "runId": run_id,
-            "choices": ["once", "deny"],
+            "choices": ["once", "session", "always", "deny"],
             "status": "pending",
             "createdAt": int(time.time() * 1000),
             "e2eTest": True,
@@ -4390,7 +4424,7 @@ def _handle_hermes_approval_feishu_e2e_action(body):
     value = _feishu_card_action_value(event)
     action = str(value.get("action") or "").strip()
     approval_id = str(value.get("approval_id") or value.get("approvalId") or "").strip()
-    if action not in {"hermes_approval_approve_once", "hermes_approval_deny"}:
+    if action not in {"hermes_approval_once", "hermes_approval_approve_once", "hermes_approval_session", "hermes_approval_always", "hermes_approval_deny"}:
         return {"ok": False, "error": "Only Hermes approval actions are allowed", "_status": 400}
     if not approval_id.startswith("hermes-feishu-e2e-"):
         return {"ok": False, "error": "Only Hermes Feishu e2e approvals can use this test route", "_status": 403}
@@ -4526,12 +4560,18 @@ def _detect_hermes_approval_request(reply="", stderr="", original_message="", ag
         "command": command or "Approval-gated Hermes command",
         "message": original_message,
         "agentId": agent_key,
-        "choices": ["approve_once", "deny"],
+        "choices": ["once", "session", "always", "deny"],
     }
 
 
 def _approval_result_message(approval, choice):
-    label = "approved once and retried" if choice == "approve_once" else "denied"
+    labels = {
+        "once": "approved once and retried",
+        "session": "approved for this session",
+        "always": "approved permanently",
+        "deny": "denied",
+    }
+    label = labels.get(choice, str(choice or "resolved"))
     return {
         "role": "assistant",
         "text": "",
@@ -4732,7 +4772,7 @@ def _hermes_api_approval_from_event(event, agent_id="", profile="", session_id="
         "profile": profile or "default",
         "session_id": session_id or "",
         "runId": run_id,
-        "choices": event.get("choices") or ["once", "deny"],
+        "choices": event.get("choices") or ["once", "session", "always", "deny"],
         "status": "pending",
         "createdAt": int(time.time() * 1000),
     }
@@ -5296,8 +5336,8 @@ def _handle_claude_code_test(body=None):
 def _handle_hermes_approval_respond(body):
     approval = body.get("approval") if isinstance(body.get("approval"), dict) else {}
     choice = _normalize_hermes_approval_choice(body.get("choice") or body.get("action") or "")
-    if choice not in {"approve_once", "deny"}:
-        return {"ok": False, "error": "choice must be approve_once or deny", "_status": 400}
+    if choice not in {"once", "session", "always", "deny"}:
+        return {"ok": False, "error": "choice must be once, session, always, or deny", "_status": 400}
     agent_key = body.get("agentId") or approval.get("agentId") or "hermes-default"
     approval_id = str(body.get("approval_id") or body.get("approvalId") or approval.get("approval_id") or approval.get("id") or "").strip()
     session_id = str(body.get("session_id") or body.get("sessionId") or approval.get("session_id") or approval.get("sessionId") or "").strip()
@@ -5311,10 +5351,9 @@ def _handle_hermes_approval_respond(body):
     profile = agent.get("profile") or agent.get("providerAgentId") or "default"
     if approval.get("provider") == "hermes-api" and approval.get("runId"):
         run_id = str(approval.get("runId"))
-        api_choice = "deny" if choice == "deny" else "once"
         try:
             client = _hermes_api_client_for_profile(profile)
-            approved = client.respond_approval(run_id, api_choice)
+            approved = client.respond_approval(run_id, choice)
             history = _load_hermes_history(profile)
             history.append(_approval_result_message({**approval, "agentId": agent.get("id") or agent_key, "message": message}, choice))
             _save_hermes_history(profile, history)
@@ -5325,8 +5364,8 @@ def _handle_hermes_approval_respond(body):
             gateway_presence.set_provider_event(agent.get("statusKey") or agent.get("id"), "hermes", {"event": "approval.responded", "run_id": run_id})
             return {
                 "ok": True,
-                "choice": "approve_once",
-                "approvalChoice": "approve_once",
+                "choice": choice,
+                "approvalChoice": choice,
                 "providerPath": "api",
                 "runId": run_id,
                 "sessionId": approval.get("session_id") or "",
@@ -5339,10 +5378,12 @@ def _handle_hermes_approval_respond(body):
         history.append(_approval_result_message({**approval, "agentId": agent.get("id") or agent_key, "message": message}, "deny"))
         _save_hermes_history(profile, history)
         return {"ok": True, "choice": "deny", "message": "Hermes approval denied."}
+    if choice in {"session", "always"}:
+        return {"ok": False, "error": "session and always approvals require Hermes native API approval support", "_status": 409}
     if not message:
         return {"ok": False, "error": "original approval message is missing", "_status": 400}
     history = _load_hermes_history(profile)
-    history.append(_approval_result_message({**approval, "agentId": agent.get("id") or agent_key, "message": message}, "approve_once"))
+    history.append(_approval_result_message({**approval, "agentId": agent.get("id") or agent_key, "message": message}, "once"))
     _save_hermes_history(profile, history)
     retry_body = {
         "agentId": agent_key,
@@ -5356,7 +5397,7 @@ def _handle_hermes_approval_respond(body):
         "approvalRetry": True,
     }
     result = _handle_hermes_chat(retry_body)
-    result["approvalChoice"] = "approve_once"
+    result["approvalChoice"] = "once"
     return result
 
 
@@ -10683,7 +10724,14 @@ def _dispatch_feishu_project_execution_action(action, value, event):
 
 
 def _dispatch_feishu_hermes_approval_action(action, value, event):
-    if action not in {"hermes_approval_approve_once", "hermes_approval_deny"}:
+    action_choice = {
+        "hermes_approval_once": "once",
+        "hermes_approval_approve_once": "once",
+        "hermes_approval_session": "session",
+        "hermes_approval_always": "always",
+        "hermes_approval_deny": "deny",
+    }
+    if action not in action_choice:
         return {"handled": False}
     approval_id = str(value.get("approval_id") or value.get("approvalId") or "").strip()
     agent_id = str(value.get("agent_id") or value.get("agentId") or "hermes-default").strip()
@@ -10695,7 +10743,7 @@ def _dispatch_feishu_hermes_approval_action(action, value, event):
             "businessStatus": "missing_approval_id",
             "toast": _feishu_card_action_error("Hermes 审批缺少 approval_id，无法处理"),
         }
-    choice = "approve_once" if action == "hermes_approval_approve_once" else "deny"
+    choice = action_choice[action]
     actor = _feishu_meeting_action_actor(event)
     result = _handle_hermes_approval_respond({
         "agentId": agent_id,
@@ -10708,11 +10756,11 @@ def _dispatch_feishu_hermes_approval_action(action, value, event):
         return {
             "handled": True,
             "ok": True,
-            "businessStatus": "approved_once" if choice == "approve_once" else "denied",
+            "businessStatus": "denied" if choice == "deny" else f"approved_{choice}",
             "approvalId": approval_id,
             "agentId": agent_id,
             "runId": result.get("runId") or value.get("run_id") or value.get("runId") or "",
-            "toast": _feishu_card_action_success("Hermes 审批已同意" if choice == "approve_once" else "Hermes 审批已拒绝"),
+            "toast": _feishu_card_action_success("Hermes 审批已拒绝" if choice == "deny" else "Hermes 审批已同意"),
         }
     return {
         "handled": True,

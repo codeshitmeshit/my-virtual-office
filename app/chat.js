@@ -3244,12 +3244,19 @@
 
     async respondHermesApproval(approval, choice, card) {
       if (!approval || !this.isHermesSelected()) return;
+      const normalizedChoice = choice === 'approve_once' ? 'once' : choice;
       const buttons = card ? [...card.querySelectorAll('button')] : [];
       buttons.forEach(btn => btn.disabled = true);
       if (card) {
         card.classList.add('responding');
         const status = card.querySelector('.chat-approval-status');
-        if (status) status.textContent = choice === 'approve_once' ? (typeof i18n !== 'undefined' ? i18n.t('chat_approving_once') : 'Approving once...') : (typeof i18n !== 'undefined' ? i18n.t('chat_denying') : 'Denying...');
+        const respondingLabels = {
+          once: typeof i18n !== 'undefined' ? i18n.t('chat_approving_once') : 'Approving once...',
+          session: 'Approving for this session...',
+          always: 'Approving permanently...',
+          deny: typeof i18n !== 'undefined' ? i18n.t('chat_denying') : 'Denying...'
+        };
+        if (status) status.textContent = respondingLabels[normalizedChoice] || respondingLabels.once;
       }
       try {
         const resp = await fetch('/api/hermes/approval/respond', {
@@ -3260,7 +3267,7 @@
             approval,
             approval_id: approval.approval_id || approval.id || '',
             session_id: approval.session_id || approval.sessionId || '',
-            choice,
+            choice: normalizedChoice,
             fromDisplayName: 'User'
           })
         });
@@ -3268,13 +3275,19 @@
         if (!resp.ok || data.ok === false) throw new Error(data.error || data.reply || resp.statusText);
         if (card) {
           card.classList.remove('responding');
-          card.classList.add(choice === 'approve_once' ? 'approved' : 'denied');
+          card.classList.add(normalizedChoice === 'deny' ? 'denied' : 'approved');
           const status = card.querySelector('.chat-approval-status');
-          if (status) status.textContent = choice === 'approve_once' ? (typeof i18n !== 'undefined' ? i18n.t('chat_approved_once') : 'approved once') : (typeof i18n !== 'undefined' ? i18n.t('chat_denied_status') : 'denied');
+          const doneLabels = {
+            once: typeof i18n !== 'undefined' ? i18n.t('chat_approved_once') : 'approved once',
+            session: 'approved for session',
+            always: 'approved always',
+            deny: typeof i18n !== 'undefined' ? i18n.t('chat_denied_status') : 'denied'
+          };
+          if (status) status.textContent = doneLabels[normalizedChoice] || doneLabels.once;
         }
-        if (choice === 'approve_once') {
+        if (normalizedChoice !== 'deny') {
           await this.pollHermesApproval().catch(() => {});
-        } else if (choice === 'deny') {
+        } else if (normalizedChoice === 'deny') {
           this.appendSystem(typeof i18n !== 'undefined' ? i18n.t('chat_hermes_approval_denied') : 'Hermes approval denied.');
           await this.pollHermesApproval().catch(() => {});
         }
@@ -4240,25 +4253,27 @@
     if (status === 'pending') {
       const actions = document.createElement('div');
       actions.className = 'chat-approval-actions';
-      const allow = document.createElement('button');
-      allow.type = 'button';
-      allow.className = 'chat-approval-btn primary';
-      allow.textContent = typeof i18n !== 'undefined' ? i18n.t('chat_allow_once') : 'Allow once';
-      allow.title = isCodex ? _ct('chat_codex_approval_allow_hint') : _ct('retry_hermes_allow_hint');
-      allow.addEventListener('click', () => {
-        if (isCodex) windowInstance?.respondCodexApproval(approval, 'approve', card);
-        else windowInstance?.respondHermesApproval(approval, 'approve_once', card);
-      });
-      const deny = document.createElement('button');
-      deny.type = 'button';
-      deny.className = 'chat-approval-btn';
-      deny.textContent = typeof i18n !== 'undefined' ? i18n.t('chat_deny') : 'Deny';
-      deny.title = isCodex ? _ct('chat_codex_approval_cancel_hint') : _ct('retry_hermes_deny_hint');
-      deny.addEventListener('click', () => {
-        if (isCodex) windowInstance?.respondCodexApproval(approval, 'cancel', card);
-        else windowInstance?.respondHermesApproval(approval, 'deny', card);
-      });
-      actions.append(allow, deny);
+      const addButton = (label, choice, primary = false) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'chat-approval-btn' + (primary ? ' primary' : '');
+        btn.textContent = label;
+        btn.title = choice === 'deny' ? (isCodex ? _ct('chat_codex_approval_cancel_hint') : _ct('retry_hermes_deny_hint')) : (isCodex ? _ct('chat_codex_approval_allow_hint') : _ct('retry_hermes_allow_hint'));
+        btn.addEventListener('click', () => {
+          if (isCodex) windowInstance?.respondCodexApproval(approval, choice === 'deny' ? 'cancel' : 'approve', card);
+          else windowInstance?.respondHermesApproval(approval, choice, card);
+        });
+        actions.appendChild(btn);
+      };
+      if (isCodex) {
+        addButton(typeof i18n !== 'undefined' ? i18n.t('chat_allow_once') : 'Allow once', 'approve', true);
+        addButton(typeof i18n !== 'undefined' ? i18n.t('chat_deny') : 'Deny', 'deny');
+      } else {
+        addButton('允许一次', 'once', true);
+        addButton('本会话允许', 'session');
+        addButton('永久允许', 'always');
+        addButton('拒绝', 'deny');
+      }
       card.appendChild(actions);
     }
     return card;
