@@ -1,0 +1,33 @@
+app/game.js
+  s_e06cfbea6b95ec::t_e610f5bac710c8 688,769-770,822-833,838-839,868,1826
+app/index.html
+  s_e06cfbea6b95ec::t_4a1382b3e87f31 12,20,27,1040
+app/locales/en.json
+  s_e06cfbea6b95ec::t_c26cc1e9561097 51-52
+app/locales/zh.json
+  s_e06cfbea6b95ec::t_f37d3c3380174c 51-52
+app/server.py
+  s_e06cfbea6b95ec::t_51a64f44b88a3e 25665
+tests/test_weather_glass_furniture.js
+  s_e06cfbea6b95ec::t_bc31c64b4c908c 104,108,110,128-130
+tests/test_weather_location_test_ui.js
+  s_e06cfbea6b95ec::t_bec615039d03c0 35-36,45,53-54
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "80fac54fab49811105118af1b04cfd731bddda14",
+  "prompts": {},
+  "sessions": {
+    "s_e06cfbea6b95ec": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f3713-e932-7e01-9821-02146559c30c",
+        "model": "unknown"
+      },
+      "human_author": "codeshitmeshit <codeshitmeshit@126.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
