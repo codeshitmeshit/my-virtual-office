@@ -100,12 +100,22 @@ class FakeHermesApiClient:
 
     def start_run(self, message, session_id=None, session_key=None, instructions=None, conversation_history=None):
         self.calls.append({"start_message": message, "session_id": session_id, "session_key": session_key})
+        if self.mode == "alternate_events":
+            return {"runId": "run-native-alt"}
         return {"run_id": "run-native-1"}
 
     def stream_run_events(self, run_id, timeout_sec=None):
         if self.mode == "approval":
             yield {"event": "message.delta", "delta": "needs approval"}
             yield {"event": "approval.request", "run_id": run_id, "command": "write-file", "description": "Approve write"}
+            return
+        if self.mode == "alternate_events":
+            yield {"type": "reasoning", "text": "thinking alt"}
+            yield {"type": "tool_call", "id": "tool-alt", "name": "search", "preview": "docs"}
+            yield {"type": "tool_result", "id": "tool-alt", "name": "search", "result": "ok"}
+            yield {"type": "response_delta", "data": {"delta": "alt "}}
+            yield {"type": "message_completed", "content": "reply"}
+            yield {"type": "completed", "output": "alt reply"}
             return
         yield {"event": "reasoning.available", "text": "thinking natively"}
         yield {"event": "tool.started", "id": "tool-1", "tool": "read", "preview": "README.md"}
@@ -274,6 +284,20 @@ def test_hermes_chat_native_approval_records_pending_without_cli_fallback():
         assert FakeHermesProvider.chats == []
         pending = server._get_hermes_approval_pending("hermes-default", result["sessionId"])
         assert pending["pending"]["approval_id"] == result["approval"]["approval_id"]
+    finally:
+        restore_native_fakes(old)
+
+
+def test_hermes_chat_accepts_alternate_native_event_shapes():
+    old = install_native_fakes("alternate_events")
+    try:
+        result = server._handle_hermes_chat({"agentId": "hermes-default", "message": "hello", "conversationId": "conv-alt-events"})
+        assert result["ok"] is True
+        assert result["providerPath"] == "api"
+        assert result["runId"] == "run-native-alt"
+        assert result["reply"] == "alt reply"
+        assert result["thinking"] == "thinking alt"
+        assert any(t["id"] == "tool-alt" and t["status"] == "done" for t in result["tools"])
     finally:
         restore_native_fakes(old)
 
@@ -682,6 +706,7 @@ if __name__ == "__main__":
     test_hermes_test_skips_native_api_when_disabled()
     test_hermes_chat_uses_native_api_when_available()
     test_hermes_chat_native_approval_records_pending_without_cli_fallback()
+    test_hermes_chat_accepts_alternate_native_event_shapes()
     test_hermes_native_approval_sends_feishu_notification_once()
     test_feishu_card_action_can_approve_hermes_native_approval()
     test_hermes_feishu_e2e_routes_create_and_approve_via_http()

@@ -4754,9 +4754,10 @@ def _hermes_event_tool_card(event, status="running", fallback_id=""):
 
 
 def _hermes_api_approval_from_event(event, agent_id="", profile="", session_id="", original_message=""):
+    event = event if isinstance(event, dict) else {}
     command = str(event.get("command") or event.get("preview") or event.get("tool") or "Hermes approval request")
     description = str(event.get("description") or "Hermes needs approval before it can continue this run.")
-    run_id = str(event.get("run_id") or "")
+    run_id = str(event.get("run_id") or event.get("runId") or event.get("id") or "")
     seed = f"{agent_id}|{profile}|{session_id}|{run_id}|{command}|{original_message}"
     approval_id = "hermes-api-approval-" + hashlib.sha1(seed.encode("utf-8")).hexdigest()[:16]
     return {
@@ -4826,7 +4827,7 @@ def _handle_hermes_api_chat(agent, profile, delivery_message, original_message, 
     session_id = _get_hermes_session_id(profile, conversation_id) or f"vo-hermes-{_safe_hermes_path_part(profile)}"
     session_key = f"virtual-office:hermes:{profile}"
     started = client.start_run(delivery_message, session_id=session_id, session_key=session_key)
-    run_id = started.get("run_id")
+    run_id = str(started.get("run_id") or started.get("runId") or started.get("id") or "")
     if not run_id:
         return {"ok": False, "fallback": True, "error": started.get("error") or "Hermes API did not return a run_id"}
 
@@ -4860,16 +4861,20 @@ def _handle_hermes_api_chat(agent, profile, delivery_message, original_message, 
             gateway_presence.set_provider_event(status_key, "hermes", event)
             if callable(on_event):
                 on_event(event if isinstance(event, dict) else {})
-            event_name = str(event.get("event") or "").lower()
-            if event_name == "message.delta":
-                reply += str(event.get("delta") or "")
+            event_name = _hermes_event_name(event)
+            event_text = _hermes_event_text(event)
+            if event_name in {"message.delta", "message.delta.text", "response.delta", "delta"}:
+                reply += event_text
                 publish_progress()
-            elif event_name == "reasoning.available":
-                text = str(event.get("text") or "")
-                if text:
-                    reasoning_parts.append(text)
+            elif event_name in {"message", "message.completed"}:
+                if event_text:
+                    reply += event_text
                     publish_progress(force=True)
-            elif event_name == "tool.started":
+            elif event_name in {"reasoning.available", "reasoning", "thinking"}:
+                if event_text:
+                    reasoning_parts.append(event_text)
+                    publish_progress(force=True)
+            elif event_name in {"tool.started", "tool.call", "tool"}:
                 tool_seq += 1
                 fallback_id = f"{run_id}:tool:{tool_seq}"
                 card = _hermes_event_tool_card(event, "running", fallback_id=fallback_id)
@@ -4878,19 +4883,19 @@ def _handle_hermes_api_chat(agent, profile, delivery_message, original_message, 
                 started_tools[card["id"]] = card
                 tools.append(card)
                 publish_progress(force=True)
-            elif event_name in {"tool.completed", "tool.failed"}:
+            elif event_name in {"tool.completed", "tool.result", "tool.failed"}:
                 event_tool_key = f"{event.get('tool') or event.get('name') or 'tool'}:{event.get('preview') or event.get('label') or ''}"
                 fallback_id = started_tool_keys.get(event_tool_key)
                 if not fallback_id:
                     matching_id = next((tid for tid, item in reversed(list(started_tools.items())) if item.get("name") == (event.get("tool") or event.get("name"))), "")
                     fallback_id = matching_id or f"{run_id}:tool:{len(started_tools) + 1}"
-                card = _hermes_event_tool_card(event, "done" if event_name == "tool.completed" else "error", fallback_id=fallback_id)
+                card = _hermes_event_tool_card(event, "error" if event_name == "tool.failed" or event.get("error") else "done", fallback_id=fallback_id)
                 if card["id"] in started_tools:
                     started_tools[card["id"]].update(card)
                 else:
                     tools.append(card)
                 publish_progress(force=True)
-            elif event_name == "approval.request":
+            elif event_name in {"approval.request", "approval"}:
                 approval = _remember_hermes_approval_pending(
                     _hermes_api_approval_from_event(event, agent_id=agent_id, profile=profile, session_id=session_id, original_message=original_message),
                     agent_id=agent_id,
@@ -4899,13 +4904,13 @@ def _handle_hermes_api_chat(agent, profile, delivery_message, original_message, 
                 )
                 publish_progress(force=True)
                 continue
-            elif event_name in {"run.completed", "run.failed", "run.cancelled", "run.canceled"}:
+            elif event_name in {"run.completed", "completed", "run.failed", "failed", "run.cancelled", "run.canceled", "cancelled", "canceled"}:
                 terminal_event = event
-                if event.get("output"):
-                    reply = str(event.get("output") or reply)
-                if event.get("error"):
-                    error_text = str(event.get("error") or "")
-                if event_name == "run.completed":
+                if event_text:
+                    reply = event_text or reply
+                if event.get("error") or event.get("message"):
+                    error_text = str(event.get("error") or event.get("message") or "")
+                if event_name in {"run.completed", "completed"}:
                     approval = None
                 publish_progress(force=True)
                 break
@@ -4913,12 +4918,12 @@ def _handle_hermes_api_chat(agent, profile, delivery_message, original_message, 
         gateway_presence.set_provider_event(status_key, "hermes", {"event": "run.failed", "run_id": run_id, "error": str(exc)})
         return {"ok": False, "error": str(exc), "providerPath": "api", "runId": run_id}
 
-    terminal_name = str((terminal_event or {}).get("event") or "").lower()
-    ok = terminal_name == "run.completed"
+    terminal_name = _hermes_event_name(terminal_event or {})
+    ok = terminal_name in {"run.completed", "completed"}
     if approval:
         ok = False
         error_text = "Hermes is waiting for approval."
-    elif terminal_name in {"run.failed", "run.cancelled", "run.canceled"}:
+    elif terminal_name in {"run.failed", "failed", "run.cancelled", "run.canceled", "cancelled", "canceled"}:
         ok = False
         error_text = error_text or terminal_name.replace("run.", "Hermes run ")
 
