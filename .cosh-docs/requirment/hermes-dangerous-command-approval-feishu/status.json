@@ -1,0 +1,31 @@
+{
+  "name": "hermes-dangerous-command-approval-feishu",
+  "stage": "todolist_created",
+  "waiting_for_user": false,
+  "updated_at": "2026-07-06T13:48:17+08:00",
+  "confirmed": {
+    "checklist": true,
+    "tested": false,
+    "done": false
+  },
+  "confirmations": {
+    "checklist": {
+      "item": "checklist",
+      "confirmed_at": "2026-07-06T13:48:17+08:00",
+      "summary": "User replied \"continue\" to confirm the checklist and proceed to todolist generation."
+    },
+    "tested": null,
+    "done": null
+  },
+  "files": {
+    "requirement": "requirement.md",
+    "review": "review.md",
+    "checklist": "checklist.md",
+    "todolist": "todolist.md"
+  },
+  "notes": [
+    "Requirement archived and reviewed from user discussion on Hermes dangerous command approval and Feishu action cards.",
+    "Checklist was confirmed by user response \"continue\".",
+    "Todolist has been generated from the confirmed checklist."
+  ]
+}
