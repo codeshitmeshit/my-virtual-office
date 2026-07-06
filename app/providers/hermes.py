@@ -931,7 +931,106 @@ class HermesDesktopBackendClient:
 
         return self._run_async(run())
 
-    def send_chat_message(self, message: str, session_id: str | None = None, timeout_sec: int | None = None) -> dict[str, Any]:
+    @staticmethod
+    def _payload_text(payload: dict[str, Any]) -> str:
+        for key in ("text", "delta", "content", "output", "message"):
+            value = payload.get(key)
+            if isinstance(value, str):
+                return value
+        value = payload.get("chunk")
+        if isinstance(value, dict):
+            for key in ("text", "delta", "content"):
+                if isinstance(value.get(key), str):
+                    return value.get(key) or ""
+        return ""
+
+    @staticmethod
+    def _coerce_reasoning_text(text: str) -> str:
+        raw = str(text or "")
+        cleaned = re.sub(
+            r"^\s*(?:(?:[^\s.]{1,16})\s+)?(?:processing|thinking|reasoning|analyzing|pondering|contemplating|musing|cogitating|ruminating|deliberating|mulling|reflecting|computing|synthesizing|formulating|brainstorming)\.\.\.\s*",
+            "",
+            raw,
+            flags=re.IGNORECASE,
+        )
+        if re.search(r"\b(?:current rewritten thinking|next thinking to process|provide the thinking content|don't see any .*thinking)\b", cleaned, flags=re.IGNORECASE):
+            return ""
+        return cleaned
+
+    @staticmethod
+    def _payload_tool_card(payload: dict[str, Any], status: str, fallback_id: str) -> dict[str, Any]:
+        nested = payload.get("tool") if isinstance(payload.get("tool"), dict) else {}
+        function = payload.get("function") if isinstance(payload.get("function"), dict) else {}
+        tool_id = str(
+            payload.get("tool_id")
+            or payload.get("toolCallId")
+            or payload.get("tool_call_id")
+            or payload.get("call_id")
+            or payload.get("id")
+            or nested.get("id")
+            or fallback_id
+        )
+        name = str(
+            payload.get("name")
+            or payload.get("tool_name")
+            or payload.get("toolName")
+            or nested.get("name")
+            or function.get("name")
+            or "Hermes tool"
+        )
+        args = (
+            payload.get("arguments")
+            or payload.get("args")
+            or payload.get("input")
+            or payload.get("parameters")
+            or nested.get("arguments")
+            or nested.get("args")
+            or function.get("arguments")
+            or {}
+        )
+        if not isinstance(args, dict):
+            args = {"input": args}
+        if not args and payload.get("args_text"):
+            args = {"input": payload.get("args_text")}
+        preview = payload.get("context") or payload.get("preview") or payload.get("command") or ""
+        if preview and not any(args.get(k) for k in ("command", "description", "input")):
+            args["command"] = str(preview)
+        result = (
+            payload.get("result")
+            or payload.get("summary")
+            or payload.get("output")
+            or payload.get("content")
+            or nested.get("result")
+            or nested.get("output")
+            or ""
+        )
+        error = payload.get("error") or nested.get("error") or ""
+        return {
+            "id": tool_id,
+            "name": name,
+            "status": "error" if error else status,
+            "arguments": args,
+            "args_preview": str(preview or ""),
+            "result": error or result or ("Running" if status == "running" else "Completed"),
+            "error": str(error or ""),
+        }
+
+    def send_chat_message(
+        self,
+        message: str,
+        session_id: str | None = None,
+        timeout_sec: int | None = None,
+        on_event=None,
+        run_id: str | None = None,
+    ) -> dict[str, Any]:
+        def emit_event(event_name: str, payload: dict[str, Any]) -> None:
+            if not on_event:
+                return
+            try:
+                on_event(event_name, payload)
+            except Exception:
+                pass
+
         async def run() -> dict[str, Any]:
             async with self._connect_ws() as ws:
                 stored_session_id = str(session_id or "").strip()
@@ -950,62 +1049,100 @@ class HermesDesktopBackendClient:
                 if not live_session_id:
                     raise RuntimeError("Hermes Desktop Backend did not return a live session id")
 
-                await self._rpc(ws, "prompt.submit", {"session_id": live_session_id, "text": message}, timeout_sec=min(int(timeout_sec or self.timeout_sec), 30))
+                _, submit_events = await self._rpc(ws, "prompt.submit", {"session_id": live_session_id, "text": message}, timeout_sec=min(int(timeout_sec or self.timeout_sec), 30))
 
                 reply_parts: list[str] = []
                 reasoning_parts: list[str] = []
                 tools: list[dict[str, Any]] = []
                 tools_by_id: dict[str, dict[str, Any]] = {}
                 terminal_error = ""
+                tool_seq = 0
+                pending_events = list(submit_events or [])
                 deadline = time.monotonic() + int(timeout_sec or self.timeout_sec)
                 while True:
                     remaining = deadline - time.monotonic()
                     if remaining <= 0:
                         raise TimeoutError("Hermes Desktop Backend chat timed out")
-                    item = await self._recv_json(ws, remaining)
-                    if item.get("method") != "event":
-                        continue
-                    params_obj = item.get("params") if isinstance(item.get("params"), dict) else {}
-                    event_type = str(params_obj.get("type") or "").lower()
+                    if pending_events:
+                        params_obj = pending_events.pop(0)
+                        if not isinstance(params_obj, dict):
+                            continue
+                    else:
+                        item = await self._recv_json(ws, remaining)
+                        if item.get("method") != "event":
+                            continue
+                        params_obj = item.get("params") if isinstance(item.get("params"), dict) else {}
                     payload = params_obj.get("payload") if isinstance(params_obj.get("payload"), dict) else {}
+                    event_type = str(params_obj.get("type") or params_obj.get("event") or payload.get("type") or payload.get("event") or "").lower()
+                    if not payload:
+                        payload = {k: v for k, v in params_obj.items() if k not in {"type", "event", "session_id"}}
                     event_session = str(params_obj.get("session_id") or payload.get("session_id") or "")
                     if event_session and event_session != live_session_id:
                         continue
-                    if event_type in {"message.delta", "thinking.delta", "reasoning.delta"}:
-                        text = str(payload.get("text") or payload.get("delta") or "")
+                    if event_type in {"message.delta", "message_delta", "assistant.delta", "assistant_delta", "output.delta"}:
+                        text = self._payload_text(payload)
                         if event_type == "message.delta":
                             reply_parts.append(text)
-                        elif text:
+                        else:
+                            reply_parts.append(text)
+                        if text:
+                            emit_event("message.delta", {
+                                "delta": text,
+                                "reply": "".join(reply_parts),
+                                "sessionId": stored_session_id,
+                                "liveSessionId": live_session_id,
+                                "runId": run_id or "",
+                            })
+                    elif event_type in {"thinking.delta", "thinking_delta", "reasoning.delta", "reasoning_delta", "thought.delta", "thought_delta", "analysis.delta", "analysis_delta", "reasoning.available"}:
+                        text = self._coerce_reasoning_text(self._payload_text(payload))
+                        if text and text.strip() != "".join(reply_parts).strip():
                             reasoning_parts.append(text)
-                    elif event_type == "tool.start":
-                        tool_id = str(payload.get("tool_id") or payload.get("toolCallId") or f"desktop-tool-{len(tools) + 1}")
-                        card = {
-                            "id": tool_id,
-                            "name": str(payload.get("name") or "Hermes tool"),
-                            "status": "running",
-                            "args_preview": str(payload.get("context") or payload.get("preview") or ""),
-                            "result": "Running",
-                        }
+                            emit_event("reasoning.available", {
+                                    "text": text,
+                                    "thinking": "\n".join(reasoning_parts).strip(),
+                                    "sessionId": stored_session_id,
+                                    "liveSessionId": live_session_id,
+                                    "runId": run_id or "",
+                                })
+                    elif event_type in {"tool.start", "tool.started", "tool.progress", "tool.generating", "tool.update", "tool.updated", "tool_start", "tool_progress", "tool_generating", "tool_update", "tool.call.start", "tool_call.start", "tool_call.started", "tool_call.progress", "tool_call.generating", "tool_call.update"}:
+                        tool_seq += 1
+                        card = self._payload_tool_card(payload, "running", f"desktop-tool-{tool_seq}")
+                        tool_id = card["id"]
                         tools_by_id[tool_id] = card
                         tools.append(card)
-                    elif event_type == "tool.complete":
-                        tool_id = str(payload.get("tool_id") or payload.get("toolCallId") or "")
+                        emit_event("tool.started", {
+                                "toolCard": card,
+                                "tool": card.get("name") or "Hermes tool",
+                                "preview": card.get("args_preview") or "",
+                                "sessionId": stored_session_id,
+                                "liveSessionId": live_session_id,
+                                "runId": run_id or "",
+                            })
+                    elif event_type in {"tool.complete", "tool.completed", "tool.end", "tool.ended", "tool.result", "tool.failed", "tool.error", "tool_complete", "tool_result", "tool_call.complete", "tool_call.completed", "tool_call.result", "tool_call.failed"}:
+                        tool_id = str(payload.get("tool_id") or payload.get("toolCallId") or payload.get("tool_call_id") or payload.get("call_id") or payload.get("id") or "")
                         card = tools_by_id.get(tool_id) if tool_id else None
                         if not card:
-                            card = {"id": tool_id or f"desktop-tool-{len(tools) + 1}", "name": str(payload.get("name") or "Hermes tool")}
+                            card = self._payload_tool_card(payload, "done", tool_id or f"desktop-tool-{len(tools) + 1}")
                             tools.append(card)
-                        card.update({
-                            "status": "done",
-                            "result": str(payload.get("summary") or "Completed"),
-                        })
+                        update = self._payload_tool_card(payload, "error" if "fail" in event_type or "error" in event_type else "done", card.get("id") or "")
+                        card.update({k: v for k, v in update.items() if v not in ("", {}, None)})
+                        emit_event("tool.failed" if card.get("status") == "error" else "tool.completed", {
+                                "toolCard": card,
+                                "tool": card.get("name") or "Hermes tool",
+                                "preview": card.get("args_preview") or "",
+                                "error": card.get("error") or "",
+                                "sessionId": stored_session_id,
+                                "liveSessionId": live_session_id,
+                                "runId": run_id or "",
+                            })
                     elif event_type in {"approval.request", "clarify.request", "sudo.request", "secret.request"}:
                         terminal_error = "Hermes Desktop Backend is waiting for interactive input that Virtual Office cannot answer yet."
                         break
-                    elif event_type == "error":
+                    elif event_type in {"error", "run.failed", "message.error"}:
                         terminal_error = str(payload.get("message") or payload.get("error") or "Hermes Desktop Backend error")
                         break
-                    elif event_type == "message.complete":
-                        text = str(payload.get("text") or "")
+                    elif event_type in {"message.complete", "message.completed", "run.completed", "complete", "done"}:
+                        text = self._payload_text(payload)
                         status = str(payload.get("status") or "complete")
                         final_reply = text or "".join(reply_parts)
                         return {

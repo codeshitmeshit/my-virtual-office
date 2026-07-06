@@ -12794,7 +12794,7 @@ function mmTestHermes() {
         return;
     }
     statusEl.innerHTML = '<div class="mm-status info">Saving and testing Hermes...</div>';
-    var hermesPayload = { enabled: enabled, homePath: homePath || null, binary: binary || null, apiUrl: apiUrl || null, desktopUrl: desktopUrl || null, desktopTcpHost: desktopTcpHost || null, desktopHostHeader: desktopHostHeader || null, preferApi: true };
+    var hermesPayload = { enabled: enabled, homePath: homePath || null, binary: binary || null, apiUrl: apiUrl || null, desktopUrl: desktopUrl || null, desktopTcpHost: desktopTcpHost || null, desktopHostHeader: desktopHostHeader || null, preferApi: !desktopUrl, preferDesktop: !!desktopUrl };
     if (apiKey) hermesPayload.apiKey = apiKey;
     fetch('/setup/save', {
         method: 'POST',
@@ -13021,7 +13021,8 @@ function mmSaveSettings() {
             desktopUrl: (_hDesktopUrl ? _hDesktopUrl.value.trim() : '') || null,
             desktopTcpHost: (_hDesktopTcpHost ? _hDesktopTcpHost.value.trim() : '') || null,
             desktopHostHeader: (_hDesktopHostHeader ? _hDesktopHostHeader.value.trim() : '') || null,
-            preferApi: true
+            preferApi: !((_hDesktopUrl ? _hDesktopUrl.value.trim() : '')),
+            preferDesktop: !!((_hDesktopUrl ? _hDesktopUrl.value.trim() : ''))
         };
         var hermesApiKey = (_hApiKey ? _hApiKey.value.trim() : '');
         if (hermesApiKey) hermesSettings.apiKey = hermesApiKey;

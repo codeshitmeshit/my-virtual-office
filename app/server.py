@@ -287,6 +287,7 @@ def _load_vo_config():
             "desktopTcpHost": _env_or("VO_HERMES_DESKTOP_TCP_HOST", hermes_cfg.get("desktopTcpHost", "")),
             "desktopTcpPort": _env_or("VO_HERMES_DESKTOP_TCP_PORT", hermes_cfg.get("desktopTcpPort", "")),
             "preferApi": str(_env_or("VO_HERMES_PREFER_API", hermes_cfg.get("preferApi", True))).lower() not in ("0", "false", "no", "off"),
+            "preferDesktop": str(_env_or("VO_HERMES_PREFER_DESKTOP", hermes_cfg.get("preferDesktop", True))).lower() not in ("0", "false", "no", "off"),
             "autoStartProfileApis": str(_env_or("VO_HERMES_AUTO_START_PROFILE_APIS", hermes_cfg.get("autoStartProfileApis", True))).lower() not in ("0", "false", "no", "off"),
             "autoStartDefaultApi": str(_env_or("VO_HERMES_AUTO_START_DEFAULT_API", hermes_cfg.get("autoStartDefaultApi", hermes_cfg.get("autoStartProfileApis", True)))).lower() not in ("0", "false", "no", "off"),
             "apiProfilePortBase": _env_or("VO_HERMES_API_PROFILE_PORT_BASE", hermes_cfg.get("apiProfilePortBase")),
@@ -4822,6 +4823,74 @@ def _handle_hermes_desktop_chat(agent, profile, delivery_message, timeout):
     return result
 
 
+def _handle_hermes_desktop_run_start(agent, agent_key, profile, body, timeout):
+    """Register a Desktop Backend run that will stream over /api/hermes/runs/<id>/events."""
+    hermes_cfg = VO_CONFIG.get("hermes", {})
+    desktop_url = agent.get("desktopUrl") or hermes_cfg.get("desktopUrl")
+    if not desktop_url:
+        return {"ok": False, "fallback": True, "error": "Hermes Desktop Backend URL is not configured", "_status": 409}
+
+    client = HermesDesktopBackendClient(
+        base_url=desktop_url,
+        token=hermes_cfg.get("desktopToken"),
+        host_header=agent.get("desktopHostHeader") or hermes_cfg.get("desktopHostHeader"),
+        tcp_host=agent.get("desktopTcpHost") or hermes_cfg.get("desktopTcpHost"),
+        tcp_port=agent.get("desktopTcpPort") or hermes_cfg.get("desktopTcpPort"),
+        timeout_sec=min(int(timeout or hermes_cfg.get("timeoutSec") or 600), 60),
+    )
+    status = client.test(verify_ws=True)
+    if not status.get("ok") or not status.get("chatReady"):
+        return {"ok": False, "fallback": True, "error": status.get("error") or "Hermes Desktop Backend WebSocket is not ready", "_status": 409}
+    if status.get("authRequired"):
+        return {"ok": False, "fallback": True, "error": "Hermes Desktop Backend is reachable but requires dashboard authentication", "_status": 409}
+
+    delivery = _build_hermes_delivery_message(agent, agent_key, body.get("message") or "", body)
+    now_ms = int(time.time() * 1000)
+    run_seed = f"{profile}|{agent_key}|{now_ms}|{delivery.get('deliveryMessage') or ''}"
+    run_id = "hermes-desktop-" + hashlib.sha1(run_seed.encode("utf-8")).hexdigest()[:16]
+    agent_id = agent.get("id") or agent_key
+    session_id = _get_hermes_session_id(profile) or ""
+
+    history = _load_hermes_history(profile)
+    history.append({
+        "role": "user",
+        "text": body.get("message") or "",
+        "ts": now_ms,
+        "agentId": agent_id,
+        "from": delivery["senderName"] if delivery["isHumanSource"] else "You",
+        "fromType": delivery["fromType"] or "",
+        "sourceApp": delivery["sourceApp"] if delivery["isHumanSource"] else "",
+        "sourceSurface": delivery["sourceSurface"] if delivery["isHumanSource"] else "",
+        "sourceLabel": delivery["sourceLabel"] if delivery["isHumanSource"] else "",
+        "attachments": delivery["attachments"],
+    })
+    _save_hermes_history(profile, history)
+
+    _remember_hermes_active_run({
+        "runId": run_id,
+        "providerPath": "desktop",
+        "sessionId": session_id,
+        "agentId": agent_id,
+        "agentKey": agent_key,
+        "statusKey": agent.get("statusKey") or agent_id,
+        "profile": profile,
+        "message": body.get("message") or "",
+        "deliveryMessage": delivery["deliveryMessage"],
+        "timeoutSec": timeout,
+        "startedAt": now_ms,
+        "desktopUrl": desktop_url,
+    })
+    gateway_presence.set_provider_event(agent.get("statusKey") or agent_id, "hermes", {"event": "run.started", "run_id": run_id, "providerPath": "desktop"})
+    _publish_hermes_api_progress(profile, agent_id, run_id, tools=[], reasoning_parts=[], reply="")
+    return {
+        "ok": True,
+        "providerPath": "desktop",
+        "runId": run_id,
+        "sessionId": session_id,
+        "agent": {"id": agent_id, "name": agent.get("name"), "providerKind": "hermes", "profile": profile},
+    }
+
+
 def _handle_hermes_run_start(body):
     """Start a native Hermes API run and return the run id for browser SSE attach."""
     message = (body.get("message") or "").strip()
@@ -4834,14 +4903,34 @@ def _handle_hermes_run_start(body):
         return {"ok": False, "error": f"Hermes agent '{agent_key}' not found", "_status": 404}
 
     hermes_cfg = VO_CONFIG.get("hermes", {})
-    if not hermes_cfg.get("preferApi", True):
-        return {"ok": False, "fallback": True, "error": "Hermes native API is disabled by configuration", "_status": 409}
-
     timeout = int(body.get("timeoutSec") or hermes_cfg.get("timeoutSec") or 600)
     profile = agent.get("profile") or agent.get("providerAgentId") or "default"
+    desktop_configured = bool(agent.get("desktopUrl") or hermes_cfg.get("desktopUrl"))
+    desktop_first = bool(desktop_configured and hermes_cfg.get("preferDesktop", True) is not False)
+    desktop_error = ""
+
+    if desktop_first:
+        desktop_start = _handle_hermes_desktop_run_start(agent, agent_key, profile, body, timeout)
+        if desktop_start.get("ok"):
+            return desktop_start
+        desktop_error = desktop_start.get("error") or ""
+
+    if not hermes_cfg.get("preferApi", True):
+        return {
+            "ok": False,
+            "fallback": True,
+            "error": desktop_error or "Hermes native API is disabled by configuration",
+            "_status": 409,
+        }
+
     client = _hermes_api_client_for_profile(profile)
     if not client.is_available():
-        return {"ok": False, "fallback": True, "error": "Hermes API Server is not available", "_status": 409}
+        if desktop_configured and not desktop_first:
+            desktop_start = _handle_hermes_desktop_run_start(agent, agent_key, profile, body, timeout)
+            if desktop_start.get("ok"):
+                return desktop_start
+            desktop_error = desktop_start.get("error") or desktop_error
+        return {"ok": False, "fallback": True, "error": desktop_error or "Hermes API Server is not available", "_status": 409}
 
     delivery = _build_hermes_delivery_message(agent, agent_key, message, body)
     now_ms = int(time.time() * 1000)
@@ -4897,6 +4986,168 @@ def _handle_hermes_run_start(body):
     }
 
 
+def _handle_hermes_desktop_run_events(handler, run_id, meta):
+    """Stream an already-registered Hermes Desktop Backend run to the browser."""
+    profile = meta.get("profile") or "default"
+    agent = _get_hermes_agent(meta.get("agentId") or meta.get("agentKey") or f"hermes-{profile}") or {}
+    agent_id = agent.get("id") or meta.get("agentId") or "hermes-default"
+    status_key = agent.get("statusKey") or meta.get("statusKey") or agent_id
+    session_id = meta.get("sessionId") or _get_hermes_session_id(profile) or ""
+    timeout = int(meta.get("timeoutSec") or VO_CONFIG.get("hermes", {}).get("timeoutSec") or 600)
+    hermes_cfg = VO_CONFIG.get("hermes", {})
+    client = HermesDesktopBackendClient(
+        base_url=meta.get("desktopUrl") or agent.get("desktopUrl") or hermes_cfg.get("desktopUrl"),
+        token=hermes_cfg.get("desktopToken"),
+        host_header=agent.get("desktopHostHeader") or hermes_cfg.get("desktopHostHeader"),
+        tcp_host=agent.get("desktopTcpHost") or hermes_cfg.get("desktopTcpHost"),
+        tcp_port=agent.get("desktopTcpPort") or hermes_cfg.get("desktopTcpPort"),
+        timeout_sec=min(timeout, 60),
+    )
+
+    handler.send_response(200)
+    handler.send_header("Content-Type", "text/event-stream")
+    handler.send_header("Cache-Control", "no-cache")
+    handler.send_header("Access-Control-Allow-Origin", "*")
+    handler.send_header("X-Accel-Buffering", "no")
+    handler.end_headers()
+
+    client_connected = True
+
+    def send_sse(event_name, payload):
+        nonlocal client_connected
+        if not client_connected:
+            return False
+        data = dict(payload or {})
+        data.setdefault("event", event_name)
+        data.setdefault("runId", run_id)
+        data.setdefault("sessionId", session_id)
+        data.setdefault("agentId", agent_id)
+        data.setdefault("profile", profile)
+        data.setdefault("providerPath", "desktop")
+        try:
+            handler.wfile.write(f"event: {event_name}\ndata: {json.dumps(data)}\n\n".encode("utf-8"))
+            handler.wfile.flush()
+            return True
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            client_connected = False
+            return False
+
+    reply = ""
+    reasoning_text = ""
+    tools = []
+    tools_by_id = {}
+    approval = None
+    error_text = ""
+    last_progress_publish = 0.0
+
+    def publish_progress(force=False):
+        nonlocal last_progress_publish
+        now = time.time()
+        if force or now - last_progress_publish >= 0.25:
+            _publish_hermes_api_progress(profile, agent_id, run_id, tools=tools, reasoning_parts=[reasoning_text] if reasoning_text else [], reply=reply)
+            last_progress_publish = now
+
+    def upsert_tool(card):
+        if not isinstance(card, dict):
+            return None
+        tool_id = str(card.get("id") or f"{run_id}:tool:{len(tools) + 1}")
+        card["id"] = tool_id
+        existing = tools_by_id.get(tool_id)
+        if existing:
+            existing.update(card)
+            return existing
+        tools_by_id[tool_id] = card
+        tools.append(card)
+        return card
+
+    def handle_desktop_event(event_name, payload):
+        nonlocal reply, reasoning_text
+        payload = dict(payload or {})
+        payload["providerPath"] = "desktop"
+        payload["agentId"] = agent_id
+        payload["profile"] = profile
+        payload["runId"] = run_id
+        gateway_presence.set_provider_event(status_key, "hermes", {**payload, "event": event_name, "run_id": run_id})
+
+        if event_name == "message.delta":
+            reply = str(payload.get("reply") or (reply + str(payload.get("delta") or "")))
+            payload["reply"] = reply
+        elif event_name == "reasoning.available":
+            reasoning_text = str(payload.get("thinking") or payload.get("text") or reasoning_text)
+            payload["thinking"] = reasoning_text
+        elif event_name in {"tool.started", "tool.completed", "tool.failed"}:
+            card = upsert_tool(payload.get("toolCard") if isinstance(payload.get("toolCard"), dict) else {})
+            if card:
+                payload["toolCard"] = card
+        publish_progress(force=event_name != "message.delta")
+        send_sse(event_name, payload)
+
+    def finalize_history(ok=False):
+        history = _remove_hermes_progress_messages(_load_hermes_history(profile))
+        final_ts = int(time.time() * 1000)
+        history.extend(_hermes_tool_activity_messages(
+            tools,
+            agent_id=agent_id,
+            run_id=run_id,
+            base_ts=final_ts,
+            coerce_complete=bool(ok) and not approval,
+        ))
+        history.append({
+            "role": "assistant",
+            "text": reply,
+            "ts": final_ts + len(tools),
+            "agentId": agent_id,
+            "exitCode": 0 if ok else 1,
+            "sessionId": session_id,
+            "runId": run_id,
+            "tools": [],
+            "thinking": "" if reasoning_text.strip() == reply.strip() else reasoning_text,
+            "reasoningTokens": 0,
+            "approval": approval,
+            "error": error_text or None,
+        })
+        _save_hermes_history(profile, history)
+        _clear_hermes_active_run(run_id)
+
+    send_sse("run.started", {"ok": True})
+    publish_progress(force=True)
+
+    result = None
+    try:
+        result = client.send_chat_message(
+            meta.get("deliveryMessage") or meta.get("message") or "",
+            session_id=session_id,
+            timeout_sec=timeout,
+            on_event=handle_desktop_event,
+            run_id=run_id,
+        )
+    except Exception as exc:
+        result = {"ok": False, "error": str(exc), "reply": reply, "tools": tools, "thinking": reasoning_text}
+
+    if result.get("sessionId"):
+        session_id = result.get("sessionId")
+        _set_hermes_session_id(profile, session_id)
+    reply = result.get("reply") or reply
+    reasoning_text = result.get("thinking") or reasoning_text
+    if result.get("tools"):
+        for item in result.get("tools") or []:
+            upsert_tool(item)
+    error_text = result.get("error") or result.get("stderr") or error_text
+    ok = bool(result.get("ok"))
+    terminal_event = "run.completed" if ok else "run.failed"
+    terminal_payload = {
+        "ok": ok,
+        "reply": reply,
+        "tools": tools,
+        "thinking": "" if reasoning_text.strip() == reply.strip() else reasoning_text,
+        "error": None if ok else (error_text or "Hermes Desktop Backend run failed"),
+    }
+    gateway_presence.set_provider_event(status_key, "hermes", {"event": terminal_event, "run_id": run_id, "error": terminal_payload.get("error") or ""})
+    publish_progress(force=True)
+    send_sse(terminal_event, terminal_payload)
+    finalize_history(ok=ok)
+
+
 def _handle_hermes_run_events(handler, run_id):
     """Proxy Hermes' native run SSE stream to the browser and persist final history."""
     meta = _get_hermes_active_run(run_id)
@@ -4907,6 +5158,8 @@ def _handle_hermes_run_events(handler, run_id):
         handler.end_headers()
         handler.wfile.write(json.dumps({"ok": False, "error": f"Hermes run '{run_id}' not found"}).encode())
         return
+    if meta.get("providerPath") == "desktop":
+        return _handle_hermes_desktop_run_events(handler, run_id, meta)
 
     profile = meta.get("profile") or "default"
     agent = _get_hermes_agent(meta.get("agentId") or meta.get("agentKey") or f"hermes-{profile}") or {}
@@ -5177,13 +5430,24 @@ def _handle_hermes_chat(body):
         used_api = False
         used_desktop = False
         desktop_error = ""
-        if hermes_cfg.get("preferApi", True) and not yolo_once:
+        desktop_configured = bool(agent.get("desktopUrl") or hermes_cfg.get("desktopUrl"))
+        desktop_first = bool(desktop_configured and hermes_cfg.get("preferDesktop", True) is not False)
+
+        if desktop_first and not yolo_once:
+            desktop_result = _handle_hermes_desktop_chat(agent, profile, delivery_message, timeout)
+            if not desktop_result.get("fallback"):
+                result = desktop_result
+                used_desktop = True
+            else:
+                desktop_error = desktop_result.get("error") or ""
+
+        if result is None and hermes_cfg.get("preferApi", True) and not yolo_once:
             api_result = _handle_hermes_api_chat(agent, profile, delivery_message, message, timeout)
             if not api_result.get("fallback"):
                 result = api_result
                 used_api = True
 
-        if result is None and not yolo_once and (agent.get("desktopAvailable") or hermes_cfg.get("desktopUrl")):
+        if result is None and not desktop_first and not yolo_once and (agent.get("desktopAvailable") or hermes_cfg.get("desktopUrl")):
             desktop_result = _handle_hermes_desktop_chat(agent, profile, delivery_message, timeout)
             if not desktop_result.get("fallback"):
                 result = desktop_result
@@ -12014,6 +12278,7 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                     "desktopTcpHost": VO_CONFIG.get("hermes", {}).get("desktopTcpHost"),
                     "desktopTcpPort": VO_CONFIG.get("hermes", {}).get("desktopTcpPort"),
                     "preferApi": VO_CONFIG.get("hermes", {}).get("preferApi", True),
+                    "preferDesktop": VO_CONFIG.get("hermes", {}).get("preferDesktop", True),
                     "detected": bool(_handle_hermes_test().get("ok")),
                 },
                 "codex": {

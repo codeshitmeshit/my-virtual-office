@@ -87,6 +87,9 @@
       this.hermesHistoryPollTimer = null;
       this.hermesEventSource = null;
       this.hermesCompletedToolKeys = new Set();
+      this.liveThinkingEl = null;
+      this.liveThinkingPre = null;
+      this.liveThinkingRunId = '';
       this.codexHistoryPollTimer = null;
       this.codexEventSource = null;
       this.codexCompletedToolKeys = new Set();
@@ -556,6 +559,9 @@
           if (data.ok && Array.isArray(data.messages)) {
             this.applySessionMetrics(data);
             this.messages.innerHTML = '';
+            this.liveThinkingEl = null;
+            this.liveThinkingPre = null;
+            this.liveThinkingRunId = '';
             for (const msg of data.messages) {
               if (msg.text || msg.thinking || msg.approval || (Array.isArray(msg.tools) && msg.tools.length)) {
                 const meta = msg.role === 'assistant'
@@ -584,6 +590,9 @@
           const messages = res.payload.messages;
           const seenToolKeys = new Set();
           this.messages.innerHTML = '';
+          this.liveThinkingEl = null;
+          this.liveThinkingPre = null;
+          this.liveThinkingRunId = '';
           for (const msg of messages) {
             const t = extractText(msg) || (typeof msg.content === 'string' ? msg.content : '');
             const ts = msg.timestamp || msg.ts || msg.message?.timestamp || null;
@@ -1564,6 +1573,7 @@
       }
 
       if (eventName === 'reasoning.available') {
+        this.updateLiveThinking(runId, data.thinking || data.text || '');
         this.updateTypingIndicator('Hermes is reasoning...');
         return;
       }
@@ -2097,7 +2107,10 @@
           this.updateToolCall(payload);
         }
       });
-      if (progress.thinking) this.updateTypingIndicator('Hermes is reasoning...');
+      if (progress.thinking) {
+        this.updateLiveThinking(runId, progress.thinking);
+        this.updateTypingIndicator('Hermes is reasoning...');
+      }
     }
 
     async recoverHermesFinalFromHistory(startedAt, timeoutMs = 45000) {
@@ -2325,6 +2338,33 @@
           this.liveToolCards.delete(key);
         }
       }
+    }
+
+    updateLiveThinking(runId, text) {
+      const cleaned = String(text || '').trim();
+      if (!cleaned) return;
+      const shouldStick = this.isNearBottom();
+      const key = runId || this.currentRunId || 'hermes';
+      if (!this.liveThinkingEl || this.liveThinkingRunId !== key || !this.liveThinkingEl.isConnected) {
+        const wrap = document.createElement('div');
+        wrap.className = 'chat-msg assistant chat-thinking-live';
+        wrap.dataset.runId = key;
+        const bubble = document.createElement('div');
+        bubble.className = 'chat-bubble';
+        const card = renderThinkingCard(cleaned);
+        card.open = true;
+        bubble.appendChild(card);
+        wrap.appendChild(bubble);
+        const ind = this.messages.querySelector('.typing-indicator');
+        if (ind) this.messages.insertBefore(wrap, ind);
+        else this.messages.appendChild(wrap);
+        this.liveThinkingEl = wrap;
+        this.liveThinkingPre = card.querySelector('.chat-thinking-body pre');
+        this.liveThinkingRunId = key;
+      } else if (this.liveThinkingPre) {
+        this.liveThinkingPre.textContent = cleaned;
+      }
+      this.scrollBottom(shouldStick);
     }
 
     appendActivity(text) {
@@ -2615,6 +2655,18 @@
     }, 60000);
   }
 
+  function setGatewayDisconnectedStatus(windowInstance, message) {
+    if (windowInstance?.isHermesSelected?.()) {
+      if (windowInstance.currentRunId || windowInstance.hermesEventSource) {
+        windowInstance.setStatus('Hermes stream active...', 'connecting');
+      } else {
+        windowInstance.setStatus('Hermes ready', 'connected');
+      }
+      return;
+    }
+    windowInstance.setStatus(message, 'disconnected');
+  }
+
   function connectGateway() {
     if (ws) return;
     ws = new WebSocket(getGatewayUrl());
@@ -2633,10 +2685,10 @@
     ws.onclose = (evt) => {
       connected = false;
       ws = null;
-      chatWindows.forEach(w => w.setStatus(`Disconnected (${evt.code})`, 'disconnected'));
+      chatWindows.forEach(w => setGatewayDisconnectedStatus(w, `Disconnected (${evt.code})`));
       if (chatWindows.some(w => w.root.classList.contains('open') || w.currentRunId || w.streamingMsg)) setTimeout(connectGateway, 3000);
     };
-    ws.onerror = () => chatWindows.forEach(w => w.setStatus('Connection error', 'disconnected'));
+    ws.onerror = () => chatWindows.forEach(w => setGatewayDisconnectedStatus(w, 'Connection error'));
   }
 
   function sendConnect() {

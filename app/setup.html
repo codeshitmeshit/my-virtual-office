@@ -648,7 +648,7 @@
                 return;
             }
             statusEl.innerHTML = '<div class="status-box info">Saving and testing Hermes...</div>';
-            var hermesPayload = { enabled: enabled, homePath: homePath || null, binary: binary || null, apiUrl: apiUrl || null, desktopUrl: desktopUrl || null, desktopTcpHost: desktopTcpHost || null, desktopHostHeader: desktopHostHeader || null, preferApi: true };
+            var hermesPayload = { enabled: enabled, homePath: homePath || null, binary: binary || null, apiUrl: apiUrl || null, desktopUrl: desktopUrl || null, desktopTcpHost: desktopTcpHost || null, desktopHostHeader: desktopHostHeader || null, preferApi: !desktopUrl, preferDesktop: !!desktopUrl };
             if (apiKey) hermesPayload.apiKey = apiKey;
             fetch('/setup/save', {
                 method: 'POST',
@@ -996,15 +996,17 @@
                     url: document.getElementById('s-pcmetrics-url').value.trim() || null
                 } : {},
                 hermes: (function() {
+                    var desktopUrl = document.getElementById('s-hermes-desktop-url').value.trim();
                     var h = {
                         enabled: hermesEnabled,
                         homePath: document.getElementById('s-hermes-home').value.trim() || null,
                         binary: document.getElementById('s-hermes-bin').value.trim() || null,
                         apiUrl: document.getElementById('s-hermes-api-url').value.trim() || null,
-                        desktopUrl: document.getElementById('s-hermes-desktop-url').value.trim() || null,
+                        desktopUrl: desktopUrl || null,
                         desktopTcpHost: document.getElementById('s-hermes-desktop-tcp-host').value.trim() || null,
                         desktopHostHeader: document.getElementById('s-hermes-desktop-host-header').value.trim() || null,
-                        preferApi: true
+                        preferApi: !desktopUrl,
+                        preferDesktop: !!desktopUrl
                     };
                     var apiKey = document.getElementById('s-hermes-api-key').value.trim();
                     if (apiKey) h.apiKey = apiKey;
