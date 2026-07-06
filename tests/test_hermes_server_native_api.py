@@ -83,6 +83,10 @@ class FakeHermesApiClient:
         yield {"event": "message.delta", "delta": "reply"}
         yield {"event": "run.completed"}
 
+    def respond_approval(self, run_id, choice):
+        self.calls.append({"respond_approval": run_id, "choice": choice})
+        return {"ok": True, "run_id": run_id, "choice": choice}
+
     def stop_run(self, run_id):
         self.calls.append({"stop_run": run_id})
         return {"ok": True, "stopped": True, "run_id": run_id}
@@ -110,6 +114,7 @@ def install_native_fakes(api_mode="success"):
     FakeHermesProvider.chats = []
     FakeHermesApiClient.calls = []
     FakeHermesApiClient.mode = api_mode
+    server.HERMES_APPROVAL_PENDING.clear()
     status_dir = tempfile.mkdtemp(prefix="vo-hermes-native-chat-")
     server.STATUS_DIR = status_dir
     server.HermesProvider = FakeHermesProvider
@@ -236,6 +241,68 @@ def test_hermes_chat_native_approval_records_pending_without_cli_fallback():
         pending = server._get_hermes_approval_pending("hermes-default", result["sessionId"])
         assert pending["pending"]["approval_id"] == result["approval"]["approval_id"]
     finally:
+        restore_native_fakes(old)
+
+
+def test_hermes_native_approval_sends_feishu_notification_once():
+    old = install_native_fakes("approval")
+    old_send = server.send_feishu_notification
+    sent = []
+    try:
+        def fake_send(intent, **kwargs):
+            sent.append({"intent": intent, "kwargs": kwargs})
+            return {"ok": True, "status": "sent", "record": {"id": intent["id"]}}
+
+        server.send_feishu_notification = fake_send
+        result = server._handle_hermes_chat({"agentId": "hermes-default", "message": "hello", "conversationId": "conv-approval-feishu"})
+        assert result["approval"]["feishuNotification"]["status"] == "sent"
+        assert len(sent) == 1
+        intent = sent[0]["intent"]
+        assert intent["type"] == "application_form"
+        assert intent["target"] == "feishu-hermes-approval"
+        assert intent["related"]["type"] == "hermes_approval"
+        assert [a["value"]["action"] for a in intent["actions"][:2]] == ["hermes_approval_approve_once", "hermes_approval_deny"]
+
+        duplicate = server._remember_hermes_approval_pending(result["approval"], agent_id="hermes-default", profile="default", session_id=result["sessionId"])
+        assert duplicate["approval_id"] == result["approval"]["approval_id"]
+        assert len(sent) == 1
+    finally:
+        server.send_feishu_notification = old_send
+        restore_native_fakes(old)
+
+
+def test_feishu_card_action_can_approve_hermes_native_approval():
+    old = install_native_fakes("approval")
+    old_send = server.send_feishu_notification
+    try:
+        server.send_feishu_notification = lambda intent, **kwargs: {"ok": True, "status": "sent"}
+        result = server._handle_hermes_chat({"agentId": "hermes-default", "message": "hello", "conversationId": "conv-approval-action"})
+        approval = result["approval"]
+        action_result = server._handle_feishu_card_action({
+            "schema": "2.0",
+            "header": {"event_type": "card.action.trigger"},
+            "event": {
+                "operator": {"open_id": "ou_approver"},
+                "open_message_id": "om_approval",
+                "action": {
+                    "value": {
+                        "action": "hermes_approval_approve_once",
+                        "approval_id": approval["approval_id"],
+                        "agent_id": "hermes-default",
+                        "session_id": approval["session_id"],
+                        "run_id": approval["runId"],
+                    }
+                },
+            },
+        })
+
+        assert action_result["ok"] is True
+        assert action_result["outcome"]["businessStatus"] == "approved_once"
+        assert {"respond_approval": "run-native-1", "choice": "once"} in FakeHermesApiClient.calls
+        pending = server._get_hermes_approval_pending("hermes-default", approval["session_id"])
+        assert pending["pending"] is None
+    finally:
+        server.send_feishu_notification = old_send
         restore_native_fakes(old)
 
 
@@ -466,6 +533,8 @@ if __name__ == "__main__":
     test_hermes_test_skips_native_api_when_disabled()
     test_hermes_chat_uses_native_api_when_available()
     test_hermes_chat_native_approval_records_pending_without_cli_fallback()
+    test_hermes_native_approval_sends_feishu_notification_once()
+    test_feishu_card_action_can_approve_hermes_native_approval()
     test_hermes_chat_falls_back_to_cli_when_native_api_unavailable()
     test_hermes_history_clear_is_conversation_scoped()
     test_hermes_run_start_publishes_provider_bridge_events()

@@ -4252,6 +4252,76 @@ def _normalize_hermes_approval_choice(choice):
     }.get(choice, choice)
 
 
+def _hermes_approval_feishu_dedupe_key(approval):
+    approval_id = str((approval or {}).get("approval_id") or (approval or {}).get("id") or "").strip()
+    return f"hermes-approval:{approval_id}" if approval_id else ""
+
+
+def _send_hermes_approval_feishu_notification(approval):
+    if not isinstance(approval, dict):
+        return {"ok": True, "status": "skipped_invalid_approval"}
+    approval_id = str(approval.get("approval_id") or approval.get("id") or "").strip()
+    if not approval_id:
+        return {"ok": True, "status": "skipped_missing_approval_id"}
+    title = str(approval.get("title") or "Hermes 危险命令待审批").strip()
+    command = str(approval.get("command") or "Hermes approval request").strip()
+    description = str(approval.get("description") or "Hermes 需要人工审批后才能继续执行。").strip()
+    agent_id = str(approval.get("agentId") or "hermes-default").strip()
+    session_id = str(approval.get("session_id") or approval.get("sessionId") or "").strip()
+    run_id = str(approval.get("runId") or approval.get("run_id") or "").strip()
+    intent = {
+        "id": _hermes_approval_feishu_dedupe_key(approval),
+        "type": "application_form",
+        "title": title,
+        "summary": description,
+        "state": "pending",
+        "multi_participant": False,
+        "related": {"type": "hermes_approval", "id": approval_id, "title": command},
+        "details": [
+            ("Agent", agent_id),
+            ("命令", command),
+            ("Run ID", run_id or "-"),
+            ("Session ID", session_id or "-"),
+        ],
+        "actions": [
+            {
+                "category": "confirm",
+                "text": "同意本次",
+                "value": {
+                    "action": "hermes_approval_approve_once",
+                    "approval_id": approval_id,
+                    "agent_id": agent_id,
+                    "session_id": session_id,
+                    "run_id": run_id,
+                },
+            },
+            {
+                "category": "cancel",
+                "text": "拒绝",
+                "value": {
+                    "action": "hermes_approval_deny",
+                    "approval_id": approval_id,
+                    "agent_id": agent_id,
+                    "session_id": session_id,
+                    "run_id": run_id,
+                },
+            },
+            {
+                "category": "jump",
+                "text": "打开聊天",
+                "url": _vo_public_url("/"),
+            },
+        ],
+        "target": "feishu-hermes-approval",
+    }
+    return send_feishu_notification(
+        intent,
+        webhook_url=VO_CONFIG.get("notifications", {}).get("feishuWebhook") or None,
+        app_config=_feishu_app_send_config(VO_CONFIG.get("notifications", {})),
+        status_dir=STATUS_DIR,
+    )
+
+
 def _remember_hermes_approval_pending(approval, agent_id="", profile="", session_id=""):
     if not isinstance(approval, dict):
         return None
@@ -4266,14 +4336,22 @@ def _remember_hermes_approval_pending(approval, agent_id="", profile="", session
     approval["queuedAt"] = approval.get("queuedAt") or int(time.time() * 1000)
     approval["status"] = approval.get("status") or "pending"
     key = _hermes_approval_key(approval.get("agentId"), approval.get("profile"), approval.get("session_id"))
+    should_notify = False
     with HERMES_APPROVAL_LOCK:
         queue = HERMES_APPROVAL_PENDING.setdefault(key, [])
         existing_idx = next((i for i, item in enumerate(queue) if item.get("id") == approval.get("id")), None)
         if existing_idx is None:
             queue.append(approval)
+            should_notify = True
         else:
             queue[existing_idx] = {**queue[existing_idx], **approval}
-        return approval
+            approval = queue[existing_idx]
+    if should_notify:
+        try:
+            approval["feishuNotification"] = _send_hermes_approval_feishu_notification(approval)
+        except Exception as exc:
+            approval["feishuNotification"] = {"ok": False, "status": "error", "error": str(exc)}
+    return approval
 
 
 def _get_hermes_approval_pending(agent_key="hermes-default", session_id=""):
@@ -10529,6 +10607,49 @@ def _dispatch_feishu_project_execution_action(action, value, event):
     }
 
 
+def _dispatch_feishu_hermes_approval_action(action, value, event):
+    if action not in {"hermes_approval_approve_once", "hermes_approval_deny"}:
+        return {"handled": False}
+    approval_id = str(value.get("approval_id") or value.get("approvalId") or "").strip()
+    agent_id = str(value.get("agent_id") or value.get("agentId") or "hermes-default").strip()
+    session_id = str(value.get("session_id") or value.get("sessionId") or "").strip()
+    if not approval_id:
+        return {
+            "handled": True,
+            "ok": False,
+            "businessStatus": "missing_approval_id",
+            "toast": _feishu_card_action_error("Hermes 审批缺少 approval_id，无法处理"),
+        }
+    choice = "approve_once" if action == "hermes_approval_approve_once" else "deny"
+    actor = _feishu_meeting_action_actor(event)
+    result = _handle_hermes_approval_respond({
+        "agentId": agent_id,
+        "approval_id": approval_id,
+        "session_id": session_id,
+        "choice": choice,
+        "fromDisplayName": actor or "Feishu",
+    })
+    if result.get("ok"):
+        return {
+            "handled": True,
+            "ok": True,
+            "businessStatus": "approved_once" if choice == "approve_once" else "denied",
+            "approvalId": approval_id,
+            "agentId": agent_id,
+            "runId": result.get("runId") or value.get("run_id") or value.get("runId") or "",
+            "toast": _feishu_card_action_success("Hermes 审批已同意" if choice == "approve_once" else "Hermes 审批已拒绝"),
+        }
+    return {
+        "handled": True,
+        "ok": False,
+        "businessStatus": str(result.get("status") or result.get("code") or "hermes_approval_action_failed"),
+        "businessError": str(result.get("error") or "Hermes 审批操作失败"),
+        "approvalId": approval_id,
+        "agentId": agent_id,
+        "toast": _feishu_card_action_error(str(result.get("error") or "Hermes 审批操作失败")),
+    }
+
+
 def _handle_feishu_card_action(body):
     if not isinstance(body, dict):
         return {"ok": False, "error": "Invalid Feishu callback body", "_status": 400}
@@ -10541,7 +10662,8 @@ def _handle_feishu_card_action(body):
     action = str(value.get("action") or "").strip()
     meeting_outcome = _dispatch_feishu_meeting_request_action(action, str(value.get("request_id") or "").strip(), event)
     project_outcome = {"handled": False} if meeting_outcome.get("handled") else _dispatch_feishu_project_execution_action(action, value, event)
-    outcome = meeting_outcome if meeting_outcome.get("handled") else (project_outcome if project_outcome.get("handled") else None)
+    hermes_outcome = {"handled": False} if meeting_outcome.get("handled") or project_outcome.get("handled") else _dispatch_feishu_hermes_approval_action(action, value, event)
+    outcome = meeting_outcome if meeting_outcome.get("handled") else (project_outcome if project_outcome.get("handled") else (hermes_outcome if hermes_outcome.get("handled") else None))
     record = _record_feishu_card_action(body, event, value, outcome=outcome)
     if meeting_outcome.get("handled"):
         return {
@@ -10556,6 +10678,13 @@ def _handle_feishu_card_action(body):
             "toast": project_outcome.get("toast") or _feishu_card_action_success("操作已收到"),
             "recordId": record["id"],
             "outcome": {k: v for k, v in project_outcome.items() if k not in {"toast"}},
+        }
+    if hermes_outcome.get("handled"):
+        return {
+            "ok": bool(hermes_outcome.get("ok")),
+            "toast": hermes_outcome.get("toast") or _feishu_card_action_success("操作已收到"),
+            "recordId": record["id"],
+            "outcome": {k: v for k, v in hermes_outcome.items() if k not in {"toast"}},
         }
     return {
         "ok": True,
