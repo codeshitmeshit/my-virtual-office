@@ -1,0 +1,27 @@
+app/locales/en.json
+  s_2ec1870fda0a2c::t_5b941cc28342a5 1102
+app/locales/zh.json
+  s_2ec1870fda0a2c::t_f03846813340f8 1102
+app/projects.css
+  s_2ec1870fda0a2c::t_63356322f472d8 944-955,993-1036,1213-1216
+app/projects.js
+  s_2ec1870fda0a2c::t_22c857e0c8ab86 962-976,1065-1068,1078-1085
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "b41817c91b52b7a7879dfd0233be3b8cdd48d469",
+  "prompts": {},
+  "sessions": {
+    "s_2ec1870fda0a2c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f3a7c-58d1-7f82-9b8a-a3b5b30f6013",
+        "model": "unknown"
+      },
+      "human_author": "codeshitmeshit <codeshitmeshit@126.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
