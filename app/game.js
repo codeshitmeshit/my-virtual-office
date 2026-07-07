@@ -8459,6 +8459,27 @@ function getAgentChatActivitySignature(msg) {
     return tools.map(function(t) { return (t && (t.status || '') + ':' + (t.name || t.toolName || t.tool_name || 'tool')); }).join('|') + '|' + (msg.thinking || '') + '|' + (msg.reasoningTokens || 0) + '|' + approval;
 }
 
+function getAgentChatSessionMeta(messages) {
+    if (!Array.isArray(messages)) return null;
+    for (var i = messages.length - 1; i >= 0; i--) {
+        var msg = messages[i];
+        if (!msg || typeof msg !== 'object') continue;
+        var title = String(msg.sessionTitle || '').trim();
+        var sessionId = String(msg.sessionId || msg.sessionKey || '').trim();
+        var sessionKind = String(msg.sessionKind || '').trim();
+        if (title || sessionId || sessionKind || msg.liveMode || msg.activeSession) {
+            return {
+                title: title || (msg.liveMode ? 'Live Agent Mode' : (sessionKind || 'Session')),
+                sessionId: sessionId,
+                sessionKind: sessionKind,
+                liveMode: Boolean(msg.liveMode),
+                activeSession: Boolean(msg.activeSession)
+            };
+        }
+    }
+    return null;
+}
+
 function pollAgentChat() {
     var now = Date.now();
     if (now - lastChatPoll < 3000) return;
@@ -8474,7 +8495,9 @@ function pollAgentChat() {
         for (var key in data) {
             var msgs = data[key];
             var lastMsg = msgs[msgs.length - 1];
-            var lastText = lastMsg ? ((lastMsg.text || '') + (getAgentChatActivitySignature(lastMsg) ? ' [activity]' : '') + (getAgentChatFirstImage(lastMsg) ? ' [image]' : '')) : '';
+            var sessionMeta = getAgentChatSessionMeta(msgs);
+            var sessionSig = sessionMeta ? (sessionMeta.title + ':' + sessionMeta.sessionId + ':' + (sessionMeta.liveMode ? 'live' : '')) : '';
+            var lastText = lastMsg ? ((lastMsg.text || '') + (getAgentChatActivitySignature(lastMsg) ? ' [activity]' : '') + (getAgentChatFirstImage(lastMsg) ? ' [image]' : '') + (sessionSig ? ' [session:' + sessionSig + ']' : '')) : '';
             if (lastText !== chatLastMsg[key]) {
                 chatTypewriterState[key] = { charIdx: 0, targetText: lastText, done: false, msgIdx: msgs.length - 1 };
                 // On first load, keep minimized. After that, auto-expand on new messages.
@@ -8673,8 +8696,10 @@ function drawChatBubbles() {
         var canScrollUp = startIdx > 0;
         var canScrollDown = scrollOff > 0;
         var mediaLineCount = visLines.filter(function(l) { return l.image; }).length;
-        var bubbleH = Math.min(220, 26 + (visLines.length - mediaLineCount) * 12 + mediaLineCount * 58);
-        chatBubbles.push({ agent: agent, agentKey: agent.statusKey, lines: visLines, canScrollUp: canScrollUp, canScrollDown: canScrollDown, x: headX + 25, y: headY - bubbleH - 10, w: 155, h: bubbleH, anchorX: headX, anchorY: headY, });
+        var sessionMeta = getAgentChatSessionMeta(msgs);
+        var headerExtra = sessionMeta ? 11 : 0;
+        var bubbleH = Math.min(232, 26 + headerExtra + (visLines.length - mediaLineCount) * 12 + mediaLineCount * 58);
+        chatBubbles.push({ agent: agent, agentKey: agent.statusKey, lines: visLines, sessionMeta: sessionMeta, canScrollUp: canScrollUp, canScrollDown: canScrollDown, x: headX + 25, y: headY - bubbleH - 10, w: 155, h: bubbleH, anchorX: headX, anchorY: headY, });
     }
 
     // Compute visible world bounds so bubbles (especially headers with indicators)
@@ -8746,8 +8771,9 @@ function drawChatBubbles() {
         // Header banner
         ctx.fillStyle = b.agent.color + 'dd';
         ctx.save();
-        ctx.beginPath(); ctx.rect(b.x, b.y, b.w, 15); ctx.clip();
-        drawRoundRect(b.x, b.y, b.w, 18, r); ctx.fill();
+        var headerH = b.sessionMeta ? 26 : 15;
+        ctx.beginPath(); ctx.rect(b.x, b.y, b.w, headerH); ctx.clip();
+        drawRoundRect(b.x, b.y, b.w, headerH + 3, r); ctx.fill();
         ctx.restore();
 
         // Header text
@@ -8755,6 +8781,12 @@ function drawChatBubbles() {
         ctx.fillStyle = '#fff';
         ctx.textAlign = 'left';
         ctx.fillText(b.agent.name, b.x + 8, b.y + 11);
+        if (b.sessionMeta) {
+            var sessionText = (b.sessionMeta.liveMode ? '* ' : '') + truncateAgentChatActivity(b.sessionMeta.title || 'Session', 26);
+            ctx.font = '7px Arial, sans-serif';
+            ctx.fillStyle = b.sessionMeta.liveMode ? '#b8ffc8' : 'rgba(255,255,255,0.84)';
+            ctx.fillText(sessionText, b.x + 8, b.y + 22);
+        }
 
         // Live pulsing dot
         var pulse = 0.5 + Math.sin(Date.now() * 0.005) * 0.5;
@@ -8788,7 +8820,7 @@ function drawChatBubbles() {
         renderedChatBubbles.push({ agentKey: b.agentKey, closeRect: { x: closeX, y: closeY, w: 10, h: 10 }, fullRect: { x: b.x, y: b.y, w: b.w, h: b.h }, canScrollUp: b.canScrollUp, canScrollDown: b.canScrollDown, projIndicator: projWork ? { x: b.x + b.w - 33, y: b.y + 4, w: 6, h: 6, info: projWork } : null });
 
         // Message lines
-        var lineY = b.y + 26;
+        var lineY = b.y + (b.sessionMeta ? 37 : 26);
         ctx.font = '9px Arial, sans-serif';
         ctx.textAlign = 'left';
         for (var li = 0; li < b.lines.length; li++) {
@@ -8830,7 +8862,7 @@ function drawChatBubbles() {
             ctx.fillStyle = 'rgba(180,150,50,0.6)';
             ctx.font = '8px sans-serif';
             ctx.textAlign = 'center';
-            ctx.fillText('▲', b.x + b.w / 2, b.y + 24);
+            ctx.fillText('▲', b.x + b.w / 2, b.y + (b.sessionMeta ? 35 : 24));
         }
         if (b.canScrollDown) {
             ctx.fillStyle = 'rgba(180,150,50,0.6)';

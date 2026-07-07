@@ -61,6 +61,22 @@
     }
   }
 
+  function formatSessionTimestamp(value) {
+    if (value === null || value === undefined || value === '') return '';
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if (!trimmed || trimmed.toLowerCase() === 'undefined' || trimmed.toLowerCase() === 'null') return '';
+      const parsed = new Date(trimmed);
+      if (Number.isNaN(parsed.getTime())) return trimmed.length > 28 ? trimmed.slice(0, 28) : trimmed;
+      return parsed.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    }
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric) || numeric <= 0) return '';
+    const date = new Date(numeric > 1e12 ? numeric : numeric * 1000);
+    if (Number.isNaN(date.getTime())) return '';
+    return date.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  }
+
   class ChatWindow {
     constructor(root, options = {}) {
       this.root = root;
@@ -107,6 +123,10 @@
       this.isRecording = false;
       this.mediaRecorder = null;
       this.audioChunks = [];
+      this.sessionsRefreshSeq = 0;
+      this.sessionsRefreshTimer = null;
+      this.sessionsPanelOpen = false;
+      this.currentSessions = [];
 
       this.messages = root.querySelector('.chat-messages');
       this.status = root.querySelector('.chat-status');
@@ -122,6 +142,10 @@
       this.micBtn = root.querySelector('.chat-mic-btn');
       this.newSessionBtn = root.querySelector('.chat-new-session');
       this.closeBtn = root.querySelector('.chat-close, .chat-secondary-close');
+      this.sessionsToggleBtn = root.querySelector('.chat-sessions-toggle');
+      this.sessionsPanel = root.querySelector('.chat-sessions-panel');
+      this.sessionsListEl = root.querySelector('.chat-sessions-list');
+      this.sessionsNewBtn = root.querySelector('.chat-sessions-new');
 
       this.messages.addEventListener('click', (e) => {
         if (e.target.classList.contains('chat-image-clickable') || e.target.classList.contains('chat-image-thumb')) {
@@ -150,6 +174,8 @@
       this.fileInput?.addEventListener('change', () => this.handleFiles());
       this.micBtn?.addEventListener('click', () => this.toggleRecording());
       this.newSessionBtn?.addEventListener('click', () => this.newSession());
+      this.sessionsToggleBtn?.addEventListener('click', () => this.toggleSessionsPanel());
+      this.sessionsNewBtn?.addEventListener('click', () => this.createSessionFromPanel());
       this.closeBtn?.addEventListener('click', () => {
         if (this.isPrimary) {
           const chatPanel = document.getElementById('chat-panel');
@@ -308,6 +334,7 @@
       this.streamingMsg = null;
       this.syncAgentSelect();
       this.resetConversation(`${systemPrefix} ${opt.textContent.trim()}`);
+      if (this.sessionsPanelOpen) this.refreshSessionsList({ showLoading: true });
       const isHermes = this.isHermesSelected();
       const isCodex = this.isCodexSelected();
       const isClaudeCode = this.isClaudeCodeSelected();
@@ -350,6 +377,7 @@
           this.agentSelect.appendChild(group);
         }
         this.syncAgentSelect();
+        if (this.sessionsPanelOpen) this.refreshSessionsList({ showLoading: true });
         if (connected || this.isHermesSelected() || this.isCodexSelected() || this.isClaudeCodeSelected()) this.fetchSessionInfo();
       } catch (e) {
         console.warn('[chat] Failed to load agent list:', e);
@@ -399,6 +427,10 @@
 
     isClaudeCodeSelected() {
       return this.getSelectedProviderKind() === 'claude-code' || String(this.sessionKey || '').startsWith('claude-code:');
+    }
+
+    isProviderAgentSelected() {
+      return this.getSelectedProviderKind() !== 'openclaw' || this.isHermesSelected() || this.isCodexSelected() || this.isClaudeCodeSelected();
     }
 
     startHermesApprovalPolling() {
@@ -650,38 +682,205 @@
     async newSession() {
       const agentName = this.agentSelect.selectedOptions[0]?.textContent.trim() || 'this agent';
       if (!confirm(`Start a new session for ${agentName}? This clears the conversation history.`)) return;
-      if (this.isHermesSelected() || this.isCodexSelected() || this.isClaudeCodeSelected()) {
-        const providerName = this.isClaudeCodeSelected() ? 'Claude Code' : (this.isCodexSelected() ? 'Codex' : 'Hermes');
-        const providerPath = this.isClaudeCodeSelected() ? 'claude-code' : (this.isCodexSelected() ? 'codex' : 'hermes');
-        try {
-          const res = await fetch('/api/' + providerPath + '/history/clear', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ agentId: this.getSelectedAgentId() || this.selectedAgentKey })
-          });
-          const data = await res.json();
-          if (!data.ok) throw new Error(data.error || 'clear failed');
-          this.resetConversation('New ' + providerName + ' session started');
-          await this.fetchSessionInfo();
-        } catch (e) {
-          this.appendSystem('Reset error: ' + e.message);
-        }
-        return;
-      }
-      if (!connected) { this.appendSystem('Not connected'); return; }
       try {
-        const res = await rpc('sessions.reset', { key: this.sessionKey });
-        if (res.ok) {
-          this.messages.innerHTML = '';
-          this.streamingMsg = null;
-          this.currentRunId = null;
-          this.liveToolCards.clear();
-          this.appendSystem('New session started');
-        } else {
-          this.appendSystem('Reset failed: ' + JSON.stringify(res.error || res));
-        }
+        await this.createSessionFromPanel({ skipConfirm: true });
       } catch (e) {
         this.appendSystem('Reset error: ' + e.message);
+      }
+    }
+
+    // Sessions panel
+    toggleSessionsPanel(force) {
+      const next = typeof force === 'boolean' ? force : !this.sessionsPanelOpen;
+      this.sessionsPanelOpen = next;
+      this.sessionsPanel?.classList.toggle('open', next);
+      this.sessionsToggleBtn?.classList.toggle('active', next);
+      if (next) {
+        this.refreshSessionsList();
+        if (!this.sessionsRefreshTimer) {
+          this.sessionsRefreshTimer = setInterval(() => {
+            if (this.sessionsPanelOpen) this.refreshSessionsList();
+          }, 15000);
+        }
+      } else if (this.sessionsRefreshTimer) {
+        clearInterval(this.sessionsRefreshTimer);
+        this.sessionsRefreshTimer = null;
+      }
+    }
+
+    async refreshSessionsList({ showLoading = false } = {}) {
+      if (!this.sessionsListEl) return;
+      const agentId = this.getSelectedAgentId() || this.selectedAgentKey;
+      if (!agentId) return;
+      const requestSeq = ++this.sessionsRefreshSeq;
+      const requestAgentId = String(agentId);
+      if (showLoading) {
+        this.currentSessions = [];
+        this.sessionsListEl.innerHTML = '';
+        const div = document.createElement('div');
+        div.className = 'chat-sessions-empty';
+        div.textContent = 'Loading sessions...';
+        this.sessionsListEl.appendChild(div);
+      }
+      let data = null;
+      try {
+        const res = await fetch('/api/chat-sessions?agentId=' + encodeURIComponent(agentId) + '&limit=40');
+        data = await res.json();
+      } catch (e) {
+        if (requestSeq !== this.sessionsRefreshSeq) return;
+        this.sessionsListEl.innerHTML = '<div class="chat-sessions-empty">Sessions unavailable</div>';
+        return;
+      }
+      const currentAgentId = String(this.getSelectedAgentId() || this.selectedAgentKey || '');
+      if (requestSeq !== this.sessionsRefreshSeq || requestAgentId !== currentAgentId) return;
+      if (!data?.ok || !Array.isArray(data.sessions)) {
+        const err = (data && data.error) ? String(data.error) : 'Sessions unavailable';
+        this.sessionsListEl.innerHTML = '';
+        const div = document.createElement('div');
+        div.className = 'chat-sessions-empty';
+        div.textContent = err.slice(0, 200);
+        this.sessionsListEl.appendChild(div);
+        return;
+      }
+      this.currentSessions = data.sessions;
+      this.renderSessionsList(data);
+    }
+
+    activeSessionIdForPanel() {
+      if (this.getSelectedProviderKind() === 'openclaw' && !this.isProviderAgentSelected()) return this.sessionKey;
+      const active = this.currentSessions.find(s => s.active);
+      return active ? active.id : '';
+    }
+
+    renderSessionsList(data) {
+      const listEl = this.sessionsListEl;
+      if (!listEl) return;
+      listEl.innerHTML = '';
+      if (!this.currentSessions.length) {
+        listEl.innerHTML = '<div class="chat-sessions-empty">No sessions yet</div>';
+        return;
+      }
+      const selectedId = this.activeSessionIdForPanel();
+      for (const session of this.currentSessions) {
+        const item = document.createElement('div');
+        item.className = 'chat-session-item';
+        if (session.id === selectedId || (session.active && data.providerKind !== 'openclaw')) item.classList.add('selected');
+
+        const title = document.createElement('div');
+        title.className = 'cs-title';
+        title.textContent = session.title || session.id;
+        item.appendChild(title);
+
+        if (session.preview) {
+          const preview = document.createElement('div');
+          preview.className = 'cs-preview';
+          preview.textContent = session.preview;
+          item.appendChild(preview);
+        }
+
+        const meta = document.createElement('div');
+        meta.className = 'cs-meta';
+        if (session.liveMode) {
+          const live = document.createElement('span');
+          live.className = 'cs-live-badge';
+          live.textContent = session.active ? 'LIVE' : 'Live Mode';
+          meta.appendChild(live);
+        }
+        if (session.updatedAt) {
+          const when = document.createElement('span');
+          when.textContent = formatSessionTimestamp(session.updatedAt);
+          meta.appendChild(when);
+        }
+        if (meta.childNodes.length) item.appendChild(meta);
+
+        if (session.deletable) {
+          const del = document.createElement('button');
+          del.className = 'chat-session-delete';
+          del.title = 'Delete session';
+          del.textContent = '\u{1F5D1}';
+          del.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.deleteSessionFromPanel(session);
+          });
+          item.appendChild(del);
+        }
+
+        item.addEventListener('click', () => this.switchToSession(session));
+        listEl.appendChild(item);
+      }
+    }
+
+    async switchToSession(session) {
+      const agentId = this.getSelectedAgentId() || this.selectedAgentKey;
+      try {
+        if (this.getSelectedProviderKind() === 'openclaw' && !this.isProviderAgentSelected()) {
+          if (session.sessionKey && session.sessionKey !== this.sessionKey) {
+            this.sessionKey = session.sessionKey;
+            saveChatSelection(this.slotId, { selectedAgentKey: this.selectedAgentKey, sessionKey: this.sessionKey });
+            this.resetConversation('Switched to session: ' + (session.title || session.sessionKey));
+            await this.loadHistory();
+            this.fetchSessionInfo();
+          }
+          this.refreshSessionsList();
+          return;
+        }
+        const res = await fetch('/api/chat-sessions/switch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ agentId, sessionId: session.id })
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || res.statusText);
+        this.resetConversation('Switched to session: ' + (session.title || session.id));
+        await this.loadHistory();
+        this.fetchSessionInfo();
+        this.refreshSessionsList();
+      } catch (e) {
+        this.appendSystem('Session switch failed: ' + e.message);
+      }
+    }
+
+    async createSessionFromPanel({ skipConfirm = false } = {}) {
+      const agentId = this.getSelectedAgentId() || this.selectedAgentKey;
+      const agentName = this.agentSelect?.selectedOptions?.[0]?.textContent.trim() || agentId;
+      if (!skipConfirm && !confirm(`Start a new session for ${agentName}?`)) return;
+      try {
+        const body = { agentId };
+        if (this.getSelectedProviderKind() === 'openclaw' && !this.isProviderAgentSelected()) body.sessionKey = this.sessionKey;
+        const res = await fetch('/api/chat-sessions/create', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || res.statusText);
+        this.resetConversation('New session started');
+        await this.loadHistory();
+        this.fetchSessionInfo();
+        this.refreshSessionsList();
+      } catch (e) {
+        this.appendSystem('New session failed: ' + e.message);
+      }
+    }
+
+    async deleteSessionFromPanel(session) {
+      const agentId = this.getSelectedAgentId() || this.selectedAgentKey;
+      if (!confirm(`Delete session "${session.title || session.id}"?`)) return;
+      try {
+        const res = await fetch('/api/chat-sessions/delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ agentId, sessionId: session.id })
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || res.statusText);
+        if (session.sessionKey === this.sessionKey || session.active) {
+          this.resetConversation('Session deleted');
+          await this.loadHistory();
+        }
+        this.refreshSessionsList();
+      } catch (e) {
+        this.appendSystem('Delete failed: ' + e.message);
       }
     }
 

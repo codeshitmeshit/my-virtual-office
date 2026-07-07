@@ -3251,6 +3251,34 @@ def _parse_iso_epoch_ms(value):
         return 0
 
 
+def _utc_now_iso():
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _epoch_to_utc_iso(epoch):
+    try:
+        return datetime.fromtimestamp(float(epoch), tz=timezone.utc).isoformat()
+    except Exception:
+        return ""
+
+
+def _format_time_local(ts):
+    """Convert ISO timestamp or epoch ms to HH:MM AM/PM in the configured local zone."""
+    try:
+        if isinstance(ts, (int, float)):
+            dt = datetime.fromtimestamp(ts / 1000 if ts > 1e12 else ts, tz=timezone.utc)
+        elif isinstance(ts, str):
+            if not ts.strip():
+                return ""
+            dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        else:
+            return ""
+        local_tz = ZoneInfo(os.environ.get("VO_TIMEZONE") or os.environ.get("TZ") or "UTC")
+        return dt.astimezone(local_tz).strftime("%I:%M %p").lstrip("0")
+    except Exception:
+        return ""
+
+
 def _read_tail_text(path, initial_bytes=64 * 1024, max_bytes=2 * 1024 * 1024, min_lines=20):
     """Read a complete-line tail from large JSONL files."""
     if not path or not os.path.exists(path):
@@ -3283,6 +3311,7 @@ def _openclaw_session_paths(agent_id, session_key=None):
     sessions_dir = os.path.join(WORKSPACE_BASE, f"agents/{agent_id}/sessions")
     sessions_json_path = os.path.join(sessions_dir, "sessions.json")
     session_info = {}
+    selected_key = session_key or ""
     try:
         with open(sessions_json_path, "r") as f:
             sessions = json.load(f)
@@ -3290,16 +3319,21 @@ def _openclaw_session_paths(agent_id, session_key=None):
             session_info = sessions.get(session_key) or {}
         if not session_info:
             best_ts = -1
-            for val in sessions.values():
+            for skey, val in sessions.items():
                 if not isinstance(val, dict):
                     continue
                 ts = val.get("updatedAt", 0)
                 if ts > best_ts:
                     best_ts = ts
                     session_info = val
+                    selected_key = skey
     except (FileNotFoundError, json.JSONDecodeError, OSError):
         session_info = {}
 
+    if session_info and selected_key:
+        session_info = dict(session_info)
+        session_info.setdefault("key", selected_key)
+        session_info.setdefault("sessionKey", selected_key)
     session_id = str(session_info.get("sessionId") or "")
     jsonl_file = os.path.join(sessions_dir, f"{session_id}.jsonl") if session_id else None
     trajectory_file = os.path.join(sessions_dir, f"{session_id}.trajectory.jsonl") if session_id else None
@@ -3495,6 +3529,20 @@ def _load_codex_state(profile="default"):
         return {"messages": []}
 
 
+def _save_codex_state(profile, state):
+    path = _codex_history_path(profile)
+    data = state if isinstance(state, dict) else {}
+    data.setdefault("messages", [])
+    data["updatedAt"] = int(time.time() * 1000)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        json.dump(data, f, indent=2)
+    try:
+        os.chmod(path, 0o666)
+    except OSError:
+        pass
+
+
 def _codex_int(value, default=0):
     try:
         return int(value)
@@ -3670,6 +3718,20 @@ def _load_claude_code_state(profile="main"):
         return data if isinstance(data, dict) else {"messages": []}
     except (FileNotFoundError, json.JSONDecodeError, OSError):
         return {"messages": []}
+
+
+def _save_claude_code_state(profile, state):
+    path = _claude_code_history_path(profile)
+    data = state if isinstance(state, dict) else {}
+    data.setdefault("messages", [])
+    data["updatedAt"] = int(time.time() * 1000)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        json.dump(data, f, indent=2)
+    try:
+        os.chmod(path, 0o666)
+    except OSError:
+        pass
 
 
 def _get_claude_code_token_usage(profile="main"):
@@ -4408,6 +4470,21 @@ def _load_hermes_state(profile="default"):
         return data if isinstance(data, dict) else {"profile": profile, "messages": []}
     except (FileNotFoundError, json.JSONDecodeError, OSError):
         return {"profile": profile, "messages": []}
+
+
+def _save_hermes_state(profile, state):
+    path = _hermes_history_path(profile)
+    data = state if isinstance(state, dict) else {}
+    data["profile"] = profile
+    data.setdefault("messages", [])
+    data["updatedAt"] = int(time.time() * 1000)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        json.dump(data, f, indent=2)
+    try:
+        os.chmod(path, 0o666)
+    except OSError:
+        pass
 
 
 def _save_hermes_history(profile, messages):
@@ -11841,6 +11918,560 @@ def _handle_agent_delete(body):
 
 ##############################################################################
 
+# ─── UNIFIED CHAT SESSIONS (per-framework session management) ───────────────
+# Normalizes OpenClaw gateway/file sessions, Hermes CLI sessions, Codex
+# app-server threads, and Claude Code JSONL sessions for the chat sessions drawer.
+
+CHAT_SESSION_SCHEMA_VERSION = "vo-chat-sessions/v1"
+
+
+def _chat_sessions_agent(agent_id):
+    agent = _find_agent_record(agent_id)
+    if not agent:
+        return None
+    return {
+        "agentId": agent.get("statusKey") or agent.get("id"),
+        "providerKind": str(agent.get("providerKind") or "openclaw").lower(),
+        "profile": agent.get("profile") or agent.get("providerAgentId") or agent.get("id"),
+        "name": agent.get("name") or agent.get("id"),
+        "record": agent,
+    }
+
+
+def _openclaw_live_mode_session_key(agent_id):
+    return f"agent:{agent_id}:vw-live-mode-planner"
+
+
+def _openclaw_live_mode_enabled(agent_id):
+    state_fn = globals().get("get_live_agent_loop_state")
+    if callable(state_fn):
+        try:
+            state = state_fn(persist_migration=False)
+            agent_state = (state.get("agents") or {}).get(agent_id) or {}
+            return bool(agent_state.get("enabled"))
+        except Exception:
+            pass
+    features = VO_CONFIG.get("features", {}) if isinstance(VO_CONFIG.get("features"), dict) else {}
+    live_cfg = features.get("liveAgentMode") if isinstance(features.get("liveAgentMode"), dict) else {}
+    return bool(live_cfg.get(agent_id) or live_cfg.get("enabled"))
+
+
+def _openclaw_session_key_for_agent(agent_id, session_key="", default_bucket="main"):
+    safe_agent = _safe_openclaw_agent_id(agent_id)
+    prefix = f"agent:{safe_agent}:"
+    raw = str(session_key or "").strip()
+    if not raw:
+        return f"{prefix}{default_bucket}" if default_bucket else ""
+    if raw.startswith(prefix) and len(raw) > len(prefix):
+        return raw
+    if re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", raw):
+        return f"{prefix}{raw}"
+    return ""
+
+
+def _chat_sessions_openclaw_entry(agent_id, session_key, row=None, live_action_running=False):
+    key = _openclaw_session_key_for_agent(agent_id, session_key, default_bucket="")
+    if not key:
+        return None
+    prefix = f"agent:{_safe_openclaw_agent_id(agent_id)}:"
+    kind = key[len(prefix):]
+    is_live_planner = kind == "vw-live-mode-planner"
+    row = row if isinstance(row, dict) else {}
+    title = str(row.get("label") or row.get("title") or row.get("name") or "").strip()
+    if not title:
+        title = "Live Agent Mode" if is_live_planner else ("Main chat" if kind == "main" else kind)
+    return {
+        "id": key,
+        "sessionKey": key,
+        "title": title[:200],
+        "preview": str(row.get("preview") or row.get("lastMessage") or row.get("summary") or "")[:300],
+        "updatedAt": row.get("updatedAt") or row.get("lastActiveAt") or row.get("createdAt"),
+        "kind": "live-mode" if is_live_planner else ("main" if kind == "main" else "other"),
+        "liveMode": is_live_planner,
+        "active": bool(is_live_planner and live_action_running),
+        "deletable": kind != "main",
+    }
+
+
+def _chat_sessions_list_openclaw_files(agent_id, live_action_running=False, limit=200):
+    sessions_dir = os.path.join(WORKSPACE_BASE, "agents", _safe_openclaw_agent_id(agent_id), "sessions")
+    sessions_json_path = os.path.join(sessions_dir, "sessions.json")
+    try:
+        with open(sessions_json_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return []
+    if not isinstance(data, dict):
+        return []
+    entries = []
+    for session_key, row in data.items():
+        if not isinstance(row, dict):
+            continue
+        entry = _chat_sessions_openclaw_entry(agent_id, session_key, row, live_action_running=live_action_running)
+        if not entry:
+            continue
+        if not entry.get("updatedAt"):
+            session_id = str(row.get("sessionId") or "").strip()
+            candidates = [
+                os.path.join(sessions_dir, f"{session_id}.jsonl") if session_id else "",
+                os.path.join(sessions_dir, f"{session_id}.trajectory.jsonl") if session_id else "",
+            ]
+            mtimes = []
+            for path in candidates:
+                try:
+                    if path:
+                        mtimes.append(os.stat(path).st_mtime)
+                except OSError:
+                    pass
+            if mtimes:
+                entry["updatedAt"] = _epoch_to_utc_iso(max(mtimes))
+        entries.append(entry)
+    entries.sort(key=lambda s: _parse_iso_epoch_ms(s.get("updatedAt")), reverse=True)
+    return entries[: max(1, int(limit))]
+
+
+def _merge_openclaw_session_entries(entries):
+    merged = {}
+    for entry in entries:
+        if not isinstance(entry, dict) or not entry.get("id"):
+            continue
+        existing = merged.get(entry["id"], {})
+        row = dict(existing)
+        for key, value in entry.items():
+            if value not in (None, "", []):
+                row[key] = value
+        if "deletable" in entry:
+            row["deletable"] = bool(entry.get("deletable"))
+        if entry.get("active"):
+            row["active"] = True
+        merged[entry["id"]] = row
+    return list(merged.values())
+
+
+def _chat_sessions_list_openclaw(agent_ref, limit=40):
+    agent_id = agent_ref["agentId"]
+    live_action_running = _openclaw_live_mode_enabled(agent_id)
+    file_sessions = _chat_sessions_list_openclaw_files(agent_id, live_action_running=live_action_running, limit=max(200, int(limit) * 5))
+    gateway_sessions = []
+    gateway_error = ""
+    res = _gateway_rpc_call("sessions.list", {"limit": max(200, int(limit) * 5)}, timeout=15)
+    if res.get("ok"):
+        rows = res.get("sessions")
+        if not isinstance(rows, list):
+            payload = res.get("payload") if isinstance(res.get("payload"), dict) else {}
+            rows = payload.get("sessions") if isinstance(payload.get("sessions"), list) else []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            entry = _chat_sessions_openclaw_entry(agent_id, str(row.get("key") or row.get("sessionKey") or ""), row, live_action_running=live_action_running)
+            if entry:
+                gateway_sessions.append(entry)
+    else:
+        gateway_error = str(res.get("error") or "sessions.list failed")
+    sessions = _merge_openclaw_session_entries([*file_sessions, *gateway_sessions])
+    if live_action_running and not any(s.get("liveMode") for s in sessions):
+        sessions.insert(0, {
+            "id": _openclaw_live_mode_session_key(agent_id),
+            "sessionKey": _openclaw_live_mode_session_key(agent_id),
+            "title": "Live Agent Mode",
+            "preview": "Active autonomous mode session",
+            "updatedAt": None,
+            "kind": "live-mode",
+            "liveMode": True,
+            "active": True,
+            "deletable": False,
+            "virtual": True,
+        })
+    sessions.sort(key=lambda s: _parse_iso_epoch_ms(s.get("updatedAt")), reverse=True)
+    if sessions or not gateway_error:
+        return {"ok": True, "sessions": sessions[: max(1, int(limit))]}
+    return {"ok": False, "error": gateway_error, "sessions": []}
+
+
+def _chat_sessions_list_hermes(agent_ref, limit=40):
+    provider = _hermes_provider(agent_ref.get("record") or {})
+    profile = agent_ref["profile"] or "default"
+    outcome = provider.list_sessions(profile, limit=limit)
+    if not outcome.get("ok"):
+        return {"ok": False, "error": outcome.get("error"), "sessions": []}
+    active_id = _get_hermes_session_id(profile)
+    sessions = []
+    for row in outcome.get("sessions") or []:
+        sessions.append({
+            "id": row.get("id"),
+            "sessionKey": f"hermes:{profile}:{row.get('id')}",
+            "title": row.get("title") or row.get("id"),
+            "preview": row.get("preview") or "",
+            "updatedAt": row.get("lastActive") or None,
+            "kind": "chat",
+            "liveMode": False,
+            "active": bool(active_id and row.get("id") == active_id),
+            "deletable": True,
+        })
+    return {"ok": True, "sessions": sessions}
+
+
+def _chat_sessions_list_codex(agent_ref, limit=40):
+    provider = _codex_provider()
+    profile = agent_ref["profile"] or "main"
+    outcome = provider.list_threads(profile, limit=limit)
+    if not outcome.get("ok"):
+        return {"ok": False, "error": outcome.get("error"), "sessions": []}
+    active_id = _get_codex_session_id(profile)
+    sessions = []
+    for row in outcome.get("sessions") or []:
+        if row.get("archived"):
+            continue
+        sessions.append({
+            "id": row.get("id"),
+            "sessionKey": f"codex:{profile}:{row.get('id')}",
+            "title": row.get("title") or row.get("id"),
+            "preview": row.get("preview") or "",
+            "updatedAt": row.get("updatedAt"),
+            "kind": "chat",
+            "liveMode": False,
+            "active": bool(active_id and row.get("id") == active_id),
+            "deletable": True,
+        })
+    return {"ok": True, "sessions": sessions}
+
+
+def _claude_code_home_path():
+    cfg = VO_CONFIG.get("claudeCode", {}) or {}
+    return os.path.expanduser(str(os.environ.get("VO_CLAUDE_CODE_HOME") or os.environ.get("CLAUDE_CONFIG_DIR") or cfg.get("homePath") or "~/.claude"))
+
+
+def _claude_code_projects_dir():
+    return os.path.join(_claude_code_home_path(), "projects")
+
+
+def _claude_code_valid_session_id(session_id):
+    text = str(session_id or "").strip()
+    return text if re.fullmatch(r"[A-Za-z0-9_.:-]{8,128}", text) else ""
+
+
+def _claude_code_text_from_content(content):
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if isinstance(item, dict) and item.get("type") == "text" and item.get("text"):
+                parts.append(str(item.get("text") or ""))
+        return "\n".join(parts)
+    if isinstance(content, dict):
+        return str(content.get("text") or "")
+    return ""
+
+
+def _claude_code_session_records(limit=80):
+    projects_dir = _claude_code_projects_dir()
+    if not os.path.isdir(projects_dir):
+        return []
+    records = []
+    for path in glob.glob(os.path.join(projects_dir, "*", "*.jsonl")):
+        if ".deleted." in os.path.basename(path):
+            continue
+        session_id = _claude_code_valid_session_id(os.path.splitext(os.path.basename(path))[0])
+        if not session_id:
+            continue
+        title = ""
+        preview = ""
+        cwd = ""
+        updated_at = None
+        try:
+            stat = os.stat(path)
+            updated_at = _epoch_to_utc_iso(stat.st_mtime)
+            with open(path, "r", encoding="utf-8", errors="replace") as f:
+                for line in f:
+                    try:
+                        row = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if not isinstance(row, dict):
+                        continue
+                    if row.get("sessionId"):
+                        session_id = str(row.get("sessionId") or session_id)
+                    if row.get("cwd") and not cwd:
+                        cwd = str(row.get("cwd") or "")
+                    if row.get("timestamp"):
+                        updated_at = row.get("timestamp")
+                    if row.get("type") == "last-prompt" and row.get("lastPrompt"):
+                        title = str(row.get("lastPrompt") or "").replace("\n", " ").strip()[:120]
+                    message = row.get("message") if isinstance(row.get("message"), dict) else {}
+                    role = message.get("role") or row.get("type")
+                    text = _claude_code_text_from_content(message.get("content") if message else row.get("content")).strip()
+                    if text and role in ("user", "assistant"):
+                        if not title and role == "user":
+                            title = text.replace("\n", " ").strip()[:120]
+                        preview = text.replace("\n", " ").strip()[:300]
+        except OSError:
+            continue
+        records.append({"id": session_id, "path": path, "title": title or session_id, "preview": preview, "updatedAt": updated_at, "cwd": cwd})
+    records.sort(key=lambda row: str(row.get("updatedAt") or ""), reverse=True)
+    return records[: max(1, int(limit))]
+
+
+def _claude_code_find_session_file(session_id):
+    wanted = _claude_code_valid_session_id(session_id)
+    if not wanted:
+        return ""
+    for row in _claude_code_session_records(limit=500):
+        if str(row.get("id") or "") == wanted:
+            return str(row.get("path") or "")
+    return ""
+
+
+def _chat_sessions_list_claude_code(agent_ref, limit=40):
+    cfg = VO_CONFIG.get("claudeCode", {}) or {}
+    home_path = _claude_code_home_path()
+    if not os.path.isdir(home_path):
+        return {"ok": False, "error": f"Claude Code home not found at {home_path}", "sessions": []}
+    active_id = _get_claude_code_session_id(agent_ref["profile"] or "main")
+    sessions = []
+    for row in _claude_code_session_records(limit=limit):
+        session_id = row.get("id")
+        sessions.append({
+            "id": session_id,
+            "sessionKey": f"claude-code:{agent_ref['profile']}:{session_id}",
+            "title": row.get("title") or session_id,
+            "preview": row.get("preview") or "",
+            "updatedAt": row.get("updatedAt"),
+            "kind": "chat",
+            "liveMode": False,
+            "active": bool(active_id and session_id == active_id),
+            "deletable": True,
+            "cwd": row.get("cwd") or "",
+        })
+    return {"ok": True, "sessions": sessions, "binary": str(cfg.get("binary") or "claude"), "homePath": home_path, "resumeCommand": "claude --resume <session-id>"}
+
+
+def handle_chat_sessions_list(agent_id, limit=40):
+    agent_ref = _chat_sessions_agent(agent_id)
+    if not agent_ref:
+        return {"ok": False, "error": f"Unknown agent: {agent_id}", "sessions": []}, 404
+    kind = agent_ref["providerKind"]
+    if kind == "hermes":
+        outcome = _chat_sessions_list_hermes(agent_ref, limit=limit)
+    elif kind == "codex":
+        outcome = _chat_sessions_list_codex(agent_ref, limit=limit)
+    elif kind == "openclaw":
+        outcome = _chat_sessions_list_openclaw(agent_ref, limit=limit)
+    elif kind in ("claude-code", "claudecode", "claude"):
+        outcome = _chat_sessions_list_claude_code(agent_ref, limit=limit)
+    else:
+        outcome = {"ok": False, "error": f"{kind} session management is not supported yet", "sessions": []}
+    status = 200 if outcome.get("ok") else 502
+    return {"schemaVersion": CHAT_SESSION_SCHEMA_VERSION, "agentId": agent_ref["agentId"], "providerKind": kind, "profile": agent_ref["profile"], **outcome}, status
+
+
+def handle_chat_session_create(agent_id, body=None):
+    agent_ref = _chat_sessions_agent(agent_id)
+    if not agent_ref:
+        return {"ok": False, "error": f"Unknown agent: {agent_id}"}, 404
+    kind = agent_ref["providerKind"]
+    profile = agent_ref["profile"]
+    if kind == "hermes":
+        _save_hermes_state(profile, {"messages": [], "sessionId": ""})
+        return {"ok": True, "providerKind": kind, "profile": profile, "sessionId": "", "note": "New Hermes session starts with the next message."}, 200
+    if kind == "codex":
+        _save_codex_state(profile, {"messages": [], "sessionId": ""})
+        _clear_codex_token_usage(profile)
+        return {"ok": True, "providerKind": kind, "profile": profile, "sessionId": "", "note": "New Codex thread starts with the next message."}, 200
+    if kind in ("claude-code", "claudecode", "claude"):
+        _save_claude_code_state(profile, {"messages": [], "sessionId": ""})
+        _clear_claude_code_token_usage(profile)
+        return {"ok": True, "providerKind": kind, "profile": profile, "sessionId": "", "note": "New Claude Code session starts with the next message."}, 200
+    if kind == "openclaw":
+        session_key = _openclaw_session_key_for_agent(agent_ref["agentId"], (body or {}).get("sessionKey"), default_bucket="main")
+        if not session_key:
+            return {"ok": False, "error": "Invalid session key for this agent"}, 400
+        res = _gateway_rpc_call("sessions.reset", {"key": session_key}, timeout=15)
+        if not res.get("ok"):
+            return {"ok": False, "error": str(res.get("error") or "sessions.reset failed")}, 502
+        return {"ok": True, "providerKind": kind, "sessionKey": session_key}, 200
+    return {"ok": False, "error": f"{kind} session management is not supported yet"}, 400
+
+
+def handle_chat_session_delete(agent_id, session_id, body=None):
+    agent_ref = _chat_sessions_agent(agent_id)
+    if not agent_ref:
+        return {"ok": False, "error": f"Unknown agent: {agent_id}"}, 404
+    if not session_id:
+        return {"ok": False, "error": "sessionId is required"}, 400
+    kind = agent_ref["providerKind"]
+    profile = agent_ref["profile"]
+    if kind == "hermes":
+        outcome = _hermes_provider(agent_ref.get("record") or {}).delete_session(profile, session_id)
+        if outcome.get("ok") and _get_hermes_session_id(profile) == session_id:
+            _save_hermes_state(profile, {"messages": [], "sessionId": ""})
+        return outcome, 200 if outcome.get("ok") else 502
+    if kind == "codex":
+        outcome = _codex_provider().delete_thread(profile, session_id)
+        if outcome.get("ok") and _get_codex_session_id(profile) == session_id:
+            _save_codex_state(profile, {"messages": [], "sessionId": ""})
+            _clear_codex_token_usage(profile)
+        return outcome, 200 if outcome.get("ok") else 502
+    if kind in ("claude-code", "claudecode", "claude"):
+        path = _claude_code_find_session_file(session_id)
+        if not path:
+            return {"ok": False, "error": "Claude Code session not found"}, 404
+        deleted_path = f"{path}.deleted.{_utc_now_iso().replace(':', '-')}"
+        try:
+            os.replace(path, deleted_path)
+        except OSError as exc:
+            return {"ok": False, "error": str(exc)}, 500
+        if _get_claude_code_session_id(profile) == session_id:
+            _save_claude_code_state(profile, {"messages": [], "sessionId": ""})
+            _clear_claude_code_token_usage(profile)
+        return {"ok": True, "deleted": True, "sessionId": session_id, "deletedPath": deleted_path}, 200
+    if kind == "openclaw":
+        session_key = _openclaw_session_key_for_agent(agent_ref["agentId"], session_id, default_bucket="")
+        if not session_key:
+            return {"ok": False, "error": "Invalid session key for this agent"}, 400
+        if session_key.endswith(":main"):
+            return {"ok": False, "error": "The main session cannot be deleted; use new session to reset it."}, 400
+        res = _gateway_rpc_call("sessions.delete", {"key": session_key, "deleteTranscript": True}, timeout=15)
+        if not res.get("ok"):
+            return {"ok": False, "error": str(res.get("error") or "sessions.delete failed")}, 502
+        return {"ok": True, "deleted": True, "sessionKey": session_key}, 200
+    return {"ok": False, "error": f"{kind} session management is not supported yet"}, 400
+
+
+def handle_chat_session_switch(agent_id, session_id, body=None):
+    agent_ref = _chat_sessions_agent(agent_id)
+    if not agent_ref:
+        return {"ok": False, "error": f"Unknown agent: {agent_id}"}, 404
+    if not session_id:
+        return {"ok": False, "error": "sessionId is required"}, 400
+    kind = agent_ref["providerKind"]
+    profile = agent_ref["profile"]
+    if kind == "hermes":
+        exported = _hermes_provider(agent_ref.get("record") or {}).export_session(profile, session_id)
+        if not exported.get("ok"):
+            return {"ok": False, "error": exported.get("error") or "Hermes session export failed"}, 502
+        messages = _hermes_session_to_chat_messages(exported.get("session") or {}, agent_ref)
+        _save_hermes_state(profile, {"messages": messages, "sessionId": session_id})
+        return {"ok": True, "providerKind": kind, "sessionId": session_id, "messages": messages}, 200
+    if kind == "codex":
+        outcome = _codex_provider().read_thread(profile, session_id)
+        if not outcome.get("ok"):
+            return {"ok": False, "error": outcome.get("error") or "Codex thread read failed"}, 502
+        messages = _codex_thread_to_chat_messages(outcome.get("thread") or {}, agent_ref)
+        state = _load_codex_state(profile)
+        state["messages"] = messages[-500:]
+        state["sessionId"] = session_id
+        _save_codex_state(profile, state)
+        return {"ok": True, "providerKind": kind, "sessionId": session_id, "messages": messages}, 200
+    if kind in ("claude-code", "claudecode", "claude"):
+        path = _claude_code_find_session_file(session_id)
+        if not path:
+            return {"ok": False, "error": "Claude Code session not found"}, 404
+        messages = _claude_code_jsonl_to_chat_messages(path, agent_ref)
+        _save_claude_code_state(profile, {"messages": messages[-500:], "sessionId": session_id})
+        return {"ok": True, "providerKind": kind, "sessionId": session_id, "messages": messages, "resumeCommand": f"claude --resume {session_id}"}, 200
+    if kind == "openclaw":
+        session_key = _openclaw_session_key_for_agent(agent_ref["agentId"], session_id, default_bucket="")
+        if not session_key:
+            return {"ok": False, "error": "Invalid session key for this agent"}, 400
+        return {"ok": True, "providerKind": kind, "sessionKey": session_key}, 200
+    return {"ok": False, "error": f"{kind} session management is not supported yet"}, 400
+
+
+def _hermes_session_to_chat_messages(session, agent_ref):
+    messages = []
+    session_id = str(session.get("id") or "")
+    for msg in session.get("messages") or []:
+        if not isinstance(msg, dict):
+            continue
+        role = str(msg.get("role") or "")
+        if role == "tool":
+            continue
+        content = msg.get("content")
+        text = content if isinstance(content, str) else json.dumps(content)[:2000] if content else ""
+        if role not in ("user", "assistant") or not text:
+            continue
+        messages.append({"role": role, "text": text, "ts": int(time.time() * 1000), "from": agent_ref["name"] if role == "assistant" else "You", "fromType": "agent" if role == "assistant" else "human", "sessionId": session_id, "sessionTitle": f"Hermes session {session_id[-8:]}" if session_id else "Hermes session", "sessionKind": "chat", "activeSession": True, "source": "hermes"})
+    return messages[-500:]
+
+
+def _codex_thread_to_chat_messages(thread, agent_ref):
+    messages = []
+    thread_id = str(thread.get("id") or "")
+    for turn in thread.get("turns") or []:
+        if not isinstance(turn, dict):
+            continue
+        for item in turn.get("items") or []:
+            if not isinstance(item, dict):
+                continue
+            item_type = str(item.get("type") or "")
+            if item_type in ("userMessage", "user_message"):
+                content = item.get("content")
+                text = " ".join(str(part.get("text") or "") for part in content if isinstance(part, dict)) if isinstance(content, list) else str(item.get("text") or content or "")
+                if text.strip():
+                    messages.append({"role": "user", "text": text.strip()[:4000], "ts": int(time.time() * 1000), "from": "You", "fromType": "human", "sessionId": thread_id, "sessionTitle": f"Codex thread {thread_id[-8:]}" if thread_id else "Codex thread", "sessionKind": "chat", "activeSession": True, "source": "codex"})
+            elif item_type in ("agentMessage", "agent_message", "assistantMessage"):
+                text = str(item.get("text") or "")
+                if text.strip():
+                    messages.append({"role": "assistant", "text": text.strip()[:8000], "ts": int(time.time() * 1000), "from": agent_ref["name"], "fromType": "agent", "sessionId": thread_id, "sessionTitle": f"Codex thread {thread_id[-8:]}" if thread_id else "Codex thread", "sessionKind": "chat", "activeSession": True, "source": "codex"})
+    return messages[-500:]
+
+
+def _claude_code_jsonl_to_chat_messages(path, agent_ref):
+    messages = []
+    session_id = os.path.splitext(os.path.basename(path))[0]
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                try:
+                    row = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(row, dict):
+                    continue
+                msg = row.get("message") if isinstance(row.get("message"), dict) else {}
+                role = str(msg.get("role") or row.get("type") or "")
+                if role not in ("user", "assistant"):
+                    continue
+                text = _claude_code_text_from_content(msg.get("content")).strip()
+                if not text:
+                    continue
+                if row.get("sessionId"):
+                    session_id = str(row.get("sessionId") or session_id)
+                messages.append({"role": role, "text": text[:8000 if role == "assistant" else 4000], "ts": row.get("timestamp") or int(time.time() * 1000), "from": agent_ref["name"] if role == "assistant" else "You", "fromType": "agent" if role == "assistant" else "human", "sessionId": session_id, "sessionTitle": f"Claude Code {session_id[-8:]}" if session_id else "Claude Code session", "sessionKind": "chat", "activeSession": True, "source": "claude-code"})
+    except OSError:
+        pass
+    return messages[-500:]
+
+
+def _openclaw_session_meta_for_bubble(agent_id, session_info=None, jsonl_file=None):
+    session_info = session_info if isinstance(session_info, dict) else {}
+    session_key = str(session_info.get("key") or session_info.get("sessionKey") or "")
+    if not session_key:
+        return {}
+    kind = session_key.split(":", 2)[2] if session_key.count(":") >= 2 else ""
+    live_mode = kind == "vw-live-mode-planner"
+    title = str(session_info.get("label") or session_info.get("title") or "").strip()
+    if not title:
+        title = "Live Agent Mode" if live_mode else ("Main chat" if kind == "main" else kind)
+    return {"sessionKey": session_key, "sessionId": str(session_info.get("sessionId") or (os.path.splitext(os.path.basename(jsonl_file))[0] if jsonl_file else "")), "sessionTitle": title, "sessionKind": "live-mode" if live_mode else ("main" if kind == "main" else "other"), "liveMode": live_mode}
+
+
+def _agent_chat_apply_session_meta(messages, meta):
+    if not meta:
+        return messages
+    for msg in messages:
+        if not isinstance(msg, dict):
+            continue
+        msg["sessionKey"] = meta.get("sessionKey") or msg.get("sessionKey")
+        msg["sessionId"] = meta.get("sessionId") or msg.get("sessionId")
+        msg["sessionTitle"] = meta.get("sessionTitle") or msg.get("sessionTitle")
+        msg["sessionKind"] = meta.get("sessionKind") or msg.get("sessionKind")
+        if meta.get("liveMode") is not None:
+            msg["liveMode"] = bool(meta.get("liveMode"))
+    return messages
+
+
 def get_agent_messages(agent_key, max_messages=500):
     """Read recent messages from an agent's active session JSONL."""
     agent_id = AGENT_SESSION_IDS.get(agent_key)
@@ -11854,6 +12485,7 @@ def get_agent_messages(agent_key, max_messages=500):
     # to an older session-store entry; that makes bubbles show stale cron/DM
     # sessions. Instead, fall through to the newest real transcript by mtime.
     jsonl_file, trajectory_file, _session_info = _openclaw_session_paths(agent_id)
+    session_meta = _openclaw_session_meta_for_bubble(agent_id, _session_info, jsonl_file)
     if not jsonl_file:
         # Only consider primary transcript files named <uuid>.jsonl. Ignore
         # trajectory/checkpoint/reset JSONL artifacts, which can be newer but
@@ -11870,7 +12502,7 @@ def get_agent_messages(agent_key, max_messages=500):
             if os.path.exists(candidate_trajectory):
                 trajectory_file = candidate_trajectory
     if not jsonl_file:
-        return _trajectory_activity_messages(trajectory_file, max_tools=min(80, max_messages))
+        return _agent_chat_apply_session_meta(_trajectory_activity_messages(trajectory_file, max_tools=min(80, max_messages)), session_meta)
     messages = []
     try:
         # Performance: read the tail instead of the whole JSONL. Some model/tool
@@ -12020,7 +12652,7 @@ def get_agent_messages(agent_key, max_messages=500):
     if trajectory_file:
         messages.extend(_trajectory_activity_messages(trajectory_file, max_tools=80))
         messages.sort(key=lambda m: m.get("epochMs") or 0)
-    return messages[-max_messages:]
+    return _agent_chat_apply_session_meta(messages[-max_messages:], session_meta)
 
 
 def get_codex_agent_messages(profile, max_messages=500):
@@ -12747,6 +13379,19 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             limit = max(1, min(120, limit))
             messages = _session_trajectory_messages(session_key, max_tools=limit)
             self.wfile.write(json.dumps({"ok": True, "messages": messages}).encode())
+        elif request_path == "/api/chat-sessions":
+            agent_id = (query_params.get("agentId") or query_params.get("agent") or query_params.get("key") or ["main"])[0]
+            try:
+                limit = int((query_params.get("limit") or ["40"])[0])
+            except Exception:
+                limit = 40
+            limit = max(1, min(100, limit))
+            payload, status = handle_chat_sessions_list(agent_id, limit=limit)
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps(payload).encode())
         elif self.path == "/agent-chat":
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -15067,6 +15712,36 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             result.pop("_status", None)
+            self.wfile.write(json.dumps(result).encode())
+            return
+        elif self.path == "/api/chat-sessions/create":
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            result, status = handle_chat_session_create(body.get("agentId") or body.get("agent") or body.get("key") or "main", body)
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps(result).encode())
+            return
+        elif self.path == "/api/chat-sessions/delete":
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            result, status = handle_chat_session_delete(body.get("agentId") or body.get("agent") or body.get("key") or "main", body.get("sessionId") or body.get("sessionKey") or "", body)
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps(result).encode())
+            return
+        elif self.path == "/api/chat-sessions/switch":
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            result, status = handle_chat_session_switch(body.get("agentId") or body.get("agent") or body.get("key") or "main", body.get("sessionId") or body.get("sessionKey") or "", body)
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
             self.wfile.write(json.dumps(result).encode())
             return
         elif self.path == "/api/hermes/history/clear":
