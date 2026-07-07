@@ -1099,6 +1099,7 @@
   "proj_scheduled_cron_enable": "启用",
   "proj_scheduled_cron_delete": "删除",
   "proj_scheduled_cron_error": "错误",
+  "proj_scheduled_cron_error_detail": "原因",
   "proj_scheduled_cron_default_name": "定时任务",
   "proj_scheduled_cron_no_extra_info": "无额外信息",
   "proj_scheduled_cron_target_task": "指定任务",

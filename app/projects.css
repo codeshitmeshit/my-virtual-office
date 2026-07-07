@@ -941,6 +941,18 @@
     gap: 6px;
     flex-wrap: wrap;
 }
+.proj-scheduled-cron-meta {
+    flex-direction: column;
+    align-items: flex-start;
+    min-width: 180px;
+    max-width: 360px;
+}
+.proj-scheduled-cron-status-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+}
 .proj-scheduled-cron-list {
     display: flex;
     flex-direction: column;
@@ -977,6 +989,50 @@
 .proj-scheduled-cron-meta span {
     color: #a8afc0;
     font-size: 10px;
+}
+.proj-scheduled-cron-status {
+    display: inline-flex;
+    align-items: center;
+    min-height: 18px;
+    padding: 1px 6px;
+    border: 1px solid #343a56;
+    border-radius: 4px;
+    background: #101426;
+    font-weight: 700;
+}
+.proj-scheduled-cron-status.is-ok {
+    border-color: #2f7d46;
+    background: #102015;
+    color: #8be09d;
+}
+.proj-scheduled-cron-status.is-muted {
+    border-color: #343a56;
+    background: #101426;
+    color: #a8afc0;
+}
+.proj-scheduled-cron-status.is-error {
+    border-color: #8a3c3c;
+    background: #251313;
+    color: #ff9b9b;
+}
+.proj-scheduled-cron-error-detail {
+    display: grid;
+    grid-template-columns: max-content minmax(0, 1fr);
+    gap: 6px;
+    width: 100%;
+    color: #ffb0b0;
+    font-size: 10px;
+    line-height: 1.35;
+}
+.proj-scheduled-cron-error-detail span {
+    color: #ff8585;
+    font-weight: 700;
+}
+.proj-scheduled-cron-error-detail strong {
+    min-width: 0;
+    color: #ffd1d1;
+    font-weight: 600;
+    overflow-wrap: anywhere;
 }
 .proj-scheduled-cron-main .proj-scheduled-repeat-gate {
     display: inline-flex;
@@ -1153,6 +1209,10 @@
     .proj-scheduled-history-item {
         grid-template-columns: 1fr;
         align-items: stretch;
+    }
+    .proj-scheduled-cron-meta {
+        max-width: none;
+        width: 100%;
     }
     .proj-scheduled-cron-actions {
         width: 100%;

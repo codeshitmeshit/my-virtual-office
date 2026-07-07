@@ -959,6 +959,21 @@
         return { state: 'blocked', label: _t('proj_scheduled_cron_repeat_gate_blocked') };
     }
 
+    function scheduledCronStatusClass(status, hasError) {
+        if (hasError) return 'error';
+        const value = String(status || 'pending').toLowerCase();
+        if (['started', 'running', 'success', 'ok'].includes(value)) return 'ok';
+        if (['failed', 'error', 'stop_error', 'missing_project', 'missing_target'].includes(value)) return 'error';
+        if (['skipped', 'paused', 'pending', 'disengaged_completed', 'skipped_confirmation_required'].includes(value)) return 'muted';
+        return 'muted';
+    }
+
+    function scheduledCronErrorSummary(error) {
+        const text = String(error || '').replace(/\s+/g, ' ').trim();
+        if (!text) return '';
+        return text.length > 180 ? `${text.slice(0, 177)}...` : text;
+    }
+
     function scheduledCronHistoryStatusLabel(status) {
         const labels = {
             started: _t('proj_scheduled_cron_history_started'),
@@ -1047,6 +1062,10 @@
             </div>` : ''}
             ${jobs.length ? `<div class="proj-scheduled-cron-list">${jobs.map(j => {
                 const repeatGate = scheduledCronRepeatGate(j, p);
+                const cronState = j.state || {};
+                const lastStatus = cronState.lastStatus || 'pending';
+                const lastError = scheduledCronErrorSummary(cronState.lastError);
+                const statusClass = scheduledCronStatusClass(lastStatus, !!lastError);
                 return `
                 <div class="proj-scheduled-cron-item ${j.enabled === false ? 'is-disabled' : ''}">
                     <div class="proj-scheduled-cron-main">
@@ -1056,9 +1075,14 @@
                         <code>${escHtml(formatCronSchedule(j.schedule))}</code>
                     </div>
                     <div class="proj-scheduled-cron-meta">
-                        <span>${j.enabled === false ? 'disabled' : 'enabled'}</span>
-                        <span>${escHtml(((j.state || {}).lastStatus) || 'pending')}</span>
-                        ${((j.state || {}).lastError) ? `<span title="${escHtml((j.state || {}).lastError)}">${_t('proj_scheduled_cron_error')}</span>` : ''}
+                        <div class="proj-scheduled-cron-status-row">
+                            <span>${j.enabled === false ? 'disabled' : 'enabled'}</span>
+                            <span class="proj-scheduled-cron-status is-${statusClass}">${escHtml(lastStatus)}</span>
+                        </div>
+                        ${lastError ? `<div class="proj-scheduled-cron-error-detail" title="${escHtml(cronState.lastError)}">
+                            <span>${_t('proj_scheduled_cron_error_detail')}</span>
+                            <strong>${escHtml(lastError)}</strong>
+                        </div>` : ''}
                     </div>
                     <div class="proj-scheduled-cron-buttons">
                         <button class="proj-btn proj-btn-sm" onclick="ProjMgr.runProjectCron('${escHtml(j.id)}')">${_t('proj_scheduled_cron_run_now')}</button>
