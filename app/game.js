@@ -12691,6 +12691,9 @@ function _mmLoadCurrentSettings() {
         var hermesDesktopTcpHost = document.getElementById('mm-hermes-desktop-tcp-host');
         var hermesDesktopTcpPort = document.getElementById('mm-hermes-desktop-tcp-port');
         var hermesDesktopHostHeader = document.getElementById('mm-hermes-desktop-host-header');
+        var hermesPlatformEnable = document.getElementById('mm-hermes-platform-enable');
+        var hermesPlatformToken = document.getElementById('mm-hermes-platform-token');
+        var hermesPlatformAgent = document.getElementById('mm-hermes-platform-agent');
         if (gwInput) gwInput.value = (cfg.openclaw || {}).gatewayUrl || '';
         if (nameInput) nameInput.value = (cfg.office || {}).name || '';
         // Parse "City,State" or "City+Name,State" back into separate fields
@@ -12711,6 +12714,9 @@ function _mmLoadCurrentSettings() {
         if (hermesDesktopTcpPort) hermesDesktopTcpPort.value = hermesCfg.desktopTcpPort || '';
         if (hermesDesktopHostHeader) hermesDesktopHostHeader.value = hermesCfg.desktopHostHeader || '';
         if (hermesApiKey && hermesCfg.apiKeyConfigured) hermesApiKey.placeholder = 'Configured - leave blank to keep';
+        if (hermesPlatformEnable) hermesPlatformEnable.checked = !!hermesCfg.platformEnabled;
+        if (hermesPlatformToken && hermesCfg.platformTokenConfigured) hermesPlatformToken.placeholder = 'Configured - leave blank to keep';
+        if (hermesPlatformAgent) hermesPlatformAgent.value = hermesCfg.platformAgentId || 'hermes-gateway';
         // Auto-populate token from /gateway-info (shows current effective token)
         if (tokenInput) {
             fetch('/gateway-info').then(function(r) { return r.json(); }).then(function(gi) {
@@ -12791,8 +12797,11 @@ function _mmHermesPayload() {
     var desktopTcpPort = (document.getElementById('mm-hermes-desktop-tcp-port') || {}).value || '';
     var desktopHostHeader = (document.getElementById('mm-hermes-desktop-host-header') || {}).value || '';
     var apiKey = ((document.getElementById('mm-hermes-api-key') || {}).value || '').trim();
-    var hermesPayload = { enabled: enabled, homePath: homePath || null, binary: binary || null, apiUrl: apiUrl || null, desktopUrl: desktopUrl || null, desktopTcpHost: desktopTcpHost || null, desktopTcpPort: desktopTcpPort || null, desktopHostHeader: desktopHostHeader || null, preferApi: !desktopUrl, preferDesktop: !!desktopUrl };
+    var platformToken = ((document.getElementById('mm-hermes-platform-token') || {}).value || '').trim();
+    var platformAgent = ((document.getElementById('mm-hermes-platform-agent') || {}).value || '').trim();
+    var hermesPayload = { enabled: enabled, homePath: homePath || null, binary: binary || null, apiUrl: apiUrl || null, desktopUrl: desktopUrl || null, desktopTcpHost: desktopTcpHost || null, desktopTcpPort: desktopTcpPort || null, desktopHostHeader: desktopHostHeader || null, preferApi: !desktopUrl, preferDesktop: !!desktopUrl, platformEnabled: !!(document.getElementById('mm-hermes-platform-enable') || {}).checked, platformAgentId: platformAgent || 'hermes-gateway' };
     if (apiKey) hermesPayload.apiKey = apiKey;
+    if (platformToken) hermesPayload.platformToken = platformToken;
     return { enabled: enabled, apiKey: apiKey, hermes: hermesPayload };
 }
 
@@ -12869,6 +12878,7 @@ function mmTestHermes() {
         var api = d.api || {};
         var desktop = d.desktop || {};
         var cli = d.cli || {};
+        var platform = d.platform || {};
         var desktopDetail = desktop.chatReady
             ? ''
             : (desktop.error ? ' — ' + escHtml(desktop.error) : '');
@@ -12884,14 +12894,18 @@ function mmTestHermes() {
         var cliLine = cli.ok
             ? '<br>CLI: connected' + (cli.agents ? ' · ' + cli.agents.length + ' profile' + (cli.agents.length === 1 ? '' : 's') : '')
             : '<br>CLI fallback: unavailable' + (cli.error ? ' — ' + escHtml(cli.error) : '');
+        var platformAdapters = platform.adapters ? Object.keys(platform.adapters).length : 0;
+        var platformLine = platform.enabled
+            ? '<br>Gateway Platform: ' + (platform.configured ? 'configured' : 'missing token') + (platformAdapters ? ' · adapter online' : ' · waiting for Hermes gateway')
+            : '<br>Gateway Platform: disabled';
         if (d.ok) {
             var names = (d.agents || []).slice(0, 5).map(function(a){
                 var modes = (a.connectionModes || []).join('+') || (a.apiAvailable ? 'api' : 'cli');
                 return (a.emoji || '⚕️') + ' ' + escHtml(a.name) + (a.model ? ' · ' + escHtml(a.model) : '') + ' · ' + escHtml(modes);
             }).join('<br>');
-            statusEl.innerHTML = '<div class="mm-status ok">✅ Hermes connected — ' + count + ' office agent' + (count === 1 ? '' : 's') + apiLine + desktopLine + routeLine + cliLine + (names ? '<br>' + names : '') + '</div>';
+            statusEl.innerHTML = '<div class="mm-status ok">✅ Hermes connected — ' + count + ' office agent' + (count === 1 ? '' : 's') + apiLine + desktopLine + routeLine + cliLine + platformLine + (names ? '<br>' + names : '') + '</div>';
         } else {
-            statusEl.innerHTML = '<div class="mm-status err">❌ Hermes not reachable: ' + escHtml(d.error || 'unknown error') + apiLine + desktopLine + routeLine + cliLine + '</div>';
+            statusEl.innerHTML = '<div class="mm-status err">❌ Hermes not reachable: ' + escHtml(d.error || 'unknown error') + apiLine + desktopLine + routeLine + cliLine + platformLine + '</div>';
         }
     }).catch(function(e) {
         statusEl.innerHTML = '<div class="mm-status err">❌ Hermes test failed: ' + e.message + '</div>';
@@ -13069,7 +13083,11 @@ function mmSaveSettings() {
     var _hDesktopTcpHost = document.getElementById('mm-hermes-desktop-tcp-host');
     var _hDesktopTcpPort = document.getElementById('mm-hermes-desktop-tcp-port');
     var _hDesktopHostHeader = document.getElementById('mm-hermes-desktop-host-header');
+    var _hPlatformEnable = document.getElementById('mm-hermes-platform-enable');
+    var _hPlatformToken = document.getElementById('mm-hermes-platform-token');
+    var _hPlatformAgent = document.getElementById('mm-hermes-platform-agent');
     if (_hCb) {
+        var platformAgent = (_hPlatformAgent ? _hPlatformAgent.value.trim() : '') || 'hermes-gateway';
         var hermesSettings = {
             enabled: _hCb.checked,
             homePath: (_hHome ? _hHome.value.trim() : '') || null,
@@ -13079,11 +13097,15 @@ function mmSaveSettings() {
             desktopTcpHost: (_hDesktopTcpHost ? _hDesktopTcpHost.value.trim() : '') || null,
             desktopTcpPort: (_hDesktopTcpPort ? _hDesktopTcpPort.value.trim() : '') || null,
             desktopHostHeader: (_hDesktopHostHeader ? _hDesktopHostHeader.value.trim() : '') || null,
+            platformEnabled: !!(_hPlatformEnable && _hPlatformEnable.checked),
+            platformAgentId: platformAgent,
             preferApi: !((_hDesktopUrl ? _hDesktopUrl.value.trim() : '')),
             preferDesktop: !!((_hDesktopUrl ? _hDesktopUrl.value.trim() : ''))
         };
         var hermesApiKey = (_hApiKey ? _hApiKey.value.trim() : '');
         if (hermesApiKey) hermesSettings.apiKey = hermesApiKey;
+        var hermesPlatformToken = (_hPlatformToken ? _hPlatformToken.value.trim() : '');
+        if (hermesPlatformToken) hermesSettings.platformToken = hermesPlatformToken;
         config.hermes = hermesSettings;
     }
     config.office = { name: officeName || 'Virtual Office' };

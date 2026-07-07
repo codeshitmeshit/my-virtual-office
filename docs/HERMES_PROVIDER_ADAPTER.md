@@ -54,6 +54,14 @@ The chat UI uses Hermes' native run flow when `preferApi` is enabled and the API
 
 If the native API server is unavailable, `/api/hermes/chat` can use a configured Desktop Backend URL (`hermes serve`) through the documented TUI-gateway JSON-RPC/WebSocket API. CLI remains a compatibility fallback when the CLI is installed or mounted into the Virtual Office container.
 
+## Messaging Gateway platform mode
+
+Virtual Office also includes a Hermes Messaging Gateway platform plugin at:
+
+`integrations/hermes-platform/my_virtual_office/`
+
+This is intentionally separate from API Server/Desktop Backend mode. In this mode, Hermes gateway polls Virtual Office as a messaging platform and posts replies back into the office communication log. See `docs/HERMES_PLATFORM_ADAPTER.md`.
+
 ## Configuration
 
 Hermes integration is product-neutral and configured through `vo-config.json` or environment variables:
@@ -68,6 +76,9 @@ Hermes integration is product-neutral and configured through `vo-config.json` or
 - `VO_HERMES_DESKTOP_TCP_HOST` / `hermes.desktopTcpHost`
 - `VO_HERMES_DESKTOP_TCP_PORT` / `hermes.desktopTcpPort`
 - `VO_HERMES_DESKTOP_LOG_PATH` / `hermes.desktopLogPath`
+- `VO_HERMES_PLATFORM_ENABLED` / `hermes.platformEnabled`
+- `VO_HERMES_PLATFORM_TOKEN` / `hermes.platformToken`
+- `VO_HERMES_PLATFORM_AGENT_ID` / `hermes.platformAgentId`
 - `VO_HERMES_PREFER_API` / `hermes.preferApi`
 - `VO_HERMES_AUTO_START_PROFILE_APIS` / `hermes.autoStartProfileApis`
 - `VO_HERMES_AUTO_START_DEFAULT_API` / `hermes.autoStartDefaultApi`

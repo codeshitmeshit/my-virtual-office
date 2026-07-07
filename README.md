@@ -26,6 +26,8 @@ Virtual Office can connect Hermes as a first-class office agent through the Herm
 
 For Docker deployments, point `VO_HERMES_API_URL` at the host gateway, usually `http://host.docker.internal:8642`, and set `VO_HERMES_API_KEY` to the Hermes `API_SERVER_KEY`. If using Desktop Backend mode with an already-open Desktop app, set `VO_HERMES_DESKTOP_URL` to the loopback URL that Desktop's `hermes serve` backend is bound to, such as `http://127.0.0.1:62353`. Docker-hosted Virtual Office routes loopback Desktop URLs through `host.docker.internal` while preserving Hermes' expected `127.0.0.1:<port>` Host identity. The setup/settings Auto Discover button can use an exposed Desktop readiness log path, a previously entered URL, or visible loopback listeners; Docker still cannot reliably discover a private host Desktop port unless that port or log is exposed to the container. Mount or otherwise expose the Hermes home directory and CLI path only when you want CLI fallback/profile management. Hermes secrets, private memory files, and config internals are not read or exposed.
 
+Virtual Office also ships a Hermes Messaging Gateway platform plugin under `integrations/hermes-platform/my_virtual_office/`. This is a different mode: Hermes gateway connects to Virtual Office as a messaging platform, so the `Hermes Gateway` office agent can receive queued Virtual Office messages and post replies back into visible office chat. Configure `VO_HERMES_PLATFORM_TOKEN` on Virtual Office, copy the plugin into `~/.hermes/plugins/my_virtual_office/`, set `MY_VIRTUAL_OFFICE_URL` and `MY_VIRTUAL_OFFICE_TOKEN` for Hermes, then run `hermes gateway`.
+
 ### Codex
 
 Virtual Office can create Codex-backed office agents when the Codex CLI is available to the app. Chat uses Codex's native `codex app-server` JSON-RPC protocol for thread start/resume, live progress, approval requests, and interrupt support. `codex exec` is retained only as an explicit compatibility fallback.
@@ -228,6 +230,9 @@ All settings live in `vo-config.json`. Environment variables override config val
 | `VO_HERMES_HOME` | ~/.hermes | Optional Hermes home/profile root directory for CLI fallback |
 | `VO_HERMES_BIN` | ~/.local/bin/hermes | Optional Hermes CLI binary for profile discovery/management and fallback chat |
 | `VO_HERMES_TIMEOUT_SEC` | 600 | Timeout for Hermes API/CLI chat calls |
+| `VO_HERMES_PLATFORM_ENABLED` | false unless token is set | Enable Hermes Messaging Gateway platform bridge |
+| `VO_HERMES_PLATFORM_TOKEN` | *(none)* | Shared token required by the Hermes `my_virtual_office` platform plugin |
+| `VO_HERMES_PLATFORM_AGENT_ID` | hermes-gateway | Office agent ID for the Hermes Messaging Gateway platform |
 | `VO_STATUS_DIR` | /data | Directory for presence/status data inside the container. By default this is backed by the `vo-data` Docker volume. |
 | `VO_WEATHER_LOCATION` | *(none)* | Weather location for window display |
 

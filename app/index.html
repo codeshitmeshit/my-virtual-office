@@ -66,6 +66,13 @@
                                 <input type="text" id="mm-hermes-home" class="mm-input" placeholder="/home/user/.hermes or /root/.hermes">
                                 <label class="mm-label">Hermes CLI <span style="color:#666;font-size:9px">optional CLI fallback</span></label>
                                 <input type="text" id="mm-hermes-bin" class="mm-input" placeholder="hermes or /home/user/.local/bin/hermes">
+                                <label class="mm-label" style="display:flex;align-items:center;gap:6px;margin-top:8px;">
+                                    <input type="checkbox" id="mm-hermes-platform-enable"> Hermes Messaging Gateway Platform
+                                </label>
+                                <label class="mm-label">Gateway Platform Token <span style="color:#666;font-size:9px">shared with MY_VIRTUAL_OFFICE_TOKEN</span></label>
+                                <input type="password" id="mm-hermes-platform-token" class="mm-input" placeholder="long shared token">
+                                <label class="mm-label">Gateway Platform Agent ID</label>
+                                <input type="text" id="mm-hermes-platform-agent" class="mm-input" placeholder="hermes-gateway">
                                 <div style="font-size:9px;color:#666;margin:4px 0 8px;">For the already-open Desktop app, paste its loopback URL. In Docker, Virtual Office will route loopback Desktop URLs through <code>host.docker.internal</code> while keeping Hermes' expected <code>127.0.0.1:&lt;port&gt;</code> identity.</div>
                                 <button class="mm-btn" onclick="mmDiscoverHermesDesktop()">🔎 Auto Discover Desktop App</button>
                                 <button class="mm-btn mm-btn-primary" onclick="mmTestHermes()">🔍 Test Hermes</button>

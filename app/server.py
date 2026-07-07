@@ -9,6 +9,7 @@ import json
 import os
 import mimetypes
 import queue
+import secrets
 import sys
 import threading
 import traceback
@@ -218,6 +219,7 @@ def _load_vo_config():
     weather_cfg = cfg.get("weather") or {}
     sms_cfg = cfg.get("sms") or {}
     hermes_cfg = cfg.get("hermes") or {}
+    hermes_platform_token = _env_or("VO_HERMES_PLATFORM_TOKEN", hermes_cfg.get("platformToken", ""))
     codex_cfg = cfg.get("codex") or {}
     claude_code_cfg = cfg.get("claudeCode") or cfg.get("claude_code") or {}
 
@@ -289,6 +291,10 @@ def _load_vo_config():
             "desktopLogPath": _env_or("VO_HERMES_DESKTOP_LOG_PATH", hermes_cfg.get("desktopLogPath", "")),
             "preferApi": str(_env_or("VO_HERMES_PREFER_API", hermes_cfg.get("preferApi", True))).lower() not in ("0", "false", "no", "off"),
             "preferDesktop": str(_env_or("VO_HERMES_PREFER_DESKTOP", hermes_cfg.get("preferDesktop", True))).lower() not in ("0", "false", "no", "off"),
+            "platformEnabled": str(_env_or("VO_HERMES_PLATFORM_ENABLED", hermes_cfg.get("platformEnabled", bool(hermes_platform_token)))).lower() not in ("0", "false", "no", "off"),
+            "platformToken": hermes_platform_token,
+            "platformAgentId": _env_or("VO_HERMES_PLATFORM_AGENT_ID", hermes_cfg.get("platformAgentId", "hermes-gateway")),
+            "platformPollLeaseSec": int(_env_or("VO_HERMES_PLATFORM_LEASE_SEC", hermes_cfg.get("platformPollLeaseSec", 120))),
             "autoStartProfileApis": str(_env_or("VO_HERMES_AUTO_START_PROFILE_APIS", hermes_cfg.get("autoStartProfileApis", True))).lower() not in ("0", "false", "no", "off"),
             "autoStartDefaultApi": str(_env_or("VO_HERMES_AUTO_START_DEFAULT_API", hermes_cfg.get("autoStartDefaultApi", hermes_cfg.get("autoStartProfileApis", True)))).lower() not in ("0", "false", "no", "off"),
             "apiProfilePortBase": _env_or("VO_HERMES_API_PROFILE_PORT_BASE", hermes_cfg.get("apiProfilePortBase")),
@@ -2976,11 +2982,44 @@ def _ensure_builtin_communication_skill():
         print(f"[SKILLS] Failed to seed built-in office skills: {e}")
         return ""
 
+
+def _hermes_platform_roster_agent():
+    """Return the synthetic Hermes Messaging Gateway office agent, if enabled."""
+    hermes = VO_CONFIG.get("hermes", {})
+    if not hermes.get("platformEnabled") or not hermes.get("platformToken"):
+        return None
+    agent_id = str(hermes.get("platformAgentId") or "hermes-gateway").strip() or "hermes-gateway"
+    now_ms = int(time.time() * 1000)
+    return {
+        "id": agent_id,
+        "statusKey": agent_id,
+        "providerKind": "hermes",
+        "providerType": "gateway-platform",
+        "providerAgentId": "gateway",
+        "profile": "gateway",
+        "name": "Hermes Gateway",
+        "emoji": os.environ.get("VO_HERMES_GATEWAY_AGENT_EMOJI", "⚕️"),
+        "role": "Hermes Messaging Gateway platform adapter",
+        "model": "Hermes Gateway",
+        "provider": "Hermes Messaging Gateway",
+        "gateway": "my_virtual_office",
+        "workspace": "",
+        "home": "",
+        "binary": "",
+        "lastActiveAt": now_ms,
+        "capabilities": ["chat", "presence", "messages"],
+        "connectionModes": ["gateway-platform"],
+        "cliAvailable": False,
+        "apiAvailable": False,
+        "desktopAvailable": False,
+    }
+
+
 def _discover_roster():
     hermes = VO_CONFIG.get("hermes", {})
     codex = VO_CONFIG.get("codex", {})
     claude_code = VO_CONFIG.get("claudeCode", {})
-    return discover_all_agents(
+    roster = discover_all_agents(
         WORKSPACE_BASE,
         hermes_home=hermes.get("homePath"),
         hermes_bin=hermes.get("binary"),
@@ -3019,6 +3058,12 @@ def _discover_roster():
         claude_include_native_agents=claude_code.get("includeNativeAgents", True),
         claude_register_native_agents=claude_code.get("registerNativeAgents", True),
     )
+    gateway_agent = _hermes_platform_roster_agent()
+    if gateway_agent:
+        key = gateway_agent.get("statusKey") or gateway_agent.get("id")
+        if not any(key in (a.get("id"), a.get("statusKey"), a.get("providerAgentId")) for a in roster):
+            roster.append(gateway_agent)
+    return roster
 
 _discovered_roster = _discover_roster()
 _discovered_at = time.time()
@@ -3382,6 +3427,11 @@ def _get_hermes_agent(agent_id_or_key=None):
         if a.get("providerKind") == "hermes" and (not needle or needle in (a.get("id"), a.get("statusKey"), a.get("providerAgentId"))):
             return a
     return None
+
+
+def _is_hermes_gateway_platform_agent(agent_or_id):
+    agent = agent_or_id if isinstance(agent_or_id, dict) else _get_hermes_agent(agent_or_id)
+    return bool(agent and agent.get("providerKind") == "hermes" and agent.get("providerType") == "gateway-platform")
 
 
 def _get_codex_agent(agent_id_or_key=None):
@@ -5379,6 +5429,14 @@ def _handle_hermes_run_start(body):
     agent = _get_hermes_agent(agent_key)
     if not agent:
         return {"ok": False, "error": f"Hermes agent '{agent_key}' not found", "_status": 404}
+    if _is_hermes_gateway_platform_agent(agent):
+        return {
+            "ok": False,
+            "fallback": True,
+            "providerPath": "gateway-platform",
+            "error": "Hermes Gateway Platform uses the queued messaging bridge",
+            "_status": 409,
+        }
 
     hermes_cfg = VO_CONFIG.get("hermes", {})
     timeout = int(body.get("timeoutSec") or hermes_cfg.get("timeoutSec") or 600)
@@ -5838,6 +5896,8 @@ def _handle_hermes_chat(body):
     agent = _get_hermes_agent(agent_key)
     if not agent:
         return {"ok": False, "error": f"Hermes agent '{agent_key}' not found", "_status": 404}
+    if _is_hermes_gateway_platform_agent(agent):
+        return _handle_hermes_platform_chat(body, agent)
 
     hermes_cfg = VO_CONFIG.get("hermes", {})
     hermes_bin = os.path.expanduser(agent.get("binary") or hermes_cfg.get("binary") or "~/.local/bin/hermes")
@@ -6703,12 +6763,18 @@ def _handle_hermes_test(body=None):
         prefer_api=hermes_cfg.get("preferApi", True),
         timeout_sec=int(hermes_cfg.get("timeoutSec") or 600),
     )
+    platform_status = _handle_hermes_platform_status()
+    platform_agent = _hermes_platform_roster_agent()
+    if platform_agent and not any(platform_agent["statusKey"] in (a.get("id"), a.get("statusKey")) for a in agents):
+        agents.append(platform_agent)
+    platform_ok = bool(platform_status.get("enabled") and platform_status.get("configured"))
 
     result = {
-        "ok": bool(api_status.get("ok") or desktop_status.get("chatReady") or cli.get("ok")),
+        "ok": bool(api_status.get("ok") or desktop_status.get("chatReady") or cli.get("ok") or platform_ok),
         "agents": agents,
         "api": api_status,
         "desktop": desktop_status,
+        "platform": platform_status,
         "cli": {
             "ok": bool(cli.get("ok")),
             "binary": hermes_bin,
@@ -6722,6 +6788,8 @@ def _handle_hermes_test(body=None):
             result["error"] = desktop_status.get("error")
         elif api_url and api_status.get("error"):
             result["error"] = api_status.get("error")
+        elif platform_status.get("enabled") and not platform_status.get("configured"):
+            result["error"] = "Hermes Gateway Platform is enabled but missing VO_HERMES_PLATFORM_TOKEN"
         else:
             result["error"] = result["cli"].get("error") or "Hermes is not available"
 
@@ -7144,6 +7212,548 @@ def _handle_agent_platform_comm_history(query):
     conversation_id = (query.get("conversationId") or query.get("threadId") or [None])[0]
     agent_id = (query.get("agentId") or [None])[0]
     return {"ok": True, "events": _load_comm_history(limit=limit, conversation_id=conversation_id, agent_id=agent_id)}
+
+
+# ─── HERMES MESSAGING GATEWAY PLATFORM BRIDGE ───────────────────
+
+_HERMES_PLATFORM_LOCK = threading.RLock()
+_HERMES_PLATFORM_MAX_MESSAGES = 2000
+
+
+def _now_ms():
+    return int(time.time() * 1000)
+
+
+def _hermes_platform_queue_path():
+    return os.path.join(STATUS_DIR, "hermes-platform-queue.json")
+
+
+def _hermes_platform_ready():
+    cfg = VO_CONFIG.get("hermes", {})
+    return bool(cfg.get("platformEnabled") and cfg.get("platformToken"))
+
+
+def _hermes_platform_state_default():
+    return {
+        "schema": "vo.hermes-platform-queue.v1",
+        "messages": [],
+        "adapters": {},
+        "updatedAt": _now_ms(),
+    }
+
+
+def _load_hermes_platform_state():
+    path = _hermes_platform_queue_path()
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            return _hermes_platform_state_default()
+        messages = data.get("messages") if isinstance(data.get("messages"), list) else []
+        adapters = data.get("adapters") if isinstance(data.get("adapters"), dict) else {}
+        return {
+            "schema": data.get("schema") or "vo.hermes-platform-queue.v1",
+            "messages": messages,
+            "adapters": adapters,
+            "updatedAt": int(data.get("updatedAt") or 0),
+        }
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return _hermes_platform_state_default()
+
+
+def _save_hermes_platform_state(state):
+    state = dict(state or {})
+    messages = state.get("messages") if isinstance(state.get("messages"), list) else []
+    if len(messages) > _HERMES_PLATFORM_MAX_MESSAGES:
+        messages = messages[-_HERMES_PLATFORM_MAX_MESSAGES:]
+    state["messages"] = messages
+    state.setdefault("schema", "vo.hermes-platform-queue.v1")
+    state.setdefault("adapters", {})
+    state["updatedAt"] = _now_ms()
+    _atomic_write_text(_hermes_platform_queue_path(), json.dumps(state, indent=2, ensure_ascii=False) + "\n")
+    try:
+        os.chmod(_hermes_platform_queue_path(), 0o666)
+    except OSError:
+        pass
+
+
+def _hermes_platform_counts(state):
+    counts = {}
+    for msg in state.get("messages") or []:
+        status = str(msg.get("status") or "queued")
+        counts[status] = counts.get(status, 0) + 1
+    return counts
+
+
+def _hermes_platform_public_message(msg):
+    return {
+        "id": msg.get("id"),
+        "text": msg.get("text") or "",
+        "chatId": msg.get("chatId") or "",
+        "chatName": msg.get("chatName") or msg.get("chatId") or "",
+        "chatType": msg.get("chatType") or "dm",
+        "userId": msg.get("userId") or "",
+        "userName": msg.get("userName") or "",
+        "conversationId": msg.get("conversationId") or "",
+        "threadId": msg.get("threadId") or "",
+        "messageId": msg.get("id"),
+        "leaseId": msg.get("leaseId") or "",
+        "createdAt": msg.get("createdAt") or 0,
+        "metadata": msg.get("metadata") if isinstance(msg.get("metadata"), dict) else {},
+        "sourceRef": msg.get("from") if isinstance(msg.get("from"), dict) else {},
+        "targetRef": msg.get("to") if isinstance(msg.get("to"), dict) else {},
+    }
+
+
+def _hermes_platform_adapter_id(value=None):
+    raw = str(value or os.environ.get("VO_HERMES_PLATFORM_ADAPTER_ID") or "hermes-gateway").strip()
+    return raw[:120] or "hermes-gateway"
+
+
+def _hermes_platform_agent_ref(agent_id=None):
+    cfg = VO_CONFIG.get("hermes", {})
+    target_id = str(agent_id or cfg.get("platformAgentId") or "hermes-gateway").strip() or "hermes-gateway"
+    ref = _office_agent_ref(target_id)
+    if ref.get("providerKind") == "unknown":
+        ref.update({
+            "id": target_id,
+            "nativeId": "gateway",
+            "providerKind": "hermes",
+            "providerType": "gateway-platform",
+            "name": "Hermes Gateway",
+            "emoji": os.environ.get("VO_HERMES_GATEWAY_AGENT_EMOJI", "⚕️"),
+        })
+    else:
+        ref["providerType"] = ref.get("providerType") or "gateway-platform"
+    return ref
+
+
+def _hermes_platform_source_ref(body):
+    from_type = str(body.get("fromType") or body.get("senderType") or "human").strip().lower()
+    from_agent_id = str(body.get("fromAgentId") or body.get("from") or "").strip()
+    if from_agent_id and from_type not in {"human", "user", "chat", "ui"}:
+        return _office_agent_ref(from_agent_id)
+    user_id = str(body.get("fromUserId") or body.get("fromId") or body.get("userId") or "user").strip() or "user"
+    display_name = str(body.get("fromDisplayName") or body.get("displayName") or body.get("fromName") or body.get("userName") or "User").strip() or "User"
+    return {
+        "id": user_id,
+        "nativeId": user_id,
+        "providerKind": "human",
+        "providerType": "chat-window",
+        "name": display_name,
+        "emoji": "",
+        "sourceApp": str(body.get("sourceApp") or body.get("app") or "virtual-office").strip() or "virtual-office",
+        "sourceSurface": str(body.get("sourceSurface") or body.get("surface") or "chat-window").strip() or "chat-window",
+        "sourceLabel": str(body.get("sourceLabel") or "").strip(),
+    }
+
+
+def _hermes_platform_request_token(headers):
+    auth = str(headers.get("Authorization") or "").strip()
+    if auth.lower().startswith("bearer "):
+        return auth.split(" ", 1)[1].strip()
+    for name in ("X-Virtual-Office-Token", "X-My-Virtual-Office-Token", "X-Hermes-Platform-Token"):
+        val = str(headers.get(name) or "").strip()
+        if val:
+            return val
+    return ""
+
+
+def _hermes_platform_auth_error(headers):
+    cfg = VO_CONFIG.get("hermes", {})
+    if not cfg.get("platformEnabled"):
+        return {"ok": False, "error": "Hermes platform bridge is disabled", "_status": 503}
+    expected = str(cfg.get("platformToken") or "").strip()
+    if not expected:
+        return {"ok": False, "error": "Hermes platform bridge token is not configured", "_status": 503}
+    provided = _hermes_platform_request_token(headers)
+    if not provided:
+        return {"ok": False, "error": "Hermes platform bridge token is required", "_status": 401}
+    if not secrets.compare_digest(provided, expected):
+        return {"ok": False, "error": "Hermes platform bridge token is invalid", "_status": 403}
+    return None
+
+
+def _handle_hermes_platform_status():
+    with _HERMES_PLATFORM_LOCK:
+        state = _load_hermes_platform_state()
+    adapters = {}
+    now = _now_ms()
+    for key, item in (state.get("adapters") or {}).items():
+        if not isinstance(item, dict):
+            continue
+        last_seen = int(item.get("lastSeenAt") or 0)
+        adapters[key] = {
+            "adapterId": key,
+            "lastSeenAt": last_seen,
+            "ageSec": max(0, int((now - last_seen) / 1000)) if last_seen else None,
+            "status": item.get("status") or "unknown",
+            "version": item.get("version") or "",
+        }
+    return {
+        "ok": True,
+        "enabled": bool(VO_CONFIG.get("hermes", {}).get("platformEnabled")),
+        "configured": bool(VO_CONFIG.get("hermes", {}).get("platformToken")),
+        "agentId": VO_CONFIG.get("hermes", {}).get("platformAgentId") or "hermes-gateway",
+        "counts": _hermes_platform_counts(state),
+        "adapters": adapters,
+    }
+
+
+def _handle_hermes_platform_enqueue(body):
+    if not _hermes_platform_ready():
+        return {"ok": False, "error": "Hermes platform bridge is not configured", "_status": 503}
+    message = str(body.get("message") or body.get("text") or "").strip()
+    if not message:
+        return {"ok": False, "error": "message is required", "_status": 400}
+    if len(message) > 60000:
+        return {"ok": False, "error": "message is too large", "_status": 413}
+
+    metadata = body.get("metadata") if isinstance(body.get("metadata"), dict) else {}
+    metadata = dict(metadata)
+    source_app = str(body.get("sourceApp") or body.get("app") or "virtual-office").strip() or "virtual-office"
+    source_surface = str(body.get("sourceSurface") or body.get("surface") or "chat-window").strip() or "chat-window"
+    source_label = str(body.get("sourceLabel") or "").strip()
+    metadata.setdefault("sourceApp", source_app)
+    metadata.setdefault("sourceSurface", source_surface)
+    if source_label:
+        metadata.setdefault("sourceLabel", source_label)
+    metadata.setdefault("bridge", "hermes-gateway-platform")
+
+    to_ref = _hermes_platform_agent_ref(body.get("toAgentId") or body.get("to"))
+    from_ref = _hermes_platform_source_ref(body)
+    conversation_id = str(body.get("conversationId") or body.get("threadId") or f"{from_ref['id']}__{to_ref['id']}").strip()
+    chat_id = str(body.get("chatId") or conversation_id).strip() or conversation_id
+    chat_name = str(body.get("chatName") or body.get("roomName") or conversation_id).strip() or conversation_id
+    chat_type = str(body.get("chatType") or "dm").strip().lower() or "dm"
+    if chat_type not in {"dm", "group", "channel"}:
+        chat_type = "dm"
+    thread_id = str(body.get("threadId") or conversation_id).strip() or conversation_id
+
+    inbound = _append_comm_event({
+        "type": "message",
+        "direction": "request",
+        "conversationId": conversation_id,
+        "from": from_ref,
+        "to": to_ref,
+        "text": message,
+        "metadata": metadata,
+        "visibleInOffice": bool(body.get("visibleInOffice", True)),
+    })
+
+    msg = {
+        "schema": "vo.hermes-platform-message.v1",
+        "id": str(uuid.uuid4()),
+        "createdAt": _now_ms(),
+        "updatedAt": _now_ms(),
+        "status": "queued",
+        "attempts": 0,
+        "conversationId": conversation_id,
+        "chatId": chat_id,
+        "chatName": chat_name,
+        "chatType": chat_type,
+        "threadId": thread_id,
+        "userId": from_ref.get("nativeId") or from_ref.get("id") or "user",
+        "userName": from_ref.get("name") or "User",
+        "text": message,
+        "from": from_ref,
+        "to": to_ref,
+        "commEventId": inbound.get("id"),
+        "metadata": {**metadata, "commEventId": inbound.get("id")},
+    }
+    with _HERMES_PLATFORM_LOCK:
+        state = _load_hermes_platform_state()
+        state.setdefault("messages", []).append(msg)
+        _save_hermes_platform_state(state)
+
+    gateway_presence.set_manual_override(to_ref["id"], "working", "Queued message via Hermes Gateway")
+    return {
+        "ok": True,
+        "messageId": msg["id"],
+        "conversationId": conversation_id,
+        "chatId": chat_id,
+        "message": _hermes_platform_public_message(msg),
+    }
+
+
+def _handle_hermes_platform_poll(query):
+    if not _hermes_platform_ready():
+        return {"ok": False, "error": "Hermes platform bridge is not configured", "_status": 503}
+    adapter_id = _hermes_platform_adapter_id((query.get("adapterId") or query.get("adapter") or [""])[0])
+    try:
+        limit = max(1, min(20, int((query.get("limit") or ["5"])[0] or 5)))
+    except Exception:
+        limit = 5
+    try:
+        lease_sec = max(10, min(900, int((query.get("leaseSec") or [VO_CONFIG.get("hermes", {}).get("platformPollLeaseSec") or 120])[0] or 120)))
+    except Exception:
+        lease_sec = 120
+
+    now = _now_ms()
+    selected = []
+    with _HERMES_PLATFORM_LOCK:
+        state = _load_hermes_platform_state()
+        adapters = state.setdefault("adapters", {})
+        adapters[adapter_id] = {
+            **(adapters.get(adapter_id) if isinstance(adapters.get(adapter_id), dict) else {}),
+            "adapterId": adapter_id,
+            "lastSeenAt": now,
+            "status": "polling",
+            "version": (query.get("version") or [""])[0],
+        }
+        for msg in state.get("messages") or []:
+            status = str(msg.get("status") or "queued")
+            leased_at = int(msg.get("leasedAt") or 0)
+            stale_lease = status == "leased" and leased_at and now - leased_at > lease_sec * 1000
+            if status != "queued" and not stale_lease:
+                continue
+            lease_id = str(uuid.uuid4())
+            msg.update({
+                "status": "leased",
+                "leaseId": lease_id,
+                "leasedAt": now,
+                "leasedBy": adapter_id,
+                "attempts": int(msg.get("attempts") or 0) + 1,
+                "updatedAt": now,
+            })
+            selected.append(_hermes_platform_public_message(msg))
+            if len(selected) >= limit:
+                break
+        _save_hermes_platform_state(state)
+    return {"ok": True, "adapterId": adapter_id, "messages": selected}
+
+
+def _handle_hermes_platform_ack(body):
+    message_id = str(body.get("messageId") or body.get("id") or "").strip()
+    lease_id = str(body.get("leaseId") or "").strip()
+    ok = bool(body.get("ok", True))
+    if not message_id:
+        return {"ok": False, "error": "messageId is required", "_status": 400}
+    with _HERMES_PLATFORM_LOCK:
+        state = _load_hermes_platform_state()
+        for msg in state.get("messages") or []:
+            if msg.get("id") != message_id:
+                continue
+            if lease_id and msg.get("leaseId") and msg.get("leaseId") != lease_id:
+                return {"ok": False, "error": "leaseId does not match current message lease", "_status": 409}
+            if ok:
+                if msg.get("status") != "replied":
+                    msg["status"] = "delivered"
+                msg["deliveredAt"] = _now_ms()
+                msg["lastError"] = ""
+            else:
+                msg["lastError"] = str(body.get("error") or "adapter did not accept message")[:500]
+                msg["status"] = "queued" if int(msg.get("attempts") or 0) < 5 else "failed"
+            msg["updatedAt"] = _now_ms()
+            _save_hermes_platform_state(state)
+            return {"ok": True, "messageId": message_id, "status": msg.get("status")}
+    return {"ok": False, "error": f"Hermes platform message '{message_id}' not found", "_status": 404}
+
+
+def _find_hermes_platform_message(state, message_id="", chat_id=""):
+    messages = state.get("messages") or []
+    if message_id:
+        for msg in reversed(messages):
+            if msg.get("id") == message_id:
+                return msg
+    if chat_id:
+        for msg in reversed(messages):
+            if msg.get("chatId") == chat_id and msg.get("status") in {"leased", "delivered", "replied"}:
+                return msg
+    return None
+
+
+def _handle_hermes_platform_reply(body):
+    if not _hermes_platform_ready():
+        return {"ok": False, "error": "Hermes platform bridge is not configured", "_status": 503}
+    text = str(body.get("message") or body.get("text") or body.get("content") or "").strip()
+    if not text:
+        return {"ok": False, "error": "message is required", "_status": 400}
+    message_id = str(body.get("messageId") or body.get("inReplyTo") or body.get("replyToMessageId") or "").strip()
+    chat_id = str(body.get("chatId") or "").strip()
+    adapter_id = _hermes_platform_adapter_id(body.get("adapterId") or body.get("adapter"))
+    body_metadata = body.get("metadata") if isinstance(body.get("metadata"), dict) else {}
+
+    with _HERMES_PLATFORM_LOCK:
+        state = _load_hermes_platform_state()
+        msg = _find_hermes_platform_message(state, message_id=message_id, chat_id=chat_id)
+        if msg:
+            from_ref = msg.get("to") if isinstance(msg.get("to"), dict) else _hermes_platform_agent_ref()
+            to_ref = msg.get("from") if isinstance(msg.get("from"), dict) else _hermes_platform_source_ref({"fromUserId": chat_id or "user"})
+            conversation_id = msg.get("conversationId") or chat_id or f"{from_ref.get('id')}__{to_ref.get('id')}"
+            metadata = dict(msg.get("metadata") if isinstance(msg.get("metadata"), dict) else {})
+            metadata.update(body_metadata)
+            metadata["adapterId"] = adapter_id
+            outbound = _append_comm_event({
+                "type": "message",
+                "direction": "reply",
+                "conversationId": conversation_id,
+                "from": from_ref,
+                "to": to_ref,
+                "text": text,
+                "inReplyTo": msg.get("commEventId") or msg.get("id"),
+                "metadata": metadata,
+                "visibleInOffice": True,
+                "ok": True,
+            })
+            msg.update({
+                "status": "replied",
+                "replyText": text,
+                "replyEventId": outbound.get("id"),
+                "repliedAt": _now_ms(),
+                "updatedAt": _now_ms(),
+            })
+            _save_hermes_platform_state(state)
+            gateway_presence.set_manual_override(from_ref.get("id") or "hermes-gateway", "idle", "")
+            return {
+                "ok": True,
+                "messageId": msg.get("id"),
+                "conversationId": conversation_id,
+                "replyMessageId": outbound.get("id"),
+            }
+
+    from_ref = _hermes_platform_agent_ref(body.get("fromAgentId"))
+    to_ref = _hermes_platform_source_ref({
+        "fromUserId": chat_id or "virtual-office",
+        "fromDisplayName": body.get("chatName") or chat_id or "Virtual Office",
+        "sourceApp": "virtual-office",
+        "sourceSurface": "hermes-gateway-platform",
+    })
+    conversation_id = str(body.get("conversationId") or chat_id or f"{from_ref['id']}__{to_ref['id']}").strip()
+    outbound = _append_comm_event({
+        "type": "message",
+        "direction": "reply",
+        "conversationId": conversation_id,
+        "from": from_ref,
+        "to": to_ref,
+        "text": text,
+        "metadata": {**body_metadata, "adapterId": adapter_id, "unmatched": True},
+        "visibleInOffice": True,
+        "ok": True,
+    })
+    return {"ok": True, "conversationId": conversation_id, "replyMessageId": outbound.get("id"), "unmatched": True}
+
+
+def _handle_hermes_platform_heartbeat(body):
+    if not _hermes_platform_ready():
+        return {"ok": False, "error": "Hermes platform bridge is not configured", "_status": 503}
+    adapter_id = _hermes_platform_adapter_id(body.get("adapterId") or body.get("adapter"))
+    status = str(body.get("status") or "connected").strip() or "connected"
+    now = _now_ms()
+    with _HERMES_PLATFORM_LOCK:
+        state = _load_hermes_platform_state()
+        adapters = state.setdefault("adapters", {})
+        adapters[adapter_id] = {
+            **(adapters.get(adapter_id) if isinstance(adapters.get(adapter_id), dict) else {}),
+            "adapterId": adapter_id,
+            "lastSeenAt": now,
+            "status": status,
+            "version": str(body.get("version") or ""),
+        }
+        _save_hermes_platform_state(state)
+    agent_id = str(body.get("agentId") or VO_CONFIG.get("hermes", {}).get("platformAgentId") or "hermes-gateway")
+    if status == "working":
+        gateway_presence.set_manual_override(agent_id, "working", "Hermes Gateway processing")
+    elif status == "disconnected":
+        gateway_presence.set_manual_override(agent_id, "idle", "")
+    else:
+        gateway_presence.set_manual_override(agent_id, "idle", "Hermes Gateway connected")
+    return {"ok": True, "adapterId": adapter_id, "seenAt": now}
+
+
+def _get_hermes_platform_message(message_id):
+    with _HERMES_PLATFORM_LOCK:
+        state = _load_hermes_platform_state()
+        return _find_hermes_platform_message(state, message_id=message_id)
+
+
+def _wait_for_hermes_platform_reply(message_id, timeout_sec=600):
+    deadline = time.time() + max(1, int(timeout_sec or 600))
+    while time.time() < deadline:
+        msg = _get_hermes_platform_message(message_id)
+        if msg and msg.get("replyText"):
+            return msg
+        time.sleep(0.5)
+    return None
+
+
+def _handle_hermes_platform_chat(body, agent):
+    message = str(body.get("message") or "").strip()
+    if not message:
+        return {"ok": False, "error": "message is required", "_status": 400}
+    timeout = int(body.get("timeoutSec") or VO_CONFIG.get("hermes", {}).get("timeoutSec") or 600)
+    profile = agent.get("profile") or "gateway"
+    agent_id = agent.get("statusKey") or agent.get("id") or VO_CONFIG.get("hermes", {}).get("platformAgentId") or "hermes-gateway"
+    now = _now_ms()
+    history = _load_hermes_history(profile)
+    history.append({
+        "role": "user",
+        "text": message,
+        "ts": now,
+        "agentId": agent_id,
+        "from": body.get("fromDisplayName") or "User",
+        "fromType": body.get("fromType") or "",
+        "sourceApp": body.get("sourceApp") or "virtual-office",
+        "sourceSurface": body.get("sourceSurface") or "chat-window",
+        "sourceLabel": body.get("sourceLabel") or "",
+        "attachments": body.get("attachments") if isinstance(body.get("attachments"), list) else [],
+    })
+    _save_hermes_history(profile, history)
+
+    enqueue = _handle_hermes_platform_enqueue({
+        **body,
+        "toAgentId": agent_id,
+        "chatId": body.get("conversationId") or f"{body.get('fromUserId') or 'user'}__{agent_id}",
+        "chatName": body.get("sourceLabel") or "Virtual Office Chat",
+        "chatType": "dm",
+        "metadata": {
+            **(body.get("metadata") if isinstance(body.get("metadata"), dict) else {}),
+            "providerPath": "gateway-platform",
+            "agentId": agent_id,
+        },
+    })
+    if not enqueue.get("ok"):
+        return enqueue
+
+    msg = _wait_for_hermes_platform_reply(enqueue.get("messageId"), timeout_sec=timeout)
+    if not msg:
+        gateway_presence.set_manual_override(agent_id, "idle", "")
+        return {
+            "ok": False,
+            "error": "Timed out waiting for Hermes Gateway platform reply",
+            "providerPath": "gateway-platform",
+            "_status": 504,
+        }
+
+    reply = msg.get("replyText") or ""
+    final_ts = _now_ms()
+    history = _load_hermes_history(profile)
+    history.append({
+        "role": "assistant",
+        "text": reply,
+        "ts": final_ts,
+        "agentId": agent_id,
+        "exitCode": 0,
+        "sessionId": msg.get("conversationId") or "",
+        "runId": msg.get("id") or "",
+        "tools": [],
+        "thinking": "",
+        "reasoningTokens": 0,
+    })
+    _save_hermes_history(profile, history)
+    return {
+        "ok": True,
+        "reply": reply,
+        "stderr": "",
+        "exitCode": 0,
+        "sessionId": msg.get("conversationId") or "",
+        "runId": msg.get("id") or "",
+        "providerPath": "gateway-platform",
+        "tools": [],
+        "thinking": "",
+        "reasoningTokens": 0,
+        "agent": {"id": agent_id, "name": agent.get("name") or "Hermes Gateway", "providerKind": "hermes", "profile": profile},
+    }
 
 
 def _parse_a2a_envelope(text):
@@ -12658,6 +13268,22 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(json.dumps(result).encode())
+        elif request_path == "/api/hermes-platform/status":
+            result = _handle_hermes_platform_status()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps(result).encode())
+        elif request_path == "/api/hermes-platform/poll":
+            auth_error = _hermes_platform_auth_error(self.headers)
+            result = auth_error or _handle_hermes_platform_poll(query_params)
+            self.send_response(result.get("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            result.pop("_status", None)
+            self.wfile.write(json.dumps(result).encode())
         elif self.path.startswith("/api/agent/") and "/skills" in self.path:
             # GET /api/agent/<id>/skills — list skills for an agent
             parts = self.path.split("/api/agent/")[1].split("/skills")
@@ -12805,6 +13431,10 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                     "desktopLogPath": VO_CONFIG.get("hermes", {}).get("desktopLogPath"),
                     "preferApi": VO_CONFIG.get("hermes", {}).get("preferApi", True),
                     "preferDesktop": VO_CONFIG.get("hermes", {}).get("preferDesktop", True),
+                    "platformEnabled": VO_CONFIG.get("hermes", {}).get("platformEnabled", False),
+                    "platformTokenConfigured": bool(VO_CONFIG.get("hermes", {}).get("platformToken")),
+                    "platformAgentId": VO_CONFIG.get("hermes", {}).get("platformAgentId", "hermes-gateway"),
+                    "platformPollLeaseSec": VO_CONFIG.get("hermes", {}).get("platformPollLeaseSec", 120),
                     "detected": bool(_handle_hermes_test().get("ok")),
                 },
                 "codex": {
@@ -14040,7 +14670,7 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Virtual-Office-Token, X-My-Virtual-Office-Token, X-Hermes-Platform-Token")
         self.end_headers()
 
     def do_POST(self):
@@ -14091,6 +14721,8 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                             hermes_body.pop("desktopTcpPort", None)
                         if not hermes_body.get("desktopLogPath") and existing[key].get("desktopLogPath"):
                             hermes_body.pop("desktopLogPath", None)
+                        if not hermes_body.get("platformToken") and existing[key].get("platformToken"):
+                            hermes_body.pop("platformToken", None)
                         existing[key].update(hermes_body)
                         continue
                     if isinstance(body[key], dict) and isinstance(existing.get(key), dict):
@@ -14409,6 +15041,27 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             length = int(self.headers.get('Content-Length', 0))
             body = json.loads(self.rfile.read(length)) if length else {}
             result = _handle_agent_platform_comm_send(body)
+            self.send_response(result.get("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            result.pop("_status", None)
+            self.wfile.write(json.dumps(result).encode())
+            return
+        elif request_path in {"/api/hermes-platform/enqueue", "/api/hermes-platform/ack", "/api/hermes-platform/reply", "/api/hermes-platform/heartbeat"}:
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            auth_error = _hermes_platform_auth_error(self.headers)
+            if auth_error:
+                result = auth_error
+            elif request_path == "/api/hermes-platform/enqueue":
+                result = _handle_hermes_platform_enqueue(body)
+            elif request_path == "/api/hermes-platform/ack":
+                result = _handle_hermes_platform_ack(body)
+            elif request_path == "/api/hermes-platform/reply":
+                result = _handle_hermes_platform_reply(body)
+            else:
+                result = _handle_hermes_platform_heartbeat(body)
             self.send_response(result.get("_status", 200))
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
