@@ -44,6 +44,14 @@
         .model-item { padding:4px 6px; font-size:7px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; gap:8px; align-items:center; }
         .model-item span { min-width:0; overflow-wrap:anywhere; word-break:break-word; }
         .model-item:last-child { border-bottom:none; }
+        .auth-help .model-item { align-items:flex-start; }
+        .auth-help .model-item span:first-child { color:var(--gold); }
+        .mvw-confirm-overlay { position:fixed; inset:0; z-index:1000; display:grid; place-items:center; padding:18px; background:rgba(5,5,12,.78); }
+        .mvw-confirm-overlay[hidden] { display:none; }
+        .mvw-confirm-dialog { width:min(460px, 100%); background:var(--surface); border:1px solid var(--gold); border-radius:6px; padding:14px; box-shadow:0 20px 70px rgba(0,0,0,.55); }
+        .mvw-confirm-title { color:var(--gold); font-size:9px; margin-bottom:8px; }
+        .mvw-confirm-message { color:var(--text); margin-bottom:12px; overflow-wrap:anywhere; }
+        .mvw-confirm-actions { display:flex; justify-content:flex-end; gap:6px; flex-wrap:wrap; }
         .status-msg { font-size:7px; margin:6px 0; min-height:12px; }
         .grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(300px, 1fr)); gap:10px; }
         .wide { grid-column:1 / -1; }
@@ -75,9 +83,21 @@
     <div id="panel-codex" class="panel"><div id="codex-models">Loading...</div></div>
     <div id="panel-claude-code" class="panel"><div id="claude-code-models">Loading...</div></div>
     <div id="panel-setup" class="panel"><div id="native-setup">Loading...</div></div>
+    <div id="mvw-confirm-overlay" class="mvw-confirm-overlay" hidden>
+        <div class="mvw-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="mvw-confirm-title">
+            <div id="mvw-confirm-title" class="mvw-confirm-title">Confirm Action</div>
+            <div id="mvw-confirm-message" class="mvw-confirm-message"></div>
+            <div class="mvw-confirm-actions">
+                <button id="mvw-confirm-cancel" class="btn" type="button">Cancel</button>
+                <button id="mvw-confirm-ok" class="btn btn-red" type="button">Continue</button>
+            </div>
+        </div>
+    </div>
 
 <script>
 let nativeData = null;
+let pendingScrollRestore = null;
+let activeConfirmResolve = null;
 
 function esc(value) {
     return String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -95,6 +115,58 @@ function setStatus(id, data, okText = 'Saved') {
     el.textContent = data.ok ? okText : (data.error || 'Failed');
 }
 
+function restoreScrollSoon(state) {
+    if (!state) return;
+    requestAnimationFrame(() => {
+        window.scrollTo(state.x || 0, state.y || 0);
+        requestAnimationFrame(() => window.scrollTo(state.x || 0, state.y || 0));
+    });
+}
+
+function refreshNativeSoon(delay = 800) {
+    const scrollState = { x: window.scrollX || 0, y: window.scrollY || 0 };
+    setTimeout(() => reloadNative({ preserveScroll: scrollState, quiet: true }), delay);
+}
+
+function closeConfirmDialog(result) {
+    const overlay = document.getElementById('mvw-confirm-overlay');
+    if (overlay) overlay.hidden = true;
+    const resolve = activeConfirmResolve;
+    activeConfirmResolve = null;
+    if (resolve) resolve(Boolean(result));
+}
+
+function confirmAction(message, options = {}) {
+    const overlay = document.getElementById('mvw-confirm-overlay');
+    const titleEl = document.getElementById('mvw-confirm-title');
+    const messageEl = document.getElementById('mvw-confirm-message');
+    const cancelEl = document.getElementById('mvw-confirm-cancel');
+    const okEl = document.getElementById('mvw-confirm-ok');
+    if (!overlay || !titleEl || !messageEl || !cancelEl || !okEl) {
+        return Promise.resolve(false);
+    }
+    if (activeConfirmResolve) closeConfirmDialog(false);
+    titleEl.textContent = options.title || 'Confirm Action';
+    messageEl.textContent = message || 'Continue?';
+    cancelEl.textContent = options.cancelText || 'Cancel';
+    okEl.textContent = options.okText || 'Continue';
+    okEl.className = 'btn ' + (options.danger === false ? 'btn-green' : 'btn-red');
+    overlay.hidden = false;
+    okEl.focus({ preventScroll:true });
+    return new Promise(resolve => {
+        activeConfirmResolve = resolve;
+    });
+}
+
+document.getElementById('mvw-confirm-cancel')?.addEventListener('click', () => closeConfirmDialog(false));
+document.getElementById('mvw-confirm-ok')?.addEventListener('click', () => closeConfirmDialog(true));
+document.getElementById('mvw-confirm-overlay')?.addEventListener('click', event => {
+    if (event.target === event.currentTarget) closeConfirmDialog(false);
+});
+document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && activeConfirmResolve) closeConfirmDialog(false);
+});
+
 function showTab(event, name) {
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
     document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
@@ -102,14 +174,19 @@ function showTab(event, name) {
     document.getElementById('panel-' + name).classList.add('active');
 }
 
-async function loadNativeModels() {
-    const res = await fetch('/api/native-models', { cache:'no-store' });
+async function loadNativeModels(options = {}) {
+    const res = await fetch('/api/native-models?agent=main', { cache:'no-store' });
     nativeData = await res.json();
     renderOpenClaw();
     renderHermes();
     renderCodex();
     renderClaudeCode();
     renderSetup();
+    if (pendingScrollRestore) {
+        const state = pendingScrollRestore;
+        pendingScrollRestore = null;
+        restoreScrollSoon(state);
+    }
 }
 
 function modelOptions(models, current, providerFilter) {
@@ -125,6 +202,69 @@ function modelOptions(models, current, providerFilter) {
 
 function providerOptions(providers, current) {
     return (providers || []).sort().map(p => `<option value="${esc(p)}" ${p === current ? 'selected' : ''}>${esc(p)}</option>`).join('');
+}
+
+function authIssueText(row) {
+    const bits = [];
+    if ((row.missingManagedStatic || []).length) bits.push('missing ' + row.missingManagedStatic.length);
+    if ((row.divergentManagedStatic || []).length) bits.push('stale ' + row.divergentManagedStatic.length);
+    if ((row.extraStaticProfiles || []).length) bits.push('extra ' + row.extraStaticProfiles.length);
+    if (!bits.length) return 'static profiles synced';
+    return bits.join(' · ');
+}
+
+function profileListText(values) {
+    return (values || []).length ? values.join(', ') : 'none';
+}
+
+function syncedManagedProfileIds(row, profiles) {
+    const profileIds = profiles.map(p => p.id).filter(Boolean);
+    const missing = new Set(row.missingManagedStatic || []);
+    const stale = new Set(row.divergentManagedStatic || []);
+    return profileIds.filter(id => !missing.has(id) && !stale.has(id));
+}
+
+function renderOpenClawManagedAuth(oc) {
+    const managed = oc.managedAuth || {};
+    const rows = managed.agentRows || [];
+    const profiles = managed.managedStaticProfiles || [];
+    const driftRows = rows.filter(row => row.agent !== 'main' && !row.staticInSync);
+    return `<div class="card wide">
+        <div class="provider-header">
+            <div>
+                <div class="provider-name">Virtual Office Global Auth</div>
+                <div class="muted">Source <code>${esc(managed.sourceAgent || 'main')}</code> · ${profiles.length} managed static profile${profiles.length === 1 ? '' : 's'} · ${driftRows.length} agent${driftRows.length === 1 ? '' : 's'} need sync</div>
+            </div>
+            <button class="btn btn-blue" onclick="syncOpenClawStaticAuth()">Sync Static Profiles</button>
+        </div>
+        <div class="model-list auth-help">
+            <div class="model-item"><span>Managed Static Profiles</span><span>uses <code>main</code> as the source for API-key and static-token profiles.</span></div>
+            <div class="model-item"><span>Sync Static Profiles</span><span>copies the managed static profiles from <code>main</code> into every known OpenClaw agent store.</span></div>
+            <div class="model-item"><span>Agent Auth Stores</span><span>shows whether each agent matches <code>main</code>, is missing a managed profile, has a stale copy, or has extra local static profiles.</span></div>
+            <div class="model-item"><span>Reset Static Overrides</span><span>for one agent, copies managed profiles from <code>main</code> and removes extra static profiles. OAuth profiles are left alone.</span></div>
+        </div>
+        <h3>Managed Static Profiles</h3>
+        ${profiles.length ? renderAuthTags(profiles) : '<div class="muted">No portable API-key or static-token profiles are managed from main yet.</div>'}
+        <p id="oc-managed-auth-status" class="status-msg"></p>
+        <h3>Agent Auth Stores</h3>
+        <div class="model-list">${rows.length ? rows.map(row => {
+            const issue = authIssueText(row);
+            const synced = row.agent === 'main'
+                ? profiles.map(p => p.id).filter(Boolean)
+                : syncedManagedProfileIds(row, profiles);
+            const detail = [
+                'synced: ' + profileListText(synced),
+                (row.missingManagedStatic || []).length ? 'missing: ' + row.missingManagedStatic.join(', ') : '',
+                (row.divergentManagedStatic || []).length ? 'stale: ' + row.divergentManagedStatic.join(', ') : '',
+                (row.extraStaticProfiles || []).length ? 'extra: ' + row.extraStaticProfiles.join(', ') : '',
+                (row.localOAuthProfiles || []).length ? 'local OAuth: ' + row.localOAuthProfiles.join(', ') : '',
+            ].filter(Boolean).join(' · ');
+            return `<div class="model-item">
+                <span>${esc(row.agent)} · ${esc(issue)}${detail ? `<br><small>${esc(detail)}</small>` : ''}</span>
+                <span>${row.agent === 'main' ? 'source' : (row.staticInSync ? 'ok' : `<button class="btn btn-red" onclick="resetOpenClawAuthOverrides('${esc(row.agent)}')">Reset Static Overrides</button>`)}</span>
+            </div>`;
+        }).join('') : '<div class="model-item"><span>No OpenClaw agent auth stores reported.</span><span></span></div>'}</div>
+    </div>`;
 }
 
 function modelsText(models) {
@@ -229,6 +369,7 @@ function renderOpenClaw() {
             </div>
             <h3>Auth Profiles</h3>${renderAuthTags(oc.authProfiles)}
         </div>
+        ${renderOpenClawManagedAuth(oc)}
         ${renderOpenClawCloudProviders(oc)}
         ${renderOpenClawLocalProviders(oc)}
         <div class="card">
@@ -568,7 +709,7 @@ function claudeCodeSetupPayload() {
 async function saveCodexSetup() {
     const data = await postJson('/setup/save', { codex: codexSetupPayload() });
     setStatus('setup-codex-status', data, 'Codex setup saved');
-    if (data.ok) setTimeout(reloadNative, 800);
+    if (data.ok) refreshNativeSoon();
 }
 
 async function testCodexSetup() {
@@ -586,13 +727,13 @@ async function testCodexSetup() {
         status.className = 'status-msg ' + (data.ok ? 'ok' : 'err');
         status.textContent = text;
     }
-    if (data.ok) setTimeout(reloadNative, 800);
+    if (data.ok) refreshNativeSoon();
 }
 
 async function saveClaudeCodeSetup() {
     const data = await postJson('/setup/save', { claudeCode: claudeCodeSetupPayload() });
     setStatus('setup-claude-status', data, 'Claude Code setup saved');
-    if (data.ok) setTimeout(reloadNative, 800);
+    if (data.ok) refreshNativeSoon();
 }
 
 async function testClaudeCodeSetup() {
@@ -610,52 +751,75 @@ async function testClaudeCodeSetup() {
         status.className = 'status-msg ' + (data.ok ? 'ok' : 'err');
         status.textContent = text;
     }
-    if (data.ok) setTimeout(reloadNative, 800);
+    if (data.ok) refreshNativeSoon();
 }
 
 async function saveOpenClawApiKey() {
-    const data = await postJson('/api/native-models/openclaw/auth/api-key', { provider:val('oc-key-provider'), profileId:val('oc-key-profile'), apiKey:val('oc-key-value') });
-    setStatus('oc-key-status', data, 'Saved ' + (data.profileId || data.provider));
-    if (data.ok) { document.getElementById('oc-key-value').value = ''; setTimeout(reloadNative, 800); }
+    const data = await postJson('/api/native-models/openclaw/auth/api-key', { scope:'global', provider:val('oc-key-provider'), profileId:val('oc-key-profile'), apiKey:val('oc-key-value') });
+    setStatus('oc-key-status', data, 'Saved globally ' + (data.profileId || data.provider));
+    if (data.ok) { document.getElementById('oc-key-value').value = ''; refreshNativeSoon(); }
 }
 
 async function saveOpenClawCloudApiKey(index) {
     const provider = ((nativeData.openclaw || {}).cloudProviders || [])[index] || {};
     const data = await postJson('/api/native-models/openclaw/auth/api-key', {
+        scope: 'global',
         provider: provider.provider || '',
         profileId: val('oc-cloud-profile-' + index),
         apiKey: val('oc-cloud-key-' + index)
     });
-    setStatus('oc-cloud-status-' + index, data, 'Saved ' + (data.profileId || data.provider));
+    setStatus('oc-cloud-status-' + index, data, 'Saved globally ' + (data.profileId || data.provider));
     if (data.ok) {
         const keyEl = document.getElementById('oc-cloud-key-' + index);
         if (keyEl) keyEl.value = '';
-        setTimeout(reloadNative, 800);
+        refreshNativeSoon();
     }
 }
 
 async function deleteOpenClawApiKey() {
     const profileId = val('oc-key-delete-profile');
-    if (!profileId || !confirm('Delete OpenClaw API key profile ' + profileId + '?')) return;
+    if (!profileId || !(await confirmAction(
+        'Delete OpenClaw auth profile ' + profileId + ' from all agents?',
+        { title:'Delete Auth Profile', okText:'Delete Profile' }
+    ))) return;
     const provider = profileId.includes(':') ? profileId.split(':')[0] : '';
-    const data = await postJson('/api/native-models/openclaw/auth/delete', { provider, profileId });
-    setStatus('oc-key-status', data, 'Deleted ' + profileId);
-    if (data.ok) setTimeout(reloadNative, 800);
+    const data = await postJson('/api/native-models/openclaw/auth/delete', { scope:'global', provider, profileId });
+    setStatus('oc-key-status', data, 'Deleted globally ' + profileId);
+    if (data.ok) refreshNativeSoon();
 }
 
 async function deleteOpenClawCloudApiKey(index) {
     const provider = ((nativeData.openclaw || {}).cloudProviders || [])[index] || {};
     const profileId = val('oc-cloud-delete-' + index);
-    if (!profileId || !confirm('Delete OpenClaw auth profile ' + profileId + '?')) return;
-    const data = await postJson('/api/native-models/openclaw/auth/delete', { provider: provider.provider || '', profileId });
-    setStatus('oc-cloud-status-' + index, data, 'Deleted ' + profileId);
-    if (data.ok) setTimeout(reloadNative, 800);
+    if (!profileId || !(await confirmAction(
+        'Delete OpenClaw auth profile ' + profileId + ' from all agents?',
+        { title:'Delete Auth Profile', okText:'Delete Profile' }
+    ))) return;
+    const data = await postJson('/api/native-models/openclaw/auth/delete', { scope:'global', provider: provider.provider || '', profileId });
+    setStatus('oc-cloud-status-' + index, data, 'Deleted globally ' + profileId);
+    if (data.ok) refreshNativeSoon();
+}
+
+async function syncOpenClawStaticAuth() {
+    const data = await postJson('/api/native-models/openclaw/auth/sync-static', {});
+    setStatus('oc-managed-auth-status', data, data.ok ? 'Synced static profiles to ' + (data.touchedAgents || 0) + ' agent stores' : 'Sync failed');
+    if (data.ok) refreshNativeSoon();
+}
+
+async function resetOpenClawAuthOverrides(agentId) {
+    if (!agentId || !(await confirmAction(
+        'Reset static auth overrides for ' + agentId + '? Managed static profiles will be copied from main and extra static overrides will be removed. OAuth profiles are left alone.',
+        { title:'Reset Static Overrides', okText:'Reset Overrides' }
+    ))) return;
+    const data = await postJson('/api/native-models/openclaw/auth/reset-overrides', { agent: agentId });
+    setStatus('oc-managed-auth-status', data, data.ok ? 'Reset static overrides for ' + agentId : 'Reset failed');
+    if (data.ok) refreshNativeSoon();
 }
 
 async function saveOpenClawProvider() {
     const data = await postJson('/api/native-models/openclaw/provider', { provider:val('oc-provider-id'), baseUrl:val('oc-provider-url'), api:val('oc-provider-api'), apiKey:val('oc-provider-key'), models:val('oc-provider-models') });
     setStatus('oc-provider-status', data, 'Saved ' + (data.provider || 'provider'));
-    if (data.ok) { document.getElementById('oc-provider-key').value = ''; setTimeout(reloadNative, 800); }
+    if (data.ok) { document.getElementById('oc-provider-key').value = ''; refreshNativeSoon(); }
 }
 
 async function saveOpenClawLocalProvider(index) {
@@ -673,7 +837,7 @@ async function saveOpenClawLocalProvider(index) {
     if (data.ok) {
         const keyEl = document.getElementById('oc-local-provider-key-' + index);
         if (keyEl) keyEl.value = '';
-        setTimeout(reloadNative, 800);
+        refreshNativeSoon();
     }
 }
 
@@ -683,28 +847,47 @@ async function deleteOpenClawProvider() {
 }
 
 async function deleteOpenClawProviderById(provider, statusId = 'oc-delete-status') {
-    if (!provider || !confirm('Delete OpenClaw provider ' + provider + '?')) return;
+    if (!provider || !(await confirmAction(
+        'Delete OpenClaw provider ' + provider + '?',
+        { title:'Delete Provider', okText:'Delete Provider' }
+    ))) return;
     const data = await postJson('/api/native-models/openclaw/provider/delete', { provider });
     setStatus(statusId, data, 'Deleted ' + provider);
-    if (data.ok) setTimeout(reloadNative, 800);
+    if (data.ok) refreshNativeSoon();
 }
 
 async function setOpenClawAgentModel(agentId) {
-    const data = await postJson('/api/native-models/openclaw/agent-model', { agent:agentId, model:val('oc-agent-' + agentId) });
+    const selectedModel = val('oc-agent-' + agentId);
+    const data = await postJson('/api/native-models/openclaw/agent-model', { agent:agentId, model:selectedModel });
     setStatus('oc-agent-status-' + agentId, data, 'Applied');
-    if (data.ok) setTimeout(reloadNative, 800);
+    if (data.ok) {
+        try {
+            if (window.parent && window.parent !== window) {
+                window.parent.dispatchEvent(new CustomEvent('vo:agent-model-changed', {
+                    detail: {
+                        agentId,
+                        providerKind: 'openclaw',
+                        model: data.model || selectedModel || '',
+                        defaulted: Boolean(data.defaulted),
+                    }
+                }));
+                window.parent.dispatchEvent(new CustomEvent('vo:agents-changed', { detail: { reason: 'model-changed', agentId } }));
+            }
+        } catch (_) {}
+        refreshNativeSoon();
+    }
 }
 
 async function saveHermesApiKey() {
     const data = await postJson('/api/native-models/hermes/auth/api-key', { provider:val('hm-key-provider'), label:val('hm-key-label'), apiKey:val('hm-key-value') });
     setStatus('hm-key-status', data, 'Saved ' + (data.label || data.provider));
-    if (data.ok) { document.getElementById('hm-key-value').value = ''; setTimeout(reloadNative, 800); }
+    if (data.ok) { document.getElementById('hm-key-value').value = ''; refreshNativeSoon(); }
 }
 
 async function saveHermesProvider() {
     const data = await postJson('/api/native-models/hermes/provider', { profile:val('hm-provider-profile'), provider:val('hm-provider-id'), baseUrl:val('hm-provider-url'), models:val('hm-provider-models') });
     setStatus('hm-provider-status', data, 'Saved ' + (data.provider || 'provider'));
-    if (data.ok) setTimeout(reloadNative, 800);
+    if (data.ok) refreshNativeSoon();
 }
 
 async function saveHermesLocalProvider(index) {
@@ -716,7 +899,7 @@ async function saveHermesLocalProvider(index) {
     };
     const data = await postJson('/api/native-models/hermes/provider', body);
     setStatus('hm-local-provider-status-' + index, data, 'Saved ' + (data.provider || body.provider));
-    if (data.ok) setTimeout(reloadNative, 800);
+    if (data.ok) refreshNativeSoon();
 }
 
 async function deleteHermesProvider() {
@@ -733,16 +916,19 @@ async function deleteHermesLocalProvider(index) {
 }
 
 async function deleteHermesProviderByValues(profile, provider, statusId = 'hm-delete-status') {
-    if (!provider || !confirm('Delete Hermes custom aliases/cache for ' + provider + '?')) return;
+    if (!provider || !(await confirmAction(
+        'Delete Hermes custom aliases/cache for ' + provider + '?',
+        { title:'Delete Hermes Provider', okText:'Delete Provider' }
+    ))) return;
     const data = await postJson('/api/native-models/hermes/provider/delete', { profile: profile || 'default', provider });
     setStatus(statusId, data, 'Deleted ' + provider);
-    if (data.ok) setTimeout(reloadNative, 800);
+    if (data.ok) refreshNativeSoon();
 }
 
 async function deleteHermesAuth() {
     const data = await postJson('/api/native-models/hermes/auth/delete', { provider:val('hm-delete-provider'), target:val('hm-delete-auth-target') });
     setStatus('hm-delete-status', data, 'Deleted auth');
-    if (data.ok) setTimeout(reloadNative, 800);
+    if (data.ok) refreshNativeSoon();
 }
 
 async function setHermesProfileModel(profileId) {
@@ -750,15 +936,18 @@ async function setHermesProfileModel(profileId) {
     const model = modelValue.includes('/') ? modelValue.split('/').slice(1).join('/') : modelValue;
     const data = await postJson('/api/native-models/hermes/profile-model', { profile:profileId, provider:val('hm-prov-' + profileId), model });
     setStatus('hm-status-' + profileId, data, 'Applied');
-    if (data.ok) setTimeout(reloadNative, 800);
+    if (data.ok) refreshNativeSoon();
 }
 
-function reloadNative() {
-    document.getElementById('openclaw-models').textContent = 'Loading...';
-    document.getElementById('hermes-models').textContent = 'Loading...';
-    document.getElementById('codex-models').textContent = 'Loading...';
-    document.getElementById('claude-code-models').textContent = 'Loading...';
-    document.getElementById('native-setup').textContent = 'Loading...';
+function reloadNative(options = {}) {
+    if (options.preserveScroll) pendingScrollRestore = options.preserveScroll;
+    if (!options.quiet) {
+        document.getElementById('openclaw-models').textContent = 'Loading...';
+        document.getElementById('hermes-models').textContent = 'Loading...';
+        document.getElementById('codex-models').textContent = 'Loading...';
+        document.getElementById('claude-code-models').textContent = 'Loading...';
+        document.getElementById('native-setup').textContent = 'Loading...';
+    }
     loadNativeModels().catch(e => {
         document.getElementById('openclaw-models').innerHTML = `<div class="card err">${esc(e.message)}</div>`;
     });
