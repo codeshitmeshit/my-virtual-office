@@ -88,6 +88,7 @@ def create_project_execution_project(workspace):
         "assignee": "executor",
         "executorAgentId": "executor",
     })["task"]
+    project.setdefault("tasks", []).append(task)
     return project, task
 
 
@@ -956,6 +957,137 @@ def test_project_execution_pipeline_restart_clears_execution_context():
     assert task["meetingBlockerHistory"][0]["requestId"] == "req-1"
     assert task["meetingBlockerHistory"][0]["resetReason"] == "project pipeline restart"
     assert task["comments"] == [{"id": "comment-1", "author": "user", "text": "人工评论保留"}]
+
+
+def test_project_reset_requires_confirmation_and_preserves_history_order():
+    with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as workspace:
+        old = with_store(status_dir)
+        try:
+            project, first = create_project_execution_project(workspace)
+            second = server._handle_task_create(project["id"], {
+                "title": "Running task",
+                "columnId": col_id(project, "Backlog"),
+                "executorAgentId": "executor",
+            })["task"]
+            third = server._handle_task_create(project["id"], {
+                "title": "Review task",
+                "columnId": col_id(project, "Backlog"),
+                "executorAgentId": "executor",
+            })["task"]
+            data = server._load_projects()
+            stored = next(p for p in data["projects"] if p["id"] == project["id"])
+            in_progress = col_id(stored, "In Progress")
+            review = col_id(stored, "Review")
+            done = col_id(stored, "Done")
+            stored["workflowActive"] = True
+            stored["workflowPhase"] = "executing"
+            stored["activeTaskId"] = second["id"]
+            stored["activeAgent"] = "executor"
+            for task in stored["tasks"]:
+                if task["id"] == first["id"]:
+                    task["title"] = "Backlog task"
+                    task["columnId"] = col_id(stored, "Backlog")
+                    task["order"] = 0
+                elif task["id"] == second["id"]:
+                    task.update({
+                        "columnId": in_progress,
+                        "order": 0,
+                        "executionState": "executing",
+                        "activeAttemptId": "attempt-1",
+                        "blockedReason": "waiting",
+                        "lastError": "boom",
+                        "reviewResult": {"status": "needs_more_work"},
+                        "evidence": {"summary": "current evidence"},
+                        "meetingBlocker": {"requestId": "req-1", "meetingId": "m1"},
+                        "meetingActionItems": [{"id": "a1", "title": "follow up"}],
+                        "meetingDecisionHistory": [{"id": "d1", "decision": "keep"}],
+                        "meetingDiscussionPoints": [{"id": "p1", "text": "risk"}],
+                        "meetingRecords": [{"id": "r1", "meetingId": "m1"}],
+                        "comments": [{"id": "comment-1", "text": "keep comment"}],
+                        "attempts": [{"id": "attempt-1", "status": "running"}],
+                        "stateHistory": [{"from": "backlog", "to": "executing"}],
+                        "checklist": [{"id": "c1", "text": "keep checklist", "done": True, "completedAt": "2026-07-07T00:00:00+08:00"}],
+                    })
+                elif task["id"] == third["id"]:
+                    task.update({
+                        "columnId": review,
+                        "order": 0,
+                        "executionState": "reviewing",
+                        "completedAt": "2026-07-07T00:00:00+08:00",
+                    })
+            # Put one task in Done to ensure the API treats both columns and states as risky.
+            stored["tasks"][2]["columnId"] = done
+            stored["scheduledCronHistory"] = [{"id": "cron-history-1", "status": "started"}]
+            server._save_projects(data)
+
+            blocked = server._handle_project_reset(project["id"], {"mode": "task_state"})
+            assert blocked["_status"] == 409
+            assert blocked["confirmationRequired"] is True
+            assert blocked["riskyTaskCount"] == 2
+
+            result = server._handle_project_reset(project["id"], {"mode": "task_state", "confirmed": True, "by": "test"})
+            assert result["ok"] is True
+            assert result["resetTaskCount"] == 2
+            fresh = next(p for p in server._load_projects()["projects"] if p["id"] == project["id"])
+            backlog = col_id(fresh, "Backlog")
+            ordered = sorted(fresh["tasks"], key=lambda t: t["order"])
+            assert [t["title"] for t in ordered] == ["Backlog task", "Running task", "Review task"]
+            assert all(t["columnId"] == backlog for t in ordered)
+            assert all(t["executionState"] == "backlog" for t in ordered)
+            assert fresh["workflowActive"] is False
+            assert fresh["workflowPhase"] == "idle"
+            assert fresh["activeTaskId"] is None
+            reset_running = next(t for t in fresh["tasks"] if t["id"] == second["id"])
+            assert reset_running["activeAttemptId"] is None
+            assert reset_running["blockedReason"] is None
+            assert reset_running["lastError"] is None
+            assert reset_running["reviewResult"] == {}
+            assert reset_running["evidence"] == {}
+            assert reset_running["meetingBlocker"] == {}
+            assert reset_running["meetingActionItems"] == []
+            assert reset_running["meetingDecisionHistory"] == [{"id": "d1", "decision": "keep"}]
+            assert reset_running["meetingDiscussionPoints"] == [{"id": "p1", "text": "risk"}]
+            assert reset_running["meetingRecords"] == [{"id": "r1", "meetingId": "m1"}]
+            assert reset_running["meetingBlockerHistory"][0]["requestId"] == "req-1"
+            assert [c["text"] for c in reset_running["comments"]] == ["keep comment"]
+            assert reset_running["attempts"] == [{"id": "attempt-1", "status": "running"}]
+            assert reset_running["checklist"][0]["text"] == "keep checklist"
+            assert reset_running["checklist"][0]["done"] is False
+            assert "completedAt" not in reset_running["checklist"][0]
+            assert fresh["scheduledCronHistory"] == [{"id": "cron-history-1", "status": "started"}]
+        finally:
+            restore_store(old)
+
+
+def test_project_flow_reset_keeps_added_tasks_config_and_clean_reset_needs_no_confirmation():
+    with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as workspace:
+        old = with_store(status_dir)
+        try:
+            project, first = create_project_execution_project(workspace)
+            added = server._handle_task_create(project["id"], {
+                "title": "Added later",
+                "columnId": col_id(project, "Backlog"),
+                "executorAgentId": "executor",
+            })["task"]
+            data = server._load_projects()
+            stored = next(p for p in data["projects"] if p["id"] == project["id"])
+            stored["scheduledCronPaused"] = True
+            stored["scheduledCronHistory"] = [{"id": "cron-history-2", "status": "skipped"}]
+            stored["projectExecutionStartMode"] = "single"
+            server._save_projects(data)
+
+            result = server._handle_project_reset(project["id"], {"mode": "project_flow"})
+            assert result["ok"] is True
+            assert "confirmationRequired" not in result
+            fresh = next(p for p in server._load_projects()["projects"] if p["id"] == project["id"])
+            assert [t["id"] for t in sorted(fresh["tasks"], key=lambda t: t["order"])] == [first["id"], added["id"]]
+            assert fresh["scheduledCronPaused"] is True
+            assert fresh["scheduledCronHistory"] == [{"id": "cron-history-2", "status": "skipped"}]
+            assert fresh["projectExecutionStartMode"] == "single"
+            assert fresh["defaultExecutorAgentId"] == "executor"
+            assert fresh["defaultReviewerAgentId"] == "reviewer"
+        finally:
+            restore_store(old)
 
 
 def test_project_execution_manual_restart_clears_stale_meeting_bindings():
@@ -2861,6 +2993,8 @@ if __name__ == "__main__":
     test_project_execution_matches_summarized_checklist_update_conservatively()
     test_project_execution_does_not_apply_ambiguous_fuzzy_checklist_update()
     test_project_execution_pipeline_restart_clears_execution_context()
+    test_project_reset_requires_confirmation_and_preserves_history_order()
+    test_project_flow_reset_keeps_added_tasks_config_and_clean_reset_needs_no_confirmation()
     test_project_execution_manual_restart_clears_stale_meeting_bindings()
     test_project_execution_meeting_result_records_discussion_points_not_comments()
     test_project_execution_applies_executor_meeting_discussion_points()

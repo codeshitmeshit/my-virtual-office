@@ -16480,6 +16480,178 @@ def _project_execution_all_tasks_repeatable(project):
     return bool(tasks) and all(t.get("scheduledRepeatEnabled") is True for t in tasks)
 
 
+_PROJECT_RESET_RISKY_STATES = {
+    "validating",
+    "executing",
+    "retrying",
+    "reviewing",
+    "review",
+    "reworking",
+    "blocked",
+    "execution_complete",
+    "awaiting_user_acceptance",
+    "awaiting_meeting_resolution",
+    "done",
+    "completed",
+}
+
+
+def _project_reset_backlog_col(project):
+    done_cols = _project_execution_done_column_ids(project)
+    backlog_col = _wf_get_backlog_col(project)
+    if not backlog_col:
+        backlog_col = next((c for c in sorted(project.get("columns", []) or [], key=lambda c: c.get("order", 0)) if c.get("id") not in done_cols), None)
+    return backlog_col
+
+
+def _project_reset_visible_tasks(project):
+    col_order = {c.get("id"): idx for idx, c in enumerate(sorted(project.get("columns", []) or [], key=lambda c: c.get("order", 0)))}
+    tasks = list(project.get("tasks", []) or [])
+    tasks.sort(key=lambda t: (col_order.get(t.get("columnId"), 9999), t.get("order", 0), t.get("createdAt", ""), t.get("id", "")))
+    return tasks
+
+
+def _project_reset_risk_summary(project):
+    done_cols = _project_execution_done_column_ids(project)
+    backlog_col = _project_reset_backlog_col(project)
+    backlog_id = backlog_col.get("id") if backlog_col else None
+    risky_tasks = []
+    risky_project = any(bool(project.get(field)) for field in (
+        "workflowActive",
+        "projectExecutionFlowActive",
+        "activeTaskId",
+        "activeAgent",
+    ))
+    if str(project.get("workflowPhase") or "").strip().lower() not in ("", "idle", "stopped", "done"):
+        risky_project = True
+    for task in project.get("tasks", []) or []:
+        state = str(task.get("executionState") or ("done" if task.get("completedAt") else "backlog")).strip().lower()
+        risky = (
+            state in _PROJECT_RESET_RISKY_STATES
+            or (backlog_id and task.get("columnId") != backlog_id)
+            or task.get("columnId") in done_cols
+            or bool(task.get("completedAt"))
+            or bool(task.get("activeAttemptId"))
+            or bool(task.get("blockedReason"))
+            or bool(task.get("lastError"))
+            or bool(task.get("meetingBlocker"))
+            or bool(task.get("reviewResult"))
+        )
+        if risky:
+            risky_tasks.append({
+                "id": task.get("id"),
+                "title": task.get("title") or "",
+                "executionState": state,
+            })
+    return {
+        "risky": risky_project or bool(risky_tasks),
+        "riskyProject": risky_project,
+        "riskyTaskCount": len(risky_tasks),
+        "riskyTasks": risky_tasks[:20],
+    }
+
+
+def _project_reset_clear_current_context(task, now, actor, reason):
+    blocker = task.get("meetingBlocker") if isinstance(task.get("meetingBlocker"), dict) else {}
+    if blocker:
+        archived = dict(blocker)
+        archived["resetAt"] = now
+        archived["resetBy"] = actor
+        archived["resetReason"] = reason
+        task.setdefault("meetingBlockerHistory", []).append(archived)
+        task["meetingBlockerHistory"] = task["meetingBlockerHistory"][-50:]
+    task["meetingBlocker"] = {}
+    task["meetingActionItems"] = []
+    task["activeAttemptId"] = None
+    task["blockedReason"] = None
+    task["lastError"] = None
+    task["reworkFeedback"] = None
+    task["reworkCount"] = 0
+    task["evidence"] = {}
+    task["reviewResult"] = {}
+    checklist = task.get("checklist")
+    if isinstance(checklist, list):
+        for item in checklist:
+            if not isinstance(item, dict):
+                continue
+            item["done"] = False
+            for key in ("completedAt", "completedBy", "completionEvidence"):
+                item.pop(key, None)
+
+
+def _handle_project_reset(project_id, body):
+    data = _load_projects()
+    project = next((p for p in data.get("projects", []) if p.get("id") == project_id), None)
+    if not project:
+        return {"ok": False, "error": "Project not found", "_status": 404}
+    mode = str((body or {}).get("mode") or "task_state").strip()
+    if mode not in {"task_state", "project_flow"}:
+        return {"ok": False, "error": "Unsupported project reset mode", "code": "invalid_project_reset_mode", "_status": 400}
+    backlog_col = _project_reset_backlog_col(project)
+    if not backlog_col:
+        return {"ok": False, "error": "Backlog column not found", "code": "backlog_column_not_found", "_status": 409}
+    risk = _project_reset_risk_summary(project)
+    if risk.get("risky") and (body or {}).get("confirmed") is not True:
+        return {
+            "ok": False,
+            "error": "Project reset requires confirmation because active, blocked, review, or done work will be forced back to backlog.",
+            "code": "project_reset_confirmation_required",
+            "confirmationRequired": True,
+            **risk,
+            "_status": 409,
+        }
+    now = _proj_now()
+    actor = str((body or {}).get("by") or "user")
+    reason = f"project reset: {mode}"
+    reset_count = 0
+    tasks = _project_reset_visible_tasks(project)
+    backlog_id = backlog_col.get("id")
+    for idx, task in enumerate(tasks):
+        previous_state = task.get("executionState") or ("done" if task.get("completedAt") else "backlog")
+        previous_col = task.get("columnId")
+        changed = (
+            previous_col != backlog_id
+            or previous_state != "backlog"
+            or task.get("order") != idx
+            or bool(task.get("completedAt"))
+            or bool(task.get("activeAttemptId"))
+            or bool(task.get("blockedReason"))
+            or bool(task.get("lastError"))
+            or bool(task.get("meetingBlocker"))
+            or bool(task.get("meetingActionItems"))
+            or bool(task.get("evidence"))
+            or bool(task.get("reviewResult"))
+        )
+        task["columnId"] = backlog_id
+        task["order"] = idx
+        task["completedAt"] = None
+        task["executionState"] = "backlog"
+        _project_reset_clear_current_context(task, now, actor, reason)
+        task["updatedAt"] = now
+        if changed:
+            reset_count += 1
+            task.setdefault("stateHistory", []).append({
+                "actor": actor,
+                "from": previous_state,
+                "to": "backlog",
+                "reason": reason,
+                "previousColumnId": previous_col,
+                "at": now,
+            })
+            task["stateHistory"] = task["stateHistory"][-100:]
+    project["projectExecutionFlowActive"] = False
+    project["projectExecutionFlowStopReason"] = None
+    project["workflowActive"] = False
+    project["workflowPhase"] = "idle"
+    project["activeTaskId"] = None
+    project["activeAgent"] = None
+    project["executionDirtyConfirmations"] = []
+    project["updatedAt"] = now
+    _log_activity(project, "project_reset", actor, f"Reset project with mode '{mode}' and reset {reset_count} task(s).")
+    _save_projects(data)
+    return {"ok": True, "project": project, "mode": mode, "resetTaskCount": reset_count, **risk}
+
+
 def _project_execution_reset_project_tasks_for_restart(project, actor="user"):
     done_cols = _project_execution_done_column_ids(project)
     backlog_col = _wf_get_backlog_col(project)
@@ -28424,6 +28596,17 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             length = int(self.headers.get('Content-Length', 0))
             body = json.loads(self.rfile.read(length)) if length else {}
             result = _handle_project_execution_workspace_validate(proj_id, body)
+            self.send_response(result.get("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            result.pop("_status", None)
+            self.wfile.write(json.dumps(result).encode())
+        elif self.path.startswith("/api/projects/") and "/tasks/" not in self.path and self.path.endswith("/reset"):
+            proj_id = self.path.split("/api/projects/")[1].rsplit("/reset", 1)[0]
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            result = _handle_project_reset(proj_id, body)
             self.send_response(result.get("_status", 200))
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")

@@ -1743,6 +1743,12 @@
     color: #ffd700;
     margin-bottom: 20px;
 }
+.proj-form-help {
+    color: #aeb4c8;
+    font-size: 12px;
+    line-height: 1.5;
+    margin: -8px 0 16px;
+}
 .proj-form-group {
     margin-bottom: 14px;
 }
@@ -1818,6 +1824,39 @@
 }
 .proj-confirm-danger .proj-form-title {
     color: #f87171;
+}
+.proj-reset-dialog {
+    max-width: 560px;
+}
+.proj-reset-options {
+    display: grid;
+    gap: 10px;
+}
+.proj-reset-option {
+    width: 100%;
+    text-align: left;
+    background: #171733;
+    border: 1px solid #303058;
+    border-radius: 6px;
+    color: #e8e8f0;
+    padding: 14px;
+    cursor: pointer;
+}
+.proj-reset-option:hover {
+    border-color: #ffd700;
+    background: #20203f;
+}
+.proj-reset-option strong {
+    display: block;
+    color: #ffd700;
+    font-size: 13px;
+    margin-bottom: 6px;
+}
+.proj-reset-option span {
+    display: block;
+    color: #aeb4c8;
+    font-size: 12px;
+    line-height: 1.45;
 }
 .proj-acceptance-task {
     color: #e8e8f0;

@@ -1,0 +1,38 @@
+{
+  "name": "project-reset-actions",
+  "stage": "accepted",
+  "waiting_for_user": false,
+  "updated_at": "2026-07-08T11:56:00+08:00",
+  "confirmed": {
+    "checklist": true,
+    "tested": true,
+    "done": true
+  },
+  "confirmations": {
+    "checklist": {
+      "confirmed_at": "2026-07-07T13:38:04+08:00",
+      "summary": "User replied \"pass\" to confirm the checklist."
+    },
+    "tested": {
+      "confirmed_at": "2026-07-08T11:56:00+08:00",
+      "summary": "User accepted the project reset actions implementation."
+    },
+    "done": {
+      "confirmed_at": "2026-07-08T11:56:00+08:00",
+      "summary": "User requested marking the project reset requirement complete and committing the implementation."
+    }
+  },
+  "files": {
+    "requirement": "requirement.md",
+    "review": "review.md",
+    "checklist": "checklist.md",
+    "todolist": "todolist.md"
+  },
+  "notes": [
+    "Product clarification completed before archiving.",
+    "Checklist must be confirmed by user before todolist or implementation.",
+    "Requirement name auto-generated as project-reset-actions; user may request rename before checklist confirmation.",
+    "Implementation, unit/static tests, and browser E2E are complete.",
+    "User acceptance confirmed; ready for commit."
+  ]
+}

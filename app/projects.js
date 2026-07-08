@@ -245,6 +245,10 @@
             const r = await fetch(`/api/projects/${id}${qs}`, { method: 'DELETE' });
             return r.json();
         },
+        async resetProject(id, body) {
+            const r = await fetch(`/api/projects/${id}/reset`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
+            return r.json();
+        },
         async createTask(projectId, body) {
             const r = await fetch(`/api/projects/${projectId}/tasks`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
             return r.json();
@@ -904,6 +908,7 @@
                 </div>
                 <span class="proj-wf-status" id="wf-status-badge"></span>
             </div>`}
+            <button class="proj-btn proj-btn-sm" onclick="ProjMgr.openProjectResetDialog()">${_t('proj_reset')}</button>
             <button class="proj-btn proj-btn-sm" onclick="ProjMgr.editProjectDialog('${p.id}')">${_t('proj_edit')}</button>
             ${p.projectExecutionEnabled ? `<button class="proj-btn proj-btn-sm" onclick="ProjMgr.showArtifacts('${p.id}')">产物</button>` : ''}
             <button class="proj-btn proj-btn-sm" onclick="ProjMgr.showReport('${p.id}')">${_t('proj_report')}</button>
@@ -2845,6 +2850,69 @@
         state.textInputDialog = null;
     }
 
+    function projectResetModeTitle(mode) {
+        return mode === 'project_flow' ? _t('proj_reset_project_flow_title') : _t('proj_reset_task_state_title');
+    }
+
+    function openProjectResetDialogAction() {
+        const p = state.currentProject;
+        const overlay = document.getElementById('proj-form-overlay');
+        if (!p || !overlay) return;
+        overlay.classList.remove('hidden');
+        overlay.innerHTML = `
+        <div class="proj-form-modal" style="position:static;padding:0;background:transparent" onclick="event.stopPropagation()">
+            <div class="proj-form-box proj-reset-dialog" role="dialog" aria-modal="true" aria-labelledby="proj-reset-dialog-title">
+                <div class="proj-form-title" id="proj-reset-dialog-title">${_t('proj_reset_dialog_title')}</div>
+                <div class="proj-form-help">${_t('proj_reset_dialog_desc')}</div>
+                <div class="proj-reset-options">
+                    <button class="proj-reset-option" onclick="ProjMgr.projectReset('task_state')">
+                        <strong>${_t('proj_reset_task_state_title')}</strong>
+                        <span>${_t('proj_reset_task_state_desc')}</span>
+                    </button>
+                    <button class="proj-reset-option" onclick="ProjMgr.projectReset('project_flow')">
+                        <strong>${_t('proj_reset_project_flow_title')}</strong>
+                        <span>${_t('proj_reset_project_flow_desc')}</span>
+                    </button>
+                </div>
+                <div class="proj-form-actions">
+                    <button class="proj-btn" onclick="ProjMgr.hideFormModal()">${_t('proj_cancel')}</button>
+                </div>
+            </div>
+        </div>`;
+    }
+
+    async function projectResetAction(mode, confirmed) {
+        const p = state.currentProject;
+        if (!p) return;
+        hideFormModal();
+        try {
+            const d = await api.resetProject(p.id, { mode, confirmed: confirmed === true });
+            if (d.confirmationRequired) {
+                const taskTitles = (d.riskyTasks || []).map(t => t.title || t.id).filter(Boolean).slice(0, 5);
+                const titleSeparator = currentLang().startsWith('zh') ? '、' : ', ';
+                const extra = taskTitles.length ? `${_t('proj_reset_confirm_detail_prefix')} ${taskTitles.join(titleSeparator)}` : '';
+                const ok = await showConfirmDialog({
+                    tone: 'danger',
+                    title: _t('proj_reset_confirm_title'),
+                    message: formatTextTemplate(_t('proj_reset_confirm_message'), { count: d.riskyTaskCount || 0, mode: projectResetModeTitle(mode) }),
+                    detail: extra || _t('proj_reset_confirm_detail'),
+                    confirmText: _t('proj_reset_confirm_action'),
+                    cancelText: _t('proj_cancel'),
+                });
+                if (ok) await projectResetAction(mode, true);
+                return;
+            }
+            if (!d.ok) throw new Error(d.error || 'reset failed');
+            stopWorkflowPolling();
+            state.workflow.active = false;
+            state.workflow.phase = 'idle';
+            await refreshProjectScheduledCronPanel();
+            toast(formatTextTemplate(_t('proj_reset_success'), { count: d.resetTaskCount || 0 }), 'success');
+        } catch (e) {
+            toast(formatTextTemplate(_t('proj_reset_failed'), { message: e.message || String(e) }), 'error');
+        }
+    }
+
     function resolveConfirmAction(confirmed) {
         const dialog = state.confirmDialog;
         if (dialog && typeof dialog.done === 'function') dialog.done(!!confirmed);
@@ -4558,6 +4626,8 @@
         runProjectCron: runProjectCronAction,
         toggleProjectCron: toggleProjectCronAction,
         deleteProjectCron: deleteProjectCronAction,
+        openProjectResetDialog: openProjectResetDialogAction,
+        projectReset: projectResetAction,
         updateReviewItemStatus: updateReviewItemStatusAction,
         saveReviewCheck: saveReviewCheckAction,
         projectExecutionStart: projectExecutionStartAction,
