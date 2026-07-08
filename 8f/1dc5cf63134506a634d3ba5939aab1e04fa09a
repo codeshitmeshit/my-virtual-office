@@ -1,0 +1,35 @@
+app/chat.js
+  s_6819ac0a7ccd4d::t_38dd3495338aae 208,294-295,298-299,324,438,2087-2089,3657,3661-3662,3717,3733
+app/style.css
+  s_6819ac0a7ccd4d::t_6a9484dc1cd4c1 2142,2436,2449-2454
+tests/check_chat_bug_regressions.mjs
+  s_6819ac0a7ccd4d::t_6885b915726e64 6,48-69
+tests/check_codex_runs_bridge.mjs
+  s_3d9586efb91aa5::t_55cd68a77a5d88 70,120-132
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "8f1dc5cf63134506a634d3ba5939aab1e04fa09a",
+  "prompts": {},
+  "sessions": {
+    "s_3d9586efb91aa5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f42d1-499d-7480-9532-f69d177bcf0c",
+        "model": "unknown"
+      },
+      "human_author": "codeshitmeshit <codeshitmeshit@126.com>"
+    },
+    "s_6819ac0a7ccd4d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f42d9-3927-75d2-9c37-bdf671bdfc64",
+        "model": "unknown"
+      },
+      "human_author": "codeshitmeshit <codeshitmeshit@126.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
