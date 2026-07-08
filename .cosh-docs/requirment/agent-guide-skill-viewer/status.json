@@ -1,0 +1,41 @@
+{
+  "name": "agent-guide-skill-viewer",
+  "stage": "accepted",
+  "waiting_for_user": false,
+  "updated_at": "2026-07-07T23:12:00+08:00",
+  "confirmed": {
+    "checklist": true,
+    "tested": true,
+    "done": true
+  },
+  "confirmations": {
+    "checklist": {
+      "confirmed_at": "2026-07-07T22:03:28+08:00",
+      "item": "checklist",
+      "summary": "User replied \"continue\", confirming the checklist can be used for todolist and implementation acceptance."
+    },
+    "tested": {
+      "confirmed_at": "2026-07-07T23:12:00+08:00",
+      "item": "tested",
+      "summary": "User accepted the Agent Guide behavior after verifying the full SKILL.md detail modal."
+    },
+    "done": {
+      "confirmed_at": "2026-07-07T23:12:00+08:00",
+      "item": "done",
+      "summary": "User requested marking the requirement complete and committing the implementation."
+    }
+  },
+  "files": {
+    "requirement": "requirement.md",
+    "review": "review.md",
+    "checklist": "checklist.md",
+    "todolist": "todolist.md"
+  },
+  "notes": [
+    "Created from clarified product scope: read-only Agent Guide modal for VO built-in exposed skills.",
+    "Checklist confirmed from user reply: continue.",
+    "Generated todolist.md after checklist confirmation.",
+    "Implementation completed with static checks and browser E2E verification.",
+    "User acceptance confirmed after Agent Guide card click opened a read-only full SKILL.md detail modal."
+  ]
+}

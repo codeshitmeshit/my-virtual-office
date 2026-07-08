@@ -4732,6 +4732,229 @@ button:active { transform: translateY(3px); box-shadow: none; }
 .skl-textarea { background: #12121e; border: 1px solid #2a2a4e; color: #eee; border-radius: 6px; padding: 10px; font-size: 11px; font-family: 'Courier New', monospace; min-height: 320px; resize: vertical; white-space: pre; width: 100%; box-sizing: border-box; }
 .skl-editor-actions { display: flex; gap: 8px; }
 
+/* === Agent Guide === */
+.agent-guide-modal {
+    max-width: 860px;
+    width: min(92vw, 860px);
+    box-sizing: border-box;
+    min-height: 320px;
+    max-height: 88vh;
+    max-height: 88dvh;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+}
+.agent-guide-intro {
+    color: #aaa;
+    font-size: 11px;
+    line-height: 1.5;
+    margin: -2px 0 12px;
+}
+.agent-guide-modal .modal-header {
+    margin: -20px 0 0;
+    padding: 20px 0 8px;
+}
+.agent-guide-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding-bottom: 10px;
+    margin-bottom: 12px;
+    border-bottom: 1px solid var(--ui-border);
+}
+.agent-guide-filter {
+    min-height: 28px;
+    padding: 5px 10px;
+    background: #12121e;
+    border: 1px solid #2a2a4e;
+    color: #cfcfcf;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 10px;
+    line-height: 1.2;
+}
+.agent-guide-filter:hover,
+.agent-guide-filter.active {
+    color: var(--gold);
+    border-color: var(--gold);
+    background: #1a1a2e;
+}
+.agent-guide-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 10px;
+    padding-bottom: 12px;
+}
+.agent-guide-card {
+    background: #1a1a2e;
+    border: 1px solid #2a2a4e;
+    border-radius: 6px;
+    padding: 12px;
+    min-width: 0;
+    cursor: pointer;
+}
+.agent-guide-card:hover,
+.agent-guide-card:focus {
+    border-color: rgba(255, 215, 0, 0.58);
+    outline: none;
+}
+.agent-guide-card-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+.agent-guide-skill-name {
+    color: #f2f2f2;
+    font-size: 12px;
+    font-weight: bold;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+}
+.agent-guide-category-badge {
+    flex-shrink: 0;
+    color: var(--gold);
+    background: rgba(255, 215, 0, 0.08);
+    border: 1px solid rgba(255, 215, 0, 0.25);
+    border-radius: 4px;
+    padding: 3px 6px;
+    font-size: 9px;
+    line-height: 1.2;
+    max-width: 42%;
+    text-align: center;
+    overflow-wrap: anywhere;
+}
+.agent-guide-field + .agent-guide-field {
+    margin-top: 8px;
+}
+.agent-guide-field-label {
+    color: #888;
+    font-size: 9px;
+    margin-bottom: 3px;
+}
+.agent-guide-field-text {
+    color: #ddd;
+    font-size: 10px;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+}
+.agent-guide-details {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+.agent-guide-details .agent-guide-field-label {
+    color: var(--gold);
+    font-size: 10px;
+    line-height: 1.4;
+}
+.agent-guide-detail-list {
+    margin: 8px 0 0 0;
+    padding-left: 16px;
+    color: #d8d8d8;
+    font-size: 10px;
+    line-height: 1.55;
+}
+.agent-guide-detail-list li + li {
+    margin-top: 5px;
+}
+.agent-guide-open-skill {
+    margin-top: 10px;
+    width: 100%;
+    min-height: 28px;
+    padding: 6px 10px;
+    background: #12121e;
+    border: 1px solid rgba(255, 215, 0, 0.45);
+    color: var(--gold);
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 10px;
+    line-height: 1.2;
+}
+.agent-guide-open-skill:hover,
+.agent-guide-open-skill:focus {
+    background: #1f1f36;
+    border-color: var(--gold);
+    outline: none;
+}
+.agent-guide-empty {
+    color: #666;
+    font-size: 11px;
+    text-align: center;
+    padding: 28px 12px;
+}
+.agent-guide-detail-overlay {
+    z-index: 10030;
+}
+.agent-guide-skill-detail-modal {
+    max-width: 980px;
+    width: min(94vw, 980px);
+    max-height: 90vh;
+    max-height: 90dvh;
+}
+.agent-guide-skill-path {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+    color: #888;
+    font-size: 9px;
+    margin: 10px 0;
+}
+.agent-guide-skill-path code {
+    color: var(--gold);
+    background: rgba(0, 0, 0, 0.28);
+    border: 1px solid var(--ui-border);
+    border-radius: 4px;
+    padding: 4px 6px;
+    overflow-wrap: anywhere;
+}
+.agent-guide-skill-detail-error {
+    color: #ff8f8f;
+    background: rgba(244, 67, 54, 0.12);
+    border: 1px solid rgba(244, 67, 54, 0.35);
+    border-radius: 4px;
+    padding: 8px;
+    font-size: 10px;
+    line-height: 1.5;
+    margin-bottom: 10px;
+}
+.agent-guide-skill-detail-content {
+    margin: 0;
+    min-height: 220px;
+    max-height: calc(90dvh - 150px);
+    overflow: auto;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    background: rgba(0, 0, 0, 0.36);
+    border: 1px solid var(--ui-border);
+    border-radius: 6px;
+    color: #e6e6e6;
+    padding: 12px;
+    font-family: 'Courier New', monospace;
+    font-size: 11px;
+    line-height: 1.55;
+}
+
+@media (max-width: 640px) {
+    .agent-guide-modal {
+        width: calc(100vw - 20px);
+        max-height: 90vh;
+        max-height: 90dvh;
+    }
+    .agent-guide-cards {
+        grid-template-columns: 1fr;
+    }
+    .agent-guide-card-head {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    .agent-guide-category-badge {
+        max-width: none;
+        align-self: flex-start;
+    }
+}
+
 /* SMS media attachments */
 .sms-media-list {
     display: flex;

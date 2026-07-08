@@ -9,7 +9,7 @@
     <link rel="apple-touch-icon" href="icon-192.png">
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#1a1a2e">
-    <link rel="stylesheet" href="style.css?v=1783190741-usage-tabs-weather-form-layout">
+    <link rel="stylesheet" href="style.css?v=1783436700-agent-guide-skill-md">
     <link rel="stylesheet" href="projects.css?v=1783041181-meeting-request-status-colors">
     <link rel="stylesheet" href="archive-room.css?v=1783041181-phase13">
     <link rel="stylesheet" href="fonts.css?v=1783041181.05.07">
@@ -339,6 +339,7 @@
                 <button title="Reset canvas zoom" onclick="resetCamera()" data-i18n="reset_zoom" data-i18n-title="reset_zoom">🔍 Reset</button>
                 <button id="sms-toggle" title="SMS/Phone Panel" data-i18n="sms" data-i18n-title="sms_phone_panel">📞 SMS</button>
                 <button id="browser-toggle" title="Agent Browser" class="browser-toggle-btn" data-i18n="browser" data-i18n-title="agent_browser_title">🌐 Browser</button>
+                <button id="agent-guide-toggle" title="Agent Guide" onclick="openAgentGuide()" data-i18n="agent_guide" data-i18n-title="agent_guide_title">🧭 Agent Guide</button>
             </div>
         </div>
         <div class="sidebar-edge" id="sidebar-edge" onclick="toggleSidebar()" title="Toggle sidebar">
@@ -708,6 +709,38 @@
         </div>
     </div>
 
+    <!-- Agent Guide Modal -->
+    <div id="agentGuideModal" class="modal hidden" onclick="if(event.target===this)closeAgentGuide()">
+        <div class="modal-content agent-guide-modal">
+            <div class="modal-header">
+                <span class="modal-emoji">🧭</span>
+                <h2 data-i18n="agent_guide_title">Agent Guide</h2>
+                <span class="close-btn" onclick="closeAgentGuide()">&times;</span>
+            </div>
+            <div class="agent-guide-intro" data-i18n="agent_guide_intro">View the built-in VO skills exposed by this office.</div>
+            <div id="agent-guide-filters" class="agent-guide-filters" role="tablist" aria-label="Agent Guide categories"></div>
+            <div id="agent-guide-cards" class="agent-guide-cards"></div>
+            <div id="agent-guide-empty" class="agent-guide-empty hidden" data-i18n="agent_guide_empty">No exposed VO skills in this category.</div>
+        </div>
+    </div>
+
+    <!-- Agent Guide Skill Detail Modal -->
+    <div id="agentGuideSkillDetailModal" class="modal hidden agent-guide-detail-overlay" onclick="if(event.target===this)closeAgentGuideSkillDetail()">
+        <div class="modal-content agent-guide-skill-detail-modal">
+            <div class="modal-header">
+                <span class="modal-emoji">📄</span>
+                <h2 id="agent-guide-skill-detail-title" data-i18n="agent_guide_skill_detail_title">Skill Detail</h2>
+                <span class="close-btn" onclick="closeAgentGuideSkillDetail()">&times;</span>
+            </div>
+            <div class="agent-guide-skill-path">
+                <span data-i18n="agent_guide_skill_path_label">Path</span>
+                <code id="agent-guide-skill-detail-path"></code>
+            </div>
+            <div id="agent-guide-skill-detail-error" class="agent-guide-skill-detail-error hidden"></div>
+            <pre id="agent-guide-skill-detail-content" class="agent-guide-skill-detail-content" data-i18n="agent_guide_skill_detail_loading">Loading SKILL.md...</pre>
+        </div>
+    </div>
+
     <!-- Skill Editor Sub-Modal -->
     <div id="skillEditorModal" class="modal hidden">
         <div class="modal-content" style="max-width:640px;">
@@ -1038,6 +1071,7 @@
     </script>
     <script src="internal-bubble.js?v=1783041181"></script>
     <script src="game.js?v=1783277100-weather-updated-at"></script>
+    <script src="agent-guide.js?v=1783436700-agent-guide-skill-md"></script>
     <script src="dashboard-realtime.js?v=1783120000-dashboard-realtime"></script>
     <script src="browser-viewer-url.js?v=1783080200-viewer-proxy"></script>
     <script src="browser-panel.js?v=1783078720-viewer-reload"></script>
