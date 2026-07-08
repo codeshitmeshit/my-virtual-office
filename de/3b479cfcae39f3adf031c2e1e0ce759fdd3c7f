@@ -1,0 +1,31 @@
+.cosh-docs/requirment/agent-guide-skill-viewer/requirement.md
+  s_d60b80d57357d9::t_284f212ebe3c6b 1-95
+.cosh-docs/requirment/agent-guide-skill-viewer/review.md
+  s_d60b80d57357d9::t_a9c02221529866 1-54
+.cosh-docs/requirment/agent-guide-skill-viewer/status.json
+  s_d60b80d57357d9::t_ab62ffd048764d 1-41
+.cosh-docs/requirment/agent-guide-skill-viewer/todolist.md
+  s_d60b80d57357d9::t_f59d51abb30463 1-107
+app/index.html
+  s_d60b80d57357d9::t_faea094effa362 12,342,712-743,1074
+app/style.css
+  s_d60b80d57357d9::t_9a281abe06ebc0 4735-4957
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "de3b479cfcae39f3adf031c2e1e0ce759fdd3c7f",
+  "prompts": {},
+  "sessions": {
+    "s_d60b80d57357d9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f3cd7-8a68-7f30-a0fa-0f3a099cc4df",
+        "model": "unknown"
+      },
+      "human_author": "codeshitmeshit <codeshitmeshit@126.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
