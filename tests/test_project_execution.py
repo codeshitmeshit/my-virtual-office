@@ -60,6 +60,24 @@ def restore_attrs(pairs):
         setattr(owner, name, value)
 
 
+def test_workflow_activity_summary_formats_provider_message_lists():
+    activity = [
+        {"type": "message", "summary": "Executor completed the task.", "ts": 1000},
+        {"type": "message", "summary": "Reviewer approved the work.", "ts": 1001},
+    ]
+    summary = server._wf_format_activity_summary(activity)
+    assert "Provider messages" in summary
+    assert "Executor completed the task." in summary
+    assert "Reviewer approved the work." in summary
+
+
+def test_workflow_provider_message_activity_does_not_count_as_review_evidence():
+    activity = [{"type": "message", "summary": "Reviewer checked the task.", "ts": 1000}]
+    assert server._wf_activity_tool_count(activity) == 0
+    assert server._wf_activity_has_review_evidence(activity) is False
+    assert server._wf_activity_has_browser_evidence(activity) is False
+
+
 def fake_feishu_sender(calls):
     def _send(intent, **kwargs):
         calls.append({"intent": intent, "kwargs": kwargs})
@@ -2966,6 +2984,8 @@ def test_legacy_review_check_cannot_update_project_execution_project():
 
 
 if __name__ == "__main__":
+    test_workflow_activity_summary_formats_provider_message_lists()
+    test_workflow_provider_message_activity_does_not_count_as_review_evidence()
     test_project_store_round_trip_and_legacy_defaults()
     test_workflow_chat_reads_project_execution_codex_attempt_reasoning()
     test_openclaw_workflow_chat_reads_gateway_prefixed_session_file()

@@ -3,7 +3,7 @@
 
   function buildBrowserViewerUrl(viewerUrl, pageUrl) {
     var url = new URL(viewerUrl, pageUrl);
-    var shouldUseLocalProxy = url.username || url.password || url.port === '6901';
+    var shouldUseLocalProxy = url.username || url.password;
     if (shouldUseLocalProxy && /^https?:$/.test(url.protocol)) {
       return new URL('/browser-viewer', pageUrl).toString();
     }

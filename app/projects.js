@@ -29,6 +29,8 @@
         filters: { status: '', priority: '', tag: '', search: '', sort: 'updatedAt' },
         workflow: { active: false, autoMode: false, phase: 'idle', currentTaskId: null, pollTimer: null, startMode: 'continuous', flowStopReason: null },
         acceptanceDialog: null,
+        pendingActions: new Map(),
+        duplicateActionToastAt: {},
     };
 
     const _t = (key, params) => typeof i18n !== 'undefined' ? i18n.t(key, params) : key;
@@ -606,6 +608,70 @@
         el.classList.add('show');
         clearTimeout(el._timer);
         el._timer = setTimeout(() => el.classList.remove('show'), 3000);
+    }
+
+    function currentActionButton(opts = {}) {
+        if (opts.button) return opts.button;
+        if (opts.event && opts.event.currentTarget) return opts.event.currentTarget;
+        const browserEvent = typeof window !== 'undefined' ? window.event : null;
+        if (browserEvent && browserEvent.currentTarget) return browserEvent.currentTarget;
+        const active = typeof document !== 'undefined' ? document.activeElement : null;
+        return active && active.tagName === 'BUTTON' ? active : null;
+    }
+
+    function setButtonBusy(button, busy, label) {
+        if (!button || button.nodeType !== 1) return;
+        if (busy) {
+            if (!button.dataset.projOriginalText) button.dataset.projOriginalText = button.textContent || '';
+            button.disabled = true;
+            button.setAttribute('aria-busy', 'true');
+            if (label) button.textContent = label;
+            return;
+        }
+        button.disabled = false;
+        button.removeAttribute('aria-busy');
+        if (button.dataset.projOriginalText) {
+            button.textContent = button.dataset.projOriginalText;
+            delete button.dataset.projOriginalText;
+        }
+    }
+
+    function duplicateActionFeedback(key, opts = {}) {
+        console.info(`[PROJECTS] duplicate action ignored key=${key}`);
+        if (opts.silentDuplicate) return;
+        const now = Date.now();
+        if ((state.duplicateActionToastAt[key] || 0) + 1200 > now) return;
+        state.duplicateActionToastAt[key] = now;
+        toast(_tf('proj_action_in_progress', 'Already processing, please wait...', '处理中，请稍候...'), 'info');
+    }
+
+    async function runActionOnce(key, fn, opts = {}) {
+        if (!key || typeof fn !== 'function') return undefined;
+        if (state.pendingActions.has(key)) {
+            duplicateActionFeedback(key, opts);
+            return state.pendingActions.get(key).result;
+        }
+        const button = currentActionButton(opts);
+        const busyText = opts.busyText || _tf('proj_processing', 'Processing...', '处理中...');
+        const entry = { startedAt: Date.now(), button, result: null };
+        state.pendingActions.set(key, entry);
+        setButtonBusy(button, true, opts.showBusyText === false ? '' : busyText);
+        entry.result = (async () => {
+            try {
+                return await fn();
+            } finally {
+                state.pendingActions.delete(key);
+                setButtonBusy(button, false);
+            }
+        })();
+        return entry.result;
+    }
+
+    function markDialogSubmitting(submitting, label) {
+        const overlay = document.getElementById('proj-form-overlay');
+        if (!overlay) return;
+        const confirmButtons = overlay.querySelectorAll('.proj-form-actions .proj-btn-primary, .proj-form-actions .proj-btn-stop');
+        confirmButtons.forEach(btn => setButtonBusy(btn, submitting, submitting ? (label || _tf('proj_processing', 'Processing...', '处理中...')) : ''));
     }
 
     // ── MODAL SCAFFOLD ────────────────────────────────────────────
@@ -2843,6 +2909,7 @@
 
     function submitTextInputDialogAction(confirmed) {
         const dialog = state.textInputDialog;
+        if (confirmed) markDialogSubmitting(true);
         const input = document.getElementById('proj-text-input-value');
         const value = confirmed ? ((input && input.value) || '').trim() : '';
         if (dialog && typeof dialog.done === 'function') dialog.done({ confirmed: !!confirmed, value });
@@ -2915,6 +2982,7 @@
 
     function resolveConfirmAction(confirmed) {
         const dialog = state.confirmDialog;
+        if (confirmed) markDialogSubmitting(true);
         if (dialog && typeof dialog.done === 'function') dialog.done(!!confirmed);
         else hideFormModal();
         state.confirmDialog = null;
@@ -2978,10 +3046,13 @@
         const p = state.currentProject;
         if (!p) return;
         const cronId = ((document.getElementById('pf-cron-id') || {}).value || '').trim();
+        const actionKey = `cron-submit:${p.id}:${cronId || 'new'}`;
+        return runActionOnce(actionKey, async () => {
         const name = ((document.getElementById('pf-cron-name') || {}).value || '').trim() || _t('proj_scheduled_cron_default_project_name', { title: p.title });
         const targetType = (document.getElementById('pf-cron-target') || {}).value || 'projectWorkflow';
         const taskId = (document.getElementById('pf-cron-task') || {}).value || '';
         try {
+            markDialogSubmitting(true);
             if (targetType === 'projectTask' && !taskId) throw new Error(_t('proj_scheduled_cron_error_task'));
             const body = {
                 name,
@@ -2999,8 +3070,10 @@
             toast(cronId ? _t('proj_scheduled_cron_updated') : _t('proj_scheduled_cron_created'), 'success');
             await refreshProjectScheduledCronPanel();
         } catch (e) {
+            markDialogSubmitting(false);
             toast(_t('proj_scheduled_cron_save_failed', { message: e.message }), 'error');
         }
+        });
     }
 
     async function submitNewProject() {
@@ -3700,6 +3773,10 @@
     async function projectExecutionStartAction(taskId, dirtyFingerprint, opts = {}) {
         const p = state.currentProject;
         if (!p) return;
+        const actionKey = opts.actionKey || `project-exec-start:${p.id}:${taskId}`;
+        if (!opts._guarded) {
+            return runActionOnce(actionKey, () => projectExecutionStartAction(taskId, dirtyFingerprint, { ...opts, _guarded: true, actionKey }), opts);
+        }
         const confirmedDirtyFingerprint = dirtyFingerprint || opts.dirtyFingerprint || '';
         try {
             const d = await api.projectExecutionStart(p.id, taskId, confirmedDirtyFingerprint, opts);
@@ -3713,7 +3790,7 @@
                         confirmText: '跳过审查并继续',
                     });
                     if (confirmed) {
-                        return projectExecutionStartAction(taskId, confirmedDirtyFingerprint, { ...opts, dirtyFingerprint: confirmedDirtyFingerprint, skipReviewConfirmed: true });
+                        return projectExecutionStartAction(taskId, confirmedDirtyFingerprint, { ...opts, dirtyFingerprint: confirmedDirtyFingerprint, skipReviewConfirmed: true, _guarded: true, actionKey });
                     }
                     await refreshProjectExecutionProject(taskId);
                     return;
@@ -3726,7 +3803,7 @@
                     confirmText: '继续启动',
                 });
                 if (confirmed) {
-                    return projectExecutionStartAction(taskId, d.dirtyFingerprint, { ...opts, dirtyFingerprint: d.dirtyFingerprint });
+                    return projectExecutionStartAction(taskId, d.dirtyFingerprint, { ...opts, dirtyFingerprint: d.dirtyFingerprint, _guarded: true, actionKey });
                 }
                 return;
             }
@@ -3773,6 +3850,10 @@
         if (!p) return;
         const mode = projectExecutionSelectedStartMode();
         const restartPipeline = opts.restartPipeline === true;
+        const actionKey = opts.actionKey || (restartPipeline ? `project-exec-project-restart:${p.id}` : `project-exec-project-start:${p.id}`);
+        if (!opts._guarded) {
+            return runActionOnce(actionKey, () => projectExecutionProjectStartAction(dirtyFingerprint, { ...opts, _guarded: true, actionKey }), opts);
+        }
         const confirmedDirtyFingerprint = dirtyFingerprint || opts.dirtyFingerprint || '';
         try {
             const d = await api.projectExecutionProjectStart(p.id, mode, confirmedDirtyFingerprint, opts);
@@ -3786,7 +3867,7 @@
                         confirmText: '跳过审查并继续',
                     });
                     if (confirmed) {
-                        return projectExecutionProjectStartAction(confirmedDirtyFingerprint, { ...opts, dirtyFingerprint: confirmedDirtyFingerprint, skipReviewConfirmed: true });
+                        return projectExecutionProjectStartAction(confirmedDirtyFingerprint, { ...opts, dirtyFingerprint: confirmedDirtyFingerprint, skipReviewConfirmed: true, _guarded: true, actionKey });
                     }
                     await refreshProjectExecutionProject((d.selectedTask || {}).id || d.taskId);
                     return;
@@ -3799,7 +3880,7 @@
                     confirmText: '继续启动',
                 });
                 if (confirmed) {
-                    return projectExecutionProjectStartAction(d.dirtyFingerprint, { ...opts, dirtyFingerprint: d.dirtyFingerprint });
+                    return projectExecutionProjectStartAction(d.dirtyFingerprint, { ...opts, dirtyFingerprint: d.dirtyFingerprint, _guarded: true, actionKey });
                 }
                 return;
             }
@@ -3832,6 +3913,10 @@
     async function projectExecutionProjectRestartAction(dirtyFingerprint, opts = {}) {
         const p = state.currentProject;
         if (!p) return;
+        const actionKey = opts.actionKey || `project-exec-project-restart:${p.id}`;
+        if (!opts._guarded) {
+            return runActionOnce(actionKey, () => projectExecutionProjectRestartAction(dirtyFingerprint, { ...opts, _guarded: true, actionKey }), opts);
+        }
         if (state.workflow.active || p.workflowActive) {
             toast('请先停止当前任务，再重启流水线', 'error');
             return;
@@ -3848,7 +3933,7 @@
             confirmText: '重启流水线',
         });
         if (!confirmed) return;
-        return projectExecutionProjectStartAction(dirtyFingerprint, { ...opts, restartPipeline: true, confirmed: true });
+        return projectExecutionProjectStartAction(dirtyFingerprint, { ...opts, restartPipeline: true, confirmed: true, _guarded: true, actionKey });
     }
 
     async function projectExecutionCancelActiveAction() {
@@ -3878,89 +3963,99 @@
     async function projectExecutionCancelAction(taskId, attemptId) {
         const p = state.currentProject;
         if (!p) return;
-        try {
-            const d = await api.projectExecutionCancel(p.id, taskId, attemptId);
-            if (d.error) { toast(d.error, 'error'); return; }
-        toast(_t('proj_stopping_task'), 'info');
-    } catch (e) { toast(_t('proj_stop_task_failed'), 'error'); }
+        const actionKey = `project-exec-cancel:${p.id}:${taskId}:${attemptId || ''}`;
+        return runActionOnce(actionKey, async () => {
+            try {
+                const d = await api.projectExecutionCancel(p.id, taskId, attemptId);
+                if (d.error) { toast(d.error, 'error'); await refreshProjectExecutionProject(taskId); return; }
+                toast(_t('proj_stopping_task'), 'info');
+                await refreshProjectExecutionProject(taskId);
+            } catch (e) { toast(_t('proj_stop_task_failed'), 'error'); }
+        });
     }
 
     async function projectExecutionMeetingBlockerAction(taskId, action) {
         const p = state.currentProject;
         if (!p) return;
-        const task = (p.tasks || []).find(t => t.id === taskId);
-        let feedback = '';
-        let dialogResult = null;
-        if (action === 'mark_blocked') {
-            dialogResult = await showTextInputDialog({
-                title: _tf('proj_meeting_blocker_mark_blocked', 'Mark blocked', '标记阻塞'),
-                label: _tf('proj_meeting_blocker_block_reason', 'Explain why this should be marked blocked:', '说明为什么标记为阻塞：'),
-                placeholder: _tf('proj_meeting_blocker_block_placeholder', 'Describe why this task cannot continue...', '说明为什么无法继续推进...'),
-                confirmText: _tf('proj_confirm', 'Confirm', '确认'),
-                taskTitle: task && task.title,
-                tone: 'danger',
-            });
-            if (!dialogResult.confirmed) return;
-            feedback = dialogResult.value || '';
-            if (!feedback.trim()) return;
-        } else if (action === 'continue_execution') {
-            dialogResult = await showTextInputDialog({
-                title: _tf('proj_meeting_blocker_continue', 'Continue execution', '继续执行'),
-                label: _tf('proj_meeting_blocker_continue_reason_optional', 'Reason for continuing (optional):', '继续执行理由（可选）：'),
-                placeholder: _tf('proj_meeting_blocker_continue_placeholder', 'Describe why it is acceptable to continue...', '说明为什么可以继续执行...'),
-                confirmText: _tf('proj_meeting_blocker_continue', 'Continue execution', '继续执行'),
-                taskTitle: task && task.title,
-            });
-            if (!dialogResult.confirmed) return;
-            feedback = dialogResult.value || '';
-        } else if (action === 'reopen_meeting') {
-            dialogResult = await showTextInputDialog({
-                title: _tf('proj_meeting_blocker_reopen', 'Request new meeting', '重新申请会议'),
-                label: _tf('proj_meeting_blocker_reopen_reason', 'Explain why a new meeting request is needed:', '说明重新申请会议的原因：'),
-                placeholder: _tf('proj_meeting_blocker_reopen_placeholder', 'Describe what the new meeting should resolve...', '说明新会议需要解决什么问题...'),
-                confirmText: _tf('proj_meeting_blocker_reopen', 'Request new meeting', '重新申请会议'),
-                taskTitle: task && task.title,
-            });
-            if (!dialogResult.confirmed) return;
-            feedback = dialogResult.value || '';
-            if (!feedback.trim()) return;
-        }
-        try {
-            const d = await api.projectExecutionMeetingBlocker(p.id, taskId, action, feedback);
-            if (d.error) {
-                if (action === 'continue_execution' && d.status === 'start_failed') {
-                    toast(`${_tf('proj_meeting_blocker_continue_failed', 'Meeting wait was cleared, but task start failed', '已退出会议等待，但任务启动失败')}：${d.error}`, 'error');
+        const actionKey = `meeting-blocker:${p.id}:${taskId}:${action}`;
+        return runActionOnce(actionKey, async () => {
+            const task = (p.tasks || []).find(t => t.id === taskId);
+            let feedback = '';
+            let dialogResult = null;
+            if (action === 'mark_blocked') {
+                dialogResult = await showTextInputDialog({
+                    title: _tf('proj_meeting_blocker_mark_blocked', 'Mark blocked', '标记阻塞'),
+                    label: _tf('proj_meeting_blocker_block_reason', 'Explain why this should be marked blocked:', '说明为什么标记为阻塞：'),
+                    placeholder: _tf('proj_meeting_blocker_block_placeholder', 'Describe why this task cannot continue...', '说明为什么无法继续推进...'),
+                    confirmText: _tf('proj_confirm', 'Confirm', '确认'),
+                    taskTitle: task && task.title,
+                    tone: 'danger',
+                });
+                if (!dialogResult.confirmed) return;
+                feedback = dialogResult.value || '';
+                if (!feedback.trim()) return;
+            } else if (action === 'continue_execution') {
+                dialogResult = await showTextInputDialog({
+                    title: _tf('proj_meeting_blocker_continue', 'Continue execution', '继续执行'),
+                    label: _tf('proj_meeting_blocker_continue_reason_optional', 'Reason for continuing (optional):', '继续执行理由（可选）：'),
+                    placeholder: _tf('proj_meeting_blocker_continue_placeholder', 'Describe why it is acceptable to continue...', '说明为什么可以继续执行...'),
+                    confirmText: _tf('proj_meeting_blocker_continue', 'Continue execution', '继续执行'),
+                    taskTitle: task && task.title,
+                });
+                if (!dialogResult.confirmed) return;
+                feedback = dialogResult.value || '';
+            } else if (action === 'reopen_meeting') {
+                dialogResult = await showTextInputDialog({
+                    title: _tf('proj_meeting_blocker_reopen', 'Request new meeting', '重新申请会议'),
+                    label: _tf('proj_meeting_blocker_reopen_reason', 'Explain why a new meeting request is needed:', '说明重新申请会议的原因：'),
+                    placeholder: _tf('proj_meeting_blocker_reopen_placeholder', 'Describe what the new meeting should resolve...', '说明新会议需要解决什么问题...'),
+                    confirmText: _tf('proj_meeting_blocker_reopen', 'Request new meeting', '重新申请会议'),
+                    taskTitle: task && task.title,
+                });
+                if (!dialogResult.confirmed) return;
+                feedback = dialogResult.value || '';
+                if (!feedback.trim()) return;
+            }
+            try {
+                const d = await api.projectExecutionMeetingBlocker(p.id, taskId, action, feedback);
+                if (d.error) {
+                    if (action === 'continue_execution' && d.status === 'start_failed') {
+                        toast(`${_tf('proj_meeting_blocker_continue_failed', 'Meeting wait was cleared, but task start failed', '已退出会议等待，但任务启动失败')}：${d.error}`, 'error');
+                    } else {
+                        toast(d.error, 'error');
+                    }
+                    await refreshProjectExecutionProject(taskId);
+                    return;
+                }
+                const startResult = d.startResult || {};
+                if (action === 'continue_execution' && startResult.ok) {
+                    toast(_tf('proj_meeting_blocker_continue_started', 'Task execution restarted', '任务已继续执行'), 'success');
                 } else {
-                    toast(d.error, 'error');
+                    toast(_tf('proj_meeting_blocker_updated', 'Meeting wait state updated', '会议等待状态已更新'), 'success');
                 }
                 await refreshProjectExecutionProject(taskId);
-                return;
+            } catch (e) {
+                toast(String(e.message || e), 'error');
             }
-            const startResult = d.startResult || {};
-            if (action === 'continue_execution' && startResult.ok) {
-                toast(_tf('proj_meeting_blocker_continue_started', 'Task execution restarted', '任务已继续执行'), 'success');
-            } else {
-                toast(_tf('proj_meeting_blocker_updated', 'Meeting wait state updated', '会议等待状态已更新'), 'success');
-            }
-            await refreshProjectExecutionProject(taskId);
-        } catch (e) {
-            toast(String(e.message || e), 'error');
-        }
+        });
     }
 
     async function projectExecutionReviewStartAction(taskId, attemptId) {
         const p = state.currentProject;
         if (!p) return;
-        try {
-            const d = await api.projectExecutionReviewStart(p.id, taskId, attemptId);
-            if (d.error) { toast(d.error, 'error'); return; }
-        toast(_t('proj_review_started'), 'success');
-            state.workflow.active = true;
-            state.workflow.phase = 'reviewing';
-            state.workflow.currentTaskId = taskId;
-            startProjectExecutionPolling();
-            await refreshProjectExecutionProject(taskId);
-    } catch (e) { toast(_t('proj_start_review_failed'), 'error'); }
+        const actionKey = `project-exec-review-start:${p.id}:${taskId}:${attemptId || ''}`;
+        return runActionOnce(actionKey, async () => {
+            try {
+                const d = await api.projectExecutionReviewStart(p.id, taskId, attemptId);
+                if (d.error) { toast(d.error, 'error'); await refreshProjectExecutionProject(taskId); return; }
+                toast(_t('proj_review_started'), 'success');
+                state.workflow.active = true;
+                state.workflow.phase = 'reviewing';
+                state.workflow.currentTaskId = taskId;
+                startProjectExecutionPolling();
+                await refreshProjectExecutionProject(taskId);
+            } catch (e) { toast(_t('proj_start_review_failed'), 'error'); }
+        });
     }
 
     async function projectExecutionAcceptAction(taskId, action, attemptId) {
@@ -4039,19 +4134,26 @@
     async function submitProjectExecutionAcceptance(taskId, action, attemptId, feedback, opts = {}) {
         const p = state.currentProject;
         if (!p) return;
-        try {
-            const d = await api.projectExecutionAccept(p.id, taskId, action, attemptId, feedback, opts);
-            if (d.error) { toast(d.error, 'error'); return; }
-            toast(action === 'accept' ? '任务已验收完成' : (d.status === 'reworking' ? '已退回并开始返工' : '验收状态已更新'), 'success');
-            hideFormModal();
-            if (d.status === 'reworking') {
-                state.workflow.active = true;
-                state.workflow.phase = 'reworking';
-                state.workflow.currentTaskId = taskId;
-                startProjectExecutionPolling();
+        const actionKey = `project-exec-accept:${p.id}:${taskId}:${attemptId || ''}:${action}`;
+        return runActionOnce(actionKey, async () => {
+            try {
+                markDialogSubmitting(true);
+                const d = await api.projectExecutionAccept(p.id, taskId, action, attemptId, feedback, opts);
+                if (d.error) { toast(d.error, 'error'); markDialogSubmitting(false); await refreshProjectExecutionProject(taskId); return; }
+                toast(action === 'accept' ? '任务已验收完成' : (d.status === 'reworking' ? '已退回并开始返工' : '验收状态已更新'), 'success');
+                hideFormModal();
+                if (d.status === 'reworking') {
+                    state.workflow.active = true;
+                    state.workflow.phase = 'reworking';
+                    state.workflow.currentTaskId = taskId;
+                    startProjectExecutionPolling();
+                }
+                await refreshProjectExecutionProject(taskId);
+            } catch (e) {
+                markDialogSubmitting(false);
+                toast(_t('proj_accept_action_failed'), 'error');
             }
-            await refreshProjectExecutionProject(taskId);
-    } catch (e) { toast(_t('proj_accept_action_failed'), 'error'); }
+        }, { silentDuplicate: false });
     }
 
     function projectExecutionBoardSignature(project) {
@@ -4118,6 +4220,8 @@
     async function workflowStartAction() {
         const p = state.currentProject;
         if (!p) return;
+        const actionKey = `workflow-start:${p.id}`;
+        return runActionOnce(actionKey, async () => {
         const autoMode = document.getElementById('wf-auto-toggle');
         const isAuto = autoMode ? autoMode.checked : false;
         try {
@@ -4129,11 +4233,14 @@
             updateWorkflowUI();
             startWorkflowPolling();
         } catch (e) { toast(_t('proj_failed_start_workflow'), 'error'); }
+        });
     }
 
     async function workflowStopAction() {
         const p = state.currentProject;
         if (!p) return;
+        const actionKey = `workflow-stop:${p.id}`;
+        return runActionOnce(actionKey, async () => {
         try {
             await api.workflowStop(p.id);
             toast(_t('proj_workflow_stopped_msg'), 'info');
@@ -4142,6 +4249,7 @@
             updateWorkflowUI();
             stopWorkflowPolling();
         } catch (e) { toast(_t('proj_failed_stop_workflow'), 'error'); }
+        });
     }
 
     async function refreshProjectScheduledCronPanel() {
@@ -4178,54 +4286,67 @@
     async function toggleProjectCronPauseAction() {
         const p = state.currentProject;
         if (!p) return;
-        try {
-            const d = await api.updateProject(p.id, { scheduledCronPaused: !p.scheduledCronPaused });
-            if (!d.ok) throw new Error(d.error || 'update failed');
-            state.currentProject = d.project;
-            await refreshProjectScheduledCronPanel();
-            toast(state.currentProject.scheduledCronPaused ? _t('proj_scheduled_cron_paused') : _t('proj_scheduled_cron_resumed'), 'success');
-        } catch (e) {
-            toast(_t('proj_scheduled_cron_pause_failed', { message: e.message }), 'error');
-        }
+        const actionKey = `cron-pause:${p.id}`;
+        return runActionOnce(actionKey, async () => {
+            try {
+                const d = await api.updateProject(p.id, { scheduledCronPaused: !p.scheduledCronPaused });
+                if (!d.ok) throw new Error(d.error || 'update failed');
+                state.currentProject = d.project;
+                await refreshProjectScheduledCronPanel();
+                toast(state.currentProject.scheduledCronPaused ? _t('proj_scheduled_cron_paused') : _t('proj_scheduled_cron_resumed'), 'success');
+            } catch (e) {
+                toast(_t('proj_scheduled_cron_pause_failed', { message: e.message }), 'error');
+            }
+        });
     }
 
     async function runProjectCronAction(cronId) {
         const p = state.currentProject;
         if (!p) return;
-        try {
-            const d = await api.runScheduledCron(p.id, cronId);
-            if (!d.ok) throw new Error(d.error || 'run failed');
-            toast(_t('proj_scheduled_cron_triggered'), 'success');
-            await refreshProjectScheduledCronPanel();
-        } catch (e) {
-            toast(_t('proj_scheduled_cron_run_failed', { message: e.message }), 'error');
-        }
+        const actionKey = `cron-run:${p.id}:${cronId}`;
+        return runActionOnce(actionKey, async () => {
+            try {
+                const d = await api.runScheduledCron(p.id, cronId);
+                if (!d.ok) throw new Error(d.error || 'run failed');
+                toast(_t('proj_scheduled_cron_triggered'), 'success');
+                await refreshProjectScheduledCronPanel();
+            } catch (e) {
+                toast(_t('proj_scheduled_cron_run_failed', { message: e.message }), 'error');
+            }
+        });
     }
 
     async function toggleProjectCronAction(cronId, currentlyEnabled) {
         const p = state.currentProject;
         if (!p) return;
-        try {
-            const d = await api.updateScheduledCron(p.id, cronId, { enabled: !currentlyEnabled });
-            if (!d.ok) throw new Error(d.error || 'update failed');
-            toast(currentlyEnabled ? _t('proj_scheduled_cron_disabled') : _t('proj_scheduled_cron_enabled'), 'success');
-            await refreshProjectScheduledCronPanel();
-        } catch (e) {
-            toast(_t('proj_scheduled_cron_update_failed', { message: e.message }), 'error');
-        }
+        const actionKey = `cron-toggle:${p.id}:${cronId}`;
+        return runActionOnce(actionKey, async () => {
+            try {
+                const d = await api.updateScheduledCron(p.id, cronId, { enabled: !currentlyEnabled });
+                if (!d.ok) throw new Error(d.error || 'update failed');
+                toast(currentlyEnabled ? _t('proj_scheduled_cron_disabled') : _t('proj_scheduled_cron_enabled'), 'success');
+                await refreshProjectScheduledCronPanel();
+            } catch (e) {
+                toast(_t('proj_scheduled_cron_update_failed', { message: e.message }), 'error');
+            }
+        });
     }
 
     async function deleteProjectCronAction(cronId) {
         const p = state.currentProject;
-        if (!p || !confirm(_t('proj_scheduled_cron_delete_confirm'))) return;
-        try {
-            const d = await api.deleteScheduledCron(p.id, cronId);
-            if (!d.ok) throw new Error(d.error || 'delete failed');
-            toast(_t('proj_scheduled_cron_deleted'), 'success');
-            await refreshProjectScheduledCronPanel();
-        } catch (e) {
-            toast(_t('proj_scheduled_cron_delete_failed', { message: e.message }), 'error');
-        }
+        if (!p) return;
+        const actionKey = `cron-delete:${p.id}:${cronId}`;
+        return runActionOnce(actionKey, async () => {
+            if (!confirm(_t('proj_scheduled_cron_delete_confirm'))) return;
+            try {
+                const d = await api.deleteScheduledCron(p.id, cronId);
+                if (!d.ok) throw new Error(d.error || 'delete failed');
+                toast(_t('proj_scheduled_cron_deleted'), 'success');
+                await refreshProjectScheduledCronPanel();
+            } catch (e) {
+                toast(_t('proj_scheduled_cron_delete_failed', { message: e.message }), 'error');
+            }
+        });
     }
 
     async function toggleAutoModeAction(enabled) {

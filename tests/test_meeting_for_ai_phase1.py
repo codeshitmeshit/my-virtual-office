@@ -5,6 +5,8 @@ import os
 import json
 import sys
 import tempfile
+import threading
+import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 APP_DIR = os.path.join(ROOT, "app")
@@ -950,6 +952,78 @@ def test_phase3_final_round_without_disagreement_auto_summarizes_on_timeout():
                 os.environ["VO_MEETING_FAKE_PROVIDER"] = old_fake
 
 
+def test_run_returns_pending_when_any_formal_provider_call_is_in_flight():
+    with tempfile.TemporaryDirectory() as status_dir:
+        old_store = with_meeting_store(status_dir)
+        old_call = server._meeting_call_provider
+        release_first = threading.Event()
+        started = []
+
+        def slow_first_call(meeting, speaker, prompt):
+            started.append(speaker)
+            if speaker == "main":
+                release_first.wait(3)
+            return {
+                "ok": True,
+                "reply": json.dumps({
+                    "position": f"{speaker} position",
+                    "reasoning": "reentry fixture",
+                    "disagreements": [],
+                    "questions": [],
+                    "suggestedNextStep": "continue",
+                    "confidence": "high",
+                }),
+                "providerRef": {"providerKind": "fake", "agentId": speaker},
+                "durationMs": 0,
+                "conversationId": f"meeting:{meeting.get('id')}:participant:{speaker}",
+            }
+
+        try:
+            server._meeting_call_provider = slow_first_call
+            created = create_meeting(
+                participants=["main", "hermes-default"],
+                moderator="main",
+                maxRounds=1,
+                idempotencyKey="phase3-run-pending-call-reentry",
+            )
+            meeting_id = created["meeting"]["id"]
+            first_result = {}
+
+            def first_run():
+                first_result.update(server._handle_executable_meeting_run(meeting_id, {}))
+
+            thread = threading.Thread(target=first_run)
+            thread.start()
+            deadline = time.time() + 2
+            while "main" not in started and time.time() < deadline:
+                time.sleep(0.01)
+
+            second = server._handle_executable_meeting_run(meeting_id, {})
+            assert second["ok"] is True
+            assert second["providerCallPending"] is True
+            assert second["meeting"]["stage"] == "active_opening"
+            assert started == ["main"]
+
+            release_first.set()
+            thread.join(5)
+            assert not thread.is_alive()
+            assert first_result["meeting"]["stage"] == "awaiting_user_decision"
+
+            detail = server._handle_executable_meeting_detail(meeting_id)
+            provider_starts = [
+                e for e in detail["events"]
+                if e["type"] == "provider_call_started"
+            ]
+            assert [(e["payload"]["speaker"], e["payload"]["stage"]) for e in provider_starts] == [
+                ("main", "active_opening"),
+                ("hermes-default", "active_opening"),
+            ]
+        finally:
+            release_first.set()
+            server._meeting_call_provider = old_call
+            restore_meeting_store(old_store)
+
+
 def test_phase3_moderator_resolution_policy_auto_closes_disagreement():
     with tempfile.TemporaryDirectory() as status_dir:
         old_store = with_meeting_store(status_dir)
@@ -1357,6 +1431,98 @@ def test_phase3_provider_timeout_skip_continues_meeting():
             restore_meeting_store(old)
 
 
+def test_late_provider_completion_after_timeout_skip_is_ignored():
+    with tempfile.TemporaryDirectory() as status_dir:
+        old = with_meeting_store(status_dir)
+        old_timeout = os.environ.get("VO_MEETING_PROVIDER_TIMEOUT_SEC")
+        old_call = server._meeting_call_provider
+        os.environ["VO_MEETING_PROVIDER_TIMEOUT_SEC"] = "5"
+        release_provider = threading.Event()
+        provider_started = threading.Event()
+
+        def slow_call(meeting, speaker, prompt):
+            if speaker == "main":
+                provider_started.set()
+                release_provider.wait(3)
+            return {
+                "ok": True,
+                "reply": json.dumps({
+                    "position": f"{speaker} late position",
+                    "reasoning": "timeout skip late completion fixture",
+                    "disagreements": [],
+                    "questions": [],
+                    "suggestedNextStep": "continue",
+                    "confidence": "high",
+                }),
+                "providerRef": {"providerKind": "fake", "agentId": speaker},
+                "durationMs": 1,
+                "conversationId": f"meeting:{meeting['id']}:participant:{speaker}",
+            }
+
+        server._meeting_call_provider = slow_call
+        try:
+            created = create_meeting(
+                participants=["main", "hermes-default"],
+                moderator="main",
+                maxRounds=1,
+                idempotencyKey="phase3-timeout-late-completion",
+            )
+            meeting_id = created["meeting"]["id"]
+            first_result = {}
+
+            def first_run():
+                first_result.update(server._handle_executable_meeting_run(meeting_id, {}))
+
+            thread = threading.Thread(target=first_run)
+            thread.start()
+            assert provider_started.wait(2)
+
+            with server._EXEC_MEETING_LOCK:
+                store = server._load_exec_meeting_store()
+                pending = [
+                    e for e in store["events"][meeting_id]
+                    if e["type"] == "provider_call_started" and (e.get("payload") or {}).get("speaker") == "main"
+                ][0]
+                pending["createdAt"] = "2026-06-20T00:00:00+00:00"
+                server._save_exec_meeting_store(store)
+
+            skipped = server._handle_executable_meeting_run(meeting_id, {
+                "action": "provider_timeout_skip",
+                "pendingSequence": pending["sequence"],
+                "_noAutoContinue": True,
+            })
+            assert skipped["ok"] is True
+            assert skipped["skipped"] is True
+
+            release_provider.set()
+            thread.join(5)
+            assert not thread.is_alive()
+
+            detail = server._handle_executable_meeting_detail(meeting_id)
+            turns = [
+                e for e in detail["events"]
+                if e["type"] == "participant_turn" and (e.get("payload") or {}).get("stage") == "active_opening"
+            ]
+            assert [(e["payload"]["speaker"], e["payload"].get("parseError", "")) for e in turns] == [
+                ("main", "provider_timeout_skipped"),
+            ]
+            ignored = [
+                e for e in detail["events"]
+                if e["type"] == "provider_call_ignored" and (e.get("payload") or {}).get("speaker") == "main"
+            ]
+            assert len(ignored) == 1
+            assert ignored[0]["payload"]["reason"] == "formal_turn_already_exists"
+            assert first_result["ignoredProviderCompletion"] is True
+        finally:
+            release_provider.set()
+            server._meeting_call_provider = old_call
+            if old_timeout is None:
+                os.environ.pop("VO_MEETING_PROVIDER_TIMEOUT_SEC", None)
+            else:
+                os.environ["VO_MEETING_PROVIDER_TIMEOUT_SEC"] = old_timeout
+            restore_meeting_store(old)
+
+
 def test_phase3_user_intervention_is_projected_and_passed_to_incremental_prompt():
     with tempfile.TemporaryDirectory() as status_dir:
         old = with_meeting_store(status_dir)
@@ -1624,6 +1790,123 @@ def test_phase3_executable_end_uses_moderator_summary_without_manual_summary():
             restore_meeting_store(old)
 
 
+def test_reentrant_moderator_summary_returns_pending_without_duplicate_provider_call():
+    with tempfile.TemporaryDirectory() as status_dir:
+        old = with_meeting_store(status_dir)
+        old_call = server._meeting_call_provider
+        release_first = threading.Event()
+        started = []
+
+        def slow_summary_call(meeting, speaker, prompt):
+            assert "Summarize and close this meeting" in prompt
+            started.append(speaker)
+            if len(started) == 1:
+                release_first.wait(3)
+            return {
+                "ok": True,
+                "reply": json.dumps({
+                    "summary": f"Summary from call {len(started)}.",
+                    "decision": "Proceed.",
+                    "unresolvedQuestions": [],
+                    "disagreements": [],
+                    "actionItems": [],
+                }),
+                "providerRef": {"providerKind": "fake", "agentId": speaker},
+                "durationMs": 3,
+                "conversationId": f"meeting:{meeting['id']}:participant:{speaker}",
+            }
+
+        server._meeting_call_provider = slow_summary_call
+        try:
+            created = create_meeting(
+                topic="Reentrant Summary Meeting",
+                participants=["main", "hermes-default"],
+                moderator="main",
+                idempotencyKey="phase3-reentrant-summary",
+            )
+            meeting_id = created["meeting"]["id"]
+            server._handle_executable_meeting_transition(meeting_id, {"action": "start", "expectedVersion": 1})
+
+            first_result = {}
+
+            def first_end():
+                first_result.update(server._handle_executable_meeting_end_with_moderator(meeting_id, {"actorId": "user"}))
+
+            thread = threading.Thread(target=first_end)
+            thread.start()
+            deadline = time.time() + 2
+            while not started and time.time() < deadline:
+                time.sleep(0.01)
+
+            second = server._handle_executable_meeting_end_with_moderator(meeting_id, {"actorId": "user"})
+            assert second["ok"] is True
+            assert second["providerCallPending"] is True
+            assert second["meeting"]["stage"] == "summarizing"
+            assert started == ["main"]
+
+            release_first.set()
+            thread.join(5)
+            assert not thread.is_alive()
+            assert first_result["meeting"]["stage"] == "completed"
+
+            detail = server._handle_executable_meeting_detail(meeting_id)
+            summary_starts = [
+                e for e in detail["events"]
+                if e["type"] == "provider_call_started" and (e.get("payload") or {}).get("purpose") == "meeting_result"
+            ]
+            assert len(summary_starts) == 1
+            assert len([e for e in detail["events"] if e["type"] == "meeting_result"]) == 1
+        finally:
+            release_first.set()
+            server._meeting_call_provider = old_call
+            restore_meeting_store(old)
+
+
+def test_decision_continue_honors_expected_version_and_rejects_invalid_value():
+    with tempfile.TemporaryDirectory() as status_dir:
+        old = with_meeting_store(status_dir)
+        try:
+            created = create_meeting(
+                topic="Decision Version Guard",
+                participants=["main", "hermes-default"],
+                moderator="main",
+                idempotencyKey="phase3-decision-version-guard",
+            )
+            meeting_id = created["meeting"]["id"]
+
+            invalid = server._handle_executable_meeting_transition(meeting_id, {
+                "action": "start",
+                "expectedVersion": "not-an-int",
+            })
+            assert invalid["_status"] == 400
+            assert invalid["error"] == "Invalid expectedVersion"
+
+            server._handle_executable_meeting_transition(meeting_id, {"action": "start", "expectedVersion": 1})
+            with server._EXEC_MEETING_LOCK:
+                store = server._load_exec_meeting_store()
+                meeting = store["meetings"][meeting_id]
+                server._meeting_open_decision_window(store, meeting, "active_opening", 0, "active_discussion", 1, "round_complete")
+                server._save_exec_meeting_store(store)
+
+            live = server._handle_executable_meeting_detail(meeting_id)["meeting"]
+            stale = server._handle_executable_meeting_transition(meeting_id, {
+                "action": "continue",
+                "expectedVersion": live["version"] - 1,
+            })
+            assert stale["_status"] == 409
+            assert stale["error"] == "Meeting version conflict"
+            assert server._handle_executable_meeting_detail(meeting_id)["meeting"]["stage"] == "awaiting_user_decision"
+
+            continued = server._handle_executable_meeting_transition(meeting_id, {
+                "action": "continue",
+                "expectedVersion": live["version"],
+            })
+            assert continued["ok"] is True
+            assert continued["meeting"]["stage"] == "active_discussion"
+        finally:
+            restore_meeting_store(old)
+
+
 def test_phase3_moderator_failure_user_takeover_and_replacement():
     with tempfile.TemporaryDirectory() as status_dir:
         old = with_meeting_store(status_dir)
@@ -1713,6 +1996,98 @@ def test_phase3_moderator_failure_user_takeover_and_replacement():
             restore_meeting_store(old)
 
 
+def test_moderator_failure_decision_window_sets_deadline():
+    with tempfile.TemporaryDirectory() as status_dir:
+        old = with_meeting_store(status_dir)
+        old_call = server._meeting_call_provider
+
+        def failing_moderator(meeting, speaker, prompt):
+            return {
+                "ok": False,
+                "reply": "[ERROR] moderator quota exhausted",
+                "providerRef": {"providerKind": "fake", "agentId": speaker},
+                "durationMs": 1,
+                "conversationId": f"meeting:{meeting['id']}:participant:{speaker}",
+            }
+
+        server._meeting_call_provider = failing_moderator
+        try:
+            created = create_meeting(
+                topic="Moderator Failure Deadline",
+                participants=["main", "hermes-default"],
+                moderator="main",
+                idempotencyKey="phase3-moderator-failure-deadline",
+            )
+            meeting_id = created["meeting"]["id"]
+            server._handle_executable_meeting_transition(meeting_id, {"action": "start", "expectedVersion": 1})
+            failed = server._handle_meeting_end({"id": meeting_id, "endedBy": "user"})
+            assert failed["ok"] is False
+            meeting = failed["meeting"]
+            assert meeting["stage"] == "awaiting_user_decision"
+            assert meeting["moderatorFailure"]["reason"] == "moderator_failed"
+            assert meeting["decisionWindowSec"] > 0
+            assert meeting["decisionDeadlineAt"]
+            assert "T" in meeting["decisionDeadlineAt"]
+        finally:
+            server._meeting_call_provider = old_call
+            restore_meeting_store(old)
+
+
+def test_successful_moderator_retry_clears_failure_state():
+    with tempfile.TemporaryDirectory() as status_dir:
+        old = with_meeting_store(status_dir)
+        old_call = server._meeting_call_provider
+        calls = []
+
+        def fail_then_succeed(meeting, speaker, prompt):
+            calls.append(speaker)
+            if len(calls) == 1:
+                return {
+                    "ok": False,
+                    "reply": "[ERROR] moderator quota exhausted",
+                    "providerRef": {"providerKind": "fake", "agentId": speaker},
+                    "durationMs": 1,
+                    "conversationId": f"meeting:{meeting['id']}:participant:{speaker}",
+                }
+            return {
+                "ok": True,
+                "reply": json.dumps({
+                    "summary": "Retry summary succeeded.",
+                    "decision": "Proceed after retry.",
+                    "unresolvedQuestions": [],
+                    "disagreements": [],
+                    "actionItems": [],
+                }),
+                "providerRef": {"providerKind": "fake", "agentId": speaker},
+                "durationMs": 1,
+                "conversationId": f"meeting:{meeting['id']}:participant:{speaker}",
+            }
+
+        server._meeting_call_provider = fail_then_succeed
+        try:
+            created = create_meeting(
+                topic="Moderator Retry Clears Failure",
+                participants=["main", "hermes-default"],
+                moderator="main",
+                idempotencyKey="phase3-moderator-retry-clears-failure",
+            )
+            meeting_id = created["meeting"]["id"]
+            server._handle_executable_meeting_transition(meeting_id, {"action": "start", "expectedVersion": 1})
+            failed = server._handle_meeting_end({"id": meeting_id, "endedBy": "user"})
+            assert failed["ok"] is False
+            assert failed["meeting"]["moderatorFailure"]["reason"] == "moderator_failed"
+
+            retried = server._handle_executable_meeting_run(meeting_id, {"action": "continue"})
+            assert retried["ok"] is True
+            assert retried["meeting"]["stage"] == "completed"
+            assert "moderatorFailure" not in retried["meeting"]
+            assert "moderatorFailure" not in server._handle_executable_meeting_detail(meeting_id)["meeting"]
+            assert calls == ["main", "main"]
+        finally:
+            server._meeting_call_provider = old_call
+            restore_meeting_store(old)
+
+
 def test_legacy_meeting_end_still_requires_manual_summary():
     with tempfile.TemporaryDirectory() as status_dir:
         old = with_meeting_store(status_dir)
@@ -1746,6 +2121,7 @@ if __name__ == "__main__":
     test_phase3_late_targeted_provider_response_is_ignored_after_continue()
     test_phase3_no_consensus_arbitration_decide_end_and_continue()
     test_phase3_final_round_without_disagreement_auto_summarizes_on_timeout()
+    test_run_returns_pending_when_any_formal_provider_call_is_in_flight()
     test_phase3_moderator_resolution_policy_auto_closes_disagreement()
     test_executable_meeting_events_after_and_reconcile()
     test_phase2_fake_provider_runs_incremental_meeting_to_completion()
@@ -1753,12 +2129,17 @@ if __name__ == "__main__":
     test_phase2_provider_timeout_is_configurable_for_real_calls()
     test_phase3_active_projection_includes_live_transcript_and_pending_calls()
     test_phase3_provider_timeout_skip_continues_meeting()
+    test_late_provider_completion_after_timeout_skip_is_ignored()
     test_phase3_user_intervention_is_projected_and_passed_to_incremental_prompt()
     test_phase3_agenda_change_updates_future_prompt_and_projection()
     test_phase3_provider_envelope_is_unwrapped_and_structured_turn_is_projected()
     test_phase3_structured_provider_output_is_saved_without_raw_envelope_in_transcript()
     test_phase3_executable_end_uses_moderator_summary_without_manual_summary()
+    test_reentrant_moderator_summary_returns_pending_without_duplicate_provider_call()
+    test_decision_continue_honors_expected_version_and_rejects_invalid_value()
     test_phase3_moderator_failure_user_takeover_and_replacement()
+    test_moderator_failure_decision_window_sets_deadline()
+    test_successful_moderator_retry_clears_failure_state()
     test_legacy_meeting_end_still_requires_manual_summary()
     test_phase2_openclaw_workflow_session_key_is_safe_for_meeting_ids()
     print("ok")

@@ -17587,6 +17587,66 @@ var _mtgLivePollTimer = null;
 var _mtgHistorySearch = '';
 var _mtgDecisionAutoContinuing = {};
 var _mtgDetailMeetingId = '';
+var _mtgPendingActions = {};
+var _mtgDuplicateActionToastAt = {};
+
+function _mtgCurrentActionButton(opts) {
+    opts = opts || {};
+    if (opts.button) return opts.button;
+    if (opts.event && opts.event.currentTarget) return opts.event.currentTarget;
+    var browserEvent = typeof window !== 'undefined' ? window.event : null;
+    if (browserEvent && browserEvent.currentTarget) return browserEvent.currentTarget;
+    var active = typeof document !== 'undefined' ? document.activeElement : null;
+    return active && active.tagName === 'BUTTON' ? active : null;
+}
+
+function _mtgSetButtonBusy(button, busy, label) {
+    if (!button || button.nodeType !== 1) return;
+    if (busy) {
+        if (!button.dataset.mtgOriginalText) button.dataset.mtgOriginalText = button.textContent || '';
+        button.disabled = true;
+        button.setAttribute('aria-busy', 'true');
+        if (label) button.textContent = label;
+        return;
+    }
+    button.disabled = false;
+    button.removeAttribute('aria-busy');
+    if (button.dataset.mtgOriginalText) {
+        button.textContent = button.dataset.mtgOriginalText;
+        delete button.dataset.mtgOriginalText;
+    }
+}
+
+function _mtgDuplicateActionFeedback(key, opts) {
+    opts = opts || {};
+    console.info('[MEETINGS] duplicate action ignored key=' + key);
+    if (opts.silentDuplicate) return;
+    var now = Date.now();
+    if ((_mtgDuplicateActionToastAt[key] || 0) + 1200 > now) return;
+    _mtgDuplicateActionToastAt[key] = now;
+}
+
+async function _mtgRunActionOnce(key, fn, opts) {
+    opts = opts || {};
+    if (!key || typeof fn !== 'function') return undefined;
+    if (_mtgPendingActions[key]) {
+        _mtgDuplicateActionFeedback(key, opts);
+        return _mtgPendingActions[key].result;
+    }
+    var button = _mtgCurrentActionButton(opts);
+    var entry = { startedAt: Date.now(), button: button, result: null };
+    _mtgPendingActions[key] = entry;
+    _mtgSetButtonBusy(button, true, opts.busyText || _mtgT('meeting_processing', 'Processing...'));
+    entry.result = (async function() {
+        try {
+            return await fn();
+        } finally {
+            delete _mtgPendingActions[key];
+            _mtgSetButtonBusy(button, false);
+        }
+    })();
+    return entry.result;
+}
 
 function openMeetingsDashboard() {
     ['meetingsModal', 'meetingDetailModal', 'meetingRequestDetailModal', 'newMeetingModal'].forEach(function(id) {
@@ -18410,6 +18470,7 @@ function _mtgRequestError(requestId, msg) {
 }
 
 async function _mtgConfirmRequest(requestId) {
+    return _mtgRunActionOnce('meeting-request-confirm:' + requestId, async function() {
     _mtgRequestError(requestId, '');
     var participants = _mtgFilterAssignableParticipants(Array.prototype.slice.call(document.querySelectorAll('[data-request-id="' + requestId + '"].mtg-request-participant:checked')).map(function(el) { return el.value; }));
     var selectedContextIds = Array.prototype.slice.call(document.querySelectorAll('[data-request-id="' + requestId + '"].mtg-request-context:checked')).map(function(el) { return el.value; });
@@ -18449,9 +18510,11 @@ async function _mtgConfirmRequest(requestId) {
     } catch (e) {
         _mtgRequestError(requestId, e.message || String(e));
     }
+    });
 }
 
 async function _mtgRejectRequest(requestId) {
+    return _mtgRunActionOnce('meeting-request-reject:' + requestId, async function() {
     _mtgRequestError(requestId, '');
     var reason = ((document.getElementById('mtg-request-reject-reason-' + requestId) || {}).value || '').trim();
     if (!reason) return _mtgRequestError(requestId, _mtgT('meeting_request_reject_reason_required', 'Enter a rejection reason.'));
@@ -18469,6 +18532,7 @@ async function _mtgRejectRequest(requestId) {
     } catch (e) {
         _mtgRequestError(requestId, e.message || String(e));
     }
+    });
 }
 
 function _mtgDecisionSecondsRemaining(deadlineAt) {
@@ -19403,6 +19467,7 @@ async function submitMeetingIntervention(meetingId) {
         }
     }
     if (!text && !context) return fail(_mtgT('meeting_intervention_required', 'Enter a message or additional context.'));
+    return _mtgRunActionOnce('meeting-intervention:' + meetingId, async function() {
     if (err) err.style.display = 'none';
     if (btn) btn.disabled = true;
     try {
@@ -19427,6 +19492,7 @@ async function submitMeetingIntervention(meetingId) {
     } finally {
         if (btn) btn.disabled = false;
     }
+    }, { button: btn });
 }
 
 async function submitMeetingAgendaChange(meetingId) {
@@ -19443,6 +19509,7 @@ async function submitMeetingAgendaChange(meetingId) {
         }
     }
     if (!agenda) return fail(_mtgT('meeting_agenda_required', 'Enter a new agenda.'));
+    return _mtgRunActionOnce('meeting-agenda:' + meetingId, async function() {
     if (err) err.style.display = 'none';
     if (btn) btn.disabled = true;
     try {
@@ -19466,6 +19533,7 @@ async function submitMeetingAgendaChange(meetingId) {
     } finally {
         if (btn) btn.disabled = false;
     }
+    }, { button: btn });
 }
 
 async function submitMeetingTargetedQuestion(meetingId) {
@@ -19483,6 +19551,7 @@ async function submitMeetingTargetedQuestion(meetingId) {
     }
     if (!target) return fail(_mtgT('meeting_target_required', 'Select a target participant.'));
     if (!question) return fail(_mtgT('meeting_target_question_required', 'Enter a targeted question.'));
+    return _mtgRunActionOnce('meeting-targeted-question:' + meetingId + ':' + target, async function() {
     if (err) err.style.display = 'none';
     if (btn) btn.disabled = true;
     try {
@@ -19508,6 +19577,7 @@ async function submitMeetingTargetedQuestion(meetingId) {
     } finally {
         if (btn) btn.disabled = false;
     }
+    }, { button: btn });
 }
 
 async function submitMeetingArbitration(meetingId, action) {
@@ -19523,6 +19593,7 @@ async function submitMeetingArbitration(meetingId, action) {
         }
     }
     if (action === 'decide' && !decision) return fail(_mtgT('meeting_arbitration_decision_required', 'Enter a decision.'));
+    return _mtgRunActionOnce('meeting-arbitration:' + meetingId + ':' + action, async function() {
     if (err) err.style.display = 'none';
     _mtgSetDecisionControlsDisabled(meetingId, true);
     try {
@@ -19552,6 +19623,7 @@ async function submitMeetingArbitration(meetingId, action) {
         await _mtgAfterMeetingRefresh();
         _mtgSetDecisionControlsDisabled(meetingId, false);
     }
+    });
 }
 
 async function submitModeratorTakeover(meetingId, action) {
@@ -19569,6 +19641,7 @@ async function submitModeratorTakeover(meetingId, action) {
         }
     }
     if (action === 'user_takeover' && !summary) return fail(_mtgT('meeting_takeover_summary_required', 'Enter a user summary.'));
+    return _mtgRunActionOnce('meeting-moderator-takeover:' + meetingId + ':' + action, async function() {
     if (err) err.style.display = 'none';
     _mtgSetDecisionControlsDisabled(meetingId, true);
     ['mtg-takeover-submit-', 'mtg-replacement-submit-', 'mtg-takeover-summary-', 'mtg-takeover-decision-', 'mtg-replacement-moderator-'].forEach(function(prefix) {
@@ -19603,10 +19676,12 @@ async function submitModeratorTakeover(meetingId, action) {
             if (el) el.disabled = false;
         });
     }
+    });
 }
 
 async function continueMeetingDecisionWindow(meetingId) {
     var btn = document.getElementById('mtg-continue-' + meetingId);
+    return _mtgRunActionOnce('meeting-decision-continue:' + meetingId, async function() {
     _mtgSetDecisionControlsDisabled(meetingId, true);
     try {
         var ran = await _mtgRunMeeting(meetingId, { action: 'continue' });
@@ -19619,21 +19694,27 @@ async function continueMeetingDecisionWindow(meetingId) {
     } finally {
         if (btn) btn.disabled = false;
     }
+    }, { button: btn });
 }
 
 async function _mtgRunMeeting(meetingId, body) {
+    body = body || {};
+    var actionKey = 'meeting-run:' + meetingId + ':' + (body.action || 'default') + ':' + (body.pendingSequence || '');
+    return _mtgRunActionOnce(actionKey, async function() {
     var res = await fetch('/api/meetings/executable/' + encodeURIComponent(meetingId) + '/run', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body || {})
+        body: JSON.stringify(body)
     });
     var data = await res.json();
     if (!res.ok || data.error) throw new Error(data.error || 'Failed to run meeting');
     return data;
+    }, { silentDuplicate: true });
 }
 
 async function startExecutableMeeting(meetingId) {
     var btn = document.getElementById('mtg-start-' + meetingId);
+    return _mtgRunActionOnce('meeting-start:' + meetingId, async function() {
     if (btn) {
         btn.disabled = true;
         btn.textContent = _mtgT('meeting_starting', 'Starting...');
@@ -19650,6 +19731,7 @@ async function startExecutableMeeting(meetingId) {
             btn.textContent = '▶ ' + _mtgT('meeting_start_existing', 'Start meeting');
         }
     }
+    }, { button: btn, busyText: _mtgT('meeting_starting', 'Starting...') });
 }
 
 function updateMeetingLabels() {
@@ -19879,6 +19961,7 @@ async function submitNewMeeting() {
     if (!topic.trim()) return fail(_mtgT('meeting_error_topic_required', 'Topic is required.'));
     if (participants.length < 2) return fail(_mtgT('meeting_error_participants_required', 'Select at least two participants.'));
     if (!moderator) return fail(_mtgT('meeting_error_moderator_required', 'Select a moderator.'));
+    return _mtgRunActionOnce('meeting-create:new', async function() {
     if (btn) { btn.disabled = true; btn.textContent = _mtgT('meeting_running', 'Running...'); }
     if (err) err.style.display = 'none';
     try {
@@ -19918,6 +20001,7 @@ async function submitNewMeeting() {
     } finally {
         if (btn) { btn.disabled = false; btn.textContent = '▶ ' + _mtgT('meeting_start', 'Start meeting'); }
     }
+    }, { button: btn, busyText: _mtgT('meeting_running', 'Running...') });
 }
 
 function _mtgActionText(action) {
@@ -20283,6 +20367,9 @@ function _mtgActionError(meetingId, actionItemId, msg) {
 }
 
 async function _mtgActionItemRequest(meetingId, actionItemId, body) {
+    body = body || {};
+    var actionKey = 'meeting-action-item:' + meetingId + ':' + actionItemId + ':' + (body.action || 'update');
+    return _mtgRunActionOnce(actionKey, async function() {
     var res = await fetch('/api/meetings/executable/' + encodeURIComponent(meetingId) + '/action-items/' + encodeURIComponent(actionItemId), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -20292,6 +20379,7 @@ async function _mtgActionItemRequest(meetingId, actionItemId, body) {
     if (!res.ok || data.error) throw new Error(data.error || 'Action item update failed');
     await _mtgAfterMeetingRefresh();
     return data;
+    });
 }
 
 async function updateMeetingActionItem(meetingId, actionItemId) {
@@ -20468,6 +20556,7 @@ function closeEndMeetingModal() {
 
 async function endExecutableMeetingWithAI(meetingId) {
     var btn = document.getElementById('mtg-ai-end-' + meetingId);
+    return _mtgRunActionOnce('meeting-end-ai:' + meetingId, async function() {
     if (btn) {
         btn.disabled = true;
         btn.textContent = _mtgT('meeting_ai_ending', 'Moderator summarizing...');
@@ -20490,6 +20579,7 @@ async function endExecutableMeetingWithAI(meetingId) {
             btn.textContent = '✅ ' + _mtgT('meeting_ai_end', 'Ask moderator to end');
         }
     }
+    }, { button: btn, busyText: _mtgT('meeting_ai_ending', 'Moderator summarizing...') });
 }
 
 function _mtgFindActiveMeeting(meetingId) {
@@ -20497,6 +20587,7 @@ function _mtgFindActiveMeeting(meetingId) {
 }
 
 async function _mtgTransitionMeeting(meetingId, action, reason) {
+    return _mtgRunActionOnce('meeting-transition:' + meetingId + ':' + action, async function() {
     var meeting = _mtgFindActiveMeeting(meetingId);
     var body = {
         action: action,
@@ -20516,10 +20607,13 @@ async function _mtgTransitionMeeting(meetingId, action, reason) {
     await _mtgAfterMeetingRefresh();
     if (action === 'cancel') switchMtgTab('completed');
     return data;
+    }, { silentDuplicate: true });
 }
 
 async function _mtgConflictAction(meetingId, body) {
     body = body || {};
+    var conflictKey = 'meeting-conflict:' + meetingId + ':' + (body.action || 'conflict') + ':' + (body.agentId || '') + ':' + (body.replacement || '');
+    return _mtgRunActionOnce(conflictKey, async function() {
     body.actorType = body.actorType || 'user';
     body.actorId = body.actorId || 'user';
     body.idempotencyKey = body.idempotencyKey || ((body.action || 'conflict') + '-' + Date.now() + '-' + Math.random().toString(16).slice(2));
@@ -20532,6 +20626,7 @@ async function _mtgConflictAction(meetingId, body) {
     if (!res.ok || data.error) throw new Error(data.error || 'Conflict handling failed');
     await _mtgAfterMeetingRefresh();
     return data;
+    }, { silentDuplicate: true });
 }
 
 async function resolveMeetingConflict(meetingId, agentId, action) {
@@ -20639,6 +20734,7 @@ async function submitEndMeeting() {
         return;
     }
 
+    return _mtgRunActionOnce('meeting-end-manual:' + meetId, async function() {
     try {
         var res = await fetch('/api/meetings/end', {
             method: 'POST',
@@ -20659,10 +20755,12 @@ async function submitEndMeeting() {
         errEl.textContent = _tr('error') + ': ' + e.message;
         errEl.style.display = 'block';
     }
+    });
 }
 
 async function deleteMeetingHistory(meetingId) {
     if (!confirm(_tr('delete_meeting_confirm'))) return;
+    return _mtgRunActionOnce('meeting-history-delete:' + meetingId, async function() {
     try {
         var res = await fetch('/api/meetings/history/' + meetingId, { method: 'DELETE' });
         var data = await res.json();
@@ -20671,6 +20769,7 @@ async function deleteMeetingHistory(meetingId) {
     } catch (e) {
         alert(_tr('error') + ': ' + e.message);
     }
+    });
 }
 
 // --- Sidebar meetings widget ---

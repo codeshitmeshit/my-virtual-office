@@ -1,6 +1,8 @@
-const liveUrl = process.env.VO_LIVE_URL || 'http://10.43.55.108:8090/';
-const apiUrl = process.env.VO_API_URL || 'http://10.43.55.108:8090';
-const pageInfo = await (await fetch(`http://127.0.0.1:9224/json/new?${encodeURIComponent(`${liveUrl}?meeting-records=${Date.now()}`)}`, { method: 'PUT' })).json();
+import { apiURL, closeCdpPage, createCdpPage, liveURL } from './cdp-test-utils.mjs';
+
+const liveUrl = liveURL;
+const apiUrl = apiURL;
+const pageInfo = await createCdpPage(`${liveUrl}?meeting-records=${Date.now()}`);
 
 function openWs(url) {
   return new Promise((resolve, reject) => {
@@ -152,6 +154,6 @@ try {
   if (projectId && !externalProject) {
     await fetch(`${apiUrl}/api/projects/${encodeURIComponent(projectId)}`, { method: 'DELETE' }).catch(() => {});
   }
-  fetch(`http://127.0.0.1:9224/json/close/${encodeURIComponent(pageInfo.id)}`).catch(() => {});
+  closeCdpPage(pageInfo);
   ws.close();
 }

@@ -5,6 +5,7 @@ import os
 import sys
 import tempfile
 import time
+import pytest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 APP_DIR = os.path.join(ROOT, "app")
@@ -19,6 +20,25 @@ os.environ["VO_CLAUDE_CODE_ENABLED"] = "1"
 os.environ["VO_CLAUDE_CODE_REPLY_TEXT"] = "ack from claude server"
 
 import server
+
+os.environ.pop("VO_CLAUDE_CODE_REPLY_TEXT", None)
+
+
+@pytest.fixture(autouse=True)
+def claude_code_reply_text_config():
+    old_config = server.VO_CONFIG
+    server.VO_CONFIG = {
+        **server.VO_CONFIG,
+        "claudeCode": {
+            **(server.VO_CONFIG.get("claudeCode") or {}),
+            "enabled": True,
+            "replyText": "ack from claude server",
+        },
+    }
+    try:
+        yield
+    finally:
+        server.VO_CONFIG = old_config
 
 
 AGENT = {

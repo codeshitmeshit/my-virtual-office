@@ -5542,14 +5542,6 @@ def _handle_hermes_run_start(body):
             result = _handle_hermes_chat(run_body)
         except Exception as exc:
             result = {"ok": False, "error": str(exc), "_status": 500}
-        PROVIDER_RUN_BRIDGE.update(
-            run_id,
-            done=True,
-            result=result,
-            sessionId=result.get("sessionId") or "",
-            turnId=result.get("runId") or run_id,
-        )
-        _finish_provider_run_idempotency(idempotency_scope, result)
         terminal_payload = _hermes_stream_event_payload(run_id, agent, profile, result, conversationId=conversation_id)
         if result.get("approval"):
             enqueue("approval.required", terminal_payload)
@@ -5564,6 +5556,14 @@ def _handle_hermes_run_start(body):
             terminal_payload["error"] = result.get("error") or result.get("reply") or "Hermes run failed"
             enqueue("run.failed", terminal_payload)
             presence_event = "run.failed"
+        PROVIDER_RUN_BRIDGE.update(
+            run_id,
+            done=True,
+            result=result,
+            sessionId=result.get("sessionId") or "",
+            turnId=result.get("runId") or run_id,
+        )
+        _finish_provider_run_idempotency(idempotency_scope, result)
         if hasattr(gateway_presence, "set_provider_event"):
             gateway_presence.set_provider_event(status_key, "hermes", {"event": presence_event, "run_id": run_id, "error": terminal_payload.get("error") or ""})
         threading.Timer(600, PROVIDER_RUN_BRIDGE.clear, args=(run_id,)).start()
@@ -6365,14 +6365,6 @@ def _handle_codex_run_start(body):
             result = _handle_codex_chat(run_body)
         except Exception as exc:
             result = {"ok": False, "status": "execution_failed", "error": str(exc), "_status": 500}
-        PROVIDER_RUN_BRIDGE.update(run_id, done=True, result=result)
-        if idempotency_scope:
-            with _CODEX_ACTIVE_LOCK:
-                entry = _CODEX_RUN_IDEMPOTENCY.get(idempotency_scope)
-                if entry:
-                    entry["done"] = True
-                    entry["result"] = result
-                    entry["ts"] = int(time.time() * 1000)
         _remove_comm_progress_events("codex-progress", progress_id, conversation_id)
         terminal_payload = _codex_stream_event_payload(run_id, agent, result=result, conversationId=conversation_id)
         status = str(result.get("status") or "").lower()
@@ -6386,6 +6378,14 @@ def _handle_codex_run_start(body):
             terminal_payload["error"] = result.get("error") or result.get("reply") or "Codex run failed"
             enqueue("run.failed", terminal_payload)
             presence_event = "run.failed"
+        PROVIDER_RUN_BRIDGE.update(run_id, done=True, result=result)
+        if idempotency_scope:
+            with _CODEX_ACTIVE_LOCK:
+                entry = _CODEX_RUN_IDEMPOTENCY.get(idempotency_scope)
+                if entry:
+                    entry["done"] = True
+                    entry["result"] = result
+                    entry["ts"] = int(time.time() * 1000)
         if hasattr(gateway_presence, "set_provider_event"):
             gateway_presence.set_provider_event(status_key, "codex", {"event": presence_event, "run_id": run_id, "error": terminal_payload.get("error") or ""})
         threading.Timer(600, PROVIDER_RUN_BRIDGE.clear, args=(run_id,)).start()
@@ -7810,8 +7810,6 @@ def _handle_claude_code_run_start(body):
             result = {"ok": False, "error": str(exc), "_status": 500}
         history = _remove_claude_code_progress_messages(_load_claude_code_history(profile, conversation_id))
         _save_claude_code_history(profile, history, conversation_id, result.get("sessionId") or _get_claude_code_session_id(profile, conversation_id) or "")
-        PROVIDER_RUN_BRIDGE.update(run_id, done=True, result=result)
-        _finish_provider_run_idempotency(idempotency_scope, result)
         token_usage = result.get("tokenUsage") if isinstance(result.get("tokenUsage"), dict) else {}
         payload = {
             "runId": run_id,
@@ -7836,6 +7834,8 @@ def _handle_claude_code_run_start(body):
             enqueue("run.failed", payload)
             if hasattr(gateway_presence, "set_provider_event"):
                 gateway_presence.set_provider_event(status_key, "claude-code", {"event": "run.failed", "run_id": run_id, "error": payload["error"]})
+        PROVIDER_RUN_BRIDGE.update(run_id, done=True, result=result)
+        _finish_provider_run_idempotency(idempotency_scope, result)
         threading.Timer(600, _clear_claude_code_stream_run, args=(run_id,)).start()
 
     threading.Thread(target=worker, daemon=True, name=f"claude-code-run-{run_id}").start()
@@ -10049,6 +10049,34 @@ def _send_meeting_request_notification(req, state="pending", *, summary="", acti
     if not isinstance(req, dict):
         return {"ok": True, "status": "skipped_invalid_request"}
     proposal = req.get("originalProposal") if isinstance(req.get("originalProposal"), dict) else {}
+    conversion = req.get("conversion") if isinstance(req.get("conversion"), dict) else {}
+    request_status = str(req.get("status") or "")
+    if actions is None:
+        if state == "pending" and request_status == "pending" and not conversion.get("meetingId"):
+            actions = [
+                {
+                    "category": "confirm",
+                    "text": "同意",
+                    "value": {"action": "confirm_meeting_request", "request_id": req.get("id")},
+                },
+                {
+                    "category": "cancel",
+                    "text": "拒绝",
+                    "value": {"action": "reject_meeting_request", "request_id": req.get("id")},
+                },
+                {
+                    "category": "jump",
+                    "text": "查看详情",
+                    "url": _vo_public_url("/#projects"),
+                },
+            ]
+        else:
+            meeting_id = str(conversion.get("meetingId") or "")
+            actions = [{
+                "category": "jump",
+                "text": "查看会议" if meeting_id else "查看详情",
+                "url": _meeting_open_url(meeting_id) if meeting_id else _vo_public_url("/#projects"),
+            }]
     title_prefix = {
         "pending": "会议申请待处理",
         "approved": "会议申请已同意",
@@ -10067,23 +10095,7 @@ def _send_meeting_request_notification(req, state="pending", *, summary="", acti
         "multi_participant": False,
         "related": _meeting_request_notification_related(req),
         "details": details if details is not None else _meeting_request_notification_details(req),
-        "actions": actions if actions is not None else [
-            {
-                "category": "confirm",
-                "text": "同意",
-                "value": {"action": "confirm_meeting_request", "request_id": req.get("id")},
-            },
-            {
-                "category": "cancel",
-                "text": "拒绝",
-                "value": {"action": "reject_meeting_request", "request_id": req.get("id")},
-            },
-            {
-                "category": "jump",
-                "text": "查看详情",
-                "url": _vo_public_url("/#projects"),
-            },
-        ],
+        "actions": actions,
         "target": "feishu-meeting-request",
     }
     return send_feishu_notification(
@@ -11788,6 +11800,26 @@ def _meeting_pending_formal_turn_exists(events, stage, round_value, speaker):
     return False
 
 
+def _meeting_pending_formal_calls_for_round(events, stage, round_value):
+    pending_calls = []
+    for call in _exec_meeting_pending_calls_projection(events or []):
+        if call.get("purpose"):
+            continue
+        if call.get("stage") == stage and int(call.get("round") or 0) == int(round_value or 0):
+            pending_calls.append(call)
+    return pending_calls
+
+
+def _meeting_pending_calls_for_purpose(events, stage, round_value, purpose):
+    pending_calls = []
+    for call in _exec_meeting_pending_calls_projection(events or []):
+        if call.get("purpose") != purpose:
+            continue
+        if call.get("stage") == stage and int(call.get("round") or 0) == int(round_value or 0):
+            pending_calls.append(call)
+    return pending_calls
+
+
 def _meeting_provider_completion_should_be_ignored(meeting, expected_stage, expected_round):
     current_stage = meeting.get("stage")
     if current_stage in _EXEC_MEETING_TERMINAL or current_stage == "paused":
@@ -12367,7 +12399,7 @@ def _exec_meeting_pending_calls_projection(events):
                 "timeoutSec": timeout_sec,
                 "timedOut": elapsed_sec >= timeout_sec,
             }
-        elif event_type == "participant_turn":
+        elif event_type in {"participant_turn", "provider_call_ignored"}:
             in_reply_to = payload.get("inReplyToSequence")
             if in_reply_to in pending:
                 pending.pop(in_reply_to, None)
@@ -13061,6 +13093,12 @@ def _handle_executable_meeting_transition(meeting_id, body):
     if target not in _EXEC_MEETING_PHASES:
         return {"error": "Invalid meeting stage", "_status": 400}
     expected = body.get("expectedVersion")
+    expected_version = None
+    if expected is not None:
+        try:
+            expected_version = int(expected)
+        except (TypeError, ValueError):
+            return {"error": "Invalid expectedVersion", "_status": 400}
     idempotency_key = str(body.get("idempotencyKey") or "").strip()
     actor = {"type": str(body.get("actorType") or "user"), "id": str(body.get("actorId") or "user")}
     with _EXEC_MEETING_LOCK:
@@ -13073,13 +13111,13 @@ def _handle_executable_meeting_transition(meeting_id, body):
         if not meeting:
             return {"error": "Executable meeting not found", "_status": 404}
         current = meeting.get("stage")
+        if expected_version is not None and expected_version != int(meeting.get("version", 0)):
+            return {"error": "Meeting version conflict", "currentVersion": meeting.get("version", 0), "_status": 409}
         if current == "awaiting_user_decision" and str(body.get("action") or "").strip() in {"continue", "continue_decision"}:
             _meeting_continue_from_decision_window(store, meeting, actor=actor, reason=body.get("reason") or "user_continue")
             event = store.get("events", {}).get(meeting_id, [])[-1]
             _save_exec_meeting_store(store)
             return {"ok": True, "meeting": meeting, "event": event}
-        if expected is not None and int(expected) != int(meeting.get("version", 0)):
-            return {"error": "Meeting version conflict", "currentVersion": meeting.get("version", 0), "_status": 409}
         if target not in _EXEC_MEETING_TRANSITIONS.get(current, set()):
             return {"error": f"Illegal transition from {current} to {target}", "stage": current, "_status": 409}
         meeting["previousStage"] = current
@@ -13353,14 +13391,22 @@ def _handle_executable_meeting_moderator_takeover(meeting_id, body):
         decision = str(body.get("decision") or body.get("resolution") or "").strip()
         if not summary:
             return {"error": "Summary is required for user takeover", "_status": 400}
+        manual_result = body.get("result") if isinstance(body.get("result"), dict) else {}
+        manual_outcome = _meeting_result_outcome(
+            manual_result.get("outcome") or manual_result.get("status") or manual_result.get("result") or body.get("outcome")
+        )
         action_items = body.get("actionItems") if isinstance(body.get("actionItems"), list) else []
+        if not action_items and isinstance(manual_result.get("actionItems"), list):
+            action_items = manual_result.get("actionItems") or []
         events = list(store.get("events", {}).get(meeting_id, []))
         failure = dict(meeting.get("moderatorFailure") or {})
         fallback = _meeting_fallback_result(meeting, events)
         final_result = {
             **fallback,
+            **{k: v for k, v in manual_result.items() if v not in ("", [], {})},
             "summary": summary,
-            "decision": decision or "Meeting closed by user after moderator failure.",
+            "outcome": manual_outcome or fallback.get("outcome") or "needs_user_decision",
+            "decision": decision or manual_result.get("decision") or "Meeting closed by user after moderator failure.",
             "actionItems": action_items,
             "moderatorFailure": failure,
             "moderatorTakeover": {"action": "user_takeover", "actorId": actor["id"]},
@@ -13382,8 +13428,15 @@ def _handle_executable_meeting_moderator_takeover(meeting_id, body):
         _meeting_resume_original_work(store, meeting, "moderator_takeover")
         _award_meeting_participation_points(meeting)
         _append_exec_meeting_event(store, meeting, "meeting_transitioned", actor=actor, payload={"from": previous, "to": "completed", "reason": "user_moderator_takeover"})
+        source = meeting.get("source") if isinstance(meeting.get("source"), dict) else {}
+        print(
+            "[MEETING] moderator user takeover completed "
+            f"meeting={meeting_id} outcome={final_result.get('outcome')} "
+            f"project={meeting.get('projectId') or source.get('projectId') or ''} task={source.get('taskId') or ''}"
+        )
         _save_exec_meeting_store(store)
         result_payload = {"ok": True, "meeting": meeting, "event": event, "events": store.get("events", {}).get(meeting_id, [])}
+    _project_execution_apply_meeting_result(meeting)
     _archive_trigger_meeting_conclusion(meeting)
     return result_payload
 
@@ -13807,8 +13860,14 @@ def _handle_executable_meeting_end_with_moderator(meeting_id, body=None):
     with _EXEC_MEETING_LOCK:
         store = _load_exec_meeting_store()
         meeting = store["meetings"][meeting_id]
+        if meeting.get("stage") in _EXEC_MEETING_TERMINAL:
+            return {"ok": True, "meeting": meeting, "alreadyTerminal": True}
         events = list(store.get("events", {}).get(meeting_id, []))
         moderator = meeting.get("moderator") or (meeting.get("participants") or [""])[0]
+        pending_calls = _meeting_pending_calls_for_purpose(events, "summarizing", meeting.get("round"), "meeting_result")
+        if pending_calls:
+            _save_exec_meeting_store(store)
+            return {"ok": True, "meeting": meeting, "providerCallPending": True, "pendingCalls": pending_calls}
         prompt = _meeting_build_result_prompt(meeting, events)
         pending = _append_exec_meeting_event(store, meeting, "provider_call_started", actor={"type": "agent", "id": moderator}, payload={"speaker": moderator, "stage": "summarizing", "round": meeting.get("round"), "contextMode": meeting.get("contextMode"), "promptChars": len(prompt), "purpose": "meeting_result"})
         _save_exec_meeting_store(store)
@@ -13869,7 +13928,8 @@ def _handle_executable_meeting_end_with_moderator(meeting_id, body=None):
             meeting["decisionForRound"] = int(meeting.get("round") or 0)
             meeting["decisionNextStage"] = "summarizing"
             meeting["decisionNextRound"] = int(meeting.get("round") or 0)
-            meeting["decisionWindowSec"] = meeting.get("decisionWindowSec") or _meeting_decision_window_sec()
+            meeting["decisionWindowSec"] = _meeting_clamped_decision_window_sec(meeting.get("decisionWindowSec") or _meeting_decision_window_sec())
+            meeting["decisionDeadlineAt"] = datetime.fromtimestamp(time.time() + int(meeting["decisionWindowSec"] or 0), timezone.utc).isoformat()
             _append_exec_meeting_event(store, meeting, "moderator_failure", actor={"type": "agent", "id": moderator}, payload=meeting["moderatorFailure"])
             _append_exec_meeting_event(store, meeting, "meeting_transitioned", actor={"type": "agent", "id": moderator}, payload={"from": previous, "to": "awaiting_user_decision", "reason": "moderator_failed"})
             _send_meeting_failure_notification(meeting, meeting["moderatorFailure"])
@@ -13885,6 +13945,7 @@ def _handle_executable_meeting_end_with_moderator(meeting_id, body=None):
             "moderatorProviderRef": moderator_payload.get("providerRef") or {},
         }
         meeting["result"] = final_result
+        meeting.pop("moderatorFailure", None)
         meeting["currentSpeaker"] = ""
         _append_exec_meeting_event(store, meeting, "meeting_result", actor={"type": "agent", "id": moderator}, payload=final_result)
         previous = meeting.get("stage")
@@ -14112,6 +14173,10 @@ def _handle_executable_meeting_run(meeting_id, body=None):
                 if _meeting_formal_round_complete(events, stage, meeting.get("round"), participants):
                     _save_exec_meeting_store(store)
                     continue
+                pending_calls = _meeting_pending_formal_calls_for_round(events, stage, meeting.get("round"))
+                if pending_calls:
+                    _save_exec_meeting_store(store)
+                    return {"ok": True, "meeting": meeting, "providerCallPending": True, "pendingCalls": pending_calls}
                 _save_exec_meeting_store(store)
             for speaker in participants:
                 with _EXEC_MEETING_LOCK:
@@ -14135,6 +14200,11 @@ def _handle_executable_meeting_run(meeting_id, body=None):
                     expected_round = pending_payload.get("round", meeting.get("round"))
                     if _meeting_provider_completion_should_be_ignored(meeting, stage, expected_round):
                         _append_ignored_provider_completion(store, meeting, speaker, result, normalized, pending, "meeting_state_changed", stage, expected_round)
+                        _save_exec_meeting_store(store)
+                        return {"ok": True, "meeting": meeting, "ignoredProviderCompletion": True}
+                    events = list(store.get("events", {}).get(meeting_id, []))
+                    if _meeting_formal_turn_exists(events, stage, expected_round, speaker):
+                        _append_ignored_provider_completion(store, meeting, speaker, result, normalized, pending, "formal_turn_already_exists", stage, expected_round)
                         _save_exec_meeting_store(store)
                         return {"ok": True, "meeting": meeting, "ignoredProviderCompletion": True}
                     payload = {
@@ -14177,7 +14247,7 @@ def _handle_executable_meeting_run(meeting_id, body=None):
                     window_reason = "round_complete"
                 _meeting_open_decision_window(store, meeting, stage, meeting.get("round"), next_stage, next_round, window_reason)
                 _save_exec_meeting_store(store)
-                return {"ok": True, "meeting": meeting, "awaitingUserDecision": True}
+                return {"ok": True, "meeting": meeting, "events": store.get("events", {}).get(meeting_id, []), "awaitingUserDecision": True}
     with _EXEC_MEETING_LOCK:
         store = _load_exec_meeting_store()
         meeting = store["meetings"][meeting_id]
@@ -18386,7 +18456,7 @@ def _archive_project_maintenance_meta(project, record=None):
         "lastSkippedReason": schedule.get("lastSkippedReason") or "",
         "lastSkippedKind": schedule.get("lastSkippedKind") or "",
         "customIntervalHours": schedule.get("customIntervalHours") or project_maintenance.get("customIntervalHours"),
-        "explanation": "计划巡检按频率执行；事件触发整理独立生效；关闭长期维护或暂停管理员时计划整理会跳过。"
+        "explanation": "计划巡检按频率执行；高价值事件触发整理独立生效；关闭长期维护或暂停管理员时计划整理会跳过。"
     }
 
 
@@ -19398,13 +19468,25 @@ def _archive_maintenance_trigger(project_id, event_type, source=None, title="", 
     text = summary or title or f"Archive maintenance event: {event_type}"
     entry_title = title or event_type.replace("_", " ").title()
     high_impact = (impact or "").strip().lower() in {"state", "task", "risk", "project_status", "task_conclusion", "risk_judgment"}
+    replaces_manager_context = event_type == "meeting_conclusion" and any(
+        isinstance(e, dict)
+        and not e.get("stale")
+        and str(e.get("title") or "") == entry_title
+        and _archive_normalize_authority(e) == ARCHIVE_AUTH_MANAGER
+        for e in record.get("entries", [])
+    )
     human_conflict = event_type == "conflict_reminder" and any(
         _archive_normalize_authority(e) == ARCHIVE_AUTH_HUMAN
         for e in record.get("entries", []) if isinstance(e, dict)
     )
     owner_decision_terms = ["owner", "人类", "human", "approval", "批准", "规则", "rule", "policy", "策略"]
     owner_decision = high_impact and any(term in (text + " " + entry_title + " " + reason).lower() for term in owner_decision_terms)
-    archive_manager_first_auto = event_type in {"meeting_conclusion", "conflict_reminder"} and not human_conflict and not owner_decision
+    non_human_context = any(term in (reason or "").lower() for term in {"non-human", "non human", "非人工确认", "非人类确认"})
+    archive_manager_first_auto = (
+        (event_type == "conflict_reminder" or (event_type == "meeting_conclusion" and (non_human_context or replaces_manager_context)))
+        and not human_conflict
+        and not owner_decision
+    )
     requires_human_confirmation = event_type not in objective_events and not archive_manager_first_auto and (
         event_type in {"meeting_conclusion", "conflict_reminder"} or high_impact or confidence == ARCHIVE_PENDING
     )
@@ -21913,6 +21995,20 @@ def _wf_extract_session_activity(agent_id, project_id, task_id):
 def _wf_format_activity_summary(activity):
     """Format extracted session activity as markdown for the task file."""
     lines = []
+    if isinstance(activity, list):
+        messages = [
+            str(item.get("summary") or "").strip()
+            for item in activity
+            if isinstance(item, dict) and str(item.get("summary") or "").strip()
+        ]
+        if not messages:
+            return "No provider activity messages captured."
+        lines.append(f"**Provider messages ({len(messages)}):**")
+        for message in messages[-12:]:
+            lines.append(f"  - {message[:500]}")
+        return "\n".join(lines)
+    if not isinstance(activity, dict):
+        return "No activity captured."
 
     if activity["tool_call_count"] == 0:
         lines.append("⚠️ NO TOOL CALLS DETECTED — agent produced text only, no real changes made.")
@@ -21948,6 +22044,26 @@ def _wf_format_activity_summary(activity):
             lines.append(f"  - ... and {len(activity['exec_commands']) - 20} more")
 
     return "\n".join(lines)
+
+
+def _wf_activity_tool_count(activity):
+    if isinstance(activity, dict):
+        return int(activity.get("tool_call_count") or 0)
+    if isinstance(activity, list):
+        return 0
+    return 0
+
+
+def _wf_activity_has_review_evidence(activity):
+    if isinstance(activity, dict):
+        return bool(activity.get("files_read") or activity.get("exec_commands") or activity.get("browser_actions"))
+    return False
+
+
+def _wf_activity_has_browser_evidence(activity):
+    if isinstance(activity, dict):
+        return bool(activity.get("browser_actions"))
+    return False
 
 
 def _wf_abort_task_session(session_key):
@@ -22996,12 +23112,10 @@ def _wf_run_pipeline_inner(project_id, single_task, wf, stop_flag):
             # For non-visual tasks, read/exec verification is enough.
             # Exception: cycle >= 4 with all checklist done bypasses this
             # to prevent infinite loops when the agent refuses to use tools.
-            review_tool_count = review_activity.get("tool_call_count", 0)
-            review_has_reads = len(review_activity.get("files_read", [])) > 0
-            review_has_exec = len(review_activity.get("exec_commands", [])) > 0
-            review_has_browser = len(review_activity.get("browser_actions", [])) > 0
+            review_tool_count = _wf_activity_tool_count(review_activity)
+            review_has_browser = _wf_activity_has_browser_evidence(review_activity)
             task_needs_visual_review = _wf_task_needs_visual_review(task)
-            review_verified = review_has_reads or review_has_exec or review_has_browser
+            review_verified = _wf_activity_has_review_evidence(review_activity)
             review_visual_verified = review_has_browser if task_needs_visual_review else True
 
             # Track whether the original parse had structured matches (before

@@ -39,17 +39,19 @@ def restore_store(old):
     server.STATUS_DIR, server.PROJECT_STORE, server.get_roster = old
 
 
-def create_fixture_project(workspace):
+def create_fixture_project(workspace, *, auto_confirm=False):
     project = server._handle_project_create({
         "title": "Meeting Block Fixture",
         "projectExecutionEnabled": True,
         "workspacePath": workspace,
         "defaultExecutorAgentId": "executor",
         "defaultReviewerAgentId": "reviewer",
+        "highPriorityAiMeetingAutoApprove": not auto_confirm,
     })["project"]
     validation = server._handle_project_execution_workspace_validate(project["id"], {"workspacePath": workspace})
     assert validation["ok"] is True
     task = server._handle_task_create(project["id"], {"title": "Resolve ambiguity", "columnId": project["columns"][0]["id"], "assignee": "executor"})["task"]
+    project, task = reload_task(project["id"], task["id"])
     return project, task
 
 
@@ -229,6 +231,34 @@ def test_feishu_meeting_request_card_actions_confirm_and_reject():
             restore_store(old)
 
 
+def test_auto_confirmed_meeting_request_pending_notification_is_view_only():
+    with tempfile.TemporaryDirectory() as status_dir:
+        old = with_store(status_dir)
+        try:
+            project, task = create_fixture_project(status_dir, auto_confirm=True)
+            req = server._handle_meeting_request_create(project["id"], task["id"], meeting_request_body("auto"))["request"]
+            assert req["status"] == "confirmed"
+            assert req["review"]["autoConfirmed"] is True
+
+            sent_intents = []
+            old_send = server.send_feishu_notification
+            try:
+                def fake_send(intent, **kwargs):
+                    sent_intents.append(intent)
+                    return {"ok": True, "record": {"type": intent["type"]}}
+
+                server.send_feishu_notification = fake_send
+                notification = server._send_meeting_request_notification(req, "pending")
+            finally:
+                server.send_feishu_notification = old_send
+
+            assert notification["record"]["type"] == "application_form"
+            assert [a["text"] for a in sent_intents[-1]["actions"]] == ["查看会议"]
+            assert sent_intents[-1]["actions"][0]["url"].endswith(f"/#meeting={req['conversion']['meetingId']}")
+        finally:
+            restore_store(old)
+
+
 def test_feishu_meeting_request_card_actions_reject_invalid_states():
     with tempfile.TemporaryDirectory() as status_dir:
         old = with_store(status_dir)
@@ -371,10 +401,114 @@ def test_meeting_result_approved_releases_task_and_no_consensus_blocks():
             restore_store(old)
 
 
+def test_moderator_user_takeover_applies_project_meeting_result():
+    with tempfile.TemporaryDirectory() as status_dir:
+        old = with_store(status_dir)
+        old_call = server._meeting_call_provider
+        old_start = server._handle_project_execution_start
+        started = []
+
+        def failing_moderator(meeting, speaker, prompt):
+            return {
+                "ok": False,
+                "reply": "[ERROR] moderator unavailable",
+                "providerRef": {"providerKind": "fake", "agentId": speaker},
+                "durationMs": 1,
+                "conversationId": f"meeting:{meeting['id']}:participant:{speaker}",
+            }
+
+        def fake_start(project_id, task_id, body=None):
+            started.append((project_id, task_id, body or {}))
+            return {"ok": True, "status": "started", "taskId": task_id}
+
+        server._meeting_call_provider = failing_moderator
+        server._handle_project_execution_start = fake_start
+        try:
+            project, task = create_fixture_project(status_dir)
+            req = server._handle_meeting_request_create(project["id"], task["id"], meeting_request_body("takeover"))["request"]
+            confirmed = server._handle_meeting_request_confirm(req["id"], {"confirmedBy": "user"})
+            meeting_id = confirmed["meetingId"]
+
+            server._handle_executable_meeting_transition(meeting_id, {"action": "start"})
+            failed = server._handle_meeting_end({"id": meeting_id, "endedBy": "user"})
+            assert failed["ok"] is False
+            assert failed["meeting"]["stage"] == "awaiting_user_decision"
+
+            takeover = server._handle_executable_meeting_moderator_takeover(meeting_id, {
+                "action": "user_takeover",
+                "summary": "Manual moderator summary.",
+                "decision": "Consensus reached.",
+                "result": {"outcome": "approved"},
+            })
+            assert takeover["ok"] is True
+            project, task = reload_task(project["id"], task["id"])
+            assert task["executionState"] == "backlog"
+            assert task["meetingBlocker"]["status"] == "resolved_continue"
+            assert task["meetingRecords"][0]["outcome"] == "approved"
+            assert started and started[-1][1] == task["id"]
+        finally:
+            server._handle_project_execution_start = old_start
+            server._meeting_call_provider = old_call
+            restore_store(old)
+
+
+def test_moderator_user_takeover_no_consensus_blocks_project_task():
+    with tempfile.TemporaryDirectory() as status_dir:
+        old = with_store(status_dir)
+        old_call = server._meeting_call_provider
+        old_start = server._handle_project_execution_start
+        started = []
+
+        def failing_moderator(meeting, speaker, prompt):
+            return {
+                "ok": False,
+                "reply": "[ERROR] moderator unavailable",
+                "providerRef": {"providerKind": "fake", "agentId": speaker},
+                "durationMs": 1,
+                "conversationId": f"meeting:{meeting['id']}:participant:{speaker}",
+            }
+
+        def fake_start(project_id, task_id, body=None):
+            started.append((project_id, task_id, body or {}))
+            return {"ok": True, "status": "started", "taskId": task_id}
+
+        server._meeting_call_provider = failing_moderator
+        server._handle_project_execution_start = fake_start
+        try:
+            project, task = create_fixture_project(status_dir)
+            req = server._handle_meeting_request_create(project["id"], task["id"], meeting_request_body("takeover no consensus"))["request"]
+            confirmed = server._handle_meeting_request_confirm(req["id"], {"confirmedBy": "user"})
+            meeting_id = confirmed["meetingId"]
+
+            server._handle_executable_meeting_transition(meeting_id, {"action": "start"})
+            failed = server._handle_meeting_end({"id": meeting_id, "endedBy": "user"})
+            assert failed["ok"] is False
+            assert failed["meeting"]["stage"] == "awaiting_user_decision"
+
+            takeover = server._handle_executable_meeting_moderator_takeover(meeting_id, {
+                "action": "user_takeover",
+                "summary": "Manual moderator summary.",
+                "decision": "No consensus; keep the task blocked.",
+                "result": {"outcome": "no_consensus"},
+            })
+            assert takeover["ok"] is True
+            assert takeover["meeting"]["result"]["outcome"] == "no_consensus"
+            project, task = reload_task(project["id"], task["id"])
+            assert task["executionState"] == "blocked"
+            assert task["meetingBlocker"]["status"] == "blocked"
+            assert task["meetingRecords"][0]["outcome"] == "no_consensus"
+            assert not started
+        finally:
+            server._handle_project_execution_start = old_start
+            server._meeting_call_provider = old_call
+            restore_store(old)
+
+
 def test_approved_meeting_applies_action_items_before_original_task_resumes():
     with tempfile.TemporaryDirectory() as status_dir:
         old = with_store(status_dir)
         old_thread = server.threading.Thread
+        old_start = server._handle_project_execution_start
         started = []
         try:
             class SyncThread:
@@ -391,6 +525,7 @@ def test_approved_meeting_applies_action_items_before_original_task_resumes():
                 return {"ok": True, "status": "started", "taskId": task_id}
 
             server.threading.Thread = SyncThread
+            server._handle_project_execution_start = fake_start
             project, task = create_fixture_project(status_dir)
             req = server._handle_meeting_request_create(project["id"], task["id"], meeting_request_body("action items"))["request"]
             meeting = {
@@ -434,7 +569,8 @@ def test_approved_meeting_applies_action_items_before_original_task_resumes():
             assert any("完成任务目标" in c.get("text", "") for c in acceptance_items)
             assert not any(c.get("source") == "meeting_action_item" for c in task["checklist"])
             assert not any(c.get("source") == "meeting_risk" for c in task["checklist"])
-            assert any(c.get("source") == "meeting_risk" and "Regression around meeting resume order" in c.get("text", "") for c in task["comments"])
+            assert not any(c.get("source") == "meeting_risk" for c in task["comments"])
+            assert any(c.get("kind") == "risk" and "Regression around meeting resume order" in c.get("text", "") for c in task["meetingDiscussionPoints"])
             assert task["meetingDecisionHistory"][0]["decision"] == "Use the smaller API surface."
             assert task["meetingRecords"][0]["actionItemCount"] == 2
             assert task["meetingRecords"][0]["risks"] == ["Regression around meeting resume order"]
@@ -448,8 +584,9 @@ def test_approved_meeting_applies_action_items_before_original_task_resumes():
             assert len(task["meetingRecords"]) == 1
             assert len([c for c in task["checklist"] if c.get("source") == "project_execution_acceptance"]) == len(acceptance_items)
             assert len([c for c in task["checklist"] if c.get("source") == "meeting_action_item"]) == 0
-            assert len([c for c in task["comments"] if c.get("source") == "meeting_risk"]) == 1
+            assert len([c for c in task["meetingDiscussionPoints"] if c.get("kind") == "risk"]) == 1
         finally:
+            server._handle_project_execution_start = old_start
             server.threading.Thread = old_thread
             restore_store(old)
 

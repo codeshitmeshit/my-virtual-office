@@ -1,5 +1,7 @@
-const liveUrl = process.env.VO_LIVE_URL || 'http://10.43.55.108:8090/';
-const pageInfo = await (await fetch(`http://127.0.0.1:9224/json/new?${encodeURIComponent(`${liveUrl}?meeting-action-items=${Date.now()}`)}`, { method: 'PUT' })).json();
+import { closeCdpPage, createCdpPage, liveURL } from './cdp-test-utils.mjs';
+
+const liveUrl = liveURL;
+const pageInfo = await createCdpPage(`${liveUrl}?meeting-action-items=${Date.now()}`);
 
 function openWs(url) {
   return new Promise((resolve, reject) => {
@@ -98,5 +100,5 @@ if (!result.projectFound || !result.taskFound || !result.panelFound || result.pe
   throw new Error('Meeting action item UI check failed');
 }
 
-fetch(`http://127.0.0.1:9224/json/close/${encodeURIComponent(pageInfo.id)}`).catch(() => {});
+closeCdpPage(pageInfo);
 ws.close();

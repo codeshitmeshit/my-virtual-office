@@ -109,7 +109,7 @@ moved_to_inprogress = False
 while time.time() - start_time < MAX_WAIT:
     status = api_get(f"/{PROJECT_ID}/workflow/status")
     phase = status.get("phase", "")
-    if phase in ("in_progress", "reviewing", "reworking", "task_done", "awaiting_user_review"):
+    if phase in ("in_progress", "reviewing", "reworking", "task_done", "awaiting_user_review", "awaiting_human_intervention"):
         moved_to_inprogress = True
         break
     if phase in ("error", "stopped"):

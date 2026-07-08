@@ -280,9 +280,9 @@ def test_completed_task_cron_skips_when_repeat_not_enabled():
             })
             dispatched = server._handle_project_scheduled_cron_dispatch(project["id"], created["id"])
             assert dispatched["status"] == "skipped"
-            assert dispatched["reason"] == "task_completed_repeat_disabled"
+            assert dispatched["reason"] == "task_completed_cron_disengaged"
             assert calls == []
-            assert server._load_project_cron_bindings()["bindings"][created["id"]]["lastStatus"] == "skipped_completed_task"
+            assert server._load_project_cron_bindings()["bindings"][created["id"]]["lastStatus"] == "disengaged_completed"
         finally:
             restore_store(old)
 

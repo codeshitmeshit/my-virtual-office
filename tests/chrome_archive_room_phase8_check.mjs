@@ -1,12 +1,13 @@
 import fs from 'node:fs';
+import { apiURL, appURL, closeCdpPage, createCdpPage, cdpVersion } from './cdp-test-utils.mjs';
 
-const browserVersion = await (await fetch('http://127.0.0.1:9224/json/version')).json();
+const browserVersion = await cdpVersion();
 const archiveRoomJs = fs.readFileSync('app/archive-room.js', 'utf8');
 const archiveRoomCss = fs.readFileSync('app/archive-room.css', 'utf8');
 const phase8ProjectId = '7e8fb87a-bff6-4442-9854-c761e8c97532';
-const realOverview = await (await fetch('http://127.0.0.1:8090/api/archive-room')).json();
-const realProject = await (await fetch(`http://127.0.0.1:8090/api/archive-room/projects/${phase8ProjectId}`)).json();
-const realMarkdown = await (await fetch(`http://127.0.0.1:8090/api/projects/${phase8ProjectId}/artifacts/read?archive=1&path=docs%2Fphase8%2Fgovernance%2Fsource-comparison.md`)).json();
+const realOverview = await (await fetch(`${apiURL}/api/archive-room`)).json();
+const realProject = await (await fetch(`${apiURL}/api/archive-room/projects/${phase8ProjectId}`)).json();
+const realMarkdown = await (await fetch(`${apiURL}/api/projects/${phase8ProjectId}/artifacts/read?archive=1&path=docs%2Fphase8%2Fgovernance%2Fsource-comparison.md`)).json();
 if (Array.isArray(realOverview.projects)) {
   const targetSummary = realOverview.projects.find((p) => p.id === phase8ProjectId);
   if (targetSummary) {
@@ -98,7 +99,7 @@ function openWs(url, label) {
   });
 }
 
-const pageInfo = await (await fetch('http://127.0.0.1:9224/json/new?about:blank', { method: 'PUT' })).json();
+const pageInfo = await createCdpPage('about:blank');
 if (!pageInfo) throw new Error('Created page not found');
 console.log('phase8-cdp: page created');
 
@@ -115,7 +116,7 @@ await send(pageWs, 'Emulation.setDeviceMetricsOverride', {
   mobile: false,
 });
 
-await send(pageWs, 'Page.navigate', { url: 'http://127.0.0.1:8090/' });
+await send(pageWs, 'Page.navigate', { url: appURL });
 await new Promise((resolve) => setTimeout(resolve, 1500));
 let hasArchiveRoom = false;
 try {
@@ -263,5 +264,5 @@ if (failedChecks.length) {
   process.exitCode = 1;
 }
 
-fetch(`http://127.0.0.1:9224/json/close/${encodeURIComponent(pageInfo.id)}`).catch(() => {});
+closeCdpPage(pageInfo);
 pageWs.close();

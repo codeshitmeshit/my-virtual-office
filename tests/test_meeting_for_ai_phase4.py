@@ -21,15 +21,25 @@ from project_store import MarkdownProjectStore
 
 
 def with_store(status_dir):
-    old = (server.STATUS_DIR, server.STATUS_FILE, server.PROJECT_STORE)
+    old = (server.STATUS_DIR, server.STATUS_FILE, server.PROJECT_STORE, server.VO_CONFIG)
     server.STATUS_DIR = status_dir
     server.STATUS_FILE = os.path.join(status_dir, "virtual-office-status.json")
     server.PROJECT_STORE = MarkdownProjectStore(status_dir)
+    server.VO_CONFIG = {
+        **server.VO_CONFIG,
+        "notifications": {
+            **(server.VO_CONFIG.get("notifications") or {}),
+            "feishuWebhook": "",
+            "feishuAppId": "",
+            "feishuAppSecret": "",
+            "feishuReceiveId": "",
+        },
+    }
     return old
 
 
 def restore_store(old):
-    server.STATUS_DIR, server.STATUS_FILE, server.PROJECT_STORE = old
+    server.STATUS_DIR, server.STATUS_FILE, server.PROJECT_STORE, server.VO_CONFIG = old
 
 
 def create_project_and_task():

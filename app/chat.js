@@ -23,6 +23,7 @@
   const ACTIVE_RUN_RECOVERY_MS = 15000;
   const PROVIDER_PROGRESS_MAX_AGE_MS = 120000;
   const HERMES_APPROVAL_POLL_MS = 1500;
+  const HERMES_HISTORY_POLL_MS = 1000;
   function setVoChatShiftEnterToSend(value) {
     _shiftEnterToSend = value === true;
   }
@@ -200,6 +201,7 @@
       this.sendInFlight = false;
       this.codexBusy = false;
       this.codexRequestInFlight = false;
+      this.codexCancelPending = false;
       this.codexActivityTimer = null;
       this.codexLastSequence = 0;
       this.codexInteractionCards = new Map();
@@ -320,6 +322,7 @@
       this.codexRunStatusCards.clear();
       this.codexLastSequence = 0;
       this.currentRunId = null;
+      this.codexCancelPending = false;
       this.sessionModel = '—';
       this.contextWindow = 0;
       this.contextUsed = 0;
@@ -427,6 +430,7 @@
       this.sendInFlight = false;
       this.codexBusy = false;
       this.codexRequestInFlight = false;
+      this.codexCancelPending = false;
       this.closeCodexEventSource();
       this.closeHermesEventSource();
       this.closeClaudeCodeEventSource();
@@ -1285,6 +1289,7 @@
 
       let attachments;
       let uploadedFiles = [];
+      let attachmentUploadFailures = 0;
       if (hasAttachments) {
         const UPLOAD_URL = window.location.origin + '/upload';
         const imageAtts = [];
@@ -1312,6 +1317,7 @@
             uploaded = await uploadAttachment(a);
             if (uploaded?.path || uploaded?.url) uploadedFiles.push(uploaded);
           } catch (e) {
+            attachmentUploadFailures += 1;
             this.appendSystem('Upload failed for ' + a.name + ': ' + e.message);
             continue;
           }
@@ -1353,6 +1359,17 @@
 
       this.pendingAttachments = [];
       this.renderAttachmentPreviews();
+
+      if (hasAttachments && !uploadedFiles.length && !attachments?.length && !text.trim()) {
+        localUserMessage?.remove?.();
+        this.sendInFlight = false;
+        this.appendSystem(
+          attachmentUploadFailures
+            ? _ct('chat_failed_to_send') + ': all attachments failed to upload'
+            : _ct('chat_failed_to_send') + ': no attachment content was available to send'
+        );
+        return;
+      }
 
       const idempotencyKey = `office-${Date.now()}-${Math.random().toString(36).slice(2)}`;
       const params = { sessionKey: this.sessionKey, message: text || '(attached files)', idempotencyKey };
@@ -1426,13 +1443,14 @@
             this.setStatus(finalStatusText, finalStatusClass);
           }
         } finally {
-          this.codexBusy = false;
+          this.codexBusy = !!this.codexCancelPending;
           this.codexRequestInFlight = false;
           this.sendInFlight = false;
-          this.sendBtn.disabled = false;
+          this.sendBtn.disabled = !!this.codexCancelPending;
           this.removeTypingIndicator();
           if (finalStatusText) this.setStatus(finalStatusText, finalStatusClass);
-          this.stopCodexActivityPolling();
+          if (this.codexCancelPending) this.startCodexActivityPolling();
+          else this.stopCodexActivityPolling();
           this.scrollBottom();
         }
         return;
@@ -1599,19 +1617,22 @@
         if (this.isClaudeCodeSelected()) {
           const agentId = this.getSelectedAgentId() || this.selectedAgentKey;
           const conversationId = this.getProviderConversationId('claude-code');
+          let res;
           if (this.currentRunId) {
-            await fetch('/api/claude-code/runs/' + encodeURIComponent(this.currentRunId) + '/stop', {
+            res = await fetch('/api/claude-code/runs/' + encodeURIComponent(this.currentRunId) + '/stop', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ agentId, conversationId })
-            }).catch(() => {});
+            });
           } else {
-            await fetch('/api/claude-code/cancel', {
+            res = await fetch('/api/claude-code/cancel', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ agentId, conversationId })
-            }).catch(() => {});
+            });
           }
+          const data = await res.json();
+          if (!res.ok || data.ok === false) throw new Error(data.error || _ct('cancel_failed_detail'));
           this.closeClaudeCodeEventSource();
           this.setStatus(_ct('claude_code_working'), 'connecting');
           this.appendSystem(_ct('stop_preserves_changes'));
@@ -1637,6 +1658,11 @@
           const data = await res.json();
           if (!res.ok || !data.ok) throw new Error(data.error || _ct('cancel_failed_detail'));
           this.closeCodexEventSource();
+          this.codexRequestInFlight = false;
+          this.codexCancelPending = true;
+          this.codexBusy = true;
+          this.sendBtn.disabled = true;
+          this.startCodexActivityPolling();
           this.setStatus(_ct('codex_cancelling'), 'connecting');
           this.appendSystem(_ct('stop_preserves_changes'));
           return;
@@ -1856,6 +1882,7 @@
         this.currentRunId = null;
         this.codexBusy = false;
         this.codexRequestInFlight = false;
+        this.codexCancelPending = false;
         this.sendBtn.disabled = false;
         this.setStatus(eventName === 'run.completed' ? _ct('codex_ready') : _ct('codex_error'), eventName === 'run.completed' ? 'connected' : 'disconnected');
         this.stopRecoveryWatchdog();
@@ -2011,6 +2038,7 @@
       } else {
         const wasBusy = this.codexBusy;
         this.codexBusy = false;
+        this.codexCancelPending = false;
         this.sendBtn.disabled = false;
         if (wasBusy) {
           this.removeTypingIndicator();

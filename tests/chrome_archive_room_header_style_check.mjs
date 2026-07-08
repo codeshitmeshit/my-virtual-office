@@ -1,11 +1,12 @@
 import fs from 'node:fs';
+import { apiURL, closeCdpPage, createCdpPage } from './cdp-test-utils.mjs';
 
 const archiveRoomJs = fs.readFileSync('app/archive-room.js', 'utf8');
 const archiveRoomCss = fs.readFileSync('app/archive-room.css', 'utf8');
-const realOverview = await (await fetch('http://127.0.0.1:8090/api/archive-room')).json();
+const realOverview = await (await fetch(`${apiURL}/api/archive-room`)).json();
 const firstProjectId = (realOverview.projects || [])[0]?.id;
-const realProject = await (await fetch(`http://127.0.0.1:8090/api/archive-room/projects/${firstProjectId}`)).json();
-const pageInfo = await (await fetch('http://127.0.0.1:9224/json/new?about:blank', { method: 'PUT' })).json();
+const realProject = await (await fetch(`${apiURL}/api/archive-room/projects/${firstProjectId}`)).json();
+const pageInfo = await createCdpPage('about:blank');
 
 function openWs(url) {
   return new Promise((resolve, reject) => {
@@ -86,5 +87,5 @@ const result = await evalJson(ws, `new Promise(async (resolve) => {
 })`);
 
 console.log(JSON.stringify(result, null, 2));
-fetch(`http://127.0.0.1:9224/json/close/${encodeURIComponent(pageInfo.id)}`).catch(() => {});
+closeCdpPage(pageInfo);
 ws.close();

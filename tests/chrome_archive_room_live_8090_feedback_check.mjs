@@ -1,5 +1,7 @@
-const liveUrl = 'http://10.110.139.216:8090/';
-const pageInfo = await (await fetch(`http://127.0.0.1:9224/json/new?${encodeURIComponent(`${liveUrl}?live-feedback=${Date.now()}`)}`, { method: 'PUT' })).json();
+import { closeCdpPage, createCdpPage, liveURL } from './cdp-test-utils.mjs';
+
+const liveUrl = liveURL;
+const pageInfo = await createCdpPage(`${liveUrl}?live-feedback=${Date.now()}`);
 const created = true;
 
 function openWs(url) {
@@ -121,4 +123,5 @@ if (result.buttonFound) {
 }
 
 console.log(JSON.stringify(result, null, 2));
+closeCdpPage(pageInfo);
 ws.close();

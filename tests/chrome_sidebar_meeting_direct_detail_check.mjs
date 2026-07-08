@@ -1,5 +1,7 @@
-const liveUrl = process.env.VO_LIVE_URL || 'http://192.168.100.3:8090/';
-const apiUrl = process.env.VO_API_URL || 'http://127.0.0.1:8090';
+import { apiURL, closeCdpPage, createCdpPage, liveURL } from './cdp-test-utils.mjs';
+
+const liveUrl = liveURL;
+const apiUrl = apiURL;
 
 const active = await (await fetch(`${apiUrl}/api/meetings/active`)).json();
 let meeting = (active.meetings || [])[0];
@@ -25,7 +27,7 @@ if (!meeting) {
   createdMeetingId = meeting.id;
 }
 
-const pageInfo = await (await fetch(`http://127.0.0.1:9224/json/new?${encodeURIComponent(`${liveUrl}?sidebar-meeting=${Date.now()}`)}`, { method: 'PUT' })).json();
+const pageInfo = await createCdpPage(`${liveUrl}?sidebar-meeting=${Date.now()}`);
 
 function openWs(url) {
   return new Promise((resolve, reject) => {
@@ -113,6 +115,6 @@ try {
       body: JSON.stringify({ action: 'cancel', reason: 'sidebar direct detail check complete', idempotencyKey: 'sidebar-direct-detail-cleanup-' + Date.now() })
     }).catch(() => {});
   }
-  fetch(`http://127.0.0.1:9224/json/close/${encodeURIComponent(pageInfo.id)}`).catch(() => {});
+  closeCdpPage(pageInfo);
   ws.close();
 }

@@ -153,7 +153,7 @@ def test_paused_and_repeat_block_write_non_alert_history():
             stored_task["scheduledRepeatEnabled"] = False
             server._save_projects(data)
             skipped = server._handle_project_scheduled_cron_dispatch(project["id"], created["id"])
-            assert skipped["reason"] == "task_completed_repeat_disabled"
+            assert skipped["reason"] == "task_completed_cron_disengaged"
             entry, _ = latest_history(project["id"])
             assert entry["status"] == "skipped"
             assert entry["message"]
