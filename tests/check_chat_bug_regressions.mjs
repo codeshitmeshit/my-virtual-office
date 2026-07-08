@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 const chat = fs.readFileSync('app/chat.js', 'utf8');
+const style = fs.readFileSync('app/style.css', 'utf8');
 
 assert.match(
   chat,
@@ -42,6 +43,28 @@ assert.ok(claudeStopBranch.includes('const data = await res.json()'), 'Claude Co
 assert.ok(
   claudeStopBranch.includes("if (!res.ok || data.ok === false) throw new Error(data.error || _ct('cancel_failed_detail'))"),
   'Claude Code stop should surface backend cancel failures'
+);
+
+assert.match(
+  style,
+  /\.chat-panel\s*\{[^}]*z-index:\s*10003/s,
+  'primary chat panel should sit above non-active secondary panels'
+);
+assert.match(
+  style,
+  /\.chat-panel-secondary\s*\{[^}]*z-index:\s*10000[^}]*border-color:\s*#7b8aa8/s,
+  'non-active secondary chat panels should be visually de-emphasized below the primary panel'
+);
+assert.match(
+  style,
+  /\.chat-panel-secondary\.chat-panel-active\s*\{[^}]*z-index:\s*10004[^}]*border-color:\s*var\(--gold\)/s,
+  'only the active secondary chat panel should receive the foreground gold treatment'
+);
+assert.ok(
+  chat.includes('if (this.isPrimary) setActiveSecondarySlot(null);') &&
+    chat.includes("button.classList.toggle('state-active', isActive)") &&
+    chat.includes("button.dataset.chatSlotState = isActive ? 'active' : (isOpen ? 'open' : 'hidden')"),
+  'chat focus and slot controls should keep active secondary state in sync'
 );
 
 console.log('chat bug regression checks passed');

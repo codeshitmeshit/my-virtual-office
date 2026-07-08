@@ -67,6 +67,7 @@ const chatRequired = [
   "isA2AEnvelope",
   "renderedHistoryKeys",
   "renderCodexActivity(event, options = {})",
+  "this.codexUnavailableInteractionKeys = new Set()",
   "renderCodexRunStatus({ runId, label, status, text, ts })",
   "settleCodexRunningStatusCards(",
   "settleCodexReasoningCards(",
@@ -116,6 +117,19 @@ if (!chat.includes('const senderHeader = agentResultSummary ? null : renderSende
 }
 if (!style.includes('.chat-agent-result-summary') || !style.includes('.chat-agent-result-reply')) {
   throw new Error('Agent tool result summaries should have visible VO-styled card CSS');
+}
+
+const unavailableInteractionBranch = chat.slice(
+  chat.indexOf("event.type === 'interaction' && event.status === 'unavailable'"),
+  chat.indexOf("event.type === 'turn' && event.status === 'cancelling'")
+);
+if (
+  !unavailableInteractionBranch.includes('const key = this.codexInteractionKey(event)') ||
+  !unavailableInteractionBranch.includes('if (this.codexUnavailableInteractionKeys.has(key)) return') ||
+  !unavailableInteractionBranch.includes('this.codexUnavailableInteractionKeys.add(key)') ||
+  unavailableInteractionBranch.indexOf('this.codexUnavailableInteractionKeys.add(key)') > unavailableInteractionBranch.indexOf('this.appendSystem(')
+) {
+  throw new Error('Unavailable Codex interactions should be deduped before appending system messages');
 }
 
 const nativeEventHandler = chat.slice(chat.indexOf('    handleCodexNativeEvent(eventName, data, label) {'), chat.indexOf('    closeClaudeCodeEventSource()'));

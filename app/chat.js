@@ -205,6 +205,7 @@
       this.codexActivityTimer = null;
       this.codexLastSequence = 0;
       this.codexInteractionCards = new Map();
+      this.codexUnavailableInteractionKeys = new Set();
       this.codexReasoningCards = new Map();
       this.codexRunStatusCards = new Map();
       this.codexEventSource = null;
@@ -290,10 +291,12 @@
       });
 
       this.root.addEventListener('mousedown', () => {
-        if (!this.isPrimary && this.slot) setActiveSecondarySlot(this.slot);
+        if (this.isPrimary) setActiveSecondarySlot(null);
+        else if (this.slot) setActiveSecondarySlot(this.slot);
       });
       this.root.addEventListener('focusin', () => {
-        if (!this.isPrimary && this.slot) setActiveSecondarySlot(this.slot);
+        if (this.isPrimary) setActiveSecondarySlot(null);
+        else if (this.slot) setActiveSecondarySlot(this.slot);
       });
     }
 
@@ -318,6 +321,7 @@
       this.pendingToolEvents.clear();
       this.liveToolCards.clear();
       this.codexInteractionCards.clear();
+      this.codexUnavailableInteractionKeys.clear();
       this.codexReasoningCards.clear();
       this.codexRunStatusCards.clear();
       this.codexLastSequence = 0;
@@ -431,6 +435,7 @@
       this.codexBusy = false;
       this.codexRequestInFlight = false;
       this.codexCancelPending = false;
+      this.codexUnavailableInteractionKeys.clear();
       this.closeCodexEventSource();
       this.closeHermesEventSource();
       this.closeClaudeCodeEventSource();
@@ -2079,6 +2084,9 @@
         if (status) status.textContent = event.output?.action || _ct('resolved');
         }
       } else if (event.type === 'interaction' && event.status === 'unavailable') {
+        const key = this.codexInteractionKey(event);
+        if (this.codexUnavailableInteractionKeys.has(key)) return;
+        this.codexUnavailableInteractionKeys.add(key);
         this.appendSystem(event.error || _ct('codex_interaction_unavailable'));
       } else if (event.type === 'turn' && event.status === 'cancelling') {
         this.setStatus(_ct('codex_cancelling'), 'connecting');
@@ -3646,11 +3654,12 @@
       const slotNum = button.dataset.chatSlotToggle;
       const panel = secondaryChatPanels[slotNum];
       const isOpen = !!panel && panel.classList.contains('open');
+      const isActive = isOpen && activeSecondarySlot === String(slotNum);
       button.classList.toggle('active', isOpen);
       button.classList.toggle('state-open', isOpen);
       button.classList.toggle('state-hidden', !isOpen);
-      button.classList.remove('state-active');
-      button.dataset.chatSlotState = isOpen ? 'open' : 'hidden';
+      button.classList.toggle('state-active', isActive);
+      button.dataset.chatSlotState = isActive ? 'active' : (isOpen ? 'open' : 'hidden');
       button.setAttribute('aria-pressed', isOpen ? 'true' : 'false');
       button.setAttribute('aria-label', `${isOpen ? 'Hide' : 'Open'} chat window ${slotNum}`);
       button.title = isOpen ? `Hide chat window ${slotNum}` : `Open chat window ${slotNum}`;
@@ -3705,6 +3714,7 @@
 
     if (shouldOpen) {
       panel.dataset.hiddenByUser = 'false';
+      setActiveSecondarySlot(slotKey);
       windowInstance?.scrollBottom();
       if (connected || windowInstance?.isHermesSelected() || windowInstance?.isCodexSelected()) {
         windowInstance?.loadHistory();
@@ -3720,6 +3730,7 @@
       }
       windowInstance?.removeTypingIndicator();
       windowInstance?.closeFeishuEventSource();
+      if (activeSecondarySlot === slotKey) setActiveSecondarySlot(null);
     }
     syncSecondaryChatControls();
   }
