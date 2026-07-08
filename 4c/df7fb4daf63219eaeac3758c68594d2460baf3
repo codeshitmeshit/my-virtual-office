@@ -1,0 +1,101 @@
+.cosh-docs/requirment/frontend-action-dedup-guard/checklist.md
+  s_a2d335c216091a::t_f1817951bdbdcf 1-117
+.cosh-docs/requirment/frontend-action-dedup-guard/requirement.md
+  s_a2d335c216091a::t_0edd817993f286 1-70
+.cosh-docs/requirment/frontend-action-dedup-guard/review.md
+  s_a2d335c216091a::t_ef17493566da68 1-111
+.cosh-docs/requirment/frontend-action-dedup-guard/status.json
+  s_a2d335c216091a::t_706790150a97a6 1-32
+.cosh-docs/requirment/frontend-action-dedup-guard/todolist.md
+  s_a2d335c216091a::t_5ed10fbeb660d1 1-103
+app/browser-viewer-url.js
+  s_7c9adb01fad09b::t_8987e6990a4cf0 6
+app/chat.js
+  s_a2d335c216091a::t_789746450e6a9d 26,204,325,433,1292,1320,1363-1373,1446,1449,1452-1453,1620,1622,1626,1628,1632,1634-1635,1661-1665,1885,2041
+app/game.js
+  s_a2d335c216091a::t_020da10515ed00 17590-17649,18473,18513,18517,18535,19470,19495,19512,19536,19554,19580,19596,19626,19644,19679,19684,19697,19701-19703,19707,19712,19717,19734,19964,20004,20370-20372,20382,20559,20582,20590,20610,20615-20616,20629,20737,20758,20763,20772
+app/index.html
+  s_7c9adb01fad09b::t_a2878fa5d3789e 12
+app/projects.js
+  s_a2d335c216091a::t_e3a1d5f78ecfcb 32-33,613-676,2912,2985,3049-3050,3055,3073,3076,3776-3779,3793,3806,3853-3856,3870,3883,3916-3919,3936,3966-3974,3980-4032,4034,4037-4038,4040,4046-4058,4137-4154,4156,4223-4224,4236,4242-4243,4252,4289-4300,4306-4316,4322-4332,4337-4349
+app/server.py
+  s_a2d335c216091a::t_7f51e194d92e7e 5559-5566,6381-6388,7837-7838,10052-10079,10098,11803-11822,12402,13096-13101,13114-13115,13394-13397,13399-13400,13406,13408-13409,13431-13436,13439,13863-13864,13867-13870,13931-13932,13948,14176-14179,14205-14209,14250,18459,19471-19477,19484-19489,21998-22011,22049-22068,23115-23116,23118
+tests/cdp-test-utils.mjs
+  s_7c9adb01fad09b::t_53a54f49686ae0 1-31
+tests/check_chat_bug_regressions.mjs
+  s_a2d335c216091a::t_5d50ea86a6315a 1-47
+tests/check_chrome_cdp_scripts_static.mjs
+  s_7c9adb01fad09b::t_a59a26fd39f563 1-27
+tests/check_meeting_action_dedup_static.mjs
+  s_a2d335c216091a::t_a15aa9466274ee 1-78
+tests/check_project_action_dedup_static.mjs
+  s_a2d335c216091a::t_e1f451fcb462e1 1-88
+tests/chrome_archive_room_ai_refine_feedback_check.mjs
+  s_7c9adb01fad09b::t_be1ab70b22cc7d 2,6,8,32,127
+tests/chrome_archive_room_ai_refine_live_8090_check.mjs
+  s_7c9adb01fad09b::t_d3d0cb3724a8b2 1-4,130
+tests/chrome_archive_room_header_style_check.mjs
+  s_7c9adb01fad09b::t_2b3854cee3f4e8 2,6,8-9,90
+tests/chrome_archive_room_live_8090_feedback_check.mjs
+  s_7c9adb01fad09b::t_7aefd1b6e3b7ef 1-4,126
+tests/chrome_archive_room_manual_refresh_feedback_check.mjs
+  s_7c9adb01fad09b::t_737a42dbd99f14 2,6,8,26,119
+tests/chrome_archive_room_phase8_check.mjs
+  s_7c9adb01fad09b::t_6e7566f2fc0784 2,4,8-10,102,119,267
+tests/chrome_archive_room_switch_rebuild_check.mjs
+  s_7c9adb01fad09b::t_9b2e2032e87e99 2,4,7,10,12,146
+tests/chrome_meeting_action_items_task_check.mjs
+  s_7c9adb01fad09b::t_a695df92be178a 1-4,103
+tests/chrome_project_action_dedup_check.mjs
+  s_a2d335c216091a::t_56c0ca07e61371 1-118
+tests/chrome_project_meeting_records_check.mjs
+  s_7c9adb01fad09b::t_69d4b61dfd8dfe 1-5,157
+tests/chrome_sidebar_meeting_direct_detail_check.mjs
+  s_7c9adb01fad09b::t_71794e11376102 1-4,30,118
+tests/e2e_internal_bubble.js
+  s_7c9adb01fad09b::t_88ae882068e0be 2,4-15,17,19-34,36,38-52,54,56-91,93-117,119-212
+tests/test_claude_code_server.py
+  s_7c9adb01fad09b::t_dbeeda8eac71cc 8,24-42
+tests/test_internal_bubble.js
+  s_7c9adb01fad09b::t_7dfa7ce4b11b53 23,33-36
+tests/test_meeting_for_ai_phase1.py
+  s_7c9adb01fad09b::t_89c1afb5b00611 8-9,955-1026,1434-1525,1793-1909,1999-2090,2124,2132,2138-2139,2141-2142
+tests/test_meeting_for_ai_phase4.py
+  s_7c9adb01fad09b::t_163063174e5aaa 24,28-37,42
+tests/test_meeting_request_blocks_task.py
+  s_a2d335c216091a::t_95e6ea102a8d34 42,49,54,234-261,404-506,511,528,572-573,587,589
+tests/test_project_execution.py
+  s_a2d335c216091a::t_1c6a7f577a587f 63-80,2987-2988
+tests/test_project_scheduled_cron_phase2_3.py
+  s_7c9adb01fad09b::t_b724a18f1f1ad0 283,285
+tests/test_project_scheduled_cron_phase4.py
+  s_7c9adb01fad09b::t_0238344ac86231 156
+tests/test_workflow_e2e.py
+  s_7c9adb01fad09b::t_098850d6f0c842 112
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "4cdf7fb4daf63219eaeac3758c68594d2460baf3",
+  "prompts": {},
+  "sessions": {
+    "s_7c9adb01fad09b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f3fdc-90c3-7491-b1db-845a76e4524d",
+        "model": "unknown"
+      },
+      "human_author": "codeshitmeshit <codeshitmeshit@126.com>"
+    },
+    "s_a2d335c216091a": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4010-d6b3-7be1-97a6-f4ba481bc318",
+        "model": "unknown"
+      },
+      "human_author": "codeshitmeshit <codeshitmeshit@126.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
