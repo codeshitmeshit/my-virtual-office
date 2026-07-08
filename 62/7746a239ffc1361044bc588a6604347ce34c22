@@ -1,0 +1,43 @@
+.cosh-docs/requirment/project-reset-actions/requirement.md
+  s_2ec1870fda0a2c::t_94ce960b3ffa2f 1-64
+.cosh-docs/requirment/project-reset-actions/review.md
+  s_2ec1870fda0a2c::t_0d8d1d06076975 1-80
+app/locales/en.json
+  s_d60b80d57357d9::t_8c25019adacacc 1074-1087
+app/locales/zh.json
+  s_d60b80d57357d9::t_b301f07c5b9361 1074-1087
+app/projects.css
+  s_2ec1870fda0a2c::t_0bc6ed438850ab 1746-1751,1828-1860
+app/projects.js
+  s_2ec1870fda0a2c::t_ccad25c953149a 248-251,911,2853-2915,4629-4630
+app/server.py
+  s_2ec1870fda0a2c::t_7761c545cd8856 16483-16654,28604-28614
+tests/test_project_execution.py
+  s_2ec1870fda0a2c::t_76ebe527063018 91,962-1092,2996-2997
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "627746a239ffc1361044bc588a6604347ce34c22",
+  "prompts": {},
+  "sessions": {
+    "s_2ec1870fda0a2c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f3a7c-58d1-7f82-9b8a-a3b5b30f6013",
+        "model": "unknown"
+      },
+      "human_author": "codeshitmeshit <codeshitmeshit@126.com>"
+    },
+    "s_d60b80d57357d9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f3cd7-8a68-7f30-a0fa-0f3a099cc4df",
+        "model": "unknown"
+      },
+      "human_author": "codeshitmeshit <codeshitmeshit@126.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
