@@ -1,0 +1,29 @@
+app/index.html
+  s_f79e68737d9845::t_9c8b167075b056 12
+app/server.py
+  s_f79e68737d9845::t_dbe0aa34edfed6 8931-8943
+app/style.css
+  s_f79e68737d9845::t_1084f7e689b320 1155-1158,3667-3674,3676
+tests/check_chat_bug_regressions.mjs
+  s_f79e68737d9845::t_147e18376671d1 61-63
+tests/test_chat_history_api.py
+  s_f79e68737d9845::t_1fdf184136e024 174-195
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "d1da177a6b3f6f8376f9ba0c1bf97b6853f02c38",
+  "prompts": {},
+  "sessions": {
+    "s_f79e68737d9845": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4c15-638a-7af1-8ad3-c3999d7c00fb",
+        "model": "unknown"
+      },
+      "human_author": "codeshitmeshit <codeshitmeshit@126.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
