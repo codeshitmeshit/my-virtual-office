@@ -115,10 +115,29 @@ def main():
                 full_state = server._load_hermes_platform_state()
                 full_state["messages"] = [{"id": "pending-one", "status": "queued", "text": "pending"}]
                 server._save_hermes_platform_state(full_state)
+                comm_count_before = len(server._load_comm_history(limit=1000))
                 rejected = server._handle_hermes_platform_enqueue({"message": "must not be dropped"})
                 check("Gateway queue applies backpressure", rejected.get("_status") == 503, str(rejected))
                 preserved = server._load_hermes_platform_state().get("messages") or []
                 check("Gateway queue preserves pending messages", [item.get("id") for item in preserved] == ["pending-one"], str(preserved))
+                check("Rejected enqueue does not create a communication event", len(server._load_comm_history(limit=1000)) == comm_count_before)
+
+                failed_state = server._hermes_platform_state_default()
+                failed_state["messages"] = [{"id": "failed-one", "status": "failed", "text": "failed"}]
+                server._save_hermes_platform_state(failed_state)
+                accepted = server._handle_hermes_platform_enqueue({"message": "after failed terminal"})
+                check("Failed terminal messages release queue capacity", accepted.get("ok") is True, str(accepted))
+
+                delivered_state = server._hermes_platform_state_default()
+                delivered_state["messages"] = [{
+                    "id": "stale-delivered",
+                    "status": "delivered",
+                    "text": "delivered without reply",
+                    "deliveredAt": server._now_ms() - 3_700_000,
+                }]
+                server._save_hermes_platform_state(delivered_state)
+                accepted_after_stale = server._handle_hermes_platform_enqueue({"message": "after stale delivered"})
+                check("Stale delivered messages release queue capacity", accepted_after_stale.get("ok") is True, str(accepted_after_stale))
             finally:
                 server._HERMES_PLATFORM_MAX_MESSAGES = old_max_messages
                 server._save_hermes_platform_state(server._hermes_platform_state_default())

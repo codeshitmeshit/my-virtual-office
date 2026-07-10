@@ -5845,6 +5845,13 @@ def _handle_hermes_test(body=None):
         return {"ok": False, "error": "apiUrl must match the configured Hermes API URL", "_status": 400}
     if not allowed_test_target(requested_desktop_url, configured_desktop_url):
         return {"ok": False, "error": "desktopUrl must match the configured Hermes Desktop URL", "_status": 400}
+    for request_key, config_key in (
+        ("desktopHostHeader", "desktopHostHeader"),
+        ("desktopTcpHost", "desktopTcpHost"),
+        ("desktopTcpPort", "desktopTcpPort"),
+    ):
+        if request_key in body and str(body.get(request_key) or "").strip() != str(hermes_cfg.get(config_key) or "").strip():
+            return {"ok": False, "error": f"{request_key} must match the configured Hermes Desktop route", "_status": 400}
 
     api_url = requested_api_url or configured_api_url
     api_key = body.get("apiKey") if "apiKey" in body else hermes_cfg.get("apiKey", "")
@@ -31805,8 +31812,8 @@ def _save_hermes_platform_state(state):
     state = dict(state or {})
     messages = state.get("messages") if isinstance(state.get("messages"), list) else []
     if len(messages) > _HERMES_PLATFORM_MAX_MESSAGES:
-        active = [item for item in messages if str(item.get("status") or "queued") != "replied"]
-        terminal = [item for item in messages if str(item.get("status") or "queued") == "replied"]
+        active = [item for item in messages if _hermes_platform_message_active(item)]
+        terminal = [item for item in messages if not _hermes_platform_message_active(item)]
         terminal_slots = max(0, _HERMES_PLATFORM_MAX_MESSAGES - len(active))
         messages = active + (terminal[-terminal_slots:] if terminal_slots else [])
     state["messages"] = messages
@@ -31818,6 +31825,18 @@ def _save_hermes_platform_state(state):
         os.chmod(_hermes_platform_queue_path(), 0o600)
     except OSError:
         pass
+
+
+def _hermes_platform_message_active(item, now_ms=None):
+    status = str((item or {}).get("status") or "queued")
+    if status in {"replied", "failed"}:
+        return False
+    if status == "delivered":
+        retention_sec = max(60, int(VO_CONFIG.get("hermes", {}).get("platformDeliveredRetentionSec") or 3600))
+        delivered_at = int((item or {}).get("deliveredAt") or (item or {}).get("updatedAt") or 0)
+        if delivered_at and int(now_ms or _now_ms()) - delivered_at > retention_sec * 1000:
+            return False
+    return True
 
 
 def _hermes_platform_counts(state):
@@ -31973,13 +31992,8 @@ def _handle_hermes_platform_enqueue(body):
         chat_type = "dm"
     thread_id = str(body.get("threadId") or conversation_id).strip() or conversation_id
 
-    with _HERMES_PLATFORM_LOCK:
-        current_state = _load_hermes_platform_state()
-        active_count = sum(1 for item in current_state.get("messages") or [] if str(item.get("status") or "queued") != "replied")
-        if active_count >= _HERMES_PLATFORM_MAX_MESSAGES:
-            return {"ok": False, "error": "Hermes platform queue is full; retry after pending messages are processed", "_status": 503}
-
-    inbound = _append_comm_event({
+    inbound_event = {
+        "id": str(uuid.uuid4()),
         "type": "message",
         "direction": "request",
         "conversationId": conversation_id,
@@ -31988,7 +32002,7 @@ def _handle_hermes_platform_enqueue(body):
         "text": message,
         "metadata": metadata,
         "visibleInOffice": bool(body.get("visibleInOffice", True)),
-    })
+    }
 
     msg = {
         "schema": "vo.hermes-platform-message.v1",
@@ -32007,14 +32021,15 @@ def _handle_hermes_platform_enqueue(body):
         "text": message,
         "from": from_ref,
         "to": to_ref,
-        "commEventId": inbound.get("id"),
-        "metadata": {**metadata, "commEventId": inbound.get("id")},
+        "commEventId": inbound_event["id"],
+        "metadata": {**metadata, "commEventId": inbound_event["id"]},
     }
     with _HERMES_PLATFORM_LOCK:
         state = _load_hermes_platform_state()
-        active_count = sum(1 for item in state.get("messages") or [] if str(item.get("status") or "queued") != "replied")
+        active_count = sum(1 for item in state.get("messages") or [] if _hermes_platform_message_active(item))
         if active_count >= _HERMES_PLATFORM_MAX_MESSAGES:
             return {"ok": False, "error": "Hermes platform queue is full; retry after pending messages are processed", "_status": 503}
+        _append_comm_event(inbound_event)
         state.setdefault("messages", []).append(msg)
         _save_hermes_platform_state(state)
 

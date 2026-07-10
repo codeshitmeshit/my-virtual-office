@@ -271,6 +271,14 @@ def test_hermes_test_rejects_unconfigured_request_target():
         assert result["_status"] == 400
         assert FakeHermesApiClient.calls == []
         assert "stored-secret" not in str(result)
+        tcp_override = server._handle_hermes_test({
+            "desktopUrl": server._default_hermes_desktop_url(),
+            "desktopTcpHost": "attacker.invalid",
+            "desktopTcpPort": 9999,
+        })
+        assert tcp_override["ok"] is False
+        assert tcp_override["_status"] == 400
+        assert "Desktop route" in tcp_override["error"]
     finally:
         server.HermesProvider = old_provider
         server.HermesApiClient = old_client
