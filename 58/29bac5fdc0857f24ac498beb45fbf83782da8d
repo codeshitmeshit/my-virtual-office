@@ -1,0 +1,25 @@
+app/server.py
+  s_2c1ad674089b59::t_68bd94aa0b85d3 5848-5854,31815-31816,31830-31841,31995-31996,32005,32024-32025,32029,32032
+tests/test_hermes_platform_bridge.py
+  s_2c1ad674089b59::t_9e9d18e5a40ea3 118,123-140
+tests/test_hermes_server_native_api.py
+  s_2c1ad674089b59::t_8a347e7ced3859 274-281
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "5829bac5fdc0857f24ac498beb45fbf83782da8d",
+  "prompts": {},
+  "sessions": {
+    "s_2c1ad674089b59": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4ced-a915-7051-97fc-8df97b21d523",
+        "model": "unknown"
+      },
+      "human_author": "codeshitmeshit <codeshitmeshit@126.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
