@@ -24,6 +24,7 @@ import glob
 import hashlib
 import email.utils
 import re
+import secrets
 import shutil
 import signal
 import ssl
@@ -637,6 +638,15 @@ def _load_vo_config():
             "preferApi": _env_bool("VO_HERMES_API_ENABLED", _env_bool("VO_HERMES_PREFER_API", hermes_api_enabled)),
             "apiUrl": _env_or("VO_HERMES_API_URL", hermes_cfg.get("apiUrl", "http://127.0.0.1:8642")),
             "apiKey": _env_or("VO_HERMES_API_KEY", hermes_cfg.get("apiKey", "")),
+            "desktopUrl": _env_or("VO_HERMES_DESKTOP_URL", hermes_cfg.get("desktopUrl", "")),
+            "desktopToken": _env_or("VO_HERMES_DESKTOP_TOKEN", hermes_cfg.get("desktopToken", "")),
+            "desktopHostHeader": _env_or("VO_HERMES_DESKTOP_HOST_HEADER", hermes_cfg.get("desktopHostHeader", "")),
+            "desktopTcpHost": _env_or("VO_HERMES_DESKTOP_TCP_HOST", hermes_cfg.get("desktopTcpHost", "")),
+            "desktopTcpPort": _env_or("VO_HERMES_DESKTOP_TCP_PORT", hermes_cfg.get("desktopTcpPort", "")),
+            "platformEnabled": _env_bool("VO_HERMES_PLATFORM_ENABLED", hermes_cfg.get("platformEnabled", False)),
+            "platformToken": _env_or("VO_HERMES_PLATFORM_TOKEN", hermes_cfg.get("platformToken", "")),
+            "platformAgentId": _env_or("VO_HERMES_PLATFORM_AGENT_ID", hermes_cfg.get("platformAgentId", "hermes-gateway")),
+            "platformPollLeaseSec": int(_env_or("VO_HERMES_PLATFORM_LEASE_SEC", hermes_cfg.get("platformPollLeaseSec", 120))),
         },
         "codex": {
             "enabled": _env_bool("VO_CODEX_ENABLED", codex_cfg.get("enabled", False)),
@@ -3198,18 +3208,55 @@ def _ensure_builtin_communication_skill():
         print(f"[SKILLS] Failed to seed built-in office skills: {e}")
         return ""
 
+_HERMES_PLATFORM_LOCK = threading.RLock()
+_HERMES_PLATFORM_MAX_MESSAGES = 2000
+
+
+def _hermes_platform_roster_agent():
+    """Return the synthetic Hermes Messaging Gateway office agent, if enabled."""
+    hermes = VO_CONFIG.get("hermes", {})
+    if not hermes.get("platformEnabled") or not hermes.get("platformToken"):
+        return None
+    agent_id = str(hermes.get("platformAgentId") or "hermes-gateway").strip() or "hermes-gateway"
+    return {
+        "id": agent_id, "statusKey": agent_id, "providerKind": "hermes",
+        "providerType": "gateway-platform", "providerAgentId": "gateway",
+        "profile": "gateway", "name": "Hermes Gateway",
+        "emoji": os.environ.get("VO_HERMES_GATEWAY_AGENT_EMOJI", "⚕️"),
+        "role": "Hermes Messaging Gateway platform adapter", "model": "Hermes Gateway",
+        "provider": "Hermes Messaging Gateway", "gateway": "my_virtual_office",
+        "workspace": "", "home": "", "binary": "", "lastActiveAt": int(time.time() * 1000),
+        "capabilities": ["chat", "presence", "messages"],
+        "connectionModes": ["gateway-platform"], "cliAvailable": False,
+        "apiAvailable": False, "desktopAvailable": False,
+    }
+
+
 def _discover_roster():
     hermes = VO_CONFIG.get("hermes", {})
     codex = VO_CONFIG.get("codex", {})
     claude_code = VO_CONFIG.get("claudeCode", {})
-    return discover_all_agents(
+    agents = discover_all_agents(
         WORKSPACE_BASE,
         hermes_home=hermes.get("homePath"),
         hermes_bin=hermes.get("binary"),
         hermes_enabled=hermes.get("enabled", True),
+        hermes_api_url=hermes.get("apiUrl"),
+        hermes_api_key=hermes.get("apiKey"),
+        hermes_desktop_url=hermes.get("desktopUrl"),
+        hermes_desktop_token=hermes.get("desktopToken"),
+        hermes_desktop_host_header=hermes.get("desktopHostHeader"),
+        hermes_desktop_tcp_host=hermes.get("desktopTcpHost"),
+        hermes_desktop_tcp_port=hermes.get("desktopTcpPort"),
+        hermes_prefer_api=hermes.get("preferApi", True),
+        hermes_timeout_sec=hermes.get("timeoutSec", 600),
         codex=codex,
         claude_code=claude_code,
     )
+    gateway_agent = _hermes_platform_roster_agent()
+    if gateway_agent and not any(a.get("statusKey") == gateway_agent.get("statusKey") for a in agents):
+        agents.append(gateway_agent)
+    return agents
 
 _discovered_roster = _discover_roster()
 _discovered_at = time.time()
@@ -6811,6 +6858,47 @@ def _load_codex_history(profile="default"):
     state = _load_codex_state(profile)
     messages = state.get("messages") if isinstance(state.get("messages"), list) else []
     return messages
+
+
+CHAT_SESSION_SCHEMA_VERSION = "vo-chat-sessions/v1"
+
+
+def _utc_now_iso():
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _epoch_to_utc_iso(epoch):
+    try:
+        return datetime.fromtimestamp(float(epoch), timezone.utc).isoformat().replace("+00:00", "Z")
+    except (TypeError, ValueError, OSError):
+        return None
+
+
+def _parse_iso_epoch_ms(value):
+    if value is None or value == "":
+        return 0
+    if isinstance(value, (int, float)):
+        return int(value * 1000) if value < 10_000_000_000 else int(value)
+    try:
+        return int(datetime.fromisoformat(str(value).replace("Z", "+00:00")).timestamp() * 1000)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _merge_openclaw_session_entries(entries):
+    merged = {}
+    for entry in entries:
+        if not isinstance(entry, dict) or not entry.get("id"):
+            continue
+        key = entry["id"]
+        if key not in merged:
+            merged[key] = dict(entry)
+            continue
+        current = merged[key]
+        for field, value in entry.items():
+            if value not in (None, "", [], {}):
+                current[field] = value
+    return list(merged.values())
 
 
 def _save_codex_state(profile, state):
@@ -25784,6 +25872,32 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                 requests_loader=lambda: _meeting_request_list_filtered("status=pending").get("requests", []),
                 projects_loader=lambda: _handle_projects_list("status=active").get("projects", []),
             ).stream(self)
+        elif request_path == "/api/chat-sessions":
+            agent_id = (query_params.get("agentId") or query_params.get("agent") or query_params.get("key") or ["main"])[0]
+            try:
+                limit = max(1, min(100, int((query_params.get("limit") or ["40"])[0])))
+            except (TypeError, ValueError):
+                limit = 40
+            payload, status = handle_chat_sessions_list(agent_id, limit=limit)
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps(payload).encode())
+        elif request_path == "/api/hermes-platform/status":
+            result = _handle_hermes_platform_status()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps(result).encode())
+        elif request_path == "/api/hermes-platform/poll":
+            result = _hermes_platform_auth_error(self.headers) or _handle_hermes_platform_poll(query_params)
+            self.send_response(result.pop("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps(result).encode())
         elif request_path == "/api/provider/events":
             provider_kind = (query_params.get("provider") or query_params.get("providerKind") or [""])[0]
             agent_id = (query_params.get("agentId") or [""])[0]
@@ -28244,7 +28358,68 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
         parsed_url = urllib.parse.urlparse(self.path)
         request_path = parsed_url.path
         # --- SETUP WIZARD ---
-        if self.path == "/setup/save":
+        if request_path in {"/api/chat-sessions/create", "/api/chat-sessions/delete", "/api/chat-sessions/switch"}:
+            length = int(self.headers.get("Content-Length", 0))
+            try:
+                body = json.loads(self.rfile.read(length)) if length else {}
+            except json.JSONDecodeError as exc:
+                body, result, status = {}, {"ok": False, "error": str(exc)}, 400
+            else:
+                agent_id = body.get("agentId") or body.get("agent") or body.get("key") or "main"
+                if request_path.endswith("/create"):
+                    result, status = handle_chat_session_create(agent_id, body)
+                elif request_path.endswith("/delete"):
+                    result, status = handle_chat_session_delete(agent_id, body.get("sessionId") or body.get("sessionKey") or "", body)
+                else:
+                    result, status = handle_chat_session_switch(agent_id, body.get("sessionId") or body.get("sessionKey") or "", body)
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps(result).encode())
+            return
+        elif request_path in {"/api/hermes-platform/enqueue", "/api/hermes-platform/ack", "/api/hermes-platform/reply", "/api/hermes-platform/heartbeat"}:
+            length = int(self.headers.get("Content-Length", 0))
+            try:
+                body = json.loads(self.rfile.read(length)) if length else {}
+            except json.JSONDecodeError as exc:
+                result = {"ok": False, "error": str(exc), "_status": 400}
+            else:
+                result = _hermes_platform_auth_error(self.headers)
+                if not result:
+                    handler = {
+                        "/api/hermes-platform/enqueue": _handle_hermes_platform_enqueue,
+                        "/api/hermes-platform/ack": _handle_hermes_platform_ack,
+                        "/api/hermes-platform/reply": _handle_hermes_platform_reply,
+                        "/api/hermes-platform/heartbeat": _handle_hermes_platform_heartbeat,
+                    }[request_path]
+                    result = handler(body)
+            self.send_response(result.pop("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps(result).encode())
+            return
+        elif request_path == "/api/native-models/openclaw/auth/sync-static":
+            length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            result = _sync_openclaw_static_auth_from_main(body.get("provider"), body.get("profileId") or body.get("profile"))
+            self.send_response(200 if result.get("ok") else 400)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps(result).encode())
+            return
+        elif request_path == "/api/native-models/openclaw/auth/reset-overrides":
+            length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            result = _reset_openclaw_static_auth_overrides(body.get("agent") or body.get("agentId"), body.get("provider"))
+            self.send_response(200 if result.get("ok") else 400)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps(result).encode())
+            return
+        # --- SETUP WIZARD ---
+        elif self.path == "/setup/save":
             length = int(self.headers.get('Content-Length', 0))
             try:
                 body = json.loads(self.rfile.read(length)) if length else {}
@@ -30638,6 +30813,1875 @@ def _wf_auto_resume_on_startup():
     except Exception as e:
         print(f"[WORKFLOW AUTO-RESUME] Error: {e}")
 
+
+def _openclaw_config_path():
+    return os.path.join(WORKSPACE_BASE, "openclaw.json")
+
+
+def _atomic_write_text(path, content):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    existing_stat = None
+    try:
+        existing_stat = os.stat(path)
+    except OSError:
+        pass
+    tmp_path = f"{path}.tmp-{os.getpid()}-{threading.get_ident()}"
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        f.write(content)
+        f.flush()
+        if existing_stat is not None:
+            try:
+                os.fchmod(f.fileno(), existing_stat.st_mode & 0o777)
+                os.fchown(f.fileno(), existing_stat.st_uid, existing_stat.st_gid)
+            except OSError:
+                pass
+        os.fsync(f.fileno())
+    os.replace(tmp_path, path)
+
+
+def _load_openclaw_model_config():
+    try:
+        with open(_openclaw_config_path(), "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def _safe_openclaw_agent_id(agent_id=None):
+    safe_id = re.sub(r"[^A-Za-z0-9_.-]", "", str(agent_id or "").strip())
+    return safe_id or "main"
+
+
+def _openclaw_agent_dir(agent_id=None):
+    return os.path.join(WORKSPACE_BASE, "agents", _safe_openclaw_agent_id(agent_id), "agent")
+
+
+def _openclaw_auth_profiles_path(agent_id=None):
+    return os.path.join(_openclaw_agent_dir(agent_id), "auth-profiles.json")
+
+
+def _openclaw_binary():
+    configured = os.environ.get("OPENCLAW_BIN") or VO_CONFIG.get("openclaw", {}).get("binary") or ""
+    candidates = [
+        configured,
+        shutil.which("openclaw"),
+        os.path.expanduser("~/.npm-global/bin/openclaw"),
+        os.path.expanduser("~/.local/bin/openclaw"),
+        "/usr/local/bin/openclaw",
+    ]
+    for candidate in candidates:
+        if not candidate:
+            continue
+        expanded = os.path.expanduser(candidate)
+        if os.path.isfile(expanded) and os.access(expanded, os.X_OK):
+            return expanded
+    return ""
+
+
+def _primary_openclaw_model(cfg=None):
+    cfg = cfg if isinstance(cfg, dict) else _load_openclaw_model_config()
+    return str(cfg.get("agents", {}).get("defaults", {}).get("model", {}).get("primary", "") or "")
+
+
+def _default_openclaw_model(cfg=None):
+    cfg = cfg if isinstance(cfg, dict) else _load_openclaw_model_config()
+    for agent in cfg.get("agents", {}).get("list", []) or []:
+        if isinstance(agent, dict) and agent.get("default") and agent.get("model"):
+            return str(agent.get("model") or "")
+    return _primary_openclaw_model(cfg) or "unknown"
+
+
+def _context_window_for_model(model, provider="", cfg=None):
+    model = str(model or "")
+    provider = str(provider or _provider_from_model_id(model) or "")
+    cfg = cfg if isinstance(cfg, dict) else _load_openclaw_model_config()
+    configured = cfg.get("agents", {}).get("defaults", {}).get("models", {})
+    if isinstance(configured, dict):
+        meta = configured.get(model)
+        if isinstance(meta, dict):
+            params = meta.get("params") if isinstance(meta.get("params"), dict) else {}
+            value = meta.get("contextWindow") or params.get("contextWindow")
+            if value:
+                try:
+                    return int(value)
+                except Exception:
+                    pass
+    for pdata_provider, pdata in (cfg.get("models", {}).get("providers", {}) or {}).items():
+        if provider and pdata_provider != provider:
+            continue
+        if not isinstance(pdata, dict):
+            continue
+        for item in pdata.get("models", []) or []:
+            if not isinstance(item, dict):
+                continue
+            raw_id = str(item.get("id") or item.get("model") or item.get("name") or "").strip()
+            full_id = raw_id if "/" in raw_id else f"{pdata_provider}/{raw_id}" if raw_id else ""
+            if model in {raw_id, full_id} and item.get("contextWindow"):
+                try:
+                    return int(item.get("contextWindow") or 0)
+                except Exception:
+                    return 0
+    return 0
+
+
+def _read_openclaw_auth_sqlite(agent_id=None):
+    db_path = os.path.join(_openclaw_agent_dir(agent_id), "openclaw-agent.sqlite")
+    profiles = []
+    if not os.path.exists(db_path):
+        return profiles
+    con = None
+    try:
+        con = sqlite3.connect(db_path)
+        con.row_factory = sqlite3.Row
+        tables = [r[0] for r in con.execute("select name from sqlite_master where type='table'")]
+        for table in tables:
+            qtable = _quote_sqlite_identifier(table)
+            cols = [r[1] for r in con.execute(f"pragma table_info({qtable})")]
+            if "store_json" in cols:
+                for row in con.execute(f"select store_json from {qtable}").fetchall():
+                    try:
+                        data = json.loads(row["store_json"] or "{}")
+                    except Exception:
+                        continue
+                    for profile_id, profile in (data.get("profiles") or {}).items():
+                        if not isinstance(profile, dict):
+                            continue
+                        provider = profile.get("provider") or profile_id.split(":", 1)[0]
+                        ptype = profile.get("type") or profile.get("mode") or "profile"
+                        email = profile.get("email") or ""
+                        profiles.append({
+                            "id": profile_id,
+                            "provider": provider,
+                            "type": ptype,
+                            "label": profile_id + (f" ({email})" if email else ""),
+                            "source": "sqlite",
+                        })
+                continue
+            if not {"id", "provider"}.issubset(set(cols)):
+                continue
+            type_col = "type" if "type" in cols else ("mode" if "mode" in cols else None)
+            rows = con.execute(f"select * from {qtable}").fetchall()
+            for row in rows:
+                provider = row["provider"]
+                profile_id = row["id"]
+                if not provider or not profile_id:
+                    continue
+                ptype = row[type_col] if type_col else ""
+                email = row["email"] if "email" in cols else ""
+                label = profile_id + (f" ({email})" if email else "")
+                profiles.append({
+                    "id": profile_id,
+                    "provider": provider,
+                    "type": ptype or "profile",
+                    "label": label,
+                    "source": "sqlite",
+                })
+    except Exception:
+        return profiles
+    finally:
+        try:
+            if con:
+                con.close()
+        except Exception:
+            pass
+    # Deduplicate by id/provider/type.
+    seen = set()
+    unique = []
+    for profile in profiles:
+        key = (profile["id"], profile["provider"], profile["type"])
+        if key not in seen:
+            seen.add(key)
+            unique.append(profile)
+    return unique
+
+
+def _read_openclaw_auth_json(agent_id=None):
+    profiles = []
+    try:
+        with open(_openclaw_auth_profiles_path(agent_id), "r") as f:
+            data = json.load(f)
+    except Exception:
+        return profiles
+    for profile_id, profile in (data.get("profiles") or {}).items():
+        if not isinstance(profile, dict):
+            continue
+        provider = profile.get("provider") or profile_id.split(":", 1)[0]
+        ptype = profile.get("type") or profile.get("mode") or "profile"
+        email = profile.get("email") or ""
+        profiles.append({
+            "id": profile_id,
+            "provider": provider,
+            "type": ptype,
+            "label": profile_id + (f" ({email})" if email else ""),
+            "source": "auth-profiles.json",
+        })
+    return profiles
+
+
+def _read_openclaw_auth_profiles(agent_id=None):
+    sqlite_profiles = _read_openclaw_auth_sqlite(agent_id)
+    if sqlite_profiles:
+        return sqlite_profiles
+    return _read_openclaw_auth_json(agent_id)
+
+
+def _quote_sqlite_identifier(name):
+    return '"' + str(name).replace('"', '""') + '"'
+
+
+def _openclaw_agent_ids():
+    ids = ["main"]
+    cfg = _load_openclaw_model_config()
+    for item in cfg.get("agents", {}).get("list", []) or []:
+        if isinstance(item, dict) and item.get("id"):
+            safe_id = _safe_openclaw_agent_id(item.get("id"))
+            if safe_id and safe_id not in ids:
+                ids.append(safe_id)
+    agents_dir = os.path.join(WORKSPACE_BASE, "agents")
+    try:
+        for name in sorted(os.listdir(agents_dir)):
+            if not os.path.isdir(os.path.join(agents_dir, name, "agent")):
+                continue
+            safe_id = _safe_openclaw_agent_id(name)
+            if safe_id and safe_id not in ids:
+                ids.append(safe_id)
+    except OSError:
+        pass
+    return ids
+
+
+def _openclaw_profile_provider(profile_id, profile):
+    profile = profile if isinstance(profile, dict) else {}
+    return profile.get("provider") or str(profile_id or "").split(":", 1)[0]
+
+
+def _openclaw_profile_type(profile):
+    profile = profile if isinstance(profile, dict) else {}
+    return str(profile.get("type") or profile.get("mode") or "").lower()
+
+
+def _is_openclaw_portable_static_profile(profile):
+    if not isinstance(profile, dict) or profile.get("copyToAgents") is False:
+        return False
+    ptype = _openclaw_profile_type(profile)
+    if ptype in {"api_key", "key"} or "key" in profile:
+        return True
+    if ptype == "token" and (profile.get("token") or profile.get("tokenRef")):
+        return True
+    return False
+
+
+def _read_openclaw_auth_profile_map(agent_id=None):
+    db_path = os.path.join(_openclaw_agent_dir(agent_id), "openclaw-agent.sqlite")
+    if os.path.exists(db_path):
+        con = None
+        try:
+            con = sqlite3.connect(db_path)
+            con.row_factory = sqlite3.Row
+            tables = [r[0] for r in con.execute("select name from sqlite_master where type='table'")]
+            for table in tables:
+                qtable = _quote_sqlite_identifier(table)
+                cols = [r[1] for r in con.execute(f"pragma table_info({qtable})")]
+                if not {"store_key", "store_json"}.issubset(set(cols)):
+                    continue
+                row = con.execute(f"select store_json from {qtable} where store_key = ?", ("primary",)).fetchone()
+                if not row:
+                    continue
+                data = json.loads(row["store_json"] or "{}")
+                profiles = data.get("profiles") if isinstance(data, dict) else {}
+                if isinstance(profiles, dict):
+                    return {pid: dict(profile) for pid, profile in profiles.items() if isinstance(profile, dict)}
+        except Exception:
+            pass
+        finally:
+            try:
+                if con:
+                    con.close()
+            except Exception:
+                pass
+    try:
+        with open(_openclaw_auth_profiles_path(agent_id), "r") as f:
+            data = json.load(f)
+    except Exception:
+        return {}
+    profiles = data.get("profiles") if isinstance(data, dict) else {}
+    return {pid: dict(profile) for pid, profile in profiles.items() if isinstance(profile, dict)}
+
+
+def _openclaw_profile_public(profile_id, profile, *, agent_id=None, main_profiles=None):
+    profile = profile if isinstance(profile, dict) else {}
+    ptype = _openclaw_profile_type(profile) or "profile"
+    email = profile.get("email") or ""
+    provider = _openclaw_profile_provider(profile_id, profile)
+    main_profile = (main_profiles or {}).get(profile_id) if isinstance(main_profiles, dict) else None
+    return {
+        "id": profile_id,
+        "provider": provider,
+        "type": ptype,
+        "label": profile_id + (f" ({email})" if email else ""),
+        "agent": agent_id,
+        "portableStatic": _is_openclaw_portable_static_profile(profile),
+        "localOverride": agent_id not in {None, "main"},
+        "matchesMain": main_profile == profile if main_profile is not None else False,
+        "inMain": main_profile is not None,
+    }
+
+
+def _openclaw_managed_auth_report():
+    agent_ids = _openclaw_agent_ids()
+    main_profiles = _read_openclaw_auth_profile_map("main")
+    managed_profiles = {
+        pid: profile
+        for pid, profile in main_profiles.items()
+        if _is_openclaw_portable_static_profile(profile)
+    }
+    agent_rows = []
+    for agent_id in agent_ids:
+        profiles = _read_openclaw_auth_profile_map(agent_id)
+        if agent_id == "main":
+            missing = []
+            divergent = []
+            extra_static = []
+        else:
+            missing = [pid for pid in managed_profiles if pid not in profiles]
+            divergent = [
+                pid for pid, profile in managed_profiles.items()
+                if pid in profiles and profiles.get(pid) != profile
+            ]
+            extra_static = [
+                pid for pid, profile in profiles.items()
+                if _is_openclaw_portable_static_profile(profile)
+                and pid not in managed_profiles
+            ]
+        local_oauth = [
+            pid for pid, profile in profiles.items()
+            if _openclaw_profile_type(profile) == "oauth"
+        ]
+        agent_rows.append({
+            "agent": agent_id,
+            "profileCount": len(profiles),
+            "profiles": [
+                _openclaw_profile_public(pid, profile, agent_id=agent_id, main_profiles=main_profiles)
+                for pid, profile in sorted(profiles.items())
+            ],
+            "missingManagedStatic": missing,
+            "divergentManagedStatic": divergent,
+            "extraStaticProfiles": extra_static,
+            "localOAuthProfiles": local_oauth,
+            "staticInSync": not missing and not divergent and not extra_static,
+        })
+    return {
+        "sourceAgent": "main",
+        "managedStaticProfiles": [
+            _openclaw_profile_public(pid, profile, agent_id="main", main_profiles=main_profiles)
+            for pid, profile in sorted(managed_profiles.items())
+        ],
+        "agentRows": agent_rows,
+    }
+
+
+def _update_openclaw_sqlite_auth_stores(updater, agent_id=None):
+    db_path = os.path.join(_openclaw_agent_dir(agent_id), "openclaw-agent.sqlite")
+    if not os.path.exists(db_path):
+        return 0, None
+    updated = 0
+    con = None
+    try:
+        con = sqlite3.connect(db_path)
+        con.row_factory = sqlite3.Row
+        tables = [r[0] for r in con.execute("select name from sqlite_master where type='table'")]
+        now_ms = int(time.time() * 1000)
+        for table in tables:
+            qtable = _quote_sqlite_identifier(table)
+            cols = [r[1] for r in con.execute(f"pragma table_info({qtable})")]
+            if not {"store_key", "store_json", "updated_at"}.issubset(set(cols)):
+                continue
+            rows = con.execute(f"select store_key, store_json from {qtable}").fetchall()
+            for row in rows:
+                try:
+                    data = json.loads(row["store_json"] or "{}")
+                except Exception:
+                    continue
+                if not isinstance(data.get("profiles"), dict):
+                    continue
+                changed = updater(data)
+                if not changed:
+                    continue
+                con.execute(
+                    f"update {qtable} set store_json = ?, updated_at = ? where store_key = ?",
+                    (json.dumps(data, separators=(",", ":")), now_ms, row["store_key"]),
+                )
+                updated += 1
+        con.commit()
+        return updated, None
+    except Exception as e:
+        return updated, str(e)
+    finally:
+        try:
+            if con:
+                con.close()
+        except Exception:
+            pass
+
+
+def _update_openclaw_auth_profiles_json(updater, create_if_missing=False, agent_id=None):
+    path = _openclaw_auth_profiles_path(agent_id)
+    if not os.path.exists(path) and not create_if_missing:
+        return False, None
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        try:
+            with open(path, "r") as f:
+                data = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            data = {"version": 1, "profiles": {}, "lastGood": {}}
+        data.setdefault("version", 1)
+        data.setdefault("profiles", {})
+        data.setdefault("lastGood", {})
+        changed = updater(data)
+        if not changed:
+            return False, None
+        _atomic_write_text(path, json.dumps(data, indent=2) + "\n")
+        return True, None
+    except Exception as e:
+        return False, str(e)
+
+
+def _mirror_openclaw_config_auth_profile(provider, profile_id):
+    cfg_path = _openclaw_config_path()
+    cfg = _load_openclaw_model_config()
+    cfg.setdefault("auth", {}).setdefault("profiles", {})[profile_id] = {
+        "provider": provider,
+        "mode": "api_key",
+    }
+    try:
+        _atomic_write_text(cfg_path, json.dumps(cfg, indent=2) + "\n")
+        return True, None
+    except OSError as exc:
+        return False, str(exc)
+
+
+def _remove_openclaw_config_auth_profiles(profile_ids):
+    if not profile_ids:
+        return True, None
+    cfg_path = _openclaw_config_path()
+    cfg = _load_openclaw_model_config()
+    profiles = cfg.setdefault("auth", {}).setdefault("profiles", {})
+    changed = False
+    for profile_id in profile_ids:
+        if profile_id in profiles:
+            profiles.pop(profile_id, None)
+            changed = True
+    if not changed:
+        return True, None
+    try:
+        _atomic_write_text(cfg_path, json.dumps(cfg, indent=2) + "\n")
+        return True, None
+    except OSError as exc:
+        return False, str(exc)
+
+
+def _cleanup_openclaw_sqlite_auth_state(agent_id, provider, profile_ids):
+    profile_ids = {str(pid) for pid in (profile_ids or []) if pid}
+    if not profile_ids:
+        return 0, None
+    db_path = os.path.join(_openclaw_agent_dir(agent_id), "openclaw-agent.sqlite")
+    if not os.path.exists(db_path):
+        return 0, None
+    updated = 0
+    con = None
+    try:
+        con = sqlite3.connect(db_path)
+        con.row_factory = sqlite3.Row
+        tables = [r[0] for r in con.execute("select name from sqlite_master where type='table'")]
+        now_ms = int(time.time() * 1000)
+        for table in tables:
+            qtable = _quote_sqlite_identifier(table)
+            cols = [r[1] for r in con.execute(f"pragma table_info({qtable})")]
+            if not {"state_key", "state_json", "updated_at"}.issubset(set(cols)):
+                continue
+            rows = con.execute(f"select state_key, state_json from {qtable}").fetchall()
+            for row in rows:
+                try:
+                    data = json.loads(row["state_json"] or "{}")
+                except Exception:
+                    continue
+                changed = False
+                last_good = data.get("lastGood")
+                if isinstance(last_good, dict):
+                    for key, value in list(last_good.items()):
+                        if value in profile_ids:
+                            last_good.pop(key, None)
+                            changed = True
+                order = data.get("order")
+                if isinstance(order, dict):
+                    for key, values in list(order.items()):
+                        if isinstance(values, list):
+                            kept = [value for value in values if value not in profile_ids]
+                            if kept != values:
+                                order[key] = kept
+                                changed = True
+                usage_stats = data.get("usageStats")
+                if isinstance(usage_stats, dict):
+                    for profile_id in profile_ids:
+                        if profile_id in usage_stats:
+                            usage_stats.pop(profile_id, None)
+                            changed = True
+                if not changed:
+                    continue
+                con.execute(
+                    f"update {qtable} set state_json = ?, updated_at = ? where state_key = ?",
+                    (json.dumps(data, separators=(",", ":")), now_ms, row["state_key"]),
+                )
+                updated += 1
+        con.commit()
+        return updated, None
+    except Exception as exc:
+        return updated, str(exc)
+    finally:
+        try:
+            if con:
+                con.close()
+        except Exception:
+            pass
+
+
+def _sync_openclaw_static_auth_from_main(provider=None, profile_id=None, target_agent=None, prune=False):
+    provider = _safe_provider_id(provider) if provider else ""
+    profile_id = str(profile_id or "").strip()
+    target_agent = _safe_openclaw_agent_id(target_agent) if target_agent else ""
+    main_profiles = _read_openclaw_auth_profile_map("main")
+    managed_profiles = {
+        pid: dict(profile)
+        for pid, profile in main_profiles.items()
+        if _is_openclaw_portable_static_profile(profile)
+        and (not provider or _openclaw_profile_provider(pid, profile) == provider)
+        and (not profile_id or pid == profile_id)
+    }
+    if profile_id and not managed_profiles:
+        return {"ok": False, "error": f"Portable static profile not found in main: {profile_id}"}
+
+    agent_ids = [target_agent] if target_agent else _openclaw_agent_ids()
+    summary = []
+    touched = 0
+    removed_by_agent = {}
+    for agent_id in agent_ids:
+        if agent_id == "main":
+            continue
+        removed = []
+
+        def updater(data):
+            profiles = data.setdefault("profiles", {})
+            changed = False
+            for pid, profile in managed_profiles.items():
+                if profiles.get(pid) != profile:
+                    profiles[pid] = dict(profile)
+                    changed = True
+            if prune:
+                remove = [
+                    pid for pid, profile in list(profiles.items())
+                    if isinstance(profile, dict)
+                    and _is_openclaw_portable_static_profile(profile)
+                    and (not provider or _openclaw_profile_provider(pid, profile) == provider)
+                    and (not profile_id or pid == profile_id or pid not in managed_profiles)
+                    and (pid not in managed_profiles or profiles.get(pid) != managed_profiles.get(pid))
+                ]
+                for pid in remove:
+                    profiles.pop(pid, None)
+                    removed.append(pid)
+                    changed = True
+                last_good = data.get("lastGood")
+                if isinstance(last_good, dict):
+                    for key, value in list(last_good.items()):
+                        if value in remove:
+                            last_good.pop(key, None)
+            return changed
+
+        sqlite_updates, sqlite_err = _update_openclaw_sqlite_auth_stores(updater, agent_id=agent_id)
+        json_updated, json_err = _update_openclaw_auth_profiles_json(updater, create_if_missing=(sqlite_updates == 0 and not sqlite_err), agent_id=agent_id)
+        if removed:
+            removed_by_agent[agent_id] = removed
+            _cleanup_openclaw_sqlite_auth_state(agent_id, provider, removed)
+        ok = not ((sqlite_err and not json_updated) or (json_err and sqlite_updates == 0))
+        if ok and (sqlite_updates or json_updated or removed):
+            touched += 1
+        summary.append({
+            "agent": agent_id,
+            "ok": ok,
+            "sqliteUpdates": sqlite_updates,
+            "jsonUpdated": bool(json_updated),
+            "removedProfiles": removed,
+            "error": sqlite_err or json_err or "",
+        })
+    _signal_openclaw_gateway(restart=False)
+    return {
+        "ok": all(item["ok"] for item in summary),
+        "sourceAgent": "main",
+        "provider": provider,
+        "profileId": profile_id,
+        "syncedProfiles": sorted(managed_profiles.keys()),
+        "touchedAgents": touched,
+        "agents": summary,
+        "removedProfilesByAgent": removed_by_agent,
+    }
+
+
+def _reset_openclaw_static_auth_overrides(agent_id=None, provider=None):
+    agent_id = _safe_openclaw_agent_id(agent_id) if agent_id else ""
+    if agent_id == "main":
+        return {"ok": False, "error": "main is the Virtual Office global auth source and cannot be reset to itself"}
+    return _sync_openclaw_static_auth_from_main(provider=provider, target_agent=agent_id or None, prune=True)
+
+
+def _save_openclaw_api_key_direct(provider, profile_id, api_key, agent_id=None):
+    profile = {"type": "api_key", "provider": provider, "key": api_key}
+    agent_id = _safe_openclaw_agent_id(agent_id)
+
+    def updater(data):
+        profiles = data.setdefault("profiles", {})
+        if profiles.get(profile_id) == profile:
+            return False
+        profiles[profile_id] = dict(profile)
+        last_good = data.get("lastGood")
+        if isinstance(last_good, dict):
+            last_good[provider] = profile_id
+        return True
+
+    sqlite_updates, sqlite_err = _update_openclaw_sqlite_auth_stores(updater, agent_id=agent_id)
+    json_updated, json_err = _update_openclaw_auth_profiles_json(
+        updater,
+        create_if_missing=(sqlite_updates == 0 and not sqlite_err),
+        agent_id=agent_id,
+    )
+    if sqlite_err and not json_updated:
+        return {"ok": False, "error": f"Cannot write OpenClaw auth store: {sqlite_err}"}
+    if json_err and sqlite_updates == 0:
+        return {"ok": False, "error": f"Cannot write auth-profiles.json: {json_err}"}
+
+    _mirror_openclaw_config_auth_profile(provider, profile_id)
+    _signal_openclaw_gateway(restart=False)
+    return {
+        "ok": True,
+        "provider": provider,
+        "profileId": profile_id,
+        "agent": agent_id,
+        "maskedKey": _mask_secret(api_key),
+        "source": "direct-auth-store",
+    }
+
+
+def _delete_openclaw_auth_direct(provider, profile_id="", agent_id=None):
+    deleted = set()
+    agent_id = _safe_openclaw_agent_id(agent_id)
+
+    def should_delete(pid, profile):
+        if profile_id:
+            return pid == profile_id
+        if (profile.get("provider") or pid.split(":", 1)[0]) != provider:
+            return False
+        ptype = str(profile.get("type") or profile.get("mode") or "").lower()
+        return ptype in {"api_key", "key"} or "key" in profile
+
+    def updater(data):
+        profiles = data.setdefault("profiles", {})
+        remove = [pid for pid, profile in profiles.items() if isinstance(profile, dict) and should_delete(pid, profile)]
+        for pid in remove:
+            profiles.pop(pid, None)
+            deleted.add(pid)
+        last_good = data.get("lastGood")
+        if isinstance(last_good, dict):
+            for key, value in list(last_good.items()):
+                if value in remove:
+                    last_good.pop(key, None)
+        return bool(remove)
+
+    sqlite_updates, sqlite_err = _update_openclaw_sqlite_auth_stores(updater, agent_id=agent_id)
+    json_updated, json_err = _update_openclaw_auth_profiles_json(updater, create_if_missing=False, agent_id=agent_id)
+    if sqlite_err and not json_updated:
+        return {"ok": False, "error": f"Cannot write OpenClaw auth store: {sqlite_err}"}
+    if json_err and sqlite_updates == 0:
+        return {"ok": False, "error": f"Cannot write auth-profiles.json: {json_err}"}
+    state_updates, state_err = _cleanup_openclaw_sqlite_auth_state(agent_id, provider, deleted)
+    if state_err and not deleted:
+        return {"ok": False, "error": f"Cannot update OpenClaw auth state: {state_err}"}
+
+    _remove_openclaw_config_auth_profiles(deleted)
+    _signal_openclaw_gateway(restart=False)
+    return {"ok": True, "provider": provider, "agent": agent_id, "deletedProfiles": sorted(deleted), "stateUpdates": state_updates, "source": "direct-auth-store"}
+
+
+def _save_openclaw_api_key(provider, api_key, profile_id="", agent_id=None, sync_all=False):
+    provider = _safe_provider_id(provider)
+    agent_id = _safe_openclaw_agent_id(agent_id)
+    api_key = str(api_key or "").strip()
+    profile_id = str(profile_id or f"{provider}:manual").strip()
+    if not provider or not api_key:
+        return {"ok": False, "error": "provider and API key are required"}
+    if sync_all:
+        saved = _save_openclaw_api_key(provider, api_key, profile_id, agent_id="main", sync_all=False)
+        if not saved.get("ok"):
+            return saved
+        sync_result = _sync_openclaw_static_auth_from_main(provider=provider, profile_id=profile_id)
+        return {
+            **saved,
+            "agent": "main",
+            "scope": "global",
+            "sync": sync_result,
+            "ok": bool(saved.get("ok") and sync_result.get("ok")),
+        }
+    openclaw_bin = _openclaw_binary() or OPENCLAW_BIN
+    if openclaw_bin:
+        result = _run_json_command(
+            [openclaw_bin, "models", "auth", "paste-api-key", "--agent", agent_id, "--provider", provider, "--profile-id", profile_id],
+            input_text=api_key + "\n",
+            timeout=30,
+        )
+        if result.get("ok"):
+            _mirror_openclaw_config_auth_profile(provider, profile_id)
+            _signal_openclaw_gateway(restart=False)
+            return {"ok": True, "provider": provider, "profileId": profile_id, "agent": agent_id, "maskedKey": _mask_secret(api_key)}
+    return _save_openclaw_api_key_direct(provider, profile_id, api_key, agent_id=agent_id)
+
+
+def _delete_openclaw_auth(provider, profile_id="", agent_id=None, sync_all=False):
+    provider = _safe_provider_id(provider)
+    agent_id = _safe_openclaw_agent_id(agent_id)
+    profile_id = str(profile_id or "").strip()
+    if not provider and not profile_id:
+        return {"ok": False, "error": "provider or profileId is required"}
+    if sync_all:
+        results = []
+        deleted = set()
+        for target in _openclaw_agent_ids():
+            result = _delete_openclaw_auth_direct(provider, profile_id, agent_id=target)
+            results.append(result)
+            deleted.update(result.get("deletedProfiles") or [])
+        _signal_openclaw_gateway(restart=False)
+        return {
+            "ok": all(item.get("ok") for item in results),
+            "provider": provider,
+            "profileId": profile_id,
+            "scope": "global",
+            "deletedProfiles": sorted(deleted),
+            "agents": results,
+            "source": "global-auth-store",
+        }
+    return _delete_openclaw_auth_direct(provider, profile_id, agent_id=agent_id)
+
+# ─── DYNAMIC AGENT DISCOVERY ─────────────────────────────────
+from discovery import discover_all_agents, discover_hermes_agents, get_agent_workspace_dir, get_agent_session_id
+from providers.codex import CodexProvider
+from providers.claude_code import ClaudeCodeProvider
+
+def _hermes_platform_roster_agent():
+    """Return the synthetic Hermes Messaging Gateway office agent, if enabled."""
+    hermes = VO_CONFIG.get("hermes", {})
+    if not hermes.get("platformEnabled") or not hermes.get("platformToken"):
+        return None
+    agent_id = str(hermes.get("platformAgentId") or "hermes-gateway").strip() or "hermes-gateway"
+    now_ms = int(time.time() * 1000)
+    return {
+        "id": agent_id,
+        "statusKey": agent_id,
+        "providerKind": "hermes",
+        "providerType": "gateway-platform",
+        "providerAgentId": "gateway",
+        "profile": "gateway",
+        "name": "Hermes Gateway",
+        "emoji": os.environ.get("VO_HERMES_GATEWAY_AGENT_EMOJI", "⚕️"),
+        "role": "Hermes Messaging Gateway platform adapter",
+        "model": "Hermes Gateway",
+        "provider": "Hermes Messaging Gateway",
+        "gateway": "my_virtual_office",
+        "workspace": "",
+        "home": "",
+        "binary": "",
+        "lastActiveAt": now_ms,
+        "capabilities": ["chat", "presence", "messages"],
+        "connectionModes": ["gateway-platform"],
+        "cliAvailable": False,
+        "apiAvailable": False,
+        "desktopAvailable": False,
+    }
+
+def _now_ms():
+    return int(time.time() * 1000)
+
+
+def _hermes_platform_queue_path():
+    return os.path.join(STATUS_DIR, "hermes-platform-queue.json")
+
+
+def _hermes_platform_ready():
+    cfg = VO_CONFIG.get("hermes", {})
+    return bool(cfg.get("platformEnabled") and cfg.get("platformToken"))
+
+
+def _hermes_platform_state_default():
+    return {
+        "schema": "vo.hermes-platform-queue.v1",
+        "messages": [],
+        "adapters": {},
+        "updatedAt": _now_ms(),
+    }
+
+
+def _load_hermes_platform_state():
+    path = _hermes_platform_queue_path()
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            return _hermes_platform_state_default()
+        messages = data.get("messages") if isinstance(data.get("messages"), list) else []
+        adapters = data.get("adapters") if isinstance(data.get("adapters"), dict) else {}
+        return {
+            "schema": data.get("schema") or "vo.hermes-platform-queue.v1",
+            "messages": messages,
+            "adapters": adapters,
+            "updatedAt": int(data.get("updatedAt") or 0),
+        }
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return _hermes_platform_state_default()
+
+
+def _save_hermes_platform_state(state):
+    state = dict(state or {})
+    messages = state.get("messages") if isinstance(state.get("messages"), list) else []
+    if len(messages) > _HERMES_PLATFORM_MAX_MESSAGES:
+        messages = messages[-_HERMES_PLATFORM_MAX_MESSAGES:]
+    state["messages"] = messages
+    state.setdefault("schema", "vo.hermes-platform-queue.v1")
+    state.setdefault("adapters", {})
+    state["updatedAt"] = _now_ms()
+    _atomic_write_text(_hermes_platform_queue_path(), json.dumps(state, indent=2, ensure_ascii=False) + "\n")
+    try:
+        os.chmod(_hermes_platform_queue_path(), 0o666)
+    except OSError:
+        pass
+
+
+def _hermes_platform_counts(state):
+    counts = {}
+    for msg in state.get("messages") or []:
+        status = str(msg.get("status") or "queued")
+        counts[status] = counts.get(status, 0) + 1
+    return counts
+
+
+def _hermes_platform_public_message(msg):
+    return {
+        "id": msg.get("id"),
+        "text": msg.get("text") or "",
+        "chatId": msg.get("chatId") or "",
+        "chatName": msg.get("chatName") or msg.get("chatId") or "",
+        "chatType": msg.get("chatType") or "dm",
+        "userId": msg.get("userId") or "",
+        "userName": msg.get("userName") or "",
+        "conversationId": msg.get("conversationId") or "",
+        "threadId": msg.get("threadId") or "",
+        "messageId": msg.get("id"),
+        "leaseId": msg.get("leaseId") or "",
+        "createdAt": msg.get("createdAt") or 0,
+        "metadata": msg.get("metadata") if isinstance(msg.get("metadata"), dict) else {},
+        "sourceRef": msg.get("from") if isinstance(msg.get("from"), dict) else {},
+        "targetRef": msg.get("to") if isinstance(msg.get("to"), dict) else {},
+    }
+
+
+def _hermes_platform_adapter_id(value=None):
+    raw = str(value or os.environ.get("VO_HERMES_PLATFORM_ADAPTER_ID") or "hermes-gateway").strip()
+    return raw[:120] or "hermes-gateway"
+
+
+def _hermes_platform_agent_ref(agent_id=None):
+    cfg = VO_CONFIG.get("hermes", {})
+    target_id = str(agent_id or cfg.get("platformAgentId") or "hermes-gateway").strip() or "hermes-gateway"
+    ref = _office_agent_ref(target_id)
+    if ref.get("providerKind") == "unknown":
+        ref.update({
+            "id": target_id,
+            "nativeId": "gateway",
+            "providerKind": "hermes",
+            "providerType": "gateway-platform",
+            "name": "Hermes Gateway",
+            "emoji": os.environ.get("VO_HERMES_GATEWAY_AGENT_EMOJI", "⚕️"),
+        })
+    else:
+        ref["providerType"] = ref.get("providerType") or "gateway-platform"
+    return ref
+
+
+def _hermes_platform_source_ref(body):
+    from_type = str(body.get("fromType") or body.get("senderType") or "human").strip().lower()
+    from_agent_id = str(body.get("fromAgentId") or body.get("from") or "").strip()
+    if from_agent_id and from_type not in {"human", "user", "chat", "ui"}:
+        return _office_agent_ref(from_agent_id)
+    user_id = str(body.get("fromUserId") or body.get("fromId") or body.get("userId") or "user").strip() or "user"
+    display_name = str(body.get("fromDisplayName") or body.get("displayName") or body.get("fromName") or body.get("userName") or "User").strip() or "User"
+    return {
+        "id": user_id,
+        "nativeId": user_id,
+        "providerKind": "human",
+        "providerType": "chat-window",
+        "name": display_name,
+        "emoji": "",
+        "sourceApp": str(body.get("sourceApp") or body.get("app") or "virtual-office").strip() or "virtual-office",
+        "sourceSurface": str(body.get("sourceSurface") or body.get("surface") or "chat-window").strip() or "chat-window",
+        "sourceLabel": str(body.get("sourceLabel") or "").strip(),
+    }
+
+
+def _hermes_platform_request_token(headers):
+    auth = str(headers.get("Authorization") or "").strip()
+    if auth.lower().startswith("bearer "):
+        return auth.split(" ", 1)[1].strip()
+    for name in ("X-Virtual-Office-Token", "X-My-Virtual-Office-Token", "X-Hermes-Platform-Token"):
+        val = str(headers.get(name) or "").strip()
+        if val:
+            return val
+    return ""
+
+
+def _hermes_platform_auth_error(headers):
+    cfg = VO_CONFIG.get("hermes", {})
+    if not cfg.get("platformEnabled"):
+        return {"ok": False, "error": "Hermes platform bridge is disabled", "_status": 503}
+    expected = str(cfg.get("platformToken") or "").strip()
+    if not expected:
+        return {"ok": False, "error": "Hermes platform bridge token is not configured", "_status": 503}
+    provided = _hermes_platform_request_token(headers)
+    if not provided:
+        return {"ok": False, "error": "Hermes platform bridge token is required", "_status": 401}
+    if not secrets.compare_digest(provided, expected):
+        return {"ok": False, "error": "Hermes platform bridge token is invalid", "_status": 403}
+    return None
+
+
+def _handle_hermes_platform_status():
+    with _HERMES_PLATFORM_LOCK:
+        state = _load_hermes_platform_state()
+    adapters = {}
+    now = _now_ms()
+    for key, item in (state.get("adapters") or {}).items():
+        if not isinstance(item, dict):
+            continue
+        last_seen = int(item.get("lastSeenAt") or 0)
+        adapters[key] = {
+            "adapterId": key,
+            "lastSeenAt": last_seen,
+            "ageSec": max(0, int((now - last_seen) / 1000)) if last_seen else None,
+            "status": item.get("status") or "unknown",
+            "version": item.get("version") or "",
+        }
+    return {
+        "ok": True,
+        "enabled": bool(VO_CONFIG.get("hermes", {}).get("platformEnabled")),
+        "configured": bool(VO_CONFIG.get("hermes", {}).get("platformToken")),
+        "agentId": VO_CONFIG.get("hermes", {}).get("platformAgentId") or "hermes-gateway",
+        "counts": _hermes_platform_counts(state),
+        "adapters": adapters,
+    }
+
+
+def _handle_hermes_platform_enqueue(body):
+    if not _hermes_platform_ready():
+        return {"ok": False, "error": "Hermes platform bridge is not configured", "_status": 503}
+    message = str(body.get("message") or body.get("text") or "").strip()
+    if not message:
+        return {"ok": False, "error": "message is required", "_status": 400}
+    if len(message) > 60000:
+        return {"ok": False, "error": "message is too large", "_status": 413}
+
+    metadata = body.get("metadata") if isinstance(body.get("metadata"), dict) else {}
+    metadata = dict(metadata)
+    source_app = str(body.get("sourceApp") or body.get("app") or "virtual-office").strip() or "virtual-office"
+    source_surface = str(body.get("sourceSurface") or body.get("surface") or "chat-window").strip() or "chat-window"
+    source_label = str(body.get("sourceLabel") or "").strip()
+    metadata.setdefault("sourceApp", source_app)
+    metadata.setdefault("sourceSurface", source_surface)
+    if source_label:
+        metadata.setdefault("sourceLabel", source_label)
+    metadata.setdefault("bridge", "hermes-gateway-platform")
+
+    to_ref = _hermes_platform_agent_ref(body.get("toAgentId") or body.get("to"))
+    from_ref = _hermes_platform_source_ref(body)
+    conversation_id = str(body.get("conversationId") or body.get("threadId") or f"{from_ref['id']}__{to_ref['id']}").strip()
+    chat_id = str(body.get("chatId") or conversation_id).strip() or conversation_id
+    chat_name = str(body.get("chatName") or body.get("roomName") or conversation_id).strip() or conversation_id
+    chat_type = str(body.get("chatType") or "dm").strip().lower() or "dm"
+    if chat_type not in {"dm", "group", "channel"}:
+        chat_type = "dm"
+    thread_id = str(body.get("threadId") or conversation_id).strip() or conversation_id
+
+    inbound = _append_comm_event({
+        "type": "message",
+        "direction": "request",
+        "conversationId": conversation_id,
+        "from": from_ref,
+        "to": to_ref,
+        "text": message,
+        "metadata": metadata,
+        "visibleInOffice": bool(body.get("visibleInOffice", True)),
+    })
+
+    msg = {
+        "schema": "vo.hermes-platform-message.v1",
+        "id": str(uuid.uuid4()),
+        "createdAt": _now_ms(),
+        "updatedAt": _now_ms(),
+        "status": "queued",
+        "attempts": 0,
+        "conversationId": conversation_id,
+        "chatId": chat_id,
+        "chatName": chat_name,
+        "chatType": chat_type,
+        "threadId": thread_id,
+        "userId": from_ref.get("nativeId") or from_ref.get("id") or "user",
+        "userName": from_ref.get("name") or "User",
+        "text": message,
+        "from": from_ref,
+        "to": to_ref,
+        "commEventId": inbound.get("id"),
+        "metadata": {**metadata, "commEventId": inbound.get("id")},
+    }
+    with _HERMES_PLATFORM_LOCK:
+        state = _load_hermes_platform_state()
+        state.setdefault("messages", []).append(msg)
+        _save_hermes_platform_state(state)
+
+    gateway_presence.set_manual_override(to_ref["id"], "working", "Queued message via Hermes Gateway")
+    return {
+        "ok": True,
+        "messageId": msg["id"],
+        "conversationId": conversation_id,
+        "chatId": chat_id,
+        "message": _hermes_platform_public_message(msg),
+    }
+
+
+def _handle_hermes_platform_poll(query):
+    if not _hermes_platform_ready():
+        return {"ok": False, "error": "Hermes platform bridge is not configured", "_status": 503}
+    adapter_id = _hermes_platform_adapter_id((query.get("adapterId") or query.get("adapter") or [""])[0])
+    try:
+        limit = max(1, min(20, int((query.get("limit") or ["5"])[0] or 5)))
+    except Exception:
+        limit = 5
+    try:
+        lease_sec = max(10, min(900, int((query.get("leaseSec") or [VO_CONFIG.get("hermes", {}).get("platformPollLeaseSec") or 120])[0] or 120)))
+    except Exception:
+        lease_sec = 120
+
+    now = _now_ms()
+    selected = []
+    with _HERMES_PLATFORM_LOCK:
+        state = _load_hermes_platform_state()
+        adapters = state.setdefault("adapters", {})
+        adapters[adapter_id] = {
+            **(adapters.get(adapter_id) if isinstance(adapters.get(adapter_id), dict) else {}),
+            "adapterId": adapter_id,
+            "lastSeenAt": now,
+            "status": "polling",
+            "version": (query.get("version") or [""])[0],
+        }
+        for msg in state.get("messages") or []:
+            status = str(msg.get("status") or "queued")
+            leased_at = int(msg.get("leasedAt") or 0)
+            stale_lease = status == "leased" and leased_at and now - leased_at > lease_sec * 1000
+            if status != "queued" and not stale_lease:
+                continue
+            lease_id = str(uuid.uuid4())
+            msg.update({
+                "status": "leased",
+                "leaseId": lease_id,
+                "leasedAt": now,
+                "leasedBy": adapter_id,
+                "attempts": int(msg.get("attempts") or 0) + 1,
+                "updatedAt": now,
+            })
+            selected.append(_hermes_platform_public_message(msg))
+            if len(selected) >= limit:
+                break
+        _save_hermes_platform_state(state)
+    return {"ok": True, "adapterId": adapter_id, "messages": selected}
+
+
+def _handle_hermes_platform_ack(body):
+    message_id = str(body.get("messageId") or body.get("id") or "").strip()
+    lease_id = str(body.get("leaseId") or "").strip()
+    ok = bool(body.get("ok", True))
+    if not message_id:
+        return {"ok": False, "error": "messageId is required", "_status": 400}
+    with _HERMES_PLATFORM_LOCK:
+        state = _load_hermes_platform_state()
+        for msg in state.get("messages") or []:
+            if msg.get("id") != message_id:
+                continue
+            if lease_id and msg.get("leaseId") and msg.get("leaseId") != lease_id:
+                return {"ok": False, "error": "leaseId does not match current message lease", "_status": 409}
+            if ok:
+                if msg.get("status") != "replied":
+                    msg["status"] = "delivered"
+                msg["deliveredAt"] = _now_ms()
+                msg["lastError"] = ""
+            else:
+                msg["lastError"] = str(body.get("error") or "adapter did not accept message")[:500]
+                msg["status"] = "queued" if int(msg.get("attempts") or 0) < 5 else "failed"
+            msg["updatedAt"] = _now_ms()
+            _save_hermes_platform_state(state)
+            return {"ok": True, "messageId": message_id, "status": msg.get("status")}
+    return {"ok": False, "error": f"Hermes platform message '{message_id}' not found", "_status": 404}
+
+
+def _find_hermes_platform_message(state, message_id="", chat_id=""):
+    messages = state.get("messages") or []
+    if message_id:
+        for msg in reversed(messages):
+            if msg.get("id") == message_id:
+                return msg
+    if chat_id:
+        for msg in reversed(messages):
+            if msg.get("chatId") == chat_id and msg.get("status") in {"leased", "delivered", "replied"}:
+                return msg
+    return None
+
+
+def _handle_hermes_platform_reply(body):
+    if not _hermes_platform_ready():
+        return {"ok": False, "error": "Hermes platform bridge is not configured", "_status": 503}
+    text = str(body.get("message") or body.get("text") or body.get("content") or "").strip()
+    if not text:
+        return {"ok": False, "error": "message is required", "_status": 400}
+    message_id = str(body.get("messageId") or body.get("inReplyTo") or body.get("replyToMessageId") or "").strip()
+    chat_id = str(body.get("chatId") or "").strip()
+    adapter_id = _hermes_platform_adapter_id(body.get("adapterId") or body.get("adapter"))
+    body_metadata = body.get("metadata") if isinstance(body.get("metadata"), dict) else {}
+
+    with _HERMES_PLATFORM_LOCK:
+        state = _load_hermes_platform_state()
+        msg = _find_hermes_platform_message(state, message_id=message_id, chat_id=chat_id)
+        if msg:
+            from_ref = msg.get("to") if isinstance(msg.get("to"), dict) else _hermes_platform_agent_ref()
+            to_ref = msg.get("from") if isinstance(msg.get("from"), dict) else _hermes_platform_source_ref({"fromUserId": chat_id or "user"})
+            conversation_id = msg.get("conversationId") or chat_id or f"{from_ref.get('id')}__{to_ref.get('id')}"
+            metadata = dict(msg.get("metadata") if isinstance(msg.get("metadata"), dict) else {})
+            metadata.update(body_metadata)
+            metadata["adapterId"] = adapter_id
+            outbound = _append_comm_event({
+                "type": "message",
+                "direction": "reply",
+                "conversationId": conversation_id,
+                "from": from_ref,
+                "to": to_ref,
+                "text": text,
+                "inReplyTo": msg.get("commEventId") or msg.get("id"),
+                "metadata": metadata,
+                "visibleInOffice": True,
+                "ok": True,
+            })
+            msg.update({
+                "status": "replied",
+                "replyText": text,
+                "replyEventId": outbound.get("id"),
+                "repliedAt": _now_ms(),
+                "updatedAt": _now_ms(),
+            })
+            _save_hermes_platform_state(state)
+            gateway_presence.set_manual_override(from_ref.get("id") or "hermes-gateway", "idle", "")
+            return {
+                "ok": True,
+                "messageId": msg.get("id"),
+                "conversationId": conversation_id,
+                "replyMessageId": outbound.get("id"),
+            }
+
+    from_ref = _hermes_platform_agent_ref(body.get("fromAgentId"))
+    to_ref = _hermes_platform_source_ref({
+        "fromUserId": chat_id or "virtual-office",
+        "fromDisplayName": body.get("chatName") or chat_id or "Virtual Office",
+        "sourceApp": "virtual-office",
+        "sourceSurface": "hermes-gateway-platform",
+    })
+    conversation_id = str(body.get("conversationId") or chat_id or f"{from_ref['id']}__{to_ref['id']}").strip()
+    outbound = _append_comm_event({
+        "type": "message",
+        "direction": "reply",
+        "conversationId": conversation_id,
+        "from": from_ref,
+        "to": to_ref,
+        "text": text,
+        "metadata": {**body_metadata, "adapterId": adapter_id, "unmatched": True},
+        "visibleInOffice": True,
+        "ok": True,
+    })
+    return {"ok": True, "conversationId": conversation_id, "replyMessageId": outbound.get("id"), "unmatched": True}
+
+
+def _handle_hermes_platform_heartbeat(body):
+    if not _hermes_platform_ready():
+        return {"ok": False, "error": "Hermes platform bridge is not configured", "_status": 503}
+    adapter_id = _hermes_platform_adapter_id(body.get("adapterId") or body.get("adapter"))
+    status = str(body.get("status") or "connected").strip() or "connected"
+    now = _now_ms()
+    with _HERMES_PLATFORM_LOCK:
+        state = _load_hermes_platform_state()
+        adapters = state.setdefault("adapters", {})
+        adapters[adapter_id] = {
+            **(adapters.get(adapter_id) if isinstance(adapters.get(adapter_id), dict) else {}),
+            "adapterId": adapter_id,
+            "lastSeenAt": now,
+            "status": status,
+            "version": str(body.get("version") or ""),
+        }
+        _save_hermes_platform_state(state)
+    agent_id = str(body.get("agentId") or VO_CONFIG.get("hermes", {}).get("platformAgentId") or "hermes-gateway")
+    if status == "working":
+        gateway_presence.set_manual_override(agent_id, "working", "Hermes Gateway processing")
+    elif status == "disconnected":
+        gateway_presence.set_manual_override(agent_id, "idle", "")
+    else:
+        gateway_presence.set_manual_override(agent_id, "idle", "Hermes Gateway connected")
+    return {"ok": True, "adapterId": adapter_id, "seenAt": now}
+
+
+def _get_hermes_platform_message(message_id):
+    with _HERMES_PLATFORM_LOCK:
+        state = _load_hermes_platform_state()
+        return _find_hermes_platform_message(state, message_id=message_id)
+
+
+def _wait_for_hermes_platform_reply(message_id, timeout_sec=600):
+    deadline = time.time() + max(1, int(timeout_sec or 600))
+    while time.time() < deadline:
+        msg = _get_hermes_platform_message(message_id)
+        if msg and msg.get("replyText"):
+            return msg
+        time.sleep(0.5)
+    return None
+
+
+def _handle_hermes_platform_chat(body, agent):
+    message = str(body.get("message") or "").strip()
+    if not message:
+        return {"ok": False, "error": "message is required", "_status": 400}
+    timeout = int(body.get("timeoutSec") or VO_CONFIG.get("hermes", {}).get("timeoutSec") or 600)
+    profile = agent.get("profile") or "gateway"
+    agent_id = agent.get("statusKey") or agent.get("id") or VO_CONFIG.get("hermes", {}).get("platformAgentId") or "hermes-gateway"
+    now = _now_ms()
+    history = _load_hermes_history(profile)
+    history.append({
+        "role": "user",
+        "text": message,
+        "ts": now,
+        "agentId": agent_id,
+        "from": body.get("fromDisplayName") or "User",
+        "fromType": body.get("fromType") or "",
+        "sourceApp": body.get("sourceApp") or "virtual-office",
+        "sourceSurface": body.get("sourceSurface") or "chat-window",
+        "sourceLabel": body.get("sourceLabel") or "",
+        "attachments": body.get("attachments") if isinstance(body.get("attachments"), list) else [],
+    })
+    _save_hermes_history(profile, history)
+
+    enqueue = _handle_hermes_platform_enqueue({
+        **body,
+        "toAgentId": agent_id,
+        "chatId": body.get("conversationId") or f"{body.get('fromUserId') or 'user'}__{agent_id}",
+        "chatName": body.get("sourceLabel") or "Virtual Office Chat",
+        "chatType": "dm",
+        "metadata": {
+            **(body.get("metadata") if isinstance(body.get("metadata"), dict) else {}),
+            "providerPath": "gateway-platform",
+            "agentId": agent_id,
+        },
+    })
+    if not enqueue.get("ok"):
+        return enqueue
+
+    msg = _wait_for_hermes_platform_reply(enqueue.get("messageId"), timeout_sec=timeout)
+    if not msg:
+        gateway_presence.set_manual_override(agent_id, "idle", "")
+        return {
+            "ok": False,
+            "error": "Timed out waiting for Hermes Gateway platform reply",
+            "providerPath": "gateway-platform",
+            "_status": 504,
+        }
+
+    reply = msg.get("replyText") or ""
+    final_ts = _now_ms()
+    history = _load_hermes_history(profile)
+    history.append({
+        "role": "assistant",
+        "text": reply,
+        "ts": final_ts,
+        "agentId": agent_id,
+        "exitCode": 0,
+        "sessionId": msg.get("conversationId") or "",
+        "runId": msg.get("id") or "",
+        "tools": [],
+        "thinking": "",
+        "reasoningTokens": 0,
+    })
+    _save_hermes_history(profile, history)
+    return {
+        "ok": True,
+        "reply": reply,
+        "stderr": "",
+        "exitCode": 0,
+        "sessionId": msg.get("conversationId") or "",
+        "runId": msg.get("id") or "",
+        "providerPath": "gateway-platform",
+        "tools": [],
+        "thinking": "",
+        "reasoningTokens": 0,
+        "agent": {"id": agent_id, "name": agent.get("name") or "Hermes Gateway", "providerKind": "hermes", "profile": profile},
+    }
+
+def _save_codex_state(profile, state):
+    path = _codex_history_path(profile)
+    data = state if isinstance(state, dict) else {}
+    data.setdefault("messages", [])
+    data["updatedAt"] = int(time.time() * 1000)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        json.dump(data, f, indent=2)
+    try:
+        os.chmod(path, 0o666)
+    except OSError:
+        pass
+
+def _save_claude_code_state(profile, state):
+    path = _claude_code_history_path(profile)
+    data = state if isinstance(state, dict) else {}
+    data.setdefault("messages", [])
+    data["updatedAt"] = int(time.time() * 1000)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        json.dump(data, f, indent=2)
+    try:
+        os.chmod(path, 0o666)
+    except OSError:
+        pass
+
+def _save_hermes_state(profile, state):
+    path = _hermes_history_path(profile)
+    data = state if isinstance(state, dict) else {}
+    data["profile"] = profile
+    data.setdefault("messages", [])
+    data["updatedAt"] = int(time.time() * 1000)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        json.dump(data, f, indent=2)
+    try:
+        os.chmod(path, 0o666)
+    except OSError:
+        pass
+
+def _chat_sessions_agent(agent_id):
+    agent = _find_agent_record(agent_id)
+    if not agent:
+        return None
+    return {
+        "agentId": agent.get("statusKey") or agent.get("id"),
+        "providerKind": str(agent.get("providerKind") or "openclaw").lower(),
+        "profile": agent.get("profile") or agent.get("providerAgentId") or agent.get("id"),
+        "name": agent.get("name") or agent.get("id"),
+        "record": agent,
+    }
+
+def _openclaw_live_mode_session_key(agent_id):
+    return f"agent:{agent_id}:vw-live-mode-planner"
+
+def _openclaw_live_mode_enabled(agent_id):
+    state_fn = globals().get("get_live_agent_loop_state")
+    if callable(state_fn):
+        try:
+            state = state_fn(persist_migration=False)
+            agent_state = (state.get("agents") or {}).get(agent_id) or {}
+            return bool(agent_state.get("enabled"))
+        except Exception:
+            pass
+    features = VO_CONFIG.get("features", {}) if isinstance(VO_CONFIG.get("features"), dict) else {}
+    live_cfg = features.get("liveAgentMode") if isinstance(features.get("liveAgentMode"), dict) else {}
+    return bool(live_cfg.get(agent_id) or live_cfg.get("enabled"))
+
+def _openclaw_session_key_for_agent(agent_id, session_key="", default_bucket="main"):
+    safe_agent = _safe_openclaw_agent_id(agent_id)
+    prefix = f"agent:{safe_agent}:"
+    raw = str(session_key or "").strip()
+    if not raw:
+        return f"{prefix}{default_bucket}" if default_bucket else ""
+    if raw.startswith(prefix) and len(raw) > len(prefix):
+        return raw
+    if re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", raw):
+        return f"{prefix}{raw}"
+    return ""
+
+def _chat_sessions_openclaw_entry(agent_id, session_key, row=None, live_action_running=False):
+    key = _openclaw_session_key_for_agent(agent_id, session_key, default_bucket="")
+    if not key:
+        return None
+    prefix = f"agent:{_safe_openclaw_agent_id(agent_id)}:"
+    kind = key[len(prefix):]
+    is_live_planner = kind == "vw-live-mode-planner"
+    row = row if isinstance(row, dict) else {}
+    title = str(row.get("label") or row.get("title") or row.get("name") or "").strip()
+    if not title:
+        title = "Live Agent Mode" if is_live_planner else ("Main chat" if kind == "main" else kind)
+    return {
+        "id": key,
+        "sessionKey": key,
+        "title": title[:200],
+        "preview": str(row.get("preview") or row.get("lastMessage") or row.get("summary") or "")[:300],
+        "updatedAt": row.get("updatedAt") or row.get("lastActiveAt") or row.get("createdAt"),
+        "kind": "live-mode" if is_live_planner else ("main" if kind == "main" else "other"),
+        "liveMode": is_live_planner,
+        "active": bool(is_live_planner and live_action_running),
+        "deletable": kind != "main",
+    }
+
+def _chat_sessions_list_openclaw_files(agent_id, live_action_running=False, limit=200):
+    sessions_dir = os.path.join(WORKSPACE_BASE, "agents", _safe_openclaw_agent_id(agent_id), "sessions")
+    sessions_json_path = os.path.join(sessions_dir, "sessions.json")
+    try:
+        with open(sessions_json_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return []
+    if not isinstance(data, dict):
+        return []
+    entries = []
+    for session_key, row in data.items():
+        if not isinstance(row, dict):
+            continue
+        entry = _chat_sessions_openclaw_entry(agent_id, session_key, row, live_action_running=live_action_running)
+        if not entry:
+            continue
+        if not entry.get("updatedAt"):
+            session_id = str(row.get("sessionId") or "").strip()
+            candidates = [
+                os.path.join(sessions_dir, f"{session_id}.jsonl") if session_id else "",
+                os.path.join(sessions_dir, f"{session_id}.trajectory.jsonl") if session_id else "",
+            ]
+            mtimes = []
+            for path in candidates:
+                try:
+                    if path:
+                        mtimes.append(os.stat(path).st_mtime)
+                except OSError:
+                    pass
+            if mtimes:
+                entry["updatedAt"] = _epoch_to_utc_iso(max(mtimes))
+        entries.append(entry)
+    entries.sort(key=lambda s: _parse_iso_epoch_ms(s.get("updatedAt")), reverse=True)
+    return entries[: max(1, int(limit))]
+
+def _chat_sessions_list_openclaw(agent_ref, limit=40):
+    agent_id = agent_ref["agentId"]
+    live_action_running = _openclaw_live_mode_enabled(agent_id)
+    file_sessions = _chat_sessions_list_openclaw_files(agent_id, live_action_running=live_action_running, limit=max(200, int(limit) * 5))
+    gateway_sessions = []
+    gateway_error = ""
+    res = _gateway_rpc_call("sessions.list", {"limit": max(200, int(limit) * 5)}, timeout=15)
+    if res.get("ok"):
+        rows = res.get("sessions")
+        if not isinstance(rows, list):
+            payload = res.get("payload") if isinstance(res.get("payload"), dict) else {}
+            rows = payload.get("sessions") if isinstance(payload.get("sessions"), list) else []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            entry = _chat_sessions_openclaw_entry(agent_id, str(row.get("key") or row.get("sessionKey") or ""), row, live_action_running=live_action_running)
+            if entry:
+                gateway_sessions.append(entry)
+    else:
+        gateway_error = str(res.get("error") or "sessions.list failed")
+    sessions = _merge_openclaw_session_entries([*file_sessions, *gateway_sessions])
+    if live_action_running and not any(s.get("liveMode") for s in sessions):
+        sessions.insert(0, {
+            "id": _openclaw_live_mode_session_key(agent_id),
+            "sessionKey": _openclaw_live_mode_session_key(agent_id),
+            "title": "Live Agent Mode",
+            "preview": "Active autonomous mode session",
+            "updatedAt": None,
+            "kind": "live-mode",
+            "liveMode": True,
+            "active": True,
+            "deletable": False,
+            "virtual": True,
+        })
+    sessions.sort(key=lambda s: _parse_iso_epoch_ms(s.get("updatedAt")), reverse=True)
+    if sessions or not gateway_error:
+        return {"ok": True, "sessions": sessions[: max(1, int(limit))]}
+    return {"ok": False, "error": gateway_error, "sessions": []}
+
+def _chat_sessions_list_hermes(agent_ref, limit=40):
+    provider = _hermes_provider(agent_ref.get("record") or {})
+    profile = agent_ref["profile"] or "default"
+    outcome = provider.list_sessions(profile, limit=limit)
+    if not outcome.get("ok"):
+        return {"ok": False, "error": outcome.get("error"), "sessions": []}
+    active_id = _get_hermes_session_id(profile)
+    sessions = []
+    for row in outcome.get("sessions") or []:
+        sessions.append({
+            "id": row.get("id"),
+            "sessionKey": f"hermes:{profile}:{row.get('id')}",
+            "title": row.get("title") or row.get("id"),
+            "preview": row.get("preview") or "",
+            "updatedAt": row.get("lastActive") or None,
+            "kind": "chat",
+            "liveMode": False,
+            "active": bool(active_id and row.get("id") == active_id),
+            "deletable": True,
+        })
+    return {"ok": True, "sessions": sessions}
+
+def _chat_sessions_list_codex(agent_ref, limit=40):
+    provider = _codex_provider()
+    profile = agent_ref["profile"] or "main"
+    outcome = provider.list_threads(profile, limit=limit)
+    if not outcome.get("ok"):
+        return {"ok": False, "error": outcome.get("error"), "sessions": []}
+    active_id = _get_codex_session_id(profile)
+    sessions = []
+    for row in outcome.get("sessions") or []:
+        if row.get("archived"):
+            continue
+        sessions.append({
+            "id": row.get("id"),
+            "sessionKey": f"codex:{profile}:{row.get('id')}",
+            "title": row.get("title") or row.get("id"),
+            "preview": row.get("preview") or "",
+            "updatedAt": row.get("updatedAt"),
+            "kind": "chat",
+            "liveMode": False,
+            "active": bool(active_id and row.get("id") == active_id),
+            "deletable": True,
+        })
+    return {"ok": True, "sessions": sessions}
+
+def _claude_code_home_path():
+    cfg = VO_CONFIG.get("claudeCode", {}) or {}
+    return os.path.expanduser(str(os.environ.get("VO_CLAUDE_CODE_HOME") or os.environ.get("CLAUDE_CONFIG_DIR") or cfg.get("homePath") or "~/.claude"))
+
+def _claude_code_projects_dir():
+    return os.path.join(_claude_code_home_path(), "projects")
+
+def _claude_code_valid_session_id(session_id):
+    text = str(session_id or "").strip()
+    return text if re.fullmatch(r"[A-Za-z0-9_.:-]{8,128}", text) else ""
+
+def _claude_code_text_from_content(content):
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if isinstance(item, dict) and item.get("type") == "text" and item.get("text"):
+                parts.append(str(item.get("text") or ""))
+        return "\n".join(parts)
+    if isinstance(content, dict):
+        return str(content.get("text") or "")
+    return ""
+
+def _claude_code_session_records(limit=80):
+    projects_dir = _claude_code_projects_dir()
+    if not os.path.isdir(projects_dir):
+        return []
+    records = []
+    for path in glob.glob(os.path.join(projects_dir, "*", "*.jsonl")):
+        if ".deleted." in os.path.basename(path):
+            continue
+        session_id = _claude_code_valid_session_id(os.path.splitext(os.path.basename(path))[0])
+        if not session_id:
+            continue
+        title = ""
+        preview = ""
+        cwd = ""
+        updated_at = None
+        try:
+            stat = os.stat(path)
+            updated_at = _epoch_to_utc_iso(stat.st_mtime)
+            with open(path, "r", encoding="utf-8", errors="replace") as f:
+                for line in f:
+                    try:
+                        row = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if not isinstance(row, dict):
+                        continue
+                    if row.get("sessionId"):
+                        session_id = str(row.get("sessionId") or session_id)
+                    if row.get("cwd") and not cwd:
+                        cwd = str(row.get("cwd") or "")
+                    if row.get("timestamp"):
+                        updated_at = row.get("timestamp")
+                    if row.get("type") == "last-prompt" and row.get("lastPrompt"):
+                        title = str(row.get("lastPrompt") or "").replace("\n", " ").strip()[:120]
+                    message = row.get("message") if isinstance(row.get("message"), dict) else {}
+                    role = message.get("role") or row.get("type")
+                    text = _claude_code_text_from_content(message.get("content") if message else row.get("content")).strip()
+                    if text and role in ("user", "assistant"):
+                        if not title and role == "user":
+                            title = text.replace("\n", " ").strip()[:120]
+                        preview = text.replace("\n", " ").strip()[:300]
+        except OSError:
+            continue
+        records.append({"id": session_id, "path": path, "title": title or session_id, "preview": preview, "updatedAt": updated_at, "cwd": cwd})
+    records.sort(key=lambda row: str(row.get("updatedAt") or ""), reverse=True)
+    return records[: max(1, int(limit))]
+
+def _claude_code_find_session_file(session_id):
+    wanted = _claude_code_valid_session_id(session_id)
+    if not wanted:
+        return ""
+    for row in _claude_code_session_records(limit=500):
+        if str(row.get("id") or "") == wanted:
+            return str(row.get("path") or "")
+    return ""
+
+def _chat_sessions_list_claude_code(agent_ref, limit=40):
+    cfg = VO_CONFIG.get("claudeCode", {}) or {}
+    home_path = _claude_code_home_path()
+    if not os.path.isdir(home_path):
+        return {"ok": False, "error": f"Claude Code home not found at {home_path}", "sessions": []}
+    active_id = _get_claude_code_session_id(agent_ref["profile"] or "main")
+    sessions = []
+    for row in _claude_code_session_records(limit=limit):
+        session_id = row.get("id")
+        sessions.append({
+            "id": session_id,
+            "sessionKey": f"claude-code:{agent_ref['profile']}:{session_id}",
+            "title": row.get("title") or session_id,
+            "preview": row.get("preview") or "",
+            "updatedAt": row.get("updatedAt"),
+            "kind": "chat",
+            "liveMode": False,
+            "active": bool(active_id and session_id == active_id),
+            "deletable": True,
+            "cwd": row.get("cwd") or "",
+        })
+    return {"ok": True, "sessions": sessions, "binary": str(cfg.get("binary") or "claude"), "homePath": home_path, "resumeCommand": "claude --resume <session-id>"}
+
+def handle_chat_sessions_list(agent_id, limit=40):
+    agent_ref = _chat_sessions_agent(agent_id)
+    if not agent_ref:
+        return {"ok": False, "error": f"Unknown agent: {agent_id}", "sessions": []}, 404
+    kind = agent_ref["providerKind"]
+    if kind == "hermes":
+        outcome = _chat_sessions_list_hermes(agent_ref, limit=limit)
+    elif kind == "codex":
+        outcome = _chat_sessions_list_codex(agent_ref, limit=limit)
+    elif kind == "openclaw":
+        outcome = _chat_sessions_list_openclaw(agent_ref, limit=limit)
+    elif kind in ("claude-code", "claudecode", "claude"):
+        outcome = _chat_sessions_list_claude_code(agent_ref, limit=limit)
+    else:
+        outcome = {"ok": False, "error": f"{kind} session management is not supported yet", "sessions": []}
+    status = 200 if outcome.get("ok") else 502
+    return {"schemaVersion": CHAT_SESSION_SCHEMA_VERSION, "agentId": agent_ref["agentId"], "providerKind": kind, "profile": agent_ref["profile"], **outcome}, status
+
+def handle_chat_session_create(agent_id, body=None):
+    agent_ref = _chat_sessions_agent(agent_id)
+    if not agent_ref:
+        return {"ok": False, "error": f"Unknown agent: {agent_id}"}, 404
+    kind = agent_ref["providerKind"]
+    profile = agent_ref["profile"]
+    if kind == "hermes":
+        _save_hermes_state(profile, {"messages": [], "sessionId": ""})
+        return {"ok": True, "providerKind": kind, "profile": profile, "sessionId": "", "note": "New Hermes session starts with the next message."}, 200
+    if kind == "codex":
+        _save_codex_state(profile, {"messages": [], "sessionId": ""})
+        _clear_codex_token_usage(profile)
+        return {"ok": True, "providerKind": kind, "profile": profile, "sessionId": "", "note": "New Codex thread starts with the next message."}, 200
+    if kind in ("claude-code", "claudecode", "claude"):
+        _save_claude_code_state(profile, {"messages": [], "sessionId": ""})
+        _clear_claude_code_token_usage(profile)
+        return {"ok": True, "providerKind": kind, "profile": profile, "sessionId": "", "note": "New Claude Code session starts with the next message."}, 200
+    if kind == "openclaw":
+        session_key = _openclaw_session_key_for_agent(agent_ref["agentId"], (body or {}).get("sessionKey"), default_bucket="main")
+        if not session_key:
+            return {"ok": False, "error": "Invalid session key for this agent"}, 400
+        res = _gateway_rpc_call("sessions.reset", {"key": session_key}, timeout=15)
+        if not res.get("ok"):
+            return {"ok": False, "error": str(res.get("error") or "sessions.reset failed")}, 502
+        return {"ok": True, "providerKind": kind, "sessionKey": session_key}, 200
+    return {"ok": False, "error": f"{kind} session management is not supported yet"}, 400
+
+def handle_chat_session_delete(agent_id, session_id, body=None):
+    agent_ref = _chat_sessions_agent(agent_id)
+    if not agent_ref:
+        return {"ok": False, "error": f"Unknown agent: {agent_id}"}, 404
+    if not session_id:
+        return {"ok": False, "error": "sessionId is required"}, 400
+    kind = agent_ref["providerKind"]
+    profile = agent_ref["profile"]
+    if kind == "hermes":
+        outcome = _hermes_provider(agent_ref.get("record") or {}).delete_session(profile, session_id)
+        if outcome.get("ok") and _get_hermes_session_id(profile) == session_id:
+            _save_hermes_state(profile, {"messages": [], "sessionId": ""})
+        return outcome, 200 if outcome.get("ok") else 502
+    if kind == "codex":
+        outcome = _codex_provider().delete_thread(profile, session_id)
+        if outcome.get("ok") and _get_codex_session_id(profile) == session_id:
+            _save_codex_state(profile, {"messages": [], "sessionId": ""})
+            _clear_codex_token_usage(profile)
+        return outcome, 200 if outcome.get("ok") else 502
+    if kind in ("claude-code", "claudecode", "claude"):
+        path = _claude_code_find_session_file(session_id)
+        if not path:
+            return {"ok": False, "error": "Claude Code session not found"}, 404
+        deleted_path = f"{path}.deleted.{_utc_now_iso().replace(':', '-')}"
+        try:
+            os.replace(path, deleted_path)
+        except OSError as exc:
+            return {"ok": False, "error": str(exc)}, 500
+        if _get_claude_code_session_id(profile) == session_id:
+            _save_claude_code_state(profile, {"messages": [], "sessionId": ""})
+            _clear_claude_code_token_usage(profile)
+        return {"ok": True, "deleted": True, "sessionId": session_id, "deletedPath": deleted_path}, 200
+    if kind == "openclaw":
+        session_key = _openclaw_session_key_for_agent(agent_ref["agentId"], session_id, default_bucket="")
+        if not session_key:
+            return {"ok": False, "error": "Invalid session key for this agent"}, 400
+        if session_key.endswith(":main"):
+            return {"ok": False, "error": "The main session cannot be deleted; use new session to reset it."}, 400
+        res = _gateway_rpc_call("sessions.delete", {"key": session_key, "deleteTranscript": True}, timeout=15)
+        if not res.get("ok"):
+            return {"ok": False, "error": str(res.get("error") or "sessions.delete failed")}, 502
+        return {"ok": True, "deleted": True, "sessionKey": session_key}, 200
+    return {"ok": False, "error": f"{kind} session management is not supported yet"}, 400
+
+def handle_chat_session_switch(agent_id, session_id, body=None):
+    agent_ref = _chat_sessions_agent(agent_id)
+    if not agent_ref:
+        return {"ok": False, "error": f"Unknown agent: {agent_id}"}, 404
+    if not session_id:
+        return {"ok": False, "error": "sessionId is required"}, 400
+    kind = agent_ref["providerKind"]
+    profile = agent_ref["profile"]
+    if kind == "hermes":
+        exported = _hermes_provider(agent_ref.get("record") or {}).export_session(profile, session_id)
+        if not exported.get("ok"):
+            return {"ok": False, "error": exported.get("error") or "Hermes session export failed"}, 502
+        messages = _hermes_session_to_chat_messages(exported.get("session") or {}, agent_ref)
+        _save_hermes_state(profile, {"messages": messages, "sessionId": session_id})
+        return {"ok": True, "providerKind": kind, "sessionId": session_id, "messages": messages}, 200
+    if kind == "codex":
+        outcome = _codex_provider().read_thread(profile, session_id)
+        if not outcome.get("ok"):
+            return {"ok": False, "error": outcome.get("error") or "Codex thread read failed"}, 502
+        messages = _codex_thread_to_chat_messages(outcome.get("thread") or {}, agent_ref)
+        state = _load_codex_state(profile)
+        state["messages"] = messages[-500:]
+        state["sessionId"] = session_id
+        _save_codex_state(profile, state)
+        return {"ok": True, "providerKind": kind, "sessionId": session_id, "messages": messages}, 200
+    if kind in ("claude-code", "claudecode", "claude"):
+        path = _claude_code_find_session_file(session_id)
+        if not path:
+            return {"ok": False, "error": "Claude Code session not found"}, 404
+        messages = _claude_code_jsonl_to_chat_messages(path, agent_ref)
+        _save_claude_code_state(profile, {"messages": messages[-500:], "sessionId": session_id})
+        return {"ok": True, "providerKind": kind, "sessionId": session_id, "messages": messages, "resumeCommand": f"claude --resume {session_id}"}, 200
+    if kind == "openclaw":
+        session_key = _openclaw_session_key_for_agent(agent_ref["agentId"], session_id, default_bucket="")
+        if not session_key:
+            return {"ok": False, "error": "Invalid session key for this agent"}, 400
+        return {"ok": True, "providerKind": kind, "sessionKey": session_key}, 200
+    return {"ok": False, "error": f"{kind} session management is not supported yet"}, 400
+
+def _hermes_session_to_chat_messages(session, agent_ref):
+    messages = []
+    session_id = str(session.get("id") or "")
+    for msg in session.get("messages") or []:
+        if not isinstance(msg, dict):
+            continue
+        role = str(msg.get("role") or "")
+        if role == "tool":
+            continue
+        content = msg.get("content")
+        text = content if isinstance(content, str) else json.dumps(content)[:2000] if content else ""
+        if role not in ("user", "assistant") or not text:
+            continue
+        messages.append({"role": role, "text": text, "ts": int(time.time() * 1000), "from": agent_ref["name"] if role == "assistant" else "You", "fromType": "agent" if role == "assistant" else "human", "sessionId": session_id, "sessionTitle": f"Hermes session {session_id[-8:]}" if session_id else "Hermes session", "sessionKind": "chat", "activeSession": True, "source": "hermes"})
+    return messages[-500:]
+
+def _codex_thread_to_chat_messages(thread, agent_ref):
+    messages = []
+    thread_id = str(thread.get("id") or "")
+    for turn in thread.get("turns") or []:
+        if not isinstance(turn, dict):
+            continue
+        for item in turn.get("items") or []:
+            if not isinstance(item, dict):
+                continue
+            item_type = str(item.get("type") or "")
+            if item_type in ("userMessage", "user_message"):
+                content = item.get("content")
+                text = " ".join(str(part.get("text") or "") for part in content if isinstance(part, dict)) if isinstance(content, list) else str(item.get("text") or content or "")
+                if text.strip():
+                    messages.append({"role": "user", "text": text.strip()[:4000], "ts": int(time.time() * 1000), "from": "You", "fromType": "human", "sessionId": thread_id, "sessionTitle": f"Codex thread {thread_id[-8:]}" if thread_id else "Codex thread", "sessionKind": "chat", "activeSession": True, "source": "codex"})
+            elif item_type in ("agentMessage", "agent_message", "assistantMessage"):
+                text = str(item.get("text") or "")
+                if text.strip():
+                    messages.append({"role": "assistant", "text": text.strip()[:8000], "ts": int(time.time() * 1000), "from": agent_ref["name"], "fromType": "agent", "sessionId": thread_id, "sessionTitle": f"Codex thread {thread_id[-8:]}" if thread_id else "Codex thread", "sessionKind": "chat", "activeSession": True, "source": "codex"})
+    return messages[-500:]
+
+def _claude_code_jsonl_to_chat_messages(path, agent_ref):
+    messages = []
+    session_id = os.path.splitext(os.path.basename(path))[0]
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                try:
+                    row = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(row, dict):
+                    continue
+                msg = row.get("message") if isinstance(row.get("message"), dict) else {}
+                role = str(msg.get("role") or row.get("type") or "")
+                if role not in ("user", "assistant"):
+                    continue
+                text = _claude_code_text_from_content(msg.get("content")).strip()
+                if not text:
+                    continue
+                if row.get("sessionId"):
+                    session_id = str(row.get("sessionId") or session_id)
+                messages.append({"role": role, "text": text[:8000 if role == "assistant" else 4000], "ts": row.get("timestamp") or int(time.time() * 1000), "from": agent_ref["name"] if role == "assistant" else "You", "fromType": "agent" if role == "assistant" else "human", "sessionId": session_id, "sessionTitle": f"Claude Code {session_id[-8:]}" if session_id else "Claude Code session", "sessionKind": "chat", "activeSession": True, "source": "claude-code"})
+    except OSError:
+        pass
+    return messages[-500:]
+
+def _openclaw_session_meta_for_bubble(agent_id, session_info=None, jsonl_file=None):
+    session_info = session_info if isinstance(session_info, dict) else {}
+    session_key = str(session_info.get("key") or session_info.get("sessionKey") or "")
+    if not session_key:
+        return {}
+    kind = session_key.split(":", 2)[2] if session_key.count(":") >= 2 else ""
+    live_mode = kind == "vw-live-mode-planner"
+    title = str(session_info.get("label") or session_info.get("title") or "").strip()
+    if not title:
+        title = "Live Agent Mode" if live_mode else ("Main chat" if kind == "main" else kind)
+    return {"sessionKey": session_key, "sessionId": str(session_info.get("sessionId") or (os.path.splitext(os.path.basename(jsonl_file))[0] if jsonl_file else "")), "sessionTitle": title, "sessionKind": "live-mode" if live_mode else ("main" if kind == "main" else "other"), "liveMode": live_mode}
+
+def _agent_chat_apply_session_meta(messages, meta):
+    if not meta:
+        return messages
+    for msg in messages:
+        if not isinstance(msg, dict):
+            continue
+        msg["sessionKey"] = meta.get("sessionKey") or msg.get("sessionKey")
+        msg["sessionId"] = meta.get("sessionId") or msg.get("sessionId")
+        msg["sessionTitle"] = meta.get("sessionTitle") or msg.get("sessionTitle")
+        msg["sessionKind"] = meta.get("sessionKind") or msg.get("sessionKind")
+        if meta.get("liveMode") is not None:
+            msg["liveMode"] = bool(meta.get("liveMode"))
+    return messages
 
 if __name__ == "__main__":
     # Start API usage collector background thread

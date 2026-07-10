@@ -1,0 +1,43 @@
+name: my-virtual-office-platform
+label: My Virtual Office
+kind: platform
+version: 1.0.0
+description: >
+  My Virtual Office gateway adapter for Hermes Agent. Polls a configured
+  Virtual Office instance for queued office messages and posts Hermes replies
+  back into the visible office communication log.
+author: My Virtual Office
+requires_env:
+  - name: MY_VIRTUAL_OFFICE_URL
+    description: "Base URL for My Virtual Office, e.g. http://100.64.0.10:8090"
+    prompt: "My Virtual Office URL"
+    password: false
+  - name: MY_VIRTUAL_OFFICE_TOKEN
+    description: "Shared token matching VO_HERMES_PLATFORM_TOKEN in Virtual Office"
+    prompt: "My Virtual Office bridge token"
+    password: true
+optional_env:
+  - name: MY_VIRTUAL_OFFICE_ADAPTER_ID
+    description: "Adapter identity shown in Virtual Office status"
+    prompt: "Adapter ID"
+    password: false
+  - name: MY_VIRTUAL_OFFICE_POLL_SECONDS
+    description: "Polling interval in seconds when no messages are queued"
+    prompt: "Poll interval seconds"
+    password: false
+  - name: MY_VIRTUAL_OFFICE_HOME_CHANNEL
+    description: "Default chat ID for Hermes cron or send_message delivery"
+    prompt: "Home channel"
+    password: false
+  - name: MY_VIRTUAL_OFFICE_HOME_CHANNEL_NAME
+    description: "Display name for the home channel"
+    prompt: "Home channel name"
+    password: false
+  - name: MY_VIRTUAL_OFFICE_ALLOWED_USERS
+    description: "Comma-separated Virtual Office user IDs allowed to talk to Hermes"
+    prompt: "Allowed user IDs"
+    password: false
+  - name: MY_VIRTUAL_OFFICE_ALLOW_ALL_USERS
+    description: "Allow any queued Virtual Office user to talk to Hermes"
+    prompt: "Allow all users? (true/false)"
+    password: false

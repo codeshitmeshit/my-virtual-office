@@ -37,6 +37,8 @@ MANUAL_OVERRIDE_TTL = 30
 # How long after last activity before an agent is considered idle
 IDLE_TIMEOUT_SEC = 120
 
+GATEWAY_PROTOCOL_VERSION = 4
+
 # Rare bootstrap/fallback snapshot size. Do not poll sessions.list on an interval.
 SESSIONS_BOOTSTRAP_LIMIT = 100
 
@@ -696,8 +698,8 @@ async def _gateway_loop(gateway_url, gateway_token, origin, client_version="unkn
                     "id": f"gp-connect-{int(time.time())}",
                     "method": "connect",
                     "params": {
-                        "minProtocol": 4,
-                        "maxProtocol": 4,
+                        "minProtocol": GATEWAY_PROTOCOL_VERSION,
+                        "maxProtocol": GATEWAY_PROTOCOL_VERSION,
                         "client": {
                             "id": "openclaw-control-ui",
                             "version": client_version or "unknown",

@@ -14,9 +14,7 @@ import glob
 import time
 from providers.codex import CodexProvider
 from providers.claude_code import ClaudeCodeProvider
-from providers.hermes import HermesProvider
-from providers.codex import CodexProvider
-from providers.claude_code import ClaudeCodeProvider
+from providers.hermes import HermesProvider, discover_api_agents, discover_desktop_agents
 
 def discover_agents(oc_home):
     """
@@ -97,15 +95,54 @@ def discover_agents(oc_home):
     return roster
 
 
-def discover_hermes_agents(hermes_home=None, hermes_bin=None, enabled=True):
-    """Discover local Hermes Agent profiles as Virtual Office agents.
+def _merge_hermes_agent_modes(cli_agents, api_agents, desktop_agents=None, prefer_api=True):
+    merged = {}
+    order = []
+    desktop_agents = desktop_agents or []
+    for agent in cli_agents:
+        key = agent.get("id") or f"hermes-{agent.get('profile') or agent.get('providerAgentId') or 'default'}"
+        merged[key] = dict(agent)
+        order.append(key)
+    for agent, mode, available_key, url_key in (
+        *((item, "desktop", "desktopAvailable", "desktopUrl") for item in desktop_agents),
+        *((item, "api", "apiAvailable", "apiUrl") for item in api_agents),
+    ):
+        key = agent.get("id") or "hermes-default"
+        if key not in merged:
+            merged[key] = dict(agent)
+            order.append(key)
+            continue
+        existing = merged[key]
+        existing[available_key] = True
+        existing[url_key] = agent.get(url_key) or existing.get(url_key) or ""
+        existing["connectionModes"] = list(dict.fromkeys((existing.get("connectionModes") or []) + (agent.get("connectionModes") or [mode])))
+        existing["capabilities"] = list(dict.fromkeys((existing.get("capabilities") or []) + (agent.get("capabilities") or [])))
+        prefer_mode = (mode == "api" and prefer_api) or (mode == "desktop" and not prefer_api)
+        if prefer_mode:
+            existing["gateway"] = f"{mode}+cli" if existing.get("cliAvailable") else mode
+            existing["provider"] = existing.get("provider") or agent.get("provider") or ("Hermes API" if mode == "api" else "Hermes Desktop Backend")
+            existing["model"] = agent.get("model") or existing.get("model") or ""
+    return [merged[key] for key in order]
 
-    This intentionally uses Hermes' public CLI surfaces instead of reading
-    private config/auth/memory files. The first implementation is conservative:
-    expose the active/default profile as a single office agent when Hermes is
-    installed and its home directory exists.
-    """
-    return HermesProvider(home_path=hermes_home, binary=hermes_bin, enabled=enabled).discover_agents()
+
+def discover_hermes_agents(hermes_home=None, hermes_bin=None, enabled=True, api_url=None, api_key=None,
+                           desktop_url=None, desktop_token=None, desktop_host_header=None,
+                           desktop_tcp_host=None, desktop_tcp_port=None, prefer_api=True, timeout_sec=600):
+    """Discover Hermes API, Desktop Backend, and CLI profiles."""
+    if not enabled:
+        return []
+    cli_agents = HermesProvider(home_path=hermes_home, binary=hermes_bin, enabled=True).discover_agents()
+    desktop_agents = discover_desktop_agents(
+        desktop_url=desktop_url, desktop_token=desktop_token,
+        desktop_host_header=desktop_host_header, desktop_tcp_host=desktop_tcp_host,
+        desktop_tcp_port=desktop_tcp_port, enabled=True,
+        timeout_sec=min(int(timeout_sec or 600), 10),
+    )
+    api_agents = discover_api_agents(
+        api_url=api_url, api_key=api_key, enabled=True,
+        timeout_sec=min(int(timeout_sec or 600), 10),
+    )
+    return _merge_hermes_agent_modes(cli_agents, api_agents, desktop_agents, prefer_api)
 
 
 def discover_codex_agents(enabled=False, workspace=None, home_path=None, binary=None, workspace_root=None, main_workspace=None, name=None, agent_id=None, model=None, reply_text=None, bridge_url=None, sandbox="workspace-write", approval_policy="never", include_main=True, include_native_agents=True, register_native_agents=True):
@@ -151,10 +188,22 @@ def discover_claude_code_agents(enabled=False, workspace=None, home_path=None, b
     ).discover_agents()
 
 
-def discover_all_agents(oc_home, hermes_home=None, hermes_bin=None, hermes_enabled=True, codex=None, claude_code=None):
+def discover_all_agents(oc_home, hermes_home=None, hermes_bin=None, hermes_enabled=True,
+                        hermes_api_url=None, hermes_api_key=None, hermes_desktop_url=None,
+                        hermes_desktop_token=None, hermes_desktop_host_header=None,
+                        hermes_desktop_tcp_host=None, hermes_desktop_tcp_port=None,
+                        hermes_prefer_api=True, hermes_timeout_sec=600,
+                        codex=None, claude_code=None):
     """Discover OpenClaw agents plus optional local provider agents."""
     agents = discover_agents(oc_home)
-    agents.extend(discover_hermes_agents(hermes_home=hermes_home, hermes_bin=hermes_bin, enabled=hermes_enabled))
+    agents.extend(discover_hermes_agents(
+        hermes_home=hermes_home, hermes_bin=hermes_bin, enabled=hermes_enabled,
+        api_url=hermes_api_url, api_key=hermes_api_key,
+        desktop_url=hermes_desktop_url, desktop_token=hermes_desktop_token,
+        desktop_host_header=hermes_desktop_host_header,
+        desktop_tcp_host=hermes_desktop_tcp_host, desktop_tcp_port=hermes_desktop_tcp_port,
+        prefer_api=hermes_prefer_api, timeout_sec=hermes_timeout_sec,
+    ))
     codex = codex or {}
     agents.extend(discover_codex_agents(
         enabled=codex.get("enabled", False),
