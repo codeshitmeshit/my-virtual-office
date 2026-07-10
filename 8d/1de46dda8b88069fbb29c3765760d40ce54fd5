@@ -1,0 +1,23 @@
+app/server.py
+  s_f79e68737d9845::t_3dddd4ccf76b4c 6386-6392
+tests/test_codex_runs_sse.py
+  s_f79e68737d9845::t_8a3668368a5c39 63-72,110-112,118,126,128,287,292-296
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "8d1de46dda8b88069fbb29c3765760d40ce54fd5",
+  "prompts": {},
+  "sessions": {
+    "s_f79e68737d9845": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4c15-638a-7af1-8ad3-c3999d7c00fb",
+        "model": "unknown"
+      },
+      "human_author": "codeshitmeshit <codeshitmeshit@126.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
