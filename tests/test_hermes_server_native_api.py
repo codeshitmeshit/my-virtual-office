@@ -279,6 +279,12 @@ def test_hermes_test_rejects_unconfigured_request_target():
         assert tcp_override["ok"] is False
         assert tcp_override["_status"] == 400
         assert "Desktop route" in tcp_override["error"]
+        discover_override = server._handle_hermes_desktop_discover({
+            "desktopTcpHost": "attacker.invalid",
+            "desktopTcpPort": 9999,
+        })
+        assert discover_override["ok"] is False
+        assert discover_override["_status"] == 400
     finally:
         server.HermesProvider = old_provider
         server.HermesApiClient = old_client

@@ -108,6 +108,8 @@ def main():
             check("Reply text is logged", history[-1].get("text") == "Hello from Hermes", str(history[-1]))
             queue_mode = os.stat(server._hermes_platform_queue_path()).st_mode & 0o777
             check("Gateway queue is private", queue_mode == 0o600, oct(queue_mode))
+            comm_mode = os.stat(server._comm_log_path()).st_mode & 0o777
+            check("Gateway communication log is private", comm_mode == 0o600, oct(comm_mode))
 
             old_max_messages = server._HERMES_PLATFORM_MAX_MESSAGES
             try:
@@ -138,6 +140,9 @@ def main():
                 server._save_hermes_platform_state(delivered_state)
                 accepted_after_stale = server._handle_hermes_platform_enqueue({"message": "after stale delivered"})
                 check("Stale delivered messages release queue capacity", accepted_after_stale.get("ok") is True, str(accepted_after_stale))
+                server.VO_CONFIG["hermes"]["platformDeliveredRetentionSec"] = "not-a-number"
+                check("Invalid delivered retention falls back safely", isinstance(server._hermes_platform_message_active({"status": "delivered", "deliveredAt": server._now_ms()}), bool))
+                server.VO_CONFIG["hermes"].pop("platformDeliveredRetentionSec", None)
             finally:
                 server._HERMES_PLATFORM_MAX_MESSAGES = old_max_messages
                 server._save_hermes_platform_state(server._hermes_platform_state_default())

@@ -188,9 +188,9 @@ def main():
         hermes_payload, hermes_status = server.handle_chat_sessions_list("hermes-default")
         check("Hermes sessions list uses provider", hermes_status == 200 and hermes_payload.get("sessions", [{}])[0].get("active") is True)
         switched, status = server.handle_chat_session_switch("hermes-default", "hermes-session-1")
-        check("Hermes switch exports messages", status == 200 and len(switched.get("messages") or []) == 2 and server._get_hermes_session_id("default") == "hermes-session-1")
-        deleted, status = server.handle_chat_session_delete("hermes-default", "hermes-session-1")
-        check("Hermes delete clears active session", status == 200 and deleted.get("deleted") and server._get_hermes_session_id("default") == "")
+        check("Hermes switch exports messages", status == 200 and len(switched.get("messages") or []) == 2 and server._get_hermes_session_id("default", "hermes-session-1") == "hermes-session-1")
+        deleted, status = server.handle_chat_session_delete("hermes-default", "hermes-session-1", {"conversationId": "hermes-session-1"})
+        check("Hermes delete clears active session", status == 200 and deleted.get("deleted") and server._get_hermes_session_id("default", "hermes-session-1") == "")
 
         codex_payload, codex_status = server.handle_chat_sessions_list("codex-main")
         codex_sessions = codex_payload.get("sessions") or []
@@ -204,9 +204,9 @@ def main():
         claude_sessions = claude_payload.get("sessions") or []
         check("Claude Code lists native JSONL sessions", claude_status == 200 and claude_sessions and claude_sessions[0].get("id") == claude_session_id)
         switched, status = server.handle_chat_session_switch("claude-main", claude_session_id)
-        check("Claude Code switch reads JSONL messages", status == 200 and len(switched.get("messages") or []) == 2 and server._get_claude_code_session_id("main") == claude_session_id)
-        deleted, status = server.handle_chat_session_delete("claude-main", claude_session_id)
-        check("Claude Code delete renames native session file and clears active id", status == 200 and deleted.get("deleted") and server._get_claude_code_session_id("main") == "" and not claude_file.exists())
+        check("Claude Code switch reads JSONL messages", status == 200 and len(switched.get("messages") or []) == 2 and server._get_claude_code_session_id("main", claude_session_id) == claude_session_id)
+        deleted, status = server.handle_chat_session_delete("claude-main", claude_session_id, {"conversationId": claude_session_id})
+        check("Claude Code delete renames native session file and clears active id", status == 200 and deleted.get("deleted") and server._get_claude_code_session_id("main", claude_session_id) == "" and not claude_file.exists())
 
     failures = [name for name, ok, _detail in CHECKS if not ok]
     if failures:

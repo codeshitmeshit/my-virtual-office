@@ -8668,10 +8668,15 @@ def _append_comm_event(event):
     path = _comm_log_path()
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "a") as f:
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
+        fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+        with os.fdopen(fd, "a") as f:
             f.write(json.dumps(event, ensure_ascii=False) + "\n")
         try:
-            os.chmod(path, 0o666)
+            os.chmod(path, 0o600)
         except OSError:
             pass
     except OSError as e:
@@ -28575,7 +28580,7 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                 result = {"ok": False, "found": False, "error": str(exc)}
             else:
                 result = _handle_hermes_desktop_discover(body)
-            self.send_response(200 if result.get("found") else 404)
+            self.send_response(int(result.get("_status") or (200 if result.get("found") else 404)))
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
@@ -30989,7 +30994,8 @@ def _atomic_write_text(path, content):
     except OSError:
         pass
     tmp_path = f"{path}.tmp-{os.getpid()}-{threading.get_ident()}"
-    with open(tmp_path, "w", encoding="utf-8") as f:
+    fd = os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
         f.write(content)
         f.flush()
         if existing_stat is not None:
@@ -31820,7 +31826,12 @@ def _save_hermes_platform_state(state):
     state.setdefault("schema", "vo.hermes-platform-queue.v1")
     state.setdefault("adapters", {})
     state["updatedAt"] = _now_ms()
-    _atomic_write_text(_hermes_platform_queue_path(), json.dumps(state, indent=2, ensure_ascii=False) + "\n")
+    queue_path = _hermes_platform_queue_path()
+    try:
+        os.chmod(queue_path, 0o600)
+    except OSError:
+        pass
+    _atomic_write_text(queue_path, json.dumps(state, indent=2, ensure_ascii=False) + "\n")
     try:
         os.chmod(_hermes_platform_queue_path(), 0o600)
     except OSError:
@@ -31832,7 +31843,11 @@ def _hermes_platform_message_active(item, now_ms=None):
     if status in {"replied", "failed"}:
         return False
     if status == "delivered":
-        retention_sec = max(60, int(VO_CONFIG.get("hermes", {}).get("platformDeliveredRetentionSec") or 3600))
+        try:
+            retention_sec = int(VO_CONFIG.get("hermes", {}).get("platformDeliveredRetentionSec") or 3600)
+        except (TypeError, ValueError):
+            retention_sec = 3600
+        retention_sec = max(60, min(retention_sec, 7 * 24 * 3600))
         delivered_at = int((item or {}).get("deliveredAt") or (item or {}).get("updatedAt") or 0)
         if delivered_at and int(now_ms or _now_ms()) - delivered_at > retention_sec * 1000:
             return False
@@ -33368,6 +33383,16 @@ def _handle_hermes_desktop_discover(body=None):
     """Auto-discover the optional Hermes Desktop Backend connection point."""
     body = body or {}
     hermes_cfg = VO_CONFIG.get("hermes", {})
+    for request_key, config_key in (
+        ("homePath", "homePath"),
+        ("desktopUrl", "desktopUrl"),
+        ("desktopHostHeader", "desktopHostHeader"),
+        ("desktopTcpHost", "desktopTcpHost"),
+        ("desktopTcpPort", "desktopTcpPort"),
+        ("desktopLogPath", "desktopLogPath"),
+    ):
+        if request_key in body and str(body.get(request_key) or "").strip() != str(hermes_cfg.get(config_key) or "").strip():
+            return {"ok": False, "found": False, "error": f"{request_key} must match the configured Hermes Desktop route", "_status": 400}
     result = discover_desktop_backend(
         hermes_home=body.get("homePath") or hermes_cfg.get("homePath"),
         desktop_url=body.get("desktopUrl") or hermes_cfg.get("desktopUrl"),
