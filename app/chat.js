@@ -18,12 +18,17 @@
   const CHAT_STACK_GAP = 12;
   const STREAM_RENDER_INTERVAL_MS = 80;
   const TOOL_RENDER_INTERVAL_MS = 90;
+  const HISTORY_RENDER_BATCH_SIZE = 24;
+  const HISTORY_RENDER_BATCH_BUDGET_MS = 12;
   const MAX_LIVE_TOOL_CARDS = 40;
   const MAX_TOOL_PAYLOAD_CHARS = 6000;
   const ACTIVE_RUN_RECOVERY_MS = 15000;
+  const MAX_ACTIVE_RUN_RECOVERY_MS = 120000;
   const PROVIDER_PROGRESS_MAX_AGE_MS = 120000;
   const HERMES_APPROVAL_POLL_MS = 1500;
   const HERMES_HISTORY_POLL_MS = 1000;
+  const CHAT_HISTORY_V2_ENABLED = true;
+  const sharedChatHistoryStore = new ChatHistoryRuntime.ChatHistoryStore({ fetchImpl: (...args) => fetch(...args) });
   function setVoChatShiftEnterToSend(value) {
     _shiftEnterToSend = value === true;
   }
@@ -176,9 +181,18 @@
       this.toolFlushTimer = null;
       this.pendingStreamContent = '';
       this.streamRenderTimer = null;
+      this.historyRenderToken = 0;
       this.scrollFrame = null;
       this.lastLiveEventAt = 0;
+      this.providerEventSource = null;
+      this.providerEventKey = '';
+      this.providerEventReady = null;
+      this.providerEventCursors = new Map();
+      this.providerRunWaiters = new Map();
+      this.providerRunResults = new Map();
+      this.providerRecoveryTimer = null;
       this.recoveryTimer = null;
+      this.recoveryBackoffMs = ACTIVE_RUN_RECOVERY_MS;
       this.hermesProgressTimers = [];
       this.hermesHistoryPollTimer = null;
       this.hermesEventSource = null;
@@ -220,6 +234,18 @@
       this.audioChunks = [];
 
       this.messages = root.querySelector('.chat-messages');
+      this.historyStore = sharedChatHistoryStore;
+      this.historyLayer = document.createElement('div');
+      this.historyLayer.className = 'chat-history-layer';
+      this.liveLayer = document.createElement('div');
+      this.liveLayer.className = 'chat-live-layer';
+      if (CHAT_HISTORY_V2_ENABLED) this.messages.append(this.historyLayer, this.liveLayer);
+      this.historyView = new ChatHistoryRuntime.ChatHistoryView({
+        scrollElement: this.messages,
+        historyLayer: this.historyLayer,
+        liveLayer: this.liveLayer,
+        renderMessage: (message, renderOptions) => this.renderNormalizedHistoryMessage(message, renderOptions)
+      });
       this.status = root.querySelector('.chat-status');
       this.feishuLiveStatus = root.querySelector('.chat-feishu-live-status');
       this.agentSelect = root.querySelector('.chat-agent-select');
@@ -241,6 +267,7 @@
           openImageLightbox(e.target.src);
         }
       });
+      this.messages.addEventListener('scroll', () => this.handleHistoryScroll(), { passive: true });
 
       this.agentSelect?.addEventListener('change', (event) => {
         event.__voChatHandledByInstance = true;
@@ -283,6 +310,7 @@
           chatBtn.classList.remove('active');
           if (exteriorTabs) exteriorTabs.classList.remove('visible');
           closeAllSecondaryPanels();
+          this.closeProviderEventSource();
           _chatExitMoveMode();
         } else if (this.slot) {
           _secExitMoveMode(this.slot);
@@ -301,20 +329,30 @@
     }
 
     resetConversation(systemText) {
+      this.cancelHistoryRender();
       this.closeCodexEventSource();
       this.closeHermesEventSource();
       this.closeClaudeCodeEventSource();
+      this.closeProviderEventSource();
       this.closeFeishuEventSource();
       this.stopCodexActivityPolling();
       this.stopHermesHistoryPolling();
       this.stopCodexHistoryPolling();
       this.stopClaudeCodeHistoryPolling();
-      this.messages.innerHTML = '';
+      if (CHAT_HISTORY_V2_ENABLED) {
+        this.historyView.deactivate();
+        this.historyStore.deactivate(this.historyView);
+        this.historyLayer.querySelectorAll('[data-history-message-id]').forEach(node => node.remove());
+        this.liveLayer.innerHTML = '';
+      } else {
+        this.messages.innerHTML = '';
+      }
       this.streamingMsg = null;
       this.pendingStreamContent = '';
       if (this.streamRenderTimer) { clearTimeout(this.streamRenderTimer); this.streamRenderTimer = null; }
       if (this.toolFlushTimer) { clearTimeout(this.toolFlushTimer); this.toolFlushTimer = null; }
-      if (this.recoveryTimer) { clearInterval(this.recoveryTimer); this.recoveryTimer = null; }
+      if (this.recoveryTimer) { clearTimeout(this.recoveryTimer); this.recoveryTimer = null; }
+      this.recoveryBackoffMs = ACTIVE_RUN_RECOVERY_MS;
       this.stopHermesProgressTimers();
       this.stopHermesApprovalPolling();
       this.stopCodexApprovalPolling();
@@ -332,6 +370,35 @@
       this.contextUsed = 0;
       this.updateModelBar();
       if (systemText) this.appendSystem(systemText);
+    }
+
+    cancelHistoryRender() {
+      this.historyRenderToken = (this.historyRenderToken || 0) + 1;
+    }
+
+    async renderHistoryQueue(renderQueue, isCurrentHistoryRequest = () => true) {
+      this.cancelHistoryRender();
+      const renderToken = this.historyRenderToken;
+      const items = Array.isArray(renderQueue) ? renderQueue : [];
+      if (!items.length) return true;
+      let index = 0;
+      while (index < items.length) {
+        if (this.historyRenderToken !== renderToken || !isCurrentHistoryRequest()) return false;
+        const batchStart = typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now();
+        const fragment = document.createDocumentFragment();
+        let rendered = 0;
+        while (index < items.length && rendered < HISTORY_RENDER_BATCH_SIZE) {
+          items[index].render({ parent: fragment, skipTypingCleanup: true });
+          index += 1;
+          rendered += 1;
+          const now = typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now();
+          if (now - batchStart >= HISTORY_RENDER_BATCH_BUDGET_MS) break;
+        }
+        this.removeTypingIndicator();
+        this.messages.appendChild(fragment);
+        if (index < items.length) await waitForNextHistoryRenderFrame();
+      }
+      return this.historyRenderToken === renderToken && isCurrentHistoryRequest();
     }
 
     setStatus(text, cls) {
@@ -439,6 +506,7 @@
       this.closeCodexEventSource();
       this.closeHermesEventSource();
       this.closeClaudeCodeEventSource();
+      this.closeProviderEventSource();
       this.closeFeishuEventSource();
       this.stopCodexActivityPolling();
       this.stopHermesHistoryPolling();
@@ -448,8 +516,9 @@
       this.removeTypingIndicator();
       this.syncAgentSelect();
       this.resetConversation(`${systemPrefix} ${opt.textContent.trim()}`);
-      this.appendSystem(typeof i18n !== 'undefined' ? i18n.t('chat_loading_history') : 'Loading chat history...');
+      this.activateHistory();
       this.updateProviderControls();
+      this.updateProviderEventSource();
       if (this.isHermesSelected()) this.startHermesApprovalPolling();
       else this.stopHermesApprovalPolling();
       if (this.isCodexSelected()) this.startCodexApprovalPolling();
@@ -491,6 +560,7 @@
         }
         this.syncAgentSelect();
         this.updateProviderControls();
+        this.updateProviderEventSource();
         this.updateFeishuEventSource();
       } catch (e) {
         console.warn('[chat] Failed to load agent list:', e);
@@ -628,16 +698,13 @@
     }
 
     startHermesApprovalPolling() {
-      if (!this.isHermesSelected() || this.hermesApprovalPollTimer) return;
-      this.pollHermesApproval().catch(() => {});
-      this.hermesApprovalPollTimer = setInterval(() => {
-        this.pollHermesApproval().catch(() => {});
-      }, HERMES_APPROVAL_POLL_MS);
+      if (!this.isHermesSelected()) return;
+      this.updateProviderEventSource();
     }
 
     stopHermesApprovalPolling() {
       if (this.hermesApprovalPollTimer) {
-        clearInterval(this.hermesApprovalPollTimer);
+        clearTimeout(this.hermesApprovalPollTimer);
         this.hermesApprovalPollTimer = null;
       }
       this.hermesApprovalLastId = '';
@@ -682,16 +749,13 @@
     }
 
     startCodexApprovalPolling() {
-      this.stopCodexApprovalPolling();
-      this.pollCodexApproval().catch(() => {});
-      this.codexApprovalPollTimer = setInterval(() => {
-        this.pollCodexApproval().catch(() => {});
-      }, HERMES_APPROVAL_POLL_MS);
+      if (!this.isCodexSelected()) return;
+      this.updateProviderEventSource();
     }
 
     stopCodexApprovalPolling() {
       if (this.codexApprovalPollTimer) {
-        clearInterval(this.codexApprovalPollTimer);
+        clearTimeout(this.codexApprovalPollTimer);
         this.codexApprovalPollTimer = null;
       }
       this.codexApprovalLastId = '';
@@ -770,7 +834,7 @@
       this.updateModelBar();
     }
 
-    async loadHistory(opts = {}) {
+    async loadLegacyHistory(opts = {}) {
       const loadToken = (this.historyLoadToken || 0) + 1;
       this.historyLoadToken = loadToken;
       const expectedAgentKey = this.selectedAgentKey;
@@ -838,12 +902,12 @@
                 : { label: event.from?.name || _ct('chat_you_label'), kind: 'human' };
               renderQueue.push({
                 ts,
-                render: () => this.appendMessage(role, text, ts, [], meta)
+                render: (renderOptions) => this.appendMessage(role, text, ts, [], meta, [], renderOptions)
               });
             }
             renderQueue.push(...await this.collectFeishuChannelHistory(agentId, renderedHistoryKeys));
             renderQueue.sort((a, b) => Number(a.ts || 0) - Number(b.ts || 0));
-            for (const item of renderQueue) item.render();
+            if (!await this.renderHistoryQueue(renderQueue, isCurrentHistoryRequest)) return;
             for (const progress of progressById.values()) {
               this.restoreProviderProgress(progress, 'codex');
             }
@@ -926,13 +990,13 @@
                 const tools = normalizeHermesTools(msg.tools || []);
                 renderQueue.push({
                   ts,
-                  render: () => this.appendMessage(role, text, ts, attachments, meta, tools)
+                  render: (renderOptions) => this.appendMessage(role, text, ts, attachments, meta, tools, renderOptions)
                 });
               }
             }
             if (!usingMergedAgentHistory) renderQueue.push(...await this.collectFeishuChannelHistory(this.getSelectedAgentId() || this.selectedAgentKey, renderedHistoryKeys));
             renderQueue.sort((a, b) => Number(a.ts || 0) - Number(b.ts || 0));
-            for (const item of renderQueue) item.render();
+            if (!await this.renderHistoryQueue(renderQueue, isCurrentHistoryRequest)) return;
             this.scrollBottomAfterLayout();
           }
           if (this.isHermesSelected()) await this.pollHermesApproval().catch(() => {});
@@ -944,14 +1008,19 @@
           const messages = res.payload.messages;
           const seenToolKeys = new Set();
           this.messages.innerHTML = '';
+          const renderQueue = [];
           for (const msg of messages) {
             const t = extractText(msg) || (typeof msg.content === 'string' ? msg.content : '');
             const ts = msg.timestamp || msg.ts || msg.message?.timestamp || null;
             const media = extractMedia(msg, t);
             const tools = extractToolItems(msg);
             for (const tool of tools) seenToolKeys.add(toolHistoryKey(tool));
-            if (t || media.length || tools.length) this.appendMessage(msg.role, t, ts, media, resolveMessageSender(msg, this), tools);
+            if (t || media.length || tools.length) renderQueue.push({
+              ts: Number(ts || 0),
+              render: (renderOptions) => this.appendMessage(msg.role, t, ts, media, resolveMessageSender(msg, this), tools, renderOptions)
+            });
           }
+          if (!await this.renderHistoryQueue(renderQueue, isCurrentHistoryRequest)) return;
           await this.loadRecoveredActivity(seenToolKeys);
           const lastMeaningful = [...messages].reverse().find(m => {
             const t = extractText(m) || (typeof m.content === 'string' ? m.content : '');
@@ -976,6 +1045,78 @@
           this.messages.innerHTML = '';
           this.appendSystem(typeof i18n !== 'undefined' ? i18n.t('chat_history_unavailable') : 'Chat history is unavailable right now.');
         }
+      }
+    }
+
+    getHistoryContext() {
+      let providerKind = this.getSelectedProviderKindStrict();
+      if (!providerKind || providerKind === 'openclaw') providerKind = 'gateway';
+      const context = {
+        providerKind,
+        agentId: this.getSelectedAgentId() || this.selectedAgentKey,
+        sessionKey: this.sessionKey
+      };
+      if (providerKind === 'codex') context.conversationId = this.getCodexConversationId();
+      else if (providerKind === 'hermes' || providerKind === 'claude-code') context.conversationId = this.getProviderConversationId(providerKind);
+      return context;
+    }
+
+    activateHistory(options = {}) {
+      if (!CHAT_HISTORY_V2_ENABLED) return null;
+      if (typeof performance !== 'undefined' && performance.mark) performance.mark('vo-chat-history:switch:start');
+      const context = this.getHistoryContext();
+      const { entry } = this.historyStore.activate(context, this.historyView);
+      if (options.coldEmpty && entry.order.length) this.historyStore.invalidate(context);
+      const activeEntry = options.coldEmpty ? this.historyStore.activate(context, this.historyView).entry : entry;
+      this.historyView.activate(activeEntry);
+      if (typeof performance !== 'undefined' && performance.mark && performance.measure) {
+        performance.mark('vo-chat-history:switch:paint');
+        performance.measure('vo-chat-history:switch', 'vo-chat-history:switch:start', 'vo-chat-history:switch:paint');
+      }
+      return { context, entry: activeEntry };
+    }
+
+    renderNormalizedHistoryMessage(message, options = {}) {
+      const role = message.role || 'assistant';
+      const providerKind = message.providerKind || this.getHistoryContext().providerKind;
+      const meta = role === 'assistant'
+        ? {
+            ...resolveMessageSender(message, this),
+            label: message.from || resolveMessageSender(message, this).label,
+            thinking: visibleProviderThinking(providerKind, message.thinking, message.status),
+            reasoningTokens: message.reasoningTokens || 0,
+            approval: message.approval || null
+          }
+        : { label: message.from || _ct('chat_you_label'), kind: message.fromAgentId && message.fromAgentId !== 'user' ? 'agent' : 'human' };
+      const media = [...(message.media || []), ...(message.attachments || [])];
+      const tools = normalizeHermesTools(message.tools || []);
+      const cacheable = !['queued', 'starting', 'running', 'streaming'].includes(String(message.status || '').toLowerCase());
+      const cachedHtml = cacheable ? this.historyStore.getRenderedHtml(message.id, message.version) : null;
+      return this.appendMessage(role, message.text || '', message.epochMs, media, meta, tools, {
+        ...options,
+        cachedHtml,
+        onFormattedHtml: cacheable && cachedHtml == null
+          ? html => this.historyStore.setRenderedHtml(message.id, message.version, html)
+          : null
+      });
+    }
+
+    async loadHistory(opts = {}) {
+      if (!CHAT_HISTORY_V2_ENABLED) return this.loadLegacyHistory(opts);
+      const activation = this.activateHistory();
+      if (!activation) return;
+      const { context, entry } = activation;
+      const isColdMiss = entry.order.length === 0;
+      if (isColdMiss) this.setStatus(_ct('chat_loading_history'), 'connecting');
+      try {
+        const refreshed = await this.historyStore.fetchLatest(context);
+        if (this.historyStore.viewKeys.get(this.historyView) !== refreshed.key) return;
+        this.applySessionMetrics(refreshed.session);
+        this.setStatus(this.isCodexSelected() ? _ct('codex_ready') : _ct('connected'), 'connected');
+      } catch (e) {
+        if (e?.name === 'AbortError') return;
+        console.warn('Failed to load history:', e);
+        if (isColdMiss && opts.showError !== false) this.appendSystem(_ct('chat_history_unavailable'));
       }
     }
 
@@ -1047,7 +1188,7 @@
           const ts = Number(event.ts || Date.now());
           items.push({
             ts,
-            render: () => this.appendMessage(role, text, ts, attachments, meta)
+            render: (renderOptions) => this.appendMessage(role, text, ts, attachments, meta, [], renderOptions)
           });
         }
         return items;
@@ -1087,6 +1228,7 @@
     }
 
     async newSession() {
+      const oldHistoryContext = this.getHistoryContext();
       const agentName = this.agentSelect.selectedOptions[0]?.textContent.trim() || 'this agent';
       const shouldStart = await showChatConfirmDialog({
         title: _ct('chat_new_session'),
@@ -1107,7 +1249,10 @@
           const data = await res.json();
           if (!res.ok || !data.ok) throw new Error(data.error || 'reset failed');
           this.rotateCodexConversationId();
+          this.historyStore.invalidate(oldHistoryContext);
           this.resetConversation(_ct('new_codex_session'));
+          this.activateHistory({ coldEmpty: true });
+          this.updateProviderEventSource();
         } catch (e) {
           this.appendSystem(_ct('chat_reset_error') + ': ' + e.message);
         }
@@ -1127,7 +1272,10 @@
           const data = await res.json();
           if (!data.ok) throw new Error(data.error || 'clear failed');
           this.rotateProviderConversationId(providerKind);
+          this.historyStore.invalidate(oldHistoryContext);
           this.resetConversation(this.isClaudeCodeSelected() ? _ct('new_claude_code_session') : _ct('new_hermes_session'));
+          this.activateHistory({ coldEmpty: true });
+          this.updateProviderEventSource();
         } catch (e) {
           this.appendSystem(_ct('chat_reset_error') + ': ' + e.message);
         }
@@ -1137,7 +1285,9 @@
       try {
         const res = await rpc('sessions.reset', { key: this.sessionKey });
         if (res.ok) {
-          this.messages.innerHTML = '';
+          this.historyStore.invalidate(oldHistoryContext);
+          this.resetConversation();
+          this.activateHistory({ coldEmpty: true });
           this.streamingMsg = null;
           this.currentRunId = null;
           this.liveToolCards.clear();
@@ -1277,14 +1427,36 @@
       const imageDataUrls = this.pendingAttachments.filter(a => a.mimeType.startsWith('image/')).map(a => a.dataUrl);
       const nonImageNames = this.pendingAttachments.filter(a => !a.mimeType.startsWith('image/')).map(a => a.name);
       if (nonImageNames.length) displayText += (displayText ? '\n' : '') + '📎 ' + nonImageNames.join(', ');
-      const localUserMessage = this.appendMessage('user', displayText, Date.now(), imageDataUrls, { label: _ct('chat_you_label'), kind: 'human' });
+      const historyContext = this.getHistoryContext();
+      const optimisticEpochMs = Date.now();
+      const localUserMessage = this.appendMessage('user', displayText, optimisticEpochMs, imageDataUrls, { label: _ct('chat_you_label'), kind: 'human' });
+      const optimisticHistoryMessage = this.historyStore.insertOptimistic(historyContext, {
+        id: `optimistic-${this.slotId}-${optimisticEpochMs}`,
+        version: 'optimistic',
+        role: 'user',
+        text: displayText,
+        epochMs: optimisticEpochMs,
+        media: imageDataUrls.map(url => ({ url })),
+        status: 'running'
+      }, { notify: false });
       this.scrollBottom();
 
       if (this.isArchiveManagerSelected() && !this.isArchiveRelatedMessage(text || displayText)) {
         this.sendInFlight = false;
         this.pendingAttachments = [];
         this.renderAttachmentPreviews();
-        this.appendMessage('assistant', this.archiveManagerBoundaryReply(), Date.now(), [], {
+        const boundaryText = this.archiveManagerBoundaryReply();
+        const boundaryEpochMs = Date.now();
+        this.historyStore.insertOptimistic(historyContext, { ...optimisticHistoryMessage, version: 'local-final', status: 'done' }, { notify: false });
+        this.historyStore.insertOptimistic(historyContext, {
+          id: `local-${this.slotId}-${boundaryEpochMs}`,
+          version: 'local-final',
+          role: 'assistant',
+          text: boundaryText,
+          epochMs: boundaryEpochMs,
+          status: 'done'
+        }, { notify: false });
+        this.appendMessage('assistant', boundaryText, boundaryEpochMs, [], {
           label: this.agentSelect.selectedOptions[0]?.textContent.trim() || '档案管理员',
           kind: 'agent'
         });
@@ -1367,6 +1539,7 @@
 
       if (hasAttachments && !uploadedFiles.length && !attachments?.length && !text.trim()) {
         localUserMessage?.remove?.();
+        this.historyStore.removeMessage(historyContext, optimisticHistoryMessage.id);
         this.sendInFlight = false;
         this.appendSystem(
           attachmentUploadFailures
@@ -1385,6 +1558,7 @@
         const codexSendStartedAt = Date.now();
         let finalStatusText = _ct('codex_ready');
         let finalStatusClass = 'connected';
+        let codexAccepted = false;
         const codexBody = {
           agentId: this.getSelectedAgentId() || this.selectedAgentKey,
           message: text || '(attached files)',
@@ -1403,6 +1577,7 @@
         this.updateTypingIndicator(label + ' ' + _ct('working'));
         this.startCodexActivityPolling();
         try {
+          await this.ensureProviderEventSourceReady();
           const resp = await fetch('/api/codex/runs', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1411,6 +1586,7 @@
           const data = await resp.json();
           if (data.status === 'busy') {
             localUserMessage?.remove?.();
+            this.historyStore.removeMessage(historyContext, optimisticHistoryMessage.id);
             this.appendCodexActiveConversationNotice(data.activeConversationId || '', data.activeStatus || 'running');
             finalStatusText = _ct('codex_working');
             finalStatusClass = 'connecting';
@@ -1419,8 +1595,10 @@
           }
           if (!resp.ok || data.ok === false || !data.runId) {
             await this.sendCodexBlockingMessage(codexBody, codexSendStartedAt, label);
+            codexAccepted = true;
             return;
           }
+          codexAccepted = true;
           this.currentRunId = data.runId || null;
           await this.streamCodexRunEvents(data.runId, label);
           this.removeTypingIndicator();
@@ -1435,12 +1613,18 @@
             finalStatusClass = '';
           } else if (e?.providerBusy) {
             localUserMessage?.remove?.();
+            this.historyStore.removeMessage(historyContext, optimisticHistoryMessage.id);
             finalStatusText = _ct('codex_working');
             finalStatusClass = 'connecting';
             this.setStatus(finalStatusText, finalStatusClass);
           } else try {
             await this.sendCodexBlockingMessage(codexBody, codexSendStartedAt, label);
+            codexAccepted = true;
           } catch (fallbackError) {
+            if (!codexAccepted) {
+              localUserMessage?.remove?.();
+              this.historyStore.removeMessage(historyContext, optimisticHistoryMessage.id);
+            }
             await this.loadHistory({ recoverFinal: true, startedAt: codexSendStartedAt }).catch(() => {});
             this.appendSystem(_ct('chat_failed_to_send') + ': ' + fallbackError.message);
             finalStatusText = _ct('codex_error');
@@ -1479,7 +1663,9 @@
         };
         this.updateTypingIndicator(providerLabel + ' ' + _ct('working'));
         this.setStatus(_ct('claude_code_working'), 'connecting');
+        let claudeAccepted = false;
         try {
+          await this.ensureProviderEventSourceReady();
           const resp = await fetch('/api/claude-code/runs', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1489,10 +1675,12 @@
           if (!resp.ok || data.ok === false) {
             if (data.fallback) {
               await this.sendClaudeCodeBlockingMessage(claudeBody, claudeSendStartedAt);
+              claudeAccepted = true;
               return;
             }
             throw new Error(data.error || data.reply || resp.statusText);
           }
+          claudeAccepted = true;
           this.currentRunId = data.runId || null;
           await this.fetchSessionInfo();
           await this.streamClaudeCodeRunEvents(data.runId);
@@ -1504,6 +1692,10 @@
           this.closeClaudeCodeEventSource();
           this.removeTypingIndicator();
           if (!e?.cancelledByUi) {
+            if (!claudeAccepted) {
+              localUserMessage?.remove?.();
+              this.historyStore.removeMessage(historyContext, optimisticHistoryMessage.id);
+            }
             await this.loadHistory({ recoverFinal: true, startedAt: claudeSendStartedAt }).catch(() => {});
             this.appendSystem(_ct('claude_code_send_failed') + ': ' + e.message);
             this.setStatus(_ct('claude_code_error'), 'disconnected');
@@ -1531,7 +1723,9 @@
           attachments: attachments || []
         };
         const hermesProgress = this.startHermesProgress(providerLabel);
+        let hermesAccepted = false;
         try {
+          await this.ensureProviderEventSourceReady();
           const resp = await fetch('/api/hermes/runs', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1541,10 +1735,12 @@
           if (!resp.ok || data.ok === false) {
             if (data.fallback) {
               await this.sendHermesBlockingMessage(hermesBody, hermesProgress, hermesSendStartedAt);
+              hermesAccepted = true;
               return;
             }
             throw new Error(data.error || data.reply || resp.statusText);
           }
+          hermesAccepted = true;
           this.currentRunId = data.runId || null;
           await this.streamHermesRunEvents(data.runId, hermesProgress, hermesSendStartedAt);
           this.removeTypingIndicator();
@@ -1555,6 +1751,10 @@
           this.closeHermesEventSource();
           this.removeTypingIndicator();
           if (!e?.cancelledByUi) {
+            if (!hermesAccepted) {
+              localUserMessage?.remove?.();
+              this.historyStore.removeMessage(historyContext, optimisticHistoryMessage.id);
+            }
             this.appendSystem((typeof i18n !== 'undefined' ? i18n.t('chat_hermes_send_failed') : 'Hermes send failed') + ': ' + e.message);
             this.setStatus(typeof i18n !== 'undefined' ? i18n.t('chat_hermes_error') : 'Hermes error', 'disconnected');
           }
@@ -1567,6 +1767,7 @@
       const sendSessionKey = this.sessionKey;
       rpc('chat.send', params).then(res => {
         if (res.ok && res.payload?.runId) {
+          this.historyStore.insertOptimistic(historyContext, { ...optimisticHistoryMessage, version: 'sent', status: 'done' }, { notify: false });
           this.currentRunId = res.payload.runId;
           this.markLiveEvent();
           this.ensureRecoveryWatchdog();
@@ -1574,6 +1775,7 @@
         }
       }).catch(e => {
         localUserMessage?.remove?.();
+        this.historyStore.removeMessage(historyContext, optimisticHistoryMessage.id);
         this.appendSystem((typeof i18n !== 'undefined' ? i18n.t('chat_failed_to_send') : 'Failed to send') + ': ' + e.message);
       }).finally(() => {
         this.sendInFlight = false;
@@ -1737,44 +1939,12 @@
 
     streamCodexRunEvents(runId, label) {
       if (!runId) return Promise.reject(new Error('Codex run did not return a run id'));
-      this.closeCodexEventSource();
       this.currentRunId = runId;
       this.setStatus('Codex stream active...', 'connecting');
       this.markLiveEvent();
       this.ensureRecoveryWatchdog();
-      const agentId = this.getSelectedAgentId() || this.selectedAgentKey || '';
-      const url = '/api/codex/runs/' + encodeURIComponent(runId) + '/events?agentId=' + encodeURIComponent(agentId);
-      return new Promise((resolve, reject) => {
-        let settled = false;
-        const source = new EventSource(url);
-        this.codexEventSource = source;
-        this.codexStreamCancel = (err) => finish(false, err);
-        const cleanup = () => {
-          if (this.codexEventSource === source) this.codexEventSource = null;
-          if (this.codexStreamCancel) this.codexStreamCancel = null;
-          source.close();
-        };
-        const finish = (ok, value) => {
-          if (settled) return;
-          settled = true;
-          cleanup();
-          if (ok) resolve(value);
-          else reject(value instanceof Error ? value : new Error(String(value || 'Codex stream failed')));
-        };
-        const handle = (eventName, evt) => {
-          let data = {};
-          try { data = JSON.parse(evt.data || '{}'); } catch (_) {}
-          this.handleCodexNativeEvent(eventName, data, label);
-          if (eventName === 'run.completed') finish(true, data);
-          if (eventName === 'run.failed' || eventName === 'run.cancelled' || eventName === 'run.canceled') finish(false, data.error || data.status || 'Codex run failed');
-        };
-        ['run.started','message.delta','reasoning.available','session.metrics','tool.started','tool.completed','tool.failed','approval.request','provider.activity','run.completed','run.failed','run.cancelled','run.canceled'].forEach(name => {
-          source.addEventListener(name, evt => handle(name, evt));
-        });
-        source.onerror = () => {
-          if (!settled) finish(false, new Error('Codex event stream disconnected'));
-        };
-      });
+      this.updateProviderEventSource();
+      return this.waitForProviderRun(runId);
     }
 
     handleCodexNativeEvent(eventName, data, label) {
@@ -1897,44 +2067,12 @@
 
     streamClaudeCodeRunEvents(runId) {
       if (!runId) return Promise.reject(new Error('Claude Code run did not return a run id'));
-      this.closeClaudeCodeEventSource();
       this.claudeCodeCompletedToolKeys = new Set();
       this.currentRunId = runId;
       this.setStatus(_ct('claude_code_stream_active'), 'connecting');
       this.markLiveEvent();
-      const agentId = this.getSelectedAgentId() || this.selectedAgentKey || '';
-      const url = '/api/claude-code/runs/' + encodeURIComponent(runId) + '/events?agentId=' + encodeURIComponent(agentId);
-      return new Promise((resolve, reject) => {
-        let settled = false;
-        const source = new EventSource(url);
-        this.claudeCodeEventSource = source;
-        this.claudeCodeStreamCancel = (err) => finish(false, err);
-        const cleanup = () => {
-          if (this.claudeCodeEventSource === source) this.claudeCodeEventSource = null;
-          if (this.claudeCodeStreamCancel) this.claudeCodeStreamCancel = null;
-          source.close();
-        };
-        const finish = (ok, value) => {
-          if (settled) return;
-          settled = true;
-          cleanup();
-          if (ok) resolve(value);
-          else reject(value instanceof Error ? value : new Error(String(value || _ct('claude_code_stream_failed'))));
-        };
-        const handle = (eventName, evt) => {
-          let data = {};
-          try { data = JSON.parse(evt.data || '{}'); } catch (_) {}
-          this.handleClaudeCodeNativeEvent(eventName, data);
-          if (eventName === 'run.completed') finish(true, data);
-          if (eventName === 'run.failed' || eventName === 'run.cancelled' || eventName === 'run.canceled') finish(false, data.error || _ct('claude_code_run_failed'));
-        };
-        ['run.started','message.delta','reasoning.available','session.metrics','tool.started','tool.completed','tool.failed','run.completed','run.failed','run.cancelled','run.canceled'].forEach(name => {
-          source.addEventListener(name, evt => handle(name, evt));
-        });
-        source.onerror = () => {
-          if (!settled) finish(false, new Error(_ct('claude_code_stream_disconnected')));
-        };
-      });
+      this.updateProviderEventSource();
+      return this.waitForProviderRun(runId);
     }
 
     handleClaudeCodeNativeEvent(eventName, data) {
@@ -2004,13 +2142,12 @@
     }
 
     startCodexActivityPolling() {
-      if (!this.isCodexSelected() || this.codexActivityTimer) return;
-      this.pollCodexActivity().catch(() => {});
-      this.codexActivityTimer = setInterval(() => this.pollCodexActivity().catch(() => {}), 500);
+      if (!this.isCodexSelected()) return;
+      this.updateProviderEventSource();
     }
 
     stopCodexActivityPolling() {
-      if (this.codexActivityTimer) clearInterval(this.codexActivityTimer);
+      if (this.codexActivityTimer) clearTimeout(this.codexActivityTimer);
       this.codexActivityTimer = null;
     }
 
@@ -2146,8 +2283,7 @@
         bubble.append(title, body, time);
         wrap.appendChild(bubble);
         const indicator = this.messages.querySelector('.typing-indicator');
-        if (indicator) this.messages.insertBefore(wrap, indicator);
-        else this.messages.appendChild(wrap);
+        this.appendLiveNode(wrap, indicator);
         card = { wrap, title, body, time };
         this.codexRunStatusCards.set(key, card);
       }
@@ -2198,8 +2334,7 @@
         wrap.dataset.reasoningKey = key;
         wrap.appendChild(renderThinkingCard(state.text, { codex: true, status: event.status }));
         const indicator = this.messages.querySelector('.typing-indicator');
-        if (indicator) this.messages.insertBefore(wrap, indicator);
-        else this.messages.appendChild(wrap);
+        this.appendLiveNode(wrap, indicator);
         state.wrap = wrap;
       } else {
         updateThinkingCard(state.wrap.querySelector('.chat-thinking-card'), state.text, event.status);
@@ -2236,7 +2371,7 @@
       status.textContent = _ct('pending');
       card.append(title, detail, actions, note, status);
       wrap.appendChild(card);
-      this.messages.appendChild(wrap);
+      this.appendLiveNode(wrap);
       this.codexInteractionCards.set(interactionKey, card);
       this.scrollBottom();
     }
@@ -2331,7 +2466,7 @@
       });
       bubble.appendChild(stopButton);
       wrap.appendChild(bubble);
-      this.messages.appendChild(wrap);
+      this.appendLiveNode(wrap);
       this.scrollBottom();
     }
 
@@ -2409,6 +2544,7 @@
         }
       } else if (payload?.state === 'final' || payload?.state === 'done') {
         const finalText = text || this.pendingStreamContent || (this.streamingMsg ? this.streamingMsg.content : '');
+        this.mergeLiveHistoryRecord('run.completed', { ...payload, reply: finalText });
         this.flushStreamingRender(true);
         this.flushToolEvents(true);
         this.clearActivityFeed();
@@ -2454,6 +2590,7 @@
 
     markLiveEvent() {
       this.lastLiveEventAt = Date.now();
+      this.recoveryBackoffMs = ACTIVE_RUN_RECOVERY_MS;
     }
 
     scheduleStreamingRender() {
@@ -2529,20 +2666,46 @@
     ensureRecoveryWatchdog() {
       if (this.recoveryTimer) return;
       this.lastLiveEventAt = this.lastLiveEventAt || Date.now();
-      this.recoveryTimer = setInterval(() => {
-        if (!this.currentRunId && !this.streamingMsg && !this.liveToolCards.size && !this.messages.querySelector('.typing-indicator')) return this.stopRecoveryWatchdog();
-        if (!connected) return;
-        if (Date.now() - this.lastLiveEventAt > ACTIVE_RUN_RECOVERY_MS) {
-          this.lastLiveEventAt = Date.now();
-          const providerKind = this.isClaudeCodeSelected() ? 'claude-code' : (this.isHermesSelected() ? 'hermes' : '');
-          const startedAt = providerKind === 'claude-code' ? this.claudeCodeSendStartedAt : (providerKind === 'hermes' ? this.hermesSendStartedAt : 0);
-          this.loadHistory({ recoverFinal: true, startedAt }).catch(() => {});
+      const hasActiveWork = () => !!(
+        this.currentRunId ||
+        this.streamingMsg ||
+        this.liveToolCards.size ||
+        this.messages.querySelector('.typing-indicator')
+      );
+      const schedule = () => {
+        if (!hasActiveWork() || !this.root.classList.contains('open')) return this.stopRecoveryWatchdog();
+        const visibilityDelay = document.hidden ? this.recoveryBackoffMs * 4 : this.recoveryBackoffMs;
+        this.recoveryTimer = setTimeout(tick, Math.min(MAX_ACTIVE_RUN_RECOVERY_MS, visibilityDelay));
+      };
+      const tick = () => {
+        this.recoveryTimer = null;
+        if (!hasActiveWork() || !this.root.classList.contains('open')) return this.stopRecoveryWatchdog();
+        if (Date.now() - this.lastLiveEventAt <= ACTIVE_RUN_RECOVERY_MS) {
+          this.recoveryBackoffMs = ACTIVE_RUN_RECOVERY_MS;
+          schedule();
+          return;
         }
-      }, ACTIVE_RUN_RECOVERY_MS);
+
+        this.lastLiveEventAt = Date.now();
+        this.recoveryBackoffMs = Math.min(
+          MAX_ACTIVE_RUN_RECOVERY_MS,
+          Math.max(ACTIVE_RUN_RECOVERY_MS, this.recoveryBackoffMs * 2)
+        );
+        const providerContext = this.getSelectedProviderEventContext();
+        let recovery = Promise.resolve();
+        if (providerContext) {
+          recovery = this.recoverProviderStateOnce();
+        } else if (connected) {
+          recovery = this.loadHistory({ recoverFinal: true });
+        }
+        Promise.resolve(recovery).catch(() => {}).finally(schedule);
+      };
+      schedule();
     }
 
     stopRecoveryWatchdog() {
-      if (this.recoveryTimer) { clearInterval(this.recoveryTimer); this.recoveryTimer = null; }
+      if (this.recoveryTimer) { clearTimeout(this.recoveryTimer); this.recoveryTimer = null; }
+      this.recoveryBackoffMs = ACTIVE_RUN_RECOVERY_MS;
     }
 
     handleSessionMessageEvent(payload) {
@@ -2550,6 +2713,7 @@
       const msg = payload?.message && typeof payload.message === 'object' ? payload.message : payload;
       const role = msg?.role || payload?.role || '';
       if (role === 'assistant') {
+        this.mergeLiveHistoryRecord('session.message', msg);
         this.markLiveEvent();
         const providerKind = this.isClaudeCodeSelected() ? 'claude-code' : (this.isHermesSelected() ? 'hermes' : '');
         const startedAt = providerKind === 'claude-code' ? this.claudeCodeSendStartedAt : (providerKind === 'hermes' ? this.hermesSendStartedAt : 0);
@@ -2559,7 +2723,7 @@
       }
     }
 
-    appendMessage(role, content, ts, mediaItems, meta = {}, toolItems = []) {
+    appendMessage(role, content, ts, mediaItems, meta = {}, toolItems = [], options = {}) {
       const div = document.createElement('div');
       div.className = `chat-msg ${role}`;
       const bubble = document.createElement('div');
@@ -2601,7 +2765,9 @@
           bubble.appendChild(renderAgentToolResultSummary(agentResultSummary));
         } else {
           const textDiv = document.createElement('div');
-          textDiv.innerHTML = formatContent(displayContent);
+          const formattedHtml = options.cachedHtml == null ? formatContent(displayContent) : options.cachedHtml;
+          textDiv.innerHTML = formattedHtml;
+          options.onFormattedHtml?.(formattedHtml);
           bubble.appendChild(textDiv);
         }
       }
@@ -2613,9 +2779,16 @@
         bubble.appendChild(time);
       }
       div.appendChild(bubble);
-      this.removeTypingIndicator();
-      this.messages.appendChild(div);
+      if (!options.skipTypingCleanup) this.removeTypingIndicator();
+      (options.parent || (CHAT_HISTORY_V2_ENABLED ? this.liveLayer : this.messages)).appendChild(div);
       return div;
+    }
+
+    appendLiveNode(node, before = null) {
+      const parent = CHAT_HISTORY_V2_ENABLED ? this.liveLayer : this.messages;
+      if (before && before.parentNode === parent) parent.insertBefore(node, before);
+      else parent.appendChild(node);
+      return node;
     }
 
     appendStreamingMessage() {
@@ -2629,7 +2802,7 @@
       bubble.className = 'chat-bubble streaming';
       bubble.innerHTML = '<span class="cursor">▊</span>';
       div.appendChild(bubble);
-      this.messages.appendChild(div);
+      (CHAT_HISTORY_V2_ENABLED ? this.liveLayer : this.messages).appendChild(div);
       this.scrollBottom(shouldStick);
     }
 
@@ -2637,7 +2810,7 @@
       const div = this.messages.querySelector('.streaming-msg');
       if (!div) return;
       const bubble = div.querySelector('.chat-bubble');
-      bubble.innerHTML = formatContent(content) + '<span class="cursor">▊</span>';
+      bubble.innerHTML = formatStreamingContent(content) + '<span class="cursor">▊</span>';
     }
 
     finalizeStreamingMessage(content, mediaItems) {
@@ -2666,7 +2839,7 @@
       const div = document.createElement('div');
       div.className = 'chat-msg system';
       div.innerHTML = `<div class="chat-bubble system-bubble">${escHtml(text)}</div>`;
-      this.messages.appendChild(div);
+      (CHAT_HISTORY_V2_ENABLED ? this.liveLayer : this.messages).appendChild(div);
       this.scrollBottom();
     }
 
@@ -2676,7 +2849,7 @@
         ind = document.createElement('div');
         ind.className = 'chat-msg assistant typing-indicator';
         ind.innerHTML = `<div class="chat-bubble typing"><span class="typing-text">${escHtml(text)}</span><span class="typing-dots"><span>.</span><span>.</span><span>.</span></span></div>`;
-        this.messages.appendChild(ind);
+        this.appendLiveNode(ind);
       } else {
         ind.querySelector('.typing-text').textContent = text;
       }
@@ -2694,6 +2867,298 @@
       const err = new Error(providerKind + ' stream cancelled');
       err.cancelledByUi = true;
       return err;
+    }
+
+    getSelectedProviderEventContext() {
+      const providerKind = this.isClaudeCodeSelected()
+        ? 'claude-code'
+        : this.isHermesSelected()
+          ? 'hermes'
+          : this.isCodexSelected()
+            ? 'codex'
+            : '';
+      if (!providerKind) return null;
+      return {
+        providerKind,
+        agentId: this.getSelectedAgentId() || this.selectedAgentKey || '',
+        conversationId: providerKind === 'codex'
+          ? this.getCodexConversationId()
+          : this.getProviderConversationId(providerKind)
+      };
+    }
+
+    clearProviderRecoveryTimer() {
+      if (this.providerRecoveryTimer) {
+        clearTimeout(this.providerRecoveryTimer);
+        this.providerRecoveryTimer = null;
+      }
+    }
+
+    closeProviderEventSource() {
+      this.clearProviderRecoveryTimer();
+      if (this.providerEventSource) {
+        try { this.providerEventSource.close(); } catch (_) {}
+        this.providerEventSource = null;
+      }
+      this.providerEventKey = '';
+      this.providerEventReady = null;
+      if (this.providerRunWaiters.size) {
+        const error = this.makeStreamCancelledError('Provider');
+        for (const waiter of this.providerRunWaiters.values()) {
+          clearTimeout(waiter.timer);
+          waiter.reject(error);
+        }
+        this.providerRunWaiters.clear();
+      }
+    }
+
+    updateProviderEventSource() {
+      const context = this.getSelectedProviderEventContext();
+      if (!context || !this.root.classList.contains('open')) {
+        this.closeProviderEventSource();
+        return Promise.resolve(false);
+      }
+      const key = [context.providerKind, context.agentId, context.conversationId].join(':');
+      if (this.providerEventSource && this.providerEventKey === key) {
+        return this.providerEventReady || Promise.resolve(true);
+      }
+
+      this.closeProviderEventSource();
+      this.providerEventKey = key;
+      const query = new URLSearchParams({
+        provider: context.providerKind,
+        agentId: context.agentId,
+        conversationId: context.conversationId,
+        after: String(this.providerEventCursors.get(key) || 0)
+      });
+      let resolveReady;
+      this.providerEventReady = new Promise(resolve => { resolveReady = resolve; });
+      const source = new EventSource('/api/provider/events?' + query.toString());
+      source.__providerEventKey = key;
+      this.providerEventSource = source;
+
+      const handle = (eventName, event) => {
+        if (this.providerEventSource !== source) return;
+        this.clearProviderRecoveryTimer();
+        let data = {};
+        try { data = JSON.parse(event.data || '{}'); } catch (_) {}
+        const eventId = Number(data.eventId || event.lastEventId || 0);
+        if (eventId > 0) this.providerEventCursors.set(key, eventId);
+        this.handleProviderEvent(eventName, data);
+        resolveReady(true);
+      };
+      [
+        'provider.snapshot',
+        'provider.heartbeat',
+        'history.recovered',
+        'run.started',
+        'message.delta',
+        'reasoning.available',
+        'session.metrics',
+        'tool.started',
+        'tool.completed',
+        'tool.failed',
+        'provider.activity',
+        'approval.request',
+        'approval.resolved',
+        'run.completed',
+        'run.failed',
+        'run.cancelled',
+        'run.canceled'
+      ].forEach(name => source.addEventListener(name, event => handle(name, event)));
+      source.onopen = () => {
+        this.clearProviderRecoveryTimer();
+        resolveReady(true);
+      };
+      source.onerror = () => {
+        if (this.providerEventSource !== source || this.providerRecoveryTimer) return;
+        this.providerRecoveryTimer = setTimeout(() => {
+          this.providerRecoveryTimer = null;
+          this.recoverProviderStateOnce().catch(() => {});
+        }, document.hidden ? 10000 : 1500);
+      };
+      return this.providerEventReady;
+    }
+
+    async ensureProviderEventSourceReady() {
+      const ready = this.updateProviderEventSource();
+      await Promise.race([ready, new Promise(resolve => setTimeout(resolve, 2500))]);
+    }
+
+    async recoverProviderStateOnce() {
+      if (!this.root.classList.contains('open')) return;
+      if (this.isCodexSelected()) {
+        await this.pollCodexActivity(false, { replayHistoricalTurns: false }).catch(() => {});
+        await this.pollCodexLiveActivity().catch(() => {});
+        await this.pollCodexApproval().catch(() => {});
+      } else if (this.isHermesSelected()) {
+        await this.pollHermesLiveActivity().catch(() => {});
+        await this.pollHermesApproval().catch(() => {});
+      } else if (this.isClaudeCodeSelected()) {
+        await this.pollClaudeCodeLiveActivity().catch(() => {});
+      }
+    }
+
+    handleProviderEvent(eventName, data) {
+      const context = this.getSelectedProviderEventContext();
+      if (!context) return;
+      this.markLiveEvent();
+      if (eventName === 'provider.heartbeat') return;
+      if (eventName === 'provider.snapshot') {
+        const active = Array.isArray(data.activeRuns) ? data.activeRuns[0] : null;
+        if (active?.runId && !this.currentRunId) this.currentRunId = active.runId;
+        return;
+      }
+      this.mergeLiveHistoryRecord(eventName, data);
+      if (eventName === 'approval.request') {
+        if (context.providerKind === 'hermes' && data.approval) {
+          this.appendHermesPendingApproval(data.approval, data.pending_count || 1);
+        } else if (context.providerKind === 'codex' && data.approval) {
+          this.appendCodexPendingApproval(data.approval, data.pending_count || 1);
+        }
+      } else if (eventName === 'approval.resolved') {
+        const approval = data.approval || {};
+        const approvalId = approval.approval_id || approval.approvalId || approval.id || '';
+        const card = approvalId
+          ? [...this.messages.querySelectorAll('[data-approval-id]')].find(el => el.dataset.approvalId === approvalId)
+          : null;
+        if (card) {
+          card.classList.remove('responding');
+          card.classList.add(String(data.status || approval.status || '').includes('den') ? 'denied' : 'approved');
+        }
+      }
+
+      if (eventName === 'history.recovered') {
+        this.handleProviderHistoryRecovered(context.providerKind, data.progress || data.message || data);
+        return;
+      }
+      if (context.providerKind === 'codex') {
+        this.handleCodexNativeEvent(eventName, data, this.agentSelect.selectedOptions[0]?.textContent.trim() || 'Codex');
+      } else if (context.providerKind === 'hermes') {
+        this.handleHermesNativeEvent(eventName, data);
+      } else if (context.providerKind === 'claude-code') {
+        this.handleClaudeCodeNativeEvent(eventName, data);
+      }
+
+      if (['run.completed', 'run.failed', 'run.cancelled', 'run.canceled'].includes(eventName)) {
+        const runId = data.runId || '';
+        if (!runId) return;
+        const result = { eventName, data };
+        this.providerRunResults.set(runId, result);
+        while (this.providerRunResults.size > 50) {
+          this.providerRunResults.delete(this.providerRunResults.keys().next().value);
+        }
+        const waiter = this.providerRunWaiters.get(runId);
+        if (waiter) {
+          clearTimeout(waiter.timer);
+          this.providerRunWaiters.delete(runId);
+          if (eventName === 'run.completed') waiter.resolve(data);
+          else waiter.reject(new Error(data.error || data.status || eventName));
+        }
+      }
+    }
+
+    mergeLiveHistoryRecord(eventName, payload) {
+      if (eventName === 'message.delta') return;
+      payload = payload && typeof payload === 'object' ? payload : {};
+      const context = this.getHistoryContext();
+      const runId = payload.runId || payload.turnId || this.currentRunId || '';
+      const epochMs = Number(payload.epochMs || payload.ts || Date.now());
+      const terminalRun = ['run.completed', 'run.failed', 'run.cancelled', 'run.canceled'].includes(eventName);
+      const toolEvent = eventName.startsWith('tool.');
+      const approvalEvent = eventName.startsWith('approval.');
+      const sessionMessage = eventName === 'session.message';
+      const recovered = eventName === 'history.recovered';
+      if (!terminalRun && !toolEvent && !approvalEvent && !sessionMessage && !recovered) return;
+
+      const toolCard = payload.toolCard || {};
+      const toolId = payload.toolCallId || toolCard.id || payload.itemId || payload.id || '';
+      const approval = payload.approval && typeof payload.approval === 'object' ? payload.approval : null;
+      const approvalId = approval?.approval_id || approval?.approvalId || approval?.id || payload.approvalId || '';
+      const status = terminalRun
+        ? (eventName === 'run.completed' ? 'done' : 'failed')
+        : (eventName === 'tool.started' || eventName === 'approval.request' ? 'running' : 'done');
+      const record = sessionMessage ? { ...payload } : {
+        id: terminalRun
+          ? `run-${runId || epochMs}-final`
+          : toolEvent
+            ? `tool-${runId || 'run'}-${toolId || epochMs}`
+            : approvalEvent
+              ? `approval-${approvalId || runId || epochMs}`
+              : `recovered-${runId || epochMs}`,
+        role: payload.role || 'assistant',
+        text: payload.reply || payload.text || payload.error || '',
+        epochMs,
+        status,
+        thinking: payload.thinking || '',
+        approval,
+        tools: toolEvent ? [{
+          id: toolId,
+          name: toolCard.name || payload.name || payload.tool || 'tool',
+          arguments: toolCard.arguments || payload.arguments || payload.input || {},
+          result: toolCard.result || payload.result || payload.output || '',
+          error: toolCard.error || payload.error || '',
+          status,
+        }] : (payload.tools || [])
+      };
+      this.historyStore.applyLiveEvent(context, eventName, record, { notify: false });
+    }
+
+    handleProviderHistoryRecovered(providerKind, progress) {
+      if (!isRecoverableProviderProgress(progress)) return;
+      const runId = progress.runId || progress.progressId || this.currentRunId || '';
+      if (runId) this.currentRunId = runId;
+      this.applySessionMetrics(progress);
+      if (progress.approval) {
+        if (providerKind === 'codex') this.appendCodexPendingApproval(progress.approval, progress.approval.pending_count || 1);
+        if (providerKind === 'hermes') this.appendHermesPendingApproval(progress.approval, progress.approval.pending_count || 1);
+      }
+      if (progress.text || progress.reply) {
+        if (!this.streamingMsg || this.streamingMsg.id !== runId) {
+          this.streamingMsg = { id: runId, role: 'assistant', content: '' };
+          this.pendingStreamContent = '';
+          this.appendStreamingMessage();
+        }
+        this.pendingStreamContent = progress.text || progress.reply;
+        this.scheduleStreamingRender();
+      }
+      normalizeHermesTools(progress.tools || []).forEach((tool, index) => {
+        const toolId = tool.id || `${index}:${tool.name || 'tool'}`;
+        const terminal = ['done', 'error', 'failed'].includes(String(tool.status || '').toLowerCase());
+        const payload = {
+          runId,
+          data: {
+            toolCallId: toolId,
+            phase: terminal ? 'result' : 'update',
+            name: tool.name || 'Provider tool',
+            args: tool.arguments || {},
+            result: tool.result || '',
+            isError: tool.status === 'error' || !!tool.error,
+            error: tool.error || ''
+          }
+        };
+        if (terminal) this.finishToolCall(payload);
+        else this.updateToolCall(payload);
+      });
+    }
+
+    waitForProviderRun(runId, timeoutMs = 20 * 60 * 1000) {
+      if (!runId) return Promise.reject(new Error('Provider run did not return a run id'));
+      const completed = this.providerRunResults.get(runId);
+      if (completed) {
+        this.providerRunResults.delete(runId);
+        return completed.eventName === 'run.completed'
+          ? Promise.resolve(completed.data)
+          : Promise.reject(new Error(completed.data.error || completed.data.status || completed.eventName));
+      }
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+          this.providerRunWaiters.delete(runId);
+          this.recoverProviderStateOnce().catch(() => {});
+          reject(new Error('Provider event stream timed out'));
+        }, timeoutMs);
+        this.providerRunWaiters.set(runId, { resolve, reject, timer });
+      });
     }
 
     closeHermesEventSource() {
@@ -2824,57 +3289,15 @@
 
     streamHermesRunEvents(runId, hermesProgress, startedAt = 0) {
       if (!runId) return Promise.reject(new Error('Hermes run did not return a run id'));
-      this.closeHermesEventSource();
       this.hermesCompletedToolKeys = new Set();
       this.currentRunId = runId;
       this.setStatus('Hermes stream active...', 'connecting');
       this.markLiveEvent();
-      const agentId = this.getSelectedAgentId() || this.selectedAgentKey || '';
-      const url = '/api/hermes/runs/' + encodeURIComponent(runId) + '/events?agentId=' + encodeURIComponent(agentId);
       let completed = false;
-      return new Promise((resolve, reject) => {
-        let settled = false;
-        const source = new EventSource(url);
-        this.hermesEventSource = source;
-        this.hermesStreamCancel = (err) => finish(false, err);
-        const cleanup = () => {
-          if (this.hermesEventSource === source) this.hermesEventSource = null;
-          if (this.hermesStreamCancel) this.hermesStreamCancel = null;
-          source.close();
-        };
-        const finish = (ok, value) => {
-          if (settled) return;
-          settled = true;
-          completed = !!ok;
-          cleanup();
-          if (ok) resolve(value);
-          else reject(value instanceof Error ? value : new Error(String(value || 'Hermes stream failed')));
-        };
-        const handle = (eventName, evt) => {
-          let data = {};
-          try { data = JSON.parse(evt.data || '{}'); } catch (_) {}
-          this.handleHermesNativeEvent(eventName, data);
-          if (['run.completed', 'run.failed', 'run.cancelled', 'run.canceled'].includes(eventName)) {
-            finish(eventName === 'run.completed', eventName === 'run.completed' ? data : new Error(data.error || eventName));
-          }
-        };
-        [
-          'run.started',
-          'message.delta',
-          'reasoning.available',
-          'tool.started',
-          'tool.completed',
-          'tool.failed',
-          'approval.request',
-          'run.completed',
-          'run.failed',
-          'run.cancelled',
-          'run.canceled'
-        ].forEach(name => source.addEventListener(name, evt => handle(name, evt)));
-        source.onmessage = evt => handle('message', evt);
-        source.onerror = () => {
-          if (!settled) finish(false, new Error('Hermes native stream disconnected'));
-        };
+      this.updateProviderEventSource();
+      return this.waitForProviderRun(runId).then(value => {
+        completed = true;
+        return value;
       }).catch(async err => {
         const recovered = await this.recoverHermesFinalFromHistory(startedAt || this.hermesSendStartedAt, 8000).catch(() => false);
         if (recovered) {
@@ -2975,42 +3398,33 @@
     startHermesHistoryPolling() {
       this.stopHermesHistoryPolling();
       this.hermesCompletedToolKeys = new Set();
-      this.pollHermesLiveActivity().catch(() => {});
-      this.hermesHistoryPollTimer = setInterval(() => {
-        if (this.isHermesSelected()) this.pollHermesLiveActivity().catch(() => {});
-      }, HERMES_HISTORY_POLL_MS);
+      this.updateProviderEventSource();
     }
 
     stopHermesHistoryPolling() {
-      if (this.hermesHistoryPollTimer) clearInterval(this.hermesHistoryPollTimer);
+      if (this.hermesHistoryPollTimer) clearTimeout(this.hermesHistoryPollTimer);
       this.hermesHistoryPollTimer = null;
     }
 
     startCodexHistoryPolling() {
       this.stopCodexHistoryPolling();
       this.codexCompletedToolKeys = new Set();
-      this.pollCodexLiveActivity().catch(() => {});
-      this.codexHistoryPollTimer = setInterval(() => {
-        if (this.isCodexSelected()) this.pollCodexLiveActivity().catch(() => {});
-      }, HERMES_HISTORY_POLL_MS);
+      this.updateProviderEventSource();
     }
 
     stopCodexHistoryPolling() {
-      if (this.codexHistoryPollTimer) clearInterval(this.codexHistoryPollTimer);
+      if (this.codexHistoryPollTimer) clearTimeout(this.codexHistoryPollTimer);
       this.codexHistoryPollTimer = null;
     }
 
     startClaudeCodeHistoryPolling() {
       this.stopClaudeCodeHistoryPolling();
       this.claudeCodeCompletedToolKeys = new Set();
-      this.pollClaudeCodeLiveActivity().catch(() => {});
-      this.claudeCodeHistoryPollTimer = setInterval(() => {
-        if (this.isClaudeCodeSelected()) this.pollClaudeCodeLiveActivity().catch(() => {});
-      }, HERMES_HISTORY_POLL_MS);
+      this.updateProviderEventSource();
     }
 
     stopClaudeCodeHistoryPolling() {
-      if (this.claudeCodeHistoryPollTimer) clearInterval(this.claudeCodeHistoryPollTimer);
+      if (this.claudeCodeHistoryPollTimer) clearTimeout(this.claudeCodeHistoryPollTimer);
       this.claudeCodeHistoryPollTimer = null;
     }
 
@@ -3400,6 +3814,31 @@
       return this.messages.scrollHeight - this.messages.scrollTop - this.messages.clientHeight <= threshold;
     }
 
+    handleHistoryScroll() {
+      if (!CHAT_HISTORY_V2_ENABLED || !this.historyView.entry || this.historyScrollFrame) return;
+      this.historyScrollFrame = requestAnimationFrame(() => {
+        this.historyScrollFrame = null;
+        const entry = this.historyView.entry;
+        if (!entry) return;
+        if (this.messages.scrollTop <= 240) {
+          if (this.historyView.range.start > 0) {
+            this.historyView.navigate('older');
+          } else if (entry.hasMore) {
+            this.historyStore.fetchOlder(entry.context)
+              .then(() => {
+                if (this.historyView.entry === entry) this.historyView.navigate('older');
+              })
+              .catch(error => {
+                if (error?.name !== 'AbortError') console.warn('[chat] Failed to load older history:', error);
+              });
+          }
+          return;
+        }
+        const remaining = this.messages.scrollHeight - this.messages.scrollTop - this.messages.clientHeight;
+        if (remaining <= 240 && this.historyView.range.end < entry.order.length) this.historyView.navigate('newer');
+      });
+    }
+
     scrollBottom(force = true) {
       if (!force) return;
       if (this.scrollFrame) return;
@@ -3442,8 +3881,7 @@
       wrap.dataset.toolKey = key;
       wrap.appendChild(renderToolCallCard(tool, { live: true }));
       const ind = this.messages.querySelector('.typing-indicator');
-      if (ind) this.messages.insertBefore(wrap, ind);
-      else this.messages.appendChild(wrap);
+      this.appendLiveNode(wrap, ind);
       this.liveToolCards.set(key, wrap);
       this.pruneToolCards();
       this.scrollBottom(shouldStick);
@@ -3491,8 +3929,7 @@
       div.className = 'chat-activity';
       div.innerHTML = '<span class="activity-text">' + escHtml(text) + '</span><span class="activity-time">' + new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'}) + '</span>';
       const ind = this.messages.querySelector('.typing-indicator');
-      if (ind) this.messages.insertBefore(div, ind);
-      else this.messages.appendChild(div);
+      this.appendLiveNode(div, ind);
       this.scrollBottom(shouldStick);
     }
   }
@@ -3715,12 +4152,14 @@
     if (shouldOpen) {
       panel.dataset.hiddenByUser = 'false';
       setActiveSecondarySlot(slotKey);
+      windowInstance?.activateHistory();
       windowInstance?.scrollBottom();
       if (connected || windowInstance?.isHermesSelected() || windowInstance?.isCodexSelected()) {
         windowInstance?.loadHistory();
         windowInstance?.fetchSessionInfo();
       }
       windowInstance?.updateFeishuEventSource();
+      windowInstance?.updateProviderEventSource();
       windowInstance?.input?.focus();
     } else {
       panel.dataset.hiddenByUser = 'true';
@@ -3730,6 +4169,7 @@
       }
       windowInstance?.removeTypingIndicator();
       windowInstance?.closeFeishuEventSource();
+      windowInstance?.closeProviderEventSource();
       if (activeSecondarySlot === slotKey) setActiveSecondarySlot(null);
     }
     syncSecondaryChatControls();
@@ -4562,6 +5002,20 @@
     html = html.replace(/<img ([^>]*)>/g, '<img $1 class="chat-image-thumb chat-image-clickable">');
     return html;
   }
+  function formatStreamingContent(text) {
+    if (!text) return '';
+    return escHtml(text).replace(/\n/g, '<br>');
+  }
+  function waitForNextHistoryRenderFrame() {
+    return new Promise(resolve => {
+      if (typeof document !== 'undefined' && document.hidden) {
+        setTimeout(resolve, 16);
+        return;
+      }
+      if (typeof requestAnimationFrame === 'function') requestAnimationFrame(resolve);
+      else setTimeout(resolve, 16);
+    });
+  }
   function escHtml(s) { return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 
   function formatToolLabel(name, args) {
@@ -4732,14 +5186,17 @@
     if (shouldOpen && !ws) connectGateway();
     if (shouldOpen) {
       primaryWindow.input.focus();
+      primaryWindow.activateHistory();
       primaryWindow.scrollBottom();
       if (connected || primaryWindow.isHermesSelected() || primaryWindow.isCodexSelected()) {
         primaryWindow.loadHistory();
         primaryWindow.fetchSessionInfo();
       }
       primaryWindow.updateFeishuEventSource();
+      primaryWindow.updateProviderEventSource();
     } else {
       primaryWindow.closeFeishuEventSource();
+      primaryWindow.closeProviderEventSource();
       closeAllSecondaryPanels();
     }
   }

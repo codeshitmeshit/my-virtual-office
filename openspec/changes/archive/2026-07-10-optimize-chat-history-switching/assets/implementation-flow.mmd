@@ -1,0 +1,44 @@
+flowchart TD
+    A([开始：ChatWindow 选择会话]) --> B{修改：缓存是否命中？}
+    B -- 命中 --> C[新增：ChatHistoryStore 返回缓存模型]
+    B -- 未命中 --> D[修改：ChatHistoryView 显示轻量加载状态]
+    C --> E[新增：ChatHistoryView 渲染最多 160 条]
+    D --> F[新增：请求 GET /api/chat/history]
+    E --> F
+    F --> G{新增：OfficeHandler 参数和游标是否合法？}
+    G -- 否 --> H([返回 400：稳定错误码])
+    G -- 是 --> I[新增：按 Provider 读取 limit + 1 候选]
+
+    subgraph R[复用范围：现有历史数据源]
+        R1[复用：Hermes/Codex/Claude 历史文件读取]
+        R2[复用：OpenClaw session 路径解析]
+        R3[复用：通信日志和发送方上下文]
+    end
+
+    I --> R1
+    I --> R2
+    I --> R3
+    R1 --> J[新增：统一消息模型和稳定 identity]
+    R2 --> J
+    R3 --> J
+    J --> K[新增：去重、排序、游标分页]
+    K --> L[/返回 messages、nextCursor、hasMore/]
+    L --> M[新增：Store 按 conversationKey 合并]
+    M --> N{修改：响应仍属于当前 activation？}
+    N -- 否 --> O[新增：只更新匹配的非活动缓存]
+    N -- 是 --> P[新增：按 key 增量更新历史窗口]
+    P --> Q{修改：用户接近顶部？}
+    Q -- 是且 hasMore --> F
+    Q -- 否 --> R4[复用：Provider SSE / Gateway 实时事件]
+    R4 --> S[修改：实时事件写入同一 Store]
+    S --> P
+    O --> T([结束：当前会话 DOM 不变])
+    P --> U([结束：保持锚点且 DOM 不超过 160])
+
+    class C,E,F,G,I,J,K,M,O,P,S addNode
+    class B,D,N,Q modifyNode
+    class R1,R2,R3,R4 reuseNode
+    classDef addNode fill:#E8F1FF,stroke:#1D4ED8,stroke-width:2px,color:#111827
+    classDef modifyNode fill:#FFF4E5,stroke:#F59E0B,stroke-width:2px,color:#111827
+    classDef reuseNode fill:#ECFDF3,stroke:#16A34A,stroke-width:2px,color:#111827
+    style R fill:#F0FDF4,stroke:#16A34A,stroke-width:2px,stroke-dasharray:4 3

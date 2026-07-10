@@ -2790,6 +2790,28 @@ button:active { transform: translateY(3px); box-shadow: none; }
 .chat-messages::-webkit-scrollbar { width: 6px; }
 .chat-messages::-webkit-scrollbar-thumb { background: var(--ui-border); border-radius: 3px; }
 
+.chat-history-layer,
+.chat-live-layer {
+    display: flex;
+    flex: 0 0 auto;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+    width: 100%;
+}
+
+.chat-history-layer:empty,
+.chat-live-layer:empty {
+    display: none;
+}
+
+.chat-history-spacer {
+    flex: 0 0 auto;
+    min-height: 0;
+    pointer-events: none;
+    width: 1px;
+}
+
 .chat-msg { display: flex; }
 .chat-msg.user { justify-content: flex-end; }
 .chat-msg.assistant { justify-content: flex-start; }

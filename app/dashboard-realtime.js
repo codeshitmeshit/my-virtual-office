@@ -7,6 +7,7 @@
     var mode = 'starting';
     var seenActions = Object.create(null);
     var fallbackMs = 2000;
+    var lastSseAt = 0;
 
     function t(key, fallback) {
         try {
@@ -49,6 +50,14 @@
 
     function refreshModeLabel() {
         setMode(mode || 'starting');
+    }
+
+    function markSseActive() {
+        lastSseAt = Date.now();
+    }
+
+    function isSseFresh(maxAgeMs) {
+        return mode === 'sse' && lastSseAt && Date.now() - lastSseAt < (maxAgeMs || 15000);
     }
 
     function applyStatus(statusPayload) {
@@ -199,7 +208,7 @@
         if (reconnectTimer) return;
         reconnectTimer = setTimeout(function () {
             reconnectTimer = null;
-            if (mode !== 'sse') startFallback();
+            if (!isSseFresh(15000)) startFallback();
         }, 3500);
     }
 
@@ -216,38 +225,49 @@
             return;
         }
         source.onopen = function () {
+            markSseActive();
             stopFallback();
             setMode('sse');
         };
         source.onerror = function () {
-            if (mode !== 'polling') setMode('reconnecting');
+            if (!isSseFresh(5000) && mode !== 'polling') setMode('reconnecting');
             scheduleFallback();
         };
         source.addEventListener('dashboard.snapshot', function (evt) {
+            markSseActive();
             stopFallback();
             setMode('sse');
             applySnapshot(parse(evt));
         });
         source.addEventListener('dashboard.status', function (evt) {
+            markSseActive();
             stopFallback();
             setMode('sse');
             applyStatus(parse(evt).status);
         });
         source.addEventListener('dashboard.meetings', function (evt) {
+            markSseActive();
             stopFallback();
             setMode('sse');
             applyMeetings(parse(evt).meetings);
         });
         source.addEventListener('dashboard.projects', function (evt) {
+            markSseActive();
             stopFallback();
             setMode('sse');
             applyProjects(parse(evt).projects);
         });
         source.addEventListener('dashboard.actions', function (evt) {
+            markSseActive();
             applyActions(parse(evt).actions);
         });
+        source.addEventListener('dashboard.heartbeat', function () {
+            markSseActive();
+            stopFallback();
+            setMode('sse');
+        });
         source.addEventListener('dashboard.error', function () {
-            setMode('reconnecting');
+            if (!isSseFresh(5000)) setMode('reconnecting');
             scheduleFallback();
         });
     }
@@ -255,6 +275,7 @@
     window.dashboardRealtime = {
         connect: connect,
         setMode: setMode,
+        isSseFresh: isSseFresh,
         fetchFallbackOnce: fetchFallbackOnce,
         _applySnapshot: applySnapshot,
         _applyActions: applyActions

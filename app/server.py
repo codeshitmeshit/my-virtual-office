@@ -31,6 +31,8 @@ import sqlite3
 import subprocess
 import time
 import difflib
+from collections import OrderedDict, deque
+from dataclasses import dataclass
 import feishu_chat_channel
 import gateway_presence
 from dashboard_realtime import DashboardRealtimeStream
@@ -4460,6 +4462,20 @@ def _remember_hermes_approval_pending(approval, agent_id="", profile="", session
             approval["feishuNotification"] = _send_hermes_approval_feishu_notification(approval)
         except Exception as exc:
             approval["feishuNotification"] = {"ok": False, "status": "error", "error": str(exc)}
+        bridge = globals().get("PROVIDER_RUN_BRIDGE")
+        if bridge:
+            bridge.publish(
+                "hermes",
+                approval.get("agentId") or agent_id,
+                approval.get("conversationId") or "",
+                "approval.request",
+                {
+                    "approval": approval,
+                    "pending_count": 1,
+                    "runId": approval.get("runId") or approval.get("run_id") or "",
+                },
+                approval.get("runId") or approval.get("run_id") or "",
+            )
     return approval
 
 
@@ -5354,6 +5370,23 @@ def _handle_hermes_approval_respond(body):
     if not agent:
         return {"ok": False, "error": f"Hermes agent '{agent_key}' not found", "_status": 404}
     profile = agent.get("profile") or agent.get("providerAgentId") or "default"
+
+    def publish_resolution(run_id=""):
+        resolved = {
+            **approval,
+            "id": approval.get("id") or approval_id,
+            "approval_id": approval.get("approval_id") or approval_id,
+            "status": "denied" if choice == "deny" else "approved",
+        }
+        PROVIDER_RUN_BRIDGE.publish(
+            "hermes",
+            agent.get("id") or agent_key,
+            body.get("conversationId") or approval.get("conversationId") or "",
+            "approval.resolved",
+            {"approval": resolved, "choice": choice, "status": resolved["status"], "runId": run_id},
+            run_id,
+        )
+
     if approval.get("provider") == "hermes-api" and approval.get("runId"):
         run_id = str(approval.get("runId"))
         try:
@@ -5364,9 +5397,11 @@ def _handle_hermes_approval_respond(body):
             _save_hermes_history(profile, history)
             if choice == "deny":
                 gateway_presence.set_provider_event(agent.get("statusKey") or agent.get("id"), "hermes", {"event": "run.cancelled", "run_id": run_id})
+                publish_resolution(run_id)
                 return {"ok": True, "choice": "deny", "providerPath": "api", "runId": run_id, "message": "Hermes approval denied."}
 
             gateway_presence.set_provider_event(agent.get("statusKey") or agent.get("id"), "hermes", {"event": "approval.responded", "run_id": run_id})
+            publish_resolution(run_id)
             return {
                 "ok": True,
                 "choice": choice,
@@ -5382,6 +5417,7 @@ def _handle_hermes_approval_respond(body):
         history = _load_hermes_history(profile)
         history.append(_approval_result_message({**approval, "agentId": agent.get("id") or agent_key, "message": message}, "deny"))
         _save_hermes_history(profile, history)
+        publish_resolution()
         return {"ok": True, "choice": "deny", "message": "Hermes approval denied."}
     if choice in {"session", "always"}:
         return {"ok": False, "error": "session and always approvals require Hermes native API approval support", "_status": 409}
@@ -5403,6 +5439,8 @@ def _handle_hermes_approval_respond(body):
     }
     result = _handle_hermes_chat(retry_body)
     result["approvalChoice"] = "once"
+    if result.get("ok"):
+        publish_resolution(str(result.get("runId") or ""))
     return result
 
 
@@ -5455,6 +5493,7 @@ def _handle_hermes_run_start(body):
     events = queue.Queue()
     meta = {
         "runId": run_id,
+        "providerKind": "hermes",
         "agentId": agent.get("id"),
         "agentKey": agent_key,
         "profile": profile,
@@ -5544,7 +5583,7 @@ def _handle_hermes_run_start(body):
             result = {"ok": False, "error": str(exc), "_status": 500}
         terminal_payload = _hermes_stream_event_payload(run_id, agent, profile, result, conversationId=conversation_id)
         if result.get("approval"):
-            enqueue("approval.required", terminal_payload)
+            enqueue("approval.request", terminal_payload)
         status = str(result.get("status") or "").lower()
         if result.get("ok"):
             enqueue("run.completed", terminal_payload)
@@ -6287,6 +6326,7 @@ def _handle_codex_run_start(body):
     events = queue.Queue()
     meta = {
         "runId": run_id,
+        "providerKind": "codex",
         "agentId": agent.get("id"),
         "agentKey": agent_key,
         "profile": profile,
@@ -6623,6 +6663,19 @@ def _handle_codex_approval_respond(body):
     history_event = None
     if result.get("ok"):
         history_event = _append_codex_approval_result_comm_event(agent, agent_id, conversation_id, merged_approval, normalized_choice)
+        PROVIDER_RUN_BRIDGE.publish(
+            "codex",
+            agent_id,
+            conversation_id,
+            "approval.resolved",
+            {
+                "approval": merged_approval,
+                "choice": normalized_choice,
+                "status": merged_approval.get("status") or "",
+                "runId": merged_approval.get("runId") or merged_approval.get("turnId") or "",
+            },
+            merged_approval.get("runId") or merged_approval.get("turnId") or "",
+        )
         status_key = agent.get("statusKey") or agent_id
         if hasattr(gateway_presence, "set_provider_event"):
             gateway_presence.set_provider_event(status_key, "codex", {
@@ -7522,18 +7575,52 @@ def _remove_claude_code_progress_messages(messages):
     return _remove_provider_progress_messages(messages, "claude-code")
 
 
+def _provider_recovery_progress_snapshot(provider_kind, agent_id, conversation_id):
+    provider_kind = str(provider_kind or "").strip().lower()
+    if provider_kind == "hermes":
+        agent = _get_hermes_agent(agent_id) or {}
+        profile = agent.get("profile") or agent.get("providerAgentId") or "default"
+        messages = _load_hermes_history(profile, conversation_id)
+        marker = "hermes-progress"
+    elif provider_kind == "claude-code":
+        agent = _get_claude_code_agent(agent_id) or {}
+        profile = agent.get("profile") or agent.get("providerAgentId") or "main"
+        messages = _sanitize_claude_code_history_messages(_load_claude_code_history(profile, conversation_id))
+        marker = "claude-code-progress"
+    elif provider_kind == "codex":
+        agent = _get_codex_agent(agent_id) or {}
+        profile = agent.get("profile") or agent.get("providerAgentId") or "default"
+        messages = _load_codex_history(profile)
+        marker = "codex-progress"
+    else:
+        return None
+    recoverable = _filter_recoverable_provider_progress_messages(messages)
+    for message in reversed(recoverable):
+        if not isinstance(message, dict) or message.get("ephemeral") != marker:
+            continue
+        message_conversation = str(message.get("conversationId") or "")
+        if message_conversation and message_conversation != conversation_id:
+            continue
+        return message
+    return None
+
+
 class ProviderRunBridge:
     """Provider-neutral run registry and SSE event distributor."""
 
     def __init__(self):
         self._lock = threading.Lock()
+        self._condition = threading.Condition(self._lock)
         self._runs = {}
+        self._event_log = deque(maxlen=4000)
+        self._next_event_id = 0
 
     def remember(self, meta):
         if not isinstance(meta, dict) or not meta.get("runId"):
             return
-        with self._lock:
+        with self._condition:
             self._runs[str(meta["runId"])] = meta
+            self._condition.notify_all()
 
     def get(self, run_id):
         with self._lock:
@@ -7541,32 +7628,99 @@ class ProviderRunBridge:
             return meta if isinstance(meta, dict) else None
 
     def clear(self, run_id):
-        with self._lock:
+        with self._condition:
             self._runs.pop(str(run_id or ""), None)
+            self._condition.notify_all()
 
     def update(self, run_id, **updates):
-        with self._lock:
+        with self._condition:
             meta = self._runs.get(str(run_id or ""))
             if isinstance(meta, dict):
                 meta.update({k: v for k, v in updates.items() if v is not None})
+                self._condition.notify_all()
             return meta if isinstance(meta, dict) else None
+
+    @staticmethod
+    def _provider_kind(meta, run_id=""):
+        provider_kind = str((meta or {}).get("providerKind") or "").strip().lower()
+        if provider_kind:
+            return provider_kind
+        run_id = str(run_id or "").lower()
+        if run_id.startswith("claude-code-"):
+            return "claude-code"
+        if run_id.startswith("hermes-"):
+            return "hermes"
+        if run_id.startswith("codex-"):
+            return "codex"
+        return ""
+
+    def publish(self, provider_kind, agent_id, conversation_id, event_name, payload=None, run_id=""):
+        payload = dict(payload) if isinstance(payload, dict) else {}
+        provider_kind = str(provider_kind or "").strip().lower()
+        agent_id = str(agent_id or payload.get("agentId") or "").strip()
+        conversation_id = str(conversation_id or payload.get("conversationId") or "").strip()
+        run_id = str(run_id or payload.get("runId") or "").strip()
+        with self._condition:
+            self._next_event_id += 1
+            event_id = self._next_event_id
+            payload.setdefault("providerKind", provider_kind)
+            payload.setdefault("agentId", agent_id)
+            payload.setdefault("conversationId", conversation_id)
+            if run_id:
+                payload.setdefault("runId", run_id)
+            payload["eventId"] = event_id
+            item = {
+                "id": event_id,
+                "event": str(event_name or "message"),
+                "providerKind": provider_kind,
+                "agentId": agent_id,
+                "conversationId": conversation_id,
+                "runId": run_id,
+                "data": payload,
+                "ts": int(time.time() * 1000),
+            }
+            self._event_log.append(item)
+            self._condition.notify_all()
+            return item
 
     def emit(self, run_id, event_name, payload=None):
         meta = self.get(run_id)
         if not meta:
             return False
-        events = meta.get("events")
-        if not isinstance(events, queue.Queue):
-            return False
         payload = payload if isinstance(payload, dict) else {}
         payload.setdefault("runId", run_id)
         payload.setdefault("agentId", meta.get("agentId") or "")
         payload.setdefault("profile", meta.get("profile") or "")
-        try:
-            events.put_nowait({"event": event_name, "data": payload, "ts": int(time.time() * 1000)})
-            return True
-        except Exception:
-            return False
+        payload.setdefault("conversationId", meta.get("conversationId") or "")
+        provider_kind = self._provider_kind(meta, run_id)
+        self.publish(
+            provider_kind,
+            meta.get("agentId") or "",
+            meta.get("conversationId") or "",
+            event_name,
+            payload,
+            run_id,
+        )
+        return True
+
+    @staticmethod
+    def _write_event(handler, event_name, payload, event_id=None):
+        encoded = json.dumps(payload if isinstance(payload, dict) else {}, ensure_ascii=False, default=str)
+        prefix = f"id: {int(event_id)}\n" if event_id else ""
+        handler.wfile.write(f"{prefix}event: {event_name}\ndata: {encoded}\n\n".encode("utf-8"))
+        handler.wfile.flush()
+
+    def _events_after(self, cursor, predicate):
+        with self._lock:
+            return [item for item in self._event_log if item.get("id", 0) > cursor and predicate(item)]
+
+    def _wait_for_events(self, cursor, predicate, timeout=1.0):
+        with self._condition:
+            items = [item for item in self._event_log if item.get("id", 0) > cursor and predicate(item)]
+            if items:
+                return items
+            self._condition.wait(timeout=timeout)
+            return [item for item in self._event_log if item.get("id", 0) > cursor and predicate(item)]
 
     def stream_events(self, handler, run_id, missing_provider_label="Provider"):
         meta = self.get(run_id)
@@ -7587,17 +7741,14 @@ class ProviderRunBridge:
         handler.send_header("Access-Control-Allow-Origin", "*")
         handler.end_headers()
 
-        events = meta.get("events")
-        if not isinstance(events, queue.Queue):
-            return
-
+        cursor = 0
         last_keepalive = time.time()
         try:
             while True:
-                try:
-                    item = events.get(timeout=0.5)
-                except queue.Empty:
-                    if meta.get("done") and events.empty():
+                items = self._wait_for_events(cursor, lambda item: item.get("runId") == run_id, timeout=0.5)
+                if not items:
+                    meta = self.get(run_id) or meta
+                    if meta.get("done"):
                         result = meta.get("result") if isinstance(meta.get("result"), dict) else {}
                         status = str(result.get("status") or "").lower()
                         event_name = "run.completed" if result.get("ok") else ("run.cancelled" if status in {"cancelled", "canceled"} else "run.failed")
@@ -7606,28 +7757,126 @@ class ProviderRunBridge:
                         payload.setdefault("runId", run_id)
                         payload.setdefault("agentId", meta.get("agentId") or "")
                         payload.setdefault("profile", meta.get("profile") or "")
-                        encoded = json.dumps(payload, ensure_ascii=False, default=str)
-                        handler.wfile.write(f"event: {event_name}\ndata: {encoded}\n\n".encode("utf-8"))
-                        handler.wfile.flush()
+                        self._write_event(handler, event_name, payload)
                         break
                     if time.time() - last_keepalive >= 10:
                         handler.wfile.write(b": keepalive\n\n")
                         handler.wfile.flush()
                         last_keepalive = time.time()
                     continue
-
-                event_name = str(item.get("event") or "message")
-                payload = item.get("data") if isinstance(item.get("data"), dict) else {}
-                encoded = json.dumps(payload, ensure_ascii=False, default=str)
-                handler.wfile.write(f"event: {event_name}\ndata: {encoded}\n\n".encode("utf-8"))
-                handler.wfile.flush()
-                if event_name in {"run.completed", "run.failed", "run.cancelled", "run.canceled"}:
-                    break
+                for item in items:
+                    cursor = max(cursor, int(item.get("id") or 0))
+                    event_name = str(item.get("event") or "message")
+                    payload = item.get("data") if isinstance(item.get("data"), dict) else {}
+                    self._write_event(handler, event_name, payload, item.get("id"))
+                    if event_name in {"run.completed", "run.failed", "run.cancelled", "run.canceled"}:
+                        return
         except (BrokenPipeError, ConnectionError, OSError):
             pass
-        finally:
-            if meta.get("done"):
-                self.clear(run_id)
+
+    def stream_provider_events(self, handler, provider_kind, agent_id, conversation_id, after=0):
+        provider_kind = str(provider_kind or "").strip().lower()
+        agent_id = str(agent_id or "").strip()
+        conversation_id = str(conversation_id or "").strip()
+        if provider_kind not in {"codex", "hermes", "claude-code"} or not agent_id or not conversation_id:
+            handler.send_response(400)
+            handler.send_header("Content-Type", "application/json")
+            handler.send_header("Access-Control-Allow-Origin", "*")
+            handler.end_headers()
+            handler.wfile.write(json.dumps({"ok": False, "error": "provider, agentId and conversationId are required"}).encode("utf-8"))
+            return
+
+        try:
+            header_cursor = int(handler.headers.get("Last-Event-ID") or 0)
+        except (TypeError, ValueError):
+            header_cursor = 0
+        cursor = max(int(after or 0), header_cursor)
+        with self._lock:
+            current_cursor = self._next_event_id
+            active_runs = [
+                {
+                    "runId": meta.get("runId") or run_id,
+                    "startedAt": meta.get("startedAt") or 0,
+                    "status": "running",
+                }
+                for run_id, meta in self._runs.items()
+                if isinstance(meta, dict)
+                and not meta.get("done")
+                and self._provider_kind(meta, run_id) == provider_kind
+                and str(meta.get("agentId") or "") == agent_id
+                and str(meta.get("conversationId") or "") == conversation_id
+            ]
+        if cursor <= 0:
+            cursor = current_cursor
+
+        handler.send_response(200)
+        handler.send_header("Content-Type", "text/event-stream")
+        handler.send_header("Cache-Control", "no-cache, no-transform")
+        handler.send_header("Connection", "keep-alive")
+        handler.send_header("Access-Control-Allow-Origin", "*")
+        handler.send_header("X-Accel-Buffering", "no")
+        handler.end_headers()
+
+        snapshot = {
+            "ok": True,
+            "providerKind": provider_kind,
+            "agentId": agent_id,
+            "conversationId": conversation_id,
+            "activeRuns": active_runs,
+            "eventId": cursor,
+            "ts": int(time.time() * 1000),
+        }
+        last_keepalive = time.time()
+        try:
+            self._write_event(handler, "provider.snapshot", snapshot, cursor if cursor > 0 else None)
+            pending = None
+            if provider_kind == "hermes":
+                pending = _get_hermes_approval_pending(agent_id).get("pending")
+            elif provider_kind == "codex":
+                pending = _handle_codex_approval_pending({"agentId": agent_id}).get("pending")
+            if isinstance(pending, dict):
+                self._write_event(handler, "approval.request", {
+                    "providerKind": provider_kind,
+                    "agentId": agent_id,
+                    "conversationId": conversation_id,
+                    "approval": pending,
+                    "pending_count": 1,
+                })
+            progress = _provider_recovery_progress_snapshot(provider_kind, agent_id, conversation_id)
+            if isinstance(progress, dict):
+                self._write_event(handler, "history.recovered", {
+                    "providerKind": provider_kind,
+                    "agentId": agent_id,
+                    "conversationId": conversation_id,
+                    "progress": progress,
+                    "eventId": cursor,
+                })
+
+            def matches(item):
+                return (
+                    item.get("providerKind") == provider_kind
+                    and item.get("agentId") == agent_id
+                    and (not item.get("conversationId") or item.get("conversationId") == conversation_id)
+                )
+
+            while True:
+                items = self._wait_for_events(cursor, matches, timeout=1.0)
+                if items:
+                    for item in items:
+                        cursor = max(cursor, int(item.get("id") or 0))
+                        self._write_event(handler, item.get("event") or "message", item.get("data") or {}, item.get("id"))
+                    continue
+                if time.time() - last_keepalive >= 10:
+                    self._write_event(handler, "provider.heartbeat", {
+                        "providerKind": provider_kind,
+                        "agentId": agent_id,
+                        "conversationId": conversation_id,
+                        "eventId": cursor,
+                        "ts": int(time.time() * 1000),
+                    })
+                    last_keepalive = time.time()
+        except (BrokenPipeError, ConnectionError, OSError):
+            pass
 
 
 PROVIDER_RUN_BRIDGE = ProviderRunBridge()
@@ -7712,6 +7961,7 @@ def _handle_claude_code_run_start(body):
     status_key = agent.get("statusKey") or agent.get("id")
     meta = {
         "runId": run_id,
+        "providerKind": "claude-code",
         "agentId": agent.get("id"),
         "agentKey": agent_key,
         "profile": profile,
@@ -8429,6 +8679,480 @@ def _append_codex_progress_comm_event(agent, agent_id, conversation_id, progress
         },
         "visibleInOffice": False,
     }, "codex-progress", progress_id)
+
+
+_CHAT_HISTORY_PROVIDERS = {"codex", "hermes", "claude-code", "gateway"}
+_CHAT_HISTORY_KEY_SEPARATOR = "\x1f"
+
+
+class _ChatHistoryRequestError(ValueError):
+    def __init__(self, message, code="invalid_chat_history_request", status=400):
+        super().__init__(message)
+        self.code = code
+        self.status = status
+
+
+@dataclass(frozen=True)
+class _ChatHistoryRequest:
+    provider_kind: str
+    agent_id: str
+    conversation_id: str
+    session_key: str
+    limit: int
+    before: object
+    key: str
+
+
+def _chat_history_hash(value):
+    """Return the shared unsigned FNV-1a hash for normalized UTF-8 text."""
+    result = 0x811C9DC5
+    for byte in str(value or "").encode("utf-8"):
+        result ^= byte
+        result = (result * 0x01000193) & 0xFFFFFFFF
+    return f"{result:08x}"
+
+
+def _encode_chat_history_cursor(epoch_ms, message_id):
+    payload = json.dumps({
+        "v": 1,
+        "ts": int(epoch_ms or 0),
+        "id": str(message_id or ""),
+    }, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    return base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=")
+
+
+def _decode_chat_history_cursor(cursor):
+    raw = str(cursor or "").strip()
+    if not raw or len(raw) > 1024:
+        raise _ChatHistoryRequestError("Invalid chat history cursor", "invalid_chat_history_cursor")
+    try:
+        padding = "=" * (-len(raw) % 4)
+        payload = json.loads(base64.urlsafe_b64decode((raw + padding).encode("ascii")).decode("utf-8"))
+        if not isinstance(payload, dict) or payload.get("v") != 1:
+            raise ValueError("unsupported cursor")
+        epoch_ms = int(payload.get("ts"))
+        message_id = str(payload.get("id") or "")
+        if epoch_ms < 0 or not message_id or len(message_id) > 512:
+            raise ValueError("invalid cursor values")
+        return epoch_ms, message_id
+    except (_ChatHistoryRequestError,):
+        raise
+    except Exception as exc:
+        raise _ChatHistoryRequestError(
+            "Invalid chat history cursor",
+            "invalid_chat_history_cursor",
+        ) from exc
+
+
+def _chat_history_query_value(query, name, default=""):
+    value = (query.get(name) or [default])[0]
+    return str(value or "").strip()
+
+
+def _parse_chat_history_request(query):
+    provider_kind = _chat_history_query_value(query, "providerKind").lower()
+    agent_id = _chat_history_query_value(query, "agentId")
+    conversation_id = _chat_history_query_value(query, "conversationId")
+    session_key = _chat_history_query_value(query, "sessionKey")
+    if provider_kind not in _CHAT_HISTORY_PROVIDERS:
+        raise _ChatHistoryRequestError("Unsupported chat history provider")
+    if not agent_id or len(agent_id) > 160:
+        raise _ChatHistoryRequestError("Invalid chat history agent")
+    if len(conversation_id) > 256 or len(session_key) > 512:
+        raise _ChatHistoryRequestError("Invalid chat history identifier")
+    if provider_kind != "gateway" and not conversation_id:
+        raise _ChatHistoryRequestError("Conversation id is required")
+
+    raw_limit = _chat_history_query_value(query, "limit", "50")
+    try:
+        limit = max(1, min(50, int(raw_limit or 50)))
+    except ValueError as exc:
+        raise _ChatHistoryRequestError("Invalid chat history limit") from exc
+
+    raw_before = _chat_history_query_value(query, "before")
+    before = _decode_chat_history_cursor(raw_before) if raw_before else None
+    conversation_ref = conversation_id or session_key
+    key = _CHAT_HISTORY_KEY_SEPARATOR.join((provider_kind, agent_id, conversation_ref))
+    return _ChatHistoryRequest(
+        provider_kind=provider_kind,
+        agent_id=agent_id,
+        conversation_id=conversation_id,
+        session_key=session_key,
+        limit=limit,
+        before=before,
+        key=key,
+    )
+
+
+_CHAT_HISTORY_SOURCE_CACHE_ENTRY_LIMIT = 32
+_CHAT_HISTORY_SOURCE_CACHE_BYTE_LIMIT = 64 * 1024 * 1024
+_CHAT_HISTORY_SOURCE_CACHE = OrderedDict()
+_CHAT_HISTORY_SOURCE_CACHE_BYTES = 0
+_CHAT_HISTORY_SOURCE_CACHE_LOCK = threading.RLock()
+_CHAT_HISTORY_SOURCE_CACHE_HITS = 0
+_CHAT_HISTORY_SOURCE_CACHE_MISSES = 0
+
+
+def _chat_history_file_signature(path):
+    try:
+        stat = os.stat(path)
+        return (stat.st_ino, stat.st_size, stat.st_mtime_ns)
+    except (FileNotFoundError, OSError):
+        return None
+
+
+def _iter_chat_history_jsonl_reverse(path, chunk_size=64 * 1024):
+    try:
+        with open(path, "rb") as stream:
+            stream.seek(0, os.SEEK_END)
+            position = stream.tell()
+            remainder = b""
+            while position > 0:
+                read_size = min(chunk_size, position)
+                position -= read_size
+                stream.seek(position)
+                data = stream.read(read_size) + remainder
+                lines = data.split(b"\n")
+                remainder = lines[0]
+                for line in reversed(lines[1:]):
+                    if line.strip():
+                        yield line.decode("utf-8", errors="replace")
+            if remainder.strip():
+                yield remainder.decode("utf-8", errors="replace")
+    except (FileNotFoundError, OSError):
+        return
+
+
+def _load_cached_chat_history_jsonl(path, cache_key, max_records=1000, predicate=None):
+    global _CHAT_HISTORY_SOURCE_CACHE_BYTES, _CHAT_HISTORY_SOURCE_CACHE_HITS, _CHAT_HISTORY_SOURCE_CACHE_MISSES
+    signature = _chat_history_file_signature(path)
+    key = (os.path.abspath(path or ""), str(cache_key or ""), int(max_records or 1000))
+    with _CHAT_HISTORY_SOURCE_CACHE_LOCK:
+        cached = _CHAT_HISTORY_SOURCE_CACHE.get(key)
+        if cached and cached["signature"] == signature:
+            _CHAT_HISTORY_SOURCE_CACHE_HITS += 1
+            _CHAT_HISTORY_SOURCE_CACHE.move_to_end(key)
+            return [dict(row) for row in cached["rows"]]
+        _CHAT_HISTORY_SOURCE_CACHE_MISSES += 1
+
+    newest_first = []
+    if signature:
+        for line in _iter_chat_history_jsonl_reverse(path):
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(row, dict) or (predicate and not predicate(row)):
+                continue
+            newest_first.append(row)
+            if len(newest_first) >= max(1, min(int(max_records or 1000), 1000)):
+                break
+    rows = list(reversed(newest_first))
+    estimated_bytes = len(json.dumps(rows, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+    with _CHAT_HISTORY_SOURCE_CACHE_LOCK:
+        previous = _CHAT_HISTORY_SOURCE_CACHE.pop(key, None)
+        if previous:
+            _CHAT_HISTORY_SOURCE_CACHE_BYTES -= previous["bytes"]
+        _CHAT_HISTORY_SOURCE_CACHE[key] = {
+            "signature": signature,
+            "rows": rows,
+            "bytes": estimated_bytes,
+        }
+        _CHAT_HISTORY_SOURCE_CACHE_BYTES += estimated_bytes
+        while (
+            len(_CHAT_HISTORY_SOURCE_CACHE) > _CHAT_HISTORY_SOURCE_CACHE_ENTRY_LIMIT or
+            _CHAT_HISTORY_SOURCE_CACHE_BYTES > _CHAT_HISTORY_SOURCE_CACHE_BYTE_LIMIT
+        ):
+            _, evicted = _CHAT_HISTORY_SOURCE_CACHE.popitem(last=False)
+            _CHAT_HISTORY_SOURCE_CACHE_BYTES -= evicted["bytes"]
+    return [dict(row) for row in rows]
+
+
+def _chat_history_extract_content(row):
+    message = row.get("message") if isinstance(row.get("message"), dict) else row
+    content = message.get("content")
+    text = str(row.get("text") or message.get("text") or "")
+    media = list(row.get("media") or row.get("attachments") or [])
+    tools = [dict(item) for item in (row.get("tools") or []) if isinstance(item, dict)]
+    if isinstance(content, str):
+        text = content
+    elif isinstance(content, list):
+        text_parts = []
+        indexed_tools = {str(item.get("id") or item.get("toolCallId") or ""): item for item in tools}
+        for block in content:
+            if not isinstance(block, dict):
+                continue
+            block_type = str(block.get("type") or "")
+            if block_type == "text":
+                text_parts.append(str(block.get("text") or ""))
+            elif block_type in ("image", "image_url", "input_image", "file", "media", "attachment", "video", "audio"):
+                url = block.get("url") or block.get("path") or block.get("filePath") or block.get("mediaUrl")
+                if not url and isinstance(block.get("image_url"), dict):
+                    url = block["image_url"].get("url")
+                if not url and isinstance(block.get("source"), dict):
+                    url = block["source"].get("url") or block["source"].get("path")
+                if url:
+                    media.append({
+                        "url": url,
+                        "mimeType": block.get("mimeType") or block.get("media_type") or block.get("contentType") or "",
+                        "name": block.get("name") or block.get("filename") or "",
+                    })
+            elif block_type in ("toolCall", "tool_call"):
+                tool = {
+                    "id": block.get("id") or block.get("toolCallId") or block.get("callId") or "",
+                    "name": block.get("name") or block.get("toolName") or (block.get("function") or {}).get("name") or "tool",
+                    "arguments": block.get("arguments") or block.get("args") or block.get("input") or (block.get("function") or {}).get("arguments") or {},
+                    "status": "done",
+                }
+                tools.append(tool)
+                if tool["id"]:
+                    indexed_tools[str(tool["id"])] = tool
+            elif block_type in ("toolResult", "tool_result"):
+                tool_id = str(block.get("toolCallId") or block.get("id") or "")
+                tool = indexed_tools.get(tool_id)
+                result = block.get("result", block.get("output", block.get("content", block.get("text", block.get("error", "")))))
+                if tool is None:
+                    tool = {"id": tool_id, "name": block.get("name") or "tool result", "arguments": {}}
+                    tools.append(tool)
+                    if tool_id:
+                        indexed_tools[tool_id] = tool
+                tool["result"] = result
+                tool["error"] = block.get("error") or ""
+                tool["status"] = "error" if block.get("error") else "done"
+        text = "".join(text_parts)
+    return text, media, tools
+
+
+def _normalize_chat_history_message(request, row, source="", ordinal=0):
+    row = row if isinstance(row, dict) else {}
+    message = row.get("message") if isinstance(row.get("message"), dict) else row
+    role = str(row.get("role") or message.get("role") or "assistant")
+    text, media, tools = _chat_history_extract_content(row)
+    epoch_ms = _parse_iso_epoch_ms(
+        row.get("epochMs") or row.get("ts") or row.get("timestamp") or message.get("timestamp")
+    )
+    if not epoch_ms:
+        try:
+            epoch_ms = int(row.get("epochMs") or row.get("ts") or 0)
+        except (TypeError, ValueError):
+            epoch_ms = 0
+    source = str(source or row.get("source") or request.provider_kind)
+    from_ref = row.get("from") if isinstance(row.get("from"), dict) else {}
+    to_ref = row.get("to") if isinstance(row.get("to"), dict) else {}
+    from_id = str(row.get("fromAgentId") or from_ref.get("id") or "")
+    to_id = str(row.get("toAgentId") or to_ref.get("id") or "")
+    canonical_identity = _CHAT_HISTORY_KEY_SEPARATOR.join((
+        request.provider_kind,
+        request.conversation_id or request.session_key,
+        role,
+        str(epoch_ms),
+        from_id,
+        to_id,
+        source,
+        _chat_history_hash(text),
+    ))
+    source_id = row.get("commEventId") or row.get("messageId") or row.get("id") or message.get("id")
+    message_id = str(source_id or f"fallback-{_chat_history_hash(canonical_identity)}-{int(ordinal or 0)}")
+    normalized = {
+        "id": message_id,
+        "providerKind": request.provider_kind,
+        "conversationId": request.conversation_id or request.session_key,
+        "role": role,
+        "text": text,
+        "epochMs": epoch_ms,
+        "from": row.get("from") if not isinstance(row.get("from"), dict) else row["from"].get("name") or from_id,
+        "fromAgentId": from_id,
+        "to": row.get("to") if not isinstance(row.get("to"), dict) else row["to"].get("name") or to_id,
+        "toAgentId": to_id,
+        "media": media,
+        "attachments": list(row.get("attachments") or []),
+        "tools": tools,
+        "thinking": str(row.get("thinking") or ""),
+        "reasoningTokens": int(row.get("reasoningTokens") or 0),
+        "approval": row.get("approval") if isinstance(row.get("approval"), dict) else None,
+        "status": str(row.get("status") or "done"),
+        "source": source,
+        "identityFields": canonical_identity,
+    }
+    version_fields = {key: normalized[key] for key in (
+        "role", "text", "from", "fromAgentId", "to", "toAgentId", "media", "attachments",
+        "tools", "thinking", "reasoningTokens", "approval", "status", "source",
+    )}
+    normalized["version"] = _chat_history_hash(json.dumps(version_fields, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+    return normalized
+
+
+def _chat_history_sort_tuple(message):
+    return int(message.get("epochMs") or 0), str(message.get("id") or "")
+
+
+def _page_chat_history_messages(messages, before, limit_plus_one):
+    ordered = sorted((item for item in messages if isinstance(item, dict)), key=_chat_history_sort_tuple)
+    if before:
+        ordered = [item for item in ordered if _chat_history_sort_tuple(item) < before]
+    selected = ordered[-max(1, int(limit_plus_one or 1)):]
+    return {"messages": selected, "hasMore": len(ordered) > len(selected)}
+
+
+def _merge_chat_history_source_pages(source_pages, before, limit):
+    merged = {}
+    source_has_more = False
+    for page in source_pages or []:
+        source_has_more = source_has_more or bool(page.get("hasMore"))
+        for message in page.get("messages") or []:
+            if before and _chat_history_sort_tuple(message) >= before:
+                continue
+            message_id = str(message.get("id") or "")
+            existing = merged.get(message_id)
+            if existing is None or (
+                existing.get("source") != "agent-platform-communications" and
+                message.get("source") == "agent-platform-communications"
+            ):
+                merged[message_id] = message
+    ordered = sorted(merged.values(), key=_chat_history_sort_tuple)
+    page_messages = ordered[-max(1, min(int(limit or 50), 50)):]
+    has_more = source_has_more or len(ordered) > len(page_messages)
+    next_cursor = ""
+    if page_messages and has_more:
+        first = page_messages[0]
+        next_cursor = _encode_chat_history_cursor(first.get("epochMs"), first.get("id"))
+    return page_messages, next_cursor, has_more
+
+
+def _page_openclaw_session_history(request, limit_plus_one):
+    jsonl_path, _, session_info = _openclaw_session_paths(request.agent_id, request.session_key)
+    if not jsonl_path:
+        return {"messages": [], "hasMore": False, "session": session_info or {}}
+
+    def is_message(row):
+        return row.get("type") == "message" and isinstance(row.get("message"), dict)
+
+    rows = _load_cached_chat_history_jsonl(
+        jsonl_path,
+        f"gateway:{request.agent_id}:{request.session_key}",
+        1000,
+        predicate=is_message,
+    )
+    normalized = [
+        _normalize_chat_history_message(request, row, source="gateway", ordinal=index)
+        for index, row in enumerate(rows)
+    ]
+    return _page_chat_history_messages(normalized, request.before, limit_plus_one)
+
+
+def _page_provider_history(request, rows, source, limit_plus_one):
+    normalized = [
+        _normalize_chat_history_message(request, row, source=source, ordinal=index)
+        for index, row in enumerate(rows or [])
+        if isinstance(row, dict)
+    ]
+    return _page_chat_history_messages(normalized, request.before, limit_plus_one)
+
+
+def _chat_history_comm_page(request, limit_plus_one):
+    def matches(event):
+        if event.get("visibleInOffice", True) is False:
+            return False
+        if request.conversation_id and event.get("conversationId") != request.conversation_id:
+            return False
+        src = (event.get("from") or {}).get("id")
+        dst = (event.get("to") or {}).get("id")
+        return request.agent_id in (src, dst)
+
+    events = _load_cached_chat_history_jsonl(
+        _comm_log_path(),
+        f"comm:{request.agent_id}:{request.conversation_id}",
+        1000,
+        predicate=matches,
+    )
+    return _page_provider_history(request, events, "agent-platform-communications", limit_plus_one)
+
+
+def _history_session_metrics(request, agent=None, profile=""):
+    result = {"sessionId": "", "contextUsed": 0, "contextWindow": 0, "tokenUsage": {}}
+    if request.provider_kind == "codex":
+        state = _load_codex_state(profile)
+        usage = _get_codex_token_usage(profile)
+        result.update({
+            "sessionId": _get_codex_session_id(profile),
+            "contextUsed": _codex_context_used_from_token_usage(usage) or _codex_int(state.get("contextUsed"), 0),
+            "contextWindow": _codex_context_window_from_token_usage(usage) or _codex_int(state.get("contextWindow"), 0),
+            "tokenUsage": usage,
+        })
+    elif request.provider_kind == "hermes":
+        result["sessionId"] = _get_hermes_session_id(profile, request.conversation_id)
+    elif request.provider_kind == "claude-code":
+        state = _load_claude_code_state(profile, request.conversation_id)
+        usage = _get_claude_code_token_usage(profile, request.conversation_id)
+        result.update({
+            "sessionId": _get_claude_code_session_id(profile, request.conversation_id),
+            "contextUsed": _codex_context_used_from_token_usage(usage) or _codex_int(state.get("contextUsed"), 0),
+            "contextWindow": _codex_context_window_from_token_usage(usage) or _codex_int(state.get("contextWindow"), 0),
+            "tokenUsage": usage,
+        })
+    return result
+
+
+def _load_chat_history_source_pages(request):
+    profile = ""
+    if request.provider_kind == "gateway":
+        provider_page = _page_openclaw_session_history(request, request.limit + 1)
+    elif request.provider_kind == "codex":
+        agent = _get_codex_agent(request.agent_id) or {}
+        profile = agent.get("profile") or agent.get("providerAgentId") or "default"
+        provider_page = _page_provider_history(request, _load_codex_history(profile), "codex", request.limit + 1)
+    elif request.provider_kind == "hermes":
+        agent = _get_hermes_agent(request.agent_id) or {}
+        profile = agent.get("profile") or agent.get("providerAgentId") or "default"
+        provider_page = _page_provider_history(
+            request,
+            _filter_recoverable_provider_progress_messages(_load_hermes_history(profile, request.conversation_id)),
+            "hermes",
+            request.limit + 1,
+        )
+    else:
+        agent = _get_claude_code_agent(request.agent_id) or {}
+        profile = agent.get("profile") or agent.get("providerAgentId") or "main"
+        provider_page = _page_provider_history(
+            request,
+            _sanitize_claude_code_history_messages(_load_claude_code_history(profile, request.conversation_id)),
+            "claude-code",
+            request.limit + 1,
+        )
+    comm_page = _chat_history_comm_page(request, request.limit + 1)
+    return [provider_page, comm_page], _history_session_metrics(request, profile=profile)
+
+
+def _handle_chat_history_page(query):
+    started_at = time.perf_counter()
+    try:
+        request = _parse_chat_history_request(query)
+        source_pages, session = _load_chat_history_source_pages(request)
+        messages, next_cursor, has_more = _merge_chat_history_source_pages(
+            source_pages,
+            request.before,
+            request.limit,
+        )
+        result = {
+            "ok": True,
+            "conversationKey": request.key,
+            "messages": messages,
+            "nextCursor": next_cursor,
+            "hasMore": has_more,
+            "session": session,
+        }
+        duration_ms = int((time.perf_counter() - started_at) * 1000)
+        if duration_ms >= 200:
+            with _CHAT_HISTORY_SOURCE_CACHE_LOCK:
+                cache_hits = _CHAT_HISTORY_SOURCE_CACHE_HITS
+                cache_misses = _CHAT_HISTORY_SOURCE_CACHE_MISSES
+            print(
+                f"[CHAT-HISTORY] provider={request.provider_kind} count={len(messages)} "
+                f"durationMs={duration_ms} sourceCacheHits={cache_hits} sourceCacheMisses={cache_misses}"
+            )
+        return result
+    except _ChatHistoryRequestError as exc:
+        return {"ok": False, "code": exc.code, "error": str(exc), "_status": exc.status}
 
 
 def _load_comm_history(limit=200, conversation_id=None, agent_id=None):
@@ -25040,6 +25764,15 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                 requests_loader=lambda: _meeting_request_list_filtered("status=pending").get("requests", []),
                 projects_loader=lambda: _handle_projects_list("status=active").get("projects", []),
             ).stream(self)
+        elif request_path == "/api/provider/events":
+            provider_kind = (query_params.get("provider") or query_params.get("providerKind") or [""])[0]
+            agent_id = (query_params.get("agentId") or [""])[0]
+            conversation_id = (query_params.get("conversationId") or [""])[0]
+            try:
+                after = int((query_params.get("after") or ["0"])[0] or 0)
+            except (TypeError, ValueError):
+                after = 0
+            PROVIDER_RUN_BRIDGE.stream_provider_events(self, provider_kind, agent_id, conversation_id, after)
         elif self.path == "/agents-list":
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -25386,9 +26119,15 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             # Proxy PC metrics from remote machine (configurable)
             _pc_url = VO_CONFIG["pcMetrics"].get("url")
             if not _pc_url or not VO_CONFIG["features"]["pcMetrics"]:
-                self.send_response(404)
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Access-Control-Allow-Origin", "*")
                 self.end_headers()
-                self.wfile.write(b'{"error":"PC metrics not configured"}')
+                self.wfile.write(json.dumps({
+                    "ok": False,
+                    "status": "offline",
+                    "error": "PC metrics not configured"
+                }).encode())
                 return
             try:
                 req = urllib.request.urlopen(_pc_url, timeout=4)
@@ -25399,11 +26138,15 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(data)
             except Exception as e:
-                self.send_response(502)
+                self.send_response(200)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Access-Control-Allow-Origin", "*")
                 self.end_headers()
-                self.wfile.write(json.dumps({"error": str(e)}).encode())
+                self.wfile.write(json.dumps({
+                    "ok": False,
+                    "status": "offline",
+                    "error": str(e)
+                }).encode())
         elif self.path == "/api-usage":
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -25542,6 +26285,14 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(json.dumps(_handle_agent_platforms()).encode())
+        elif request_path == "/api/chat/history":
+            result = _handle_chat_history_page(query_params)
+            status = result.pop("_status", 200)
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(json.dumps(result).encode())
         elif self.path == "/api/hermes/history" or self.path.startswith("/api/hermes/history?"):
             qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             agent_key = (qs.get("agentId") or qs.get("key") or ["hermes-default"])[0]

@@ -78,7 +78,8 @@ const chatRequired = [
   "activityOutput.reply",
   "sendCodexBlockingMessage(codexBody",
   "'/api/codex/runs/' + encodeURIComponent(this.currentRunId) + '/stop'",
-  "'/api/codex/runs/' + encodeURIComponent(runId) + '/events?agentId='",
+  "new EventSource('/api/provider/events?'",
+  "waitForProviderRun(runId)",
 ];
 
 for (const needle of chatRequired) {

@@ -2,7 +2,8 @@
 (function() {
     const _t = (key) => typeof i18n !== 'undefined' ? i18n.t(key) : key;
     const METRICS_URL = '/pc-metrics';
-    const POLL_INTERVAL = 1000;
+    const POLL_INTERVAL = 3000;
+    const PC_FAILURE_BACKOFF_MS = 30000;
     const HISTORY_LEN = 60; // 60 data points (~3 min at 3s interval)
 
     // History arrays
@@ -16,6 +17,8 @@
     let _pollTimer = null;
     let _online = false;
     let _enabled = false;
+    let _failureCount = 0;
+    let _pollInFlight = false;
 
     window.togglePcMonitor = function() {
         if (!_enabled) {
@@ -48,25 +51,41 @@
     };
 
     function startPolling() {
-        if (!_enabled) return;
-        fetchMetrics();
-        _pollTimer = setInterval(fetchMetrics, POLL_INTERVAL);
+        if (!_enabled || _pollTimer) return;
+        scheduleNextPoll(0);
     }
 
     function stopPolling() {
-        if (_pollTimer) clearInterval(_pollTimer);
+        if (_pollTimer) clearTimeout(_pollTimer);
         _pollTimer = null;
     }
 
+    function scheduleNextPoll(delay) {
+        stopPolling();
+        if (!_enabled || !_open) return;
+        _pollTimer = setTimeout(fetchMetrics, Math.max(0, delay || 0));
+    }
+
     async function fetchMetrics() {
+        if (_pollInFlight) return;
+        _pollTimer = null;
+        _pollInFlight = true;
         try {
             const res = await fetch(METRICS_URL, { signal: AbortSignal.timeout(4000) });
             const data = await res.json();
+            if (!res.ok || data.ok === false || data.status === 'offline') {
+                throw new Error(data.error || 'PC metrics offline');
+            }
+            _failureCount = 0;
             _online = true;
             updateUI(data);
         } catch(e) {
+            _failureCount += 1;
             _online = false;
             setStatusDot(false);
+        } finally {
+            _pollInFlight = false;
+            scheduleNextPoll(_failureCount ? PC_FAILURE_BACKOFF_MS : POLL_INTERVAL);
         }
     }
 

@@ -31,6 +31,7 @@
         acceptanceDialog: null,
         pendingActions: new Map(),
         duplicateActionToastAt: {},
+        _projectSummarySignature: '',
     };
 
     const _t = (key, params) => typeof i18n !== 'undefined' ? i18n.t(key, params) : key;
@@ -712,6 +713,7 @@
         try {
             const d = await api.listProjects();
             state.projects = d.projects || [];
+            state._projectSummarySignature = projectSummarySignature(state.projects);
             mc.innerHTML = renderListView();
             bindListEvents();
             updateSidebar();
@@ -843,6 +845,22 @@
 
     function bindListEvents() { /* events bound via inline handlers */ }
 
+    function projectSummarySignature(projects) {
+        return JSON.stringify((projects || []).map(p => ({
+            id: p && p.id,
+            title: p && p.title,
+            description: p && p.description,
+            status: p && p.status,
+            priority: p && p.priority,
+            branch: p && p.branch,
+            updatedAt: p && p.updatedAt,
+            dueDate: p && p.dueDate,
+            taskCount: p && p.taskCount,
+            taskDone: p && p.taskDone,
+            tags: p && p.tags
+        })).sort((a, b) => String(a.id || '').localeCompare(String(b.id || ''))));
+    }
+
     function applyProjectSummaries(projects) {
         if (!Array.isArray(projects)) return;
         const byId = {};
@@ -851,7 +869,11 @@
             if (!summary || !summary.id) return;
             byId[summary.id] = { ...(byId[summary.id] || {}), ...summary };
         });
-        state.projects = Object.values(byId);
+        const nextProjects = Object.values(byId);
+        const nextSignature = projectSummarySignature(nextProjects);
+        if (nextSignature === state._projectSummarySignature) return;
+        state._projectSummarySignature = nextSignature;
+        state.projects = nextProjects;
         updateSidebar();
         if (state.view === 'list') {
             const mc = getMainContent();

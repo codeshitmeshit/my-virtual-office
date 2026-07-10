@@ -5,6 +5,7 @@ const ctx = canvas.getContext('2d');
 const DPR = window.devicePixelRatio || 2;
 const TILE = 40;
 const HALF_TILE = TILE / 2;
+const BACKGROUND_FRAME_DELAY_MS = 1000;
 
 // --- DYNAMIC CANVAS SIZE (data-driven) ---
 const OFFICE_CONFIG_KEY = 'vo-product-office-config';
@@ -5271,6 +5272,9 @@ window.dashboardApplyStatusSnapshot = applyStatusSnapshot;
 
 async function pollStatus() {
     try {
+        if (window.dashboardRealtime && window.dashboardRealtime.isSseFresh && window.dashboardRealtime.isSseFresh(12000)) {
+            return; // realtime SSE owns this refresh while it is healthy
+        }
         const res = await fetch('/status');
         if (!res.ok) throw new Error();
         const data = await res.json();
@@ -5314,6 +5318,7 @@ function addGlobalLog(msg) {
 }
 
 // --- SIDEBAR ---
+var _sidebarRenderSignature = '';
 function _agentStateLabel(state) {
     var key = {
         moving: 'agent_state_moving',
@@ -5347,12 +5352,18 @@ function _agentStateLabel(state) {
 function updateSidebar() {
     const container = document.getElementById('branch-sections-container');
     if (!container) return;
-    container.innerHTML = '';
     ensureValidAgentBranches();
 
     let counts = { working: 0, idle: 0, meeting: 0, break: 0 };
     const byBranch = {};
-    getBranchList().forEach(function(branch) { byBranch[branch.id] = []; });
+    const branches = getBranchList();
+    const signatureParts = [
+        (typeof i18n !== 'undefined' && i18n.getLanguage ? i18n.getLanguage() : ''),
+        branches.map(function(branch) {
+            return [branch.id, branch.name, branch.emoji, branch.color || '', branch.theme || ''].join(':');
+        }).join('|')
+    ];
+    branches.forEach(function(branch) { byBranch[branch.id] = []; });
 
     agents.forEach(agent => {
         const isMoving = Math.abs(agent.targetX - agent.x) > agent.speed || Math.abs(agent.targetY - agent.y) > agent.speed;
@@ -5386,6 +5397,14 @@ function updateSidebar() {
         else if (agent.state === 'break' || agent.idleAction === 'break') counts.break++;
         else counts.idle++;
 
+        signatureParts.push([
+            agent.id || agent.statusKey || agent.name,
+            agent.branch || '',
+            agent.name || '',
+            agent.emoji || '',
+            displayState
+        ].join(':'));
+
         const div = document.createElement('div');
         div.className = 'agent-entry';
         div.innerHTML = `<span class="dot ${displayState}"></span><span class="name">${agent.emoji} ${agent.name}</span><span class="state">${_agentStateLabel(displayState)}</span>`;
@@ -5394,7 +5413,17 @@ function updateSidebar() {
         byBranch[branchId].push(div);
     });
 
-    getBranchList().forEach(function(branch) {
+    signatureParts.push([counts.working, counts.idle, counts.meeting, counts.break].join(':'));
+    const signature = signatureParts.join('||');
+    document.getElementById('count-working').textContent = counts.working;
+    document.getElementById('count-idle').textContent = counts.idle;
+    document.getElementById('count-meeting').textContent = counts.meeting;
+    document.getElementById('count-break').textContent = counts.break;
+    if (signature === _sidebarRenderSignature) return;
+    _sidebarRenderSignature = signature;
+
+    container.innerHTML = '';
+    branches.forEach(function(branch) {
         const section = document.createElement('div');
         section.className = 'branch-section collapsible ' + getBranchTheme(branch.id);
         if (branch.color) {
@@ -5441,10 +5470,6 @@ function updateSidebar() {
         container.appendChild(section);
     });
 
-    document.getElementById('count-working').textContent = counts.working;
-    document.getElementById('count-idle').textContent = counts.idle;
-    document.getElementById('count-meeting').textContent = counts.meeting;
-    document.getElementById('count-break').textContent = counts.break;
 }
 setInterval(updateSidebar, 1000);
 
@@ -12853,7 +12878,11 @@ function loop() {
         drawEditHUD();
     }
 
-    requestAnimationFrame(loop);
+    if (document.hidden) {
+        setTimeout(loop, BACKGROUND_FRAME_DELAY_MS);
+    } else {
+        requestAnimationFrame(loop);
+    }
 }
 
 // ============================================================
@@ -20803,6 +20832,9 @@ function _updateSidebarMeetings() {
 
 // Refresh sidebar meetings periodically
 setInterval(function() {
+    if (window.dashboardRealtime && window.dashboardRealtime.isSseFresh && window.dashboardRealtime.isSseFresh(15000)) {
+        return; // realtime SSE owns this refresh while it is healthy
+    }
     Promise.all([
         fetch('/api/meetings/active').then(function(r) { return r.json(); }),
         fetch('/api/meetings/requests?status=pending').then(function(r) { return r.json(); })

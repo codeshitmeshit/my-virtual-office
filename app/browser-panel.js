@@ -4,6 +4,7 @@
   const _t = (key) => typeof i18n !== 'undefined' ? i18n.t(key) : key;
   let BROWSER_VIEW_URL = null; // loaded from config
   let _browserConfigured = false;
+  let _browserCdpAvailable = false;
   let _agentNames = {}; // loaded dynamically from /api/agents
 
   const browserBtn       = document.getElementById('browser-toggle');
@@ -398,6 +399,7 @@
 
   // ─── Periodic URL check ───────────────────────────────────────────────────
   async function pollCurrentUrl() {
+    if (!_browserCdpAvailable) return;
     try {
       const res = await fetch('/browser-tabs');
       const data = await res.json();
@@ -482,6 +484,7 @@
     try {
       const statusRes = await fetch('/browser-status');
       const status = await statusRes.json();
+      _browserCdpAvailable = !!status.cdpAvailable;
       _browserConfigured = status.enabled && (status.cdpAvailable || status.viewerUrl);
       if (status.viewerUrl) {
         BROWSER_VIEW_URL = status.viewerUrl;
