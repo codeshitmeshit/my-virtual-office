@@ -1152,6 +1152,10 @@ button:active { transform: translateY(3px); box-shadow: none; }
 .chat-confirm-modal {
     width: 440px;
 }
+.chat-confirm-dialog {
+    /* Chat panels use 10003-10010 (including mobile/active secondary panels). */
+    z-index: 10050;
+}
 .chat-confirm-body {
     margin-top: 14px;
     color: var(--ui-text);
@@ -3660,8 +3664,16 @@ button:active { transform: translateY(3px); box-shadow: none; }
 .chat-bubble table { border-collapse: collapse; margin: 8px 0; width: 100%; font-size: 13px; }
 .chat-bubble th, .chat-bubble td { border: 1px solid rgba(255,255,255,0.2); padding: 4px 8px; text-align: left; }
 .chat-bubble th { background: rgba(255,255,255,0.1); font-weight: bold; }
-.chat-bubble h1, .chat-bubble h2, .chat-bubble h3 { margin: 8px 0 4px; }
+.chat-bubble h1, .chat-bubble h2, .chat-bubble h3,
+.chat-bubble h4, .chat-bubble h5, .chat-bubble h6 {
+    margin: 8px 0 4px;
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+}
+.chat-bubble h1 { font-size: 18px; }
+.chat-bubble h2 { font-size: 16px; }
 .chat-bubble h3 { font-size: 14px; }
+.chat-bubble h4, .chat-bubble h5, .chat-bubble h6 { font-size: 13px; }
 .chat-bubble ul, .chat-bubble ol { margin: 4px 0; padding-left: 20px; }
 .chat-bubble p { margin: 4px 0; }
 .chat-bubble pre { background: rgba(0,0,0,0.3); padding: 8px; border-radius: 4px; overflow-x: auto; }

@@ -8928,7 +8928,19 @@ def _chat_history_extract_content(row):
 def _normalize_chat_history_message(request, row, source="", ordinal=0):
     row = row if isinstance(row, dict) else {}
     message = row.get("message") if isinstance(row.get("message"), dict) else row
-    role = str(row.get("role") or message.get("role") or "assistant")
+    from_ref = row.get("from") if isinstance(row.get("from"), dict) else {}
+    to_ref = row.get("to") if isinstance(row.get("to"), dict) else {}
+    from_id = str(row.get("fromAgentId") or from_ref.get("id") or "")
+    to_id = str(row.get("toAgentId") or to_ref.get("id") or "")
+    explicit_role = str(row.get("role") or message.get("role") or "").strip().lower()
+    direction = str(row.get("direction") or "").strip().lower()
+    from_kind = str(from_ref.get("providerKind") or "").strip().lower()
+    if explicit_role:
+        role = explicit_role
+    elif direction == "request" or from_id == "user" or from_kind == "human":
+        role = "user"
+    else:
+        role = "assistant"
     text, media, tools = _chat_history_extract_content(row)
     epoch_ms = _parse_iso_epoch_ms(
         row.get("epochMs") or row.get("ts") or row.get("timestamp") or message.get("timestamp")
@@ -8939,10 +8951,6 @@ def _normalize_chat_history_message(request, row, source="", ordinal=0):
         except (TypeError, ValueError):
             epoch_ms = 0
     source = str(source or row.get("source") or request.provider_kind)
-    from_ref = row.get("from") if isinstance(row.get("from"), dict) else {}
-    to_ref = row.get("to") if isinstance(row.get("to"), dict) else {}
-    from_id = str(row.get("fromAgentId") or from_ref.get("id") or "")
-    to_id = str(row.get("toAgentId") or to_ref.get("id") or "")
     canonical_identity = _CHAT_HISTORY_KEY_SEPARATOR.join((
         request.provider_kind,
         request.conversation_id or request.session_key,

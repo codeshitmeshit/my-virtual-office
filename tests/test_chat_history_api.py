@@ -171,6 +171,28 @@ class ChatHistoryContractTest(unittest.TestCase):
         self.assertEqual(len(page), 1)
         self.assertEqual(page[0]["text"], "communication")
 
+    def test_communication_direction_infers_user_and_assistant_roles(self):
+        normalize = self.require("_normalize_chat_history_message")
+        request = self.request("codex")
+        user_message = normalize(request, {
+            "id": "request-1",
+            "direction": "request",
+            "from": {"id": "user", "name": "User", "providerKind": "human"},
+            "to": {"id": "codex-local", "name": "Codex", "providerKind": "codex"},
+            "text": "hello",
+            "ts": 1,
+        }, source="agent-platform-communications")
+        assistant_message = normalize(request, {
+            "id": "reply-1",
+            "direction": "reply",
+            "from": {"id": "codex-local", "name": "Codex", "providerKind": "codex"},
+            "to": {"id": "user", "name": "User", "providerKind": "human"},
+            "text": "hi",
+            "ts": 2,
+        }, source="agent-platform-communications")
+        self.assertEqual(user_message["role"], "user")
+        self.assertEqual(assistant_message["role"], "assistant")
+
     def test_handler_returns_page_and_session_for_every_provider(self):
         handle = self.require("_handle_chat_history_page")
         for provider in ("codex", "hermes", "claude-code", "gateway"):

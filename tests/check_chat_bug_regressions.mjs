@@ -58,6 +58,9 @@ assert.match(
 assert.match(
   style,
   /\.chat-panel-secondary\.chat-panel-active\s*\{[^}]*z-index:\s*10004[^}]*border-color:\s*var\(--gold\)/s,
+  /\.chat-confirm-dialog\s*\{[^}]*z-index:\s*10050/s,
+  /\.chat-bubble h1\s*\{[^}]*font-size:\s*18px/s,
+  /\.chat-bubble h2\s*\{[^}]*font-size:\s*16px/s,
   'only the active secondary chat panel should receive the foreground gold treatment'
 );
 assert.ok(
