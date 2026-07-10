@@ -2862,6 +2862,11 @@ button:active { transform: translateY(3px); box-shadow: none; }
     border-color: rgba(255,215,0,0.55);
     background: rgba(255,215,0,0.08);
 }
+.chat-session-main {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+}
 .chat-session-item .cs-title {
     color: #ddd;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;

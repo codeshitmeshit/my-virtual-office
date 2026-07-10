@@ -134,12 +134,19 @@ def main():
                 "message": "Blocking bridge hello",
                 "fromType": "human",
                 "fromDisplayName": "User",
+                "conversationId": "gateway-conversation-a",
                 "timeoutSec": 5,
             }, agent)
             thread.join(timeout=2)
             check("Blocking chat returns plugin reply", chat.get("ok") and chat.get("reply") == "Blocking bridge reply", str(chat))
-            gateway_history = server._load_hermes_history("gateway")
+            gateway_history = server._load_hermes_history("gateway", "gateway-conversation-a")
             check("Gateway Hermes history records assistant reply", gateway_history[-1].get("text") == "Blocking bridge reply", str(gateway_history))
+            check("Gateway Hermes history stays conversation-scoped", not server._load_hermes_history("gateway"), str(server._load_hermes_history("gateway")))
+            check("Gateway conversation stores its platform session", server._get_hermes_session_id("gateway", "gateway-conversation-a") == "gateway-conversation-a")
+            sessions, status = server.handle_chat_sessions_list("hermes-gateway")
+            check("Gateway session browser uses platform conversations", status == 200 and any(item.get("id") == "gateway-conversation-a" for item in sessions.get("sessions") or []), str(sessions))
+            switched, switch_status = server.handle_chat_session_switch("hermes-gateway", "gateway-conversation-a")
+            check("Gateway session switch loads platform history", switch_status == 200 and switched.get("conversationId") == "gateway-conversation-a" and switched.get("messages", [])[-1].get("text") == "Blocking bridge reply", str(switched))
 
     finally:
         os.environ.clear()

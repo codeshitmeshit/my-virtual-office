@@ -643,7 +643,7 @@ def _load_vo_config():
             "desktopHostHeader": _env_or("VO_HERMES_DESKTOP_HOST_HEADER", hermes_cfg.get("desktopHostHeader", "")),
             "desktopTcpHost": _env_or("VO_HERMES_DESKTOP_TCP_HOST", hermes_cfg.get("desktopTcpHost", "")),
             "desktopTcpPort": _env_or("VO_HERMES_DESKTOP_TCP_PORT", hermes_cfg.get("desktopTcpPort", "")),
-            "preferDesktop": _env_bool("VO_HERMES_PREFER_DESKTOP", hermes_cfg.get("preferDesktop", False)),
+            "preferDesktop": _env_bool("VO_HERMES_PREFER_DESKTOP", hermes_cfg.get("preferDesktop", True)),
             "platformEnabled": _env_bool("VO_HERMES_PLATFORM_ENABLED", hermes_cfg.get("platformEnabled", bool(_env_or("VO_HERMES_PLATFORM_TOKEN", hermes_cfg.get("platformToken", ""))))),
             "platformToken": _env_or("VO_HERMES_PLATFORM_TOKEN", hermes_cfg.get("platformToken", "")),
             "platformAgentId": _env_or("VO_HERMES_PLATFORM_AGENT_ID", hermes_cfg.get("platformAgentId", "hermes-gateway")),
@@ -5036,6 +5036,55 @@ def _handle_hermes_interrupt(body):
         return {"ok": False, "error": str(exc), "providerPath": "api", "runId": run_id, "_status": 500}
 
 
+def _complete_hermes_desktop_chat(agent, profile, conversation_id, result):
+    """Persist and normalize a successful/non-fallback Desktop Backend result."""
+    session_id = result.get("sessionId") or _get_hermes_session_id(profile, conversation_id) or ""
+    if session_id:
+        _set_hermes_session_id(profile, session_id, conversation_id)
+    reply = result.get("reply") or ""
+    tools = result.get("tools") or []
+    history = _remove_hermes_progress_messages(_load_hermes_history(profile, conversation_id))
+    history.append({
+        "role": "assistant",
+        "text": reply,
+        "ts": int(time.time() * 1000),
+        "agentId": agent.get("id"),
+        "exitCode": result.get("exitCode", 0 if result.get("ok") else 1),
+        "sessionId": session_id,
+        "runId": result.get("runId") or "",
+        "providerPath": "desktop",
+        "tools": tools,
+        "thinking": result.get("thinking") or "",
+        "reasoningTokens": result.get("reasoningTokens") or 0,
+        "approval": result.get("approval"),
+        "conversationId": conversation_id,
+    })
+    _save_hermes_history(profile, history, conversation_id)
+    gateway_presence.set_manual_override(
+        agent.get("statusKey") or agent.get("id"),
+        "idle" if result.get("ok") else "offline",
+        "",
+    )
+    normalized = {
+        "ok": bool(result.get("ok")),
+        "reply": reply,
+        "stderr": str(result.get("stderr") or "")[:2000],
+        "exitCode": result.get("exitCode", 0 if result.get("ok") else 1),
+        "sessionId": session_id,
+        "runId": result.get("runId") or "",
+        "providerPath": "desktop",
+        "tools": tools,
+        "thinking": result.get("thinking") or "",
+        "reasoningTokens": result.get("reasoningTokens") or 0,
+        "approval": result.get("approval"),
+        "error": result.get("error"),
+        "conversationId": conversation_id,
+        "agent": {"id": agent.get("id"), "name": agent.get("name"), "providerKind": "hermes", "profile": profile},
+    }
+    _append_vo_usage_record("hermes", agent, normalized, conversation_id=conversation_id, session_id=session_id, run_id=result.get("runId") or "")
+    return normalized
+
+
 def _handle_hermes_chat(body):
     """Send one message to a local Hermes agent.
 
@@ -5051,6 +5100,8 @@ def _handle_hermes_chat(body):
     agent = _get_hermes_agent(agent_key)
     if not agent:
         return {"ok": False, "error": f"Hermes agent '{agent_key}' not found", "_status": 404}
+    if _is_hermes_gateway_platform_agent(agent):
+        return _handle_hermes_platform_chat(body, agent)
     archive_guard = _archive_manager_chat_guard(agent.get("id") or agent_key, message)
     if archive_guard:
         profile = agent.get("profile") or agent.get("providerAgentId") or "default"
@@ -5132,6 +5183,15 @@ def _handle_hermes_chat(body):
 
     gateway_presence.set_manual_override(agent.get("statusKey") or agent.get("id"), "working", "Hermes task")
     try:
+        desktop_configured = bool(agent.get("desktopUrl") or hermes_cfg.get("desktopUrl"))
+        desktop_first = bool(desktop_configured and hermes_cfg.get("preferDesktop", True) is not False)
+        desktop_error = ""
+        if desktop_first and not yolo_once:
+            desktop_result = _handle_hermes_desktop_chat(agent, profile, conversation_id, delivery_message, timeout)
+            if not desktop_result.get("fallback"):
+                return _complete_hermes_desktop_chat(agent, profile, conversation_id, desktop_result)
+            desktop_error = desktop_result.get("error") or ""
+
         api_result = None
         if hermes_cfg.get("apiEnabled"):
             api_result = _handle_hermes_api_chat(agent, profile, delivery_message, message, conversation_id, timeout, on_event=body.get("_onHermesApiEvent"))
@@ -5185,6 +5245,12 @@ def _handle_hermes_chat(body):
                 _append_vo_usage_record("hermes", agent, normalized, conversation_id=conversation_id, session_id=active_session_id, run_id=api_result.get("runId") or "")
                 return normalized
 
+        if not desktop_first and not yolo_once and (agent.get("desktopAvailable") or desktop_configured):
+            desktop_result = _handle_hermes_desktop_chat(agent, profile, conversation_id, delivery_message, timeout)
+            if not desktop_result.get("fallback"):
+                return _complete_hermes_desktop_chat(agent, profile, conversation_id, desktop_result)
+            desktop_error = desktop_result.get("error") or desktop_error
+
         provider = HermesProvider(
             home_path=hermes_cfg.get("homePath"),
             binary=hermes_bin,
@@ -5193,6 +5259,8 @@ def _handle_hermes_chat(body):
         )
         session_id = _get_hermes_session_id(profile, conversation_id)
         result = provider.send_chat_message(profile, delivery_message, session_id=session_id, timeout_sec=timeout, yolo_once=yolo_once)
+        if desktop_error and not result.get("ok"):
+            result["error"] = f"{desktop_error}; {result.get('error') or result.get('stderr') or 'Hermes CLI fallback failed'}"
         if result.get("sessionId"):
             _set_hermes_session_id(profile, result.get("sessionId"), conversation_id)
         activity = {"tools": [], "thinking": "", "reasoningTokens": 0}
@@ -5529,11 +5597,21 @@ def _handle_hermes_run_start(body):
     agent = _get_hermes_agent(agent_key)
     if not agent:
         return {"ok": False, "error": f"Hermes agent '{agent_key}' not found", "_status": 404}
+    if _is_hermes_gateway_platform_agent(agent):
+        return {
+            "ok": False,
+            "fallback": True,
+            "providerPath": "gateway-platform",
+            "error": "Hermes Gateway Platform uses the queued messaging bridge",
+            "_status": 409,
+        }
 
     profile = agent.get("profile") or agent.get("providerAgentId") or "default"
     conversation_id = str(body.get("conversationId") or body.get("threadId") or "").strip()
     hermes_cfg = VO_CONFIG.get("hermes", {})
-    if hermes_cfg.get("desktopUrl") and (hermes_cfg.get("preferDesktop") or not hermes_cfg.get("apiEnabled")):
+    desktop_configured = bool(agent.get("desktopUrl") or hermes_cfg.get("desktopUrl"))
+    desktop_first = bool(desktop_configured and hermes_cfg.get("preferDesktop", True) is not False)
+    if desktop_first:
         desktop_start = _handle_hermes_desktop_run_start(
             agent, agent_key, profile, body,
             int(body.get("timeoutSec") or hermes_cfg.get("timeoutSec") or 600),
@@ -5646,6 +5724,7 @@ def _handle_hermes_run_start(body):
             result = {"ok": False, "error": str(exc), "_status": 500}
         terminal_payload = _hermes_stream_event_payload(run_id, agent, profile, result, conversationId=conversation_id)
         if result.get("approval"):
+            enqueue("approval.required", terminal_payload)
             enqueue("approval.request", terminal_payload)
         status = str(result.get("status") or "").lower()
         if result.get("ok"):
@@ -5746,32 +5825,76 @@ def _handle_hermes_history_clear(body):
 
 
 def _handle_hermes_test(body=None):
-    """Test the configured Hermes installation without changing Hermes state."""
+    """Test configured Hermes API, Desktop, CLI, and Gateway Platform paths."""
     body = body or {}
     hermes_cfg = VO_CONFIG.get("hermes", {})
     hermes_bin = os.path.expanduser(body.get("binary") or hermes_cfg.get("binary") or "~/.local/bin/hermes")
     hermes_home = os.path.expanduser(body.get("homePath") or hermes_cfg.get("homePath") or "~/.hermes")
-    result = HermesProvider(home_path=hermes_home, binary=hermes_bin, enabled=True).test()
-    api_enabled = bool(body.get("apiEnabled") if "apiEnabled" in body else hermes_cfg.get("apiEnabled", False))
-    api_url = body.get("apiUrl") or hermes_cfg.get("apiUrl") or "http://127.0.0.1:8642"
+    api_url = body.get("apiUrl") or hermes_cfg.get("apiUrl") or _default_hermes_api_url()
     api_key = body.get("apiKey") if "apiKey" in body else hermes_cfg.get("apiKey", "")
-    result["api"] = {"enabled": api_enabled, "ok": False, "url": api_url}
-    if api_enabled:
-        try:
-            client = HermesApiClient(base_url=api_url, api_key=api_key, timeout_sec=min(int(hermes_cfg.get("timeoutSec") or 600), 30))
-            caps = client.capabilities()
-            features = caps.get("features") if isinstance(caps.get("features"), dict) else {}
-            result["api"].update({
-                "ok": bool(features.get("run_submission") and features.get("run_events_sse")),
-                "features": {
-                    "runSubmission": bool(features.get("run_submission")),
-                    "runEventsSse": bool(features.get("run_events_sse")),
-                    "runApprovalResponse": bool(features.get("run_approval_response")),
-                },
-                "model": caps.get("model") or caps.get("model_name") or "",
-            })
-        except Exception as exc:
-            result["api"]["error"] = str(exc)[:500]
+    api_enabled = bool(body.get("apiEnabled") if "apiEnabled" in body else hermes_cfg.get("apiEnabled", hermes_cfg.get("preferApi", True)))
+    desktop_url = body.get("desktopUrl") or hermes_cfg.get("desktopUrl") or _default_hermes_desktop_url()
+    desktop_token = body.get("desktopToken") if "desktopToken" in body else hermes_cfg.get("desktopToken", "")
+    desktop_host_header = body.get("desktopHostHeader") or hermes_cfg.get("desktopHostHeader") or ""
+    desktop_tcp_host = body.get("desktopTcpHost") or hermes_cfg.get("desktopTcpHost") or ""
+    desktop_tcp_port = body.get("desktopTcpPort") or hermes_cfg.get("desktopTcpPort") or ""
+
+    cli = HermesProvider(home_path=hermes_home, binary=hermes_bin, enabled=True).test()
+    api_status = _test_hermes_api(api_url=api_url, api_key=api_key) if api_enabled else {"enabled": False, "ok": False, "url": api_url}
+    api_status["enabled"] = api_enabled
+    desktop_status = (
+        _test_hermes_desktop(
+            desktop_url=desktop_url,
+            desktop_token=desktop_token,
+            desktop_host_header=desktop_host_header,
+            desktop_tcp_host=desktop_tcp_host,
+            desktop_tcp_port=desktop_tcp_port,
+        )
+        if desktop_url else {"enabled": False, "ok": False, "chatReady": False, "url": ""}
+    )
+    desktop_status["enabled"] = bool(desktop_url)
+    agents = discover_hermes_agents(
+        hermes_home=hermes_home,
+        hermes_bin=hermes_bin,
+        enabled=True,
+        api_url=api_url,
+        api_key=api_key,
+        desktop_url=desktop_url,
+        desktop_token=desktop_token,
+        desktop_host_header=desktop_host_header,
+        desktop_tcp_host=desktop_tcp_host,
+        desktop_tcp_port=desktop_tcp_port,
+        prefer_api=hermes_cfg.get("preferApi", True),
+        timeout_sec=int(hermes_cfg.get("timeoutSec") or 600),
+    )
+    platform_status = _handle_hermes_platform_status()
+    platform_agent = _hermes_platform_roster_agent()
+    if platform_agent and not any(platform_agent["statusKey"] in (a.get("id"), a.get("statusKey")) for a in agents):
+        agents.append(platform_agent)
+    platform_ok = bool(platform_status.get("enabled") and platform_status.get("configured"))
+    result = {
+        "ok": bool(api_status.get("ok") or desktop_status.get("chatReady") or cli.get("ok") or platform_ok),
+        "agents": agents,
+        "api": api_status,
+        "desktop": desktop_status,
+        "platform": platform_status,
+        "cli": {
+            "ok": bool(cli.get("ok")),
+            "binary": hermes_bin,
+            "homePath": hermes_home,
+            "agents": cli.get("agents") or [],
+            "error": "" if cli.get("ok") else cli.get("error", "Hermes CLI is not available"),
+        },
+    }
+    if not result["ok"]:
+        if desktop_url and desktop_status.get("error"):
+            result["error"] = desktop_status.get("error")
+        elif api_url and api_status.get("error"):
+            result["error"] = api_status.get("error")
+        elif platform_status.get("enabled") and not platform_status.get("configured"):
+            result["error"] = "Hermes Gateway Platform is enabled but missing its shared token"
+        else:
+            result["error"] = result["cli"].get("error") or "Hermes is not available"
     return result
 
 
@@ -7805,7 +7928,7 @@ class ProviderRunBridge:
         payload.setdefault("profile", meta.get("profile") or "")
         payload.setdefault("conversationId", meta.get("conversationId") or "")
         provider_kind = self._provider_kind(meta, run_id)
-        self.publish(
+        item = self.publish(
             provider_kind,
             meta.get("agentId") or "",
             meta.get("conversationId") or "",
@@ -7813,6 +7936,14 @@ class ProviderRunBridge:
             payload,
             run_id,
         )
+        legacy_queue = meta.get("events")
+        if legacy_queue is not None and hasattr(legacy_queue, "put"):
+            legacy_queue.put({
+                "id": item.get("id"),
+                "event": item.get("event"),
+                "data": item.get("data"),
+                "ts": item.get("ts"),
+            })
         return True
 
     @staticmethod
@@ -27691,6 +27822,13 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                 "preferApi": safe_vo_config.get("hermes", {}).get("preferApi", safe_vo_config.get("hermes", {}).get("apiEnabled", False)),
                 "apiUrl": safe_vo_config.get("hermes", {}).get("apiUrl"),
                 "apiDetected": safe_vo_config.get("hermes", {}).get("apiDetected", False),
+                "desktopUrl": safe_vo_config.get("hermes", {}).get("desktopUrl"),
+                "desktopTcpHost": safe_vo_config.get("hermes", {}).get("desktopTcpHost"),
+                "desktopTcpPort": safe_vo_config.get("hermes", {}).get("desktopTcpPort"),
+                "desktopHostHeader": safe_vo_config.get("hermes", {}).get("desktopHostHeader"),
+                "preferDesktop": safe_vo_config.get("hermes", {}).get("preferDesktop", True),
+                "platformEnabled": safe_vo_config.get("hermes", {}).get("platformEnabled", False),
+                "platformAgentId": safe_vo_config.get("hermes", {}).get("platformAgentId", "hermes-gateway"),
                 "configSurface": "models-native",
             },
             "codex": {
@@ -27833,37 +27971,10 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
 
     def _handle_save_key(self, req):
         """Save an API key to auth-profiles and openclaw.json."""
-        provider = req["provider"]
-        key = req["key"]
-
-        # Update auth-profiles.json
-        try:
-            with open(AUTH_PROFILES_PATH) as f:
-                ap = json.load(f)
-        except Exception:
-            ap = {"version": 1, "profiles": {}, "lastGood": {}}
-
-        profile_id = f"{provider}:default"
-        ap["profiles"][profile_id] = {"type": "api_key", "provider": provider, "key": key}
-        ap["lastGood"][provider] = profile_id
-
-        try:
-            with open(AUTH_PROFILES_PATH, "w") as f:
-                json.dump(ap, f, indent=2)
-        except OSError as e:
-            return {"ok": False, "error": f"Cannot write auth-profiles.json: {e}"}
-
-        # Mirror in openclaw.json
-        with open(CONFIG_PATH) as f:
-            cfg = json.load(f)
-        cfg.setdefault("auth", {}).setdefault("profiles", {})[profile_id] = {"provider": provider, "mode": "api_key"}
-        ok, err = self._write_openclaw_config(cfg)
-        if not ok:
-            return {"ok": False, "error": err}
-
-        self._signal_gateway(restart=False)
-        masked = key[:4] + "••••••••" if len(key) > 4 else "****"
-        return {"ok": True, "provider": provider, "maskedKey": masked}
+        provider = req.get("provider", "")
+        key = req.get("key", "")
+        profile_id = req.get("profileId") or f"{provider}:default"
+        return _save_openclaw_api_key(provider, key, profile_id, agent_id=req.get("agent") or "main", sync_all=True)
 
     def _handle_delete_key(self, req):
         """Delete an API key from auth-profiles and openclaw.json."""
@@ -27871,11 +27982,7 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
         profile_id = str(req.get("profileId") or "").strip()
         if not provider and not profile_id:
             return {"ok": False, "error": "provider or profileId is required"}
-        result = _delete_openclaw_auth_direct(provider, profile_id)
-        if not result.get("ok"):
-            return result
-        self._signal_gateway(restart=False)
-        return result
+        return _delete_openclaw_auth(provider, profile_id, agent_id=req.get("agent") or "main", sync_all=True)
 
     def _handle_save_custom_provider(self, req):
         """Save a custom provider (ollama, lmstudio, etc.) to openclaw.json."""
@@ -29334,7 +29441,7 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
         elif self.path == "/api/native-models/openclaw/auth/api-key":
             length = int(self.headers.get('Content-Length', 0))
             body = json.loads(self.rfile.read(length)) if length else {}
-            result = _save_openclaw_api_key(body.get("provider", ""), body.get("apiKey", ""), body.get("profileId", ""))
+            result = _save_openclaw_api_key(body.get("provider", ""), body.get("apiKey", ""), body.get("profileId", ""), agent_id=body.get("agent") or body.get("agentId") or "main", sync_all=True)
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
@@ -29343,7 +29450,7 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
         elif self.path == "/api/native-models/openclaw/auth/delete":
             length = int(self.headers.get('Content-Length', 0))
             body = json.loads(self.rfile.read(length)) if length else {}
-            result = self._delete_provider_key(body.get("provider", ""), body.get("profileId", ""))
+            result = _delete_openclaw_auth(body.get("provider", ""), body.get("profileId", ""), agent_id=body.get("agent") or body.get("agentId") or "main", sync_all=True)
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
@@ -32100,9 +32207,10 @@ def _handle_hermes_platform_chat(body, agent):
         return {"ok": False, "error": "message is required", "_status": 400}
     timeout = int(body.get("timeoutSec") or VO_CONFIG.get("hermes", {}).get("timeoutSec") or 600)
     profile = agent.get("profile") or "gateway"
+    conversation_id = str(body.get("conversationId") or body.get("threadId") or "").strip()
     agent_id = agent.get("statusKey") or agent.get("id") or VO_CONFIG.get("hermes", {}).get("platformAgentId") or "hermes-gateway"
     now = _now_ms()
-    history = _load_hermes_history(profile)
+    history = _load_hermes_history(profile, conversation_id)
     history.append({
         "role": "user",
         "text": message,
@@ -32114,8 +32222,9 @@ def _handle_hermes_platform_chat(body, agent):
         "sourceSurface": body.get("sourceSurface") or "chat-window",
         "sourceLabel": body.get("sourceLabel") or "",
         "attachments": body.get("attachments") if isinstance(body.get("attachments"), list) else [],
+        "conversationId": conversation_id,
     })
-    _save_hermes_history(profile, history)
+    _save_hermes_history(profile, history, conversation_id)
 
     enqueue = _handle_hermes_platform_enqueue({
         **body,
@@ -32143,32 +32252,37 @@ def _handle_hermes_platform_chat(body, agent):
         }
 
     reply = msg.get("replyText") or ""
+    platform_session_id = str(msg.get("conversationId") or conversation_id or "").strip()
+    if platform_session_id:
+        _set_hermes_session_id(profile, platform_session_id, conversation_id)
     final_ts = _now_ms()
-    history = _load_hermes_history(profile)
+    history = _load_hermes_history(profile, conversation_id)
     history.append({
         "role": "assistant",
         "text": reply,
         "ts": final_ts,
         "agentId": agent_id,
         "exitCode": 0,
-        "sessionId": msg.get("conversationId") or "",
+        "sessionId": platform_session_id,
         "runId": msg.get("id") or "",
         "tools": [],
         "thinking": "",
         "reasoningTokens": 0,
+        "conversationId": conversation_id,
     })
-    _save_hermes_history(profile, history)
+    _save_hermes_history(profile, history, conversation_id)
     return {
         "ok": True,
         "reply": reply,
         "stderr": "",
         "exitCode": 0,
-        "sessionId": msg.get("conversationId") or "",
+        "sessionId": platform_session_id,
         "runId": msg.get("id") or "",
         "providerPath": "gateway-platform",
         "tools": [],
         "thinking": "",
         "reasoningTokens": 0,
+        "conversationId": conversation_id,
         "agent": {"id": agent_id, "name": agent.get("name") or "Hermes Gateway", "providerKind": "hermes", "profile": profile},
     }
 
@@ -32351,6 +32465,29 @@ def _chat_sessions_list_openclaw(agent_ref, limit=40):
     return {"ok": False, "error": gateway_error, "sessions": []}
 
 def _chat_sessions_list_hermes(agent_ref, limit=40):
+    if _is_hermes_gateway_platform_agent(agent_ref.get("record") or {}):
+        conversations = {}
+        for row in _load_hermes_platform_state().get("messages") or []:
+            conversation_id = str(row.get("conversationId") or row.get("chatId") or "").strip()
+            if not conversation_id:
+                continue
+            updated_at = int(row.get("repliedAt") or row.get("deliveredAt") or row.get("createdAt") or 0)
+            current = conversations.get(conversation_id)
+            if current and int(current.get("updatedAt") or 0) > updated_at:
+                continue
+            conversations[conversation_id] = {
+                "id": conversation_id,
+                "sessionKey": f"hermes:gateway:{conversation_id}",
+                "title": row.get("chatName") or conversation_id,
+                "preview": row.get("replyText") or row.get("text") or "",
+                "updatedAt": updated_at or None,
+                "kind": "gateway-platform",
+                "liveMode": False,
+                "active": False,
+                "deletable": False,
+            }
+        sessions = sorted(conversations.values(), key=lambda item: int(item.get("updatedAt") or 0), reverse=True)
+        return {"ok": True, "sessions": sessions[: max(1, int(limit))]}
     provider = _hermes_provider(agent_ref.get("record") or {})
     profile = agent_ref["profile"] or "default"
     outcome = provider.list_sessions(profile, limit=limit)
@@ -32552,10 +32689,15 @@ def handle_chat_session_delete(agent_id, session_id, body=None):
         return {"ok": False, "error": "sessionId is required"}, 400
     kind = agent_ref["providerKind"]
     profile = agent_ref["profile"]
+    conversation_id = str((body or {}).get("conversationId") or "").strip()
     if kind == "hermes":
         outcome = _hermes_provider(agent_ref.get("record") or {}).delete_session(profile, session_id)
-        if outcome.get("ok") and _get_hermes_session_id(profile) == session_id:
-            _save_hermes_state(profile, {"messages": [], "sessionId": ""})
+        if outcome.get("ok") and _get_hermes_session_id(profile, conversation_id or None) == session_id:
+            if conversation_id:
+                _save_hermes_history(profile, [], conversation_id)
+                _set_hermes_session_id(profile, "", conversation_id)
+            else:
+                _save_hermes_state(profile, {"messages": [], "sessionId": ""})
         return outcome, 200 if outcome.get("ok") else 502
     if kind == "codex":
         outcome = _codex_provider().delete_thread(profile, session_id)
@@ -32572,8 +32714,12 @@ def handle_chat_session_delete(agent_id, session_id, body=None):
             os.replace(path, deleted_path)
         except OSError as exc:
             return {"ok": False, "error": str(exc)}, 500
-        if _get_claude_code_session_id(profile) == session_id:
-            _save_claude_code_state(profile, {"messages": [], "sessionId": ""})
+        if _get_claude_code_session_id(profile, conversation_id or None) == session_id:
+            if conversation_id:
+                _save_claude_code_history(profile, [], conversation_id)
+                _set_claude_code_session_id(profile, "", conversation_id)
+            else:
+                _save_claude_code_state(profile, {"messages": [], "sessionId": ""})
             _clear_claude_code_token_usage(profile)
         return {"ok": True, "deleted": True, "sessionId": session_id, "deletedPath": deleted_path}, 200
     if kind == "openclaw":
@@ -32597,12 +32743,25 @@ def handle_chat_session_switch(agent_id, session_id, body=None):
     kind = agent_ref["providerKind"]
     profile = agent_ref["profile"]
     if kind == "hermes":
+        if _is_hermes_gateway_platform_agent(agent_ref.get("record") or {}):
+            messages = _load_hermes_history(profile, session_id)
+            if not messages:
+                return {"ok": False, "error": "Gateway Platform conversation not found"}, 404
+            _set_hermes_session_id(profile, session_id, session_id)
+            return {
+                "ok": True,
+                "providerKind": kind,
+                "sessionId": session_id,
+                "conversationId": session_id,
+                "messages": messages,
+            }, 200
         exported = _hermes_provider(agent_ref.get("record") or {}).export_session(profile, session_id)
         if not exported.get("ok"):
             return {"ok": False, "error": exported.get("error") or "Hermes session export failed"}, 502
         messages = _hermes_session_to_chat_messages(exported.get("session") or {}, agent_ref)
-        _save_hermes_state(profile, {"messages": messages, "sessionId": session_id})
-        return {"ok": True, "providerKind": kind, "sessionId": session_id, "messages": messages}, 200
+        _save_hermes_history(profile, messages, session_id)
+        _set_hermes_session_id(profile, session_id, session_id)
+        return {"ok": True, "providerKind": kind, "sessionId": session_id, "conversationId": session_id, "messages": messages}, 200
     if kind == "codex":
         outcome = _codex_provider().read_thread(profile, session_id)
         if not outcome.get("ok"):
@@ -32618,8 +32777,8 @@ def handle_chat_session_switch(agent_id, session_id, body=None):
         if not path:
             return {"ok": False, "error": "Claude Code session not found"}, 404
         messages = _claude_code_jsonl_to_chat_messages(path, agent_ref)
-        _save_claude_code_state(profile, {"messages": messages[-500:], "sessionId": session_id})
-        return {"ok": True, "providerKind": kind, "sessionId": session_id, "messages": messages, "resumeCommand": f"claude --resume {session_id}"}, 200
+        _save_claude_code_history(profile, messages, session_id, session_id=session_id)
+        return {"ok": True, "providerKind": kind, "sessionId": session_id, "conversationId": session_id, "messages": messages, "resumeCommand": f"claude --resume {session_id}"}, 200
     if kind == "openclaw":
         session_key = _openclaw_session_key_for_agent(agent_ref["agentId"], session_id, default_bucket="")
         if not session_key:
@@ -32839,7 +32998,7 @@ def _hermes_desktop_client():
         timeout_sec=min(int(hermes_cfg.get("timeoutSec") or 600), 60),
     )
 
-def _handle_hermes_desktop_chat(agent, profile, delivery_message, timeout):
+def _handle_hermes_desktop_chat(agent, profile, conversation_id, delivery_message, timeout):
     """Run a Hermes turn through Desktop's `hermes serve` TUI-gateway backend."""
     hermes_cfg = VO_CONFIG.get("hermes", {})
     desktop_url = agent.get("desktopUrl") or hermes_cfg.get("desktopUrl")
@@ -32862,7 +33021,7 @@ def _handle_hermes_desktop_chat(agent, profile, delivery_message, timeout):
 
     result = client.send_chat_message(
         delivery_message,
-        session_id=_get_hermes_session_id(profile),
+        session_id=_get_hermes_session_id(profile, conversation_id),
         timeout_sec=int(timeout or hermes_cfg.get("timeoutSec") or 600),
     )
     result["providerPath"] = "desktop"
@@ -32895,9 +33054,10 @@ def _handle_hermes_desktop_run_start(agent, agent_key, profile, body, timeout):
     run_seed = f"{profile}|{agent_key}|{now_ms}|{delivery.get('deliveryMessage') or ''}"
     run_id = "hermes-desktop-" + hashlib.sha1(run_seed.encode("utf-8")).hexdigest()[:16]
     agent_id = agent.get("id") or agent_key
-    session_id = _get_hermes_session_id(profile) or ""
+    conversation_id = str(body.get("conversationId") or body.get("threadId") or "").strip()
+    session_id = _get_hermes_session_id(profile, conversation_id) or ""
 
-    history = _load_hermes_history(profile)
+    history = _load_hermes_history(profile, conversation_id)
     history.append({
         "role": "user",
         "text": body.get("message") or "",
@@ -32909,8 +33069,9 @@ def _handle_hermes_desktop_run_start(agent, agent_key, profile, body, timeout):
         "sourceSurface": delivery["sourceSurface"] if delivery["isHumanSource"] else "",
         "sourceLabel": delivery["sourceLabel"] if delivery["isHumanSource"] else "",
         "attachments": delivery["attachments"],
+        "conversationId": conversation_id,
     })
-    _save_hermes_history(profile, history)
+    _save_hermes_history(profile, history, conversation_id)
 
     _remember_hermes_active_run({
         "runId": run_id,
@@ -32925,6 +33086,7 @@ def _handle_hermes_desktop_run_start(agent, agent_key, profile, body, timeout):
         "timeoutSec": timeout,
         "startedAt": now_ms,
         "desktopUrl": desktop_url,
+        "conversationId": conversation_id,
     })
     gateway_presence.set_provider_event(agent.get("statusKey") or agent_id, "hermes", {"event": "run.started", "run_id": run_id, "providerPath": "desktop"})
     _publish_hermes_api_progress(profile, agent_id, run_id, tools=[], reasoning_parts=[], reply="")
@@ -32933,16 +33095,18 @@ def _handle_hermes_desktop_run_start(agent, agent_key, profile, body, timeout):
         "providerPath": "desktop",
         "runId": run_id,
         "sessionId": session_id,
+        "conversationId": conversation_id,
         "agent": {"id": agent_id, "name": agent.get("name"), "providerKind": "hermes", "profile": profile},
     }
 
 def _handle_hermes_desktop_run_events(handler, run_id, meta):
     """Stream an already-registered Hermes Desktop Backend run to the browser."""
     profile = meta.get("profile") or "default"
+    conversation_id = str(meta.get("conversationId") or "").strip()
     agent = _get_hermes_agent(meta.get("agentId") or meta.get("agentKey") or f"hermes-{profile}") or {}
     agent_id = agent.get("id") or meta.get("agentId") or "hermes-default"
     status_key = agent.get("statusKey") or meta.get("statusKey") or agent_id
-    session_id = meta.get("sessionId") or _get_hermes_session_id(profile) or ""
+    session_id = meta.get("sessionId") or _get_hermes_session_id(profile, conversation_id) or ""
     timeout = int(meta.get("timeoutSec") or VO_CONFIG.get("hermes", {}).get("timeoutSec") or 600)
     hermes_cfg = VO_CONFIG.get("hermes", {})
     client = HermesDesktopBackendClient(
@@ -32974,6 +33138,7 @@ def _handle_hermes_desktop_run_events(handler, run_id, meta):
         data.setdefault("agentId", agent_id)
         data.setdefault("profile", profile)
         data.setdefault("providerPath", "desktop")
+        data.setdefault("conversationId", conversation_id)
         try:
             handler.wfile.write(f"event: {event_name}\ndata: {json.dumps(data)}\n\n".encode("utf-8"))
             handler.wfile.flush()
@@ -33033,7 +33198,7 @@ def _handle_hermes_desktop_run_events(handler, run_id, meta):
         send_sse(event_name, payload)
 
     def finalize_history(ok=False):
-        history = _remove_hermes_progress_messages(_load_hermes_history(profile))
+        history = _remove_hermes_progress_messages(_load_hermes_history(profile, conversation_id))
         final_ts = int(time.time() * 1000)
         history.extend(_hermes_tool_activity_messages(
             tools,
@@ -33055,8 +33220,9 @@ def _handle_hermes_desktop_run_events(handler, run_id, meta):
             "reasoningTokens": 0,
             "approval": approval,
             "error": error_text or None,
+            "conversationId": conversation_id,
         })
-        _save_hermes_history(profile, history)
+        _save_hermes_history(profile, history, conversation_id)
         _clear_hermes_active_run(run_id)
 
     send_sse("run.started", {"ok": True})
@@ -33076,7 +33242,7 @@ def _handle_hermes_desktop_run_events(handler, run_id, meta):
 
     if result.get("sessionId"):
         session_id = result.get("sessionId")
-        _set_hermes_session_id(profile, session_id)
+        _set_hermes_session_id(profile, session_id, conversation_id)
     reply = result.get("reply") or reply
     reasoning_text = result.get("thinking") or reasoning_text
     if result.get("tools"):
@@ -33105,7 +33271,7 @@ def _test_hermes_api(api_url=None, api_key=None):
     )
     result = {"ok": False, "url": api.base_url, "features": {}}
     try:
-        health = api.health()
+        health = api.health() if hasattr(api, "health") else {}
         result["health"] = health.get("status") or ""
         caps = api.capabilities()
         features = caps.get("features") if isinstance(caps.get("features"), dict) else {}

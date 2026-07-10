@@ -14246,8 +14246,21 @@ function mmTestHermes() {
         return;
     }
     statusEl.innerHTML = '<div class="mm-status info">' + _tr('testing_hermes') + '</div>';
-    var hermesSave = { enabled: enabled, homePath: homePath || null, binary: binary || null, apiEnabled: apiEnabled, apiUrl: apiUrl || null };
+    var desktopUrl = ((document.getElementById('mm-hermes-desktop-url') || {}).value || '').trim();
+    var hermesSave = {
+        enabled: enabled, homePath: homePath || null, binary: binary || null,
+        apiEnabled: apiEnabled, preferApi: apiEnabled, apiUrl: apiUrl || null,
+        desktopUrl: desktopUrl || null,
+        desktopTcpHost: ((document.getElementById('mm-hermes-desktop-tcp-host') || {}).value || '').trim() || null,
+        desktopTcpPort: ((document.getElementById('mm-hermes-desktop-tcp-port') || {}).value || '').trim() || null,
+        desktopHostHeader: ((document.getElementById('mm-hermes-desktop-host-header') || {}).value || '').trim() || null,
+        preferDesktop: !!desktopUrl,
+        platformEnabled: !!(document.getElementById('mm-hermes-platform-enable') || {}).checked,
+        platformAgentId: ((document.getElementById('mm-hermes-platform-agent') || {}).value || '').trim() || 'hermes-gateway'
+    };
     if (apiKey.trim()) hermesSave.apiKey = apiKey.trim();
+    var platformToken = ((document.getElementById('mm-hermes-platform-token') || {}).value || '').trim();
+    if (platformToken) hermesSave.platformToken = platformToken;
     fetch('/setup/save', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -14256,7 +14269,7 @@ function mmTestHermes() {
         return fetch('/api/hermes/test', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ homePath: homePath || null, binary: binary || null, apiEnabled: apiEnabled, apiUrl: apiUrl || null, apiKey: apiKey.trim() || undefined })
+            body: JSON.stringify(hermesSave)
         });
     }).then(function(r) { return r.json().then(function(d){ d._httpOk = r.ok; return d; }); }).then(function(d) {
         if (d.ok) {
@@ -14289,6 +14302,17 @@ function mmDiscoverHermesDesktop() {
         if (d.desktopTcpHost) document.getElementById('mm-hermes-desktop-tcp-host').value = d.desktopTcpHost;
         if (d.desktopTcpPort) document.getElementById('mm-hermes-desktop-tcp-port').value = d.desktopTcpPort;
         if (d.desktopHostHeader) document.getElementById('mm-hermes-desktop-host-header').value = d.desktopHostHeader;
+        if (d.chatReady) {
+            var discovered = {
+                enabled: true,
+                desktopUrl: d.desktopUrl || payload.desktopUrl || null,
+                desktopTcpHost: d.desktopTcpHost || payload.desktopTcpHost || null,
+                desktopTcpPort: d.desktopTcpPort || payload.desktopTcpPort || null,
+                desktopHostHeader: d.desktopHostHeader || payload.desktopHostHeader || null,
+                preferDesktop: true
+            };
+            fetch('/setup/save', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({hermes:discovered})}).catch(function(){});
+        }
         if (statusEl) statusEl.innerHTML = '<div class="mm-status ' + (d.ok ? 'ok' : 'err') + '">' + escHtml(d.message || d.error || 'Discovery complete') + '</div>';
       }).catch(function(e){ if (statusEl) statusEl.innerHTML = '<div class="mm-status err">' + escHtml(e.message) + '</div>'; });
 }

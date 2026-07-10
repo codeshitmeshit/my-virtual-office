@@ -1268,12 +1268,19 @@
         this.sessionsListEl.innerHTML = '<div class="chat-sessions-empty">No sessions yet</div>';
         return;
       }
+      const selectedProviderKind = this.isClaudeCodeSelected() ? 'claude-code' : (this.isHermesSelected() ? 'hermes' : '');
+      const activeConversationId = selectedProviderKind ? this.getProviderConversationId(selectedProviderKind) : '';
       for (const session of this.currentSessions) {
         const item = document.createElement('button');
         item.type = 'button';
-        item.className = 'chat-session-item' + (session.active || session.sessionKey === this.sessionKey ? ' selected' : '');
-        item.innerHTML = '<span class="chat-session-main"><strong>' + escapeHtml(session.title || session.id || 'Session') + '</strong>' +
-          (session.preview ? '<small>' + escapeHtml(session.preview) + '</small>' : '') + '</span>' +
+        item.className = 'chat-session-item' + (session.active || session.sessionKey === this.sessionKey || (activeConversationId && session.id === activeConversationId) ? ' selected' : '');
+        const meta = [];
+        if (session.liveMode) meta.push('<span class="cs-live-badge">' + (session.active ? 'LIVE' : 'Live Mode') + '</span>');
+        if (session.kind && !session.liveMode) meta.push('<span>' + escapeHtml(session.kind) + '</span>');
+        if (session.updatedAt) meta.push('<span>' + escapeHtml(this.formatSessionTimestamp(session.updatedAt)) + '</span>');
+        item.innerHTML = '<span class="chat-session-main"><span class="cs-title">' + escapeHtml(session.title || session.id || 'Session') + '</span>' +
+          (session.preview ? '<span class="cs-preview">' + escapeHtml(session.preview) + '</span>' : '') +
+          (meta.length ? '<span class="cs-meta">' + meta.join('') + '</span>' : '') + '</span>' +
           (session.deletable ? '<span class="chat-session-delete" title="Delete">×</span>' : '');
         item.addEventListener('click', (event) => {
           if (event.target.closest('.chat-session-delete')) this.deleteManagedSession(session);
@@ -1283,31 +1290,57 @@
       }
     }
 
+    formatSessionTimestamp(value) {
+      if (value === null || value === undefined || value === '') return '';
+      const numeric = Number(value);
+      const date = Number.isFinite(numeric) && numeric > 0
+        ? new Date(numeric < 100000000000 ? numeric * 1000 : numeric)
+        : new Date(value);
+      if (Number.isNaN(date.getTime())) return String(value).slice(0, 28);
+      return date.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    }
+
     async switchManagedSession(session) {
       const agentId = this.getSelectedAgentId() || this.selectedAgentKey;
+      const oldHistoryContext = this.getHistoryContext();
       const res = await fetch('/api/chat-sessions/switch', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({agentId, sessionId: session.id, sessionKey: session.sessionKey}) });
       const data = await res.json();
       if (!res.ok || !data.ok) { this.appendSystem(data.error || 'Session switch failed'); return; }
       if (data.sessionKey) this.sessionKey = data.sessionKey;
+      if (data.conversationId && (this.isHermesSelected() || this.isClaudeCodeSelected())) {
+        const providerKind = this.isClaudeCodeSelected() ? 'claude-code' : 'hermes';
+        localStorage.setItem(this.providerConversationStorageKey(providerKind), data.conversationId);
+      }
       this.saveSelection();
+      this.historyStore.invalidate(oldHistoryContext);
       this.historyStore.invalidate(this.getHistoryContext());
+      this.updateProviderEventSource();
       await this.loadHistory({ force: true });
       this.toggleSessionsPanel(false);
     }
 
     async createManagedSession() {
       const agentId = this.getSelectedAgentId() || this.selectedAgentKey;
+      const oldHistoryContext = this.getHistoryContext();
       const res = await fetch('/api/chat-sessions/create', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({agentId, sessionKey: this.sessionKey}) });
       const data = await res.json();
       if (!res.ok || !data.ok) { this.appendSystem(data.error || 'New session failed'); return; }
+      if (this.isHermesSelected() || this.isClaudeCodeSelected()) {
+        const providerKind = this.isClaudeCodeSelected() ? 'claude-code' : 'hermes';
+        this.rotateProviderConversationId(providerKind);
+        this.historyStore.invalidate(oldHistoryContext);
+      }
       this.resetConversation(_ct('chat_new_session'));
       this.activateHistory({ coldEmpty: true });
+      if (this.isHermesSelected() || this.isClaudeCodeSelected()) this.updateProviderEventSource();
       await this.refreshSessionsList();
     }
 
     async deleteManagedSession(session) {
       const agentId = this.getSelectedAgentId() || this.selectedAgentKey;
-      const res = await fetch('/api/chat-sessions/delete', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({agentId, sessionId: session.id, sessionKey: session.sessionKey}) });
+      const providerKind = this.isClaudeCodeSelected() ? 'claude-code' : (this.isHermesSelected() ? 'hermes' : '');
+      const conversationId = providerKind ? this.getProviderConversationId(providerKind) : '';
+      const res = await fetch('/api/chat-sessions/delete', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({agentId, sessionId: session.id, sessionKey: session.sessionKey, conversationId}) });
       const data = await res.json();
       if (!res.ok || !data.ok) { this.appendSystem(data.error || 'Session delete failed'); return; }
       await this.refreshSessionsList();

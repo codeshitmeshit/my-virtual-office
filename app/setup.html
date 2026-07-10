@@ -843,6 +843,12 @@
                 if (d.desktopTcpHost) document.getElementById('s-hermes-desktop-tcp-host').value = d.desktopTcpHost;
                 if (d.desktopTcpPort) document.getElementById('s-hermes-desktop-tcp-port').value = d.desktopTcpPort;
                 if (d.desktopHostHeader) document.getElementById('s-hermes-desktop-host-header').value = d.desktopHostHeader;
+                if (d.chatReady) {
+                    var discovered = _hermesExtendedSettings();
+                    discovered.enabled = true;
+                    discovered.preferDesktop = true;
+                    fetch('/setup/save', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({hermes:discovered})}).catch(function(){});
+                }
                 document.getElementById('hermes-test-status').textContent = d.message || d.error || 'Discovery complete';
               });
         }
@@ -872,7 +878,7 @@
                 return fetch('/api/hermes/test', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ homePath: homePath || null, binary: binary || null, apiEnabled: apiEnabled, preferApi: apiEnabled, apiUrl: apiUrl || null, apiKey: apiKey || undefined })
+                    body: JSON.stringify(hermesSave)
                 });
             }).then(function(r) { return r.json(); }).then(function(d) {
                 if (d.ok) {

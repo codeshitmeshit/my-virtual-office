@@ -2,7 +2,7 @@
 
 # Hermes Provider Adapter
 
-Status: native API client plus opt-in server-side run/event integration
+Status: native run streaming implementation
 
 ## Goal
 
@@ -17,10 +17,13 @@ Path: `app/providers/hermes.py`
 The adapter exposes:
 
 - `discover_agents()` — returns Hermes profiles as normalized office agents
-- `test()` — checks the configured Hermes CLI/home and returns detected profiles
+- `discover_api_agents()` — discovers API Server-backed agents
+- `discover_desktop_agents()` — discovers Desktop Backend-backed agents
+- `test()` — checks the CLI/home adapter mode; the server's `/api/hermes/test` handler combines API Server, Desktop Backend, Gateway Platform, and CLI results
 - `send_message(profile, message)` — sends a one-shot Hermes message through the public CLI and returns stdout
 - `send_chat_message(profile, message, session_id)` — CLI chat fallback for installs without the native API server
 - `HermesApiClient` — talks to Hermes' native API server for runs, SSE events, approvals, and stops
+- `HermesDesktopBackendClient` — talks to Desktop's `hermes serve` status and WebSocket JSON-RPC surfaces
 - `create_agent(name, role, model, emoji, profile)` — creates a Hermes profile for a Virtual Office agent
 - `delete_agent(profile)` — deletes a Hermes profile through the public CLI
 
@@ -36,14 +39,20 @@ It uses safe public Hermes surfaces only:
 - `GET /v1/runs/{run_id}/events`
 - `POST /v1/runs/{run_id}/approval`
 - `POST /v1/runs/{run_id}/stop`
+- `GET /v1/capabilities`
+- `GET /v1/models`
+- `GET /api/status`
+- WebSocket `/api/ws` TUI-gateway JSON-RPC
 
-## Native API routing
+## Native streaming
 
-Hermes native API use is opt-in. When `hermes.apiEnabled` or the reference-compatible alias `hermes.preferApi` is enabled and the API server reports run submission plus SSE event support, `/api/hermes/chat` starts a Hermes API run, consumes native events server-side, normalizes the result into the existing Virtual Office chat/history shape, and records reply, thinking, tool cards, run/session IDs, approval state, and errors.
+The chat UI starts native runs with `POST /api/hermes/runs`, then opens `EventSource("/api/hermes/runs/{runId}/events")`. The server proxies normalized message, reasoning, tool, approval, and terminal events while keeping provider credentials server-side. Conversation history is persisted for reloads and session browsing.
 
-If the native API server is disabled, unavailable, or cannot start a run, `/api/hermes/chat` keeps the existing CLI fallback path. Approval events from the native API are stored in the same pending approval queue used by the rest of the chat UI.
+When configured, Desktop Backend uses the same browser run/SSE contract while communicating with `hermes serve` through its TUI-gateway WebSocket API. The synchronous `/api/hermes/chat` path and CLI remain compatibility fallbacks.
 
-The reference branch describes browser `EventSource` proxy routes such as `/api/hermes/runs/{runId}/events`. This local migration has not replaced the chat transport with those browser SSE routes; it intentionally keeps the current chat/project/meeting contracts and consumes native run events inside the server request path.
+## Messaging Gateway platform mode
+
+The plugin under `integrations/hermes-platform/my_virtual_office/` lets Hermes Gateway poll queued office messages and post replies. This mode is separate from API Server and Desktop Backend; see [HERMES_PLATFORM_ADAPTER.md](HERMES_PLATFORM_ADAPTER.md).
 
 ## Configuration
 
@@ -57,8 +66,19 @@ Hermes integration is configured through `vo-config.json` or environment variabl
 - `VO_HERMES_PREFER_API` / `hermes.preferApi`
 - `VO_HERMES_API_URL` / `hermes.apiUrl`
 - `VO_HERMES_API_KEY` / `hermes.apiKey`
+- `VO_HERMES_DESKTOP_URL` / `hermes.desktopUrl`
+- `VO_HERMES_DESKTOP_TOKEN` / `hermes.desktopToken`
+- `VO_HERMES_DESKTOP_HOST_HEADER` / `hermes.desktopHostHeader`
+- `VO_HERMES_DESKTOP_TCP_HOST` / `hermes.desktopTcpHost`
+- `VO_HERMES_DESKTOP_TCP_PORT` / `hermes.desktopTcpPort`
+- `VO_HERMES_DESKTOP_LOG_PATH` / `hermes.desktopLogPath`
+- `VO_HERMES_PLATFORM_ENABLED` / `hermes.platformEnabled`
+- `VO_HERMES_PLATFORM_TOKEN` / `hermes.platformToken`
+- `VO_HERMES_PLATFORM_AGENT_ID` / `hermes.platformAgentId`
 
 `preferApi` is accepted for compatibility with the reference implementation and maps to the same runtime behavior as `apiEnabled`.
+
+Desktop auto-discovery may use an exposed readiness log, a previously configured URL, or visible loopback listeners. Docker deployments can route loopback Desktop services through `host.docker.internal` while preserving the logical Host header; the TCP host/port and Host header settings provide explicit overrides.
 
 It does **not** read or expose:
 
@@ -96,6 +116,10 @@ Example:
 
 - `/api/hermes/test`
 - `/api/hermes/chat`
+- `/api/hermes/runs`
+- `/api/hermes/runs/{runId}/events`
+- `/api/hermes/desktop/discover`
+- `/api/hermes/platform/*`
 - `/api/hermes/history`
 - `/api/hermes/history/clear`
 - `/api/agent/create` with `platform: "hermes"`
