@@ -80,13 +80,15 @@ Hermes integration is configured through `vo-config.json` or environment variabl
 
 Desktop auto-discovery may use an exposed readiness log, a previously configured URL, or visible loopback listeners. Docker deployments can route loopback Desktop services through `host.docker.internal` while preserving the logical Host header; the TCP host/port and Host header settings provide explicit overrides.
 
+For Desktop port discovery, the integration may read a bounded tail of the configured readiness log. It extracts listener ports only and does not return or expose the raw log contents.
+
 It does **not** read or expose:
 
 - `.env`
 - `auth.json`
 - raw config
 - raw memories
-- raw logs
+- raw log contents (apart from the bounded Desktop readiness scan described above)
 - raw SQLite DB contents
 
 ## Normalized Hermes agent shape
@@ -119,7 +121,7 @@ Example:
 - `/api/hermes/runs`
 - `/api/hermes/runs/{runId}/events`
 - `/api/hermes/desktop/discover`
-- `/api/hermes/platform/*`
+- `/api/hermes-platform/*`
 - `/api/hermes/history`
 - `/api/hermes/history/clear`
 - `/api/agent/create` with `platform: "hermes"`

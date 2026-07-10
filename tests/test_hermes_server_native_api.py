@@ -254,6 +254,29 @@ def test_hermes_test_skips_native_api_when_disabled():
         server.VO_CONFIG = old_config
 
 
+def test_hermes_test_rejects_unconfigured_request_target():
+    old_provider = server.HermesProvider
+    old_client = server.HermesApiClient
+    old_config = server.VO_CONFIG
+    FakeHermesApiClient.calls = []
+    server.HermesProvider = FakeHermesProvider
+    server.HermesApiClient = FakeHermesApiClient
+    server.VO_CONFIG = {
+        **server.VO_CONFIG,
+        "hermes": {"apiEnabled": True, "apiUrl": "http://127.0.0.1:8642", "apiKey": "stored-secret"},
+    }
+    try:
+        result = server._handle_hermes_test({"apiUrl": "http://attacker.invalid:9999"})
+        assert result["ok"] is False
+        assert result["_status"] == 400
+        assert FakeHermesApiClient.calls == []
+        assert "stored-secret" not in str(result)
+    finally:
+        server.HermesProvider = old_provider
+        server.HermesApiClient = old_client
+        server.VO_CONFIG = old_config
+
+
 def test_hermes_chat_uses_native_api_when_available():
     old = install_native_fakes("success")
     try:
@@ -704,6 +727,7 @@ def test_hermes_run_stop_delegates_to_native_api_and_emits_terminal():
 if __name__ == "__main__":
     test_hermes_test_reports_native_api_without_exposing_key()
     test_hermes_test_skips_native_api_when_disabled()
+    test_hermes_test_rejects_unconfigured_request_target()
     test_hermes_chat_uses_native_api_when_available()
     test_hermes_chat_native_approval_records_pending_without_cli_fallback()
     test_hermes_chat_accepts_alternate_native_event_shapes()

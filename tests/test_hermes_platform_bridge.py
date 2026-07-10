@@ -106,6 +106,22 @@ def main():
             history = server._load_comm_history(conversation_id="user-1__hermes-gateway")
             check("Communication log has request and reply", len(history) == 2, str(history))
             check("Reply text is logged", history[-1].get("text") == "Hello from Hermes", str(history[-1]))
+            queue_mode = os.stat(server._hermes_platform_queue_path()).st_mode & 0o777
+            check("Gateway queue is private", queue_mode == 0o600, oct(queue_mode))
+
+            old_max_messages = server._HERMES_PLATFORM_MAX_MESSAGES
+            try:
+                server._HERMES_PLATFORM_MAX_MESSAGES = 1
+                full_state = server._load_hermes_platform_state()
+                full_state["messages"] = [{"id": "pending-one", "status": "queued", "text": "pending"}]
+                server._save_hermes_platform_state(full_state)
+                rejected = server._handle_hermes_platform_enqueue({"message": "must not be dropped"})
+                check("Gateway queue applies backpressure", rejected.get("_status") == 503, str(rejected))
+                preserved = server._load_hermes_platform_state().get("messages") or []
+                check("Gateway queue preserves pending messages", [item.get("id") for item in preserved] == ["pending-one"], str(preserved))
+            finally:
+                server._HERMES_PLATFORM_MAX_MESSAGES = old_max_messages
+                server._save_hermes_platform_state(server._hermes_platform_state_default())
 
             agent = server._get_hermes_agent("hermes-gateway")
 

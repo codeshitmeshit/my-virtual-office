@@ -5830,10 +5830,26 @@ def _handle_hermes_test(body=None):
     hermes_cfg = VO_CONFIG.get("hermes", {})
     hermes_bin = os.path.expanduser(body.get("binary") or hermes_cfg.get("binary") or "~/.local/bin/hermes")
     hermes_home = os.path.expanduser(body.get("homePath") or hermes_cfg.get("homePath") or "~/.hermes")
-    api_url = body.get("apiUrl") or hermes_cfg.get("apiUrl") or _default_hermes_api_url()
+    configured_api_url = hermes_cfg.get("apiUrl") or _default_hermes_api_url()
+    configured_desktop_url = hermes_cfg.get("desktopUrl") or _default_hermes_desktop_url()
+    requested_api_url = str(body.get("apiUrl") or "").strip()
+    requested_desktop_url = str(body.get("desktopUrl") or "").strip()
+
+    def allowed_test_target(requested, configured):
+        if not requested:
+            return True
+        normalize = lambda value: str(value or "").strip().rstrip("/")
+        return bool(configured and normalize(requested) == normalize(configured))
+
+    if not allowed_test_target(requested_api_url, configured_api_url):
+        return {"ok": False, "error": "apiUrl must match the configured Hermes API URL", "_status": 400}
+    if not allowed_test_target(requested_desktop_url, configured_desktop_url):
+        return {"ok": False, "error": "desktopUrl must match the configured Hermes Desktop URL", "_status": 400}
+
+    api_url = requested_api_url or configured_api_url
     api_key = body.get("apiKey") if "apiKey" in body else hermes_cfg.get("apiKey", "")
     api_enabled = bool(body.get("apiEnabled") if "apiEnabled" in body else hermes_cfg.get("apiEnabled", hermes_cfg.get("preferApi", True)))
-    desktop_url = body.get("desktopUrl") or hermes_cfg.get("desktopUrl") or _default_hermes_desktop_url()
+    desktop_url = requested_desktop_url or configured_desktop_url
     desktop_token = body.get("desktopToken") if "desktopToken" in body else hermes_cfg.get("desktopToken", "")
     desktop_host_header = body.get("desktopHostHeader") or hermes_cfg.get("desktopHostHeader") or ""
     desktop_tcp_host = body.get("desktopTcpHost") or hermes_cfg.get("desktopTcpHost") or ""
@@ -29265,7 +29281,7 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             length = int(self.headers.get('Content-Length', 0))
             body = json.loads(self.rfile.read(length)) if length else {}
             result = _handle_hermes_test(body)
-            self.send_response(200 if result.get("ok") else 503)
+            self.send_response(int(result.get("_status") or (200 if result.get("ok") else 503)))
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
@@ -31789,14 +31805,17 @@ def _save_hermes_platform_state(state):
     state = dict(state or {})
     messages = state.get("messages") if isinstance(state.get("messages"), list) else []
     if len(messages) > _HERMES_PLATFORM_MAX_MESSAGES:
-        messages = messages[-_HERMES_PLATFORM_MAX_MESSAGES:]
+        active = [item for item in messages if str(item.get("status") or "queued") != "replied"]
+        terminal = [item for item in messages if str(item.get("status") or "queued") == "replied"]
+        terminal_slots = max(0, _HERMES_PLATFORM_MAX_MESSAGES - len(active))
+        messages = active + (terminal[-terminal_slots:] if terminal_slots else [])
     state["messages"] = messages
     state.setdefault("schema", "vo.hermes-platform-queue.v1")
     state.setdefault("adapters", {})
     state["updatedAt"] = _now_ms()
     _atomic_write_text(_hermes_platform_queue_path(), json.dumps(state, indent=2, ensure_ascii=False) + "\n")
     try:
-        os.chmod(_hermes_platform_queue_path(), 0o666)
+        os.chmod(_hermes_platform_queue_path(), 0o600)
     except OSError:
         pass
 
@@ -31954,6 +31973,12 @@ def _handle_hermes_platform_enqueue(body):
         chat_type = "dm"
     thread_id = str(body.get("threadId") or conversation_id).strip() or conversation_id
 
+    with _HERMES_PLATFORM_LOCK:
+        current_state = _load_hermes_platform_state()
+        active_count = sum(1 for item in current_state.get("messages") or [] if str(item.get("status") or "queued") != "replied")
+        if active_count >= _HERMES_PLATFORM_MAX_MESSAGES:
+            return {"ok": False, "error": "Hermes platform queue is full; retry after pending messages are processed", "_status": 503}
+
     inbound = _append_comm_event({
         "type": "message",
         "direction": "request",
@@ -31987,6 +32012,9 @@ def _handle_hermes_platform_enqueue(body):
     }
     with _HERMES_PLATFORM_LOCK:
         state = _load_hermes_platform_state()
+        active_count = sum(1 for item in state.get("messages") or [] if str(item.get("status") or "queued") != "replied")
+        if active_count >= _HERMES_PLATFORM_MAX_MESSAGES:
+            return {"ok": False, "error": "Hermes platform queue is full; retry after pending messages are processed", "_status": 503}
         state.setdefault("messages", []).append(msg)
         _save_hermes_platform_state(state)
 
