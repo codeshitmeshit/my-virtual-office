@@ -137,7 +137,7 @@ def run():
             interaction = next(event for event in pending["events"] if event.get("status") == "pending")
             status, accepted = request(base, "/api/codex/interaction", {
                 "agentId": "codex-local", "conversationId": "e2e-approval",
-                "interactionId": interaction["interactionId"], "action": "accept",
+                "interactionId": interaction["interactionId"], "action": "acceptForSession",
             })
             assert status == 200 and accepted["ok"] is True
             worker.join(5)

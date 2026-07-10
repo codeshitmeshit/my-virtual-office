@@ -736,6 +736,7 @@ class CodexAppServerClient:
     def respond_approval(self, approval_id: str, choice: str = "cancel") -> dict[str, Any]:
         approval_id = str(approval_id or "").strip()
         normalized_choice = self._normalize_approval_choice(choice)
+        response_choice = "acceptForSession" if str(choice or "").strip().lower() == "acceptforsession" else normalized_choice
         if not approval_id:
             return {"ok": False, "error": "approval_id is required"}
         with self._approval_lock:
@@ -756,21 +757,21 @@ class CodexAppServerClient:
         if not isinstance(operation, _Operation):
             return {"ok": False, "error": "Codex approval request is detached from an active turn"}
         interaction_id = str(entry.get("interactionId") or "")
-        ok = self.respond(operation.thread_id, interaction_id, normalized_choice, {})
+        ok = self.respond(operation.thread_id, interaction_id, response_choice, {})
         if not ok:
             return {"ok": False, "error": "Codex approval request is no longer pending"}
         resolved = {
             **dict(entry.get("approval") or {}),
             "status": "approved" if normalized_choice == "approve" else "cancelled",
             "resolvedAt": int(time.time() * 1000),
-            "choice": normalized_choice,
+            "choice": response_choice,
         }
         operation.state.set_approval(resolved)
         return {
             "ok": True,
             "approval": resolved,
-            "choice": normalized_choice,
-            "response": self._approval_response(entry.get("method") or "", entry.get("params") or {}, normalized_choice),
+            "choice": response_choice,
+            "response": self._approval_response(entry.get("method") or "", entry.get("params") or {}, response_choice),
         }
 
     def _approval_from_request(self, message: dict[str, Any]) -> dict[str, Any]:
@@ -876,7 +877,8 @@ class CodexAppServerClient:
     def _approval_response(cls, method: str, params: dict[str, Any], choice: str) -> dict[str, Any]:
         approved = cls._normalize_approval_choice(choice) == "approve"
         if method in {"item/commandExecution/requestApproval", "item/fileChange/requestApproval"}:
-            return {"decision": "accept" if approved else "cancel"}
+            decision = "acceptForSession" if approved and choice == "acceptForSession" else "accept"
+            return {"decision": decision if approved else "cancel"}
         if method == "item/permissions/requestApproval":
             if approved:
                 requested = params.get("permissions") if isinstance(params.get("permissions"), dict) else {}
@@ -885,7 +887,7 @@ class CodexAppServerClient:
                     granted["fileSystem"] = requested.get("fileSystem")
                 if requested.get("network") is not None:
                     granted["network"] = requested.get("network")
-                return {"permissions": granted, "scope": "turn"}
+                return {"permissions": granted, "scope": "session" if choice == "acceptForSession" else "turn"}
             return {"permissions": {"fileSystem": None, "network": None}, "scope": "turn"}
         if method in {"execCommandApproval", "applyPatchApproval"}:
             return {"decision": "approved" if approved else "abort"}

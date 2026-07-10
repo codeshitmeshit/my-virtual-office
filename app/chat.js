@@ -568,7 +568,7 @@
     }
 
     isVisibleForPolling() {
-      return this.isPrimary ? this.root.classList.contains('open') : this.root.classList.contains('open');
+      return this.isPrimary || this.root.classList.contains('open');
     }
 
     async fetchContextUsage() {
@@ -1950,9 +1950,11 @@
     handleCodexNativeEvent(eventName, data, label) {
       if (!this.isCodexSelected()) return;
       data = data && typeof data === 'object' ? data : {};
+      const runId = data.runId || this.currentRunId || 'codex-run';
+      const terminalEvent = ['run.completed', 'run.failed', 'run.cancelled', 'run.canceled'].includes(eventName);
+      if (!terminalEvent && runId && this.providerRunResults.has(runId)) return;
       this.markLiveEvent();
       this.applySessionMetrics(data);
-      const runId = data.runId || this.currentRunId || 'codex-run';
       const activity = data.activity && typeof data.activity === 'object' ? data.activity : null;
       if (activity) this.codexLastSequence = Math.max(this.codexLastSequence, Number(activity.sequence || 0));
 
@@ -2385,7 +2387,9 @@
       button.type = 'button';
       button.textContent = label;
       button.dataset.action = action;
-      button.addEventListener('click', async () => {
+      button.addEventListener('click', async clickEvent => {
+        clickEvent.preventDefault();
+        clickEvent.stopPropagation();
         let answers = {};
         if (action === 'answer') {
           const value = prompt(_ct('answer_codex'));
@@ -2673,13 +2677,13 @@
         this.messages.querySelector('.typing-indicator')
       );
       const schedule = () => {
-        if (!hasActiveWork() || !this.root.classList.contains('open')) return this.stopRecoveryWatchdog();
+        if (!hasActiveWork() || !this.isVisibleForPolling()) return this.stopRecoveryWatchdog();
         const visibilityDelay = document.hidden ? this.recoveryBackoffMs * 4 : this.recoveryBackoffMs;
         this.recoveryTimer = setTimeout(tick, Math.min(MAX_ACTIVE_RUN_RECOVERY_MS, visibilityDelay));
       };
       const tick = () => {
         this.recoveryTimer = null;
-        if (!hasActiveWork() || !this.root.classList.contains('open')) return this.stopRecoveryWatchdog();
+        if (!hasActiveWork() || !this.isVisibleForPolling()) return this.stopRecoveryWatchdog();
         if (Date.now() - this.lastLiveEventAt <= ACTIVE_RUN_RECOVERY_MS) {
           this.recoveryBackoffMs = ACTIVE_RUN_RECOVERY_MS;
           schedule();
@@ -2914,7 +2918,7 @@
 
     updateProviderEventSource() {
       const context = this.getSelectedProviderEventContext();
-      if (!context || !this.root.classList.contains('open')) {
+      if (!context || !this.isVisibleForPolling()) {
         this.closeProviderEventSource();
         return Promise.resolve(false);
       }
@@ -2986,7 +2990,7 @@
     }
 
     async recoverProviderStateOnce() {
-      if (!this.root.classList.contains('open')) return;
+      if (!this.isVisibleForPolling()) return;
       if (this.isCodexSelected()) {
         await this.pollCodexActivity(false, { replayHistoricalTurns: false }).catch(() => {});
         await this.pollCodexLiveActivity().catch(() => {});
@@ -3763,13 +3767,15 @@
 
     async respondCodexApproval(approval, choice, card) {
       if (!approval || !this.isCodexSelected()) return;
-      const normalized = String(choice || '').toLowerCase().includes('approve') ? 'approve' : 'cancel';
+      const normalized = choice === 'acceptForSession'
+        ? 'acceptForSession'
+        : String(choice || '').toLowerCase().includes('approve') ? 'approve' : 'cancel';
       const buttons = card ? [...card.querySelectorAll('button')] : [];
       buttons.forEach(btn => btn.disabled = true);
       if (card) {
         card.classList.add('responding');
         const status = card.querySelector('.chat-approval-status');
-        if (status) status.textContent = normalized === 'approve' ? _ct('chat_approving_once') : _ct('chat_cancelling_approval');
+        if (status) status.textContent = normalized === 'acceptForSession' ? _ct('codex_waiting') : normalized === 'approve' ? _ct('chat_approving_once') : _ct('chat_cancelling_approval');
       }
       try {
         const resp = await fetch('/api/codex/approval/respond', {
@@ -3791,11 +3797,11 @@
         if (!resp.ok || data.ok === false) throw new Error(data.error || data.status || resp.statusText);
         if (card) {
           card.classList.remove('responding');
-          card.classList.add(normalized === 'approve' ? 'approved' : 'denied');
+          card.classList.add(normalized !== 'cancel' ? 'approved' : 'denied');
           const status = card.querySelector('.chat-approval-status');
-          if (status) status.textContent = normalized === 'approve' ? _ct('chat_approved_once') : _ct('chat_cancelled_status');
+          if (status) status.textContent = normalized === 'acceptForSession' ? _ct('allow_codex_session') : normalized === 'approve' ? _ct('chat_approved_once') : _ct('chat_cancelled_status');
         }
-        if (normalized !== 'approve') this.appendSystem(_ct('chat_codex_approval_cancelled'));
+        if (normalized === 'cancel') this.appendSystem(_ct('chat_codex_approval_cancelled'));
         this.setStatus(_ct('codex_ready'), 'connected');
         await this.pollCodexApproval().catch(() => {});
       } catch (e) {
@@ -4746,13 +4752,14 @@
         btn.textContent = label;
         btn.title = choice === 'deny' ? (isCodex ? _ct('chat_codex_approval_cancel_hint') : _ct('retry_hermes_deny_hint')) : (isCodex ? _ct('chat_codex_approval_allow_hint') : _ct('retry_hermes_allow_hint'));
         btn.addEventListener('click', () => {
-          if (isCodex) windowInstance?.respondCodexApproval(approval, choice === 'deny' ? 'cancel' : 'approve', card);
+          if (isCodex) windowInstance?.respondCodexApproval(approval, choice === 'deny' ? 'cancel' : choice, card);
           else windowInstance?.respondHermesApproval(approval, choice, card);
         });
         actions.appendChild(btn);
       };
       if (isCodex) {
         addButton(typeof i18n !== 'undefined' ? i18n.t('chat_allow_once') : 'Allow once', 'approve', true);
+        addButton(typeof i18n !== 'undefined' ? i18n.t('allow_codex_session') : 'Allow for Codex session', 'acceptForSession');
         addButton(typeof i18n !== 'undefined' ? i18n.t('chat_deny') : 'Deny', 'deny');
       } else {
         addButton('允许一次', 'once', true);

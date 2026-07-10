@@ -326,9 +326,10 @@ def test_reference_style_approval_response_continues_turn():
                 pending = pending_result.get("pending")
                 time.sleep(0.02)
             assert pending
-            submitted = client.respond_approval(pending["id"], "approve")
+            submitted = client.respond_approval(pending["id"], "acceptForSession")
             assert submitted["ok"] is True
-            assert submitted["choice"] == "approve"
+            assert submitted["choice"] == "acceptForSession"
+            assert submitted["response"] == {"decision": "acceptForSession"}
             worker.join(3)
             assert result["ok"] is True
             assert result["reply"] == "approved reply"
@@ -367,12 +368,18 @@ def test_interactive_permissions_approval_continues_original_turn():
 
 def test_approval_response_mapping_covers_reference_shapes():
     command_accept = CodexAppServerClientImpl._approval_response("item/commandExecution/requestApproval", {}, "approve")
+    command_accept_for_session = CodexAppServerClientImpl._approval_response("item/commandExecution/requestApproval", {}, "acceptForSession")
     command_cancel = CodexAppServerClientImpl._approval_response("item/commandExecution/requestApproval", {}, "cancel")
     file_accept = CodexAppServerClientImpl._approval_response("item/fileChange/requestApproval", {}, "approve")
     permissions_accept = CodexAppServerClientImpl._approval_response(
         "item/permissions/requestApproval",
         {"permissions": {"fileSystem": {"write": ["/tmp/project"]}, "network": True, "other": "ignored"}},
         "approve",
+    )
+    permissions_accept_for_session = CodexAppServerClientImpl._approval_response(
+        "item/permissions/requestApproval",
+        {"permissions": {"fileSystem": {"write": ["/tmp/project"]}, "network": False}},
+        "acceptForSession",
     )
     permissions_cancel = CodexAppServerClientImpl._approval_response(
         "item/permissions/requestApproval",
@@ -382,9 +389,11 @@ def test_approval_response_mapping_covers_reference_shapes():
     legacy_patch = CodexAppServerClientImpl._approval_response("applyPatchApproval", {}, "approve")
 
     assert command_accept == {"decision": "accept"}
+    assert command_accept_for_session == {"decision": "acceptForSession"}
     assert command_cancel == {"decision": "cancel"}
     assert file_accept == {"decision": "accept"}
     assert permissions_accept == {"permissions": {"fileSystem": {"write": ["/tmp/project"]}, "network": True}, "scope": "turn"}
+    assert permissions_accept_for_session == {"permissions": {"fileSystem": {"write": ["/tmp/project"]}, "network": False}, "scope": "session"}
     assert permissions_cancel == {"permissions": {"fileSystem": None, "network": None}, "scope": "turn"}
     assert legacy_patch == {"decision": "approved"}
 

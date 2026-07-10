@@ -6536,7 +6536,7 @@ def _handle_codex_approval_pending(query_or_body=None):
 
 def _normalize_codex_approval_choice(choice):
     value = str(choice or "").strip().lower()
-    if value in {"approve", "approved", "accept", "allow", "allow_once", "approve_once", "yes"}:
+    if value in {"approve", "approved", "accept", "acceptforsession", "allow", "allow_once", "approve_once", "yes"}:
         return "approve"
     return "cancel"
 
@@ -7833,7 +7833,9 @@ class ProviderRunBridge:
             if provider_kind == "hermes":
                 pending = _get_hermes_approval_pending(agent_id).get("pending")
             elif provider_kind == "codex":
-                pending = _handle_codex_approval_pending({"agentId": agent_id}).get("pending")
+                active = _get_codex_active(agent_id)
+                if active and str(active.get("conversationId") or "") == conversation_id:
+                    pending = _handle_codex_approval_pending({"agentId": agent_id}).get("pending")
             if isinstance(pending, dict):
                 self._write_event(handler, "approval.request", {
                     "providerKind": provider_kind,
@@ -9100,7 +9102,12 @@ def _load_chat_history_source_pages(request):
     elif request.provider_kind == "codex":
         agent = _get_codex_agent(request.agent_id) or {}
         profile = agent.get("profile") or agent.get("providerAgentId") or "default"
-        provider_page = _page_provider_history(request, _load_codex_history(profile), "codex", request.limit + 1)
+        codex_rows = [
+            row for row in _filter_recoverable_provider_progress_messages(_load_codex_history(profile))
+            if isinstance(row, dict)
+            and str(row.get("conversationId") or "") == request.conversation_id
+        ]
+        provider_page = _page_provider_history(request, codex_rows, "codex", request.limit + 1)
     elif request.provider_kind == "hermes":
         agent = _get_hermes_agent(request.agent_id) or {}
         profile = agent.get("profile") or agent.get("providerAgentId") or "default"

@@ -196,6 +196,20 @@ class ChatHistoryContractTest(unittest.TestCase):
             self.assertEqual(result["messages"][0]["id"], provider)
             self.assertEqual(result["session"]["contextUsed"], 10)
 
+    def test_codex_provider_history_is_isolated_by_conversation(self):
+        request = self.request("codex")
+        rows = [
+            {"id": "current", "role": "assistant", "text": "current", "ts": 3, "conversationId": "conv-1"},
+            {"id": "other", "role": "assistant", "text": "other", "ts": 2, "conversationId": "conv-2"},
+            {"id": "legacy", "role": "assistant", "text": "legacy", "ts": 1},
+        ]
+        with mock.patch.object(server, "_get_codex_agent", return_value={"profile": "local"}), \
+             mock.patch.object(server, "_load_codex_history", return_value=rows), \
+             mock.patch.object(server, "_chat_history_comm_page", return_value={"messages": [], "hasMore": False}), \
+             mock.patch.object(server, "_history_session_metrics", return_value={}):
+            pages, _ = self.require("_load_chat_history_source_pages")(request)
+        self.assertEqual([message["id"] for message in pages[0]["messages"]], ["current"])
+
     def test_jsonl_snapshot_cache_invalidates_and_is_thread_safe(self):
         load = self.require("_load_cached_chat_history_jsonl")
         with tempfile.TemporaryDirectory() as tmp:
