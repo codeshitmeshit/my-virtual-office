@@ -228,6 +228,17 @@
                     <input type="text" id="s-hermes-api-url" placeholder="http://127.0.0.1:8642">
                     <label>Hermes API Key</label>
                     <input type="password" id="s-hermes-api-key" placeholder="Leave blank to keep existing key" autocomplete="off">
+                    <label>Hermes Desktop URL</label>
+                    <input type="text" id="s-hermes-desktop-url" placeholder="http://127.0.0.1:8643">
+                    <div class="form-row">
+                        <input type="text" id="s-hermes-desktop-tcp-host" placeholder="Desktop TCP route host">
+                        <input type="number" id="s-hermes-desktop-tcp-port" placeholder="Port">
+                    </div>
+                    <input type="text" id="s-hermes-desktop-host-header" placeholder="Logical Host header">
+                    <button type="button" class="btn secondary" onclick="discoverHermesDesktop()">🔎 Auto Discover Desktop App</button>
+                    <label class="checkbox-label"><input type="checkbox" id="s-hermes-platform-enable"> Enable Hermes Messaging Gateway Platform</label>
+                    <input type="password" id="s-hermes-platform-token" placeholder="Shared platform token" autocomplete="off">
+                    <input type="text" id="s-hermes-platform-agent" placeholder="hermes-gateway">
                     <div style="font-size:12px;color:#666;margin:6px 0 12px;line-height:1.5;" data-i18n="hermes_docker_hint_setup">Running in Docker? Mount the Hermes home/CLI into the container and enter the mounted paths.</div>
                     <button onclick="testHermesConnection()" style="margin:0 0 12px;padding:8px 16px;font-size:9px;" data-i18n="test_hermes_btn">🔍 TEST HERMES</button>
                     <div id="hermes-test-status"></div>
@@ -630,6 +641,10 @@
             if (hBin && h.binary) hBin.value = h.binary;
             if (hApiEnable) hApiEnable.checked = h.apiEnabled === true || h.preferApi === true;
             if (hApiUrl && h.apiUrl) hApiUrl.value = h.apiUrl;
+            var desktopMap = { 's-hermes-desktop-url':'desktopUrl', 's-hermes-desktop-tcp-host':'desktopTcpHost', 's-hermes-desktop-tcp-port':'desktopTcpPort', 's-hermes-desktop-host-header':'desktopHostHeader', 's-hermes-platform-agent':'platformAgentId' };
+            Object.keys(desktopMap).forEach(function(id){ var el=document.getElementById(id); if(el) el.value=h[desktopMap[id]] || (id === 's-hermes-platform-agent' ? 'hermes-gateway' : ''); });
+            var platformEnable = document.getElementById('s-hermes-platform-enable');
+            if (platformEnable) platformEnable.checked = !!h.platformEnabled;
             var hFields = document.getElementById('hermes-fields');
             if (hFields && hEnable) hFields.style.display = hEnable.checked ? 'block' : 'none';
             var c = cfg.codex || {};
@@ -809,6 +824,29 @@
             });
         }
 
+        function _hermesExtendedSettings() {
+            return {
+                desktopUrl: (document.getElementById('s-hermes-desktop-url') || {}).value || null,
+                desktopTcpHost: (document.getElementById('s-hermes-desktop-tcp-host') || {}).value || null,
+                desktopTcpPort: (document.getElementById('s-hermes-desktop-tcp-port') || {}).value || null,
+                desktopHostHeader: (document.getElementById('s-hermes-desktop-host-header') || {}).value || null,
+                preferDesktop: !!((document.getElementById('s-hermes-desktop-url') || {}).value || '').trim(),
+                platformEnabled: !!(document.getElementById('s-hermes-platform-enable') || {}).checked,
+                platformAgentId: ((document.getElementById('s-hermes-platform-agent') || {}).value || '').trim() || 'hermes-gateway'
+            };
+        }
+
+        function discoverHermesDesktop() {
+            fetch('/api/hermes/desktop/discover', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(_hermesExtendedSettings())})
+              .then(function(r){ return r.json(); }).then(function(d){
+                if (d.desktopUrl) document.getElementById('s-hermes-desktop-url').value = d.desktopUrl;
+                if (d.desktopTcpHost) document.getElementById('s-hermes-desktop-tcp-host').value = d.desktopTcpHost;
+                if (d.desktopTcpPort) document.getElementById('s-hermes-desktop-tcp-port').value = d.desktopTcpPort;
+                if (d.desktopHostHeader) document.getElementById('s-hermes-desktop-host-header').value = d.desktopHostHeader;
+                document.getElementById('hermes-test-status').textContent = d.message || d.error || 'Discovery complete';
+              });
+        }
+
         function testHermesConnection() {
             var enabled = document.getElementById('s-hermes-enable').checked;
             var homePath = document.getElementById('s-hermes-home').value.trim();
@@ -822,7 +860,9 @@
                 return;
             }
             statusEl.innerHTML = '<div class="status-box info">' + _t('testing_hermes') + '</div>';
-            var hermesSave = { enabled: enabled, homePath: homePath || null, binary: binary || null, apiEnabled: apiEnabled, preferApi: apiEnabled, apiUrl: apiUrl || null };
+            var hermesSave = Object.assign({ enabled: enabled, homePath: homePath || null, binary: binary || null, apiEnabled: apiEnabled, preferApi: apiEnabled, apiUrl: apiUrl || null }, _hermesExtendedSettings());
+            var platformToken = ((document.getElementById('s-hermes-platform-token') || {}).value || '').trim();
+            if (platformToken) hermesSave.platformToken = platformToken;
             if (apiKey) hermesSave.apiKey = apiKey;
             fetch('/setup/save', {
                 method: 'POST',
@@ -1190,6 +1230,9 @@
                     };
                     var apiKey = document.getElementById('s-hermes-api-key').value.trim();
                     if (apiKey) h.apiKey = apiKey;
+                    Object.assign(h, _hermesExtendedSettings());
+                    var platformToken = ((document.getElementById('s-hermes-platform-token') || {}).value || '').trim();
+                    if (platformToken) h.platformToken = platformToken;
                     return h;
                 })(),
                 codex: codexPayloadFromSetup(),

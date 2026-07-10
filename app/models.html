@@ -277,11 +277,34 @@ function renderNativeProviders() {
     const codex = nativeProviders.codex || {};
     const claude = nativeProviders['claude-code'] || {};
     container.innerHTML = `<div class="native-grid">
+        ${renderManagedAuthCard()}
         ${renderNativeSummaryCard('hermes', 'Hermes', hermes, renderHermesNativeForm(hermes))}
         ${renderNativeSummaryCard('codex', 'Codex CLI', codex, renderCodexNativeForm(codex))}
         ${renderNativeSummaryCard('claude-code', 'Claude Code', claude, renderClaudeNativeForm(claude))}
         ${renderNativeSetupGuide()}
     </div>`;
+}
+
+function renderManagedAuthCard() {
+    const managed = providersData.managedAuth || {};
+    const profiles = managed.managedStaticProfiles || [];
+    const rows = managed.agentRows || [];
+    return `<div class="card native-card wide"><div class="provider-header"><span class="provider-name">OpenClaw Global Auth</span><button class="btn btn-blue" onclick="syncOpenClawStaticAuth()">Sync Static Profiles</button></div>
+      <div class="native-detail">Source <code>${escapeHtml(managed.sourceAgent || 'main')}</code> · ${profiles.length} managed static profiles</div>
+      <div class="model-list">${rows.map(row => `<div class="model-item"><span>${escapeHtml(row.agent)} · ${row.staticInSync ? 'synced' : 'needs sync'}</span><span>${row.agent === 'main' || row.staticInSync ? '' : `<button class="btn btn-red" onclick="resetOpenClawAuthOverrides('${escapeHtml(row.agent)}')">Reset overrides</button>`}</span></div>`).join('')}</div>
+      <p id="oc-managed-auth-status" class="status-msg"></p></div>`;
+}
+
+async function syncOpenClawStaticAuth() {
+    const data = await postNativeJson('/api/native-models/openclaw/auth/sync-static', {});
+    setNativeStatus('oc-managed-auth-status', data, data.ok ? 'Static profiles synchronized' : 'Sync failed');
+    if (data.ok) setTimeout(loadProviders, 500);
+}
+
+async function resetOpenClawAuthOverrides(agentId) {
+    const data = await postNativeJson('/api/native-models/openclaw/auth/reset-overrides', {agentId});
+    setNativeStatus('oc-managed-auth-status', data, data.ok ? 'Overrides reset for ' + agentId : 'Reset failed');
+    if (data.ok) setTimeout(loadProviders, 500);
 }
 
 function escAttr(value) {

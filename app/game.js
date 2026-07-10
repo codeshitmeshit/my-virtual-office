@@ -14100,6 +14100,15 @@ function _mmLoadCurrentSettings() {
         if (hermesBin) hermesBin.value = hermesCfg.binary || '';
         if (hermesApiEnabled) hermesApiEnabled.checked = hermesCfg.apiEnabled === true;
         if (hermesApiUrl) hermesApiUrl.value = hermesCfg.apiUrl || '';
+        ['desktop-url','desktop-tcp-host','desktop-tcp-port','desktop-host-header'].forEach(function(key) {
+            var el = document.getElementById('mm-hermes-' + key);
+            var prop = key.replace(/-([a-z])/g, function(_, c){ return c.toUpperCase(); });
+            if (el) el.value = hermesCfg[prop] || '';
+        });
+        var hpEnabled = document.getElementById('mm-hermes-platform-enable');
+        var hpAgent = document.getElementById('mm-hermes-platform-agent');
+        if (hpEnabled) hpEnabled.checked = !!hermesCfg.platformEnabled;
+        if (hpAgent) hpAgent.value = hermesCfg.platformAgentId || 'hermes-gateway';
         var codexCfg = cfg.codex || {};
         if (codexEnabled) codexEnabled.checked = codexCfg.enabled === true;
         if (codexWorkspace) codexWorkspace.value = codexCfg.workspace || '';
@@ -14262,6 +14271,26 @@ function mmTestHermes() {
     }).catch(function(e) {
         statusEl.innerHTML = '<div class="mm-status err">❌ ' + _tr('hermes_test_failed') + ': ' + escHtml(e.message) + '</div>';
     });
+}
+
+function mmDiscoverHermesDesktop() {
+    var statusEl = document.getElementById('mm-hermes-status');
+    var payload = {
+        homePath: (document.getElementById('mm-hermes-home') || {}).value || '',
+        desktopUrl: (document.getElementById('mm-hermes-desktop-url') || {}).value || '',
+        desktopTcpHost: (document.getElementById('mm-hermes-desktop-tcp-host') || {}).value || '',
+        desktopTcpPort: (document.getElementById('mm-hermes-desktop-tcp-port') || {}).value || '',
+        desktopHostHeader: (document.getElementById('mm-hermes-desktop-host-header') || {}).value || ''
+    };
+    if (statusEl) statusEl.innerHTML = '<div class="mm-status info">Discovering Hermes Desktop…</div>';
+    fetch('/api/hermes/desktop/discover', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)})
+      .then(function(r){ return r.json(); }).then(function(d){
+        if (d.desktopUrl) document.getElementById('mm-hermes-desktop-url').value = d.desktopUrl;
+        if (d.desktopTcpHost) document.getElementById('mm-hermes-desktop-tcp-host').value = d.desktopTcpHost;
+        if (d.desktopTcpPort) document.getElementById('mm-hermes-desktop-tcp-port').value = d.desktopTcpPort;
+        if (d.desktopHostHeader) document.getElementById('mm-hermes-desktop-host-header').value = d.desktopHostHeader;
+        if (statusEl) statusEl.innerHTML = '<div class="mm-status ' + (d.ok ? 'ok' : 'err') + '">' + escHtml(d.message || d.error || 'Discovery complete') + '</div>';
+      }).catch(function(e){ if (statusEl) statusEl.innerHTML = '<div class="mm-status err">' + escHtml(e.message) + '</div>'; });
 }
 
 function mmTestSse() {
@@ -14953,10 +14982,19 @@ function mmSaveSettings() {
             homePath: (_hHome ? _hHome.value.trim() : '') || null,
             binary: (_hBin ? _hBin.value.trim() : '') || null,
             apiEnabled: _hApiEnabled ? _hApiEnabled.checked : false,
-            apiUrl: (_hApiUrl ? _hApiUrl.value.trim() : '') || null
+            apiUrl: (_hApiUrl ? _hApiUrl.value.trim() : '') || null,
+            desktopUrl: ((document.getElementById('mm-hermes-desktop-url') || {}).value || '').trim() || null,
+            desktopTcpHost: ((document.getElementById('mm-hermes-desktop-tcp-host') || {}).value || '').trim() || null,
+            desktopTcpPort: ((document.getElementById('mm-hermes-desktop-tcp-port') || {}).value || '').trim() || null,
+            desktopHostHeader: ((document.getElementById('mm-hermes-desktop-host-header') || {}).value || '').trim() || null,
+            preferDesktop: !!((document.getElementById('mm-hermes-desktop-url') || {}).value || '').trim(),
+            platformEnabled: !!(document.getElementById('mm-hermes-platform-enable') || {}).checked,
+            platformAgentId: ((document.getElementById('mm-hermes-platform-agent') || {}).value || '').trim() || 'hermes-gateway'
         };
         var hermesApiKey = (_hApiKey ? _hApiKey.value.trim() : '');
         if (hermesApiKey) hermesSettings.apiKey = hermesApiKey;
+        var platformToken = ((document.getElementById('mm-hermes-platform-token') || {}).value || '').trim();
+        if (platformToken) hermesSettings.platformToken = platformToken;
         config.hermes = hermesSettings;
     }
     var _codexCb = document.getElementById('mm-codex-enable');

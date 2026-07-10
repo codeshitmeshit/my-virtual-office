@@ -167,6 +167,56 @@ class CodexProvider:
     def is_available(self) -> bool:
         return bool(self.enabled)
 
+    def _session_workspace(self, profile: str) -> str:
+        safe = self._safe_profile_name(profile or self.agent_id or "local")
+        external = self._external_agent_dir(safe)
+        managed = os.path.join(self.workspace_root or "", safe)
+        if external and os.path.isdir(external):
+            return external
+        if managed and os.path.isdir(managed):
+            return managed
+        return self.workspace or os.getcwd()
+
+    def _thread_request(self, profile: str, method: str, params: dict[str, Any], timeout_sec: int = 30) -> dict[str, Any]:
+        bridge = get_codex_bridge(self._session_workspace(profile), self.model or "", self.bridge_url or "")
+        if not hasattr(bridge, "_request"):
+            return {"ok": False, "error": "Configured Codex HTTP bridge does not expose thread management"}
+        try:
+            if hasattr(bridge, "_ensure_started"):
+                bridge._ensure_started()
+            return {"ok": True, "result": bridge._request(method, params, timeout=float(timeout_sec))}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)[:1000]}
+
+    def list_threads(self, profile: str, limit: int = 40, timeout_sec: int = 30) -> dict[str, Any]:
+        workspace = self._session_workspace(profile)
+        outcome = self._thread_request(profile, "thread/list", {"cwd": workspace, "limit": max(1, int(limit))}, timeout_sec)
+        if not outcome.get("ok"):
+            return {"ok": False, "error": outcome.get("error"), "sessions": []}
+        rows = (outcome.get("result") or {}).get("data")
+        sessions = []
+        for row in rows if isinstance(rows, list) else []:
+            if not isinstance(row, dict):
+                continue
+            preview = str(row.get("preview") or "")
+            sessions.append({"id": str(row.get("id") or ""), "title": str(row.get("name") or "").strip() or preview[:80] or str(row.get("id") or "")[:24], "preview": preview[:300], "updatedAt": row.get("updatedAt"), "createdAt": row.get("createdAt"), "archived": bool(row.get("archived"))})
+        return {"ok": True, "sessions": sessions, "profile": self._safe_profile_name(profile)}
+
+    def read_thread(self, profile: str, thread_id: str, timeout_sec: int = 30) -> dict[str, Any]:
+        if not thread_id:
+            return {"ok": False, "error": "thread_id is required"}
+        outcome = self._thread_request(profile, "thread/read", {"threadId": str(thread_id), "includeTurns": True}, timeout_sec)
+        if not outcome.get("ok"):
+            return {"ok": False, "error": outcome.get("error"), "thread": None}
+        result = outcome.get("result") or {}
+        return {"ok": True, "thread": result.get("thread") if isinstance(result, dict) and isinstance(result.get("thread"), dict) else result}
+
+    def delete_thread(self, profile: str, thread_id: str, timeout_sec: int = 30) -> dict[str, Any]:
+        if not thread_id:
+            return {"ok": False, "error": "thread_id is required"}
+        outcome = self._thread_request(profile, "thread/delete", {"threadId": str(thread_id)}, timeout_sec)
+        return {"ok": bool(outcome.get("ok")), "deleted": bool(outcome.get("ok")), "error": outcome.get("error", "")}
+
     def discover_agents(self) -> list[dict[str, Any]]:
         if not self.enabled:
             return []

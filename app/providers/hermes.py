@@ -218,6 +218,40 @@ class HermesProvider:
         except Exception as exc:
             return {"ok": False, "error": str(exc), "exitCode": None, "reply": "", "sessionId": session_id or ""}
 
+    def list_sessions(self, profile: str, limit: int = 40, timeout_sec: int = 30) -> dict[str, Any]:
+        """List recent Hermes sessions through the public sessions CLI."""
+        if not self.binary or not os.path.exists(self.binary):
+            return {"ok": False, "error": f"Hermes CLI not found at {self.binary}", "sessions": []}
+        cmd = [self.binary]
+        if profile and profile != "default":
+            cmd.extend(["--profile", profile])
+        cmd.extend(["sessions", "list", "--limit", str(max(1, int(limit)))])
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=int(timeout_sec), env=self._subprocess_env())
+        except subprocess.TimeoutExpired:
+            return {"ok": False, "error": "Hermes sessions list timed out", "sessions": []}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc), "sessions": []}
+        if result.returncode != 0:
+            return {"ok": False, "error": (result.stderr or result.stdout or "Hermes sessions list failed").strip()[:1000], "sessions": []}
+        sessions = []
+        past_header = False
+        for line in (result.stdout or "").splitlines():
+            stripped = line.rstrip()
+            if not stripped:
+                continue
+            if set(stripped.strip()) <= {"─", "-", "="}:
+                past_header = True
+                continue
+            if not past_header:
+                continue
+            parts = stripped.split()
+            if not parts or not re.match(r"^[A-Za-z0-9_.:-]+$", parts[-1]):
+                continue
+            columns = re.split(r"\s{2,}", stripped)
+            sessions.append({"id": parts[-1], "title": columns[0].strip()[:200], "preview": (columns[1].strip() if len(columns) > 2 else "")[:300], "lastActive": (columns[-2].strip() if len(columns) >= 3 else "")[:60]})
+        return {"ok": True, "sessions": sessions, "profile": profile or "default"}
+
     def export_session(self, profile: str, session_id: str, timeout_sec: int = 30) -> dict[str, Any]:
         """Export one Hermes session through the public CLI JSONL surface."""
         if not self.binary or not os.path.exists(self.binary):

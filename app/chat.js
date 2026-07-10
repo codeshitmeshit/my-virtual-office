@@ -1,5 +1,8 @@
 // Virtual Office Chat — Gateway WebSocket Client (Multi-Window)
 (() => {
+  function escapeHtml(value) {
+    return String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+  }
   let GATEWAY_TOKEN = '';
   let ws = null;
   let reqId = 0;
@@ -260,6 +263,12 @@
       this.attachmentsPreview = root.querySelector('.chat-attachments-preview');
       this.micBtn = root.querySelector('.chat-mic-btn');
       this.newSessionBtn = root.querySelector('.chat-new-session');
+      this.sessionsToggleBtn = root.querySelector('.chat-sessions-toggle');
+      this.sessionsPanel = root.querySelector('.chat-sessions-panel');
+      this.sessionsListEl = root.querySelector('.chat-sessions-list');
+      this.sessionsNewBtn = root.querySelector('.chat-sessions-new');
+      this.sessionsPanelOpen = false;
+      this.currentSessions = [];
       this.compactContextBtn = root.querySelector('.chat-compact-context');
       this.closeBtn = root.querySelector('.chat-close, .chat-secondary-close');
 
@@ -293,6 +302,8 @@
       this.fileInput?.addEventListener('change', () => this.handleFiles());
       this.micBtn?.addEventListener('click', () => this.toggleRecording());
       this.newSessionBtn?.addEventListener('click', () => this.newSession());
+      this.sessionsToggleBtn?.addEventListener('click', () => this.toggleSessionsPanel());
+      this.sessionsNewBtn?.addEventListener('click', () => this.createManagedSession());
       this.compactContextBtn?.addEventListener('click', () => this.compactCodexContext());
       this.closeBtn?.addEventListener('click', () => {
         if (this.isPrimary) {
@@ -1226,6 +1237,80 @@
       } catch (e) {
         console.warn('[chat] recovered activity load failed:', e);
       }
+    }
+
+    toggleSessionsPanel(force) {
+      this.sessionsPanelOpen = force === undefined ? !this.sessionsPanelOpen : !!force;
+      this.sessionsPanel?.classList.toggle('open', this.sessionsPanelOpen);
+      this.sessionsToggleBtn?.classList.toggle('active', this.sessionsPanelOpen);
+      if (this.sessionsPanelOpen) this.refreshSessionsList(true);
+    }
+
+    async refreshSessionsList(showLoading = false) {
+      if (!this.sessionsListEl) return;
+      if (showLoading) this.sessionsListEl.innerHTML = '<div class="chat-sessions-empty">Loading…</div>';
+      const agentId = this.getSelectedAgentId() || this.selectedAgentKey;
+      try {
+        const res = await fetch('/api/chat-sessions?agentId=' + encodeURIComponent(agentId) + '&limit=40');
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || res.statusText);
+        this.currentSessions = Array.isArray(data.sessions) ? data.sessions : [];
+        this.renderSessionsList();
+      } catch (error) {
+        this.sessionsListEl.innerHTML = '<div class="chat-sessions-empty">' + escapeHtml(error.message || 'Sessions unavailable') + '</div>';
+      }
+    }
+
+    renderSessionsList() {
+      if (!this.sessionsListEl) return;
+      this.sessionsListEl.innerHTML = '';
+      if (!this.currentSessions.length) {
+        this.sessionsListEl.innerHTML = '<div class="chat-sessions-empty">No sessions yet</div>';
+        return;
+      }
+      for (const session of this.currentSessions) {
+        const item = document.createElement('button');
+        item.type = 'button';
+        item.className = 'chat-session-item' + (session.active || session.sessionKey === this.sessionKey ? ' selected' : '');
+        item.innerHTML = '<span class="chat-session-main"><strong>' + escapeHtml(session.title || session.id || 'Session') + '</strong>' +
+          (session.preview ? '<small>' + escapeHtml(session.preview) + '</small>' : '') + '</span>' +
+          (session.deletable ? '<span class="chat-session-delete" title="Delete">×</span>' : '');
+        item.addEventListener('click', (event) => {
+          if (event.target.closest('.chat-session-delete')) this.deleteManagedSession(session);
+          else this.switchManagedSession(session);
+        });
+        this.sessionsListEl.appendChild(item);
+      }
+    }
+
+    async switchManagedSession(session) {
+      const agentId = this.getSelectedAgentId() || this.selectedAgentKey;
+      const res = await fetch('/api/chat-sessions/switch', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({agentId, sessionId: session.id, sessionKey: session.sessionKey}) });
+      const data = await res.json();
+      if (!res.ok || !data.ok) { this.appendSystem(data.error || 'Session switch failed'); return; }
+      if (data.sessionKey) this.sessionKey = data.sessionKey;
+      this.saveSelection();
+      this.historyStore.invalidate(this.getHistoryContext());
+      await this.loadHistory({ force: true });
+      this.toggleSessionsPanel(false);
+    }
+
+    async createManagedSession() {
+      const agentId = this.getSelectedAgentId() || this.selectedAgentKey;
+      const res = await fetch('/api/chat-sessions/create', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({agentId, sessionKey: this.sessionKey}) });
+      const data = await res.json();
+      if (!res.ok || !data.ok) { this.appendSystem(data.error || 'New session failed'); return; }
+      this.resetConversation(_ct('chat_new_session'));
+      this.activateHistory({ coldEmpty: true });
+      await this.refreshSessionsList();
+    }
+
+    async deleteManagedSession(session) {
+      const agentId = this.getSelectedAgentId() || this.selectedAgentKey;
+      const res = await fetch('/api/chat-sessions/delete', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({agentId, sessionId: session.id, sessionKey: session.sessionKey}) });
+      const data = await res.json();
+      if (!res.ok || !data.ok) { this.appendSystem(data.error || 'Session delete failed'); return; }
+      await this.refreshSessionsList();
     }
 
     async newSession() {
