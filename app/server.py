@@ -6383,8 +6383,13 @@ def _handle_codex_run_start(body):
                 turnId=record.get("turnId") or meta.get("turnId") or "",
             )
             event_name = _codex_activity_bridge_event_name(record)
-            enqueue(event_name, _codex_stream_event_payload(run_id, agent, record))
-            if hasattr(gateway_presence, "set_provider_event"):
+            terminal_event = event_name in {"run.completed", "run.failed", "run.cancelled", "run.canceled"}
+            # The worker publishes the single canonical terminal event after
+            # _handle_codex_chat returns. Forwarding the provider turn terminal
+            # here as well makes the UI finalize and append the reply twice.
+            if not terminal_event:
+                enqueue(event_name, _codex_stream_event_payload(run_id, agent, record))
+            if not terminal_event and hasattr(gateway_presence, "set_provider_event"):
                 gateway_presence.set_provider_event(status_key, "codex", {
                     "event": event_name,
                     "run_id": run_id,

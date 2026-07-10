@@ -60,6 +60,16 @@ class FakeCodexProvider:
             "interactionId": "int-1",
             "ts": 2,
         })
+        event_callback({
+            "id": "turn-completed-1",
+            "sequence": 3,
+            "type": "turn",
+            "status": "completed",
+            "threadId": thread_id or "thr-run",
+            "turnId": "turn-run",
+            "output": {"reply": "done", "modifiedFiles": []},
+            "ts": 3,
+        })
         return {
             "ok": True,
             "status": "completed",
@@ -97,15 +107,15 @@ def test_codex_run_start_publishes_bridge_events_and_keeps_activity():
                 time.sleep(0.02)
             assert meta and meta["done"] is True
 
-            events = []
-            q = meta["events"]
-            while not q.empty():
-                events.append(q.get_nowait())
+            events = server.PROVIDER_RUN_BRIDGE._events_after(
+                0, lambda event: event.get("runId") == run_id
+            )
             names = [event["event"] for event in events]
             assert "run.started" in names
             assert "tool.started" in names
             assert "approval.request" in names
             assert names[-1] == "run.completed"
+            assert names.count("run.completed") == 1
             assert meta["result"]["ok"] is True
 
             activity = server._handle_codex_activity({
@@ -113,8 +123,9 @@ def test_codex_run_start_publishes_bridge_events_and_keeps_activity():
                 "conversationId": ["conv-run"],
             })
             assert activity["ok"] is True
-            assert [event["sequence"] for event in activity["events"]] == [1, 2]
+            assert [event["sequence"] for event in activity["events"]] == [1, 2, 3]
             assert activity["events"][1]["type"] == "interaction"
+            assert activity["events"][2]["type"] == "turn"
 
             history = server._load_comm_history(limit=20, conversation_id="conv-run", agent_id="codex-local")
             texts = [event.get("text") for event in history]
@@ -273,11 +284,16 @@ def test_codex_run_stop_uses_existing_cancel_and_emits_terminal_event():
                 "status": "running",
             }
         try:
+            before_event_id = server.PROVIDER_RUN_BRIDGE._next_event_id
             result = server._handle_codex_run_stop({"runId": run_id})
             assert result["ok"] is True
             meta = server.PROVIDER_RUN_BRIDGE.get(run_id)
             assert meta["done"] is True
-            event = meta["events"].get_nowait()
+            events = server.PROVIDER_RUN_BRIDGE._events_after(
+                before_event_id, lambda item: item.get("runId") == run_id
+            )
+            assert len(events) == 1
+            event = events[0]
             assert event["event"] == "run.cancelled"
         finally:
             with server._CODEX_ACTIVE_LOCK:

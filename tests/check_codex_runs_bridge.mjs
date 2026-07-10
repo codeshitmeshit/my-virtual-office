@@ -140,6 +140,23 @@ if (!nativeEventHandler.includes('const settledCards = this.settleCodexRunningSt
 if (!nativeEventHandler.includes('if (!settledCards)')) {
   throw new Error('Codex completion should avoid creating duplicate completed cards when a running card was already settled');
 }
+if (
+  !nativeEventHandler.includes('const replyAlreadyInHistory = this.hasCurrentCodexReplyInHistory(canonicalReply)') ||
+  !nativeEventHandler.includes('this.streamingMsg && replyAlreadyInHistory') ||
+  !nativeEventHandler.includes('finalText && !replyAlreadyInHistory')
+) {
+  throw new Error('Codex completion should not append a live reply when the same run reply is already rendered from history');
+}
+const codexHistoryReplyDedupe = chat.slice(
+  chat.indexOf('hasCurrentCodexReplyInHistory(reply)'),
+  chat.indexOf('streamClaudeCodeRunEvents(runId)')
+);
+if (
+  !codexHistoryReplyDedupe.includes("querySelectorAll('[data-history-message-id]')") ||
+  !codexHistoryReplyDedupe.includes('node.dataset.historyMessageId === String(message.id')
+) {
+  throw new Error('Codex reply dedupe must require the matching history message to be mounted in the visible history layer');
+}
 const settleRunStatus = chat.slice(chat.indexOf('settleCodexRunningStatusCards(status, text)'), chat.indexOf('settleCodexReasoningCards(status ='));
 if (!settleRunStatus.includes('let settled = 0') || !settleRunStatus.includes('settled += 1') || !settleRunStatus.includes('return settled')) {
   throw new Error('Codex run status settling should report how many cards it updated');

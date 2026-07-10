@@ -215,6 +215,7 @@
       this.sendInFlight = false;
       this.codexBusy = false;
       this.codexRequestInFlight = false;
+      this.codexSendStartedAt = 0;
       this.codexCancelPending = false;
       this.codexActivityTimer = null;
       this.codexLastSequence = 0;
@@ -1556,6 +1557,7 @@
       if (this.isCodexSelected()) {
         const label = this.agentSelect.selectedOptions[0]?.textContent.trim() || 'Codex';
         const codexSendStartedAt = Date.now();
+        this.codexSendStartedAt = codexSendStartedAt;
         let finalStatusText = _ct('codex_ready');
         let finalStatusClass = 'connected';
         let codexAccepted = false;
@@ -1634,6 +1636,7 @@
         } finally {
           this.codexBusy = !!this.codexCancelPending;
           this.codexRequestInFlight = false;
+          this.codexSendStartedAt = 0;
           this.sendInFlight = false;
           this.sendBtn.disabled = !!this.codexCancelPending;
           this.removeTypingIndicator();
@@ -2030,16 +2033,22 @@
           ? data.modifiedFiles
           : (Array.isArray(activityOutput.modifiedFiles) ? activityOutput.modifiedFiles : []);
         let finalText = data.reply || activityOutput.reply || data.error || activity?.error || this.pendingStreamContent || (this.streamingMsg ? this.streamingMsg.content : '');
+        const canonicalReply = data.reply || activityOutput.reply || '';
+        const replyAlreadyInHistory = this.hasCurrentCodexReplyInHistory(canonicalReply);
         if (files.length) finalText += '\n\n' + _ct('modified_files') + ':\n' + files.map(path => '- ' + path).join('\n');
         if (data.needsHumanIntervention) finalText += '\n\n' + _ct('human_intervention_required');
         this.flushStreamingRender(true);
         this.flushToolEvents(true);
         this.clearActivityFeed();
         this.removeTypingIndicator();
-        if (this.streamingMsg) {
+        if (this.streamingMsg && replyAlreadyInHistory) {
+          this.messages.querySelector('.streaming-msg')?.remove();
+          this.pendingStreamContent = '';
+          this.streamingMsg = null;
+        } else if (this.streamingMsg) {
           this.finalizeStreamingMessage(finalText);
           this.streamingMsg = null;
-        } else if (finalText) {
+        } else if (finalText && !replyAlreadyInHistory) {
           this.appendMessage('assistant', finalText, Date.now(), [], { label: label || 'Codex', kind: 'agent' });
         }
         if (runId) this.finalizeRunToolCards(runId);
@@ -2059,12 +2068,29 @@
         this.currentRunId = null;
         this.codexBusy = false;
         this.codexRequestInFlight = false;
+        this.codexSendStartedAt = 0;
         this.codexCancelPending = false;
         this.sendBtn.disabled = false;
         this.setStatus(eventName === 'run.completed' ? _ct('codex_ready') : _ct('codex_error'), eventName === 'run.completed' ? 'connected' : 'disconnected');
         this.stopRecoveryWatchdog();
         this.fetchSessionInfo().catch(() => {});
       }
+    }
+
+    hasCurrentCodexReplyInHistory(reply) {
+      const text = String(reply || '').trim();
+      const startedAt = Number(this.codexSendStartedAt || 0);
+      const entry = this.historyView?.entry;
+      if (!text || !startedAt || !(entry?.messages instanceof Map)) return false;
+      for (const message of entry.messages.values()) {
+        if (message?.role !== 'assistant') continue;
+        if (Number(message.epochMs || 0) < startedAt - 1000) continue;
+        if (String(message.text || '').trim() !== text) continue;
+        const rendered = Array.from(this.historyLayer?.querySelectorAll('[data-history-message-id]') || [])
+          .some(node => node.dataset.historyMessageId === String(message.id || ''));
+        if (rendered) return true;
+      }
+      return false;
     }
 
     streamClaudeCodeRunEvents(runId) {
