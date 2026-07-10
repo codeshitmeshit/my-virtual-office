@@ -1,0 +1,35 @@
+app/chat.js
+  s_2c1ad674089b59::t_51200eaff983c0 3-5,266-271,305-306,1242-1315
+app/game.js
+  s_2c1ad674089b59::t_63757ac8fa3cdf 14103-14111,14276-14295,14985-14992,14996-14997
+app/index.html
+  s_2c1ad674089b59::t_b8e8b016d2775c 80-90,935,953-962
+app/models.html
+  s_2c1ad674089b59::t_0ba755a2ed28f5 280,288-309
+app/providers/codex.py
+  s_2c1ad674089b59::t_a9135fe035ca65 170-219
+app/providers/hermes.py
+  s_2c1ad674089b59::t_9b10b2221809e2 221-254
+app/server.py
+  s_2c1ad674089b59::t_06a587807e5113 646,2297,4893-4899,5535-5543,5685-5687,27732,28440-28453,32719-33230
+app/setup.html
+  s_2c1ad674089b59::t_2e83071e02a2b1 231-241,644-647,827-849,863-865,1233-1235
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "15f77e92baf9bc6a7972437d55801edc0abae460",
+  "prompts": {},
+  "sessions": {
+    "s_2c1ad674089b59": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4ced-a915-7051-97fc-8df97b21d523",
+        "model": "unknown"
+      },
+      "human_author": "codeshitmeshit <codeshitmeshit@126.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
