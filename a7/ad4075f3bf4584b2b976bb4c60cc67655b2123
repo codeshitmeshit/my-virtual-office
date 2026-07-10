@@ -1,0 +1,47 @@
+.env.example
+  s_2c1ad674089b59::t_e4e9bae440b42a 26-49
+app/discovery.py
+  s_2c1ad674089b59::t_11af254af13991 17,98-145,191-196,199-206
+app/gateway_presence.py
+  s_2c1ad674089b59::t_52f4732c77fde4 40-41,701-702
+app/providers/hermes.py
+  s_2c1ad674089b59::t_6fb47543af7cb2 14-16,18,21-23,26,591-593,627-648,681-1750
+app/style.css
+  s_2c1ad674089b59::t_74beb0154dde77 2500,2762-2934,3787-3924
+docs/HERMES_PLATFORM_ADAPTER.md
+  s_2c1ad674089b59::t_0e6e7a71ba3a80 1-94
+integrations/hermes-platform/my_virtual_office/README.md
+  s_2c1ad674089b59::t_9dcd2eee3e3a33 1-58
+integrations/hermes-platform/my_virtual_office/adapter.py
+  s_2c1ad674089b59::t_6adc62c9ff1561 1-372
+integrations/hermes-platform/my_virtual_office/plugin.yaml
+  s_2c1ad674089b59::t_1459365ada455c 1-43
+tests/test_chat_sessions.py
+  s_2c1ad674089b59::t_dac4066a2d68d8 1-219
+tests/test_hermes_desktop_discovery.py
+  s_2c1ad674089b59::t_51909a1c723e74 1-97
+tests/test_hermes_platform_bridge.py
+  s_2c1ad674089b59::t_6b1d7aca217f58 1-152
+tests/test_hermes_platform_plugin.py
+  s_2c1ad674089b59::t_bf455acf70278d 1-156
+tests/test_openclaw_managed_auth.py
+  s_2c1ad674089b59::t_97b3483b0d292d 1-133
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "a7ad4075f3bf4584b2b976bb4c60cc67655b2123",
+  "prompts": {},
+  "sessions": {
+    "s_2c1ad674089b59": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4ced-a915-7051-97fc-8df97b21d523",
+        "model": "unknown"
+      },
+      "human_author": "codeshitmeshit <codeshitmeshit@126.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
