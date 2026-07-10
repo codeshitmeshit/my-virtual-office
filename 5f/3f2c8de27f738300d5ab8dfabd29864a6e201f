@@ -1,0 +1,83 @@
+.codex/skills/openspec-apply-change/SKILL.md
+  s_8d63e3258e60d2::t_d20c98851d4c84 1-159
+.codex/skills/openspec-archive-change/SKILL.md
+  s_8d63e3258e60d2::t_398163170a95f4 1-117
+.codex/skills/openspec-explore/SKILL.md
+  s_8d63e3258e60d2::t_9720131a0c8a68 1-289
+.codex/skills/openspec-propose/SKILL.md
+  s_8d63e3258e60d2::t_83a6adb0e5d497 1-113
+.codex/skills/openspec-sync-specs/SKILL.md
+  s_8d63e3258e60d2::t_7e239725fd4128 1-147
+app/browser-panel.js
+  s_8d63e3258e60d2::t_712059d6d3c6e2 7,402,487
+app/chat-history.js
+  s_8d63e3258e60d2::t_9f5aa1e0ebe70c 1-651
+app/chat.js
+  s_8d63e3258e60d2::t_6d1907118bcd2d 21-22,26,30-31,184,187-193,195,237-248,270,313,332,336,342-349,354-355,375-403,509,519,521,563,701-702,707,752-753,758,837,905,910,993,999,1011,1018-1021,1023,1051-1122,1191,1231,1252,1254-1255,1275,1277-1278,1288-1290,1430-1441,1448-1459,1542,1561,1580,1589,1598,1601,1616,1622,1624-1627,1666,1668,1678,1683,1695-1698,1726,1728,1738,1743,1754-1757,1770,1778,1946-1947,2074-2075,2145-2146,2150,2286,2337,2374,2469,2547,2593,2669-2699,2701-2703,2707-2708,2716,2726,2768-2770,2782-2783,2787-2793,2805,2813,2842,2852,2872-3163,3297-3300,3401,3405,3412,3416,3423,3427,3817-3841,3884,3932,4155,4162,4172,5005-5018,5189,5196,5199
+app/dashboard-realtime.js
+  s_8d63e3258e60d2::t_55d5a6e2040fca 10,55-62,211,228,233,237,243,249,255,261,264-268,270,278
+app/game.js
+  s_8d63e3258e60d2::t_91ba2cdf60a5a7 8,5275-5277,5321,5359-5366,5400-5407,5416-5426,12881-12885,20835-20837
+app/index.html
+  s_8d63e3258e60d2::t_55bfe2c043af0b 1304
+app/pc-monitor.js
+  s_8d63e3258e60d2::t_514a3d87f24727 5-6,20-21,54-55,59,63-68,70-72,76-79,83,86-88
+app/projects.js
+  s_8d63e3258e60d2::t_ad8d214f64de8b 34,716,848-863,872-876
+app/server.py
+  s_8d63e3258e60d2::t_c64586e5417907 34-35,4465-4478,5373-5389,5400,5404,5420,5442-5443,5496,5586,6329,6666-6678,7578-7607,7613,7615-7616,7621,7623,7631,7633,7636,7640,7643-7685,7694-7723,7744,7748-7751,7760,7767-7775,7777-7877,7964,8684-9157,25767-25775,26122-26124,26126-26130,26141,26145-26149,26288-26295
+app/style.css
+  s_8d63e3258e60d2::t_974e579cadd8ed 2793-2814
+docs/superpowers/plans/2026-07-10-chat-provider-sse.md
+  s_8d63e3258e60d2::t_f8f00d49ce0cdb 1-58
+openspec/changes/archive/2026-07-10-optimize-chat-history-switching/.openspec.yaml
+  s_8d63e3258e60d2::t_ac8168701c89a8 1-2
+openspec/changes/archive/2026-07-10-optimize-chat-history-switching/assets/implementation-flow.mmd
+  s_8d63e3258e60d2::t_59eea6c28401f0 1-44
+openspec/changes/archive/2026-07-10-optimize-chat-history-switching/design.md
+  s_8d63e3258e60d2::t_c963e3c3683c84 1-428
+openspec/changes/archive/2026-07-10-optimize-chat-history-switching/proposal.md
+  s_8d63e3258e60d2::t_1ea7dc372ec9cc 1-30
+openspec/changes/archive/2026-07-10-optimize-chat-history-switching/specs/chat-history-navigation/spec.md
+  s_8d63e3258e60d2::t_1457caf06e044f 1-116
+openspec/changes/archive/2026-07-10-optimize-chat-history-switching/tasks.md
+  s_8d63e3258e60d2::t_6199a943780f4e 1-168
+openspec/config.yaml
+  s_8d63e3258e60d2::t_2bfacdeca30584 1-20
+tests/chat_history_performance.mjs
+  s_8d63e3258e60d2::t_0b027fda097faf 1-243
+tests/chat_history_ui_e2e.mjs
+  s_8d63e3258e60d2::t_d4d67b06e19c9d 1-228
+tests/check_chat_history_navigation.mjs
+  s_8d63e3258e60d2::t_f539ba4165c9e0 1-66
+tests/check_chat_history_store.mjs
+  s_8d63e3258e60d2::t_f02740b85d3ecf 1-231
+tests/check_claude_code_runs_sse.mjs
+  s_8d63e3258e60d2::t_8e30d5cb0902ff 39-40
+tests/check_codex_runs_bridge.mjs
+  s_8d63e3258e60d2::t_bba6e31efebbdd 81-82
+tests/check_frontend_performance_static.mjs
+  s_8d63e3258e60d2::t_a9359c556cf500 1-92
+tests/check_provider_chat_sse.mjs
+  s_8d63e3258e60d2::t_0c1121b18cb830 1-79
+tests/test_chat_history_api.py
+  s_8d63e3258e60d2::t_cacd47606c6c21 1-245
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "5f3f2c8de27f738300d5ab8dfabd29864a6e201f",
+  "prompts": {},
+  "sessions": {
+    "s_8d63e3258e60d2": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4812-d5f3-7b32-a77f-84918be29183",
+        "model": "unknown"
+      },
+      "human_author": "codeshitmeshit <codeshitmeshit@126.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
