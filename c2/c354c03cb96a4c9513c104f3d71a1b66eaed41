@@ -1,0 +1,21 @@
+tests/test_codex_live_activity_e2e.py
+  s_f79e68737d9845::t_f1d5c4c84d6734 140
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "c2c354c03cb96a4c9513c104f3d71a1b66eaed41",
+  "prompts": {},
+  "sessions": {
+    "s_f79e68737d9845": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4c15-638a-7af1-8ad3-c3999d7c00fb",
+        "model": "unknown"
+      },
+      "human_author": "codeshitmeshit <codeshitmeshit@126.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
