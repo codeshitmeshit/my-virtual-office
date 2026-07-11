@@ -1,0 +1,29 @@
+app/i18n.js
+  s_5852bad622de94::t_dcfe35230c853b 210-211,213-215,323-327
+app/services/project_execution.py
+  s_5852bad622de94::t_d8619bb98fa75e 1
+docs/SERVICE_BOUNDARIES.md
+  s_5852bad622de94::t_5e266c20f8907f 35-37
+openspec/changes/extract-http-foundation-and-project-service-pilot/design.md
+  s_5852bad622de94::t_f7c66c87e85cfa 58,176-180
+tests/test_management_token_dialog.js
+  s_5852bad622de94::t_1b56d81bcd2ee3 4,35-142
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "75a0b8ae1d6e427b2741df2fa3a521d1f237b3f9",
+  "prompts": {},
+  "sessions": {
+    "s_5852bad622de94": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f5163-cd74-7df3-a25d-7fd6dd323b5d",
+        "model": "unknown"
+      },
+      "human_author": "codeshitmeshit <codeshitmeshit@126.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
