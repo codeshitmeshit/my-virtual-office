@@ -1,0 +1,23 @@
+app/models.html
+  s_2c1ad674089b59::t_86b75b78c603bb 453,661,960,966,972,978,990,1010,1016,1024
+app/server.py
+  s_2c1ad674089b59::t_df37c337b28751 28568-28578
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "8a9de53f18533d80685aeaa852c6877602cddd6f",
+  "prompts": {},
+  "sessions": {
+    "s_2c1ad674089b59": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4ced-a915-7051-97fc-8df97b21d523",
+        "model": "unknown"
+      },
+      "human_author": "codeshitmeshit <codeshitmeshit@126.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
