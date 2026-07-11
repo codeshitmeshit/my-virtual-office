@@ -36,4 +36,4 @@
 ## 8. Resolve Push Review Findings
 
 - [x] 8.1 Remove the fixed weak management-token default from `start.sh`, share one in-flight management-token dialog across concurrent protected requests, and clarify the HTTP-oriented `ServiceResult.status` compatibility contract.
-- [ ] 8.2 Add concurrent-dialog behavior coverage, rerun the full first-phase regression set, and complete a fresh four-route push review with no blocking findings.
+- [x] 8.2 Add concurrent-dialog behavior coverage, rerun the full first-phase regression set, and complete a fresh four-route push review with no blocking findings.
