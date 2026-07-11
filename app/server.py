@@ -644,6 +644,7 @@ def _load_vo_config():
             "desktopHostHeader": _env_or("VO_HERMES_DESKTOP_HOST_HEADER", hermes_cfg.get("desktopHostHeader", "")),
             "desktopTcpHost": _env_or("VO_HERMES_DESKTOP_TCP_HOST", hermes_cfg.get("desktopTcpHost", "")),
             "desktopTcpPort": _env_or("VO_HERMES_DESKTOP_TCP_PORT", hermes_cfg.get("desktopTcpPort", "")),
+            "desktopLogPath": _env_or("VO_HERMES_DESKTOP_LOG_PATH", hermes_cfg.get("desktopLogPath", "")),
             "preferDesktop": _env_bool("VO_HERMES_PREFER_DESKTOP", hermes_cfg.get("preferDesktop", True)),
             "platformEnabled": _env_bool("VO_HERMES_PLATFORM_ENABLED", hermes_cfg.get("platformEnabled", bool(_env_or("VO_HERMES_PLATFORM_TOKEN", hermes_cfg.get("platformToken", ""))))),
             "platformToken": _env_or("VO_HERMES_PLATFORM_TOKEN", hermes_cfg.get("platformToken", "")),
@@ -25875,6 +25876,8 @@ def _browser_viewer_password():
 
 
 class OfficeHandler(http.server.SimpleHTTPRequestHandler):
+    _MANAGEMENT_BODY_LIMIT = 64 * 1024
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=APP_DIR, **kwargs)
 
@@ -25882,6 +25885,37 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
         if urllib.parse.urlparse(self.path).path.endswith(".woff2"):
             self.send_header("Cache-Control", "public, max-age=31536000, immutable")
         super().end_headers()
+
+    def _management_request_allowed(self):
+        """Allow local scripts and same-origin UI requests to destructive APIs."""
+        client_host = str((self.client_address or ("",))[0] or "")
+        if client_host in {"127.0.0.1", "::1"}:
+            return True
+        expected_host = str(self.headers.get("Host") or "").lower()
+        source = self.headers.get("Origin") or self.headers.get("Referer") or ""
+        source_host = str(urllib.parse.urlparse(source).netloc or "").lower()
+        return bool(expected_host and source_host and source_host == expected_host)
+
+    def _reject_untrusted_management_request(self):
+        if self._management_request_allowed():
+            return False
+        self.send_response(403)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(json.dumps({"ok": False, "error": "Management request must come from the same-origin UI or localhost"}).encode())
+        return True
+
+    def _read_limited_json_body(self):
+        try:
+            length = int(self.headers.get("Content-Length", 0) or 0)
+        except (TypeError, ValueError):
+            return None, {"ok": False, "error": "Invalid Content-Length", "_status": 400}
+        if length < 0 or length > self._MANAGEMENT_BODY_LIMIT:
+            return None, {"ok": False, "error": "Request body is too large", "_status": 413}
+        try:
+            return (json.loads(self.rfile.read(length)) if length else {}), None
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            return None, {"ok": False, "error": str(exc), "_status": 400}
 
     def _serve_website_asset(self, request_path):
         website_dir = os.path.realpath(os.path.join(APP_DIR, "..", "website"))
@@ -26052,6 +26086,8 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                 projects_loader=lambda: _handle_projects_list("status=active").get("projects", []),
             ).stream(self)
         elif request_path == "/api/chat-sessions":
+            if self._reject_untrusted_management_request():
+                return
             agent_id = (query_params.get("agentId") or query_params.get("agent") or query_params.get("key") or ["main"])[0]
             try:
                 limit = max(1, min(100, int((query_params.get("limit") or ["40"])[0])))
@@ -26060,7 +26096,6 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             payload, status = handle_chat_sessions_list(agent_id, limit=limit)
             self.send_response(status)
             self.send_header("Content-Type", "application/json")
-            self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(json.dumps(payload).encode())
         elif request_path == "/api/hermes-platform/status":
@@ -28514,11 +28549,11 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
         request_path = parsed_url.path
         # --- SETUP WIZARD ---
         if request_path in {"/api/chat-sessions/create", "/api/chat-sessions/delete", "/api/chat-sessions/switch"}:
-            length = int(self.headers.get("Content-Length", 0))
-            try:
-                body = json.loads(self.rfile.read(length)) if length else {}
-            except json.JSONDecodeError as exc:
-                body, result, status = {}, {"ok": False, "error": str(exc)}, 400
+            if self._reject_untrusted_management_request():
+                return
+            body, error = self._read_limited_json_body()
+            if error:
+                result, status = error, error.pop("_status")
             else:
                 agent_id = body.get("agentId") or body.get("agent") or body.get("key") or "main"
                 if request_path.endswith("/create"):
@@ -28529,16 +28564,13 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                     result, status = handle_chat_session_switch(agent_id, body.get("sessionId") or body.get("sessionKey") or "", body)
             self.send_response(status)
             self.send_header("Content-Type", "application/json")
-            self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(json.dumps(result).encode())
             return
         elif request_path in {"/api/hermes-platform/enqueue", "/api/hermes-platform/ack", "/api/hermes-platform/reply", "/api/hermes-platform/heartbeat"}:
-            length = int(self.headers.get("Content-Length", 0))
-            try:
-                body = json.loads(self.rfile.read(length)) if length else {}
-            except json.JSONDecodeError as exc:
-                result = {"ok": False, "error": str(exc), "_status": 400}
+            body, error = self._read_limited_json_body()
+            if error:
+                result = error
             else:
                 result = _hermes_platform_auth_error(self.headers)
                 if not result:
@@ -28556,8 +28588,15 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             self.wfile.write(json.dumps(result).encode())
             return
         elif request_path == "/api/native-models/openclaw/auth/sync-static":
-            length = int(self.headers.get("Content-Length", 0))
-            body = json.loads(self.rfile.read(length)) if length else {}
+            if self._reject_untrusted_management_request():
+                return
+            body, error = self._read_limited_json_body()
+            if error:
+                self.send_response(error.pop("_status"))
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps(error).encode())
+                return
             result = _sync_openclaw_static_auth_from_main(body.get("provider"), body.get("profileId") or body.get("profile"))
             self.send_response(200 if result.get("ok") else 400)
             self.send_header("Content-Type", "application/json")
@@ -28565,8 +28604,15 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             self.wfile.write(json.dumps(result).encode())
             return
         elif request_path == "/api/native-models/openclaw/auth/reset-overrides":
-            length = int(self.headers.get("Content-Length", 0))
-            body = json.loads(self.rfile.read(length)) if length else {}
+            if self._reject_untrusted_management_request():
+                return
+            body, error = self._read_limited_json_body()
+            if error:
+                self.send_response(error.pop("_status"))
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps(error).encode())
+                return
             result = _reset_openclaw_static_auth_overrides(body.get("agent") or body.get("agentId"), body.get("provider"))
             self.send_response(200 if result.get("ok") else 400)
             self.send_header("Content-Type", "application/json")
@@ -28574,11 +28620,9 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             self.wfile.write(json.dumps(result).encode())
             return
         elif request_path == "/api/hermes/desktop/discover":
-            length = int(self.headers.get("Content-Length", 0))
-            try:
-                body = json.loads(self.rfile.read(length)) if length else {}
-            except json.JSONDecodeError as exc:
-                result = {"ok": False, "found": False, "error": str(exc)}
+            body, error = self._read_limited_json_body()
+            if error:
+                result = {**error, "found": False}
             else:
                 result = _handle_hermes_desktop_discover(body)
             self.send_response(int(result.get("_status") or (200 if result.get("found") else 404)))
@@ -32125,7 +32169,8 @@ def _handle_hermes_platform_ack(body):
         for msg in state.get("messages") or []:
             if msg.get("id") != message_id:
                 continue
-            if lease_id and msg.get("leaseId") and msg.get("leaseId") != lease_id:
+            current_lease_id = str(msg.get("leaseId") or "").strip()
+            if msg.get("status") == "leased" and (not lease_id or lease_id != current_lease_id):
                 return {"ok": False, "error": "leaseId does not match current message lease", "_status": 409}
             if ok:
                 if msg.get("status") != "replied":

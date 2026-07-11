@@ -110,6 +110,10 @@ def main():
             check("Poll succeeds", poll.get("ok"), str(poll))
             check("Poll returns queued message", poll.get("messages") and poll["messages"][0]["id"] == msg_id, str(poll))
             lease_id = poll["messages"][0]["leaseId"]
+            missing_lease_ack = server._handle_hermes_platform_ack({"messageId": msg_id, "ok": True})
+            check("Ack rejects a missing lease", missing_lease_ack.get("_status") == 409, str(missing_lease_ack))
+            stale_lease_ack = server._handle_hermes_platform_ack({"messageId": msg_id, "leaseId": "stale-lease", "ok": False})
+            check("Ack rejects a stale lease", stale_lease_ack.get("_status") == 409, str(stale_lease_ack))
             ack = server._handle_hermes_platform_ack({"messageId": msg_id, "leaseId": lease_id, "ok": True})
             check("Ack marks delivered", ack.get("ok") and ack.get("status") == "delivered", str(ack))
             reply = server._handle_hermes_platform_reply({
