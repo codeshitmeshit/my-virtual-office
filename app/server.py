@@ -25875,6 +25875,9 @@ def _browser_viewer_password():
     return urllib.parse.unquote(parsed.password or "")
 
 
+_MANAGEMENT_TOKEN = str(os.environ.get("VO_MANAGEMENT_TOKEN") or secrets.token_urlsafe(32))
+
+
 class OfficeHandler(http.server.SimpleHTTPRequestHandler):
     _MANAGEMENT_BODY_LIMIT = 64 * 1024
 
@@ -25891,16 +25894,9 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
         super().end_headers()
 
     def _management_request_allowed(self):
-        """Allow local scripts and same-origin UI requests to destructive APIs."""
-        client_host = str((self.client_address or ("",))[0] or "")
-        if client_host not in {"127.0.0.1", "::1"}:
-            return False
-        expected_host = str(self.headers.get("Host") or "").lower()
-        source = self.headers.get("Origin") or self.headers.get("Referer") or ""
-        if not source:
-            return True
-        source_host = str(urllib.parse.urlparse(source).netloc or "").lower()
-        return bool(expected_host and source_host and source_host == expected_host)
+        """Require the per-process management token for destructive APIs."""
+        supplied = str(self.headers.get("X-VO-Management-Token") or "")
+        return bool(supplied and secrets.compare_digest(supplied, _MANAGEMENT_TOKEN))
 
     def _reject_untrusted_management_request(self):
         if self._management_request_allowed():
@@ -25908,7 +25904,7 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
         self.send_response(403)
         self.send_header("Content-Type", "application/json")
         self.end_headers()
-        self.wfile.write(json.dumps({"ok": False, "error": "Management request must come from the same-origin UI or localhost"}).encode())
+        self.wfile.write(json.dumps({"ok": False, "error": "A valid Virtual Office management token is required"}).encode())
         return True
 
     def _read_limited_json_body(self):
@@ -25919,7 +25915,22 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
         if length < 0 or length > self._MANAGEMENT_BODY_LIMIT:
             return None, {"ok": False, "error": "Request body is too large", "_status": 413}
         try:
-            return (json.loads(self.rfile.read(length)) if length else {}), None
+            deadline = time.monotonic() + 15
+            chunks = []
+            remaining = length
+            while remaining:
+                time_left = deadline - time.monotonic()
+                if time_left <= 0:
+                    raise TimeoutError("Request body deadline exceeded")
+                self.connection.settimeout(time_left)
+                chunk = self.rfile.read(min(8192, remaining))
+                if not chunk:
+                    raise ConnectionError("Request body ended before Content-Length")
+                chunks.append(chunk)
+                remaining -= len(chunk)
+            return (json.loads(b"".join(chunks)) if length else {}), None
+        except (TimeoutError, ConnectionError) as exc:
+            return None, {"ok": False, "error": str(exc), "_status": 408}
         except (json.JSONDecodeError, UnicodeDecodeError) as exc:
             return None, {"ok": False, "error": str(exc), "_status": 400}
 
@@ -30970,6 +30981,7 @@ def start_http_server():
 
     _oname = VO_CONFIG["office"]["name"]
     print(f"🏢 {_oname} → http://localhost:{PORT}")
+    print(f"🔐 Management token: {_MANAGEMENT_TOKEN}")
     server = http.server.ThreadingHTTPServer(("0.0.0.0", PORT), OfficeHandler)
     server.serve_forever()
 

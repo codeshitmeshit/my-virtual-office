@@ -207,6 +207,20 @@
         }
     }
 
+    async function managementFetch(input, init) {
+        init = Object.assign({}, init || {});
+        init.headers = new Headers(init.headers || {});
+        var token = sessionStorage.getItem('voManagementToken') || '';
+        if (token) init.headers.set('X-VO-Management-Token', token);
+        var response = await fetch(input, init);
+        if (response.status !== 403) return response;
+        token = window.prompt(t('management_token_prompt'), '') || '';
+        if (!token) return response;
+        sessionStorage.setItem('voManagementToken', token);
+        init.headers.set('X-VO-Management-Token', token);
+        return fetch(input, init);
+    }
+
     // Auto-init on DOMContentLoaded
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', initLanguage);
@@ -220,6 +234,7 @@
         setLanguage: setLanguage,
         getLanguage: getLanguage,
         initLanguage: initLanguage,
-        applyTranslations: applyTranslations
+        applyTranslations: applyTranslations,
+        managementFetch: managementFetch
     };
 })();

@@ -449,7 +449,10 @@ function setNativeStatus(id, data, okText) {
 }
 
 async function postNativeJson(url, body) {
-    const res = await fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
+    const request = { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) };
+    const res = url.startsWith('/api/native-models/openclaw/auth/')
+        ? await i18n.managementFetch(url, request)
+        : await fetch(url, request);
     return await res.json();
 }
 

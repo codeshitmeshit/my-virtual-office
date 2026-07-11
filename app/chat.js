@@ -1251,7 +1251,7 @@
       if (showLoading) this.sessionsListEl.innerHTML = '<div class="chat-sessions-empty">' + escapeHtml(_ct('loading')) + '</div>';
       const agentId = this.getSelectedAgentId() || this.selectedAgentKey;
       try {
-        const res = await fetch('/api/chat-sessions?agentId=' + encodeURIComponent(agentId) + '&limit=40');
+        const res = await i18n.managementFetch('/api/chat-sessions?agentId=' + encodeURIComponent(agentId) + '&limit=40');
         const data = await res.json();
         if (!res.ok || !data.ok) throw new Error(data.error || res.statusText);
         this.currentSessions = Array.isArray(data.sessions) ? data.sessions : [];
@@ -1303,7 +1303,7 @@
     async switchManagedSession(session) {
       const agentId = this.getSelectedAgentId() || this.selectedAgentKey;
       const oldHistoryContext = this.getHistoryContext();
-      const res = await fetch('/api/chat-sessions/switch', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({agentId, sessionId: session.id, sessionKey: session.sessionKey}) });
+      const res = await i18n.managementFetch('/api/chat-sessions/switch', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({agentId, sessionId: session.id, sessionKey: session.sessionKey}) });
       const data = await res.json();
       if (!res.ok || !data.ok) { this.appendSystem(data.error || _ct('chat_session_switch_failed')); return; }
       if (data.sessionKey) this.sessionKey = data.sessionKey;
@@ -1322,7 +1322,7 @@
     async createManagedSession() {
       const agentId = this.getSelectedAgentId() || this.selectedAgentKey;
       const oldHistoryContext = this.getHistoryContext();
-      const res = await fetch('/api/chat-sessions/create', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({agentId, sessionKey: this.sessionKey}) });
+      const res = await i18n.managementFetch('/api/chat-sessions/create', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({agentId, sessionKey: this.sessionKey}) });
       const data = await res.json();
       if (!res.ok || !data.ok) { this.appendSystem(data.error || _ct('chat_session_create_failed')); return; }
       if (this.isHermesSelected() || this.isClaudeCodeSelected()) {
@@ -1340,7 +1340,7 @@
       const agentId = this.getSelectedAgentId() || this.selectedAgentKey;
       const providerKind = this.isClaudeCodeSelected() ? 'claude-code' : (this.isHermesSelected() ? 'hermes' : '');
       const conversationId = providerKind ? this.getProviderConversationId(providerKind) : '';
-      const res = await fetch('/api/chat-sessions/delete', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({agentId, sessionId: session.id, sessionKey: session.sessionKey, conversationId}) });
+      const res = await i18n.managementFetch('/api/chat-sessions/delete', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({agentId, sessionId: session.id, sessionKey: session.sessionKey, conversationId}) });
       const data = await res.json();
       if (!res.ok || !data.ok) { this.appendSystem(data.error || _ct('chat_session_delete_failed')); return; }
       await this.refreshSessionsList();
