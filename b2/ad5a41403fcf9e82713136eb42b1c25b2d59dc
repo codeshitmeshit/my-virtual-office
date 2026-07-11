@@ -1,0 +1,33 @@
+app/game.js
+  s_0961bafd576825::t_708fe732aa28be 9087
+app/index.html
+  s_0961bafd576825::t_b15414f678cf3a 1305
+app/models.html
+  s_2c1ad674089b59::t_5e19fb0110ee7c 795,833,854,880,1040,1061,1087
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "b2ad5a41403fcf9e82713136eb42b1c25b2d59dc",
+  "prompts": {},
+  "sessions": {
+    "s_0961bafd576825": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4fa5-0033-7d23-8294-2e044aa6853a",
+        "model": "unknown"
+      },
+      "human_author": "codeshitmeshit <codeshitmeshit@126.com>"
+    },
+    "s_2c1ad674089b59": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4ced-a915-7051-97fc-8df97b21d523",
+        "model": "unknown"
+      },
+      "human_author": "codeshitmeshit <codeshitmeshit@126.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
