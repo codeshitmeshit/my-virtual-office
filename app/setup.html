@@ -802,7 +802,7 @@
             }
             statusEl.innerHTML = '<div class="status-box info">' + _t('saving_testing') + '</div>';
             // Save config so server can proxy
-            fetch('/setup/save', {
+            i18n.managementFetch('/setup/save', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ features: { pcMetrics: true }, pcMetrics: { url: url } })
@@ -847,7 +847,7 @@
                     var discovered = _hermesExtendedSettings();
                     discovered.enabled = true;
                     discovered.preferDesktop = true;
-                    fetch('/setup/save', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({hermes:discovered})}).catch(function(){});
+                    i18n.managementFetch('/setup/save', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({hermes:discovered})}).catch(function(){});
                 }
                 document.getElementById('hermes-test-status').textContent = d.ok ? i18n.t('hermes_desktop_discovered') : (d.error || d.message || i18n.t('hermes_discovery_complete'));
               });
@@ -870,7 +870,7 @@
             var platformToken = ((document.getElementById('s-hermes-platform-token') || {}).value || '').trim();
             if (platformToken) hermesSave.platformToken = platformToken;
             if (apiKey) hermesSave.apiKey = apiKey;
-            fetch('/setup/save', {
+            i18n.managementFetch('/setup/save', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ hermes: hermesSave })
@@ -942,7 +942,7 @@
                 return;
             }
             statusEl.innerHTML = '<div class="status-box info">Saving and testing Codex...</div>';
-            fetch('/setup/save', {
+            i18n.managementFetch('/setup/save', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ codex: payload })
@@ -972,7 +972,7 @@
                 return;
             }
             statusEl.innerHTML = '<div class="status-box info">Saving and testing Claude Code...</div>';
-            fetch('/setup/save', {
+            i18n.managementFetch('/setup/save', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ claudeCode: payload })
@@ -1021,7 +1021,7 @@
             }
             statusEl.innerHTML = '<div class="status-box info">' + _t('saving_testing') + '</div>';
             // Save browser config first so server can test it
-            fetch('/setup/save', {
+            i18n.managementFetch('/setup/save', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -1048,7 +1048,7 @@
                 return;
             }
             document.getElementById('agent-status').innerHTML = '<div class="status-box info">' + _t('saving_detecting') + '</div>';
-            fetch('/setup/save', {
+            i18n.managementFetch('/setup/save', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ openclaw: { homePath: path } })
@@ -1249,7 +1249,7 @@
             var statusEl = document.getElementById('save-status');
             statusEl.innerHTML = '<div class="status-box info">' + _t('saving') + '</div>';
 
-            fetch('/setup/save', {
+            i18n.managementFetch('/setup/save', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(config)

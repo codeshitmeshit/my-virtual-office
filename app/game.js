@@ -14261,7 +14261,7 @@ function mmTestHermes() {
     if (apiKey.trim()) hermesSave.apiKey = apiKey.trim();
     var platformToken = ((document.getElementById('mm-hermes-platform-token') || {}).value || '').trim();
     if (platformToken) hermesSave.platformToken = platformToken;
-    fetch('/setup/save', {
+    i18n.managementFetch('/setup/save', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ hermes: hermesSave })
@@ -14311,7 +14311,7 @@ function mmDiscoverHermesDesktop() {
                 desktopHostHeader: d.desktopHostHeader || payload.desktopHostHeader || null,
                 preferDesktop: true
             };
-            fetch('/setup/save', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({hermes:discovered})}).catch(function(){});
+            i18n.managementFetch('/setup/save', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({hermes:discovered})}).catch(function(){});
         }
         if (statusEl) statusEl.innerHTML = '<div class="mm-status ' + (d.ok ? 'ok' : 'err') + '">' + escHtml(d.ok ? (typeof i18n !== 'undefined' ? i18n.t('hermes_desktop_discovered') : 'Hermes Desktop discovered') : (d.error || d.message || (typeof i18n !== 'undefined' ? i18n.t('hermes_discovery_complete') : 'Discovery complete'))) + '</div>';
       }).catch(function(e){ if (statusEl) statusEl.innerHTML = '<div class="mm-status err">' + escHtml(e.message) + '</div>'; });
@@ -14405,7 +14405,7 @@ function mmTestCodex() {
         includeMain: !!(document.getElementById('mm-codex-include-main') || {}).checked,
         includeNativeAgents: !!(document.getElementById('mm-codex-include-native') || {}).checked
     };
-    fetch('/setup/save', {
+    i18n.managementFetch('/setup/save', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ codex: cfg })
@@ -14434,7 +14434,7 @@ function mmTestClaudeCode() {
         includeNativeAgents: !!(document.getElementById('mm-claude-code-include-native') || {}).checked,
         registerNativeAgents: !!(document.getElementById('mm-claude-code-register-native') || {}).checked
     };
-    fetch('/setup/save', {
+    i18n.managementFetch('/setup/save', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ claudeCode: cfg })
@@ -14454,7 +14454,7 @@ function mmTestCdp() {
     if (!cdpUrl) { statusEl.innerHTML = '<div class="mm-status err">' + _tr('enter_cdp_first') + '</div>'; return; }
     statusEl.innerHTML = '<div class="mm-status">' + _tr('saving_testing') + '</div>';
     // Save first, then test
-    fetch('/setup/save', {
+    i18n.managementFetch('/setup/save', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -14486,7 +14486,7 @@ function mmTestViewer() {
     if (!viewerUrl) { statusEl.innerHTML = '<div class="mm-status err">' + _tr('enter_viewer_first') + '</div>'; return; }
     statusEl.innerHTML = '<div class="mm-status">' + _tr('saving_testing') + '</div>';
     // Save first, then test
-    fetch('/setup/save', {
+    i18n.managementFetch('/setup/save', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -14510,7 +14510,7 @@ function mmTestPcMetrics() {
     var statusEl = document.getElementById('mm-pcmetrics-status');
     if (!url) { statusEl.innerHTML = '<div class="mm-status err">' + _tr('enter_metrics_url') + '</div>'; return; }
     statusEl.innerHTML = '<div class="mm-status info">' + _tr('saving_testing') + '</div>';
-    fetch('/setup/save', {
+    i18n.managementFetch('/setup/save', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ features: { pcMetrics: true }, pcMetrics: { url: url } })
@@ -14547,7 +14547,7 @@ function mmTestConnection() {
     if (ocPath) saveBody.openclaw.homePath = ocPath;
     if (gwToken) saveBody.openclaw.gatewayToken = gwToken;
 
-    fetch('/setup/save', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(saveBody) })
+    i18n.managementFetch('/setup/save', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(saveBody) })
     .then(function() {
         // Test agents (OpenClaw path)
         return fetch('/api/agents').then(function(r){ return r.json(); });
@@ -15118,7 +15118,7 @@ function mmSaveSettings() {
         if (_feishuChatAppSecretValue && !mmIsMaskedFeishuValue(_feishuChatAppSecretValue)) config.feishu.chatApp.appSecret = _feishuChatAppSecretValue;
     }
 
-    fetch('/setup/save', {
+    i18n.managementFetch('/setup/save', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(config)

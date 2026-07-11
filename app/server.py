@@ -25875,7 +25875,8 @@ def _browser_viewer_password():
     return urllib.parse.unquote(parsed.password or "")
 
 
-_MANAGEMENT_TOKEN = str(os.environ.get("VO_MANAGEMENT_TOKEN") or secrets.token_urlsafe(32))
+_CONFIGURED_MANAGEMENT_TOKEN = str(os.environ.get("VO_MANAGEMENT_TOKEN") or "")
+_MANAGEMENT_TOKEN = _CONFIGURED_MANAGEMENT_TOKEN or secrets.token_urlsafe(32)
 
 
 class OfficeHandler(http.server.SimpleHTTPRequestHandler):
@@ -28650,15 +28651,14 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             return
         # --- SETUP WIZARD ---
         elif self.path == "/setup/save":
-            length = int(self.headers.get('Content-Length', 0))
-            try:
-                body = json.loads(self.rfile.read(length)) if length else {}
-            except json.JSONDecodeError as e:
-                self.send_response(400)
+            if self._reject_untrusted_management_request():
+                return
+            body, error = self._read_limited_json_body()
+            if error:
+                self.send_response(error.pop("_status"))
                 self.send_header("Content-Type", "application/json")
-                self.send_header("Access-Control-Allow-Origin", "*")
                 self.end_headers()
-                self.wfile.write(json.dumps({"ok": False, "error": f"Invalid JSON: {str(e)}"}).encode())
+                self.wfile.write(json.dumps(error).encode())
                 return
             try:
                 result = _persist_setup_payload(body)
@@ -29529,8 +29529,11 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(json.dumps(result).encode())
         elif self.path == "/api/native-models/openclaw/auth/api-key":
-            length = int(self.headers.get('Content-Length', 0))
-            body = json.loads(self.rfile.read(length)) if length else {}
+            if self._reject_untrusted_management_request():
+                return
+            body, error = self._read_limited_json_body()
+            if error:
+                self.send_response(error.pop("_status")); self.send_header("Content-Type", "application/json"); self.end_headers(); self.wfile.write(json.dumps(error).encode()); return
             result = _save_openclaw_api_key(body.get("provider", ""), body.get("apiKey", ""), body.get("profileId", ""), agent_id=body.get("agent") or body.get("agentId") or "main", sync_all=True)
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -29538,8 +29541,11 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(json.dumps(result).encode())
         elif self.path == "/api/native-models/openclaw/auth/delete":
-            length = int(self.headers.get('Content-Length', 0))
-            body = json.loads(self.rfile.read(length)) if length else {}
+            if self._reject_untrusted_management_request():
+                return
+            body, error = self._read_limited_json_body()
+            if error:
+                self.send_response(error.pop("_status")); self.send_header("Content-Type", "application/json"); self.end_headers(); self.wfile.write(json.dumps(error).encode()); return
             result = _delete_openclaw_auth(body.get("provider", ""), body.get("profileId", ""), agent_id=body.get("agent") or body.get("agentId") or "main", sync_all=True)
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -29627,8 +29633,11 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(json.dumps(result).encode())
         elif self.path == "/config/providers/save-key":
-            length = int(self.headers.get('Content-Length', 0))
-            body = json.loads(self.rfile.read(length)) if length else {}
+            if self._reject_untrusted_management_request():
+                return
+            body, error = self._read_limited_json_body()
+            if error:
+                self.send_response(error.pop("_status")); self.send_header("Content-Type", "application/json"); self.end_headers(); self.wfile.write(json.dumps(error).encode()); return
             result = self._save_provider_key(body.get("provider", ""), body.get("key", ""))
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -29636,8 +29645,11 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(json.dumps(result).encode())
         elif self.path == "/config/providers/delete-key":
-            length = int(self.headers.get('Content-Length', 0))
-            body = json.loads(self.rfile.read(length)) if length else {}
+            if self._reject_untrusted_management_request():
+                return
+            body, error = self._read_limited_json_body()
+            if error:
+                self.send_response(error.pop("_status")); self.send_header("Content-Type", "application/json"); self.end_headers(); self.wfile.write(json.dumps(error).encode()); return
             result = self._delete_provider_key(body.get("provider", ""), body.get("profileId", ""))
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -30981,7 +30993,10 @@ def start_http_server():
 
     _oname = VO_CONFIG["office"]["name"]
     print(f"🏢 {_oname} → http://localhost:{PORT}")
-    print(f"🔐 Management token: {_MANAGEMENT_TOKEN}")
+    if _CONFIGURED_MANAGEMENT_TOKEN:
+        print(f"🔐 Management token configured (sha256:{hashlib.sha256(_MANAGEMENT_TOKEN.encode()).hexdigest()[:12]})")
+    else:
+        print(f"🔐 Ephemeral management token: {_MANAGEMENT_TOKEN}")
     server = http.server.ThreadingHTTPServer(("0.0.0.0", PORT), OfficeHandler)
     server.serve_forever()
 

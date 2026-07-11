@@ -450,7 +450,7 @@ function setNativeStatus(id, data, okText) {
 
 async function postNativeJson(url, body) {
     const request = { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) };
-    const res = url.startsWith('/api/native-models/openclaw/auth/')
+    const res = url === '/setup/save' || url.startsWith('/api/native-models/openclaw/auth/') || url.startsWith('/config/providers/')
         ? await i18n.managementFetch(url, request)
         : await fetch(url, request);
     return await res.json();
@@ -657,7 +657,7 @@ function renderCloudProviders() {
         }
         html += '</div>';
     }
-    await postJson('/setup/save', { codex: codexSetupPayload() });
+    await postNativeJson('/setup/save', { codex: codexSetupPayload() });
     const data = await postJson('/api/codex/test', codexSetupPayload());
     const text = data.ok
         ? 'Codex connected · ' + (data.protocol || 'codex') + ' · ' + ((data.agents || []).length) + ' agent' + (((data.agents || []).length) === 1 ? '' : 's')
@@ -670,7 +670,7 @@ function renderCloudProviders() {
 }
 
 async function saveClaudeCodeSetup() {
-    const data = await postJson('/setup/save', { claudeCode: claudeCodeSetupPayload() });
+    const data = await postNativeJson('/setup/save', { claudeCode: claudeCodeSetupPayload() });
     setStatus('setup-claude-status', data, 'Claude Code setup saved');
     if (data.ok) setTimeout(reloadNative, 800);
 }
@@ -728,7 +728,7 @@ async function saveClaudeCodeSetup() {
 }
 
 async function saveOpenClawApiKey() {
-    const data = await postJson('/api/native-models/openclaw/auth/api-key', { provider:val('oc-key-provider'), profileId:val('oc-key-profile'), apiKey:val('oc-key-value') });
+    const data = await postNativeJson('/api/native-models/openclaw/auth/api-key', { provider:val('oc-key-provider'), profileId:val('oc-key-profile'), apiKey:val('oc-key-value') });
     setStatus('oc-key-status', data, 'Saved ' + (data.profileId || data.provider));
     if (data.ok) { document.getElementById('oc-key-value').value = ''; setTimeout(reloadNative, 800); }
 }
@@ -745,7 +745,7 @@ async function saveKey(provider) {
     if (!key) { status.className = 'status-msg err'; status.textContent = i18n.t('enter_api_key'); return; }
     status.textContent = i18n.t('saving');
     try {
-        const res = await fetch('/config/providers/save-key', {
+        const res = await i18n.managementFetch('/config/providers/save-key', {
             method: 'POST', headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({ provider: baseProvider, key })
         });
@@ -768,7 +768,7 @@ async function deleteKey(provider, profileId='') {
     const status = document.getElementById('key-status-' + provider);
     status.textContent = i18n.t('deleting');
     try {
-        const res = await fetch('/config/providers/delete-key', {
+        const res = await i18n.managementFetch('/config/providers/delete-key', {
             method: 'POST', headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({ provider: baseProvider, profileId })
         });
