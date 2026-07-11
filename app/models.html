@@ -450,7 +450,7 @@ function setNativeStatus(id, data, okText) {
 
 async function postNativeJson(url, body) {
     const request = { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) };
-    const res = url === '/setup/save' || url.startsWith('/api/native-models/openclaw/auth/') || url.startsWith('/config/providers/')
+    const res = url === '/setup/save' || url.startsWith('/api/native-models/') || url.startsWith('/config/providers/')
         ? await i18n.managementFetch(url, request)
         : await fetch(url, request);
     return await res.json();
@@ -658,7 +658,7 @@ function renderCloudProviders() {
         html += '</div>';
     }
     await postNativeJson('/setup/save', { codex: codexSetupPayload() });
-    const data = await postJson('/api/codex/test', codexSetupPayload());
+    const data = await postNativeJson('/api/codex/test', codexSetupPayload());
     const text = data.ok
         ? 'Codex connected · ' + (data.protocol || 'codex') + ' · ' + ((data.agents || []).length) + ' agent' + (((data.agents || []).length) === 1 ? '' : 's')
         : (data.error || 'Codex test failed');
@@ -957,25 +957,25 @@ function renderLMStudio() {
 
 async function deleteOpenClawProviderById(provider, statusId = 'oc-delete-status') {
     if (!provider || !confirm('Delete OpenClaw provider ' + provider + '?')) return;
-    const data = await postJson('/api/native-models/openclaw/provider/delete', { provider });
+    const data = await postNativeJson('/api/native-models/openclaw/provider/delete', { provider });
     setStatus(statusId, data, 'Deleted ' + provider);
     if (data.ok) setTimeout(reloadNative, 800);
 }
 
 async function setOpenClawAgentModel(agentId) {
-    const data = await postJson('/api/native-models/openclaw/agent-model', { agent:agentId, model:val('oc-agent-' + agentId) });
+    const data = await postNativeJson('/api/native-models/openclaw/agent-model', { agent:agentId, model:val('oc-agent-' + agentId) });
     setStatus('oc-agent-status-' + agentId, data, 'Applied');
     if (data.ok) setTimeout(reloadNative, 800);
 }
 
 async function saveHermesApiKey() {
-    const data = await postJson('/api/native-models/hermes/auth/api-key', { provider:val('hm-key-provider'), label:val('hm-key-label'), apiKey:val('hm-key-value') });
+    const data = await postNativeJson('/api/native-models/hermes/auth/api-key', { provider:val('hm-key-provider'), label:val('hm-key-label'), apiKey:val('hm-key-value') });
     setStatus('hm-key-status', data, 'Saved ' + (data.label || data.provider));
     if (data.ok) { document.getElementById('hm-key-value').value = ''; setTimeout(reloadNative, 800); }
 }
 
 async function saveHermesProvider() {
-    const data = await postJson('/api/native-models/hermes/provider', { profile:val('hm-provider-profile'), provider:val('hm-provider-id'), baseUrl:val('hm-provider-url'), models:val('hm-provider-models') });
+    const data = await postNativeJson('/api/native-models/hermes/provider', { profile:val('hm-provider-profile'), provider:val('hm-provider-id'), baseUrl:val('hm-provider-url'), models:val('hm-provider-models') });
     setStatus('hm-provider-status', data, 'Saved ' + (data.provider || 'provider'));
     if (data.ok) setTimeout(reloadNative, 800);
 }
@@ -987,7 +987,7 @@ async function saveHermesLocalProvider(index) {
         baseUrl: val('hm-local-provider-url-' + index),
         models: val('hm-local-provider-models-' + index)
     };
-    const data = await postJson('/api/native-models/hermes/provider', body);
+    const data = await postNativeJson('/api/native-models/hermes/provider', body);
     setStatus('hm-local-provider-status-' + index, data, 'Saved ' + (data.provider || body.provider));
     if (data.ok) setTimeout(reloadNative, 800);
 }
@@ -1007,13 +1007,13 @@ async function deleteHermesLocalProvider(index) {
 
 async function deleteHermesProviderByValues(profile, provider, statusId = 'hm-delete-status') {
     if (!provider || !confirm('Delete Hermes custom aliases/cache for ' + provider + '?')) return;
-    const data = await postJson('/api/native-models/hermes/provider/delete', { profile: profile || 'default', provider });
+    const data = await postNativeJson('/api/native-models/hermes/provider/delete', { profile: profile || 'default', provider });
     setStatus(statusId, data, 'Deleted ' + provider);
     if (data.ok) setTimeout(reloadNative, 800);
 }
 
 async function deleteHermesAuth() {
-    const data = await postJson('/api/native-models/hermes/auth/delete', { provider:val('hm-delete-provider'), target:val('hm-delete-auth-target') });
+    const data = await postNativeJson('/api/native-models/hermes/auth/delete', { provider:val('hm-delete-provider'), target:val('hm-delete-auth-target') });
     setStatus('hm-delete-status', data, 'Deleted auth');
     if (data.ok) setTimeout(reloadNative, 800);
 }
@@ -1021,7 +1021,7 @@ async function deleteHermesAuth() {
 async function setHermesProfileModel(profileId) {
     const modelValue = val('hm-model-' + profileId);
     const model = modelValue.includes('/') ? modelValue.split('/').slice(1).join('/') : modelValue;
-    const data = await postJson('/api/native-models/hermes/profile-model', { profile:profileId, provider:val('hm-prov-' + profileId), model });
+    const data = await postNativeJson('/api/native-models/hermes/profile-model', { profile:profileId, provider:val('hm-prov-' + profileId), model });
     setStatus('hm-status-' + profileId, data, 'Applied');
     if (data.ok) setTimeout(reloadNative, 800);
 }

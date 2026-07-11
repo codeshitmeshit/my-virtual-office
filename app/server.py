@@ -28565,6 +28565,17 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
     def do_POST(self):
         parsed_url = urllib.parse.urlparse(self.path)
         request_path = parsed_url.path
+        if request_path.startswith("/api/native-models/") or request_path.startswith("/config/providers/"):
+            if self._reject_untrusted_management_request():
+                return
+            try:
+                management_length = int(self.headers.get("Content-Length", 0) or 0)
+            except (TypeError, ValueError):
+                self.send_error(400, "Invalid Content-Length")
+                return
+            if management_length < 0 or management_length > self._MANAGEMENT_BODY_LIMIT:
+                self.send_error(413, "Request body is too large")
+                return
         # --- SETUP WIZARD ---
         if request_path in {"/api/chat-sessions/create", "/api/chat-sessions/delete", "/api/chat-sessions/switch"}:
             if self._reject_untrusted_management_request():
