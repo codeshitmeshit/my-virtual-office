@@ -1,0 +1,21 @@
+docker-compose.yml
+  s_0961bafd576825::t_ef109264b97c50 22
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "bbf7b91033552c51d09989482e472b2660cb9cdb",
+  "prompts": {},
+  "sessions": {
+    "s_0961bafd576825": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4fa5-0033-7d23-8294-2e044aa6853a",
+        "model": "unknown"
+      },
+      "human_author": "codeshitmeshit <codeshitmeshit@126.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
