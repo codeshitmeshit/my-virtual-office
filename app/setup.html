@@ -228,16 +228,16 @@
                     <input type="text" id="s-hermes-api-url" placeholder="http://127.0.0.1:8642">
                     <label>Hermes API Key</label>
                     <input type="password" id="s-hermes-api-key" placeholder="Leave blank to keep existing key" autocomplete="off">
-                    <label>Hermes Desktop URL</label>
+                    <label data-i18n="hermes_desktop_url">Hermes Desktop URL</label>
                     <input type="text" id="s-hermes-desktop-url" placeholder="http://127.0.0.1:8643">
                     <div class="form-row">
-                        <input type="text" id="s-hermes-desktop-tcp-host" placeholder="Desktop TCP route host">
-                        <input type="number" id="s-hermes-desktop-tcp-port" placeholder="Port">
+                        <input type="text" id="s-hermes-desktop-tcp-host" data-i18n-placeholder="hermes_tcp_route_host" placeholder="Desktop TCP route host">
+                        <input type="number" id="s-hermes-desktop-tcp-port" data-i18n-placeholder="hermes_tcp_port_placeholder" placeholder="Port">
                     </div>
-                    <input type="text" id="s-hermes-desktop-host-header" placeholder="Logical Host header">
-                    <button type="button" class="btn secondary" onclick="discoverHermesDesktop()">🔎 Auto Discover Desktop App</button>
-                    <label class="checkbox-label"><input type="checkbox" id="s-hermes-platform-enable"> Enable Hermes Messaging Gateway Platform</label>
-                    <input type="password" id="s-hermes-platform-token" placeholder="Shared platform token" autocomplete="off">
+                    <input type="text" id="s-hermes-desktop-host-header" data-i18n-placeholder="hermes_logical_host_header" placeholder="Logical Host header">
+                    <button type="button" class="btn secondary" onclick="discoverHermesDesktop()">🔎 <span data-i18n="hermes_auto_discover_desktop">Auto Discover Desktop App</span></button>
+                    <label class="checkbox-label"><input type="checkbox" id="s-hermes-platform-enable"> <span data-i18n="enable_hermes_messaging_gateway_platform">Enable Hermes Messaging Gateway Platform</span></label>
+                    <input type="password" id="s-hermes-platform-token" data-i18n-placeholder="hermes_shared_platform_token" placeholder="Shared platform token" autocomplete="off">
                     <input type="text" id="s-hermes-platform-agent" placeholder="hermes-gateway">
                     <div style="font-size:12px;color:#666;margin:6px 0 12px;line-height:1.5;" data-i18n="hermes_docker_hint_setup">Running in Docker? Mount the Hermes home/CLI into the container and enter the mounted paths.</div>
                     <button onclick="testHermesConnection()" style="margin:0 0 12px;padding:8px 16px;font-size:9px;" data-i18n="test_hermes_btn">🔍 TEST HERMES</button>
@@ -849,7 +849,7 @@
                     discovered.preferDesktop = true;
                     fetch('/setup/save', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({hermes:discovered})}).catch(function(){});
                 }
-                document.getElementById('hermes-test-status').textContent = d.message || d.error || 'Discovery complete';
+                document.getElementById('hermes-test-status').textContent = d.ok ? i18n.t('hermes_desktop_discovered') : (d.error || d.message || i18n.t('hermes_discovery_complete'));
               });
         }
 
@@ -884,7 +884,7 @@
                 if (d.ok) {
                     var agents = d.agents || [];
                     var api = d.api || {};
-                    var apiLine = apiEnabled ? '<br>Native API: ' + (api.ok ? 'connected' : ('unavailable' + (api.error ? ' · ' + _esc(api.error) : ''))) : '';
+                    var apiLine = apiEnabled ? '<br>' + _t('native_api') + ': ' + (api.ok ? _t('native_status_available') : (_t('native_status_unavailable') + (api.error ? ' · ' + _esc(api.error) : ''))) : '';
                     var html = '<div class="status-box success">' + _t('hermes_connected_profiles', { count: agents.length }) + apiLine + '</div>';
                     if (agents.length) {
                         html += '<div class="agent-list-preview">';

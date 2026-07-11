@@ -7,6 +7,7 @@ its focused unit test still passes.
 """
 
 import ast
+import json
 from pathlib import Path
 
 
@@ -99,6 +100,15 @@ def main():
     check("Managed session switch rebinds provider SSE", "this.updateProviderEventSource()" in switch_session_source)
     check("Managed session list highlights provider conversation", "session.id === activeConversationId" in chat_source)
     check("Managed session delete sends provider conversation", "sessionKey: session.sessionKey, conversationId" in chat_source)
+    check("Session browser user-facing strings use i18n", all(text not in chat_source for text in ("No sessions yet", "Sessions unavailable", "Session switch failed", "New session failed", "Session delete failed")))
+
+    en_locale = json.loads((ROOT / "app" / "locales" / "en.json").read_text(encoding="utf-8"))
+    zh_locale = json.loads((ROOT / "app" / "locales" / "zh.json").read_text(encoding="utf-8"))
+    new_i18n_keys = {
+        "chat_no_sessions", "chat_session_live_mode", "chat_session_switch_failed",
+        "hermes_auto_discover_desktop", "hermes_gateway_platform", "hermes_platform_token",
+    }
+    check("Session and Hermes settings translations exist in both locales", new_i18n_keys <= en_locale.keys() and new_i18n_keys <= zh_locale.keys())
 
     settings = MODELS.read_text(encoding="utf-8") + GAME.read_text(encoding="utf-8") + SETUP.read_text(encoding="utf-8")
     check("All settings surfaces expose Desktop discovery", settings.count("/api/hermes/desktop/discover") >= 3)

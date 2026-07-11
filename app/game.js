@@ -14276,7 +14276,7 @@ function mmTestHermes() {
             var count = (d.agents || []).length;
             var names = (d.agents || []).slice(0, 5).map(function(a){ return (a.emoji || '⚕️') + ' ' + a.name + (a.model ? ' · ' + a.model : ''); }).join('<br>');
             var api = d.api || {};
-            var apiLine = apiEnabled ? '<br>Native API: ' + (api.ok ? 'connected' : ('unavailable' + (api.error ? ' · ' + escHtml(api.error) : ''))) : '';
+            var apiLine = apiEnabled ? '<br>' + _tr('native_api') + ': ' + (api.ok ? _tr('native_status_available') : (_tr('native_status_unavailable') + (api.error ? ' · ' + escHtml(api.error) : ''))) : '';
             statusEl.innerHTML = '<div class="mm-status ok">' + _tr('hermes_connected_profiles', { count: count }) + apiLine + (names ? '<br>' + names : '') + '</div>';
         } else {
             statusEl.innerHTML = '<div class="mm-status err">❌ ' + _tr('hermes_not_reachable') + ': ' + escHtml(d.error || _tr('unknown')) + '</div>';
@@ -14295,7 +14295,7 @@ function mmDiscoverHermesDesktop() {
         desktopTcpPort: (document.getElementById('mm-hermes-desktop-tcp-port') || {}).value || '',
         desktopHostHeader: (document.getElementById('mm-hermes-desktop-host-header') || {}).value || ''
     };
-    if (statusEl) statusEl.innerHTML = '<div class="mm-status info">Discovering Hermes Desktop…</div>';
+    if (statusEl) statusEl.innerHTML = '<div class="mm-status info">' + escHtml(typeof i18n !== 'undefined' ? i18n.t('hermes_discovering_desktop') : 'Discovering Hermes Desktop…') + '</div>';
     fetch('/api/hermes/desktop/discover', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)})
       .then(function(r){ return r.json(); }).then(function(d){
         if (d.desktopUrl) document.getElementById('mm-hermes-desktop-url').value = d.desktopUrl;
@@ -14313,7 +14313,7 @@ function mmDiscoverHermesDesktop() {
             };
             fetch('/setup/save', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({hermes:discovered})}).catch(function(){});
         }
-        if (statusEl) statusEl.innerHTML = '<div class="mm-status ' + (d.ok ? 'ok' : 'err') + '">' + escHtml(d.message || d.error || 'Discovery complete') + '</div>';
+        if (statusEl) statusEl.innerHTML = '<div class="mm-status ' + (d.ok ? 'ok' : 'err') + '">' + escHtml(d.ok ? (typeof i18n !== 'undefined' ? i18n.t('hermes_desktop_discovered') : 'Hermes Desktop discovered') : (d.error || d.message || (typeof i18n !== 'undefined' ? i18n.t('hermes_discovery_complete') : 'Discovery complete'))) + '</div>';
       }).catch(function(e){ if (statusEl) statusEl.innerHTML = '<div class="mm-status err">' + escHtml(e.message) + '</div>'; });
 }
 

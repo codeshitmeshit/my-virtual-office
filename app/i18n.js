@@ -170,6 +170,7 @@
      * - data-i18n="key" — replaces textContent
      * - data-i18n-title="key" — replaces title attribute
      * - data-i18n-placeholder="key" — replaces placeholder attribute
+     * - data-i18n-aria-label="key" — replaces aria-label attribute
      * - data-i18n-html="key" — replaces innerHTML
      */
     function applyTranslations() {
@@ -196,6 +197,13 @@
         for (var i = 0; i < els.length; i++) {
             var key = els[i].getAttribute('data-i18n-placeholder');
             els[i].setAttribute('placeholder', t(key));
+        }
+
+        // data-i18n-aria-label: aria-label attribute
+        els = document.querySelectorAll('[data-i18n-aria-label]');
+        for (i = 0; i < els.length; i++) {
+            var key = els[i].getAttribute('data-i18n-aria-label');
+            els[i].setAttribute('aria-label', t(key));
         }
     }
 

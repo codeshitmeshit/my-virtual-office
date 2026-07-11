@@ -77,16 +77,16 @@
                                 <input type="text" id="mm-hermes-api-url" class="mm-input" placeholder="http://127.0.0.1:8642">
                                 <label class="mm-label" data-i18n="hermes_api_key">Hermes API Key</label>
                                 <input type="password" id="mm-hermes-api-key" class="mm-input" data-i18n-placeholder="leave_blank_keep_key" placeholder="Leave blank to keep existing key" autocomplete="off">
-                                <label class="mm-label">Hermes Desktop URL</label>
+                                <label class="mm-label" data-i18n="hermes_desktop_url">Hermes Desktop URL</label>
                                 <input type="text" id="mm-hermes-desktop-url" class="mm-input" placeholder="http://127.0.0.1:8643">
                                 <div style="display:grid;grid-template-columns:1fr 110px;gap:6px">
-                                    <input type="text" id="mm-hermes-desktop-tcp-host" class="mm-input" placeholder="TCP route host">
-                                    <input type="number" id="mm-hermes-desktop-tcp-port" class="mm-input" placeholder="Port">
+                                    <input type="text" id="mm-hermes-desktop-tcp-host" class="mm-input" data-i18n-placeholder="hermes_tcp_route_host" placeholder="Desktop TCP route host">
+                                    <input type="number" id="mm-hermes-desktop-tcp-port" class="mm-input" data-i18n-placeholder="hermes_tcp_port_placeholder" placeholder="Port">
                                 </div>
-                                <input type="text" id="mm-hermes-desktop-host-header" class="mm-input" placeholder="Logical Host header">
-                                <button class="mm-btn" onclick="mmDiscoverHermesDesktop()">🔎 Auto Discover Desktop App</button>
-                                <label class="mm-checkbox"><input type="checkbox" id="mm-hermes-platform-enable"> Hermes Messaging Gateway Platform</label>
-                                <input type="password" id="mm-hermes-platform-token" class="mm-input" placeholder="Shared platform token" autocomplete="off">
+                                <input type="text" id="mm-hermes-desktop-host-header" class="mm-input" data-i18n-placeholder="hermes_logical_host_header" placeholder="Logical Host header">
+                                <button class="mm-btn" onclick="mmDiscoverHermesDesktop()">🔎 <span data-i18n="hermes_auto_discover_desktop">Auto Discover Desktop App</span></button>
+                                <label class="mm-checkbox"><input type="checkbox" id="mm-hermes-platform-enable"> <span data-i18n="hermes_messaging_gateway_platform">Hermes Messaging Gateway Platform</span></label>
+                                <input type="password" id="mm-hermes-platform-token" class="mm-input" data-i18n-placeholder="hermes_shared_platform_token" placeholder="Shared platform token" autocomplete="off">
                                 <input type="text" id="mm-hermes-platform-agent" class="mm-input" placeholder="hermes-gateway">
                                 <div style="font-size:9px;color:#666;margin:4px 0 8px;" data-i18n="hermes_docker_hint">For Docker, mount the Hermes home/CLI into the container and use the mounted paths here.</div>
                                 <button class="mm-btn mm-btn-primary" onclick="mmTestHermes()" data-i18n="test_hermes">🔍 Test Hermes</button>
@@ -932,7 +932,7 @@
         <div id="chat-resize-handle-bottom-left"   class="chat-resize-handle bottom-left"></div>
         <div id="chat-resize-handle-left"          class="chat-resize-handle left"></div>
         <div class="chat-header">
-            <button id="chat-sessions-toggle" class="chat-sessions-toggle" title="Sessions">☰</button>
+            <button id="chat-sessions-toggle" class="chat-sessions-toggle" data-i18n-title="chat_sessions" title="Sessions">☰</button>
             <select id="chat-agent-select" class="chat-agent-select" title="Switch agent" data-i18n-title="switch_agent">
                 <option value="main" data-emoji="🤖" data-name="Main Agent" selected>🤖 Main Agent</option>
             </select>
@@ -941,7 +941,7 @@
             <span style="flex:1"></span>
             <div class="chat-header-btns">
                 <button id="chat-compact-context" class="chat-compact-context" title="Compress Codex context" style="display:none" data-i18n-title="compress_codex_context">🗜</button>
-                <button id="chat-new-session" class="chat-new-session" data-i18n-title="new_session" title="New Session">🔄</button>
+                <button id="chat-new-session" class="chat-new-session" data-i18n-title="chat_new_session" title="New Session">🔄</button>
                 <button id="chat-move" class="chat-move-btn" title="Move/snap chat window" data-i18n-title="move_chat_window">⇱</button>
                 <button id="chat-close" class="chat-close">&times;</button>
             </div>
@@ -951,10 +951,10 @@
             <span id="chat-context-info" class="chat-context-info">— / —</span>
         </div>
         <div class="chat-body">
-            <div id="chat-sessions-panel" class="chat-sessions-panel" aria-label="Sessions">
+            <div id="chat-sessions-panel" class="chat-sessions-panel" data-i18n-aria-label="chat_sessions" aria-label="Sessions">
                 <div class="chat-sessions-head">
-                    <span class="chat-sessions-title">Sessions</span>
-                    <button id="chat-sessions-new" class="chat-sessions-new" title="New session">+</button>
+                    <span class="chat-sessions-title" data-i18n="chat_sessions">Sessions</span>
+                    <button id="chat-sessions-new" class="chat-sessions-new" data-i18n-title="chat_new_session" title="New session">+</button>
                 </div>
                 <div id="chat-sessions-list" class="chat-sessions-list"></div>
             </div>

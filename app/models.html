@@ -346,17 +346,17 @@ function renderHermesNativeForm(p) {
         <div class="row"><label>${i18n.t('native_cli')}</label><input id="native-hermes-bin" value="${escAttr(p.binary || '')}" placeholder="hermes or /path/to/hermes"></div>
         <div class="row"><label>${i18n.t('native_api_url')}</label><input id="native-hermes-api-url" value="${escAttr(p.apiUrl || '')}" placeholder="http://127.0.0.1:8642"></div>
         <div class="row"><label>${i18n.t('native_api_key')}</label><input id="native-hermes-api-key" type="password" autocomplete="off" placeholder="${escAttr(i18n.t('leave_blank_keep_key'))}"></div>
-        <div class="row"><label>Desktop URL</label><input id="native-hermes-desktop-url" value="${escAttr(p.desktopUrl || '')}" placeholder="http://127.0.0.1:8643"></div>
-        <div class="row"><label>Desktop TCP Host</label><input id="native-hermes-desktop-host" value="${escAttr(p.desktopTcpHost || '')}" placeholder="host.docker.internal"></div>
-        <div class="row"><label>Desktop TCP Port</label><input id="native-hermes-desktop-port" value="${escAttr(p.desktopTcpPort || '')}" placeholder="8643"></div>
-        <div class="row"><label>Desktop Host Header</label><input id="native-hermes-desktop-header" value="${escAttr(p.desktopHostHeader || '')}" placeholder="127.0.0.1:8643"></div>
-        <label class="checkbox-line"><input id="native-hermes-platform-enabled" type="checkbox" ${nativeChecked(p.platformEnabled, false)}> Hermes Gateway Platform</label>
-        <div class="row"><label>Platform Token</label><input id="native-hermes-platform-token" type="password" autocomplete="off" placeholder="${escAttr(i18n.t('leave_blank_keep_key'))}"></div>
-        <div class="row"><label>Platform Agent</label><input id="native-hermes-platform-agent" value="${escAttr(p.platformAgentId || 'hermes-gateway')}"></div>
+        <div class="row"><label>${i18n.t('hermes_desktop_url')}</label><input id="native-hermes-desktop-url" value="${escAttr(p.desktopUrl || '')}" placeholder="http://127.0.0.1:8643"></div>
+        <div class="row"><label>${i18n.t('hermes_desktop_tcp_host')}</label><input id="native-hermes-desktop-host" value="${escAttr(p.desktopTcpHost || '')}" placeholder="host.docker.internal"></div>
+        <div class="row"><label>${i18n.t('hermes_desktop_tcp_port')}</label><input id="native-hermes-desktop-port" value="${escAttr(p.desktopTcpPort || '')}" placeholder="8643"></div>
+        <div class="row"><label>${i18n.t('hermes_desktop_host_header')}</label><input id="native-hermes-desktop-header" value="${escAttr(p.desktopHostHeader || '')}" placeholder="127.0.0.1:8643"></div>
+        <label class="checkbox-line"><input id="native-hermes-platform-enabled" type="checkbox" ${nativeChecked(p.platformEnabled, false)}> ${i18n.t('hermes_gateway_platform')}</label>
+        <div class="row"><label>${i18n.t('hermes_platform_token')}</label><input id="native-hermes-platform-token" type="password" autocomplete="off" placeholder="${escAttr(i18n.t('leave_blank_keep_key'))}"></div>
+        <div class="row"><label>${i18n.t('hermes_platform_agent')}</label><input id="native-hermes-platform-agent" value="${escAttr(p.platformAgentId || 'hermes-gateway')}"></div>
         <div class="native-actions">
             <button class="btn btn-green" onclick="saveHermesNativeSetup()">${i18n.t('save')}</button>
             <button class="btn btn-blue" onclick="testHermesNativeSetup()">${i18n.t('test')}</button>
-            <button class="btn btn-blue" onclick="discoverHermesNativeDesktop()">Discover Desktop</button>
+            <button class="btn btn-blue" onclick="discoverHermesNativeDesktop()">${i18n.t('hermes_discover_desktop')}</button>
         </div>
         <p id="native-hermes-status" class="status-msg"></p>`;
 }
@@ -488,7 +488,7 @@ async function discoverHermesNativeDesktop() {
         discovered.preferDesktop = true;
         await postNativeJson('/setup/save', {hermes: discovered});
     }
-    setNativeStatus('native-hermes-status', data, data.message || 'Hermes Desktop discovered');
+    setNativeStatus('native-hermes-status', data, data.ok ? i18n.t('hermes_desktop_discovered') : (data.error || data.message || i18n.t('hermes_discovery_complete')));
 }
 
 function codexNativePayload() {
