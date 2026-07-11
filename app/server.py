@@ -25881,6 +25881,10 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=APP_DIR, **kwargs)
 
+    def setup(self):
+        super().setup()
+        self.connection.settimeout(15)
+
     def end_headers(self):
         if urllib.parse.urlparse(self.path).path.endswith(".woff2"):
             self.send_header("Cache-Control", "public, max-age=31536000, immutable")
@@ -25889,10 +25893,12 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
     def _management_request_allowed(self):
         """Allow local scripts and same-origin UI requests to destructive APIs."""
         client_host = str((self.client_address or ("",))[0] or "")
-        if client_host in {"127.0.0.1", "::1"}:
-            return True
+        if client_host not in {"127.0.0.1", "::1"}:
+            return False
         expected_host = str(self.headers.get("Host") or "").lower()
         source = self.headers.get("Origin") or self.headers.get("Referer") or ""
+        if not source:
+            return True
         source_host = str(urllib.parse.urlparse(source).netloc or "").lower()
         return bool(expected_host and source_host and source_host == expected_host)
 
@@ -32170,8 +32176,13 @@ def _handle_hermes_platform_ack(body):
             if msg.get("id") != message_id:
                 continue
             current_lease_id = str(msg.get("leaseId") or "").strip()
-            if msg.get("status") == "leased" and (not lease_id or lease_id != current_lease_id):
+            if current_lease_id and lease_id != current_lease_id:
                 return {"ok": False, "error": "leaseId does not match current message lease", "_status": 409}
+            current_status = str(msg.get("status") or "queued")
+            if current_status in {"delivered", "replied", "failed"}:
+                return {"ok": True, "messageId": message_id, "status": current_status}
+            if current_status != "leased":
+                return {"ok": False, "error": "message is not currently leased", "_status": 409}
             if ok:
                 if msg.get("status") != "replied":
                     msg["status"] = "delivered"

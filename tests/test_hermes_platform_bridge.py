@@ -116,6 +116,8 @@ def main():
             check("Ack rejects a stale lease", stale_lease_ack.get("_status") == 409, str(stale_lease_ack))
             ack = server._handle_hermes_platform_ack({"messageId": msg_id, "leaseId": lease_id, "ok": True})
             check("Ack marks delivered", ack.get("ok") and ack.get("status") == "delivered", str(ack))
+            late_nack = server._handle_hermes_platform_ack({"messageId": msg_id, "leaseId": lease_id, "ok": False, "error": "response lost"})
+            check("Late nack cannot requeue a delivered message", late_nack.get("status") == "delivered", str(late_nack))
             reply = server._handle_hermes_platform_reply({
                 "adapterId": "adapter-test",
                 "chatId": "user-1__hermes-gateway",
