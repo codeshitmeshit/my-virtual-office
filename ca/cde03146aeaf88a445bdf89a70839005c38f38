@@ -1,0 +1,67 @@
+README.md
+  s_5852bad622de94::t_2e173fcdcd78ce 108-109
+app/i18n.js
+  s_5852bad622de94::t_26d25d0c843929 210-320,328,354
+app/locales/en.json
+  s_5852bad622de94::t_0962a7fdf97862 762-765
+app/locales/zh.json
+  s_5852bad622de94::t_2c697967475f59 762-765
+app/server.py
+  s_5852bad622de94::t_76a19d004e0a09 41,25868,25890-25902,25904-25908,25910-25931,25933-25934,25939,25955-25958,29935-29951
+app/services/__init__.py
+  s_5852bad622de94::t_00dc1419e166f4 1-2
+app/services/project_execution.py
+  s_5852bad622de94::t_db742db4634e3e 1-55
+app/style.css
+  s_5852bad622de94::t_c8939aa7a5b3ea 1174-1228
+docs/SERVICE_BOUNDARIES.md
+  s_5852bad622de94::t_bf0f5923d663ff 1-63
+openspec/changes/extract-http-foundation-and-project-service-pilot/.openspec.yaml
+  s_5852bad622de94::t_9e362537e61041 1-2
+openspec/changes/extract-http-foundation-and-project-service-pilot/design.md
+  s_5852bad622de94::t_5053c318ddea8e 1-175
+openspec/changes/extract-http-foundation-and-project-service-pilot/proposal.md
+  s_5852bad622de94::t_85e3fa3cb6d4a3 1-29
+openspec/changes/extract-http-foundation-and-project-service-pilot/specs/http-service-boundary/spec.md
+  s_5852bad622de94::t_039b9a6674ac32 1-102
+openspec/changes/extract-http-foundation-and-project-service-pilot/tasks.md
+  s_5852bad622de94::t_03f6492c44218d 1-34
+openspec/changes/extract-meeting-and-collaboration-services/.openspec.yaml
+  s_5852bad622de94::t_3f67c0d22bd133 1-2
+openspec/changes/extract-meeting-and-collaboration-services/proposal.md
+  s_5852bad622de94::t_6c5b11994e6470 1-27
+openspec/changes/extract-project-execution-services/.openspec.yaml
+  s_5852bad622de94::t_ad43fe0b0fc912 1-2
+openspec/changes/extract-project-execution-services/proposal.md
+  s_5852bad622de94::t_616f9dad5e0101 1-27
+openspec/changes/extract-provider-services-and-finish-modularization/proposal.md
+  s_5852bad622de94::t_8e31d10eb792be 1-28
+start.sh
+  s_5852bad622de94::t_537395089a047e 481
+tests/test_management_token_dialog.js
+  s_5852bad622de94::t_b2a452db6dda61 1-33
+tests/test_meeting_request_blocks_task.py
+  s_5852bad622de94::t_4527251c085a78 51-60
+tests/test_project_execution.py
+  s_5852bad622de94::t_1b3d3ef81eb7f2 101-110
+tests/test_project_execution_service_boundary.py
+  s_5852bad622de94::t_6bf2540e7f177b 1-287
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "cacde03146aeaf88a445bdf89a70839005c38f38",
+  "prompts": {},
+  "sessions": {
+    "s_5852bad622de94": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f5163-cd74-7df3-a25d-7fd6dd323b5d",
+        "model": "unknown"
+      },
+      "human_author": "codeshitmeshit <codeshitmeshit@126.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
