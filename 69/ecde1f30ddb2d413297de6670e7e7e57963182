@@ -1,0 +1,37 @@
+app/chat.js
+  s_2c1ad674089b59::t_0abad148f59c52 1251,1260,1268,1278,1281,1284,1308,1327,1345
+app/game.js
+  s_2c1ad674089b59::t_4d8029a81c72da 14279,14298,14316
+app/i18n.js
+  s_2c1ad674089b59::t_352f747a119f71 173,201-207
+app/index.html
+  s_2c1ad674089b59::t_d875693dedd254 80,83-84,86-89,935,944,954,956-957
+app/locales/en.json
+  s_2c1ad674089b59::t_b1e5bbe6b1b4e4 759-768,781-798
+app/locales/zh.json
+  s_2c1ad674089b59::t_f229179315c1ab 759-768,781-798
+app/models.html
+  s_2c1ad674089b59::t_534cecdc1112c7 349-355,359,491
+app/setup.html
+  s_2c1ad674089b59::t_bdd0398c073d98 231,234-235,237-240,852,887
+tests/test_merged_change_coverage.py
+  s_2c1ad674089b59::t_602ede8144a2d3 10,103-111
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "69ecde1f30ddb2d413297de6670e7e7e57963182",
+  "prompts": {},
+  "sessions": {
+    "s_2c1ad674089b59": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4ced-a915-7051-97fc-8df97b21d523",
+        "model": "unknown"
+      },
+      "human_author": "codeshitmeshit <codeshitmeshit@126.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
