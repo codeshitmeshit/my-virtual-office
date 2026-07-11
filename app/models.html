@@ -792,7 +792,7 @@ async function addCustomProvider() {
     if (!name || !url) { status.className = 'status-msg err'; status.textContent = i18n.t('name_url_required'); return; }
     status.textContent = i18n.t('saving');
     try {
-        const res = await fetch('/config/providers/save-custom', {
+        const res = await i18n.managementFetch('/config/providers/save-custom', {
             method: 'POST', headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({ provider: name, baseUrl: url, models: [], api })
         });
@@ -830,7 +830,7 @@ async function saveOllamaModel(modelId) {
     });
     status.textContent = i18n.t('saving');
     try {
-        const res = await fetch('/config/providers/save-custom', {
+        const res = await i18n.managementFetch('/config/providers/save-custom', {
             method: 'POST', headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({ provider: 'ollama', baseUrl: normalizeOllamaBaseUrl(ollama.baseUrl), api: 'ollama', apiKey: 'ollama-tailscale-local', timeoutSeconds: ollama.timeoutSeconds || 300, models })
         });
@@ -851,7 +851,7 @@ async function removeOllamaModel(modelId) {
     const ollama = providersData.customProviders.ollama;
     const models = (ollama.models || []).filter(m => m.id !== modelId);
     try {
-        const res = await fetch('/config/providers/save-custom', {
+        const res = await i18n.managementFetch('/config/providers/save-custom', {
             method: 'POST', headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({ provider: 'ollama', baseUrl: normalizeOllamaBaseUrl(ollama.baseUrl), api: 'ollama', apiKey: 'ollama-tailscale-local', timeoutSeconds: ollama.timeoutSeconds || 300, models })
         });
@@ -877,7 +877,7 @@ async function addOllamaModel() {
     }];
     status.textContent = i18n.t('adding');
     try {
-        const res = await fetch('/config/providers/save-custom', {
+        const res = await i18n.managementFetch('/config/providers/save-custom', {
             method: 'POST', headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({ provider: 'ollama', baseUrl: normalizeOllamaBaseUrl(ollama.baseUrl), api: 'ollama', apiKey: 'ollama-tailscale-local', timeoutSeconds: ollama.timeoutSeconds || 300, models })
         });
@@ -1037,7 +1037,7 @@ function reloadNative() {
     });
     status.textContent = i18n.t('saving');
     try {
-        const res = await fetch('/config/providers/save-custom', {
+        const res = await i18n.managementFetch('/config/providers/save-custom', {
             method: 'POST', headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({ provider: 'lmstudio', baseUrl: lms.baseUrl, api: 'openai-completions', timeoutSeconds: lms.timeoutSeconds || 300, models })
         });
@@ -1058,7 +1058,7 @@ async function removeLMStudioModel(modelId) {
     const lms = providersData.customProviders.lmstudio;
     const models = (lms.models || []).filter(m => m.id !== modelId);
     try {
-        const res = await fetch('/config/providers/save-custom', {
+        const res = await i18n.managementFetch('/config/providers/save-custom', {
             method: 'POST', headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({ provider: 'lmstudio', baseUrl: lms.baseUrl, api: 'openai-completions', timeoutSeconds: lms.timeoutSeconds || 300, models })
         });
@@ -1084,7 +1084,7 @@ async function addLMStudioModel() {
     }];
     status.textContent = i18n.t('adding');
     try {
-        const res = await fetch('/config/providers/save-custom', {
+        const res = await i18n.managementFetch('/config/providers/save-custom', {
             method: 'POST', headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({ provider: 'lmstudio', baseUrl: lms.baseUrl, api: 'openai-completions', timeoutSeconds: lms.timeoutSeconds || 300, models })
         });

@@ -1302,7 +1302,7 @@
         const model = sel.value;
         status.textContent = i18n.t('applying');
         try {
-            const res = await fetch('/api/native-models/openclaw/agent-model', {
+            const res = await i18n.managementFetch('/api/native-models/openclaw/agent-model', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ agent: agent.statusKey, model: model })

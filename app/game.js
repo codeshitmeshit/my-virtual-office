@@ -9084,7 +9084,7 @@ async function _agentWorkspaceSetModel(model) {
     var agent = _agentWorkspace.agent;
     var key = _agentWorkspaceKey(agent);
     if (!key) return { ok: false, error: 'No agent selected' };
-    var res = await fetch('/api/native-models/openclaw/agent-model', {
+    var res = await i18n.managementFetch('/api/native-models/openclaw/agent-model', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ agent: key, model: model || '' })
