@@ -1,0 +1,33 @@
+.env.example
+  s_2c1ad674089b59::t_d64f3d040e2f28 16-18
+app/chat.js
+  s_2c1ad674089b59::t_d98097572a98b8 1254,1306,1325,1343
+app/i18n.js
+  s_2c1ad674089b59::t_140c61f5792e51 210-223,237-238
+app/locales/en.json
+  s_2c1ad674089b59::t_bf70eef9cda46e 761
+app/locales/zh.json
+  s_2c1ad674089b59::t_45aa488408b3cc 761
+app/models.html
+  s_2c1ad674089b59::t_8a7690046a914d 452-455
+app/server.py
+  s_2c1ad674089b59::t_04dbad8fc9939a 25878-25880,25897-25899,25907,25918-25933,30984
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "b5bd246b7c9bb9904aca2989dd8cee8985d9f5c2",
+  "prompts": {},
+  "sessions": {
+    "s_2c1ad674089b59": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4ced-a915-7051-97fc-8df97b21d523",
+        "model": "unknown"
+      },
+      "human_author": "codeshitmeshit <codeshitmeshit@126.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
