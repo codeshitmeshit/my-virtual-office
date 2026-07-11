@@ -1,0 +1,27 @@
+app/game.js
+  s_2c1ad674089b59::t_84a738c0217c5c 14264,14314,14408,14437,14457,14489,14513,14550,15121
+app/models.html
+  s_2c1ad674089b59::t_f36f60e329376e 453,660,673,731,748,771
+app/server.py
+  s_2c1ad674089b59::t_f2b975acee30f5 25878-25879,28654-28658,28661,29532-29536,29544-29548,29636-29640,29648-29652,30996-30999
+app/setup.html
+  s_2c1ad674089b59::t_d806c620fe4ff5 805,850,873,945,975,1024,1051,1252
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "8c16484c490de18d33ea2014b9e1e5041b62118c",
+  "prompts": {},
+  "sessions": {
+    "s_2c1ad674089b59": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4ced-a915-7051-97fc-8df97b21d523",
+        "model": "unknown"
+      },
+      "human_author": "codeshitmeshit <codeshitmeshit@126.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
