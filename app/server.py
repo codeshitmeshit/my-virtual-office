@@ -26,6 +26,7 @@ import email.utils
 import re
 import secrets
 import shutil
+import tempfile
 import signal
 import ssl
 import sqlite3
@@ -30993,19 +30994,27 @@ def _atomic_write_text(path, content):
         existing_stat = os.stat(path)
     except OSError:
         pass
-    tmp_path = f"{path}.tmp-{os.getpid()}-{threading.get_ident()}"
-    fd = os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        f.write(content)
-        f.flush()
-        if existing_stat is not None:
+    fd, tmp_path = tempfile.mkstemp(prefix=f".{os.path.basename(path)}.tmp-", dir=os.path.dirname(path))
+    replaced = False
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(content)
+            f.flush()
+            if existing_stat is not None:
+                try:
+                    os.fchmod(f.fileno(), existing_stat.st_mode & 0o777)
+                    os.fchown(f.fileno(), existing_stat.st_uid, existing_stat.st_gid)
+                except OSError:
+                    pass
+            os.fsync(f.fileno())
+        os.replace(tmp_path, path)
+        replaced = True
+    finally:
+        if not replaced:
             try:
-                os.fchmod(f.fileno(), existing_stat.st_mode & 0o777)
-                os.fchown(f.fileno(), existing_stat.st_uid, existing_stat.st_gid)
+                os.unlink(tmp_path)
             except OSError:
                 pass
-        os.fsync(f.fileno())
-    os.replace(tmp_path, path)
 
 
 def _load_openclaw_model_config():

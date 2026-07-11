@@ -114,7 +114,7 @@ Example:
 
 ## Server integration
 
-`app/server.py` only routes Hermes-specific behavior to the Hermes adapter:
+`app/server.py` owns the HTTP routes, Virtual Office state, and run/session/platform orchestration. `app/providers/hermes.py` owns Hermes clients, discovery, and provider-protocol adaptation. The server exposes:
 
 - `/api/hermes/test`
 - `/api/hermes/chat`

@@ -76,6 +76,21 @@ def main():
             server._discovered_roster = server._discover_roster()
             server.AGENT_SESSION_IDS = server._build_agent_session_ids()
 
+            atomic_target = os.path.join(status_dir, "atomic-retry.txt")
+            old_replace = server.os.replace
+            try:
+                server.os.replace = lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("injected replace failure"))
+                try:
+                    server._atomic_write_text(atomic_target, "first")
+                except OSError:
+                    pass
+                leftovers = [name for name in os.listdir(status_dir) if name.startswith(".atomic-retry.txt.tmp-")]
+                check("Atomic write removes failed temporary files", not leftovers, str(leftovers))
+            finally:
+                server.os.replace = old_replace
+            server._atomic_write_text(atomic_target, "retry")
+            check("Atomic write retry succeeds after transient failure", open(atomic_target, encoding="utf-8").read() == "retry")
+
             check("Gateway platform agent is synthesized", any(a.get("statusKey") == "hermes-gateway" for a in server.get_roster()))
             check("Auth accepts bearer token", server._hermes_platform_auth_error(Headers({"Authorization": "Bearer test-token"})) is None)
             check("Auth rejects missing token", server._hermes_platform_auth_error(Headers({})).get("_status") == 401)
