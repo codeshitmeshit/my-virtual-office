@@ -48,8 +48,16 @@ def create_fixture_project(workspace, *, auto_confirm=False):
         "defaultReviewerAgentId": "reviewer",
         "highPriorityAiMeetingAutoApprove": not auto_confirm,
     })["project"]
-    validation = server._handle_project_execution_workspace_validate(project["id"], {"workspacePath": workspace})
-    assert validation["ok"] is True
+    validation = server.project_execution_service.validate_workspace(
+        project["id"],
+        {"workspacePath": workspace},
+        load_projects=server._load_projects,
+        save_projects=server._save_projects,
+        validate_workspace_path=server._project_execution_validate_workspace,
+        now=server._proj_now,
+    )
+    assert validation.status == 200
+    assert validation.payload["ok"] is True
     task = server._handle_task_create(project["id"], {"title": "Resolve ambiguity", "columnId": project["columns"][0]["id"], "assignee": "executor"})["task"]
     project, task = reload_task(project["id"], task["id"])
     return project, task

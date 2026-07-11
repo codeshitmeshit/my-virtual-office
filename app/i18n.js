@@ -207,6 +207,117 @@
         }
     }
 
+    function requestManagementToken() {
+        return new Promise(function (resolve) {
+            var existing = document.getElementById('management-token-dialog');
+            if (existing) existing.remove();
+
+            var previouslyFocused = document.activeElement;
+            var modal = document.createElement('div');
+            modal.id = 'management-token-dialog';
+            modal.className = 'modal management-token-dialog';
+            modal.setAttribute('role', 'presentation');
+
+            var content = document.createElement('section');
+            content.className = 'modal-content management-token-modal';
+            content.setAttribute('role', 'dialog');
+            content.setAttribute('aria-modal', 'true');
+            content.setAttribute('aria-labelledby', 'management-token-title');
+
+            var header = document.createElement('div');
+            header.className = 'modal-header';
+            var emoji = document.createElement('span');
+            emoji.className = 'modal-emoji';
+            emoji.textContent = '🔐';
+            var title = document.createElement('h2');
+            title.id = 'management-token-title';
+            title.textContent = t('management_token_title');
+            var close = document.createElement('button');
+            close.type = 'button';
+            close.className = 'close-btn management-token-close';
+            close.setAttribute('aria-label', t('management_token_cancel'));
+            close.textContent = '×';
+            close.setAttribute('data-management-token-cancel', '');
+            header.appendChild(emoji);
+            header.appendChild(title);
+            header.appendChild(close);
+
+            var body = document.createElement('div');
+            body.className = 'management-token-body';
+            var help = document.createElement('p');
+            help.className = 'management-token-help';
+            help.textContent = t('management_token_prompt');
+            var label = document.createElement('label');
+            label.className = 'management-token-label';
+            label.setAttribute('for', 'management-token-input');
+            label.textContent = t('management_token_title');
+            var input = document.createElement('input');
+            input.id = 'management-token-input';
+            input.className = 'management-token-input';
+            input.type = 'password';
+            input.autocomplete = 'current-password';
+            input.placeholder = t('management_token_placeholder');
+            body.appendChild(help);
+            body.appendChild(label);
+            body.appendChild(input);
+
+            var controls = document.createElement('div');
+            controls.className = 'modal-controls management-token-actions';
+            var cancel = document.createElement('button');
+            cancel.type = 'button';
+            cancel.className = 'mtg-btn';
+            cancel.textContent = t('management_token_cancel');
+            cancel.setAttribute('data-management-token-cancel', '');
+            var confirm = document.createElement('button');
+            confirm.type = 'button';
+            confirm.className = 'mtg-btn mtg-btn-end';
+            confirm.textContent = t('management_token_confirm');
+            confirm.setAttribute('data-management-token-confirm', '');
+            confirm.disabled = true;
+            controls.appendChild(cancel);
+            controls.appendChild(confirm);
+
+            content.appendChild(header);
+            content.appendChild(body);
+            content.appendChild(controls);
+            modal.appendChild(content);
+
+            var settled = false;
+            function finish(value) {
+                if (settled) return;
+                settled = true;
+                document.removeEventListener('keydown', onKeydown, true);
+                modal.remove();
+                if (previouslyFocused && typeof previouslyFocused.focus === 'function') previouslyFocused.focus();
+                resolve(value);
+            }
+            function submit() {
+                var value = input.value.trim();
+                if (value) finish(value);
+            }
+            function onKeydown(event) {
+                if (event.key === 'Escape') {
+                    event.preventDefault();
+                    finish('');
+                } else if (event.key === 'Enter') {
+                    event.preventDefault();
+                    submit();
+                }
+            }
+
+            input.addEventListener('input', function () {
+                confirm.disabled = !input.value.trim();
+            });
+            modal.addEventListener('click', function (event) {
+                if (event.target === modal || event.target.closest('[data-management-token-cancel]')) finish('');
+                if (event.target.closest('[data-management-token-confirm]')) submit();
+            });
+            document.addEventListener('keydown', onKeydown, true);
+            document.body.appendChild(modal);
+            input.focus();
+        });
+    }
+
     async function managementFetch(input, init) {
         init = Object.assign({}, init || {});
         init.headers = new Headers(init.headers || {});
@@ -214,7 +325,7 @@
         if (token) init.headers.set('X-VO-Management-Token', token);
         var response = await fetch(input, init);
         if (response.status !== 403) return response;
-        token = window.prompt(t('management_token_prompt'), '') || '';
+        token = await requestManagementToken();
         if (!token) throw new Error(t('management_token_required'));
         sessionStorage.setItem('voManagementToken', token);
         init.headers.set('X-VO-Management-Token', token);
@@ -240,6 +351,7 @@
         getLanguage: getLanguage,
         initLanguage: initLanguage,
         applyTranslations: applyTranslations,
+        requestManagementToken: requestManagementToken,
         managementFetch: managementFetch
     };
 })();

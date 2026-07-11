@@ -38,6 +38,7 @@ from dataclasses import dataclass
 import feishu_chat_channel
 import gateway_presence
 from dashboard_realtime import DashboardRealtimeStream
+from services import project_execution as project_execution_service
 from zoneinfo import ZoneInfo
 from provider_execution import (
     collect_modified_files,
@@ -18833,23 +18834,6 @@ def _project_execution_apply_meeting_result(meeting):
     return {"ok": True, "status": "needs_user_decision", "taskId": task_id}
 
 
-def _handle_project_execution_workspace_validate(project_id, body):
-    data, project, _ = _project_execution_find(project_id)
-    if not project:
-        return {"error": "Project not found", "_status": 404}
-    result = _project_execution_validate_workspace(body.get("workspacePath") or project.get("workspacePath"))
-    if not result.get("ok"):
-        project["projectExecutionEnabled"] = True
-        project["workspacePath"] = body.get("workspacePath") or project.get("workspacePath")
-        project["workspaceStatus"] = result
-        project["updatedAt"] = _proj_now()
-        _save_projects(data)
-        return {**result, "_status": 400}
-    project.update({"projectExecutionEnabled": True, "workspacePath": result["path"], "workspaceKind": result["kind"], "workspaceStatus": result, "updatedAt": _proj_now()})
-    _save_projects(data)
-    return {"ok": True, "workspace": result}
-
-
 _ARTIFACT_EXCLUDE_DIRS = {
     ".git", ".hg", ".svn", "node_modules", ".venv", "venv", "__pycache__",
     ".pytest_cache", ".mypy_cache", ".ruff_cache", ".cache", "dist", "build",
@@ -25881,6 +25865,7 @@ _MANAGEMENT_TOKEN = _CONFIGURED_MANAGEMENT_TOKEN or secrets.token_urlsafe(32)
 
 class OfficeHandler(http.server.SimpleHTTPRequestHandler):
     _MANAGEMENT_BODY_LIMIT = 64 * 1024
+    _JSON_BODY_LIMIT = 64 * 1024
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=APP_DIR, **kwargs)
@@ -25902,18 +25887,56 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
     def _reject_untrusted_management_request(self):
         if self._management_request_allowed():
             return False
-        self.send_response(403)
-        self.send_header("Content-Type", "application/json")
-        self.end_headers()
-        self.wfile.write(json.dumps({"ok": False, "error": "A valid Virtual Office management token is required"}).encode())
+        self._send_json({"ok": False, "error": "A valid Virtual Office management token is required"}, status=403)
         return True
 
-    def _read_limited_json_body(self):
+    def _request_id(self):
+        request_id = getattr(self, "_vo_request_id", "")
+        if not request_id:
+            request_id = uuid.uuid4().hex
+            self._vo_request_id = request_id
+        return request_id
+
+    def _send_json(self, payload, status=200, *, allow_origin=None):
+        raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(raw)))
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Request-Id", self._request_id())
+        if allow_origin is not None:
+            self.send_header("Access-Control-Allow-Origin", allow_origin)
+        self.end_headers()
+        self.wfile.write(raw)
+
+    def _send_json_error(self, error, *, status=None, allow_origin=None):
+        payload = dict(error or {})
+        resolved_status = int(status or payload.pop("_status", 500))
+        payload.pop("_status", None)
+        self._send_json(payload, status=resolved_status, allow_origin=allow_origin)
+
+    def _send_unexpected_json_error(self, exc, *, allow_origin=None):
+        request_id = self._request_id()
+        safe_message = re.sub(
+            r"(?i)\b(token|cookie|authorization|api[_-]?key|password|secret)\s*[:=]\s*([^\s,;]+)",
+            lambda match: f"{match.group(1)}=[REDACTED]",
+            str(exc),
+        )
+        safe_message = _project_execution_redact(safe_message)
+        print(f"HTTP request failed request_id={request_id} error={safe_message}", file=sys.stderr)
+        self._send_json(
+            {"ok": False, "error": "Internal server error", "requestId": request_id},
+            status=500,
+            allow_origin=allow_origin,
+        )
+
+    def _read_limited_json_body(self, *, limit=None, require_object=True):
+        body_limit = self._MANAGEMENT_BODY_LIMIT if limit is None else int(limit)
         try:
             length = int(self.headers.get("Content-Length", 0) or 0)
         except (TypeError, ValueError):
             return None, {"ok": False, "error": "Invalid Content-Length", "_status": 400}
-        if length < 0 or length > self._MANAGEMENT_BODY_LIMIT:
+        if length < 0 or length > body_limit:
             return None, {"ok": False, "error": "Request body is too large", "_status": 413}
         try:
             deadline = time.monotonic() + 15
@@ -25929,7 +25952,10 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                     raise ConnectionError("Request body ended before Content-Length")
                 chunks.append(chunk)
                 remaining -= len(chunk)
-            return (json.loads(b"".join(chunks)) if length else {}), None
+            body = json.loads(b"".join(chunks)) if length else {}
+            if require_object and not isinstance(body, dict):
+                return None, {"ok": False, "error": "JSON body must be an object", "_status": 400}
+            return body, None
         except (TimeoutError, ConnectionError) as exc:
             return None, {"ok": False, "error": str(exc), "_status": 408}
         except (json.JSONDecodeError, UnicodeDecodeError) as exc:
@@ -29906,15 +29932,23 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             self.wfile.write(json.dumps(result).encode())
         elif self.path.startswith("/api/projects/") and self.path.endswith("/project-execution/workspace/validate"):
             proj_id = self.path.split("/api/projects/")[1].rsplit("/project-execution/workspace/validate", 1)[0]
-            length = int(self.headers.get('Content-Length', 0))
-            body = json.loads(self.rfile.read(length)) if length else {}
-            result = _handle_project_execution_workspace_validate(proj_id, body)
-            self.send_response(result.get("_status", 200))
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.end_headers()
-            result.pop("_status", None)
-            self.wfile.write(json.dumps(result).encode())
+            body, error = self._read_limited_json_body(limit=self._JSON_BODY_LIMIT)
+            if error:
+                self._send_json_error(error, allow_origin="*")
+                return
+            try:
+                result = project_execution_service.validate_workspace(
+                    proj_id,
+                    body,
+                    load_projects=_load_projects,
+                    save_projects=_save_projects,
+                    validate_workspace_path=_project_execution_validate_workspace,
+                    now=_proj_now,
+                )
+                self._send_json(result.payload, status=result.status, allow_origin="*")
+            except Exception as exc:
+                self._send_unexpected_json_error(exc, allow_origin="*")
+            return
         elif self.path.startswith("/api/projects/") and "/tasks/" not in self.path and self.path.endswith("/reset"):
             proj_id = self.path.split("/api/projects/")[1].rsplit("/reset", 1)[0]
             length = int(self.headers.get('Content-Length', 0))

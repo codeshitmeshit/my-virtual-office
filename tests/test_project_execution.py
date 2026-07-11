@@ -98,8 +98,16 @@ def create_project_execution_project(workspace):
         "defaultExecutorAgentId": "executor",
         "defaultReviewerAgentId": "reviewer",
     })["project"]
-    validation = server._handle_project_execution_workspace_validate(project["id"], {"workspacePath": workspace})
-    assert validation["ok"] is True
+    validation = server.project_execution_service.validate_workspace(
+        project["id"],
+        {"workspacePath": workspace},
+        load_projects=server._load_projects,
+        save_projects=server._save_projects,
+        validate_workspace_path=server._project_execution_validate_workspace,
+        now=server._proj_now,
+    )
+    assert validation.status == 200
+    assert validation.payload["ok"] is True
     task = server._handle_task_create(project["id"], {
         "title": "Implement fixture",
         "columnId": project["columns"][0]["id"],
