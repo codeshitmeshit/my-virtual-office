@@ -32,7 +32,9 @@ flow:
 - invoking the existing workspace safety validator;
 - applying the existing success or failure state to the project;
 - persisting the project exactly once on a completed validation path;
-- returning an HTTP-independent `ServiceResult`.
+- returning a `ServiceResult` without reading from or writing to HTTP transport
+  objects. Its `status` remains an HTTP-oriented compatibility value for this
+  incremental pilot and is mapped by the handler.
 
 The service receives load, save, validation, and clock dependencies explicitly.
 It must not import `server.py`, construct `OfficeHandler`, write an HTTP

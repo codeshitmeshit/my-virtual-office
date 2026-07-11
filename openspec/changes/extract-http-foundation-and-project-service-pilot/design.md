@@ -55,7 +55,7 @@ Starting a task was considered because it is more representative of the final do
 
 Create `app/services/project_execution.py` and `app/services/__init__.py`. The pilot function will accept `project_id`, a normalized request mapping, and explicit callables for loading projects, saving projects, validating a workspace, and obtaining the current timestamp.
 
-The service will not import `server.py`, inspect `OfficeHandler`, or write network responses. Explicit callables are chosen over a dependency-injection framework because the existing code is function-oriented and tests already replace module functions directly. A class hierarchy was considered and rejected for this pilot because it adds lifecycle and inheritance decisions without an existing project convention.
+The service will not import `server.py`, inspect `OfficeHandler`, or write network responses. Its `ServiceResult.status` remains an HTTP-oriented compatibility value for this incremental pilot; "transport-independent" here means it does not read or write HTTP transport objects, not that its result vocabulary is protocol-neutral. Explicit callables are chosen over a dependency-injection framework because the existing code is function-oriented and tests already replace module functions directly. A class hierarchy was considered and rejected for this pilot because it adds lifecycle and inheritance decisions without an existing project convention.
 
 Expected service flow:
 
@@ -173,3 +173,8 @@ None required to proceed to task planning. Phase two must independently decide p
 The dialog will render text through DOM `textContent` rather than interpolating translated strings into HTML. Its input uses `type="password"`, `autocomplete="current-password"`, and an accessible label. Confirm resolves the entered trimmed value; cancel, close, backdrop, and Escape resolve an empty value. Enter submits only when the token is non-empty. The implementation removes prior dialog instances, restores focus on close, and does not persist the value beyond the existing `sessionStorage` behavior.
 
 This follow-up changes only the token-entry UI. It does not change the default token, management header, retry count, 403 handling, server authorization, or storage lifetime.
+
+Concurrent protected requests share one in-flight token-dialog Promise. A later
+403 therefore reuses the visible dialog rather than removing it, so every
+waiting `managementFetch` resumes from the same user decision and no orphaned
+keydown listener remains.

@@ -32,3 +32,8 @@
 
 - [x] 7.1 Add a Promise-based Virtual Office management-token modal in `app/i18n.js` with password masking, confirm/cancel/backdrop/Enter/Escape behavior, focus restoration, and unchanged `sessionStorage` retry semantics; add narrowly scoped styles and Chinese/English dialog strings.
 - [x] 7.2 Add focused frontend tests for rendering, keyboard behavior, cancellation, successful retry, and rejected-token cleanup; run the relevant static/UI checks and repeat the protected-action browser acceptance through `./start.sh`.
+
+## 8. Resolve Push Review Findings
+
+- [x] 8.1 Remove the fixed weak management-token default from `start.sh`, share one in-flight management-token dialog across concurrent protected requests, and clarify the HTTP-oriented `ServiceResult.status` compatibility contract.
+- [ ] 8.2 Add concurrent-dialog behavior coverage, rerun the full first-phase regression set, and complete a fresh four-route push review with no blocking findings.

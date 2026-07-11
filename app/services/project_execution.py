@@ -1,4 +1,4 @@
-"""Project execution application services that are independent of HTTP."""
+"""Project execution services that do not depend on HTTP transport objects."""
 
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping

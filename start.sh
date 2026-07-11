@@ -478,7 +478,6 @@ PY
     export VO_PC_METRICS_ENABLED="${VO_PC_METRICS_ENABLED:-true}"
     export VO_PC_METRICS_URL="${VO_PC_METRICS_URL:-http://127.0.0.1:8099}"
     export VO_API_USAGE="${VO_API_USAGE:-false}"
-    export VO_MANAGEMENT_TOKEN="${VO_MANAGEMENT_TOKEN:-4285}"
     export NO_PROXY="127.0.0.1,localhost,${NO_PROXY:-}"
     export no_proxy="127.0.0.1,localhost,${no_proxy:-}"
 

@@ -207,8 +207,12 @@
         }
     }
 
+    var managementTokenPromptPromise = null;
+
     function requestManagementToken() {
-        return new Promise(function (resolve) {
+        if (managementTokenPromptPromise) return managementTokenPromptPromise;
+
+        managementTokenPromptPromise = new Promise(function (resolve) {
             var existing = document.getElementById('management-token-dialog');
             if (existing) existing.remove();
 
@@ -316,6 +320,11 @@
             document.body.appendChild(modal);
             input.focus();
         });
+        managementTokenPromptPromise.then(
+            function () { managementTokenPromptPromise = null; },
+            function () { managementTokenPromptPromise = null; }
+        );
+        return managementTokenPromptPromise;
     }
 
     async function managementFetch(input, init) {
