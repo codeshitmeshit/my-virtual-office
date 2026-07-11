@@ -759,6 +759,8 @@
   "chat_sessions_unavailable": "会话列表暂时不可用",
   "chat_sessions": "会话列表",
   "management_token_prompt": "请输入 Virtual Office 服务端输出的管理令牌：",
+  "management_token_required": "必须提供管理令牌。",
+  "management_token_invalid": "管理令牌无效。",
   "chat_no_sessions": "暂无会话",
   "chat_session": "会话",
   "chat_session_live": "实时",

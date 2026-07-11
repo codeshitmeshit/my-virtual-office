@@ -759,6 +759,8 @@
   "chat_sessions_unavailable": "Sessions unavailable",
   "chat_sessions": "Sessions",
   "management_token_prompt": "Enter the management token printed by the Virtual Office server:",
+  "management_token_required": "A management token is required.",
+  "management_token_invalid": "The management token is invalid.",
   "chat_no_sessions": "No sessions yet",
   "chat_session": "Session",
   "chat_session_live": "LIVE",

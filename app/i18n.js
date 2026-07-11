@@ -215,10 +215,15 @@
         var response = await fetch(input, init);
         if (response.status !== 403) return response;
         token = window.prompt(t('management_token_prompt'), '') || '';
-        if (!token) return response;
+        if (!token) throw new Error(t('management_token_required'));
         sessionStorage.setItem('voManagementToken', token);
         init.headers.set('X-VO-Management-Token', token);
-        return fetch(input, init);
+        response = await fetch(input, init);
+        if (response.status === 403) {
+            sessionStorage.removeItem('voManagementToken');
+            throw new Error(t('management_token_invalid'));
+        }
+        return response;
     }
 
     // Auto-init on DOMContentLoaded
