@@ -1,0 +1,25 @@
+app/i18n.js
+  s_2c1ad674089b59::t_3112d090a93f14 218,221-226
+app/locales/en.json
+  s_2c1ad674089b59::t_d331c8f1e0a5c4 762-763
+app/locales/zh.json
+  s_2c1ad674089b59::t_e3462f0c5a78a8 762-763
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "73763c5a75bd56cd78be49af8ed8d1ab2e72c8b2",
+  "prompts": {},
+  "sessions": {
+    "s_2c1ad674089b59": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4ced-a915-7051-97fc-8df97b21d523",
+        "model": "unknown"
+      },
+      "human_author": "codeshitmeshit <codeshitmeshit@126.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
