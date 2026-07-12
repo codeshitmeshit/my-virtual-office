@@ -1,0 +1,43 @@
+app/services/artifacts.py
+  s_5852bad622de94::t_0cc7a0927bba4d 351-353,356-358,360-365
+docs/SERVICE_BOUNDARIES.md
+  s_5852bad622de94::t_ea834ca170c00e 81
+openspec/changes/extract-project-execution-services/full-regression.md
+  s_5852bad622de94::t_11a2a88e7caa9a 13,15,61
+openspec/changes/extract-project-execution-services/manual-acceptance.md
+  s_5852bad622de94::t_b3b9796e1f1f48 30
+openspec/changes/extract-project-execution-services/rollout-rehearsal.md
+  s_5852bad622de94::t_4d4ca00be78c41 1,9,62
+openspec/changes/extract-project-execution-services/rollout-rehearsal.sh
+  s_5852bad622de94::t_6a0be400f42c2a 133
+openspec/changes/extract-project-execution-services/rollout-runtime.patch
+  s_5852bad622de94::t_a1a5fb34c32a89 1-10,307-329
+openspec/changes/extract-project-execution-services/scenario-evidence.md
+  s_5852bad622de94::t_5143111bbf39f0 21,28
+openspec/changes/extract-project-execution-services/tasks.md
+  s_5852bad622de94::t_063eb0514b4f6c 51-52
+start.sh
+  s_5852bad622de94::t_f05d12008e6028 452
+tests/test_artifact_service.py
+  s_5852bad622de94::t_e7f903a6d4980a 120-150
+tests/test_management_token_dialog.js
+  s_5852bad622de94::t_f743e37ed9756f 9,22
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "68690c4c912fbc729feaf84d5b8bb084601e5c43",
+  "prompts": {},
+  "sessions": {
+    "s_5852bad622de94": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f5163-cd74-7df3-a25d-7fd6dd323b5d",
+        "model": "unknown"
+      },
+      "human_author": "codeshitmeshit <codeshitmeshit@126.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
