@@ -1,0 +1,23 @@
+openspec/changes/extract-meeting-and-collaboration-services/performance-baseline.json
+  s_5852bad622de94::t_22e44672f4f61c 1-121
+tests/meeting_baseline_harness.py
+  s_5852bad622de94::t_e7ed73dffe62d9 1-165
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "705e96772e62737560f6502b8e5dfcd98c94e969",
+  "prompts": {},
+  "sessions": {
+    "s_5852bad622de94": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f5163-cd74-7df3-a25d-7fd6dd323b5d",
+        "model": "unknown"
+      },
+      "human_author": "codeshitmeshit <codeshitmeshit@126.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
