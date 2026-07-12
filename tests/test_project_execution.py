@@ -3518,9 +3518,16 @@ def test_acceptance_rework_rechecks_active_task_after_slow_snapshot():
         old_executor = server._project_execution_call_executor
         old_reviewer = server._project_execution_call_reviewer
         old_snapshot = server._project_execution_automatic_snapshot
+        old_launcher = server._project_execution_launch
+        launched = []
         snapshot_entered = threading.Event()
         snapshot_release = threading.Event()
         executor_release = threading.Event()
+
+        def tracked_launch(callback):
+            thread = threading.Thread(target=callback, daemon=True)
+            launched.append(thread)
+            thread.start()
 
         def executor(*args, **kwargs):
             if kwargs.get("task_id") == second_id["value"]:
@@ -3530,6 +3537,7 @@ def test_acceptance_rework_rechecks_active_task_after_slow_snapshot():
                 "checklistUpdates": [{"id": "done", "text": "Complete implementation", "done": True}],
             }
 
+        server._project_execution_launch = tracked_launch
         server._project_execution_call_executor = executor
         server._project_execution_call_reviewer = lambda *args, **kwargs: {
             "ok": True, "status": "completed",
@@ -3568,6 +3576,7 @@ def test_acceptance_rework_rechecks_active_task_after_slow_snapshot():
             assert started["ok"] is True
             snapshot_release.set()
             worker.join(3)
+            assert not worker.is_alive()
             assert outcome["_status"] == 409
             assert outcome["activeTaskId"] == second["id"]
             current = server._handle_project_get(project["id"])["project"]
@@ -3577,6 +3586,10 @@ def test_acceptance_rework_rechecks_active_task_after_slow_snapshot():
         finally:
             snapshot_release.set()
             executor_release.set()
+            for thread in launched:
+                thread.join(timeout=5)
+                assert not thread.is_alive()
+            server._project_execution_launch = old_launcher
             server._project_execution_automatic_snapshot = old_snapshot
             server._project_execution_call_executor = old_executor
             server._project_execution_call_reviewer = old_reviewer

@@ -73,7 +73,7 @@ Regression canaries include Basic/Bearer authorization, cookies, JSON and key-va
 
 ## Confirmed migration fixes
 
-- Project writers no longer lose unrelated concurrent project/task/history fields.
+- Project writers no longer lose unrelated concurrent project/task/history fields; two legacy snapshots that concurrently add the same field with different values now conflict instead of silently overwriting.
 - Git workspace snapshot failure fails closed before Provider invocation with `workspace_git_snapshot_failed`.
 - Review/acceptance ignores forged actors, validates linkage, and persists stable local notification intent before best-effort delivery.
 - Native Codex/Claude reviewers receive the revalidated attempt-workspace snapshot only in their in-memory Provider call, preventing project-path races or verification of the provider's unrelated default repository. Codex is forced to `read-only`/`never`, Claude Code to `plan`; these provider-layer restrictions are independent of the prompt, and the path is not copied into review DTOs or logs.

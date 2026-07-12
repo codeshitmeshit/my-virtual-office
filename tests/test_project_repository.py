@@ -271,6 +271,35 @@ def test_stale_snapshot_cannot_delete_a_concurrently_updated_field():
     assert repo.get("p1")["scheduledCronHistory"][-1] == {"id": "new-history"}
 
 
+def test_stale_snapshots_cannot_add_the_same_field_with_different_values():
+    _, repo = repository()
+    baseline = repo.load_all()
+    first = copy.deepcopy(baseline)
+    second = copy.deepcopy(baseline)
+    first["projects"][0]["workflowPhase"] = "executing"
+    second["projects"][0]["workflowPhase"] = "done"
+
+    repo.commit_snapshot(first, baseline)
+    with pytest.raises(ProjectConflictError, match="legacy field addition"):
+        repo.commit_snapshot(second, baseline)
+
+    assert repo.get("p1")["workflowPhase"] == "executing"
+
+
+def test_stale_snapshots_may_add_the_same_field_with_the_same_value():
+    _, repo = repository()
+    baseline = repo.load_all()
+    first = copy.deepcopy(baseline)
+    second = copy.deepcopy(baseline)
+    first["projects"][0]["workflowPhase"] = "executing"
+    second["projects"][0]["workflowPhase"] = "executing"
+
+    repo.commit_snapshot(first, baseline)
+    repo.commit_snapshot(second, baseline)
+
+    assert repo.get("p1")["workflowPhase"] == "executing"
+
+
 def test_stale_snapshot_cannot_delete_a_concurrently_updated_entity():
     _, repo = repository()
     baseline = repo.load_all()

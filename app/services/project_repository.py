@@ -346,6 +346,8 @@ class ProjectRepository:
                 merged.pop(key, None)
             for key, value in changed.items():
                 if key not in baseline:
+                    if reject_conflicts and key in latest and latest[key] != value:
+                        raise ProjectConflictError("Project state changed before a legacy field addition")
                     merged[key] = copy.deepcopy(value)
                 elif key in prefer_changed_keys and value != baseline[key]:
                     latest_value = latest.get(key)
