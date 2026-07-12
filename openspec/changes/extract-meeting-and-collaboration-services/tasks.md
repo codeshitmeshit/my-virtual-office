@@ -10,8 +10,8 @@
 
 ## 3. Meeting lifecycle and occupancy service
 
-- [ ] 3.1 Extract lifecycle creation, transitions, conflict actions, interventions, agenda/arbitration/moderator operations, Agent turn orchestration, terminalization, timeout, and recovery into `meeting_lifecycle.py` with explicit repository/Agent/clock/ID ports and phase/sequence/call compare tokens; migrate HTTP/internal callers and verify every transition, stale result, failure, cancellation, and compatibility path.
-- [ ] 3.2 Move participant eligibility, archive-manager exclusion, occupancy claim/release, conflict handling, participant replacement, terminal cleanup, and restart rebuild into the lifecycle/repository boundary; add concurrent Meeting, stale-owner release, conflicting legacy occupancy, recovery repair, and unrelated-Meeting parallelism tests.
+- [x] 3.1 Extract lifecycle creation, transitions, conflict actions, interventions, agenda/arbitration/moderator operations, Agent turn orchestration, terminalization, timeout, and recovery into `meeting_lifecycle.py` with explicit repository/Agent/clock/ID ports and phase/sequence/call compare tokens; migrate HTTP/internal callers and verify every transition, stale result, failure, cancellation, and compatibility path.
+- [x] 3.2 Move participant eligibility, archive-manager exclusion, occupancy claim/release, conflict handling, participant replacement, terminal cleanup, and restart rebuild into the lifecycle/repository boundary; add concurrent Meeting, stale-owner release, conflicting legacy occupancy, recovery repair, and unrelated-Meeting parallelism tests.
 
 ## 4. AI meeting request and project-linkage service
 
