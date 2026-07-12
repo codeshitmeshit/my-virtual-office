@@ -711,6 +711,10 @@ def test_project_artifacts_include_phase7_source_records():
             read = server._handle_project_artifact_read(project["id"], "path=docs%2Fartifact.md")
             assert read["ok"] is True
             assert read["artifact"]["content"] == "# Artifact"
+            unassociated = server._handle_project_artifact_read(
+                project["id"], "archive=1&path=docs%2Fmanual.md",
+            )
+            assert unassociated["_status"] == 403
         finally:
             restore_store(old)
 

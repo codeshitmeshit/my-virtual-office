@@ -27,9 +27,9 @@
 
 ## 5. Artifact service
 
-- [ ] 5.1 Add `tests/test_artifact_service.py` characterization for list/read/file/delete, directory allowlist deletion, associated-only access, traversal, symlink swap, non-regular files, limits, client interruption, and current status/payload semantics.
-- [ ] 5.2 Implement `app/services/artifacts.py` with realpath containment, allowlists, resource limits, `OpenedArtifact` context management, `fstat`, no-follow support/fallback, sanitized errors, and compatible recursive allowlist directory deletion.
-- [ ] 5.3 Migrate Artifact JSON and file-stream handlers while keeping management authorization, headers, streaming, BrokenPipe cleanup, and HTTP error mapping in `OfficeHandler`; run focused security and contract tests.
+- [x] 5.1 Add `tests/test_artifact_service.py` characterization for list/read/file/delete, directory allowlist deletion, associated-only access, traversal, symlink swap, non-regular files, limits, client interruption, and current status/payload semantics.
+- [x] 5.2 Implement `app/services/artifacts.py` with realpath containment, allowlists, resource limits, `OpenedArtifact` context management, `fstat`, no-follow support/fallback, sanitized errors, and compatible recursive allowlist directory deletion.
+- [x] 5.3 Migrate Artifact JSON and file-stream handlers while keeping management authorization, headers, streaming, BrokenPipe cleanup, and HTTP error mapping in `OfficeHandler`; run focused security and contract tests.
 
 ## 6. Schedule service
 

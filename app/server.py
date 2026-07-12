@@ -42,6 +42,7 @@ from services import project_execution as project_execution_service
 from services import project_commands as project_command_service
 from services import execution_lifecycle as execution_lifecycle_service
 from services import review_acceptance as review_acceptance_service
+from services import artifacts as artifact_service
 from services.project_repository import ProjectConflictError, ProjectNotFoundError, ProjectRepository
 from zoneinfo import ZoneInfo
 from provider_execution import (
@@ -18579,56 +18580,27 @@ _ARTIFACT_EXCLUDE_DIRS = {
     ".pytest_cache", ".mypy_cache", ".ruff_cache", ".cache", "dist", "build",
     "dist-packages",
 }
-_ARTIFACT_MARKDOWN_EXTENSIONS = {".md", ".markdown"}
-_ARTIFACT_TEXT_EXTENSIONS = {".md", ".markdown", ".txt", ".csv", ".json", ".yaml", ".yml", ".log"}
-_ARTIFACT_DOCUMENT_EXTENSIONS = _ARTIFACT_TEXT_EXTENSIONS | {".pdf"}
-_ARTIFACT_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"}
-_ARTIFACT_VIDEO_EXTENSIONS = {".mp4", ".webm", ".ogg", ".mov", ".m4v"}
-_ARTIFACT_AUDIO_EXTENSIONS = {".mp3", ".wav", ".ogg", ".m4a", ".aac", ".flac"}
-_ARTIFACT_ALLOWED_EXTENSIONS = (
-    _ARTIFACT_DOCUMENT_EXTENSIONS
-    | _ARTIFACT_IMAGE_EXTENSIONS
-    | _ARTIFACT_VIDEO_EXTENSIONS
-    | _ARTIFACT_AUDIO_EXTENSIONS
-)
-_ARTIFACT_MAX_ITEMS = 500
-_ARTIFACT_MAX_READ_BYTES = 512 * 1024
+_ARTIFACT_MARKDOWN_EXTENSIONS = artifact_service.MARKDOWN_EXTENSIONS
+_ARTIFACT_TEXT_EXTENSIONS = artifact_service.TEXT_EXTENSIONS
+_ARTIFACT_DOCUMENT_EXTENSIONS = artifact_service.DOCUMENT_EXTENSIONS
+_ARTIFACT_IMAGE_EXTENSIONS = artifact_service.IMAGE_EXTENSIONS
+_ARTIFACT_VIDEO_EXTENSIONS = artifact_service.VIDEO_EXTENSIONS
+_ARTIFACT_AUDIO_EXTENSIONS = artifact_service.AUDIO_EXTENSIONS
+_ARTIFACT_ALLOWED_EXTENSIONS = artifact_service.ALLOWED_EXTENSIONS
+_ARTIFACT_MAX_ITEMS = artifact_service.MAX_ITEMS
+_ARTIFACT_MAX_READ_BYTES = artifact_service.MAX_READ_BYTES
 
 
 def _artifact_kind_for_ext(ext):
-    ext = (ext or "").lower()
-    if ext in _ARTIFACT_MARKDOWN_EXTENSIONS:
-        return "markdown"
-    if ext in _ARTIFACT_TEXT_EXTENSIONS:
-        return "text"
-    if ext == ".pdf":
-        return "pdf"
-    if ext in _ARTIFACT_IMAGE_EXTENSIONS:
-        return "image"
-    if ext in _ARTIFACT_VIDEO_EXTENSIONS:
-        return "video"
-    if ext in _ARTIFACT_AUDIO_EXTENSIONS:
-        return "audio"
-    return "file"
+    return artifact_service.kind_for_extension(ext)
 
 
 def _artifact_normalize_relpath(path):
-    rel = urllib.parse.unquote(str(path or "")).replace("\\", "/").lstrip("/")
-    parts = [part for part in rel.split("/") if part not in ("", ".")]
-    if any(part == ".." for part in parts):
-        return ""
-    return "/".join(parts)
+    return artifact_service.normalize_relative_path(path)
 
 
 def _artifact_safe_path(root, rel_path):
-    root = os.path.realpath(root)
-    rel = _artifact_normalize_relpath(rel_path)
-    if not rel:
-        return None, ""
-    full_path = os.path.realpath(os.path.join(root, rel))
-    if not (full_path == root or full_path.startswith(root + os.sep)):
-        return None, rel
-    return full_path, rel
+    return artifact_service.resolve_inside_root(root, rel_path)
 
 
 def _artifact_source_relpath(root, path):
@@ -18645,164 +18617,39 @@ def _artifact_source_relpath(root, path):
 
 
 def _artifact_context_list(context, allowed_extensions=None, associated_only=False):
-    root = os.path.realpath(context.get("root") or "")
-    if not root or not os.path.isdir(root):
-        return {"error": "Artifact root is not accessible", "_status": 409}
-    allowed_extensions = allowed_extensions or _ARTIFACT_MARKDOWN_EXTENSIONS
-    sources_by_path = context.get("sourcesByPath") or {}
-    artifacts = []
-    truncated = False
-    try:
-        for current_root, dirs, files in os.walk(root):
-            dirs[:] = [
-                d for d in dirs
-                if d not in _ARTIFACT_EXCLUDE_DIRS and not d.startswith(".git")
-            ]
-            rel_dir = os.path.relpath(current_root, root)
-            depth = 0 if rel_dir == "." else rel_dir.count(os.sep) + 1
-            if depth > 8:
-                dirs[:] = []
-                continue
-            for name in files:
-                ext = os.path.splitext(name)[1].lower()
-                if ext not in allowed_extensions:
-                    continue
-                full_path = os.path.realpath(os.path.join(current_root, name))
-                if not (full_path == root or full_path.startswith(root + os.sep)):
-                    continue
-                try:
-                    stat = os.stat(full_path)
-                except OSError:
-                    continue
-                rel_path = os.path.relpath(full_path, root).replace(os.sep, "/")
-                source_records = sources_by_path.get(rel_path, [])
-                if associated_only and not source_records:
-                    continue
-                artifacts.append({
-                    "path": rel_path,
-                    "name": name,
-                    "kind": _artifact_kind_for_ext(ext),
-                    "extension": ext,
-                    "size": stat.st_size,
-                    "modifiedAt": datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(),
-                    "sources": source_records[:10],
-                    "unassociated": not bool(source_records),
-                })
-                if len(artifacts) >= _ARTIFACT_MAX_ITEMS:
-                    truncated = True
-                    break
-            if truncated:
-                break
-    except OSError as exc:
-        return {"error": f"Unable to scan artifacts: {exc}", "_status": 500}
-    artifacts.sort(key=lambda item: (item.get("modifiedAt") or "", item.get("path") or ""), reverse=True)
-    return {"ok": True, "artifacts": artifacts, "truncated": truncated}
+    return artifact_service.list_artifacts(
+        context, allowed_extensions=allowed_extensions, associated_only=associated_only,
+    )
 
 
-def _artifact_context_read(context, rel_path, allow_text=False):
-    root = os.path.realpath(context.get("root") or "")
-    if not root or not os.path.isdir(root):
-        return {"error": "Artifact root is not accessible", "_status": 409}
-    full_path, rel = _artifact_safe_path(root, rel_path)
-    if not rel:
-        return {"error": "Artifact path is required", "_status": 400}
-    if not full_path:
-        return {"error": "Artifact path is outside the artifact root", "_status": 403}
-    ext = os.path.splitext(rel)[1].lower()
-    allowed = _ARTIFACT_TEXT_EXTENSIONS if allow_text else _ARTIFACT_MARKDOWN_EXTENSIONS
-    if ext not in allowed:
-        return {"error": "Only text artifacts can be read inline" if allow_text else "Only Markdown artifacts can be read inline", "_status": 415}
-    if not os.path.isfile(full_path):
-        return {"error": "Artifact not found", "_status": 404}
-    try:
-        size = os.path.getsize(full_path)
-        with open(full_path, "rb") as f:
-            raw = f.read(_ARTIFACT_MAX_READ_BYTES + 1)
-        truncated = len(raw) > _ARTIFACT_MAX_READ_BYTES
-        if truncated:
-            raw = raw[:_ARTIFACT_MAX_READ_BYTES]
-        content = raw.decode("utf-8", errors="replace")
-    except OSError as exc:
-        return {"error": f"Unable to read artifact: {exc}", "_status": 500}
-    return {"ok": True, "artifact": {"path": rel, "kind": _artifact_kind_for_ext(ext), "size": size, "truncated": truncated, "content": content}}
+
+def _artifact_context_read(context, rel_path, allow_text=False, associated_only=False):
+    return artifact_service.read_artifact(
+        context, rel_path, allow_text=allow_text, associated_only=associated_only,
+    )
+
 
 
 def _artifact_context_file_response(context, rel_path):
-    root = os.path.realpath(context.get("root") or "")
-    if not root or not os.path.isdir(root):
-        return {"error": "Artifact root is not accessible", "_status": 409}
-    full_path, rel = _artifact_safe_path(root, rel_path)
-    if not rel:
-        return {"error": "Artifact path is required", "_status": 400}
-    if not full_path:
-        return {"error": "Artifact path is outside the artifact root", "_status": 403}
-    if not os.path.isfile(full_path):
-        return {"error": "Artifact not found", "_status": 404}
-    ext = os.path.splitext(rel)[1].lower()
-    if ext not in _ARTIFACT_ALLOWED_EXTENSIONS:
-        return {"error": "Artifact type is not previewable", "_status": 415}
-    sources_by_path = context.get("sourcesByPath") or {}
-    if not sources_by_path.get(rel):
-        return {"error": "Artifact is not associated with this project", "_status": 403}
-    return {"ok": True, "path": full_path, "rel": rel, "kind": _artifact_kind_for_ext(ext)}
+    result = artifact_service.open_file(context, rel_path, associated_only=True)
+    if not result.get("ok"):
+        return result
+    opened = result["opened"]
+    return {
+        "ok": True, "opened": opened, "rel": opened.relative_path,
+        "kind": opened.kind, "size": opened.size,
+    }
+
 
 
 def _artifact_context_delete(context, rel_path):
-    root = os.path.realpath(context.get("root") or "")
-    if not root or not os.path.isdir(root):
-        return {"error": "Artifact root is not accessible", "_status": 409}
-    full_path, rel = _artifact_safe_path(root, rel_path)
-    if not rel:
-        return {"error": "Artifact path is required", "_status": 400}
-    if not full_path:
-        return {"error": "Artifact path is outside the artifact root", "_status": 403}
-    if not os.path.isfile(full_path):
-        return {"error": "Artifact not found", "_status": 404}
-    ext = os.path.splitext(rel)[1].lower()
-    if ext not in _ARTIFACT_ALLOWED_EXTENSIONS:
-        return {"error": "Artifact type is not deletable here", "_status": 415}
-    try:
-        os.remove(full_path)
-    except OSError as exc:
-        return {"error": f"Unable to delete artifact: {exc}", "_status": 500}
-    return {"ok": True, "deleted": rel}
+    return artifact_service.delete_file(context, rel_path)
+
 
 
 def _artifact_context_delete_dir(context, rel_dir):
-    root = os.path.realpath(context.get("root") or "")
-    if not root or not os.path.isdir(root):
-        return {"error": "Artifact root is not accessible", "_status": 409}
-    if rel_dir:
-        full_path, rel = _artifact_safe_path(root, rel_dir)
-        if not full_path:
-            return {"error": "Artifact path is outside the artifact root", "_status": 403}
-        if not os.path.isdir(full_path):
-            return {"error": "Artifact directory not found", "_status": 404}
-    else:
-        full_path, rel = root, ""
-    deleted = 0
-    try:
-        for current_root, dirs, files in os.walk(full_path, topdown=False):
-            current_real = os.path.realpath(current_root)
-            if not (current_real == root or current_real.startswith(root + os.sep)):
-                continue
-            for name in files:
-                file_path = os.path.realpath(os.path.join(current_root, name))
-                if not (file_path == root or file_path.startswith(root + os.sep)):
-                    continue
-                file_rel = os.path.relpath(file_path, root).replace(os.sep, "/")
-                if os.path.splitext(file_rel)[1].lower() not in _ARTIFACT_ALLOWED_EXTENSIONS:
-                    continue
-                os.remove(file_path)
-                deleted += 1
-            if current_real != root:
-                try:
-                    os.rmdir(current_real)
-                except OSError:
-                    pass
-    except OSError as exc:
-        return {"error": f"Unable to delete artifact directory: {exc}", "_status": 500}
-    return {"ok": True, "deletedDir": rel, "deleted": deleted}
+    return artifact_service.delete_directory(context, rel_dir)
+
 
 
 def _project_artifact_source_records(project):
@@ -18928,7 +18775,9 @@ def _handle_project_artifact_read(project_id, query_string=""):
     params = urllib.parse.parse_qs(query_string or "")
     rel_path = (params.get("path") or [""])[0]
     allow_text = (params.get("archive") or [""])[0] in ("1", "true", "yes")
-    return _artifact_context_read(context, rel_path, allow_text=allow_text)
+    return _artifact_context_read(
+        context, rel_path, allow_text=allow_text, associated_only=True,
+    )
 
 
 def _handle_project_artifact_file(project_id, query_string=""):
@@ -25356,6 +25205,25 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             allow_origin=allow_origin,
         )
 
+    def _stream_opened_artifact(self, opened):
+        """Write an already validated descriptor and always close it."""
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", self.guess_type(opened.relative_path))
+            self.send_header("Content-Length", str(opened.size))
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header(
+                "Content-Disposition",
+                f"inline; filename={json.dumps(os.path.basename(opened.relative_path))}",
+            )
+            self.end_headers()
+            with opened:
+                shutil.copyfileobj(opened.stream, self.wfile)
+            return True
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            opened.close()
+            return False
+
     def _read_limited_json_body(self, *, limit=None, require_object=True):
         body_limit = self._MANAGEMENT_BODY_LIMIT if limit is None else int(limit)
         try:
@@ -26681,22 +26549,8 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                 result.pop("_status", None)
                 self.wfile.write(json.dumps(result).encode())
             else:
-                path = result.get("path")
-                try:
-                    size = os.path.getsize(path)
-                    self.send_response(200)
-                    self.send_header("Content-Type", self.guess_type(path))
-                    self.send_header("Content-Length", str(size))
-                    self.send_header("Access-Control-Allow-Origin", "*")
-                    self.send_header("Content-Disposition", f"inline; filename={json.dumps(os.path.basename(path))}")
-                    self.end_headers()
-                    with open(path, "rb") as f:
-                        shutil.copyfileobj(f, self.wfile)
-                except OSError:
-                    self.send_response(404)
-                    self.send_header("Content-Type", "application/json")
-                    self.end_headers()
-                    self.wfile.write(json.dumps({"error": "Artifact not found"}).encode())
+                opened = result.get("opened")
+                self._stream_opened_artifact(opened)
         elif self.path.startswith("/api/projects/") and self.path.endswith("/artifacts"):
             proj_id = self.path.split("/api/projects/")[1].rsplit("/artifacts", 1)[0]
             result = _handle_project_artifacts_list(proj_id)

@@ -154,6 +154,8 @@ def test_archive_artifact_file_blocks_traversal_and_unassociated_files():
             ok = server._handle_project_artifact_file(project["id"], "path=registered.mp4")
             assert ok["ok"] is True
             assert ok["kind"] == "video"
+            assert ok["rel"] == "registered.mp4"
+            ok["opened"].close()
 
             unassociated = server._handle_project_artifact_file(project["id"], "path=secret.mp4")
             assert unassociated["_status"] == 403
