@@ -1,0 +1,37 @@
+app/project_store.py
+  s_5852bad622de94::t_c46f1b708833e4 527,531-533,536
+app/services/project_commands.py
+  s_5852bad622de94::t_9c6ca82920ce77 1-311
+openspec/changes/extract-project-execution-services/design.md
+  s_5852bad622de94::t_74d1c7ba6f20b8 95,324
+openspec/changes/extract-project-execution-services/tasks.md
+  s_5852bad622de94::t_0700f919aadd41 9-12
+openspec/changes/extract-project-execution-services/writer-inventory.md
+  s_5852bad622de94::t_356fe0ab6fb539 98
+tests/project_performance_harness.py
+  s_5852bad622de94::t_7900aedba8df46 18,272-275,281
+tests/test_project_commands.py
+  s_5852bad622de94::t_f9ae7af9327e92 1-143
+tests/test_project_execution.py
+  s_5852bad622de94::t_c3794ddf55116b 364-392
+tests/test_project_writer_characterization.py
+  s_5852bad622de94::t_01a66f6fe97d49 17-21,23,45-46,49,53-54,58-59,66,68,71-72,76,86-91
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "c4408c9c926d5e814fed3555dbb65669b7a3bd88",
+  "prompts": {},
+  "sessions": {
+    "s_5852bad622de94": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f5163-cd74-7df3-a25d-7fd6dd323b5d",
+        "model": "unknown"
+      },
+      "human_author": "codeshitmeshit <codeshitmeshit@126.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
