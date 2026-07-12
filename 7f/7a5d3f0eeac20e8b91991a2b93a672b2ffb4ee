@@ -1,0 +1,29 @@
+openspec/changes/extract-meeting-and-collaboration-services/design.md
+  s_5852bad622de94::t_e1c66d4d3fc51a 1-250
+openspec/changes/extract-meeting-and-collaboration-services/proposal.md
+  s_5852bad622de94::t_fa5c116537ded2 10-11,28
+openspec/changes/extract-meeting-and-collaboration-services/specs/meeting-collaboration-service-boundaries/spec.md
+  s_5852bad622de94::t_1c8addc591539b 1-186
+openspec/changes/extract-meeting-and-collaboration-services/tasks.md
+  s_5852bad622de94::t_6973efed7b61c6 1-39
+openspec/specs/project-execution-service-boundaries/spec.md
+  s_5852bad622de94::t_f9d6e4e31100ca 1-193
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "7f7a5d3f0eeac20e8b91991a2b93a672b2ffb4ee",
+  "prompts": {},
+  "sessions": {
+    "s_5852bad622de94": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f5163-cd74-7df3-a25d-7fd6dd323b5d",
+        "model": "unknown"
+      },
+      "human_author": "codeshitmeshit <codeshitmeshit@126.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
