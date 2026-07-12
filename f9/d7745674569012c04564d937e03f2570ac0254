@@ -1,0 +1,49 @@
+app/project_store.py
+  s_5852bad622de94::t_1fd86b00989329 2,8,10,139-146,151-157,159-167,175-261,290,330-331
+app/server.py
+  s_5852bad622de94::t_534c7149cac9a5 43-44,2309,15760,17021-17023,17079-17081,17101-17125,17627,17633-17635,17644,17675-17678,17684,17705-17712,17731,17804-17808,21669-21677,21689,21721-21806,21808-21835,21839-21843,21848-21858,21880-21886,21889,21896-21905,22011-22019,22036
+app/services/execution_lifecycle.py
+  s_5852bad622de94::t_da0e2e083d3866 1-780
+app/services/project_repository.py
+  s_5852bad622de94::t_73a7afc9f89482 51,57-60,71-75,81,87-115,117-132,146,155-159,166,182-203,206-237,243,271-278,281-289,328-336,350-355,357-361,365-369,383-391,433-437
+openspec/changes/extract-project-execution-services/design.md
+  s_5852bad622de94::t_31a48599ba91f6 230
+openspec/changes/extract-project-execution-services/performance-group3-final.json
+  s_5852bad622de94::t_e5bf6995c48244 1-253
+openspec/changes/extract-project-execution-services/performance-progress.md
+  s_5852bad622de94::t_43547b94beb45b 37-49
+openspec/changes/extract-project-execution-services/revision-group3-final.json
+  s_5852bad622de94::t_2a8152eaf2e878 1-39
+openspec/changes/extract-project-execution-services/tasks.md
+  s_5852bad622de94::t_95ffcb18e3da43 16-19
+tests/project_performance_harness.py
+  s_5852bad622de94::t_65f641ba460754 33,46,56-59,156-160
+tests/project_revision_benchmark.py
+  s_5852bad622de94::t_db5067d92d56d9 1-106
+tests/test_execution_lifecycle.py
+  s_5852bad622de94::t_7ec9ba601a1dc7 1-231
+tests/test_project_execution.py
+  s_5852bad622de94::t_34f2471e993184 9,524-574,2440,2443,2454,2472-2530
+tests/test_project_execution_service_boundary.py
+  s_5852bad622de94::t_f230f2a683a8d5 190-209
+tests/test_project_repository.py
+  s_5852bad622de94::t_276fb30d1a05f9 10,26,153-210,287-365
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "f9d7745674569012c04564d937e03f2570ac0254",
+  "prompts": {},
+  "sessions": {
+    "s_5852bad622de94": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f5163-cd74-7df3-a25d-7fd6dd323b5d",
+        "model": "unknown"
+      },
+      "human_author": "codeshitmeshit <codeshitmeshit@126.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
