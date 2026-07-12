@@ -1,0 +1,29 @@
+app/server.py
+  s_5852bad622de94::t_b4e8adebb9ee62 17177-17194
+openspec/changes/extract-project-execution-services/performance-group6-final.json
+  s_5852bad622de94::t_ab7d57cfb4c9f5 16-17,32-34,47-49,62-64,77-79,92-94,109-111,124-125,139-141,154-156,169-171,186-188,201-202,216-218,231-233,246-247
+openspec/changes/extract-project-execution-services/tasks.md
+  s_5852bad622de94::t_95930fee2fd82d 42-45
+tests/test_project_execution.py
+  s_5852bad622de94::t_367af0d6f950ef 1999-2007,2036-2039
+tests/test_project_service_static_boundaries.py
+  s_5852bad622de94::t_be22bc05317ac2 1-97
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "13a8219afdc410a65cdf8b34d6d695fc22335c2b",
+  "prompts": {},
+  "sessions": {
+    "s_5852bad622de94": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f5163-cd74-7df3-a25d-7fd6dd323b5d",
+        "model": "unknown"
+      },
+      "human_author": "codeshitmeshit <codeshitmeshit@126.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
