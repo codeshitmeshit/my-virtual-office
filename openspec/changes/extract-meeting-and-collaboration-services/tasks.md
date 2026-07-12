@@ -1,6 +1,6 @@
 ## 1. Baseline and writer inventory
 
-- [ ] 1.1 Inventory every executable Meeting, request, occupancy, event, idempotency, action-item, notification, callback, recovery, and project-linkage reader/writer; add characterization fixtures and fixed performance baselines for both legacy stores, lifecycle transitions, confirmation/rejection, Agent calls, callback replay, old records, and concurrent operations.
+- [x] 1.1 Inventory every executable Meeting, request, occupancy, event, idempotency, action-item, notification, callback, recovery, and project-linkage reader/writer; add characterization fixtures and fixed performance baselines for both legacy stores, lifecycle transitions, confirmation/rejection, Agent calls, callback replay, old records, and concurrent operations.
 
 ## 2. Unified schema, repository, and migration
 
