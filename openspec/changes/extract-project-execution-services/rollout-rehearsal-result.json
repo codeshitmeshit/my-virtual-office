@@ -1,0 +1,48 @@
+{
+  "result": "pass",
+  "executedAt": "2026-07-12T15:02:06Z",
+  "baseSha": "13a8219afdc410a65cdf8b34d6d695fc22335c2b",
+  "runtimePatchSha256": "b6371a94b12c86d93e4004bf2291c8106fd1edeabc968c3092b741957b6c10e2",
+  "fixture": {
+    "projects": 50,
+    "tasks": 2500
+  },
+  "acknowledgedState": {
+    "projects": 51,
+    "tasks": 2502
+  },
+  "activeBefore": {
+    "active": true,
+    "phase": "executing",
+    "attemptId": "0f940e46-6434-445f-bcc1-33602da32a16"
+  },
+  "activeAfter": {
+    "active": false,
+    "state": "blocked",
+    "attemptStatus": "cancelled"
+  },
+  "rollback": {
+    "projects": 51,
+    "tasks": 2502,
+    "active": false,
+    "attemptStatus": "cancelled"
+  },
+  "backup": {
+    "beforeDigest": "d1a1ebfca52a2d6bdee4ce42f42eac828920a078a5e6f3ea0d1ee83eebd19c59",
+    "restoredDigest": "d1a1ebfca52a2d6bdee4ce42f42eac828920a078a5e6f3ea0d1ee83eebd19c59"
+  },
+  "startup": {
+    "candidateHttp": true,
+    "candidateWebSocket": true,
+    "rollbackHttp": true,
+    "rollbackWebSocket": true
+  },
+  "expectedDegraded": [
+    "gateway_unavailable",
+    "browser_viewer_unavailable"
+  ],
+  "ids": {
+    "projectId": "52490ede-aa22-43b0-a6d6-eb5c67d6c52a",
+    "taskId": "f1e10cb7-20da-49cc-9cfc-0cf37114a86d"
+  }
+}

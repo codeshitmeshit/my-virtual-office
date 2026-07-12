@@ -114,6 +114,7 @@ def test_management_rejection_uses_shared_json_response(monkeypatch):
     assert json.loads(handler.wfile.getvalue()) == {
         "ok": False,
         "error": "A valid Virtual Office management token is required",
+        "code": "management_token_required",
     }
     assert dict(handler.response_headers)["X-Content-Type-Options"] == "nosniff"
 

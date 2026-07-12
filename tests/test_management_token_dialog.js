@@ -140,3 +140,46 @@ testConcurrentPromptSharing().then(() => {
   console.error(error);
   process.exitCode = 1;
 });
+
+async function testDomain403PassesThroughWithoutClearingToken() {
+  const document = createDocument();
+  const storage = new Map([['voManagementToken', 'valid-token']]);
+  const response = {
+    status: 403,
+    clone() { return this; },
+    async json() { return { code: 'artifact_path_forbidden', error: 'Artifact path escapes workspace' }; },
+  };
+  let calls = 0;
+  const window = { location: { href: 'http://localhost:8090/' }, dispatchEvent() {} };
+  const context = {
+    window,
+    document,
+    navigator: { language: 'en' },
+    localStorage: { getItem: () => null, setItem() {} },
+    sessionStorage: {
+      getItem(key) { return storage.get(key) || null; },
+      setItem(key, value) { storage.set(key, String(value)); },
+      removeItem(key) { storage.delete(key); },
+    },
+    Headers,
+    URL,
+    CustomEvent: class CustomEvent {},
+    fetch: async () => { calls += 1; return response; },
+    console,
+    setTimeout,
+    clearTimeout,
+  };
+  vm.runInNewContext(source, context, { filename: 'i18n.js' });
+  const result = await window.i18n.managementFetch('/api/projects/p/artifacts?path=escape', { method: 'DELETE' });
+  assert.strictEqual(result, response, 'domain 403 response must pass through unchanged');
+  assert.strictEqual(calls, 1, 'domain 403 must not be retried');
+  assert.strictEqual(storage.get('voManagementToken'), 'valid-token', 'valid token must be preserved');
+  assert.strictEqual(document.getElementById('management-token-dialog'), null, 'domain 403 must not open token dialog');
+}
+
+testDomain403PassesThroughWithoutClearingToken().then(() => {
+  console.log('management token domain 403 behavior ok');
+}).catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});

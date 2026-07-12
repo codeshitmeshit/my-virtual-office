@@ -333,17 +333,27 @@
         var token = sessionStorage.getItem('voManagementToken') || '';
         if (token) init.headers.set('X-VO-Management-Token', token);
         var response = await fetch(input, init);
-        if (response.status !== 403) return response;
+        if (!(await isManagementTokenChallenge(response))) return response;
         token = await requestManagementToken();
         if (!token) throw new Error(t('management_token_required'));
         sessionStorage.setItem('voManagementToken', token);
         init.headers.set('X-VO-Management-Token', token);
         response = await fetch(input, init);
-        if (response.status === 403) {
+        if (await isManagementTokenChallenge(response)) {
             sessionStorage.removeItem('voManagementToken');
             throw new Error(t('management_token_invalid'));
         }
         return response;
+    }
+
+    async function isManagementTokenChallenge(response) {
+        if (!response || response.status !== 403) return false;
+        try {
+            var payload = await response.clone().json();
+            return payload && payload.code === 'management_token_required';
+        } catch (_) {
+            return false;
+        }
     }
 
     // Auto-init on DOMContentLoaded

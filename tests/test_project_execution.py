@@ -119,6 +119,48 @@ def create_project_execution_project(workspace):
     return project, task
 
 
+def test_task_compatibility_log_and_project_update_are_concurrency_safe():
+    with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as workspace:
+        old = with_store(status_dir)
+        try:
+            project, task = create_project_execution_project(workspace)
+            errors = []
+            for index in range(8):
+                barrier = threading.Barrier(2)
+
+                def update_project():
+                    try:
+                        barrier.wait()
+                        result = server._handle_project_update(project["id"], {"description": f"project-{index}"})
+                        assert result["ok"] is True
+                    except BaseException as exc:
+                        errors.append(exc)
+
+                def update_task():
+                    try:
+                        barrier.wait()
+                        result = server._handle_task_update(project["id"], task["id"], {"priority": "high" if index % 2 else "medium"})
+                        assert result["ok"] is True
+                    except BaseException as exc:
+                        errors.append(exc)
+
+                threads = [threading.Thread(target=update_project), threading.Thread(target=update_task)]
+                for thread in threads:
+                    thread.start()
+                for thread in threads:
+                    thread.join(timeout=5)
+                    assert not thread.is_alive()
+
+            assert errors == []
+            stored = server._handle_project_get(project["id"])["project"]
+            stored_task = next(item for item in stored["tasks"] if item["id"] == task["id"])
+            assert stored["description"] == "project-7"
+            assert stored_task["priority"] == "high"
+            assert any(comment.get("text") == "Priority set to high" for comment in stored_task["comments"])
+        finally:
+            restore_store(old)
+
+
 def col_id(project, title):
     return next(c["id"] for c in project["columns"] if c["title"] == title)
 
@@ -1337,6 +1379,7 @@ def test_provider_matrix_routes_execution_with_workspace_and_provider_ref():
         (server, "_wf_call_agent", server._wf_call_agent),
         (server, "_handle_hermes_chat", server._handle_hermes_chat),
         (server, "_handle_codex_chat", server._handle_codex_chat),
+        (server, "_handle_claude_code_chat", server._handle_claude_code_chat),
     ]
 
     def openclaw_call(agent_id, prompt, timeout=600, project_id=None, task_id=None):
@@ -1348,7 +1391,7 @@ def test_provider_matrix_routes_execution_with_workspace_and_provider_ref():
         return {"ok": True, "status": "completed", "reply": "hermes done", "modifiedFiles": ["hermes.txt"]}
 
     def codex_call(body):
-        calls.append(("codex", body.get("agentId"), body.get("message"), body.get("workspace")))
+        calls.append(("codex", body.get("agentId"), body.get("message"), body.get("workspace"), body.get("_reviewReadOnly")))
         return {"ok": True, "status": "completed", "reply": "codex done", "modifiedFiles": ["codex.txt"]}
 
     server._wf_call_agent = openclaw_call
@@ -2641,6 +2684,7 @@ def test_reviewer_provider_matrix_receives_read_only_evidence_packet():
         (server, "_wf_call_agent", server._wf_call_agent),
         (server, "_handle_hermes_chat", server._handle_hermes_chat),
         (server, "_handle_codex_chat", server._handle_codex_chat),
+        (server, "_handle_claude_code_chat", server._handle_claude_code_chat),
     ]
 
     def review_reply():
@@ -2655,12 +2699,17 @@ def test_reviewer_provider_matrix_receives_read_only_evidence_packet():
         return {"ok": True, "status": "completed", "reply": review_reply()}
 
     def codex_call(body):
-        calls.append(("codex", body.get("agentId"), body.get("message"), body.get("workspace")))
+        calls.append(("codex", body.get("agentId"), body.get("message"), body.get("workspace"), body.get("_reviewReadOnly")))
+        return {"ok": True, "status": "completed", "reply": review_reply()}
+
+    def claude_call(body):
+        calls.append(("claude-code", body.get("agentId"), body.get("message"), body.get("workspace"), body.get("_reviewReadOnly")))
         return {"ok": True, "status": "completed", "reply": review_reply()}
 
     server._wf_call_agent = openclaw_call
     server._handle_hermes_chat = hermes_call
     server._handle_codex_chat = codex_call
+    server._handle_claude_code_chat = claude_call
     try:
         attempt = {"id": "a1", "evidence": {"executorSummary": "implemented", "changedFiles": ["x.py"], "testResults": ["pytest passed"]}}
         project = {"title": "P", "description": "", "workspacePath": "/tmp/should-not-be-sent"}
@@ -2669,16 +2718,67 @@ def test_reviewer_provider_matrix_receives_read_only_evidence_packet():
         for provider, reviewer in [
             ("openclaw", {"id": "reviewer", "providerKind": "openclaw"}),
             ("hermes", {"id": "hermes-executor", "providerKind": "hermes"}),
-            ("codex", {"id": "codex-executor", "providerKind": "codex"}),
+            ("codex", {"id": "codex-executor", "providerKind": "codex", "_workspacePath": "/tmp/authorized-project"}),
+            ("claude-code", {"id": "claude-executor", "providerKind": "claude-code", "_workspacePath": "/tmp/authorized-project"}),
         ]:
             result = server._project_execution_call_reviewer(reviewer, prompt, f"review-{provider}", project_id="p", task_id="t")
             assert result["ok"] is True
-        assert {call[0] for call in calls} == {"openclaw", "hermes", "codex"}
+        assert {call[0] for call in calls} == {"openclaw", "hermes", "codex", "claude-code"}
         assert all("EXECUTOR SUMMARY" in call[2] for call in calls)
+        assert all("authorized task workspace" in call[2] for call in calls)
+        assert all("may be inspected read-only" in call[2] for call in calls)
+        assert all("historical context that may already be stale" in call[2] for call in calls)
         assert all("/tmp/should-not-be-sent" not in call[2] for call in calls)
-        assert all(call[3] in (None, "") for call in calls)
+        workspace_by_provider = {call[0]: call[3] for call in calls}
+        assert workspace_by_provider == {
+            "openclaw": None, "hermes": None,
+            "codex": "/tmp/authorized-project", "claude-code": "/tmp/authorized-project",
+        }
+        read_only_by_provider = {call[0]: (call[4] if len(call) > 4 else None) for call in calls}
+        assert read_only_by_provider == {
+            "openclaw": None, "hermes": None,
+            "codex": True, "claude-code": True,
+        }
     finally:
         restore_attrs(originals)
+
+
+def test_native_reviewer_uses_attempt_workspace_snapshot_after_project_path_changes():
+    with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as workspace_a, tempfile.TemporaryDirectory() as workspace_b:
+        old = with_store(status_dir)
+        old_executor = server._project_execution_call_executor
+        old_reviewer = server._project_execution_call_reviewer
+        captured = []
+        server._project_execution_call_executor = lambda *args, **kwargs: {
+            "ok": True, "status": "completed", "reply": "implemented",
+            "checklistUpdates": [{"id": "done", "text": "done", "done": True}],
+        }
+
+        def review_call(reviewer, *args, **kwargs):
+            captured.append(reviewer.get("_workspacePath"))
+            return {
+                "ok": True, "status": "completed",
+                "reply": '{"status":"pass","summary":"ready","rationale":"verified","items":[]}',
+            }
+
+        server._project_execution_call_reviewer = review_call
+        try:
+            project, task = create_project_execution_project(workspace_a)
+            server._handle_task_update(project["id"], task["id"], {"reviewerAgentId": "codex-executor"})
+            task = complete_project_task_execution(project["id"], task["id"])
+            updated = server._handle_project_update(project["id"], {"workspacePath": workspace_b})
+            assert updated["ok"] is True
+            started = server._handle_project_execution_review_start(
+                project["id"], task["id"], {"attemptId": task["evidence"]["attemptId"]},
+            )
+            assert started["ok"] is True
+            wait_for(lambda: captured)
+            assert captured == [os.path.realpath(workspace_a)]
+            wait_for(lambda: server._handle_project_get(project["id"])["project"]["tasks"][0].get("activeAttemptId") is None)
+        finally:
+            server._project_execution_call_executor = old_executor
+            server._project_execution_call_reviewer = old_reviewer
+            restore_store(old)
 
 
 def test_malformed_reviewer_result_blocks_instead_of_passing():
@@ -3353,7 +3453,14 @@ def test_acceptance_reject_starts_rework_execution_before_returning_to_review():
     with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as workspace:
         old = with_store(status_dir)
         old_executor = server._project_execution_call_executor
+        old_launcher = server._project_execution_launch
+        launched = []
         calls = []
+
+        def tracked_launch(callback):
+            thread = threading.Thread(target=callback, daemon=True)
+            launched.append(thread)
+            thread.start()
 
         def executor_call(executor, prompt, workspace, attempt_id, project_id=None, task_id=None, timeout=600):
             calls.append(attempt_id)
@@ -3365,6 +3472,7 @@ def test_acceptance_reject_starts_rework_execution_before_returning_to_review():
                 "checklistUpdates": [{"id": "done", "text": "Complete implementation", "done": True}],
             }
 
+        server._project_execution_launch = tracked_launch
         server._project_execution_call_executor = executor_call
         try:
             project, task = create_project_execution_project(workspace)
@@ -3396,6 +3504,10 @@ def test_acceptance_reject_starts_rework_execution_before_returning_to_review():
             assert reworked["activeAttemptId"] is None
             assert reworked["attempts"][-1]["id"] == rejected["attemptId"]
         finally:
+            for thread in launched:
+                thread.join(timeout=5)
+                assert not thread.is_alive()
+            server._project_execution_launch = old_launcher
             server._project_execution_call_executor = old_executor
             restore_store(old)
 

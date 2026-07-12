@@ -216,10 +216,23 @@ def run_review(
         if not attempt or task.get("activeAttemptId") != review_id:
             return
         reviewer = copy.deepcopy(attempt.get("reviewer") or {})
-        result = ports.call_reviewer(
-            reviewer, ports.build_prompt(project, task, attempt), review_id,
-            project_id=project_id, task_id=task_id,
-        )
+        # Native code reviewers may perform read-only verification despite the
+        # evidence-only prompt. Bind them to the authorized project workspace
+        # rather than allowing their provider default workspace to be used.
+        provider_kind = reviewer.get("providerKind")
+        workspace = ports.validate_workspace(attempt.get("workspacePath") or project.get("workspacePath") or "")
+        if provider_kind in {"codex", "claude-code"} and not workspace.get("ok"):
+            result = {
+                "ok": False,
+                "status": "review_failed",
+                "error": workspace.get("error") or "Reviewer workspace is unavailable",
+            }
+        else:
+            reviewer["_workspacePath"] = workspace.get("path") if provider_kind in {"codex", "claude-code"} else ""
+            result = ports.call_reviewer(
+                reviewer, ports.build_prompt(project, task, attempt), review_id,
+                project_id=project_id, task_id=task_id,
+            )
         data, project, task = ports.find(project_id, task_id)
         if not project or not task:
             return

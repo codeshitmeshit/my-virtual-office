@@ -6307,6 +6307,9 @@ def _handle_codex_chat(body):
             "_status": 409,
         }
     provider = _codex_provider_from_config()
+    if body.get("_reviewReadOnly") is True:
+        provider.sandbox = "read-only"
+        provider.approval_policy = "never"
     requested_workspace = str(body.get("workspace") or "").strip()
     if requested_workspace:
         provider.workspace = os.path.realpath(os.path.expanduser(requested_workspace))
@@ -8446,6 +8449,7 @@ def _handle_claude_code_chat(body):
         model=agent.get("model") or cfg.get("model"),
         reply_text=cfg.get("replyText"),
         timeout_sec=int(body.get("timeoutSec") or cfg.get("timeoutSec") or 900),
+        permission_mode="plan" if body.get("_reviewReadOnly") is True else (cfg.get("permissionMode") or "acceptEdits"),
     )
     profile = agent.get("profile") or agent.get("providerAgentId") or "local"
     history = _load_claude_code_history(profile, conversation_id)
@@ -16393,7 +16397,7 @@ def _project_schedule_owns_dispatch(cron_id, token):
         return claim.get("token") == token and float(claim.get("expiresAtEpoch") or 0) > time.time()
 
 
-def _project_schedule_release_dispatch(cron_id, token):
+def _project_schedule_release_dispatch(cron_id, token, completed=True):
     with _PROJECT_CRON_BINDINGS_LOCK:
         data = _load_project_cron_bindings()
         binding = data.setdefault("bindings", {}).get(str(cron_id))
@@ -16404,7 +16408,7 @@ def _project_schedule_release_dispatch(cron_id, token):
             return False
         binding.pop("dispatchClaim", None)
         occurrence_id = str(claim.get("occurrenceId") or "")
-        if occurrence_id:
+        if completed and occurrence_id:
             sequence = _project_schedule_run_now_sequence(cron_id, occurrence_id)
             if sequence is not None:
                 binding["completedRunNowSequence"] = max(
@@ -16416,8 +16420,11 @@ def _project_schedule_release_dispatch(cron_id, token):
                     completed = []
                 binding["completedDispatchOccurrences"] = (completed + [occurrence_id])[-50:]
         binding["lastDispatchClaim"] = {
-            "token": token, "completedAt": _proj_now(), "source": claim.get("source") or "",
+            "token": token,
+            "completedAt" if completed else "releasedAt": _proj_now(),
+            "source": claim.get("source") or "",
             "occurrenceId": occurrence_id,
+            "completed": bool(completed),
         }
         _save_project_cron_bindings(data)
         return True
@@ -21509,7 +21516,8 @@ def _project_execution_build_review_prompt(project, task, attempt):
     feedback = task.get("reworkFeedback") or ""
     return (
         "You are the independent read-only reviewer for a Virtual Office Project Execution task.\n"
-        "Review only the evidence below. Do not modify files, run tools that write files, or mark the task done.\n"
+        "Review the evidence below first. If your runtime exposes a workspace, it is the authorized task workspace and may be inspected read-only to verify the evidence. "
+        "Do not modify files, run write-capable tools, or mark the task done. Treat earlier rework feedback as historical context that may already be stale.\n"
         "The checklist contains deliverable acceptance criteria only; meeting action items and risks are context, not acceptance checklist items.\n"
         "Return one JSON object with fields: status, summary, rationale, items.\n"
         "status must be one of: pass, needs_more_work, blocked.\n\n"
@@ -21525,12 +21533,13 @@ def _project_execution_build_review_prompt(project, task, attempt):
 def _project_execution_call_reviewer(reviewer, prompt, review_id, project_id=None, task_id=None, timeout=600):
     agent_id = reviewer.get("id")
     provider_kind = reviewer.get("providerKind")
+    workspace = reviewer.get("_workspacePath") or None
     if provider_kind == "codex":
-        return _handle_codex_chat({"agentId": agent_id, "message": prompt, "conversationId": review_id, "timeoutSec": timeout, "fromType": "agent"})
+        return _handle_codex_chat({"agentId": agent_id, "message": prompt, "conversationId": review_id, "timeoutSec": timeout, "workspace": workspace, "_reviewReadOnly": True, "fromType": "agent"})
     if provider_kind == "hermes":
         return _handle_hermes_chat({"agentId": agent_id, "message": prompt, "conversationId": review_id, "timeoutSec": timeout, "fromType": "agent"})
     if provider_kind == "claude-code":
-        return _handle_claude_code_chat({"agentId": agent_id, "message": prompt, "conversationId": review_id, "timeoutSec": timeout, "fromType": "agent"})
+        return _handle_claude_code_chat({"agentId": agent_id, "message": prompt, "conversationId": review_id, "timeoutSec": timeout, "workspace": workspace, "_reviewReadOnly": True, "fromType": "agent"})
     reply = _wf_call_agent(agent_id, prompt, timeout=timeout, project_id=project_id, task_id=review_id or task_id)
     ok = not str(reply).startswith("[ERROR]")
     return {"ok": ok, "reply": reply, "error": None if ok else reply, "status": "completed" if ok else "review_failed"}
@@ -22127,28 +22136,31 @@ def _wf_sync_project_workflow_meta(project_id, *, active=None, phase=None, curre
 
 def _wf_write_task_file(project_id, task, status_text, review_results=None, work_log_entry=None):
     """Update canonical markdown-backed task state, preserving compatibility with workflow logging."""
-    data = _load_projects()
-    p = next((x for x in data["projects"] if x["id"] == project_id), None)
-    if not p:
-        return
-    live_task = next((t for t in p.get("tasks", []) if t.get("id") == task.get("id")), None)
-    if not live_task:
-        return
-    if review_results is not None:
-        live_task["reviewCheck"] = review_results
-    if work_log_entry:
-        comments = live_task.setdefault("comments", [])
-        comments.append({
-            "id": _proj_uuid(),
-            "author": "workflow",
-            "text": work_log_entry,
-            "createdAt": _proj_now(),
-        })
-        if len(comments) > 200:
-            live_task["comments"] = comments[-200:]
-    live_task["updatedAt"] = _proj_now()
-    p["updatedAt"] = _proj_now()
-    _save_projects(data)
+    def mutate(project):
+        live_task = next((item for item in project.get("tasks", []) if item.get("id") == task.get("id")), None)
+        if not live_task:
+            return False
+        if review_results is not None:
+            live_task["reviewCheck"] = review_results
+        if work_log_entry:
+            comments = live_task.setdefault("comments", [])
+            comments.append({
+                "id": _proj_uuid(),
+                "author": "workflow",
+                "text": work_log_entry,
+                "createdAt": _proj_now(),
+            })
+            if len(comments) > 200:
+                live_task["comments"] = comments[-200:]
+        now = _proj_now()
+        live_task["updatedAt"] = now
+        project["updatedAt"] = now
+        return True
+
+    try:
+        return _PROJECT_REPOSITORY.update(project_id, mutate)
+    except ProjectNotFoundError:
+        return False
 
 
 def _wf_read_task_file(project_id, task_id):
@@ -25260,7 +25272,11 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
     def _reject_untrusted_management_request(self):
         if self._management_request_allowed():
             return False
-        self._send_json({"ok": False, "error": "A valid Virtual Office management token is required"}, status=403)
+        self._send_json({
+            "ok": False,
+            "error": "A valid Virtual Office management token is required",
+            "code": "management_token_required",
+        }, status=403)
         return True
 
     def _request_id(self):

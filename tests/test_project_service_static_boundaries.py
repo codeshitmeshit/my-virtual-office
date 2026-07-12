@@ -95,3 +95,19 @@ def test_legacy_save_delegate_uses_repository_commit_snapshot():
     assert "_PROJECT_REPOSITORY.commit_snapshot" in calls
     assert "PROJECT_STORE.save_all" not in calls
     assert "PROJECT_STORE.delete_project" not in calls
+
+
+def test_service_boundary_document_covers_final_operating_contract():
+    document = (ROOT / "docs" / "SERVICE_BOUNDARIES.md").read_text(encoding="utf-8")
+    required = (
+        "## Module ownership",
+        "## Trusted entries",
+        "## Writer and lock rules",
+        "## Sensitive data",
+        "## Confirmed migration fixes",
+        "## Performance method and result",
+        "Legacy `_wf_*` orchestration remains a deliberate non-goal",
+        "./start.sh",
+    )
+    for phrase in required:
+        assert phrase in document

@@ -1,4 +1,4 @@
-# Project Execution Full Regression — Section 7
+# Project Execution Full Regression — Final Section 8 confirmation
 
 ## Automated Python suite
 
@@ -10,9 +10,9 @@ rg --files tests -g 'test_*.py' \
   | xargs .venv/bin/python -m pytest -q
 ```
 
-Final post-CR result: **496 passed**, 2 dependency deprecation warnings, 0 failed. The suite covers project persistence and writer races, Provider adapters, execution lifecycle, Review/acceptance/notifications, Feishu, Meeting, Artifact, Cron, SSE, WebSocket route contracts, dashboard realtime behavior, and the new static/security/performance gates.
+Final post-CR result: **504 passed**, 2 dependency deprecation warnings, 0 failed. The suite covers project persistence and writer races, Provider adapters, execution lifecycle, Review/acceptance/notifications, Feishu, Meeting, Artifact, Cron, SSE, WebSocket route contracts, dashboard realtime behavior, and the static/security/performance gates. Section 8 and overall-CR additions cover the documentation contract, concurrent compatibility work-log/project updates, attempt-workspace binding, Provider-enforced read-only native review, Cron occurrence retry after unexpected exceptions, and Gateway/binding compensation/retry failures.
 
-The first pre-CR run collected 497 tests and was `496 passed, 1 failed`: the failed assertion was `TemporaryDirectory` cleanup racing a finishing background workflow writer in `test_skipped_review_waits_for_acceptance_when_required`. The fixture now tracks and joins every launched execution thread before restoring globals and cleaning the directory. A name-only AST “coverage matrix” was also removed during CR because it did not execute behavior, leaving 496 real tests; the final complete command passed 496/496.
+The first Section 8 run was `497 passed, 1 failed`: the reviewer-provider matrix replaced the Claude handler but did not restore it, so a later usage-ledger test observed the fake success response. Restoring the fourth patched handler removed the order dependency. A later full run exposed an existing test-fixture cleanup race after rework; that fixture now tracks and joins its launched threads. After the overall CR fixes, the final complete suite passed 504/504.
 
 ## Script-style Python suites
 
@@ -22,8 +22,9 @@ These files call `sys.exit` during import and therefore must not be collected by
 | --- | --- |
 | `.venv/bin/python tests/test_chat_sessions.py` | 20 checks passed |
 | `.venv/bin/python tests/test_review_parser.py` | 16/16 passed |
-| `.venv/bin/python tests/test_workflow_e2e.py` | 20/20 passed |
+| `VO_MANAGEMENT_TOKEN=<test-token> .venv/bin/python tests/test_workflow_e2e.py` | 20/20 passed; server started via `./start.sh` |
 | `.venv/bin/python test_review_parser.py` | 85/85 passed |
+| `node tests/test_management_token_dialog.js` | modal, shared prompt, and domain-403 pass-through checks passed |
 
 ## JavaScript/static suite
 
@@ -48,8 +49,15 @@ Result: **23 scripts passed**, including project execution request payloads, Mee
 - Static Service dependency and persistence-coordinator tests: 24/24 with repository/writer regressions.
 - Trusted-entry and sensitive-data command (project HTTP boundary, Meeting command, execution/review, Artifact, Feishu, Cron, Codex and Claude Provider adapters): 236/236 with canary-secret, Basic/Bearer/Cookie/JSON credentials, POSIX/Windows/UNC paths, logger, and notifier coverage.
 - Performance artifact gates: 3/3; all stable call counts are non-regressing and Cron strictly improves project-store loads.
-- Final Section 6 Schedule suite: 40/40; includes persisted capacity reservations, lease renewal, same-occurrence replay protection, and distinct-occurrence execution.
+- Dedicated Schedule/Cron files: 39/39; includes persisted capacity reservations, lease renewal, same-occurrence replay protection, distinct-occurrence execution, exception retry, and update/delete compensation. Writer/performance suites add further Schedule coverage in the 504-test total.
 
 ## Remaining manual-only coverage
 
-`node tests/chat_history_performance.mjs` requires Chrome DevTools at `127.0.0.1:9224` and correctly failed fast because CDP was not running. The `chat_history_ui_e2e.mjs` and `chrome_*.mjs` suites have the same live-browser prerequisite. They are deferred to task 8.2, where the application and agent browser must be started through the repository startup script; they are not treated as automated failures in this headless Section 7 gate.
+`node tests/chat_history_performance.mjs` requires Chrome DevTools at `127.0.0.1:9224`; CDP was not available in this environment. Task 8.2 instead used the in-app browser to confirm that the startup-script instance rendered the Virtual Office shell and project navigation. This change has no frontend interaction or layout scope; all 23 deterministic frontend/static scripts passed.
+
+## Final release evidence
+
+- Manual acceptance: `manual-acceptance.md` — project/task, execution, Review/rework/acceptance, Artifact, Cron degraded behavior, Git failure, concurrency, and token boundary.
+- Rollout rehearsal: `rollout-rehearsal.md` — fixed medium fixture, active write, drain, rollback, backup restore, and exact counts/digests.
+- Scenario traceability: `scenario-evidence.md` — every confirmed OpenSpec scenario mapped to implementation and executable/manual evidence.
+- Bits remote UT was checked because the final gate requested tests; it is inapplicable because this repository has no `go.mod` or `.codebase/pipelines/ci.yaml` and is not a Go/Bits pipeline project.

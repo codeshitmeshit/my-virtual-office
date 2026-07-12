@@ -227,3 +227,46 @@ def test_gateway_success_binding_failure_is_compensated_and_releases_slot():
         "schedule": {"kind": "every", "everyMs": 60000}, "targetType": "projectWorkflow",
     }, ports=ports)
     assert retry["ok"] is True
+
+
+def test_update_binding_failure_restores_previous_gateway_job():
+    ports, bindings, jobs = _schedule_fixture()
+    project_schedule.create("p", {
+        "schedule": {"kind": "every", "everyMs": 60000}, "targetType": "projectWorkflow",
+    }, ports=ports)
+    before_job = dict(jobs["c"])
+    broken = project_schedule.SchedulePorts(**{
+        **ports.__dict__, "merge_binding": lambda *_: (_ for _ in ()).throw(OSError("disk full")),
+    })
+    result = project_schedule.update("p", "c", {"enabled": False}, ports=broken)
+    assert result["_status"] == 500
+    assert result["code"] == "cron_binding_persist_failed"
+    assert result["reconciliationRequired"] is False
+    assert jobs["c"] == before_job
+    assert bindings["c"]["enabled"] is True
+
+
+def test_delete_binding_failure_can_retry_when_gateway_reports_missing():
+    ports, bindings, jobs = _schedule_fixture()
+    project_schedule.create("p", {
+        "schedule": {"kind": "every", "everyMs": 60000}, "targetType": "projectWorkflow",
+    }, ports=ports)
+    broken = project_schedule.SchedulePorts(**{
+        **ports.__dict__, "delete_binding": lambda *_: (_ for _ in ()).throw(OSError("disk full")),
+    })
+    first = project_schedule.delete("p", "c", ports=broken)
+    assert first["_status"] == 500
+    assert first["code"] == "cron_binding_delete_failed"
+    assert "c" not in jobs and "c" in bindings
+
+    original_gateway = ports.gateway
+
+    def missing_gateway(method, params, timeout):
+        if method == "cron.remove":
+            return {"ok": False, "code": "not_found", "error": "job not found"}
+        return original_gateway(method, params, timeout)
+
+    retry_ports = project_schedule.SchedulePorts(**{**ports.__dict__, "gateway": missing_gateway})
+    retry = project_schedule.delete("p", "c", ports=retry_ports)
+    assert retry["ok"] is True
+    assert bindings == {}

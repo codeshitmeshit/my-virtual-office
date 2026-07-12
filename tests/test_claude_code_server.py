@@ -73,6 +73,37 @@ def test_claude_code_chat_saves_isolated_history():
         server.get_roster = old_roster
 
 
+def test_review_claude_code_chat_forces_plan_permission_mode():
+    old_roster = server.get_roster
+    old_provider = server.ClaudeCodeProvider
+    captured = {}
+
+    class ReviewProvider:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+        def send_chat_message(self, *args, **kwargs):
+            return {
+                "ok": True, "status": "completed", "reply": "reviewed",
+                "sessionId": "review-session", "runId": "review-session",
+            }
+
+    server.get_roster = lambda: [AGENT]
+    server.ClaudeCodeProvider = ReviewProvider
+    try:
+        result = server._handle_claude_code_chat({
+            "agentId": "claude-code-local",
+            "message": "read-only review",
+            "conversationId": "conv-review-read-only",
+            "_reviewReadOnly": True,
+        })
+        assert result["ok"] is True
+        assert captured["permission_mode"] == "plan"
+    finally:
+        server.get_roster = old_roster
+        server.ClaudeCodeProvider = old_provider
+
+
 def test_claude_code_history_endpoint_source_is_conversation_scoped():
     server._save_claude_code_history("local", [
         {"role": "user", "text": "conv-a only", "ts": 1000, "agentId": "claude-code-local"},

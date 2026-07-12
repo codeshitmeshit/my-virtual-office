@@ -15,6 +15,8 @@ import os
 
 BASE = os.environ.get("VO_TEST_URL", "http://127.0.0.1:8090")
 API = f"{BASE}/api/projects"
+MANAGEMENT_TOKEN = os.environ.get("VO_MANAGEMENT_TOKEN", "")
+REQUEST_HEADERS = {"X-VO-Management-Token": MANAGEMENT_TOKEN} if MANAGEMENT_TOKEN else {}
 
 PASS = "✅"
 FAIL = "❌"
@@ -31,19 +33,19 @@ def check(name, condition, detail=""):
     return condition
 
 def api_get(path):
-    r = requests.get(f"{API}{path}", timeout=10)
+    r = requests.get(f"{API}{path}", headers=REQUEST_HEADERS, timeout=10)
     return r.json()
 
 def api_post(path, body=None):
-    r = requests.post(f"{API}{path}", json=body or {}, timeout=10)
+    r = requests.post(f"{API}{path}", json=body or {}, headers=REQUEST_HEADERS, timeout=10)
     return r.json()
 
 def api_put(path, body=None):
-    r = requests.put(f"{API}{path}", json=body or {}, timeout=10)
+    r = requests.put(f"{API}{path}", json=body or {}, headers=REQUEST_HEADERS, timeout=10)
     return r.json()
 
 def api_delete(path):
-    r = requests.delete(f"{API}{path}", timeout=10)
+    r = requests.delete(f"{API}{path}", headers=REQUEST_HEADERS, timeout=10)
     return r.json()
 
 # ── Cleanup: delete any existing test projects ──

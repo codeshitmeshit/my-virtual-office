@@ -8,6 +8,8 @@ import tempfile
 import threading
 import time
 
+import pytest
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 APP_DIR = os.path.join(ROOT, "app")
 if APP_DIR not in sys.path:
@@ -548,6 +550,54 @@ def test_run_now_suppresses_delayed_gateway_callback_duplicate():
             later = server._handle_project_scheduled_cron_dispatch(project["id"], created["id"], "cron")
             assert later["status"] == "started"
             assert calls == [project["id"], project["id"]]
+        finally:
+            restore_store(old)
+
+
+def test_dispatch_exception_releases_claim_without_completing_occurrence():
+    with tempfile.TemporaryDirectory() as status_dir:
+        old = with_store(status_dir)
+        server._gateway_rpc_call = FakeCronGateway()
+        calls = []
+        try:
+            project, _ = create_project_with_task(project_execution_enabled=True)
+            created = server._handle_project_scheduled_cron_create(project["id"], {
+                "schedule": {"kind": "every", "everyMs": 120000},
+                "targetType": "projectWorkflow",
+            })
+            occurrence_id = f"{created['id']}:run-now:1"
+            base_ports = server._project_schedule_dispatch_ports()
+
+            def raising_start(project_id, body=None):
+                calls.append("raise")
+                raise RuntimeError("simulated start failure")
+
+            broken_ports = server.project_schedule_service.DispatchPorts(**{
+                **base_ports.__dict__, "start_project": raising_start,
+            })
+            with pytest.raises(RuntimeError, match="simulated start failure"):
+                server.project_schedule_service.dispatch(
+                    project["id"], created["id"], "run-now", occurrence_id, ports=broken_ports,
+                )
+            after_failure = server._load_project_cron_bindings()["bindings"][created["id"]]
+            assert "dispatchClaim" not in after_failure
+            assert int(after_failure.get("completedRunNowSequence") or 0) == 0
+            assert after_failure["lastDispatchClaim"]["completed"] is False
+
+            retry_ports = server.project_schedule_service.DispatchPorts(**{
+                **base_ports.__dict__,
+                "start_project": lambda project_id, body=None: calls.append("success") or {
+                    "ok": True, "status": "started", "projectId": project_id,
+                },
+            })
+            retry = server.project_schedule_service.dispatch(
+                project["id"], created["id"], "run-now", occurrence_id, ports=retry_ports,
+            )
+            assert retry["status"] == "started"
+            assert calls == ["raise", "success"]
+            completed = server._load_project_cron_bindings()["bindings"][created["id"]]
+            assert completed["completedRunNowSequence"] == 1
+            assert completed["lastDispatchClaim"]["completed"] is True
         finally:
             restore_store(old)
 

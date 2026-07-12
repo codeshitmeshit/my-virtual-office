@@ -86,7 +86,7 @@ class DispatchPorts:
     claim_dispatch: Callable[[str, str, str | None], dict[str, Any]]
     renew_dispatch: Callable[[str, str], bool]
     owns_dispatch: Callable[[str, str], bool]
-    release_dispatch: Callable[[str, str], Any]
+    release_dispatch: Callable[[str, str, bool], Any]
     sanitize_result: Callable[[Mapping[str, Any] | None], dict[str, Any]]
     monotonic: Callable[[], float] = time.monotonic
     lease_refresh_seconds: float = 20.0
@@ -102,6 +102,12 @@ def _gateway(ports: SchedulePorts | DispatchPorts, method: str, params: dict[str
 
 def _gateway_error(default: str) -> dict[str, Any]:
     return {"error": default, "_status": 502}
+
+
+def _gateway_not_found(result: Mapping[str, Any]) -> bool:
+    code = str(result.get("code") or result.get("status") or "").lower().replace("-", "_")
+    error = str(result.get("error") or "").lower()
+    return code in {"404", "not_found", "cron_not_found"} or "not found" in error
 
 
 def list_jobs(project_id: str, *, ports: SchedulePorts) -> dict[str, Any]:
@@ -218,12 +224,22 @@ def update(project_id: str, cron_id: str, body: Mapping[str, Any] | None, *, por
         schedule_error = ports.validate_schedule(schedule)
         if schedule_error:
             return {"error": schedule_error, "_status": 400}
+        previous_job, _previous_binding = ports.build_job(project, {}, existing)
         job, binding = ports.build_job(project, {**body, "targetType": target_type, "taskId": task_id, "schedule": schedule}, existing)
         cron_result = _gateway(ports, "cron.update", {"id": cron_id, "patch": dict(job)}, 30)
         if not cron_result.get("ok"):
             return _gateway_error("Failed to update cron job")
         binding.update({"cronJobId": cron_id, "createdAt": existing.get("createdAt") or ports.now()})
-        ports.merge_binding(str(cron_id), binding)
+        try:
+            ports.merge_binding(str(cron_id), binding)
+        except Exception:
+            rollback = _gateway(ports, "cron.update", {"id": cron_id, "patch": dict(previous_job)}, 30)
+            return {
+                "error": "Failed to persist cron binding",
+                "code": "cron_binding_persist_failed" if rollback.get("ok") else "cron_binding_reconciliation_required",
+                "reconciliationRequired": not bool(rollback.get("ok")),
+                "_status": 500,
+            }
         return {"ok": True, "projectId": project_id, "id": cron_id, "binding": binding}
 
 
@@ -233,9 +249,17 @@ def delete(project_id: str, cron_id: str, *, ports: SchedulePorts) -> dict[str, 
         if not existing or existing.get("projectId") != project_id:
             return {"error": "Project scheduled cron not found", "_status": 404}
         cron_result = _gateway(ports, "cron.remove", {"id": cron_id}, 30)
-        if not cron_result.get("ok"):
+        if not cron_result.get("ok") and not _gateway_not_found(cron_result):
             return _gateway_error("Failed to delete cron job")
-        ports.delete_binding(str(cron_id))
+        try:
+            ports.delete_binding(str(cron_id))
+        except Exception:
+            return {
+                "error": "Cron job was removed but its binding could not be deleted",
+                "code": "cron_binding_delete_failed",
+                "reconciliationRequired": True,
+                "_status": 500,
+            }
         return {"ok": True, "projectId": project_id, "id": cron_id}
 
 
@@ -308,6 +332,7 @@ def dispatch(project_id: str, cron_id: str, source: str = "manual", occurrence_i
 
     renewal = threading.Thread(target=renew_lease, name=f"cron-lease-{cron_id}", daemon=True)
     renewal.start()
+    completed = False
     try:
         with ports.operation_lock(cron_id):
             if not ports.owns_dispatch(str(cron_id), token):
@@ -315,11 +340,13 @@ def dispatch(project_id: str, cron_id: str, source: str = "manual", occurrence_i
                     "ok": True, "status": "skipped", "reason": "dispatch_claim_superseded",
                     "projectId": project_id, "id": cron_id, "idempotent": True,
                 }
-            return _dispatch_locked(project_id, cron_id, source, ports=ports)
+            result = _dispatch_locked(project_id, cron_id, source, ports=ports)
+            completed = True
+            return result
     finally:
         renewal_stop.set()
         renewal.join(timeout=max(0.02, min(1.0, ports.lease_refresh_seconds * 2)))
-        ports.release_dispatch(str(cron_id), token)
+        ports.release_dispatch(str(cron_id), token, completed)
 
 
 def _dispatch_locked(project_id: str, cron_id: str, source: str, *, ports: DispatchPorts) -> dict[str, Any]:

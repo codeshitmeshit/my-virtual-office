@@ -132,6 +132,41 @@ def test_provider_exception_clears_active_operation():
             server._codex_provider_from_config = old_provider
 
 
+def test_review_codex_chat_forces_provider_read_only_sandbox():
+    with tempfile.TemporaryDirectory() as workspace:
+        old_roster = server.get_roster
+        old_provider = server._codex_provider_from_config
+
+        class ReviewProvider:
+            def __init__(self):
+                self.workspace = workspace
+                self.sandbox = "workspace-write"
+                self.approval_policy = "on-request"
+
+            def send_message(self, *args, **kwargs):
+                assert self.sandbox == "read-only"
+                assert self.approval_policy == "never"
+                return {"ok": True, "status": "completed", "reply": "reviewed", "modifiedFiles": []}
+
+        provider = ReviewProvider()
+        server.get_roster = lambda: [AGENT]
+        server._codex_provider_from_config = lambda: provider
+        try:
+            result = server._handle_codex_chat({
+                "agentId": "codex-local",
+                "message": "read-only review",
+                "conversationId": "conv-review-read-only",
+                "workspace": workspace,
+                "_reviewReadOnly": True,
+            })
+            assert result["ok"] is True
+            assert provider.sandbox == "read-only"
+            assert provider.approval_policy == "never"
+        finally:
+            server.get_roster = old_roster
+            server._codex_provider_from_config = old_provider
+
+
 def test_human_codex_chat_persists_user_and_reply_to_comm_history():
     old_status_dir = server.STATUS_DIR
     old_roster = server.get_roster
