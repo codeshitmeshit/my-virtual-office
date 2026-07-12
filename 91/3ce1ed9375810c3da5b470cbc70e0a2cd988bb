@@ -1,0 +1,27 @@
+app/server.py
+  s_5852bad622de94::t_a6bb17e0696d80 48,10760-10762,12790-12796,13377,13818-13825,13844-13875,13877,13881,13914-13915,13917-13929,13932-13933,13935-13939,13945-13957,13959-13960,13965-13974,13980-13986,13992-14000,14004-14010,14013-14020,14022,14024-14029,14033-14038,14041,14043-14049,14051-14054,14058,14061-14063,14079-14086,14089-14091,14093,14096-14098,14100,14403-14404,14408-14418,14421-14425,14427-14431,14434-14437,14439-14448,14635-14644,14679-14682,14684-14686,14688,14691-14693,14695-14696,14740-14743
+app/services/meeting_lifecycle.py
+  s_5852bad622de94::t_605148226b4e0e 1-1067
+openspec/changes/extract-meeting-and-collaboration-services/meeting-call-inventory.json
+  s_5852bad622de94::t_7df99aa9575aa0 133,438,590,638,730,734
+tests/test_meeting_lifecycle_service.py
+  s_5852bad622de94::t_1523e1f3c85360 1-283
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "913ce1ed9375810c3da5b470cbc70e0a2cd988bb",
+  "prompts": {},
+  "sessions": {
+    "s_5852bad622de94": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f5163-cd74-7df3-a25d-7fd6dd323b5d",
+        "model": "unknown"
+      },
+      "human_author": "codeshitmeshit <codeshitmeshit@126.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
