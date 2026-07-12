@@ -81,7 +81,7 @@ def create_project_with_task():
 
 
 def test_project_bound_cron_create_list_update_delete_and_persist():
-    with tempfile.TemporaryDirectory() as status_dir:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as status_dir:
         old = with_store(status_dir)
         fake_gateway = FakeCronGateway()
         server._gateway_rpc_call = fake_gateway
@@ -130,7 +130,7 @@ def test_project_bound_cron_create_list_update_delete_and_persist():
 
 
 def test_project_bound_cron_rejects_invalid_project_target_and_schedule():
-    with tempfile.TemporaryDirectory() as status_dir:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as status_dir:
         old = with_store(status_dir)
         server._gateway_rpc_call = FakeCronGateway()
         try:

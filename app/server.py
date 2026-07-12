@@ -43,6 +43,7 @@ from services import project_commands as project_command_service
 from services import execution_lifecycle as execution_lifecycle_service
 from services import review_acceptance as review_acceptance_service
 from services import artifacts as artifact_service
+from services import project_schedule as project_schedule_service
 from services.project_repository import ProjectConflictError, ProjectNotFoundError, ProjectRepository
 from zoneinfo import ZoneInfo
 from provider_execution import (
@@ -15710,6 +15711,7 @@ SCORE_MEETING_PARTICIPANT_XP = 3  # Per participant in a completed executable me
 
 _PROJECTS_FILE_LOCK = threading.Lock()
 _PROJECT_CRON_BINDINGS_LOCK = threading.Lock()
+_PROJECT_CRON_OPERATION_LOCKS = project_schedule_service.KeyedOperationLocks()
 _PROJECT_CRON_HISTORY_LIMIT = 200
 _PROJECT_CRON_ALERT_STATUSES = {"failed", "intervention_required"}
 
@@ -15721,6 +15723,7 @@ def _project_execution_repair_acceptance_state(data):
     for project in data.get("projects", []) or []:
         if not isinstance(project, dict):
             continue
+        project.setdefault("longTermProject", False)
         done_col = next((c for c in project.get("columns", []) or [] if str(c.get("title", "")).lower() in done_titles), None)
         for task in project.get("tasks", []) or []:
             if not isinstance(task, dict):
@@ -15864,7 +15867,13 @@ def _load_project_cron_bindings():
     for cron_id, binding in bindings.items():
         if isinstance(binding, dict) and binding.get("projectId") and binding.get("targetType"):
             clean[str(cron_id)] = binding
-    return {"version": 1, "bindings": clean}
+    reservations = data.get("reservations")
+    clean_reservations = {}
+    if isinstance(reservations, dict):
+        for token, reservation in reservations.items():
+            if isinstance(reservation, dict) and str(token) and reservation.get("expiresAtEpoch") is not None:
+                clean_reservations[str(token)] = reservation
+    return {"version": 1, "bindings": clean, "reservations": clean_reservations}
 
 
 def _save_project_cron_bindings(data):
@@ -15874,6 +15883,7 @@ def _save_project_cron_bindings(data):
     payload = {
         "version": 1,
         "bindings": data.get("bindings", {}) if isinstance(data, dict) else {},
+        "reservations": data.get("reservations", {}) if isinstance(data, dict) else {},
     }
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False, indent=2)
@@ -15937,48 +15947,58 @@ def _project_cron_normalize_history_status(status, reason=None, result=None):
 
 
 def _project_cron_append_history(project_id, cron_id, binding, status, reason=None, error=None, result=None, source="manual", duration_ms=None):
-    data, project = _project_find(project_id)
-    if not project:
-        return None
     binding = binding or {}
+    safe_result = _project_schedule_sanitize_result(result)
+    safe_error = _project_execution_compact_evidence_line(error, 360)
     now = _proj_now()
-    history_status = _project_cron_normalize_history_status(status, reason, result)
-    target = _project_cron_target_snapshot(project, binding)
-    message = _project_cron_reason_label(reason, error)
-    entry = {
-        "id": _proj_uuid(),
-        "cronId": str(cron_id),
-        "cronName": binding.get("name") or binding.get("cronName") or str(cron_id),
-        "projectId": project_id,
-        "projectName": project.get("title", ""),
-        "targetType": target["targetType"],
-        "taskId": target["taskId"],
-        "taskTitle": target["taskTitle"],
-        "status": history_status,
-        "reason": reason or "",
-        "message": message,
-        "error": error or "",
-        "source": source,
-        "createdAt": now,
-    }
-    if duration_ms is not None:
-        entry["durationMs"] = duration_ms
-    if isinstance(result, dict):
-        entry["resultStatus"] = result.get("status") or result.get("code") or ""
-        if result.get("_status"):
-            entry["httpStatus"] = result.get("_status")
-    history = project.get("scheduledCronHistory")
-    if not isinstance(history, list):
-        history = []
-    history.append(entry)
-    project["scheduledCronHistory"] = history[-_PROJECT_CRON_HISTORY_LIMIT:]
-    if history_status in _PROJECT_CRON_ALERT_STATUSES:
-        detail = f"Project scheduled cron '{entry['cronName']}' requires attention"
-        if message:
-            detail += f": {message}"
-        _log_activity(project, "project_cron_alert", "project-cron", detail, target["taskId"])
-    project["updatedAt"] = now
-    _save_projects(data)
+    history_status = _project_cron_normalize_history_status(status, reason, safe_result)
+    message = _project_cron_reason_label(reason, safe_error)
+    holder = {}
+
+    def append(project):
+        target = _project_cron_target_snapshot(project, binding)
+        entry = {
+            "id": _proj_uuid(),
+            "cronId": str(cron_id),
+            "cronName": binding.get("name") or binding.get("cronName") or str(cron_id),
+            "projectId": project_id,
+            "projectName": project.get("title", ""),
+            "targetType": target["targetType"],
+            "taskId": target["taskId"],
+            "taskTitle": target["taskTitle"],
+            "status": history_status,
+            "reason": reason or "",
+            "message": message,
+            "error": safe_error,
+            "source": source,
+            "createdAt": now,
+        }
+        if duration_ms is not None:
+            entry["durationMs"] = duration_ms
+        if safe_result:
+            entry["resultStatus"] = safe_result.get("status") or safe_result.get("code") or ""
+            if safe_result.get("_status"):
+                entry["httpStatus"] = safe_result.get("_status")
+        history = project.get("scheduledCronHistory")
+        if not isinstance(history, list):
+            history = []
+        history.append(entry)
+        project["scheduledCronHistory"] = history[-_PROJECT_CRON_HISTORY_LIMIT:]
+        if history_status in _PROJECT_CRON_ALERT_STATUSES:
+            detail = f"Project scheduled cron '{entry['cronName']}' requires attention"
+            if message:
+                detail += f": {message}"
+            _log_activity(project, "project_cron_alert", "project-cron", detail, target["taskId"])
+        project["updatedAt"] = now
+        holder["entry"] = entry
+        holder["target"] = target
+
+    try:
+        _PROJECT_REPOSITORY.update(project_id, append)
+    except ProjectNotFoundError:
+        return None
+    entry = holder["entry"]
+    target = holder["target"]
     print(json.dumps({
         "type": "project_cron_dispatch",
         "projectId": project_id,
@@ -15987,7 +16007,7 @@ def _project_cron_append_history(project_id, cron_id, binding, status, reason=No
         "taskId": target["taskId"],
         "decision": history_status,
         "reason": reason or "",
-        "error": error or "",
+        "error": safe_error,
         "timestamp": now,
     }, ensure_ascii=False), flush=True)
     return entry
@@ -16216,123 +16236,250 @@ def _project_cron_enrich_item(cron_id, binding, job, project=None):
     return merged
 
 
-def _handle_project_scheduled_cron_list(project_id):
-    project, error = _project_cron_validate_project(project_id)
-    if error:
-        return error
-    cron_result = _gateway_rpc_call("cron.list", {"includeDisabled": True}, timeout=20)
-    if not cron_result.get("ok"):
-        return {"error": cron_result.get("error", "Failed to list cron jobs"), "_status": 502}
-    jobs_by_id = {str(j.get("id")): j for j in _project_cron_extract_jobs(cron_result) if isinstance(j, dict) and j.get("id")}
+def _project_schedule_bindings():
     with _PROJECT_CRON_BINDINGS_LOCK:
-        bindings = _load_project_cron_bindings().get("bindings", {})
-    items = []
-    for cron_id, binding in bindings.items():
-        if binding.get("projectId") != project_id:
-            continue
-        items.append(_project_cron_enrich_item(cron_id, binding, jobs_by_id.get(str(cron_id), {}), project))
-    return {"ok": True, "projectId": project_id, "jobs": items, "cronOwner": "gateway", "bindingOwner": "virtual-office"}
+        return copy.deepcopy(_load_project_cron_bindings().get("bindings", {}))
+
+
+def _project_schedule_put_binding(cron_id, binding):
+    with _PROJECT_CRON_BINDINGS_LOCK:
+        data = _load_project_cron_bindings()
+        data.setdefault("bindings", {})[str(cron_id)] = copy.deepcopy(binding)
+        _save_project_cron_bindings(data)
+
+
+def _project_schedule_merge_binding(cron_id, binding):
+    with _PROJECT_CRON_BINDINGS_LOCK:
+        data = _load_project_cron_bindings()
+        bindings = data.setdefault("bindings", {})
+        merged = copy.deepcopy(bindings.get(str(cron_id)) or {})
+        merged.update(copy.deepcopy(binding))
+        bindings[str(cron_id)] = merged
+        _save_project_cron_bindings(data)
+        return merged
+
+
+def _project_schedule_reserve_binding_slot(limit):
+    now_epoch = time.time()
+    token = _proj_uuid()
+    with _PROJECT_CRON_BINDINGS_LOCK:
+        data = _load_project_cron_bindings()
+        reservations = data.setdefault("reservations", {})
+        for stale_token, reservation in list(reservations.items()):
+            expires = (reservation or {}).get("expiresAtEpoch") if isinstance(reservation, dict) else 0
+            if float(expires or 0) <= now_epoch:
+                reservations.pop(stale_token, None)
+        if len(data.setdefault("bindings", {})) + len(reservations) >= max(1, int(limit)):
+            return None
+        reservations[token] = {"createdAt": _proj_now(), "expiresAtEpoch": now_epoch + 300}
+        _save_project_cron_bindings(data)
+        return token
+
+
+def _project_schedule_release_binding_slot(token):
+    if not token:
+        return False
+    with _PROJECT_CRON_BINDINGS_LOCK:
+        data = _load_project_cron_bindings()
+        removed = data.setdefault("reservations", {}).pop(str(token), None) is not None
+        if removed:
+            _save_project_cron_bindings(data)
+        return removed
+
+
+def _project_schedule_next_occurrence_id(cron_id):
+    with _PROJECT_CRON_BINDINGS_LOCK:
+        data = _load_project_cron_bindings()
+        binding = data.setdefault("bindings", {}).get(str(cron_id))
+        if not binding:
+            return f"{cron_id}:run-now:0"
+        sequence = max(
+            0,
+            int(binding.get("runNowSequence") or 0),
+            int(binding.get("completedRunNowSequence") or 0),
+        ) + 1
+        binding["runNowSequence"] = sequence
+        _save_project_cron_bindings(data)
+        return f"{cron_id}:run-now:{sequence}"
+
+
+def _project_schedule_run_now_sequence(cron_id, occurrence_id):
+    prefix = f"{cron_id}:run-now:"
+    value = str(occurrence_id or "")
+    if not value.startswith(prefix):
+        return None
+    suffix = value[len(prefix):]
+    return int(suffix) if suffix.isdigit() else None
+
+
+def _project_schedule_validate_job_policy(project, body, existing=None):
+    body = body or {}
+    effective_agent = body.get("agentId") if "agentId" in body else (existing or {}).get("agentId")
+    if effective_agent and str(effective_agent) not in set(_project_agent_fields(project)):
+        return "agentId must be bound to this project or target task"
+    delivery = body.get("delivery") if "delivery" in body else (existing or {}).get("delivery")
+    if delivery is not None:
+        if not isinstance(delivery, dict) or str(delivery.get("mode") or "none") != "none":
+            return "Project scheduled cron delivery must use mode 'none'"
+    return None
+
+
+def _project_schedule_sanitize_result(result):
+    result = result if isinstance(result, dict) else {}
+    allowed = {
+        "ok", "status", "code", "_status", "confirmationRequired", "taskId",
+        "attemptId", "projectId", "reviewId", "reopenedCompletedTask",
+        "cronDisabled", "allCompleted", "id", "action",
+    }
+    safe = {key: copy.deepcopy(value) for key, value in result.items() if key in allowed}
+    if result.get("error"):
+        error = re.sub(
+            r"(?i)\b(authorization\s*[:=]\s*)?bearer\s+[A-Za-z0-9._~+/=-]+",
+            lambda match: f"{match.group(1) or ''}Bearer [REDACTED]", str(result.get("error") or ""),
+        )
+        error = _project_execution_redact(error)
+        error = re.sub(
+            r'''(?ix)(["']?(?:authorization|api[_-]?key|access[_-]?token|refresh[_-]?token|password|secret)["']?\s*:\s*)["'][^"']*["']''',
+            lambda match: f'{match.group(1)}"[REDACTED]"', error,
+        )
+        safe["error"] = error[:360]
+    return safe
+
+
+def _project_schedule_claim_dispatch(cron_id, source, occurrence_id=None):
+    now_epoch = time.time()
+    token = _proj_uuid()
+    with _PROJECT_CRON_BINDINGS_LOCK:
+        data = _load_project_cron_bindings()
+        binding = data.setdefault("bindings", {}).get(str(cron_id))
+        if not binding:
+            return {"claimed": False, "status": "missing"}
+        claim = binding.get("dispatchClaim") if isinstance(binding.get("dispatchClaim"), dict) else {}
+        if claim.get("token") and float(claim.get("expiresAtEpoch") or 0) > now_epoch:
+            return {"claimed": False, "status": "dispatching"}
+        sequence = _project_schedule_run_now_sequence(cron_id, occurrence_id)
+        completed_sequence = max(0, int(binding.get("completedRunNowSequence") or 0))
+        completed = binding.get("completedDispatchOccurrences")
+        if sequence is not None and sequence <= completed_sequence:
+            return {"claimed": False, "status": "completed_occurrence"}
+        if sequence is None and occurrence_id and isinstance(completed, list) and str(occurrence_id) in completed:
+            return {"claimed": False, "status": "completed_occurrence"}
+        binding["dispatchClaim"] = {
+            "token": token, "source": str(source or "manual"),
+            "occurrenceId": str(occurrence_id or ""),
+            "claimedAt": _proj_now(), "expiresAtEpoch": now_epoch + 90,
+        }
+        _save_project_cron_bindings(data)
+    return {"claimed": True, "token": token}
+
+
+def _project_schedule_renew_dispatch(cron_id, token):
+    with _PROJECT_CRON_BINDINGS_LOCK:
+        data = _load_project_cron_bindings()
+        binding = data.setdefault("bindings", {}).get(str(cron_id))
+        claim = binding.get("dispatchClaim") if isinstance(binding, dict) and isinstance(binding.get("dispatchClaim"), dict) else {}
+        if claim.get("token") != token:
+            return False
+        claim["expiresAtEpoch"] = time.time() + 90
+        claim["renewedAt"] = _proj_now()
+        _save_project_cron_bindings(data)
+        return True
+
+
+def _project_schedule_owns_dispatch(cron_id, token):
+    with _PROJECT_CRON_BINDINGS_LOCK:
+        binding = _load_project_cron_bindings().get("bindings", {}).get(str(cron_id))
+        claim = binding.get("dispatchClaim") if isinstance(binding, dict) and isinstance(binding.get("dispatchClaim"), dict) else {}
+        return claim.get("token") == token and float(claim.get("expiresAtEpoch") or 0) > time.time()
+
+
+def _project_schedule_release_dispatch(cron_id, token):
+    with _PROJECT_CRON_BINDINGS_LOCK:
+        data = _load_project_cron_bindings()
+        binding = data.setdefault("bindings", {}).get(str(cron_id))
+        if not binding:
+            return False
+        claim = binding.get("dispatchClaim") if isinstance(binding.get("dispatchClaim"), dict) else {}
+        if claim.get("token") != token:
+            return False
+        binding.pop("dispatchClaim", None)
+        occurrence_id = str(claim.get("occurrenceId") or "")
+        if occurrence_id:
+            sequence = _project_schedule_run_now_sequence(cron_id, occurrence_id)
+            if sequence is not None:
+                binding["completedRunNowSequence"] = max(
+                    max(0, int(binding.get("completedRunNowSequence") or 0)), sequence,
+                )
+            else:
+                completed = binding.get("completedDispatchOccurrences")
+                if not isinstance(completed, list):
+                    completed = []
+                binding["completedDispatchOccurrences"] = (completed + [occurrence_id])[-50:]
+        binding["lastDispatchClaim"] = {
+            "token": token, "completedAt": _proj_now(), "source": claim.get("source") or "",
+            "occurrenceId": occurrence_id,
+        }
+        _save_project_cron_bindings(data)
+        return True
+
+
+def _project_schedule_delete_binding(cron_id):
+    with _PROJECT_CRON_BINDINGS_LOCK:
+        data = _load_project_cron_bindings()
+        data.setdefault("bindings", {}).pop(str(cron_id), None)
+        _save_project_cron_bindings(data)
+
+
+def _project_schedule_ports():
+    return project_schedule_service.SchedulePorts(
+        gateway=lambda method, params, timeout: _gateway_rpc_call(method, params, timeout=timeout),
+        validate_project=_project_cron_validate_project,
+        get_project=lambda project_id: _PROJECT_REPOSITORY.get(project_id),
+        list_projects=lambda: _PROJECT_REPOSITORY.load_all().get("projects", []),
+        bindings=_project_schedule_bindings,
+        put_binding=_project_schedule_put_binding,
+        merge_binding=_project_schedule_merge_binding,
+        delete_binding=_project_schedule_delete_binding,
+        reserve_binding_slot=_project_schedule_reserve_binding_slot,
+        release_binding_slot=_project_schedule_release_binding_slot,
+        operation_lock=_PROJECT_CRON_OPERATION_LOCKS.hold,
+        validate_job_policy=_project_schedule_validate_job_policy,
+        sanitize_result=_project_schedule_sanitize_result,
+        update_binding_status=_project_cron_update_binding_status,
+        validate_schedule=_project_cron_validate_schedule,
+        validate_target=_project_cron_validate_target,
+        build_job=lambda project, body, existing: _project_cron_gateway_job_from_body(project, body, existing=existing),
+        extract_jobs=_project_cron_extract_jobs,
+        extract_job_id=_project_cron_extract_job_id,
+        enrich_item=lambda cron_id, binding, job, project: _project_cron_enrich_item(cron_id, binding, job, project),
+        now=_proj_now,
+        next_occurrence_id=_project_schedule_next_occurrence_id,
+    )
+
+
+def _handle_project_scheduled_cron_list(project_id):
+    return project_schedule_service.list_jobs(project_id, ports=_project_schedule_ports())
+
 
 
 def _handle_project_scheduled_cron_all():
-    cron_result = _gateway_rpc_call("cron.list", {"includeDisabled": True}, timeout=20)
-    if not cron_result.get("ok"):
-        return {"error": cron_result.get("error", "Failed to list cron jobs"), "_status": 502}
-    jobs_by_id = {str(j.get("id")): j for j in _project_cron_extract_jobs(cron_result) if isinstance(j, dict) and j.get("id")}
-    with _PROJECT_CRON_BINDINGS_LOCK:
-        bindings = _load_project_cron_bindings().get("bindings", {})
-    data = _load_projects()
-    projects_by_id = {p.get("id"): p for p in data.get("projects", []) if isinstance(p, dict)}
-    items = []
-    for cron_id, binding in bindings.items():
-        project = projects_by_id.get(binding.get("projectId"), {})
-        items.append(_project_cron_enrich_item(cron_id, binding, jobs_by_id.get(str(cron_id), {}), project))
-    return {
-        "ok": True,
-        "jobs": items,
-        "projects": [
-            {"id": p.get("id"), "title": p.get("title", ""), "status": p.get("status", "active"), "scheduledCronPaused": bool(p.get("scheduledCronPaused"))}
-            for p in data.get("projects", []) if isinstance(p, dict)
-        ],
-        "cronOwner": "gateway",
-        "bindingOwner": "virtual-office",
-    }
+    return project_schedule_service.list_all(ports=_project_schedule_ports())
+
 
 
 def _handle_project_scheduled_cron_create(project_id, body):
-    project, error = _project_cron_validate_project(project_id)
-    if error:
-        return error
-    target_type = body.get("targetType") or "projectWorkflow"
-    task_id = body.get("taskId")
-    target_error = _project_cron_validate_target(project, target_type, task_id)
-    if target_error:
-        return {"error": target_error, "_status": 400}
-    schedule_error = _project_cron_validate_schedule(body.get("schedule"))
-    if schedule_error:
-        return {"error": schedule_error, "_status": 400}
-    job, binding = _project_cron_gateway_job_from_body(project, body)
-    cron_result = _gateway_rpc_call("cron.add", job, timeout=30)
-    if not cron_result.get("ok"):
-        return {"error": cron_result.get("error", "Failed to create cron job"), "_status": 502}
-    cron_id = _project_cron_extract_job_id(cron_result)
-    if not cron_id:
-        return {"error": "Cron job was created but no id was returned", "_status": 502}
-    binding["cronJobId"] = cron_id
-    binding["createdAt"] = _proj_now()
-    with _PROJECT_CRON_BINDINGS_LOCK:
-        data = _load_project_cron_bindings()
-        data.setdefault("bindings", {})[cron_id] = binding
-        _save_project_cron_bindings(data)
-    return {"ok": True, "projectId": project_id, "id": cron_id, "job": {**job, "id": cron_id}, "binding": binding}
+    return project_schedule_service.create(project_id, body, ports=_project_schedule_ports())
+
 
 
 def _handle_project_scheduled_cron_update(project_id, cron_id, body):
-    project, error = _project_cron_validate_project(project_id)
-    if error:
-        return error
-    with _PROJECT_CRON_BINDINGS_LOCK:
-        data = _load_project_cron_bindings()
-        existing = data.get("bindings", {}).get(cron_id)
-    if not existing or existing.get("projectId") != project_id:
-        return {"error": "Project scheduled cron not found", "_status": 404}
-    target_type = body.get("targetType") if "targetType" in body else existing.get("targetType")
-    task_id = body.get("taskId") if "taskId" in body else existing.get("taskId")
-    target_error = _project_cron_validate_target(project, target_type, task_id)
-    if target_error:
-        return {"error": target_error, "_status": 400}
-    schedule = body.get("schedule") if "schedule" in body else existing.get("schedule")
-    schedule_error = _project_cron_validate_schedule(schedule)
-    if schedule_error:
-        return {"error": schedule_error, "_status": 400}
-    job, binding = _project_cron_gateway_job_from_body(project, {**body, "targetType": target_type, "taskId": task_id, "schedule": schedule}, existing=existing)
-    patch = dict(job)
-    cron_result = _gateway_rpc_call("cron.update", {"id": cron_id, "patch": patch}, timeout=30)
-    if not cron_result.get("ok"):
-        return {"error": cron_result.get("error", "Failed to update cron job"), "_status": 502}
-    binding["cronJobId"] = cron_id
-    binding["createdAt"] = existing.get("createdAt") or _proj_now()
-    with _PROJECT_CRON_BINDINGS_LOCK:
-        data = _load_project_cron_bindings()
-        data.setdefault("bindings", {})[cron_id] = binding
-        _save_project_cron_bindings(data)
-    return {"ok": True, "projectId": project_id, "id": cron_id, "binding": binding}
+    return project_schedule_service.update(project_id, cron_id, body, ports=_project_schedule_ports())
+
 
 
 def _handle_project_scheduled_cron_delete(project_id, cron_id):
-    with _PROJECT_CRON_BINDINGS_LOCK:
-        data = _load_project_cron_bindings()
-        existing = data.get("bindings", {}).get(cron_id)
-    if not existing or existing.get("projectId") != project_id:
-        return {"error": "Project scheduled cron not found", "_status": 404}
-    cron_result = _gateway_rpc_call("cron.remove", {"id": cron_id}, timeout=30)
-    if not cron_result.get("ok"):
-        return {"error": cron_result.get("error", "Failed to delete cron job"), "_status": 502}
-    with _PROJECT_CRON_BINDINGS_LOCK:
-        data = _load_project_cron_bindings()
-        data.setdefault("bindings", {}).pop(cron_id, None)
-        _save_project_cron_bindings(data)
-    return {"ok": True, "projectId": project_id, "id": cron_id}
+    return project_schedule_service.delete(project_id, cron_id, ports=_project_schedule_ports())
+
 
 
 def _project_cron_update_binding_status(cron_id, status, error=None, extra=None):
@@ -16390,131 +16537,65 @@ def _project_execution_reopen_completed_task(project, task, actor="project-execu
     return True
 
 
-def _handle_project_scheduled_cron_dispatch(project_id, cron_id, source="manual"):
-    started_at = time.time()
-
-    def record(status, reason=None, error=None, result=None):
-        duration_ms = int((time.time() - started_at) * 1000)
-        return _project_cron_append_history(project_id, cron_id, binding, status, reason=reason, error=error, result=result, source=source, duration_ms=duration_ms)
-
-    with _PROJECT_CRON_BINDINGS_LOCK:
-        binding = _load_project_cron_bindings().get("bindings", {}).get(str(cron_id))
-    if not binding or binding.get("projectId") != project_id:
-        return {"error": "Project scheduled cron not found", "_status": 404}
-
-    # ── Pre-dispatch idempotency: skip if last status was completion-disengage ──
-    if binding.get("lastStatus") in ("disengaged_completed",):
-        return {"ok": True, "status": "skipped", "reason": "pre_check_disengaged", "projectId": project_id, "id": cron_id, "idempotent": True}
-
-    data, project = _project_find(project_id)
-    if not project:
-        _project_cron_update_binding_status(cron_id, "missing_project", "Project not found")
-        return {"error": "Project not found", "_status": 404, "status": "missing_project"}
-    if project.get("status") == "archived":
-        _project_cron_update_binding_status(cron_id, "skipped_archived", "Project is archived")
-        record("skipped", "project_archived")
-        return {"ok": True, "status": "skipped", "reason": "project_archived", "projectId": project_id, "id": cron_id}
-    if project.get("scheduledCronPaused"):
-        _project_cron_update_binding_status(cron_id, "paused", "Project scheduled cron is paused")
-        record("paused", "project_cron_paused")
-        return {"ok": True, "status": "paused", "reason": "project_cron_paused", "projectId": project_id, "id": cron_id}
-    target_type = binding.get("targetType") or "projectWorkflow"
-    task_id = binding.get("taskId")
-    active = _project_execution_active_task(project) if _project_execution_enabled(project) else None
-    if active:
-        _project_cron_update_binding_status(cron_id, "skipped", "Another task is already active for this project", {"activeTaskId": active.get("id")})
-        record("skipped", "project_active")
-        return {"ok": True, "status": "skipped", "reason": "project_active", "activeTaskId": active.get("id"), "projectId": project_id, "id": cron_id}
-    if target_type == "projectTask":
-        task = next((t for t in project.get("tasks", []) or [] if t.get("id") == task_id), None)
+def _project_schedule_reopen_task(project_id, task_id):
+    def reopen(project):
+        task = next((item for item in project.get("tasks", []) if item.get("id") == task_id), None)
         if not task:
-            _project_cron_update_binding_status(cron_id, "missing_target", "Task not found")
-            record("skipped", "task_missing")
-            return {"ok": True, "status": "skipped", "reason": "task_missing", "projectId": project_id, "id": cron_id}
-        if task.get("completedAt"):
-            if task.get("scheduledRepeatEnabled") is not True:
-                # ── Task is done and not repeatable: auto-disengage cron ──
-                _project_cron_update_binding_status(cron_id, "disengaged_completed", "Task completed, cron disengaged")
-                record("skipped", "task_completed_cron_disengaged")
-                try:
-                    _gateway_rpc_call("cron.update", {"id": cron_id, "patch": {"enabled": False}}, timeout=5)
-                except Exception:
-                    pass
-                return {"ok": True, "status": "skipped", "reason": "task_completed_cron_disengaged", "projectId": project_id, "id": cron_id, "taskId": task_id}
-            # Repeatable task: reopen and restart below (normal repeat flow)
-        # Falls through: task not completed, or is repeatable and should be reopened
+            return {"error": "Task not found", "_status": 404}
+        active = _project_execution_active_task(project) if _project_execution_enabled(project) else None
+        if active:
+            return {
+                "error": "Another task is already active for this project",
+                "activeTaskId": active.get("id"), "_status": 409,
+            }
         reopened = _project_execution_reopen_completed_task(project, task, actor="project-cron")
-        if reopened:
-            data["projects"] = [project if p.get("id") == project_id else p for p in data.get("projects", [])]
-            _save_projects(data)
-        if _project_execution_enabled(project):
-            result = _handle_project_execution_start(project_id, task_id, {"by": "project-cron", "source": source, "skipReviewConfirmed": True})
-        else:
-            result = _handle_workflow_start(project_id, {"autoMode": False})
-        if reopened and isinstance(result, dict):
-            result["reopenedCompletedTask"] = True
-    else:
-        # ── Idempotency guard: skip if all tasks are completed ──
-        all_completed = False
-        tasks = project.get("tasks", []) or []
-        if target_type == "projectWorkflow" and tasks:
-            done_cols = _project_execution_done_column_ids(project)
-            non_done_tasks = [t for t in tasks if t.get("columnId") not in done_cols and not t.get("completedAt")]
-            if not non_done_tasks:
-                all_completed = True
+        return {"ok": True, "reopened": reopened, "project": project}
 
-        if all_completed:
-            # ── Auto-disengage cron when all tasks completed ──
-            _project_cron_update_binding_status(cron_id, "disengaged_completed", "All tasks completed; cron disengaged")
-            record("skipped", "project_all_tasks_completed")
-            try:
-                _gateway_rpc_call("cron.update", {"id": cron_id, "patch": {"enabled": False}}, timeout=5)
-            except Exception:
-                pass
-            # ── Alert on repeated dispatch attempt ──
-            history = project.get("scheduledCronHistory", []) or []
-            recent_same = [h for h in history[-10:] if h.get("reason") == "project_all_tasks_completed"]
-            if len(recent_same) >= 2:
-                _gateway_rpc_call("cron.alert", {"id": cron_id, "message": f"P0 cron 重复触发缺陷告警：项目 {project_id} 的所有任务已完成，但定时任务被重复触发（最近 10 次中有 {len(recent_same)} 次因 '项目已完成' 跳过）。已自动暂停该定时任务。请确认是否有残留缺陷。"}, timeout=10)
-            # ── Also update with completion disengage reason ──
-            return {"ok": True, "status": "skipped", "reason": "project_all_tasks_completed", "projectId": project_id, "id": cron_id, "allCompleted": True, "cronDisabled": True}
+    try:
+        return _PROJECT_REPOSITORY.update(project_id, reopen)
+    except ProjectNotFoundError:
+        return {"error": "Project not found", "_status": 404}
 
-        if _project_execution_enabled(project):
-            result = _handle_project_execution_project_start(project_id, {"mode": project.get("projectExecutionStartMode") or "continuous", "by": "project-cron", "source": source, "skipReviewConfirmed": True})
-        else:
-            result = _handle_workflow_start(project_id, {"autoMode": True})
-    if result.get("ok"):
-        _project_cron_update_binding_status(cron_id, "started", None, {"lastDispatchResult": result})
-        record("started", None, result=result)
-        return {"ok": True, "status": "started", "projectId": project_id, "id": cron_id, "result": result}
-    if result.get("confirmationRequired"):
-        _project_cron_update_binding_status(cron_id, "skipped_confirmation_required", result.get("code") or "confirmation required", {"lastDispatchResult": result})
-        record("skipped", result.get("code") or "confirmation_required", error=result.get("error"), result=result)
-        return {"ok": True, "status": "skipped", "reason": result.get("code") or "confirmation_required", "projectId": project_id, "id": cron_id, "result": result}
-    status = "failed"
-    if result.get("_status") == 409:
-        status = "skipped"
-    _project_cron_update_binding_status(cron_id, status, result.get("error") or result.get("code") or "dispatch failed", {"lastDispatchResult": result})
-    if status == "skipped":
-        record("skipped", result.get("code") or result.get("error"), error=result.get("error"), result=result)
-        return {"ok": True, "status": "skipped", "reason": result.get("code") or result.get("error"), "projectId": project_id, "id": cron_id, "result": result}
-    record("failed", result.get("code") or "dispatch_failed", error=result.get("error"), result=result)
-    return {**result, "projectId": project_id, "id": cron_id}
+
+def _project_schedule_dispatch_ports():
+    return project_schedule_service.DispatchPorts(
+        get_binding=lambda cron_id: _project_schedule_bindings().get(str(cron_id)),
+        get_project=lambda project_id: _PROJECT_REPOSITORY.get(project_id),
+        update_binding_status=_project_cron_update_binding_status,
+        append_history=_project_cron_append_history,
+        execution_enabled=_project_execution_enabled,
+        active_task=_project_execution_active_task,
+        done_column_ids=_project_execution_done_column_ids,
+        reopen_task=_project_schedule_reopen_task,
+        start_task=_handle_project_execution_start,
+        start_project=_handle_project_execution_project_start,
+        start_legacy=_handle_workflow_start,
+        gateway=lambda method, params, timeout: _gateway_rpc_call(method, params, timeout=timeout),
+        operation_lock=_PROJECT_CRON_OPERATION_LOCKS.hold,
+        claim_dispatch=_project_schedule_claim_dispatch,
+        renew_dispatch=_project_schedule_renew_dispatch,
+        owns_dispatch=_project_schedule_owns_dispatch,
+        release_dispatch=_project_schedule_release_dispatch,
+        sanitize_result=_project_schedule_sanitize_result,
+    )
+
+
+def _handle_project_scheduled_cron_dispatch(project_id, cron_id, source="manual", occurrence_id=None):
+    return project_schedule_service.dispatch(
+        project_id, cron_id, source, occurrence_id, ports=_project_schedule_dispatch_ports(),
+    )
+
 
 
 def _handle_project_scheduled_cron_run(project_id, cron_id):
-    with _PROJECT_CRON_BINDINGS_LOCK:
-        binding = _load_project_cron_bindings().get("bindings", {}).get(cron_id)
-    if not binding or binding.get("projectId") != project_id:
-        return {"error": "Project scheduled cron not found", "_status": 404}
-    cron_result = _gateway_rpc_call("cron.run", {"id": cron_id}, timeout=30)
-    if not cron_result.get("ok"):
-        return {"error": cron_result.get("error", "Failed to run cron job"), "_status": 502}
-    dispatch = _handle_project_scheduled_cron_dispatch(project_id, cron_id, source="run-now")
-    return {"ok": True, "projectId": project_id, "id": cron_id, "result": cron_result, "dispatch": dispatch}
+    return project_schedule_service.run_now(
+        project_id, cron_id, ports=_project_schedule_ports(),
+        dispatch=_handle_project_scheduled_cron_dispatch,
+    )
 
 
 # ── Built-in templates ────────────────────────────────────────────────────────
+
 _BUILTIN_TEMPLATES = [
     {
         "id": "tpl-software",

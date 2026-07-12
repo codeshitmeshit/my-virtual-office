@@ -5,6 +5,8 @@ import os
 import shutil
 import sys
 import tempfile
+import threading
+import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 APP_DIR = os.path.join(ROOT, "app")
@@ -106,7 +108,7 @@ def create_project_with_task(project_execution_enabled=True):
 
 
 def test_global_project_cron_overview_enriches_project_context():
-    with tempfile.TemporaryDirectory() as status_dir:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as status_dir:
         old = with_store(status_dir)
         fake_gateway = FakeCronGateway()
         server._gateway_rpc_call = fake_gateway
@@ -284,6 +286,373 @@ def test_completed_task_cron_skips_when_repeat_not_enabled():
             assert calls == []
             assert server._load_project_cron_bindings()["bindings"][created["id"]]["lastStatus"] == "disengaged_completed"
         finally:
+            restore_store(old)
+
+
+def test_run_now_preserves_gateway_success_when_local_dispatch_fails():
+    with tempfile.TemporaryDirectory() as status_dir:
+        old = with_store(status_dir)
+        fake_gateway = FakeCronGateway()
+        server._gateway_rpc_call = fake_gateway
+        server._handle_project_execution_project_start = lambda project_id, body=None: {
+            "ok": False, "error": "local executor unavailable", "_status": 502,
+        }
+        try:
+            project, _ = create_project_with_task(project_execution_enabled=True)
+            created = server._handle_project_scheduled_cron_create(project["id"], {
+                "name": "Gateway success local failure",
+                "schedule": {"kind": "every", "everyMs": 120000},
+                "targetType": "projectWorkflow",
+            })
+            result = server._handle_project_scheduled_cron_run(project["id"], created["id"])
+            assert result["ok"] is True
+            assert result["result"]["ok"] is True
+            assert result["dispatch"]["ok"] is False
+            assert result["dispatch"]["error"] == "local executor unavailable"
+            binding = server._load_project_cron_bindings()["bindings"][created["id"]]
+            assert binding["lastStatus"] == "failed"
+            _, stored = server._project_find(project["id"])
+            assert stored["scheduledCronHistory"][-1]["status"] == "failed"
+        finally:
+            restore_store(old)
+
+
+def test_archived_project_dispatch_is_skipped_and_recorded():
+    with tempfile.TemporaryDirectory() as status_dir:
+        old = with_store(status_dir)
+        server._gateway_rpc_call = FakeCronGateway()
+        try:
+            project, _ = create_project_with_task(project_execution_enabled=True)
+            created = server._handle_project_scheduled_cron_create(project["id"], {
+                "name": "Archived dispatch",
+                "schedule": {"kind": "every", "everyMs": 120000},
+                "targetType": "projectWorkflow",
+            })
+            server._handle_project_update(project["id"], {"status": "archived"})
+            result = server._handle_project_scheduled_cron_dispatch(project["id"], created["id"])
+            assert result["status"] == "skipped"
+            assert result["reason"] == "project_archived"
+            _, stored = server._project_find(project["id"])
+            assert stored["scheduledCronHistory"][-1]["reason"] == "project_archived"
+        finally:
+            restore_store(old)
+
+
+def test_different_project_dispatches_preserve_each_history_concurrently():
+    with tempfile.TemporaryDirectory() as status_dir:
+        old = with_store(status_dir)
+        server._gateway_rpc_call = FakeCronGateway()
+        barrier = threading.Barrier(2)
+
+        def start(project_id, body=None):
+            barrier.wait(timeout=3)
+            return {"ok": True, "status": "started", "projectId": project_id}
+
+        server._handle_project_execution_project_start = start
+        try:
+            pairs = []
+            for index in range(2):
+                project, _ = create_project_with_task(project_execution_enabled=True)
+                created = server._handle_project_scheduled_cron_create(project["id"], {
+                    "name": f"Concurrent {index}",
+                    "schedule": {"kind": "every", "everyMs": 120000},
+                    "targetType": "projectWorkflow",
+                })
+                pairs.append((project["id"], created["id"]))
+            outcomes = []
+            threads = [threading.Thread(target=lambda pair=pair: outcomes.append(
+                server._handle_project_scheduled_cron_dispatch(pair[0], pair[1], source="concurrent")
+            )) for pair in pairs]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(5)
+            assert len(outcomes) == 2
+            assert all(item["status"] == "started" for item in outcomes)
+            for project_id, cron_id in pairs:
+                _, stored = server._project_find(project_id)
+                assert stored["scheduledCronHistory"][-1]["cronId"] == cron_id
+                assert stored["scheduledCronHistory"][-1]["source"] == "concurrent"
+        finally:
+            restore_store(old)
+
+
+def test_create_rejects_unbound_agent_and_external_delivery():
+    with tempfile.TemporaryDirectory() as status_dir:
+        old = with_store(status_dir)
+        gateway = FakeCronGateway()
+        server._gateway_rpc_call = gateway
+        try:
+            project, _ = create_project_with_task(project_execution_enabled=True)
+            base = {
+                "schedule": {"kind": "every", "everyMs": 120000},
+                "targetType": "projectWorkflow",
+            }
+            unbound = server._handle_project_scheduled_cron_create(
+                project["id"], {**base, "agentId": "unbound-agent"},
+            )
+            assert unbound["_status"] == 400
+            delivery = server._handle_project_scheduled_cron_create(
+                project["id"], {**base, "delivery": {"mode": "announce"}},
+            )
+            assert delivery["_status"] == 400
+            assert gateway.jobs == {}
+            assert server._load_project_cron_bindings().get("bindings", {}) == {}
+        finally:
+            restore_store(old)
+
+
+def test_same_cron_concurrent_dispatch_is_claimed_once():
+    with tempfile.TemporaryDirectory() as status_dir:
+        old = with_store(status_dir)
+        server._gateway_rpc_call = FakeCronGateway()
+        entered = threading.Event()
+        release = threading.Event()
+        calls = []
+
+        def start(project_id, body=None):
+            calls.append(project_id)
+            entered.set()
+            assert release.wait(3)
+            return {"ok": True, "status": "started", "projectId": project_id}
+
+        server._handle_project_execution_project_start = start
+        try:
+            project, _ = create_project_with_task(project_execution_enabled=True)
+            created = server._handle_project_scheduled_cron_create(project["id"], {
+                "schedule": {"kind": "every", "everyMs": 120000},
+                "targetType": "projectWorkflow",
+            })
+            outcomes = []
+            first = threading.Thread(target=lambda: outcomes.append(
+                server._handle_project_scheduled_cron_dispatch(project["id"], created["id"], "callback")
+            ))
+            first.start()
+            assert entered.wait(2)
+            second = threading.Thread(target=lambda: outcomes.append(
+                server._handle_project_scheduled_cron_dispatch(project["id"], created["id"], "manual")
+            ))
+            second.start()
+            second.join(2)
+            release.set()
+            first.join(3)
+            assert calls == [project["id"]]
+            assert sorted(item["status"] for item in outcomes) == ["skipped", "started"]
+            skipped = next(item for item in outcomes if item["status"] == "skipped")
+            assert skipped["reason"] == "dispatch_in_progress"
+        finally:
+            release.set()
+            restore_store(old)
+
+
+def test_dispatch_result_and_history_redact_secrets_and_drop_raw_fields():
+    with tempfile.TemporaryDirectory() as status_dir:
+        old = with_store(status_dir)
+        server._gateway_rpc_call = FakeCronGateway()
+        server._handle_project_execution_project_start = lambda project_id, body=None: {
+            "ok": False,
+            "status": "failed",
+            "error": "api_key=canary-secret at /private/workspace/file.py",
+            "rawProviderPayload": "canary-raw-" + ("x" * 10000),
+            "_status": 502,
+        }
+        try:
+            project, _ = create_project_with_task(project_execution_enabled=True)
+            created = server._handle_project_scheduled_cron_create(project["id"], {
+                "schedule": {"kind": "every", "everyMs": 120000},
+                "targetType": "projectWorkflow",
+            })
+            result = server._handle_project_scheduled_cron_dispatch(project["id"], created["id"])
+            serialized = str(result)
+            assert "canary-secret" not in serialized
+            assert "rawProviderPayload" not in serialized
+            binding = server._load_project_cron_bindings()["bindings"][created["id"]]
+            assert "canary-secret" not in str(binding)
+            assert "rawProviderPayload" not in str(binding)
+            _, stored = server._project_find(project["id"])
+            history = stored["scheduledCronHistory"][-1]
+            assert "canary-secret" not in str(history)
+            assert "rawProviderPayload" not in str(history)
+            assert len(history["error"]) <= 360
+        finally:
+            restore_store(old)
+
+
+def test_schedule_sanitizer_handles_bearer_and_json_secrets():
+    safe = server._project_schedule_sanitize_result({
+        "error": 'Authorization: Bearer sk-secret {"api_key":"json-secret"}',
+    })
+    assert "sk-secret" not in safe["error"]
+    assert "json-secret" not in safe["error"]
+    assert safe["error"].count("[REDACTED]") >= 2
+
+
+def test_cron_list_drops_untrusted_gateway_job_fields():
+    with tempfile.TemporaryDirectory() as status_dir:
+        old = with_store(status_dir)
+        gateway = FakeCronGateway()
+        server._gateway_rpc_call = gateway
+        try:
+            project, _ = create_project_with_task(project_execution_enabled=True)
+            created = server._handle_project_scheduled_cron_create(project["id"], {
+                "schedule": {"kind": "every", "everyMs": 120000},
+                "targetType": "projectWorkflow",
+            })
+            gateway.jobs[created["id"]]["debug"] = {"Authorization": "Bearer gateway-secret"}
+            gateway.jobs[created["id"]]["payload"] = {"raw": "provider-secret"}
+            gateway.jobs[created["id"]]["state"] = {
+                "lastStatus": "failed",
+                "lastError": "Authorization: Bearer state-secret",
+                "internalTrace": "trace-secret",
+            }
+            listed = server._handle_project_scheduled_cron_list(project["id"])["jobs"][0]
+            serialized = str(listed)
+            assert "debug" not in listed and "payload" not in listed
+            assert "gateway-secret" not in serialized
+            assert "provider-secret" not in serialized
+            assert "state-secret" not in serialized
+            assert "internalTrace" not in serialized
+            assert listed["state"]["lastStatus"] == "failed"
+        finally:
+            restore_store(old)
+
+
+def test_run_now_suppresses_delayed_gateway_callback_duplicate():
+    with tempfile.TemporaryDirectory() as status_dir:
+        old = with_store(status_dir)
+        server._gateway_rpc_call = FakeCronGateway()
+        calls = []
+        server._handle_project_execution_project_start = lambda project_id, body=None: calls.append(project_id) or {
+            "ok": True, "status": "started", "projectId": project_id,
+        }
+        try:
+            project, _ = create_project_with_task(project_execution_enabled=True)
+            created = server._handle_project_scheduled_cron_create(project["id"], {
+                "schedule": {"kind": "every", "everyMs": 120000},
+                "targetType": "projectWorkflow",
+            })
+            ran = server._handle_project_scheduled_cron_run(project["id"], created["id"])
+            occurrence_id = server._load_project_cron_bindings()["bindings"][created["id"]]["lastDispatchClaim"]["occurrenceId"]
+            callback = server._handle_project_scheduled_cron_dispatch(
+                project["id"], created["id"], "cron", occurrence_id,
+            )
+            assert ran["dispatch"]["status"] == "started"
+            assert callback["status"] == "skipped"
+            assert callback["reason"] == "duplicate_occurrence"
+            assert calls == [project["id"]]
+            binding = server._load_project_cron_bindings()["bindings"][created["id"]]
+            assert binding["completedRunNowSequence"] == 1
+
+            # A later legitimate schedule occurrence has a distinct/no id and
+            # must not be swallowed when the run-now callback never arrives.
+            later = server._handle_project_scheduled_cron_dispatch(project["id"], created["id"], "cron")
+            assert later["status"] == "started"
+            assert calls == [project["id"], project["id"]]
+        finally:
+            restore_store(old)
+
+
+def test_old_run_now_occurrence_remains_duplicate_after_many_newer_runs():
+    with tempfile.TemporaryDirectory() as status_dir:
+        old = with_store(status_dir)
+        server._gateway_rpc_call = FakeCronGateway()
+        calls = []
+        server._handle_project_execution_project_start = lambda project_id, body=None: calls.append(project_id) or {
+            "ok": True, "status": "started", "projectId": project_id,
+        }
+        try:
+            project, _ = create_project_with_task(project_execution_enabled=True)
+            created = server._handle_project_scheduled_cron_create(project["id"], {
+                "schedule": {"kind": "every", "everyMs": 120000},
+                "targetType": "projectWorkflow",
+            })
+            first = server._project_schedule_next_occurrence_id(created["id"])
+            for sequence in range(1, 61):
+                occurrence_id = f"{created['id']}:run-now:{sequence}"
+                claim = server._project_schedule_claim_dispatch(created["id"], "run-now", occurrence_id)
+                if claim.get("claimed"):
+                    assert server._project_schedule_release_dispatch(created["id"], claim["token"])
+            replay = server._handle_project_scheduled_cron_dispatch(project["id"], created["id"], "cron", first)
+            assert replay["status"] == "skipped"
+            assert replay["reason"] == "duplicate_occurrence"
+            assert calls == []
+            binding = server._load_project_cron_bindings()["bindings"][created["id"]]
+            assert binding["completedRunNowSequence"] == 60
+        finally:
+            restore_store(old)
+
+
+def test_binding_capacity_reservation_persists_atomically_in_server_adapter():
+    with tempfile.TemporaryDirectory() as status_dir:
+        old = with_store(status_dir)
+        try:
+            barrier = threading.Barrier(2)
+            tokens = []
+
+            def reserve():
+                barrier.wait(timeout=2)
+                tokens.append(server._project_schedule_reserve_binding_slot(1))
+
+            threads = [threading.Thread(target=reserve) for _ in range(2)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(2)
+            assert sum(token is not None for token in tokens) == 1
+            persisted = server._load_project_cron_bindings()
+            assert list(persisted["reservations"]) == [next(token for token in tokens if token)]
+            assert server._project_schedule_release_binding_slot(next(token for token in tokens if token)) is True
+            assert server._load_project_cron_bindings()["reservations"] == {}
+        finally:
+            restore_store(old)
+
+
+def test_dispatch_lease_is_renewed_while_start_is_blocked():
+    with tempfile.TemporaryDirectory() as status_dir:
+        old = with_store(status_dir)
+        server._gateway_rpc_call = FakeCronGateway()
+        entered = threading.Event()
+        release = threading.Event()
+        calls = []
+
+        def start(project_id, body=None):
+            calls.append(project_id)
+            entered.set()
+            assert release.wait(3)
+            return {"ok": True, "status": "started", "projectId": project_id}
+
+        server._handle_project_execution_project_start = start
+        try:
+            project, _ = create_project_with_task(project_execution_enabled=True)
+            created = server._handle_project_scheduled_cron_create(project["id"], {
+                "schedule": {"kind": "every", "everyMs": 120000},
+                "targetType": "projectWorkflow",
+            })
+            ports = server._project_schedule_dispatch_ports()
+            ports = server.project_schedule_service.DispatchPorts(**{
+                **ports.__dict__, "lease_refresh_seconds": 0.01,
+            })
+            outcomes = []
+            first = threading.Thread(target=lambda: outcomes.append(server.project_schedule_service.dispatch(
+                project["id"], created["id"], "cron", ports=ports,
+            )))
+            first.start()
+            assert entered.wait(2)
+            with server._PROJECT_CRON_BINDINGS_LOCK:
+                data = server._load_project_cron_bindings()
+                data["bindings"][created["id"]]["dispatchClaim"]["expiresAtEpoch"] = time.time() + 0.005
+                server._save_project_cron_bindings(data)
+            time.sleep(0.04)
+            claim = server._load_project_cron_bindings()["bindings"][created["id"]]["dispatchClaim"]
+            assert claim.get("renewedAt")
+            assert claim["expiresAtEpoch"] > time.time() + 80
+            second = server.project_schedule_service.dispatch(project["id"], created["id"], "cron", ports=ports)
+            assert second["reason"] == "dispatch_in_progress"
+            release.set()
+            first.join(3)
+            assert calls == [project["id"]]
+        finally:
+            release.set()
             restore_store(old)
 
 

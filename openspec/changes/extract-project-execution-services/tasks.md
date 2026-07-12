@@ -33,9 +33,9 @@
 
 ## 6. Schedule service
 
-- [ ] 6.1 Extend Cron phase characterization tests for Gateway run plus local dispatch, skipped/paused/archived cases, repeatable-task reopen, cross-project concurrency, binding/history limits, and Gateway-success/local-failure behavior.
-- [ ] 6.2 Implement `app/services/project_schedule.py` with the specified Gateway, Binding, and Execution ports, compatible payload/status/error results, lock-order rules, history limits, and diagnostic reconciliation state.
-- [ ] 6.3 Migrate all scheduled Cron handlers and dispatch callers, preserve Gateway job/binding/project-history ordering and 502/skipped semantics, then run phase 1-5, idempotency, writer-race, and performance tests.
+- [x] 6.1 Extend Cron phase characterization tests for Gateway run plus local dispatch, skipped/paused/archived cases, repeatable-task reopen, cross-project concurrency, binding/history limits, and Gateway-success/local-failure behavior.
+- [x] 6.2 Implement `app/services/project_schedule.py` with the specified Gateway, Binding, and Execution ports, compatible payload/status/error results, lock-order rules, history limits, and diagnostic reconciliation state.
+- [x] 6.3 Migrate all scheduled Cron handlers and dispatch callers, preserve Gateway job/binding/project-history ordering and 502/skipped semantics, then run phase 1-5, idempotency, writer-race, and performance tests.
 
 ## 7. Boundary, security, and performance verification
 
