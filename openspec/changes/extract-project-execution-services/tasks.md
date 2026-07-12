@@ -13,10 +13,10 @@
 
 ## 3. Execution lifecycle
 
-- [ ] 3.1 Add lifecycle characterization tests for start, project start, status, cancel, transition matrix, dirty-worktree confirmation, retry, Meeting blocking, continuous execution, and every runner intermediate branch.
-- [ ] 3.2 Implement `app/services/execution_lifecycle.py` with explicit repository, clock, ID, launcher, workspace, Git snapshot, Provider, cancel-registry, notification, and scheduling dependencies; preserve persist-before-launch and attempt-ID compare-and-commit ordering.
-- [ ] 3.3 Change Git workspace snapshot failure/timeout to fail closed with HTTP 409 and `workspace_git_snapshot_failed`, preserve non-Git behavior, and add failing-before plus API compatibility tests proving Provider is not invoked.
-- [ ] 3.4 Migrate HTTP, Cron, Meeting, continuation, retry, and internal execution callers to lifecycle commands while retaining thin compatibility delegates only where references remain; run lifecycle and cross-writer concurrency tests.
+- [x] 3.1 Add lifecycle characterization tests for start, project start, status, cancel, transition matrix, dirty-worktree confirmation, retry, Meeting blocking, continuous execution, and every runner intermediate branch.
+- [x] 3.2 Implement `app/services/execution_lifecycle.py` with explicit repository, clock, ID, launcher, workspace, Git snapshot, Provider, cancel-registry, notification, and scheduling dependencies; preserve persist-before-launch and attempt-ID compare-and-commit ordering.
+- [x] 3.3 Change Git workspace snapshot failure/timeout to fail closed with HTTP 409 and `workspace_git_snapshot_failed`, preserve non-Git behavior, and add failing-before plus API compatibility tests proving Provider is not invoked.
+- [x] 3.4 Migrate HTTP, Cron, Meeting, continuation, retry, and internal execution callers to lifecycle commands while retaining thin compatibility delegates only where references remain; run lifecycle and cross-writer concurrency tests.
 
 ## 4. Review, rework, and acceptance
 

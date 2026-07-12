@@ -34,3 +34,16 @@
 | Cron dispatch | 2 / 1 | 2 / 1 | unchanged |
 
 The performance-improvement claim remains open because application-operation counts have not yet strictly improved. Group 2 establishes coordinated writes and prevents lost updates without a measured latency regression. The identified two-load paths belong to later lifecycle, acceptance, and schedule slices; at least one must strictly improve before final acceptance.
+
+## Group 3 — Execution lifecycle
+
+- Measured revision: `c4408c9c926d5e814fed3555dbb65669b7a3bd88+group3-final-post-cr`, after the conditional-merge, O(1) revision, external-watcher, and concurrency CR fixes.
+- Harness command: `.venv/bin/python tests/project_performance_harness.py --scales small,medium,large --warmups 3 --runs 20 --revision-label "$(git rev-parse HEAD)+group3-final-post-cr" --output /tmp/project-performance-group3-final-post-cr.json`.
+- Real Markdown revision command: `.venv/bin/python tests/project_revision_benchmark.py --scales small,medium,large --warmups 3 --runs 20 --output /tmp/project-revision-group3-final.json`.
+- Auditable raw results: `performance-group3-final.json` and `revision-group3-final.json` in this change directory.
+- All five scenarios retained their baseline load/save/provider/notification/gateway/Git-scan counts. Start prepare remains `1 load / 1 save / 1 Git scan`; provider completion remains `2 loads / 1 save / 1 Provider / 1 Git scan`.
+- Against the original fixed baseline, final small p95 changes were `-3.1%` to `+28.5%`, medium `-1.2%` to `+5.3%`, and large `+5.2%` to `+13.1%`; every operation remained below the 30% rollback threshold. The lifecycle scenarios recorded the new O(1) revision port explicitly: start performed 4 revision checks and provider completion 3, without adding a store read/write or external call.
+- On real Markdown trees, request-path `revision()` p95 was `0.001 ms` for all fixtures. The 500ms quick watcher p95 was `0.267 / 0.356 / 1.361 ms` for small/medium/large. The off-path 5-second fallback scan covered `55 / 2,550 / 20,200` files with p95 `3.004 / 26.610 / 159.783 ms`; it is not executed by request handlers and prevents in-place external edits from remaining hidden indefinitely.
+- The repository coherent snapshot prevents the extracted atomic start path from increasing durable store reads: the no-snapshot smoke measured `3 loads`, while the coherent run measured the baseline `1 load`. Compatibility repair still runs when a store adapter is ingested and after every successful write; namespace changes invalidate the snapshot.
+
+The overall strict operation-count improvement remains open for later review/acceptance or schedule slices. Group 3's verified result is no call-count regression while adding persist-before-launch and conditional attempt-result commit safety.

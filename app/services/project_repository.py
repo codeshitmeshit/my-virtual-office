@@ -48,11 +48,16 @@ class ProjectRepository:
         save_projects: Callable[[ProjectData], None],
         repair_projects: Callable[[ProjectData], ProjectData] | None = None,
         delete_project: Callable[[str], bool] | None = None,
+        cache_namespace: Callable[[], Any] | None = None,
     ) -> None:
         self._load_projects = load_projects
         self._save_projects = save_projects
         self._repair_projects = repair_projects or (lambda data: data)
         self._delete_project = delete_project
+        self._cache_namespace = cache_namespace or (lambda: None)
+        self._cache_guard = threading.RLock()
+        self._cached_namespace: Any = object()
+        self._cached_data: ProjectData | None = None
         self._registry_guard = threading.Lock()
         self._project_locks: dict[str, _LockEntry] = {}
         self._store_commit_lock = threading.Lock()
@@ -63,28 +68,68 @@ class ProjectRepository:
 
     def get(self, project_id: str) -> ProjectData | None:
         self._validate_project_id(project_id)
-        project = self._find_project(self._load_repaired(), project_id)
-        return copy.deepcopy(project) if project is not None else None
+        namespace = self._cache_namespace()
+        with self._cache_guard:
+            self._ensure_cache_locked(namespace)
+            project = self._find_project(self._cached_data or {}, project_id)
+            return copy.deepcopy(project) if project is not None else None
 
     def update(self, project_id: str, mutator: ProjectMutator[T]) -> T:
         """Atomically mutate and commit one project in the current process."""
         self._validate_project_id(project_id)
         with self._project_lock(project_id):
-            snapshot = self._load_repaired()
-            current = self._find_project(snapshot, project_id)
+            current = self.get(project_id)
             if current is None:
                 raise ProjectNotFoundError(project_id)
             changed = copy.deepcopy(current)
             result = mutator(changed)
             with self._store_commit_lock:
-                latest = self._load_repaired()
-                latest_current = self._find_project(latest, project_id)
-                if latest_current is None:
+                namespace = self._cache_namespace()
+                with self._cache_guard:
+                    self._ensure_cache_locked(namespace)
+                    coherent = self._cached_data or {"projects": [], "templates": []}
+                    latest_current = self._find_project(coherent, project_id)
+                    if latest_current is None:
+                        raise ProjectNotFoundError(project_id)
+                    merged = self._merge_value(current, changed, latest_current)
+                    self._preserve_cron_history(latest_current, merged)
+                    latest = dict(coherent)
+                    latest["projects"] = list(coherent.get("projects", []))
+                    self._replace_project(latest, project_id, merged)
+                    self._save_coherent(latest)
+            return result
+
+    def update_from_snapshot(
+        self,
+        project_id: str,
+        snapshot_project: ProjectData,
+        mutator: ProjectMutator[T],
+    ) -> T:
+        """Reuse a validated project snapshot when it is still the latest version."""
+        self._validate_project_id(project_id)
+        with self._project_lock(project_id):
+            namespace = self._cache_namespace()
+            with self._cache_guard:
+                self._ensure_cache_locked(namespace)
+                coherent_current = self._find_project(self._cached_data or {}, project_id)
+                if coherent_current is None:
                     raise ProjectNotFoundError(project_id)
-                merged = self._merge_value(current, changed, latest_current)
-                self._preserve_cron_history(latest_current, merged)
-                self._replace_project(latest, project_id, merged)
-                self._save_projects(latest)
+                current = snapshot_project if coherent_current == snapshot_project else copy.deepcopy(coherent_current)
+            changed = copy.deepcopy(current)
+            result = mutator(changed)
+            with self._store_commit_lock:
+                with self._cache_guard:
+                    self._ensure_cache_locked(self._cache_namespace())
+                    coherent = self._cached_data or {"projects": [], "templates": []}
+                    latest_current = self._find_project(coherent, project_id)
+                    if latest_current is None:
+                        raise ProjectNotFoundError(project_id)
+                    merged = self._merge_value(current, changed, latest_current)
+                    self._preserve_cron_history(latest_current, merged)
+                    latest = dict(coherent)
+                    latest["projects"] = list(coherent.get("projects", []))
+                    self._replace_project(latest, project_id, merged)
+                    self._save_coherent(latest)
             return result
 
     def create(self, project: ProjectData) -> ProjectData:
@@ -98,7 +143,7 @@ class ProjectRepository:
                     raise ProjectAlreadyExistsError(project_id)
                 created = copy.deepcopy(project)
                 latest.setdefault("projects", []).append(created)
-                self._save_projects(latest)
+                self._save_coherent(latest)
                 return copy.deepcopy(created)
 
     def delete(self, project_id: str) -> bool:
@@ -107,14 +152,18 @@ class ProjectRepository:
         with self._project_lock(project_id):
             with self._store_commit_lock:
                 if self._delete_project is not None:
-                    return self._delete_project(project_id)
+                    deleted = self._delete_project(project_id)
+                    if deleted:
+                        with self._cache_guard:
+                            self._cached_data = None
+                    return deleted
                 latest = self._load_repaired()
                 projects = latest.setdefault("projects", [])
                 remaining = [item for item in projects if item.get("id") != project_id]
                 if len(remaining) == len(projects):
                     return False
                 latest["projects"] = remaining
-                self._save_projects(latest)
+                self._save_coherent(latest)
                 return True
 
     def commit_snapshot(self, changed: ProjectData, baseline: ProjectData | None = None) -> ProjectData:
@@ -130,15 +179,68 @@ class ProjectRepository:
             with self._store_commit_lock:
                 latest = self._load_repaired()
                 merged = self._merge_value(clean_baseline, clean_changed, latest, reject_conflicts=True)
-                self._save_projects(merged)
+                self._save_coherent(merged)
                 return merged
+
+    def commit_snapshot_if(
+        self,
+        project_id: str,
+        changed: ProjectData,
+        baseline: ProjectData,
+        predicate: Callable[[ProjectData], bool],
+    ) -> ProjectData | None:
+        """Commit a legacy result only if latest target state still matches its token."""
+        self._validate_project_id(project_id)
+        clean_changed = {key: value for key, value in changed.items() if key != "__vo_repository_base__"}
+        clean_baseline = {key: value for key, value in baseline.items() if key != "__vo_repository_base__"}
+        with self._project_lock(project_id):
+            with self._store_commit_lock:
+                latest = self._load_repaired()
+                latest_project = self._find_project(latest, project_id)
+                if latest_project is None or not predicate(copy.deepcopy(latest_project)):
+                    return None
+                merged = self._merge_value(clean_baseline, clean_changed, latest, reject_conflicts=True)
+                self._save_coherent(merged)
+                return merged
+
+    def commit_project_if(
+        self,
+        project_id: str,
+        changed_project: ProjectData,
+        baseline_project: ProjectData,
+        predicate: Callable[[ProjectData], bool],
+    ) -> ProjectData | None:
+        """Conditionally merge one project without copying a full caller snapshot."""
+        self._validate_project_id(project_id)
+        with self._project_lock(project_id):
+            with self._store_commit_lock:
+                namespace = self._cache_namespace()
+                with self._cache_guard:
+                    self._ensure_cache_locked(namespace)
+                    coherent = self._cached_data or {"projects": [], "templates": []}
+                    latest_project = self._find_project(coherent, project_id)
+                    if latest_project is None or not predicate(copy.deepcopy(latest_project)):
+                        return None
+                    merged_project = self._merge_value(
+                        baseline_project,
+                        changed_project,
+                        latest_project,
+                        reject_conflicts=True,
+                        prefer_changed_keys=frozenset({"updatedAt"}),
+                    )
+                    self._preserve_cron_history(latest_project, merged_project)
+                    latest = dict(coherent)
+                    latest["projects"] = list(coherent.get("projects", []))
+                    self._replace_project(latest, project_id, merged_project)
+                    self._save_coherent(latest)
+                    return copy.deepcopy(merged_project)
 
     def update_root(self, mutator: RootMutator[T]) -> T:
         """Mutate root collections such as templates under the commit lock."""
         with self._store_commit_lock:
             latest = self._load_repaired()
             result = mutator(latest)
-            self._save_projects(latest)
+            self._save_coherent(latest)
             return result
 
     @property
@@ -166,9 +268,25 @@ class ProjectRepository:
                     del self._project_locks[project_id]
 
     def _load_repaired(self) -> ProjectData:
+        namespace = self._cache_namespace()
+        with self._cache_guard:
+            self._ensure_cache_locked(namespace)
+            return copy.deepcopy(self._cached_data)
+
+    def _ensure_cache_locked(self, namespace: Any) -> None:
+        if self._cached_data is not None and namespace == self._cached_namespace:
+            return
         data = self._load_projects()
         repaired = self._repair_projects(data)
-        return repaired if repaired is not None else data
+        self._cached_namespace = namespace
+        self._cached_data = repaired if repaired is not None else data
+
+    def _save_coherent(self, data: ProjectData) -> None:
+        self._save_projects(data)
+        with self._cache_guard:
+            repaired = self._repair_projects(data)
+            self._cached_namespace = self._cache_namespace()
+            self._cached_data = repaired if repaired is not None else data
 
     @staticmethod
     def _validate_project_id(project_id: str) -> None:
@@ -207,7 +325,15 @@ class ProjectRepository:
                 cls._preserve_cron_history(previous, project)
 
     @classmethod
-    def _merge_value(cls, baseline: Any, changed: Any, latest: Any, *, reject_conflicts: bool = False) -> Any:
+    def _merge_value(
+        cls,
+        baseline: Any,
+        changed: Any,
+        latest: Any,
+        *,
+        reject_conflicts: bool = False,
+        prefer_changed_keys: frozenset[str] = frozenset(),
+    ) -> Any:
         if changed == baseline:
             return copy.deepcopy(latest)
         if latest == baseline:
@@ -221,12 +347,26 @@ class ProjectRepository:
             for key, value in changed.items():
                 if key not in baseline:
                     merged[key] = copy.deepcopy(value)
+                elif key in prefer_changed_keys and value != baseline[key]:
+                    latest_value = latest.get(key)
+                    if isinstance(value, str) and isinstance(latest_value, str):
+                        merged[key] = max(value, latest_value)
+                    else:
+                        merged[key] = copy.deepcopy(value)
                 else:
-                    merged[key] = cls._merge_value(baseline[key], value, latest.get(key), reject_conflicts=reject_conflicts)
+                    merged[key] = cls._merge_value(
+                        baseline[key], value, latest.get(key),
+                        reject_conflicts=reject_conflicts,
+                        prefer_changed_keys=prefer_changed_keys,
+                    )
             return merged
         if isinstance(baseline, list) and isinstance(changed, list) and isinstance(latest, list):
             if cls._has_stable_ids(baseline, changed, latest):
-                return cls._merge_entity_list(baseline, changed, latest, reject_conflicts=reject_conflicts)
+                return cls._merge_entity_list(
+                    baseline, changed, latest,
+                    reject_conflicts=reject_conflicts,
+                    prefer_changed_keys=prefer_changed_keys,
+                )
             if changed[: len(baseline)] == baseline:
                 additions = changed[len(baseline):]
                 return copy.deepcopy(latest + [item for item in additions if item not in latest])
@@ -240,7 +380,15 @@ class ProjectRepository:
         return bool(items) and all(isinstance(item, dict) and item.get("id") for item in items)
 
     @classmethod
-    def _merge_entity_list(cls, baseline: list[Any], changed: list[Any], latest: list[Any], *, reject_conflicts: bool = False) -> list[Any]:
+    def _merge_entity_list(
+        cls,
+        baseline: list[Any],
+        changed: list[Any],
+        latest: list[Any],
+        *,
+        reject_conflicts: bool = False,
+        prefer_changed_keys: frozenset[str] = frozenset(),
+    ) -> list[Any]:
         latest = copy.deepcopy(latest)
         baseline_ids = {item["id"] for item in baseline}
         latest_ids = {item["id"] for item in latest}
@@ -282,7 +430,11 @@ class ProjectRepository:
                     positions[item_id] = len(result)
                     result.append(copy.deepcopy(item))
                 continue
-            merged = cls._merge_value(baseline_by_id[item_id], item, latest_by_id[item_id], reject_conflicts=reject_conflicts)
+            merged = cls._merge_value(
+                baseline_by_id[item_id], item, latest_by_id[item_id],
+                reject_conflicts=reject_conflicts,
+                prefer_changed_keys=prefer_changed_keys,
+            )
             if item_id in positions:
                 result[positions[item_id]] = merged
             else:

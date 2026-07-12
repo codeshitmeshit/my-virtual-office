@@ -1,0 +1,39 @@
+{
+  "runs": 20,
+  "scales": {
+    "large": {
+      "backgroundScanMedianMs": 146.102,
+      "backgroundScanP95Ms": 159.783,
+      "filesScanned": 20200,
+      "projects": 200,
+      "quickWatcherMedianMs": 1.214,
+      "quickWatcherP95Ms": 1.361,
+      "revisionMedianMs": 0.001,
+      "revisionP95Ms": 0.001,
+      "tasksPerProject": 100
+    },
+    "medium": {
+      "backgroundScanMedianMs": 19.297,
+      "backgroundScanP95Ms": 26.61,
+      "filesScanned": 2550,
+      "projects": 50,
+      "quickWatcherMedianMs": 0.304,
+      "quickWatcherP95Ms": 0.356,
+      "revisionMedianMs": 0.001,
+      "revisionP95Ms": 0.001,
+      "tasksPerProject": 50
+    },
+    "small": {
+      "backgroundScanMedianMs": 1.438,
+      "backgroundScanP95Ms": 3.004,
+      "filesScanned": 55,
+      "projects": 5,
+      "quickWatcherMedianMs": 0.11,
+      "quickWatcherP95Ms": 0.267,
+      "revisionMedianMs": 0.001,
+      "revisionP95Ms": 0.001,
+      "tasksPerProject": 10
+    }
+  },
+  "warmups": 3
+}

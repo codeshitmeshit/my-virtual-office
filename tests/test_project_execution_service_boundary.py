@@ -187,6 +187,26 @@ def test_execution_agent_meeting_request_remains_reachable_without_browser_token
     assert called == [("project-1", "task-1", {"question": "Need a decision"})]
 
 
+def test_execution_start_http_preserves_git_snapshot_failure_status_and_code(monkeypatch):
+    handler = _authorize(_handler_for_post(b"{}"))
+    handler.path = "/api/projects/project-1/tasks/task-1/project-execution/start"
+    monkeypatch.setattr(
+        server,
+        "_handle_project_execution_start",
+        lambda project_id, task_id, body: {
+            "ok": False,
+            "error": "Unable to verify the Git workspace state",
+            "code": "workspace_git_snapshot_failed",
+            "_status": 409,
+        },
+    )
+
+    handler.do_POST()
+
+    assert handler.responses == [409]
+    assert json.loads(handler.wfile.getvalue())["code"] == "workspace_git_snapshot_failed"
+
+
 def _service_dependencies(project=None, validation=None):
     data = {"projects": [project] if project else []}
     saved = []

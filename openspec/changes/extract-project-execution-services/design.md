@@ -227,7 +227,7 @@ sequenceDiagram
 
 ### 2.3 存储与缓存设计（必填）
 
-MarkdownProjectStore 与 frontmatter 字段不变；不新增缓存。Repository 保留 load-time acceptance repair、save-time cron history merge和未知字段。LockEntry 包含 `{lock, refcount}`；在 registry guard 内先增加包含等待者在内的 refcount，再等待 project lock，finally 在 guard 内递减，只有 refcount=0 才删除，避免同项目同时出现两把锁。不存在的 project id 在创建 LockEntry 前先做格式限制，并确保失败路径释放引用。
+MarkdownProjectStore 与 frontmatter 字段不变；不新增跨进程、TTL 或业务结果缓存。Repository 在当前单 server process 内维护一份 write-through coherent snapshot，用于消除同一命令在 atomic prepare/commit 中对全量 Markdown 的重复解析；所有 Repository 写入口成功落盘后同步替换 snapshot，直接 delete 后失效。Cache namespace 包含 store adapter identity 与 O(1) generation；协调写立即递增 generation。后台 watcher 每 500ms 只检查 project/tasks 目录 metadata，原子替换类外部编辑可快速失效；每 5 秒离线扫描一次 path/inode/size/mtime，覆盖不改变目录 mtime 的原地编辑。两类扫描均不位于请求路径；检测后的下一次读取会重新加载，避免长期屏蔽 Markdown 权威状态。Acceptance repair 在底层 reload 和每次成功 write 后执行；公开返回值继续深拷贝，调用方不能修改 snapshot。Repository 保留 save-time cron history merge和未知字段。LockEntry 包含 `{lock, refcount}`；在 registry guard 内先增加包含等待者在内的 refcount，再等待 project lock，finally 在 guard 内递减，只有 refcount=0 才删除，避免同项目同时出现两把锁。不存在的 project id 在创建 LockEntry 前先做格式限制，并确保失败路径释放引用。
 
 ### 2.4 MG 设计（必填）
 

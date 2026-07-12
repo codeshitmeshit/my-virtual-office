@@ -6,6 +6,7 @@ import json
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -518,6 +519,57 @@ def test_workspace_validation_and_dirty_fingerprint():
         assert snapshot["fingerprint"]
         assert "tracked.txt" in snapshot["files"]
         assert server._project_execution_validate_workspace(os.path.join(workspace, "missing"))["ok"] is False
+
+
+def test_automatic_attempt_snapshot_fails_closed_and_requires_current_dirty_confirmation():
+    with tempfile.TemporaryDirectory() as workspace:
+        subprocess.run(["git", "init", "-q"], cwd=workspace, check=True)
+        original = server._project_execution_git_snapshot
+        try:
+            server._project_execution_git_snapshot = lambda path: {
+                "kind": "git", "dirty": False, "files": [], "fingerprint": "", "error": "git failed",
+            }
+            failed = server._project_execution_automatic_snapshot({"executionDirtyConfirmations": []}, workspace)
+            assert failed["code"] == "workspace_git_snapshot_failed"
+
+            server._project_execution_git_snapshot = lambda path: {
+                "kind": "git", "dirty": True, "files": ["changed.txt"], "fingerprint": "new-fingerprint",
+            }
+            dirty = server._project_execution_automatic_snapshot({"executionDirtyConfirmations": ["old-fingerprint"]}, workspace)
+            assert dirty["code"] == "dirty_worktree_confirmation_required"
+            assert dirty["confirmationRequired"] is True
+            accepted = server._project_execution_automatic_snapshot({"executionDirtyConfirmations": ["new-fingerprint"]}, workspace)
+            assert accepted["ok"] is True
+        finally:
+            server._project_execution_git_snapshot = original
+
+
+def test_git_snapshot_command_failure_blocks_start_before_provider_invocation():
+    with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as workspace:
+        subprocess.run(["git", "init", "-q"], cwd=workspace, check=True)
+        old = with_store(status_dir)
+        old_run = server.subprocess.run
+        old_executor = server._project_execution_call_executor
+        provider_calls = []
+
+        def failed_git(*args, **kwargs):
+            return subprocess.CompletedProcess(args=args[0], returncode=128, stdout="", stderr="fatal: snapshot failed")
+
+        server.subprocess.run = failed_git
+        server._project_execution_call_executor = lambda *args, **kwargs: provider_calls.append(args) or {"ok": True}
+        try:
+            project, task = create_project_execution_project(workspace)
+            result = server._handle_project_execution_start(project["id"], task["id"], {})
+            assert result["_status"] == 409
+            assert result["code"] == "workspace_git_snapshot_failed"
+            assert provider_calls == []
+            current = server._handle_project_get(project["id"])["project"]["tasks"][0]
+            assert current.get("activeAttemptId") in (None, "")
+            assert current.get("attempts") == []
+        finally:
+            server.subprocess.run = old_run
+            server._project_execution_call_executor = old_executor
+            restore_store(old)
 
 
 def test_workspace_validation_rejects_files_and_outside_allowed_roots():
@@ -2385,8 +2437,10 @@ def test_cancel_active_execution_blocks_and_preserves_evidence():
         old = with_store(status_dir)
         old_call = server._project_execution_call_executor
         release = {"done": False}
+        entered = threading.Event()
 
         def slow_executor(executor, prompt, workspace, attempt_id, project_id=None, task_id=None, timeout=600):
+            entered.set()
             deadline = time.time() + 2
             while not release["done"] and time.time() < deadline:
                 time.sleep(0.02)
@@ -2397,6 +2451,7 @@ def test_cancel_active_execution_blocks_and_preserves_evidence():
             project, task = create_project_execution_project(workspace)
             started = server._handle_project_execution_start(project["id"], task["id"], {})
             assert started["ok"] is True
+            assert entered.wait(timeout=2)
             cancelling = server._handle_project_execution_cancel(project["id"], task["id"], {"attemptId": started["attemptId"]})
             assert cancelling["ok"] is True
             assert cancelling["status"] == "blocked"
@@ -2414,6 +2469,65 @@ def test_cancel_active_execution_blocks_and_preserves_evidence():
             assert "cancelled" in task["blockedReason"].lower()
             assert task["evidence"]["providerStatus"] == "cancelled"
             assert task["evidence"]["changedFiles"] == ["partial.txt"]
+            assert started["attemptId"] not in server._PROJECT_EXECUTION_CANCEL_FLAGS
+        finally:
+            server._project_execution_call_executor = old_call
+            restore_store(old)
+
+
+def test_cancel_racing_transient_failure_does_not_schedule_retry_or_leak_flag():
+    with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as workspace:
+        old = with_store(status_dir)
+        old_call = server._project_execution_call_executor
+        release = threading.Event()
+
+        def timeout_after_cancel(*args, **kwargs):
+            release.wait(timeout=2)
+            return {"ok": False, "status": "execution_failed", "error": "provider timeout", "modifiedFiles": []}
+
+        server._project_execution_call_executor = timeout_after_cancel
+        try:
+            project, task = create_project_execution_project(workspace)
+            started = server._handle_project_execution_start(project["id"], task["id"], {})
+            server._handle_project_execution_cancel(project["id"], task["id"], {"attemptId": started["attemptId"]})
+            release.set()
+            wait_for(lambda: started["attemptId"] not in server._PROJECT_EXECUTION_CANCEL_FLAGS)
+            current = server._handle_project_get(project["id"])["project"]["tasks"][0]
+            assert current["executionState"] == "blocked"
+            assert len(current.get("attempts") or []) == 1
+            assert current["attempts"][0]["status"] == "cancelled"
+        finally:
+            server._project_execution_call_executor = old_call
+            restore_store(old)
+
+
+def test_provider_completion_merges_comment_added_while_provider_is_running():
+    with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as workspace:
+        old = with_store(status_dir)
+        old_call = server._project_execution_call_executor
+        entered = threading.Event()
+        release = threading.Event()
+
+        def provider(*args, **kwargs):
+            entered.set()
+            release.wait(timeout=2)
+            return {"ok": True, "status": "completed", "reply": "done", "modifiedFiles": []}
+
+        server._project_execution_call_executor = provider
+        try:
+            project, task = create_project_execution_project(workspace)
+            started = server._handle_project_execution_start(project["id"], task["id"], {})
+            assert started["ok"] is True
+            assert entered.wait(timeout=2)
+            comment = server._handle_task_comment(project["id"], task["id"], {"text": "concurrent note", "author": "user"})
+            assert comment["ok"] is True
+            release.set()
+
+            completed = wait_for(lambda: (
+                current if (current := server._handle_project_get(project["id"])["project"]["tasks"][0]).get("executionState") == "execution_complete" else None
+            ))
+            assert "concurrent note" in completed["comments"][-1]["text"]
+            assert completed["evidence"]["providerStatus"] == "completed"
         finally:
             server._project_execution_call_executor = old_call
             restore_store(old)

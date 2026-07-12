@@ -7,6 +7,7 @@ import sys
 import threading
 import time
 import ast
+import tempfile
 
 import pytest
 
@@ -22,6 +23,7 @@ from services.project_repository import (
     ProjectNotFoundError,
     ProjectRepository,
 )
+from project_store import MarkdownProjectStore
 
 
 class MemoryStore:
@@ -148,7 +150,64 @@ def test_repair_hook_runs_for_reads_and_commits():
     _, repo = repository(repair=repair)
     assert repo.load_all()["repaired"] is True
     repo.update("p1", lambda project: project.update({"title": "Repaired"}))
-    assert len(calls) >= 3
+    assert len(calls) >= 1
+
+
+def test_coherent_snapshot_avoids_redundant_store_reads_and_namespace_invalidates():
+    state, repo = repository()
+    loads = []
+    namespace = ["store-a"]
+
+    def load():
+        loads.append(namespace[0])
+        return copy.deepcopy(state.data)
+
+    cached = ProjectRepository(
+        load_projects=load,
+        save_projects=state.save,
+        cache_namespace=lambda: namespace[0],
+    )
+    assert cached.get("p1")["title"] == "One"
+    assert cached.get("p1")["title"] == "One"
+    cached.update("p1", lambda project: project.update({"title": "Cached"}))
+    assert cached.get("p1")["title"] == "Cached"
+    assert loads == ["store-a"]
+
+    namespace[0] = "store-b"
+    assert cached.get("p1")["title"] == "Cached"
+    assert loads == ["store-a", "store-b"]
+
+
+def test_markdown_revision_invalidates_cache_after_external_file_edit():
+    with tempfile.TemporaryDirectory() as status_dir:
+        store = MarkdownProjectStore(
+            status_dir,
+            watch_external_changes=True,
+            watch_interval=0.1,
+            full_revision_interval=0.2,
+        )
+        store.save_all({"projects": [{"id": "p1", "title": "One", "tasks": [], "activity": []}], "templates": []})
+        repo = ProjectRepository(
+            load_projects=store.load_all,
+            save_projects=store.save_all,
+            cache_namespace=lambda: (store, store.revision()),
+        )
+        assert repo.get("p1")["title"] == "One"
+        project_md = next(
+            os.path.join(store.projects_dir, entry, "project.md")
+            for entry in os.listdir(store.projects_dir)
+        )
+        with open(project_md, encoding="utf-8") as source_file:
+            source = source_file.read()
+        with open(project_md, "w", encoding="utf-8") as output_file:
+            output_file.write(source.replace("title: One", "title: Two"))
+
+        deadline = time.time() + 2
+        while repo.get("p1")["title"] != "Two" and time.time() < deadline:
+            time.sleep(0.02)
+        assert repo.get("p1")["title"] == "Two"
+        repo.update("p1", lambda project: project.update({"priority": "high"}))
+        assert store.get_project("p1")["title"] == "Two"
 
 
 def test_legacy_snapshots_merge_different_projects_and_same_project_fields():
@@ -223,6 +282,85 @@ def test_stale_snapshot_cannot_delete_a_concurrently_updated_entity():
         repo.commit_snapshot(changed, baseline)
 
     assert repo.get("p1")["workflowPhase"] == "execution_complete"
+
+
+def test_conditional_snapshot_commit_discards_stale_attempt_result():
+    _, repo = repository()
+    repo.update("p1", lambda project: project.update({"activeAttemptId": "a1"}))
+    baseline = repo.load_all()
+    completed = copy.deepcopy(baseline)
+    completed["projects"][0]["activeAttemptId"] = None
+    completed["projects"][0]["workflowPhase"] = "execution_complete"
+    repo.update("p1", lambda project: project.update({"activeAttemptId": "a2", "workflowPhase": "executing"}))
+
+    committed = repo.commit_snapshot_if(
+        "p1", completed, baseline,
+        lambda project: project.get("activeAttemptId") == "a1",
+    )
+
+    assert committed is None
+    assert repo.get("p1")["activeAttemptId"] == "a2"
+    assert repo.get("p1")["workflowPhase"] == "executing"
+
+
+def test_conditional_project_commit_preserves_other_projects_and_checks_token():
+    _, repo = repository()
+    baseline = repo.get("p1")
+    changed = copy.deepcopy(baseline)
+    changed["workflowPhase"] = "execution_complete"
+    repo.update("p2", lambda project: project.update({"title": "Concurrent project"}))
+
+    committed = repo.commit_project_if(
+        "p1", changed, baseline,
+        lambda project: project.get("title") == "One",
+    )
+    assert committed["workflowPhase"] == "execution_complete"
+    assert repo.get("p2")["title"] == "Concurrent project"
+
+    stale = copy.deepcopy(committed)
+    stale["workflowPhase"] = "done"
+    repo.update("p1", lambda project: project.update({"activeAttemptId": "replacement"}))
+    assert repo.commit_project_if(
+        "p1", stale, committed,
+        lambda project: project.get("activeAttemptId") in (None, ""),
+    ) is None
+    assert repo.get("p1")["activeAttemptId"] == "replacement"
+
+
+def test_conditional_project_commit_merges_concurrent_comment_despite_updated_at():
+    _, repo = repository()
+    repo.update("p1", lambda project: project.update({
+        "updatedAt": "2026-01-01T00:00:00+00:00",
+        "tasks": [{
+            "id": "t1", "title": "Task", "activeAttemptId": "a1",
+            "updatedAt": "2026-01-01T00:00:00+00:00", "comments": [],
+            "attempts": [{"id": "a1", "status": "executing"}],
+        }],
+    }))
+    baseline = repo.get("p1")
+    completed = copy.deepcopy(baseline)
+    completed["updatedAt"] = "2026-01-01T00:00:02+00:00"
+    completed["tasks"][0].update({
+        "activeAttemptId": None,
+        "updatedAt": "2026-01-01T00:00:02+00:00",
+        "evidence": {"providerStatus": "completed"},
+    })
+
+    def add_comment(project):
+        project["updatedAt"] = "2026-01-01T00:00:01+00:00"
+        task = project["tasks"][0]
+        task["updatedAt"] = "2026-01-01T00:00:01+00:00"
+        task["comments"].append({"id": "comment-1", "text": "keep me"})
+
+    repo.update("p1", add_comment)
+    committed = repo.commit_project_if(
+        "p1", completed, baseline,
+        lambda project: project["tasks"][0].get("activeAttemptId") == "a1",
+    )
+
+    assert committed["tasks"][0]["comments"] == [{"id": "comment-1", "text": "keep me"}]
+    assert committed["tasks"][0]["evidence"]["providerStatus"] == "completed"
+    assert committed["tasks"][0]["updatedAt"] == "2026-01-01T00:00:02+00:00"
 
 
 def _capture_error(errors, callback):

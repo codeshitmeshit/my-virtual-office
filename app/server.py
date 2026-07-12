@@ -40,7 +40,8 @@ import gateway_presence
 from dashboard_realtime import DashboardRealtimeStream
 from services import project_execution as project_execution_service
 from services import project_commands as project_command_service
-from services.project_repository import ProjectRepository
+from services import execution_lifecycle as execution_lifecycle_service
+from services.project_repository import ProjectConflictError, ProjectNotFoundError, ProjectRepository
 from zoneinfo import ZoneInfo
 from provider_execution import (
     collect_modified_files,
@@ -2305,7 +2306,7 @@ from providers.claude_code import ClaudeCodeProvider
 from license import get_license_status, activate_license, deactivate_license, check_feature, get_agent_limit
 from project_store import MarkdownProjectStore
 
-PROJECT_STORE = MarkdownProjectStore(STATUS_DIR)
+PROJECT_STORE = MarkdownProjectStore(STATUS_DIR, watch_external_changes=True)
 
 
 AGENT_PLATFORM_COMM_SKILL_NAME = "AgentPlatform-to-AgentPlatform_Communications"
@@ -15756,6 +15757,7 @@ _PROJECT_REPOSITORY = ProjectRepository(
     save_projects=lambda data: PROJECT_STORE.save_all(data),
     repair_projects=_project_execution_repair_acceptance_state,
     delete_project=lambda project_id: PROJECT_STORE.delete_project(project_id),
+    cache_namespace=lambda: (PROJECT_STORE, PROJECT_STORE.revision()),
 )
 
 
@@ -17016,6 +17018,9 @@ def _handle_task_delete(project_id, task_id):
 
 _PROJECT_EXECUTION_LOCK = threading.Lock()
 _PROJECT_EXECUTION_CANCEL_FLAGS = {}
+_PROJECT_EXECUTION_CANCEL_REGISTRY = execution_lifecycle_service.CancelRegistry(
+    _PROJECT_EXECUTION_LOCK, _PROJECT_EXECUTION_CANCEL_FLAGS
+)
 _PROJECT_EXECUTION_REVIEW_FLAGS = set()
 _PROJECT_EXECUTION_MAX_TEXT = 12000
 _PROJECT_EXECUTION_MAX_EVIDENCE_LINE = 360
@@ -17071,6 +17076,9 @@ def _project_execution_git_snapshot(workspace):
         return {"kind": "directory", "dirty": False, "fingerprint": "", "files": []}
     try:
         result = subprocess.run(["git", "status", "--porcelain=v1", "--untracked-files=all"], cwd=workspace, capture_output=True, text=True, timeout=15)
+        if result.returncode != 0:
+            detail = _project_execution_compact_evidence_line(result.stderr or "git status failed", limit=240)
+            return {"kind": "git", "dirty": False, "fingerprint": "", "files": [], "error": detail}
         lines = [line for line in (result.stdout or "").splitlines() if line.strip()]
         files = []
         for line in lines[:200]:
@@ -17088,6 +17096,31 @@ def _project_execution_git_snapshot(workspace):
         return {"kind": "git", "dirty": bool(lines), "fingerprint": hashlib.sha256("\n".join(fingerprint_parts).encode()).hexdigest(), "files": files, "truncated": len(lines) > 200}
     except Exception as exc:
         return {"kind": "git", "dirty": False, "fingerprint": "", "files": [], "error": str(exc)}
+
+
+def _project_execution_automatic_snapshot(project, workspace):
+    """Apply the same fail-closed Git/dirty gate to every automatic attempt."""
+    snapshot = _project_execution_git_snapshot(workspace)
+    if snapshot.get("error"):
+        return {
+            "ok": False,
+            "error": "Unable to verify the Git workspace state",
+            "code": "workspace_git_snapshot_failed",
+            "snapshot": snapshot,
+        }
+    fingerprint = str(snapshot.get("fingerprint") or "")
+    confirmations = project.get("executionDirtyConfirmations") or []
+    if snapshot.get("dirty") and fingerprint not in confirmations:
+        return {
+            "ok": False,
+            "error": "The workspace changed and requires a new dirty-worktree confirmation",
+            "code": "dirty_worktree_confirmation_required",
+            "confirmationRequired": True,
+            "dirtyFingerprint": fingerprint,
+            "dirtyFiles": snapshot.get("files", [])[:50],
+            "snapshot": snapshot,
+        }
+    return {"ok": True, "snapshot": snapshot}
 
 
 def _project_execution_resolve_roles(project, task):
@@ -17591,11 +17624,14 @@ def _project_execution_attempt_retry_count(attempt):
         return 0
 
 
-def _project_execution_schedule_transient_retry(data, project_id, task_id, project, task, attempt, evidence, reason):
+def _project_execution_schedule_transient_retry(data, project_id, task_id, project, task, attempt, evidence, reason, baseline_project):
     if _project_execution_attempt_retry_count(attempt) >= 1:
         return False
     workspace = _project_execution_validate_workspace(project.get("workspacePath"))
     if not workspace.get("ok"):
+        return False
+    automatic_snapshot = _project_execution_automatic_snapshot(project, workspace["path"])
+    if not automatic_snapshot.get("ok"):
         return False
     retry_attempt_id = str(uuid.uuid4())
     retry_attempt = {
@@ -17605,7 +17641,7 @@ def _project_execution_schedule_transient_retry(data, project_id, task_id, proje
         "startedAt": _proj_now(),
         "finishedAt": None,
         "evidence": {},
-        "baseline": _project_execution_git_snapshot(workspace["path"]),
+        "baseline": automatic_snapshot["snapshot"],
         "workspacePath": workspace["path"],
         "workspaceKind": workspace["kind"],
         "rework": False,
@@ -17636,16 +17672,16 @@ def _project_execution_schedule_transient_retry(data, project_id, task_id, proje
         "updatedAt": _proj_now(),
     })
     _project_execution_transition(project, task, "executing", "system", f"Provider timeout or transient gateway failure detected; retrying once ({reason}).", retry_attempt_id)
-    _save_projects(data)
-    cancel_flag = threading.Event()
-    with _PROJECT_EXECUTION_LOCK:
-        _PROJECT_EXECUTION_CANCEL_FLAGS[retry_attempt_id] = cancel_flag
+    cancel_flag = _PROJECT_EXECUTION_CANCEL_REGISTRY.create(retry_attempt_id)
+    if not _project_execution_commit_attempt_snapshot(project_id, task_id, attempt.get("id"), data, baseline_project):
+        _PROJECT_EXECUTION_CANCEL_REGISTRY.discard(retry_attempt_id)
+        return False
 
     def retry_later():
         time.sleep(3)
         _project_execution_run_attempt(project_id, task_id, retry_attempt_id, cancel_flag)
 
-    threading.Thread(target=retry_later, daemon=True).start()
+    _project_execution_launch(retry_later)
     return True
 
 
@@ -17666,6 +17702,14 @@ def _project_execution_continue_for_incomplete_checklist(data, project_id, task_
         project.update({"workflowActive": False, "workflowPhase": "blocked", "activeTaskId": None, "activeAgent": None, "updatedAt": _proj_now()})
         _save_projects(data)
         return {**roles, "continued": False}
+    automatic_snapshot = _project_execution_automatic_snapshot(project, workspace["path"])
+    if not automatic_snapshot.get("ok"):
+        task["blockedReason"] = automatic_snapshot.get("error")
+        task["lastError"] = automatic_snapshot.get("code")
+        _project_execution_transition(project, task, "blocked", "system", task["blockedReason"], attempt_id)
+        project.update({"workflowActive": False, "workflowPhase": "blocked", "activeTaskId": None, "activeAgent": None, "updatedAt": _proj_now()})
+        _save_projects(data)
+        return {**automatic_snapshot, "continued": False}
     feedback = _project_execution_incomplete_checklist_feedback(done_result)
     task["reworkCount"] = int(task.get("reworkCount") or 0) + 1
     task["blockedReason"] = None
@@ -17684,7 +17728,7 @@ def _project_execution_continue_for_incomplete_checklist(data, project_id, task_
         "reviewer": roles.get("reviewer"),
         "skipReview": bool(roles.get("skipReview")),
         "skipReviewReason": roles.get("skipReviewReason"),
-        "baseline": _project_execution_git_snapshot(workspace["path"]),
+        "baseline": automatic_snapshot["snapshot"],
         "startMode": project.get("projectExecutionStartMode") or "continuous",
         "projectFlow": bool(project.get("projectExecutionFlowActive")),
         "requiresUserAcceptance": _project_execution_requires_user_acceptance(task),
@@ -17757,16 +17801,11 @@ def _project_execution_move_task_to_column(project, task, col):
 
 
 def _project_execution_transition(project, task, next_state, actor, reason, attempt_id=None):
-    previous = task.get("executionState") or ("done" if task.get("completedAt") else "backlog")
-    task["executionState"] = next_state
-    task["updatedAt"] = _proj_now()
-    if next_state != "done":
-        task["completedAt"] = None
-    _project_execution_sync_task_column(project, task, next_state)
-    project["updatedAt"] = _proj_now()
-    _log_activity(project, "project_execution_state_changed", actor, f"Project Execution task '{task.get('title', '')}' changed from {previous} to {next_state}: {reason}", task.get("id"))
-    task.setdefault("stateHistory", []).append({"attemptId": attempt_id, "actor": actor, "from": previous, "to": next_state, "reason": _project_execution_redact(reason), "at": _proj_now()})
-    task["stateHistory"] = task["stateHistory"][-100:]
+    return execution_lifecycle_service.transition(
+        project, task, next_state, actor, reason, attempt_id,
+        now=_proj_now, sync_column=_project_execution_sync_task_column,
+        log_activity=_log_activity, redact=_project_execution_redact,
+    )
 
 
 def _project_execution_meeting_blocker_unresolved(blocker):
@@ -21627,6 +21666,15 @@ def _project_execution_run_review(project_id, task_id, attempt_id, review_id):
                     _project_execution_transition(project, task, "blocked", "system", task["blockedReason"], attempt_id)
                     _send_project_execution_intervention_notification(project, task, task["blockedReason"], attempt_id, event="blocked", kind="warning")
                 else:
+                    automatic_snapshot = _project_execution_automatic_snapshot(project, workspace["path"])
+                    if not automatic_snapshot.get("ok"):
+                        task["blockedReason"] = automatic_snapshot.get("error")
+                        task["lastError"] = automatic_snapshot.get("code")
+                        _project_execution_transition(project, task, "blocked", "system", task["blockedReason"], attempt_id)
+                        _send_project_execution_intervention_notification(project, task, task["blockedReason"], attempt_id, event="blocked", kind="error")
+                        project["workflowPhase"] = "blocked"
+                        _save_projects(data)
+                        return
                     rework_attempt_id = str(uuid.uuid4())
                     rework_attempt = {
                         "id": rework_attempt_id,
@@ -21638,7 +21686,7 @@ def _project_execution_run_review(project_id, task_id, attempt_id, review_id):
                         "dirtyFingerprint": "",
                         "executor": roles["executor"],
                         "reviewer": roles["reviewer"],
-                        "baseline": _project_execution_git_snapshot(workspace["path"]),
+                        "baseline": automatic_snapshot["snapshot"],
                         "rework": True,
                         "reworkCycle": task["reworkCount"],
                         "reworkFromAttemptId": attempt_id,
@@ -21670,256 +21718,144 @@ def _project_execution_run_review(project_id, task_id, attempt_id, review_id):
             _PROJECT_EXECUTION_REVIEW_FLAGS.discard(review_id)
 
 
+def _project_execution_commit_attempt_snapshot(project_id, task_id, attempt_id, data, baseline_project):
+    def still_current(project):
+        task = next((item for item in project.get("tasks", []) if item.get("id") == task_id), None)
+        return execution_lifecycle_service.attempt_is_committable(task, attempt_id)
+
+    changed_project = next(
+        (item for item in data.get("projects", []) if item.get("id") == project_id),
+        None,
+    )
+    if changed_project is None:
+        return False
+    try:
+        committed_project = _PROJECT_REPOSITORY.commit_project_if(
+            project_id, changed_project, baseline_project, still_current,
+        )
+    except ProjectConflictError:
+        return False
+    return committed_project is not None
+
+
+def _project_execution_finalize_cancel(project_id, task_id, attempt_id, evidence):
+    def finalize(project):
+        task = next((item for item in project.get("tasks", []) if item.get("id") == task_id), None)
+        attempt = _project_execution_attempt(task or {}, attempt_id)
+        if not task or not attempt or attempt.get("status") not in {"cancelling", "cancelled"}:
+            return False
+        attempt.update({"status": "cancelled", "evidence": copy.deepcopy(evidence), "finishedAt": _proj_now()})
+        task.update({
+            "evidence": copy.deepcopy(evidence),
+            "activeAttemptId": None,
+            "blockedReason": "Execution was cancelled. Existing workspace changes were not rolled back.",
+            "lastError": None,
+        })
+        project.update({
+            "workflowActive": False,
+            "workflowPhase": "blocked",
+            "activeTaskId": None,
+            "activeAgent": None,
+            "projectExecutionFlowActive": False,
+            "projectExecutionFlowStopReason": "user_stopped_execution",
+            "updatedAt": _proj_now(),
+        })
+        return True
+
+    try:
+        return bool(_PROJECT_REPOSITORY.update(project_id, finalize))
+    except ProjectNotFoundError:
+        return False
+
+
+def _project_execution_runner_ports():
+    return execution_lifecycle_service.RunnerPorts(
+        repository=_PROJECT_REPOSITORY,
+        build_prompt=_project_execution_build_prompt,
+        provider=_project_execution_call_executor,
+        git_snapshot=_project_execution_git_snapshot,
+        find=_project_execution_find,
+        find_attempt=_project_execution_attempt,
+        apply_checklist_updates=_project_execution_apply_checklist_updates,
+        apply_meeting_discussion_points=_project_execution_apply_meeting_discussion_points,
+        redact=_project_execution_redact,
+        now=_proj_now,
+        acceptance_checklist=_project_execution_acceptance_checklist,
+        test_evidence=_project_execution_test_evidence,
+        transition=_project_execution_transition,
+        notify_intervention=_send_project_execution_intervention_notification,
+        mark_meeting_actions_completed=_project_execution_mark_meeting_actions_completed,
+        move_task_to_column=_project_execution_move_task_to_column,
+        backlog_column=_wf_get_backlog_col,
+        commit_projects=_project_execution_commit_attempt_snapshot,
+        cancel_registry=_PROJECT_EXECUTION_CANCEL_REGISTRY,
+        has_pending_meeting_actions=_project_execution_has_pending_meeting_actions,
+        launcher=_project_execution_launch,
+        start_task=_handle_project_execution_start,
+        attempt_requires_acceptance=_project_execution_attempt_requires_user_acceptance,
+        notify_acceptance=_send_project_execution_acceptance_notification,
+        mark_done=_project_execution_mark_done,
+        continue_incomplete_checklist=_project_execution_continue_for_incomplete_checklist,
+        schedule_continue=_project_execution_schedule_continue,
+        transient_failure_reason=_project_execution_transient_failure_reason,
+        schedule_transient_retry=_project_execution_schedule_transient_retry,
+        start_review=_handle_project_execution_review_start,
+        finalize_cancel=_project_execution_finalize_cancel,
+    )
+
+
 def _project_execution_run_attempt(project_id, task_id, attempt_id, cancel_flag):
-    data, project, task = _project_execution_find(project_id, task_id)
-    if not project or not task:
-        return
-    attempt = _project_execution_attempt(task, attempt_id)
-    if not attempt:
-        return
-    workspace = attempt.get("workspacePath")
-    executor = attempt.get("executor") or {}
-    started = time.time()
-    result = _project_execution_call_executor(executor, _project_execution_build_prompt(project, task, attempt, workspace), workspace, attempt_id, project_id=project_id, task_id=task_id)
-    final_snapshot = _project_execution_git_snapshot(workspace)
-    data, project, task = _project_execution_find(project_id, task_id)
-    if not project or not task:
-        return
-    attempt = _project_execution_attempt(task, attempt_id)
-    if not attempt or (task.get("activeAttemptId") != attempt_id and attempt.get("status") != "cancelling"):
-        return
-    checklist_changed = _project_execution_apply_checklist_updates(task, result)
-    discussion_points_changed = _project_execution_apply_meeting_discussion_points(task, result)
-    cancelled = cancel_flag.is_set() or result.get("status") == "cancelled"
-    evidence = {
-        "attemptId": attempt_id,
-        "executorSummary": _project_execution_redact(result.get("reply") or ""),
-        "changedFiles": sorted(set(final_snapshot.get("files", [])) | set(result.get("modifiedFiles") or []))[:200],
-        "workspaceBefore": attempt.get("baseline", {}), "workspaceAfter": final_snapshot,
-        "checklist": _project_execution_acceptance_checklist(task),
-        "providerStatus": result.get("status") or ("completed" if result.get("ok") else "execution_failed"),
-        "error": _project_execution_redact(result.get("error") or ""), "durationMs": int((time.time() - started) * 1000), "capturedAt": _proj_now(),
-        "testResults": _project_execution_test_evidence(result),
-        "checklistUpdated": checklist_changed,
-        "meetingDiscussionUpdated": discussion_points_changed,
-        "providerRef": {"providerKind": executor.get("providerKind"), "agentId": executor.get("id"), "attemptId": attempt_id},
-    }
-    attempt.update({"evidence": evidence, "finishedAt": _proj_now()})
-    task.update({"evidence": evidence, "activeAttemptId": None})
-    project.update({"workflowActive": False, "activeTaskId": None, "activeAgent": None})
-    if cancelled:
-        attempt["status"] = "cancelled"
-        task["blockedReason"] = "Execution was cancelled. Existing workspace changes were not rolled back."
-        _project_execution_transition(project, task, "blocked", "user", task["blockedReason"], attempt_id)
-        _send_project_execution_intervention_notification(project, task, task["blockedReason"], attempt_id, event="blocked", kind="warning")
-    elif result.get("ok"):
-        attempt["status"] = "execution_complete"
-        task.update({"blockedReason": None, "lastError": None})
-        if attempt.get("meetingActionPhase"):
-            _project_execution_mark_meeting_actions_completed(project, task, attempt_id, executor.get("id") or "executor")
-            attempt["status"] = "meeting_action_items_completed"
-            task["reviewResult"] = {}
-            task["evidence"] = evidence
-            _project_execution_transition(project, task, "backlog", executor.get("id") or "executor", "Meeting action items completed; original task can resume.", attempt_id)
-            _project_execution_move_task_to_column(project, task, _wf_get_backlog_col(project))
-            project.update({
-                "workflowActive": False,
-                "workflowPhase": "meeting_action_items_completed",
-                "activeTaskId": None,
-                "activeAgent": None,
-                "projectExecutionFlowActive": project.get("projectExecutionStartMode") == "continuous",
-                "projectExecutionFlowStopReason": None,
-                "updatedAt": _proj_now(),
-            })
-            _save_projects(data)
-            with _PROJECT_EXECUTION_LOCK:
-                _PROJECT_EXECUTION_CANCEL_FLAGS.pop(attempt_id, None)
-            if not _project_execution_has_pending_meeting_actions(task):
-                threading.Thread(target=lambda: _handle_project_execution_start(project_id, task_id, {"projectStart": True, "mode": project.get("projectExecutionStartMode") or "continuous", "autoReviewAfterExecution": True, "by": "meeting-action-items"}), daemon=True).start()
-            return
-        if attempt.get("skipReview"):
-            task["reviewResult"] = {
-                "id": f"skipped-{attempt_id}",
-                "attemptId": attempt_id,
-                "status": "skipped",
-                "summary": "Independent review skipped after user confirmation because no reviewer was configured.",
-                "rationale": attempt.get("skipReviewReason") or "reviewer_missing",
-                "items": [],
-                "reviewedAt": _proj_now(),
-            }
-            task.setdefault("reviewHistory", []).append(task["reviewResult"])
-            task["reviewHistory"] = task["reviewHistory"][-50:]
-            if _project_execution_attempt_requires_user_acceptance(task, attempt):
-                attempt["status"] = "review_skipped_waiting_acceptance"
-                project["projectExecutionFlowActive"] = False
-                project["projectExecutionFlowStopReason"] = "awaiting_user_acceptance"
-                _project_execution_transition(project, task, "awaiting_user_acceptance", "system", "Review skipped by user confirmation; waiting for user acceptance.", attempt_id)
-                _send_project_execution_acceptance_notification(project, task, attempt_id, "Review skipped by user confirmation; waiting for user acceptance.")
-            else:
-                done_result = _project_execution_mark_done(project, task, "system", "Review skipped by user confirmation; task does not require user acceptance.", attempt_id)
-                if not done_result.get("ok"):
-                    continued = _project_execution_continue_for_incomplete_checklist(data, project_id, task_id, project, task, attempt_id, "system", done_result)
-                    if continued.get("continued"):
-                        with _PROJECT_EXECUTION_LOCK:
-                            _PROJECT_EXECUTION_CANCEL_FLAGS.pop(attempt_id, None)
-                        return
-                    task["blockedReason"] = done_result.get("error")
-                    _project_execution_transition(project, task, "blocked", "system", task["blockedReason"], attempt_id)
-                    _send_project_execution_intervention_notification(project, task, task["blockedReason"], attempt_id, event="blocked", kind="warning")
-                elif attempt.get("projectFlow") or project.get("projectExecutionFlowActive"):
-                    project["projectExecutionFlowActive"] = True
-                    project["projectExecutionFlowStopReason"] = None
-                    _project_execution_schedule_continue(project_id, "review_skipped")
-        else:
-            _project_execution_transition(project, task, "execution_complete", executor.get("id") or "executor", "Execution completed; Independent review has not started.", attempt_id)
-    else:
-        transient_reason = _project_execution_transient_failure_reason(result)
-        if transient_reason and not cancelled and _project_execution_schedule_transient_retry(data, project_id, task_id, project, task, attempt, evidence, transient_reason):
-            with _PROJECT_EXECUTION_LOCK:
-                _PROJECT_EXECUTION_CANCEL_FLAGS.pop(attempt_id, None)
-            return
-        attempt["status"] = "blocked"
-        task["lastError"] = evidence["error"] or "Executor failed"
-        task["blockedReason"] = task["lastError"]
-        _project_execution_transition(project, task, "blocked", executor.get("id") or "executor", task["blockedReason"], attempt_id)
-        _send_project_execution_intervention_notification(project, task, task["blockedReason"], attempt_id, event="blocked", kind="error")
-    project["workflowPhase"] = task["executionState"]
-    _save_projects(data)
-    with _PROJECT_EXECUTION_LOCK:
-        _PROJECT_EXECUTION_CANCEL_FLAGS.pop(attempt_id, None)
-    if result.get("ok") and attempt.get("autoReviewAfterExecution"):
-        _handle_project_execution_review_start(project_id, task_id, {"attemptId": attempt_id})
+    return execution_lifecycle_service.run_attempt(
+        project_id, task_id, attempt_id, cancel_flag,
+        ports=_project_execution_runner_ports(),
+    )
+
+
+def _project_execution_launch(callback):
+    threading.Thread(target=callback, daemon=True).start()
+
+
+def _project_execution_start_ports():
+    return execution_lifecycle_service.StartPorts(
+        validate_workspace=_project_execution_validate_workspace,
+        git_snapshot=_project_execution_git_snapshot,
+        resolve_roles=lambda project, task, allow_skip: _project_execution_resolve_start_roles(project, task, allow_skip_reviewer=allow_skip),
+        active_task=_project_execution_active_task,
+        start_mode=_project_execution_start_mode,
+        requires_acceptance=_project_execution_requires_user_acceptance,
+        reopen_completed_task=_project_execution_reopen_completed_task,
+        clear_restart_bindings=_project_execution_clear_restart_bindings,
+        has_pending_meeting_actions=_project_execution_has_pending_meeting_actions,
+        transition=_project_execution_transition,
+        now=_proj_now,
+        new_id=_proj_uuid,
+        launcher=_project_execution_launch,
+        runner=_project_execution_run_attempt,
+        notify_intervention=_send_project_execution_intervention_notification,
+    )
 
 
 def _handle_project_execution_start(project_id, task_id, body):
-    body = body or {}
-    data, project, task = _project_execution_find(project_id, task_id)
-    if not project or not task:
-        return {"error": "Project or task not found", "_status": 404}
-    if not _project_execution_enabled(project):
-        return {"error": "Project Execution is not enabled for this project", "_status": 409}
-    workspace = _project_execution_validate_workspace(project.get("workspacePath"))
-    if not workspace.get("ok"):
-        project["workspaceStatus"] = workspace
-        _send_project_execution_intervention_notification(project, task, workspace.get("error") or "Project workspace is not available.", task.get("activeAttemptId"), event="start_failed", kind="error")
-        _save_projects(data)
-        return {**workspace, "_status": 409}
-    roles = _project_execution_resolve_start_roles(
-        project,
-        task,
-        allow_skip_reviewer=bool(body.get("skipReviewConfirmed")) or task.get("allowReviewerlessExecution") is True,
+    return execution_lifecycle_service.start_task(
+        project_id, task_id, body,
+        repository=_PROJECT_REPOSITORY,
+        cancel_registry=_PROJECT_EXECUTION_CANCEL_REGISTRY,
+        ports=_project_execution_start_ports(),
     )
-    if not roles.get("ok"):
-        payload = {**roles, "_status": 409}
-        _send_project_execution_intervention_notification(project, task, roles.get("error") or "Project Execution role configuration needs user attention.", task.get("activeAttemptId"), event="start_failed", kind="error")
-        _save_projects(data)
-        if roles.get("confirmationRequired"):
-            payload.update({
-                "taskId": task_id,
-                "startMode": _project_execution_start_mode(project, body) if body.get("projectStart") else "single",
-                "requiresUserAcceptance": _project_execution_requires_user_acceptance(task),
-            })
-        return payload
-    active = _project_execution_active_task(project)
-    if active:
-        return {"error": "Another task is already active for this project", "activeTaskId": active.get("id"), "_status": 409}
-    snapshot = _project_execution_git_snapshot(workspace["path"])
-    start_mode = _project_execution_start_mode(project, body) if body.get("projectStart") else "single"
-    project_flow = bool(body.get("projectStart")) and start_mode == "continuous"
-    if snapshot.get("dirty") and str(body.get("dirtyFingerprint") or "") != snapshot.get("fingerprint"):
-        return {"ok": False, "confirmationRequired": True, "code": "dirty_worktree_confirmation_required", "taskId": task_id, "startMode": start_mode, "requiresUserAcceptance": _project_execution_requires_user_acceptance(task), "dirtyFingerprint": snapshot.get("fingerprint"), "dirtyFiles": snapshot.get("files", [])[:50], "truncated": snapshot.get("truncated", False), "_status": 409}
-    if snapshot.get("dirty"):
-        project.setdefault("executionDirtyConfirmations", []).append(snapshot.get("fingerprint"))
-        project["executionDirtyConfirmations"] = project["executionDirtyConfirmations"][-100:]
-    reopened_completed_task = False
-    if task.get("completedAt"):
-        if task.get("scheduledRepeatEnabled") is not True:
-            return {
-                "ok": False,
-                "error": "Task is completed and repeat triggering is not enabled",
-                "code": "task_completed_repeat_disabled",
-                "taskId": task_id,
-                "_status": 409,
-            }
-        reopened_completed_task = _project_execution_reopen_completed_task(project, task, actor=str(body.get("by") or "user"))
-    if body.get("resetExecutionContext") is True:
-        _project_execution_clear_restart_bindings(task, _proj_now(), str(body.get("by") or "user"), "manual task restart")
-    attempt_id = str(uuid.uuid4())
-    project["projectExecutionStartMode"] = start_mode if body.get("projectStart") else project.get("projectExecutionStartMode", "continuous")
-    project["projectExecutionFlowActive"] = project_flow
-    project["projectExecutionFlowStopReason"] = None
-    meeting_action_phase = _project_execution_has_pending_meeting_actions(task)
-    attempt_status = "meeting_action_items" if meeting_action_phase else "executing"
-    attempt = {"id": attempt_id, "status": attempt_status, "startedAt": _proj_now(), "workspacePath": workspace["path"], "workspaceKind": workspace["kind"], "dirtyConfirmed": bool(snapshot.get("dirty")), "dirtyFingerprint": snapshot.get("fingerprint") if snapshot.get("dirty") else "", "executor": roles["executor"], "reviewer": roles.get("reviewer"), "skipReview": bool(roles.get("skipReview")), "skipReviewReason": roles.get("skipReviewReason"), "baseline": snapshot, "startMode": start_mode, "projectFlow": project_flow, "requiresUserAcceptance": _project_execution_requires_user_acceptance(task), "autoReviewAfterExecution": bool(body.get("autoReviewAfterExecution")) and not roles.get("skipReview"), "meetingActionPhase": meeting_action_phase}
-    task.setdefault("attempts", []).append(attempt)
-    task["attempts"] = task["attempts"][-20:]
-    if not task.get("assignee"):
-        task["assignee"] = roles["executor"]["id"]
-    task.update({"activeAttemptId": attempt_id, "executorAgentId": roles["executor"]["id"], "reviewerAgentId": (roles.get("reviewer") or {}).get("id"), "blockedReason": None, "lastError": None})
-    project.update({"workspaceStatus": workspace, "workflowActive": True, "workflowPhase": "executing", "activeTaskId": task_id, "activeAgent": roles["executor"]["id"]})
-    transition_reason = "Meeting action item phase started" if meeting_action_phase else "Project Execution task started"
-    _project_execution_transition(project, task, "executing", "user", transition_reason, attempt_id)
-    _save_projects(data)
-    cancel_flag = threading.Event()
-    with _PROJECT_EXECUTION_LOCK:
-        _PROJECT_EXECUTION_CANCEL_FLAGS[attempt_id] = cancel_flag
-    threading.Thread(target=_project_execution_run_attempt, args=(project_id, task_id, attempt_id, cancel_flag), daemon=True).start()
-    return {"ok": True, "status": "started", "taskId": task_id, "attemptId": attempt_id, "startMode": start_mode, "requiresUserAcceptance": _project_execution_requires_user_acceptance(task), "reopenedCompletedTask": reopened_completed_task}
 
 
 def _handle_project_execution_project_start(project_id, body=None):
-    body = body or {}
-    data, project, _ = _project_execution_find(project_id)
-    if not project:
-        return {"error": "Project not found", "_status": 404}
-    if not _project_execution_enabled(project):
-        return {"error": "Project Execution is not enabled for this project", "_status": 409}
-    active = _project_execution_active_task(project)
-    if active:
-        return {"error": "Another task is already active for this project", "activeTaskId": active.get("id"), "_status": 409}
-    restart_pipeline = body.get("restartPipeline") is True
-    reset_result = None
-    if restart_pipeline:
-        if not _project_execution_all_tasks_repeatable(project):
-            return {
-                "ok": False,
-                "error": "Project pipeline can only be restarted when every task allows retriggering",
-                "code": "project_restart_requires_all_tasks_repeatable",
-                "_status": 409,
-            }
-        reset_result = _project_execution_reset_project_tasks_for_restart(project, actor=str(body.get("by") or "user"))
-        if not reset_result.get("ok"):
-            return reset_result
-        _save_projects(data)
-    task = _project_execution_next_task(project)
-    if not task:
-        project["projectExecutionFlowActive"] = False
-        project["projectExecutionFlowStopReason"] = "no_eligible_task"
-        project["workflowActive"] = False
-        project["workflowPhase"] = "no_eligible_task"
-        project["updatedAt"] = _proj_now()
-        _send_project_execution_project_complete_notification(project, "Project Execution 已完成，当前没有可继续执行的任务。")
-        _save_projects(data)
-        return {"error": "No eligible task to start", "code": "no_eligible_task", "_status": 409}
-    mode = _project_execution_start_mode(project, body)
-    result = _handle_project_execution_start(project_id, task.get("id"), {**body, "mode": mode, "projectStart": True, "autoReviewAfterExecution": True})
-    if restart_pipeline and isinstance(result, dict):
-        result["restartPipeline"] = True
-        result["resetTaskCount"] = (reset_result or {}).get("resetTaskCount", 0)
-    if result.get("ok") or result.get("confirmationRequired"):
-        result["selectedTask"] = {"id": task.get("id"), "title": task.get("title", "")}
-    if result.get("confirmationRequired") or (not result.get("ok") and result.get("error")):
-        data, project, _ = _project_execution_find(project_id)
-        if project:
-            project["projectExecutionStartMode"] = mode
-            project["projectExecutionFlowActive"] = False
-            project["projectExecutionFlowStopReason"] = result.get("code") or result.get("error")
-            project["workflowActive"] = False
-            project["workflowPhase"] = result.get("code") or "start_failed"
-            project["updatedAt"] = _proj_now()
-            _save_projects(data)
-        result["selectedTask"] = {"id": task.get("id"), "title": task.get("title", "")}
-    return result
+    return execution_lifecycle_service.start_project(
+        project_id, body, repository=_PROJECT_REPOSITORY,
+        active_task=_project_execution_active_task,
+        all_tasks_repeatable=_project_execution_all_tasks_repeatable,
+        reset_tasks=_project_execution_reset_project_tasks_for_restart,
+        next_task=_project_execution_next_task,
+        start_mode=_project_execution_start_mode,
+        start_task_command=_handle_project_execution_start,
+        notify_complete=_send_project_execution_project_complete_notification,
+        now=_proj_now,
+    )
 
 
 def _project_execution_schedule_continue(project_id, reason="continue"):
@@ -21941,71 +21877,32 @@ def _project_execution_schedule_continue(project_id, reason="continue"):
 
 
 def _handle_project_execution_status(project_id, task_id=None):
-    data, project, task = _project_execution_find(project_id, task_id)
-    if not project or (task_id and not task):
-        return {"error": "Project or task not found", "_status": 404}
-    targets = [task] if task else project.get("tasks", [])
-    changed = False
-    for item in targets:
-        if item and item.get("executionState") in {"validating", "executing", "reviewing", "reworking"}:
-            attempt_id = item.get("activeAttemptId")
-            with _PROJECT_EXECUTION_LOCK:
-                live = bool(attempt_id and (attempt_id in _PROJECT_EXECUTION_CANCEL_FLAGS or attempt_id in _PROJECT_EXECUTION_REVIEW_FLAGS))
-            if not live:
-                item["activeAttemptId"] = None
-                item["blockedReason"] = "previous_execution_not_resumable"
-                _project_execution_transition(project, item, "blocked", "system", item["blockedReason"], attempt_id)
-                changed = True
-    if changed:
-        project.update({"workflowActive": False, "activeTaskId": None, "activeAgent": None, "workflowPhase": "blocked"})
-        _save_projects(data)
-    return {
-        "ok": True,
-        "active": bool(project.get("workflowActive")),
-        "phase": project.get("workflowPhase") or "idle",
-        "currentTaskId": project.get("activeTaskId"),
-        "startMode": project.get("projectExecutionStartMode") or "continuous",
-        "flowActive": bool(project.get("projectExecutionFlowActive")),
-        "flowStopReason": project.get("projectExecutionFlowStopReason"),
-        "task": task,
-    }
+    def is_live(attempt_id):
+        with _PROJECT_EXECUTION_LOCK:
+            return bool(attempt_id and (attempt_id in _PROJECT_EXECUTION_CANCEL_FLAGS or attempt_id in _PROJECT_EXECUTION_REVIEW_FLAGS))
+    return execution_lifecycle_service.status(
+        project_id, task_id, repository=_PROJECT_REPOSITORY,
+        is_live=is_live, transition_task=_project_execution_transition,
+    )
 
 
-def _handle_project_execution_cancel(project_id, task_id, body=None):
-    data, project, task = _project_execution_find(project_id, task_id)
-    if not project or not task:
-        return {"error": "Task not found", "_status": 404}
-    attempt_id = str((body or {}).get("attemptId") or task.get("activeAttemptId") or "")
-    if not attempt_id or task.get("activeAttemptId") != attempt_id:
-        return {"error": "No matching active attempt", "_status": 409}
-    with _PROJECT_EXECUTION_LOCK:
-        flag = _PROJECT_EXECUTION_CANCEL_FLAGS.get(attempt_id)
-        if flag:
-            flag.set()
-    attempt = _project_execution_attempt(task, attempt_id) or {}
-    attempt["status"] = "cancelling"
-    task["activeAttemptId"] = None
-    task["blockedReason"] = "Execution was stopped by user. Existing workspace changes were not rolled back."
-    task["lastError"] = None
-    _project_execution_transition(project, task, "blocked", "user", task["blockedReason"], attempt_id)
-    _send_project_execution_intervention_notification(project, task, task["blockedReason"], attempt_id, event="blocked", kind="warning")
-    project.update({
-        "workflowActive": False,
-        "workflowPhase": "blocked",
-        "activeTaskId": None,
-        "activeAgent": None,
-        "projectExecutionFlowActive": False,
-        "projectExecutionFlowStopReason": "user_stopped_execution",
-        "updatedAt": _proj_now(),
-    })
-    _save_projects(data)
+def _project_execution_cancel_provider(attempt, project_id, task_id, attempt_id):
     executor = attempt.get("executor") or {}
     if executor.get("providerKind") == "codex":
         _handle_codex_cancel({"agentId": executor.get("id"), "conversationId": attempt_id, "workspace": attempt.get("workspacePath")})
     elif executor.get("providerKind") == "openclaw":
         raw_session_key = _wf_task_session_key(executor.get("id"), project_id, attempt_id or task_id)
         _wf_abort_task_session(_openclaw_gateway_session_key(executor.get("id"), raw_session_key))
-    return {"ok": True, "status": "blocked", "attemptId": attempt_id, "task": task}
+
+
+def _handle_project_execution_cancel(project_id, task_id, body=None):
+    return execution_lifecycle_service.cancel(
+        project_id, task_id, body, repository=_PROJECT_REPOSITORY,
+        cancel_registry=_PROJECT_EXECUTION_CANCEL_REGISTRY,
+        transition_task=_project_execution_transition, now=_proj_now,
+        cancel_provider=_project_execution_cancel_provider,
+        notify_intervention=_send_project_execution_intervention_notification,
+    )
 
 
 def _handle_project_execution_review_start(project_id, task_id, body=None):
@@ -22111,6 +22008,15 @@ def _handle_project_execution_acceptance(project_id, task_id, body=None):
         )
         if not roles.get("ok"):
             return {**roles, "_status": 409}
+        automatic_snapshot = _project_execution_automatic_snapshot(project, workspace["path"])
+        if not automatic_snapshot.get("ok"):
+            task["blockedReason"] = automatic_snapshot.get("error")
+            task["lastError"] = automatic_snapshot.get("code")
+            _project_execution_transition(project, task, "blocked", "system", task["blockedReason"], review.get("attemptId"))
+            _send_project_execution_intervention_notification(project, task, task["blockedReason"], review.get("attemptId"), event="blocked", kind="error")
+            project.update({"workflowActive": False, "workflowPhase": "blocked", "activeTaskId": None, "activeAgent": None, "updatedAt": _proj_now()})
+            _save_projects(data)
+            return {**automatic_snapshot, "_status": 409}
         task["reworkCount"] = int(task.get("reworkCount") or 0) + 1
         task["blockedReason"] = None
         rejected_source = "skipped review result" if review.get("status") == "skipped" else "reviewer pass"
@@ -22127,7 +22033,7 @@ def _handle_project_execution_acceptance(project_id, task_id, body=None):
             "reviewer": roles.get("reviewer"),
             "skipReview": bool(roles.get("skipReview")),
             "skipReviewReason": roles.get("skipReviewReason"),
-            "baseline": _project_execution_git_snapshot(workspace["path"]),
+            "baseline": automatic_snapshot["snapshot"],
             "startMode": "single",
             "projectFlow": False,
             "requiresUserAcceptance": _project_execution_requires_user_acceptance(task),

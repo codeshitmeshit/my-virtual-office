@@ -1,10 +1,13 @@
 import copy
+import hashlib
 import json
 import os
 import re
 import shutil
 import threading
+import time
 import uuid
+import weakref
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -133,18 +136,128 @@ def _atomic_write(path: str, content: str):
 
 
 class MarkdownProjectStore:
-    def __init__(self, status_dir: str):
+    def __init__(
+        self,
+        status_dir: str,
+        *,
+        watch_external_changes: bool = False,
+        watch_interval: float = 0.5,
+        full_revision_interval: float = 5.0,
+    ):
         self.status_dir = status_dir
         self.projects_dir = os.path.join(status_dir, PROJECTS_DIRNAME)
         self.legacy_json = os.path.join(status_dir, LEGACY_PROJECTS_FILENAME)
         self.lock = threading.Lock()
+        self._revision_lock = threading.Lock()
+        self._revision_generation = 0
+        self._revision_signature = ""
+        self._revision_quick_signature = ""
+        self._last_full_revision_poll = 0.0
+        self._watch_interval = max(0.1, float(watch_interval))
+        self._full_revision_interval = max(self._watch_interval, float(full_revision_interval))
         os.makedirs(self.projects_dir, exist_ok=True)
+        if watch_external_changes:
+            self.poll_external_revision()
+            self._revision_quick_signature = self._quick_revision_signature()
+            threading.Thread(
+                target=self._watch_revision_loop,
+                args=(weakref.ref(self), self._watch_interval),
+                daemon=True,
+                name="project-markdown-revision",
+            ).start()
 
     def now(self) -> str:
         return _now_iso()
 
     def new_id(self) -> str:
         return _new_id()
+
+    def revision(self) -> int:
+        """Return the O(1) generation maintained by writes and the file watcher."""
+        with self._revision_lock:
+            return self._revision_generation
+
+    def poll_external_revision(self) -> dict[str, Any]:
+        """Scan Markdown metadata once; the background watcher calls this off-path."""
+        digest = hashlib.blake2b(digest_size=16)
+        files_scanned = 0
+        for root, dirs, files in os.walk(self.projects_dir):
+            dirs.sort()
+            files.sort()
+            for name in files:
+                path = os.path.join(root, name)
+                try:
+                    stat = os.stat(path, follow_symlinks=False)
+                except OSError:
+                    continue
+                files_scanned += 1
+                relative = os.path.relpath(path, self.projects_dir)
+                digest.update(relative.encode("utf-8", errors="surrogateescape"))
+                digest.update(f":{stat.st_ino}:{stat.st_size}:{stat.st_mtime_ns}".encode())
+        if os.path.isfile(self.legacy_json):
+            try:
+                stat = os.stat(self.legacy_json, follow_symlinks=False)
+                digest.update(f"legacy:{stat.st_ino}:{stat.st_size}:{stat.st_mtime_ns}".encode())
+                files_scanned += 1
+            except OSError:
+                pass
+        signature = digest.hexdigest()
+        with self._revision_lock:
+            changed = bool(self._revision_signature and signature != self._revision_signature)
+            if changed:
+                self._revision_generation += 1
+            self._revision_signature = signature
+            self._last_full_revision_poll = time.monotonic()
+            generation = self._revision_generation
+        return {"generation": generation, "changed": changed, "filesScanned": files_scanned}
+
+    def _quick_revision_signature(self) -> str:
+        """Fingerprint project/task directories without stat-ing every task file."""
+        digest = hashlib.blake2b(digest_size=12)
+        try:
+            with os.scandir(self.projects_dir) as scan:
+                entries = sorted(scan, key=lambda item: item.name)
+        except OSError:
+            return ""
+        for entry in entries:
+            if not entry.is_dir(follow_symlinks=False):
+                continue
+            try:
+                stat = entry.stat(follow_symlinks=False)
+                digest.update(f"{entry.name}:{stat.st_mtime_ns}".encode())
+                tasks_dir = os.path.join(entry.path, "tasks")
+                task_stat = os.stat(tasks_dir, follow_symlinks=False)
+                digest.update(f":{task_stat.st_mtime_ns}".encode())
+            except OSError:
+                continue
+        return digest.hexdigest()
+
+    def _watcher_poll(self) -> None:
+        quick = self._quick_revision_signature()
+        with self._revision_lock:
+            quick_changed = bool(self._revision_quick_signature and quick != self._revision_quick_signature)
+            self._revision_quick_signature = quick
+            full_due = time.monotonic() - self._last_full_revision_poll >= self._full_revision_interval
+        if quick_changed or full_due:
+            self.poll_external_revision()
+
+    @staticmethod
+    def _watch_revision_loop(store_ref, interval):
+        while True:
+            time.sleep(interval)
+            store = store_ref()
+            if store is None:
+                return
+            try:
+                store._watcher_poll()
+            except Exception:
+                pass
+            finally:
+                del store
+
+    def _mark_written(self) -> None:
+        with self._revision_lock:
+            self._revision_generation += 1
 
     def load_all(self) -> Dict[str, Any]:
         with self.lock:
@@ -174,6 +287,7 @@ class MarkdownProjectStore:
     def save_all(self, data: Dict[str, Any]):
         with self.lock:
             self._rewrite_from_dict(data)
+            self._mark_written()
 
     def get_project(self, project_id: str) -> Optional[Dict[str, Any]]:
         data = self.load_all()
@@ -213,6 +327,8 @@ class MarkdownProjectStore:
             if len(legacy["projects"]) != before_projects or len(legacy["templates"]) != before_templates:
                 _atomic_write(self.legacy_json, json.dumps(legacy, ensure_ascii=False, indent=2) + "\n")
                 deleted = True
+            if deleted:
+                self._mark_written()
 
             task_dir = os.path.join(self.status_dir, "project-tasks", project_id)
             if os.path.isdir(task_dir):

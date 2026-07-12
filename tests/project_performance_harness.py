@@ -30,6 +30,7 @@ os.environ.setdefault("VO_CLAUDE_CODE_ENABLED", "0")
 os.environ.setdefault("VO_STATUS_DIR", tempfile.mkdtemp(prefix="vo-perf-import-"))
 
 import server
+from services.project_repository import ProjectRepository
 
 
 SCALES = {
@@ -42,7 +43,7 @@ SCALES = {
 class MemoryProjects:
     def __init__(self, data):
         self.data = copy.deepcopy(data)
-        self.counts = {"load": 0, "save": 0}
+        self.counts = {"load": 0, "save": 0, "revision_check": 0}
 
     def load(self):
         self.counts["load"] += 1
@@ -51,6 +52,10 @@ class MemoryProjects:
     def save(self, value):
         self.counts["save"] += 1
         self.data = copy.deepcopy(value)
+
+    def revision(self):
+        self.counts["revision_check"] += 1
+        return self.counts["save"]
 
 
 class NoopThread:
@@ -148,6 +153,11 @@ def _common(scale):
     return memory, external, {
         "_load_projects": memory.load,
         "_save_projects": memory.save,
+        "_PROJECT_REPOSITORY": ProjectRepository(
+            load_projects=memory.load,
+            save_projects=memory.save,
+            cache_namespace=memory.revision,
+        ),
         "get_roster": _roles,
         "_project_execution_validate_workspace": lambda path: {"ok": True, "path": path, "kind": "directory"},
         "_project_execution_git_snapshot": snapshot,

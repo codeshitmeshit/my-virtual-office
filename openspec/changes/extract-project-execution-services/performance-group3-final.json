@@ -1,0 +1,253 @@
+{
+  "fixtures": {
+    "large": {
+      "projects": 200,
+      "tasks_per_project": 100
+    },
+    "medium": {
+      "projects": 50,
+      "tasks_per_project": 50
+    },
+    "small": {
+      "projects": 5,
+      "tasks_per_project": 10
+    }
+  },
+  "measured_head": "c4408c9c926d5e814fed3555dbb65669b7a3bd88",
+  "revision_label": "c4408c9c926d5e814fed3555dbb65669b7a3bd88+group3-final-post-cr",
+  "runs": 20,
+  "scales": {
+    "large": {
+      "acceptance": {
+        "counts": {
+          "gateway": 0,
+          "git_scan": 0,
+          "load": 2,
+          "notification": 0,
+          "provider": 0,
+          "revision_check": 0,
+          "save": 1
+        },
+        "counts_stable": true,
+        "median_ms": 602.646,
+        "p95_ms": 640.222,
+        "peak_kib": 67813.7
+      },
+      "cron_dispatch": {
+        "counts": {
+          "gateway": 0,
+          "git_scan": 0,
+          "load": 2,
+          "notification": 0,
+          "provider": 0,
+          "revision_check": 0,
+          "save": 1
+        },
+        "counts_stable": true,
+        "median_ms": 599.399,
+        "p95_ms": 632.802,
+        "peak_kib": 86076.5
+      },
+      "provider_completion": {
+        "counts": {
+          "gateway": 0,
+          "git_scan": 1,
+          "load": 2,
+          "notification": 0,
+          "provider": 1,
+          "revision_check": 3,
+          "save": 1
+        },
+        "counts_stable": true,
+        "median_ms": 613.504,
+        "p95_ms": 650.239,
+        "peak_kib": 86459.9
+      },
+      "review_start": {
+        "counts": {
+          "gateway": 0,
+          "git_scan": 0,
+          "load": 1,
+          "notification": 0,
+          "provider": 0,
+          "revision_check": 0,
+          "save": 1
+        },
+        "counts_stable": true,
+        "median_ms": 431.241,
+        "p95_ms": 465.434,
+        "peak_kib": 67811.9
+      },
+      "start_prepare": {
+        "counts": {
+          "gateway": 0,
+          "git_scan": 1,
+          "load": 1,
+          "notification": 0,
+          "provider": 0,
+          "revision_check": 4,
+          "save": 1
+        },
+        "counts_stable": true,
+        "median_ms": 448.952,
+        "p95_ms": 472.543,
+        "peak_kib": 68184.6
+      }
+    },
+    "medium": {
+      "acceptance": {
+        "counts": {
+          "gateway": 0,
+          "git_scan": 0,
+          "load": 2,
+          "notification": 0,
+          "provider": 0,
+          "revision_check": 0,
+          "save": 1
+        },
+        "counts_stable": true,
+        "median_ms": 68.154,
+        "p95_ms": 71.7,
+        "peak_kib": 8609.5
+      },
+      "cron_dispatch": {
+        "counts": {
+          "gateway": 0,
+          "git_scan": 0,
+          "load": 2,
+          "notification": 0,
+          "provider": 0,
+          "revision_check": 0,
+          "save": 1
+        },
+        "counts_stable": true,
+        "median_ms": 57.502,
+        "p95_ms": 59.714,
+        "peak_kib": 10940.7
+      },
+      "provider_completion": {
+        "counts": {
+          "gateway": 0,
+          "git_scan": 1,
+          "load": 2,
+          "notification": 0,
+          "provider": 1,
+          "revision_check": 3,
+          "save": 1
+        },
+        "counts_stable": true,
+        "median_ms": 61.299,
+        "p95_ms": 63.616,
+        "peak_kib": 11145.2
+      },
+      "review_start": {
+        "counts": {
+          "gateway": 0,
+          "git_scan": 0,
+          "load": 1,
+          "notification": 0,
+          "provider": 0,
+          "revision_check": 0,
+          "save": 1
+        },
+        "counts_stable": true,
+        "median_ms": 43.363,
+        "p95_ms": 44.785,
+        "peak_kib": 8604.6
+      },
+      "start_prepare": {
+        "counts": {
+          "gateway": 0,
+          "git_scan": 1,
+          "load": 1,
+          "notification": 0,
+          "provider": 0,
+          "revision_check": 4,
+          "save": 1
+        },
+        "counts_stable": true,
+        "median_ms": 44.679,
+        "p95_ms": 46.531,
+        "peak_kib": 8797.8
+      }
+    },
+    "small": {
+      "acceptance": {
+        "counts": {
+          "gateway": 0,
+          "git_scan": 0,
+          "load": 2,
+          "notification": 0,
+          "provider": 0,
+          "revision_check": 0,
+          "save": 1
+        },
+        "counts_stable": true,
+        "median_ms": 8.9,
+        "p95_ms": 10.273,
+        "peak_kib": 611.0
+      },
+      "cron_dispatch": {
+        "counts": {
+          "gateway": 0,
+          "git_scan": 0,
+          "load": 2,
+          "notification": 0,
+          "provider": 0,
+          "revision_check": 0,
+          "save": 1
+        },
+        "counts_stable": true,
+        "median_ms": 1.199,
+        "p95_ms": 1.284,
+        "peak_kib": 265.8
+      },
+      "provider_completion": {
+        "counts": {
+          "gateway": 0,
+          "git_scan": 1,
+          "load": 2,
+          "notification": 0,
+          "provider": 1,
+          "revision_check": 3,
+          "save": 1
+        },
+        "counts_stable": true,
+        "median_ms": 3.068,
+        "p95_ms": 3.553,
+        "peak_kib": 324.9
+      },
+      "review_start": {
+        "counts": {
+          "gateway": 0,
+          "git_scan": 0,
+          "load": 1,
+          "notification": 0,
+          "provider": 0,
+          "revision_check": 0,
+          "save": 1
+        },
+        "counts_stable": true,
+        "median_ms": 0.905,
+        "p95_ms": 0.995,
+        "peak_kib": 210.4
+      },
+      "start_prepare": {
+        "counts": {
+          "gateway": 0,
+          "git_scan": 1,
+          "load": 1,
+          "notification": 0,
+          "provider": 0,
+          "revision_check": 4,
+          "save": 1
+        },
+        "counts_stable": true,
+        "median_ms": 1.176,
+        "p95_ms": 1.331,
+        "peak_kib": 260.8
+      }
+    }
+  },
+  "warmups": 3
+}
