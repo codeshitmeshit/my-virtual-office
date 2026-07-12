@@ -39,10 +39,10 @@
 
 ## 7. Boundary, security, and performance verification
 
-- [ ] 7.1 Add static dependency checks proving new Service modules do not import `server.py`, `OfficeHandler`, or HTTP transport objects, and proving all project-store writes use the shared coordinator.
-- [ ] 7.2 Add trusted-entry and sensitive-data regression coverage for HTTP, Feishu, Meeting, Cron, workspace paths, Provider metadata, Review feedback, Artifact content, canary secrets, absolute paths, and sanitized logger/notifier DTOs.
-- [ ] 7.3 Produce `performance-result.md` from the fixed harness; verify no measured operation increases store/external call counts and at least one evidenced redundant store read/write path strictly improves before claiming the backend performance goal.
-- [ ] 7.4 Run the complete Python, JavaScript, static, persistence, Provider, SSE/WebSocket, notification, workflow, Artifact, Cron, and OpenSpec strict regression set; record commands, results, failures, and any remaining manual-only coverage.
+- [x] 7.1 Add static dependency checks proving new Service modules do not import `server.py`, `OfficeHandler`, or HTTP transport objects, and proving all project-store writes use the shared coordinator.
+- [x] 7.2 Add trusted-entry and sensitive-data regression coverage for HTTP, Feishu, Meeting, Cron, workspace paths, Provider metadata, Review feedback, Artifact content, canary secrets, absolute paths, and sanitized logger/notifier DTOs.
+- [x] 7.3 Produce `performance-result.md` from the fixed harness; verify no measured operation increases store/external call counts and at least one evidenced redundant store read/write path strictly improves before claiming the backend performance goal.
+- [x] 7.4 Run the complete Python, JavaScript, static, persistence, Provider, SSE/WebSocket, notification, workflow, Artifact, Cron, and OpenSpec strict regression set; record commands, results, failures, and any remaining manual-only coverage.
 
 ## 8. Documentation, acceptance, and release readiness
 

@@ -1,0 +1,99 @@
+{
+  "fixtures": {
+    "large": {
+      "projects": 200,
+      "tasks_per_project": 100
+    },
+    "medium": {
+      "projects": 50,
+      "tasks_per_project": 50
+    },
+    "small": {
+      "projects": 5,
+      "tasks_per_project": 10
+    }
+  },
+  "measured_head": "a42882e24ad4e8a13d39420b33cf3230cb19b816",
+  "revision_label": "section7-small-confirmation-a",
+  "runs": 20,
+  "scales": {
+    "small": {
+      "acceptance": {
+        "counts": {
+          "gateway": 0,
+          "git_scan": 0,
+          "load": 2,
+          "notification": 0,
+          "provider": 0,
+          "revision_check": 4,
+          "save": 1
+        },
+        "counts_stable": true,
+        "median_ms": 8.26,
+        "p95_ms": 11.886,
+        "peak_kib": 647.8
+      },
+      "cron_dispatch": {
+        "counts": {
+          "gateway": 0,
+          "git_scan": 0,
+          "load": 1,
+          "notification": 0,
+          "provider": 0,
+          "revision_check": 4,
+          "save": 1
+        },
+        "counts_stable": true,
+        "median_ms": 1.489,
+        "p95_ms": 2.144,
+        "peak_kib": 269.1
+      },
+      "provider_completion": {
+        "counts": {
+          "gateway": 0,
+          "git_scan": 1,
+          "load": 2,
+          "notification": 0,
+          "provider": 1,
+          "revision_check": 3,
+          "save": 1
+        },
+        "counts_stable": true,
+        "median_ms": 2.98,
+        "p95_ms": 3.89,
+        "peak_kib": 327.2
+      },
+      "review_start": {
+        "counts": {
+          "gateway": 0,
+          "git_scan": 0,
+          "load": 1,
+          "notification": 0,
+          "provider": 0,
+          "revision_check": 3,
+          "save": 1
+        },
+        "counts_stable": true,
+        "median_ms": 1.51,
+        "p95_ms": 1.941,
+        "peak_kib": 259.7
+      },
+      "start_prepare": {
+        "counts": {
+          "gateway": 0,
+          "git_scan": 1,
+          "load": 1,
+          "notification": 0,
+          "provider": 0,
+          "revision_check": 4,
+          "save": 1
+        },
+        "counts_stable": true,
+        "median_ms": 1.212,
+        "p95_ms": 1.754,
+        "peak_kib": 260.8
+      }
+    }
+  },
+  "warmups": 3
+}

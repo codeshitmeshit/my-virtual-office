@@ -1996,6 +1996,15 @@ def test_skipped_review_waits_for_acceptance_when_required():
     with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as workspace:
         old = with_store(status_dir)
         old_executor = server._project_execution_call_executor
+        old_launcher = server._project_execution_launch
+        launched = []
+
+        def tracked_launch(callback):
+            thread = threading.Thread(target=callback, daemon=True)
+            launched.append(thread)
+            thread.start()
+
+        server._project_execution_launch = tracked_launch
         server._project_execution_call_executor = lambda executor, prompt, workspace, attempt_id, project_id=None, task_id=None, timeout=600: {
             "ok": True, "status": "completed", "reply": "implemented without reviewer", "modifiedFiles": [],
             "checklistUpdates": [{"id": "done", "text": "Complete implementation", "done": True}],
@@ -2024,6 +2033,10 @@ def test_skipped_review_waits_for_acceptance_when_required():
             assert accepted["task"]["columnId"] == done_col
             assert accepted["task"]["completedAt"]
         finally:
+            for thread in launched:
+                thread.join(timeout=5)
+                assert not thread.is_alive()
+            server._project_execution_launch = old_launcher
             server._project_execution_call_executor = old_executor
             restore_store(old)
 

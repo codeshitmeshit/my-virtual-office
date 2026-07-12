@@ -17174,7 +17174,24 @@ def _project_execution_enabled(project):
 
 
 def _project_execution_redact(value):
-    text = _PROJECT_EXECUTION_SECRET_RE.sub(lambda m: f"{m.group(1)}=[REDACTED]", str(value or ""))
+    text = str(value or "")
+    text = re.sub(
+        r"(?i)\bauthorization\s*[:=]\s*[^,;\r\n]+",
+        "Authorization=[REDACTED]", text,
+    )
+    text = re.sub(r"(?i)\b(?:set-cookie|cookie)\s*[:=]\s*[^\r\n]+", "Cookie=[REDACTED]", text)
+    text = _PROJECT_EXECUTION_SECRET_RE.sub(lambda m: f"{m.group(1)}=[REDACTED]", text)
+    text = re.sub(
+        r'''(?ix)(["']?(?:authorization|api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|private[_-]?key|password|secret|session)["']?\s*:\s*)["'][^"']*["']''',
+        lambda match: f'{match.group(1)}"[REDACTED]"', text,
+    )
+    text = re.sub(
+        r"(?i)\b(client[_-]?secret|private[_-]?key|session(?:[_-]?(?:id|token))?)\s*[:=]\s*[^\s,;]+",
+        lambda match: f"{match.group(1)}=[REDACTED]", text,
+    )
+    text = re.sub(r"(?<![A-Za-z0-9:])/(?!/)[^,;'\"<>\r\n]+", "[ABSOLUTE_PATH]", text)
+    text = re.sub(r"(?i)\b[A-Z]:\\[^,;'\"<>\r\n]+", "[ABSOLUTE_PATH]", text)
+    text = re.sub(r"\\\\[^\\\s]+\\[^,;'\"<>\r\n]+", "[ABSOLUTE_PATH]", text)
     return text if len(text) <= _PROJECT_EXECUTION_MAX_TEXT else text[:_PROJECT_EXECUTION_MAX_TEXT] + "\n...[truncated]"
 
 

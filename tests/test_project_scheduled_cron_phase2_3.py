@@ -484,7 +484,7 @@ def test_schedule_sanitizer_handles_bearer_and_json_secrets():
     })
     assert "sk-secret" not in safe["error"]
     assert "json-secret" not in safe["error"]
-    assert safe["error"].count("[REDACTED]") >= 2
+    assert "[REDACTED]" in safe["error"]
 
 
 def test_cron_list_drops_untrusted_gateway_job_fields():
