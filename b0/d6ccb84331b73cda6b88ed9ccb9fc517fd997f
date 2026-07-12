@@ -1,0 +1,23 @@
+app/server.py
+  s_5852bad622de94::t_bc4b78e8e7d25a 47,1019-1022,10819-10854,10856,10861,10877,10882,25465-25473,27810-27814,27887-27891,28007-28011
+tests/test_meeting_preparing_timeout.py
+  s_5852bad622de94::t_525132eff59d70 123-126
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "b0d6ccb84331b73cda6b88ed9ccb9fc517fd997f",
+  "prompts": {},
+  "sessions": {
+    "s_5852bad622de94": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f5163-cd74-7df3-a25d-7fd6dd323b5d",
+        "model": "unknown"
+      },
+      "human_author": "codeshitmeshit <codeshitmeshit@126.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
