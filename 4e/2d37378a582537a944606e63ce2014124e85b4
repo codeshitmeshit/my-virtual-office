@@ -1,0 +1,29 @@
+openspec/changes/extract-project-execution-services/design.md
+  s_5852bad622de94::t_25d9726889d1b1 1-388
+openspec/changes/extract-project-execution-services/proposal.md
+  s_5852bad622de94::t_36bfad8d412e4d 3,10-13,31-32
+openspec/changes/extract-project-execution-services/specs/project-execution-service-boundaries/spec.md
+  s_5852bad622de94::t_376e469f88de5b 1-171
+openspec/changes/extract-project-execution-services/writer-inventory.md
+  s_5852bad622de94::t_d784ab7d44af82 1-100
+openspec/specs/http-service-boundary/spec.md
+  s_5852bad622de94::t_71c058ad98be36 1-106
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "4e2d37378a582537a944606e63ce2014124e85b4",
+  "prompts": {},
+  "sessions": {
+    "s_5852bad622de94": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f5163-cd74-7df3-a25d-7fd6dd323b5d",
+        "model": "unknown"
+      },
+      "human_author": "codeshitmeshit <codeshitmeshit@126.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
