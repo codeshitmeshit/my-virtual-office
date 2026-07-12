@@ -4,9 +4,9 @@
 
 ## 2. Unified schema, repository, and migration
 
-- [ ] 2.1 Implement the versioned `meeting-domain.json` schema, `MeetingDomainRepository`, coherent deep-copy snapshot, single atomic update boundary, bounded metadata invalidation, validation/repair rules, namespaced idempotency, and focused repository/concurrency tests proving all Meeting-domain persistence uses the coordinator.
-- [ ] 2.2 Implement `scripts/migrate_meeting_store.py` with default dry-run, explicit apply, no-follow source reads, source re-digest, byte backups, deterministic merge, relationship/occupancy/conflict validation, atomic destination validation, JSON report, source-digest idempotency, and failure/rollback tests covering malformed, changing, symlinked, conflicting, disk/replace/fsync, repeated, and already-migrated cases.
-- [ ] 2.3 Add the runtime authority gate for valid unified, empty-new, migration-required, invalid, and unknown-version states; migrate legacy Meeting/request store helpers to the unified repository, forbid parallel runtime authority, and run API/storage/old-record/startup compatibility regression.
+- [x] 2.1 Implement the versioned `meeting-domain.json` schema, `MeetingDomainRepository`, coherent deep-copy snapshot, single atomic update boundary, bounded metadata invalidation, validation/repair rules, namespaced idempotency, and focused repository/concurrency tests proving all Meeting-domain persistence uses the coordinator.
+- [x] 2.2 Implement `scripts/migrate_meeting_store.py` with default dry-run, explicit apply, no-follow source reads, source re-digest, byte backups, deterministic merge, relationship/occupancy/conflict validation, atomic destination validation, JSON report, source-digest idempotency, and failure/rollback tests covering malformed, changing, symlinked, conflicting, disk/replace/fsync, repeated, and already-migrated cases.
+- [x] 2.3 Add the runtime authority gate for valid unified, empty-new, migration-required, invalid, and unknown-version states; migrate legacy Meeting/request store helpers to the unified repository, forbid parallel runtime authority, and run API/storage/old-record/startup compatibility regression.
 
 ## 3. Meeting lifecycle and occupancy service
 
