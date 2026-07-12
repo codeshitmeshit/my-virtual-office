@@ -120,6 +120,10 @@ def test_preparing_timeout_does_not_release_other_stages_or_other_occupancy():
             assert transitioned["ok"] is True
             age_meeting(meeting["id"], 60)
             store = server._load_exec_meeting_store()
+            store["meetings"]["other-meeting"] = {
+                "id": "other-meeting", "stage": "active_discussion", "participants": ["other-agent"],
+            }
+            store["events"]["other-meeting"] = []
             store["occupancy"]["other-agent"] = "other-meeting"
             server._save_exec_meeting_store(store)
 

@@ -44,6 +44,7 @@ from services import execution_lifecycle as execution_lifecycle_service
 from services import review_acceptance as review_acceptance_service
 from services import artifacts as artifact_service
 from services import project_schedule as project_schedule_service
+from services import meeting_repository as meeting_repository_service
 from services.project_repository import ProjectConflictError, ProjectNotFoundError, ProjectRepository
 from zoneinfo import ZoneInfo
 from provider_execution import (
@@ -1015,6 +1016,10 @@ WS_PORT = VO_CONFIG["office"]["wsPort"]
 WORKSPACE_BASE = VO_CONFIG["openclaw"]["homePath"]
 STATUS_DIR = VO_CONFIG["presence"]["statusDir"]
 os.makedirs(STATUS_DIR, exist_ok=True)
+_MEETING_STORE_ACTIVE_LOCK_FD = meeting_repository_service.acquire_active_lock(STATUS_DIR)
+_MEETING_STORE_BOOT_REPOSITORY = meeting_repository_service.MeetingDomainRepository(STATUS_DIR)
+if _MEETING_STORE_BOOT_REPOSITORY.authority_state() == "empty":
+    _MEETING_STORE_BOOT_REPOSITORY.update(lambda data: None)
 STATUS_FILE = os.path.join(STATUS_DIR, "virtual-office-status.json")
 PROJECT_CRON_BINDINGS_FILE = os.path.join(STATUS_DIR, "project-cron-bindings.json")
 
@@ -10811,42 +10816,49 @@ def _exec_meeting_empty_store():
     return {"meetings": {}, "events": {}, "occupancy": {}, "idempotency": {}, "updatedAt": ""}
 
 
+_MEETING_DOMAIN_REPOSITORIES = {}
+_MEETING_DOMAIN_REPOSITORIES_LOCK = threading.Lock()
+
+
+def _meeting_domain_repository():
+    key = os.path.realpath(STATUS_DIR)
+    with _MEETING_DOMAIN_REPOSITORIES_LOCK:
+        repository = _MEETING_DOMAIN_REPOSITORIES.get(key)
+        if repository is None:
+            repository = meeting_repository_service.MeetingDomainRepository(key)
+            _MEETING_DOMAIN_REPOSITORIES[key] = repository
+        return repository
+
+
+def _meeting_domain_file():
+    return os.path.join(STATUS_DIR, meeting_repository_service.UNIFIED_FILENAME)
+
+
+def _meeting_domain_authority_status():
+    state = _meeting_domain_repository().authority_state()
+    if state == "migration_required":
+        return {"ok": False, "code": "meeting_store_migration_required", "_status": 409}
+    if state == "invalid":
+        return {"ok": False, "code": "meeting_store_invalid", "_status": 500}
+    return {"ok": True, "state": state, "schemaVersion": meeting_repository_service.SCHEMA_VERSION}
+
+
+def _is_meeting_domain_path(path):
+    parsed = urllib.parse.urlparse(str(path or "")).path
+    return (
+        parsed.startswith("/api/meetings")
+        or parsed.endswith("/meeting-requests")
+        or "/meeting-requests/" in parsed
+    )
+
+
 def _load_exec_meeting_store():
-    try:
-        with open(_exec_meetings_file(), "r", encoding="utf-8") as f:
-            data = json.load(f)
-        if not isinstance(data, dict):
-            return _exec_meeting_empty_store()
-    except (FileNotFoundError, json.JSONDecodeError, OSError):
-        return _exec_meeting_empty_store()
-    data.setdefault("meetings", {})
-    data.setdefault("events", {})
-    data.setdefault("occupancy", {})
-    data.setdefault("idempotency", {})
-    data.setdefault("updatedAt", "")
-    if not isinstance(data["meetings"], dict):
-        data["meetings"] = {}
-    if not isinstance(data["events"], dict):
-        data["events"] = {}
-    if not isinstance(data["occupancy"], dict):
-        data["occupancy"] = {}
-    if not isinstance(data["idempotency"], dict):
-        data["idempotency"] = {}
-    return data
+    return _meeting_domain_repository().executable_view()
 
 
 def _save_exec_meeting_store(data):
     data["updatedAt"] = _exec_meeting_now()
-    path = _exec_meetings_file()
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    tmp = f"{path}.tmp-{os.getpid()}-{threading.get_ident()}"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, sort_keys=True)
-    os.replace(tmp, path)
-    try:
-        os.chmod(path, 0o666)
-    except Exception:
-        pass
+    _meeting_domain_repository().replace_executable(data)
 
 
 _MEETING_REQUEST_LOCK = threading.RLock()
@@ -10862,35 +10874,12 @@ def _meeting_request_empty_store():
 
 
 def _load_meeting_request_store():
-    try:
-        with open(_meeting_requests_file(), "r", encoding="utf-8") as f:
-            data = json.load(f)
-        if not isinstance(data, dict):
-            return _meeting_request_empty_store()
-    except (FileNotFoundError, json.JSONDecodeError, OSError):
-        return _meeting_request_empty_store()
-    data.setdefault("requests", {})
-    data.setdefault("idempotency", {})
-    data.setdefault("updatedAt", "")
-    if not isinstance(data["requests"], dict):
-        data["requests"] = {}
-    if not isinstance(data["idempotency"], dict):
-        data["idempotency"] = {}
-    return data
+    return _meeting_domain_repository().request_view()
 
 
 def _save_meeting_request_store(data):
     data["updatedAt"] = _exec_meeting_now()
-    path = _meeting_requests_file()
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    tmp = f"{path}.tmp-{os.getpid()}-{threading.get_ident()}"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, sort_keys=True)
-    os.replace(tmp, path)
-    try:
-        os.chmod(path, 0o666)
-    except Exception:
-        pass
+    _meeting_domain_repository().replace_requests(data)
 
 
 def _meeting_request_clean_type(raw):
@@ -25473,6 +25462,15 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
         parsed_url = urllib.parse.urlparse(self.path)
         request_path = parsed_url.path
         query_params = urllib.parse.parse_qs(parsed_url.query)
+        if request_path == "/api/meetings/store-status":
+            status = _meeting_domain_authority_status()
+            self._send_json(status, status=status.get("_status", 200))
+            return
+        if _is_meeting_domain_path(request_path):
+            authority = _meeting_domain_authority_status()
+            if not authority.get("ok"):
+                self._send_json({"error": "Meeting store is not ready", **authority}, status=authority["_status"])
+                return
         if request_path.startswith("/skills/"):
             self._serve_vo_skill_file(request_path)
             return
@@ -27809,6 +27807,11 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
         return self._send_watcher_request(request)
 
     def do_PUT(self):
+        if _is_meeting_domain_path(self.path):
+            authority = _meeting_domain_authority_status()
+            if not authority.get("ok"):
+                self._send_json({"error": "Meeting store is not ready", **authority}, status=authority["_status"])
+                return
         project_mutation = urllib.parse.urlparse(self.path).path.startswith("/api/projects/")
         if project_mutation:
             if self._reject_untrusted_management_request():
@@ -27881,6 +27884,11 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             self.end_headers()
 
     def do_DELETE(self):
+        if _is_meeting_domain_path(self.path):
+            authority = _meeting_domain_authority_status()
+            if not authority.get("ok"):
+                self._send_json({"error": "Meeting store is not ready", **authority}, status=authority["_status"])
+                return
         if urllib.parse.urlparse(self.path).path.startswith("/api/projects/") and self._reject_untrusted_management_request():
             return
         if self.path == "/api/agent/delete":
@@ -27996,6 +28004,11 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
     def do_POST(self):
         parsed_url = urllib.parse.urlparse(self.path)
         request_path = parsed_url.path
+        if _is_meeting_domain_path(request_path):
+            authority = _meeting_domain_authority_status()
+            if not authority.get("ok"):
+                self._send_json({"error": "Meeting store is not ready", **authority}, status=authority["_status"])
+                return
         agent_meeting_request = (
             request_path.startswith("/api/projects/")
             and "/tasks/" in request_path
