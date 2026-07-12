@@ -1,0 +1,31 @@
+app/server.py
+  s_5852bad622de94::t_1658772f2454c3 45,18583-18591,18595,18599,18603,18620-18622,18625-18630,18634-18642,18646-18647,18651-18652,18778-18780,25208-25226,26552-26553
+app/services/artifacts.py
+  s_5852bad622de94::t_0fd5029ebea717 1-462
+openspec/changes/extract-project-execution-services/tasks.md
+  s_5852bad622de94::t_791c119d11ffeb 30-32
+tests/test_archive_room_phase_1_3.py
+  s_5852bad622de94::t_41171e584e5547 157-158
+tests/test_artifact_service.py
+  s_5852bad622de94::t_860efdc0bb1a23 1-325
+tests/test_project_execution.py
+  s_5852bad622de94::t_4f745b0431ccf8 714-717
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "9f7ccb8e46cd9ab005656897ee8f71da8b1d4243",
+  "prompts": {},
+  "sessions": {
+    "s_5852bad622de94": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f5163-cd74-7df3-a25d-7fd6dd323b5d",
+        "model": "unknown"
+      },
+      "human_author": "codeshitmeshit <codeshitmeshit@126.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
