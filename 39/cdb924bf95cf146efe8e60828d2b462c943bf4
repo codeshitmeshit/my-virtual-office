@@ -1,0 +1,35 @@
+app/services/artifacts.py
+  s_5852bad622de94::t_f455340f2fb625 197-203
+docs/SERVICE_BOUNDARIES.md
+  s_5852bad622de94::t_014a917fefe61f 81
+openspec/changes/extract-project-execution-services/full-regression.md
+  s_5852bad622de94::t_e09e9871c1a8ab 13,15
+openspec/changes/extract-project-execution-services/manual-acceptance.md
+  s_5852bad622de94::t_2e1bdef74f9921 28
+openspec/changes/extract-project-execution-services/rollout-rehearsal.md
+  s_5852bad622de94::t_d8a5f7d76255a0 9
+openspec/changes/extract-project-execution-services/rollout-runtime.patch
+  s_5852bad622de94::t_399b9bd0a66d4b 269-285
+openspec/changes/extract-project-execution-services/scenario-evidence.md
+  s_5852bad622de94::t_22658bcdf3e6cc 21,28
+tests/test_artifact_service.py
+  s_5852bad622de94::t_0b3906e47c30f1 29-48
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "39cdb924bf95cf146efe8e60828d2b462c943bf4",
+  "prompts": {},
+  "sessions": {
+    "s_5852bad622de94": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f5163-cd74-7df3-a25d-7fd6dd323b5d",
+        "model": "unknown"
+      },
+      "human_author": "codeshitmeshit <codeshitmeshit@126.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
