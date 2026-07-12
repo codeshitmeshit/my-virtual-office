@@ -524,14 +524,16 @@ class MarkdownProjectStore:
         if not body:
             return ""
         lines = body.splitlines()
-        target = f"## {heading}"
+        target_level = None
         collecting = False
         buf: List[str] = []
         for line in lines:
-            if line.strip() == target:
+            match = re.match(r"^(#+)\s+(.*)$", line.strip())
+            if match and match.group(2) == heading:
+                target_level = len(match.group(1))
                 collecting = True
                 continue
-            if collecting and line.startswith("## "):
+            if collecting and match and (target_level == 1 or len(match.group(1)) <= (target_level or 1)):
                 break
             if collecting:
                 buf.append(line)

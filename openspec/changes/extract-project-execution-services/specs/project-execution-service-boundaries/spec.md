@@ -136,6 +136,21 @@ The change SHALL permit correction of a defect discovered in a migrated slice on
 - **THEN** the defect MAY be fixed in that slice
 - **AND** the change SHALL include a failing-before regression scenario and document the intentional behavior difference
 
+#### Scenario: Untrusted management mutation reaches the HTTP boundary
+- **WHEN** a POST, PUT, or DELETE request targets a browser management mutation endpoint without a valid management token
+- **THEN** the handler SHALL reject it before parsing or mutating project state
+- **AND** the trusted project client SHALL attach the management token through the existing management-fetch flow
+
+#### Scenario: Execution agent requests a meeting blocker
+- **WHEN** the execution prompt posts to the dedicated task meeting-request endpoint without a browser management token
+- **THEN** the existing agent bridge SHALL remain reachable
+- **AND** the handler SHALL validate project/task linkage and the request body through the meeting-request command
+
+#### Scenario: Managed-workspace deletion is requested
+- **WHEN** project deletion requests removal of a system-managed workspace
+- **THEN** deletion SHALL proceed only for a non-symlink descendant of the configured auto-workspace root
+- **AND** the root itself and every path outside it SHALL be preserved
+
 #### Scenario: Suspected issue lacks evidence or expected behavior
 - **WHEN** an observation cannot be reproduced or its correct product behavior is ambiguous
 - **THEN** it SHALL not be changed as an incidental bug fix

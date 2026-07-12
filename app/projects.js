@@ -225,6 +225,7 @@
     ];
 
     // ── API ────────────────────────────────────────────────────────
+    const projectMutationFetch = (input, init) => window.i18n.managementFetch(input, init);
     const api = {
         async listProjects(status) {
             const qs = status ? `?status=${status}` : '';
@@ -236,44 +237,44 @@
             return r.json();
         },
         async createProject(body) {
-            const r = await fetch('/api/projects', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+            const r = await projectMutationFetch('/api/projects', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
             return r.json();
         },
         async updateProject(id, body) {
-            const r = await fetch(`/api/projects/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+            const r = await projectMutationFetch(`/api/projects/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
             return r.json();
         },
         async deleteProject(id, opts = {}) {
             const qs = opts.deleteWorkspace ? '?deleteWorkspace=true' : '';
-            const r = await fetch(`/api/projects/${id}${qs}`, { method: 'DELETE' });
+            const r = await projectMutationFetch(`/api/projects/${id}${qs}`, { method: 'DELETE' });
             return r.json();
         },
         async resetProject(id, body) {
-            const r = await fetch(`/api/projects/${id}/reset`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
+            const r = await projectMutationFetch(`/api/projects/${id}/reset`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
             return r.json();
         },
         async createTask(projectId, body) {
-            const r = await fetch(`/api/projects/${projectId}/tasks`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+            const r = await projectMutationFetch(`/api/projects/${projectId}/tasks`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
             return r.json();
         },
         async updateTask(projectId, taskId, body) {
-            const r = await fetch(`/api/projects/${projectId}/tasks/${taskId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+            const r = await projectMutationFetch(`/api/projects/${projectId}/tasks/${taskId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
             return r.json();
         },
         async deleteTask(projectId, taskId) {
-            const r = await fetch(`/api/projects/${projectId}/tasks/${taskId}`, { method: 'DELETE' });
+            const r = await projectMutationFetch(`/api/projects/${projectId}/tasks/${taskId}`, { method: 'DELETE' });
             return r.json();
         },
         async addComment(projectId, taskId, body) {
-            const r = await fetch(`/api/projects/${projectId}/tasks/${taskId}/comments`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+            const r = await projectMutationFetch(`/api/projects/${projectId}/tasks/${taskId}/comments`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
             return r.json();
         },
         async reorderTasks(projectId, updates) {
-            const r = await fetch(`/api/projects/${projectId}/tasks/reorder`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ updates }) });
+            const r = await projectMutationFetch(`/api/projects/${projectId}/tasks/reorder`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ updates }) });
             return r.json();
         },
         async updateColumns(projectId, columns) {
-            const r = await fetch(`/api/projects/${projectId}/columns`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ columns }) });
+            const r = await projectMutationFetch(`/api/projects/${projectId}/columns`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ columns }) });
             return r.json();
         },
         async listTemplates() {
@@ -281,15 +282,15 @@
             return r.json();
         },
         async saveTemplate(body) {
-            const r = await fetch('/api/projects/templates', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+            const r = await projectMutationFetch('/api/projects/templates', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
             return r.json();
         },
         async deleteTemplate(id) {
-            const r = await fetch(`/api/projects/templates/${id}`, { method: 'DELETE' });
+            const r = await projectMutationFetch(`/api/projects/templates/${id}`, { method: 'DELETE' });
             return r.json();
         },
         async createFromTemplate(body) {
-            const r = await fetch('/api/projects/from-template', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+            const r = await projectMutationFetch('/api/projects/from-template', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
             return r.json();
         },
         async getReport(projectId) {
@@ -306,11 +307,11 @@
         },
         // Workflow API
         async workflowStart(projectId, autoMode) {
-            const r = await fetch(`/api/projects/${projectId}/workflow/start`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ autoMode }) });
+            const r = await projectMutationFetch(`/api/projects/${projectId}/workflow/start`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ autoMode }) });
             return r.json();
         },
         async workflowStop(projectId) {
-            const r = await fetch(`/api/projects/${projectId}/workflow/stop`, { method: 'POST' });
+            const r = await projectMutationFetch(`/api/projects/${projectId}/workflow/stop`, { method: 'POST' });
             return r.json();
         },
         async workflowStatus(projectId) {
@@ -318,11 +319,11 @@
             return r.json();
         },
         async setAutoMode(projectId, autoMode) {
-            const r = await fetch(`/api/projects/${projectId}/workflow/auto-mode`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ autoMode }) });
+            const r = await projectMutationFetch(`/api/projects/${projectId}/workflow/auto-mode`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ autoMode }) });
             return r.json();
         },
         async updateReviewCheck(projectId, taskId, reviewCheck) {
-            const r = await fetch(`/api/projects/${projectId}/tasks/${taskId}/review-check`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reviewCheck }) });
+            const r = await projectMutationFetch(`/api/projects/${projectId}/tasks/${taskId}/review-check`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reviewCheck }) });
             return r.json();
         },
         async workflowChat(projectId) {
@@ -330,31 +331,31 @@
             return r.json();
         },
         async projectExecutionValidateWorkspace(projectId, workspacePath) {
-            const r = await fetch(`/api/projects/${projectId}/project-execution/workspace/validate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ workspacePath }) });
+            const r = await projectMutationFetch(`/api/projects/${projectId}/project-execution/workspace/validate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ workspacePath }) });
             return r.json();
         },
         async projectExecutionStart(projectId, taskId, dirtyFingerprint, opts = {}) {
-            const r = await fetch(`/api/projects/${projectId}/tasks/${taskId}/project-execution/start`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dirtyFingerprint: dirtyFingerprint || '', skipReviewConfirmed: !!opts.skipReviewConfirmed, resetExecutionContext: opts.resetExecutionContext === true }) });
+            const r = await projectMutationFetch(`/api/projects/${projectId}/tasks/${taskId}/project-execution/start`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dirtyFingerprint: dirtyFingerprint || '', skipReviewConfirmed: !!opts.skipReviewConfirmed, resetExecutionContext: opts.resetExecutionContext === true }) });
             return r.json();
         },
         async projectExecutionProjectStart(projectId, mode, dirtyFingerprint, opts = {}) {
-            const r = await fetch(`/api/projects/${projectId}/project-execution/start`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: mode || 'continuous', dirtyFingerprint: dirtyFingerprint || '', skipReviewConfirmed: !!opts.skipReviewConfirmed, restartPipeline: !!opts.restartPipeline }) });
+            const r = await projectMutationFetch(`/api/projects/${projectId}/project-execution/start`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: mode || 'continuous', dirtyFingerprint: dirtyFingerprint || '', skipReviewConfirmed: !!opts.skipReviewConfirmed, restartPipeline: !!opts.restartPipeline }) });
             return r.json();
         },
         async projectExecutionCancel(projectId, taskId, attemptId) {
-            const r = await fetch(`/api/projects/${projectId}/tasks/${taskId}/project-execution/cancel`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ attemptId }) });
+            const r = await projectMutationFetch(`/api/projects/${projectId}/tasks/${taskId}/project-execution/cancel`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ attemptId }) });
             return r.json();
         },
         async projectExecutionReviewStart(projectId, taskId, attemptId) {
-            const r = await fetch(`/api/projects/${projectId}/tasks/${taskId}/project-execution/review/start`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ attemptId }) });
+            const r = await projectMutationFetch(`/api/projects/${projectId}/tasks/${taskId}/project-execution/review/start`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ attemptId }) });
             return r.json();
         },
         async projectExecutionAccept(projectId, taskId, action, attemptId, feedback, opts = {}) {
-            const r = await fetch(`/api/projects/${projectId}/tasks/${taskId}/project-execution/accept`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, attemptId, feedback: feedback || '', allowEmptyChecklist: opts.allowEmptyChecklist === true }) });
+            const r = await projectMutationFetch(`/api/projects/${projectId}/tasks/${taskId}/project-execution/accept`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, attemptId, feedback: feedback || '', allowEmptyChecklist: opts.allowEmptyChecklist === true }) });
             return r.json();
         },
         async projectExecutionMeetingBlocker(projectId, taskId, action, feedback) {
-            const r = await fetch(`/api/projects/${projectId}/tasks/${taskId}/project-execution/meeting-blocker`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, feedback: feedback || '' }) });
+            const r = await projectMutationFetch(`/api/projects/${projectId}/tasks/${taskId}/project-execution/meeting-blocker`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, feedback: feedback || '' }) });
             return r.json();
         },
         async projectExecutionStatus(projectId, taskId) {
@@ -371,11 +372,11 @@
             return r.json();
         },
         async deleteArtifact(projectId, path) {
-            const r = await fetch(`/api/projects/${projectId}/artifacts?path=${encodeURIComponent(path)}`, { method: 'DELETE' });
+            const r = await projectMutationFetch(`/api/projects/${projectId}/artifacts?path=${encodeURIComponent(path)}`, { method: 'DELETE' });
             return r.json();
         },
         async deleteArtifactDir(projectId, dir) {
-            const r = await fetch(`/api/projects/${projectId}/artifacts?dir=${encodeURIComponent(dir || '')}`, { method: 'DELETE' });
+            const r = await projectMutationFetch(`/api/projects/${projectId}/artifacts?dir=${encodeURIComponent(dir || '')}`, { method: 'DELETE' });
             return r.json();
         },
         async listMeetingRequests(projectId, taskId) {
@@ -388,19 +389,19 @@
             return r.json();
         },
         async createScheduledCron(projectId, body) {
-            const r = await fetch(`/api/projects/${projectId}/scheduled-cron`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+            const r = await projectMutationFetch(`/api/projects/${projectId}/scheduled-cron`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
             return r.json();
         },
         async updateScheduledCron(projectId, cronId, body) {
-            const r = await fetch(`/api/projects/${projectId}/scheduled-cron/${cronId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+            const r = await projectMutationFetch(`/api/projects/${projectId}/scheduled-cron/${cronId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
             return r.json();
         },
         async deleteScheduledCron(projectId, cronId) {
-            const r = await fetch(`/api/projects/${projectId}/scheduled-cron/${cronId}`, { method: 'DELETE' });
+            const r = await projectMutationFetch(`/api/projects/${projectId}/scheduled-cron/${cronId}`, { method: 'DELETE' });
             return r.json();
         },
         async runScheduledCron(projectId, cronId) {
-            const r = await fetch(`/api/projects/${projectId}/scheduled-cron/${cronId}/run`, { method: 'POST' });
+            const r = await projectMutationFetch(`/api/projects/${projectId}/scheduled-cron/${cronId}/run`, { method: 'POST' });
             return r.json();
         },
     };

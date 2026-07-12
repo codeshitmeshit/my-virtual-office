@@ -6,10 +6,10 @@
 
 ## 2. Repository and project command foundation
 
-- [ ] 2.1 Implement `app/services/project_repository.py` with the ref-counted project lock registry, short global store commit lock, latest-data merge, acceptance repair, Cron-history compatibility, stable lock ordering, and explicit `update`/`delete` operations; add focused repository tests.
-- [ ] 2.2 Route all inventoried project-store writers through the shared commit coordinator without moving legacy `_wf_*` business orchestration; add static checks forbidding stale full-data saves and direct `PROJECT_STORE.save_all/delete_project` outside the repository adapter.
-- [ ] 2.3 Extract project and task CRUD commands into `app/services/project_commands.py`, preserve validation, Done/checklist/column policies, payload/status/storage compatibility, and add direct Service plus Handler adapter contract tests.
-- [ ] 2.4 Run repository, writer-race, project/task CRUD, old-Markdown compatibility, and performance-harness regression; record the first verified read/write reduction or explicitly keep the performance claim open.
+- [x] 2.1 Implement `app/services/project_repository.py` with the ref-counted project lock registry, short global store commit lock, latest-data merge, acceptance repair, Cron-history compatibility, stable lock ordering, and explicit `update`/`delete` operations; add focused repository tests.
+- [x] 2.2 Route all inventoried project-store writers through the shared commit coordinator without moving legacy `_wf_*` business orchestration; add static checks forbidding stale full-data saves and direct `PROJECT_STORE.save_all/delete_project` outside the repository adapter.
+- [x] 2.3 Extract project and task CRUD commands into `app/services/project_commands.py`, preserve validation, Done/checklist/column policies, payload/status/storage compatibility, and add direct Service plus Handler adapter contract tests.
+- [x] 2.4 Run repository, writer-race, project/task CRUD, old-Markdown compatibility, and performance-harness regression; record the first verified read/write reduction or explicitly keep the performance claim open.
 
 ## 3. Execution lifecycle
 

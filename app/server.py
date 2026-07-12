@@ -39,6 +39,8 @@ import feishu_chat_channel
 import gateway_presence
 from dashboard_realtime import DashboardRealtimeStream
 from services import project_execution as project_execution_service
+from services import project_commands as project_command_service
+from services.project_repository import ProjectRepository
 from zoneinfo import ZoneInfo
 from provider_execution import (
     collect_modified_files,
@@ -15729,24 +15731,32 @@ def _project_execution_repair_acceptance_state(data):
 
 def _load_projects():
     """Load projects from the markdown-backed store."""
-    return _project_execution_repair_acceptance_state(PROJECT_STORE.load_all())
+    data = _PROJECT_REPOSITORY.load_all()
+    data["__vo_repository_base__"] = copy.deepcopy(data)
+    return data
 
 
 def _save_projects(data):
     """Persist projects to the markdown-backed store."""
-    try:
-        existing = PROJECT_STORE.load_all()
-        existing_by_id = {p.get("id"): p for p in existing.get("projects", []) if isinstance(p, dict)}
-        for project in data.get("projects", []) if isinstance(data, dict) else []:
-            if not isinstance(project, dict):
-                continue
-            current_history = project.get("scheduledCronHistory")
-            previous_history = (existing_by_id.get(project.get("id")) or {}).get("scheduledCronHistory")
-            if (not current_history) and previous_history:
-                project["scheduledCronHistory"] = previous_history
-    except Exception:
-        pass
-    PROJECT_STORE.save_all(data)
+    baseline = data.get("__vo_repository_base__") if isinstance(data, dict) else None
+    if baseline is None:
+        # Legacy callers occasionally construct a snapshot directly.  Anchor it
+        # to the current store so the repository always performs a coordinated
+        # three-way commit instead of replacing unrelated concurrent updates.
+        baseline = _PROJECT_REPOSITORY.load_all()
+    committed = _PROJECT_REPOSITORY.commit_snapshot(data, baseline)
+    if isinstance(data, dict):
+        data.clear()
+        data.update(committed)
+        data["__vo_repository_base__"] = copy.deepcopy(committed)
+
+
+_PROJECT_REPOSITORY = ProjectRepository(
+    load_projects=lambda: PROJECT_STORE.load_all(),
+    save_projects=lambda data: PROJECT_STORE.save_all(data),
+    repair_projects=_project_execution_repair_acceptance_state,
+    delete_project=lambda project_id: PROJECT_STORE.delete_project(project_id),
+)
 
 
 def _proj_uuid():
@@ -16719,163 +16729,38 @@ def _project_prepare_workspace(title, body, now):
 
 def _handle_project_create(body):
     """POST /api/projects — create a new project."""
-    title = (body.get("title") or "").strip()
-    if not title:
-        return {"error": "Project title is required", "_status": 400}
-    for field in ("defaultExecutorAgentId", "defaultReviewerAgentId"):
-        if _is_archive_manager_agent(body.get(field)):
-            return {"error": "档案管理员不能作为普通项目默认执行或审查 AI", "code": "archive_manager_not_assignable", "_status": 400}
-    created_by = (body.get("createdBy") or body.get("author") or "user").strip()
-    now = _proj_now()
-    workspace = _project_prepare_workspace(title, body, now)
-    if not workspace.get("ok"):
-        return workspace
-    # Default columns
-    default_cols = [
-        {"id": _proj_uuid(), "title": "Backlog", "color": "#6c757d", "order": 0},
-        {"id": _proj_uuid(), "title": "In Progress", "color": "#ffc107", "order": 1},
-        {"id": _proj_uuid(), "title": "Review", "color": "#fd7e14", "order": 2},
-        {"id": _proj_uuid(), "title": "Done", "color": "#198754", "order": 3},
-    ]
-    cols = body.get("columns") or default_cols
-    project = {
-        "id": _proj_uuid(),
-        "title": title,
-        "description": body.get("description", ""),
-        "status": body.get("status", "active"),
-        "priority": body.get("priority", "medium"),
-        "createdAt": now,
-        "updatedAt": now,
-        "dueDate": body.get("dueDate"),
-        "createdBy": created_by,
-        "tags": body.get("tags", []),
-        "branch": body.get("branch", ""),
-        "longTermProject": bool(body.get("longTermProject", False)),
-        "highPriorityAiMeetingAutoApprove": bool(body.get("highPriorityAiMeetingAutoApprove", False)),
-        "archiveMaintenanceEnabled": bool(body["archiveMaintenanceEnabled"]) if "archiveMaintenanceEnabled" in body else _archive_project_default_maintenance_enabled({"status": body.get("status", "active")}),
-        "archiveMaintenance": {
-            "enabled": bool(body["archiveMaintenanceEnabled"]) if "archiveMaintenanceEnabled" in body else _archive_project_default_maintenance_enabled({"status": body.get("status", "active")}),
-            "explicit": "archiveMaintenanceEnabled" in body,
-            "updatedAt": now,
-            "updatedBy": created_by,
-        },
-        "projectExecutionEnabled": workspace["projectExecutionEnabled"],
-        "workspacePath": workspace["workspacePath"],
-        "workspaceKind": workspace["workspaceKind"],
-        "workspaceStatus": workspace["workspaceStatus"],
-        "workspaceManagedBy": workspace.get("workspaceManagedBy"),
-        "workspaceCreatedAt": workspace.get("workspaceCreatedAt"),
-        "defaultExecutorAgentId": body.get("defaultExecutorAgentId"),
-        "defaultReviewerAgentId": body.get("defaultReviewerAgentId"),
-        "projectExecutionStartMode": body.get("projectExecutionStartMode") or "continuous",
-        "projectExecutionFlowActive": False,
-        "projectExecutionFlowStopReason": None,
-        "scheduledCronPaused": bool(body.get("scheduledCronPaused", False)),
-        "executionPolicy": {"maxActiveTasks": 1},
-        "executionDirtyConfirmations": [],
-        "columns": cols,
-        "tasks": [],
-        "activity": [],
-        "template": False,
-    }
-    _log_activity(project, "project_created", created_by, f"Created project '{title}'")
-    data = _load_projects()
-    data["projects"].append(project)
-    _save_projects(data)
-    return {"ok": True, "project": project}
+    outcome = project_command_service.create_project(
+        body, repository=_PROJECT_REPOSITORY, prepare_workspace=_project_prepare_workspace,
+        is_archive_manager=_is_archive_manager_agent, archive_maintenance_default=_archive_project_default_maintenance_enabled,
+        log_activity=_log_activity, new_id=_proj_uuid, now=_proj_now,
+    )
+    return {**outcome.result.payload, **({"_status": outcome.result.status} if outcome.result.status != 200 else {})}
+
+
 
 
 def _handle_task_create(project_id, body):
-    """POST /api/projects/{id}/tasks — create a task."""
-    data = _load_projects()
-    p = next((x for x in data["projects"] if x["id"] == project_id), None)
-    if not p:
-        return {"error": "Project not found", "_status": 404}
-    title = (body.get("title") or "").strip()
-    if not title:
-        return {"error": "Task title is required", "_status": 400}
-    for field in ("assignee", "executorAgentId", "reviewerAgentId"):
-        if _is_archive_manager_agent(body.get(field)):
-            return {"error": "档案管理员不能被分配普通项目任务", "code": "archive_manager_not_assignable", "_status": 400}
-    # Determine column
-    col_id = body.get("columnId")
-    if not col_id and p.get("columns"):
-        col_id = p["columns"][0]["id"]
-    # Max order in column
-    max_order = max((t.get("order", 0) for t in p["tasks"] if t.get("columnId") == col_id), default=-1) + 1
-    now = _proj_now()
-    default_executor_id = body.get("executorAgentId")
-    assignee_id = body.get("assignee")
-    task = {
-        "id": _proj_uuid(),
-        "title": title,
-        "description": body.get("description", ""),
-        "columnId": col_id,
-        "order": max_order,
-        "priority": body.get("priority", "medium"),
-        "assignee": assignee_id,
-        "assigneeBranch": body.get("assigneeBranch"),
-        "executorAgentId": default_executor_id,
-        "reviewerAgentId": body.get("reviewerAgentId"),
-        "requiresUserAcceptance": body.get("requiresUserAcceptance", False) is True,
-        "allowReviewerlessExecution": body.get("allowReviewerlessExecution", False) is True,
-        "scheduledRepeatEnabled": body.get("scheduledRepeatEnabled", False) is True,
-        "executionState": "backlog",
-        "activeAttemptId": None,
-        "attempts": [],
-        "evidence": {},
-        "blockedReason": None,
-        "lastError": None,
-        "dueDate": body.get("dueDate"),
-        "tags": body.get("tags", []),
-        "checklist": body.get("checklist", []),
-        "meetingActionItems": body.get("meetingActionItems", []) if isinstance(body.get("meetingActionItems"), list) else [],
-        "meetingDecisionHistory": body.get("meetingDecisionHistory", []) if isinstance(body.get("meetingDecisionHistory"), list) else [],
-        "meetingDiscussionPoints": body.get("meetingDiscussionPoints", []) if isinstance(body.get("meetingDiscussionPoints"), list) else [],
-        "meetingRecords": body.get("meetingRecords", []) if isinstance(body.get("meetingRecords"), list) else [],
-        "source": body.get("source") if isinstance(body.get("source"), dict) else {},
-        "comments": [],
-        "attachments": [],
-        "createdAt": now,
-        "updatedAt": now,
-        "completedAt": None,
-    }
-    p["tasks"].append(task)
-    p["updatedAt"] = now
-    by = body.get("by", "user")
-    _log_activity(p, "task_created", by, f"Created task '{title}'", task["id"])
-    _save_projects(data)
-    # Create task markdown file at creation time
-    col_title = next((c["title"] for c in p.get("columns", []) if c["id"] == col_id), "backlog")
-    _wf_write_task_file(project_id, task, col_title.lower().replace(" ", "_"), work_log_entry=f"Task created by {by} in '{col_title}'")
-    return {"ok": True, "task": task}
+    outcome = project_command_service.create_task(
+        project_id, body, repository=_PROJECT_REPOSITORY, is_archive_manager=_is_archive_manager_agent,
+        log_activity=_log_activity, new_id=_proj_uuid, now=_proj_now,
+    )
+    if outcome.result.status == 200 and outcome.post_commit:
+        info = outcome.post_commit
+        _wf_write_task_file(project_id, info["task"], info["columnTitle"].lower().replace(" ", "_"), work_log_entry=f"Task created by {info['by']} in '{info['columnTitle']}'")
+    return {**outcome.result.payload, **({"_status": outcome.result.status} if outcome.result.status != 200 else {})}
+
+
 
 
 def _handle_task_comment(project_id, task_id, body):
-    """POST /api/projects/{id}/tasks/{taskId}/comments."""
-    data = _load_projects()
-    p = next((x for x in data["projects"] if x["id"] == project_id), None)
-    if not p:
-        return {"error": "Project not found", "_status": 404}
-    task = next((t for t in p["tasks"] if t["id"] == task_id), None)
-    if not task:
-        return {"error": "Task not found", "_status": 404}
-    text = (body.get("text") or "").strip()
-    if not text:
-        return {"error": "Comment text is required", "_status": 400}
-    author = (body.get("author") or "user").strip()
-    comment = {"id": _proj_uuid(), "author": author, "text": text, "createdAt": _proj_now()}
-    if not isinstance(task.get("comments"), list):
-        task["comments"] = []
-    task["comments"].append(comment)
-    task["updatedAt"] = _proj_now()
-    p["updatedAt"] = _proj_now()
-    _log_activity(p, "task_commented", author, f"Commented on '{task['title']}'", task_id)
-    _save_projects(data)
-    # Update task markdown file with comment
-    current_col = next((c["title"] for c in p.get("columns", []) if c["id"] == task.get("columnId")), "unknown")
-    _wf_write_task_file(project_id, task, current_col.lower().replace(" ", "_"), work_log_entry=f"Comment by {author}: {text[:200]}")
-    return {"ok": True, "comment": comment}
+    outcome = project_command_service.add_task_comment(
+        project_id, task_id, body, repository=_PROJECT_REPOSITORY,
+        log_activity=_log_activity, new_id=_proj_uuid, now=_proj_now,
+    )
+    if outcome.result.status == 200 and outcome.post_commit:
+        info = outcome.post_commit
+        _wf_write_task_file(project_id, info["task"], info["columnTitle"].lower().replace(" ", "_"), work_log_entry=f"Comment by {info['author']}: {str(body.get('text') or '')[:200]}")
+    return {**outcome.result.payload, **({"_status": outcome.result.status} if outcome.result.status != 200 else {})}
 
 
 def _handle_project_from_template(body):
@@ -17024,333 +16909,107 @@ def _handle_save_as_template(body):
 
 # ── PUT handlers ──────────────────────────────────────────────────────────────
 
+
+
 def _handle_project_update(project_id, body):
-    """PUT /api/projects/{id} — update project metadata."""
-    data = _load_projects()
-    p = next((x for x in data["projects"] if x["id"] == project_id), None)
-    if not p:
-        return {"error": "Project not found", "_status": 404}
-    for field in ("defaultExecutorAgentId", "defaultReviewerAgentId"):
-        if _is_archive_manager_agent(body.get(field)):
-            return {"error": "档案管理员不能作为普通项目默认执行或审查 AI", "code": "archive_manager_not_assignable", "_status": 400}
-    by = body.get("by", "user")
-    if body.get("projectExecutionEnabled") or (_project_execution_enabled(p) and "workspacePath" in body):
-        workspace_status = _project_execution_validate_workspace(body.get("workspacePath") or p.get("workspacePath"))
-        if not workspace_status.get("ok"):
-            return {**workspace_status, "_status": 400}
-        body["projectExecutionEnabled"] = True
-        body["workspacePath"] = workspace_status.get("path")
-        body["workspaceKind"] = workspace_status.get("kind")
-        body["workspaceStatus"] = workspace_status
-    updatable = [
-        "title", "description", "status", "priority", "dueDate", "tags", "branch",
-        "longTermProject", "highPriorityAiMeetingAutoApprove",
-        "projectExecutionEnabled", "workspacePath", "workspaceKind", "workspaceStatus",
-        "workspaceManagedBy", "workspaceCreatedAt",
-        "defaultExecutorAgentId", "defaultReviewerAgentId", "projectExecutionStartMode",
-        "projectExecutionFlowActive", "projectExecutionFlowStopReason", "executionPolicy",
-        "scheduledCronPaused",
-        "archiveMaintenanceEnabled", "archiveMaintenance",
-    ]
-    old_status = p.get("status")
-    for field in updatable:
-        if field in body:
-            old = p.get(field)
-            p[field] = body[field]
-            if old != body[field]:
-                _log_activity(p, "project_updated", by, f"Changed {field}: {old} → {body[field]}")
-    p["updatedAt"] = _proj_now()
-    _save_projects(data)
-    if "status" in body and body.get("status") != old_status:
-        _archive_maintenance_trigger(
-            project_id,
-            "project_status_changed",
-            source=_archive_source_ref("project", project_id, title=p.get("title", ""), oldStatus=old_status, newStatus=body.get("status")),
-            title="Project status changed",
-            summary=f"Project status changed from {old_status} to {body.get('status')}.",
-            value_level="high",
-            impact="project_status",
-        )
-    return {"ok": True, "project": p}
+    outcome = project_command_service.update_project(
+        project_id, body, repository=_PROJECT_REPOSITORY, is_archive_manager=_is_archive_manager_agent,
+        execution_enabled=_project_execution_enabled, validate_workspace=_project_execution_validate_workspace,
+        log_activity=_log_activity, now=_proj_now,
+    )
+    if outcome.result.status == 200 and outcome.post_commit and outcome.post_commit.get("statusChanged"):
+        project = outcome.post_commit["project"]; old_status = outcome.post_commit["oldStatus"]
+        _archive_maintenance_trigger(project_id, "project_status_changed", source=_archive_source_ref("project", project_id, title=project.get("title", ""), oldStatus=old_status, newStatus=body.get("status")), title="Project status changed", summary=f"Project status changed from {old_status} to {body.get('status')}.", value_level="high", impact="project_status")
+    return {**outcome.result.payload, **({"_status": outcome.result.status} if outcome.result.status != 200 else {})}
+
+
 
 
 def _handle_task_update(project_id, task_id, body):
-    """PUT /api/projects/{id}/tasks/{taskId} — update a task."""
-    data = _load_projects()
-    p = next((x for x in data["projects"] if x["id"] == project_id), None)
-    if not p:
-        return {"error": "Project not found", "_status": 404}
-    task = next((t for t in p["tasks"] if t["id"] == task_id), None)
-    if not task:
-        return {"error": "Task not found", "_status": 404}
-    for field in ("assignee", "executorAgentId", "reviewerAgentId"):
-        if _is_archive_manager_agent(body.get(field)):
-            return {"error": "档案管理员不能被分配普通项目任务", "code": "archive_manager_not_assignable", "_status": 400}
-    old_executor = task.get("executorAgentId")
-    if (
-        _project_execution_enabled(p)
-        and "assignee" in body
-        and "executorAgentId" not in body
-        and body.get("assignee")
-        and not old_executor
-    ):
-        body["executorAgentId"] = body.get("assignee")
-    by = body.get("by", "user")
-    now = _proj_now()
-    was_completed = bool(task.get("completedAt"))
-    checklist_was_complete = _project_execution_acceptance_checklist_complete(task) if _project_execution_enabled(p) else False
-    if _project_execution_enabled(p) and "columnId" in body:
-        done_cols = {c["id"] for c in p.get("columns", []) if c.get("title", "").lower() in ("done", "completed", "verified", "published", "fixed", "closed")}
-        if body.get("columnId") != task.get("columnId") and _project_execution_column_locked(task):
-            return {
-                "error": "Project Execution is controlling this task column; wait for the state machine transition or stop/reset execution before moving it manually.",
-                "code": "project_execution_column_locked",
-                "_status": 409,
-            }
-        if body.get("columnId") in done_cols and task.get("executionState") != "done":
-            return {"error": "Project Execution tasks require final user acceptance before Done", "_status": 409}
-    # Track column move
-    if "columnId" in body and body["columnId"] != task.get("columnId"):
-        old_col = next((c["title"] for c in p.get("columns", []) if c["id"] == task.get("columnId")), task.get("columnId"))
-        new_col = next((c["title"] for c in p.get("columns", []) if c["id"] == body["columnId"]), body["columnId"])
-        # Check if moving to "Done" column
-        done_cols = [c["id"] for c in p.get("columns", []) if c.get("title", "").lower() in ("done", "completed", "verified", "published", "fixed", "closed")]
-        if body["columnId"] in done_cols and not task.get("completedAt"):
-            task["completedAt"] = now
-            # GAMIFICATION: Award points to assignee
-            assignee = task.get("assignee") or body.get("assignee")
-            if assignee:
-                pts = SCORE_TASK_COMPLETED
-                pri = task.get("priority", "medium")
-                if pri == "critical": pts += SCORE_CRITICAL_BONUS
-                elif pri == "high": pts += SCORE_HIGH_BONUS
-                elif pri == "medium": pts += SCORE_MEDIUM_BONUS
-                # On-time bonus
-                dd = task.get("dueDate")
-                if dd:
-                    try:
-                        due = datetime.fromisoformat(dd.replace("Z", "+00:00"))
-                        if datetime.now(timezone.utc) <= due:
-                            pts += SCORE_ON_TIME_BONUS
-                    except Exception:
-                        pass
-                # Checklist bonus
-                chk = task.get("checklist", [])
-                done_items = sum(1 for c in chk if c.get("done"))
-                pts += done_items * SCORE_CHECKLIST_BONUS
-                score_result = _award_points(assignee, pts, f"Completed: {task.get('title','')}")
-                task["_scoreAwarded"] = score_result  # Transient field for response
-        elif body["columnId"] not in done_cols and task.get("completedAt"):
-            task["completedAt"] = None
-        _log_activity(p, "task_moved", by, f"Moved '{task['title']}' from {old_col} to {new_col}", task_id)
-    # Track priority change
-    if "priority" in body and body["priority"] != task.get("priority"):
-        _log_activity(p, "task_priority_changed", by, f"Priority changed: {task.get('priority')} → {body['priority']}", task_id)
-    # Track assignee change
-    if "assignee" in body and body["assignee"] != task.get("assignee"):
-        _log_activity(p, "task_assigned", by, f"Assigned to {body['assignee']}", task_id)
-    updatable = [
-        "title", "description", "columnId", "order", "priority", "assignee",
-        "assigneeBranch", "executorAgentId", "reviewerAgentId", "dueDate", "tags",
-        "checklist", "meetingActionItems", "meetingDecisionHistory", "meetingDiscussionPoints", "meetingRecords", "completedAt", "requiresUserAcceptance", "allowReviewerlessExecution", "scheduledRepeatEnabled",
-    ]
-    # Track which fields changed for md file update
-    changed_fields = []
-    for field in updatable:
-        if field in body:
-            if task.get(field) != body[field]:
-                changed_fields.append(field)
-            task[field] = body[field]
-    schedule_project_execution_continue = False
-    if (
-        _project_execution_enabled(p)
-        and "checklist" in changed_fields
-        and not checklist_was_complete
-        and _project_execution_acceptance_checklist_complete(task)
-        and _project_execution_can_complete_after_checklist_update(task)
-    ):
-        review = task.get("reviewResult") if isinstance(task.get("reviewResult"), dict) else {}
-        done_result = _project_execution_mark_done(
-            p,
-            task,
-            by,
-            "Acceptance checklist completed after reviewer pass.",
-            review.get("attemptId"),
-        )
-        if done_result.get("ok"):
-            schedule_project_execution_continue = p.get("projectExecutionStartMode") == "continuous"
-            p.update({
-                "workflowActive": False,
-                "workflowPhase": "done",
-                "activeTaskId": None,
-                "activeAgent": None,
-                "projectExecutionFlowActive": schedule_project_execution_continue,
-                "projectExecutionFlowStopReason": None if schedule_project_execution_continue else "checklist_completed",
-            })
-            _log_activity(p, "project_execution_checklist_completed", by, f"Completed Project Execution task '{task.get('title', '')}' after checklist completion.", task_id)
-    task["updatedAt"] = now
-    p["updatedAt"] = now
-    _save_projects(data)
-    if schedule_project_execution_continue:
+    def is_on_time(raw):
+        try:
+            return datetime.now(timezone.utc) <= datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        except Exception:
+            return False
+    outcome = project_command_service.update_task(
+        project_id, task_id, body, repository=_PROJECT_REPOSITORY, is_archive_manager=_is_archive_manager_agent,
+        execution_enabled=_project_execution_enabled, column_locked=_project_execution_column_locked,
+        checklist_complete=_project_execution_acceptance_checklist_complete,
+        can_complete_after_checklist=_project_execution_can_complete_after_checklist_update,
+        mark_done=_project_execution_mark_done, log_activity=_log_activity, now=_proj_now, is_on_time=is_on_time,
+        score_values={"task_completed": SCORE_TASK_COMPLETED, "critical": SCORE_CRITICAL_BONUS, "high": SCORE_HIGH_BONUS, "medium": SCORE_MEDIUM_BONUS, "on_time": SCORE_ON_TIME_BONUS, "checklist": SCORE_CHECKLIST_BONUS},
+    )
+    if outcome.result.status != 200:
+        return {**outcome.result.payload, "_status": outcome.result.status}
+    post = outcome.post_commit or {}; task = post.get("task") or outcome.result.payload.get("task")
+    if post.get("score"):
+        score = post["score"]; task["_scoreAwarded"] = _award_points(score["assignee"], score["points"], score["reason"])
+    if post.get("continueFlow"):
         _project_execution_schedule_continue(project_id, "checklist_completed")
-    # Update task markdown file on meaningful changes
+    changed_fields = post.get("changedFields") or []
     if changed_fields:
-        current_col = next((c["title"] for c in p.get("columns", []) if c["id"] == task.get("columnId")), "unknown")
-        status_text = current_col.lower().replace(" ", "_")
-        log_parts = []
-        if "columnId" in changed_fields:
-            log_parts.append(f"Moved to '{current_col}' by {by}")
-        if "assignee" in changed_fields:
-            log_parts.append(f"Assigned to {task.get('assignee', 'unassigned')}")
-        if "priority" in changed_fields:
-            log_parts.append(f"Priority set to {task.get('priority')}")
-        if any(f in changed_fields for f in ("title", "description", "checklist", "tags", "dueDate")):
-            log_parts.append(f"Updated by {by}")
-        work_log_entry = "; ".join(log_parts) if log_parts else f"Updated by {by}"
-        review_results = task.get("reviewCheck") if task.get("reviewCheck") else None
-        _wf_write_task_file(project_id, task, status_text, review_results=review_results, work_log_entry=work_log_entry)
-    if not was_completed and task.get("completedAt"):
-        _archive_maintenance_trigger(
-            project_id,
-            "task_completed",
-            source=_archive_source_ref("task", task_id, title=task.get("title", ""), taskId=task_id),
-            title=f"Task completed: {task.get('title', '')}",
-            summary=f"Task completed: {task.get('title', '')}",
-            value_level="high",
-            impact="task",
-        )
+        project = post.get("project") or {}; current_col = next((column["title"] for column in project.get("columns", []) if column["id"] == task.get("columnId")), "unknown"); by = post.get("by", "user"); log_parts = []
+        if "columnId" in changed_fields: log_parts.append(f"Moved to '{current_col}' by {by}")
+        if "assignee" in changed_fields: log_parts.append(f"Assigned to {task.get('assignee', 'unassigned')}")
+        if "priority" in changed_fields: log_parts.append(f"Priority set to {task.get('priority')}")
+        if any(field in changed_fields for field in ("title", "description", "checklist", "tags", "dueDate")): log_parts.append(f"Updated by {by}")
+        _wf_write_task_file(project_id, task, current_col.lower().replace(" ", "_"), review_results=task.get("reviewCheck") or None, work_log_entry="; ".join(log_parts) if log_parts else f"Updated by {by}")
+    if not post.get("wasCompleted") and task.get("completedAt"):
+        _archive_maintenance_trigger(project_id, "task_completed", source=_archive_source_ref("task", task_id, title=task.get("title", ""), taskId=task_id), title=f"Task completed: {task.get('title', '')}", summary=f"Task completed: {task.get('title', '')}", value_level="high", impact="task")
     if task.get("blockedReason") or task.get("lastError") or str(task.get("executionState") or "").lower() == "blocked":
-        _archive_maintenance_trigger(
-            project_id,
-            "blocker",
-            source=_archive_source_ref("task", task_id, title=task.get("title", ""), taskId=task_id),
-            title=f"Task blocker: {task.get('title', '')}",
-            summary=task.get("blockedReason") or task.get("lastError") or "Task is blocked.",
-            value_level="high",
-            impact="risk",
-        )
+        _archive_maintenance_trigger(project_id, "blocker", source=_archive_source_ref("task", task_id, title=task.get("title", ""), taskId=task_id), title=f"Task blocker: {task.get('title', '')}", summary=task.get("blockedReason") or task.get("lastError") or "Task is blocked.", value_level="high", impact="risk")
     return {"ok": True, "task": task}
 
 
+
+
 def _handle_columns_update(project_id, body):
-    """PUT /api/projects/{id}/columns — reorder/add/edit columns."""
-    data = _load_projects()
-    p = next((x for x in data["projects"] if x["id"] == project_id), None)
-    if not p:
-        return {"error": "Project not found", "_status": 404}
-    columns = body.get("columns")
-    if not isinstance(columns, list):
-        return {"error": "columns must be a list", "_status": 400}
-    by = body.get("by", "user")
-    # Assign IDs to new columns
-    for i, col in enumerate(columns):
-        if not col.get("id"):
-            col["id"] = _proj_uuid()
-        col["order"] = i
-    p["columns"] = columns
-    p["updatedAt"] = _proj_now()
-    _log_activity(p, "columns_updated", by, "Columns updated")
-    _save_projects(data)
-    return {"ok": True, "columns": columns}
+    outcome = project_command_service.update_columns(
+        project_id, body, repository=_PROJECT_REPOSITORY, log_activity=_log_activity, new_id=_proj_uuid, now=_proj_now,
+    )
+    return {**outcome.result.payload, **({"_status": outcome.result.status} if outcome.result.status != 200 else {})}
+
+
 
 
 def _handle_tasks_reorder(project_id, body):
-    """PUT /api/projects/{id}/tasks/reorder — batch reorder."""
-    data = _load_projects()
-    p = next((x for x in data["projects"] if x["id"] == project_id), None)
-    if not p:
-        return {"error": "Project not found", "_status": 404}
-    # body.updates = [{id, columnId, order}, ...]
-    # Also accept body.tasks as alias for updates (frontend compat)
-    updates = body.get("updates", body.get("tasks", []))
-    task_map = {t["id"]: t for t in p["tasks"]}
-    for u in updates:
-        if any(_is_archive_manager_agent(u.get(field)) for field in ("assignee", "executorAgentId", "reviewerAgentId")):
-            return {"error": "档案管理员不能被分配普通项目任务", "code": "archive_manager_not_assignable", "_status": 400}
-    done_cols = {c["id"] for c in p.get("columns", []) if c.get("title", "").lower() in ("done", "completed", "verified", "published", "fixed", "closed")}
-    now = _proj_now()
-    completed_tasks = []
-    for u in updates:
-        tid = u.get("id")
-        if tid in task_map:
-            task = task_map[tid]
-            new_col = u.get("columnId")
-            if _project_execution_enabled(p) and new_col and new_col != task.get("columnId") and _project_execution_column_locked(task):
-                return {
-                    "error": "Project Execution is controlling this task column; wait for the state machine transition or stop/reset execution before moving it manually.",
-                    "code": "project_execution_column_locked",
-                    "_status": 409,
-                }
-            if _project_execution_enabled(p) and new_col in done_cols and task.get("executionState") != "done":
-                return {"error": "Project Execution tasks require final user acceptance before Done", "_status": 409}
-            if new_col and new_col != task.get("columnId"):
-                # Auto-set/clear completedAt on done column moves
-                if new_col in done_cols and not task.get("completedAt"):
-                    task["completedAt"] = now
-                    completed_tasks.append(task)
-                elif new_col not in done_cols and task.get("completedAt"):
-                    task["completedAt"] = None
-                task["columnId"] = new_col
-            if "order" in u:
-                task["order"] = u["order"]
-            task["updatedAt"] = now
-    p["updatedAt"] = now
-    _save_projects(data)
-    for task in completed_tasks:
-        _archive_maintenance_trigger(
-            project_id,
-            "task_completed",
-            source=_archive_source_ref("task", task.get("id"), title=task.get("title", ""), taskId=task.get("id")),
-            title=f"Task completed: {task.get('title', '')}",
-            summary=f"Task completed: {task.get('title', '')}",
-            value_level="high",
-            impact="task",
-        )
-    return {"ok": True}
+    outcome = project_command_service.reorder_tasks(
+        project_id, body, repository=_PROJECT_REPOSITORY, is_archive_manager=_is_archive_manager_agent,
+        execution_enabled=_project_execution_enabled, column_locked=_project_execution_column_locked, now=_proj_now,
+    )
+    if outcome.result.status == 200:
+        for task in (outcome.post_commit or {}).get("completedTasks", []):
+            _archive_maintenance_trigger(project_id, "task_completed", source=_archive_source_ref("task", task.get("id"), title=task.get("title", ""), taskId=task.get("id")), title=f"Task completed: {task.get('title', '')}", summary=f"Task completed: {task.get('title', '')}", value_level="high", impact="task")
+    return {**outcome.result.payload, **({"_status": outcome.result.status} if outcome.result.status != 200 else {})}
 
 
 # ── DELETE handlers ───────────────────────────────────────────────────────────
 
+
+
+def _delete_managed_project_workspace(workspace_path):
+    raw_path = os.path.abspath(os.path.expanduser(str(workspace_path or "")))
+    if not raw_path or os.path.islink(raw_path):
+        raise OSError("Managed workspace path is invalid or symbolic")
+    auto_root = os.path.realpath(_project_auto_workspace_root())
+    target = os.path.realpath(raw_path)
+    if target == auto_root or os.path.commonpath([auto_root, target]) != auto_root:
+        raise OSError("Managed workspace is outside the automatic workspace root")
+    shutil.rmtree(target)
+
+
 def _handle_project_delete(project_id, delete_workspace=False):
-    """DELETE /api/projects/{id}."""
-    data = _load_projects()
-    project = next((p for p in data.get("projects", []) if p.get("id") == project_id), None)
-    workspace_path = project.get("workspacePath") if project else None
-    workspace_managed_by = project.get("workspaceManagedBy") if project else None
-    workspace_delete_error = None
-    if delete_workspace and project and workspace_managed_by == "system" and workspace_path:
-        try:
-            shutil.rmtree(workspace_path)
-        except FileNotFoundError:
-            pass
-        except OSError as exc:
-            workspace_delete_error = str(exc)
-    elif delete_workspace and project and workspace_managed_by != "system":
-        workspace_delete_error = "Workspace was not automatically created by this project"
-    # Delete through the store so both markdown-backed projects and legacy
-    # JSON-only projects are removed correctly.
-    deleted = PROJECT_STORE.delete_project(project_id)
-    if not deleted:
-        return {"error": "Project not found", "_status": 404}
-    result = {"ok": True, "id": project_id, "workspaceDeleted": bool(delete_workspace and workspace_managed_by == "system" and not workspace_delete_error)}
-    if workspace_delete_error:
-        result["workspaceDeleteError"] = workspace_delete_error
-    return result
+    outcome = project_command_service.delete_project(
+        project_id, delete_workspace=delete_workspace, repository=_PROJECT_REPOSITORY, remove_workspace=_delete_managed_project_workspace,
+    )
+    return {**outcome.result.payload, **({"_status": outcome.result.status} if outcome.result.status != 200 else {})}
+
+
 
 
 def _handle_task_delete(project_id, task_id):
-    """DELETE /api/projects/{id}/tasks/{taskId}."""
-    data = _load_projects()
-    p = next((x for x in data["projects"] if x["id"] == project_id), None)
-    if not p:
-        return {"error": "Project not found", "_status": 404}
-    before = len(p["tasks"])
-    p["tasks"] = [t for t in p["tasks"] if t["id"] != task_id]
-    if len(p["tasks"]) == before:
-        return {"error": "Task not found", "_status": 404}
-    p["updatedAt"] = _proj_now()
-    _save_projects(data)
-    return {"ok": True, "id": task_id}
+    outcome = project_command_service.delete_task(project_id, task_id, repository=_PROJECT_REPOSITORY, now=_proj_now)
+    return {**outcome.result.payload, **({"_status": outcome.result.status} if outcome.result.status != 200 else {})}
 
 
 # ─── PHASE 7A UNIVERSAL PROJECT EXECUTION ────────────────────────────────────
@@ -28415,8 +28074,17 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
         return self._send_watcher_request(request)
 
     def do_PUT(self):
-        length = int(self.headers.get('Content-Length', 0))
-        body = json.loads(self.rfile.read(length)) if length else {}
+        project_mutation = urllib.parse.urlparse(self.path).path.startswith("/api/projects/")
+        if project_mutation:
+            if self._reject_untrusted_management_request():
+                return
+            body, error = self._read_limited_json_body(limit=self._MANAGEMENT_BODY_LIMIT)
+            if error:
+                self._send_json({key: value for key, value in error.items() if key != "_status"}, status=error.get("_status", 400), allow_origin="*")
+                return
+        else:
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
         # ── PROJECTS PUT ─────────────────────────────────────────────
         if self.path.startswith("/api/projects/") and self.path.endswith("/workflow/auto-mode"):
             proj_id = self.path.split("/api/projects/")[1].rsplit("/workflow/auto-mode", 1)[0]
@@ -28478,6 +28146,8 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             self.end_headers()
 
     def do_DELETE(self):
+        if urllib.parse.urlparse(self.path).path.startswith("/api/projects/") and self._reject_untrusted_management_request():
+            return
         if self.path == "/api/agent/delete":
             length = int(self.headers.get('Content-Length', 0))
             body = json.loads(self.rfile.read(length)) if length else {}
@@ -28585,12 +28255,23 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-VO-Management-Token")
         self.end_headers()
 
     def do_POST(self):
         parsed_url = urllib.parse.urlparse(self.path)
         request_path = parsed_url.path
+        agent_meeting_request = (
+            request_path.startswith("/api/projects/")
+            and "/tasks/" in request_path
+            and request_path.endswith("/meeting-requests")
+        )
+        if (
+            (request_path == "/api/projects" or request_path.startswith("/api/projects/"))
+            and not agent_meeting_request
+            and self._reject_untrusted_management_request()
+        ):
+            return
         if request_path.startswith("/api/native-models/") or request_path.startswith("/config/providers/"):
             if self._reject_untrusted_management_request():
                 return

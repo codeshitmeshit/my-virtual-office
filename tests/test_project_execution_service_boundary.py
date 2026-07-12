@@ -55,6 +55,11 @@ def _handler_for_post(payload, content_length=None):
     return handler
 
 
+def _authorize(handler):
+    handler.headers["X-VO-Management-Token"] = server._MANAGEMENT_TOKEN
+    return handler
+
+
 def test_bounded_json_reader_accepts_object_and_rejects_malformed_scalar_and_large_body():
     valid = _handler_for_post(b'{"workspacePath":"/tmp"}')
     assert valid._read_limited_json_body(limit=1024) == ({"workspacePath": "/tmp"}, None)
@@ -111,6 +116,75 @@ def test_management_rejection_uses_shared_json_response(monkeypatch):
         "error": "A valid Virtual Office management token is required",
     }
     assert dict(handler.response_headers)["X-Content-Type-Options"] == "nosniff"
+
+
+def test_project_put_requires_management_token_before_parsing_or_mutation(monkeypatch):
+    handler = _handler_for_post(b'{"title":"changed"}')
+    handler.path = "/api/projects/project-1"
+    called = []
+    monkeypatch.setattr(server, "_handle_project_update", lambda *args: called.append(args) or {"ok": True})
+
+    handler.do_PUT()
+
+    assert handler.responses == [403]
+    assert called == []
+
+
+def test_project_put_accepts_management_token_and_bounded_object_json(monkeypatch):
+    handler = _handler_for_post(b'{"title":"changed"}')
+    handler.path = "/api/projects/project-1"
+    handler.headers["X-VO-Management-Token"] = server._MANAGEMENT_TOKEN
+    called = []
+    monkeypatch.setattr(server, "_handle_project_update", lambda *args: called.append(args) or {"ok": True})
+
+    handler.do_PUT()
+
+    assert handler.responses == [200]
+    assert called == [("project-1", {"title": "changed"})]
+
+
+def test_project_post_requires_management_token_before_parsing_or_mutation(monkeypatch):
+    handler = _handler_for_post(b'{"title":"new"}')
+    handler.path = "/api/projects"
+    called = []
+    monkeypatch.setattr(server, "_handle_project_create", lambda body: called.append(body) or {"ok": True})
+
+    handler.do_POST()
+
+    assert handler.responses == [403]
+    assert called == []
+
+
+def test_project_frontend_routes_mutations_through_management_fetch():
+    with open(os.path.join(APP_DIR, "projects.js"), encoding="utf-8") as source_file:
+        source = source_file.read()
+    mutation_lines = [
+        line for line in source.splitlines()
+        if "api/projects" in line and "method: 'POST'" in line
+    ]
+    assert mutation_lines
+    assert all("projectMutationFetch(" in line for line in mutation_lines)
+    assert "window.i18n.managementFetch(input, init)" in source
+    with open(os.path.join(APP_DIR, "i18n.js"), encoding="utf-8") as source_file:
+        i18n_source = source_file.read()
+    assert "window.i18n =" in i18n_source
+    assert "managementFetch: managementFetch" in i18n_source
+
+
+def test_execution_agent_meeting_request_remains_reachable_without_browser_token(monkeypatch):
+    handler = _handler_for_post(b'{"question":"Need a decision"}')
+    handler.path = "/api/projects/project-1/tasks/task-1/meeting-requests"
+    called = []
+    monkeypatch.setattr(
+        server,
+        "_handle_meeting_request_create",
+        lambda project_id, task_id, body: called.append((project_id, task_id, body)) or {"ok": True},
+    )
+
+    handler.do_POST()
+
+    assert handler.responses == [200]
+    assert called == [("project-1", "task-1", {"question": "Need a decision"})]
 
 
 def _service_dependencies(project=None, validation=None):
@@ -209,7 +283,7 @@ def test_project_execution_service_has_no_server_or_http_dependency():
 
 
 def test_legacy_workspace_validate_http_route_returns_handler_payload(monkeypatch):
-    handler = _handler_for_post(json.dumps({"workspacePath": "/submitted"}).encode())
+    handler = _authorize(_handler_for_post(json.dumps({"workspacePath": "/submitted"}).encode()))
     called = []
     monkeypatch.setattr(server, "_load_projects", lambda: {"projects": [{"id": "project-1", "workspacePath": "/stored"}]})
     monkeypatch.setattr(server, "_save_projects", lambda value: None)
@@ -233,7 +307,7 @@ def test_legacy_workspace_validate_http_route_returns_handler_payload(monkeypatc
 
 
 def test_workspace_validate_http_route_rejects_malformed_json_before_service(monkeypatch):
-    handler = _handler_for_post(b"{")
+    handler = _authorize(_handler_for_post(b"{"))
     called = []
     monkeypatch.setattr(server.project_execution_service, "validate_workspace", lambda *args, **kwargs: called.append(args))
 
@@ -245,7 +319,7 @@ def test_workspace_validate_http_route_rejects_malformed_json_before_service(mon
 
 
 def test_workspace_validate_http_route_rejects_scalar_json_before_service(monkeypatch):
-    handler = _handler_for_post(b"[]")
+    handler = _authorize(_handler_for_post(b"[]"))
     called = []
     monkeypatch.setattr(server.project_execution_service, "validate_workspace", lambda *args, **kwargs: called.append(args))
 
@@ -259,7 +333,7 @@ def test_workspace_validate_http_route_rejects_scalar_json_before_service(monkey
 def test_workspace_validate_http_route_rejects_body_above_limit(monkeypatch):
     body = {"workspacePath": "/submitted", "padding": "x" * (65 * 1024)}
     payload = json.dumps(body).encode()
-    handler = _handler_for_post(payload)
+    handler = _authorize(_handler_for_post(payload))
     called = []
     monkeypatch.setattr(server.project_execution_service, "validate_workspace", lambda *args, **kwargs: called.append(args))
 
@@ -270,7 +344,7 @@ def test_workspace_validate_http_route_rejects_body_above_limit(monkeypatch):
 
 
 def test_workspace_validate_http_route_sanitizes_unexpected_service_failure(monkeypatch, capsys):
-    handler = _handler_for_post(b"{}")
+    handler = _authorize(_handler_for_post(b"{}"))
     monkeypatch.setattr(
         server.project_execution_service,
         "validate_workspace",

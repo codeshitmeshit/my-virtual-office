@@ -15,6 +15,7 @@ import sys
 import tempfile
 import threading
 import time
+import tracemalloc
 from contextlib import contextmanager
 
 
@@ -268,11 +269,16 @@ def measure(scale, warmups, runs):
             samples.append({**store_counts, **external_counts})
         ordered = sorted(durations)
         p95_index = max(0, min(len(ordered) - 1, int(len(ordered) * 0.95) - 1))
+        tracemalloc.start()
+        scenario(scale)
+        _, peak_bytes = tracemalloc.get_traced_memory()
+        tracemalloc.stop()
         results[name] = {
             "median_ms": round(statistics.median(durations), 3),
             "p95_ms": round(ordered[p95_index], 3),
             "counts": samples[0],
             "counts_stable": all(item == samples[0] for item in samples),
+            "peak_kib": round(peak_bytes / 1024, 1),
         }
     return results
 

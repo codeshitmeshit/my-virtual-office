@@ -95,6 +95,6 @@ The following are not production writers but depend on `_save_projects` for fixt
 ## Task 2.2 enforcement targets
 
 1. A static test must fail if `app/server.py` directly calls `PROJECT_STORE.save_all` or `PROJECT_STORE.delete_project` outside the repository adapter wiring.
-2. A static test must fail if a production function calls `_save_projects` after Task 2.2.
+2. A static test must prove `_save_projects` delegates to `ProjectRepository.commit_snapshot` and contains no direct store write; each later service slice removes its corresponding compatibility calls.
 3. Barrier tests must cover same-project legacy/new writes and different-project commits.
 4. Slow Provider, notification, Gateway, Git, filesystem, thread launch, and session-abort work must remain outside project/store locks.

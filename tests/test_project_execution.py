@@ -361,6 +361,35 @@ def test_project_create_auto_workspace_and_store_round_trip():
             restore_store(old)
 
 
+def test_managed_workspace_delete_rejects_outside_root_root_itself_and_symlink():
+    with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as outside:
+        old_root = os.environ.get("VO_AUTO_PROJECT_WORKSPACE_ROOT")
+        auto_root = os.path.join(status_dir, "auto-root")
+        os.makedirs(auto_root)
+        managed = os.path.join(auto_root, "managed-project")
+        os.makedirs(managed)
+        link = os.path.join(auto_root, "linked-project")
+        os.symlink(outside, link)
+        os.environ["VO_AUTO_PROJECT_WORKSPACE_ROOT"] = auto_root
+        try:
+            for unsafe in (outside, auto_root, link):
+                try:
+                    server._delete_managed_project_workspace(unsafe)
+                except OSError:
+                    pass
+                else:
+                    raise AssertionError(f"unsafe workspace delete was accepted: {unsafe}")
+            assert os.path.isdir(outside)
+            assert os.path.isdir(managed)
+            server._delete_managed_project_workspace(managed)
+            assert not os.path.exists(managed)
+        finally:
+            if old_root is None:
+                os.environ.pop("VO_AUTO_PROJECT_WORKSPACE_ROOT", None)
+            else:
+                os.environ["VO_AUTO_PROJECT_WORKSPACE_ROOT"] = old_root
+
+
 def test_project_create_normal_and_manual_workspace_provenance():
     with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as workspace:
         old = with_store(status_dir)
