@@ -1,0 +1,23 @@
+app/services/execution_lifecycle.py
+  s_5852bad622de94::t_8d1809d325f51f 116-117,247,338-341,372-373
+openspec/changes/extract-project-execution-services/tasks.md
+  s_5852bad622de94::t_363f0d2ddd790a 23-26
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "0cff272f3d290a21081f1d0258e2cb14c43cbc78",
+  "prompts": {},
+  "sessions": {
+    "s_5852bad622de94": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f5163-cd74-7df3-a25d-7fd6dd323b5d",
+        "model": "unknown"
+      },
+      "human_author": "codeshitmeshit <codeshitmeshit@126.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
