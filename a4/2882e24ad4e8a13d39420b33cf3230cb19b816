@@ -1,0 +1,35 @@
+app/server.py
+  s_5852bad622de94::t_b23ba93beeb484 46,15714,15726,15870-15876,15886,15951-15952,15954-16001,16010,16239,16241,16244,16246-16248,16251,16254-16257,16259,16262-16281,16284-16290,16293-16301,16303,16306-16351,16354-16376,16379-16384,16386-16482,16540-16552,16554-16557,16560-16586,16591-16594,16598
+app/services/project_schedule.py
+  s_5852bad622de94::t_fe7202d640c39a 1-460
+openspec/changes/extract-project-execution-services/performance-group6-final.json
+  s_5852bad622de94::t_b90d4455d07b49 1-253
+openspec/changes/extract-project-execution-services/performance-progress.md
+  s_5852bad622de94::t_e6ef6198c9159c 61-73
+openspec/changes/extract-project-execution-services/tasks.md
+  s_5852bad622de94::t_ff1234cb80f760 36-38
+tests/test_project_schedule_service.py
+  s_5852bad622de94::t_3e90d963911766 1-229
+tests/test_project_scheduled_cron_phase1.py
+  s_5852bad622de94::t_3116405400ee2d 84,133
+tests/test_project_scheduled_cron_phase2_3.py
+  s_5852bad622de94::t_b1fb5751894f08 8-9,111,292-658
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "a42882e24ad4e8a13d39420b33cf3230cb19b816",
+  "prompts": {},
+  "sessions": {
+    "s_5852bad622de94": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f5163-cd74-7df3-a25d-7fd6dd323b5d",
+        "model": "unknown"
+      },
+      "human_author": "codeshitmeshit <codeshitmeshit@126.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
