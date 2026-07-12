@@ -47,3 +47,14 @@ The performance-improvement claim remains open because application-operation cou
 - The repository coherent snapshot prevents the extracted atomic start path from increasing durable store reads: the no-snapshot smoke measured `3 loads`, while the coherent run measured the baseline `1 load`. Compatibility repair still runs when a store adapter is ingested and after every successful write; namespace changes invalidate the snapshot.
 
 The overall strict operation-count improvement remains open for later review/acceptance or schedule slices. Group 3's verified result is no call-count regression while adding persist-before-launch and conditional attempt-result commit safety.
+
+## Group 4 — Review, rework, and acceptance
+
+- Measured revision: `f9d7745674569012c04564d937e03f2570ac0254+group4-review-acceptance-post-cr` with the final Group 4 CR fixes.
+- Harness command: `.venv/bin/python tests/project_performance_harness.py --scales small,medium,large --warmups 3 --runs 20 --revision-label group4-review-acceptance-post-cr --output /tmp/project-performance-group4-post-cr.json`.
+- Auditable raw result: `performance-group4-final.json` in this change directory.
+- Review start retained `1 load / 1 save / 0 external calls`; acceptance retained `2 loads / 1 save / 0 external calls`. Counts were stable for all 20 runs at all fixture sizes, so the extraction introduced no store or external-call regression.
+- Against the post-CR Group 3 measurement, final acceptance p95 changed `-11.0% / +20.4% / +7.3%` for small/medium/large. Review-start p95 changed `+29.7% / +23.5% / -2.3%`; the small result is the confirmation run (`1.291 ms`, versus `0.995 ms`) and remains below the 30% rollback threshold. The all-scale small sample was `1.477 ms`, so the sub-millisecond absolute variance was independently repeated rather than used to claim improvement.
+- External notification delivery now happens only after the awaiting-acceptance business state and stable local intent are durable. A failed sender adds no business-state rollback and no extra synchronous call to the measured acceptance command.
+
+The strict overall operation-count improvement remains open. Group 4 proves compatibility and failure isolation without increasing load/save/external-call counts.

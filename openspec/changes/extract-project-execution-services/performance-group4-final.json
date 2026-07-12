@@ -1,0 +1,253 @@
+{
+  "fixtures": {
+    "large": {
+      "projects": 200,
+      "tasks_per_project": 100
+    },
+    "medium": {
+      "projects": 50,
+      "tasks_per_project": 50
+    },
+    "small": {
+      "projects": 5,
+      "tasks_per_project": 10
+    }
+  },
+  "measured_head": "f9d7745674569012c04564d937e03f2570ac0254",
+  "revision_label": "group4-review-acceptance-post-cr",
+  "runs": 20,
+  "scales": {
+    "large": {
+      "acceptance": {
+        "counts": {
+          "gateway": 0,
+          "git_scan": 0,
+          "load": 2,
+          "notification": 0,
+          "provider": 0,
+          "revision_check": 4,
+          "save": 1
+        },
+        "counts_stable": true,
+        "median_ms": 610.005,
+        "p95_ms": 687.037,
+        "peak_kib": 68280.4
+      },
+      "cron_dispatch": {
+        "counts": {
+          "gateway": 0,
+          "git_scan": 0,
+          "load": 2,
+          "notification": 0,
+          "provider": 0,
+          "revision_check": 0,
+          "save": 1
+        },
+        "counts_stable": true,
+        "median_ms": 592.471,
+        "p95_ms": 616.058,
+        "peak_kib": 86076.5
+      },
+      "provider_completion": {
+        "counts": {
+          "gateway": 0,
+          "git_scan": 1,
+          "load": 2,
+          "notification": 0,
+          "provider": 1,
+          "revision_check": 3,
+          "save": 1
+        },
+        "counts_stable": true,
+        "median_ms": 605.232,
+        "p95_ms": 638.167,
+        "peak_kib": 86459.8
+      },
+      "review_start": {
+        "counts": {
+          "gateway": 0,
+          "git_scan": 0,
+          "load": 1,
+          "notification": 0,
+          "provider": 0,
+          "revision_check": 3,
+          "save": 1
+        },
+        "counts_stable": true,
+        "median_ms": 432.306,
+        "p95_ms": 454.737,
+        "peak_kib": 68183.6
+      },
+      "start_prepare": {
+        "counts": {
+          "gateway": 0,
+          "git_scan": 1,
+          "load": 1,
+          "notification": 0,
+          "provider": 0,
+          "revision_check": 4,
+          "save": 1
+        },
+        "counts_stable": true,
+        "median_ms": 461.087,
+        "p95_ms": 486.354,
+        "peak_kib": 68184.7
+      }
+    },
+    "medium": {
+      "acceptance": {
+        "counts": {
+          "gateway": 0,
+          "git_scan": 0,
+          "load": 2,
+          "notification": 0,
+          "provider": 0,
+          "revision_check": 4,
+          "save": 1
+        },
+        "counts_stable": true,
+        "median_ms": 69.178,
+        "p95_ms": 86.354,
+        "peak_kib": 8851.8
+      },
+      "cron_dispatch": {
+        "counts": {
+          "gateway": 0,
+          "git_scan": 0,
+          "load": 2,
+          "notification": 0,
+          "provider": 0,
+          "revision_check": 0,
+          "save": 1
+        },
+        "counts_stable": true,
+        "median_ms": 59.461,
+        "p95_ms": 67.296,
+        "peak_kib": 10940.8
+      },
+      "provider_completion": {
+        "counts": {
+          "gateway": 0,
+          "git_scan": 1,
+          "load": 2,
+          "notification": 0,
+          "provider": 1,
+          "revision_check": 3,
+          "save": 1
+        },
+        "counts_stable": true,
+        "median_ms": 63.142,
+        "p95_ms": 77.795,
+        "peak_kib": 11146.7
+      },
+      "review_start": {
+        "counts": {
+          "gateway": 0,
+          "git_scan": 0,
+          "load": 1,
+          "notification": 0,
+          "provider": 0,
+          "revision_check": 3,
+          "save": 1
+        },
+        "counts_stable": true,
+        "median_ms": 48.269,
+        "p95_ms": 55.296,
+        "peak_kib": 8797.4
+      },
+      "start_prepare": {
+        "counts": {
+          "gateway": 0,
+          "git_scan": 1,
+          "load": 1,
+          "notification": 0,
+          "provider": 0,
+          "revision_check": 4,
+          "save": 1
+        },
+        "counts_stable": true,
+        "median_ms": 47.379,
+        "p95_ms": 58.431,
+        "peak_kib": 8797.9
+      }
+    },
+    "small": {
+      "acceptance": {
+        "counts": {
+          "gateway": 0,
+          "git_scan": 0,
+          "load": 2,
+          "notification": 0,
+          "provider": 0,
+          "revision_check": 4,
+          "save": 1
+        },
+        "counts_stable": true,
+        "median_ms": 8.087,
+        "p95_ms": 9.875,
+        "peak_kib": 647.8
+      },
+      "cron_dispatch": {
+        "counts": {
+          "gateway": 0,
+          "git_scan": 0,
+          "load": 2,
+          "notification": 0,
+          "provider": 0,
+          "revision_check": 0,
+          "save": 1
+        },
+        "counts_stable": true,
+        "median_ms": 1.206,
+        "p95_ms": 1.47,
+        "peak_kib": 265.8
+      },
+      "provider_completion": {
+        "counts": {
+          "gateway": 0,
+          "git_scan": 1,
+          "load": 2,
+          "notification": 0,
+          "provider": 1,
+          "revision_check": 3,
+          "save": 1
+        },
+        "counts_stable": true,
+        "median_ms": 3.082,
+        "p95_ms": 3.613,
+        "peak_kib": 325.1
+      },
+      "review_start": {
+        "counts": {
+          "gateway": 0,
+          "git_scan": 0,
+          "load": 1,
+          "notification": 0,
+          "provider": 0,
+          "revision_check": 3,
+          "save": 1
+        },
+        "counts_stable": true,
+        "median_ms": 1.286,
+        "p95_ms": 1.477,
+        "peak_kib": 259.8
+      },
+      "start_prepare": {
+        "counts": {
+          "gateway": 0,
+          "git_scan": 1,
+          "load": 1,
+          "notification": 0,
+          "provider": 0,
+          "revision_check": 4,
+          "save": 1
+        },
+        "counts_stable": true,
+        "median_ms": 1.277,
+        "p95_ms": 2.501,
+        "peak_kib": 260.7
+      }
+    }
+  },
+  "warmups": 3
+}

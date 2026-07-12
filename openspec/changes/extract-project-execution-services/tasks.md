@@ -20,10 +20,10 @@
 
 ## 4. Review, rework, and acceptance
 
-- [ ] 4.1 Add characterization tests for review start/normalization, malformed reviewer output, automatic rework limits, checklist/empty-checklist gates, HTTP and Feishu acceptance, repeated acceptance, and notification failure/crash windows.
-- [ ] 4.2 Implement `app/services/review_acceptance.py` with trusted entry context, review/attempt compare tokens, stable local notification intents, sanitized notification DTOs, and best-effort external delivery without business-state rollback.
-- [ ] 4.3 Migrate HTTP, Feishu card action, Meeting/rework, automatic review, and checklist-completion callers; add authorization-linkage, forged actor, cross-project, idempotency, redaction, and adapter compatibility tests.
-- [ ] 4.4 Run review, rework, acceptance, notification, legacy workflow compatibility, writer-race, and performance measurements; verify load/save/external-call counts do not regress.
+- [x] 4.1 Add characterization tests for review start/normalization, malformed reviewer output, automatic rework limits, checklist/empty-checklist gates, HTTP and Feishu acceptance, repeated acceptance, and notification failure/crash windows.
+- [x] 4.2 Implement `app/services/review_acceptance.py` with trusted entry context, review/attempt compare tokens, stable local notification intents, sanitized notification DTOs, and best-effort external delivery without business-state rollback.
+- [x] 4.3 Migrate HTTP, Feishu card action, Meeting/rework, automatic review, and checklist-completion callers; add authorization-linkage, forged actor, cross-project, idempotency, redaction, and adapter compatibility tests.
+- [x] 4.4 Run review, rework, acceptance, notification, legacy workflow compatibility, writer-race, and performance measurements; verify load/save/external-call counts do not regress.
 
 ## 5. Artifact service
 

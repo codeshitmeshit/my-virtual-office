@@ -113,7 +113,8 @@ class RunnerPorts:
     launcher: Callable[[Callable[[], None]], Any]
     start_task: Callable[[str, str, dict[str, Any]], dict[str, Any]]
     attempt_requires_acceptance: Callable[[Task, dict[str, Any]], bool]
-    notify_acceptance: Callable[..., Any]
+    stage_acceptance: Callable[..., str]
+    deliver_notification: Callable[[str, str, str, str], Any]
     mark_done: Callable[..., dict[str, Any]]
     continue_incomplete_checklist: Callable[..., dict[str, Any]]
     schedule_continue: Callable[..., Any]
@@ -243,6 +244,7 @@ def transition(
 
 
 def run_attempt(project_id: str, task_id: str, attempt_id: str, cancel_flag: threading.Event, *, ports: RunnerPorts) -> None:
+    notification_key: str | None = None
     try:
         invocation = invoke_provider(
             project_id, task_id, attempt_id,
@@ -333,7 +335,10 @@ def run_attempt(project_id: str, task_id: str, attempt_id: str, cancel_flag: thr
                     project["projectExecutionFlowActive"] = False
                     project["projectExecutionFlowStopReason"] = "awaiting_user_acceptance"
                     ports.transition(project, task, "awaiting_user_acceptance", "system", "Review skipped by user confirmation; waiting for user acceptance.", attempt_id)
-                    ports.notify_acceptance(project, task, attempt_id, "Review skipped by user confirmation; waiting for user acceptance.")
+                    notification_key = ports.stage_acceptance(
+                        project, task, attempt_id,
+                        "Review skipped by user confirmation; waiting for user acceptance.",
+                    )
                 else:
                     done_result = ports.mark_done(project, task, "system", "Review skipped by user confirmation; task does not require user acceptance.", attempt_id)
                     if not done_result.get("ok"):
@@ -364,6 +369,8 @@ def run_attempt(project_id: str, task_id: str, attempt_id: str, cancel_flag: thr
         if not ports.commit_projects(project_id, task_id, attempt_id, data, commit_baseline):
             return
         ports.cancel_registry.discard(attempt_id)
+        if notification_key:
+            ports.deliver_notification(project_id, task_id, attempt_id, notification_key)
         if result.get("ok") and attempt.get("autoReviewAfterExecution"):
             ports.start_review(project_id, task_id, {"attemptId": attempt_id})
     finally:

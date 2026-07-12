@@ -2792,6 +2792,130 @@ def test_reviewer_needs_more_work_blocks_after_three_rework_cycles():
             restore_store(old)
 
 
+def test_review_checklist_continuation_commit_failure_does_not_leak_or_launch():
+    with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as workspace:
+        old = with_store(status_dir)
+        old_executor = server._project_execution_call_executor
+        old_reviewer = server._project_execution_call_reviewer
+        old_commit = server._project_execution_commit_review_snapshot
+        executor_calls = []
+        server._project_execution_call_executor = lambda *args, **kwargs: (
+            executor_calls.append(args[3]) or {
+                "ok": True, "status": "completed", "reply": "implemented", "modifiedFiles": [],
+                "checklistUpdates": [{"id": "done", "text": "Complete implementation", "done": False}],
+            }
+        )
+        server._project_execution_call_reviewer = lambda *args, **kwargs: {
+            "ok": True, "status": "completed",
+            "reply": '{"status":"pass","summary":"ready","rationale":"review passed","items":[]}',
+        }
+        try:
+            project, task = create_project_execution_project(workspace)
+            task = complete_project_task_execution(project["id"], task["id"])
+            before_flags = set(server._PROJECT_EXECUTION_CANCEL_FLAGS)
+            server._project_execution_commit_review_snapshot = lambda *args, **kwargs: False
+            started = server._handle_project_execution_review_start(
+                project["id"], task["id"], {"attemptId": task["evidence"]["attemptId"]},
+            )
+            assert started["ok"] is True
+            wait_for(lambda: started["reviewId"] not in server._PROJECT_EXECUTION_REVIEW_FLAGS)
+            assert set(server._PROJECT_EXECUTION_CANCEL_FLAGS) == before_flags
+            assert len(executor_calls) == 1
+            current = server._handle_project_get(project["id"])["project"]["tasks"][0]
+            assert current["executionState"] == "reviewing"
+            assert len(current["attempts"]) == 1
+        finally:
+            server._project_execution_commit_review_snapshot = old_commit
+            server._project_execution_call_executor = old_executor
+            server._project_execution_call_reviewer = old_reviewer
+            restore_store(old)
+
+
+def test_stale_blocked_review_does_not_send_intervention_before_commit():
+    with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as workspace:
+        old = with_store(status_dir)
+        old_executor = server._project_execution_call_executor
+        old_reviewer = server._project_execution_call_reviewer
+        old_commit = server._project_execution_commit_review_snapshot
+        old_notify = server._deliver_project_execution_intervention
+        notifications = []
+        server._project_execution_call_executor = lambda *args, **kwargs: {
+            "ok": True, "status": "completed", "reply": "implemented", "modifiedFiles": [],
+            "checklistUpdates": [{"id": "done", "text": "Complete implementation", "done": True}],
+        }
+        server._project_execution_call_reviewer = lambda *args, **kwargs: {
+            "ok": True, "status": "completed",
+            "reply": '{"status":"blocked","summary":"cannot verify","rationale":"missing env","items":[]}',
+        }
+        server._deliver_project_execution_intervention = lambda *args, **kwargs: notifications.append((args, kwargs))
+        try:
+            project, task = create_project_execution_project(workspace)
+            task = complete_project_task_execution(project["id"], task["id"])
+            server._project_execution_commit_review_snapshot = lambda *args, **kwargs: False
+            started = server._handle_project_execution_review_start(
+                project["id"], task["id"], {"attemptId": task["evidence"]["attemptId"]},
+            )
+            assert started["ok"] is True
+            wait_for(lambda: started["reviewId"] not in server._PROJECT_EXECUTION_REVIEW_FLAGS)
+            assert notifications == []
+            current = server._handle_project_get(project["id"])["project"]["tasks"][0]
+            assert current["executionState"] == "reviewing"
+        finally:
+            server._deliver_project_execution_intervention = old_notify
+            server._project_execution_commit_review_snapshot = old_commit
+            server._project_execution_call_executor = old_executor
+            server._project_execution_call_reviewer = old_reviewer
+            restore_store(old)
+
+
+def test_blocked_review_persists_intervention_marker_and_deduplicates_delivery():
+    with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as workspace:
+        old = with_store(status_dir)
+        old_executor = server._project_execution_call_executor
+        old_reviewer = server._project_execution_call_reviewer
+        old_send = server.send_feishu_notification
+        calls = []
+        server.send_feishu_notification = fake_feishu_sender(calls)
+        server._project_execution_call_executor = lambda *args, **kwargs: {
+            "ok": True, "status": "completed", "reply": "implemented", "modifiedFiles": [],
+            "checklistUpdates": [{"id": "done", "text": "Complete implementation", "done": True}],
+        }
+        server._project_execution_call_reviewer = lambda *args, **kwargs: {
+            "ok": True, "status": "completed",
+            "reply": '{"status":"blocked","summary":"cannot verify","rationale":"missing env","items":[]}',
+        }
+        try:
+            project, task = create_project_execution_project(workspace)
+            task = complete_project_task_execution(project["id"], task["id"])
+            started = server._handle_project_execution_review_start(
+                project["id"], task["id"], {"attemptId": task["evidence"]["attemptId"]},
+            )
+            assert started["ok"] is True
+
+            def marker_persisted():
+                current = server._handle_project_get(project["id"])["project"]["tasks"][0]
+                attempt = next(item for item in current["attempts"] if item["id"] == started["attemptId"])
+                marker = attempt.get("feishuNotifications", {}).get(
+                    f"project-intervention:blocked:{started['attemptId']}", {},
+                )
+                return (current, marker) if current.get("executionState") == "blocked" and marker.get("ok") is True else None
+
+            current, marker = wait_for(marker_persisted)
+            assert marker["status"] == "sent"
+            assert len(calls) == 1
+            duplicate = server._deliver_project_execution_intervention(
+                project["id"], task["id"], current["blockedReason"],
+                started["attemptId"], "blocked", "warning",
+            )
+            assert duplicate["status"] == "skipped_duplicate"
+            assert len(calls) == 1
+        finally:
+            server.send_feishu_notification = old_send
+            server._project_execution_call_executor = old_executor
+            server._project_execution_call_reviewer = old_reviewer
+            restore_store(old)
+
+
 def test_independent_review_pass_waits_for_user_acceptance_then_done():
     with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as workspace:
         old = with_store(status_dir)
@@ -2822,6 +2946,8 @@ def test_independent_review_pass_waits_for_user_acceptance_then_done():
             assert accepted["task"]["executionState"] == "done"
             assert accepted["task"]["columnId"] == done_col
             assert accepted["task"]["completedAt"]
+            assert accepted["task"]["acceptanceHistory"][-1]["by"] == "user"
+            assert accepted["task"]["acceptanceHistory"][-1]["source"] == "http"
         finally:
             server._project_execution_call_executor = old_executor
             server._project_execution_call_reviewer = old_reviewer
@@ -2848,7 +2974,7 @@ def test_feishu_acceptance_notification_and_card_actions():
             server._handle_task_update(project["id"], task["id"], {"requiresUserAcceptance": True})
             task = complete_project_task_execution(project["id"], task["id"])
             task = review_project_execution_task(project["id"], task["id"])
-            assert len(feishu_calls) == 1
+            wait_for(lambda: len(feishu_calls) == 1)
             intent = feishu_calls[0]["intent"]
             assert intent["type"] == "application_form"
             assert intent["target"] == "feishu-project-execution-acceptance"
@@ -2875,10 +3001,9 @@ def test_feishu_acceptance_notification_and_card_actions():
             assert accept_button["behaviors"][0]["value"]["action"] == "project_execution_accept"
             assert jump_button["behaviors"][0]["type"] == "open_url"
 
-            duplicate = server._send_project_execution_acceptance_notification(
-                server._handle_project_get(project["id"])["project"],
-                task,
-                task["reviewResult"]["attemptId"],
+            duplicate = server._deliver_staged_project_execution_notification(
+                project["id"], task["id"], task["reviewResult"]["attemptId"],
+                f"project-acceptance:{task['reviewResult']['attemptId']}",
             )
             assert duplicate["status"] == "skipped_duplicate"
             assert len(feishu_calls) == 1
@@ -2906,10 +3031,145 @@ def test_feishu_acceptance_notification_and_card_actions():
             assert accepted["outcome"]["businessStatus"] == "done"
             current = server._handle_project_get(project["id"])["project"]["tasks"][0]
             assert current["executionState"] == "done"
+            assert current["acceptanceHistory"][-1]["by"] == "ou_demo"
+            assert current["acceptanceHistory"][-1]["source"] == "feishu"
+
+            repeated = server._handle_project_execution_acceptance(project["id"], task["id"], {
+                "action": "accept", "attemptId": task["reviewResult"]["attemptId"],
+            })
+            assert repeated["_status"] == 409
+            assert server._handle_project_get(project["id"])["project"]["tasks"][0]["executionState"] == "done"
         finally:
             server.send_feishu_notification = old_send
             server._project_execution_call_executor = old_executor
             server._project_execution_call_reviewer = old_reviewer
+            restore_store(old)
+
+
+def test_acceptance_ignores_forged_http_actor_and_rejects_cross_project_task_linkage():
+    with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as workspace:
+        old = with_store(status_dir)
+        old_executor = server._project_execution_call_executor
+        old_reviewer = server._project_execution_call_reviewer
+        server._project_execution_call_executor = lambda *args, **kwargs: {
+            "ok": True, "status": "completed", "reply": "implemented", "modifiedFiles": [],
+            "checklistUpdates": [{"id": "done", "text": "Complete implementation", "done": True}],
+        }
+        server._project_execution_call_reviewer = lambda *args, **kwargs: {
+            "ok": True, "status": "completed",
+            "reply": '{"status":"pass","summary":"ready","rationale":"ok","items":[]}',
+        }
+        try:
+            project, task = create_project_execution_project(workspace)
+            server._handle_task_update(project["id"], task["id"], {"requiresUserAcceptance": True})
+            task = complete_project_task_execution(project["id"], task["id"])
+            task = review_project_execution_task(project["id"], task["id"])
+            other = server._handle_project_create({"title": "Other project", "projectExecutionEnabled": True})["project"]
+            crossed = server._handle_project_execution_acceptance(other["id"], task["id"], {
+                "action": "accept", "attemptId": task["reviewResult"]["attemptId"],
+            })
+            assert crossed["_status"] == 404
+            accepted = server._handle_project_execution_acceptance(project["id"], task["id"], {
+                "action": "accept", "attemptId": task["reviewResult"]["attemptId"],
+                "actor": "admin", "by": "system",
+            })
+            assert accepted["ok"] is True
+            assert accepted["task"]["acceptanceHistory"][-1]["by"] == "user"
+            assert accepted["task"]["acceptanceHistory"][-1]["source"] == "http"
+        finally:
+            server._project_execution_call_executor = old_executor
+            server._project_execution_call_reviewer = old_reviewer
+            restore_store(old)
+
+
+def test_acceptance_notification_failure_does_not_roll_back_review_state():
+    with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as workspace:
+        old = with_store(status_dir)
+        old_executor = server._project_execution_call_executor
+        old_reviewer = server._project_execution_call_reviewer
+        old_send = server.send_feishu_notification
+        server.send_feishu_notification = lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("api_key=canary webhook failure"))
+        server._project_execution_call_executor = lambda *args, **kwargs: {
+            "ok": True, "status": "completed", "reply": "implemented", "modifiedFiles": [],
+            "checklistUpdates": [{"id": "done", "text": "Complete implementation", "done": True}],
+        }
+        server._project_execution_call_reviewer = lambda *args, **kwargs: {
+            "ok": True, "status": "completed",
+            "reply": '{"status":"pass","summary":"ready","rationale":"ok","items":[]}',
+        }
+        try:
+            project, task = create_project_execution_project(workspace)
+            server._handle_task_update(project["id"], task["id"], {"requiresUserAcceptance": True})
+            task = complete_project_task_execution(project["id"], task["id"])
+            started = server._handle_project_execution_review_start(
+                project["id"], task["id"], {"attemptId": task["evidence"]["attemptId"]},
+            )
+            assert started["ok"] is True
+            current = wait_for(lambda: server._handle_project_get(project["id"])["project"]["tasks"][0]
+                               if server._handle_project_get(project["id"])["project"]["tasks"][0].get("executionState") == "awaiting_user_acceptance"
+                               and next(item for item in server._handle_project_get(project["id"])["project"]["tasks"][0]["attempts"] if item["id"] == started["attemptId"])
+                               .get("notificationIntents", {}).get(f"project-acceptance:{started['attemptId']}", {}).get("deliveryStatus") == "failed"
+                               else None)
+            attempt = next(item for item in current["attempts"] if item["id"] == started["attemptId"])
+            local = attempt["notificationIntents"][f"project-acceptance:{started['attemptId']}"]
+            assert local["deliveryStatus"] == "failed"
+            assert "canary" not in local["lastError"]
+            assert current["reviewResult"]["status"] == "pass"
+            assert current["activeAttemptId"] is None
+        finally:
+            server.send_feishu_notification = old_send
+            server._project_execution_call_executor = old_executor
+            server._project_execution_call_reviewer = old_reviewer
+            restore_store(old)
+
+
+def test_staged_acceptance_notification_uses_atomic_delivery_claim():
+    with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as workspace:
+        old = with_store(status_dir)
+        old_send = server.send_feishu_notification
+        entered = threading.Event()
+        release = threading.Event()
+        calls = []
+
+        def blocked_sender(intent, **kwargs):
+            calls.append(intent["id"])
+            entered.set()
+            assert release.wait(3)
+            return {"ok": True, "status": "sent", "record": {"id": intent["id"]}}
+
+        server.send_feishu_notification = blocked_sender
+        try:
+            project, created = create_project_execution_project(workspace)
+            data = server._load_projects()
+            project = data["projects"][0]
+            task = next(item for item in project["tasks"] if item["id"] == created["id"])
+            task["attempts"] = [{"id": "attempt-notify"}]
+            task["reviewResult"] = {"attemptId": "attempt-notify", "status": "pass", "summary": "ready"}
+            key = server._stage_project_execution_acceptance_notification(project, task, "attempt-notify", "ready")
+            server._save_projects(data)
+
+            first_result = {}
+            first = threading.Thread(target=lambda: first_result.update(server._deliver_staged_project_execution_notification(
+                project["id"], task["id"], "attempt-notify", key,
+            )))
+            first.start()
+            assert entered.wait(3)
+            second = server._deliver_staged_project_execution_notification(
+                project["id"], task["id"], "attempt-notify", key,
+            )
+            assert second["status"] == "delivery_in_progress"
+            release.set()
+            first.join(3)
+            assert first_result["ok"] is True
+            assert calls == [key]
+            current = server._handle_project_get(project["id"])["project"]["tasks"][0]
+            local = current["attempts"][0]["notificationIntents"][key]
+            assert local["deliveryStatus"] == "sent"
+            assert local["attempts"] == 1
+            assert "claimToken" not in local
+        finally:
+            release.set()
+            server.send_feishu_notification = old_send
             restore_store(old)
 
 
@@ -3120,6 +3380,77 @@ def test_acceptance_reject_starts_rework_execution_before_returning_to_review():
             assert reworked["attempts"][-1]["id"] == rejected["attemptId"]
         finally:
             server._project_execution_call_executor = old_executor
+            restore_store(old)
+
+
+def test_acceptance_rework_rechecks_active_task_after_slow_snapshot():
+    with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as workspace:
+        old = with_store(status_dir)
+        old_executor = server._project_execution_call_executor
+        old_reviewer = server._project_execution_call_reviewer
+        old_snapshot = server._project_execution_automatic_snapshot
+        snapshot_entered = threading.Event()
+        snapshot_release = threading.Event()
+        executor_release = threading.Event()
+
+        def executor(*args, **kwargs):
+            if kwargs.get("task_id") == second_id["value"]:
+                assert executor_release.wait(3)
+            return {
+                "ok": True, "status": "completed", "reply": "implemented", "modifiedFiles": [],
+                "checklistUpdates": [{"id": "done", "text": "Complete implementation", "done": True}],
+            }
+
+        server._project_execution_call_executor = executor
+        server._project_execution_call_reviewer = lambda *args, **kwargs: {
+            "ok": True, "status": "completed",
+            "reply": '{"status":"pass","summary":"ready","rationale":"ok","items":[]}',
+        }
+        second_id = {"value": ""}
+        try:
+            project, task = create_project_execution_project(workspace)
+            server._handle_task_update(project["id"], task["id"], {"requiresUserAcceptance": True})
+            task = complete_project_task_execution(project["id"], task["id"])
+            task = review_project_execution_task(project["id"], task["id"])
+            project = server._handle_project_get(project["id"])["project"]
+            second = server._handle_task_create(project["id"], {
+                "title": "Concurrent task", "columnId": project["columns"][0]["id"],
+                "executorAgentId": "executor",
+            })["task"]
+            second_id["value"] = second["id"]
+            original_attempt_count = len(task["attempts"])
+
+            def slow_snapshot(project_value, path):
+                snapshot_entered.set()
+                assert snapshot_release.wait(3)
+                return old_snapshot(project_value, path)
+
+            server._project_execution_automatic_snapshot = slow_snapshot
+            outcome = {}
+            worker = threading.Thread(target=lambda: outcome.update(server._handle_project_execution_acceptance(
+                project["id"], task["id"], {
+                    "action": "reject_and_rework", "attemptId": task["reviewResult"]["attemptId"],
+                    "feedback": "retry",
+                },
+            )))
+            worker.start()
+            assert snapshot_entered.wait(3)
+            started = server._handle_project_execution_start(project["id"], second["id"], {})
+            assert started["ok"] is True
+            snapshot_release.set()
+            worker.join(3)
+            assert outcome["_status"] == 409
+            assert outcome["activeTaskId"] == second["id"]
+            current = server._handle_project_get(project["id"])["project"]
+            first = next(item for item in current["tasks"] if item["id"] == task["id"])
+            assert len(first["attempts"]) == original_attempt_count
+            assert current["activeTaskId"] == second["id"]
+        finally:
+            snapshot_release.set()
+            executor_release.set()
+            server._project_execution_automatic_snapshot = old_snapshot
+            server._project_execution_call_executor = old_executor
+            server._project_execution_call_reviewer = old_reviewer
             restore_store(old)
 
 

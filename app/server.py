@@ -41,6 +41,7 @@ from dashboard_realtime import DashboardRealtimeStream
 from services import project_execution as project_execution_service
 from services import project_commands as project_command_service
 from services import execution_lifecycle as execution_lifecycle_service
+from services import review_acceptance as review_acceptance_service
 from services.project_repository import ProjectConflictError, ProjectNotFoundError, ProjectRepository
 from zoneinfo import ZoneInfo
 from provider_execution import (
@@ -11212,67 +11213,66 @@ def _project_execution_open_url(project_id="", task_id=""):
     return _vo_public_url("/#projects")
 
 
-def _send_project_execution_acceptance_notification(project, task, attempt_id, reason=""):
-    if not isinstance(project, dict) or not isinstance(task, dict) or not attempt_id:
-        return {"ok": True, "status": "skipped_invalid_project_task"}
-    key = f"project-acceptance:{attempt_id}"
-    marker_container = _project_execution_notification_container(task, attempt_id)
-    if _feishu_notification_marker(marker_container, key):
-        return {"ok": True, "status": "skipped_duplicate", "dedupeKey": key}
-    project_id = project.get("id") or ""
-    task_id = task.get("id") or ""
-    intent = {
-        "id": key,
-        "type": "application_form",
-        "title": f"项目任务等待验收: {task.get('title') or task_id}",
-        "summary": reason or "Project Execution 已完成并通过 Review，等待用户验收。",
-        "state": "pending",
-        "multi_participant": False,
-        "related": _project_execution_related(project, task),
-        "details": [
-            ("项目", project.get("title") or project_id or "-"),
-            ("任务", task.get("title") or task_id or "-"),
-            ("Attempt", attempt_id),
-            ("Review", ((task.get("reviewResult") or {}).get("summary") or "-")),
-        ],
-        "inputs": [{
-            "name": "feedback",
-            "label": "返工原因",
-            "placeholder": "点击“要求返工”前填写需要补充或重做的内容",
-            "multiline": True,
-            "required": False,
-        }],
-        "actions": [
-            {
-                "category": "confirm",
-                "text": "接受",
-                "value": {
-                    "action": "project_execution_accept",
-                    "project_id": project_id,
-                    "task_id": task_id,
-                    "attempt_id": attempt_id,
-                },
-            },
-            {
-                "category": "cancel",
-                "text": "要求返工",
-                "value": {
-                    "action": "project_execution_rework",
-                    "project_id": project_id,
-                    "task_id": task_id,
-                    "attempt_id": attempt_id,
-                },
-            },
-            {
-                "category": "jump",
-                "text": "打开任务",
-                "url": _project_execution_open_url(project_id, task_id),
-            },
-        ],
-        "target": "feishu-project-execution-acceptance",
-    }
-    result = _send_feishu_workflow_notification(intent)
-    _mark_feishu_notification(marker_container, key, result)
+def _stage_project_execution_acceptance_notification(project, task, attempt_id, reason=""):
+    intent = review_acceptance_service.build_acceptance_intent(
+        project, task, attempt_id, reason,
+        redact=_project_execution_redact,
+        open_url=_project_execution_open_url,
+    )
+    review_acceptance_service.stage_notification_intent(task, attempt_id, intent, _proj_now)
+    return intent["id"]
+
+
+def _deliver_staged_project_execution_notification(project_id, task_id, attempt_id, key):
+    """Best-effort delivery after business state is durable."""
+    claim_token = _proj_uuid()
+    claim_now = time.time()
+
+    def claim(project):
+        task = next((item for item in project.get("tasks", []) if item.get("id") == task_id), None)
+        local = review_acceptance_service.notification_intent(task or {}, attempt_id, key)
+        if local is None:
+            return {"claimed": False, "status": "intent_not_found"}
+        marker_container = _project_execution_notification_container(task, attempt_id)
+        if _feishu_notification_marker(marker_container, key) or local.get("deliveryStatus") == "sent":
+            return {"claimed": False, "status": "skipped_duplicate"}
+        claimed_at = float(local.get("claimedAtEpoch") or 0)
+        if local.get("deliveryStatus") == "sending" and claim_now - claimed_at < 60:
+            return {"claimed": False, "status": "delivery_in_progress"}
+        local["deliveryStatus"] = "sending"
+        local["claimToken"] = claim_token
+        local["claimedAtEpoch"] = claim_now
+        local["attempts"] = int(local.get("attempts") or 0) + 1
+        return {"claimed": True, "intent": copy.deepcopy(local.get("intent") or {})}
+
+    try:
+        claimed = _PROJECT_REPOSITORY.update(project_id, claim)
+    except ProjectNotFoundError:
+        return {"ok": False, "status": "project_not_found"}
+    if not claimed.get("claimed"):
+        status = claimed.get("status") or "skipped_duplicate"
+        return {"ok": status in {"skipped_duplicate", "delivery_in_progress"}, "status": status, "dedupeKey": key}
+    try:
+        result = _send_feishu_workflow_notification(claimed["intent"])
+    except Exception as exc:
+        result = {"ok": False, "status": "delivery_failed", "error": _project_execution_redact(str(exc))}
+
+    def persist(latest):
+        latest_task = next((item for item in latest.get("tasks", []) if item.get("id") == task_id), None)
+        latest_local = review_acceptance_service.notification_intent(latest_task or {}, attempt_id, key)
+        if latest_local is None or latest_local.get("claimToken") != claim_token:
+            return
+        latest_local["deliveryStatus"] = "sent" if result.get("ok") else "failed"
+        latest_local["lastAttemptAt"] = _proj_now()
+        latest_local["lastError"] = "" if result.get("ok") else _project_execution_redact(result.get("error") or result.get("status") or "delivery_failed")
+        latest_local.pop("claimToken", None)
+        latest_local.pop("claimedAtEpoch", None)
+        _mark_feishu_notification(_project_execution_notification_container(latest_task, attempt_id), key, result)
+
+    try:
+        _PROJECT_REPOSITORY.update(project_id, persist)
+    except ProjectNotFoundError:
+        pass
     return result
 
 
@@ -11308,6 +11308,61 @@ def _send_project_execution_intervention_notification(project, task, reason="", 
     }
     result = _send_feishu_workflow_notification(intent)
     _mark_feishu_notification(marker_container, key, result)
+    return result
+
+
+def _deliver_project_execution_intervention(project_id, task_id, reason, attempt_id, event, kind):
+    """Atomically claim, deliver, and persist a Review intervention marker."""
+    key = f"project-intervention:{event}:{attempt_id or task_id}"
+    claim_token = _proj_uuid()
+    claim_now = time.time()
+
+    def claim(project):
+        task = next((item for item in project.get("tasks", []) if item.get("id") == task_id), None)
+        if task is None:
+            return {"claimed": False, "status": "task_not_found"}
+        container = _project_execution_notification_container(task, attempt_id)
+        markers = container.setdefault("feishuNotifications", {})
+        marker = markers.get(key) if isinstance(markers, dict) else None
+        if isinstance(marker, dict) and marker.get("ok") is True:
+            return {"claimed": False, "status": "skipped_duplicate"}
+        if isinstance(marker, dict) and marker.get("status") == "sending" and claim_now - float(marker.get("claimedAtEpoch") or 0) < 60:
+            return {"claimed": False, "status": "delivery_in_progress"}
+        markers[key] = {
+            "ok": False, "status": "sending", "claimToken": claim_token,
+            "claimedAtEpoch": claim_now,
+        }
+        return {"claimed": True, "project": copy.deepcopy(project), "task": copy.deepcopy(task)}
+
+    try:
+        claimed = _PROJECT_REPOSITORY.update(project_id, claim)
+    except ProjectNotFoundError:
+        return {"ok": False, "status": "project_not_found"}
+    if not claimed.get("claimed"):
+        status = claimed.get("status") or "skipped_duplicate"
+        return {"ok": status in {"skipped_duplicate", "delivery_in_progress"}, "status": status, "dedupeKey": key}
+    try:
+        result = _send_project_execution_intervention_notification(
+            claimed["project"], claimed["task"], reason, attempt_id,
+            event=event, kind=kind,
+        )
+    except Exception as exc:
+        result = {"ok": False, "status": "delivery_failed", "error": _project_execution_redact(str(exc))}
+
+    def finalize(project):
+        task = next((item for item in project.get("tasks", []) if item.get("id") == task_id), None)
+        if task is None:
+            return
+        container = _project_execution_notification_container(task, attempt_id)
+        marker = (container.get("feishuNotifications") or {}).get(key)
+        if not isinstance(marker, dict) or marker.get("claimToken") != claim_token:
+            return
+        _mark_feishu_notification(container, key, result)
+
+    try:
+        _PROJECT_REPOSITORY.update(project_id, finalize)
+    except ProjectNotFoundError:
+        pass
     return result
 
 
@@ -11739,7 +11794,10 @@ def _dispatch_feishu_project_execution_action(action, value, event):
     }
     if action == "project_execution_rework":
         body["feedback"] = _feishu_card_action_form_text(event, "feedback", "rework_feedback", "reason") or _PROJECT_EXECUTION_FEISHU_REWORK_FEEDBACK
-    result = _handle_project_execution_acceptance(project_id, task_id, body)
+    result = _handle_project_execution_acceptance(
+        project_id, task_id, body,
+        entry_context=review_acceptance_service.EntryContext.feishu(actor),
+    )
     if result.get("ok"):
         return {
             "handled": True,
@@ -17685,7 +17743,7 @@ def _project_execution_schedule_transient_retry(data, project_id, task_id, proje
     return True
 
 
-def _project_execution_continue_for_incomplete_checklist(data, project_id, task_id, project, task, attempt_id, actor, done_result):
+def _project_execution_prepare_incomplete_checklist(project, task, attempt_id, actor, done_result):
     if not isinstance(done_result, dict) or done_result.get("code") != "checklist_incomplete":
         return {"ok": False, "error": (done_result or {}).get("error") or "Unable to mark task done"}
     workspace = _project_execution_validate_workspace(project.get("workspacePath"))
@@ -17693,14 +17751,12 @@ def _project_execution_continue_for_incomplete_checklist(data, project_id, task_
         task["blockedReason"] = workspace.get("error") or "Project workspace is not available for checklist completion."
         _project_execution_transition(project, task, "blocked", "system", task["blockedReason"], attempt_id)
         project.update({"workspaceStatus": workspace, "workflowActive": False, "workflowPhase": "blocked", "activeTaskId": None, "activeAgent": None, "updatedAt": _proj_now()})
-        _save_projects(data)
         return {**workspace, "continued": False}
     roles = _project_execution_resolve_start_roles(project, task, allow_skip_reviewer=True)
     if not roles.get("ok"):
         task["blockedReason"] = roles.get("error") or "Project Execution roles are not available."
         _project_execution_transition(project, task, "blocked", "system", task["blockedReason"], attempt_id)
         project.update({"workflowActive": False, "workflowPhase": "blocked", "activeTaskId": None, "activeAgent": None, "updatedAt": _proj_now()})
-        _save_projects(data)
         return {**roles, "continued": False}
     automatic_snapshot = _project_execution_automatic_snapshot(project, workspace["path"])
     if not automatic_snapshot.get("ok"):
@@ -17708,62 +17764,48 @@ def _project_execution_continue_for_incomplete_checklist(data, project_id, task_
         task["lastError"] = automatic_snapshot.get("code")
         _project_execution_transition(project, task, "blocked", "system", task["blockedReason"], attempt_id)
         project.update({"workflowActive": False, "workflowPhase": "blocked", "activeTaskId": None, "activeAgent": None, "updatedAt": _proj_now()})
-        _save_projects(data)
         return {**automatic_snapshot, "continued": False}
     feedback = _project_execution_incomplete_checklist_feedback(done_result)
     task["reworkCount"] = int(task.get("reworkCount") or 0) + 1
     task["blockedReason"] = None
     task["lastError"] = None
     task["reworkFeedback"] = feedback
-    rework_attempt_id = str(uuid.uuid4())
+    rework_attempt_id = _proj_uuid()
     rework_attempt = {
-        "id": rework_attempt_id,
-        "status": "reworking",
-        "startedAt": _proj_now(),
-        "workspacePath": workspace["path"],
-        "workspaceKind": workspace["kind"],
-        "dirtyConfirmed": False,
-        "dirtyFingerprint": "",
-        "executor": roles["executor"],
-        "reviewer": roles.get("reviewer"),
-        "skipReview": bool(roles.get("skipReview")),
-        "skipReviewReason": roles.get("skipReviewReason"),
-        "baseline": automatic_snapshot["snapshot"],
+        "id": rework_attempt_id, "status": "reworking", "startedAt": _proj_now(),
+        "workspacePath": workspace["path"], "workspaceKind": workspace["kind"],
+        "dirtyConfirmed": False, "dirtyFingerprint": "", "executor": roles["executor"],
+        "reviewer": roles.get("reviewer"), "skipReview": bool(roles.get("skipReview")),
+        "skipReviewReason": roles.get("skipReviewReason"), "baseline": automatic_snapshot["snapshot"],
         "startMode": project.get("projectExecutionStartMode") or "continuous",
         "projectFlow": bool(project.get("projectExecutionFlowActive")),
         "requiresUserAcceptance": _project_execution_requires_user_acceptance(task),
-        "rework": True,
-        "reworkCycle": task["reworkCount"],
-        "reworkFromAttemptId": attempt_id,
-        "reworkFeedback": feedback,
-        "autoReviewAfterExecution": not roles.get("skipReview"),
+        "rework": True, "reworkCycle": task["reworkCount"], "reworkFromAttemptId": attempt_id,
+        "reworkFeedback": feedback, "autoReviewAfterExecution": not roles.get("skipReview"),
         "checklistCompletionRetry": True,
     }
     task.setdefault("attempts", []).append(rework_attempt)
     task["attempts"] = task["attempts"][-20:]
     task.update({
-        "activeAttemptId": rework_attempt_id,
-        "executorAgentId": roles["executor"]["id"],
-        "reviewerAgentId": (roles.get("reviewer") or {}).get("id"),
-        "reviewResult": {},
+        "activeAttemptId": rework_attempt_id, "executorAgentId": roles["executor"]["id"],
+        "reviewerAgentId": (roles.get("reviewer") or {}).get("id"), "reviewResult": {},
     })
     project.update({
-        "workspaceStatus": workspace,
-        "workflowActive": True,
-        "workflowPhase": "reworking",
-        "activeTaskId": task_id,
-        "activeAgent": roles["executor"]["id"],
-        "projectExecutionFlowActive": False,
-        "projectExecutionFlowStopReason": "checklist_incomplete",
+        "workspaceStatus": workspace, "workflowActive": True, "workflowPhase": "reworking",
+        "activeTaskId": task.get("id"), "activeAgent": roles["executor"]["id"],
+        "projectExecutionFlowActive": False, "projectExecutionFlowStopReason": "checklist_incomplete",
         "updatedAt": _proj_now(),
     })
     _project_execution_transition(project, task, "reworking", actor or "system", feedback, rework_attempt_id)
-    _save_projects(data)
-    cancel_flag = threading.Event()
-    with _PROJECT_EXECUTION_LOCK:
-        _PROJECT_EXECUTION_CANCEL_FLAGS[rework_attempt_id] = cancel_flag
-    threading.Thread(target=_project_execution_run_attempt, args=(project_id, task_id, rework_attempt_id, cancel_flag), daemon=True).start()
     return {"ok": True, "continued": True, "status": "reworking", "attemptId": rework_attempt_id}
+
+
+def _project_execution_continue_for_incomplete_checklist(data, project_id, task_id, project, task, attempt_id, actor, done_result):
+    prepared = _project_execution_prepare_incomplete_checklist(project, task, attempt_id, actor, done_result)
+    _save_projects(data)
+    if prepared.get("continued"):
+        _project_execution_launch_rework(project_id, task_id, prepared["attemptId"])
+    return prepared
 
 
 def _project_execution_column_for_state(project, state):
@@ -21558,164 +21600,85 @@ def _project_execution_review_feedback(review):
 
 
 def _project_execution_extract_json(text):
-    raw = str(text or "").strip()
-    if not raw:
-        return None
-    try:
-        return json.loads(raw)
-    except Exception:
-        pass
-    match = re.search(r"\{.*\}", raw, re.S)
-    if match:
-        try:
-            return json.loads(match.group(0))
-        except Exception:
-            return None
-    return None
+    return review_acceptance_service.extract_json(text)
 
 
 def _project_execution_normalize_review(result, reviewer, attempt_id, review_id):
-    explicit = result.get("review") if isinstance(result, dict) else None
-    parsed = explicit if isinstance(explicit, dict) else _project_execution_extract_json(result.get("reply") if isinstance(result, dict) else "")
-    if not isinstance(parsed, dict):
-        parsed = {}
-    status = str(parsed.get("status") or "").strip().lower()
-    schema_ok = all(key in parsed for key in ("status", "summary", "rationale", "items")) and isinstance(parsed.get("items"), list)
-    if status not in {"pass", "needs_more_work", "blocked"}:
-        status = "blocked"
-    if not schema_ok:
-        status = "blocked"
-    items = parsed.get("items") if isinstance(parsed.get("items"), list) else []
-    return {
-        "id": review_id,
-        "attemptId": attempt_id,
-        "status": status,
-        "summary": _project_execution_redact(parsed.get("summary") or result.get("reply") or ""),
-        "rationale": _project_execution_redact(parsed.get("rationale") or result.get("error") or ""),
-        "items": items[:50],
-        "reviewer": {"providerKind": reviewer.get("providerKind"), "agentId": reviewer.get("id")},
-        "providerStatus": result.get("status") or ("completed" if result.get("ok") else "review_failed"),
-        "raw": _project_execution_redact(result.get("reply") or ""),
-        "reviewedAt": _proj_now(),
-    }
+    return review_acceptance_service.normalize_review(
+        result, reviewer, attempt_id, review_id,
+        redact=_project_execution_redact, now=_proj_now,
+    )
 
 
 def _project_execution_run_review(project_id, task_id, attempt_id, review_id):
+    return review_acceptance_service.run_review(
+        project_id, task_id, attempt_id, review_id,
+        ports=_project_execution_review_runner_ports(),
+    )
+
+
+def _project_execution_discard_review(review_id):
+    with _PROJECT_EXECUTION_LOCK:
+        _PROJECT_EXECUTION_REVIEW_FLAGS.discard(review_id)
+
+
+def _project_execution_launch_rework(project_id, task_id, attempt_id):
+    cancel_flag = _PROJECT_EXECUTION_CANCEL_REGISTRY.create(attempt_id)
     try:
-        data, project, task = _project_execution_find(project_id, task_id)
-        if not project or not task:
-            return
-        attempt = _project_execution_attempt(task, attempt_id)
-        if not attempt or task.get("activeAttemptId") != review_id:
-            return
-        reviewer = attempt.get("reviewer") or {}
-        result = _project_execution_call_reviewer(reviewer, _project_execution_build_review_prompt(project, task, attempt), review_id, project_id=project_id, task_id=task_id)
-        data, project, task = _project_execution_find(project_id, task_id)
-        if not project or not task:
-            return
-        attempt = _project_execution_attempt(task, attempt_id)
-        if not attempt or task.get("activeAttemptId") != review_id:
-            return
-        review = _project_execution_normalize_review(result, reviewer, attempt_id, review_id)
-        attempt["review"] = review
-        attempt["reviewedAt"] = review["reviewedAt"]
-        task.setdefault("reviewHistory", []).append(review)
-        task["reviewHistory"] = task["reviewHistory"][-50:]
-        task["reviewResult"] = review
-        task["activeAttemptId"] = None
-        project.update({"workflowActive": False, "activeTaskId": None, "activeAgent": None})
-        if review["status"] == "pass":
-            task.update({"blockedReason": None, "lastError": None})
-            attempt["status"] = "review_passed"
-            if _project_execution_attempt_requires_user_acceptance(task, attempt):
-                project["projectExecutionFlowActive"] = False
-                project["projectExecutionFlowStopReason"] = "awaiting_user_acceptance"
-                _project_execution_transition(project, task, "awaiting_user_acceptance", reviewer.get("id") or "reviewer", "Reviewer passed; waiting for explicit user acceptance.", attempt_id)
-                _send_project_execution_acceptance_notification(project, task, attempt_id, "Reviewer passed; waiting for explicit user acceptance.")
-            else:
-                done_result = _project_execution_mark_done(project, task, reviewer.get("id") or "reviewer", "Reviewer passed; task does not require user acceptance.", attempt_id)
-                if not done_result.get("ok"):
-                    continued = _project_execution_continue_for_incomplete_checklist(data, project_id, task_id, project, task, attempt_id, reviewer.get("id") or "reviewer", done_result)
-                    if continued.get("continued"):
-                        return
-                    task["blockedReason"] = done_result.get("error")
-                    _project_execution_transition(project, task, "blocked", "system", task["blockedReason"], attempt_id)
-                    _send_project_execution_intervention_notification(project, task, task["blockedReason"], attempt_id, event="blocked", kind="warning")
-                elif attempt.get("projectFlow") or project.get("projectExecutionFlowActive"):
-                    project["projectExecutionFlowActive"] = True
-                    project["projectExecutionFlowStopReason"] = None
-                    _project_execution_schedule_continue(project_id, "review_passed")
-        elif review["status"] == "needs_more_work":
-            attempt["status"] = "review_needs_more_work"
-            prior_reworks = int(task.get("reworkCount") or 0)
-            feedback = _project_execution_review_feedback(review)
-            if prior_reworks >= 3:
-                task["blockedReason"] = "Reviewer still requested more work after three rework cycles."
-                task["reworkFeedback"] = feedback
-                _project_execution_transition(project, task, "blocked", reviewer.get("id") or "reviewer", task["blockedReason"], attempt_id)
-                _send_project_execution_intervention_notification(project, task, task["blockedReason"], attempt_id, event="blocked", kind="warning")
-            else:
-                task["reworkCount"] = prior_reworks + 1
-                task["blockedReason"] = None
-                task["lastError"] = None
-                task["reworkFeedback"] = feedback
-                roles = _project_execution_resolve_roles(project, task)
-                workspace = _project_execution_validate_workspace(project.get("workspacePath"))
-                if not roles.get("ok") or not workspace.get("ok"):
-                    task["blockedReason"] = roles.get("error") if not roles.get("ok") else workspace.get("error")
-                    _project_execution_transition(project, task, "blocked", "system", task["blockedReason"], attempt_id)
-                    _send_project_execution_intervention_notification(project, task, task["blockedReason"], attempt_id, event="blocked", kind="warning")
-                else:
-                    automatic_snapshot = _project_execution_automatic_snapshot(project, workspace["path"])
-                    if not automatic_snapshot.get("ok"):
-                        task["blockedReason"] = automatic_snapshot.get("error")
-                        task["lastError"] = automatic_snapshot.get("code")
-                        _project_execution_transition(project, task, "blocked", "system", task["blockedReason"], attempt_id)
-                        _send_project_execution_intervention_notification(project, task, task["blockedReason"], attempt_id, event="blocked", kind="error")
-                        project["workflowPhase"] = "blocked"
-                        _save_projects(data)
-                        return
-                    rework_attempt_id = str(uuid.uuid4())
-                    rework_attempt = {
-                        "id": rework_attempt_id,
-                        "status": "reworking",
-                        "startedAt": _proj_now(),
-                        "workspacePath": workspace["path"],
-                        "workspaceKind": workspace["kind"],
-                        "dirtyConfirmed": False,
-                        "dirtyFingerprint": "",
-                        "executor": roles["executor"],
-                        "reviewer": roles["reviewer"],
-                        "baseline": automatic_snapshot["snapshot"],
-                        "rework": True,
-                        "reworkCycle": task["reworkCount"],
-                        "reworkFromAttemptId": attempt_id,
-                        "reworkFromReviewId": review_id,
-                        "reworkFeedback": feedback,
-                        "autoReviewAfterExecution": True,
-                    }
-                    task.setdefault("attempts", []).append(rework_attempt)
-                    task["attempts"] = task["attempts"][-20:]
-                    task.update({"activeAttemptId": rework_attempt_id, "executorAgentId": roles["executor"]["id"], "reviewerAgentId": roles["reviewer"]["id"]})
-                    project.update({"workflowActive": True, "workflowPhase": "reworking", "activeTaskId": task_id, "activeAgent": roles["executor"]["id"]})
-                    _project_execution_transition(project, task, "reworking", reviewer.get("id") or "reviewer", feedback, rework_attempt_id)
-                    cancel_flag = threading.Event()
-                    with _PROJECT_EXECUTION_LOCK:
-                        _PROJECT_EXECUTION_CANCEL_FLAGS[rework_attempt_id] = cancel_flag
-                    project["workflowPhase"] = task["executionState"]
-                    _save_projects(data)
-                    threading.Thread(target=_project_execution_run_attempt, args=(project_id, task_id, rework_attempt_id, cancel_flag), daemon=True).start()
-                    return
-        else:
-            attempt["status"] = "review_blocked"
-            task["blockedReason"] = review["summary"] or "Reviewer marked the task blocked."
-            _project_execution_transition(project, task, "blocked", reviewer.get("id") or "reviewer", task["blockedReason"], attempt_id)
-            _send_project_execution_intervention_notification(project, task, task["blockedReason"], attempt_id, event="blocked", kind="warning")
-        project["workflowPhase"] = task["executionState"]
-        _save_projects(data)
-    finally:
-        with _PROJECT_EXECUTION_LOCK:
-            _PROJECT_EXECUTION_REVIEW_FLAGS.discard(review_id)
+        _project_execution_launch(
+            lambda: _project_execution_run_attempt(project_id, task_id, attempt_id, cancel_flag),
+        )
+    except Exception:
+        _PROJECT_EXECUTION_CANCEL_REGISTRY.discard(attempt_id)
+        raise
+
+
+def _project_execution_review_runner_ports():
+    return review_acceptance_service.ReviewRunnerPorts(
+        find=_project_execution_find,
+        find_attempt=_project_execution_attempt,
+        build_prompt=_project_execution_build_review_prompt,
+        call_reviewer=_project_execution_call_reviewer,
+        normalize=_project_execution_normalize_review,
+        commit=_project_execution_commit_review_snapshot,
+        attempt_requires_acceptance=_project_execution_attempt_requires_user_acceptance,
+        transition=_project_execution_transition,
+        stage_acceptance=_stage_project_execution_acceptance_notification,
+        deliver_notification=_deliver_staged_project_execution_notification,
+        mark_done=_project_execution_mark_done,
+        prepare_incomplete_checklist=_project_execution_prepare_incomplete_checklist,
+        schedule_continue=_project_execution_schedule_continue,
+        review_feedback=_project_execution_review_feedback,
+        resolve_roles=_project_execution_resolve_roles,
+        validate_workspace=_project_execution_validate_workspace,
+        automatic_snapshot=_project_execution_automatic_snapshot,
+        deliver_intervention=_deliver_project_execution_intervention,
+        now=_proj_now,
+        new_id=_proj_uuid,
+        launch_rework=_project_execution_launch_rework,
+        discard_review=_project_execution_discard_review,
+    )
+
+
+def _project_execution_commit_review_snapshot(project_id, task_id, attempt_id, review_id, data, baseline_project):
+    def still_current(project):
+        task = next((item for item in project.get("tasks", []) if item.get("id") == task_id), None)
+        attempt = _project_execution_attempt(task or {}, attempt_id)
+        return bool(task and attempt and task.get("activeAttemptId") == review_id)
+
+    changed_project = next(
+        (item for item in data.get("projects", []) if item.get("id") == project_id),
+        None,
+    )
+    if changed_project is None:
+        return False
+    try:
+        committed = _PROJECT_REPOSITORY.commit_project_if(
+            project_id, changed_project, baseline_project, still_current,
+        )
+    except ProjectConflictError:
+        return False
+    return committed is not None
 
 
 def _project_execution_commit_attempt_snapshot(project_id, task_id, attempt_id, data, baseline_project):
@@ -21793,7 +21756,8 @@ def _project_execution_runner_ports():
         launcher=_project_execution_launch,
         start_task=_handle_project_execution_start,
         attempt_requires_acceptance=_project_execution_attempt_requires_user_acceptance,
-        notify_acceptance=_send_project_execution_acceptance_notification,
+        stage_acceptance=_stage_project_execution_acceptance_notification,
+        deliver_notification=_deliver_staged_project_execution_notification,
         mark_done=_project_execution_mark_done,
         continue_incomplete_checklist=_project_execution_continue_for_incomplete_checklist,
         schedule_continue=_project_execution_schedule_continue,
@@ -21906,160 +21870,57 @@ def _handle_project_execution_cancel(project_id, task_id, body=None):
 
 
 def _handle_project_execution_review_start(project_id, task_id, body=None):
-    data, project, task = _project_execution_find(project_id, task_id)
-    if not project or not task:
-        return {"error": "Project or task not found", "_status": 404}
-    if not _project_execution_enabled(project):
-        return {"error": "Project Execution is not enabled for this project", "_status": 409}
-    if task.get("executionState") != "execution_complete":
-        return {"error": "Task must be execution_complete before reviewer handoff", "_status": 409}
-    attempt = _project_execution_latest_attempt(task)
-    if not attempt or not (attempt.get("evidence") or task.get("evidence")):
-        return {"error": "Execution evidence is required before review", "_status": 409}
-    requested_attempt = str((body or {}).get("attemptId") or attempt.get("id"))
-    if requested_attempt != attempt.get("id"):
-        return {"error": "Stale or mismatched attempt cannot be reviewed", "_status": 409}
-    roles = _project_execution_resolve_roles(project, task)
-    if not roles.get("ok"):
-        return {**roles, "_status": 409}
-    active = _project_execution_active_task(project)
-    if active:
-        return {"error": "Another task is already active for this project", "activeTaskId": active.get("id"), "_status": 409}
-    review_id = str(uuid.uuid4())
-    attempt["reviewer"] = roles["reviewer"]
-    attempt["reviewStartedAt"] = _proj_now()
-    task.update({"activeAttemptId": review_id, "reviewerAgentId": roles["reviewer"]["id"], "reviewResult": {}, "blockedReason": None, "lastError": None})
-    project.update({"workflowActive": True, "workflowPhase": "reviewing", "activeTaskId": task_id, "activeAgent": roles["reviewer"]["id"]})
-    _project_execution_transition(project, task, "reviewing", "user", "Independent reviewer handoff started", attempt.get("id"))
-    _save_projects(data)
-    with _PROJECT_EXECUTION_LOCK:
-        _PROJECT_EXECUTION_REVIEW_FLAGS.add(review_id)
-    threading.Thread(target=_project_execution_run_review, args=(project_id, task_id, attempt.get("id"), review_id), daemon=True).start()
-    return {"ok": True, "status": "reviewing", "taskId": task_id, "attemptId": attempt.get("id"), "reviewId": review_id}
-
-
-def _handle_project_execution_acceptance(project_id, task_id, body=None):
-    body = body or {}
-    data, project, task = _project_execution_find(project_id, task_id)
-    if not project or not task:
-        return {"error": "Project or task not found", "_status": 404}
-    if not _project_execution_enabled(project):
-        return {"error": "Project Execution is not enabled for this project", "_status": 409}
-    action = str(body.get("action") or "").strip()
-    if action not in {"accept", "reject_and_rework", "mark_blocked"}:
-        return {"error": "Invalid acceptance action", "_status": 400}
-    review = task.get("reviewResult") or {}
-    attempt_id = str(body.get("attemptId") or "")
-    if action == "accept":
-        if task.get("executionState") != "awaiting_user_acceptance" or review.get("status") not in {"pass", "skipped"}:
-            return {"error": "Reviewer pass or skipped review confirmation is required before user acceptance", "_status": 409}
-        if not attempt_id or attempt_id != review.get("attemptId"):
-            return {"error": "Stale or mismatched acceptance attempt", "_status": 409}
-        done_col = _wf_get_done_col(project)
-        if not done_col:
-            return {"error": "Done column not found", "_status": 409}
-        done_reason = "User accepted skipped review result" if review.get("status") == "skipped" else "User accepted reviewer pass"
-        done_result = _project_execution_mark_done(
-            project,
-            task,
-            "user",
-            done_reason,
-            attempt_id,
-            allow_empty_checklist=body.get("allowEmptyChecklist") is True,
-        )
-        if not done_result.get("ok"):
-            return done_result
-        task.setdefault("acceptanceHistory", []).append({"action": "accept", "attemptId": attempt_id, "at": _proj_now(), "by": "user"})
-        task["acceptanceHistory"] = task["acceptanceHistory"][-50:]
-        should_continue = project.get("projectExecutionStartMode") == "continuous"
-        project.update({"workflowActive": False, "workflowPhase": "done", "activeTaskId": None, "activeAgent": None, "updatedAt": _proj_now(), "projectExecutionFlowActive": should_continue, "projectExecutionFlowStopReason": None if should_continue else "user_acceptance_completed"})
-        _log_activity(project, "project_execution_user_accepted", "user", f"User accepted Project Execution task '{task.get('title', '')}'", task_id)
-        _save_projects(data)
-        if should_continue:
-            _project_execution_schedule_continue(project_id, "user_accepted")
-        return {"ok": True, "status": "done", "task": task, "flowContinues": should_continue}
-    feedback = str(body.get("feedback") or "").strip()
-    if not feedback:
-        return {"error": "Feedback is required", "_status": 400}
-    if task.get("executionState") != "awaiting_user_acceptance" or review.get("status") not in {"pass", "skipped"}:
-        return {"error": "A current reviewer pass or skipped review result is required before this acceptance action", "_status": 409}
-    if attempt_id and attempt_id != review.get("attemptId"):
-        return {"error": "Stale or mismatched acceptance attempt", "_status": 409}
-    task.setdefault("acceptanceHistory", []).append({"action": action, "attemptId": review.get("attemptId"), "feedback": _project_execution_redact(feedback), "at": _proj_now(), "by": "user"})
-    task["acceptanceHistory"] = task["acceptanceHistory"][-50:]
-    task["reviewResult"] = {}
-    task["reworkFeedback"] = _project_execution_redact(feedback)
-    if action == "reject_and_rework":
-        workspace = _project_execution_validate_workspace(project.get("workspacePath"))
-        if not workspace.get("ok"):
-            task["blockedReason"] = workspace.get("error") or "Project workspace is not available for rework."
-            _project_execution_transition(project, task, "blocked", "system", task["blockedReason"], review.get("attemptId"))
-            _send_project_execution_intervention_notification(project, task, task["blockedReason"], review.get("attemptId"), event="blocked", kind="error")
-            project.update({"workspaceStatus": workspace, "workflowActive": False, "workflowPhase": "blocked", "activeTaskId": None, "activeAgent": None, "updatedAt": _proj_now()})
-            _save_projects(data)
-            return {**workspace, "_status": 409}
-        active = _project_execution_active_task(project)
-        if active:
-            return {"error": "Another task is already active for this project", "activeTaskId": active.get("id"), "_status": 409}
-        roles = _project_execution_resolve_start_roles(
-            project,
-            task,
-            allow_skip_reviewer=task.get("allowReviewerlessExecution") is True or review.get("status") == "skipped",
-        )
-        if not roles.get("ok"):
-            return {**roles, "_status": 409}
-        automatic_snapshot = _project_execution_automatic_snapshot(project, workspace["path"])
-        if not automatic_snapshot.get("ok"):
-            task["blockedReason"] = automatic_snapshot.get("error")
-            task["lastError"] = automatic_snapshot.get("code")
-            _project_execution_transition(project, task, "blocked", "system", task["blockedReason"], review.get("attemptId"))
-            _send_project_execution_intervention_notification(project, task, task["blockedReason"], review.get("attemptId"), event="blocked", kind="error")
-            project.update({"workflowActive": False, "workflowPhase": "blocked", "activeTaskId": None, "activeAgent": None, "updatedAt": _proj_now()})
-            _save_projects(data)
-            return {**automatic_snapshot, "_status": 409}
-        task["reworkCount"] = int(task.get("reworkCount") or 0) + 1
-        task["blockedReason"] = None
-        rejected_source = "skipped review result" if review.get("status") == "skipped" else "reviewer pass"
-        rework_attempt_id = str(uuid.uuid4())
-        rework_attempt = {
-            "id": rework_attempt_id,
-            "status": "reworking",
-            "startedAt": _proj_now(),
-            "workspacePath": workspace["path"],
-            "workspaceKind": workspace["kind"],
-            "dirtyConfirmed": False,
-            "dirtyFingerprint": "",
-            "executor": roles["executor"],
-            "reviewer": roles.get("reviewer"),
-            "skipReview": bool(roles.get("skipReview")),
-            "skipReviewReason": roles.get("skipReviewReason"),
-            "baseline": automatic_snapshot["snapshot"],
-            "startMode": "single",
-            "projectFlow": False,
-            "requiresUserAcceptance": _project_execution_requires_user_acceptance(task),
-            "rework": True,
-            "reworkCycle": task["reworkCount"],
-            "reworkFromAttemptId": review.get("attemptId"),
-            "reworkFeedback": task["reworkFeedback"],
-            "autoReviewAfterExecution": not roles.get("skipReview"),
-        }
-        task.setdefault("attempts", []).append(rework_attempt)
-        task["attempts"] = task["attempts"][-20:]
-        task.update({"activeAttemptId": rework_attempt_id, "executorAgentId": roles["executor"]["id"], "reviewerAgentId": (roles.get("reviewer") or {}).get("id"), "lastError": None})
-        project.update({"workspaceStatus": workspace, "projectExecutionFlowActive": False, "projectExecutionFlowStopReason": None, "workflowActive": True, "workflowPhase": "reworking", "activeTaskId": task_id, "activeAgent": roles["executor"]["id"], "updatedAt": _proj_now()})
-        _project_execution_transition(project, task, "reworking", "user", f"User rejected {rejected_source}: {feedback}", rework_attempt_id)
-        _save_projects(data)
-        cancel_flag = threading.Event()
+    def register(review_id):
         with _PROJECT_EXECUTION_LOCK:
-            _PROJECT_EXECUTION_CANCEL_FLAGS[rework_attempt_id] = cancel_flag
-        threading.Thread(target=_project_execution_run_attempt, args=(project_id, task_id, rework_attempt_id, cancel_flag), daemon=True).start()
-        return {"ok": True, "status": "reworking", "task": task, "attemptId": rework_attempt_id}
-    task["blockedReason"] = _project_execution_redact(feedback)
-    _project_execution_transition(project, task, "blocked", "user", feedback, review.get("attemptId"))
-    _send_project_execution_intervention_notification(project, task, task["blockedReason"], review.get("attemptId"), event="blocked", kind="warning")
-    project.update({"workflowActive": False, "workflowPhase": "blocked", "activeTaskId": None, "activeAgent": None, "updatedAt": _proj_now()})
-    _save_projects(data)
-    return {"ok": True, "status": "blocked", "task": task}
+            _PROJECT_EXECUTION_REVIEW_FLAGS.add(review_id)
+
+    return review_acceptance_service.start_review(
+        project_id, task_id, body,
+        context=review_acceptance_service.EntryContext.http(),
+        repository=_PROJECT_REPOSITORY,
+        ports=review_acceptance_service.ReviewStartPorts(
+            enabled=_project_execution_enabled,
+            latest_attempt=_project_execution_latest_attempt,
+            resolve_roles=_project_execution_resolve_roles,
+            active_task=_project_execution_active_task,
+            transition=_project_execution_transition,
+            now=_proj_now,
+            new_id=_proj_uuid,
+            register_review=register,
+            launcher=_project_execution_launch,
+            runner=_project_execution_run_review,
+        ),
+    )
+
+
+def _handle_project_execution_acceptance(project_id, task_id, body=None, *, entry_context=None):
+    context = entry_context or review_acceptance_service.EntryContext.http()
+    return review_acceptance_service.acceptance(
+        project_id, task_id, body,
+        context=context,
+        repository=_PROJECT_REPOSITORY,
+        ports=review_acceptance_service.AcceptancePorts(
+            enabled=_project_execution_enabled,
+            validate_workspace=_project_execution_validate_workspace,
+            active_task=_project_execution_active_task,
+            resolve_roles=lambda project, task, allow_skip: _project_execution_resolve_start_roles(
+                project, task, allow_skip_reviewer=allow_skip,
+            ),
+            automatic_snapshot=_project_execution_automatic_snapshot,
+            requires_acceptance=_project_execution_requires_user_acceptance,
+            mark_done=_project_execution_mark_done,
+            transition=_project_execution_transition,
+            log_activity=_log_activity,
+            redact=_project_execution_redact,
+            now=_proj_now,
+            new_id=_proj_uuid,
+            create_cancel_flag=_PROJECT_EXECUTION_CANCEL_REGISTRY.create,
+            launcher=_project_execution_launch,
+            runner=_project_execution_run_attempt,
+            schedule_continue=_project_execution_schedule_continue,
+            notify_intervention=_send_project_execution_intervention_notification,
+        ),
+    )
 
 
 def _handle_project_execution_meeting_blocker_action(project_id, task_id, body=None):
