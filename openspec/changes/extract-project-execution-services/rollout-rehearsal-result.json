@@ -1,9 +1,9 @@
 {
   "result": "pass",
   "scope": "local-pre-staging",
-  "executedAt": "2026-07-12T17:35:09Z",
+  "executedAt": "2026-07-12T17:42:57Z",
   "baseSha": "13a8219afdc410a65cdf8b34d6d695fc22335c2b",
-  "runtimePatchSha256": "e7eeb70ffbbf2f792c8e893d1dd0a26f3c81ded67fdf682267b29626dd4daee9",
+  "runtimePatchSha256": "bf3759c3f8fd84a42787893b86b6974b03cc8c84a2065c6f56fd37a037e2f8c2",
   "fixture": {
     "projects": 50,
     "tasks": 2500
@@ -15,7 +15,7 @@
   "activeBefore": {
     "active": true,
     "phase": "executing",
-    "attemptId": "20be54dd-4e46-4135-a195-a9eff34416f1"
+    "attemptId": "4f019a9e-1d94-486b-8514-553ad1e789a8"
   },
   "activeAfter": {
     "active": false,
@@ -43,7 +43,7 @@
     "browser_viewer_unavailable"
   ],
   "ids": {
-    "projectId": "cd31bc07-d148-4146-ac19-8362232f443b",
-    "taskId": "0e0e672d-c65b-4d61-bee0-ef65f1411d82"
+    "projectId": "9acdcc7f-5e08-482b-9d8d-81924394f7ef",
+    "taskId": "d782d872-94c8-47ca-aba3-5ee4599a3c00"
   }
 }

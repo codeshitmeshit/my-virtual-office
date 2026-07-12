@@ -104,14 +104,33 @@ class UnsafeArtifactError(OSError):
     pass
 
 
-def _open_component_no_follow(root: str, relative: str) -> int:
+def _open_root_no_follow(root: str, expected_root: os.stat_result) -> int:
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    if not nofollow or not _secure_open_available():
+        raise NotImplementedError("secure root open is unavailable")
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0) | nofollow
+    root_fd = os.open(root, flags)
+    try:
+        opened_root = os.fstat(root_fd)
+        if (
+            not stat.S_ISDIR(opened_root.st_mode)
+            or (opened_root.st_dev, opened_root.st_ino) != (expected_root.st_dev, expected_root.st_ino)
+        ):
+            raise UnsafeArtifactError("artifact root changed while opening")
+        return root_fd
+    except Exception:
+        os.close(root_fd)
+        raise
+
+
+def _open_component_no_follow(root: str, relative: str, expected_root: os.stat_result) -> int:
     """Open every path component relative to a trusted root descriptor."""
     nofollow = getattr(os, "O_NOFOLLOW", 0)
     if not nofollow or not _secure_open_available():
         raise NotImplementedError("secure dir_fd open is unavailable")
     directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0) | nofollow
     file_flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NONBLOCK", 0) | nofollow
-    root_fd = os.open(root, directory_flags)
+    root_fd = _open_root_no_follow(root, expected_root)
     current_fd = root_fd
     try:
         parts = relative.split("/")
@@ -127,7 +146,7 @@ def _open_component_no_follow(root: str, relative: str) -> int:
         os.close(root_fd)
 
 
-def _open_fallback(root: str, full_path: str) -> int:
+def _open_fallback(root: str, full_path: str, expected_root: os.stat_result) -> int:
     """Fallback for platforms without dir_fd/no-follow; revalidate inode after open."""
     before = os.stat(full_path, follow_symlinks=False)
     if not stat.S_ISREG(before.st_mode):
@@ -138,6 +157,7 @@ def _open_fallback(root: str, full_path: str) -> int:
     )
     try:
         after = os.fstat(descriptor)
+        latest_root = os.stat(root, follow_symlinks=False)
         canonical = os.path.realpath(full_path)
         if canonical != root and not canonical.startswith(root + os.sep):
             raise UnsafeArtifactError("outside root")
@@ -145,6 +165,7 @@ def _open_fallback(root: str, full_path: str) -> int:
         identity = (before.st_dev, before.st_ino)
         if (
             not stat.S_ISREG(after.st_mode)
+            or (latest_root.st_dev, latest_root.st_ino) != (expected_root.st_dev, expected_root.st_ino)
             or identity != (after.st_dev, after.st_ino)
             or identity != (latest.st_dev, latest.st_ino)
         ):
@@ -155,11 +176,13 @@ def _open_fallback(root: str, full_path: str) -> int:
         raise
 
 
-def _open_regular(root: str, full_path: str, relative: str) -> tuple[int, os.stat_result]:
+def _open_regular(
+    root: str, full_path: str, relative: str, expected_root: os.stat_result,
+) -> tuple[int, os.stat_result]:
     try:
-        descriptor = _open_component_no_follow(root, relative)
+        descriptor = _open_component_no_follow(root, relative, expected_root)
     except (NotImplementedError, TypeError):
-        descriptor = _open_fallback(root, full_path)
+        descriptor = _open_fallback(root, full_path, expected_root)
     try:
         metadata = os.fstat(descriptor)
         if not stat.S_ISREG(metadata.st_mode):
@@ -193,29 +216,37 @@ def _secure_directory_delete_available() -> bool:
     )
 
 
-def _root(context: Mapping[str, Any]) -> tuple[str | None, dict[str, Any] | None]:
+def _root(
+    context: Mapping[str, Any],
+) -> tuple[str | None, os.stat_result | None, dict[str, Any] | None]:
     raw_root = context.get("root")
     if not isinstance(raw_root, (str, os.PathLike)) or not str(raw_root).strip():
-        return None, _error("Artifact root is not accessible", 409)
+        return None, None, _error("Artifact root is not accessible", 409)
     expanded = os.path.expanduser(str(raw_root).strip())
     if not os.path.isabs(expanded):
-        return None, _error("Artifact root is not accessible", 409)
+        return None, None, _error("Artifact root is not accessible", 409)
     root = os.path.realpath(expanded)
-    if not root or not os.path.isdir(root):
-        return None, _error("Artifact root is not accessible", 409)
-    return root, None
+    try:
+        metadata = os.stat(root, follow_symlinks=False)
+    except OSError:
+        return None, None, _error("Artifact root is not accessible", 409)
+    if not root or not stat.S_ISDIR(metadata.st_mode):
+        return None, None, _error("Artifact root is not accessible", 409)
+    return root, metadata, None
 
 
-def _validated_path(context: Mapping[str, Any], relative_path: Any) -> tuple[str | None, str, dict[str, Any] | None]:
-    root, error = _root(context)
+def _validated_path(
+    context: Mapping[str, Any], relative_path: Any,
+) -> tuple[str | None, str, os.stat_result | None, dict[str, Any] | None]:
+    root, root_metadata, error = _root(context)
     if error:
-        return None, "", error
+        return None, "", None, error
     full_path, relative = resolve_inside_root(root, relative_path)
     if not relative:
-        return None, "", _error("Artifact path is required", 400)
+        return None, "", None, _error("Artifact path is required", 400)
     if not full_path:
-        return None, relative, _error("Artifact path is outside the artifact root", 403)
-    return full_path, relative, None
+        return None, relative, None, _error("Artifact path is outside the artifact root", 403)
+    return full_path, relative, root_metadata, None
 
 
 def list_artifacts(
@@ -223,7 +254,7 @@ def list_artifacts(
     allowed_extensions: Iterable[str] | None = None,
     associated_only: bool = False,
 ) -> dict[str, Any]:
-    root, error = _root(context)
+    root, root_metadata, error = _root(context)
     if error:
         return error
     allowed = frozenset(allowed_extensions or MARKDOWN_EXTENSIONS)
@@ -231,8 +262,12 @@ def list_artifacts(
     artifacts: list[dict[str, Any]] = []
     truncated = False
     scanned = 0
+    root_fd = None
     try:
-        for current_root, directories, files in os.walk(root, followlinks=False):
+        root_fd = _open_root_no_follow(root, root_metadata)
+        for current_root, directories, files, current_fd in os.fwalk(
+            ".", topdown=True, follow_symlinks=False, dir_fd=root_fd,
+        ):
             scanned += len(directories) + len(files)
             if scanned > MAX_SCANNED_ENTRIES:
                 truncated = True
@@ -240,10 +275,10 @@ def list_artifacts(
             directories[:] = [
                 name for name in directories
                 if name not in EXCLUDE_DIRS and not name.startswith(".git")
-                and not os.path.islink(os.path.join(current_root, name))
+                and not stat.S_ISLNK(os.stat(name, dir_fd=current_fd, follow_symlinks=False).st_mode)
             ]
-            relative_dir = os.path.relpath(current_root, root)
-            depth = 0 if relative_dir == "." else relative_dir.count(os.sep) + 1
+            relative_dir = current_root
+            depth = 0 if relative_dir == "." else relative_dir.count(os.sep)
             if depth > MAX_DEPTH:
                 directories[:] = []
                 continue
@@ -251,14 +286,16 @@ def list_artifacts(
                 extension = os.path.splitext(name)[1].lower()
                 if extension not in allowed:
                     continue
-                path = os.path.join(current_root, name)
                 try:
-                    metadata = os.stat(path, follow_symlinks=False)
+                    metadata = os.stat(name, dir_fd=current_fd, follow_symlinks=False)
                 except OSError:
                     continue
                 if not stat.S_ISREG(metadata.st_mode):
                     continue
-                relative = os.path.relpath(path, root).replace(os.sep, "/")
+                relative = os.path.normpath(os.path.join(current_root, name))
+                if relative.startswith("." + os.sep):
+                    relative = relative[2:]
+                relative = relative.replace(os.sep, "/")
                 records = sources.get(relative, [])
                 if associated_only and not records:
                     continue
@@ -273,14 +310,17 @@ def list_artifacts(
                     break
             if truncated:
                 break
-    except OSError:
+    except (OSError, UnsafeArtifactError, NotImplementedError):
         return _error("Unable to scan artifacts", 500)
+    finally:
+        if root_fd is not None:
+            os.close(root_fd)
     artifacts.sort(key=lambda item: (item.get("modifiedAt") or "", item.get("path") or ""), reverse=True)
     return {"ok": True, "artifacts": artifacts, "truncated": truncated}
 
 
 def open_file(context: Mapping[str, Any], relative_path: Any, *, associated_only: bool = True) -> dict[str, Any]:
-    full_path, relative, error = _validated_path(context, relative_path)
+    full_path, relative, root_metadata, error = _validated_path(context, relative_path)
     if error:
         return error
     extension = os.path.splitext(relative)[1].lower()
@@ -291,7 +331,7 @@ def open_file(context: Mapping[str, Any], relative_path: Any, *, associated_only
         return _error("Artifact is not associated with this project", 403)
     root = os.path.realpath(str(context.get("root") or ""))
     try:
-        descriptor, metadata = _open_regular(root, full_path, relative)
+        descriptor, metadata = _open_regular(root, full_path, relative, root_metadata)
     except FileNotFoundError:
         return _error("Artifact not found", 404)
     except (OSError, UnsafeArtifactError):
@@ -307,7 +347,7 @@ def read_artifact(
     context: Mapping[str, Any], relative_path: Any, *, allow_text: bool = False,
     associated_only: bool = False,
 ) -> dict[str, Any]:
-    full_path, relative, error = _validated_path(context, relative_path)
+    full_path, relative, root_metadata, error = _validated_path(context, relative_path)
     if error:
         return error
     extension = os.path.splitext(relative)[1].lower()
@@ -319,7 +359,7 @@ def read_artifact(
         return _error("Artifact is not associated with this project", 403)
     root = os.path.realpath(str(context.get("root") or ""))
     try:
-        descriptor, metadata = _open_regular(root, full_path, relative)
+        descriptor, metadata = _open_regular(root, full_path, relative, root_metadata)
         with os.fdopen(descriptor, "rb", closefd=True) as stream:
             raw = stream.read(MAX_READ_BYTES + 1)
     except FileNotFoundError:
@@ -336,7 +376,7 @@ def read_artifact(
 
 
 def delete_file(context: Mapping[str, Any], relative_path: Any) -> dict[str, Any]:
-    full_path, relative, error = _validated_path(context, relative_path)
+    full_path, relative, root_metadata, error = _validated_path(context, relative_path)
     if error:
         return error
     extension = os.path.splitext(relative)[1].lower()
@@ -348,21 +388,10 @@ def delete_file(context: Mapping[str, Any], relative_path: Any) -> dict[str, Any
     parent_relative, name = os.path.split(relative)
     parent_fd = None
     try:
-        expected_root = os.stat(root, follow_symlinks=False)
-        if not stat.S_ISDIR(expected_root.st_mode):
-            return _error("Unable to delete artifact", 500)
-        parent_path = root if not parent_relative else os.path.join(root, parent_relative)
-        parent_fd = _open_component_no_follow(root, parent_relative) if parent_relative else os.open(
-            root,
-            os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0)
-            | getattr(os, "O_NOFOLLOW", 0),
+        parent_fd = (
+            _open_component_no_follow(root, parent_relative, root_metadata)
+            if parent_relative else _open_root_no_follow(root, root_metadata)
         )
-        opened_root = os.fstat(parent_fd) if not parent_relative else None
-        if opened_root is not None and (
-            not stat.S_ISDIR(opened_root.st_mode)
-            or (opened_root.st_dev, opened_root.st_ino) != (expected_root.st_dev, expected_root.st_ino)
-        ):
-            raise UnsafeArtifactError("artifact root changed while opening")
         metadata = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
         if not stat.S_ISREG(metadata.st_mode):
             return _error("Artifact is not a safe regular file", 403)
@@ -386,7 +415,7 @@ def _delete_file_fallback(root: str, full_path: str, relative: str) -> dict[str,
 
 
 def delete_directory(context: Mapping[str, Any], relative_directory: Any) -> dict[str, Any]:
-    root, error = _root(context)
+    root, root_metadata, error = _root(context)
     if error:
         return error
     if relative_directory:
@@ -442,12 +471,12 @@ def delete_directory(context: Mapping[str, Any], relative_directory: Any) -> dic
         if relative:
             parent_relative, target_name = os.path.split(relative)
             if parent_relative:
-                parent_fd = _open_component_no_follow(root, parent_relative)
+                parent_fd = _open_component_no_follow(root, parent_relative, root_metadata)
             else:
-                parent_fd = os.open(root, directory_flags)
+                parent_fd = _open_root_no_follow(root, root_metadata)
             target_fd = os.open(target_name, directory_flags, dir_fd=parent_fd)
         else:
-            target_fd = os.open(root, directory_flags)
+            target_fd = _open_root_no_follow(root, root_metadata)
         if not stat.S_ISDIR(os.fstat(target_fd).st_mode):
             return _error("Artifact directory not found", 404)
         delete_allowed(target_fd)
@@ -458,7 +487,7 @@ def delete_directory(context: Mapping[str, Any], relative_directory: Any) -> dic
                 pass
     except FileNotFoundError:
         return _error("Artifact directory not found", 404)
-    except OSError:
+    except (OSError, UnsafeArtifactError):
         return _error("Unable to delete artifact directory", 500)
     finally:
         if target_fd is not None:

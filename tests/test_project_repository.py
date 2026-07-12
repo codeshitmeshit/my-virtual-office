@@ -313,6 +313,34 @@ def test_stale_snapshot_cannot_delete_a_concurrently_updated_entity():
     assert repo.get("p1")["workflowPhase"] == "execution_complete"
 
 
+def test_stale_snapshots_cannot_add_same_entity_id_with_different_values():
+    _, repo = repository()
+    baseline = repo.load_all()
+    first = copy.deepcopy(baseline)
+    second = copy.deepcopy(baseline)
+    first["projects"].append({"id": "p3", "title": "first", "activity": []})
+    second["projects"].append({"id": "p3", "title": "second", "activity": []})
+
+    repo.commit_snapshot(first, baseline)
+    with pytest.raises(ProjectConflictError, match="legacy entity addition"):
+        repo.commit_snapshot(second, baseline)
+
+    assert repo.get("p3")["title"] == "first"
+
+
+def test_stale_snapshot_cannot_revive_concurrently_deleted_entity():
+    _, repo = repository()
+    baseline = repo.load_all()
+    changed = copy.deepcopy(baseline)
+    changed["projects"][0]["title"] = "legacy update"
+    repo.delete("p1")
+
+    with pytest.raises(ProjectConflictError, match="legacy entity update"):
+        repo.commit_snapshot(changed, baseline)
+
+    assert repo.get("p1") is None
+
+
 def test_conditional_snapshot_commit_discards_stale_attempt_result():
     _, repo = repository()
     repo.update("p1", lambda project: project.update({"activeAttemptId": "a1"}))

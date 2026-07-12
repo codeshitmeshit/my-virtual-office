@@ -148,6 +148,52 @@ def test_root_level_delete_rejects_workspace_root_symlink_swap(monkeypatch):
                 os.rename(original_root, root)
 
 
+def test_operations_reject_workspace_root_real_directory_swap(monkeypatch):
+    operations = [
+        lambda context: artifact_service.list_artifacts(context),
+        lambda context: artifact_service.read_artifact(context, "victim.md"),
+        lambda context: artifact_service.open_file(context, "victim.md", associated_only=False),
+        lambda context: artifact_service.delete_file(context, "nested/victim.md"),
+        lambda context: artifact_service.delete_directory(context, "generated"),
+    ]
+    for operation in operations:
+        with tempfile.TemporaryDirectory() as parent:
+            root = os.path.join(parent, "workspace")
+            canonical_root = os.path.realpath(root)
+            original_root = os.path.join(parent, "workspace-original")
+            replacement = os.path.join(parent, "replacement")
+            os.mkdir(root)
+            os.mkdir(replacement)
+            for base, content in ((root, "inside"), (replacement, "replacement")):
+                _write(os.path.join(base, "victim.md"), content)
+                _write(os.path.join(base, "nested", "victim.md"), content)
+                _write(os.path.join(base, "generated", "victim.md"), content)
+            original_open = artifact_service.os.open
+            swapped = {"value": False}
+
+            def swap_root_before_open(path, flags, *args, **kwargs):
+                if path == canonical_root and "dir_fd" not in kwargs and not swapped["value"]:
+                    swapped["value"] = True
+                    os.rename(root, original_root)
+                    os.rename(replacement, root)
+                return original_open(path, flags, *args, **kwargs)
+
+            monkeypatch.setattr(artifact_service, "_secure_open_available", lambda: True)
+            monkeypatch.setattr(artifact_service.os, "open", swap_root_before_open)
+            try:
+                result = operation({"root": root, "sourcesByPath": {}})
+                assert result.get("ok") is not True
+                assert open(os.path.join(root, "victim.md"), encoding="utf-8").read() == "replacement"
+                assert open(os.path.join(root, "nested", "victim.md"), encoding="utf-8").read() == "replacement"
+                assert open(os.path.join(root, "generated", "victim.md"), encoding="utf-8").read() == "replacement"
+            finally:
+                monkeypatch.setattr(artifact_service.os, "open", original_open)
+                if swapped["value"] and os.path.isdir(root):
+                    os.rename(root, replacement)
+                if os.path.isdir(original_root):
+                    os.rename(original_root, root)
+
+
 def test_directory_delete_is_allowlist_recursive_and_preserves_other_files():
     with tempfile.TemporaryDirectory() as root:
         _write(os.path.join(root, "generated", "one.md"), "one")
@@ -182,12 +228,12 @@ def test_read_rejects_symlink_swap_between_validation_and_open(monkeypatch):
         original_open = artifact_service._open_component_no_follow
         swapped = {"value": False}
 
-        def swap_before_open(root_value, relative):
+        def swap_before_open(root_value, relative, expected_root):
             if relative == "report.md" and not swapped["value"]:
                 swapped["value"] = True
                 os.unlink(target)
                 os.symlink(secret, target)
-            return original_open(root_value, relative)
+            return original_open(root_value, relative, expected_root)
 
         monkeypatch.setattr(artifact_service, "_open_component_no_follow", swap_before_open)
         result = artifact_service.read_artifact({"root": root, "sourcesByPath": {}}, "report.md")
@@ -338,6 +384,7 @@ def test_directory_delete_rejects_top_level_symlink_swap(monkeypatch):
             return original_open(path, flags, *args, **kwargs)
 
         monkeypatch.setattr(artifact_service, "_secure_directory_delete_available", lambda: True)
+        monkeypatch.setattr(artifact_service, "_secure_open_available", lambda: True)
         monkeypatch.setattr(artifact_service.os, "open", swap_target)
         result = artifact_service.delete_directory({"root": root}, "generated")
         assert result.get("ok") is not True

@@ -10,9 +10,9 @@ rg --files tests -g 'test_*.py' \
   | xargs .venv/bin/python -m pytest -q
 ```
 
-Final post-CR result: **508 passed**, 2 dependency deprecation warnings, 0 failed. The suite covers project persistence and writer races, Provider adapters, execution lifecycle, Review/acceptance/notifications, Feishu, Meeting, Artifact, Cron, SSE, WebSocket route contracts, dashboard realtime behavior, and the static/security/performance gates. Section 8, overall-CR, and push-gate additions cover the documentation contract, concurrent compatibility work-log/project updates, attempt-workspace binding, Provider-enforced read-only native review, Cron occurrence retry after unexpected exceptions, Gateway/binding compensation/retry failures, fail-closed missing/relative Artifact roots, root-replacement deletion safety, and conflicting/idempotent same-field legacy additions.
+Final post-CR result: **511 passed**, 2 dependency deprecation warnings, 0 failed. The suite covers project persistence and writer races, Provider adapters, execution lifecycle, Review/acceptance/notifications, Feishu, Meeting, Artifact, Cron, SSE, WebSocket route contracts, dashboard realtime behavior, and the static/security/performance gates. Section 8, overall-CR, and push-gate additions cover the documentation contract, concurrent compatibility work-log/project updates, attempt-workspace binding, Provider-enforced read-only native review, Cron occurrence retry after unexpected exceptions, Gateway/binding compensation/retry failures, fail-closed missing/relative Artifact roots, root-replacement deletion safety, and conflicting/idempotent same-field legacy additions.
 
-The first Section 8 run was `497 passed, 1 failed`: the reviewer-provider matrix replaced the Claude handler but did not restore it, so a later usage-ledger test observed the fake success response. Restoring the fourth patched handler removed the order dependency. Later full runs exposed two test-fixture cleanup races after rework; those fixtures now track and join launched threads. After the overall CR and push-gate fixes, the final complete suite passed 508/508.
+The first Section 8 run was `497 passed, 1 failed`: the reviewer-provider matrix replaced the Claude handler but did not restore it, so a later usage-ledger test observed the fake success response. Restoring the fourth patched handler removed the order dependency. Later full runs exposed two test-fixture cleanup races after rework; those fixtures now track and join launched threads. After the overall CR and push-gate fixes, the final complete suite passed 511/511.
 
 ## Script-style Python suites
 
@@ -49,7 +49,7 @@ Result: **23 scripts passed**, including project execution request payloads, Mee
 - Static Service dependency and persistence-coordinator tests: 24/24 with repository/writer regressions.
 - Trusted-entry and sensitive-data command (project HTTP boundary, Meeting command, execution/review, Artifact, Feishu, Cron, Codex and Claude Provider adapters): 236/236 with canary-secret, Basic/Bearer/Cookie/JSON credentials, POSIX/Windows/UNC paths, logger, and notifier coverage.
 - Performance artifact gates: 3/3; all stable call counts are non-regressing and Cron strictly improves project-store loads.
-- Dedicated Schedule/Cron files: 39/39; includes persisted capacity reservations, lease renewal, same-occurrence replay protection, distinct-occurrence execution, exception retry, and update/delete compensation. Writer/performance suites add further Schedule coverage in the 504-test total.
+- Dedicated Schedule/Cron files: 39/39; includes persisted capacity reservations, lease renewal, same-occurrence replay protection, distinct-occurrence execution, exception retry, and update/delete compensation. Writer/performance suites add further Schedule coverage in the 511-test total.
 
 ## Remaining manual-only coverage
 

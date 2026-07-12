@@ -25,7 +25,7 @@ This matrix maps every scenario in `specs/project-execution-service-boundaries/s
 | Atomicity — same project | Ref-counted project lock plus atomic repository update; conflicting same-field legacy additions fail | Repository writer races, same-field add conflict/idempotency, and final concurrent compatibility-log regression/manual 200+200 |
 | Atomicity — different projects | Per-project locks with short shared commit lock | Different-project barrier/concurrency tests |
 | Atomicity — slow dependency | External calls outside locks, compare token on return | Execution/review/notification/Gateway race tests |
-| API/event/storage compatibility | Thin HTTP adapters and Markdown store preserved | Full 508 Python, 23 JavaScript, workflow, SSE/WebSocket, notification suites |
+| API/event/storage compatibility | Thin HTTP adapters and Markdown store preserved | Full 511 Python, 23 JavaScript, workflow, SSE/WebSocket, notification suites |
 | Defect — confirmed active-slice bug | Fail-closed Git snapshot, reviewer workspace binding, atomic compatibility log | Failing-before/API/manual reproductions and regression tests; documented in manual acceptance |
 | Defect — untrusted mutation | Management guard before body parsing | Token boundary and sensitive-data tests; manual 403 |
 | Defect — meeting request agent bridge | Dedicated validated meeting-request command remains exempt from browser token | Meeting request/blocker/linkage tests |

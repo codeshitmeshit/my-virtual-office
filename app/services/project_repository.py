@@ -423,12 +423,17 @@ class ProjectRepository:
         for item in changed:
             item_id = item["id"]
             if item_id not in baseline_by_id:
-                if item_id not in positions:
+                if item_id in positions:
+                    if reject_conflicts and latest_by_id[item_id] != item:
+                        raise ProjectConflictError("Project state changed before a legacy entity addition")
+                else:
                     positions[item_id] = len(result)
                     result.append(copy.deepcopy(item))
                 continue
             if item_id not in latest_by_id:
                 if item != baseline_by_id[item_id]:
+                    if reject_conflicts:
+                        raise ProjectConflictError("Project state changed before a legacy entity update")
                     positions[item_id] = len(result)
                     result.append(copy.deepcopy(item))
                 continue
