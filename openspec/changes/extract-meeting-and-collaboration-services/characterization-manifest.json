@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "nodeIds": [
+    "tests/test_meeting_for_ai_phase1.py::test_executable_meeting_occupancy_transition_and_history_projection",
+    "tests/test_meeting_for_ai_phase1.py::test_phase2_fake_provider_runs_incremental_meeting_to_completion",
+    "tests/test_meeting_for_ai_phase1.py::test_phase3_late_formal_provider_response_is_ignored_after_cancel",
+    "tests/test_meeting_for_ai_phase1.py::test_reentrant_moderator_summary_returns_pending_without_duplicate_provider_call",
+    "tests/test_meeting_for_ai_phase1.py::test_legacy_meeting_end_still_requires_manual_summary",
+    "tests/test_meeting_request_blocks_task.py::test_meeting_request_confirm_reject_and_user_takeover_paths",
+    "tests/test_meeting_for_ai_phase4.py::test_phase4_confirm_creates_once_with_selected_context_snapshot",
+    "tests/test_meeting_request_blocks_task.py::test_feishu_meeting_request_card_actions_confirm_and_reject",
+    "tests/test_meeting_request_blocks_task.py::test_feishu_meeting_request_card_action_replay_is_characterized",
+    "tests/test_meeting_for_ai_phase6.py::test_phase6_edit_reject_and_confirm_are_idempotent"
+  ]
+}

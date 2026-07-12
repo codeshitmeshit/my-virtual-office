@@ -1,0 +1,3050 @@
+{
+  "definitions": [
+    "_append_exec_meeting_event",
+    "_archive_trigger_meeting_conclusion",
+    "_award_meeting_participation_points",
+    "_dispatch_feishu_meeting_request_action",
+    "_exec_meeting_archive_manager_error",
+    "_exec_meeting_archive_manager_participants",
+    "_exec_meeting_clean_participants",
+    "_exec_meeting_empty_store",
+    "_exec_meeting_next_seq",
+    "_exec_meeting_now",
+    "_exec_meeting_parse_ts",
+    "_exec_meeting_pending_calls_projection",
+    "_exec_meeting_project_active",
+    "_exec_meeting_project_history",
+    "_exec_meeting_transcript_projection",
+    "_exec_meetings_file",
+    "_feishu_meeting_action_actor",
+    "_handle_executable_meeting_action_item",
+    "_handle_executable_meeting_agenda_change",
+    "_handle_executable_meeting_arbitration",
+    "_handle_executable_meeting_conflict_action",
+    "_handle_executable_meeting_create",
+    "_handle_executable_meeting_detail",
+    "_handle_executable_meeting_end_with_moderator",
+    "_handle_executable_meeting_events",
+    "_handle_executable_meeting_intervention",
+    "_handle_executable_meeting_moderator_takeover",
+    "_handle_executable_meeting_reconcile",
+    "_handle_executable_meeting_run",
+    "_handle_executable_meeting_targeted_question",
+    "_handle_executable_meeting_transition",
+    "_handle_meeting_create",
+    "_handle_meeting_end",
+    "_handle_meeting_end_all",
+    "_handle_meeting_history_delete",
+    "_handle_meeting_request_confirm",
+    "_handle_meeting_request_create",
+    "_handle_meeting_request_detail",
+    "_handle_meeting_request_reject",
+    "_handle_project_execution_meeting_blocker_action",
+    "_load_exec_meeting_store",
+    "_load_meeting_request_store",
+    "_load_meetings_file",
+    "_meeting_action_item_snapshot",
+    "_meeting_active_projection",
+    "_meeting_advisory_timeout",
+    "_meeting_arbitration_snapshot",
+    "_meeting_audit_action_item",
+    "_meeting_build_conflicts",
+    "_meeting_build_prompt",
+    "_meeting_build_result_prompt",
+    "_meeting_build_targeted_prompt",
+    "_meeting_busy_context_for_agent",
+    "_meeting_call_advisory_provider",
+    "_meeting_call_provider",
+    "_meeting_clamped_decision_window_sec",
+    "_meeting_coerce_action_items",
+    "_meeting_coerce_list",
+    "_meeting_complete_live_advisories",
+    "_meeting_confirm_action_item_on_source_task",
+    "_meeting_conflict_advisory",
+    "_meeting_context_budget",
+    "_meeting_context_mode",
+    "_meeting_continue_from_decision_window",
+    "_meeting_decision_window_sec",
+    "_meeting_ensure_action_item_drafts",
+    "_meeting_events_text",
+    "_meeting_extract_payload_text",
+    "_meeting_fallback_result",
+    "_meeting_find_action_draft",
+    "_meeting_find_pending_call",
+    "_meeting_formal_round_complete",
+    "_meeting_formal_turn_exists",
+    "_meeting_has_open_conflicts",
+    "_meeting_has_substantive_disagreement",
+    "_meeting_history_projection",
+    "_meeting_live_advisory_prompt",
+    "_meeting_mark_preparing_started",
+    "_meeting_normalize_action_item",
+    "_meeting_normalize_advisory_reply",
+    "_meeting_normalize_provider_reply",
+    "_meeting_open_decision_window",
+    "_meeting_open_url",
+    "_meeting_original_work_snapshot",
+    "_meeting_parse_json_object",
+    "_meeting_parse_result",
+    "_meeting_parse_structured_turn",
+    "_meeting_pending_calls_for_purpose",
+    "_meeting_pending_formal_calls_for_round",
+    "_meeting_pending_formal_turn_exists",
+    "_meeting_pending_provider_agents",
+    "_meeting_preparing_timeout_sec",
+    "_meeting_project_ref",
+    "_meeting_project_work_map",
+    "_meeting_provider_completion_should_be_ignored",
+    "_meeting_provider_raw_summary",
+    "_meeting_provider_ref",
+    "_meeting_provider_timeout",
+    "_meeting_request_approved_notification_details",
+    "_meeting_request_auto_confirm_label",
+    "_meeting_request_auto_confirm_reason",
+    "_meeting_request_clean_type",
+    "_meeting_request_context_candidates",
+    "_meeting_request_empty_store",
+    "_meeting_request_error",
+    "_meeting_request_find_project_task",
+    "_meeting_request_list_filtered",
+    "_meeting_request_log_auto_confirm_activity",
+    "_meeting_request_notification_details",
+    "_meeting_request_notification_related",
+    "_meeting_request_processed",
+    "_meeting_request_public",
+    "_meeting_request_resolve_task_blocker",
+    "_meeting_request_selected_context",
+    "_meeting_request_sort_key",
+    "_meeting_request_sort_time",
+    "_meeting_request_summary",
+    "_meeting_request_unresolved_for_task",
+    "_meeting_request_urgency",
+    "_meeting_requests_file",
+    "_meeting_resolution_policy",
+    "_meeting_result_outcome",
+    "_meeting_resume_original_work",
+    "_meeting_skip_timed_out_provider_call",
+    "_meeting_strip_json_fence",
+    "_meeting_structured_display_text",
+    "_meeting_truncate_text",
+    "_meeting_update_rolling_summary",
+    "_project_execution_all_required_meeting_actions_done",
+    "_project_execution_apply_meeting_discussion_points",
+    "_project_execution_apply_meeting_output_to_task",
+    "_project_execution_apply_meeting_result",
+    "_project_execution_block_for_meeting_request",
+    "_project_execution_has_pending_meeting_actions",
+    "_project_execution_mark_meeting_actions_completed",
+    "_project_execution_meeting_action_key",
+    "_project_execution_meeting_action_summaries",
+    "_project_execution_meeting_blocker_unresolved",
+    "_project_execution_meeting_discussion_key",
+    "_project_execution_meeting_record_key",
+    "_project_execution_normalize_meeting_risks",
+    "_project_execution_result_meeting_discussion_points",
+    "_project_execution_update_meeting_blocker",
+    "_project_execution_upsert_meeting_record",
+    "_project_high_priority_ai_meeting_requires_confirmation",
+    "_rebuild_exec_meeting_occupancy",
+    "_release_timed_out_preparing_meetings",
+    "_save_exec_meeting_store",
+    "_save_meeting_request_store",
+    "_save_meetings_file",
+    "_send_meeting_failure_notification",
+    "_send_meeting_request_notification",
+    "_sort_meeting_requests",
+    "_status_meeting_projection",
+    "_vo_meetings_skill_content"
+  ],
+  "edges": [
+    {
+      "callee": "_exec_meeting_next_seq",
+      "caller": "_append_exec_meeting_event"
+    },
+    {
+      "callee": "_exec_meeting_now",
+      "caller": "_append_exec_meeting_event"
+    },
+    {
+      "callee": "str",
+      "caller": "_append_exec_meeting_event"
+    },
+    {
+      "callee": "_append_exec_meeting_event",
+      "caller": "_append_ignored_provider_completion"
+    },
+    {
+      "callee": "_meeting_provider_ref",
+      "caller": "_append_ignored_provider_completion"
+    },
+    {
+      "callee": "_archive_maintenance_trigger",
+      "caller": "_archive_trigger_meeting_conclusion"
+    },
+    {
+      "callee": "_archive_source_ref",
+      "caller": "_archive_trigger_meeting_conclusion"
+    },
+    {
+      "callee": "isinstance",
+      "caller": "_archive_trigger_meeting_conclusion"
+    },
+    {
+      "callee": "str",
+      "caller": "_archive_trigger_meeting_conclusion"
+    },
+    {
+      "callee": "_load_scores",
+      "caller": "_award_meeting_participation_points"
+    },
+    {
+      "callee": "_save_scores",
+      "caller": "_award_meeting_participation_points"
+    },
+    {
+      "callee": "_score_agent_entry",
+      "caller": "_award_meeting_participation_points"
+    },
+    {
+      "callee": "_score_valid_agent_key",
+      "caller": "_award_meeting_participation_points"
+    },
+    {
+      "callee": "int",
+      "caller": "_award_meeting_participation_points"
+    },
+    {
+      "callee": "isinstance",
+      "caller": "_award_meeting_participation_points"
+    },
+    {
+      "callee": "set",
+      "caller": "_award_meeting_participation_points"
+    },
+    {
+      "callee": "str",
+      "caller": "_award_meeting_participation_points"
+    },
+    {
+      "callee": "_vo_meetings_skill_content",
+      "caller": "_builtin_office_skill_contents"
+    },
+    {
+      "callee": "_feishu_meeting_action_actor",
+      "caller": "_dispatch_feishu_hermes_approval_action"
+    },
+    {
+      "callee": "_feishu_card_action_error",
+      "caller": "_dispatch_feishu_meeting_request_action"
+    },
+    {
+      "callee": "_feishu_card_action_success",
+      "caller": "_dispatch_feishu_meeting_request_action"
+    },
+    {
+      "callee": "_feishu_meeting_action_actor",
+      "caller": "_dispatch_feishu_meeting_request_action"
+    },
+    {
+      "callee": "_handle_executable_meeting_run",
+      "caller": "_dispatch_feishu_meeting_request_action"
+    },
+    {
+      "callee": "_handle_meeting_request_confirm",
+      "caller": "_dispatch_feishu_meeting_request_action"
+    },
+    {
+      "callee": "_handle_meeting_request_reject",
+      "caller": "_dispatch_feishu_meeting_request_action"
+    },
+    {
+      "callee": "bool",
+      "caller": "_dispatch_feishu_meeting_request_action"
+    },
+    {
+      "callee": "isinstance",
+      "caller": "_dispatch_feishu_meeting_request_action"
+    },
+    {
+      "callee": "str",
+      "caller": "_dispatch_feishu_meeting_request_action"
+    },
+    {
+      "callee": "_feishu_meeting_action_actor",
+      "caller": "_dispatch_feishu_project_execution_action"
+    },
+    {
+      "callee": "_is_archive_manager_agent",
+      "caller": "_exec_meeting_archive_manager_participants"
+    },
+    {
+      "callee": "isinstance",
+      "caller": "_exec_meeting_clean_participants"
+    },
+    {
+      "callee": "set",
+      "caller": "_exec_meeting_clean_participants"
+    },
+    {
+      "callee": "str",
+      "caller": "_exec_meeting_clean_participants"
+    },
+    {
+      "callee": "str",
+      "caller": "_exec_meeting_parse_ts"
+    },
+    {
+      "callee": "_exec_meeting_parse_ts",
+      "caller": "_exec_meeting_pending_calls_projection"
+    },
+    {
+      "callee": "_meeting_provider_timeout",
+      "caller": "_exec_meeting_pending_calls_projection"
+    },
+    {
+      "callee": "int",
+      "caller": "_exec_meeting_pending_calls_projection"
+    },
+    {
+      "callee": "list",
+      "caller": "_exec_meeting_pending_calls_projection"
+    },
+    {
+      "callee": "max",
+      "caller": "_exec_meeting_pending_calls_projection"
+    },
+    {
+      "callee": "_exec_meeting_pending_calls_projection",
+      "caller": "_exec_meeting_project_active"
+    },
+    {
+      "callee": "_exec_meeting_transcript_projection",
+      "caller": "_exec_meeting_project_active"
+    },
+    {
+      "callee": "_meeting_preparing_timeout_sec",
+      "caller": "_exec_meeting_project_active"
+    },
+    {
+      "callee": "_meeting_resolution_policy",
+      "caller": "_exec_meeting_project_active"
+    },
+    {
+      "callee": "len",
+      "caller": "_exec_meeting_project_active"
+    },
+    {
+      "callee": "_exec_meeting_project_active",
+      "caller": "_exec_meeting_project_history"
+    },
+    {
+      "callee": "_exec_meeting_transcript_projection",
+      "caller": "_exec_meeting_project_history"
+    },
+    {
+      "callee": "int",
+      "caller": "_exec_meeting_project_history"
+    },
+    {
+      "callee": "bool",
+      "caller": "_exec_meeting_transcript_projection"
+    },
+    {
+      "callee": "int",
+      "caller": "_exec_meeting_transcript_projection"
+    },
+    {
+      "callee": "_feishu_card_action_user",
+      "caller": "_feishu_meeting_action_actor"
+    },
+    {
+      "callee": "_status_meeting_projection",
+      "caller": "_get_normalized_presence_state"
+    },
+    {
+      "callee": "_meeting_parse_json_object",
+      "caller": "_handle_archive_manager_ai_refine"
+    },
+    {
+      "callee": "_append_exec_meeting_event",
+      "caller": "_handle_executable_meeting_action_item"
+    },
+    {
+      "callee": "_exec_meeting_now",
+      "caller": "_handle_executable_meeting_action_item"
+    },
+    {
+      "callee": "_load_exec_meeting_store",
+      "caller": "_handle_executable_meeting_action_item"
+    },
+    {
+      "callee": "_meeting_action_item_snapshot",
+      "caller": "_handle_executable_meeting_action_item"
+    },
+    {
+      "callee": "_meeting_audit_action_item",
+      "caller": "_handle_executable_meeting_action_item"
+    },
+    {
+      "callee": "_meeting_confirm_action_item_on_source_task",
+      "caller": "_handle_executable_meeting_action_item"
+    },
+    {
+      "callee": "_meeting_ensure_action_item_drafts",
+      "caller": "_handle_executable_meeting_action_item"
+    },
+    {
+      "callee": "_meeting_find_action_draft",
+      "caller": "_handle_executable_meeting_action_item"
+    },
+    {
+      "callee": "_save_exec_meeting_store",
+      "caller": "_handle_executable_meeting_action_item"
+    },
+    {
+      "callee": "isinstance",
+      "caller": "_handle_executable_meeting_action_item"
+    },
+    {
+      "callee": "str",
+      "caller": "_handle_executable_meeting_action_item"
+    },
+    {
+      "callee": "_append_exec_meeting_event",
+      "caller": "_handle_executable_meeting_agenda_change"
+    },
+    {
+      "callee": "_load_exec_meeting_store",
+      "caller": "_handle_executable_meeting_agenda_change"
+    },
+    {
+      "callee": "_save_exec_meeting_store",
+      "caller": "_handle_executable_meeting_agenda_change"
+    },
+    {
+      "callee": "int",
+      "caller": "_handle_executable_meeting_agenda_change"
+    },
+    {
+      "callee": "next",
+      "caller": "_handle_executable_meeting_agenda_change"
+    },
+    {
+      "callee": "str",
+      "caller": "_handle_executable_meeting_agenda_change"
+    },
+    {
+      "callee": "_append_exec_meeting_event",
+      "caller": "_handle_executable_meeting_arbitration"
+    },
+    {
+      "callee": "_archive_trigger_meeting_conclusion",
+      "caller": "_handle_executable_meeting_arbitration"
+    },
+    {
+      "callee": "_award_meeting_participation_points",
+      "caller": "_handle_executable_meeting_arbitration"
+    },
+    {
+      "callee": "_handle_executable_meeting_end_with_moderator",
+      "caller": "_handle_executable_meeting_arbitration"
+    },
+    {
+      "callee": "_load_exec_meeting_store",
+      "caller": "_handle_executable_meeting_arbitration"
+    },
+    {
+      "callee": "_meeting_continue_from_decision_window",
+      "caller": "_handle_executable_meeting_arbitration"
+    },
+    {
+      "callee": "_meeting_ensure_action_item_drafts",
+      "caller": "_handle_executable_meeting_arbitration"
+    },
+    {
+      "callee": "_meeting_fallback_result",
+      "caller": "_handle_executable_meeting_arbitration"
+    },
+    {
+      "callee": "_meeting_resume_original_work",
+      "caller": "_handle_executable_meeting_arbitration"
+    },
+    {
+      "callee": "_meeting_truncate_text",
+      "caller": "_handle_executable_meeting_arbitration"
+    },
+    {
+      "callee": "_project_execution_apply_meeting_result",
+      "caller": "_handle_executable_meeting_arbitration"
+    },
+    {
+      "callee": "_save_exec_meeting_store",
+      "caller": "_handle_executable_meeting_arbitration"
+    },
+    {
+      "callee": "int",
+      "caller": "_handle_executable_meeting_arbitration"
+    },
+    {
+      "callee": "isinstance",
+      "caller": "_handle_executable_meeting_arbitration"
+    },
+    {
+      "callee": "list",
+      "caller": "_handle_executable_meeting_arbitration"
+    },
+    {
+      "callee": "max",
+      "caller": "_handle_executable_meeting_arbitration"
+    },
+    {
+      "callee": "next",
+      "caller": "_handle_executable_meeting_arbitration"
+    },
+    {
+      "callee": "str",
+      "caller": "_handle_executable_meeting_arbitration"
+    },
+    {
+      "callee": "_append_exec_meeting_event",
+      "caller": "_handle_executable_meeting_conflict_action"
+    },
+    {
+      "callee": "_exec_meeting_now",
+      "caller": "_handle_executable_meeting_conflict_action"
+    },
+    {
+      "callee": "_load_exec_meeting_store",
+      "caller": "_handle_executable_meeting_conflict_action"
+    },
+    {
+      "callee": "_meeting_build_conflicts",
+      "caller": "_handle_executable_meeting_conflict_action"
+    },
+    {
+      "callee": "_meeting_busy_context_for_agent",
+      "caller": "_handle_executable_meeting_conflict_action"
+    },
+    {
+      "callee": "_meeting_complete_live_advisories",
+      "caller": "_handle_executable_meeting_conflict_action"
+    },
+    {
+      "callee": "_meeting_conflict_advisory",
+      "caller": "_handle_executable_meeting_conflict_action"
+    },
+    {
+      "callee": "_meeting_has_open_conflicts",
+      "caller": "_handle_executable_meeting_conflict_action"
+    },
+    {
+      "callee": "_meeting_mark_preparing_started",
+      "caller": "_handle_executable_meeting_conflict_action"
+    },
+    {
+      "callee": "_meeting_original_work_snapshot",
+      "caller": "_handle_executable_meeting_conflict_action"
+    },
+    {
+      "callee": "_project_execution_apply_meeting_result",
+      "caller": "_handle_executable_meeting_conflict_action"
+    },
+    {
+      "callee": "_rebuild_exec_meeting_occupancy",
+      "caller": "_handle_executable_meeting_conflict_action"
+    },
+    {
+      "callee": "_save_exec_meeting_store",
+      "caller": "_handle_executable_meeting_conflict_action"
+    },
+    {
+      "callee": "dict",
+      "caller": "_handle_executable_meeting_conflict_action"
+    },
+    {
+      "callee": "isinstance",
+      "caller": "_handle_executable_meeting_conflict_action"
+    },
+    {
+      "callee": "next",
+      "caller": "_handle_executable_meeting_conflict_action"
+    },
+    {
+      "callee": "str",
+      "caller": "_handle_executable_meeting_conflict_action"
+    },
+    {
+      "callee": "_append_exec_meeting_event",
+      "caller": "_handle_executable_meeting_create"
+    },
+    {
+      "callee": "_exec_meeting_archive_manager_error",
+      "caller": "_handle_executable_meeting_create"
+    },
+    {
+      "callee": "_exec_meeting_archive_manager_participants",
+      "caller": "_handle_executable_meeting_create"
+    },
+    {
+      "callee": "_exec_meeting_clean_participants",
+      "caller": "_handle_executable_meeting_create"
+    },
+    {
+      "callee": "_exec_meeting_now",
+      "caller": "_handle_executable_meeting_create"
+    },
+    {
+      "callee": "_is_archive_manager_agent",
+      "caller": "_handle_executable_meeting_create"
+    },
+    {
+      "callee": "_load_exec_meeting_store",
+      "caller": "_handle_executable_meeting_create"
+    },
+    {
+      "callee": "_meeting_build_conflicts",
+      "caller": "_handle_executable_meeting_create"
+    },
+    {
+      "callee": "_meeting_clamped_decision_window_sec",
+      "caller": "_handle_executable_meeting_create"
+    },
+    {
+      "callee": "_meeting_complete_live_advisories",
+      "caller": "_handle_executable_meeting_create"
+    },
+    {
+      "callee": "_meeting_context_budget",
+      "caller": "_handle_executable_meeting_create"
+    },
+    {
+      "callee": "_meeting_context_mode",
+      "caller": "_handle_executable_meeting_create"
+    },
+    {
+      "callee": "_meeting_decision_window_sec",
+      "caller": "_handle_executable_meeting_create"
+    },
+    {
+      "callee": "_meeting_preparing_timeout_sec",
+      "caller": "_handle_executable_meeting_create"
+    },
+    {
+      "callee": "_meeting_project_ref",
+      "caller": "_handle_executable_meeting_create"
+    },
+    {
+      "callee": "_meeting_resolution_policy",
+      "caller": "_handle_executable_meeting_create"
+    },
+    {
+      "callee": "_rebuild_exec_meeting_occupancy",
+      "caller": "_handle_executable_meeting_create"
+    },
+    {
+      "callee": "_save_exec_meeting_store",
+      "caller": "_handle_executable_meeting_create"
+    },
+    {
+      "callee": "any",
+      "caller": "_handle_executable_meeting_create"
+    },
+    {
+      "callee": "bool",
+      "caller": "_handle_executable_meeting_create"
+    },
+    {
+      "callee": "int",
+      "caller": "_handle_executable_meeting_create"
+    },
+    {
+      "callee": "isinstance",
+      "caller": "_handle_executable_meeting_create"
+    },
+    {
+      "callee": "len",
+      "caller": "_handle_executable_meeting_create"
+    },
+    {
+      "callee": "list",
+      "caller": "_handle_executable_meeting_create"
+    },
+    {
+      "callee": "max",
+      "caller": "_handle_executable_meeting_create"
+    },
+    {
+      "callee": "min",
+      "caller": "_handle_executable_meeting_create"
+    },
+    {
+      "callee": "str",
+      "caller": "_handle_executable_meeting_create"
+    },
+    {
+      "callee": "_load_exec_meeting_store",
+      "caller": "_handle_executable_meeting_detail"
+    },
+    {
+      "callee": "_meeting_ensure_action_item_drafts",
+      "caller": "_handle_executable_meeting_detail"
+    },
+    {
+      "callee": "_release_timed_out_preparing_meetings",
+      "caller": "_handle_executable_meeting_detail"
+    },
+    {
+      "callee": "_save_exec_meeting_store",
+      "caller": "_handle_executable_meeting_detail"
+    },
+    {
+      "callee": "_append_exec_meeting_event",
+      "caller": "_handle_executable_meeting_end_with_moderator"
+    },
+    {
+      "callee": "_append_ignored_provider_completion",
+      "caller": "_handle_executable_meeting_end_with_moderator"
+    },
+    {
+      "callee": "_archive_trigger_meeting_conclusion",
+      "caller": "_handle_executable_meeting_end_with_moderator"
+    },
+    {
+      "callee": "_award_meeting_participation_points",
+      "caller": "_handle_executable_meeting_end_with_moderator"
+    },
+    {
+      "callee": "_load_exec_meeting_store",
+      "caller": "_handle_executable_meeting_end_with_moderator"
+    },
+    {
+      "callee": "_meeting_build_result_prompt",
+      "caller": "_handle_executable_meeting_end_with_moderator"
+    },
+    {
+      "callee": "_meeting_call_provider",
+      "caller": "_handle_executable_meeting_end_with_moderator"
+    },
+    {
+      "callee": "_meeting_clamped_decision_window_sec",
+      "caller": "_handle_executable_meeting_end_with_moderator"
+    },
+    {
+      "callee": "_meeting_decision_window_sec",
+      "caller": "_handle_executable_meeting_end_with_moderator"
+    },
+    {
+      "callee": "_meeting_fallback_result",
+      "caller": "_handle_executable_meeting_end_with_moderator"
+    },
+    {
+      "callee": "_meeting_normalize_provider_reply",
+      "caller": "_handle_executable_meeting_end_with_moderator"
+    },
+    {
+      "callee": "_meeting_parse_result",
+      "caller": "_handle_executable_meeting_end_with_moderator"
+    },
+    {
+      "callee": "_meeting_pending_calls_for_purpose",
+      "caller": "_handle_executable_meeting_end_with_moderator"
+    },
+    {
+      "callee": "_meeting_provider_ref",
+      "caller": "_handle_executable_meeting_end_with_moderator"
+    },
+    {
+      "callee": "_meeting_resume_original_work",
+      "caller": "_handle_executable_meeting_end_with_moderator"
+    },
+    {
+      "callee": "_meeting_truncate_text",
+      "caller": "_handle_executable_meeting_end_with_moderator"
+    },
+    {
+      "callee": "_project_execution_apply_meeting_result",
+      "caller": "_handle_executable_meeting_end_with_moderator"
+    },
+    {
+      "callee": "_save_exec_meeting_store",
+      "caller": "_handle_executable_meeting_end_with_moderator"
+    },
+    {
+      "callee": "_send_meeting_failure_notification",
+      "caller": "_handle_executable_meeting_end_with_moderator"
+    },
+    {
+      "callee": "bool",
+      "caller": "_handle_executable_meeting_end_with_moderator"
+    },
+    {
+      "callee": "int",
+      "caller": "_handle_executable_meeting_end_with_moderator"
+    },
+    {
+      "callee": "isinstance",
+      "caller": "_handle_executable_meeting_end_with_moderator"
+    },
+    {
+      "callee": "len",
+      "caller": "_handle_executable_meeting_end_with_moderator"
+    },
+    {
+      "callee": "list",
+      "caller": "_handle_executable_meeting_end_with_moderator"
+    },
+    {
+      "callee": "set",
+      "caller": "_handle_executable_meeting_end_with_moderator"
+    },
+    {
+      "callee": "str",
+      "caller": "_handle_executable_meeting_end_with_moderator"
+    },
+    {
+      "callee": "_load_exec_meeting_store",
+      "caller": "_handle_executable_meeting_events"
+    },
+    {
+      "callee": "int",
+      "caller": "_handle_executable_meeting_events"
+    },
+    {
+      "callee": "_append_exec_meeting_event",
+      "caller": "_handle_executable_meeting_intervention"
+    },
+    {
+      "callee": "_load_exec_meeting_store",
+      "caller": "_handle_executable_meeting_intervention"
+    },
+    {
+      "callee": "_save_exec_meeting_store",
+      "caller": "_handle_executable_meeting_intervention"
+    },
+    {
+      "callee": "int",
+      "caller": "_handle_executable_meeting_intervention"
+    },
+    {
+      "callee": "next",
+      "caller": "_handle_executable_meeting_intervention"
+    },
+    {
+      "callee": "str",
+      "caller": "_handle_executable_meeting_intervention"
+    },
+    {
+      "callee": "_append_exec_meeting_event",
+      "caller": "_handle_executable_meeting_moderator_takeover"
+    },
+    {
+      "callee": "_archive_trigger_meeting_conclusion",
+      "caller": "_handle_executable_meeting_moderator_takeover"
+    },
+    {
+      "callee": "_award_meeting_participation_points",
+      "caller": "_handle_executable_meeting_moderator_takeover"
+    },
+    {
+      "callee": "_handle_executable_meeting_end_with_moderator",
+      "caller": "_handle_executable_meeting_moderator_takeover"
+    },
+    {
+      "callee": "_load_exec_meeting_store",
+      "caller": "_handle_executable_meeting_moderator_takeover"
+    },
+    {
+      "callee": "_meeting_fallback_result",
+      "caller": "_handle_executable_meeting_moderator_takeover"
+    },
+    {
+      "callee": "_meeting_result_outcome",
+      "caller": "_handle_executable_meeting_moderator_takeover"
+    },
+    {
+      "callee": "_meeting_resume_original_work",
+      "caller": "_handle_executable_meeting_moderator_takeover"
+    },
+    {
+      "callee": "_project_execution_apply_meeting_result",
+      "caller": "_handle_executable_meeting_moderator_takeover"
+    },
+    {
+      "callee": "_save_exec_meeting_store",
+      "caller": "_handle_executable_meeting_moderator_takeover"
+    },
+    {
+      "callee": "dict",
+      "caller": "_handle_executable_meeting_moderator_takeover"
+    },
+    {
+      "callee": "isinstance",
+      "caller": "_handle_executable_meeting_moderator_takeover"
+    },
+    {
+      "callee": "list",
+      "caller": "_handle_executable_meeting_moderator_takeover"
+    },
+    {
+      "callee": "print",
+      "caller": "_handle_executable_meeting_moderator_takeover"
+    },
+    {
+      "callee": "str",
+      "caller": "_handle_executable_meeting_moderator_takeover"
+    },
+    {
+      "callee": "_load_exec_meeting_store",
+      "caller": "_handle_executable_meeting_reconcile"
+    },
+    {
+      "callee": "_rebuild_exec_meeting_occupancy",
+      "caller": "_handle_executable_meeting_reconcile"
+    },
+    {
+      "callee": "_release_timed_out_preparing_meetings",
+      "caller": "_handle_executable_meeting_reconcile"
+    },
+    {
+      "callee": "_save_exec_meeting_store",
+      "caller": "_handle_executable_meeting_reconcile"
+    },
+    {
+      "callee": "len",
+      "caller": "_handle_executable_meeting_reconcile"
+    },
+    {
+      "callee": "_append_exec_meeting_event",
+      "caller": "_handle_executable_meeting_run"
+    },
+    {
+      "callee": "_append_ignored_provider_completion",
+      "caller": "_handle_executable_meeting_run"
+    },
+    {
+      "callee": "_archive_trigger_meeting_conclusion",
+      "caller": "_handle_executable_meeting_run"
+    },
+    {
+      "callee": "_award_meeting_participation_points",
+      "caller": "_handle_executable_meeting_run"
+    },
+    {
+      "callee": "_handle_executable_meeting_end_with_moderator",
+      "caller": "_handle_executable_meeting_run"
+    },
+    {
+      "callee": "_handle_executable_meeting_run",
+      "caller": "_handle_executable_meeting_run"
+    },
+    {
+      "callee": "_load_exec_meeting_store",
+      "caller": "_handle_executable_meeting_run"
+    },
+    {
+      "callee": "_meeting_build_prompt",
+      "caller": "_handle_executable_meeting_run"
+    },
+    {
+      "callee": "_meeting_call_provider",
+      "caller": "_handle_executable_meeting_run"
+    },
+    {
+      "callee": "_meeting_continue_from_decision_window",
+      "caller": "_handle_executable_meeting_run"
+    },
+    {
+      "callee": "_meeting_ensure_action_item_drafts",
+      "caller": "_handle_executable_meeting_run"
+    },
+    {
+      "callee": "_meeting_formal_round_complete",
+      "caller": "_handle_executable_meeting_run"
+    },
+    {
+      "callee": "_meeting_formal_turn_exists",
+      "caller": "_handle_executable_meeting_run"
+    },
+    {
+      "callee": "_meeting_has_open_conflicts",
+      "caller": "_handle_executable_meeting_run"
+    },
+    {
+      "callee": "_meeting_normalize_provider_reply",
+      "caller": "_handle_executable_meeting_run"
+    },
+    {
+      "callee": "_meeting_open_decision_window",
+      "caller": "_handle_executable_meeting_run"
+    },
+    {
+      "callee": "_meeting_pending_formal_calls_for_round",
+      "caller": "_handle_executable_meeting_run"
+    },
+    {
+      "callee": "_meeting_pending_formal_turn_exists",
+      "caller": "_handle_executable_meeting_run"
+    },
+    {
+      "callee": "_meeting_provider_completion_should_be_ignored",
+      "caller": "_handle_executable_meeting_run"
+    },
+    {
+      "callee": "_meeting_provider_ref",
+      "caller": "_handle_executable_meeting_run"
+    },
+    {
+      "callee": "_meeting_resume_original_work",
+      "caller": "_handle_executable_meeting_run"
+    },
+    {
+      "callee": "_meeting_skip_timed_out_provider_call",
+      "caller": "_handle_executable_meeting_run"
+    },
+    {
+      "callee": "_meeting_truncate_text",
+      "caller": "_handle_executable_meeting_run"
+    },
+    {
+      "callee": "_meeting_update_rolling_summary",
+      "caller": "_handle_executable_meeting_run"
+    },
+    {
+      "callee": "_project_execution_apply_meeting_result",
+      "caller": "_handle_executable_meeting_run"
+    },
+    {
+      "callee": "_release_timed_out_preparing_meetings",
+      "caller": "_handle_executable_meeting_run"
+    },
+    {
+      "callee": "_save_exec_meeting_store",
+      "caller": "_handle_executable_meeting_run"
+    },
+    {
+      "callee": "bool",
+      "caller": "_handle_executable_meeting_run"
+    },
+    {
+      "callee": "dict",
+      "caller": "_handle_executable_meeting_run"
+    },
+    {
+      "callee": "int",
+      "caller": "_handle_executable_meeting_run"
+    },
+    {
+      "callee": "isinstance",
+      "caller": "_handle_executable_meeting_run"
+    },
+    {
+      "callee": "len",
+      "caller": "_handle_executable_meeting_run"
+    },
+    {
+      "callee": "list",
+      "caller": "_handle_executable_meeting_run"
+    },
+    {
+      "callee": "max",
+      "caller": "_handle_executable_meeting_run"
+    },
+    {
+      "callee": "range",
+      "caller": "_handle_executable_meeting_run"
+    },
+    {
+      "callee": "str",
+      "caller": "_handle_executable_meeting_run"
+    },
+    {
+      "callee": "_append_exec_meeting_event",
+      "caller": "_handle_executable_meeting_targeted_question"
+    },
+    {
+      "callee": "_append_ignored_provider_completion",
+      "caller": "_handle_executable_meeting_targeted_question"
+    },
+    {
+      "callee": "_load_exec_meeting_store",
+      "caller": "_handle_executable_meeting_targeted_question"
+    },
+    {
+      "callee": "_meeting_build_targeted_prompt",
+      "caller": "_handle_executable_meeting_targeted_question"
+    },
+    {
+      "callee": "_meeting_call_provider",
+      "caller": "_handle_executable_meeting_targeted_question"
+    },
+    {
+      "callee": "_meeting_normalize_provider_reply",
+      "caller": "_handle_executable_meeting_targeted_question"
+    },
+    {
+      "callee": "_meeting_provider_completion_should_be_ignored",
+      "caller": "_handle_executable_meeting_targeted_question"
+    },
+    {
+      "callee": "_meeting_provider_ref",
+      "caller": "_handle_executable_meeting_targeted_question"
+    },
+    {
+      "callee": "_meeting_update_rolling_summary",
+      "caller": "_handle_executable_meeting_targeted_question"
+    },
+    {
+      "callee": "_save_exec_meeting_store",
+      "caller": "_handle_executable_meeting_targeted_question"
+    },
+    {
+      "callee": "bool",
+      "caller": "_handle_executable_meeting_targeted_question"
+    },
+    {
+      "callee": "int",
+      "caller": "_handle_executable_meeting_targeted_question"
+    },
+    {
+      "callee": "len",
+      "caller": "_handle_executable_meeting_targeted_question"
+    },
+    {
+      "callee": "next",
+      "caller": "_handle_executable_meeting_targeted_question"
+    },
+    {
+      "callee": "str",
+      "caller": "_handle_executable_meeting_targeted_question"
+    },
+    {
+      "callee": "_append_exec_meeting_event",
+      "caller": "_handle_executable_meeting_transition"
+    },
+    {
+      "callee": "_award_meeting_participation_points",
+      "caller": "_handle_executable_meeting_transition"
+    },
+    {
+      "callee": "_load_exec_meeting_store",
+      "caller": "_handle_executable_meeting_transition"
+    },
+    {
+      "callee": "_meeting_continue_from_decision_window",
+      "caller": "_handle_executable_meeting_transition"
+    },
+    {
+      "callee": "_meeting_ensure_action_item_drafts",
+      "caller": "_handle_executable_meeting_transition"
+    },
+    {
+      "callee": "_meeting_mark_preparing_started",
+      "caller": "_handle_executable_meeting_transition"
+    },
+    {
+      "callee": "_meeting_resume_original_work",
+      "caller": "_handle_executable_meeting_transition"
+    },
+    {
+      "callee": "_project_execution_apply_meeting_result",
+      "caller": "_handle_executable_meeting_transition"
+    },
+    {
+      "callee": "_save_exec_meeting_store",
+      "caller": "_handle_executable_meeting_transition"
+    },
+    {
+      "callee": "int",
+      "caller": "_handle_executable_meeting_transition"
+    },
+    {
+      "callee": "isinstance",
+      "caller": "_handle_executable_meeting_transition"
+    },
+    {
+      "callee": "max",
+      "caller": "_handle_executable_meeting_transition"
+    },
+    {
+      "callee": "set",
+      "caller": "_handle_executable_meeting_transition"
+    },
+    {
+      "callee": "str",
+      "caller": "_handle_executable_meeting_transition"
+    },
+    {
+      "callee": "_dispatch_feishu_meeting_request_action",
+      "caller": "_handle_feishu_card_action"
+    },
+    {
+      "callee": "_load_meetings_file",
+      "caller": "_handle_meeting_create"
+    },
+    {
+      "callee": "_save_meetings_file",
+      "caller": "_handle_meeting_create"
+    },
+    {
+      "callee": "isinstance",
+      "caller": "_handle_meeting_create"
+    },
+    {
+      "callee": "len",
+      "caller": "_handle_meeting_create"
+    },
+    {
+      "callee": "str",
+      "caller": "_handle_meeting_create"
+    },
+    {
+      "callee": "_handle_executable_meeting_detail",
+      "caller": "_handle_meeting_end"
+    },
+    {
+      "callee": "_handle_executable_meeting_end_with_moderator",
+      "caller": "_handle_meeting_end"
+    },
+    {
+      "callee": "_load_meetings_file",
+      "caller": "_handle_meeting_end"
+    },
+    {
+      "callee": "_save_meetings_file",
+      "caller": "_handle_meeting_end"
+    },
+    {
+      "callee": "dict",
+      "caller": "_handle_meeting_end"
+    },
+    {
+      "callee": "int",
+      "caller": "_handle_meeting_end"
+    },
+    {
+      "callee": "isinstance",
+      "caller": "_handle_meeting_end"
+    },
+    {
+      "callee": "len",
+      "caller": "_handle_meeting_end"
+    },
+    {
+      "callee": "_load_meetings_file",
+      "caller": "_handle_meeting_end_all"
+    },
+    {
+      "callee": "_save_meetings_file",
+      "caller": "_handle_meeting_end_all"
+    },
+    {
+      "callee": "_load_meetings_file",
+      "caller": "_handle_meeting_history_delete"
+    },
+    {
+      "callee": "_save_meetings_file",
+      "caller": "_handle_meeting_history_delete"
+    },
+    {
+      "callee": "isinstance",
+      "caller": "_handle_meeting_history_delete"
+    },
+    {
+      "callee": "len",
+      "caller": "_handle_meeting_history_delete"
+    },
+    {
+      "callee": "_exec_meeting_archive_manager_error",
+      "caller": "_handle_meeting_request_confirm"
+    },
+    {
+      "callee": "_exec_meeting_archive_manager_participants",
+      "caller": "_handle_meeting_request_confirm"
+    },
+    {
+      "callee": "_exec_meeting_clean_participants",
+      "caller": "_handle_meeting_request_confirm"
+    },
+    {
+      "callee": "_exec_meeting_now",
+      "caller": "_handle_meeting_request_confirm"
+    },
+    {
+      "callee": "_handle_executable_meeting_create",
+      "caller": "_handle_meeting_request_confirm"
+    },
+    {
+      "callee": "_handle_executable_meeting_run",
+      "caller": "_handle_meeting_request_confirm"
+    },
+    {
+      "callee": "_load_meeting_request_store",
+      "caller": "_handle_meeting_request_confirm"
+    },
+    {
+      "callee": "_meeting_open_url",
+      "caller": "_handle_meeting_request_confirm"
+    },
+    {
+      "callee": "_meeting_project_ref",
+      "caller": "_handle_meeting_request_confirm"
+    },
+    {
+      "callee": "_meeting_request_approved_notification_details",
+      "caller": "_handle_meeting_request_confirm"
+    },
+    {
+      "callee": "_meeting_request_auto_confirm_label",
+      "caller": "_handle_meeting_request_confirm"
+    },
+    {
+      "callee": "_meeting_request_clean_type",
+      "caller": "_handle_meeting_request_confirm"
+    },
+    {
+      "callee": "_meeting_request_error",
+      "caller": "_handle_meeting_request_confirm"
+    },
+    {
+      "callee": "_meeting_request_log_auto_confirm_activity",
+      "caller": "_handle_meeting_request_confirm"
+    },
+    {
+      "callee": "_meeting_request_public",
+      "caller": "_handle_meeting_request_confirm"
+    },
+    {
+      "callee": "_meeting_request_selected_context",
+      "caller": "_handle_meeting_request_confirm"
+    },
+    {
+      "callee": "_project_execution_update_meeting_blocker",
+      "caller": "_handle_meeting_request_confirm"
+    },
+    {
+      "callee": "_save_meeting_request_store",
+      "caller": "_handle_meeting_request_confirm"
+    },
+    {
+      "callee": "_send_meeting_request_notification",
+      "caller": "_handle_meeting_request_confirm"
+    },
+    {
+      "callee": "bool",
+      "caller": "_handle_meeting_request_confirm"
+    },
+    {
+      "callee": "isinstance",
+      "caller": "_handle_meeting_request_confirm"
+    },
+    {
+      "callee": "list",
+      "caller": "_handle_meeting_request_confirm"
+    },
+    {
+      "callee": "str",
+      "caller": "_handle_meeting_request_confirm"
+    },
+    {
+      "callee": "_exec_meeting_archive_manager_error",
+      "caller": "_handle_meeting_request_create"
+    },
+    {
+      "callee": "_exec_meeting_archive_manager_participants",
+      "caller": "_handle_meeting_request_create"
+    },
+    {
+      "callee": "_exec_meeting_clean_participants",
+      "caller": "_handle_meeting_request_create"
+    },
+    {
+      "callee": "_exec_meeting_now",
+      "caller": "_handle_meeting_request_create"
+    },
+    {
+      "callee": "_handle_meeting_request_confirm",
+      "caller": "_handle_meeting_request_create"
+    },
+    {
+      "callee": "_is_archive_manager_agent",
+      "caller": "_handle_meeting_request_create"
+    },
+    {
+      "callee": "_load_meeting_request_store",
+      "caller": "_handle_meeting_request_create"
+    },
+    {
+      "callee": "_meeting_request_auto_confirm_reason",
+      "caller": "_handle_meeting_request_create"
+    },
+    {
+      "callee": "_meeting_request_clean_type",
+      "caller": "_handle_meeting_request_create"
+    },
+    {
+      "callee": "_meeting_request_context_candidates",
+      "caller": "_handle_meeting_request_create"
+    },
+    {
+      "callee": "_meeting_request_error",
+      "caller": "_handle_meeting_request_create"
+    },
+    {
+      "callee": "_meeting_request_find_project_task",
+      "caller": "_handle_meeting_request_create"
+    },
+    {
+      "callee": "_meeting_request_public",
+      "caller": "_handle_meeting_request_create"
+    },
+    {
+      "callee": "_meeting_request_unresolved_for_task",
+      "caller": "_handle_meeting_request_create"
+    },
+    {
+      "callee": "_meeting_request_urgency",
+      "caller": "_handle_meeting_request_create"
+    },
+    {
+      "callee": "_project_execution_block_for_meeting_request",
+      "caller": "_handle_meeting_request_create"
+    },
+    {
+      "callee": "_save_meeting_request_store",
+      "caller": "_handle_meeting_request_create"
+    },
+    {
+      "callee": "_send_meeting_request_notification",
+      "caller": "_handle_meeting_request_create"
+    },
+    {
+      "callee": "list",
+      "caller": "_handle_meeting_request_create"
+    },
+    {
+      "callee": "next",
+      "caller": "_handle_meeting_request_create"
+    },
+    {
+      "callee": "str",
+      "caller": "_handle_meeting_request_create"
+    },
+    {
+      "callee": "_load_meeting_request_store",
+      "caller": "_handle_meeting_request_detail"
+    },
+    {
+      "callee": "_meeting_request_error",
+      "caller": "_handle_meeting_request_detail"
+    },
+    {
+      "callee": "_meeting_request_public",
+      "caller": "_handle_meeting_request_detail"
+    },
+    {
+      "callee": "_exec_meeting_now",
+      "caller": "_handle_meeting_request_reject"
+    },
+    {
+      "callee": "_handle_task_comment",
+      "caller": "_handle_meeting_request_reject"
+    },
+    {
+      "callee": "_load_meeting_request_store",
+      "caller": "_handle_meeting_request_reject"
+    },
+    {
+      "callee": "_meeting_request_error",
+      "caller": "_handle_meeting_request_reject"
+    },
+    {
+      "callee": "_meeting_request_notification_details",
+      "caller": "_handle_meeting_request_reject"
+    },
+    {
+      "callee": "_meeting_request_public",
+      "caller": "_handle_meeting_request_reject"
+    },
+    {
+      "callee": "_project_execution_update_meeting_blocker",
+      "caller": "_handle_meeting_request_reject"
+    },
+    {
+      "callee": "_save_meeting_request_store",
+      "caller": "_handle_meeting_request_reject"
+    },
+    {
+      "callee": "_send_meeting_request_notification",
+      "caller": "_handle_meeting_request_reject"
+    },
+    {
+      "callee": "str",
+      "caller": "_handle_meeting_request_reject"
+    },
+    {
+      "callee": "_handle_project_execution_start",
+      "caller": "_handle_project_execution_meeting_blocker_action"
+    },
+    {
+      "callee": "_meeting_request_resolve_task_blocker",
+      "caller": "_handle_project_execution_meeting_blocker_action"
+    },
+    {
+      "callee": "_proj_now",
+      "caller": "_handle_project_execution_meeting_blocker_action"
+    },
+    {
+      "callee": "_project_execution_find",
+      "caller": "_handle_project_execution_meeting_blocker_action"
+    },
+    {
+      "callee": "_project_execution_meeting_blocker_unresolved",
+      "caller": "_handle_project_execution_meeting_blocker_action"
+    },
+    {
+      "callee": "_project_execution_move_task_to_column",
+      "caller": "_handle_project_execution_meeting_blocker_action"
+    },
+    {
+      "callee": "_project_execution_redact",
+      "caller": "_handle_project_execution_meeting_blocker_action"
+    },
+    {
+      "callee": "_project_execution_transition",
+      "caller": "_handle_project_execution_meeting_blocker_action"
+    },
+    {
+      "callee": "_save_projects",
+      "caller": "_handle_project_execution_meeting_blocker_action"
+    },
+    {
+      "callee": "_wf_get_backlog_col",
+      "caller": "_handle_project_execution_meeting_blocker_action"
+    },
+    {
+      "callee": "dict",
+      "caller": "_handle_project_execution_meeting_blocker_action"
+    },
+    {
+      "callee": "isinstance",
+      "caller": "_handle_project_execution_meeting_blocker_action"
+    },
+    {
+      "callee": "str",
+      "caller": "_handle_project_execution_meeting_blocker_action"
+    },
+    {
+      "callee": "_exec_meeting_empty_store",
+      "caller": "_load_exec_meeting_store"
+    },
+    {
+      "callee": "_exec_meetings_file",
+      "caller": "_load_exec_meeting_store"
+    },
+    {
+      "callee": "isinstance",
+      "caller": "_load_exec_meeting_store"
+    },
+    {
+      "callee": "open",
+      "caller": "_load_exec_meeting_store"
+    },
+    {
+      "callee": "_meeting_request_empty_store",
+      "caller": "_load_meeting_request_store"
+    },
+    {
+      "callee": "_meeting_requests_file",
+      "caller": "_load_meeting_request_store"
+    },
+    {
+      "callee": "isinstance",
+      "caller": "_load_meeting_request_store"
+    },
+    {
+      "callee": "open",
+      "caller": "_load_meeting_request_store"
+    },
+    {
+      "callee": "isinstance",
+      "caller": "_load_meetings_file"
+    },
+    {
+      "callee": "open",
+      "caller": "_load_meetings_file"
+    },
+    {
+      "callee": "_exec_meeting_now",
+      "caller": "_mark_feishu_notification"
+    },
+    {
+      "callee": "_exec_meeting_project_active",
+      "caller": "_meeting_active_projection"
+    },
+    {
+      "callee": "_load_exec_meeting_store",
+      "caller": "_meeting_active_projection"
+    },
+    {
+      "callee": "_load_meetings_file",
+      "caller": "_meeting_active_projection"
+    },
+    {
+      "callee": "_release_timed_out_preparing_meetings",
+      "caller": "_meeting_active_projection"
+    },
+    {
+      "callee": "_save_exec_meeting_store",
+      "caller": "_meeting_active_projection"
+    },
+    {
+      "callee": "isinstance",
+      "caller": "_meeting_active_projection"
+    },
+    {
+      "callee": "int",
+      "caller": "_meeting_advisory_timeout"
+    },
+    {
+      "callee": "max",
+      "caller": "_meeting_advisory_timeout"
+    },
+    {
+      "callee": "min",
+      "caller": "_meeting_advisory_timeout"
+    },
+    {
+      "callee": "_meeting_coerce_list",
+      "caller": "_meeting_arbitration_snapshot"
+    },
+    {
+      "callee": "_meeting_has_substantive_disagreement",
+      "caller": "_meeting_arbitration_snapshot"
+    },
+    {
+      "callee": "_meeting_truncate_text",
+      "caller": "_meeting_arbitration_snapshot"
+    },
+    {
+      "callee": "len",
+      "caller": "_meeting_arbitration_snapshot"
+    },
+    {
+      "callee": "list",
+      "caller": "_meeting_arbitration_snapshot"
+    },
+    {
+      "callee": "_exec_meeting_now",
+      "caller": "_meeting_audit_action_item"
+    },
+    {
+      "callee": "_exec_meeting_now",
+      "caller": "_meeting_build_conflicts"
+    },
+    {
+      "callee": "_meeting_busy_context_for_agent",
+      "caller": "_meeting_build_conflicts"
+    },
+    {
+      "callee": "_meeting_conflict_advisory",
+      "caller": "_meeting_build_conflicts"
+    },
+    {
+      "callee": "str",
+      "caller": "_meeting_build_conflicts"
+    },
+    {
+      "callee": "_meeting_context_budget",
+      "caller": "_meeting_build_prompt"
+    },
+    {
+      "callee": "_meeting_context_mode",
+      "caller": "_meeting_build_prompt"
+    },
+    {
+      "callee": "_meeting_events_text",
+      "caller": "_meeting_build_prompt"
+    },
+    {
+      "callee": "_meeting_truncate_text",
+      "caller": "_meeting_build_prompt"
+    },
+    {
+      "callee": "int",
+      "caller": "_meeting_build_prompt"
+    },
+    {
+      "callee": "_meeting_events_text",
+      "caller": "_meeting_build_result_prompt"
+    },
+    {
+      "callee": "_meeting_resolution_policy",
+      "caller": "_meeting_build_result_prompt"
+    },
+    {
+      "callee": "_meeting_truncate_text",
+      "caller": "_meeting_build_result_prompt"
+    },
+    {
+      "callee": "_meeting_build_prompt",
+      "caller": "_meeting_build_targeted_prompt"
+    },
+    {
+      "callee": "_meeting_context_budget",
+      "caller": "_meeting_build_targeted_prompt"
+    },
+    {
+      "callee": "_meeting_truncate_text",
+      "caller": "_meeting_build_targeted_prompt"
+    },
+    {
+      "callee": "_meeting_pending_provider_agents",
+      "caller": "_meeting_busy_context_for_agent"
+    },
+    {
+      "callee": "_meeting_project_work_map",
+      "caller": "_meeting_busy_context_for_agent"
+    },
+    {
+      "callee": "str",
+      "caller": "_meeting_busy_context_for_agent"
+    },
+    {
+      "callee": "_meeting_advisory_timeout",
+      "caller": "_meeting_call_advisory_provider"
+    },
+    {
+      "callee": "_meeting_call_provider",
+      "caller": "_meeting_call_advisory_provider"
+    },
+    {
+      "callee": "_meeting_live_advisory_prompt",
+      "caller": "_meeting_call_advisory_provider"
+    },
+    {
+      "callee": "str",
+      "caller": "_meeting_call_advisory_provider"
+    },
+    {
+      "callee": "_handle_claude_code_chat",
+      "caller": "_meeting_call_provider"
+    },
+    {
+      "callee": "_handle_codex_chat",
+      "caller": "_meeting_call_provider"
+    },
+    {
+      "callee": "_handle_hermes_chat",
+      "caller": "_meeting_call_provider"
+    },
+    {
+      "callee": "_meeting_provider_timeout",
+      "caller": "_meeting_call_provider"
+    },
+    {
+      "callee": "_office_agent_lookup",
+      "caller": "_meeting_call_provider"
+    },
+    {
+      "callee": "_wf_call_agent",
+      "caller": "_meeting_call_provider"
+    },
+    {
+      "callee": "bool",
+      "caller": "_meeting_call_provider"
+    },
+    {
+      "callee": "int",
+      "caller": "_meeting_call_provider"
+    },
+    {
+      "callee": "str",
+      "caller": "_meeting_call_provider"
+    },
+    {
+      "callee": "int",
+      "caller": "_meeting_clamped_decision_window_sec"
+    },
+    {
+      "callee": "max",
+      "caller": "_meeting_clamped_decision_window_sec"
+    },
+    {
+      "callee": "min",
+      "caller": "_meeting_clamped_decision_window_sec"
+    },
+    {
+      "callee": "isinstance",
+      "caller": "_meeting_coerce_action_items"
+    },
+    {
+      "callee": "str",
+      "caller": "_meeting_coerce_action_items"
+    },
+    {
+      "callee": "isinstance",
+      "caller": "_meeting_coerce_list"
+    },
+    {
+      "callee": "str",
+      "caller": "_meeting_coerce_list"
+    },
+    {
+      "callee": "_append_exec_meeting_event",
+      "caller": "_meeting_complete_live_advisories"
+    },
+    {
+      "callee": "_exec_meeting_now",
+      "caller": "_meeting_complete_live_advisories"
+    },
+    {
+      "callee": "_load_exec_meeting_store",
+      "caller": "_meeting_complete_live_advisories"
+    },
+    {
+      "callee": "_meeting_call_advisory_provider",
+      "caller": "_meeting_complete_live_advisories"
+    },
+    {
+      "callee": "_meeting_normalize_advisory_reply",
+      "caller": "_meeting_complete_live_advisories"
+    },
+    {
+      "callee": "_save_exec_meeting_store",
+      "caller": "_meeting_complete_live_advisories"
+    },
+    {
+      "callee": "dict",
+      "caller": "_meeting_complete_live_advisories"
+    },
+    {
+      "callee": "_log_activity",
+      "caller": "_meeting_confirm_action_item_on_source_task"
+    },
+    {
+      "callee": "_proj_now",
+      "caller": "_meeting_confirm_action_item_on_source_task"
+    },
+    {
+      "callee": "_project_execution_meeting_action_key",
+      "caller": "_meeting_confirm_action_item_on_source_task"
+    },
+    {
+      "callee": "_project_find",
+      "caller": "_meeting_confirm_action_item_on_source_task"
+    },
+    {
+      "callee": "_save_projects",
+      "caller": "_meeting_confirm_action_item_on_source_task"
+    },
+    {
+      "callee": "isinstance",
+      "caller": "_meeting_confirm_action_item_on_source_task"
+    },
+    {
+      "callee": "next",
+      "caller": "_meeting_confirm_action_item_on_source_task"
+    },
+    {
+      "callee": "str",
+      "caller": "_meeting_confirm_action_item_on_source_task"
+    },
+    {
+      "callee": "_exec_meeting_now",
+      "caller": "_meeting_conflict_advisory"
+    },
+    {
+      "callee": "dict",
+      "caller": "_meeting_context_budget"
+    },
+    {
+      "callee": "int",
+      "caller": "_meeting_context_budget"
+    },
+    {
+      "callee": "isinstance",
+      "caller": "_meeting_context_budget"
+    },
+    {
+      "callee": "min",
+      "caller": "_meeting_context_budget"
+    },
+    {
+      "callee": "str",
+      "caller": "_meeting_context_mode"
+    },
+    {
+      "callee": "_append_exec_meeting_event",
+      "caller": "_meeting_continue_from_decision_window"
+    },
+    {
+      "callee": "int",
+      "caller": "_meeting_continue_from_decision_window"
+    },
+    {
+      "callee": "_meeting_clamped_decision_window_sec",
+      "caller": "_meeting_decision_window_sec"
+    },
+    {
+      "callee": "_append_exec_meeting_event",
+      "caller": "_meeting_ensure_action_item_drafts"
+    },
+    {
+      "callee": "_meeting_normalize_action_item",
+      "caller": "_meeting_ensure_action_item_drafts"
+    },
+    {
+      "callee": "enumerate",
+      "caller": "_meeting_ensure_action_item_drafts"
+    },
+    {
+      "callee": "isinstance",
+      "caller": "_meeting_ensure_action_item_drafts"
+    },
+    {
+      "callee": "len",
+      "caller": "_meeting_ensure_action_item_drafts"
+    },
+    {
+      "callee": "add_payload_items",
+      "caller": "_meeting_extract_payload_text"
+    },
+    {
+      "callee": "isinstance",
+      "caller": "_meeting_extract_payload_text"
+    },
+    {
+      "callee": "str",
+      "caller": "_meeting_extract_payload_text"
+    },
+    {
+      "callee": "_meeting_truncate_text",
+      "caller": "_meeting_fallback_result"
+    },
+    {
+      "callee": "str",
+      "caller": "_meeting_find_action_draft"
+    },
+    {
+      "callee": "_exec_meeting_pending_calls_projection",
+      "caller": "_meeting_find_pending_call"
+    },
+    {
+      "callee": "int",
+      "caller": "_meeting_find_pending_call"
+    },
+    {
+      "callee": "_meeting_formal_turn_exists",
+      "caller": "_meeting_formal_round_complete"
+    },
+    {
+      "callee": "all",
+      "caller": "_meeting_formal_round_complete"
+    },
+    {
+      "callee": "int",
+      "caller": "_meeting_formal_turn_exists"
+    },
+    {
+      "callee": "any",
+      "caller": "_meeting_has_open_conflicts"
+    },
+    {
+      "callee": "any",
+      "caller": "_meeting_has_substantive_disagreement"
+    },
+    {
+      "callee": "str",
+      "caller": "_meeting_has_substantive_disagreement"
+    },
+    {
+      "callee": "_exec_meeting_project_history",
+      "caller": "_meeting_history_projection"
+    },
+    {
+      "callee": "_load_exec_meeting_store",
+      "caller": "_meeting_history_projection"
+    },
+    {
+      "callee": "_load_meetings_file",
+      "caller": "_meeting_history_projection"
+    },
+    {
+      "callee": "_release_timed_out_preparing_meetings",
+      "caller": "_meeting_history_projection"
+    },
+    {
+      "callee": "_save_exec_meeting_store",
+      "caller": "_meeting_history_projection"
+    },
+    {
+      "callee": "isinstance",
+      "caller": "_meeting_history_projection"
+    },
+    {
+      "callee": "isinstance",
+      "caller": "_meeting_live_advisory_prompt"
+    },
+    {
+      "callee": "str",
+      "caller": "_meeting_live_advisory_prompt"
+    },
+    {
+      "callee": "_exec_meeting_now",
+      "caller": "_meeting_mark_preparing_started"
+    },
+    {
+      "callee": "isinstance",
+      "caller": "_meeting_mark_preparing_started"
+    },
+    {
+      "callee": "_exec_meeting_now",
+      "caller": "_meeting_normalize_action_item"
+    },
+    {
+      "callee": "isinstance",
+      "caller": "_meeting_normalize_action_item"
+    },
+    {
+      "callee": "str",
+      "caller": "_meeting_normalize_action_item"
+    },
+    {
+      "callee": "_exec_meeting_now",
+      "caller": "_meeting_normalize_advisory_reply"
+    },
+    {
+      "callee": "_meeting_conflict_advisory",
+      "caller": "_meeting_normalize_advisory_reply"
+    },
+    {
+      "callee": "_meeting_parse_json_object",
+      "caller": "_meeting_normalize_advisory_reply"
+    },
+    {
+      "callee": "_meeting_truncate_text",
+      "caller": "_meeting_normalize_advisory_reply"
+    },
+    {
+      "callee": "str",
+      "caller": "_meeting_normalize_advisory_reply"
+    },
+    {
+      "callee": "_meeting_extract_payload_text",
+      "caller": "_meeting_normalize_provider_reply"
+    },
+    {
+      "callee": "_meeting_parse_json_object",
+      "caller": "_meeting_normalize_provider_reply"
+    },
+    {
+      "callee": "_meeting_parse_structured_turn",
+      "caller": "_meeting_normalize_provider_reply"
+    },
+    {
+      "callee": "_meeting_provider_raw_summary",
+      "caller": "_meeting_normalize_provider_reply"
+    },
+    {
+      "callee": "_meeting_structured_display_text",
+      "caller": "_meeting_normalize_provider_reply"
+    },
+    {
+      "callee": "any",
+      "caller": "_meeting_normalize_provider_reply"
+    },
+    {
+      "callee": "str",
+      "caller": "_meeting_normalize_provider_reply"
+    },
+    {
+      "callee": "_append_exec_meeting_event",
+      "caller": "_meeting_open_decision_window"
+    },
+    {
+      "callee": "_meeting_arbitration_snapshot",
+      "caller": "_meeting_open_decision_window"
+    },
+    {
+      "callee": "_meeting_clamped_decision_window_sec",
+      "caller": "_meeting_open_decision_window"
+    },
+    {
+      "callee": "_meeting_decision_window_sec",
+      "caller": "_meeting_open_decision_window"
+    },
+    {
+      "callee": "_meeting_resolution_policy",
+      "caller": "_meeting_open_decision_window"
+    },
+    {
+      "callee": "int",
+      "caller": "_meeting_open_decision_window"
+    },
+    {
+      "callee": "list",
+      "caller": "_meeting_open_decision_window"
+    },
+    {
+      "callee": "_vo_public_url",
+      "caller": "_meeting_open_url"
+    },
+    {
+      "callee": "str",
+      "caller": "_meeting_open_url"
+    },
+    {
+      "callee": "_exec_meeting_now",
+      "caller": "_meeting_original_work_snapshot"
+    },
+    {
+      "callee": "str",
+      "caller": "_meeting_original_work_snapshot"
+    },
+    {
+      "callee": "_meeting_strip_json_fence",
+      "caller": "_meeting_parse_json_object"
+    },
+    {
+      "callee": "isinstance",
+      "caller": "_meeting_parse_json_object"
+    },
+    {
+      "callee": "_meeting_coerce_action_items",
+      "caller": "_meeting_parse_result"
+    },
+    {
+      "callee": "_meeting_coerce_list",
+      "caller": "_meeting_parse_result"
+    },
+    {
+      "callee": "_meeting_parse_json_object",
+      "caller": "_meeting_parse_result"
+    },
+    {
+      "callee": "_meeting_result_outcome",
+      "caller": "_meeting_parse_result"
+    },
+    {
+      "callee": "_meeting_truncate_text",
+      "caller": "_meeting_parse_result"
+    },
+    {
+      "callee": "str",
+      "caller": "_meeting_parse_result"
+    },
+    {
+      "callee": "_meeting_coerce_list",
+      "caller": "_meeting_parse_structured_turn"
+    },
+    {
+      "callee": "_meeting_parse_json_object",
+      "caller": "_meeting_parse_structured_turn"
+    },
+    {
+      "callee": "any",
+      "caller": "_meeting_parse_structured_turn"
+    },
+    {
+      "callee": "str",
+      "caller": "_meeting_parse_structured_turn"
+    },
+    {
+      "callee": "_exec_meeting_pending_calls_projection",
+      "caller": "_meeting_pending_calls_for_purpose"
+    },
+    {
+      "callee": "int",
+      "caller": "_meeting_pending_calls_for_purpose"
+    },
+    {
+      "callee": "_exec_meeting_pending_calls_projection",
+      "caller": "_meeting_pending_formal_calls_for_round"
+    },
+    {
+      "callee": "int",
+      "caller": "_meeting_pending_formal_calls_for_round"
+    },
+    {
+      "callee": "_exec_meeting_pending_calls_projection",
+      "caller": "_meeting_pending_formal_turn_exists"
+    },
+    {
+      "callee": "int",
+      "caller": "_meeting_pending_formal_turn_exists"
+    },
+    {
+      "callee": "_exec_meeting_pending_calls_projection",
+      "caller": "_meeting_pending_provider_agents"
+    },
+    {
+      "callee": "int",
+      "caller": "_meeting_preparing_timeout_sec"
+    },
+    {
+      "callee": "min",
+      "caller": "_meeting_preparing_timeout_sec"
+    },
+    {
+      "callee": "_load_projects",
+      "caller": "_meeting_project_ref"
+    },
+    {
+      "callee": "next",
+      "caller": "_meeting_project_ref"
+    },
+    {
+      "callee": "str",
+      "caller": "_meeting_project_ref"
+    },
+    {
+      "callee": "isinstance",
+      "caller": "_meeting_project_work_map"
+    },
+    {
+      "callee": "open",
+      "caller": "_meeting_project_work_map"
+    },
+    {
+      "callee": "str",
+      "caller": "_meeting_project_work_map"
+    },
+    {
+      "callee": "int",
+      "caller": "_meeting_provider_completion_should_be_ignored"
+    },
+    {
+      "callee": "_meeting_truncate_text",
+      "caller": "_meeting_provider_raw_summary"
+    },
+    {
+      "callee": "str",
+      "caller": "_meeting_provider_raw_summary"
+    },
+    {
+      "callee": "_office_agent_lookup",
+      "caller": "_meeting_provider_ref"
+    },
+    {
+      "callee": "int",
+      "caller": "_meeting_provider_timeout"
+    },
+    {
+      "callee": "max",
+      "caller": "_meeting_provider_timeout"
+    },
+    {
+      "callee": "min",
+      "caller": "_meeting_provider_timeout"
+    },
+    {
+      "callee": "_meeting_request_auto_confirm_label",
+      "caller": "_meeting_request_approved_notification_details"
+    },
+    {
+      "callee": "_meeting_request_notification_details",
+      "caller": "_meeting_request_approved_notification_details"
+    },
+    {
+      "callee": "isinstance",
+      "caller": "_meeting_request_approved_notification_details"
+    },
+    {
+      "callee": "str",
+      "caller": "_meeting_request_auto_confirm_label"
+    },
+    {
+      "callee": "_project_high_priority_ai_meeting_requires_confirmation",
+      "caller": "_meeting_request_auto_confirm_reason"
+    },
+    {
+      "callee": "str",
+      "caller": "_meeting_request_clean_type"
+    },
+    {
+      "callee": "_meeting_history_projection",
+      "caller": "_meeting_request_context_candidates"
+    },
+    {
+      "callee": "_meeting_request_summary",
+      "caller": "_meeting_request_context_candidates"
+    },
+    {
+      "callee": "len",
+      "caller": "_meeting_request_context_candidates"
+    },
+    {
+      "callee": "str",
+      "caller": "_meeting_request_context_candidates"
+    },
+    {
+      "callee": "_handle_project_get",
+      "caller": "_meeting_request_find_project_task"
+    },
+    {
+      "callee": "next",
+      "caller": "_meeting_request_find_project_task"
+    },
+    {
+      "callee": "_load_meeting_request_store",
+      "caller": "_meeting_request_list_filtered"
+    },
+    {
+      "callee": "_meeting_request_public",
+      "caller": "_meeting_request_list_filtered"
+    },
+    {
+      "callee": "_sort_meeting_requests",
+      "caller": "_meeting_request_list_filtered"
+    },
+    {
+      "callee": "list",
+      "caller": "_meeting_request_list_filtered"
+    },
+    {
+      "callee": "sum",
+      "caller": "_meeting_request_list_filtered"
+    },
+    {
+      "callee": "_load_projects",
+      "caller": "_meeting_request_log_auto_confirm_activity"
+    },
+    {
+      "callee": "_log_activity",
+      "caller": "_meeting_request_log_auto_confirm_activity"
+    },
+    {
+      "callee": "_meeting_request_auto_confirm_label",
+      "caller": "_meeting_request_log_auto_confirm_activity"
+    },
+    {
+      "callee": "_proj_now",
+      "caller": "_meeting_request_log_auto_confirm_activity"
+    },
+    {
+      "callee": "_save_projects",
+      "caller": "_meeting_request_log_auto_confirm_activity"
+    },
+    {
+      "callee": "isinstance",
+      "caller": "_meeting_request_log_auto_confirm_activity"
+    },
+    {
+      "callee": "next",
+      "caller": "_meeting_request_log_auto_confirm_activity"
+    },
+    {
+      "callee": "isinstance",
+      "caller": "_meeting_request_notification_details"
+    },
+    {
+      "callee": "isinstance",
+      "caller": "_meeting_request_notification_related"
+    },
+    {
+      "callee": "bool",
+      "caller": "_meeting_request_processed"
+    },
+    {
+      "callee": "isinstance",
+      "caller": "_meeting_request_processed"
+    },
+    {
+      "callee": "str",
+      "caller": "_meeting_request_processed"
+    },
+    {
+      "callee": "dict",
+      "caller": "_meeting_request_public"
+    },
+    {
+      "callee": "_exec_meeting_now",
+      "caller": "_meeting_request_resolve_task_blocker"
+    },
+    {
+      "callee": "_load_meeting_request_store",
+      "caller": "_meeting_request_resolve_task_blocker"
+    },
+    {
+      "callee": "_meeting_request_public",
+      "caller": "_meeting_request_resolve_task_blocker"
+    },
+    {
+      "callee": "_save_meeting_request_store",
+      "caller": "_meeting_request_resolve_task_blocker"
+    },
+    {
+      "callee": "dict",
+      "caller": "_meeting_request_selected_context"
+    },
+    {
+      "callee": "set",
+      "caller": "_meeting_request_selected_context"
+    },
+    {
+      "callee": "str",
+      "caller": "_meeting_request_selected_context"
+    },
+    {
+      "callee": "_meeting_request_processed",
+      "caller": "_meeting_request_sort_key"
+    },
+    {
+      "callee": "str",
+      "caller": "_meeting_request_sort_time"
+    },
+    {
+      "callee": "_meeting_truncate_text",
+      "caller": "_meeting_request_summary"
+    },
+    {
+      "callee": "str",
+      "caller": "_meeting_request_summary"
+    },
+    {
+      "callee": "isinstance",
+      "caller": "_meeting_request_unresolved_for_task"
+    },
+    {
+      "callee": "int",
+      "caller": "_meeting_request_urgency"
+    },
+    {
+      "callee": "max",
+      "caller": "_meeting_request_urgency"
+    },
+    {
+      "callee": "min",
+      "caller": "_meeting_request_urgency"
+    },
+    {
+      "callee": "str",
+      "caller": "_meeting_resolution_policy"
+    },
+    {
+      "callee": "str",
+      "caller": "_meeting_result_outcome"
+    },
+    {
+      "callee": "_append_exec_meeting_event",
+      "caller": "_meeting_resume_original_work"
+    },
+    {
+      "callee": "_exec_meeting_now",
+      "caller": "_meeting_resume_original_work"
+    },
+    {
+      "callee": "isinstance",
+      "caller": "_meeting_resume_original_work"
+    },
+    {
+      "callee": "_append_exec_meeting_event",
+      "caller": "_meeting_skip_timed_out_provider_call"
+    },
+    {
+      "callee": "_meeting_find_pending_call",
+      "caller": "_meeting_skip_timed_out_provider_call"
+    },
+    {
+      "callee": "_meeting_formal_turn_exists",
+      "caller": "_meeting_skip_timed_out_provider_call"
+    },
+    {
+      "callee": "_meeting_provider_ref",
+      "caller": "_meeting_skip_timed_out_provider_call"
+    },
+    {
+      "callee": "int",
+      "caller": "_meeting_skip_timed_out_provider_call"
+    },
+    {
+      "callee": "str",
+      "caller": "_meeting_strip_json_fence"
+    },
+    {
+      "callee": "isinstance",
+      "caller": "_meeting_structured_display_text"
+    },
+    {
+      "callee": "str",
+      "caller": "_meeting_structured_display_text"
+    },
+    {
+      "callee": "int",
+      "caller": "_meeting_truncate_text"
+    },
+    {
+      "callee": "len",
+      "caller": "_meeting_truncate_text"
+    },
+    {
+      "callee": "max",
+      "caller": "_meeting_truncate_text"
+    },
+    {
+      "callee": "str",
+      "caller": "_meeting_truncate_text"
+    },
+    {
+      "callee": "_meeting_truncate_text",
+      "caller": "_meeting_update_rolling_summary"
+    },
+    {
+      "callee": "str",
+      "caller": "_meeting_update_rolling_summary"
+    },
+    {
+      "callee": "all",
+      "caller": "_project_execution_all_required_meeting_actions_done"
+    },
+    {
+      "callee": "isinstance",
+      "caller": "_project_execution_all_required_meeting_actions_done"
+    },
+    {
+      "callee": "_proj_now",
+      "caller": "_project_execution_apply_meeting_discussion_points"
+    },
+    {
+      "callee": "_project_execution_meeting_discussion_key",
+      "caller": "_project_execution_apply_meeting_discussion_points"
+    },
+    {
+      "callee": "_project_execution_result_meeting_discussion_points",
+      "caller": "_project_execution_apply_meeting_discussion_points"
+    },
+    {
+      "callee": "isinstance",
+      "caller": "_project_execution_apply_meeting_discussion_points"
+    },
+    {
+      "callee": "str",
+      "caller": "_project_execution_apply_meeting_discussion_points"
+    },
+    {
+      "callee": "_is_archive_manager_agent",
+      "caller": "_project_execution_apply_meeting_output_to_task"
+    },
+    {
+      "callee": "_log_activity",
+      "caller": "_project_execution_apply_meeting_output_to_task"
+    },
+    {
+      "callee": "_proj_now",
+      "caller": "_project_execution_apply_meeting_output_to_task"
+    },
+    {
+      "callee": "_project_execution_action_item_description",
+      "caller": "_project_execution_apply_meeting_output_to_task"
+    },
+    {
+      "callee": "_project_execution_action_item_owner",
+      "caller": "_project_execution_apply_meeting_output_to_task"
+    },
+    {
+      "callee": "_project_execution_action_item_text",
+      "caller": "_project_execution_apply_meeting_output_to_task"
+    },
+    {
+      "callee": "_project_execution_has_pending_meeting_actions",
+      "caller": "_project_execution_apply_meeting_output_to_task"
+    },
+    {
+      "callee": "_project_execution_meeting_action_key",
+      "caller": "_project_execution_apply_meeting_output_to_task"
+    },
+    {
+      "callee": "_project_execution_meeting_discussion_key",
+      "caller": "_project_execution_apply_meeting_output_to_task"
+    },
+    {
+      "callee": "_project_execution_normalize_meeting_risks",
+      "caller": "_project_execution_apply_meeting_output_to_task"
+    },
+    {
+      "callee": "_project_execution_redact",
+      "caller": "_project_execution_apply_meeting_output_to_task"
+    },
+    {
+      "callee": "_project_execution_seed_acceptance_checklist",
+      "caller": "_project_execution_apply_meeting_output_to_task"
+    },
+    {
+      "callee": "_project_execution_task_executor_id",
+      "caller": "_project_execution_apply_meeting_output_to_task"
+    },
+    {
+      "callee": "_project_execution_upsert_meeting_record",
+      "caller": "_project_execution_apply_meeting_output_to_task"
+    },
+    {
+      "callee": "enumerate",
+      "caller": "_project_execution_apply_meeting_output_to_task"
+    },
+    {
+      "callee": "isinstance",
+      "caller": "_project_execution_apply_meeting_output_to_task"
+    },
+    {
+      "callee": "str",
+      "caller": "_project_execution_apply_meeting_output_to_task"
+    },
+    {
+      "callee": "_handle_project_execution_start",
+      "caller": "_project_execution_apply_meeting_result"
+    },
+    {
+      "callee": "_meeting_request_resolve_task_blocker",
+      "caller": "_project_execution_apply_meeting_result"
+    },
+    {
+      "callee": "_meeting_result_outcome",
+      "caller": "_project_execution_apply_meeting_result"
+    },
+    {
+      "callee": "_proj_now",
+      "caller": "_project_execution_apply_meeting_result"
+    },
+    {
+      "callee": "_project_execution_apply_meeting_output_to_task",
+      "caller": "_project_execution_apply_meeting_result"
+    },
+    {
+      "callee": "_project_execution_find",
+      "caller": "_project_execution_apply_meeting_result"
+    },
+    {
+      "callee": "_project_execution_move_task_to_column",
+      "caller": "_project_execution_apply_meeting_result"
+    },
+    {
+      "callee": "_project_execution_redact",
+      "caller": "_project_execution_apply_meeting_result"
+    },
+    {
+      "callee": "_project_execution_transition",
+      "caller": "_project_execution_apply_meeting_result"
+    },
+    {
+      "callee": "_project_execution_upsert_meeting_record",
+      "caller": "_project_execution_apply_meeting_result"
+    },
+    {
+      "callee": "_save_projects",
+      "caller": "_project_execution_apply_meeting_result"
+    },
+    {
+      "callee": "_wf_get_backlog_col",
+      "caller": "_project_execution_apply_meeting_result"
+    },
+    {
+      "callee": "isinstance",
+      "caller": "_project_execution_apply_meeting_result"
+    },
+    {
+      "callee": "str",
+      "caller": "_project_execution_apply_meeting_result"
+    },
+    {
+      "callee": "_proj_now",
+      "caller": "_project_execution_block_for_meeting_request"
+    },
+    {
+      "callee": "_project_execution_attempt",
+      "caller": "_project_execution_block_for_meeting_request"
+    },
+    {
+      "callee": "_project_execution_find",
+      "caller": "_project_execution_block_for_meeting_request"
+    },
+    {
+      "callee": "_project_execution_redact",
+      "caller": "_project_execution_block_for_meeting_request"
+    },
+    {
+      "callee": "_project_execution_transition",
+      "caller": "_project_execution_block_for_meeting_request"
+    },
+    {
+      "callee": "_save_projects",
+      "caller": "_project_execution_block_for_meeting_request"
+    },
+    {
+      "callee": "any",
+      "caller": "_project_execution_has_pending_meeting_actions"
+    },
+    {
+      "callee": "isinstance",
+      "caller": "_project_execution_has_pending_meeting_actions"
+    },
+    {
+      "callee": "_log_activity",
+      "caller": "_project_execution_mark_meeting_actions_completed"
+    },
+    {
+      "callee": "_proj_now",
+      "caller": "_project_execution_mark_meeting_actions_completed"
+    },
+    {
+      "callee": "isinstance",
+      "caller": "_project_execution_mark_meeting_actions_completed"
+    },
+    {
+      "callee": "_project_execution_action_item_owner",
+      "caller": "_project_execution_meeting_action_summaries"
+    },
+    {
+      "callee": "_project_execution_action_item_text",
+      "caller": "_project_execution_meeting_action_summaries"
+    },
+    {
+      "callee": "enumerate",
+      "caller": "_project_execution_meeting_action_summaries"
+    },
+    {
+      "callee": "isinstance",
+      "caller": "_project_execution_meeting_action_summaries"
+    },
+    {
+      "callee": "str",
+      "caller": "_project_execution_meeting_action_summaries"
+    },
+    {
+      "callee": "isinstance",
+      "caller": "_project_execution_meeting_blocker_unresolved"
+    },
+    {
+      "callee": "str",
+      "caller": "_project_execution_meeting_discussion_key"
+    },
+    {
+      "callee": "str",
+      "caller": "_project_execution_meeting_record_key"
+    },
+    {
+      "callee": "isinstance",
+      "caller": "_project_execution_normalize_meeting_risks"
+    },
+    {
+      "callee": "set",
+      "caller": "_project_execution_normalize_meeting_risks"
+    },
+    {
+      "callee": "str",
+      "caller": "_project_execution_normalize_meeting_risks"
+    },
+    {
+      "callee": "_project_execution_extract_json",
+      "caller": "_project_execution_result_meeting_discussion_points"
+    },
+    {
+      "callee": "_project_execution_redact",
+      "caller": "_project_execution_result_meeting_discussion_points"
+    },
+    {
+      "callee": "isinstance",
+      "caller": "_project_execution_result_meeting_discussion_points"
+    },
+    {
+      "callee": "str",
+      "caller": "_project_execution_result_meeting_discussion_points"
+    },
+    {
+      "callee": "_proj_now",
+      "caller": "_project_execution_update_meeting_blocker"
+    },
+    {
+      "callee": "_project_execution_find",
+      "caller": "_project_execution_update_meeting_blocker"
+    },
+    {
+      "callee": "_save_projects",
+      "caller": "_project_execution_update_meeting_blocker"
+    },
+    {
+      "callee": "isinstance",
+      "caller": "_project_execution_update_meeting_blocker"
+    },
+    {
+      "callee": "_meeting_result_outcome",
+      "caller": "_project_execution_upsert_meeting_record"
+    },
+    {
+      "callee": "_proj_now",
+      "caller": "_project_execution_upsert_meeting_record"
+    },
+    {
+      "callee": "_project_execution_meeting_action_summaries",
+      "caller": "_project_execution_upsert_meeting_record"
+    },
+    {
+      "callee": "_project_execution_meeting_record_key",
+      "caller": "_project_execution_upsert_meeting_record"
+    },
+    {
+      "callee": "_project_execution_normalize_meeting_risks",
+      "caller": "_project_execution_upsert_meeting_record"
+    },
+    {
+      "callee": "_project_execution_redact",
+      "caller": "_project_execution_upsert_meeting_record"
+    },
+    {
+      "callee": "isinstance",
+      "caller": "_project_execution_upsert_meeting_record"
+    },
+    {
+      "callee": "len",
+      "caller": "_project_execution_upsert_meeting_record"
+    },
+    {
+      "callee": "next",
+      "caller": "_project_execution_upsert_meeting_record"
+    },
+    {
+      "callee": "str",
+      "caller": "_project_execution_upsert_meeting_record"
+    },
+    {
+      "callee": "bool",
+      "caller": "_project_high_priority_ai_meeting_requires_confirmation"
+    },
+    {
+      "callee": "isinstance",
+      "caller": "_rebuild_exec_meeting_occupancy"
+    },
+    {
+      "callee": "_exec_meeting_now",
+      "caller": "_record_feishu_card_action"
+    },
+    {
+      "callee": "_append_exec_meeting_event",
+      "caller": "_release_timed_out_preparing_meetings"
+    },
+    {
+      "callee": "_exec_meeting_parse_ts",
+      "caller": "_release_timed_out_preparing_meetings"
+    },
+    {
+      "callee": "_meeting_preparing_timeout_sec",
+      "caller": "_release_timed_out_preparing_meetings"
+    },
+    {
+      "callee": "isinstance",
+      "caller": "_release_timed_out_preparing_meetings"
+    },
+    {
+      "callee": "list",
+      "caller": "_release_timed_out_preparing_meetings"
+    },
+    {
+      "callee": "_exec_meeting_now",
+      "caller": "_save_exec_meeting_store"
+    },
+    {
+      "callee": "_exec_meetings_file",
+      "caller": "_save_exec_meeting_store"
+    },
+    {
+      "callee": "open",
+      "caller": "_save_exec_meeting_store"
+    },
+    {
+      "callee": "_exec_meeting_now",
+      "caller": "_save_meeting_request_store"
+    },
+    {
+      "callee": "_meeting_requests_file",
+      "caller": "_save_meeting_request_store"
+    },
+    {
+      "callee": "open",
+      "caller": "_save_meeting_request_store"
+    },
+    {
+      "callee": "open",
+      "caller": "_save_meetings_file"
+    },
+    {
+      "callee": "_feishu_notification_marker",
+      "caller": "_send_meeting_failure_notification"
+    },
+    {
+      "callee": "_mark_feishu_notification",
+      "caller": "_send_meeting_failure_notification"
+    },
+    {
+      "callee": "_meeting_open_url",
+      "caller": "_send_meeting_failure_notification"
+    },
+    {
+      "callee": "_meeting_truncate_text",
+      "caller": "_send_meeting_failure_notification"
+    },
+    {
+      "callee": "_project_execution_redact",
+      "caller": "_send_meeting_failure_notification"
+    },
+    {
+      "callee": "_send_feishu_workflow_notification",
+      "caller": "_send_meeting_failure_notification"
+    },
+    {
+      "callee": "isinstance",
+      "caller": "_send_meeting_failure_notification"
+    },
+    {
+      "callee": "_feishu_app_send_config",
+      "caller": "_send_meeting_request_notification"
+    },
+    {
+      "callee": "_meeting_open_url",
+      "caller": "_send_meeting_request_notification"
+    },
+    {
+      "callee": "_meeting_request_notification_details",
+      "caller": "_send_meeting_request_notification"
+    },
+    {
+      "callee": "_meeting_request_notification_related",
+      "caller": "_send_meeting_request_notification"
+    },
+    {
+      "callee": "_vo_public_url",
+      "caller": "_send_meeting_request_notification"
+    },
+    {
+      "callee": "isinstance",
+      "caller": "_send_meeting_request_notification"
+    },
+    {
+      "callee": "send_feishu_notification",
+      "caller": "_send_meeting_request_notification"
+    },
+    {
+      "callee": "str",
+      "caller": "_send_meeting_request_notification"
+    },
+    {
+      "callee": "list",
+      "caller": "_sort_meeting_requests"
+    },
+    {
+      "callee": "_meeting_active_projection",
+      "caller": "_status_meeting_projection"
+    },
+    {
+      "callee": "dict",
+      "caller": "_status_meeting_projection"
+    },
+    {
+      "callee": "isinstance",
+      "caller": "_status_meeting_projection"
+    },
+    {
+      "callee": "list",
+      "caller": "_status_meeting_projection"
+    },
+    {
+      "callee": "_handle_meeting_history_delete",
+      "caller": "do_DELETE"
+    },
+    {
+      "callee": "_handle_executable_meeting_detail",
+      "caller": "do_GET"
+    },
+    {
+      "callee": "_handle_executable_meeting_events",
+      "caller": "do_GET"
+    },
+    {
+      "callee": "_handle_executable_meeting_reconcile",
+      "caller": "do_GET"
+    },
+    {
+      "callee": "_handle_meeting_request_detail",
+      "caller": "do_GET"
+    },
+    {
+      "callee": "_meeting_active_projection",
+      "caller": "do_GET"
+    },
+    {
+      "callee": "_meeting_history_projection",
+      "caller": "do_GET"
+    },
+    {
+      "callee": "_meeting_request_list_filtered",
+      "caller": "do_GET"
+    },
+    {
+      "callee": "_handle_executable_meeting_action_item",
+      "caller": "do_POST"
+    },
+    {
+      "callee": "_handle_executable_meeting_agenda_change",
+      "caller": "do_POST"
+    },
+    {
+      "callee": "_handle_executable_meeting_arbitration",
+      "caller": "do_POST"
+    },
+    {
+      "callee": "_handle_executable_meeting_conflict_action",
+      "caller": "do_POST"
+    },
+    {
+      "callee": "_handle_executable_meeting_create",
+      "caller": "do_POST"
+    },
+    {
+      "callee": "_handle_executable_meeting_intervention",
+      "caller": "do_POST"
+    },
+    {
+      "callee": "_handle_executable_meeting_moderator_takeover",
+      "caller": "do_POST"
+    },
+    {
+      "callee": "_handle_executable_meeting_run",
+      "caller": "do_POST"
+    },
+    {
+      "callee": "_handle_executable_meeting_targeted_question",
+      "caller": "do_POST"
+    },
+    {
+      "callee": "_handle_executable_meeting_transition",
+      "caller": "do_POST"
+    },
+    {
+      "callee": "_handle_meeting_create",
+      "caller": "do_POST"
+    },
+    {
+      "callee": "_handle_meeting_end",
+      "caller": "do_POST"
+    },
+    {
+      "callee": "_handle_meeting_end_all",
+      "caller": "do_POST"
+    },
+    {
+      "callee": "_handle_meeting_request_confirm",
+      "caller": "do_POST"
+    },
+    {
+      "callee": "_handle_meeting_request_create",
+      "caller": "do_POST"
+    },
+    {
+      "callee": "_handle_meeting_request_reject",
+      "caller": "do_POST"
+    },
+    {
+      "callee": "_handle_project_execution_meeting_blocker_action",
+      "caller": "do_POST"
+    }
+  ],
+  "schema": 1
+}

@@ -239,6 +239,37 @@ def test_feishu_meeting_request_card_actions_confirm_and_reject():
             restore_store(old)
 
 
+def test_feishu_meeting_request_card_action_replay_is_characterized():
+    with tempfile.TemporaryDirectory() as status_dir:
+        old = with_store(status_dir)
+        old_run = server._handle_executable_meeting_run
+        try:
+            project, task = create_fixture_project(status_dir)
+            req = server._handle_meeting_request_create(
+                project["id"], task["id"], meeting_request_body("feishu replay"),
+            )["request"]
+            calls = []
+
+            def fake_run(meeting_id, body=None):
+                calls.append({"meetingId": meeting_id, "body": body or {}})
+                return {"ok": True, "meeting": {"id": meeting_id, "stage": "active_opening"}}
+
+            server._handle_executable_meeting_run = fake_run
+            payload = feishu_meeting_action_payload("confirm_meeting_request", req["id"])
+            first = server._handle_feishu_card_action(payload)
+            repeated = server._handle_feishu_card_action(payload)
+            assert first["ok"] is True and repeated["ok"] is True
+            assert repeated["toast"]["content"].endswith("（已处理）")
+            assert len({call["meetingId"] for call in calls}) == 1
+            # Existing behavior attempts start again; callback extraction must make this a true no-op.
+            assert len(calls) == 2
+            detail = server._handle_meeting_request_detail(req["id"])
+            assert detail["request"]["conversion"]["meetingId"] == calls[0]["meetingId"]
+        finally:
+            server._handle_executable_meeting_run = old_run
+            restore_store(old)
+
+
 def test_auto_confirmed_meeting_request_pending_notification_is_view_only():
     with tempfile.TemporaryDirectory() as status_dir:
         old = with_store(status_dir)

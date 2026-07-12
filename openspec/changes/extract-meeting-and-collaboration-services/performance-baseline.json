@@ -1,0 +1,121 @@
+{
+  "fixtures": {
+    "1": {
+      "events": 20,
+      "legacyBytes": {
+        "executable": 2245,
+        "requests": 307
+      },
+      "meetings": 1,
+      "occupancy": 2,
+      "operations": {
+        "loadExecutable": {
+          "medianMs": 0.0476,
+          "p95Ms": 0.3288,
+          "runs": 20,
+          "warmups": 3
+        },
+        "loadRequests": {
+          "medianMs": 0.027,
+          "p95Ms": 0.0517,
+          "runs": 20,
+          "warmups": 3
+        },
+        "saveExecutable": {
+          "medianMs": 0.7272,
+          "p95Ms": 0.9163,
+          "runs": 20,
+          "warmups": 3
+        },
+        "saveRequests": {
+          "medianMs": 0.4268,
+          "p95Ms": 1.0603,
+          "runs": 20,
+          "warmups": 3
+        }
+      },
+      "requests": 1
+    },
+    "100": {
+      "events": 2000,
+      "legacyBytes": {
+        "executable": 211913,
+        "requests": 21574
+      },
+      "meetings": 100,
+      "occupancy": 200,
+      "operations": {
+        "loadExecutable": {
+          "medianMs": 0.4358,
+          "p95Ms": 0.591,
+          "runs": 20,
+          "warmups": 3
+        },
+        "loadRequests": {
+          "medianMs": 0.064,
+          "p95Ms": 0.1057,
+          "runs": 20,
+          "warmups": 3
+        },
+        "saveExecutable": {
+          "medianMs": 4.3588,
+          "p95Ms": 4.6094,
+          "runs": 20,
+          "warmups": 3
+        },
+        "saveRequests": {
+          "medianMs": 0.9101,
+          "p95Ms": 1.1113,
+          "runs": 20,
+          "warmups": 3
+        }
+      },
+      "requests": 100
+    },
+    "20": {
+      "events": 400,
+      "legacyBytes": {
+        "executable": 42433,
+        "requests": 4374
+      },
+      "meetings": 20,
+      "occupancy": 40,
+      "operations": {
+        "loadExecutable": {
+          "medianMs": 0.1076,
+          "p95Ms": 0.2081,
+          "runs": 20,
+          "warmups": 3
+        },
+        "loadRequests": {
+          "medianMs": 0.0291,
+          "p95Ms": 0.0332,
+          "runs": 20,
+          "warmups": 3
+        },
+        "saveExecutable": {
+          "medianMs": 1.4547,
+          "p95Ms": 2.123,
+          "runs": 20,
+          "warmups": 3
+        },
+        "saveRequests": {
+          "medianMs": 0.5357,
+          "p95Ms": 0.6549,
+          "runs": 20,
+          "warmups": 3
+        }
+      },
+      "requests": 20
+    }
+  },
+  "method": "3 warmups, 20 measured runs",
+  "observedRequestConversion": {
+    "executable": 1,
+    "providerCalls": 0,
+    "requests": 3,
+    "total": 4
+  },
+  "schema": 1,
+  "targetUnifiedRequestConversionWrites": 1
+}
