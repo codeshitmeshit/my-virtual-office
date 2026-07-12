@@ -45,6 +45,7 @@ from services import review_acceptance as review_acceptance_service
 from services import artifacts as artifact_service
 from services import project_schedule as project_schedule_service
 from services import meeting_repository as meeting_repository_service
+from services import meeting_lifecycle as meeting_lifecycle_service
 from services.project_repository import ProjectConflictError, ProjectNotFoundError, ProjectRepository
 from zoneinfo import ZoneInfo
 from provider_execution import (
@@ -10756,24 +10757,9 @@ def _save_meetings_file(data):
 
 
 _EXEC_MEETING_LOCK = threading.RLock()
-_EXEC_MEETING_TERMINAL = {"completed", "cancelled", "failed"}
-_EXEC_MEETING_PHASES = {
-    "draft", "conflict", "preparing", "active_opening", "active_discussion", "paused",
-    "awaiting_user_decision", "summarizing", "completed", "cancelled", "failed",
-}
-_EXEC_MEETING_TRANSITIONS = {
-    "draft": {"preparing", "cancelled"},
-    "conflict": {"preparing", "cancelled", "failed"},
-    "preparing": {"active_opening", "paused", "cancelled", "failed"},
-    "active_opening": {"active_discussion", "paused", "summarizing", "cancelled", "failed"},
-    "active_discussion": {"awaiting_user_decision", "summarizing", "paused", "cancelled", "failed"},
-    "paused": {"preparing", "active_opening", "active_discussion", "awaiting_user_decision", "cancelled", "failed"},
-    "awaiting_user_decision": {"active_discussion", "summarizing", "cancelled", "failed"},
-    "summarizing": {"completed", "cancelled", "failed"},
-    "completed": set(),
-    "cancelled": set(),
-    "failed": set(),
-}
+_EXEC_MEETING_TERMINAL = set(meeting_lifecycle_service.TERMINAL)
+_EXEC_MEETING_PHASES = set(meeting_lifecycle_service.PHASES)
+_EXEC_MEETING_TRANSITIONS = {key: set(value) for key, value in meeting_lifecycle_service.TRANSITIONS.items()}
 _MEETING_CONTEXT_MODES = {"incremental", "summary", "full"}
 _MEETING_DEFAULT_CONTEXT_BUDGET = {
     "maxPromptChars": 12000,
@@ -12801,51 +12787,13 @@ def _meeting_mark_preparing_started(meeting, now=None):
 
 def _release_timed_out_preparing_meetings(store, now=None):
     now_dt = now if isinstance(now, datetime) else datetime.now(timezone.utc)
-    now_ts = now_dt.timestamp()
-    now_iso = now_dt.isoformat()
-    timeout_sec = _meeting_preparing_timeout_sec()
-    released = []
-    for meeting in list((store.get("meetings") or {}).values()):
-        if not isinstance(meeting, dict) or meeting.get("stage") != "preparing":
-            continue
-        if meeting.get("cancelReason") == "preparing_timeout":
-            continue
-        started_at = meeting.get("preparingStartedAt") or meeting.get("createdAt") or meeting.get("updatedAt")
-        started_ts = _exec_meeting_parse_ts(started_at)
-        if not started_ts or now_ts - started_ts < timeout_sec:
-            continue
-        meeting_id = meeting.get("id")
-        previous = meeting.get("stage")
-        meeting["previousStage"] = previous
-        meeting["stage"] = "cancelled"
-        meeting["currentSpeaker"] = ""
-        meeting["cancelReason"] = "preparing_timeout"
-        meeting["timedOutAt"] = now_iso
-        meeting["preparingTimeoutSec"] = timeout_sec
-        meeting["preparingTimedOutFrom"] = started_at
-        released_agents = []
-        for participant in meeting.get("participants") or []:
-            if store.setdefault("occupancy", {}).get(participant) == meeting_id:
-                store["occupancy"].pop(participant, None)
-                released_agents.append(participant)
-        _append_exec_meeting_event(
-            store,
-            meeting,
-            "meeting_preparing_timed_out",
-            actor={"type": "system", "id": "system"},
-            payload={
-                "from": previous,
-                "to": "cancelled",
-                "reason": "preparing_timeout",
-                "timeoutSec": timeout_sec,
-                "startedAt": started_at,
-                "timedOutAt": now_iso,
-                "releasedParticipants": released_agents,
-            },
-            idempotency_key=f"{meeting_id}:preparing-timeout",
-        )
-        released.append(meeting_id)
-    return released
+    return meeting_lifecycle_service.release_timed_out_preparing(
+        store, now_timestamp=now_dt.timestamp(), now_iso=now_dt.isoformat(),
+        timeout_seconds=_meeting_preparing_timeout_sec(),
+        hooks=meeting_lifecycle_service.TimeoutHooks(
+            append_event=_append_exec_meeting_event, parse_timestamp=_exec_meeting_parse_ts,
+        ),
+    )
 
 
 def _meeting_formal_turn_exists(events, stage, round_value, speaker):
@@ -13426,21 +13374,7 @@ def _meeting_continue_from_decision_window(store, meeting, actor=None, reason="c
 
 
 def _rebuild_exec_meeting_occupancy(store):
-    occupancy = {}
-    forced = {}
-    for meeting in store.get("meetings", {}).values():
-        if meeting.get("stage") in _EXEC_MEETING_TERMINAL:
-            continue
-        participant_state = meeting.get("participantState") if isinstance(meeting.get("participantState"), dict) else {}
-        for participant in meeting.get("participants", []):
-            state = participant_state.get(participant) if isinstance(participant_state.get(participant), dict) else {}
-            if state.get("forcedJoin"):
-                forced[participant] = meeting.get("id")
-                continue
-            occupancy[participant] = meeting.get("id")
-    occupancy.update(forced)
-    store["occupancy"] = occupancy
-    return occupancy
+    return meeting_lifecycle_service.rebuild_occupancy(store)
 
 
 def _exec_meeting_pending_calls_projection(events):
@@ -13880,14 +13814,15 @@ def _handle_executable_meeting_create(body):
         return {"error": "Meeting topic is required", "_status": 400}
     if len(participants) < 2:
         return {"error": "Executable meeting requires at least 2 participants", "_status": 400}
-    blocked_participants = _exec_meeting_archive_manager_participants(participants)
-    if blocked_participants:
-        return _exec_meeting_archive_manager_error(blocked_participants)
     moderator = str(body.get("moderator") or body.get("moderatorId") or participants[0]).strip()
-    if _is_archive_manager_agent(moderator):
-        return _exec_meeting_archive_manager_error([moderator])
-    if moderator not in participants:
-        return {"error": "Moderator must be one of the participants", "_status": 400}
+    try:
+        meeting_lifecycle_service.validate_participant_eligibility(
+            participants, moderator, is_excluded=_is_archive_manager_agent,
+        )
+    except meeting_lifecycle_service.MeetingLifecycleError as error:
+        if error.code == "archive_manager_not_meeting_participant":
+            return _exec_meeting_archive_manager_error(error.details.get("participants") or [])
+        return {"error": str(error), "_status": error.status}
     meeting_type = str(body.get("meetingType") or body.get("kind") or "discussion").strip() or "discussion"
     if meeting_type not in {"information", "discussion", "task"}:
         meeting_type = "discussion"
@@ -13906,74 +13841,44 @@ def _handle_executable_meeting_create(body):
     project_id, project_title = project_ref["projectId"], project_ref["projectTitle"]
     with _EXEC_MEETING_LOCK:
         store = _load_exec_meeting_store()
-        if idempotency_key and idempotency_key in store.get("idempotency", {}):
-            existing_id = store["idempotency"][idempotency_key].get("meetingId")
-            existing = store.get("meetings", {}).get(existing_id)
-            if existing:
-                return {"ok": True, "meeting": existing, "idempotent": True}
-        _rebuild_exec_meeting_occupancy(store)
-        conflicts = _meeting_build_conflicts(store, participants)
-        occupied_conflicts = {c.get("agentId"): (c.get("source") or {}).get("meetingId") for c in conflicts if c.get("reason") == "meeting_occupied"}
-        allow_conflicts = bool(body.get("allowConflicts") or body.get("conflictAware"))
-        if conflicts and not allow_conflicts:
-            if occupied_conflicts:
-                return {"error": "One or more participants are already in an executable meeting", "conflicts": occupied_conflicts, "_status": 409}
-            return {"error": "One or more participants are busy", "conflicts": conflicts, "_status": 409}
-        meeting_stage = "conflict" if conflicts else "preparing"
-        meeting = {
-            "id": meeting_id,
-            "executableMeeting": True,
-            "topic": topic,
-            "agenda": str(body.get("agenda") or topic).strip(),
-            "purpose": str(body.get("purpose") or "").strip(),
-            "meetingType": meeting_type,
-            "organizer": str(body.get("organizer") or participants[0]).strip(),
-            "createdBy": str(body.get("createdBy") or body.get("organizer") or "user").strip(),
-            "createdByType": str(body.get("createdByType") or ("agent" if body.get("createdByAgentId") else "user")).strip(),
-            "createdByAgentId": str(body.get("createdByAgentId") or "").strip(),
-            "projectId": project_id,
-            "projectTitle": project_title,
-            "moderator": moderator,
-            "participants": participants,
-            "stage": meeting_stage,
-            "preparingStartedAt": now if meeting_stage == "preparing" else "",
-            "preparingTimeoutSec": _meeting_preparing_timeout_sec(),
-            "previousStage": "",
-            "round": 0,
-            "maxRounds": max_rounds,
-            "decisionWindowSec": _meeting_clamped_decision_window_sec(body.get("decisionWindowSec") or body.get("decisionWindowSeconds") or _meeting_decision_window_sec()),
-            "decisionWindowConfiguredSec": _meeting_clamped_decision_window_sec(body.get("decisionWindowSec") or body.get("decisionWindowSeconds") or _meeting_decision_window_sec()),
-            "resolutionPolicy": _meeting_resolution_policy(body.get("resolutionPolicy") or body.get("arbitrationPolicy")),
-            "currentSpeaker": "",
-            "speakerQueue": list(participants),
-        "context": str(body.get("context") or body.get("initialContext") or "").strip(),
-            "contextMode": _meeting_context_mode(body.get("contextMode")),
-            "contextBudget": _meeting_context_budget(body.get("contextBudget")),
-            "rollingSummary": "",
-            "participantLastSeen": {},
-            "participantState": {p: {"status": "conflict" if any(c.get("agentId") == p and c.get("status") in {"open", "waiting", "reserved"} for c in conflicts) else "reserved", "joinedAt": now} for p in participants},
-            "conflicts": conflicts,
-            "originalWork": {},
-            "reservation": {},
-            "result": {},
-            "source": body.get("source") if isinstance(body.get("source"), dict) else {},
-            "version": 0,
-            "lastEventSequence": 0,
-            "createdAt": now,
-            "updatedAt": now,
-        }
-        store.setdefault("meetings", {})[meeting_id] = meeting
-        _append_exec_meeting_event(store, meeting, "meeting_created", actor=actor, payload={"stage": meeting_stage, "conflicts": conflicts}, idempotency_key=idempotency_key)
-        if not conflicts:
-            store.setdefault("occupancy", {}).update({p: meeting_id for p in participants})
-        if idempotency_key:
-            store.setdefault("idempotency", {})[idempotency_key] = {"meetingId": meeting_id, "sequence": meeting["lastEventSequence"]}
+        decision_window = _meeting_clamped_decision_window_sec(
+            body.get("decisionWindowSec") or body.get("decisionWindowSeconds") or _meeting_decision_window_sec(),
+        )
+        result = meeting_lifecycle_service.create_command(
+            store,
+            {
+                "meetingId": meeting_id, "topic": topic, "participants": participants, "moderator": moderator,
+                "agenda": str(body.get("agenda") or topic).strip(), "purpose": str(body.get("purpose") or "").strip(),
+                "meetingType": meeting_type, "organizer": str(body.get("organizer") or participants[0]).strip(),
+                "createdBy": str(body.get("createdBy") or body.get("organizer") or "user").strip(),
+                "createdByType": str(body.get("createdByType") or ("agent" if body.get("createdByAgentId") else "user")).strip(),
+                "createdByAgentId": str(body.get("createdByAgentId") or "").strip(),
+                "projectId": project_id, "projectTitle": project_title, "maxRounds": max_rounds,
+                "decisionWindowSec": decision_window,
+                "resolutionPolicy": _meeting_resolution_policy(body.get("resolutionPolicy") or body.get("arbitrationPolicy")),
+                "context": str(body.get("context") or body.get("initialContext") or "").strip(),
+                "contextMode": _meeting_context_mode(body.get("contextMode")),
+                "contextBudget": _meeting_context_budget(body.get("contextBudget")),
+                "source": body.get("source") if isinstance(body.get("source"), dict) else {},
+                "preparingTimeoutSec": _meeting_preparing_timeout_sec(), "now": now, "actor": actor,
+                "idempotencyKey": idempotency_key,
+                "allowConflicts": bool(body.get("allowConflicts") or body.get("conflictAware")),
+            },
+            meeting_lifecycle_service.CreateHooks(
+                rebuild_occupancy=_rebuild_exec_meeting_occupancy,
+                build_conflicts=_meeting_build_conflicts,
+                append_event=_append_exec_meeting_event,
+            ),
+        )
+        if not result.get("ok") or result.get("idempotent"):
+            return result
+        meeting = result["meeting"]
         _save_exec_meeting_store(store)
-    if conflicts:
+    if result.pop("conflicts", False):
         live_meeting = _meeting_complete_live_advisories(meeting_id)
         if live_meeting:
             meeting = live_meeting
-    return {"ok": True, "meeting": meeting}
+    return {**result, "meeting": meeting}
 
 
 def _handle_executable_meeting_detail(meeting_id):
@@ -14006,508 +13911,156 @@ def _handle_executable_meeting_events(meeting_id, query_string=""):
         return {"ok": True, "meetingId": meeting_id, "after": after, "events": events}
 
 
+
+
 def _handle_executable_meeting_conflict_action(meeting_id, body):
-    action = str(body.get("action") or "").strip()
-    if action not in {"wait", "reserve", "replace", "force_join", "cancel_conflict", "refresh"}:
-        return {"error": "Invalid conflict action", "_status": 400}
-    agent_id = str(body.get("agentId") or "").strip()
-    actor = {"type": str(body.get("actorType") or "user"), "id": str(body.get("actorId") or "user")}
-    idempotency_key = str(body.get("idempotencyKey") or "").strip()
+    hooks = meeting_lifecycle_service.ConflictHooks(
+        append_event=_append_exec_meeting_event,
+        build_conflicts=_meeting_build_conflicts,
+        busy_context=_meeting_busy_context_for_agent,
+        advisory=_meeting_conflict_advisory,
+        original_work_snapshot=_meeting_original_work_snapshot,
+        has_open_conflicts=_meeting_has_open_conflicts,
+        mark_preparing=_meeting_mark_preparing_started,
+        rebuild_occupancy=_rebuild_exec_meeting_occupancy,
+        is_excluded=_is_archive_manager_agent,
+        now=_exec_meeting_now,
+        new_id=lambda: str(uuid.uuid4()),
+    )
     with _EXEC_MEETING_LOCK:
         store = _load_exec_meeting_store()
-        idem_key = f"{meeting_id}:conflict:{action}:{idempotency_key}" if idempotency_key else ""
-        meeting = store.get("meetings", {}).get(meeting_id)
-        if not meeting:
-            return {"error": "Executable meeting not found", "_status": 404}
-        if idem_key and idem_key in store.get("idempotency", {}):
-            seq = store["idempotency"][idem_key].get("sequence")
-            event = next((e for e in store.get("events", {}).get(meeting_id, []) if e.get("sequence") == seq), None)
-            return {"ok": True, "meeting": meeting, "event": event, "idempotent": True}
-        if meeting.get("stage") in _EXEC_MEETING_TERMINAL:
-            return {"error": "Cannot resolve conflicts on a terminal meeting", "stage": meeting.get("stage"), "_status": 409}
-        conflicts = meeting.get("conflicts") if isinstance(meeting.get("conflicts"), list) else []
-        if action == "refresh":
-            refreshed = _meeting_build_conflicts(store, meeting.get("participants") or [], exclude_meeting_id=meeting_id)
-            meeting["conflicts"] = refreshed
-            meeting["stage"] = "conflict" if refreshed else "preparing"
-            if not refreshed:
-                _meeting_mark_preparing_started(meeting)
-                store.setdefault("occupancy", {}).update({p: meeting_id for p in meeting.get("participants") or []})
-                for p in meeting.get("participants") or []:
-                    meeting.setdefault("participantState", {}).setdefault(p, {})["status"] = "reserved"
-            event = _append_exec_meeting_event(store, meeting, "meeting_conflict_refreshed", actor=actor, payload={"conflicts": refreshed}, idempotency_key=idempotency_key)
-            if idem_key:
-                store.setdefault("idempotency", {})[idem_key] = {"meetingId": meeting_id, "sequence": event["sequence"]}
+        result = meeting_lifecycle_service.conflict_action_command(store, meeting_id, body, hooks)
+        if result.get("ok") and not result.get("idempotent"):
             _save_exec_meeting_store(store)
-            if refreshed:
-                live_meeting = _meeting_complete_live_advisories(meeting_id)
-                if live_meeting:
-                    meeting = live_meeting
-            return {"ok": True, "meeting": meeting, "event": event}
-        conflict = next((c for c in conflicts if c.get("agentId") == agent_id and c.get("status") in {"open", "waiting", "reserved"}), None)
-        if not conflict:
-            return {"error": "Open conflict not found for agent", "agentId": agent_id, "_status": 404}
-        now = _exec_meeting_now()
-        payload = {"action": action, "agentId": agent_id, "previous": dict(conflict)}
-        if action == "wait":
-            conflict["status"] = "waiting"
-            conflict["resolution"] = {"action": "wait", "decidedAt": now, "decidedBy": actor["id"]}
-        elif action == "reserve":
-            conflict["status"] = "reserved"
-            reservation = {
-                "agentId": agent_id,
-                "status": "scheduled",
-                "mode": str(body.get("mode") or "try_later"),
-                "targetAt": str(body.get("targetAt") or body.get("remindAt") or "").strip(),
-                "note": str(body.get("note") or "Try again later; this is not a hard reservation.").strip(),
-                "createdAt": now,
-                "createdBy": actor["id"],
-            }
-            meeting.setdefault("reservation", {})[agent_id] = reservation
-            conflict["reservation"] = reservation
-            conflict["resolution"] = {"action": "reserve", "decidedAt": now, "decidedBy": actor["id"]}
-        elif action == "replace":
-            replacement = str(body.get("replacement") or body.get("replacementAgentId") or "").strip()
-            if not replacement:
-                return {"error": "Replacement agent is required", "_status": 400}
-            if replacement in (meeting.get("participants") or []):
-                return {"error": "Replacement agent is already a participant", "_status": 400}
-            replacement_ctx = _meeting_busy_context_for_agent(store, replacement, exclude_meeting_id=meeting_id)
-            if replacement_ctx.get("busy"):
-                return {"error": "Replacement agent is busy", "conflict": replacement_ctx, "_status": 409}
-            participants = [replacement if p == agent_id else p for p in meeting.get("participants") or []]
-            meeting["participants"] = participants
-            if meeting.get("moderator") == agent_id:
-                meeting["moderator"] = replacement
-            meeting["speakerQueue"] = [replacement if p == agent_id else p for p in meeting.get("speakerQueue") or []]
-            meeting.setdefault("participantState", {}).pop(agent_id, None)
-            meeting.setdefault("participantState", {})[replacement] = {"status": "reserved", "joinedAt": now, "replacedAgentId": agent_id}
-            conflict["status"] = "resolved"
-            conflict["resolution"] = {"action": "replace", "replacement": replacement, "decidedAt": now, "decidedBy": actor["id"]}
-            payload["replacement"] = replacement
-        elif action == "force_join":
-            if not body.get("confirmForce"):
-                return {"error": "Force join requires second confirmation", "advisory": conflict.get("advisory") or {}, "_status": 409}
-            if not conflict.get("advisory"):
-                conflict["advisory"] = _meeting_conflict_advisory(conflict)
-            snapshot = _meeting_original_work_snapshot(conflict, "force_join")
-            meeting.setdefault("originalWork", {})[agent_id] = snapshot
-            meeting.setdefault("participantState", {}).setdefault(agent_id, {})["status"] = "reserved"
-            meeting["participantState"][agent_id]["pauseState"] = snapshot["pauseState"]
-            meeting["participantState"][agent_id]["forcedJoin"] = True
-            conflict["status"] = "resolved"
-            conflict["resolution"] = {"action": "force_join", "decidedAt": now, "decidedBy": actor["id"], "confirmForce": True}
-            payload["snapshot"] = snapshot
-        elif action == "cancel_conflict":
-            conflict["status"] = "cancelled"
-            conflict["resolution"] = {"action": "cancel_conflict", "decidedAt": now, "decidedBy": actor["id"]}
-        conflict["updatedAt"] = now
-        if not _meeting_has_open_conflicts(meeting):
-            meeting["previousStage"] = meeting.get("stage")
-            meeting["stage"] = "preparing"
-            _meeting_mark_preparing_started(meeting, now)
-            for p in meeting.get("participants") or []:
-                meeting.setdefault("participantState", {}).setdefault(p, {})["status"] = "reserved"
-            _rebuild_exec_meeting_occupancy(store)
-            occupied = {p: store.get("occupancy", {}).get(p) for p in meeting.get("participants") or [] if store.get("occupancy", {}).get(p) and store.get("occupancy", {}).get(p) != meeting_id}
-            if occupied:
-                meeting["stage"] = "conflict"
-                for p, occupied_by in occupied.items():
-                    new_conflict = {
-                        "id": str(uuid.uuid4()),
-                        "agentId": p,
-                        "status": "open",
-                        "reason": "meeting_occupied",
-                        "busyKind": "meeting",
-                        "riskLevel": "high",
-                        "summary": f"Already in meeting: {occupied_by}",
-                        "estimatedAvailability": "unknown",
-                        "pauseCapability": "unavailable",
-                        "source": {"meetingId": occupied_by},
-                        "createdAt": now,
-                        "updatedAt": now,
-                    }
-                    new_conflict["advisory"] = _meeting_conflict_advisory(new_conflict)
-                    meeting.setdefault("conflicts", []).append(new_conflict)
-            else:
-                store.setdefault("occupancy", {}).update({p: meeting_id for p in meeting.get("participants") or []})
-        event = _append_exec_meeting_event(store, meeting, "meeting_conflict_resolved", actor=actor, payload=payload, idempotency_key=idempotency_key)
-        if idem_key:
-            store.setdefault("idempotency", {})[idem_key] = {"meetingId": meeting_id, "sequence": event["sequence"]}
-        _save_exec_meeting_store(store)
-    if meeting.get("stage") in _EXEC_MEETING_TERMINAL:
-        _project_execution_apply_meeting_result(meeting)
-    return {"ok": True, "meeting": meeting, "event": event}
+    if result.pop("needsLiveAdvisory", False):
+        live_meeting = _meeting_complete_live_advisories(meeting_id)
+        if live_meeting:
+            result["meeting"] = live_meeting
+    return result
 
 
 def _handle_executable_meeting_transition(meeting_id, body):
-    target = str(body.get("stage") or body.get("to") or body.get("action") or "").strip()
-    aliases = {
-        "start": "active_opening",
-        "opening": "active_opening",
-        "discussion": "active_discussion",
-        "pause": "paused",
-        "resume_preparing": "preparing",
-        "resume_opening": "active_opening",
-        "resume_discussion": "active_discussion",
-        "continue": "active_discussion",
-        "continue_decision": "active_discussion",
-        "await_decision": "awaiting_user_decision",
-        "summarize": "summarizing",
-        "complete": "completed",
-        "cancel": "cancelled",
-        "fail": "failed",
-    }
-    target = aliases.get(target, target)
-    if target not in _EXEC_MEETING_PHASES:
-        return {"error": "Invalid meeting stage", "_status": 400}
-    expected = body.get("expectedVersion")
-    expected_version = None
-    if expected is not None:
-        try:
-            expected_version = int(expected)
-        except (TypeError, ValueError):
-            return {"error": "Invalid expectedVersion", "_status": 400}
-    idempotency_key = str(body.get("idempotencyKey") or "").strip()
-    actor = {"type": str(body.get("actorType") or "user"), "id": str(body.get("actorId") or "user")}
     with _EXEC_MEETING_LOCK:
         store = _load_exec_meeting_store()
-        idem_key = f"{meeting_id}:transition:{idempotency_key}" if idempotency_key else ""
-        if idem_key and idem_key in store.get("idempotency", {}):
-            meeting = store.get("meetings", {}).get(meeting_id)
-            return {"ok": True, "meeting": meeting, "idempotent": True}
-        meeting = store.get("meetings", {}).get(meeting_id)
-        if not meeting:
-            return {"error": "Executable meeting not found", "_status": 404}
-        current = meeting.get("stage")
-        if expected_version is not None and expected_version != int(meeting.get("version", 0)):
-            return {"error": "Meeting version conflict", "currentVersion": meeting.get("version", 0), "_status": 409}
-        if current == "awaiting_user_decision" and str(body.get("action") or "").strip() in {"continue", "continue_decision"}:
-            _meeting_continue_from_decision_window(store, meeting, actor=actor, reason=body.get("reason") or "user_continue")
-            event = store.get("events", {}).get(meeting_id, [])[-1]
-            _save_exec_meeting_store(store)
-            return {"ok": True, "meeting": meeting, "event": event}
-        if target not in _EXEC_MEETING_TRANSITIONS.get(current, set()):
-            return {"error": f"Illegal transition from {current} to {target}", "stage": current, "_status": 409}
-        meeting["previousStage"] = current
-        meeting["stage"] = target
-        if target == "preparing":
-            _meeting_mark_preparing_started(meeting)
-        if target in {"active_opening", "active_discussion"}:
-            meeting["currentSpeaker"] = (meeting.get("speakerQueue") or [""])[0]
-        if target == "active_discussion":
-            meeting["round"] = max(1, int(meeting.get("round") or 0))
-        if target in _EXEC_MEETING_TERMINAL:
-            meeting["currentSpeaker"] = ""
-            for participant in meeting.get("participants", []):
-                store.get("occupancy", {}).pop(participant, None)
-            _meeting_resume_original_work(store, meeting, target)
-            if target == "completed":
-                result = body.get("result") if isinstance(body.get("result"), dict) else {}
-                if body.get("summary"):
-                    result.setdefault("summary", str(body.get("summary") or ""))
-                meeting["result"] = {**meeting.get("result", {}), **result}
-                _meeting_ensure_action_item_drafts(store, meeting)
-                _award_meeting_participation_points(meeting)
-        event = _append_exec_meeting_event(store, meeting, "meeting_transitioned", actor=actor, payload={"from": current, "to": target, "reason": body.get("reason") or ""}, idempotency_key=idempotency_key)
-        if idem_key:
-            store.setdefault("idempotency", {})[idem_key] = {"meetingId": meeting_id, "sequence": event["sequence"]}
+        result = meeting_lifecycle_service.transition_command(
+            store, meeting_id, body,
+            meeting_lifecycle_service.TransitionHooks(
+                append_event=_append_exec_meeting_event,
+                continue_decision=_meeting_continue_from_decision_window,
+                mark_preparing=_meeting_mark_preparing_started,
+                resume_original_work=_meeting_resume_original_work,
+                ensure_action_items=_meeting_ensure_action_item_drafts,
+                award_points=_award_meeting_participation_points,
+            ),
+        )
+        if not result.get("ok") or result.get("idempotent"):
+            return result
         _save_exec_meeting_store(store)
-    if target in _EXEC_MEETING_TERMINAL:
+    meeting = result["meeting"]
+    if result.pop("terminal", False):
         _project_execution_apply_meeting_result(meeting)
     with _EXEC_MEETING_LOCK:
         store = _load_exec_meeting_store()
         meeting = store.get("meetings", {}).get(meeting_id, meeting)
-        return {"ok": True, "meeting": meeting, "event": event}
+        return {**result, "meeting": meeting}
+
+
+def _meeting_terminal_hooks():
+    return meeting_lifecycle_service.TerminalHooks(
+        append_event=_append_exec_meeting_event,
+        resume_original_work=_meeting_resume_original_work,
+        ensure_action_items=_meeting_ensure_action_item_drafts,
+        award_points=_award_meeting_participation_points,
+    )
 
 
 def _handle_executable_meeting_intervention(meeting_id, body):
-    text = str(body.get("text") or body.get("message") or "").strip()
-    context = str(body.get("context") or body.get("additionalContext") or "").strip()
-    if not text and not context:
-        return {"error": "User intervention requires text or context", "_status": 400}
-    expected = body.get("expectedVersion")
-    idempotency_key = str(body.get("idempotencyKey") or "").strip()
-    actor_id = str(body.get("actorId") or "user").strip() or "user"
-    actor = {"type": "user", "id": actor_id}
     with _EXEC_MEETING_LOCK:
         store = _load_exec_meeting_store()
-        idem_key = f"{meeting_id}:intervention:{idempotency_key}" if idempotency_key else ""
-        meeting = store.get("meetings", {}).get(meeting_id)
-        if not meeting:
-            return {"error": "Executable meeting not found", "_status": 404}
-        if idem_key and idem_key in store.get("idempotency", {}):
-            seq = store["idempotency"][idem_key].get("sequence")
-            event = next((e for e in store.get("events", {}).get(meeting_id, []) if e.get("sequence") == seq), None)
-            return {"ok": True, "meeting": meeting, "event": event, "idempotent": True}
-        if meeting.get("stage") in _EXEC_MEETING_TERMINAL:
-            return {"error": "Cannot add context to a terminal meeting", "stage": meeting.get("stage"), "_status": 409}
-        if expected is not None:
-            try:
-                expected_version = int(expected)
-            except (TypeError, ValueError):
-                return {"error": "Invalid expectedVersion", "_status": 400}
-            if expected_version != int(meeting.get("version", 0)):
-                return {"error": "Meeting version conflict", "currentVersion": meeting.get("version", 0), "_status": 409}
-        if text and context:
-            kind = "statement_context"
-        elif context:
-            kind = "context"
-        else:
-            kind = "statement"
-        payload = {
-            "kind": kind,
-            "text": text,
-            "context": context,
-            "actorId": actor_id,
-            "stage": meeting.get("stage"),
-            "round": meeting.get("round", 0),
-            "appliesFromSequence": meeting.get("lastEventSequence", 0),
-        }
-        event = _append_exec_meeting_event(store, meeting, "user_intervention", actor=actor, payload=payload, idempotency_key=idempotency_key)
-        if idem_key:
-            store.setdefault("idempotency", {})[idem_key] = {"meetingId": meeting_id, "sequence": event["sequence"]}
-        _save_exec_meeting_store(store)
-        return {"ok": True, "meeting": meeting, "event": event}
+        result = meeting_lifecycle_service.intervention_command(
+            store, meeting_id, body,
+            meeting_lifecycle_service.MutationHooks(append_event=_append_exec_meeting_event),
+        )
+        if result.get("ok") and not result.get("idempotent"):
+            _save_exec_meeting_store(store)
+        return result
 
 
 def _handle_executable_meeting_agenda_change(meeting_id, body):
-    agenda = str(body.get("agenda") or body.get("topic") or body.get("newAgenda") or "").strip()
-    reason = str(body.get("reason") or "").strip()
-    if not agenda:
-        return {"error": "Agenda change requires agenda", "_status": 400}
-    expected = body.get("expectedVersion")
-    idempotency_key = str(body.get("idempotencyKey") or "").strip()
-    actor_id = str(body.get("actorId") or "user").strip() or "user"
-    actor = {"type": "user", "id": actor_id}
     with _EXEC_MEETING_LOCK:
         store = _load_exec_meeting_store()
-        idem_key = f"{meeting_id}:agenda:{idempotency_key}" if idempotency_key else ""
-        meeting = store.get("meetings", {}).get(meeting_id)
-        if not meeting:
-            return {"error": "Executable meeting not found", "_status": 404}
-        if idem_key and idem_key in store.get("idempotency", {}):
-            seq = store["idempotency"][idem_key].get("sequence")
-            event = next((e for e in store.get("events", {}).get(meeting_id, []) if e.get("sequence") == seq), None)
-            return {"ok": True, "meeting": meeting, "event": event, "idempotent": True}
-        if meeting.get("stage") in _EXEC_MEETING_TERMINAL:
-            return {"error": "Cannot change agenda for a terminal meeting", "stage": meeting.get("stage"), "_status": 409}
-        if expected is not None:
-            try:
-                expected_version = int(expected)
-            except (TypeError, ValueError):
-                return {"error": "Invalid expectedVersion", "_status": 400}
-            if expected_version != int(meeting.get("version", 0)):
-                return {"error": "Meeting version conflict", "currentVersion": meeting.get("version", 0), "_status": 409}
-        previous = meeting.get("agenda") or meeting.get("topic") or ""
-        payload = {
-            "agenda": agenda,
-            "previousAgenda": previous,
-            "reason": reason,
-            "actorId": actor_id,
-            "stage": meeting.get("stage"),
-            "round": meeting.get("round", 0),
-            "appliesFromSequence": meeting.get("lastEventSequence", 0),
-        }
-        meeting["agenda"] = agenda
-        event = _append_exec_meeting_event(store, meeting, "agenda_change", actor=actor, payload=payload, idempotency_key=idempotency_key)
-        if idem_key:
-            store.setdefault("idempotency", {})[idem_key] = {"meetingId": meeting_id, "sequence": event["sequence"]}
-        _save_exec_meeting_store(store)
-        return {"ok": True, "meeting": meeting, "event": event}
+        result = meeting_lifecycle_service.agenda_change_command(
+            store, meeting_id, body,
+            meeting_lifecycle_service.MutationHooks(append_event=_append_exec_meeting_event),
+        )
+        if result.get("ok") and not result.get("idempotent"):
+            _save_exec_meeting_store(store)
+        return result
+
+
 
 
 def _handle_executable_meeting_arbitration(meeting_id, body):
-    action = str(body.get("action") or body.get("decisionAction") or "").strip() or "decide"
-    if action not in {"decide", "end_no_consensus", "continue_discussion", "consensus_summary"}:
-        return {"error": "Unsupported arbitration action", "_status": 400}
-    decision = str(body.get("decision") or body.get("resolution") or "").strip()
-    rationale = str(body.get("rationale") or body.get("reason") or "").strip()
-    if action == "decide" and not decision:
-        return {"error": "Arbitration decision is required", "_status": 400}
-    idempotency_key = str(body.get("idempotencyKey") or "").strip()
-    actor_id = str(body.get("actorId") or "user").strip() or "user"
-    actor = {"type": "user", "id": actor_id}
+    hooks = meeting_lifecycle_service.ArbitrationHooks(
+        append_event=_append_exec_meeting_event,
+        continue_decision=_meeting_continue_from_decision_window,
+        fallback_result=_meeting_fallback_result,
+        truncate=_meeting_truncate_text,
+        terminal=_meeting_terminal_hooks(),
+    )
     with _EXEC_MEETING_LOCK:
         store = _load_exec_meeting_store()
-        meeting = store.get("meetings", {}).get(meeting_id)
-        if not meeting:
-            return {"error": "Executable meeting not found", "_status": 404}
-        if meeting.get("stage") in _EXEC_MEETING_TERMINAL:
-            return {"error": "Cannot arbitrate a terminal meeting", "stage": meeting.get("stage"), "_status": 409}
-        if meeting.get("stage") != "awaiting_user_decision":
-            return {"error": "Arbitration is only allowed during the user decision window", "stage": meeting.get("stage"), "_status": 409}
-        idem_key = f"{meeting_id}:arbitration:{idempotency_key}" if idempotency_key else ""
-        if idem_key and idem_key in store.get("idempotency", {}):
-            seq = store["idempotency"][idem_key].get("sequence")
-            event = next((e for e in store.get("events", {}).get(meeting_id, []) if e.get("sequence") == seq), None)
-            return {"ok": True, "meeting": meeting, "event": event, "idempotent": True}
-        payload = {
-            "action": action,
-            "decision": decision,
-            "rationale": rationale,
-            "actorId": actor_id,
-            "stage": meeting.get("decisionForStage") or meeting.get("stage"),
-            "round": int(meeting.get("decisionForRound") or meeting.get("round") or 0),
-            "arbitration": meeting.get("arbitration") or {},
-        }
-        event = _append_exec_meeting_event(store, meeting, "arbitration_decision", actor=actor, payload=payload, idempotency_key=idempotency_key)
-        if action == "continue_discussion":
-            meeting["maxRounds"] = max(int(meeting.get("maxRounds") or 1), int(meeting.get("round") or 0) + 1)
-            meeting["decisionNextStage"] = "active_discussion"
-            meeting["decisionNextRound"] = int(meeting.get("round") or 0) + 1
-            _meeting_continue_from_decision_window(store, meeting, actor=actor, reason="arbitration_continue")
-        elif action == "consensus_summary":
-            previous = meeting.get("stage")
-            meeting["previousStage"] = previous
-            meeting["stage"] = "summarizing"
-            meeting["currentSpeaker"] = meeting.get("moderator") or (meeting.get("participants") or [""])[0]
-            for key in ("decisionForStage", "decisionForRound", "decisionNextStage", "decisionNextRound", "decisionWindowSec", "decisionDeadlineAt", "arbitration"):
-                meeting.pop(key, None)
-            _append_exec_meeting_event(store, meeting, "decision_window_closed", actor=actor, payload={"to": "summarizing", "round": int(meeting.get("round") or 0), "reason": "arbitration_consensus_summary"})
-            _append_exec_meeting_event(store, meeting, "meeting_transitioned", actor=actor, payload={"from": previous, "to": "summarizing", "reason": "arbitration_consensus_summary"})
-        else:
-            events = list(store.get("events", {}).get(meeting_id, []))
-            fallback = _meeting_fallback_result(meeting, events)
-            arbitration = payload.get("arbitration") or {}
-            final_decision = decision if action == "decide" else "No consensus. Meeting ended with unresolved disagreement."
-            summary_suffix = rationale or arbitration.get("moderatorSuggestion") or ""
-            result = {
-                **fallback,
-                "summary": _meeting_truncate_text((fallback.get("summary") or "") + ("\n" + summary_suffix if summary_suffix else ""), 2000),
-                "decision": final_decision,
-                "unresolvedQuestions": arbitration.get("disagreements") or fallback.get("unresolvedQuestions") or [],
-                "disagreements": arbitration.get("disagreements") or fallback.get("disagreements") or [],
-                "arbitration": {"action": action, "decision": decision, "rationale": rationale, "actorId": actor_id},
-            }
-            meeting["result"] = result
-            _meeting_ensure_action_item_drafts(store, meeting)
-            previous = meeting.get("stage")
-            meeting["previousStage"] = previous
-            meeting["stage"] = "completed"
-            meeting["currentSpeaker"] = ""
-            for key in ("decisionForStage", "decisionForRound", "decisionNextStage", "decisionNextRound", "decisionWindowSec", "decisionDeadlineAt", "arbitration"):
-                meeting.pop(key, None)
-            for participant in meeting.get("participants", []):
-                store.get("occupancy", {}).pop(participant, None)
-            _meeting_resume_original_work(store, meeting, "arbitration")
-            _award_meeting_participation_points(meeting)
-            _append_exec_meeting_event(store, meeting, "meeting_result", actor=actor, payload=result)
-            _append_exec_meeting_event(store, meeting, "meeting_transitioned", actor=actor, payload={"from": previous, "to": "completed", "reason": action})
-        if idem_key:
-            store.setdefault("idempotency", {})[idem_key] = {"meetingId": meeting_id, "sequence": event["sequence"]}
-        _save_exec_meeting_store(store)
-    if action != "consensus_summary" and isinstance(meeting, dict) and meeting.get("stage") == "completed":
+        result = meeting_lifecycle_service.arbitration_command(store, meeting_id, body, hooks)
+        if result.get("ok") and not result.get("idempotent"):
+            _save_exec_meeting_store(store)
+    meeting = result.get("meeting")
+    if result.pop("invokeModerator", False):
+        summarized = _handle_executable_meeting_end_with_moderator(
+            meeting_id, {"actorId": str(body.get("actorId") or "user"), "actorType": "user"},
+        )
+        if isinstance(summarized, dict):
+            summarized["event"] = result.get("event")
+        return summarized
+    if result.get("ok") and meeting and meeting.get("stage") == "completed":
         _project_execution_apply_meeting_result(meeting)
         _archive_trigger_meeting_conclusion(meeting)
-    if action == "consensus_summary":
-        summarized = _handle_executable_meeting_end_with_moderator(meeting_id, {"actorId": actor_id, "actorType": "user"})
-        if isinstance(summarized, dict):
-            summarized["event"] = event
-        return summarized
-    return {"ok": True, "meeting": meeting, "event": event}
+    return result
+
+
 
 
 def _handle_executable_meeting_moderator_takeover(meeting_id, body):
-    action = str(body.get("action") or "").strip()
-    actor = {"type": str(body.get("actorType") or "user"), "id": str(body.get("actorId") or "user")}
-    if action not in {"user_takeover", "replace_moderator"}:
-        return {"error": "Invalid moderator takeover action", "_status": 400}
+    hooks = meeting_lifecycle_service.TakeoverHooks(
+        append_event=_append_exec_meeting_event,
+        fallback_result=_meeting_fallback_result,
+        normalize_outcome=_meeting_result_outcome,
+        terminal=_meeting_terminal_hooks(),
+    )
     with _EXEC_MEETING_LOCK:
         store = _load_exec_meeting_store()
-        meeting = store.get("meetings", {}).get(meeting_id)
-        if not meeting:
-            return {"error": "Executable meeting not found", "_status": 404}
-        if meeting.get("stage") in _EXEC_MEETING_TERMINAL:
-            return {"error": "Meeting already ended", "_status": 409}
-        if meeting.get("stage") != "awaiting_user_decision" or (meeting.get("moderatorFailure") or {}).get("reason") != "moderator_failed":
-            return {"error": "Meeting is not waiting for moderator takeover", "stage": meeting.get("stage"), "_status": 409}
-        failure = dict(meeting.get("moderatorFailure") or {})
-        if action == "replace_moderator":
-            replacement = str(body.get("moderator") or body.get("newModerator") or "").strip()
-            if replacement not in (meeting.get("participants") or []):
-                return {"error": "Replacement moderator must be a participant", "_status": 400}
-            previous_moderator = meeting.get("moderator") or ""
-            meeting["moderator"] = replacement
-            meeting["moderatorFailure"] = {**failure, "resolvedBy": "replace_moderator", "replacement": replacement}
-            previous = meeting.get("stage")
-            meeting["previousStage"] = previous
-            meeting["stage"] = "summarizing"
-            meeting["currentSpeaker"] = replacement
-            for key in ("decisionForStage", "decisionForRound", "decisionNextStage", "decisionNextRound", "decisionDeadlineAt"):
-                meeting.pop(key, None)
-            event = _append_exec_meeting_event(store, meeting, "moderator_takeover", actor=actor, payload={
-                "action": "replace_moderator",
-                "previousModerator": previous_moderator,
-                "moderator": replacement,
-                "failure": failure,
-            })
-            _append_exec_meeting_event(store, meeting, "meeting_transitioned", actor=actor, payload={"from": previous, "to": "summarizing", "reason": "moderator_replaced"})
-            _save_exec_meeting_store(store)
-        result = None
-    if action == "replace_moderator":
-        result = _handle_executable_meeting_end_with_moderator(meeting_id, {"actorId": actor["id"], "actorType": actor["type"]})
+        result = meeting_lifecycle_service.moderator_takeover_command(store, meeting_id, body, hooks)
         if result.get("ok"):
-            result["takeoverEvent"] = event
-        return result
-
-    with _EXEC_MEETING_LOCK:
-        store = _load_exec_meeting_store()
-        meeting = store.get("meetings", {}).get(meeting_id)
-        if not meeting:
-            return {"error": "Executable meeting not found", "_status": 404}
-        summary = str(body.get("summary") or "").strip()
-        decision = str(body.get("decision") or body.get("resolution") or "").strip()
-        if not summary:
-            return {"error": "Summary is required for user takeover", "_status": 400}
-        manual_result = body.get("result") if isinstance(body.get("result"), dict) else {}
-        manual_outcome = _meeting_result_outcome(
-            manual_result.get("outcome") or manual_result.get("status") or manual_result.get("result") or body.get("outcome")
+            _save_exec_meeting_store(store)
+            result["events"] = store.get("events", {}).get(meeting_id, [])
+    meeting = result.get("meeting")
+    if result.pop("invokeModerator", False):
+        summarized = _handle_executable_meeting_end_with_moderator(
+            meeting_id,
+            {"actorId": str(body.get("actorId") or "user"), "actorType": str(body.get("actorType") or "user")},
         )
-        action_items = body.get("actionItems") if isinstance(body.get("actionItems"), list) else []
-        if not action_items and isinstance(manual_result.get("actionItems"), list):
-            action_items = manual_result.get("actionItems") or []
-        events = list(store.get("events", {}).get(meeting_id, []))
-        failure = dict(meeting.get("moderatorFailure") or {})
-        fallback = _meeting_fallback_result(meeting, events)
-        final_result = {
-            **fallback,
-            **{k: v for k, v in manual_result.items() if v not in ("", [], {})},
-            "summary": summary,
-            "outcome": manual_outcome or fallback.get("outcome") or "needs_user_decision",
-            "decision": decision or manual_result.get("decision") or "Meeting closed by user after moderator failure.",
-            "actionItems": action_items,
-            "moderatorFailure": failure,
-            "moderatorTakeover": {"action": "user_takeover", "actorId": actor["id"]},
-        }
-        meeting["result"] = final_result
-        meeting["currentSpeaker"] = ""
-        previous = meeting.get("stage")
-        event = _append_exec_meeting_event(store, meeting, "moderator_takeover", actor=actor, payload={
-            "action": "user_takeover",
-            "summary": summary,
-            "decision": final_result["decision"],
-            "failure": failure,
-        })
-        _append_exec_meeting_event(store, meeting, "meeting_result", actor=actor, payload=final_result)
-        meeting["previousStage"] = previous
-        meeting["stage"] = "completed"
-        for participant in meeting.get("participants", []):
-            store.get("occupancy", {}).pop(participant, None)
-        _meeting_resume_original_work(store, meeting, "moderator_takeover")
-        _award_meeting_participation_points(meeting)
-        _append_exec_meeting_event(store, meeting, "meeting_transitioned", actor=actor, payload={"from": previous, "to": "completed", "reason": "user_moderator_takeover"})
+        if summarized.get("ok"):
+            summarized["takeoverEvent"] = result.get("event")
+        return summarized
+    if result.get("ok") and meeting and meeting.get("stage") == "completed":
         source = meeting.get("source") if isinstance(meeting.get("source"), dict) else {}
         print(
             "[MEETING] moderator user takeover completed "
-            f"meeting={meeting_id} outcome={final_result.get('outcome')} "
+            f"meeting={meeting_id} outcome={(meeting.get('result') or {}).get('outcome')} "
             f"project={meeting.get('projectId') or source.get('projectId') or ''} task={source.get('taskId') or ''}"
         )
-        _save_exec_meeting_store(store)
-        result_payload = {"ok": True, "meeting": meeting, "event": event, "events": store.get("events", {}).get(meeting_id, [])}
-    _project_execution_apply_meeting_result(meeting)
-    _archive_trigger_meeting_conclusion(meeting)
-    return result_payload
+        _project_execution_apply_meeting_result(meeting)
+        _archive_trigger_meeting_conclusion(meeting)
+    return result
 
 
 def _meeting_build_targeted_prompt(meeting, speaker, question, events):
@@ -14523,87 +14076,28 @@ def _meeting_build_targeted_prompt(meeting, speaker, question, events):
 
 
 def _handle_executable_meeting_targeted_question(meeting_id, body):
-    question = str(body.get("question") or body.get("text") or body.get("message") or "").strip()
-    target = str(body.get("target") or body.get("targetParticipant") or body.get("speaker") or "").strip()
-    if not question:
-        return {"error": "Targeted question requires text", "_status": 400}
-    if not target:
-        return {"error": "Target participant is required", "_status": 400}
-    idempotency_key = str(body.get("idempotencyKey") or "").strip()
-    actor_id = str(body.get("actorId") or "user").strip() or "user"
-    actor = {"type": "user", "id": actor_id}
+    hooks = meeting_lifecycle_service.TargetedQuestionHooks(
+        append_event=_append_exec_meeting_event,
+        build_prompt=_meeting_build_targeted_prompt,
+        normalize_reply=_meeting_normalize_provider_reply,
+        provider_ref=_meeting_provider_ref,
+        append_ignored=_append_ignored_provider_completion,
+        update_summary=_meeting_update_rolling_summary,
+    )
     with _EXEC_MEETING_LOCK:
         store = _load_exec_meeting_store()
-        meeting = store.get("meetings", {}).get(meeting_id)
-        if not meeting:
-            return {"error": "Executable meeting not found", "_status": 404}
-        if meeting.get("stage") in _EXEC_MEETING_TERMINAL:
-            return {"error": "Cannot target a terminal meeting", "stage": meeting.get("stage"), "_status": 409}
-        if meeting.get("stage") != "awaiting_user_decision":
-            return {"error": "Targeted questions are only allowed during the user decision window", "stage": meeting.get("stage"), "_status": 409}
-        if target not in (meeting.get("participants") or []):
-            return {"error": "Target participant is not in this meeting", "target": target, "_status": 400}
-        idem_key = f"{meeting_id}:targeted:{idempotency_key}" if idempotency_key else ""
-        if idem_key and idem_key in store.get("idempotency", {}):
-            seq = store["idempotency"][idem_key].get("sequence")
-            event = next((e for e in store.get("events", {}).get(meeting_id, []) if e.get("sequence") == seq), None)
-            return {"ok": True, "meeting": meeting, "event": event, "idempotent": True}
-        target_stage = meeting.get("decisionForStage") or meeting.get("previousStage") or meeting.get("stage")
-        target_round = int(meeting.get("decisionForRound") or meeting.get("round") or 0)
-        question_event = _append_exec_meeting_event(
-            store,
-            meeting,
-            "targeted_question",
-            actor=actor,
-            payload={"target": target, "question": question, "actorId": actor_id, "stage": target_stage, "round": target_round},
-            idempotency_key=idempotency_key,
-        )
-        prompt = _meeting_build_targeted_prompt(meeting, target, question, store.get("events", {}).get(meeting_id, []))
-        pending = _append_exec_meeting_event(
-            store,
-            meeting,
-            "provider_call_started",
-            actor={"type": "agent", "id": target},
-            payload={"speaker": target, "stage": target_stage, "round": target_round, "contextMode": meeting.get("contextMode"), "promptChars": len(prompt), "purpose": "targeted_response", "inReplyToSequence": question_event.get("sequence")},
-        )
-        if idem_key:
-            store.setdefault("idempotency", {})[idem_key] = {"meetingId": meeting_id, "sequence": question_event["sequence"]}
+        prepared = meeting_lifecycle_service.prepare_targeted_question(store, meeting_id, body, hooks)
+        if not prepared.get("ok") or prepared.get("idempotent"):
+            return prepared
         _save_exec_meeting_store(store)
-
-    result = _meeting_call_provider(meeting, target, prompt)
-
+    result = _meeting_call_provider(prepared["meeting"], prepared["target"], prepared["prompt"])
     with _EXEC_MEETING_LOCK:
         store = _load_exec_meeting_store()
-        meeting = store["meetings"][meeting_id]
-        normalized = _meeting_normalize_provider_reply(result.get("reply") or "")
-        if _meeting_provider_completion_should_be_ignored(meeting, target_stage, target_round):
-            ignored = _append_ignored_provider_completion(store, meeting, target, result, normalized, pending, "meeting_state_changed", target_stage, target_round, kind="targeted_response")
-            _save_exec_meeting_store(store)
-            return {"ok": True, "meeting": meeting, "questionEvent": question_event, "ignored": ignored, "pending": pending}
-        payload = {
-            "kind": "targeted_response",
-            "speaker": target,
-            "targetQuestion": question,
-            "text": normalized.get("text") or "",
-            "rawText": normalized.get("rawText") or "",
-            "structured": normalized.get("structured") or {},
-            "parseError": normalized.get("parseError") or "",
-            "ok": bool(result.get("ok")),
-            "stage": target_stage,
-            "round": target_round,
-            "providerRef": result.get("providerRef") or _meeting_provider_ref(target),
-            "conversationId": result.get("conversationId") or "",
-            "durationMs": result.get("durationMs") or 0,
-            "inReplyToSequence": pending.get("sequence"),
-            "questionSequence": question_event.get("sequence"),
-        }
-        if normalized.get("providerRaw"):
-            payload["providerRaw"] = normalized.get("providerRaw")
-        turn = _append_exec_meeting_event(store, meeting, "participant_turn", actor={"type": "agent", "id": target}, payload=payload)
-        meeting.setdefault("participantLastSeen", {})[target] = turn["sequence"]
-        _meeting_update_rolling_summary(meeting, target, payload["text"])
+        committed = meeting_lifecycle_service.commit_targeted_question(
+            store, meeting_id, prepared, result, hooks,
+        )
         _save_exec_meeting_store(store)
-        return {"ok": True, "meeting": meeting, "questionEvent": question_event, "event": turn, "pending": pending}
+        return committed
 
 
 def _meeting_events_text(events):
@@ -14906,130 +14400,52 @@ def _meeting_fallback_result(meeting, events):
     }
 
 
+
+
 def _handle_executable_meeting_end_with_moderator(meeting_id, body=None):
     body = body or {}
     actor = {"type": str(body.get("actorType") or "user"), "id": str(body.get("actorId") or "user")}
+    hooks = meeting_lifecycle_service.ModeratorHooks(
+        append_event=_append_exec_meeting_event,
+        build_prompt=_meeting_build_result_prompt,
+        pending_calls=_meeting_pending_calls_for_purpose,
+        normalize_reply=_meeting_normalize_provider_reply,
+        parse_result=_meeting_parse_result,
+        fallback_result=_meeting_fallback_result,
+        provider_ref=_meeting_provider_ref,
+        append_ignored=_append_ignored_provider_completion,
+        terminal=_meeting_terminal_hooks(),
+    )
     with _EXEC_MEETING_LOCK:
         store = _load_exec_meeting_store()
-        meeting = store.get("meetings", {}).get(meeting_id)
-        if not meeting:
-            return {"error": "Executable meeting not found", "_status": 404}
-        if meeting.get("stage") in _EXEC_MEETING_TERMINAL:
-            return {"ok": True, "meeting": meeting, "alreadyTerminal": True}
-        previous = meeting.get("stage")
-        if "summarizing" not in _EXEC_MEETING_TRANSITIONS.get(previous, set()) and previous != "summarizing":
-            return {"error": f"Cannot summarize meeting from {previous}", "stage": previous, "_status": 409}
-        if previous != "summarizing":
-            meeting["previousStage"] = previous
-            meeting["stage"] = "summarizing"
-            meeting["currentSpeaker"] = meeting.get("moderator") or (meeting.get("participants") or [""])[0]
-            _append_exec_meeting_event(store, meeting, "meeting_transitioned", actor=actor, payload={"from": previous, "to": "summarizing", "reason": "user_end"})
-            _save_exec_meeting_store(store)
-
-    with _EXEC_MEETING_LOCK:
-        store = _load_exec_meeting_store()
-        meeting = store["meetings"][meeting_id]
-        if meeting.get("stage") in _EXEC_MEETING_TERMINAL:
-            return {"ok": True, "meeting": meeting, "alreadyTerminal": True}
-        events = list(store.get("events", {}).get(meeting_id, []))
-        moderator = meeting.get("moderator") or (meeting.get("participants") or [""])[0]
-        pending_calls = _meeting_pending_calls_for_purpose(events, "summarizing", meeting.get("round"), "meeting_result")
-        if pending_calls:
-            _save_exec_meeting_store(store)
-            return {"ok": True, "meeting": meeting, "providerCallPending": True, "pendingCalls": pending_calls}
-        prompt = _meeting_build_result_prompt(meeting, events)
-        pending = _append_exec_meeting_event(store, meeting, "provider_call_started", actor={"type": "agent", "id": moderator}, payload={"speaker": moderator, "stage": "summarizing", "round": meeting.get("round"), "contextMode": meeting.get("contextMode"), "promptChars": len(prompt), "purpose": "meeting_result"})
+        prepared = meeting_lifecycle_service.prepare_moderator_summary(store, meeting_id, actor, hooks)
+        if not prepared.get("ok") or prepared.get("alreadyTerminal") or prepared.get("providerCallPending"):
+            if prepared.get("ok") and not prepared.get("alreadyTerminal"):
+                _save_exec_meeting_store(store)
+            return prepared
         _save_exec_meeting_store(store)
-
-    result = _meeting_call_provider(meeting, moderator, prompt)
-
+    provider_result = _meeting_call_provider(prepared["meeting"], prepared["moderator"], prepared["prompt"])
+    decision_window = _meeting_clamped_decision_window_sec(
+        prepared["meeting"].get("decisionWindowSec") or _meeting_decision_window_sec()
+    )
+    failure_deadline = datetime.fromtimestamp(time.time() + decision_window, timezone.utc).isoformat()
     with _EXEC_MEETING_LOCK:
         store = _load_exec_meeting_store()
-        meeting = store["meetings"][meeting_id]
-        normalized = _meeting_normalize_provider_reply(result.get("reply") or "")
-        if meeting.get("stage") in _EXEC_MEETING_TERMINAL:
-            pending_payload = pending.get("payload") if isinstance(pending.get("payload"), dict) else {}
-            ignored = _append_ignored_provider_completion(
-                store,
-                meeting,
-                moderator,
-                result,
-                normalized,
-                pending,
-                "meeting_state_changed",
-                "summarizing",
-                pending_payload.get("round", meeting.get("round")),
-                kind="meeting_result",
-            )
-            _save_exec_meeting_store(store)
-            return {"ok": True, "meeting": meeting, "ignored": ignored, "alreadyTerminal": True}
-        moderator_payload = {
-            "speaker": moderator,
-            "text": normalized.get("text") or "",
-            "rawText": normalized.get("rawText") or "",
-            "structured": normalized.get("structured") or {},
-            "parseError": normalized.get("parseError") or "",
-            "ok": bool(result.get("ok")),
-            "stage": "summarizing",
-            "round": meeting.get("round"),
-            "providerRef": result.get("providerRef") or _meeting_provider_ref(moderator),
-            "conversationId": result.get("conversationId") or "",
-            "durationMs": result.get("durationMs") or 0,
-            "inReplyToSequence": pending.get("sequence"),
-            "purpose": "meeting_result",
-        }
-        if normalized.get("providerRaw"):
-            moderator_payload["providerRaw"] = normalized.get("providerRaw")
-        _append_exec_meeting_event(store, meeting, "participant_turn", actor={"type": "agent", "id": moderator}, payload=moderator_payload)
-        if not result.get("ok"):
-            previous = meeting.get("stage")
-            meeting["previousStage"] = previous
-            meeting["stage"] = "awaiting_user_decision"
-            meeting["currentSpeaker"] = ""
-            meeting["moderatorFailure"] = {
-                "reason": "moderator_failed",
-                "moderator": moderator,
-                "error": _meeting_truncate_text(normalized.get("text") or normalized.get("rawText") or result.get("reply") or "Moderator failed", 1000),
-                "providerRef": moderator_payload.get("providerRef") or {},
-                "failedAtSequence": meeting.get("lastEventSequence"),
-            }
-            meeting["decisionForStage"] = previous
-            meeting["decisionForRound"] = int(meeting.get("round") or 0)
-            meeting["decisionNextStage"] = "summarizing"
-            meeting["decisionNextRound"] = int(meeting.get("round") or 0)
-            meeting["decisionWindowSec"] = _meeting_clamped_decision_window_sec(meeting.get("decisionWindowSec") or _meeting_decision_window_sec())
-            meeting["decisionDeadlineAt"] = datetime.fromtimestamp(time.time() + int(meeting["decisionWindowSec"] or 0), timezone.utc).isoformat()
-            _append_exec_meeting_event(store, meeting, "moderator_failure", actor={"type": "agent", "id": moderator}, payload=meeting["moderatorFailure"])
-            _append_exec_meeting_event(store, meeting, "meeting_transitioned", actor={"type": "agent", "id": moderator}, payload={"from": previous, "to": "awaiting_user_decision", "reason": "moderator_failed"})
-            _send_meeting_failure_notification(meeting, meeting["moderatorFailure"])
-            _save_exec_meeting_store(store)
-            return {"ok": False, "meeting": meeting, "events": store.get("events", {}).get(meeting_id, []), "moderatorFailure": meeting["moderatorFailure"]}
-        events = list(store.get("events", {}).get(meeting_id, []))
-        parsed_result = _meeting_parse_result(normalized.get("rawText") or normalized.get("text") or "")
-        fallback = _meeting_fallback_result(meeting, events)
-        final_result = {
-            **fallback,
-            **{k: v for k, v in parsed_result.items() if v not in ("", [], {})},
-            "moderator": moderator,
-            "moderatorProviderRef": moderator_payload.get("providerRef") or {},
-        }
-        meeting["result"] = final_result
-        meeting.pop("moderatorFailure", None)
-        meeting["currentSpeaker"] = ""
-        _append_exec_meeting_event(store, meeting, "meeting_result", actor={"type": "agent", "id": moderator}, payload=final_result)
-        previous = meeting.get("stage")
-        meeting["previousStage"] = previous
-        meeting["stage"] = "completed"
-        for participant in meeting.get("participants", []):
-            store.get("occupancy", {}).pop(participant, None)
-        _meeting_resume_original_work(store, meeting, "moderator_summary_complete")
-        _award_meeting_participation_points(meeting)
-        _append_exec_meeting_event(store, meeting, "meeting_transitioned", actor=actor, payload={"from": previous, "to": "completed", "reason": "moderator_summary_complete"})
+        committed = meeting_lifecycle_service.commit_moderator_summary(
+            store, meeting_id, prepared, provider_result, actor,
+            failure_deadline=failure_deadline, decision_window_seconds=decision_window, hooks=hooks,
+        )
         _save_exec_meeting_store(store)
-        result_payload = {"ok": True, "meeting": meeting, "events": store.get("events", {}).get(meeting_id, [])}
-    _project_execution_apply_meeting_result(meeting)
-    _archive_trigger_meeting_conclusion(meeting)
-    return result_payload
+        meeting = committed.get("meeting")
+        committed["events"] = store.get("events", {}).get(meeting_id, [])
+    if committed.get("notifyFailure"):
+        _send_meeting_failure_notification(meeting, committed.get("moderatorFailure") or {})
+        committed.pop("notifyFailure", None)
+        return committed
+    if committed.get("ok") and meeting and meeting.get("stage") == "completed":
+        _project_execution_apply_meeting_result(meeting)
+        _archive_trigger_meeting_conclusion(meeting)
+    return committed
 
 
 def _meeting_build_prompt(meeting, speaker, stage, events):
@@ -15216,6 +14632,16 @@ def _handle_executable_meeting_run(meeting_id, body=None):
 
     participants = list(meeting.get("participants") or [])
     max_rounds = max(1, int(meeting.get("maxRounds") or 1))
+    turn_hooks = meeting_lifecycle_service.AgentTurnHooks(
+        build_prompt=_meeting_build_prompt,
+        append_event=_append_exec_meeting_event,
+        normalize_reply=_meeting_normalize_provider_reply,
+        provider_ref=_meeting_provider_ref,
+        formal_turn_exists=_meeting_formal_turn_exists,
+        pending_turn_exists=_meeting_pending_formal_turn_exists,
+        append_ignored=_append_ignored_provider_completion,
+        update_summary=_meeting_update_rolling_summary,
+    )
     for stage, rounds in (("active_opening", 1), ("active_discussion", max_rounds)):
         for round_index in range(1, rounds + 1):
             with _EXEC_MEETING_LOCK:
@@ -15250,52 +14676,24 @@ def _handle_executable_meeting_run(meeting_id, body=None):
             for speaker in participants:
                 with _EXEC_MEETING_LOCK:
                     store = _load_exec_meeting_store()
-                    meeting = store["meetings"][meeting_id]
-                    events = list(store.get("events", {}).get(meeting_id, []))
-                    if _meeting_formal_turn_exists(events, stage, meeting.get("round"), speaker):
+                    prepared = meeting_lifecycle_service.prepare_agent_turn(
+                        store, meeting_id, stage, speaker, turn_hooks,
+                    )
+                    if prepared.get("skip"):
                         continue
-                    if _meeting_pending_formal_turn_exists(events, stage, meeting.get("round"), speaker):
-                        continue
-                    meeting["currentSpeaker"] = speaker
-                    prompt = _meeting_build_prompt(meeting, speaker, stage, store.get("events", {}).get(meeting_id, []))
-                    pending = _append_exec_meeting_event(store, meeting, "provider_call_started", actor={"type": "agent", "id": speaker}, payload={"speaker": speaker, "stage": stage, "round": meeting.get("round"), "contextMode": meeting.get("contextMode"), "promptChars": len(prompt)})
+                    if not prepared.get("ok"):
+                        return prepared
+                    meeting = prepared["meeting"]
                     _save_exec_meeting_store(store)
-                result = _meeting_call_provider(meeting, speaker, prompt)
+                result = _meeting_call_provider(meeting, speaker, prepared["prompt"])
                 with _EXEC_MEETING_LOCK:
                     store = _load_exec_meeting_store()
-                    meeting = store["meetings"][meeting_id]
-                    normalized = _meeting_normalize_provider_reply(result.get("reply") or "")
-                    pending_payload = pending.get("payload") if isinstance(pending.get("payload"), dict) else {}
-                    expected_round = pending_payload.get("round", meeting.get("round"))
-                    if _meeting_provider_completion_should_be_ignored(meeting, stage, expected_round):
-                        _append_ignored_provider_completion(store, meeting, speaker, result, normalized, pending, "meeting_state_changed", stage, expected_round)
-                        _save_exec_meeting_store(store)
-                        return {"ok": True, "meeting": meeting, "ignoredProviderCompletion": True}
-                    events = list(store.get("events", {}).get(meeting_id, []))
-                    if _meeting_formal_turn_exists(events, stage, expected_round, speaker):
-                        _append_ignored_provider_completion(store, meeting, speaker, result, normalized, pending, "formal_turn_already_exists", stage, expected_round)
-                        _save_exec_meeting_store(store)
-                        return {"ok": True, "meeting": meeting, "ignoredProviderCompletion": True}
-                    payload = {
-                        "speaker": speaker,
-                        "text": normalized.get("text") or "",
-                        "rawText": normalized.get("rawText") or "",
-                        "structured": normalized.get("structured") or {},
-                        "parseError": normalized.get("parseError") or "",
-                        "ok": bool(result.get("ok")),
-                        "stage": stage,
-                        "round": meeting.get("round"),
-                        "providerRef": result.get("providerRef") or _meeting_provider_ref(speaker),
-                        "conversationId": result.get("conversationId") or "",
-                        "durationMs": result.get("durationMs") or 0,
-                        "inReplyToSequence": pending.get("sequence"),
-                    }
-                    if normalized.get("providerRaw"):
-                        payload["providerRaw"] = normalized.get("providerRaw")
-                    event = _append_exec_meeting_event(store, meeting, "participant_turn", actor={"type": "agent", "id": speaker}, payload=payload)
-                    meeting.setdefault("participantLastSeen", {})[speaker] = event["sequence"]
-                    _meeting_update_rolling_summary(meeting, speaker, payload["text"])
+                    committed = meeting_lifecycle_service.commit_agent_turn(
+                        store, meeting_id, stage, speaker, result, prepared["pending"], prepared["token"], turn_hooks,
+                    )
                     _save_exec_meeting_store(store)
+                    if not committed.get("ok") or committed.get("ignoredProviderCompletion"):
+                        return committed
             with _EXEC_MEETING_LOCK:
                 store = _load_exec_meeting_store()
                 meeting = store["meetings"][meeting_id]
@@ -15339,16 +14737,10 @@ def _handle_executable_meeting_run(meeting_id, body=None):
             "contributions": {k: _meeting_truncate_text("\n".join(v), 1200) for k, v in contributions.items()},
             "actionItems": [],
         }
-        meeting["result"] = result
-        _append_exec_meeting_event(store, meeting, "meeting_result", payload=result)
-        previous = meeting.get("stage")
-        meeting["stage"] = "completed"
-        _meeting_ensure_action_item_drafts(store, meeting)
-        for participant in meeting.get("participants", []):
-            store.get("occupancy", {}).pop(participant, None)
-        _meeting_resume_original_work(store, meeting, "run_complete")
-        _award_meeting_participation_points(meeting)
-        _append_exec_meeting_event(store, meeting, "meeting_transitioned", payload={"from": previous, "to": "completed", "reason": "run_complete"})
+        meeting_lifecycle_service.complete_meeting(
+            store, meeting, result, actor={"type": "system", "id": "system"},
+            reason="run_complete", hooks=_meeting_terminal_hooks(),
+        )
         _save_exec_meeting_store(store)
         result_payload = {"ok": True, "meeting": meeting, "events": store.get("events", {}).get(meeting_id, [])}
     _project_execution_apply_meeting_result(meeting)
