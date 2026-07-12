@@ -191,7 +191,8 @@ class MarkdownProjectStore:
                 project_md = os.path.join(project_dir, "project.md")
                 if not os.path.isfile(project_md):
                     continue
-                meta, _ = _parse_frontmatter(open(project_md, encoding="utf-8").read())
+                with open(project_md, encoding="utf-8") as project_file:
+                    meta, _ = _parse_frontmatter(project_file.read())
                 if meta.get("id") == project_id:
                     shutil.rmtree(project_dir, ignore_errors=True)
                     deleted = True
@@ -225,8 +226,9 @@ class MarkdownProjectStore:
             return deleted
 
     def _migrate_legacy_if_needed(self):
-        if any(os.scandir(self.projects_dir)):
-            return
+        with os.scandir(self.projects_dir) as entries:
+            if any(entries):
+                return
         if not os.path.isfile(self.legacy_json):
             return
         try:
