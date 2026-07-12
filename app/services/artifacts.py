@@ -348,10 +348,21 @@ def delete_file(context: Mapping[str, Any], relative_path: Any) -> dict[str, Any
     parent_relative, name = os.path.split(relative)
     parent_fd = None
     try:
+        expected_root = os.stat(root, follow_symlinks=False)
+        if not stat.S_ISDIR(expected_root.st_mode):
+            return _error("Unable to delete artifact", 500)
         parent_path = root if not parent_relative else os.path.join(root, parent_relative)
         parent_fd = _open_component_no_follow(root, parent_relative) if parent_relative else os.open(
-            root, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0),
+            root,
+            os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0),
         )
+        opened_root = os.fstat(parent_fd) if not parent_relative else None
+        if opened_root is not None and (
+            not stat.S_ISDIR(opened_root.st_mode)
+            or (opened_root.st_dev, opened_root.st_ino) != (expected_root.st_dev, expected_root.st_ino)
+        ):
+            raise UnsafeArtifactError("artifact root changed while opening")
         metadata = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
         if not stat.S_ISREG(metadata.st_mode):
             return _error("Artifact is not a safe regular file", 403)

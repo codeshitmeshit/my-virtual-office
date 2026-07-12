@@ -117,6 +117,37 @@ def test_delete_file_keeps_status_and_extension_policy():
         assert os.path.exists(forbidden)
 
 
+def test_root_level_delete_rejects_workspace_root_symlink_swap(monkeypatch):
+    with tempfile.TemporaryDirectory() as parent, tempfile.TemporaryDirectory() as outside:
+        root = os.path.join(parent, "workspace")
+        original_root = os.path.join(parent, "workspace-original")
+        os.mkdir(root)
+        _write(os.path.join(root, "victim.md"), "inside")
+        outside_victim = os.path.join(outside, "victim.md")
+        _write(outside_victim, "outside")
+        original_open = artifact_service.os.open
+        swapped = {"value": False}
+
+        def swap_root_before_open(path, flags, *args, **kwargs):
+            if path == root and "dir_fd" not in kwargs and not swapped["value"]:
+                swapped["value"] = True
+                os.rename(root, original_root)
+                os.symlink(outside, root)
+            return original_open(path, flags, *args, **kwargs)
+
+        monkeypatch.setattr(artifact_service.os, "open", swap_root_before_open)
+        try:
+            result = artifact_service.delete_file({"root": root}, "victim.md")
+            assert result.get("ok") is not True
+            assert os.path.exists(outside_victim)
+            assert open(outside_victim, encoding="utf-8").read() == "outside"
+        finally:
+            if os.path.islink(root):
+                os.unlink(root)
+            if os.path.isdir(original_root):
+                os.rename(original_root, root)
+
+
 def test_directory_delete_is_allowlist_recursive_and_preserves_other_files():
     with tempfile.TemporaryDirectory() as root:
         _write(os.path.join(root, "generated", "one.md"), "one")

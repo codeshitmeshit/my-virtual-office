@@ -1,3 +1,13 @@
+--- a/start.sh
++++ b/start.sh
+@@ -449,6 +449,7 @@
+     export VO_OPENCLAW_PATH="${VO_OPENCLAW_PATH:-$data_dir}"
+     export VO_PORT="${VO_PORT:-8090}"
+     export VO_WS_PORT="${VO_WS_PORT:-8091}"
++    export VO_MANAGEMENT_TOKEN="${VO_MANAGEMENT_TOKEN:-4285}"
+     export VO_WS_PATH="${VO_WS_PATH:-/ws}"
+     export VO_OFFICE_NAME="${VO_OFFICE_NAME:-Virtual Office}"
+     export _VO_INT=1
 --- a/app/server.py
 +++ b/app/server.py
 @@ -6307,6 +6307,9 @@
@@ -294,6 +304,29 @@
      if not root or not os.path.isdir(root):
          return None, _error("Artifact root is not accessible", 409)
      return root, None
+@@ -342,10 +348,21 @@
+     parent_relative, name = os.path.split(relative)
+     parent_fd = None
+     try:
++        expected_root = os.stat(root, follow_symlinks=False)
++        if not stat.S_ISDIR(expected_root.st_mode):
++            return _error("Unable to delete artifact", 500)
+         parent_path = root if not parent_relative else os.path.join(root, parent_relative)
+         parent_fd = _open_component_no_follow(root, parent_relative) if parent_relative else os.open(
+-            root, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0),
++            root,
++            os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0)
++            | getattr(os, "O_NOFOLLOW", 0),
+         )
++        opened_root = os.fstat(parent_fd) if not parent_relative else None
++        if opened_root is not None and (
++            not stat.S_ISDIR(opened_root.st_mode)
++            or (opened_root.st_dev, opened_root.st_ino) != (expected_root.st_dev, expected_root.st_ino)
++        ):
++            raise UnsafeArtifactError("artifact root changed while opening")
+         metadata = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+         if not stat.S_ISREG(metadata.st_mode):
+             return _error("Artifact is not a safe regular file", 403)
 --- a/app/i18n.js
 +++ b/app/i18n.js
 @@ -333,17 +333,27 @@

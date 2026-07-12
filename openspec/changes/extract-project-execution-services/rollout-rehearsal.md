@@ -1,4 +1,4 @@
-# Staging rollout and rollback rehearsal
+# Local isolated pre-staging rollout and rollback rehearsal
 
 Date: 2026-07-12 (Asia/Shanghai)
 
@@ -6,7 +6,7 @@ Date: 2026-07-12 (Asia/Shanghai)
 
 - Candidate base commit: `13a8219afdc410a65cdf8b34d6d695fc22335c2b`
 - Candidate runtime patch: `rollout-runtime.patch`
-- Candidate runtime patch SHA-256: `10432c182b14b547d99ac81d7baf46afa626b01f00811e8082b10530f57a6294`
+- Candidate runtime patch SHA-256: `e7eeb70ffbbf2f792c8e893d1dd0a26f3c81ded67fdf682267b29626dd4daee9`
 - Rollback commit: `13a8219afdc410a65cdf8b34d6d695fc22335c2b`
 - Candidate ports: HTTP 18090 / WebSocket 18091
 - Rollback ports: HTTP 18092 / WebSocket 18093
@@ -59,4 +59,4 @@ The script contains the exact environment setup, medium-fixture generation, back
 - Expected diagnostic only: Gateway and browser viewer were unavailable in the isolated rehearsal; neither is required for project-store release/rollback integrity.
 - After final CR fixes, the tracked runtime patch was regenerated from the exact candidate files (including the management-403 client correction); that final candidate was restarted via `start.sh` and re-read the drained `cancelled` attempt with `active=false`.
 
-Result: **PASS**. Release, active write, drain, rollback, and backup restoration met every declared threshold with no project/task loss.
+Result: **LOCAL PASS**. Candidate startup, active write, drain, rollback, and backup restoration met every declared local threshold with no project/task loss. This does **not** complete the real staging gate: staging configuration, Gateway, browser viewer, and environment-specific integrations must still be exercised before release approval.

@@ -449,6 +449,7 @@ start_local() {
     export VO_OPENCLAW_PATH="${VO_OPENCLAW_PATH:-$data_dir}"
     export VO_PORT="${VO_PORT:-8090}"
     export VO_WS_PORT="${VO_WS_PORT:-8091}"
+    export VO_MANAGEMENT_TOKEN="${VO_MANAGEMENT_TOKEN:-4285}"
     export VO_WS_PATH="${VO_WS_PATH:-/ws}"
     export VO_OFFICE_NAME="${VO_OFFICE_NAME:-Virtual Office}"
     export _VO_INT=1

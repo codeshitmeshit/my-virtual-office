@@ -27,5 +27,6 @@ The application was started exclusively with the repository `./start.sh`. No dir
 5. Overall CR found two Cron recovery gaps. Unexpected dispatch exceptions no longer complete the occurrence, and Gateway-success/local-binding failures now compensate or remain retryable instead of silently splitting state.
 6. Final push review found that an empty Artifact context root could resolve to the process working directory. Missing, blank, or relative roots now fail closed before list/read/open/delete operations; regression coverage proves a cwd file is neither exposed nor deleted.
 7. Push-gate correctness review found that two stale legacy snapshots could add the same previously absent field with different values and overwrite the first commit. The repository now rejects that conflict while preserving idempotent same-value additions.
+8. Push-gate security review found that root-level Artifact deletion reopened the validated workspace root without no-follow/inode verification. It now rejects root symlink replacement and verifies the opened root identity before unlinking.
 
 Temporary acceptance projects and workspaces are disposable and are removed after the final regression evidence is captured.

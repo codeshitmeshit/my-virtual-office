@@ -48,5 +48,5 @@
 
 - [x] 8.1 Update service-boundary and developer documentation with the final module ownership, trusted entry contexts, writer coordinator rule, lock ordering, performance methodology, confirmed bug fixes, compatibility guarantees, and legacy `_wf_*` non-goal.
 - [x] 8.2 Start the application only through the repository startup script and complete manual acceptance for project/task operations, execution, Review/rework/acceptance, Artifact access, scheduling, Git snapshot failure, concurrent operations, and management-token behavior.
-- [x] 8.3 Execute the staging medium-fixture release/active-work/drain/rollback rehearsal and create `rollout-rehearsal.md` containing version SHAs, commands, backup location, before/after state snapshots, thresholds, reconciliation results, and pass/fail evidence.
-- [x] 8.4 Re-run `openspec validate extract-project-execution-services --strict`, verify every confirmed scenario maps to implementation and test evidence, and present the complete test/performance/rollback results for the test-result confirmation gate.
+- [ ] 8.3 Execute the real staging medium-fixture release/active-work/drain/rollback rehearsal. The tracked local isolated rehearsal proves the runbook but does not substitute for staging configuration/integrations.
+- [ ] 8.4 Re-run the final confirmation gate after the real staging result is attached; current code/test/performance/local-rollback evidence is complete.

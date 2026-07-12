@@ -6,6 +6,7 @@ const vm = require('vm');
 const root = path.resolve(__dirname, '..');
 const source = fs.readFileSync(path.join(root, 'app', 'i18n.js'), 'utf8');
 const styles = fs.readFileSync(path.join(root, 'app', 'style.css'), 'utf8');
+const startup = fs.readFileSync(path.join(root, 'start.sh'), 'utf8');
 
 assert(source.includes("function requestManagementToken()"));
 assert(source.includes("input.type = 'password'"));
@@ -18,6 +19,7 @@ assert(source.includes("token = await requestManagementToken()"));
 assert(!source.includes("window.prompt(t('management_token_prompt')"));
 assert(styles.includes('.management-token-dialog'));
 assert(styles.includes('.management-token-input:focus'));
+assert(startup.includes('export VO_MANAGEMENT_TOKEN="${VO_MANAGEMENT_TOKEN:-4285}"'));
 
 for (const locale of ['en.json', 'zh.json']) {
   const messages = JSON.parse(fs.readFileSync(path.join(root, 'app', 'locales', locale), 'utf8'));

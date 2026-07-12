@@ -10,9 +10,9 @@ rg --files tests -g 'test_*.py' \
   | xargs .venv/bin/python -m pytest -q
 ```
 
-Final post-CR result: **507 passed**, 2 dependency deprecation warnings, 0 failed. The suite covers project persistence and writer races, Provider adapters, execution lifecycle, Review/acceptance/notifications, Feishu, Meeting, Artifact, Cron, SSE, WebSocket route contracts, dashboard realtime behavior, and the static/security/performance gates. Section 8, overall-CR, and push-gate additions cover the documentation contract, concurrent compatibility work-log/project updates, attempt-workspace binding, Provider-enforced read-only native review, Cron occurrence retry after unexpected exceptions, Gateway/binding compensation/retry failures, fail-closed missing/relative Artifact roots, and conflicting/idempotent same-field legacy additions.
+Final post-CR result: **508 passed**, 2 dependency deprecation warnings, 0 failed. The suite covers project persistence and writer races, Provider adapters, execution lifecycle, Review/acceptance/notifications, Feishu, Meeting, Artifact, Cron, SSE, WebSocket route contracts, dashboard realtime behavior, and the static/security/performance gates. Section 8, overall-CR, and push-gate additions cover the documentation contract, concurrent compatibility work-log/project updates, attempt-workspace binding, Provider-enforced read-only native review, Cron occurrence retry after unexpected exceptions, Gateway/binding compensation/retry failures, fail-closed missing/relative Artifact roots, root-replacement deletion safety, and conflicting/idempotent same-field legacy additions.
 
-The first Section 8 run was `497 passed, 1 failed`: the reviewer-provider matrix replaced the Claude handler but did not restore it, so a later usage-ledger test observed the fake success response. Restoring the fourth patched handler removed the order dependency. A later full run exposed an existing test-fixture cleanup race after rework; that fixture now tracks and joins its launched threads. After the overall CR and push-gate fixes, the final complete suite passed 507/507.
+The first Section 8 run was `497 passed, 1 failed`: the reviewer-provider matrix replaced the Claude handler but did not restore it, so a later usage-ledger test observed the fake success response. Restoring the fourth patched handler removed the order dependency. Later full runs exposed two test-fixture cleanup races after rework; those fixtures now track and join launched threads. After the overall CR and push-gate fixes, the final complete suite passed 508/508.
 
 ## Script-style Python suites
 
@@ -58,6 +58,6 @@ Result: **23 scripts passed**, including project execution request payloads, Mee
 ## Final release evidence
 
 - Manual acceptance: `manual-acceptance.md` — project/task, execution, Review/rework/acceptance, Artifact, Cron degraded behavior, Git failure, concurrency, and token boundary.
-- Rollout rehearsal: `rollout-rehearsal.md` — fixed medium fixture, active write, drain, rollback, backup restore, and exact counts/digests.
+- Local pre-staging rehearsal: `rollout-rehearsal.md` — fixed medium fixture, active write, drain, rollback, backup restore, and exact counts/digests. The real staging gate remains pending.
 - Scenario traceability: `scenario-evidence.md` — every confirmed OpenSpec scenario mapped to implementation and executable/manual evidence.
 - Bits remote UT was checked because the final gate requested tests; it is inapplicable because this repository has no `go.mod` or `.codebase/pipelines/ci.yaml` and is not a Go/Bits pipeline project.
