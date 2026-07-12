@@ -25,5 +25,6 @@ The application was started exclusively with the repository `./start.sh`. No dir
 3. Final pre-submit review found that the management client treated every HTTP 403 as an invalid token. Authentication rejection now carries `management_token_required`; domain/security 403 responses pass through unchanged, preserving the valid token and the real error. The frontend behavior test covers the no-prompt, no-retry, no-token-clear path.
 4. Overall CR found that native reviewer prompts requested read-only behavior without enforcing it at the Provider boundary. Native Codex reviews now force `read-only` sandbox with no approvals, while Claude Code reviews force plan mode; ordinary executor/chat calls keep their existing permissions.
 5. Overall CR found two Cron recovery gaps. Unexpected dispatch exceptions no longer complete the occurrence, and Gateway-success/local-binding failures now compensate or remain retryable instead of silently splitting state.
+6. Final push review found that an empty Artifact context root could resolve to the process working directory. Missing, blank, or relative roots now fail closed before list/read/open/delete operations; regression coverage proves a cwd file is neither exposed nor deleted.
 
 Temporary acceptance projects and workspaces are disposable and are removed after the final regression evidence is captured.

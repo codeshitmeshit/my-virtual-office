@@ -26,6 +26,26 @@ def _write(path, data=b"data"):
         handle.write(data)
 
 
+def test_missing_or_relative_root_fails_closed_for_all_operations(monkeypatch, tmp_path):
+    _write(str(tmp_path / "cwd-secret.md"), "must remain")
+    monkeypatch.chdir(tmp_path)
+    invalid_contexts = [
+        {},
+        {"root": ""},
+        {"root": "   "},
+        {"root": "."},
+        {"root": None},
+    ]
+    for context in invalid_contexts:
+        context["sourcesByPath"] = {"cwd-secret.md": [{"taskId": "t"}]}
+        assert artifact_service.list_artifacts(context)["_status"] == 409
+        assert artifact_service.read_artifact(context, "cwd-secret.md")["_status"] == 409
+        assert artifact_service.open_file(context, "cwd-secret.md")["_status"] == 409
+        assert artifact_service.delete_file(context, "cwd-secret.md")["_status"] == 409
+        assert artifact_service.delete_directory(context, "")["_status"] == 409
+        assert (tmp_path / "cwd-secret.md").read_text() == "must remain"
+
+
 def test_list_is_bounded_markdown_only_and_does_not_follow_excluded_or_escape_links():
     with tempfile.TemporaryDirectory() as root, tempfile.TemporaryDirectory() as outside:
         _write(os.path.join(root, "docs", "guide.md"), "# guide")

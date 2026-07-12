@@ -194,7 +194,13 @@ def _secure_directory_delete_available() -> bool:
 
 
 def _root(context: Mapping[str, Any]) -> tuple[str | None, dict[str, Any] | None]:
-    root = os.path.realpath(str(context.get("root") or ""))
+    raw_root = context.get("root")
+    if not isinstance(raw_root, (str, os.PathLike)) or not str(raw_root).strip():
+        return None, _error("Artifact root is not accessible", 409)
+    expanded = os.path.expanduser(str(raw_root).strip())
+    if not os.path.isabs(expanded):
+        return None, _error("Artifact root is not accessible", 409)
+    root = os.path.realpath(expanded)
     if not root or not os.path.isdir(root):
         return None, _error("Artifact root is not accessible", 409)
     return root, None

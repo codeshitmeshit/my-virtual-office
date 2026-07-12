@@ -6,7 +6,7 @@ Date: 2026-07-12 (Asia/Shanghai)
 
 - Candidate base commit: `13a8219afdc410a65cdf8b34d6d695fc22335c2b`
 - Candidate runtime patch: `rollout-runtime.patch`
-- Candidate runtime patch SHA-256: `b6371a94b12c86d93e4004bf2291c8106fd1edeabc968c3092b741957b6c10e2`
+- Candidate runtime patch SHA-256: `a8fe5b3b6775b56ffef10a5fc4f686dddb4356632224d3344d442c861c81ec4f`
 - Rollback commit: `13a8219afdc410a65cdf8b34d6d695fc22335c2b`
 - Candidate ports: HTTP 18090 / WebSocket 18091
 - Rollback ports: HTTP 18092 / WebSocket 18093
