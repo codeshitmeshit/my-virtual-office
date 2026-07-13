@@ -4,6 +4,7 @@
 import os
 import sys
 import tempfile
+from unittest import mock
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 APP_DIR = os.path.join(ROOT, "app")
@@ -292,3 +293,30 @@ if __name__ == "__main__":
     test_phase6_unbound_meeting_requires_target_project_or_keep()
     test_phase6_edit_reject_and_confirm_are_idempotent()
     print("test_meeting_for_ai_phase6.py passed")
+def test_phase6_project_success_meeting_commit_failure_retries_without_duplicate():
+    with tempfile.TemporaryDirectory() as status_dir:
+        old = with_store(status_dir)
+        try:
+            project = create_project(); source_task = create_project_task(project)
+            meeting = create_completed_task_meeting(project["id"], source_task["id"])
+            draft = meeting["actionItemDrafts"][0]
+            repository = server._meeting_domain_repository(); original_update = repository.update; calls = {"count": 0}
+            def fail_second(mutator):
+                calls["count"] += 1
+                if calls["count"] == 2:
+                    raise OSError("simulated Meeting Store failure")
+                return original_update(mutator)
+            with mock.patch.object(repository, "update", side_effect=fail_second):
+                failed = server._handle_executable_meeting_action_item(
+                    meeting["id"], draft["id"], {"action": "confirm", "idempotencyKey": "partial-retry"},
+                )
+            assert failed["code"] == "action_item_commit_pending"
+            retried = server._handle_executable_meeting_action_item(
+                meeting["id"], draft["id"], {"action": "confirm", "idempotencyKey": "partial-retry"},
+            )
+            assert retried["ok"] is True and retried["actionItem"]["status"] == "confirmed"
+            current = server._handle_project_get(project["id"])["project"]
+            task = next(item for item in current["tasks"] if item["id"] == source_task["id"])
+            assert len(task["meetingActionItems"]) == 1
+        finally:
+            restore_store(old)

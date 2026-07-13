@@ -44,11 +44,9 @@
     "_load_exec_meeting_store",
     "_load_meeting_request_store",
     "_load_meetings_file",
-    "_meeting_action_item_snapshot",
     "_meeting_active_projection",
     "_meeting_advisory_timeout",
     "_meeting_arbitration_snapshot",
-    "_meeting_audit_action_item",
     "_meeting_build_conflicts",
     "_meeting_build_prompt",
     "_meeting_build_result_prompt",
@@ -60,7 +58,6 @@
     "_meeting_coerce_action_items",
     "_meeting_coerce_list",
     "_meeting_complete_live_advisories",
-    "_meeting_confirm_action_item_on_source_task",
     "_meeting_conflict_advisory",
     "_meeting_context_budget",
     "_meeting_context_mode",
@@ -73,7 +70,6 @@
     "_meeting_events_text",
     "_meeting_extract_payload_text",
     "_meeting_fallback_result",
-    "_meeting_find_action_draft",
     "_meeting_find_pending_call",
     "_meeting_formal_round_complete",
     "_meeting_formal_turn_exists",
@@ -82,7 +78,6 @@
     "_meeting_history_projection",
     "_meeting_live_advisory_prompt",
     "_meeting_mark_preparing_started",
-    "_meeting_normalize_action_item",
     "_meeting_normalize_advisory_reply",
     "_meeting_normalize_provider_reply",
     "_meeting_open_decision_window",
@@ -374,47 +369,15 @@
       "caller": "_handle_archive_manager_ai_refine"
     },
     {
-      "callee": "_append_exec_meeting_event",
+      "callee": "_log_activity",
       "caller": "_handle_executable_meeting_action_item"
     },
     {
-      "callee": "_exec_meeting_now",
+      "callee": "_meeting_domain_repository",
       "caller": "_handle_executable_meeting_action_item"
     },
     {
-      "callee": "_load_exec_meeting_store",
-      "caller": "_handle_executable_meeting_action_item"
-    },
-    {
-      "callee": "_meeting_action_item_snapshot",
-      "caller": "_handle_executable_meeting_action_item"
-    },
-    {
-      "callee": "_meeting_audit_action_item",
-      "caller": "_handle_executable_meeting_action_item"
-    },
-    {
-      "callee": "_meeting_confirm_action_item_on_source_task",
-      "caller": "_handle_executable_meeting_action_item"
-    },
-    {
-      "callee": "_meeting_ensure_action_item_drafts",
-      "caller": "_handle_executable_meeting_action_item"
-    },
-    {
-      "callee": "_meeting_find_action_draft",
-      "caller": "_handle_executable_meeting_action_item"
-    },
-    {
-      "callee": "_save_exec_meeting_store",
-      "caller": "_handle_executable_meeting_action_item"
-    },
-    {
-      "callee": "isinstance",
-      "caller": "_handle_executable_meeting_action_item"
-    },
-    {
-      "callee": "str",
+      "callee": "_proj_now",
       "caller": "_handle_executable_meeting_action_item"
     },
     {
@@ -1187,10 +1150,6 @@
     },
     {
       "callee": "_exec_meeting_now",
-      "caller": "_meeting_audit_action_item"
-    },
-    {
-      "callee": "_exec_meeting_now",
       "caller": "_meeting_build_conflicts"
     },
     {
@@ -1370,38 +1329,6 @@
       "caller": "_meeting_complete_live_advisories"
     },
     {
-      "callee": "_log_activity",
-      "caller": "_meeting_confirm_action_item_on_source_task"
-    },
-    {
-      "callee": "_proj_now",
-      "caller": "_meeting_confirm_action_item_on_source_task"
-    },
-    {
-      "callee": "_project_execution_meeting_action_key",
-      "caller": "_meeting_confirm_action_item_on_source_task"
-    },
-    {
-      "callee": "_project_find",
-      "caller": "_meeting_confirm_action_item_on_source_task"
-    },
-    {
-      "callee": "_save_projects",
-      "caller": "_meeting_confirm_action_item_on_source_task"
-    },
-    {
-      "callee": "isinstance",
-      "caller": "_meeting_confirm_action_item_on_source_task"
-    },
-    {
-      "callee": "next",
-      "caller": "_meeting_confirm_action_item_on_source_task"
-    },
-    {
-      "callee": "str",
-      "caller": "_meeting_confirm_action_item_on_source_task"
-    },
-    {
       "callee": "_exec_meeting_now",
       "caller": "_meeting_conflict_advisory"
     },
@@ -1442,23 +1369,7 @@
       "caller": "_meeting_domain_authority_status"
     },
     {
-      "callee": "_append_exec_meeting_event",
-      "caller": "_meeting_ensure_action_item_drafts"
-    },
-    {
-      "callee": "_meeting_normalize_action_item",
-      "caller": "_meeting_ensure_action_item_drafts"
-    },
-    {
-      "callee": "enumerate",
-      "caller": "_meeting_ensure_action_item_drafts"
-    },
-    {
       "callee": "isinstance",
-      "caller": "_meeting_ensure_action_item_drafts"
-    },
-    {
-      "callee": "len",
       "caller": "_meeting_ensure_action_item_drafts"
     },
     {
@@ -1476,10 +1387,6 @@
     {
       "callee": "_meeting_truncate_text",
       "caller": "_meeting_fallback_result"
-    },
-    {
-      "callee": "str",
-      "caller": "_meeting_find_action_draft"
     },
     {
       "callee": "_exec_meeting_pending_calls_projection",
@@ -1552,18 +1459,6 @@
     {
       "callee": "isinstance",
       "caller": "_meeting_mark_preparing_started"
-    },
-    {
-      "callee": "_exec_meeting_now",
-      "caller": "_meeting_normalize_action_item"
-    },
-    {
-      "callee": "isinstance",
-      "caller": "_meeting_normalize_action_item"
-    },
-    {
-      "callee": "str",
-      "caller": "_meeting_normalize_action_item"
     },
     {
       "callee": "_exec_meeting_now",

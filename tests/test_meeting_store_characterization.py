@@ -16,7 +16,7 @@ SERVER = ROOT / "app" / "server.py"
 EXPECTED_WRITERS = {
     "_save_exec_meeting_store": {
         "_meeting_complete_live_advisories", "_meeting_active_projection", "_meeting_history_projection",
-        "_handle_executable_meeting_action_item", "_handle_executable_meeting_create",
+        "_handle_executable_meeting_create",
         "_handle_executable_meeting_detail", "_handle_executable_meeting_conflict_action",
         "_handle_executable_meeting_transition", "_handle_executable_meeting_intervention",
         "_handle_executable_meeting_agenda_change", "_handle_executable_meeting_arbitration",
@@ -30,7 +30,7 @@ EXPECTED_WRITERS = {
 EXPECTED_READERS = {
     "_load_exec_meeting_store": {
         "_meeting_complete_live_advisories", "_meeting_active_projection", "_meeting_history_projection",
-        "_handle_executable_meeting_action_item", "_handle_executable_meeting_create",
+        "_handle_executable_meeting_create",
         "_handle_executable_meeting_detail", "_handle_executable_meeting_events",
         "_handle_executable_meeting_conflict_action", "_handle_executable_meeting_transition",
         "_handle_executable_meeting_intervention", "_handle_executable_meeting_agenda_change",

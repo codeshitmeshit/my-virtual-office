@@ -47,6 +47,7 @@ from services import project_schedule as project_schedule_service
 from services import meeting_repository as meeting_repository_service
 from services import meeting_lifecycle as meeting_lifecycle_service
 from services import meeting_requests as meeting_requests_service
+from services import meeting_action_items as meeting_action_items_service
 from services.project_repository import ProjectConflictError, ProjectNotFoundError, ProjectRepository
 from zoneinfo import ZoneInfo
 from provider_execution import (
@@ -13352,54 +13353,14 @@ def _exec_meeting_pending_calls_projection(events):
     return list(pending.values())
 
 
-def _meeting_normalize_action_item(raw, index, meeting):
-    if isinstance(raw, dict):
-        title = str(raw.get("title") or raw.get("item") or raw.get("text") or raw.get("task") or raw.get("action") or "").strip()
-        description = str(raw.get("description") or raw.get("details") or raw.get("note") or "").strip()
-        owner = str(raw.get("owner") or raw.get("assignee") or raw.get("responsible") or "").strip()
-        status = str(raw.get("status") or raw.get("nextStatus") or "todo").strip() or "todo"
-        source_text = str(raw.get("sourceText") or raw.get("source") or "").strip()
-        priority = str(raw.get("priority") or "medium").strip() or "medium"
-    else:
-        title = str(raw or "").strip()
-        description = ""
-        owner = ""
-        status = "todo"
-        source_text = ""
-        priority = "medium"
-    if not title:
-        title = f"Action item {index + 1}"
-    return {
-        "id": f"ai-{index + 1}",
-        "title": title,
-        "description": description,
-        "suggestedOwner": owner,
-        "assignee": owner,
-        "suggestedStatus": status,
-        "priority": priority,
-        "sourceMeetingId": meeting.get("id"),
-        "sourceText": source_text or title,
-        "targetProjectId": meeting.get("projectId") or "",
-        "status": "draft",
-        "createdAt": _exec_meeting_now(),
-        "updatedAt": _exec_meeting_now(),
-        "audit": [],
-    }
 
 
 def _meeting_ensure_action_item_drafts(store, meeting):
-    if not isinstance(meeting, dict):
-        return []
-    result = meeting.get("result") if isinstance(meeting.get("result"), dict) else {}
-    raw_items = result.get("actionItems") if isinstance(result.get("actionItems"), list) else []
-    existing = meeting.get("actionItemDrafts")
-    if isinstance(existing, list) and existing:
-        return existing
-    drafts = [_meeting_normalize_action_item(item, idx, meeting) for idx, item in enumerate(raw_items)]
-    meeting["actionItemDrafts"] = drafts
-    if drafts:
-        _append_exec_meeting_event(store, meeting, "action_item_drafts_created", actor={"type": "system", "id": "system"}, payload={"count": len(drafts), "projectId": meeting.get("projectId") or ""})
-    return drafts
+    if not isinstance(meeting, dict): return []
+    return meeting_action_items_service.ensure_drafts(
+        store, meeting,
+        meeting_action_items_service.ActionHooks(now=_exec_meeting_now, append_event=_append_exec_meeting_event),
+    )
 
 
 def _exec_meeting_project_active(meeting, events=None):
@@ -13590,164 +13551,49 @@ def _meeting_history_projection():
     return history + exec_history
 
 
-def _meeting_find_action_draft(meeting, action_item_id):
-    drafts = meeting.setdefault("actionItemDrafts", [])
-    for draft in drafts:
-        if str(draft.get("id") or "") == str(action_item_id or ""):
-            return draft
-    return None
-
-
-def _meeting_audit_action_item(draft, action, actor_id, before=None, extra=None):
-    draft.setdefault("audit", []).append({
-        "action": action,
-        "actorId": actor_id or "user",
-        "at": _exec_meeting_now(),
-        "before": before or {},
-        "after": {k: draft.get(k) for k in ("title", "description", "assignee", "targetProjectId", "priority", "status", "taskId")},
-        **(extra or {}),
-    })
-
-
-def _meeting_action_item_snapshot(draft):
-    return {k: copy.deepcopy(v) for k, v in (draft or {}).items() if k != "audit"}
-
-
-def _meeting_confirm_action_item_on_source_task(project_id, task_id, meeting, draft, action_item_id, actor_id, source_snapshot=None):
+def _handle_executable_meeting_action_item(meeting_id, action_item_id, body):
+    hooks = meeting_action_items_service.ActionHooks(now=_exec_meeting_now, append_event=_append_exec_meeting_event)
+    _, prepared = _meeting_domain_repository().update(
+        lambda data: meeting_action_items_service.mutate_command(data, meeting_id, action_item_id, body, hooks)
+    )
+    if not prepared.get("ok") or not prepared.get("prepared"):
+        return prepared
+    project_id = prepared.get("targetProjectId"); task_id = prepared.get("sourceTaskId")
     if not project_id or not task_id:
         return {"error": "Meeting action items must be attached to the source task", "code": "source_task_required", "_status": 400}
-    data, project = _project_find(project_id)
-    if not project:
+    def attach(project):
+        result = meeting_action_items_service.attach_to_project(
+            project, task_id, prepared["meeting"], prepared["actionItem"], action_item_id,
+            prepared["actorId"], prepared["before"], _proj_now(),
+        )
+        if result.get("ok") and not result.get("idempotent"):
+            _log_activity(
+                project, "meeting_action_item_attached", prepared["actorId"] or "meeting",
+                f"Attached meeting action item '{result['record'].get('title')}' to source task", task_id,
+            )
+        return result
+    try:
+        project_result = _PROJECT_REPOSITORY.update(project_id, attach)
+    except ProjectNotFoundError:
         return {"error": "Project not found", "_status": 404}
-    if project.get("status") == "archived":
-        return {"error": "Archived projects cannot receive meeting action items", "_status": 400}
-    task = next((t for t in project.get("tasks", []) if t.get("id") == task_id), None)
-    if not task:
-        return {"error": "Source task not found", "_status": 404}
-    meeting_id = str(meeting.get("id") or "").strip()
-    now = _proj_now()
-    item_id = _project_execution_meeting_action_key(meeting_id, action_item_id)
-    task.setdefault("meetingActionItems", [])
-    existing = next((a for a in task["meetingActionItems"] if isinstance(a, dict) and str(a.get("id") or "") == item_id), None)
-    record = {
-        "id": item_id,
-        "meetingId": meeting_id,
-        "requestId": str(((meeting.get("source") or {}) if isinstance(meeting.get("source"), dict) else {}).get("meetingRequestId") or ""),
-        "sourceActionItemId": action_item_id,
-        "title": str(draft.get("title") or "").strip() or "Meeting action item",
-        "description": str(draft.get("description") or draft.get("sourceText") or "").strip(),
-        "owner": str(draft.get("assignee") or draft.get("suggestedOwner") or task.get("executorAgentId") or task.get("assignee") or "").strip(),
-        "status": "pending",
-        "requiredForResume": True,
-        "priority": str(draft.get("priority") or "medium").strip() or "medium",
-        "sourceSnapshot": copy.deepcopy(source_snapshot or draft),
-        "confirmedBy": actor_id,
-        "confirmedAt": now,
-        "updatedAt": now,
-    }
-    if existing:
-        existing.update({k: v for k, v in record.items() if k not in {"createdAt"}})
-        record = existing
-    else:
-        record["createdAt"] = now
-        task["meetingActionItems"].append(record)
-    task["updatedAt"] = now
-    project["updatedAt"] = now
-    _log_activity(project, "meeting_action_item_attached", actor_id or "meeting", f"Attached meeting action item '{record.get('title')}' to source task", task.get("id"))
-    _save_projects(data)
-    return {"ok": True, "project": project, "task": task, "record": record}
-
-
-def _handle_executable_meeting_action_item(meeting_id, action_item_id, body):
-    action = str(body.get("action") or "").strip()
-    if action not in {"update", "reject", "keep", "confirm"}:
-        return {"error": "Invalid action item action", "_status": 400}
-    actor_id = str(body.get("actorId") or body.get("by") or "user").strip() or "user"
-    idempotency_key = str(body.get("idempotencyKey") or "").strip()
-    with _EXEC_MEETING_LOCK:
-        store = _load_exec_meeting_store()
-        meeting = store.get("meetings", {}).get(meeting_id)
-        if not meeting:
-            return {"error": "Executable meeting not found", "_status": 404}
-        _meeting_ensure_action_item_drafts(store, meeting)
-        draft = _meeting_find_action_draft(meeting, action_item_id)
-        if not draft:
-            return {"error": "Action item draft not found", "_status": 404}
-        idem_key = f"{meeting_id}:action-item:{action_item_id}:{action}:{idempotency_key}" if idempotency_key else ""
-        if idem_key and idem_key in store.get("idempotency", {}):
-            idem = store.get("idempotency", {}).get(idem_key) or {}
-            return {"ok": True, "meeting": meeting, "actionItem": draft, "taskId": idem.get("taskId") or draft.get("sourceTaskId") or draft.get("taskId"), "meetingActionItemId": idem.get("meetingActionItemId") or draft.get("meetingActionItemId"), "idempotent": True}
-        before = _meeting_action_item_snapshot(draft)
-        if action == "update":
-            if draft.get("status") == "confirmed":
-                return {"error": "Confirmed action items cannot be edited", "_status": 409}
-            for key in ("title", "description", "assignee", "targetProjectId", "priority"):
-                if key in body:
-                    draft[key] = str(body.get(key) or "").strip()
-            if not draft.get("targetProjectId") and body.get("projectId"):
-                draft["targetProjectId"] = str(body.get("projectId") or "").strip()
-            draft["updatedAt"] = _exec_meeting_now()
-            _meeting_audit_action_item(draft, "update", actor_id, before)
-        elif action == "reject":
-            if draft.get("status") == "confirmed":
-                return {"error": "Confirmed action items cannot be rejected", "_status": 409}
-            draft["status"] = "rejected"
-            draft["rejectionReason"] = str(body.get("reason") or body.get("rejectionReason") or "").strip()
-            draft["updatedAt"] = _exec_meeting_now()
-            _meeting_audit_action_item(draft, "reject", actor_id, before)
-        elif action == "keep":
-            if draft.get("status") == "confirmed":
-                return {"error": "Confirmed action items cannot be changed to meeting-only", "_status": 409}
-            draft["status"] = "kept_as_meeting_item"
-            draft["updatedAt"] = _exec_meeting_now()
-            _meeting_audit_action_item(draft, "keep", actor_id, before)
-        elif action == "confirm":
-            if draft.get("status") == "confirmed":
-                confirmed_task_id = draft.get("sourceTaskId") or draft.get("taskId")
-                if idem_key:
-                    store.setdefault("idempotency", {})[idem_key] = {"meetingId": meeting_id, "taskId": confirmed_task_id}
-                    _save_exec_meeting_store(store)
-                return {"ok": True, "meeting": meeting, "actionItem": draft, "taskId": confirmed_task_id, "idempotent": True}
-            source = meeting.get("source") if isinstance(meeting.get("source"), dict) else {}
-            target_project_id = str(source.get("projectId") or meeting.get("projectId") or body.get("targetProjectId") or body.get("projectId") or draft.get("targetProjectId") or "").strip()
-            source_task_id = str(source.get("taskId") or body.get("taskId") or draft.get("sourceTaskId") or "").strip()
-            attach_result = _meeting_confirm_action_item_on_source_task(target_project_id, source_task_id, meeting, draft, action_item_id, actor_id, before)
-            if attach_result.get("error"):
-                return attach_result
-            _save_exec_meeting_store(store)
-        if action != "confirm":
-            event = _append_exec_meeting_event(store, meeting, "action_item_updated", actor={"type": "user", "id": actor_id}, payload={"action": action, "actionItemId": action_item_id, "before": before, "after": draft}, idempotency_key=idempotency_key)
-            if idem_key:
-                store.setdefault("idempotency", {})[idem_key] = {"meetingId": meeting_id, "sequence": event["sequence"]}
-            _save_exec_meeting_store(store)
-            return {"ok": True, "meeting": meeting, "actionItem": draft}
-
-    with _EXEC_MEETING_LOCK:
-        store = _load_exec_meeting_store()
-        meeting = store.get("meetings", {}).get(meeting_id)
-        if not meeting:
-            return {"ok": True, "task": attach_result.get("task"), "taskId": (attach_result.get("task") or {}).get("id")}
-        _meeting_ensure_action_item_drafts(store, meeting)
-        draft = _meeting_find_action_draft(meeting, action_item_id)
-        if draft:
-            before2 = _meeting_action_item_snapshot(draft)
-            task = attach_result.get("task") or {}
-            record = attach_result.get("record") or {}
-            draft.update({
-                "status": "confirmed",
-                "targetProjectId": target_project_id,
-                "sourceTaskId": task.get("id"),
-                "meetingActionItemId": record.get("id"),
-                "confirmedBy": actor_id,
-                "confirmedAt": record.get("confirmedAt") or _exec_meeting_now(),
-                "updatedAt": _exec_meeting_now(),
-            })
-            _meeting_audit_action_item(draft, "confirm", actor_id, before2, {"taskId": task.get("id"), "projectId": target_project_id, "meetingActionItemId": record.get("id")})
-            event = _append_exec_meeting_event(store, meeting, "action_item_confirmed", actor={"type": "user", "id": actor_id}, payload={"actionItemId": action_item_id, "projectId": target_project_id, "taskId": task.get("id"), "meetingActionItemId": record.get("id")}, idempotency_key=idempotency_key)
-            if idem_key:
-                store.setdefault("idempotency", {})[idem_key] = {"meetingId": meeting_id, "taskId": task.get("id"), "meetingActionItemId": record.get("id"), "sequence": event["sequence"]}
-        _save_exec_meeting_store(store)
-        return {"ok": True, "meeting": meeting, "actionItem": draft, "task": task, "taskId": task.get("id"), "meetingActionItem": attach_result.get("record")}
+    except ProjectConflictError:
+        return {"error": "Project changed while confirming action item", "code": "project_action_item_conflict", "_status": 409}
+    if not project_result.get("ok"):
+        return project_result
+    try:
+        _, committed = _meeting_domain_repository().update(
+            lambda data: meeting_action_items_service.commit_confirmation(
+                data, meeting_id, action_item_id, prepared, project_result, hooks,
+            )
+        )
+    except (OSError, meeting_repository_service.MeetingStoreError):
+        return {
+            "error": "Project action item was created but Meeting confirmation is pending retry",
+            "code": "action_item_commit_pending", "_status": 503,
+            "taskId": (project_result.get("task") or {}).get("id"),
+            "meetingActionItemId": (project_result.get("record") or {}).get("id"),
+        }
+    return committed
 
 
 def _handle_executable_meeting_create(body):
