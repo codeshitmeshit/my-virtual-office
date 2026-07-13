@@ -1,0 +1,37 @@
+app/server.py
+  s_5852bad622de94::t_43b38274e7e52d 13563-13570
+app/services/meeting_callbacks.py
+  s_5852bad622de94::t_5b396f2495f538 7,12,62-76,107-108
+docs/MEETING_DOMAIN_OPERATIONS.md
+  s_5852bad622de94::t_13b7f8643a3959 62
+docs/SERVICE_BOUNDARIES.md
+  s_5852bad622de94::t_fc7df9a8b83b22 100,104
+tests/run_meeting_characterization_manifest.py
+  s_5852bad622de94::t_e6d26c578a6f0c 11
+tests/test_meeting_collaboration_services.py
+  s_5852bad622de94::t_13d5045ae3fb97 57-66
+tests/test_meeting_for_ai_phase6.py
+  s_5852bad622de94::t_dea595ceade951 323-346
+tests/test_meeting_service_boundaries.py
+  s_5852bad622de94::t_6003bde6221358 10
+tests/test_meeting_store_characterization.py
+  s_5852bad622de94::t_67b89750464ece 14,91,97,109
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "b4f7b8bc8187ac3659fe5669e0486832b0647a78",
+  "prompts": {},
+  "sessions": {
+    "s_5852bad622de94": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f5163-cd74-7df3-a25d-7fd6dd323b5d",
+        "model": "unknown"
+      },
+      "human_author": "codeshitmeshit <codeshitmeshit@126.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
