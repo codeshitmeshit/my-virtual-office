@@ -1,0 +1,23 @@
+app/services/meeting_action_items.py
+  s_5852bad622de94::t_91cfc8c8dab07d 39-45
+tests/test_meeting_action_items_service.py
+  s_5852bad622de94::t_a4434783b15139 40-49
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "74c0bdd7bec53cbd3fccd44c457a4b7758805c48",
+  "prompts": {},
+  "sessions": {
+    "s_5852bad622de94": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f5163-cd74-7df3-a25d-7fd6dd323b5d",
+        "model": "unknown"
+      },
+      "human_author": "codeshitmeshit <codeshitmeshit@126.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
