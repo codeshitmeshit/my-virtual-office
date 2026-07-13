@@ -24,8 +24,8 @@
 
 ## 6. Notifications and trusted callbacks
 
-- [ ] 6.1 Extract bounded redacted notification DTOs, stable intent keys, sent/failed markers, and best-effort delivery coordination into `meeting_notifications.py`; preserve business-state-first ordering and verify notification failure/crash/retry, credential/transcript/path/error canaries, payload compatibility, and no business rollback.
-- [ ] 6.2 Keep Feishu authenticity/transport parsing in adapters and extract trusted callback commands into `meeting_callbacks.py`; persist callback dedupe/outcomes in the unified Store, migrate Meeting-request and Meeting actions, and verify forged actor/linkage, unsupported actions, cross-project/request access, replay, concurrent delivery, audit redaction, and stable card responses.
+- [x] 6.1 Extract bounded redacted notification DTOs, stable intent keys, sent/failed markers, and best-effort delivery coordination into `meeting_notifications.py`; preserve business-state-first ordering and verify notification failure/crash/retry, credential/transcript/path/error canaries, payload compatibility, and no business rollback.
+- [x] 6.2 Keep Feishu authenticity/transport parsing in adapters and extract trusted callback commands into `meeting_callbacks.py`; persist callback dedupe/outcomes in the unified Store, migrate Meeting-request and Meeting actions, and verify forged actor/linkage, unsupported actions, cross-project/request access, replay, concurrent delivery, audit redaction, and stable card responses.
 
 ## 7. Boundary, performance, and complete regression
 
