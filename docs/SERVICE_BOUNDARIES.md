@@ -1,4 +1,4 @@
-# Project service boundaries
+# Project and Meeting service boundaries
 
 Virtual Office routes project-domain work through thin transport adapters and independently testable application services. Public HTTP routes, JSON fields, status semantics, Markdown persistence, Provider protocols, SSE/WebSocket behavior, and frontend workflows remain compatible.
 
@@ -37,6 +37,12 @@ Code under `app/services/` must not import `server.py`, `OfficeHandler`, `http.s
 | `review_acceptance.py` | Review, rework, acceptance, trusted entry context, notification intents and sanitized DTOs | Transport identity discovery or exactly-once external delivery |
 | `artifacts.py` | Workspace containment, association/extension policy, bounded scan/read, secure open/delete and descriptor lifetime | HTTP streaming headers or management-token checks |
 | `project_schedule.py` | Gateway/binding orchestration, dispatch claims/leases, occurrence idempotency, reconciliation and history decisions | Gateway transport implementation or project execution internals |
+| `meeting_repository.py` | Versioned unified Meeting Store, validation, authority gate, atomic replacement, cache and process lock | HTTP, Agent calls, Project mutation or online migration |
+| `meeting_lifecycle.py` | Meeting creation/transitions, occupancy, conflicts, Agent compare tokens, terminalization and recovery | Transport parsing, Provider implementation or Project persistence |
+| `meeting_requests.py` | Request validation, selection, confirmation/rejection and atomic request-to-Meeting conversion | HTTP, notification delivery or Project Markdown writes |
+| `meeting_action_items.py` | Stable action-item identity, user selection, Project projection and compare commit | Project storage implementation or transport responses |
+| `meeting_notifications.py` | Redacted bounded DTOs, stable intents and sent/failed markers | Feishu transport or business rollback |
+| `meeting_callbacks.py` | Trusted Meeting callback commands, linkage validation and persistent replay | Feishu signature verification or card parsing |
 
 Legacy `_wf_*` orchestration remains a deliberate non-goal. It may keep its business flow, but every project-store write still goes through the shared Repository coordinator.
 
@@ -60,6 +66,8 @@ Lock order is:
 
 Cron binding file locks are never held while acquiring a project/store lock. Per-Cron operation locks serialize Gateway CRUD and dispatch state for one Cron. Slow Provider, notification, Gateway, Git, and filesystem work must not run while a project lock is held; dependent results re-enter an atomic compare-and-commit boundary.
 
+Meeting-domain commands use the repository process lock and one atomic `meeting-domain.json` replacement. They release that lock before Agent, notification, Feishu and Project work. Cross-domain operations commit Meeting state first, then use Project linkage tokens and bounded forward-reconciliation records. Occupancy release removes an Agent only when the terminating Meeting is still the recorded owner.
+
 ## Sensitive data
 
 Workspace paths, Provider reply/error, Review feedback, Artifact content, credentials, and Feishu targets are sensitive.
@@ -81,6 +89,7 @@ Regression canaries include Basic/Bearer authorization, cookies, JSON and key-va
 - Artifact reads/deletes reject missing or relative roots, traversal, file and workspace-root symlink swaps, non-regular files, unassociated paths, and resource-limit abuse; an invalid context can never fall back to the process working directory, and root-level deletion verifies the opened root inode.
 - Cron history appends are atomic; same-Cron CRUD converges Gateway/binding state; update persistence failure compensates Gateway, delete retries tolerate an already-removed Gateway job, dispatch exceptions release without completing the occurrence, leases renew, run-now callbacks use an O(1) monotonic completion high-water mark, and binding capacity uses persisted atomic reservations with compensation.
 - Shared redaction now covers structured credentials and absolute paths before logger/notifier persistence.
+- Meeting request conversion now commits request status, Meeting, events, occupancy and idempotency in one unified update. Targeted/Moderator Agent results use phase/version/sequence/call tokens; persistent callback replay is a true no-op; notification failure never rolls back Meeting state.
 
 Each intentional correction has a failing-before regression. Other public behavior remains compatible and requires no Markdown data migration.
 

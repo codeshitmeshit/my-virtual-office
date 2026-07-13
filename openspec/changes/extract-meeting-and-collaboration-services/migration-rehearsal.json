@@ -1,0 +1,140 @@
+{
+  "fixtures": {
+    "large": {
+      "applyExit": 0,
+      "applyStatus": "migrated",
+      "backupCount": 2,
+      "backups": [
+        "executable-meetings.json.backup-20260713T025256Z",
+        "meeting-requests.json.backup-20260713T025256Z"
+      ],
+      "counts": {
+        "events": 100,
+        "meetings": 100,
+        "occupancy": 200,
+        "requests": 100
+      },
+      "dryRunExit": 0,
+      "dryRunStatus": "validated",
+      "relationshipChecks": {
+        "eventOwnership": {
+          "checked": 100,
+          "status": "pass"
+        },
+        "identityAndStatus": {
+          "checked": 200,
+          "status": "pass"
+        },
+        "occupancyCompatibility": {
+          "checked": 200,
+          "status": "pass"
+        },
+        "requestMeetingLinks": {
+          "checked": 100,
+          "status": "pass"
+        }
+      },
+      "repeatExit": 0,
+      "repeatStatus": "already_migrated",
+      "repeatUnifiedDigest": "e9bae82277122cda653ece5313c0e93587f26b77b78602cb55271a819fa3701c",
+      "size": 100,
+      "sourceDigest": "c57473534921914b15791f671c7a380aa512c0ecdb63e3ca37ed4d725028c5d6",
+      "sourceFileDigests": {
+        "executable-meetings.json": "e2d0067fb63feb863b11fec027dc8450117f41150cd3e9c51917af579256b8df",
+        "meeting-requests.json": "4aa5030fe1c41f5316959c288f988683c3d9466647d66b133a17931ace60d558"
+      },
+      "unifiedDigest": "e9bae82277122cda653ece5313c0e93587f26b77b78602cb55271a819fa3701c"
+    },
+    "medium": {
+      "applyExit": 0,
+      "applyStatus": "migrated",
+      "backupCount": 2,
+      "backups": [
+        "executable-meetings.json.backup-20260713T025256Z",
+        "meeting-requests.json.backup-20260713T025256Z"
+      ],
+      "counts": {
+        "events": 20,
+        "meetings": 20,
+        "occupancy": 40,
+        "requests": 20
+      },
+      "dryRunExit": 0,
+      "dryRunStatus": "validated",
+      "relationshipChecks": {
+        "eventOwnership": {
+          "checked": 20,
+          "status": "pass"
+        },
+        "identityAndStatus": {
+          "checked": 40,
+          "status": "pass"
+        },
+        "occupancyCompatibility": {
+          "checked": 40,
+          "status": "pass"
+        },
+        "requestMeetingLinks": {
+          "checked": 20,
+          "status": "pass"
+        }
+      },
+      "repeatExit": 0,
+      "repeatStatus": "already_migrated",
+      "repeatUnifiedDigest": "fd4c273d544e613fd2879234991a5a61b12610eb53af28ded2b497744c4b2dae",
+      "size": 20,
+      "sourceDigest": "4e657d4aba4ceff6948c15aa33739fb7d4f9d34ed3a2caba757763278a404518",
+      "sourceFileDigests": {
+        "executable-meetings.json": "a77f67d0b388f1e84ec38fa0b293c99dde03ac5e1b8439c50285340fe18184be",
+        "meeting-requests.json": "f531508994553f8c9d3dbd113ee5054589b021c466f53242a9e92688356f58c3"
+      },
+      "unifiedDigest": "fd4c273d544e613fd2879234991a5a61b12610eb53af28ded2b497744c4b2dae"
+    },
+    "small": {
+      "applyExit": 0,
+      "applyStatus": "migrated",
+      "backupCount": 2,
+      "backups": [
+        "executable-meetings.json.backup-20260713T025256Z",
+        "meeting-requests.json.backup-20260713T025256Z"
+      ],
+      "counts": {
+        "events": 1,
+        "meetings": 1,
+        "occupancy": 2,
+        "requests": 1
+      },
+      "dryRunExit": 0,
+      "dryRunStatus": "validated",
+      "relationshipChecks": {
+        "eventOwnership": {
+          "checked": 1,
+          "status": "pass"
+        },
+        "identityAndStatus": {
+          "checked": 2,
+          "status": "pass"
+        },
+        "occupancyCompatibility": {
+          "checked": 2,
+          "status": "pass"
+        },
+        "requestMeetingLinks": {
+          "checked": 1,
+          "status": "pass"
+        }
+      },
+      "repeatExit": 0,
+      "repeatStatus": "already_migrated",
+      "repeatUnifiedDigest": "b737d0e351c7c07f47f11e2fcf242c528333961ef17c4bdca8b990f684b2eb32",
+      "size": 1,
+      "sourceDigest": "6bd1877eba4c3cc72707d47f2761d438bdca088df108d0ca2ee7e8c76fb02bfe",
+      "sourceFileDigests": {
+        "executable-meetings.json": "ed3e8be873837d3584409b03981683d9ce05e353c9a7817ea6cb948e00c67033",
+        "meeting-requests.json": "833267a3346e8313c26b74a87c5391ecdb78bd31792bc4011440d309f56fa04b"
+      },
+      "unifiedDigest": "b737d0e351c7c07f47f11e2fcf242c528333961ef17c4bdca8b990f684b2eb32"
+    }
+  },
+  "schema": 1
+}

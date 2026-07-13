@@ -5,13 +5,17 @@
 set -e
 BASE="${1:-http://localhost:8090}"
 PASS=0; FAIL=0
+CURL_AUTH=()
+if [ -n "${VO_MANAGEMENT_TOKEN:-}" ]; then
+  CURL_AUTH=(-H "X-VO-Management-Token: ${VO_MANAGEMENT_TOKEN}")
+fi
 
 echo "CRUD TEST: Projects & Tasks API ($BASE)"
 echo "=========================================="
 
 # 1. Create Project
 echo -e "\n── TEST 1: Create Project ──"
-RESP=$(curl -s -X POST "$BASE/api/projects" \
+RESP=$(curl -s "${CURL_AUTH[@]}" -X POST "$BASE/api/projects" \
   -H "Content-Type: application/json" \
   -d '{"title":"QA CRUD Test","description":"Automated CRUD verification","tags":["qa","test"]}')
 PROJECT_ID=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['project']['id'])")
@@ -25,20 +29,20 @@ INPROG=$(echo "$RESP" | python3 -c "import sys,json; [print(c['id']) for c in js
 
 # 2. Create 2 Tasks
 echo -e "\n── TEST 2: Create 2 Tasks ──"
-T1=$(curl -s -X POST "$BASE/api/projects/$PROJECT_ID/tasks" -H "Content-Type: application/json" \
+T1=$(curl -s "${CURL_AUTH[@]}" -X POST "$BASE/api/projects/$PROJECT_ID/tasks" -H "Content-Type: application/json" \
   -d "{\"title\":\"Task A\",\"columnId\":\"$BACKLOG\",\"checklist\":[{\"text\":\"A1\",\"done\":false}]}")
 T1_ID=$(echo "$T1" | python3 -c "import sys,json; print(json.load(sys.stdin)['task']['id'])")
-T2=$(curl -s -X POST "$BASE/api/projects/$PROJECT_ID/tasks" -H "Content-Type: application/json" \
+T2=$(curl -s "${CURL_AUTH[@]}" -X POST "$BASE/api/projects/$PROJECT_ID/tasks" -H "Content-Type: application/json" \
   -d "{\"title\":\"Task B\",\"columnId\":\"$BACKLOG\",\"checklist\":[{\"text\":\"B1\",\"done\":false}]}")
-COUNT=$(curl -s "$BASE/api/projects/$PROJECT_ID" | python3 -c "import sys,json; print(len(json.load(sys.stdin)['project']['tasks']))")
+COUNT=$(curl -s "${CURL_AUTH[@]}" "$BASE/api/projects/$PROJECT_ID" | python3 -c "import sys,json; print(len(json.load(sys.stdin)['project']['tasks']))")
 if [ "$COUNT" = "2" ]; then echo "✅ PASS: 2 tasks created"; PASS=$((PASS+1))
 else echo "❌ FAIL: task count=$COUNT"; FAIL=$((FAIL+1)); fi
 
 # 3. Update Task
 echo -e "\n── TEST 3: Update Task ──"
-curl -s -X PUT "$BASE/api/projects/$PROJECT_ID/tasks/$T1_ID" -H "Content-Type: application/json" \
+curl -s "${CURL_AUTH[@]}" -X PUT "$BASE/api/projects/$PROJECT_ID/tasks/$T1_ID" -H "Content-Type: application/json" \
   -d '{"title":"Task A UPDATED","priority":"critical"}' > /dev/null
-RB=$(curl -s "$BASE/api/projects/$PROJECT_ID" | python3 -c "
+RB=$(curl -s "${CURL_AUTH[@]}" "$BASE/api/projects/$PROJECT_ID" | python3 -c "
 import sys,json
 for t in json.load(sys.stdin)['project']['tasks']:
   if t['id']=='$T1_ID': print(t['title']+'|'+t.get('priority',''))
@@ -48,9 +52,9 @@ else echo "❌ FAIL: readback=$RB"; FAIL=$((FAIL+1)); fi
 
 # 4. Move Task
 echo -e "\n── TEST 4: Move Task ──"
-curl -s -X PUT "$BASE/api/projects/$PROJECT_ID/tasks/$T1_ID" -H "Content-Type: application/json" \
+curl -s "${CURL_AUTH[@]}" -X PUT "$BASE/api/projects/$PROJECT_ID/tasks/$T1_ID" -H "Content-Type: application/json" \
   -d "{\"columnId\":\"$INPROG\"}" > /dev/null
-COL=$(curl -s "$BASE/api/projects/$PROJECT_ID" | python3 -c "
+COL=$(curl -s "${CURL_AUTH[@]}" "$BASE/api/projects/$PROJECT_ID" | python3 -c "
 import sys,json
 for t in json.load(sys.stdin)['project']['tasks']:
   if t['id']=='$T1_ID': print(t['columnId'])
@@ -60,8 +64,8 @@ else echo "❌ FAIL: col=$COL"; FAIL=$((FAIL+1)); fi
 
 # 5. Delete Project
 echo -e "\n── TEST 5: Delete Project ──"
-curl -s -X DELETE "$BASE/api/projects/$PROJECT_ID" > /dev/null
-FOUND=$(curl -s "$BASE/api/projects" | python3 -c "
+curl -s "${CURL_AUTH[@]}" -X DELETE "$BASE/api/projects/$PROJECT_ID" > /dev/null
+FOUND=$(curl -s "${CURL_AUTH[@]}" "$BASE/api/projects" | python3 -c "
 import sys,json; ids=[p['id'] for p in json.load(sys.stdin)['projects']]
 print('found' if '$PROJECT_ID' in ids else 'gone')
 ")
