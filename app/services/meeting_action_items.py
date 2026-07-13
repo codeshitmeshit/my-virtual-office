@@ -36,6 +36,13 @@ def normalize(raw: Any, index: int, meeting: Mapping[str, Any], now: str) -> dic
 def ensure_drafts(data: MutableMapping[str, Any], meeting: MutableMapping[str, Any], hooks: ActionHooks) -> list[dict[str, Any]]:
     existing = meeting.get("actionItemDrafts")
     if isinstance(existing, list) and existing:
+        for draft in existing:
+            if not isinstance(draft, MutableMapping):
+                continue
+            target_task_id = draft.get("targetTaskId") or draft.get("sourceTaskId") or draft.get("taskId")
+            if target_task_id:
+                draft.setdefault("targetTaskId", target_task_id)
+                draft.setdefault("sourceTaskId", target_task_id)
         return existing
     result = meeting.get("result") if isinstance(meeting.get("result"), Mapping) else {}
     raw_items = result.get("actionItems") if isinstance(result.get("actionItems"), list) else []

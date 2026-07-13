@@ -37,6 +37,16 @@ def test_normalization_and_draft_identity_are_stable_and_old_shape_compatible():
     assert len([event for event in data["events"]["m1"] if event["type"] == "action_item_drafts_created"]) == 1
 
 
+def test_legacy_confirmed_draft_projects_canonical_and_compatibility_task_ids():
+    data, meeting = data_with_actions()
+    meeting["actionItemDrafts"] = [{
+        "id": "legacy", "status": "confirmed", "sourceTaskId": "t-old", "meetingActionItemId": "legacy-record",
+    }]
+    drafts = ensure_drafts(data, meeting, hooks())
+    assert drafts[0]["targetTaskId"] == "t-old"
+    assert drafts[0]["sourceTaskId"] == "t-old"
+
+
 def test_update_reject_keep_and_audit_history_are_bounded():
     data, meeting = data_with_actions(); ensure_drafts(data, meeting, hooks())
     updated = mutate_command(data, "m1", "ai-1", {"action": "update", "title": "Changed", "actorId": "u"}, hooks())
