@@ -15,8 +15,8 @@
 
 ## 4. AI meeting request and project-linkage service
 
-- [ ] 4.1 Extract request create/list/detail, required-field validation, urgency/auto-confirm policy, context selection, confirm/reject, duplicate unresolved request prevention, and atomic request-to-Meeting conversion into `meeting_requests.py`; migrate HTTP, Agent bridge, Feishu, and internal callers with idempotency and payload/status compatibility tests.
-- [ ] 4.2 Integrate request/Meeting results with `ProjectRepository` using task/attempt/blocker compare tokens, stable reconciliation diagnostics, and idempotent forward recovery; verify stale linkage rejection, Project commit failure/retry, repeated decision, Meeting success/Project failure, resume/block/human-decision outcomes, and concurrent project updates.
+- [x] 4.1 Extract request create/list/detail, required-field validation, urgency/auto-confirm policy, context selection, confirm/reject, duplicate unresolved request prevention, and atomic request-to-Meeting conversion into `meeting_requests.py`; migrate HTTP, Agent bridge, Feishu, and internal callers with idempotency and payload/status compatibility tests.
+- [x] 4.2 Integrate request/Meeting results with `ProjectRepository` using task/attempt/blocker compare tokens, stable reconciliation diagnostics, and idempotent forward recovery; verify stale linkage rejection, Project commit failure/retry, repeated decision, Meeting success/Project failure, resume/block/human-decision outcomes, and concurrent project updates.
 
 ## 5. Action-item projection and task conversion
 
