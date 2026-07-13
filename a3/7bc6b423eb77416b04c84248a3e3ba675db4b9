@@ -1,0 +1,29 @@
+app/server.py
+  s_5852bad622de94::t_b5d94242b3c27e 13528
+app/services/meeting_action_items.py
+  s_5852bad622de94::t_a3fd352d873a25 91-92,96,98,100,105,135,141,143,168-169,174-175,180-181,189
+docs/VO_AGENT_USAGE_GUIDE.cn.md
+  s_5852bad622de94::t_d44bfcea6005bf 666
+docs/VO_AGENT_USAGE_GUIDE.md
+  s_5852bad622de94::t_13f187ab7c4613 667
+tests/test_meeting_for_ai_phase6.py
+  s_5852bad622de94::t_892c79120164c5 245-247
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "a37bc6b423eb77416b04c84248a3e3ba675db4b9",
+  "prompts": {},
+  "sessions": {
+    "s_5852bad622de94": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f5163-cd74-7df3-a25d-7fd6dd323b5d",
+        "model": "unknown"
+      },
+      "human_author": "codeshitmeshit <codeshitmeshit@126.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
