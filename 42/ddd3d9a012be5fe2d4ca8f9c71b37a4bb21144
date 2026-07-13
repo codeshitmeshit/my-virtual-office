@@ -1,0 +1,33 @@
+openspec/changes/extract-meeting-and-collaboration-services/characterization-result.json
+  s_5852bad622de94::t_283d52ba93d107 21
+openspec/changes/extract-meeting-and-collaboration-services/performance-final.json
+  s_5852bad622de94::t_19040efc211d3c 1-75
+openspec/changes/extract-meeting-and-collaboration-services/performance-result.md
+  s_5852bad622de94::t_0e9c14458c51e6 1-12
+openspec/changes/extract-meeting-and-collaboration-services/regression-phase7.md
+  s_5852bad622de94::t_a56198e5830378 1-30
+tests/meeting_baseline_harness.py
+  s_5852bad622de94::t_f6345bb1ec32d2 2,15,17-18,21,25-26,28,30-34,37-38,41,43,46-49,51,53-64,66-79,83
+tests/test_meeting_service_boundaries.py
+  s_5852bad622de94::t_3d680edbe3286d 1-76
+tests/test_project_performance_result.py
+  s_5852bad622de94::t_0660ce1046a3e1 9-12
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "42ddd3d9a012be5fe2d4ca8f9c71b37a4bb21144",
+  "prompts": {},
+  "sessions": {
+    "s_5852bad622de94": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f5163-cd74-7df3-a25d-7fd6dd323b5d",
+        "model": "unknown"
+      },
+      "human_author": "codeshitmeshit <codeshitmeshit@126.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
