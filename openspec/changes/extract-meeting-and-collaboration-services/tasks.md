@@ -20,7 +20,7 @@
 
 ## 5. Action-item projection and task conversion
 
-- [ ] 5.1 Extract Meeting result normalization, stable action-item identity, project-task projection, completion state, explicit selection, and `(meetingId, actionItemId)` task conversion dedupe into `meeting_action_items.py`; migrate callers and test repeated conversion, concurrent project edits, stale Meeting linkage, partial failure/retry, bounded history, and old-record compatibility.
+- [x] 5.1 Extract Meeting result normalization, stable action-item identity, project-task projection, completion state, explicit selection, and `(meetingId, actionItemId)` task conversion dedupe into `meeting_action_items.py`; migrate callers and test repeated conversion, concurrent project edits, stale Meeting linkage, partial failure/retry, bounded history, and old-record compatibility.
 
 ## 6. Notifications and trusted callbacks
 
