@@ -48,6 +48,8 @@ from services import meeting_repository as meeting_repository_service
 from services import meeting_lifecycle as meeting_lifecycle_service
 from services import meeting_requests as meeting_requests_service
 from services import meeting_action_items as meeting_action_items_service
+from services import meeting_notifications as meeting_notifications_service
+from services import meeting_callbacks as meeting_callbacks_service
 from services.project_repository import ProjectConflictError, ProjectNotFoundError, ProjectRepository
 from zoneinfo import ZoneInfo
 from provider_execution import (
@@ -11127,6 +11129,36 @@ def _meeting_request_notification_details(req):
     ]
 
 
+def _deliver_meeting_notification(entity_kind, entity_id, intent):
+    _, staged = _meeting_domain_repository().update(
+        lambda data: meeting_notifications_service.stage(
+            data, entity_kind, entity_id, intent, _exec_meeting_now(),
+        )
+    )
+    if staged.get("status") == "skipped_duplicate":
+        return staged
+    if not staged.get("ok"):
+        return staged
+    try:
+        result = send_feishu_notification(
+            staged["intent"],
+            webhook_url=VO_CONFIG.get("notifications", {}).get("feishuWebhook") or None,
+            app_config=_feishu_app_send_config(VO_CONFIG.get("notifications", {})),
+            status_dir=STATUS_DIR,
+        )
+    except Exception as exc:
+        result = {"ok": False, "status": "delivery_failed", "error": _project_execution_redact(str(exc))}
+    try:
+        _meeting_domain_repository().update(
+            lambda data: meeting_notifications_service.mark(
+                data, entity_kind, entity_id, staged["dedupeKey"], result, _exec_meeting_now(),
+            )
+        )
+    except (OSError, meeting_repository_service.MeetingStoreError):
+        pass
+    return result
+
+
 def _send_meeting_request_notification(req, state="pending", *, summary="", actions=None, details=None):
     if not isinstance(req, dict):
         return {"ok": True, "status": "skipped_invalid_request"}
@@ -11159,33 +11191,11 @@ def _send_meeting_request_notification(req, state="pending", *, summary="", acti
                 "text": "查看会议" if meeting_id else "查看详情",
                 "url": _meeting_open_url(meeting_id) if meeting_id else _vo_public_url("/#projects"),
             }]
-    title_prefix = {
-        "pending": "会议申请待处理",
-        "approved": "会议申请已同意",
-        "rejected": "会议申请已拒绝",
-        "processing": "会议申请处理中",
-        "cancelled": "会议申请已取消",
-        "expired": "会议申请已过期",
-        "no_longer_actionable": "会议申请不再可处理",
-    }.get(state, "会议申请通知")
-    intent = {
-        "id": f"meeting-request:{req.get('id')}:{state}",
-        "type": "application_form",
-        "title": f"{title_prefix}: {proposal.get('topic') or req.get('id')}",
-        "summary": summary or proposal.get("purpose") or proposal.get("goal") or "会议申请状态已更新。",
-        "state": state,
-        "multi_participant": False,
-        "related": _meeting_request_notification_related(req),
-        "details": details if details is not None else _meeting_request_notification_details(req),
-        "actions": actions,
-        "target": "feishu-meeting-request",
-    }
-    return send_feishu_notification(
-        intent,
-        webhook_url=VO_CONFIG.get("notifications", {}).get("feishuWebhook") or None,
-        app_config=_feishu_app_send_config(VO_CONFIG.get("notifications", {})),
-        status_dir=STATUS_DIR,
+    intent = meeting_notifications_service.request_intent(
+        req, state, summary=summary, actions=actions,
+        details=details if details is not None else _meeting_request_notification_details(req),
     )
+    return _deliver_meeting_notification("request", str(req.get("id") or ""), intent)
 
 
 def _meeting_request_approved_notification_details(req):
@@ -11476,38 +11486,11 @@ def _send_meeting_failure_notification(meeting, failure=None):
     if not isinstance(meeting, dict):
         return {"ok": True, "status": "skipped_invalid_meeting"}
     failure = failure if isinstance(failure, dict) else {}
-    meeting_id = meeting.get("id") or ""
-    sequence = failure.get("failedAtSequence") or meeting.get("lastEventSequence") or ""
-    key = f"meeting-failure:{meeting_id}:{sequence or failure.get('reason') or meeting.get('stage') or 'failed'}"
-    if _feishu_notification_marker(meeting, key):
-        return {"ok": True, "status": "skipped_duplicate", "dedupeKey": key}
-    summary = _project_execution_redact(_meeting_truncate_text(
-        failure.get("error") or meeting.get("error") or "AI meeting failed and needs user attention.",
-        1000,
-    ))
-    intent = {
-        "id": key,
-        "type": "error",
-        "title": f"AI 会议失败: {meeting.get('topic') or meeting_id}",
-        "summary": summary,
-        "error_variant": "user_facing",
-        "related": {"type": "meeting", "id": meeting_id, "title": meeting.get("topic") or "AI meeting"},
-        "details": [
-            ("会议", meeting.get("topic") or meeting_id or "-"),
-            ("阶段", meeting.get("stage") or "-"),
-            ("主持人", failure.get("moderator") or meeting.get("moderator") or "-"),
-            ("原因", failure.get("reason") or "meeting_failed"),
-        ],
-        "actions": [{
-            "category": "jump",
-            "text": "打开会议",
-            "url": _meeting_open_url(meeting_id),
-        }],
-        "target": "feishu-meeting-failure",
-    }
-    result = _send_feishu_workflow_notification(intent)
-    _mark_feishu_notification(meeting, key, result)
-    return result
+    meeting_id = str(meeting.get("id") or "")
+    intent = meeting_notifications_service.failure_intent(
+        meeting, failure, _meeting_open_url(meeting_id),
+    )
+    return _deliver_meeting_notification("meeting", meeting_id, intent)
 
 
 def _feishu_notification_config_response():
@@ -11733,10 +11716,10 @@ def _record_feishu_card_action(body, event, value, outcome=None):
         "user": _feishu_card_action_user(event),
         "messageId": str(event.get("open_message_id") or event.get("message_id") or ""),
         "chatId": str(event.get("open_chat_id") or event.get("chat_id") or ""),
-        "value": value,
+        "value": meeting_notifications_service.sanitize(value),
     }
     if isinstance(outcome, dict):
-        record["outcome"] = outcome
+        record["outcome"] = meeting_notifications_service.sanitize(outcome)
     os.makedirs(os.path.dirname(_feishu_card_action_log_path()), exist_ok=True)
     with open(_feishu_card_action_log_path(), "a", encoding="utf-8") as f:
         f.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
@@ -11756,86 +11739,31 @@ def _feishu_meeting_action_actor(event, fallback="feishu"):
     return user.get("userId") or user.get("openId") or user.get("unionId") or fallback
 
 
+
+
 def _dispatch_feishu_meeting_request_action(action, request_id, event):
-    if action not in {"confirm_meeting_request", "reject_meeting_request"}:
-        return {"handled": False}
-    if not request_id:
-        return {
-            "handled": True,
-            "ok": False,
-            "businessStatus": "missing_request_id",
-            "toast": _feishu_card_action_error("会议申请缺少 request_id，无法处理"),
-        }
     actor = _feishu_meeting_action_actor(event)
-    if action == "confirm_meeting_request":
-        result = _handle_meeting_request_confirm(request_id, {
-            "confirmedBy": actor,
-            "idempotencyKey": f"feishu-confirm:{request_id}",
-        })
-        if result.get("ok"):
-            idempotent = bool(result.get("idempotent"))
-            meeting_id = str(result.get("meetingId") or "")
-            run_result = None
-            run_summary = {}
-            if meeting_id:
-                run_result = _handle_executable_meeting_run(meeting_id, {
-                    "action": "start",
-                    "actorId": actor,
-                    "actorType": "user",
-                })
-                run_summary = {
-                    "attempted": True,
-                    "ok": bool(run_result.get("ok")) if isinstance(run_result, dict) else False,
-                    "stage": ((run_result or {}).get("meeting") or {}).get("stage") if isinstance(run_result, dict) else "",
-                    "error": (run_result or {}).get("error") if isinstance(run_result, dict) else "Meeting start failed",
-                }
-            if run_summary.get("attempted") and not run_summary.get("ok"):
-                return {
-                    "handled": True,
-                    "ok": True,
-                    "businessStatus": "confirmed_start_failed",
-                    "businessError": str(run_summary.get("error") or "会议启动失败"),
-                    "idempotent": idempotent,
-                    "meetingId": meeting_id,
-                    "run": run_summary,
-                    "toast": _feishu_card_action_error(f"会议申请已同意，但启动会议失败：{run_summary.get('error') or '未知错误'}"),
-                }
-            return {
-                "handled": True,
-                "ok": True,
-                "businessStatus": "confirmed_started" if run_summary.get("attempted") else "confirmed",
-                "idempotent": idempotent,
-                "meetingId": meeting_id,
-                "run": run_summary,
-                "toast": _feishu_card_action_success("会议申请已同意，会议已开始" + ("（已处理）" if idempotent else "")),
-            }
-        return {
-            "handled": True,
-            "ok": False,
-            "businessStatus": str(result.get("code") or result.get("status") or "confirm_failed"),
-            "businessError": str(result.get("error") or "会议申请无法同意"),
-            "toast": _feishu_card_action_error(str(result.get("error") or "会议申请无法同意")),
-        }
-    result = _handle_meeting_request_reject(request_id, {
-        "rejectedBy": actor,
-        "reason": "Rejected from Feishu",
-    })
-    if result.get("ok"):
-        idempotent = bool(result.get("idempotent"))
-        return {
-            "handled": True,
-            "ok": True,
-            "businessStatus": "rejected",
-            "idempotent": idempotent,
-            "toast": _feishu_card_action_success("会议申请已拒绝" + ("（已处理）" if idempotent else "")),
-        }
-    return {
-        "handled": True,
-        "ok": False,
-        "businessStatus": str(result.get("code") or result.get("status") or "reject_failed"),
-        "businessError": str(result.get("error") or "会议申请无法拒绝"),
-        "toast": _feishu_card_action_error(str(result.get("error") or "会议申请无法拒绝")),
-    }
+    outcome = meeting_callbacks_service.execute(
+        action, request_id, actor,
+        meeting_callbacks_service.CallbackPorts(
+            confirm_request=_handle_meeting_request_confirm,
+            reject_request=_handle_meeting_request_reject,
+            run_meeting=_handle_executable_meeting_run,
+        ),
+    )
+    if not outcome.get("handled"):
+        return outcome
+    status = outcome.get("businessStatus")
+    if not outcome.get("ok"):
+        content = "会议申请缺少 request_id，无法处理" if status == "missing_request_id" else str(outcome.get("businessError") or "会议申请无法处理")
+        outcome["toast"] = _feishu_card_action_error(content)
+    elif status == "confirmed_start_failed":
+        outcome["toast"] = _feishu_card_action_error(f"会议申请已同意，但启动会议失败：{outcome.get('businessError') or '未知错误'}")
+    elif status in {"confirmed", "confirmed_started"}:
+        outcome["toast"] = _feishu_card_action_success("会议申请已同意，会议已开始" + ("（已处理）" if outcome.get("idempotent") else ""))
+    else:
+        outcome["toast"] = _feishu_card_action_success("会议申请已拒绝" + ("（已处理）" if outcome.get("idempotent") else ""))
+    return outcome
 
 
 def _dispatch_feishu_project_execution_action(action, value, event):
@@ -11939,18 +11867,57 @@ def _handle_feishu_card_action(body):
     event = body.get("event") if isinstance(body.get("event"), dict) else body
     value = _feishu_card_action_value(event)
     action = str(value.get("action") or "").strip()
-    meeting_outcome = _dispatch_feishu_meeting_request_action(action, str(value.get("request_id") or "").strip(), event)
+    request_id = str(value.get("request_id") or "").strip()
+    callback_claim = None
+    if action in meeting_callbacks_service.ALLOWED_ACTIONS and request_id:
+        user = _feishu_card_action_user(event)
+        context = meeting_callbacks_service.TrustedCallbackContext(
+            event_id=str(event.get("event_id") or body.get("event_id") or (body.get("header") or {}).get("event_id") or ""),
+            message_id=str(event.get("open_message_id") or event.get("message_id") or ""),
+            chat_id=str(event.get("open_chat_id") or event.get("chat_id") or ""),
+            actor_id=user.get("userId") or user.get("openId") or user.get("unionId") or "feishu",
+        )
+        _, callback_claim = _meeting_domain_repository().update(
+            lambda data: meeting_callbacks_service.begin(
+                data, action, request_id, context, _exec_meeting_now(), value,
+            )
+        )
+        if not callback_claim.get("ok"):
+            content = {
+                "callback_linkage_invalid": "回调关联信息无效",
+                "request_not_found": "Meeting request not found",
+            }.get(callback_claim.get("businessStatus"), "会议申请无法处理")
+            record = _record_feishu_card_action(body, event, value, outcome=callback_claim)
+            return {"ok": False, "toast": _feishu_card_action_error(content), "recordId": record["id"], "outcome": callback_claim}
+        if callback_claim.get("replay") and callback_claim.get("response"):
+            response = callback_claim["response"]
+            toast = response.get("toast") if isinstance(response.get("toast"), dict) else {}
+            if toast.get("content") and not str(toast["content"]).endswith("（已处理）"):
+                toast["content"] = str(toast["content"]) + "（已处理）"
+            record = _record_feishu_card_action(body, event, value, outcome=response.get("outcome"))
+            return {**response, "recordId": record["id"]}
+        if callback_claim.get("inProgress"):
+            record = _record_feishu_card_action(body, event, value, outcome={"businessStatus": "callback_in_progress"})
+            return {"ok": True, "toast": _feishu_card_action_success("操作处理中（已处理）"), "recordId": record["id"], "outcome": {"businessStatus": "callback_in_progress", "idempotent": True}}
+    meeting_outcome = _dispatch_feishu_meeting_request_action(action, request_id, event)
     project_outcome = {"handled": False} if meeting_outcome.get("handled") else _dispatch_feishu_project_execution_action(action, value, event)
     hermes_outcome = {"handled": False} if meeting_outcome.get("handled") or project_outcome.get("handled") else _dispatch_feishu_hermes_approval_action(action, value, event)
     outcome = meeting_outcome if meeting_outcome.get("handled") else (project_outcome if project_outcome.get("handled") else (hermes_outcome if hermes_outcome.get("handled") else None))
     record = _record_feishu_card_action(body, event, value, outcome=outcome)
     if meeting_outcome.get("handled"):
-        return {
+        response = {
             "ok": bool(meeting_outcome.get("ok")),
             "toast": meeting_outcome.get("toast") or _feishu_card_action_success("操作已收到"),
             "recordId": record["id"],
             "outcome": {k: v for k, v in meeting_outcome.items() if k not in {"toast"}},
         }
+        if callback_claim and callback_claim.get("claimed"):
+            _meeting_domain_repository().update(
+                lambda data: meeting_callbacks_service.complete(
+                    data, callback_claim["key"], response, _exec_meeting_now(),
+                )
+            )
+        return response
     if project_outcome.get("handled"):
         return {
             "ok": bool(project_outcome.get("ok")),

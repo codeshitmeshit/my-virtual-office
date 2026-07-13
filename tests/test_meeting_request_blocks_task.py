@@ -261,8 +261,8 @@ def test_feishu_meeting_request_card_action_replay_is_characterized():
             assert first["ok"] is True and repeated["ok"] is True
             assert repeated["toast"]["content"].endswith("（已处理）")
             assert len({call["meetingId"] for call in calls}) == 1
-            # Existing behavior attempts start again; callback extraction must make this a true no-op.
-            assert len(calls) == 2
+            # Persistent callback replay makes the second delivery a true no-op.
+            assert len(calls) == 1
             detail = server._handle_meeting_request_detail(req["id"])
             assert detail["request"]["conversion"]["meetingId"] == calls[0]["meetingId"]
         finally:

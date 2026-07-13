@@ -3,6 +3,7 @@
     "_append_exec_meeting_event",
     "_archive_trigger_meeting_conclusion",
     "_award_meeting_participation_points",
+    "_deliver_meeting_notification",
     "_dispatch_feishu_meeting_request_action",
     "_exec_meeting_archive_manager_error",
     "_exec_meeting_archive_manager_participants",
@@ -233,6 +234,30 @@
       "caller": "_builtin_office_skill_contents"
     },
     {
+      "callee": "_exec_meeting_now",
+      "caller": "_deliver_meeting_notification"
+    },
+    {
+      "callee": "_feishu_app_send_config",
+      "caller": "_deliver_meeting_notification"
+    },
+    {
+      "callee": "_meeting_domain_repository",
+      "caller": "_deliver_meeting_notification"
+    },
+    {
+      "callee": "_project_execution_redact",
+      "caller": "_deliver_meeting_notification"
+    },
+    {
+      "callee": "send_feishu_notification",
+      "caller": "_deliver_meeting_notification"
+    },
+    {
+      "callee": "str",
+      "caller": "_deliver_meeting_notification"
+    },
+    {
       "callee": "_feishu_meeting_action_actor",
       "caller": "_dispatch_feishu_hermes_approval_action"
     },
@@ -246,26 +271,6 @@
     },
     {
       "callee": "_feishu_meeting_action_actor",
-      "caller": "_dispatch_feishu_meeting_request_action"
-    },
-    {
-      "callee": "_handle_executable_meeting_run",
-      "caller": "_dispatch_feishu_meeting_request_action"
-    },
-    {
-      "callee": "_handle_meeting_request_confirm",
-      "caller": "_dispatch_feishu_meeting_request_action"
-    },
-    {
-      "callee": "_handle_meeting_request_reject",
-      "caller": "_dispatch_feishu_meeting_request_action"
-    },
-    {
-      "callee": "bool",
-      "caller": "_dispatch_feishu_meeting_request_action"
-    },
-    {
-      "callee": "isinstance",
       "caller": "_dispatch_feishu_meeting_request_action"
     },
     {
@@ -770,6 +775,14 @@
     },
     {
       "callee": "_dispatch_feishu_meeting_request_action",
+      "caller": "_handle_feishu_card_action"
+    },
+    {
+      "callee": "_exec_meeting_now",
+      "caller": "_handle_feishu_card_action"
+    },
+    {
+      "callee": "_meeting_domain_repository",
       "caller": "_handle_feishu_card_action"
     },
     {
@@ -2329,11 +2342,7 @@
       "caller": "_save_meetings_file"
     },
     {
-      "callee": "_feishu_notification_marker",
-      "caller": "_send_meeting_failure_notification"
-    },
-    {
-      "callee": "_mark_feishu_notification",
+      "callee": "_deliver_meeting_notification",
       "caller": "_send_meeting_failure_notification"
     },
     {
@@ -2341,23 +2350,15 @@
       "caller": "_send_meeting_failure_notification"
     },
     {
-      "callee": "_meeting_truncate_text",
-      "caller": "_send_meeting_failure_notification"
-    },
-    {
-      "callee": "_project_execution_redact",
-      "caller": "_send_meeting_failure_notification"
-    },
-    {
-      "callee": "_send_feishu_workflow_notification",
-      "caller": "_send_meeting_failure_notification"
-    },
-    {
       "callee": "isinstance",
       "caller": "_send_meeting_failure_notification"
     },
     {
-      "callee": "_feishu_app_send_config",
+      "callee": "str",
+      "caller": "_send_meeting_failure_notification"
+    },
+    {
+      "callee": "_deliver_meeting_notification",
       "caller": "_send_meeting_request_notification"
     },
     {
@@ -2369,19 +2370,11 @@
       "caller": "_send_meeting_request_notification"
     },
     {
-      "callee": "_meeting_request_notification_related",
-      "caller": "_send_meeting_request_notification"
-    },
-    {
       "callee": "_vo_public_url",
       "caller": "_send_meeting_request_notification"
     },
     {
       "callee": "isinstance",
-      "caller": "_send_meeting_request_notification"
-    },
-    {
-      "callee": "send_feishu_notification",
       "caller": "_send_meeting_request_notification"
     },
     {
