@@ -137,7 +137,7 @@ Incrementally extract:
 
 - `meeting_lifecycle.py`: create, transition, conflict/intervention, agenda/arbitration/moderator operations, turns, terminalization, and reconcile.
 - `meeting_requests.py`: create/list/detail, context selection, confirm/reject, conversion, and blocker linkage.
-- `meeting_action_items.py`: result normalization and deduplicated projection onto the existing linked source task.
+- `meeting_action_items.py`: result normalization and deduplicated projection onto an existing target task, defaulting to the Meeting's linked source task.
 - `meeting_notifications.py`: bounded sanitized DTOs, stable intents, and best-effort delivery coordination.
 - `meeting_callbacks.py`: trusted callback commands, action allowlists, linkage, and persistent replay handling.
 
@@ -178,7 +178,7 @@ Project blocker mutation remains separate. It uses request/Meeting/task/attempt 
 
 ### 11. Action items, callbacks, and notifications remain idempotent
 
-Action-item IDs are stable from Meeting/result identity. Projection into the existing source task's `meetingActionItems` collection dedupes by `(meetingId, actionItemId)` through `ProjectRepository`, and the source-task/action-item linkage is recorded idempotently in the unified Store.
+Action-item IDs are stable from Meeting/result identity. Projection into the existing target task's `meetingActionItems` collection dedupes by `(meetingId, actionItemId)` through `ProjectRepository`; a bound Meeting uses its source task, while an unbound Meeting requires an explicit existing project/task destination. The target-task/action-item linkage is recorded idempotently in the unified Store.
 
 Feishu verification stays in the adapter, which creates a trusted context containing verified event/message ID and actor. Callback outcome/dedupe commits in the unified Store. Card values cannot override actor identity or linkage.
 

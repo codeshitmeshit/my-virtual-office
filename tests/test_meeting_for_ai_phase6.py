@@ -235,7 +235,19 @@ def test_phase6_unbound_meeting_requires_target_project_or_keep():
             assert denied["_status"] == 400
             assert denied["code"] == "source_task_required"
 
-            kept = server._handle_executable_meeting_action_item(meeting["id"], draft["id"], {
+            project = create_project("Explicit target")
+            target = create_project_task(project)
+            confirmed = server._handle_executable_meeting_action_item(meeting["id"], draft["id"], {
+                "action": "confirm", "targetProjectId": project["id"], "taskId": target["id"],
+                "idempotencyKey": "explicit-existing-target",
+            })
+            assert confirmed["ok"] is True and confirmed["taskId"] == target["id"]
+            current = server._handle_project_get(project["id"])["project"]
+            projected = next(item for item in current["tasks"] if item["id"] == target["id"])["meetingActionItems"]
+            assert len(projected) == 1 and projected[0]["sourceActionItemId"] == draft["id"]
+
+            second_draft = meeting["actionItemDrafts"][1]
+            kept = server._handle_executable_meeting_action_item(meeting["id"], second_draft["id"], {
                 "action": "keep",
                 "idempotencyKey": "keep-only",
             })

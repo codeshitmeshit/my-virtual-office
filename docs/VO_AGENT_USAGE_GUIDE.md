@@ -348,7 +348,7 @@ Use one of these meeting types:
 
 - `information_gathering`: collect independent facts, options, or viewpoints.
 - `decision_discussion`: form a decision or surface unresolved disagreements.
-- `task_collaboration`: produce action-item drafts that can later be attached to the Meeting's linked source task.
+- `task_collaboration`: produce action-item drafts that can later be attached to an existing project task.
 
 Some UI/API payloads may use short labels such as `discussion` or `task`; prefer the explicit values above when constructing new executable meetings unless the local UI provides different accepted values.
 
@@ -615,7 +615,7 @@ Rules:
 
 ### 10.8 Action Item Drafts
 
-Task-collaboration meetings can produce action-item drafts. For a project/task-bound Meeting, drafts are attached to the existing linked source task only after confirmation; confirmation does not create a new board task.
+Task-collaboration meetings can produce action-item drafts. A project/task-bound Meeting defaults to its linked source task; an unbound Meeting requires an explicit existing `targetProjectId`/`taskId` destination. Confirmation attaches the draft after user approval and does not create a new board task.
 
 Update a draft:
 
@@ -641,7 +641,7 @@ curl -sS -X POST http://127.0.0.1:8090/api/meetings/executable/MEETING_ID/action
   -d '{"action":"keep","by":"user","reason":"Documented but not a project task"}'
 ```
 
-Confirm and attach to the Meeting's existing source task:
+Confirm and attach to an existing task (the explicit IDs are optional when the Meeting already has source linkage):
 
 ```bash
 curl -sS -X POST http://127.0.0.1:8090/api/meetings/executable/MEETING_ID/action-items/ACTION_ITEM_ID \
@@ -650,6 +650,7 @@ curl -sS -X POST http://127.0.0.1:8090/api/meetings/executable/MEETING_ID/action
     "action":"confirm",
     "by":"user",
     "targetProjectId":"PROJECT_ID",
+    "taskId":"TASK_ID",
     "title":"Create rollback checklist",
     "description":"Add release rollback checklist from meeting decision.",
     "assignee":"codex-local",
@@ -660,10 +661,10 @@ curl -sS -X POST http://127.0.0.1:8090/api/meetings/executable/MEETING_ID/action
 
 Rules:
 
-- Source-task action-item attachment requires user confirmation and a Meeting with valid project/task linkage.
+- Existing-task action-item attachment requires user confirmation and either valid Meeting source linkage or an explicit existing project/task destination.
 - Use `idempotencyKey` for confirmation.
-- The existing source task stores a deduplicated `meetingActionItems` record with source Meeting/action-item metadata.
-- Rejected drafts remain auditable and are not attached to the source task.
+- The existing target task stores a deduplicated `meetingActionItems` record with source Meeting/action-item metadata.
+- Rejected drafts remain auditable and are not attached to a project task.
 
 ## 11. Projects and Tasks
 
@@ -1084,7 +1085,7 @@ Require explicit user confirmation before:
 - skipping an independent reviewer
 - proceeding with dirty workspace execution
 - accepting project execution output
-- attaching meeting action-item drafts to their existing linked source tasks
+- attaching meeting action-item drafts to an existing project task
 - deleting projects/tasks/templates/agents
 - changing raw browser/CDP behavior
 - exposing secrets or private logs

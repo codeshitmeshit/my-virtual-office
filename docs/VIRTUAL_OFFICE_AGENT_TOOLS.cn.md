@@ -175,7 +175,7 @@ AI 发起的会议请求路由：
 
 冲突处理使用 `POST /api/meetings/executable/<meetingId>/conflict`，支持的操作包括 `wait`、`reserve`、`replace`、`force_join`、`cancel_conflict` 和 `refresh`。中/高风险冲突可能包含忙碌代理的建议推荐、预计可用时间、中断风险以及恢复备注。建议输出为只读；用户或调用者仍需选择解决方案。
 
-任务协作会议结果可以暴露行动项草稿。`POST /api/meetings/executable/<meetingId>/action-items/<actionItemId>` 支持用户控制的草稿更新、拒绝、仅会议保留以及确认到项目任务中。确认是幂等的，并在创建的任务上存储源会议/行动项元数据。
+任务协作会议结果可以暴露行动项草稿。`POST /api/meetings/executable/<meetingId>/action-items/<actionItemId>` 支持用户控制的草稿更新、拒绝、仅会议保留以及挂载到已有项目任务。已绑定会议默认使用其来源任务；未绑定会议必须提供已有项目/任务目标。确认具有幂等性，不会新建看板任务，而是在目标任务上保存一条去重的 `meetingActionItems` 记录及来源会议/行动项元数据。
 
 ### 项目与任务
 

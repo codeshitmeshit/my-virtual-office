@@ -347,7 +347,7 @@ curl -sS -X POST http://127.0.0.1:8090/api/meetings/end \
 
 - `information_gathering`：收集独立的事实、选项或观点。
 - `decision_discussion`：形成决策或揭示未解决的分歧。
-- `task_collaboration`：生成行动项草稿，后续可转化为项目任务。
+- `task_collaboration`：生成行动项草稿，后续可挂载到已有项目任务。
 
 某些 UI/API 负载可能使用短标签，如 `discussion` 或 `task`；在构建新的可执行会议时，优先使用上述明确的值，除非本地 UI 提供不同的可接受值。
 
@@ -614,7 +614,7 @@ curl -sS -X POST http://127.0.0.1:8090/api/meetings/executable/MEETING_ID/confli
 
 ### 10.8 待办事项草稿
 
-任务协作会议可以生成待办事项草稿。草稿不会自动成为项目任务。
+任务协作会议可以生成待办事项草稿。已绑定项目/任务的会议默认使用其来源任务；未绑定会议必须显式提供已有的 `targetProjectId`/`taskId` 目标。用户确认后才会把草稿挂载到目标任务，且不会新建看板任务。
 
 更新草稿：
 
@@ -640,7 +640,7 @@ curl -sS -X POST http://127.0.0.1:8090/api/meetings/executable/MEETING_ID/action
   -d '{"action":"keep","by":"user","reason":"Documented but not a project task"}'
 ```
 
-确认为项目任务：
+确认并挂载到已有任务（会议已有来源关联时，可省略显式 ID）：
 
 ```bash
 curl -sS -X POST http://127.0.0.1:8090/api/meetings/executable/MEETING_ID/action-items/ACTION_ITEM_ID \
@@ -649,6 +649,7 @@ curl -sS -X POST http://127.0.0.1:8090/api/meetings/executable/MEETING_ID/action
     "action":"confirm",
     "by":"user",
     "targetProjectId":"PROJECT_ID",
+    "taskId":"TASK_ID",
     "title":"Create rollback checklist",
     "description":"Add release rollback checklist from meeting decision.",
     "assignee":"codex-local",
@@ -659,10 +660,10 @@ curl -sS -X POST http://127.0.0.1:8090/api/meetings/executable/MEETING_ID/action
 
 规则：
 
-- 正式的项目任务创建需要用户确认。
+- 挂载到已有任务需要用户确认，并且会议必须有有效来源关联或显式指定已有项目/任务目标。
 - 确认时使用 `idempotencyKey`。
-- 已确认的任务会存储源会议/待办事项元数据。
-- 被拒绝的草稿保留审计痕迹，不会创建项目任务。
+- 已有目标任务会保存一条去重的 `meetingActionItems` 记录，其中包含来源会议/行动项元数据。
+- 被拒绝的草稿保留审计痕迹，不会挂载到项目任务。
 
 ## 11. 项目与任务
 
@@ -1082,7 +1083,7 @@ curl -sS -X PUT http://127.0.0.1:8090/api/agent-workspace/YOUR_AGENT_ID \
 - 跳过独立审核者
 - 在脏工作区下继续执行
 - 接受项目执行输出
-- 将会议行动项草案转换为项目任务
+- 将会议行动项草稿挂载到已有项目任务
 - 删除项目/任务/模板/代理
 - 更改原始浏览器/CDP 行为
 - 暴露机密或私有日志

@@ -16,7 +16,7 @@ Against a clean candidate started through `start.sh`:
 
 - `tests/test_workflow_e2e.py`: **20/20 passed** with management token 4285.
 - `tests/test_crud_projects.sh`: **5/5 passed** after the script was corrected to send the configured management-token header.
-- `tests/meeting_phase8_acceptance.py`: passed health, management authorization denial, Meeting creation/intervention/agenda/terminalization, recovery and occupancy cleanup, request confirmation and atomic conversion, Project resume, action-item source-task projection, and missing-webhook notification degradation.
+- `tests/meeting_phase8_acceptance.py`: passed health, management authorization denial, Meeting creation/intervention/agenda/terminalization, recovery and occupancy cleanup, request confirmation and atomic conversion, Project resume, action-item existing-task projection, and missing-webhook notification degradation.
 - Trusted callback authenticity, replay and concurrent delivery are covered by the deterministic callback regression from Phase 7; no external Feishu credential was configured during runtime acceptance, so no real callback or irreversible delivery was emitted.
 
 The startup report confirmed HTTP and WebSocket listeners. Gateway and browser-CDP health were unavailable because no local gateway token or Docker/CDP service was configured; these optional integrations did not affect Meeting-domain acceptance.

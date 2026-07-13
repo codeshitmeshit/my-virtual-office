@@ -18,9 +18,9 @@
 - [x] 4.1 Extract request create/list/detail, required-field validation, urgency/auto-confirm policy, context selection, confirm/reject, duplicate unresolved request prevention, and atomic request-to-Meeting conversion into `meeting_requests.py`; migrate HTTP, Agent bridge, Feishu, and internal callers with idempotency and payload/status compatibility tests.
 - [x] 4.2 Integrate request/Meeting results with `ProjectRepository` using task/attempt/blocker compare tokens, stable reconciliation diagnostics, and idempotent forward recovery; verify stale linkage rejection, Project commit failure/retry, repeated decision, Meeting success/Project failure, resume/block/human-decision outcomes, and concurrent project updates.
 
-## 5. Action-item source-task projection
+## 5. Action-item existing-task projection
 
-- [x] 5.1 Extract Meeting result normalization, stable action-item identity, source-task projection, completion state, explicit selection, and `(meetingId, actionItemId)` projection dedupe into `meeting_action_items.py`; migrate callers and test repeated confirmation, concurrent project edits, stale Meeting linkage, partial failure/retry, bounded history, and old-record compatibility.
+- [x] 5.1 Extract Meeting result normalization, stable action-item identity, existing-task projection, completion state, explicit destination selection, and `(meetingId, actionItemId)` projection dedupe into `meeting_action_items.py`; migrate callers and test repeated confirmation, concurrent project edits, stale Meeting linkage, partial failure/retry, bounded history, and old-record compatibility.
 
 ## 6. Notifications and trusted callbacks
 
@@ -35,5 +35,5 @@
 ## 8. Documentation, migration rehearsal, and release readiness
 
 - [x] 8.1 Update service-boundary/operator documentation for the unified schema, authority gate, migration modes/report/conflict handling, backups/rollback, lock/token ordering, trusted callbacks, reconciliation, observability, and legacy-store non-authority; run the migration on copied small/medium/large fixtures and attach exact count/link/digest evidence.
-- [x] 8.2 Start the application only through `start.sh` and complete manual acceptance for migration-required/invalid states, migrated startup, Meeting lifecycle/intervention/recovery, occupancy conflicts, request decision/conversion, Project resume/block, action-item source-task projection, callback replay, notification degradation, and management authorization.
+- [x] 8.2 Start the application only through `start.sh` and complete manual acceptance for migration-required/invalid states, migrated startup, Meeting lifecycle/intervention/recovery, occupancy conflicts, request decision/conversion, Project resume/block, action-item existing-task projection, callback replay, notification degradation, and management authorization.
 - [x] 8.3 Execute an isolated release rehearsal: stop mutations and server, back up legacy/unified/project state, run migration dry-run/apply/validation, start exactly one candidate process through `start.sh`, exercise active Meeting/request/project state, stop and restore backups/prior code, restart through `start.sh`, and verify counts, links, occupancy, idempotency, and non-reversible Agent/Feishu reconciliation before final confirmation.

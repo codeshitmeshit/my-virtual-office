@@ -13527,7 +13527,7 @@ def _handle_executable_meeting_action_item(meeting_id, action_item_id, body):
         return prepared
     project_id = prepared.get("targetProjectId"); task_id = prepared.get("sourceTaskId")
     if not project_id or not task_id:
-        return {"error": "Meeting action items must be attached to the source task", "code": "source_task_required", "_status": 400}
+        return {"error": "Meeting action items must be attached to an existing project task", "code": "source_task_required", "_status": 400}
     def attach(project):
         result = meeting_action_items_service.attach_to_project(
             project, task_id, prepared["meeting"], prepared["actionItem"], action_item_id,
@@ -13536,7 +13536,7 @@ def _handle_executable_meeting_action_item(meeting_id, action_item_id, body):
         if result.get("ok") and not result.get("idempotent"):
             _log_activity(
                 project, "meeting_action_item_attached", prepared["actorId"] or "meeting",
-                f"Attached meeting action item '{result['record'].get('title')}' to source task", task_id,
+                f"Attached meeting action item '{result['record'].get('title')}' to existing project task", task_id,
             )
         return result
     try:

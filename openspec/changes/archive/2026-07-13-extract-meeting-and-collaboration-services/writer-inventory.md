@@ -6,7 +6,7 @@
 | --- | --- | --- | --- |
 | `executable-meetings.json` | meetings, events, occupancy, executable idempotency | `_EXEC_MEETING_LOCK` | lifecycle create/transition/run/intervention/agenda/arbitration/moderator/targeted-question/end/reconcile, action-item state, projections/advisories that repair data |
 | `meeting-requests.json` | requests, request idempotency, conversion metadata | `_MEETING_REQUEST_LOCK` | create, confirm, reject, blocker resolution |
-| Project Markdown | meeting blocker/history/action items/decisions and source-task projections | `ProjectRepository` | request block/update/result application, action-item projection, user blocker actions |
+| Project Markdown | meeting blocker/history/action items/decisions and existing-task projections | `ProjectRepository` | request block/update/result application, action-item projection, user blocker actions |
 | Feishu callback log/config | callback audit and delivery configuration | existing adapter locks | authenticated card receiver and notification adapters |
 
 `tests/test_meeting_store_characterization.py` uses the Python AST to lock the exact direct reader and writer function sets, cross-domain Project/callback/notification/recovery boundaries, and the only two legacy filename literals.
@@ -35,7 +35,7 @@ Readers: create, list, detail, confirm, reject, and blocker resolution. Writers:
 | Meeting/request/event/occupancy/idempotency | `MeetingDomainRepository` | one unified atomic mutation |
 | Lifecycle and Agent turns | `MeetingLifecycleService` | prepare token, slow work outside lock, compare-and-commit |
 | Request decision/conversion | `MeetingRequestService` | request + Meeting atomic in unified Store; Project compare token separately |
-| Action-item source-task projection | `MeetingActionItemService` | stable `(meetingId, actionItemId)` dedupe through ProjectRepository |
+| Action-item existing-task projection | `MeetingActionItemService` | stable `(meetingId, actionItemId)` dedupe through ProjectRepository |
 | Notification intent/delivery result | `MeetingNotificationService` | business commit first; best-effort external delivery |
 | Feishu action dispatch | verified adapter + `MeetingCallbackService` | trusted context + persistent callback dedupe |
 
