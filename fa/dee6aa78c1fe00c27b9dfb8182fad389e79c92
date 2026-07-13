@@ -1,0 +1,183 @@
+openspec/changes/extract-provider-services-and-finish-modularization/design.md
+  s_5852bad622de94::t_c87e9a70f5c5d4 1-202
+openspec/changes/extract-provider-services-and-finish-modularization/evidence/current/provider-caller-writer-map.json
+  s_5852bad622de94::t_c3c6db26a6f02c 1-9377
+tests/provider_baseline_harness.py
+  s_5852bad622de94::t_5b4cf86ce3abc0 1-216
+tests/test_provider_characterization.py
+  s_5852bad622de94::t_906487b6e87b62 1-228
+openspec/changes/extract-provider-services-and-finish-modularization/evidence/section2/provider-performance.json
+  s_5852bad622de94::t_7ec4d5f12bcb95 1-128
+app/services/provider_events.py
+  s_5852bad622de94::t_e766d02410dd69 1-245
+openspec/changes/extract-provider-services-and-finish-modularization/evidence/section3/cr-section3.md
+  s_5852bad622de94::t_176a06d31baa91 1-36
+openspec/changes/extract-provider-services-and-finish-modularization/evidence/baseline/cr-section1.md
+  s_5852bad622de94::t_845e0804dadf92 1-43
+openspec/changes/extract-provider-services-and-finish-modularization/evidence/baseline/provider-capability-matrix.json
+  s_5852bad622de94::t_7f1d9afe895e47 1-78
+tests/run_provider_characterization_manifest.py
+  s_5852bad622de94::t_0a60f2da295d92 1-53
+docs/vo-adapter.cn.md
+  s_5852bad622de94::t_a81503e7045913 78,405
+app/services/provider_conversations.py
+  s_5852bad622de94::t_02ff7b468d5313 1-378
+app/services/provider_registry.py
+  s_5852bad622de94::t_946506a3d8a774 1-333
+tests/test_provider_approvals.py
+  s_5852bad622de94::t_ef3df8950225d6 1-161
+tests/test_provider_sse_transport.py
+  s_5852bad622de94::t_48b7a37e49663a 1-144
+tests/test_provider_runs.py
+  s_5852bad622de94::t_e9a809966e4299 1-238
+tests/test_meeting_store_migration.py
+  s_5852bad622de94::t_61d4841a9ad976 70-89
+openspec/changes/extract-provider-services-and-finish-modularization/evidence/current/provider-approval-queue-bounds.json
+  s_5852bad622de94::t_f71226bdbabc8b 1-37
+openspec/changes/extract-provider-services-and-finish-modularization/specs/provider-service-boundaries/spec.md
+  s_5852bad622de94::t_4c743faac4b164 1-174
+openspec/changes/extract-provider-services-and-finish-modularization/evidence/section6/cr-section6.md
+  s_5852bad622de94::t_7c21d37df518bb 1-38
+app/providers/codex_app_server.py
+  s_5852bad622de94::t_5282374ecff334 31,484-495,717,726-727,730
+app/services/provider_runs.py
+  s_5852bad622de94::t_6af7f3d25a2497 1-269
+openspec/changes/extract-provider-services-and-finish-modularization/evidence/baseline/provider-characterization-result.json
+  s_5852bad622de94::t_7050c0f05bb419 1-229
+openspec/changes/extract-provider-services-and-finish-modularization/evidence/baseline/provider-event-alias-manifest.json
+  s_5852bad622de94::t_14bcda1df2c8fa 1-887
+openspec/changes/extract-provider-services-and-finish-modularization/tasks.md
+  s_5852bad622de94::t_9038ede57a26e8 1-52
+openspec/changes/extract-provider-services-and-finish-modularization/evidence/current/provider-capability-matrix.json
+  s_5852bad622de94::t_7b89be460e15e3 1-78
+openspec/changes/extract-provider-services-and-finish-modularization/evidence/section7/cr-section7.md
+  s_5852bad622de94::t_9630c529692dce 1-45
+tests/test_provider_registry.py
+  s_5852bad622de94::t_b4bb131c744520 1-126
+openspec/changes/extract-provider-services-and-finish-modularization/evidence/baseline/provider-caller-writer-map.json
+  s_5852bad622de94::t_5f255c95fcc473 1-8784
+tests/generate_provider_inventory.py
+  s_5852bad622de94::t_0c93f4ecddd349 1-250
+tests/test_codex_runs_sse.py
+  s_5852bad622de94::t_c986f6daa84b8d 2,104,110,235,268-269,282,285,287,294
+README.md
+  s_5852bad622de94::t_bbf2ce1862b082 43,353
+tests/test_hermes_server_native_api.py
+  s_5852bad622de94::t_35eb7c400a2eaa 11,82-83,111-119,145,172-174,513-557,591-616,649,657,670,693,699,752,756,776,781,787,796-797,806,808,810-901,903
+openspec/changes/extract-provider-services-and-finish-modularization/evidence/section2/cr-section2.md
+  s_5852bad622de94::t_13473522a27b3d 1-55
+openspec/changes/extract-provider-services-and-finish-modularization/evidence/section7/provider-coordinator-performance.json
+  s_5852bad622de94::t_d784f4c392dc83 1-47
+openspec/changes/extract-provider-services-and-finish-modularization/evidence/section4/provider-approval-performance.json
+  s_5852bad622de94::t_d3ec7a34cb5100 1-15
+tests/provider_conversation_performance.py
+  s_5852bad622de94::t_4ec253f5c1d0ce 1-87
+tests/test_provider_conversations.py
+  s_5852bad622de94::t_7aed6f69547549 1-212
+tests/compare_provider_performance.py
+  s_5852bad622de94::t_f41a33e8cb9a60 1-46
+tests/check_provider_chat_sse.mjs
+  s_5852bad622de94::t_cdf750e3fd6fac 6,10,12,16-18
+openspec/changes/extract-provider-services-and-finish-modularization/evidence/section8/release-acceptance.md
+  s_5852bad622de94::t_5081e7f9f4328f 1-53
+openspec/changes/extract-provider-services-and-finish-modularization/evidence/section7/provider-performance-comparison.json
+  s_5852bad622de94::t_c9875221b9e35d 1-126
+tests/check_codex_runs_bridge.mjs
+  s_5852bad622de94::t_273c401e261d46 11-13,30-32,35-36
+tests/test_claude_code_server.py
+  s_5852bad622de94::t_026df8ebbb36ab 162
+tests/provider_approval_performance.py
+  s_5852bad622de94::t_800b1beaa389cb 1-92
+tests/test_provider_app_server_runtime.py
+  s_5852bad622de94::t_5430ea7a1d15a1 8,17,158-186,192-193
+openspec/changes/extract-provider-services-and-finish-modularization/evidence/baseline/provider-approval-queue-bounds.json
+  s_5852bad622de94::t_70cdb03b237dd3 1-36
+tests/test_provider_service_boundaries.py
+  s_5852bad622de94::t_6970a27c1ee46a 1-130
+tests/provider_coordinator_performance.py
+  s_5852bad622de94::t_9e610d77e62961 1-114
+tests/test_provider_baseline_inventory.py
+  s_5852bad622de94::t_130068c5568274 1-127
+tests/test_merged_change_coverage.py
+  s_5852bad622de94::t_2cd0f5d007ef9b 67-68
+openspec/changes/extract-provider-services-and-finish-modularization/evidence/section7/provider-conversation-performance.json
+  s_5852bad622de94::t_559dedc2ec74cb 1-39
+docs/PROVIDER_SERVICE_ARCHITECTURE.md
+  s_5852bad622de94::t_b2f8b2f222380b 1-95
+tests/test_provider_events.py
+  s_5852bad622de94::t_5125e5665fa77d 1-118
+openspec/changes/extract-provider-services-and-finish-modularization/evidence/current/provider-transport-delegate-candidates.json
+  s_5852bad622de94::t_f2bdd48660363a 1-34
+openspec/changes/extract-provider-services-and-finish-modularization/evidence/section6/provider-sse-performance-comparison.json
+  s_5852bad622de94::t_27110e71e2a972 1-126
+openspec/changes/extract-provider-services-and-finish-modularization/evidence/section2/provider-performance-comparison.json
+  s_5852bad622de94::t_33bc7d4b2a7f35 1-126
+openspec/changes/extract-provider-services-and-finish-modularization/evidence/baseline/provider-performance-baseline.json
+  s_5852bad622de94::t_cf1c1f886e7c63 1-121
+tests/check_claude_code_runs_sse.mjs
+  s_5852bad622de94::t_72f0fe1dc7d86b 9-12,25-27,29-30,32-34
+tests/test_claude_code_runs_sse.py
+  s_5852bad622de94::t_4d8af74365017c 7,76,82,125-186,190-191
+app/provider_sse_transport.py
+  s_5852bad622de94::t_8c738d65c63c96 1-202
+openspec/changes/extract-provider-services-and-finish-modularization/evidence/section6/provider-sse-performance.json
+  s_5852bad622de94::t_6a0ba82b3fcead 1-132
+openspec/changes/extract-provider-services-and-finish-modularization/evidence/current/provider-event-alias-manifest.json
+  s_5852bad622de94::t_8c12ae6c5317ca 1-1175
+openspec/changes/extract-provider-services-and-finish-modularization/evidence/baseline/provider-characterization-manifest.json
+  s_5852bad622de94::t_676649113f72b6 1-45
+tests/test_hermes_coordinator_migration.py
+  s_5852bad622de94::t_b7512a6e9f6a37 1-138
+docs/vo-adapter.md
+  s_5852bad622de94::t_15f41543250db0 87-89,428-430
+app/provider_app_server.py
+  s_5852bad622de94::t_cff2a2ad733fa3 12-14,114-115
+app/server.py
+  s_5852bad622de94::t_6210826c7f1b50 53-59,4017-4018,4253-4260,4326,4328,4331,4405-4411,4508-4522,4524,4526-4530,4549,4813,4989-4997,5000-5001,5006,5077-5080,5111,5458,5462-5467,5472-5482,5484,5491,5500-5503,5505-5507,5509,5511,5513,5516,5519-5520,5526-5535,5537,5539-5560,5586,5594-5597,5637,5674-5677,5679,5683,5687,5691,5704-5706,5709-5713,5724,5726-5773,5785,5790-5795,5804-5805,5811-5814,5821-5822,5843,6360,6502,6530-6537,6571-6580,6582-6624,6636,6641,6644-6646,6650-6653,6660-6661,6862,7845-7852,7855-7863,7866-7877,7880-7883,7955,7971-7974,7993,7999,8004,8014,8019,8050,8055,8058-8066,8068-8104,8116,8126-8134,8156,11565,11567-11568,12026-12042,21620,21647,24507,27735,30885-31177,31216-31246,31542,31545,31548,31554-31555,31574,31576,31581,31594,31596,31604-31605,31906,31933-31934,31936,31949-31951,31954-31955,31957-31962,31965-31968,31970-31998,32000-32012,32015-32056
+openspec/changes/extract-provider-services-and-finish-modularization/evidence/section8/cr-section8.md
+  s_5852bad622de94::t_3a02fda7307d0d 1-25
+openspec/changes/extract-provider-services-and-finish-modularization/evidence/baseline/provider-transport-delegate-candidates.json
+  s_5852bad622de94::t_1034fb9043426a 1-35
+openspec/changes/extract-provider-services-and-finish-modularization/evidence/section4/cr-section4.md
+  s_5852bad622de94::t_458c2f9c29de78 1-43
+tests/test_project_cron_idempotent_defect.py
+  s_5852bad622de94::t_571de7c916d9eb 24
+openspec/changes/extract-provider-services-and-finish-modularization/evidence/section7/provider-performance.json
+  s_5852bad622de94::t_94693cdae73021 1-132
+openspec/changes/extract-provider-services-and-finish-modularization/evidence/section5/provider-conversation-performance.json
+  s_5852bad622de94::t_4797b973ca1bc4 1-39
+openspec/changes/extract-provider-services-and-finish-modularization/evidence/section7/provider-approval-performance.json
+  s_5852bad622de94::t_beb4a2bbc9c076 1-15
+scripts/migrate_meeting_store.py
+  s_5852bad622de94::t_f514c9c259d14e 56-68,160-161,183,186-192,205
+tests/test_openclaw_conversation_boundary.py
+  s_5852bad622de94::t_a369ae399364bf 1-117
+openspec/changes/extract-provider-services-and-finish-modularization/evidence/section3/provider-coordinator-performance.json
+  s_5852bad622de94::t_a42953062faab9 1-47
+app/services/provider_approvals.py
+  s_5852bad622de94::t_37a2e2abffbe34 1-333
+app/services/provider_ports.py
+  s_5852bad622de94::t_75664f4663afe6 1-114
+openspec/changes/extract-provider-services-and-finish-modularization/evidence/section5/cr-section5.md
+  s_5852bad622de94::t_c61a86721399b9 1-31
+openspec/changes/extract-provider-services-and-finish-modularization/review.md
+  s_5852bad622de94::t_dda17d02c1c591 1-58
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "fadee6aa78c1fe00c27b9dfb8182fad389e79c92",
+  "prompts": {},
+  "sessions": {
+    "s_5852bad622de94": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f5163-cd74-7df3-a25d-7fd6dd323b5d",
+        "model": "unknown"
+      },
+      "human_author": "codeshitmeshit <codeshitmeshit@126.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
