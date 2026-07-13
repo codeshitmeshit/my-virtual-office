@@ -1,0 +1,29 @@
+docs/MEETING_DOMAIN_OPERATIONS.md
+  s_5852bad622de94::t_48d20633dacb69 1-65
+docs/SERVICE_BOUNDARIES.md
+  s_5852bad622de94::t_32cff891fbb191 1,40-45,69-70,92
+tests/meeting_migration_rehearsal.py
+  s_5852bad622de94::t_22b0a2079725ce 1-62
+tests/meeting_phase8_acceptance.py
+  s_5852bad622de94::t_19dcce6e71833c 1-72
+tests/test_crud_projects.sh
+  s_5852bad622de94::t_2fbb324fa5d4ee 8-11,18,32,35,37,43,45,55,57,67-68
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "248e1bf58c0b477eec24adc8baf09975d5d60975",
+  "prompts": {},
+  "sessions": {
+    "s_5852bad622de94": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f5163-cd74-7df3-a25d-7fd6dd323b5d",
+        "model": "unknown"
+      },
+      "human_author": "codeshitmeshit <codeshitmeshit@126.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
