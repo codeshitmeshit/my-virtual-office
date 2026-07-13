@@ -35,7 +35,7 @@ Readers: create, list, detail, confirm, reject, and blocker resolution. Writers:
 | Meeting/request/event/occupancy/idempotency | `MeetingDomainRepository` | one unified atomic mutation |
 | Lifecycle and Agent turns | `MeetingLifecycleService` | prepare token, slow work outside lock, compare-and-commit |
 | Request decision/conversion | `MeetingRequestService` | request + Meeting atomic in unified Store; Project compare token separately |
-| Action-item projection/task conversion | `MeetingActionItemService` | stable `(meetingId, actionItemId)` dedupe through ProjectRepository |
+| Action-item source-task projection | `MeetingActionItemService` | stable `(meetingId, actionItemId)` dedupe through ProjectRepository |
 | Notification intent/delivery result | `MeetingNotificationService` | business commit first; best-effort external delivery |
 | Feishu action dispatch | verified adapter + `MeetingCallbackService` | trusted context + persistent callback dedupe |
 

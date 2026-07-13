@@ -178,7 +178,7 @@ Project blocker mutation remains separate. It uses request/Meeting/task/attempt 
 
 ### 11. Action items, callbacks, and notifications remain idempotent
 
-Action-item IDs are stable from Meeting/result identity. Project task creation dedupes by `(meetingId, actionItemId)` through ProjectRepository and records the linked task idempotently in the unified Store.
+Action-item IDs are stable from Meeting/result identity. Projection into the existing source task's `meetingActionItems` collection dedupes by `(meetingId, actionItemId)` through `ProjectRepository`, and the source-task/action-item linkage is recorded idempotently in the unified Store.
 
 Feishu verification stays in the adapter, which creates a trusted context containing verified event/message ID and actor. Callback outcome/dedupe commits in the unified Store. Card values cannot override actor identity or linkage.
 

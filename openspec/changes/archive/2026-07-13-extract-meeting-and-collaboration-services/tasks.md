@@ -18,7 +18,7 @@
 - [x] 4.1 Extract request create/list/detail, required-field validation, urgency/auto-confirm policy, context selection, confirm/reject, duplicate unresolved request prevention, and atomic request-to-Meeting conversion into `meeting_requests.py`; migrate HTTP, Agent bridge, Feishu, and internal callers with idempotency and payload/status compatibility tests.
 - [x] 4.2 Integrate request/Meeting results with `ProjectRepository` using task/attempt/blocker compare tokens, stable reconciliation diagnostics, and idempotent forward recovery; verify stale linkage rejection, Project commit failure/retry, repeated decision, Meeting success/Project failure, resume/block/human-decision outcomes, and concurrent project updates.
 
-## 5. Action-item projection and task conversion
+## 5. Action-item source-task projection
 
 - [x] 5.1 Extract Meeting result normalization, stable action-item identity, source-task projection, completion state, explicit selection, and `(meetingId, actionItemId)` projection dedupe into `meeting_action_items.py`; migrate callers and test repeated confirmation, concurrent project edits, stale Meeting linkage, partial failure/retry, bounded history, and old-record compatibility.
 
