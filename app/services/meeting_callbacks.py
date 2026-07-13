@@ -9,7 +9,7 @@ from typing import Any, Callable, Mapping, MutableMapping
 
 
 ALLOWED_ACTIONS = frozenset({"confirm_meeting_request", "reject_meeting_request"})
-PROCESSING_LEASE_SECONDS = 300
+PROCESSING_LEASE_SECONDS = 900
 
 
 @dataclass(frozen=True)
@@ -76,7 +76,7 @@ def _processing_claim_is_stale(record: Mapping[str, Any], now: str) -> bool:
 
 def begin(
     data: MutableMapping[str, Any], action: str, request_id: str, context: TrustedCallbackContext, now: str,
-    claimed_linkage: Mapping[str, Any] | None = None,
+    claim_token: str, claimed_linkage: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     if action not in ALLOWED_ACTIONS:
         return {"handled": False}
@@ -109,9 +109,9 @@ def begin(
     callbacks[key] = {
         "status": "processing", "action": action, "requestId": request_id,
         "actorId": context.actor_id, "messageId": context.message_id, "chatId": context.chat_id,
-        "startedAt": now,
+        "startedAt": now, "claimToken": claim_token,
     }
-    return {"handled": True, "ok": True, "claimed": True, "key": key}
+    return {"handled": True, "ok": True, "claimed": True, "key": key, "claimToken": claim_token}
 
 
 def _bounded_text(value: Any, limit: int = 500) -> str:
@@ -119,12 +119,14 @@ def _bounded_text(value: Any, limit: int = 500) -> str:
 
 
 def complete(
-    data: MutableMapping[str, Any], key: str, response: Mapping[str, Any], now: str,
+    data: MutableMapping[str, Any], key: str, claim_token: str, response: Mapping[str, Any], now: str,
 ) -> dict[str, Any]:
     callbacks = data.setdefault("idempotency", {}).setdefault("callbacks", {})
     record = callbacks.get(key)
     if not isinstance(record, MutableMapping):
         return {"ok": False, "error": "Callback claim not found", "_status": 409}
+    if record.get("status") != "processing" or record.get("claimToken") != claim_token:
+        return {"ok": True, "stale": True}
     outcome = response.get("outcome") if isinstance(response.get("outcome"), Mapping) else {}
     toast = response.get("toast") if isinstance(response.get("toast"), Mapping) else {}
     safe_response = {

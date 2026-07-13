@@ -11879,7 +11879,7 @@ def _handle_feishu_card_action(body):
         )
         _, callback_claim = _meeting_domain_repository().update(
             lambda data: meeting_callbacks_service.begin(
-                data, action, request_id, context, _exec_meeting_now(), value,
+                data, action, request_id, context, _exec_meeting_now(), uuid.uuid4().hex, value,
             )
         )
         if not callback_claim.get("ok"):
@@ -11914,7 +11914,7 @@ def _handle_feishu_card_action(body):
         if callback_claim and callback_claim.get("claimed"):
             _meeting_domain_repository().update(
                 lambda data: meeting_callbacks_service.complete(
-                    data, callback_claim["key"], response, _exec_meeting_now(),
+                    data, callback_claim["key"], callback_claim["claimToken"], response, _exec_meeting_now(),
                 )
             )
         return response

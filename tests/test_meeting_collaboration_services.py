@@ -19,19 +19,19 @@ def context(event="e1", actor="u1"):
 
 def test_callback_claim_completion_and_replay_are_persistent_and_bounded():
     data = unified()
-    claimed = begin(data, "confirm_meeting_request", "r1", context(), "now")
+    claimed = begin(data, "confirm_meeting_request", "r1", context(), "now", "claim-1")
     assert claimed["claimed"] is True
     response = {"ok": True, "toast": {"type": "success", "content": "done"}, "outcome": {"handled": True, "businessStatus": "confirmed", "meetingId": "m1"}}
-    complete(data, claimed["key"], response, "later")
-    replay = begin(data, "confirm_meeting_request", "r1", context(), "again")
+    complete(data, claimed["key"], claimed["claimToken"], response, "later")
+    replay = begin(data, "confirm_meeting_request", "r1", context(), "again", "claim-2")
     assert replay["replay"] is True and replay["response"]["outcome"]["meetingId"] == "m1"
 
 
 def test_callback_rejects_forged_linkage_and_never_trusts_card_actor_fields():
     data = unified()
-    forged = begin(data, "confirm_meeting_request", "r1", context(actor="verified-user"), "now", {"project_id": "other", "actor": "forged"})
+    forged = begin(data, "confirm_meeting_request", "r1", context(actor="verified-user"), "now", "claim-1", {"project_id": "other", "actor": "forged"})
     assert forged["businessStatus"] == "callback_linkage_invalid" and data["idempotency"]["callbacks"] == {}
-    valid = begin(data, "confirm_meeting_request", "r1", context(actor="verified-user"), "now", {"project_id": "p1"})
+    valid = begin(data, "confirm_meeting_request", "r1", context(actor="verified-user"), "now", "claim-2", {"project_id": "p1"})
     record = data["idempotency"]["callbacks"][valid["key"]]
     assert record["actorId"] == "verified-user"
 
@@ -45,7 +45,7 @@ def test_repository_serializes_concurrent_callback_claims(tmp_path):
     barrier = threading.Barrier(3); results = []
     def worker():
         barrier.wait()
-        results.append(repository.update(lambda data: begin(data, "confirm_meeting_request", "r1", context(), "now"))[1])
+        results.append(repository.update(lambda data: begin(data, "confirm_meeting_request", "r1", context(), "now", threading.current_thread().name))[1])
     threads = [threading.Thread(target=worker) for _ in range(2)]
     for thread in threads: thread.start()
     barrier.wait()
@@ -56,12 +56,25 @@ def test_repository_serializes_concurrent_callback_claims(tmp_path):
 
 def test_callback_processing_claim_can_be_recovered_after_lease_expires():
     data = unified()
-    first = begin(data, "confirm_meeting_request", "r1", context(), "2026-07-13T00:00:00Z")
-    active = begin(data, "confirm_meeting_request", "r1", context(), "2026-07-13T00:04:59Z")
-    reclaimed = begin(data, "confirm_meeting_request", "r1", context(), "2026-07-13T00:05:00Z")
+    first = begin(data, "confirm_meeting_request", "r1", context(), "2026-07-13T00:00:00Z", "claim-1")
+    active = begin(data, "confirm_meeting_request", "r1", context(), "2026-07-13T00:14:59Z", "claim-2")
+    reclaimed = begin(data, "confirm_meeting_request", "r1", context(), "2026-07-13T00:15:00Z", "claim-3")
     assert first["claimed"] is True and active["inProgress"] is True
     assert reclaimed["claimed"] is True
-    assert data["idempotency"]["callbacks"][reclaimed["key"]]["startedAt"] == "2026-07-13T00:05:00Z"
+    assert data["idempotency"]["callbacks"][reclaimed["key"]]["startedAt"] == "2026-07-13T00:15:00Z"
+
+
+def test_callback_reclaim_fences_late_completion_from_expired_worker():
+    data = unified()
+    first = begin(data, "confirm_meeting_request", "r1", context(), "2026-07-13T00:00:00Z", "claim-1")
+    reclaimed = begin(data, "confirm_meeting_request", "r1", context(), "2026-07-13T00:15:00Z", "claim-2")
+    success = {"ok": True, "toast": {"type": "success", "content": "new"}, "outcome": {"businessStatus": "confirmed"}}
+    stale = {"ok": False, "toast": {"type": "error", "content": "old"}, "outcome": {"businessStatus": "failed"}}
+    complete(data, reclaimed["key"], reclaimed["claimToken"], success, "2026-07-13T00:15:01Z")
+    late = complete(data, first["key"], first["claimToken"], stale, "2026-07-13T00:15:02Z")
+    replay = begin(data, "confirm_meeting_request", "r1", context(), "2026-07-13T00:15:03Z", "claim-3")
+    assert late == {"ok": True, "stale": True}
+    assert replay["response"]["toast"]["content"] == "new"
 
 
 def test_notification_dto_redacts_secrets_paths_raw_and_transcripts():
