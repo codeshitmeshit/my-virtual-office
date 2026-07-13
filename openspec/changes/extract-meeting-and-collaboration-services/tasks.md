@@ -29,8 +29,8 @@
 
 ## 7. Boundary, performance, and complete regression
 
-- [ ] 7.1 Remove migrated business orchestration from compatibility delegates; add static checks preventing Service imports of `server.py`/`OfficeHandler`/transport types and direct Meeting JSON writes, update fixed 1/20/100 Meeting performance results, and prove request conversion reduces two Meeting-domain writes to one without increasing Agent/notification calls or unbounded scans.
-- [ ] 7.2 Run the complete Python, JavaScript, static, migration, persistence, Project Execution, Provider, Feishu, notification, SSE/WebSocket, workflow, security, concurrency, performance, and OpenSpec strict regression; document commands/results, scenario traceability, confirmed bug fixes, compatibility exceptions, and any manual-only coverage.
+- [x] 7.1 Remove migrated business orchestration from compatibility delegates; add static checks preventing Service imports of `server.py`/`OfficeHandler`/transport types and direct Meeting JSON writes, update fixed 1/20/100 Meeting performance results, and prove request conversion reduces two Meeting-domain writes to one without increasing Agent/notification calls or unbounded scans.
+- [x] 7.2 Run the complete Python, JavaScript, static, migration, persistence, Project Execution, Provider, Feishu, notification, SSE/WebSocket, workflow, security, concurrency, performance, and OpenSpec strict regression; document commands/results, scenario traceability, confirmed bug fixes, compatibility exceptions, and any manual-only coverage.
 
 ## 8. Documentation, migration rehearsal, and release readiness
 
