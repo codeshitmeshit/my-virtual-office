@@ -1,0 +1,75 @@
+{
+  "fixtures": {
+    "1": {
+      "events": 20,
+      "meetings": 1,
+      "occupancy": 2,
+      "operations": {
+        "loadUnified": {
+          "medianMs": 0.0276,
+          "p95Ms": 0.0283,
+          "runs": 20,
+          "warmups": 3
+        },
+        "saveUnified": {
+          "medianMs": 2.6377,
+          "p95Ms": 3.7892,
+          "runs": 20,
+          "warmups": 3
+        }
+      },
+      "requests": 1,
+      "unifiedBytes": 3266
+    },
+    "100": {
+      "events": 2000,
+      "meetings": 100,
+      "occupancy": 200,
+      "operations": {
+        "loadUnified": {
+          "medianMs": 2.167,
+          "p95Ms": 2.3392,
+          "runs": 20,
+          "warmups": 3
+        },
+        "saveUnified": {
+          "medianMs": 24.7534,
+          "p95Ms": 35.8034,
+          "runs": 20,
+          "warmups": 3
+        }
+      },
+      "requests": 100,
+      "unifiedBytes": 292710
+    },
+    "20": {
+      "events": 400,
+      "meetings": 20,
+      "occupancy": 40,
+      "operations": {
+        "loadUnified": {
+          "medianMs": 0.5274,
+          "p95Ms": 0.5382,
+          "runs": 20,
+          "warmups": 3
+        },
+        "saveUnified": {
+          "medianMs": 6.8274,
+          "p95Ms": 10.9507,
+          "runs": 20,
+          "warmups": 3
+        }
+      },
+      "requests": 20,
+      "unifiedBytes": 58750
+    }
+  },
+  "method": "3 warmups, 20 measured runs",
+  "observedRequestConversion": {
+    "notificationCalls": 1,
+    "providerCalls": 0,
+    "unifiedUpdates": 1
+  },
+  "schema": 2,
+  "targetUnifiedRequestConversionWrites": 1
+}

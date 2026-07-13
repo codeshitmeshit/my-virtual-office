@@ -6,6 +6,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 CHANGE = ROOT / "openspec" / "changes" / "extract-project-execution-services"
+if not CHANGE.exists():
+    archived = sorted((ROOT / "openspec" / "changes" / "archive").glob("*-extract-project-execution-services"))
+    if archived:
+        CHANGE = archived[-1]
 
 BASELINE_COUNTS = {
     "start_prepare": {"load": 1, "save": 1, "provider": 0, "notification": 0, "gateway": 0, "git_scan": 1},
