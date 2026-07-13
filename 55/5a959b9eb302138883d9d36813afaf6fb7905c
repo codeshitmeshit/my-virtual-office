@@ -1,0 +1,25 @@
+app/server.py
+  s_5852bad622de94::t_01ea08c76f733f 51-52,11132-11161,11194-11196,11198,11489-11493,11719,11722,11742-11743,11746-11766,11870-11902,11908,11914-11920
+app/services/meeting_callbacks.py
+  s_5852bad622de94::t_b4569435529918 1-130
+tests/test_meeting_request_blocks_task.py
+  s_5852bad622de94::t_d57958a93ef19d 264-265
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "555a959b9eb302138883d9d36813afaf6fb7905c",
+  "prompts": {},
+  "sessions": {
+    "s_5852bad622de94": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f5163-cd74-7df3-a25d-7fd6dd323b5d",
+        "model": "unknown"
+      },
+      "human_author": "codeshitmeshit <codeshitmeshit@126.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
