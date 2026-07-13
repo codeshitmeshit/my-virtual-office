@@ -116,8 +116,11 @@
     "_meeting_request_notification_related",
     "_meeting_request_processed",
     "_meeting_request_public",
+    "_meeting_request_reconcile_project",
+    "_meeting_request_record_reconciliation",
     "_meeting_request_resolve_task_blocker",
     "_meeting_request_selected_context",
+    "_meeting_request_service_hooks",
     "_meeting_request_sort_key",
     "_meeting_request_sort_time",
     "_meeting_request_summary",
@@ -887,19 +890,7 @@
       "caller": "_handle_meeting_request_confirm"
     },
     {
-      "callee": "_exec_meeting_archive_manager_participants",
-      "caller": "_handle_meeting_request_confirm"
-    },
-    {
-      "callee": "_exec_meeting_clean_participants",
-      "caller": "_handle_meeting_request_confirm"
-    },
-    {
       "callee": "_exec_meeting_now",
-      "caller": "_handle_meeting_request_confirm"
-    },
-    {
-      "callee": "_handle_executable_meeting_create",
       "caller": "_handle_meeting_request_confirm"
     },
     {
@@ -907,11 +898,27 @@
       "caller": "_handle_meeting_request_confirm"
     },
     {
-      "callee": "_load_meeting_request_store",
+      "callee": "_meeting_clamped_decision_window_sec",
+      "caller": "_handle_meeting_request_confirm"
+    },
+    {
+      "callee": "_meeting_context_budget",
+      "caller": "_handle_meeting_request_confirm"
+    },
+    {
+      "callee": "_meeting_decision_window_sec",
+      "caller": "_handle_meeting_request_confirm"
+    },
+    {
+      "callee": "_meeting_domain_repository",
       "caller": "_handle_meeting_request_confirm"
     },
     {
       "callee": "_meeting_open_url",
+      "caller": "_handle_meeting_request_confirm"
+    },
+    {
+      "callee": "_meeting_preparing_timeout_sec",
       "caller": "_handle_meeting_request_confirm"
     },
     {
@@ -923,35 +930,23 @@
       "caller": "_handle_meeting_request_confirm"
     },
     {
-      "callee": "_meeting_request_auto_confirm_label",
-      "caller": "_handle_meeting_request_confirm"
-    },
-    {
-      "callee": "_meeting_request_clean_type",
-      "caller": "_handle_meeting_request_confirm"
-    },
-    {
-      "callee": "_meeting_request_error",
-      "caller": "_handle_meeting_request_confirm"
-    },
-    {
       "callee": "_meeting_request_log_auto_confirm_activity",
       "caller": "_handle_meeting_request_confirm"
     },
     {
-      "callee": "_meeting_request_public",
+      "callee": "_meeting_request_reconcile_project",
       "caller": "_handle_meeting_request_confirm"
     },
     {
-      "callee": "_meeting_request_selected_context",
+      "callee": "_meeting_request_record_reconciliation",
+      "caller": "_handle_meeting_request_confirm"
+    },
+    {
+      "callee": "_meeting_request_service_hooks",
       "caller": "_handle_meeting_request_confirm"
     },
     {
       "callee": "_project_execution_update_meeting_blocker",
-      "caller": "_handle_meeting_request_confirm"
-    },
-    {
-      "callee": "_save_meeting_request_store",
       "caller": "_handle_meeting_request_confirm"
     },
     {
@@ -967,10 +962,6 @@
       "caller": "_handle_meeting_request_confirm"
     },
     {
-      "callee": "list",
-      "caller": "_handle_meeting_request_confirm"
-    },
-    {
       "callee": "str",
       "caller": "_handle_meeting_request_confirm"
     },
@@ -979,27 +970,11 @@
       "caller": "_handle_meeting_request_create"
     },
     {
-      "callee": "_exec_meeting_archive_manager_participants",
-      "caller": "_handle_meeting_request_create"
-    },
-    {
-      "callee": "_exec_meeting_clean_participants",
-      "caller": "_handle_meeting_request_create"
-    },
-    {
-      "callee": "_exec_meeting_now",
-      "caller": "_handle_meeting_request_create"
-    },
-    {
       "callee": "_handle_meeting_request_confirm",
       "caller": "_handle_meeting_request_create"
     },
     {
-      "callee": "_is_archive_manager_agent",
-      "caller": "_handle_meeting_request_create"
-    },
-    {
-      "callee": "_load_meeting_request_store",
+      "callee": "_meeting_domain_repository",
       "caller": "_handle_meeting_request_create"
     },
     {
@@ -1007,15 +982,7 @@
       "caller": "_handle_meeting_request_create"
     },
     {
-      "callee": "_meeting_request_clean_type",
-      "caller": "_handle_meeting_request_create"
-    },
-    {
       "callee": "_meeting_request_context_candidates",
-      "caller": "_handle_meeting_request_create"
-    },
-    {
-      "callee": "_meeting_request_error",
       "caller": "_handle_meeting_request_create"
     },
     {
@@ -1023,15 +990,15 @@
       "caller": "_handle_meeting_request_create"
     },
     {
-      "callee": "_meeting_request_public",
+      "callee": "_meeting_request_reconcile_project",
       "caller": "_handle_meeting_request_create"
     },
     {
-      "callee": "_meeting_request_unresolved_for_task",
+      "callee": "_meeting_request_record_reconciliation",
       "caller": "_handle_meeting_request_create"
     },
     {
-      "callee": "_meeting_request_urgency",
+      "callee": "_meeting_request_service_hooks",
       "caller": "_handle_meeting_request_create"
     },
     {
@@ -1039,51 +1006,23 @@
       "caller": "_handle_meeting_request_create"
     },
     {
-      "callee": "_save_meeting_request_store",
-      "caller": "_handle_meeting_request_create"
-    },
-    {
       "callee": "_send_meeting_request_notification",
       "caller": "_handle_meeting_request_create"
     },
     {
-      "callee": "list",
+      "callee": "bool",
       "caller": "_handle_meeting_request_create"
     },
     {
-      "callee": "next",
-      "caller": "_handle_meeting_request_create"
-    },
-    {
-      "callee": "str",
-      "caller": "_handle_meeting_request_create"
-    },
-    {
-      "callee": "_load_meeting_request_store",
+      "callee": "_meeting_domain_repository",
       "caller": "_handle_meeting_request_detail"
-    },
-    {
-      "callee": "_meeting_request_error",
-      "caller": "_handle_meeting_request_detail"
-    },
-    {
-      "callee": "_meeting_request_public",
-      "caller": "_handle_meeting_request_detail"
-    },
-    {
-      "callee": "_exec_meeting_now",
-      "caller": "_handle_meeting_request_reject"
     },
     {
       "callee": "_handle_task_comment",
       "caller": "_handle_meeting_request_reject"
     },
     {
-      "callee": "_load_meeting_request_store",
-      "caller": "_handle_meeting_request_reject"
-    },
-    {
-      "callee": "_meeting_request_error",
+      "callee": "_meeting_domain_repository",
       "caller": "_handle_meeting_request_reject"
     },
     {
@@ -1091,15 +1030,19 @@
       "caller": "_handle_meeting_request_reject"
     },
     {
-      "callee": "_meeting_request_public",
+      "callee": "_meeting_request_reconcile_project",
+      "caller": "_handle_meeting_request_reject"
+    },
+    {
+      "callee": "_meeting_request_record_reconciliation",
+      "caller": "_handle_meeting_request_reject"
+    },
+    {
+      "callee": "_meeting_request_service_hooks",
       "caller": "_handle_meeting_request_reject"
     },
     {
       "callee": "_project_execution_update_meeting_blocker",
-      "caller": "_handle_meeting_request_reject"
-    },
-    {
-      "callee": "_save_meeting_request_store",
       "caller": "_handle_meeting_request_reject"
     },
     {
@@ -1899,23 +1842,7 @@
       "caller": "_meeting_request_find_project_task"
     },
     {
-      "callee": "_load_meeting_request_store",
-      "caller": "_meeting_request_list_filtered"
-    },
-    {
-      "callee": "_meeting_request_public",
-      "caller": "_meeting_request_list_filtered"
-    },
-    {
-      "callee": "_sort_meeting_requests",
-      "caller": "_meeting_request_list_filtered"
-    },
-    {
-      "callee": "list",
-      "caller": "_meeting_request_list_filtered"
-    },
-    {
-      "callee": "sum",
+      "callee": "_meeting_domain_repository",
       "caller": "_meeting_request_list_filtered"
     },
     {
@@ -1972,18 +1899,66 @@
     },
     {
       "callee": "_exec_meeting_now",
+      "caller": "_meeting_request_reconcile_project"
+    },
+    {
+      "callee": "_meeting_domain_repository",
+      "caller": "_meeting_request_reconcile_project"
+    },
+    {
+      "callee": "_project_execution_apply_meeting_result",
+      "caller": "_meeting_request_reconcile_project"
+    },
+    {
+      "callee": "_project_execution_block_for_meeting_request",
+      "caller": "_meeting_request_reconcile_project"
+    },
+    {
+      "callee": "_project_execution_update_meeting_blocker",
+      "caller": "_meeting_request_reconcile_project"
+    },
+    {
+      "callee": "all",
+      "caller": "_meeting_request_reconcile_project"
+    },
+    {
+      "callee": "bool",
+      "caller": "_meeting_request_reconcile_project"
+    },
+    {
+      "callee": "isinstance",
+      "caller": "_meeting_request_reconcile_project"
+    },
+    {
+      "callee": "len",
+      "caller": "_meeting_request_reconcile_project"
+    },
+    {
+      "callee": "_exec_meeting_now",
+      "caller": "_meeting_request_record_reconciliation"
+    },
+    {
+      "callee": "_meeting_domain_repository",
+      "caller": "_meeting_request_record_reconciliation"
+    },
+    {
+      "callee": "_meeting_request_summary",
+      "caller": "_meeting_request_record_reconciliation"
+    },
+    {
+      "callee": "isinstance",
+      "caller": "_meeting_request_record_reconciliation"
+    },
+    {
+      "callee": "next",
+      "caller": "_meeting_request_record_reconciliation"
+    },
+    {
+      "callee": "_meeting_domain_repository",
       "caller": "_meeting_request_resolve_task_blocker"
     },
     {
-      "callee": "_load_meeting_request_store",
-      "caller": "_meeting_request_resolve_task_blocker"
-    },
-    {
-      "callee": "_meeting_request_public",
-      "caller": "_meeting_request_resolve_task_blocker"
-    },
-    {
-      "callee": "_save_meeting_request_store",
+      "callee": "_meeting_request_service_hooks",
       "caller": "_meeting_request_resolve_task_blocker"
     },
     {
@@ -1997,6 +1972,10 @@
     {
       "callee": "str",
       "caller": "_meeting_request_selected_context"
+    },
+    {
+      "callee": "str",
+      "caller": "_meeting_request_service_hooks"
     },
     {
       "callee": "_meeting_request_processed",
@@ -2207,6 +2186,10 @@
       "caller": "_project_execution_apply_meeting_result"
     },
     {
+      "callee": "_meeting_request_record_reconciliation",
+      "caller": "_project_execution_apply_meeting_result"
+    },
+    {
       "callee": "_meeting_request_resolve_task_blocker",
       "caller": "_project_execution_apply_meeting_result"
     },
@@ -2220,10 +2203,6 @@
     },
     {
       "callee": "_project_execution_apply_meeting_output_to_task",
-      "caller": "_project_execution_apply_meeting_result"
-    },
-    {
-      "callee": "_project_execution_find",
       "caller": "_project_execution_apply_meeting_result"
     },
     {
@@ -2243,15 +2222,15 @@
       "caller": "_project_execution_apply_meeting_result"
     },
     {
-      "callee": "_save_projects",
-      "caller": "_project_execution_apply_meeting_result"
-    },
-    {
       "callee": "_wf_get_backlog_col",
       "caller": "_project_execution_apply_meeting_result"
     },
     {
       "callee": "isinstance",
+      "caller": "_project_execution_apply_meeting_result"
+    },
+    {
+      "callee": "next",
       "caller": "_project_execution_apply_meeting_result"
     },
     {
@@ -2267,7 +2246,7 @@
       "caller": "_project_execution_block_for_meeting_request"
     },
     {
-      "callee": "_project_execution_find",
+      "callee": "_project_execution_meeting_blocker_unresolved",
       "caller": "_project_execution_block_for_meeting_request"
     },
     {
@@ -2279,7 +2258,11 @@
       "caller": "_project_execution_block_for_meeting_request"
     },
     {
-      "callee": "_save_projects",
+      "callee": "isinstance",
+      "caller": "_project_execution_block_for_meeting_request"
+    },
+    {
+      "callee": "next",
       "caller": "_project_execution_block_for_meeting_request"
     },
     {
@@ -2367,15 +2350,11 @@
       "caller": "_project_execution_update_meeting_blocker"
     },
     {
-      "callee": "_project_execution_find",
-      "caller": "_project_execution_update_meeting_blocker"
-    },
-    {
-      "callee": "_save_projects",
-      "caller": "_project_execution_update_meeting_blocker"
-    },
-    {
       "callee": "isinstance",
+      "caller": "_project_execution_update_meeting_blocker"
+    },
+    {
+      "callee": "next",
       "caller": "_project_execution_update_meeting_blocker"
     },
     {
@@ -2665,6 +2644,14 @@
     {
       "callee": "_meeting_domain_authority_status",
       "caller": "do_PUT"
+    },
+    {
+      "callee": "_exec_meeting_now",
+      "caller": "record_auto_run"
+    },
+    {
+      "callee": "_exec_meeting_now",
+      "caller": "resolve"
     }
   ],
   "schema": 1

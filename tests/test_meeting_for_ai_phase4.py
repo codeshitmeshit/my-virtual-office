@@ -5,6 +5,7 @@ import os
 import sys
 import tempfile
 import json
+from unittest import mock
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 APP_DIR = os.path.join(ROOT, "app")
@@ -440,3 +441,56 @@ if __name__ == "__main__":
     test_phase4_reject_feedback_and_illegal_confirm()
     test_phase4_confirm_creates_once_with_selected_context_snapshot()
     print("test_meeting_for_ai_phase4.py passed")
+def test_phase4_stale_meeting_link_cannot_overwrite_newer_project_blocker():
+    with tempfile.TemporaryDirectory() as status_dir:
+        old = with_store(status_dir)
+        try:
+            project, task = create_high_priority_confirmation_project_and_task()
+            request = server._handle_meeting_request_create(
+                project["id"], task["id"], valid_request_body(idempotencyKey="phase4-stale-link"),
+            )["request"]
+            confirmed = server._handle_meeting_request_confirm(request["id"], {"confirmedBy": "user"})
+            meeting = dict(confirmed["meeting"])
+            meeting["stage"] = "completed"; meeting["result"] = {"outcome": "approved", "summary": "old"}
+            server._project_execution_update_meeting_blocker(
+                project["id"], task["id"], request["id"], meetingId="newer-meeting",
+            )
+            applied = server._project_execution_apply_meeting_result(meeting)
+            assert applied["skipped"] is True and applied["reason"] == "meeting_link_stale"
+            current = server._handle_project_get(project["id"])["project"]
+            current_task = next(item for item in current["tasks"] if item["id"] == task["id"])
+            assert current_task["meetingBlocker"]["meetingId"] == "newer-meeting"
+        finally:
+            restore_store(old)
+
+
+def test_phase4_project_commit_failure_records_and_retries_forward_reconciliation():
+    with tempfile.TemporaryDirectory() as status_dir:
+        old = with_store(status_dir)
+        try:
+            project, task = create_high_priority_confirmation_project_and_task()
+            request = server._handle_meeting_request_create(
+                project["id"], task["id"], valid_request_body(idempotencyKey="phase4-project-retry"),
+            )["request"]
+            confirmed = server._handle_meeting_request_confirm(request["id"], {"confirmedBy": "user"})
+            meeting_id = confirmed["meeting"]["id"]
+            def finish(data):
+                data["meetings"][meeting_id]["stage"] = "completed"
+                data["meetings"][meeting_id]["result"] = {"outcome": "no_consensus", "summary": "blocked"}
+                data["occupancy"] = {
+                    agent: owner for agent, owner in data["occupancy"].items() if owner != meeting_id
+                }
+            server._meeting_domain_repository().update(finish)
+            meeting = server._meeting_domain_repository().snapshot()["meetings"][meeting_id]
+            with mock.patch.object(server._PROJECT_REPOSITORY, "update", side_effect=server.ProjectConflictError("race")):
+                failed = server._project_execution_apply_meeting_result(meeting)
+            assert failed["code"] == "project_meeting_commit_failed"
+            stored_request = server._handle_meeting_request_detail(request["id"])["request"]
+            assert any(item["operation"] == "project_meeting_result" and item["status"] == "pending" for item in stored_request["reconciliation"])
+            reconciled = server._meeting_request_reconcile_project(request["id"])
+            assert reconciled["ok"] is True and reconciled["attempted"] == 1
+            current = server._handle_project_get(project["id"])["project"]
+            current_task = next(item for item in current["tasks"] if item["id"] == task["id"])
+            assert current_task["meetingBlocker"]["status"] == "blocked"
+        finally:
+            restore_store(old)

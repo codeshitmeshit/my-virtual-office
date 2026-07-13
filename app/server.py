@@ -46,6 +46,7 @@ from services import artifacts as artifact_service
 from services import project_schedule as project_schedule_service
 from services import meeting_repository as meeting_repository_service
 from services import meeting_lifecycle as meeting_lifecycle_service
+from services import meeting_requests as meeting_requests_service
 from services.project_repository import ProjectConflictError, ProjectNotFoundError, ProjectRepository
 from zoneinfo import ZoneInfo
 from provider_execution import (
@@ -10868,6 +10869,88 @@ def _save_meeting_request_store(data):
     _meeting_domain_repository().replace_requests(data)
 
 
+def _meeting_request_service_hooks():
+    return meeting_requests_service.RequestHooks(
+        now=_exec_meeting_now,
+        new_id=lambda: str(uuid.uuid4()),
+        clean_participants=_exec_meeting_clean_participants,
+        is_excluded=_is_archive_manager_agent,
+        auto_confirm_label=_meeting_request_auto_confirm_label,
+        lifecycle_hooks=meeting_lifecycle_service.CreateHooks(
+            rebuild_occupancy=_rebuild_exec_meeting_occupancy,
+            build_conflicts=_meeting_build_conflicts,
+            append_event=_append_exec_meeting_event,
+        ),
+    )
+
+
+def _meeting_request_record_reconciliation(request_id, operation, failure, context=None):
+    def mutate(data):
+        request = data.get("requests", {}).get(request_id)
+        if not isinstance(request, dict):
+            return False
+        entries = request.setdefault("reconciliation", [])
+        key = f"{request_id}:{operation}"
+        entry = {
+            "key": key, "operation": operation, "status": "pending",
+            "error": _meeting_request_summary((failure or {}).get("error") or "Project update failed", 500),
+            "context": {key: value for key, value in (context or {}).items() if value not in (None, "")},
+            "updatedAt": _exec_meeting_now(),
+        }
+        existing = next((item for item in entries if item.get("key") == key), None)
+        if existing:
+            existing.update(entry)
+        else:
+            entries.append(entry)
+        request["reconciliation"] = entries[-20:]
+        request["updatedAt"] = entry["updatedAt"]
+        return True
+    return _meeting_domain_repository().update(mutate)[1]
+
+
+def _meeting_request_reconcile_project(request_id):
+    request = _meeting_domain_repository().snapshot().get("requests", {}).get(request_id)
+    if not isinstance(request, dict):
+        return {"ok": False, "error": "Meeting request not found", "_status": 404}
+    pending = [item for item in request.get("reconciliation", []) if item.get("status") == "pending"]
+    results = []
+    for entry in pending:
+        context = entry.get("context") if isinstance(entry.get("context"), dict) else {}
+        operation = entry.get("operation")
+        if operation == "project_block_create":
+            outcome = _project_execution_block_for_meeting_request(
+                context.get("projectId"), context.get("taskId"), request,
+                "AI meeting requested; waiting for meeting resolution.",
+            )
+        elif operation == "project_confirm":
+            outcome = _project_execution_update_meeting_blocker(
+                context.get("projectId"), context.get("taskId"), request_id,
+                status="confirmed", meetingId=context.get("meetingId"), awaitingUserDecision=False,
+            )
+        elif operation == "project_reject":
+            outcome = _project_execution_update_meeting_blocker(
+                context.get("projectId"), context.get("taskId"), request_id,
+                status="rejected", rejectionReason=context.get("reason"), awaitingUserDecision=True,
+            )
+        elif operation == "project_meeting_result":
+            meeting = _meeting_domain_repository().snapshot().get("meetings", {}).get(context.get("meetingId"))
+            outcome = _project_execution_apply_meeting_result(meeting, _record_reconciliation=False) if meeting else {
+                "ok": False, "error": "Meeting not found", "_status": 404,
+            }
+        else:
+            outcome = {"ok": False, "error": "Unsupported reconciliation operation", "_status": 400}
+        results.append({"key": entry.get("key"), "operation": operation, "ok": bool(outcome.get("ok"))})
+        if outcome.get("ok"):
+            def resolve(data, key=entry.get("key")):
+                current = data.get("requests", {}).get(request_id)
+                for item in current.get("reconciliation", []) if isinstance(current, dict) else []:
+                    if item.get("key") == key:
+                        item["status"] = "resolved"; item["resolvedAt"] = _exec_meeting_now(); item["updatedAt"] = item["resolvedAt"]
+                return True
+            _meeting_domain_repository().update(resolve)
+    return {"ok": all(item["ok"] for item in results), "attempted": len(results), "results": results}
+
+
 def _meeting_request_clean_type(raw):
     value = str(raw or "discussion").strip()
     return value if value in {"information", "discussion", "task"} else "discussion"
@@ -12314,133 +12397,10 @@ def _test_feishu_chat_channel(body=None):
     return result
 
 
-def _handle_meeting_request_create(project_id, task_id, body):
-    project, task = _meeting_request_find_project_task(project_id, task_id)
-    if not project:
-        return _meeting_request_error("Project not found", 404, "project_not_found")
-    if not task:
-        return _meeting_request_error("Task not found", 404, "task_not_found")
-    source_type = str(body.get("sourceType") or "project_task").strip()
-    if source_type != "project_task":
-        return _meeting_request_error("Only project_task meeting requests are supported in this phase", 400, "unsupported_source")
-    goal = str(body.get("goal") or body.get("meetingGoal") or "").strip()
-    expected = str(body.get("expectedOutcome") or "").strip()
-    reason = str(body.get("reason") or body.get("cannotCompleteAloneReason") or "").strip()
-    if not goal:
-        return _meeting_request_error("Meeting goal is required", 400, "goal_required")
-    if not expected:
-        return _meeting_request_error("Expected outcome is required", 400, "expected_outcome_required")
-    if not reason:
-        return _meeting_request_error("Reason why the AI cannot complete alone is required", 400, "reason_required")
-    requester = str(body.get("requestingAgentId") or body.get("agentId") or task.get("executorAgentId") or task.get("assignee") or "").strip()
-    if not requester:
-        return _meeting_request_error("Requesting agent is required", 400, "requesting_agent_required")
-    urgency = _meeting_request_urgency(body.get("urgency") or body.get("urgencyScore") or body.get("priority"))
-    participants = _exec_meeting_clean_participants(body.get("suggestedParticipants") or body.get("participants") or [])
-    if requester and requester not in participants:
-        participants.insert(0, requester)
-    blocked_participants = _exec_meeting_archive_manager_participants(participants)
-    if blocked_participants:
-        return _exec_meeting_archive_manager_error(blocked_participants)
-    suggested_moderator = str(body.get("suggestedModerator") or body.get("moderator") or (participants[0] if participants else requester)).strip()
-    if _is_archive_manager_agent(suggested_moderator):
-        return _exec_meeting_archive_manager_error([suggested_moderator])
-    now = _exec_meeting_now()
-    request_id = str(body.get("id") or uuid.uuid4())
-    idempotency_key = str(body.get("idempotencyKey") or "").strip()
-    requested_context_ids = body.get("selectedContextIds") or body.get("contextIds") or []
-    requested_supplemental_context = str(body.get("supplementalContext") or "").strip()
-    with _MEETING_REQUEST_LOCK:
-        store = _load_meeting_request_store()
-        existing_unresolved = next((r for r in store.get("requests", {}).values() if _meeting_request_unresolved_for_task(r, project_id, task_id)), None)
-        if existing_unresolved:
-            return {"ok": True, "request": _meeting_request_public(existing_unresolved), "existingBlockingRequest": True, "idempotent": True}
-        if idempotency_key and idempotency_key in store.get("idempotency", {}):
-            existing = store.get("requests", {}).get(store["idempotency"][idempotency_key].get("requestId"))
-            if existing:
-                return {"ok": True, "request": _meeting_request_public(existing), "idempotent": True}
-        request = {
-            "id": request_id,
-            "status": "pending",
-            "sourceType": "project_task",
-            "source": {"projectId": project_id, "taskId": task_id, "projectTitle": project.get("title", ""), "taskTitle": task.get("title", "")},
-            "requestingAgentId": requester,
-            "originalProposal": {
-                "topic": str(body.get("topic") or task.get("title") or goal).strip(),
-                "purpose": str(body.get("purpose") or goal).strip(),
-                "meetingType": _meeting_request_clean_type(body.get("meetingType")),
-                "goal": goal,
-                "expectedOutcome": expected,
-                "cannotCompleteAloneReason": reason,
-                "suggestedParticipants": participants,
-                "suggestedModerator": suggested_moderator,
-                "maxRounds": body.get("maxRounds") or 2,
-                "urgency": urgency,
-            },
-            "urgency": urgency,
-            "blockingTask": True,
-            "taskBlocker": {"status": "pending", "createdAt": now, "updatedAt": now, "resolvedAt": ""},
-            "contextCandidates": _meeting_request_context_candidates(project, task),
-            "requestedContext": {
-                "selectedContextIds": list(requested_context_ids),
-                "supplementalContext": requested_supplemental_context,
-            },
-            "review": {},
-            "conversion": {},
-            "idempotencyKey": idempotency_key,
-            "createdAt": now,
-            "updatedAt": now,
-        }
-        store.setdefault("requests", {})[request_id] = request
-        if idempotency_key:
-            store.setdefault("idempotency", {})[idempotency_key] = {"requestId": request_id}
-        _save_meeting_request_store(store)
-    blocked = _project_execution_block_for_meeting_request(project_id, task_id, request, "AI meeting requested; waiting for meeting resolution.")
-    if not blocked.get("ok"):
-        return blocked
-    auto_confirm_reason = _meeting_request_auto_confirm_reason(project, urgency)
-    if auto_confirm_reason:
-        auto = _handle_meeting_request_confirm(request_id, {
-            "confirmedBy": f"agent:{requester}",
-            "autoConfirmed": True,
-            "autoConfirmReason": auto_confirm_reason,
-            "selectedContextIds": requested_context_ids,
-            "supplementalContext": requested_supplemental_context,
-            "idempotencyKey": f"meeting-request-auto:{request_id}",
-        })
-        if auto.get("ok"):
-            auto["autoConfirmed"] = True
-            return auto
-        notification = _send_meeting_request_notification(request, "pending")
-        return {"ok": True, "request": _meeting_request_public(request), "autoConfirmError": auto, "notification": notification}
-    notification = _send_meeting_request_notification(request, "pending")
-    return {"ok": True, "request": _meeting_request_public(request), "notification": notification}
 
 
-def _meeting_request_list_filtered(query_string=""):
-    parsed = urllib.parse.parse_qs(query_string or "")
-    status_filter = (parsed.get("status") or [""])[0]
-    project_id = (parsed.get("projectId") or [""])[0]
-    task_id = (parsed.get("taskId") or [""])[0]
-    with _MEETING_REQUEST_LOCK:
-        store = _load_meeting_request_store()
-        requests = list(store.get("requests", {}).values())
-    if status_filter:
-        requests = [r for r in requests if r.get("status") == status_filter]
-    if project_id:
-        requests = [r for r in requests if (r.get("source") or {}).get("projectId") == project_id]
-    if task_id:
-        requests = [r for r in requests if (r.get("source") or {}).get("taskId") == task_id]
-    requests = _sort_meeting_requests(requests)
-    return {"ok": True, "requests": [_meeting_request_public(r) for r in requests], "pendingCount": sum(1 for r in requests if r.get("status") == "pending")}
 
 
-def _handle_meeting_request_detail(request_id):
-    with _MEETING_REQUEST_LOCK:
-        req = _load_meeting_request_store().get("requests", {}).get(request_id)
-    if not req:
-        return _meeting_request_error("Meeting request not found", 404, "request_not_found")
-    return {"ok": True, "request": _meeting_request_public(req)}
 
 
 def _meeting_request_selected_context(req, selected_ids, supplemental_context):
@@ -12473,202 +12433,185 @@ def _meeting_project_ref(project_id):
     return {"ok": True, "projectId": project_id, "projectTitle": project.get("title", "")}
 
 
-def _handle_meeting_request_confirm(request_id, body):
-    idempotency_key = str(body.get("idempotencyKey") or "").strip()
-    with _MEETING_REQUEST_LOCK:
-        store = _load_meeting_request_store()
-        req = store.get("requests", {}).get(request_id)
-        if not req:
-            return _meeting_request_error("Meeting request not found", 404, "request_not_found")
-        if req.get("status") == "rejected":
-            return _meeting_request_error("Rejected meeting request cannot be confirmed", 409, "request_rejected")
-        if req.get("status") == "confirmed" and (req.get("conversion") or {}).get("meetingId"):
-            return {"ok": True, "request": _meeting_request_public(req), "meetingId": req["conversion"]["meetingId"], "idempotent": True}
-        proposal = req.get("originalProposal") or {}
-        selected_ids = body.get("selectedContextIds") or body.get("contextIds") or []
-        context, selected_candidates = _meeting_request_selected_context(req, selected_ids, body.get("supplementalContext"))
-        final_config = {
-            "topic": str(body.get("topic") or proposal.get("topic") or "").strip(),
-            "purpose": str(body.get("purpose") or proposal.get("purpose") or proposal.get("goal") or "").strip(),
-            "meetingType": _meeting_request_clean_type(body.get("meetingType") or proposal.get("meetingType")),
-            "participants": _exec_meeting_clean_participants(body.get("participants") or proposal.get("suggestedParticipants") or []),
-            "moderator": str(body.get("moderator") or proposal.get("suggestedModerator") or "").strip(),
-            "maxRounds": body.get("maxRounds") or proposal.get("maxRounds") or 2,
-            "contextMode": body.get("contextMode") or "incremental",
-            "resolutionPolicy": body.get("resolutionPolicy") or "moderator_decision",
-            "context": context,
-            "selectedContextIds": list(selected_ids),
-            "selectedContextSnapshot": selected_candidates,
-            "supplementalContext": str(body.get("supplementalContext") or "").strip(),
-            "projectId": str(body.get("projectId") or (req.get("source") or {}).get("projectId") or "").strip(),
-        }
-        project_ref = _meeting_project_ref(final_config["projectId"])
-        if not project_ref.get("ok"):
-            return _meeting_request_error(project_ref.get("error") or "Project not found", project_ref.get("_status", 404), project_ref.get("code", "project_not_found"))
-        final_config["projectId"], final_config["projectTitle"] = project_ref["projectId"], project_ref["projectTitle"]
-        if final_config["moderator"] and final_config["moderator"] not in final_config["participants"]:
-            final_config["participants"].insert(0, final_config["moderator"])
-        blocked_participants = _exec_meeting_archive_manager_participants(final_config["participants"])
-        if blocked_participants:
-            return _exec_meeting_archive_manager_error(blocked_participants)
-        edit_summary = []
-        for key in ("topic", "purpose", "meetingType", "moderator", "maxRounds"):
-            original = proposal.get(key if key != "moderator" else "suggestedModerator")
-            if str(final_config.get(key) or "") != str(original or ""):
-                edit_summary.append(key)
-        req["review"] = {
-            "finalConfig": final_config,
-            "selectedContextIds": list(selected_ids),
-            "supplementalContext": final_config["supplementalContext"],
-            "editSummary": ", ".join(edit_summary) if edit_summary else "No configuration edits",
-            "confirmedBy": str(body.get("confirmedBy") or "user"),
-            "confirmedAt": _exec_meeting_now(),
-            "autoConfirmed": bool(body.get("autoConfirmed")),
-            "autoConfirmReason": str(body.get("autoConfirmReason") or ""),
-            "autoConfirmLabel": _meeting_request_auto_confirm_label(body.get("autoConfirmReason")) if body.get("autoConfirmed") else "",
-        }
-        # Save review before conversion so a failure can be inspected/retried.
-        req["updatedAt"] = req["review"]["confirmedAt"]
-        _save_meeting_request_store(store)
-    meeting_body = {
-        "topic": final_config["topic"],
-        "purpose": final_config["purpose"],
-        "meetingType": final_config["meetingType"],
-        "participants": final_config["participants"],
-        "moderator": final_config["moderator"] or (final_config["participants"][0] if final_config["participants"] else ""),
-        "maxRounds": final_config["maxRounds"],
-        "context": final_config["context"],
-        "contextMode": final_config["contextMode"],
-        "resolutionPolicy": final_config["resolutionPolicy"],
-        "organizer": req.get("requestingAgentId") or "ai",
-        "createdBy": req.get("requestingAgentId") if body.get("autoConfirmed") else "user",
-        "createdByType": "agent" if body.get("autoConfirmed") else "user",
-        "createdByAgentId": req.get("requestingAgentId") if body.get("autoConfirmed") else "",
-        "idempotencyKey": idempotency_key or f"meeting-request-confirm:{request_id}",
-        "source": {
-            "meetingRequestId": request_id,
-            "requestingAgentId": req.get("requestingAgentId"),
-            "urgency": req.get("urgency"),
-            "autoConfirmed": bool(body.get("autoConfirmed")),
-            "autoConfirmReason": str(body.get("autoConfirmReason") or ""),
-            "autoConfirmLabel": _meeting_request_auto_confirm_label(body.get("autoConfirmReason")) if body.get("autoConfirmed") else "",
-            **(req.get("source") or {}),
-        },
-        "projectId": final_config.get("projectId") or "",
-    }
-    created = _handle_executable_meeting_create(meeting_body)
-    if not created.get("ok"):
-        return created
-    converted_at = _exec_meeting_now()
-    confirmed_req = None
-    with _MEETING_REQUEST_LOCK:
-        store = _load_meeting_request_store()
-        req = store.get("requests", {}).get(request_id)
-        if req:
-            req["status"] = "confirmed"
-            req["conversion"] = {"meetingId": created["meeting"]["id"], "convertedAt": converted_at}
-            req["taskBlocker"] = {**(req.get("taskBlocker") or {}), "status": "confirmed", "meetingId": created["meeting"]["id"], "updatedAt": converted_at}
-            req["updatedAt"] = converted_at
-            _save_meeting_request_store(store)
-            source = req.get("source") or {}
-            _project_execution_update_meeting_blocker(source.get("projectId"), source.get("taskId"), req.get("id"), status="confirmed", meetingId=created["meeting"]["id"], awaitingUserDecision=False)
-            if body.get("autoConfirmed"):
-                _meeting_request_log_auto_confirm_activity(req, created["meeting"], body.get("autoConfirmReason"))
-            confirmed_req = _meeting_request_public(req)
-    approved_notification = None
-    if confirmed_req:
-        approved_notification = _send_meeting_request_notification(
-            confirmed_req,
-            "approved",
-            summary=f"会议申请已同意，会议 ID：{created['meeting']['id']}",
-            details=_meeting_request_approved_notification_details(confirmed_req),
-            actions=[{
-                "category": "jump",
-                "text": "查看会议",
-                "url": _meeting_open_url(created["meeting"]["id"]),
-            }],
-        )
-    auto_run_result = None
-    auto_run_summary = {}
-    if body.get("autoConfirmed"):
-        auto_run_result = _handle_executable_meeting_run(created["meeting"]["id"], {
-            "action": "auto_start",
-            "actorId": req.get("requestingAgentId") or "agent",
-            "actorType": "agent",
-        })
-        auto_run_summary = {
-            "attempted": True,
-            "startedAt": _exec_meeting_now(),
-            "ok": bool(auto_run_result.get("ok")) if isinstance(auto_run_result, dict) else False,
-            "stage": ((auto_run_result or {}).get("meeting") or {}).get("stage") if isinstance(auto_run_result, dict) else "",
-            "error": (auto_run_result or {}).get("error") if isinstance(auto_run_result, dict) else "Auto run failed",
-        }
-        if isinstance(auto_run_result, dict) and auto_run_result.get("meeting"):
-            created["meeting"] = auto_run_result["meeting"]
-    with _MEETING_REQUEST_LOCK:
-        store = _load_meeting_request_store()
-        req = store.get("requests", {}).get(request_id)
-        if req:
-            req["conversion"] = req.get("conversion") or {"meetingId": created["meeting"]["id"], "convertedAt": converted_at}
-            if auto_run_summary:
-                req["conversion"]["autoRun"] = auto_run_summary
-            req["updatedAt"] = _exec_meeting_now()
-            _save_meeting_request_store(store)
-            result = {"ok": True, "request": _meeting_request_public(req), "meeting": created["meeting"], "meetingId": created["meeting"]["id"], "idempotent": bool(created.get("idempotent"))}
-            if auto_run_summary:
-                result["autoRun"] = auto_run_summary
-            result["notification"] = approved_notification
-            return result
-    result = {"ok": True, "meeting": created["meeting"], "meetingId": created["meeting"]["id"]}
-    if auto_run_summary:
-        result["autoRun"] = auto_run_summary
-    result["notification"] = approved_notification or _send_meeting_request_notification(
-        req,
-        "approved",
-        summary=f"会议申请已同意，会议 ID：{created['meeting']['id']}",
-        details=_meeting_request_approved_notification_details(req),
-        actions=[{
-            "category": "jump",
-            "text": "查看会议",
-            "url": _meeting_open_url(created["meeting"]["id"]),
-        }],
+
+
+
+
+def _handle_meeting_request_create(project_id, task_id, body):
+    project, task = _meeting_request_find_project_task(project_id, task_id)
+    if not project:
+        return meeting_requests_service.error("Project not found", 404, "project_not_found")
+    if not task:
+        return meeting_requests_service.error("Task not found", 404, "task_not_found")
+    hooks = _meeting_request_service_hooks()
+    candidates = _meeting_request_context_candidates(project, task)
+    _, result = _meeting_domain_repository().update(
+        lambda data: meeting_requests_service.create_command(data, project, task, body, candidates, hooks)
     )
+    if not result.get("ok"):
+        if result.get("code") == "archive_manager_not_meeting_participant":
+            return _exec_meeting_archive_manager_error(result.get("participants") or [])
+        return result
+    request = result["request"]
+    created = bool(result.pop("created", False))
+    if result.get("idempotent") or not created:
+        reconciliation = _meeting_request_reconcile_project(request.get("id"))
+        if reconciliation.get("attempted"):
+            result["projectReconciliation"] = reconciliation
+        return result
+    blocked = _project_execution_block_for_meeting_request(
+        project_id, task_id, request, "AI meeting requested; waiting for meeting resolution.",
+    )
+    if not blocked.get("ok"):
+        _meeting_request_record_reconciliation(
+            request["id"], "project_block_create", blocked,
+            {"projectId": project_id, "taskId": task_id},
+        )
+        return blocked
+    auto_reason = _meeting_request_auto_confirm_reason(project, request.get("urgency"))
+    if auto_reason:
+        auto = _handle_meeting_request_confirm(request["id"], {
+            "confirmedBy": f"agent:{request.get('requestingAgentId') or ''}",
+            "autoConfirmed": True, "autoConfirmReason": auto_reason,
+            "selectedContextIds": body.get("selectedContextIds") or body.get("contextIds") or [],
+            "supplementalContext": body.get("supplementalContext") or "",
+            "idempotencyKey": f"meeting-request-auto:{request['id']}",
+        })
+        if auto.get("ok"):
+            auto["autoConfirmed"] = True
+            return auto
+        return {
+            "ok": True, "request": request, "autoConfirmError": auto,
+            "notification": _send_meeting_request_notification(request, "pending"),
+        }
+    return {"ok": True, "request": request, "notification": _send_meeting_request_notification(request, "pending")}
+
+
+def _meeting_request_list_filtered(query_string=""):
+    parsed = urllib.parse.parse_qs(query_string or "")
+    status_filter = (parsed.get("status") or [""])[0]
+    project_id = (parsed.get("projectId") or [""])[0]
+    task_id = (parsed.get("taskId") or [""])[0]
+    return meeting_requests_service.list_command(
+        _meeting_domain_repository().snapshot(), status=status_filter, project_id=project_id, task_id=task_id,
+    )
+
+
+def _handle_meeting_request_detail(request_id):
+    return meeting_requests_service.detail_command(_meeting_domain_repository().snapshot(), request_id)
+
+
+def _handle_meeting_request_confirm(request_id, body):
+    snapshot = _meeting_domain_repository().snapshot()
+    request = snapshot.get("requests", {}).get(request_id)
+    if not request:
+        return meeting_requests_service.error("Meeting request not found", 404, "request_not_found")
+    source = request.get("source") if isinstance(request.get("source"), dict) else {}
+    project_ref = _meeting_project_ref(str(body.get("projectId") or source.get("projectId") or ""))
+    if not project_ref.get("ok"):
+        return meeting_requests_service.error(
+            project_ref.get("error") or "Project not found", project_ref.get("_status", 404),
+            project_ref.get("code", "project_not_found"),
+        )
+    hooks = _meeting_request_service_hooks()
+    defaults = {
+        "meetingId": str(uuid.uuid4()),
+        "preparingTimeoutSec": _meeting_preparing_timeout_sec(),
+        "decisionWindowSec": _meeting_clamped_decision_window_sec(_meeting_decision_window_sec()),
+        "contextBudget": _meeting_context_budget(None),
+        "allowConflicts": False,
+    }
+    _, result = _meeting_domain_repository().update(
+        lambda data: meeting_requests_service.confirm_command(
+            data, request_id, body, project_title=project_ref.get("projectTitle") or "",
+            lifecycle_defaults=defaults, hooks=hooks,
+        )
+    )
+    if not result.get("ok"):
+        if result.get("code") == "archive_manager_not_meeting_participant":
+            return _exec_meeting_archive_manager_error(result.get("participants") or [])
+        return result
+    request = result.get("request") or {}
+    meeting = result.get("meeting")
+    if result.get("idempotent"):
+        reconciliation = _meeting_request_reconcile_project(request_id)
+        if reconciliation.get("attempted"):
+            result["projectReconciliation"] = reconciliation
+        return result
+    project_update = _project_execution_update_meeting_blocker(
+        source.get("projectId"), source.get("taskId"), request_id,
+        status="confirmed", meetingId=result.get("meetingId"), awaitingUserDecision=False,
+    )
+    if not project_update.get("ok"):
+        _meeting_request_record_reconciliation(
+            request_id, "project_confirm", project_update,
+            {"projectId": source.get("projectId"), "taskId": source.get("taskId"), "meetingId": result.get("meetingId")},
+        )
+    if body.get("autoConfirmed") and meeting:
+        _meeting_request_log_auto_confirm_activity(request, meeting, body.get("autoConfirmReason"))
+    notification = _send_meeting_request_notification(
+        request, "approved", summary=f"会议申请已同意，会议 ID：{result.get('meetingId')}",
+        details=_meeting_request_approved_notification_details(request),
+        actions=[{"category": "jump", "text": "查看会议", "url": _meeting_open_url(result.get("meetingId"))}],
+    )
+    if body.get("autoConfirmed") and meeting:
+        auto_run = _handle_executable_meeting_run(meeting["id"], {
+            "action": "auto_start", "actorId": request.get("requestingAgentId") or "agent", "actorType": "agent",
+        })
+        summary = {
+            "attempted": True, "startedAt": _exec_meeting_now(),
+            "ok": bool(auto_run.get("ok")) if isinstance(auto_run, dict) else False,
+            "stage": ((auto_run or {}).get("meeting") or {}).get("stage") if isinstance(auto_run, dict) else "",
+            "error": (auto_run or {}).get("error") if isinstance(auto_run, dict) else "Auto run failed",
+        }
+        def record_auto_run(data):
+            current = data.get("requests", {}).get(request_id)
+            if current:
+                current.setdefault("conversion", {})["autoRun"] = summary
+                current["updatedAt"] = _exec_meeting_now()
+            return meeting_requests_service.public_request(current)
+        _, current_request = _meeting_domain_repository().update(record_auto_run)
+        result["request"] = current_request
+        result["autoRun"] = summary
+        if isinstance(auto_run, dict) and auto_run.get("meeting"):
+            result["meeting"] = auto_run["meeting"]
+    result["notification"] = notification
+    if not project_update.get("ok"):
+        result["projectReconciliationPending"] = True
     return result
 
 
 def _handle_meeting_request_reject(request_id, body):
-    reason = str(body.get("reason") or "").strip()
-    if not reason:
-        return _meeting_request_error("Rejection reason is required", 400, "reason_required")
-    with _MEETING_REQUEST_LOCK:
-        store = _load_meeting_request_store()
-        req = store.get("requests", {}).get(request_id)
-        if not req:
-            return _meeting_request_error("Meeting request not found", 404, "request_not_found")
-        if req.get("status") == "confirmed":
-            return _meeting_request_error("Confirmed meeting request cannot be rejected", 409, "request_confirmed")
-        if req.get("status") == "rejected":
-            return {"ok": True, "request": _meeting_request_public(req), "idempotent": True}
-        now = _exec_meeting_now()
-        req["status"] = "rejected"
-        req["review"] = {"rejectedBy": str(body.get("rejectedBy") or "user"), "rejectedAt": now, "rejectionReason": reason}
-        req["taskBlocker"] = {**(req.get("taskBlocker") or {}), "status": "rejected", "rejectionReason": reason, "updatedAt": now}
-        req["updatedAt"] = now
-        _save_meeting_request_store(store)
-    source = req.get("source") or {}
-    _project_execution_update_meeting_blocker(source.get("projectId"), source.get("taskId"), req.get("id"), status="rejected", rejectionReason=reason, awaitingUserDecision=True)
-    _handle_task_comment(source.get("projectId", ""), source.get("taskId", ""), {
-        "author": "meeting-request",
-        "text": f"AI meeting request rejected: {reason}",
-    })
-    notification = _send_meeting_request_notification(
-        req,
-        "rejected",
-        summary=f"会议申请已拒绝：{reason}",
-        actions=[],
-        details=_meeting_request_notification_details(req) + [("拒绝原因", reason)],
+    hooks = _meeting_request_service_hooks()
+    _, result = _meeting_domain_repository().update(
+        lambda data: meeting_requests_service.reject_command(data, request_id, body, hooks)
     )
-    return {"ok": True, "request": _meeting_request_public(req), "notification": notification}
+    if not result.get("ok"):
+        return result
+    if result.get("idempotent"):
+        reconciliation = _meeting_request_reconcile_project(request_id)
+        if reconciliation.get("attempted"):
+            result["projectReconciliation"] = reconciliation
+        return result
+    request = result["request"]; source = request.get("source") or {}; reason = str(body.get("reason") or "").strip()
+    project_update = _project_execution_update_meeting_blocker(
+        source.get("projectId"), source.get("taskId"), request_id,
+        status="rejected", rejectionReason=reason, awaitingUserDecision=True,
+    )
+    if not project_update.get("ok"):
+        _meeting_request_record_reconciliation(
+            request_id, "project_reject", project_update,
+            {"projectId": source.get("projectId"), "taskId": source.get("taskId"), "reason": reason},
+        )
+        result["projectReconciliationPending"] = True
+    _handle_task_comment(source.get("projectId", ""), source.get("taskId", ""), {
+        "author": "meeting-request", "text": f"AI meeting request rejected: {reason}",
+    })
+    result["notification"] = _send_meeting_request_notification(
+        request, "rejected", summary=f"会议申请已拒绝：{reason}", actions=[],
+        details=_meeting_request_notification_details(request) + [("拒绝原因", reason)],
+    )
+    return result
 
 
 def _exec_meeting_clean_participants(raw):
@@ -17358,80 +17301,75 @@ def _meeting_request_unresolved_for_task(req, project_id, task_id):
 
 
 def _meeting_request_resolve_task_blocker(request_id, status, extra=None):
-    if not request_id:
-        return {"ok": True, "skipped": True}
-    with _MEETING_REQUEST_LOCK:
-        store = _load_meeting_request_store()
-        req = store.get("requests", {}).get(request_id)
-        if not req:
-            return {"ok": False, "error": "Meeting request not found", "_status": 404}
-        now = _exec_meeting_now()
-        req["taskBlocker"] = {**(req.get("taskBlocker") or {}), "status": status, "resolvedAt": now, "updatedAt": now, **(extra or {})}
-        req["updatedAt"] = now
-        _save_meeting_request_store(store)
-        return {"ok": True, "request": _meeting_request_public(req)}
+    _, result = _meeting_domain_repository().update(
+        lambda data: meeting_requests_service.resolve_blocker_command(
+            data, request_id, status, extra, _meeting_request_service_hooks(),
+        )
+    )
+    return result
 
 
 def _project_execution_block_for_meeting_request(project_id, task_id, request, reason="AI meeting request created"):
-    data, project, task = _project_execution_find(project_id, task_id)
-    if not project or not task:
+    cancelled_attempt = {"id": ""}
+    def mutate(project):
+        task = next((item for item in project.get("tasks", []) if item.get("id") == task_id), None)
+        if not task:
+            return {"ok": False, "error": "Project or task not found", "_status": 404}
+        current = task.get("meetingBlocker") if isinstance(task.get("meetingBlocker"), dict) else {}
+        if current.get("requestId") and current.get("requestId") != request.get("id") and _project_execution_meeting_blocker_unresolved(current):
+            return {"ok": False, "error": "Task is blocked by a different meeting request", "code": "project_meeting_link_stale", "_status": 409}
+        now = _proj_now(); active_attempt_id = task.get("activeAttemptId")
+        if active_attempt_id:
+            attempt = _project_execution_attempt(task, active_attempt_id)
+            if attempt:
+                attempt["status"] = "awaiting_meeting_resolution"; attempt["meetingRequestId"] = request.get("id")
+            cancelled_attempt["id"] = active_attempt_id; task["activeAttemptId"] = None
+        task["blockedReason"] = None; task["lastError"] = None
+        task["meetingBlocker"] = {
+            "requestId": request.get("id"), "meetingId": (request.get("conversion") or {}).get("meetingId") or "",
+            "status": request.get("status") or "pending", "reason": _project_execution_redact(reason),
+            "requestingAgentId": request.get("requestingAgentId") or "", "createdAt": request.get("createdAt") or now,
+            "updatedAt": now, "awaitingUserDecision": False, "rejectionReason": "", "outcome": "",
+            "attemptId": active_attempt_id or "",
+        }
+        project.update({
+            "workflowActive": False, "workflowPhase": "awaiting_meeting_resolution", "activeTaskId": task_id,
+            "activeAgent": request.get("requestingAgentId") or task.get("executorAgentId") or task.get("assignee"),
+            "projectExecutionFlowActive": False, "projectExecutionFlowStopReason": "awaiting_meeting_resolution", "updatedAt": now,
+        })
+        _project_execution_transition(project, task, "awaiting_meeting_resolution", request.get("requestingAgentId") or "meeting-request", reason, request.get("id"))
+        return {"ok": True, "project": project, "task": task}
+    try:
+        result = _PROJECT_REPOSITORY.update(project_id, mutate)
+    except ProjectNotFoundError:
         return {"ok": False, "error": "Project or task not found", "_status": 404}
-    now = _proj_now()
-    active_attempt_id = task.get("activeAttemptId")
-    if active_attempt_id:
-        attempt = _project_execution_attempt(task, active_attempt_id)
-        if attempt:
-            attempt["status"] = "awaiting_meeting_resolution"
-            attempt["meetingRequestId"] = request.get("id")
+    if result.get("ok") and cancelled_attempt["id"]:
         with _PROJECT_EXECUTION_LOCK:
-            flag = _PROJECT_EXECUTION_CANCEL_FLAGS.get(active_attempt_id)
-            if flag:
-                flag.set()
-            _PROJECT_EXECUTION_REVIEW_FLAGS.discard(active_attempt_id)
-        task["activeAttemptId"] = None
-    task["blockedReason"] = None
-    task["lastError"] = None
-    task["meetingBlocker"] = {
-        "requestId": request.get("id"),
-        "meetingId": (request.get("conversion") or {}).get("meetingId") or "",
-        "status": request.get("status") or "pending",
-        "reason": _project_execution_redact(reason),
-        "requestingAgentId": request.get("requestingAgentId") or "",
-        "createdAt": request.get("createdAt") or now,
-        "updatedAt": now,
-        "awaitingUserDecision": False,
-        "rejectionReason": "",
-        "outcome": "",
-    }
-    project.update({
-        "workflowActive": False,
-        "workflowPhase": "awaiting_meeting_resolution",
-        "activeTaskId": task_id,
-        "activeAgent": request.get("requestingAgentId") or task.get("executorAgentId") or task.get("assignee"),
-        "projectExecutionFlowActive": False,
-        "projectExecutionFlowStopReason": "awaiting_meeting_resolution",
-        "updatedAt": now,
-    })
-    _project_execution_transition(project, task, "awaiting_meeting_resolution", request.get("requestingAgentId") or "meeting-request", reason, request.get("id"))
-    _save_projects(data)
-    return {"ok": True, "project": project, "task": task}
+            flag = _PROJECT_EXECUTION_CANCEL_FLAGS.get(cancelled_attempt["id"])
+            if flag: flag.set()
+            _PROJECT_EXECUTION_REVIEW_FLAGS.discard(cancelled_attempt["id"])
+    return result
 
 
 def _project_execution_update_meeting_blocker(project_id, task_id, request_id, **updates):
-    data, project, task = _project_execution_find(project_id, task_id)
-    if not project or not task:
+    if not project_id or not task_id:
         return {"ok": False, "error": "Project or task not found", "_status": 404}
-    blocker = task.get("meetingBlocker") if isinstance(task.get("meetingBlocker"), dict) else {}
-    if request_id and blocker.get("requestId") and blocker.get("requestId") != request_id:
-        return {"ok": False, "error": "Task is blocked by a different meeting request", "_status": 409}
-    blocker.update({k: v for k, v in updates.items() if v is not None})
-    blocker["requestId"] = blocker.get("requestId") or request_id
-    blocker["updatedAt"] = _proj_now()
-    task["meetingBlocker"] = blocker
-    task["updatedAt"] = _proj_now()
-    project["updatedAt"] = _proj_now()
-    _save_projects(data)
-    return {"ok": True, "project": project, "task": task}
+    def mutate(project):
+        task = next((item for item in project.get("tasks", []) if item.get("id") == task_id), None)
+        if not task:
+            return {"ok": False, "error": "Project or task not found", "_status": 404}
+        blocker = task.get("meetingBlocker") if isinstance(task.get("meetingBlocker"), dict) else {}
+        if request_id and blocker.get("requestId") and blocker.get("requestId") != request_id:
+            return {"ok": False, "error": "Task is blocked by a different meeting request", "code": "project_meeting_link_stale", "_status": 409}
+        blocker.update({key: value for key, value in updates.items() if value is not None})
+        blocker["requestId"] = blocker.get("requestId") or request_id
+        blocker["updatedAt"] = _proj_now()
+        task["meetingBlocker"] = blocker; task["updatedAt"] = _proj_now(); project["updatedAt"] = _proj_now()
+        return {"ok": True, "project": project, "task": task}
+    try:
+        return _PROJECT_REPOSITORY.update(project_id, mutate)
+    except ProjectNotFoundError:
+        return {"ok": False, "error": "Project or task not found", "_status": 404}
 
 
 def _project_execution_action_item_text(item):
@@ -17997,7 +17935,9 @@ def _project_execution_apply_meeting_output_to_task(project, task, meeting, resu
     return {"applied": applied, "linked": linked, "risks": risks_added, "meetingRecordChanged": record_changed, "checklistSeeded": checklist_seeded, "pendingRequired": _project_execution_has_pending_meeting_actions(task)}
 
 
-def _project_execution_apply_meeting_result(meeting):
+
+
+def _project_execution_apply_meeting_result(meeting, _record_reconciliation=True):
     if not isinstance(meeting, dict):
         return {"ok": False, "skipped": True, "reason": "invalid_meeting"}
     source = meeting.get("source") if isinstance(meeting.get("source"), dict) else {}
@@ -18010,55 +17950,89 @@ def _project_execution_apply_meeting_result(meeting):
     outcome = _meeting_result_outcome(result.get("outcome") or result.get("status") or result.get("result"))
     if not outcome and meeting.get("stage") in {"cancelled", "failed"}:
         outcome = "needs_user_decision"
-    data, project, task = _project_execution_find(project_id, task_id)
-    if not project or not task:
-        return {"ok": False, "error": "Project or task not found", "_status": 404}
-    blocker = task.get("meetingBlocker") if isinstance(task.get("meetingBlocker"), dict) else {}
-    if blocker.get("requestId") != request_id:
-        return {"ok": True, "skipped": True, "reason": "task_not_blocked_by_meeting"}
-    now = _proj_now()
-    blocker.update({
-        "meetingId": meeting.get("id") or blocker.get("meetingId") or "",
-        "outcome": outcome or "needs_user_decision",
-        "decision": _project_execution_redact(result.get("decision") or result.get("summary") or ""),
-        "updatedAt": now,
-    })
-    if outcome == "approved":
-        blocker.update({"status": "resolved_continue", "resolvedAt": now, "awaitingUserDecision": False})
-        _meeting_request_resolve_task_blocker(request_id, "resolved_continue", {"meetingId": meeting.get("id") or "", "outcome": outcome})
+    resume = {"needed": False, "mode": "continuous"}
+    def mutate(project):
+        task = next((item for item in project.get("tasks", []) if item.get("id") == task_id), None)
+        if not task:
+            return {"ok": False, "error": "Project or task not found", "_status": 404}
+        blocker = task.get("meetingBlocker") if isinstance(task.get("meetingBlocker"), dict) else {}
+        if blocker.get("requestId") != request_id:
+            return {"ok": True, "skipped": True, "reason": "task_not_blocked_by_meeting"}
+        current_meeting_id = str(blocker.get("meetingId") or "")
+        if current_meeting_id and current_meeting_id != str(meeting.get("id") or ""):
+            return {"ok": True, "skipped": True, "reason": "meeting_link_stale"}
+        source_attempt = str(source.get("attemptId") or "")
+        blocker_attempt = str(blocker.get("attemptId") or "")
+        if source_attempt and blocker_attempt and source_attempt != blocker_attempt:
+            return {"ok": True, "skipped": True, "reason": "attempt_link_stale"}
+        now = _proj_now()
+        blocker.update({
+            "meetingId": meeting.get("id") or blocker.get("meetingId") or "",
+            "outcome": outcome or "needs_user_decision",
+            "decision": _project_execution_redact(result.get("decision") or result.get("summary") or ""),
+            "updatedAt": now,
+        })
+        if outcome == "approved":
+            blocker.update({"status": "resolved_continue", "resolvedAt": now, "awaitingUserDecision": False})
+            task["meetingBlocker"] = blocker; task["blockedReason"] = None; task["lastError"] = None; task["activeAttemptId"] = None
+            applied = _project_execution_apply_meeting_output_to_task(project, task, meeting, result, request_id)
+            reason = f"Meeting {meeting.get('id')} reached consensus"
+            reason += "; meeting action items must be completed before original task resumes." if applied.get("pendingRequired") else "; task may continue."
+            _project_execution_transition(project, task, "backlog", "meeting", reason, request_id)
+            _project_execution_move_task_to_column(project, task, _wf_get_backlog_col(project))
+            project.update({
+                "workflowActive": False, "workflowPhase": "meeting_resolved_continue", "activeTaskId": None,
+                "activeAgent": None, "projectExecutionFlowActive": project.get("projectExecutionStartMode") == "continuous",
+                "projectExecutionFlowStopReason": None, "updatedAt": now,
+            })
+            resume["needed"] = True; resume["mode"] = project.get("projectExecutionStartMode") or "continuous"
+            return {"ok": True, "status": "resolved_continue", "taskId": task_id, "appliedMeetingResult": applied, "requestStatus": "resolved_continue"}
+        if outcome in {"rejected", "no_consensus"}:
+            blocker.update({"status": "blocked", "resolvedAt": now, "awaitingUserDecision": False})
+            task["meetingBlocker"] = blocker
+            task["blockedReason"] = result.get("decision") or result.get("summary") or "Meeting ended without consensus."
+            _project_execution_upsert_meeting_record(task, meeting, result, request_id, outcome, now)
+            _project_execution_transition(project, task, "blocked", "meeting", task["blockedReason"], request_id)
+            project.update({"workflowActive": False, "workflowPhase": "blocked", "activeTaskId": None, "activeAgent": None, "projectExecutionFlowActive": False, "projectExecutionFlowStopReason": "meeting_no_consensus", "updatedAt": now})
+            return {"ok": True, "status": "blocked", "taskId": task_id, "requestStatus": "blocked"}
+        blocker.update({"status": "needs_user_decision", "awaitingUserDecision": True})
         task["meetingBlocker"] = blocker
-        task["blockedReason"] = None
-        task["lastError"] = None
-        task["activeAttemptId"] = None
-        applied = _project_execution_apply_meeting_output_to_task(project, task, meeting, result, request_id)
-        resume_reason = f"Meeting {meeting.get('id')} reached consensus"
-        if applied.get("pendingRequired"):
-            resume_reason += "; meeting action items must be completed before original task resumes."
-        else:
-            resume_reason += "; task may continue."
-        _project_execution_transition(project, task, "backlog", "meeting", resume_reason, request_id)
-        _project_execution_move_task_to_column(project, task, _wf_get_backlog_col(project))
-        project.update({"workflowActive": False, "workflowPhase": "meeting_resolved_continue", "activeTaskId": None, "activeAgent": None, "projectExecutionFlowActive": project.get("projectExecutionStartMode") == "continuous", "projectExecutionFlowStopReason": None, "updatedAt": now})
-        _save_projects(data)
-        threading.Thread(target=lambda: _handle_project_execution_start(project_id, task_id, {"projectStart": True, "mode": project.get("projectExecutionStartMode") or "continuous", "autoReviewAfterExecution": True, "by": "meeting"}), daemon=True).start()
-        return {"ok": True, "status": "resolved_continue", "taskId": task_id, "appliedMeetingResult": applied}
-    if outcome in {"rejected", "no_consensus"}:
-        blocker.update({"status": "blocked", "resolvedAt": now, "awaitingUserDecision": False})
-        _meeting_request_resolve_task_blocker(request_id, "blocked", {"meetingId": meeting.get("id") or "", "outcome": outcome})
-        task["meetingBlocker"] = blocker
-        task["blockedReason"] = result.get("decision") or result.get("summary") or "Meeting ended without consensus."
-        _project_execution_upsert_meeting_record(task, meeting, result, request_id, outcome, now)
-        _project_execution_transition(project, task, "blocked", "meeting", task["blockedReason"], request_id)
-        project.update({"workflowActive": False, "workflowPhase": "blocked", "activeTaskId": None, "activeAgent": None, "projectExecutionFlowActive": False, "projectExecutionFlowStopReason": "meeting_no_consensus", "updatedAt": now})
-        _save_projects(data)
-        return {"ok": True, "status": "blocked", "taskId": task_id}
-    blocker.update({"status": "needs_user_decision", "awaitingUserDecision": True})
-    task["meetingBlocker"] = blocker
-    _project_execution_upsert_meeting_record(task, meeting, result, request_id, "needs_user_decision", now)
-    _project_execution_transition(project, task, "awaiting_meeting_resolution", "meeting", "Meeting requires user decision before task can continue.", request_id)
-    project.update({"workflowActive": False, "workflowPhase": "awaiting_meeting_resolution", "activeTaskId": task_id, "activeAgent": None, "projectExecutionFlowActive": False, "projectExecutionFlowStopReason": "meeting_needs_user_decision", "updatedAt": now})
-    _save_projects(data)
-    return {"ok": True, "status": "needs_user_decision", "taskId": task_id}
+        _project_execution_upsert_meeting_record(task, meeting, result, request_id, "needs_user_decision", now)
+        _project_execution_transition(project, task, "awaiting_meeting_resolution", "meeting", "Meeting requires user decision before task can continue.", request_id)
+        project.update({"workflowActive": False, "workflowPhase": "awaiting_meeting_resolution", "activeTaskId": task_id, "activeAgent": None, "projectExecutionFlowActive": False, "projectExecutionFlowStopReason": "meeting_needs_user_decision", "updatedAt": now})
+        return {"ok": True, "status": "needs_user_decision", "taskId": task_id, "requestStatus": "needs_user_decision"}
+    try:
+        applied = _PROJECT_REPOSITORY.update(project_id, mutate)
+    except (ProjectConflictError, ProjectNotFoundError) as exc:
+        failure = {"ok": False, "error": "Project meeting result commit failed", "code": "project_meeting_commit_failed", "_status": 409}
+        if _record_reconciliation:
+            _meeting_request_record_reconciliation(
+                request_id, "project_meeting_result", failure,
+                {"projectId": project_id, "taskId": task_id, "meetingId": meeting.get("id") or ""},
+            )
+        return failure
+    if not applied.get("ok"):
+        if _record_reconciliation:
+            _meeting_request_record_reconciliation(
+                request_id, "project_meeting_result", applied,
+                {"projectId": project_id, "taskId": task_id, "meetingId": meeting.get("id") or ""},
+            )
+        return applied
+    if applied.get("skipped"):
+        return applied
+    request_status = applied.pop("requestStatus", "")
+    request_resolution = _meeting_request_resolve_task_blocker(
+        request_id, request_status,
+        {"meetingId": meeting.get("id") or "", "outcome": outcome or "needs_user_decision"},
+    )
+    if not request_resolution.get("ok"):
+        applied["requestReconciliationPending"] = True
+    if resume["needed"]:
+        threading.Thread(target=lambda: _handle_project_execution_start(
+            project_id, task_id,
+            {"projectStart": True, "mode": resume["mode"], "autoReviewAfterExecution": True, "by": "meeting"},
+        ), daemon=True).start()
+    return applied
 
 
 _ARTIFACT_EXCLUDE_DIRS = {

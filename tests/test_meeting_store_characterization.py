@@ -24,10 +24,7 @@ EXPECTED_WRITERS = {
         "_handle_executable_meeting_end_with_moderator", "_handle_executable_meeting_run",
         "_handle_executable_meeting_reconcile",
     },
-    "_save_meeting_request_store": {
-        "_handle_meeting_request_create", "_handle_meeting_request_confirm",
-        "_handle_meeting_request_reject", "_meeting_request_resolve_task_blocker",
-    },
+    "_save_meeting_request_store": set(),
 }
 
 EXPECTED_READERS = {
@@ -41,11 +38,7 @@ EXPECTED_READERS = {
         "_handle_executable_meeting_targeted_question", "_handle_executable_meeting_end_with_moderator",
         "_handle_executable_meeting_run", "_handle_executable_meeting_reconcile",
     },
-    "_load_meeting_request_store": {
-        "_handle_meeting_request_create", "_meeting_request_list_filtered", "_handle_meeting_request_detail",
-        "_handle_meeting_request_confirm", "_handle_meeting_request_reject",
-        "_meeting_request_resolve_task_blocker",
-    },
+    "_load_meeting_request_store": set(),
 }
 
 REQUIRED_DOMAIN_FUNCTIONS = {
