@@ -137,7 +137,7 @@ Incrementally extract:
 
 - `meeting_lifecycle.py`: create, transition, conflict/intervention, agenda/arbitration/moderator operations, turns, terminalization, and reconcile.
 - `meeting_requests.py`: create/list/detail, context selection, confirm/reject, conversion, and blocker linkage.
-- `meeting_action_items.py`: result normalization, project projection, and task conversion.
+- `meeting_action_items.py`: result normalization and deduplicated projection onto the existing linked source task.
 - `meeting_notifications.py`: bounded sanitized DTOs, stable intents, and best-effort delivery coordination.
 - `meeting_callbacks.py`: trusted callback commands, action allowlists, linkage, and persistent replay handling.
 

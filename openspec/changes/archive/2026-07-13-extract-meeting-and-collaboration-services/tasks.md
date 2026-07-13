@@ -20,7 +20,7 @@
 
 ## 5. Action-item projection and task conversion
 
-- [x] 5.1 Extract Meeting result normalization, stable action-item identity, project-task projection, completion state, explicit selection, and `(meetingId, actionItemId)` task conversion dedupe into `meeting_action_items.py`; migrate callers and test repeated conversion, concurrent project edits, stale Meeting linkage, partial failure/retry, bounded history, and old-record compatibility.
+- [x] 5.1 Extract Meeting result normalization, stable action-item identity, source-task projection, completion state, explicit selection, and `(meetingId, actionItemId)` projection dedupe into `meeting_action_items.py`; migrate callers and test repeated confirmation, concurrent project edits, stale Meeting linkage, partial failure/retry, bounded history, and old-record compatibility.
 
 ## 6. Notifications and trusted callbacks
 
@@ -35,5 +35,5 @@
 ## 8. Documentation, migration rehearsal, and release readiness
 
 - [x] 8.1 Update service-boundary/operator documentation for the unified schema, authority gate, migration modes/report/conflict handling, backups/rollback, lock/token ordering, trusted callbacks, reconciliation, observability, and legacy-store non-authority; run the migration on copied small/medium/large fixtures and attach exact count/link/digest evidence.
-- [x] 8.2 Start the application only through `start.sh` and complete manual acceptance for migration-required/invalid states, migrated startup, Meeting lifecycle/intervention/recovery, occupancy conflicts, request decision/conversion, Project resume/block, action-item task conversion, callback replay, notification degradation, and management authorization.
+- [x] 8.2 Start the application only through `start.sh` and complete manual acceptance for migration-required/invalid states, migrated startup, Meeting lifecycle/intervention/recovery, occupancy conflicts, request decision/conversion, Project resume/block, action-item source-task projection, callback replay, notification degradation, and management authorization.
 - [x] 8.3 Execute an isolated release rehearsal: stop mutations and server, back up legacy/unified/project state, run migration dry-run/apply/validation, start exactly one candidate process through `start.sh`, exercise active Meeting/request/project state, stop and restore backups/prior code, restart through `start.sh`, and verify counts, links, occupancy, idempotency, and non-reversible Agent/Feishu reconciliation before final confirmation.

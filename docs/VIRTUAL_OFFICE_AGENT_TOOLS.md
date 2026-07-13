@@ -179,7 +179,7 @@ Meeting requests are for project-task collaboration blockers. A valid request mu
 
 Conflict handling uses `POST /api/meetings/executable/<meetingId>/conflict` with actions such as `wait`, `reserve`, `replace`, `force_join`, `cancel_conflict`, and `refresh`. Medium/high-risk conflicts can include a busy-agent advisory recommendation, estimated availability, interruption risk, and resume notes. Advisory output is read-only; the user or caller must still choose a resolution.
 
-Task-collaboration meeting results can expose action-item drafts. `POST /api/meetings/executable/<meetingId>/action-items/<actionItemId>` supports user-controlled draft update, rejection, meeting-only retention, and confirmation into a project task. Confirmation is idempotent and stores source meeting/action-item metadata on the created task.
+Task-collaboration meeting results can expose action-item drafts. `POST /api/meetings/executable/<meetingId>/action-items/<actionItemId>` supports user-controlled draft update, rejection, meeting-only retention, and confirmation onto the Meeting's existing linked source task. Confirmation is idempotent, creates no new board task, and stores a deduplicated `meetingActionItems` record with source Meeting/action-item metadata on that source task.
 
 ### Projects and tasks
 

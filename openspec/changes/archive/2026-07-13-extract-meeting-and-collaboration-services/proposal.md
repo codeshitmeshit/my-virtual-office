@@ -5,7 +5,7 @@ Meeting lifecycle, AI meeting requests, action items, Agent occupancy restoratio
 ## What Changes
 
 - Extract meeting lifecycle and turn orchestration into meeting-domain services.
-- Separate AI meeting request confirmation and action-item-to-task workflows.
+- Separate AI meeting request confirmation and action-item projection workflows.
 - Separate notification delivery from Feishu callback/action processing.
 - Consolidate executable Meetings, AI meeting requests, occupancy, events, and idempotency metadata into one authoritative JSON store.
 - Provide an idempotent migration script that backs up, validates, and combines both legacy JSON stores before the unified store becomes authoritative.

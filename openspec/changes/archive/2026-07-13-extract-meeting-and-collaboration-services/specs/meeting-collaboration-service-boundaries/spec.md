@@ -70,17 +70,17 @@ Meeting completion MUST preserve the linkage between meeting request, meeting, p
 - **WHEN** a meeting result targets a superseded request, task, attempt, or blocker
 - **THEN** the stale result SHALL not overwrite newer project execution state
 
-### Requirement: Action-item conversion compatibility
+### Requirement: Action-item projection compatibility
 Meeting action-item workflows MUST preserve action-item text, ownership, completion state, meeting linkage, explicit user selection, project/task destination, duplicate prevention, and existing API and persistence semantics.
 
-#### Scenario: Selected action item becomes a task
-- **WHEN** an authorized user converts a selected meeting action item into a linked project task
-- **THEN** exactly one compatible task SHALL be created with traceable meeting and action-item linkage
+#### Scenario: Selected action item is attached to its source task
+- **WHEN** an authorized user confirms a selected meeting action item for a Meeting linked to a project source task
+- **THEN** exactly one compatible action-item record SHALL be attached to that existing source task with traceable Meeting and action-item linkage
 - **AND** unrelated action items SHALL remain unchanged
 
-#### Scenario: Action-item conversion is repeated
-- **WHEN** the same conversion request is retried
-- **THEN** the system SHALL return the existing linked task instead of creating a duplicate
+#### Scenario: Action-item projection is repeated
+- **WHEN** the same confirmation request is retried
+- **THEN** the system SHALL return the existing linked source task and action-item record instead of creating a duplicate record
 
 ### Requirement: Notification delivery isolation
 Meeting and request state transitions SHALL persist independently of external notification delivery, while notification intents, redacted DTOs, retry markers, and existing best-effort delivery behavior remain compatible.

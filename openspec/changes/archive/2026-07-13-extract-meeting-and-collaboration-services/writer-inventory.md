@@ -6,7 +6,7 @@
 | --- | --- | --- | --- |
 | `executable-meetings.json` | meetings, events, occupancy, executable idempotency | `_EXEC_MEETING_LOCK` | lifecycle create/transition/run/intervention/agenda/arbitration/moderator/targeted-question/end/reconcile, action-item state, projections/advisories that repair data |
 | `meeting-requests.json` | requests, request idempotency, conversion metadata | `_MEETING_REQUEST_LOCK` | create, confirm, reject, blocker resolution |
-| Project Markdown | meeting blocker/history/action items/decisions and created tasks | `ProjectRepository` | request block/update/result application, action-item projection/conversion, user blocker actions |
+| Project Markdown | meeting blocker/history/action items/decisions and source-task projections | `ProjectRepository` | request block/update/result application, action-item projection, user blocker actions |
 | Feishu callback log/config | callback audit and delivery configuration | existing adapter locks | authenticated card receiver and notification adapters |
 
 `tests/test_meeting_store_characterization.py` uses the Python AST to lock the exact direct reader and writer function sets, cross-domain Project/callback/notification/recovery boundaries, and the only two legacy filename literals.

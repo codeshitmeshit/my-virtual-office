@@ -348,7 +348,7 @@ Use one of these meeting types:
 
 - `information_gathering`: collect independent facts, options, or viewpoints.
 - `decision_discussion`: form a decision or surface unresolved disagreements.
-- `task_collaboration`: produce action-item drafts that can later become project tasks.
+- `task_collaboration`: produce action-item drafts that can later be attached to the Meeting's linked source task.
 
 Some UI/API payloads may use short labels such as `discussion` or `task`; prefer the explicit values above when constructing new executable meetings unless the local UI provides different accepted values.
 
@@ -615,7 +615,7 @@ Rules:
 
 ### 10.8 Action Item Drafts
 
-Task-collaboration meetings can produce action-item drafts. Drafts do not automatically become project tasks.
+Task-collaboration meetings can produce action-item drafts. For a project/task-bound Meeting, drafts are attached to the existing linked source task only after confirmation; confirmation does not create a new board task.
 
 Update a draft:
 
@@ -641,7 +641,7 @@ curl -sS -X POST http://127.0.0.1:8090/api/meetings/executable/MEETING_ID/action
   -d '{"action":"keep","by":"user","reason":"Documented but not a project task"}'
 ```
 
-Confirm into a project task:
+Confirm and attach to the Meeting's existing source task:
 
 ```bash
 curl -sS -X POST http://127.0.0.1:8090/api/meetings/executable/MEETING_ID/action-items/ACTION_ITEM_ID \
@@ -660,10 +660,10 @@ curl -sS -X POST http://127.0.0.1:8090/api/meetings/executable/MEETING_ID/action
 
 Rules:
 
-- Formal project task creation requires user confirmation.
+- Source-task action-item attachment requires user confirmation and a Meeting with valid project/task linkage.
 - Use `idempotencyKey` for confirmation.
-- Confirmed tasks store source meeting/action-item metadata.
-- Rejected drafts remain auditable and do not create project tasks.
+- The existing source task stores a deduplicated `meetingActionItems` record with source Meeting/action-item metadata.
+- Rejected drafts remain auditable and are not attached to the source task.
 
 ## 11. Projects and Tasks
 
@@ -1084,7 +1084,7 @@ Require explicit user confirmation before:
 - skipping an independent reviewer
 - proceeding with dirty workspace execution
 - accepting project execution output
-- converting meeting action-item drafts into project tasks
+- attaching meeting action-item drafts to their existing linked source tasks
 - deleting projects/tasks/templates/agents
 - changing raw browser/CDP behavior
 - exposing secrets or private logs
