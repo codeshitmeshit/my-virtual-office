@@ -1,0 +1,25 @@
+tests/test_meeting_for_ai_phase4.py
+  s_5852bad622de94::t_78857b79b7e573 8,444-496
+tests/test_meeting_requests_service.py
+  s_5852bad622de94::t_655ab305db007f 1-91
+tests/test_meeting_store_characterization.py
+  s_5852bad622de94::t_e8ca1b8f447add 27,41
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "5362da9f594c33ea131ba7d9d4f312d5a7942e6b",
+  "prompts": {},
+  "sessions": {
+    "s_5852bad622de94": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f5163-cd74-7df3-a25d-7fd6dd323b5d",
+        "model": "unknown"
+      },
+      "human_author": "codeshitmeshit <codeshitmeshit@126.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
