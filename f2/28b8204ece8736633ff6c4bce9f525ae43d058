@@ -1,0 +1,31 @@
+app/server.py
+  s_5852bad622de94::t_bcdeb5a86fbb27 50,13359-13363,13554-13561,13564-13577,13579-13596
+app/services/meeting_action_items.py
+  s_5852bad622de94::t_1126f2dcb9b447 1-184
+openspec/changes/extract-meeting-and-collaboration-services/meeting-call-inventory.json
+  s_5852bad622de94::t_d12a3b45799a18 372,376,380
+tests/test_meeting_action_items_service.py
+  s_5852bad622de94::t_b81939cdc15ddb 1-72
+tests/test_meeting_for_ai_phase6.py
+  s_5852bad622de94::t_af9efb9a38047f 7,296-322
+tests/test_meeting_store_characterization.py
+  s_5852bad622de94::t_95702e89dcec27 19,33
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "f228b8204ece8736633ff6c4bce9f525ae43d058",
+  "prompts": {},
+  "sessions": {
+    "s_5852bad622de94": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f5163-cd74-7df3-a25d-7fd6dd323b5d",
+        "model": "unknown"
+      },
+      "human_author": "codeshitmeshit <codeshitmeshit@126.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
