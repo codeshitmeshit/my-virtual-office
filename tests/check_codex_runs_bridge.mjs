@@ -8,8 +8,9 @@ const chat = fs.readFileSync(path.join(root, 'app', 'chat.js'), 'utf8');
 const style = fs.readFileSync(path.join(root, 'app', 'style.css'), 'utf8');
 
 const required = [
-  'class ProviderRunBridge',
-  'PROVIDER_RUN_BRIDGE = ProviderRunBridge()',
+  'PROVIDER_RUN_REPOSITORY = ProviderRunRepository(',
+  'PROVIDER_EVENT_JOURNAL = ProviderEventJournal(',
+  'PROVIDER_RUN_COORDINATOR = ProviderRunCoordinator(',
   'def _handle_codex_run_start',
   'def _handle_codex_run_events',
   'def _handle_codex_run_stop',
@@ -26,10 +27,13 @@ for (const needle of required) {
     throw new Error(`missing Codex bridge source marker: ${needle}`);
   }
 }
+for (const obsolete of ['class ProviderRunBridge', '_CODEX_RUN_IDEMPOTENCY', '_PROVIDER_RUN_IDEMPOTENCY']) {
+  if (server.includes(obsolete)) throw new Error(`obsolete Provider authority remains: ${obsolete}`);
+}
 
 const runStart = server.slice(server.indexOf('def _handle_codex_run_start'), server.indexOf('def _handle_codex_run_events'));
-if (!runStart.includes('PROVIDER_RUN_BRIDGE.remember(meta)') || !runStart.includes('PROVIDER_RUN_BRIDGE.emit(run_id')) {
-  throw new Error('Codex runs should use ProviderRunBridge for registry and event emission');
+if (!runStart.includes('PROVIDER_RUN_COORDINATOR.start(command, adapter=adapter, compatibility_meta=meta)') || !runStart.includes('CallableProviderAdapter(')) {
+  throw new Error('Codex runs should use the shared ProviderRunCoordinator and a provider adapter');
 }
 if (!runStart.includes('_handle_codex_chat(run_body)')) {
   throw new Error('Codex runs should reuse existing _handle_codex_chat');

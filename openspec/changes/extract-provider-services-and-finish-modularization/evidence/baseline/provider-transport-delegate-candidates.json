@@ -1,0 +1,35 @@
+{
+  "candidates": [
+    {
+      "allowed": "parse route/query/Last-Event-ID, authenticate, choose HTTP status and headers",
+      "symbol": "OfficeHandler.do_GET"
+    },
+    {
+      "allowed": "parse/validate request and assemble compatibility response",
+      "symbol": "OfficeHandler.do_POST"
+    },
+    {
+      "allowed": "temporary SSE id/event/data framing only",
+      "symbol": "ProviderRunBridge._write_event"
+    },
+    {
+      "allowed": "route adapter forwarding to transport stream",
+      "symbol": "_handle_codex_run_events"
+    },
+    {
+      "allowed": "route adapter forwarding to transport stream",
+      "symbol": "_handle_claude_code_run_events"
+    },
+    {
+      "allowed": "route adapter forwarding to transport stream",
+      "symbol": "_handle_hermes_run_events"
+    }
+  ],
+  "mustMove": [
+    "ProviderRunBridge run/event storage and replay query logic",
+    "provider snapshot, pending approval, and recovered-history projection",
+    "run start/worker/idempotency/terminal/cancellation orchestration",
+    "conversation/native-ID ownership and approval state transitions"
+  ],
+  "schema": 1
+}

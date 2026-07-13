@@ -28,6 +28,7 @@ APPROVAL_METHODS = {
     "item/tool/requestUserInput",
     "mcpServer/elicitation/request",
 }
+MAX_PENDING_APPROVALS = 100
 
 
 def _error_result(code: str, message: str, **extra: Any) -> dict[str, Any]:
@@ -480,7 +481,18 @@ class CodexAppServerClient:
                     "approval": approval,
                 }
                 if approval:
-                    self._store_pending_approval(operation, request_key, method, params, approval)
+                    if not self._store_pending_approval(operation, request_key, method, params, approval):
+                        operation.pending_requests.pop(request_key, None)
+                        self._send({"id": message["id"], "result": self._approval_response(method, params, "cancel")})
+                        operation.emit(
+                            "interaction",
+                            status="resolved",
+                            interactionId=request_key,
+                            interactionType=interaction_type,
+                            method=method,
+                            error="Codex approval capacity reached",
+                        )
+                        return
                     operation.state.set_approval(approval)
                 operation.emit(
                     "interaction",
@@ -702,7 +714,7 @@ class CodexAppServerClient:
         method: str,
         params: dict[str, Any],
         approval: dict[str, Any],
-    ) -> None:
+    ) -> bool:
         entry = {
             "operation": operation,
             "interactionId": str(interaction_id),
@@ -711,8 +723,11 @@ class CodexAppServerClient:
             "approval": approval,
         }
         with self._approval_lock:
+            if len(self._pending_approvals) >= MAX_PENDING_APPROVALS:
+                return False
             self._pending_approvals[str(approval.get("id") or approval.get("approval_id") or interaction_id)] = entry
             self._approval_lock.notify_all()
+            return True
 
     def _clear_pending_approvals(self, thread_id: str = "") -> None:
         with self._approval_lock:

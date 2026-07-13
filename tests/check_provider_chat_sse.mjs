@@ -3,19 +3,18 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 const server = fs.readFileSync('app/server.py', 'utf8');
+const sseTransport = fs.readFileSync('app/provider_sse_transport.py', 'utf8');
 const chat = fs.readFileSync('app/chat.js', 'utf8');
 
 for (const token of [
-  'def stream_provider_events(self, handler, provider_kind, agent_id, conversation_id',
+  'PROVIDER_SSE_TRANSPORT.stream_conversation(self, provider_kind, agent_id, conversation_id, after)',
   '"/api/provider/events"',
-  'provider.snapshot',
-  'provider.heartbeat',
-  'Last-Event-ID',
-  'self._event_log',
-  'self._condition',
-  'PROVIDER_RUN_BRIDGE.publish(',
+  'PROVIDER_EVENT_JOURNAL.publish(',
 ]) {
   assert.ok(server.includes(token), `server.py missing unified provider SSE marker: ${token}`);
+}
+for (const token of ['provider.snapshot', 'provider.heartbeat', 'Last-Event-ID', 'wait_for_conversation_events']) {
+  assert.ok(sseTransport.includes(token), `provider_sse_transport.py missing unified provider SSE marker: ${token}`);
 }
 
 for (const token of [

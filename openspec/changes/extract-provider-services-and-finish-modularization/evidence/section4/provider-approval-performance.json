@@ -1,0 +1,15 @@
+{
+  "pendingAfterResolution": 900,
+  "pendingBeforeResolution": 1000,
+  "providerCalls": 100,
+  "registered": 1000,
+  "registrationLatency": {
+    "maxNs": 386959,
+    "medianNs": 27729,
+    "p95Ns": 42708
+  },
+  "resolved": 100,
+  "schema": 1,
+  "scopeCount": 10,
+  "totalRegistrationNs": 28840292
+}

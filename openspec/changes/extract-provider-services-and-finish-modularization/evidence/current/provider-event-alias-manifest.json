@@ -1,0 +1,1175 @@
+{
+  "aliases": {
+    "approval.request": [
+      {
+        "file": "app/gateway_presence.py",
+        "line": 151
+      },
+      {
+        "file": "app/provider_sse_transport.py",
+        "line": 164
+      },
+      {
+        "file": "app/providers/hermes.py",
+        "line": 1168
+      },
+      {
+        "file": "app/server.py",
+        "line": 4148
+      },
+      {
+        "file": "app/server.py",
+        "line": 4534
+      },
+      {
+        "file": "app/server.py",
+        "line": 4932
+      },
+      {
+        "file": "app/server.py",
+        "line": 5713
+      },
+      {
+        "file": "app/server.py",
+        "line": 6449
+      },
+      {
+        "file": "app/services/provider_events.py",
+        "line": 27
+      }
+    ],
+    "approval.required": [
+      {
+        "file": "app/server.py",
+        "line": 5709
+      },
+      {
+        "file": "app/services/provider_events.py",
+        "line": 27
+      }
+    ],
+    "approval.resolved": [
+      {
+        "file": "app/server.py",
+        "line": 5495
+      },
+      {
+        "file": "app/server.py",
+        "line": 6866
+      },
+      {
+        "file": "app/services/provider_events.py",
+        "line": 27
+      }
+    ],
+    "approval.responded": [
+      {
+        "file": "app/gateway_presence.py",
+        "line": 153
+      },
+      {
+        "file": "app/server.py",
+        "line": 5396
+      },
+      {
+        "file": "app/server.py",
+        "line": 5515
+      },
+      {
+        "file": "app/server.py",
+        "line": 6813
+      },
+      {
+        "file": "app/server.py",
+        "line": 6820
+      },
+      {
+        "file": "app/server.py",
+        "line": 6878
+      },
+      {
+        "file": "app/services/provider_events.py",
+        "line": 27
+      }
+    ],
+    "clarify.request": [
+      {
+        "file": "app/providers/hermes.py",
+        "line": 1168
+      },
+      {
+        "file": "app/services/provider_events.py",
+        "line": 29
+      }
+    ],
+    "history.recovered": [
+      {
+        "file": "app/provider_sse_transport.py",
+        "line": 176
+      },
+      {
+        "file": "app/services/provider_events.py",
+        "line": 29
+      }
+    ],
+    "message.complete": [
+      {
+        "file": "app/providers/hermes.py",
+        "line": 1174
+      },
+      {
+        "file": "app/services/provider_events.py",
+        "line": 22
+      }
+    ],
+    "message.completed": [
+      {
+        "file": "app/providers/hermes.py",
+        "line": 1174
+      },
+      {
+        "file": "app/server.py",
+        "line": 4127
+      },
+      {
+        "file": "app/server.py",
+        "line": 4903
+      },
+      {
+        "file": "app/server.py",
+        "line": 5676
+      },
+      {
+        "file": "app/services/provider_events.py",
+        "line": 22
+      }
+    ],
+    "message.delta": [
+      {
+        "file": "app/gateway_presence.py",
+        "line": 147
+      },
+      {
+        "file": "app/providers/hermes.py",
+        "line": 1112
+      },
+      {
+        "file": "app/providers/hermes.py",
+        "line": 1114
+      },
+      {
+        "file": "app/providers/hermes.py",
+        "line": 1119
+      },
+      {
+        "file": "app/server.py",
+        "line": 4125
+      },
+      {
+        "file": "app/server.py",
+        "line": 4900
+      },
+      {
+        "file": "app/server.py",
+        "line": 5676
+      },
+      {
+        "file": "app/server.py",
+        "line": 5677
+      },
+      {
+        "file": "app/server.py",
+        "line": 6451
+      },
+      {
+        "file": "app/server.py",
+        "line": 7999
+      },
+      {
+        "file": "app/server.py",
+        "line": 31986
+      },
+      {
+        "file": "app/services/provider_events.py",
+        "line": 22
+      }
+    ],
+    "message.delta.text": [
+      {
+        "file": "app/server.py",
+        "line": 4125
+      },
+      {
+        "file": "app/server.py",
+        "line": 4900
+      },
+      {
+        "file": "app/server.py",
+        "line": 5676
+      },
+      {
+        "file": "app/services/provider_events.py",
+        "line": 22
+      }
+    ],
+    "message.error": [
+      {
+        "file": "app/providers/hermes.py",
+        "line": 1171
+      },
+      {
+        "file": "app/services/provider_events.py",
+        "line": 22
+      }
+    ],
+    "provider.activity": [
+      {
+        "file": "app/server.py",
+        "line": 6454
+      },
+      {
+        "file": "app/server.py",
+        "line": 6467
+      },
+      {
+        "file": "app/services/provider_events.py",
+        "line": 28
+      },
+      {
+        "file": "app/services/provider_events.py",
+        "line": 39
+      },
+      {
+        "file": "app/services/provider_events.py",
+        "line": 42
+      }
+    ],
+    "provider.heartbeat": [
+      {
+        "file": "app/provider_sse_transport.py",
+        "line": 192
+      },
+      {
+        "file": "app/services/provider_events.py",
+        "line": 28
+      }
+    ],
+    "provider.snapshot": [
+      {
+        "file": "app/provider_sse_transport.py",
+        "line": 158
+      },
+      {
+        "file": "app/services/provider_events.py",
+        "line": 28
+      }
+    ],
+    "reasoning.available": [
+      {
+        "file": "app/gateway_presence.py",
+        "line": 149
+      },
+      {
+        "file": "app/providers/hermes.py",
+        "line": 1126
+      },
+      {
+        "file": "app/providers/hermes.py",
+        "line": 1130
+      },
+      {
+        "file": "app/server.py",
+        "line": 4132
+      },
+      {
+        "file": "app/server.py",
+        "line": 4907
+      },
+      {
+        "file": "app/server.py",
+        "line": 5678
+      },
+      {
+        "file": "app/server.py",
+        "line": 5679
+      },
+      {
+        "file": "app/server.py",
+        "line": 6454
+      },
+      {
+        "file": "app/server.py",
+        "line": 8004
+      },
+      {
+        "file": "app/server.py",
+        "line": 31989
+      },
+      {
+        "file": "app/services/provider_events.py",
+        "line": 23
+      }
+    ],
+    "reasoning.delta": [
+      {
+        "file": "app/providers/hermes.py",
+        "line": 1126
+      },
+      {
+        "file": "app/services/provider_events.py",
+        "line": 23
+      }
+    ],
+    "run.canceled": [
+      {
+        "file": "app/gateway_presence.py",
+        "line": 155
+      },
+      {
+        "file": "app/provider_sse_transport.py",
+        "line": 108
+      },
+      {
+        "file": "app/server.py",
+        "line": 4160
+      },
+      {
+        "file": "app/server.py",
+        "line": 4941
+      },
+      {
+        "file": "app/server.py",
+        "line": 4960
+      },
+      {
+        "file": "app/server.py",
+        "line": 6525
+      },
+      {
+        "file": "app/services/provider_events.py",
+        "line": 40
+      },
+      {
+        "file": "app/services/provider_registry.py",
+        "line": 31
+      },
+      {
+        "file": "app/services/provider_runs.py",
+        "line": 51
+      },
+      {
+        "file": "app/services/provider_runs.py",
+        "line": 52
+      }
+    ],
+    "run.cancelled": [
+      {
+        "file": "app/gateway_presence.py",
+        "line": 155
+      },
+      {
+        "file": "app/provider_sse_transport.py",
+        "line": 91
+      },
+      {
+        "file": "app/provider_sse_transport.py",
+        "line": 108
+      },
+      {
+        "file": "app/server.py",
+        "line": 4160
+      },
+      {
+        "file": "app/server.py",
+        "line": 4941
+      },
+      {
+        "file": "app/server.py",
+        "line": 4960
+      },
+      {
+        "file": "app/server.py",
+        "line": 5512
+      },
+      {
+        "file": "app/server.py",
+        "line": 5718
+      },
+      {
+        "file": "app/server.py",
+        "line": 5810
+      },
+      {
+        "file": "app/server.py",
+        "line": 6464
+      },
+      {
+        "file": "app/server.py",
+        "line": 6525
+      },
+      {
+        "file": "app/server.py",
+        "line": 6565
+      },
+      {
+        "file": "app/server.py",
+        "line": 6649
+      },
+      {
+        "file": "app/services/provider_events.py",
+        "line": 18
+      },
+      {
+        "file": "app/services/provider_events.py",
+        "line": 20
+      },
+      {
+        "file": "app/services/provider_events.py",
+        "line": 41
+      },
+      {
+        "file": "app/services/provider_registry.py",
+        "line": 31
+      },
+      {
+        "file": "app/services/provider_registry.py",
+        "line": 32
+      },
+      {
+        "file": "app/services/provider_registry.py",
+        "line": 38
+      },
+      {
+        "file": "app/services/provider_registry.py",
+        "line": 294
+      },
+      {
+        "file": "app/services/provider_runs.py",
+        "line": 51
+      },
+      {
+        "file": "app/services/provider_runs.py",
+        "line": 52
+      },
+      {
+        "file": "app/services/provider_runs.py",
+        "line": 55
+      },
+      {
+        "file": "app/services/provider_runs.py",
+        "line": 232
+      }
+    ],
+    "run.completed": [
+      {
+        "file": "app/gateway_presence.py",
+        "line": 155
+      },
+      {
+        "file": "app/provider_sse_transport.py",
+        "line": 91
+      },
+      {
+        "file": "app/provider_sse_transport.py",
+        "line": 108
+      },
+      {
+        "file": "app/providers/hermes.py",
+        "line": 1174
+      },
+      {
+        "file": "app/server.py",
+        "line": 4127
+      },
+      {
+        "file": "app/server.py",
+        "line": 4128
+      },
+      {
+        "file": "app/server.py",
+        "line": 4155
+      },
+      {
+        "file": "app/server.py",
+        "line": 4941
+      },
+      {
+        "file": "app/server.py",
+        "line": 4947
+      },
+      {
+        "file": "app/server.py",
+        "line": 4956
+      },
+      {
+        "file": "app/server.py",
+        "line": 5716
+      },
+      {
+        "file": "app/server.py",
+        "line": 6462
+      },
+      {
+        "file": "app/server.py",
+        "line": 6525
+      },
+      {
+        "file": "app/server.py",
+        "line": 6563
+      },
+      {
+        "file": "app/server.py",
+        "line": 8050
+      },
+      {
+        "file": "app/server.py",
+        "line": 8052
+      },
+      {
+        "file": "app/server.py",
+        "line": 32026
+      },
+      {
+        "file": "app/services/provider_events.py",
+        "line": 18
+      },
+      {
+        "file": "app/services/provider_events.py",
+        "line": 20
+      },
+      {
+        "file": "app/services/provider_registry.py",
+        "line": 33
+      },
+      {
+        "file": "app/services/provider_registry.py",
+        "line": 39
+      },
+      {
+        "file": "app/services/provider_runs.py",
+        "line": 51
+      },
+      {
+        "file": "app/services/provider_runs.py",
+        "line": 56
+      }
+    ],
+    "run.failed": [
+      {
+        "file": "app/gateway_presence.py",
+        "line": 159
+      },
+      {
+        "file": "app/provider_sse_transport.py",
+        "line": 91
+      },
+      {
+        "file": "app/provider_sse_transport.py",
+        "line": 108
+      },
+      {
+        "file": "app/providers/hermes.py",
+        "line": 1171
+      },
+      {
+        "file": "app/server.py",
+        "line": 4160
+      },
+      {
+        "file": "app/server.py",
+        "line": 4941
+      },
+      {
+        "file": "app/server.py",
+        "line": 4952
+      },
+      {
+        "file": "app/server.py",
+        "line": 4960
+      },
+      {
+        "file": "app/server.py",
+        "line": 5721
+      },
+      {
+        "file": "app/server.py",
+        "line": 5810
+      },
+      {
+        "file": "app/server.py",
+        "line": 6466
+      },
+      {
+        "file": "app/server.py",
+        "line": 6525
+      },
+      {
+        "file": "app/server.py",
+        "line": 6568
+      },
+      {
+        "file": "app/server.py",
+        "line": 6649
+      },
+      {
+        "file": "app/server.py",
+        "line": 8055
+      },
+      {
+        "file": "app/server.py",
+        "line": 8057
+      },
+      {
+        "file": "app/server.py",
+        "line": 32026
+      },
+      {
+        "file": "app/services/provider_events.py",
+        "line": 18
+      },
+      {
+        "file": "app/services/provider_events.py",
+        "line": 20
+      },
+      {
+        "file": "app/services/provider_registry.py",
+        "line": 33
+      },
+      {
+        "file": "app/services/provider_registry.py",
+        "line": 39
+      },
+      {
+        "file": "app/services/provider_runs.py",
+        "line": 51
+      },
+      {
+        "file": "app/services/provider_runs.py",
+        "line": 56
+      },
+      {
+        "file": "app/services/provider_runs.py",
+        "line": 116
+      },
+      {
+        "file": "app/services/provider_runs.py",
+        "line": 152
+      },
+      {
+        "file": "app/services/provider_runs.py",
+        "line": 166
+      },
+      {
+        "file": "app/services/provider_runs.py",
+        "line": 234
+      },
+      {
+        "file": "app/services/provider_runs.py",
+        "line": 235
+      }
+    ],
+    "run.native.started": [
+      {
+        "file": "app/server.py",
+        "line": 4112
+      },
+      {
+        "file": "app/server.py",
+        "line": 5674
+      },
+      {
+        "file": "app/server.py",
+        "line": 5675
+      },
+      {
+        "file": "app/services/provider_events.py",
+        "line": 21
+      }
+    ],
+    "run.queued": [
+      {
+        "file": "app/gateway_presence.py",
+        "line": 128
+      },
+      {
+        "file": "app/services/provider_events.py",
+        "line": 21
+      }
+    ],
+    "run.running": [
+      {
+        "file": "app/gateway_presence.py",
+        "line": 128
+      },
+      {
+        "file": "app/services/provider_events.py",
+        "line": 21
+      }
+    ],
+    "run.started": [
+      {
+        "file": "app/gateway_presence.py",
+        "line": 128
+      },
+      {
+        "file": "app/server.py",
+        "line": 4869
+      },
+      {
+        "file": "app/server.py",
+        "line": 4871
+      },
+      {
+        "file": "app/server.py",
+        "line": 5646
+      },
+      {
+        "file": "app/server.py",
+        "line": 5674
+      },
+      {
+        "file": "app/server.py",
+        "line": 6510
+      },
+      {
+        "file": "app/server.py",
+        "line": 7966
+      },
+      {
+        "file": "app/server.py",
+        "line": 31965
+      },
+      {
+        "file": "app/services/provider_events.py",
+        "line": 20
+      },
+      {
+        "file": "app/services/provider_runs.py",
+        "line": 123
+      }
+    ],
+    "run.stop_requested": [
+      {
+        "file": "app/server.py",
+        "line": 5007
+      },
+      {
+        "file": "app/services/provider_events.py",
+        "line": 21
+      }
+    ],
+    "secret.request": [
+      {
+        "file": "app/providers/hermes.py",
+        "line": 1168
+      },
+      {
+        "file": "app/services/provider_events.py",
+        "line": 29
+      }
+    ],
+    "session.active_list": [
+      {
+        "file": "app/providers/hermes.py",
+        "line": 1247
+      },
+      {
+        "file": "app/services/provider_events.py",
+        "line": 30
+      }
+    ],
+    "session.create": [
+      {
+        "file": "app/providers/hermes.py",
+        "line": 1076
+      },
+      {
+        "file": "app/services/provider_events.py",
+        "line": 30
+      }
+    ],
+    "session.message": [
+      {
+        "file": "app/gateway_presence.py",
+        "line": 559
+      },
+      {
+        "file": "app/gateway_presence.py",
+        "line": 819
+      },
+      {
+        "file": "app/server.py",
+        "line": 21774
+      },
+      {
+        "file": "app/services/provider_events.py",
+        "line": 30
+      }
+    ],
+    "session.metrics": [
+      {
+        "file": "app/server.py",
+        "line": 7993
+      },
+      {
+        "file": "app/services/provider_events.py",
+        "line": 24
+      }
+    ],
+    "session.resume": [
+      {
+        "file": "app/providers/hermes.py",
+        "line": 1070
+      },
+      {
+        "file": "app/services/provider_events.py",
+        "line": 30
+      }
+    ],
+    "session.tool": [
+      {
+        "file": "app/gateway_presence.py",
+        "line": 540
+      },
+      {
+        "file": "app/gateway_presence.py",
+        "line": 819
+      },
+      {
+        "file": "app/services/provider_events.py",
+        "line": 30
+      }
+    ],
+    "sudo.request": [
+      {
+        "file": "app/providers/hermes.py",
+        "line": 1168
+      },
+      {
+        "file": "app/services/provider_events.py",
+        "line": 29
+      }
+    ],
+    "tool.call": [
+      {
+        "file": "app/server.py",
+        "line": 3709
+      },
+      {
+        "file": "app/server.py",
+        "line": 3733
+      },
+      {
+        "file": "app/server.py",
+        "line": 4136
+      },
+      {
+        "file": "app/server.py",
+        "line": 4911
+      },
+      {
+        "file": "app/server.py",
+        "line": 5680
+      },
+      {
+        "file": "app/services/provider_events.py",
+        "line": 25
+      }
+    ],
+    "tool.call.start": [
+      {
+        "file": "app/providers/hermes.py",
+        "line": 1137
+      },
+      {
+        "file": "app/services/provider_events.py",
+        "line": 25
+      }
+    ],
+    "tool.complete": [
+      {
+        "file": "app/providers/hermes.py",
+        "line": 1151
+      },
+      {
+        "file": "app/services/provider_events.py",
+        "line": 25
+      }
+    ],
+    "tool.completed": [
+      {
+        "file": "app/gateway_presence.py",
+        "line": 138
+      },
+      {
+        "file": "app/providers/hermes.py",
+        "line": 1151
+      },
+      {
+        "file": "app/providers/hermes.py",
+        "line": 1159
+      },
+      {
+        "file": "app/server.py",
+        "line": 4140
+      },
+      {
+        "file": "app/server.py",
+        "line": 4920
+      },
+      {
+        "file": "app/server.py",
+        "line": 5684
+      },
+      {
+        "file": "app/server.py",
+        "line": 5687
+      },
+      {
+        "file": "app/server.py",
+        "line": 6457
+      },
+      {
+        "file": "app/server.py",
+        "line": 8018
+      },
+      {
+        "file": "app/server.py",
+        "line": 31992
+      },
+      {
+        "file": "app/services/provider_events.py",
+        "line": 24
+      }
+    ],
+    "tool.end": [
+      {
+        "file": "app/providers/hermes.py",
+        "line": 1151
+      },
+      {
+        "file": "app/services/provider_events.py",
+        "line": 25
+      }
+    ],
+    "tool.ended": [
+      {
+        "file": "app/providers/hermes.py",
+        "line": 1151
+      },
+      {
+        "file": "app/services/provider_events.py",
+        "line": 25
+      }
+    ],
+    "tool.error": [
+      {
+        "file": "app/providers/hermes.py",
+        "line": 1151
+      },
+      {
+        "file": "app/services/provider_events.py",
+        "line": 25
+      }
+    ],
+    "tool.failed": [
+      {
+        "file": "app/gateway_presence.py",
+        "line": 138
+      },
+      {
+        "file": "app/providers/hermes.py",
+        "line": 1151
+      },
+      {
+        "file": "app/providers/hermes.py",
+        "line": 1159
+      },
+      {
+        "file": "app/server.py",
+        "line": 4140
+      },
+      {
+        "file": "app/server.py",
+        "line": 4141
+      },
+      {
+        "file": "app/server.py",
+        "line": 4920
+      },
+      {
+        "file": "app/server.py",
+        "line": 4926
+      },
+      {
+        "file": "app/server.py",
+        "line": 5688
+      },
+      {
+        "file": "app/server.py",
+        "line": 5691
+      },
+      {
+        "file": "app/server.py",
+        "line": 6459
+      },
+      {
+        "file": "app/server.py",
+        "line": 8018
+      },
+      {
+        "file": "app/server.py",
+        "line": 31992
+      },
+      {
+        "file": "app/services/provider_events.py",
+        "line": 24
+      }
+    ],
+    "tool.generating": [
+      {
+        "file": "app/providers/hermes.py",
+        "line": 1137
+      },
+      {
+        "file": "app/services/provider_events.py",
+        "line": 26
+      }
+    ],
+    "tool.progress": [
+      {
+        "file": "app/providers/hermes.py",
+        "line": 1137
+      },
+      {
+        "file": "app/services/provider_events.py",
+        "line": 26
+      }
+    ],
+    "tool.result": [
+      {
+        "file": "app/providers/hermes.py",
+        "line": 1151
+      },
+      {
+        "file": "app/server.py",
+        "line": 3709
+      },
+      {
+        "file": "app/server.py",
+        "line": 3737
+      },
+      {
+        "file": "app/server.py",
+        "line": 4140
+      },
+      {
+        "file": "app/server.py",
+        "line": 4920
+      },
+      {
+        "file": "app/server.py",
+        "line": 5684
+      },
+      {
+        "file": "app/services/provider_events.py",
+        "line": 26
+      }
+    ],
+    "tool.start": [
+      {
+        "file": "app/providers/hermes.py",
+        "line": 1137
+      },
+      {
+        "file": "app/services/provider_events.py",
+        "line": 26
+      }
+    ],
+    "tool.started": [
+      {
+        "file": "app/gateway_presence.py",
+        "line": 130
+      },
+      {
+        "file": "app/providers/hermes.py",
+        "line": 1137
+      },
+      {
+        "file": "app/providers/hermes.py",
+        "line": 1143
+      },
+      {
+        "file": "app/server.py",
+        "line": 4136
+      },
+      {
+        "file": "app/server.py",
+        "line": 4911
+      },
+      {
+        "file": "app/server.py",
+        "line": 5680
+      },
+      {
+        "file": "app/server.py",
+        "line": 5683
+      },
+      {
+        "file": "app/server.py",
+        "line": 6460
+      },
+      {
+        "file": "app/server.py",
+        "line": 8014
+      },
+      {
+        "file": "app/server.py",
+        "line": 8016
+      },
+      {
+        "file": "app/server.py",
+        "line": 31992
+      },
+      {
+        "file": "app/services/provider_events.py",
+        "line": 24
+      }
+    ],
+    "tool.update": [
+      {
+        "file": "app/providers/hermes.py",
+        "line": 1137
+      },
+      {
+        "file": "app/services/provider_events.py",
+        "line": 26
+      }
+    ],
+    "tool.updated": [
+      {
+        "file": "app/providers/hermes.py",
+        "line": 1137
+      },
+      {
+        "file": "app/services/provider_events.py",
+        "line": 26
+      }
+    ],
+    "turn.stream": [
+      {
+        "file": "app/gateway_presence.py",
+        "line": 128
+      },
+      {
+        "file": "app/server.py",
+        "line": 7982
+      },
+      {
+        "file": "app/services/provider_events.py",
+        "line": 29
+      }
+    ]
+  },
+  "schema": 1
+}

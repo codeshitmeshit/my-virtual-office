@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "fixtures": [
+    {
+      "scopes": 1,
+      "elapsedMs": 1.97,
+      "medianOperationUs": 1887.708,
+      "p95OperationUs": 1887.708,
+      "retainedScopes": 1,
+      "maxRetainedMessages": 500
+    },
+    {
+      "scopes": 20,
+      "elapsedMs": 34.895,
+      "medianOperationUs": 14701.875,
+      "p95OperationUs": 19128.042,
+      "retainedScopes": 20,
+      "maxRetainedMessages": 500
+    },
+    {
+      "scopes": 100,
+      "elapsedMs": 177.194,
+      "medianOperationUs": 145301.959,
+      "p95OperationUs": 157326.875,
+      "retainedScopes": 100,
+      "maxRetainedMessages": 500
+    }
+  ],
+  "queuedDelivery": {
+    "requests": 100,
+    "adapterCalls": 100,
+    "syntheticRunRecords": 0
+  },
+  "gates": {
+    "boundedMessages": 500,
+    "oneAdapterCallPerDelivery": true,
+    "noSyntheticRunState": true
+  }
+}

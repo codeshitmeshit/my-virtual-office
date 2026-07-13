@@ -9,6 +9,9 @@ import threading
 from typing import Any, Callable
 
 
+MAX_PENDING_REQUESTS = 1000
+
+
 class JsonlAppServerRuntime:
     """Provider-neutral subprocess JSONL-RPC runtime.
 
@@ -108,6 +111,8 @@ class JsonlAppServerRuntime:
         request_id = self.allocate_id()
         response_queue: queue.Queue[dict[str, Any]] = queue.Queue(maxsize=1)
         with self._pending_lock:
+            if len(self._pending) >= MAX_PENDING_REQUESTS:
+                raise RuntimeError("App-server pending request capacity reached")
             self._pending[request_id] = response_queue
         try:
             self.send({"id": request_id, "method": method, "params": params or {}})

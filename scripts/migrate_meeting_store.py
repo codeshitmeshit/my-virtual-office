@@ -53,6 +53,19 @@ def _decode(content: bytes, label: str) -> dict:
     return value
 
 
+def _read_legacy_source(path: Path) -> tuple[bool, bytes]:
+    """Read one optional legacy Store without manufacturing a source file."""
+    try:
+        return True, read_regular_no_follow(path)
+    except FileNotFoundError:
+        return False, b"{}"
+
+
+def _source_unchanged(path: Path, existed: bool, content: bytes) -> bool:
+    current_existed, current_content = _read_legacy_source(path)
+    return current_existed == existed and current_content == content
+
+
 def _counts(data):
     return {key: len(data[key]) for key in ("meetings", "events", "occupancy", "requests")}
 
@@ -144,8 +157,8 @@ def main() -> int:
             lock_fd = acquire_active_lock(status)
         except (BlockingIOError, MeetingStoreError, OSError) as exc:
             raise MeetingStoreError("Stop the server before Meeting migration", code="meeting_store_server_running") from exc
-        executable_bytes = read_regular_no_follow(executable_path)
-        request_bytes = read_regular_no_follow(request_path)
+        executable_exists, executable_bytes = _read_legacy_source(executable_path)
+        request_exists, request_bytes = _read_legacy_source(request_path)
         digest = source_digest(executable_bytes, request_bytes)
         merged = merge_legacy(_decode(executable_bytes, "executable Meeting"), _decode(request_bytes, "Meeting request"), digest=digest)
         report.update({
@@ -167,15 +180,16 @@ def main() -> int:
                 return 0
             raise MeetingStoreError("Unified Store has a different source digest", code="migration_source_changed")
         if args.apply:
-            if read_regular_no_follow(executable_path) != executable_bytes or read_regular_no_follow(request_path) != request_bytes:
+            if not _source_unchanged(executable_path, executable_exists, executable_bytes) or not _source_unchanged(request_path, request_exists, request_bytes):
                 raise MeetingStoreError("Migration source changed during validation", code="migration_source_changed")
             timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-            backups = {
-                "executable": status / f"{LEGACY_EXECUTABLE_FILENAME}.backup-{timestamp}",
-                "requests": status / f"{LEGACY_REQUEST_FILENAME}.backup-{timestamp}",
-            }
-            _write_private(backups["executable"], executable_bytes, exclusive=True)
-            _write_private(backups["requests"], request_bytes, exclusive=True)
+            backups = {}
+            if executable_exists:
+                backups["executable"] = status / f"{LEGACY_EXECUTABLE_FILENAME}.backup-{timestamp}"
+                _write_private(backups["executable"], executable_bytes, exclusive=True)
+            if request_exists:
+                backups["requests"] = status / f"{LEGACY_REQUEST_FILENAME}.backup-{timestamp}"
+                _write_private(backups["requests"], request_bytes, exclusive=True)
             merged["migration"]["reportFile"] = report_path.name
             report.update({
                 "status": "migrated", "backups": {key: path.name for key, path in backups.items()},
@@ -188,7 +202,7 @@ def main() -> int:
                     raise MeetingStoreError("Unified Store candidate verification failed", code="meeting_store_migration_verify_failed")
             prepared = {**report, "status": "prepared", "ok": False}
             _write_report(report_path, prepared)
-            if read_regular_no_follow(executable_path) != executable_bytes or read_regular_no_follow(request_path) != request_bytes:
+            if not _source_unchanged(executable_path, executable_exists, executable_bytes) or not _source_unchanged(request_path, request_exists, request_bytes):
                 raise MeetingStoreError("Migration source changed before cutover", code="migration_source_changed")
             repository = MeetingDomainRepository(status)
             cutover_started = True

@@ -84,8 +84,9 @@ The provider should support:
 - terminal run states
 - cancellation
 
-Codex and Claude Code currently use `ProviderRunBridge` style server-side run
-bridging for UI streaming.
+Codex, Claude Code, and Hermes background runs use `ProviderRunCoordinator`
+with one run repository and event journal. Read-only `ProviderSSETransport`
+provides UI streaming.
 
 ### Level 3: full office integration
 
@@ -424,8 +425,9 @@ There are two history scopes:
 
 ## Background run and SSE contract
 
-If the provider supports streaming output, use `ProviderRunBridge` or the same
-pattern.
+If the provider supports streaming output, register a capability adapter and
+use `ProviderRunCoordinator` plus `ProviderSSETransport`; do not create a
+second run/event authority.
 
 Recommended event names:
 

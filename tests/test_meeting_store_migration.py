@@ -67,6 +67,26 @@ def test_apply_backs_up_migrates_and_repeated_run_is_noop(tmp_path):
     assert len(list(tmp_path.glob("*.backup-*"))) == 2
 
 
+def test_single_legacy_store_migrates_without_manufacturing_missing_source(tmp_path):
+    meeting = {"id": "m1", "stage": "active_discussion", "participants": ["a1"]}
+    executable = {
+        "meetings": {"m1": meeting}, "events": {"m1": []},
+        "occupancy": {"a1": "m1"}, "idempotency": {},
+    }
+    source = tmp_path / "executable-meetings.json"
+    source.write_text(json.dumps(executable), encoding="utf-8")
+
+    dry_run, dry_report = run(tmp_path)
+    assert dry_run.returncode == 0 and dry_report["counts"]["requests"] == 0
+
+    completed, report = run(tmp_path, "--apply")
+    assert completed.returncode == 0 and report["status"] == "migrated"
+    assert set(report["backups"]) == {"executable"}
+    assert (tmp_path / report["backups"]["executable"]).read_bytes() == source.read_bytes()
+    assert not (tmp_path / "meeting-requests.json").exists()
+    assert json.loads((tmp_path / "meeting-domain.json").read_text())["requests"] == {}
+
+
 def test_malformed_dangling_or_symlink_input_fails_without_destination(tmp_path):
     legacy_fixture(tmp_path, dangling=True)
     completed, report = run(tmp_path, "--apply")

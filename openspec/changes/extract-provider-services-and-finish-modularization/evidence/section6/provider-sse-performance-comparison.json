@@ -1,0 +1,126 @@
+{
+  "checks": [
+    {
+      "fixture": "runs-1",
+      "gate": "adapterLaunches",
+      "passed": true
+    },
+    {
+      "fixture": "runs-1",
+      "gate": "terminalEvents",
+      "passed": true
+    },
+    {
+      "fixture": "runs-1",
+      "gate": "registeredRuns",
+      "passed": true
+    },
+    {
+      "fixture": "runs-1",
+      "gate": "p95Bound",
+      "passed": true
+    },
+    {
+      "fixture": "runs-20",
+      "gate": "adapterLaunches",
+      "passed": true
+    },
+    {
+      "fixture": "runs-20",
+      "gate": "terminalEvents",
+      "passed": true
+    },
+    {
+      "fixture": "runs-20",
+      "gate": "registeredRuns",
+      "passed": true
+    },
+    {
+      "fixture": "runs-20",
+      "gate": "p95Bound",
+      "passed": true
+    },
+    {
+      "fixture": "runs-100",
+      "gate": "adapterLaunches",
+      "passed": true
+    },
+    {
+      "fixture": "runs-100",
+      "gate": "terminalEvents",
+      "passed": true
+    },
+    {
+      "fixture": "runs-100",
+      "gate": "registeredRuns",
+      "passed": true
+    },
+    {
+      "fixture": "runs-100",
+      "gate": "p95Bound",
+      "passed": true
+    },
+    {
+      "fixture": "events-10",
+      "gate": "publishCount",
+      "passed": true
+    },
+    {
+      "fixture": "events-10",
+      "gate": "retention",
+      "passed": true
+    },
+    {
+      "fixture": "events-10",
+      "gate": "replayCount",
+      "passed": true
+    },
+    {
+      "fixture": "events-10",
+      "gate": "publishP95Bound",
+      "passed": true
+    },
+    {
+      "fixture": "events-1000",
+      "gate": "publishCount",
+      "passed": true
+    },
+    {
+      "fixture": "events-1000",
+      "gate": "retention",
+      "passed": true
+    },
+    {
+      "fixture": "events-1000",
+      "gate": "replayCount",
+      "passed": true
+    },
+    {
+      "fixture": "events-1000",
+      "gate": "publishP95Bound",
+      "passed": true
+    },
+    {
+      "fixture": "events-4000",
+      "gate": "publishCount",
+      "passed": true
+    },
+    {
+      "fixture": "events-4000",
+      "gate": "retention",
+      "passed": true
+    },
+    {
+      "fixture": "events-4000",
+      "gate": "replayCount",
+      "passed": true
+    },
+    {
+      "fixture": "events-4000",
+      "gate": "publishP95Bound",
+      "passed": true
+    }
+  ],
+  "passed": true,
+  "schema": 1
+}

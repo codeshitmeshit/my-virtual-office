@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Codex background runs reuse the generic ProviderRunBridge while preserving activity polling."""
+"""Codex background runs use the shared repository/journal while preserving activity polling."""
 
 import os
 import sys
@@ -101,15 +101,13 @@ def test_codex_run_start_publishes_bridge_events_and_keeps_activity():
             meta = None
             deadline = time.time() + 2
             while time.time() < deadline:
-                meta = server.PROVIDER_RUN_BRIDGE.get(run_id)
+                meta = server.PROVIDER_RUN_REPOSITORY.get(run_id)
                 if meta and meta.get("done"):
                     break
                 time.sleep(0.02)
             assert meta and meta["done"] is True
 
-            events = server.PROVIDER_RUN_BRIDGE._events_after(
-                0, lambda event: event.get("runId") == run_id
-            )
+            events = server.PROVIDER_EVENT_JOURNAL.run_events_after(run_id, 0)
             names = [event["event"] for event in events]
             assert "run.started" in names
             assert "tool.started" in names
@@ -234,7 +232,7 @@ def test_codex_run_start_idempotency_reuses_existing_run():
 
             deadline = time.time() + 2
             while time.time() < deadline:
-                meta = server.PROVIDER_RUN_BRIDGE.get(first["runId"])
+                meta = server.PROVIDER_RUN_REPOSITORY.get(first["runId"])
                 if meta and meta.get("done"):
                     break
                 time.sleep(0.02)
@@ -267,13 +265,10 @@ def test_codex_run_stop_uses_existing_cancel_and_emits_terminal_event():
         provider = FakeCodexProvider(workspace)
         server._codex_provider_from_config = lambda: provider
         run_id = "codex-test-stop"
-        server.PROVIDER_RUN_BRIDGE.remember({
-            "runId": run_id,
-            "agentId": "codex-local",
+        server.PROVIDER_RUN_REPOSITORY.reserve_start(
+            provider_kind="codex", agent_id="codex-local", conversation_id="conv-stop", run_id=run_id, meta={
             "agentKey": "codex-local",
             "profile": "local",
-            "conversationId": "conv-stop",
-            "events": server.queue.Queue(),
             "done": False,
         })
         with server._CODEX_ACTIVE_LOCK:
@@ -284,21 +279,19 @@ def test_codex_run_stop_uses_existing_cancel_and_emits_terminal_event():
                 "status": "running",
             }
         try:
-            before_event_id = server.PROVIDER_RUN_BRIDGE._next_event_id
+            before_event_id = server.PROVIDER_EVENT_JOURNAL.next_event_id
             result = server._handle_codex_run_stop({"runId": run_id})
             assert result["ok"] is True
-            meta = server.PROVIDER_RUN_BRIDGE.get(run_id)
+            meta = server.PROVIDER_RUN_REPOSITORY.get(run_id)
             assert meta["done"] is True
-            events = server.PROVIDER_RUN_BRIDGE._events_after(
-                before_event_id, lambda item: item.get("runId") == run_id
-            )
+            events = server.PROVIDER_EVENT_JOURNAL.run_events_after(run_id, before_event_id)
             assert len(events) == 1
             event = events[0]
             assert event["event"] == "run.cancelled"
         finally:
             with server._CODEX_ACTIVE_LOCK:
                 server._CODEX_ACTIVE_OPERATIONS.pop("codex-local", None)
-            server.PROVIDER_RUN_BRIDGE.clear(run_id)
+            server.PROVIDER_RUN_REPOSITORY.clear(run_id)
             server.STATUS_DIR, server.get_roster, server._codex_provider_from_config = old
 
 

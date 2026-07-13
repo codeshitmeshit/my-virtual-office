@@ -1,0 +1,47 @@
+{
+  "fixtures": [
+    {
+      "activeHandlesAfterCompletion": 0,
+      "adapterLaunches": 1,
+      "fixtureCount": 1,
+      "registeredRuns": 1,
+      "startLatency": {
+        "maxNs": 147042,
+        "medianNs": 147042,
+        "p95Ns": 147042
+      },
+      "terminalEvents": 1,
+      "terminalRuns": 1,
+      "totalNs": 1445916
+    },
+    {
+      "activeHandlesAfterCompletion": 0,
+      "adapterLaunches": 20,
+      "fixtureCount": 20,
+      "registeredRuns": 20,
+      "startLatency": {
+        "maxNs": 301958,
+        "medianNs": 134833,
+        "p95Ns": 274959
+      },
+      "terminalEvents": 20,
+      "terminalRuns": 20,
+      "totalNs": 4701834
+    },
+    {
+      "activeHandlesAfterCompletion": 0,
+      "adapterLaunches": 100,
+      "fixtureCount": 100,
+      "registeredRuns": 100,
+      "startLatency": {
+        "maxNs": 492375,
+        "medianNs": 162812,
+        "p95Ns": 333958
+      },
+      "terminalEvents": 100,
+      "terminalRuns": 100,
+      "totalNs": 20060750
+    }
+  ],
+  "schema": 1
+}

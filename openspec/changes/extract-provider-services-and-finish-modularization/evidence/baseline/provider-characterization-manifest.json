@@ -1,0 +1,45 @@
+{
+  "schema": 1,
+  "commands": [
+    {"id": "bridge-contract", "command": [".venv/bin/python", "tests/test_provider_characterization.py"]},
+    {"id": "inventory-contract", "command": [".venv/bin/python", "-m", "unittest", "tests.test_provider_baseline_inventory", "-v"]},
+    {"id": "codex-runs", "command": [".venv/bin/python", "tests/test_codex_runs_sse.py"]},
+    {"id": "claude-runs", "command": [".venv/bin/python", "tests/test_claude_code_runs_sse.py"]},
+    {"id": "hermes-native", "command": [".venv/bin/python", "tests/test_hermes_server_native_api.py"]},
+    {"id": "provider-runtime", "command": [".venv/bin/python", "tests/test_provider_app_server_runtime.py"]},
+    {"id": "provider-contract", "command": [".venv/bin/python", "tests/test_provider_execution_contract.py"]},
+    {"id": "chat-sessions", "command": [".venv/bin/python", "tests/test_chat_sessions.py"]},
+    {"id": "chat-history", "command": [".venv/bin/python", "-m", "unittest", "tests.test_chat_history_api", "-v"]},
+    {"id": "codex-provider", "command": [".venv/bin/python", "tests/test_codex_provider.py"]},
+    {"id": "claude-provider", "command": [".venv/bin/python", "tests/test_claude_code_provider.py"]},
+    {"id": "hermes-api", "command": [".venv/bin/python", "tests/test_hermes_api_client.py"]},
+    {"id": "hermes-platform", "command": [".venv/bin/python", "tests/test_hermes_platform_bridge.py"]},
+    {"id": "project-port", "command": [".venv/bin/python", "tests/test_project_execution_service_boundary.py"]},
+    {"id": "meeting-port", "command": [".venv/bin/python", "-m", "pytest", "tests/test_meeting_collaboration_services.py", "-q"]},
+    {"id": "feishu", "command": [".venv/bin/python", "tests/test_feishu_notifications.py"]},
+    {"id": "provider-sse-static", "command": ["node", "tests/check_provider_chat_sse.mjs"]},
+    {"id": "codex-sse-static", "command": ["node", "tests/check_codex_runs_bridge.mjs"]},
+    {"id": "claude-sse-static", "command": ["node", "tests/check_claude_code_runs_sse.mjs"]},
+    {"id": "performance", "command": [".venv/bin/python", "tests/provider_baseline_harness.py", "--check"]},
+    {"id": "inventory-reproducibility", "command": [".venv/bin/python", "tests/generate_provider_inventory.py", "--check"]}
+  ],
+  "scenarios": [
+    {"id": "route-request-response-status", "commands": ["provider-contract", "codex-runs", "claude-runs", "hermes-native"], "covers": "accepted fields, stable result/status mapping, provider path, missing/invalid input"},
+    {"id": "run-start-poll-terminal", "commands": ["codex-runs", "claude-runs", "hermes-native"], "covers": "start identity, background state, progress, exactly one normal terminal event"},
+    {"id": "run-failure-timeout-unavailable", "commands": ["provider-runtime", "codex-provider", "claude-provider", "hermes-api", "hermes-native"], "covers": "timeout cleanup, unavailable binary/API and provider-scoped failure"},
+    {"id": "conversation-continuation-reset-isolation", "commands": ["chat-sessions", "chat-history", "codex-provider", "claude-provider", "hermes-native"], "covers": "native IDs, old histories, reset/delete and cross-conversation isolation"},
+    {"id": "approval-registration-decision-replay", "commands": ["hermes-native", "codex-provider", "feishu"], "covers": "pending identity, provider decision, Feishu action, notification dedupe and invalid decisions"},
+    {"id": "cancellation", "commands": ["codex-runs", "hermes-native", "claude-provider"], "covers": "provider stop/interrupt and compatible cancelled terminal"},
+    {"id": "sse-after-last-event-heartbeat-recovery", "commands": ["bridge-contract", "provider-sse-static", "codex-sse-static", "claude-sse-static"], "covers": "Last-Event-ID, after, event framing, 10-second heartbeat, snapshot, history recovery and late terminal"},
+    {"id": "concurrent-scopes", "commands": ["bridge-contract", "provider-runtime"], "covers": "100 isolated scopes, monotonic event IDs, request routing and no cross-scope payload"},
+    {"id": "project-meeting-feishu-callers", "commands": ["project-port", "meeting-port", "feishu"], "covers": "Provider ports used by Project Execution, Meeting and Feishu integrations"},
+    {"id": "fixed-capacity-performance", "commands": ["performance"], "covers": "1/20/100 runs and 10/1,000/4,000 events, call counts, retained bytes, latency and scan upper bounds"},
+    {"id": "generated-ownership-evidence", "commands": ["inventory-contract", "inventory-reproducibility"], "covers": "caller/writer map, capability matrix, aliases, approval bounds and transport candidates"}
+  ],
+  "knownBaselineRisks": [
+    {"id": "terminal-race-no-cas", "current": "ProviderRunBridge update/emit has no generation or terminal compare-and-set", "required": "Sections 2-4 add fenced single-terminal ownership and cancel-vs-complete concurrency tests"},
+    {"id": "approval-aggregate-unbounded", "current": "Hermes and Codex pending approval authorities have no explicit aggregate bound", "required": "Section 4 introduces bounded/redacted approval ownership"},
+    {"id": "whole-journal-replay-scan", "current": "run and conversation replay scan the retained global deque", "required": "Section 2 adds eviction-consistent scope indexes"},
+    {"id": "mutable-run-dict-exposure", "current": "ProviderRunBridge.get returns its mutable internal dict", "required": "Section 2 returns immutable/deep-copy snapshots"}
+  ]
+}

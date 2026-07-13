@@ -21,6 +21,7 @@ if APP_DIR not in sys.path:
 
 os.environ.setdefault("VO_HERMES_ENABLED", "0")
 os.environ.setdefault("VO_CODEX_ENABLED", "0")
+os.environ.setdefault("VO_STATUS_DIR", tempfile.mkdtemp(prefix="vo-cron-defect-"))
 
 import server
 from project_store import MarkdownProjectStore

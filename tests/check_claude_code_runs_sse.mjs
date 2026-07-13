@@ -6,10 +6,10 @@ const chat = fs.readFileSync('app/chat.js', 'utf8');
 const gatewayPresence = fs.readFileSync('app/gateway_presence.py', 'utf8');
 
 for (const token of [
-  'class ProviderRunBridge',
-  'PROVIDER_RUN_BRIDGE = ProviderRunBridge()',
-  'def stream_events(self, handler, run_id',
-  'CLAUDE_CODE_STREAM_RUNS',
+  'PROVIDER_RUN_REPOSITORY = ProviderRunRepository(',
+  'PROVIDER_EVENT_JOURNAL = ProviderEventJournal(',
+  'PROVIDER_RUN_COORDINATOR = ProviderRunCoordinator(',
+  'PROVIDER_SSE_TRANSPORT = _provider_sse_transport_for(PROVIDER_RUN_REPOSITORY, PROVIDER_EVENT_JOURNAL)',
   'def _handle_claude_code_run_start',
   'def _handle_claude_code_run_events',
   'def _handle_claude_code_interrupt',
@@ -22,14 +22,16 @@ for (const token of [
   assert.ok(server.includes(token), `server.py missing ${token}`);
 }
 
+for (const obsolete of ['class ProviderRunBridge', 'CLAUDE_CODE_STREAM_RUNS', '_remember_claude_code_stream_run']) {
+  assert.ok(!server.includes(obsolete), `obsolete Claude Code run authority remains: ${obsolete}`);
+}
 assert.ok(
-  server.includes('def _remember_claude_code_stream_run(meta):\n    PROVIDER_RUN_BRIDGE.remember(meta)'),
-  'Claude Code run registry should delegate to ProviderRunBridge'
+  server.includes('PROVIDER_SSE_TRANSPORT.stream_run(handler, run_id, "Claude Code")'),
+  'Claude Code SSE should delegate to the transport adapter'
 );
-assert.ok(
-  server.includes('PROVIDER_RUN_BRIDGE.stream_events(handler, run_id, "Claude Code")'),
-  'Claude Code SSE should delegate to ProviderRunBridge'
-);
+const claudeStart = server.slice(server.indexOf('def _handle_claude_code_run_start'), server.indexOf('def _handle_claude_code_run_events'));
+assert.ok(claudeStart.includes('PROVIDER_RUN_COORDINATOR.start(command, adapter=adapter, compatibility_meta=meta)'), 'Claude Code start should delegate to ProviderRunCoordinator');
+assert.ok(!claudeStart.includes('_PROVIDER_RUN_IDEMPOTENCY'), 'Claude Code start must not use the legacy idempotency map');
 
 for (const token of [
   "fetch('/api/claude-code/runs'",

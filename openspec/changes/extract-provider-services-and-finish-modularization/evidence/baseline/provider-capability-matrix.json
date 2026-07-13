@@ -1,0 +1,78 @@
+{
+  "compatibilityRule": "Capabilities describe existing paths; unsupported behavior must not be synthesized.",
+  "paths": [
+    {
+      "approvalContinuation": false,
+      "attachments": true,
+      "backgroundRun": false,
+      "cancel": false,
+      "conversationContinuation": true,
+      "owner": "app/server.py",
+      "providerKind": "openclaw",
+      "providerPath": "gateway",
+      "queuedDelivery": true,
+      "streamingEvents": false
+    },
+    {
+      "approvalContinuation": true,
+      "attachments": true,
+      "backgroundRun": true,
+      "cancel": true,
+      "conversationContinuation": true,
+      "owner": "app/providers/codex.py",
+      "providerKind": "codex",
+      "providerPath": "app-server/bridge",
+      "queuedDelivery": false,
+      "streamingEvents": true
+    },
+    {
+      "approvalContinuation": false,
+      "attachments": true,
+      "backgroundRun": true,
+      "cancel": true,
+      "conversationContinuation": true,
+      "owner": "app/providers/claude_code.py",
+      "providerKind": "claude-code",
+      "providerPath": "claude-code-cli",
+      "queuedDelivery": false,
+      "streamingEvents": true
+    },
+    {
+      "approvalContinuation": true,
+      "attachments": true,
+      "backgroundRun": true,
+      "cancel": true,
+      "conversationContinuation": true,
+      "owner": "app/providers/hermes.py",
+      "providerKind": "hermes",
+      "providerPath": "api",
+      "queuedDelivery": false,
+      "streamingEvents": true
+    },
+    {
+      "approvalContinuation": false,
+      "attachments": true,
+      "backgroundRun": true,
+      "cancel": true,
+      "conversationContinuation": true,
+      "owner": "app/providers/hermes.py",
+      "providerKind": "hermes",
+      "providerPath": "desktop",
+      "queuedDelivery": false,
+      "streamingEvents": true
+    },
+    {
+      "approvalContinuation": false,
+      "attachments": true,
+      "backgroundRun": false,
+      "cancel": false,
+      "conversationContinuation": true,
+      "owner": "app/server.py",
+      "providerKind": "hermes",
+      "providerPath": "gateway-platform",
+      "queuedDelivery": true,
+      "streamingEvents": false
+    }
+  ],
+  "schema": 1
+}

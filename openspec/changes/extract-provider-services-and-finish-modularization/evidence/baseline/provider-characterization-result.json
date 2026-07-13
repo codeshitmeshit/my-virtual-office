@@ -1,0 +1,229 @@
+{
+  "commandCount": 21,
+  "manifest": "openspec/changes/extract-provider-services-and-finish-modularization/evidence/baseline/provider-characterization-manifest.json",
+  "passed": true,
+  "results": [
+    {
+      "command": [
+        ".venv/bin/python",
+        "tests/test_provider_characterization.py"
+      ],
+      "durationMs": 1292.353,
+      "exitCode": 0,
+      "id": "bridge-contract",
+      "outputTail": "test_provider_characterization.py passed (8 tests)\n"
+    },
+    {
+      "command": [
+        ".venv/bin/python",
+        "-m",
+        "unittest",
+        "tests.test_provider_baseline_inventory",
+        "-v"
+      ],
+      "durationMs": 1004.531,
+      "exitCode": 0,
+      "id": "inventory-contract",
+      "outputTail": "test_all_supported_provider_paths_are_frozen (tests.test_provider_baseline_inventory.ProviderBaselineInventoryTests.test_all_supported_provider_paths_are_frozen) ... ok\ntest_characterization_manifest_covers_every_required_baseline_dimension (tests.test_provider_baseline_inventory.ProviderBaselineInventoryTests.test_characterization_manifest_covers_every_required_baseline_dimension) ... ok\ntest_current_approval_bounds_show_hermes_migrated_and_remaining_risk (tests.test_provider_baseline_inventory.ProviderBaselineInventoryTests.test_current_approval_bounds_show_hermes_migrated_and_remaining_risk) ... ok\ntest_current_state_authorities_and_transport_routes_are_visible (tests.test_provider_baseline_inventory.ProviderBaselineInventoryTests.test_current_state_authorities_and_transport_routes_are_visible) ... ok\ntest_generated_artifacts_are_exactly_reproducible (tests.test_provider_baseline_inventory.ProviderBaselineInventoryTests.test_generated_artifacts_are_exactly_reproducible) ... ok\ntest_public_event_aliases_include_lifecycle_replay_and_approval (tests.test_provider_baseline_inventory.ProviderBaselineInventoryTests.test_public_event_aliases_include_lifecycle_replay_and_approval) ... ok\ntest_transport_delegate_candidates_do_not_claim_business_ownership (tests.test_provider_baseline_inventory.ProviderBaselineInventoryTests.test_transport_delegate_candidates_do_not_claim_business_ownership) ... ok\n\n----------------------------------------------------------------------\nRan 7 tests in 0.916s\n\nOK\n"
+    },
+    {
+      "command": [
+        ".venv/bin/python",
+        "tests/test_codex_runs_sse.py"
+      ],
+      "durationMs": 328.876,
+      "exitCode": 0,
+      "id": "codex-runs",
+      "outputTail": "test_codex_runs_sse.py passed\n"
+    },
+    {
+      "command": [
+        ".venv/bin/python",
+        "tests/test_claude_code_runs_sse.py"
+      ],
+      "durationMs": 187.023,
+      "exitCode": 0,
+      "id": "claude-runs",
+      "outputTail": "test_claude_code_runs_sse.py passed\n"
+    },
+    {
+      "command": [
+        ".venv/bin/python",
+        "tests/test_hermes_server_native_api.py"
+      ],
+      "durationMs": 314.488,
+      "exitCode": 0,
+      "id": "hermes-native",
+      "outputTail": "[HERMES] Failed to load run history for vo-hermes-default: 'FakeHermesApiClient' object has no attribute 'get_session_messages'\n[HERMES] Failed to load run history for vo-hermes-default: 'FakeHermesApiClient' object has no attribute 'get_session_messages'\n[HERMES] Failed to load run history for vo-hermes-default: 'FakeHermesApiClient' object has no attribute 'get_session_messages'\n[HERMES] Failed to load run history for vo-hermes-default: 'FakeHermesApiClient' object has no attribute 'get_session_messages'\n[HERMES] Failed to load run history for vo-hermes-default: 'FakeHermesApiClient' object has no attribute 'get_session_messages'\n[HERMES] Failed to load run history for vo-hermes-default: 'FakeHermesApiClient' object has no attribute 'get_session_messages'\n[HERMES] Failed to load run history for vo-hermes-default: 'FakeHermesApiClient' object has no attribute 'get_session_messages'\n[HERMES] Failed to load run history for vo-hermes-default: 'FakeHermesApiClient' object has no attribute 'get_session_messages'\n[HERMES] Failed to load run history for vo-hermes-default: 'FakeHermesApiClient' object has no attribute 'get_session_messages'\n[HERMES] Failed to load run history for vo-hermes-default: 'FakeHermesApiClient' object has no attribute 'get_session_messages'\nok\n"
+    },
+    {
+      "command": [
+        ".venv/bin/python",
+        "tests/test_provider_app_server_runtime.py"
+      ],
+      "durationMs": 83.584,
+      "exitCode": 0,
+      "id": "provider-runtime",
+      "outputTail": "test_provider_app_server_runtime.py passed\n"
+    },
+    {
+      "command": [
+        ".venv/bin/python",
+        "tests/test_provider_execution_contract.py"
+      ],
+      "durationMs": 28.053,
+      "exitCode": 0,
+      "id": "provider-contract",
+      "outputTail": "test_provider_execution_contract.py passed\n"
+    },
+    {
+      "command": [
+        ".venv/bin/python",
+        "tests/test_chat_sessions.py"
+      ],
+      "durationMs": 152.257,
+      "exitCode": 0,
+      "id": "chat-sessions",
+      "outputTail": "[PASS] OpenClaw sessions list succeeds\n[PASS] OpenClaw main session is listed\n[PASS] OpenClaw file-backed session is listed\n[PASS] OpenClaw live mode row is titled\n[PASS] OpenClaw create/reset uses gateway sessions.reset\n[PASS] OpenClaw create rejects cross-agent session key\n[PASS] OpenClaw switch returns requested session key\n[PASS] OpenClaw switch rejects cross-agent session key\n[PASS] OpenClaw delete uses gateway sessions.delete\n[PASS] OpenClaw delete rejects cross-agent session key\n[PASS] bubble metadata helper overrides stale message metadata\n[PASS] Hermes sessions list uses provider\n[PASS] Hermes switch exports messages\n[PASS] Hermes delete clears active session\n[PASS] Codex list filters archived threads\n[PASS] Codex switch reads thread messages\n[PASS] Codex delete clears active thread\n[PASS] Claude Code lists native JSONL sessions\n[PASS] Claude Code switch reads JSONL messages\n[PASS] Claude Code delete renames native session file and clears active id\nverify-chat-sessions: OK (20 checks)\n"
+    },
+    {
+      "command": [
+        ".venv/bin/python",
+        "-m",
+        "unittest",
+        "tests.test_chat_history_api",
+        "-v"
+      ],
+      "durationMs": 156.251,
+      "exitCode": 0,
+      "id": "chat-history",
+      "outputTail": "test_codex_provider_history_is_isolated_by_conversation (tests.test_chat_history_api.ChatHistoryContractTest.test_codex_provider_history_is_isolated_by_conversation) ... ok\ntest_communication_copy_wins_dedupe (tests.test_chat_history_api.ChatHistoryContractTest.test_communication_copy_wins_dedupe) ... ok\ntest_communication_direction_infers_user_and_assistant_roles (tests.test_chat_history_api.ChatHistoryContractTest.test_communication_direction_infers_user_and_assistant_roles) ... ok\ntest_cursor_round_trip_preserves_sort_tuple (tests.test_chat_history_api.ChatHistoryContractTest.test_cursor_round_trip_preserves_sort_tuple) ... ok\ntest_gateway_page_reads_exact_session_without_truncating (tests.test_chat_history_api.ChatHistoryContractTest.test_gateway_page_reads_exact_session_without_truncating) ... ok\ntest_handler_returns_page_and_session_for_every_provider (tests.test_chat_history_api.ChatHistoryContractTest.test_handler_returns_page_and_session_for_every_provider) ... ok\ntest_invalid_cursor_has_stable_error_code (tests.test_chat_history_api.ChatHistoryContractTest.test_invalid_cursor_has_stable_error_code) ... ok\ntest_jsonl_snapshot_cache_invalidates_and_is_thread_safe (tests.test_chat_history_api.ChatHistoryContractTest.test_jsonl_snapshot_cache_invalidates_and_is_thread_safe) ... ok\ntest_merge_pages_returns_newest_then_older_without_duplicates (tests.test_chat_history_api.ChatHistoryContractTest.test_merge_pages_returns_newest_then_older_without_duplicates) ... ok\ntest_normalizes_rich_gateway_content (tests.test_chat_history_api.ChatHistoryContractTest.test_normalizes_rich_gateway_content) ... ok\ntest_request_rejects_provider_and_identifier_overflow (tests.test_chat_history_api.ChatHistoryContractTest.test_request_rejects_provider_and_identifier_overflow) ... ok\ntest_request_validation_and_limit_clamping (tests.test_chat_history_api.ChatHistoryContractTest.test_request_validation_and_limit_clamping) ... ok\ntest_source_cache_limits_are_explicit (tests.test_chat_history_api.ChatHistoryContractTest.test_source_cache_limits_are_explicit) ... ok\ntest_utf8_fnv1a_vectors (tests.test_chat_history_api.ChatHistoryContractTest.test_utf8_fnv1a_vectors) ... ok\n\n----------------------------------------------------------------------\nRan 14 tests in 0.010s\n\nOK\n"
+    },
+    {
+      "command": [
+        ".venv/bin/python",
+        "tests/test_codex_provider.py"
+      ],
+      "durationMs": 73.461,
+      "exitCode": 0,
+      "id": "codex-provider",
+      "outputTail": "ok\n"
+    },
+    {
+      "command": [
+        ".venv/bin/python",
+        "tests/test_claude_code_provider.py"
+      ],
+      "durationMs": 85.415,
+      "exitCode": 0,
+      "id": "claude-provider",
+      "outputTail": "ok\n"
+    },
+    {
+      "command": [
+        ".venv/bin/python",
+        "tests/test_hermes_api_client.py"
+      ],
+      "durationMs": 569.31,
+      "exitCode": 0,
+      "id": "hermes-api",
+      "outputTail": "ok\n"
+    },
+    {
+      "command": [
+        ".venv/bin/python",
+        "tests/test_hermes_platform_bridge.py"
+      ],
+      "durationMs": 695.166,
+      "exitCode": 0,
+      "id": "hermes-platform",
+      "outputTail": "  PASS Atomic write removes failed temporary files\n  PASS Atomic write retry succeeds after transient failure\n  PASS Gateway platform agent is synthesized\n  PASS Auth accepts bearer token\n  PASS Auth rejects missing token\n  PASS Auth rejects wrong token\n  PASS Enqueue succeeds\n  PASS Poll succeeds\n  PASS Poll returns queued message\n  PASS Ack rejects a missing lease\n  PASS Ack rejects a stale lease\n  PASS Ack marks delivered\n  PASS Late nack cannot requeue a delivered message\n  PASS Reply succeeds\n  PASS Communication log has request and reply\n  PASS Reply text is logged\n  PASS Gateway queue is private\n  PASS Gateway communication log is private\n  PASS Gateway queue applies backpressure\n  PASS Gateway queue preserves pending messages\n  PASS Rejected enqueue does not create a communication event\n  PASS Failed terminal messages release queue capacity\n  PASS Stale delivered messages release queue capacity\n  PASS Invalid delivered retention falls back safely\n  PASS Blocking chat returns plugin reply\n  PASS Gateway Hermes history records assistant reply\n  PASS Gateway Hermes history stays conversation-scoped\n  PASS Gateway conversation stores its platform session\n  PASS Gateway session browser uses platform conversations\n  PASS Gateway session switch loads platform history\n\n  Hermes platform bridge: all checks passed\n"
+    },
+    {
+      "command": [
+        ".venv/bin/python",
+        "tests/test_project_execution_service_boundary.py"
+      ],
+      "durationMs": 365.976,
+      "exitCode": 0,
+      "id": "project-port",
+      "outputTail": ""
+    },
+    {
+      "command": [
+        ".venv/bin/python",
+        "-m",
+        "pytest",
+        "tests/test_meeting_collaboration_services.py",
+        "-q"
+      ],
+      "durationMs": 415.837,
+      "exitCode": 0,
+      "id": "meeting-port",
+      "outputTail": "........                                                                 [100%]\n8 passed in 0.09s\n"
+    },
+    {
+      "command": [
+        ".venv/bin/python",
+        "tests/test_feishu_notifications.py"
+      ],
+      "durationMs": 12756.831,
+      "exitCode": 0,
+      "id": "feishu",
+      "outputTail": "test_feishu_notifications.py passed\n"
+    },
+    {
+      "command": [
+        "node",
+        "tests/check_provider_chat_sse.mjs"
+      ],
+      "durationMs": 60.955,
+      "exitCode": 0,
+      "id": "provider-sse-static",
+      "outputTail": "provider chat SSE checks passed\n"
+    },
+    {
+      "command": [
+        "node",
+        "tests/check_codex_runs_bridge.mjs"
+      ],
+      "durationMs": 34.754,
+      "exitCode": 0,
+      "id": "codex-sse-static",
+      "outputTail": "codex runs bridge checks passed\n"
+    },
+    {
+      "command": [
+        "node",
+        "tests/check_claude_code_runs_sse.mjs"
+      ],
+      "durationMs": 27.204,
+      "exitCode": 0,
+      "id": "claude-sse-static",
+      "outputTail": "claude code runs SSE checks passed\n"
+    },
+    {
+      "command": [
+        ".venv/bin/python",
+        "tests/provider_baseline_harness.py",
+        "--check"
+      ],
+      "durationMs": 618.68,
+      "exitCode": 0,
+      "id": "performance",
+      "outputTail": "provider performance baseline verified\n"
+    },
+    {
+      "command": [
+        ".venv/bin/python",
+        "tests/generate_provider_inventory.py",
+        "--check"
+      ],
+      "durationMs": 674.119,
+      "exitCode": 0,
+      "id": "inventory-reproducibility",
+      "outputTail": "provider inventory verified: 5 artifacts\n"
+    }
+  ],
+  "schema": 1
+}

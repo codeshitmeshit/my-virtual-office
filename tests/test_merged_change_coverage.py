@@ -62,10 +62,10 @@ def main():
 
     desktop_chat = source_segment(server_source, function_node(tree, "_handle_hermes_desktop_chat"))
     desktop_start = source_segment(server_source, function_node(tree, "_handle_hermes_desktop_run_start"))
-    desktop_events = source_segment(server_source, function_node(tree, "_handle_hermes_desktop_run_events"))
     check("Desktop synchronous chat resumes the selected conversation", "_get_hermes_session_id(profile, conversation_id)" in desktop_chat)
     check("Desktop streaming run stores conversation identity", '"conversationId": conversation_id' in desktop_start and "_save_hermes_history(profile, history, conversation_id)" in desktop_start)
-    check("Desktop streaming events preserve conversation history", "_load_hermes_history(profile, conversation_id)" in desktop_events and "_set_hermes_session_id(profile, session_id, conversation_id)" in desktop_events)
+    check("Desktop streaming run uses coordinator-owned completion", "PROVIDER_RUN_COORDINATOR.start" in desktop_start and '"events": queue.Queue()' not in desktop_start)
+    check("Obsolete Desktop connection-owned SSE executor is removed", "_handle_hermes_desktop_run_events" not in server_source)
 
     run_entry = function_node(tree, "_handle_hermes_run_start")
     run_source = source_segment(server_source, run_entry)

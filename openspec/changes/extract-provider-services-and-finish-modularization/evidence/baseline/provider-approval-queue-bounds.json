@@ -1,0 +1,36 @@
+{
+  "authorities": [
+    {
+      "bounded": false,
+      "cleanup": "resolved entries are removed lazily",
+      "file": "app/server.py",
+      "maxItems": null,
+      "name": "Hermes server pending approvals",
+      "risk": "one scope can grow without an explicit cap",
+      "shape": "dict[scope, list[approval]]",
+      "state": "HERMES_APPROVAL_PENDING"
+    },
+    {
+      "bounded": false,
+      "cleanup": "resolved/thread-close entries are removed",
+      "file": "app/providers/codex_app_server.py",
+      "maxItems": null,
+      "name": "Codex app-server pending approvals",
+      "risk": "active requests have no explicit aggregate cap",
+      "shape": "dict[approvalId, approval]",
+      "state": "CodexAppServerProvider._pending_approvals"
+    },
+    {
+      "bounded": "per-request-only",
+      "cleanup": "finally/close removes requests",
+      "file": "app/provider_app_server.py",
+      "maxItems": null,
+      "name": "Provider app-server request replies",
+      "risk": "each reply queue is bounded, aggregate concurrent requests are not",
+      "shape": "dict[requestId, Queue(maxsize=1)]",
+      "state": "ProviderAppServerClient._pending"
+    }
+  ],
+  "requiredFinalState": "provider_approvals.py must introduce documented aggregate and per-scope bounds without weakening compatibility or trust checks",
+  "schema": 1
+}

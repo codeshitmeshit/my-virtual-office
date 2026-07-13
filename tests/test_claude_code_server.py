@@ -159,7 +159,7 @@ def test_claude_code_run_start_idempotency_reuses_existing_run():
 
         deadline = time.time() + 2
         while time.time() < deadline:
-            meta = server.PROVIDER_RUN_BRIDGE.get(first["runId"])
+            meta = server.PROVIDER_RUN_REPOSITORY.get(first["runId"])
             if meta and meta.get("done"):
                 break
             time.sleep(0.02)

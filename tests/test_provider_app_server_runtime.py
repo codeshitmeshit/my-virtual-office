@@ -5,6 +5,7 @@ import json
 import os
 import queue
 import sys
+import threading
 import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -13,6 +14,7 @@ if APP_DIR not in sys.path:
     sys.path.insert(0, APP_DIR)
 
 from provider_app_server import JsonlAppServerRuntime
+from providers.codex_app_server import CodexAppServerClient, MAX_PENDING_APPROVALS
 
 
 class FakeStdout:
@@ -153,9 +155,40 @@ def test_runtime_preserves_stderr_in_exit_errors():
         runtime.close()
 
 
+def test_runtime_rejects_requests_at_aggregate_capacity():
+    import provider_app_server
+
+    old_limit = provider_app_server.MAX_PENDING_REQUESTS
+    provider_app_server.MAX_PENDING_REQUESTS = 1
+    runtime = JsonlAppServerRuntime(["fake"], popen_factory=lambda *a, **k: FakeProcess(lambda _message: None))
+    runtime._pending[999] = queue.Queue(maxsize=1)
+    try:
+        try:
+            runtime.request("overflow", {}, timeout=0.01)
+            assert False, "expected capacity failure"
+        except RuntimeError as exc:
+            assert "capacity" in str(exc)
+        assert list(runtime._pending) == [999]
+    finally:
+        runtime._pending.clear()
+        runtime.close()
+        provider_app_server.MAX_PENDING_REQUESTS = old_limit
+
+
+def test_codex_pending_approval_store_is_bounded():
+    client = object.__new__(CodexAppServerClient)
+    client._approval_lock = threading.Condition()
+    client._pending_approvals = {f"approval-{index}": {} for index in range(MAX_PENDING_APPROVALS)}
+    stored = client._store_pending_approval(None, "overflow", "item/commandExecution/requestApproval", {}, {"id": "overflow"})
+    assert stored is False
+    assert len(client._pending_approvals) == MAX_PENDING_APPROVALS
+
+
 if __name__ == "__main__":
     test_runtime_routes_request_response()
     test_runtime_dispatches_server_request_and_notification()
     test_runtime_timeout_and_close_fail_pending()
     test_runtime_preserves_stderr_in_exit_errors()
+    test_runtime_rejects_requests_at_aggregate_capacity()
+    test_codex_pending_approval_store_is_bounded()
     print("test_provider_app_server_runtime.py passed")

@@ -8,6 +8,7 @@ import time
 import io
 import json
 import types
+import threading
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 APP_DIR = os.path.join(ROOT, "app")
@@ -78,6 +79,8 @@ class FakeHermesProvider:
 class FakeHermesApiClient:
     calls = []
     mode = "success"
+    stream_started = threading.Event()
+    stream_release = threading.Event()
 
     def __init__(self, base_url=None, api_key=None, timeout_sec=30):
         self.base_url = base_url
@@ -105,6 +108,15 @@ class FakeHermesApiClient:
         return {"run_id": "run-native-1"}
 
     def stream_run_events(self, run_id, timeout_sec=None):
+        if self.mode == "blocking":
+            self.stream_started.set()
+            self.stream_release.wait(2)
+            yield {"event": "run.completed"}
+            return
+        if self.mode == "sensitive_failure":
+            yield {"event": "message.delta", "delta": "safe", "apiKey": "sk-abcdefghijklmnop", "private": "/Users/private/file"}
+            yield {"event": "run.failed", "error": "sk-abcdefghijklmnop at /Users/private/file"}
+            return
         if self.mode == "approval":
             yield {"event": "message.delta", "delta": "needs approval"}
             yield {"event": "approval.request", "run_id": run_id, "command": "write-file", "description": "Approve write"}
@@ -130,6 +142,7 @@ class FakeHermesApiClient:
 
     def stop_run(self, run_id):
         self.calls.append({"stop_run": run_id})
+        self.stream_release.set()
         return {"ok": True, "stopped": True, "run_id": run_id}
 
 
@@ -156,7 +169,9 @@ def install_native_fakes(api_mode="success"):
     FakeHermesProvider.chats = []
     FakeHermesApiClient.calls = []
     FakeHermesApiClient.mode = api_mode
-    server.HERMES_APPROVAL_PENDING.clear()
+    FakeHermesApiClient.stream_started.clear()
+    FakeHermesApiClient.stream_release.clear()
+    server.HERMES_APPROVAL_SERVICE.clear()
     status_dir = tempfile.mkdtemp(prefix="vo-hermes-native-chat-")
     server.STATUS_DIR = status_dir
     server.HermesProvider = FakeHermesProvider
@@ -495,6 +510,51 @@ def test_feishu_card_action_can_always_approve_hermes_native_approval():
         restore_native_fakes(old)
 
 
+def test_hermes_approval_replay_does_not_call_provider_twice_and_cross_run_fails_closed():
+    old = install_native_fakes("approval")
+    old_send = server.send_feishu_notification
+    try:
+        server.send_feishu_notification = lambda intent, **kwargs: {"ok": True, "status": "sent"}
+        result = server._handle_hermes_chat({"agentId": "hermes-default", "message": "hello", "conversationId": "conv-approval-replay"})
+        approval = result["approval"]
+        forged = server._handle_hermes_approval_respond({
+            "agentId": "hermes-default", "approval_id": approval["approval_id"],
+            "session_id": approval["session_id"], "runId": "other-run", "choice": "once",
+        })
+        assert forged["ok"] is False
+        assert forged["status"] == "approval_not_found"
+        request = {
+            "agentId": "hermes-default", "approval_id": approval["approval_id"],
+            "session_id": approval["session_id"], "runId": approval["runId"], "choice": "once",
+        }
+        first = server._handle_hermes_approval_respond(request)
+        replay = server._handle_hermes_approval_respond(request)
+        assert first["ok"] is True
+        assert replay == first
+        calls = [call for call in FakeHermesApiClient.calls if call.get("respond_approval") == approval["runId"]]
+        assert len(calls) == 1
+    finally:
+        server.send_feishu_notification = old_send
+        restore_native_fakes(old)
+
+
+def test_hermes_notification_failure_does_not_remove_pending_approval():
+    old = install_native_fakes("approval")
+    old_send = server.send_feishu_notification
+    try:
+        def fail_notification(intent, **kwargs):
+            raise RuntimeError("Feishu unavailable")
+
+        server.send_feishu_notification = fail_notification
+        result = server._handle_hermes_chat({"agentId": "hermes-default", "message": "hello", "conversationId": "conv-notification-failure"})
+        assert result["approval"]["feishuNotification"]["ok"] is False
+        pending = server._get_hermes_approval_pending("hermes-default", result["sessionId"])
+        assert pending["pending"]["approval_id"] == result["approval"]["approval_id"]
+    finally:
+        server.send_feishu_notification = old_send
+        restore_native_fakes(old)
+
+
 def test_hermes_feishu_e2e_action_route_rejects_non_test_approval_ids():
     old = install_native_fakes("success")
     try:
@@ -524,6 +584,32 @@ def test_hermes_chat_falls_back_to_cli_when_native_api_unavailable():
         assert result.get("providerPath") != "api"
         assert result["reply"] == "cli fallback reply"
         assert FakeHermesProvider.chats
+    finally:
+        restore_native_fakes(old)
+
+
+def test_hermes_attachment_descriptors_are_validated_before_adapter_delivery():
+    old = install_native_fakes("unavailable")
+    try:
+        upload_dir = os.path.join(server.STATUS_DIR, "uploads")
+        os.makedirs(upload_dir, exist_ok=True)
+        path = os.path.join(upload_dir, "note.txt")
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write("hello")
+        result = server._handle_hermes_chat({
+            "agentId": "hermes-default", "message": "read it", "conversationId": "conv-attachment",
+            "attachments": [{"name": "note.txt", "mimeType": "text/plain", "size": 5, "path": path, "raw": "ignored"}],
+        })
+        assert result["ok"] is True
+        delivered = FakeHermesProvider.chats[-1]["message"]
+        assert "note.txt" in delivered and path in delivered
+        rejected = server._handle_hermes_chat({
+            "agentId": "hermes-default", "message": "read secret", "conversationId": "conv-attachment",
+            "attachments": [{"name": "passwd", "path": "/etc/passwd"}],
+        })
+        assert rejected["ok"] is False
+        assert rejected["status"] == "invalid_attachment"
+        assert rejected["_status"] == 400
     finally:
         restore_native_fakes(old)
 
@@ -560,7 +646,7 @@ def test_hermes_run_start_publishes_provider_bridge_events():
         meta = None
         deadline = time.time() + 2
         while time.time() < deadline:
-            meta = server.PROVIDER_RUN_BRIDGE.get(run_id)
+            meta = server.PROVIDER_RUN_REPOSITORY.get(run_id)
             if meta and meta.get("done"):
                 break
             time.sleep(0.02)
@@ -568,10 +654,7 @@ def test_hermes_run_start_publishes_provider_bridge_events():
         assert meta["result"]["ok"] is True
         assert meta["result"]["reply"] == "native reply"
 
-        events = []
-        q = meta["events"]
-        while not q.empty():
-            events.append(q.get_nowait())
+        events = server.PROVIDER_EVENT_JOURNAL.run_events_after(run_id)
         names = [item["event"] for item in events]
         assert names[0] == "run.started"
         assert "reasoning.available" in names
@@ -584,7 +667,7 @@ def test_hermes_run_start_publishes_provider_bridge_events():
         history = server._load_hermes_history("default", "conv-run")
         assert not [msg for msg in history if msg.get("ephemeral") == "hermes-progress"]
         assert history[-1]["text"] == "native reply"
-        server.PROVIDER_RUN_BRIDGE.clear(run_id)
+        server.PROVIDER_RUN_REPOSITORY.clear(run_id)
     finally:
         restore_native_fakes(old)
 
@@ -607,13 +690,13 @@ def test_hermes_run_start_idempotency_reuses_existing_run():
 
         deadline = time.time() + 2
         while time.time() < deadline:
-            meta = server.PROVIDER_RUN_BRIDGE.get(first["runId"])
+            meta = server.PROVIDER_RUN_REPOSITORY.get(first["runId"])
             if meta and meta.get("done"):
                 break
             time.sleep(0.02)
         history = server._load_hermes_history("default", "conv-hermes-idem")
         assert len([msg for msg in history if msg.get("role") == "user" and msg.get("text") == "hello idem"]) == 1
-        server.PROVIDER_RUN_BRIDGE.clear(first["runId"])
+        server.PROVIDER_RUN_REPOSITORY.clear(first["runId"])
     finally:
         restore_native_fakes(old)
 
@@ -666,15 +749,12 @@ def test_hermes_run_events_replays_terminal_for_late_sse_connection():
 
         deadline = time.time() + 2
         while time.time() < deadline:
-            meta = server.PROVIDER_RUN_BRIDGE.get(run_id)
+            meta = server.PROVIDER_RUN_REPOSITORY.get(run_id)
             if meta and meta.get("done"):
                 break
             time.sleep(0.02)
-        meta = server.PROVIDER_RUN_BRIDGE.get(run_id)
+        meta = server.PROVIDER_RUN_REPOSITORY.get(run_id)
         assert meta and meta["done"] is True
-        while not meta["events"].empty():
-            meta["events"].get_nowait()
-
         handler = FakeSseHandler()
         server._handle_hermes_run_events(handler, run_id)
         output = handler.wfile.getvalue().decode("utf-8")
@@ -693,21 +773,18 @@ def test_hermes_run_start_publishes_approval_event_before_failure_terminal():
         meta = None
         deadline = time.time() + 2
         while time.time() < deadline:
-            meta = server.PROVIDER_RUN_BRIDGE.get(run_id)
+            meta = server.PROVIDER_RUN_REPOSITORY.get(run_id)
             if meta and meta.get("done"):
                 break
             time.sleep(0.02)
         assert meta and meta["done"] is True
-        events = []
-        q = meta["events"]
-        while not q.empty():
-            events.append(q.get_nowait())
+        events = server.PROVIDER_EVENT_JOURNAL.run_events_after(run_id)
         names = [item["event"] for item in events]
         assert "approval.required" in names
         assert names[-1] == "run.failed"
         approval_event = next(item for item in events if item["event"] == "approval.required")
         assert approval_event["data"]["approval"]["provider"] == "hermes-api"
-        server.PROVIDER_RUN_BRIDGE.clear(run_id)
+        server.PROVIDER_RUN_REPOSITORY.clear(run_id)
     finally:
         restore_native_fakes(old)
 
@@ -716,12 +793,9 @@ def test_hermes_run_stop_delegates_to_native_api_and_emits_terminal():
     old = install_native_fakes("success")
     try:
         run_id = "hermes-test-stop"
-        server.PROVIDER_RUN_BRIDGE.remember({
-            "runId": run_id,
-            "agentId": "hermes-default",
+        server.PROVIDER_RUN_REPOSITORY.reserve_start(
+            provider_kind="hermes", agent_id="hermes-default", conversation_id="conv-stop", run_id=run_id, meta={
             "profile": "default",
-            "conversationId": "conv-stop",
-            "events": server.queue.Queue(),
             "turnId": "native-run-to-stop",
             "done": False,
         })
@@ -729,12 +803,104 @@ def test_hermes_run_stop_delegates_to_native_api_and_emits_terminal():
         assert result["ok"] is True
         assert result["status"] == "cancelled"
         assert any(call.get("stop_run") == "native-run-to-stop" for call in FakeHermesApiClient.calls)
-        meta = server.PROVIDER_RUN_BRIDGE.get(run_id)
+        meta = server.PROVIDER_RUN_REPOSITORY.get(run_id)
         assert meta["done"] is True
-        item = meta["events"].get_nowait()
+        item = server.PROVIDER_EVENT_JOURNAL.run_events_after(run_id)[-1]
         assert item["event"] == "run.cancelled"
-        server.PROVIDER_RUN_BRIDGE.clear(run_id)
+        server.PROVIDER_RUN_REPOSITORY.clear(run_id)
     finally:
+        restore_native_fakes(old)
+
+
+def test_coordinated_hermes_cancel_fences_late_native_completion():
+    old = install_native_fakes("blocking")
+    try:
+        started = server._handle_hermes_run_start({"agentId": "hermes-default", "message": "wait", "conversationId": "conv-cancel-coordinated"})
+        assert FakeHermesApiClient.stream_started.wait(1)
+        result = server._handle_hermes_run_stop({"runId": started["runId"]})
+        assert result["ok"] is True
+        assert result["status"] == "cancelled"
+        deadline = time.time() + 1
+        while time.time() < deadline:
+            snapshot = server.PROVIDER_RUN_REPOSITORY.get(started["runId"])
+            if snapshot and snapshot.get("terminal"):
+                break
+            time.sleep(0.01)
+        events = server.PROVIDER_EVENT_JOURNAL.run_events_after(started["runId"])
+        terminals = [item for item in events if item["event"] in {"run.completed", "run.failed", "run.cancelled"}]
+        assert [item["event"] for item in terminals] == ["run.cancelled"]
+        assert len([call for call in FakeHermesApiClient.calls if call.get("stop_run") == "run-native-1"]) == 1, FakeHermesApiClient.calls
+    finally:
+        FakeHermesApiClient.stream_release.set()
+        restore_native_fakes(old)
+
+
+def test_hermes_run_redacts_sensitive_native_event_and_error_data():
+    old = install_native_fakes("sensitive_failure")
+    try:
+        started = server._handle_hermes_run_start({"agentId": "hermes-default", "message": "fail safely", "conversationId": "conv-sensitive"})
+        deadline = time.time() + 1
+        while time.time() < deadline:
+            snapshot = server.PROVIDER_RUN_REPOSITORY.get(started["runId"])
+            if snapshot and snapshot.get("terminal"):
+                break
+            time.sleep(0.01)
+        snapshot = server.PROVIDER_RUN_REPOSITORY.get(started["runId"])
+        events = server.PROVIDER_EVENT_JOURNAL.run_events_after(started["runId"])
+        public = json.dumps(events, ensure_ascii=False)
+        assert "sk-abcdefghijklmnop" not in public
+        assert "/Users/private/file" not in public
+        assert "rawEvent" not in public
+        assert "sk-abcdefghijklmnop" not in str(snapshot["result"].get("error"))
+        assert "/Users/private/file" not in str(snapshot["result"].get("error"))
+    finally:
+        restore_native_fakes(old)
+
+
+def test_hermes_cancel_fences_pending_approval_before_late_decision():
+    old = install_native_fakes("approval")
+    try:
+        started = server._handle_hermes_run_start({"agentId": "hermes-default", "message": "needs approval", "conversationId": "conv-cancel-approval"})
+        deadline = time.time() + 1
+        while time.time() < deadline:
+            snapshot = server.PROVIDER_RUN_REPOSITORY.get(started["runId"])
+            if snapshot and snapshot.get("terminal"):
+                break
+            time.sleep(0.01)
+        snapshot = server.PROVIDER_RUN_REPOSITORY.get(started["runId"])
+        approval = snapshot["result"]["approval"]
+        cancelled = server._handle_hermes_run_stop({"runId": started["runId"]})
+        assert cancelled["ok"] is True
+        assert cancelled["status"] == "cancelled"
+        assert server._get_hermes_approval_pending("hermes-default", approval["session_id"])["pending"] is None
+        late = server._handle_hermes_approval_respond({
+            "agentId": "hermes-default", "approval_id": approval["approval_id"],
+            "session_id": approval["session_id"], "runId": approval["runId"], "choice": "once",
+        })
+        assert late["ok"] is False
+        assert late["status"] == "approval_already_resolved"
+        assert len([call for call in FakeHermesApiClient.calls if call.get("stop_run") == approval["runId"]]) == 1
+        assert not [call for call in FakeHermesApiClient.calls if call.get("respond_approval") == approval["runId"]]
+    finally:
+        restore_native_fakes(old)
+
+
+def test_hermes_reset_fences_late_conversation_history_and_native_id_write():
+    old = install_native_fakes("blocking")
+    result_holder = []
+    try:
+        thread = threading.Thread(target=lambda: result_holder.append(server._handle_hermes_chat({"agentId": "hermes-default", "message": "late", "conversationId": "conv-reset-race"})))
+        thread.start()
+        assert FakeHermesApiClient.stream_started.wait(1)
+        cleared = server._handle_hermes_history_clear({"agentId": "hermes-default", "conversationId": "conv-reset-race"})
+        assert cleared["ok"] is True
+        FakeHermesApiClient.stream_release.set()
+        thread.join(1)
+        assert result_holder and result_holder[0]["ok"] is True
+        assert server._load_hermes_history("default", "conv-reset-race") == []
+        assert server._get_hermes_session_id("default", "conv-reset-race") == ""
+    finally:
+        FakeHermesApiClient.stream_release.set()
         restore_native_fakes(old)
 
 

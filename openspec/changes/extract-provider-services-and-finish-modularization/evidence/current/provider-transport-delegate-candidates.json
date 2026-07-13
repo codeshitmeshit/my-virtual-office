@@ -1,0 +1,34 @@
+{
+  "candidates": [
+    {
+      "allowed": "parse route/query/Last-Event-ID, authenticate, choose HTTP status and headers",
+      "symbol": "OfficeHandler.do_GET"
+    },
+    {
+      "allowed": "parse/validate request and assemble compatibility response",
+      "symbol": "OfficeHandler.do_POST"
+    },
+    {
+      "allowed": "HTTP headers, Last-Event-ID/after parsing, id/event/data framing, heartbeat, disconnect handling",
+      "symbol": "ProviderSSETransport.stream_run"
+    },
+    {
+      "allowed": "HTTP headers, Last-Event-ID/after parsing, snapshot/recovery framing, heartbeat, disconnect handling",
+      "symbol": "ProviderSSETransport.stream_conversation"
+    },
+    {
+      "allowed": "route adapter forwarding to transport stream",
+      "symbol": "_handle_codex_run_events"
+    },
+    {
+      "allowed": "route adapter forwarding to transport stream",
+      "symbol": "_handle_claude_code_run_events"
+    },
+    {
+      "allowed": "route adapter forwarding to transport stream",
+      "symbol": "_handle_hermes_run_events"
+    }
+  ],
+  "mustMove": [],
+  "schema": 1
+}

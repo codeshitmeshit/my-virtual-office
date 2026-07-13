@@ -1,0 +1,128 @@
+{
+  "compatibilityBounds": {
+    "globalEventRetention": 4000,
+    "runAndIdempotencyRetentionMs": 600000
+  },
+  "environment": {
+    "cpuCount": 18,
+    "platform": "macOS-26.5.1-arm64-arm-64bit",
+    "python": "3.12.13"
+  },
+  "eventFixtures": [
+    {
+      "firstRetainedEventId": 1,
+      "fixtureCount": 10,
+      "lastEventId": 10,
+      "lockCallCountProxy": 11,
+      "peakAllocatedBytes": 14056,
+      "publishLatency": {
+        "maxNs": 28875,
+        "medianNs": 16729,
+        "p95Ns": 28875
+      },
+      "publishedEvents": 10,
+      "replayLatencyNs": 122083,
+      "replayScanUpperBound": 10,
+      "replayedEvents": 10,
+      "retainedBytesJson": 2682,
+      "retainedEvents": 10
+    },
+    {
+      "firstRetainedEventId": 1,
+      "fixtureCount": 1000,
+      "lastEventId": 1000,
+      "lockCallCountProxy": 1001,
+      "peakAllocatedBytes": 1373448,
+      "publishLatency": {
+        "maxNs": 101042,
+        "medianNs": 18250,
+        "p95Ns": 25833
+      },
+      "publishedEvents": 1000,
+      "replayLatencyNs": 10516458,
+      "replayScanUpperBound": 1000,
+      "replayedEvents": 1000,
+      "retainedBytesJson": 273676,
+      "retainedEvents": 1000
+    },
+    {
+      "firstRetainedEventId": 1,
+      "fixtureCount": 4000,
+      "lastEventId": 4000,
+      "lockCallCountProxy": 4001,
+      "peakAllocatedBytes": 5541288,
+      "publishLatency": {
+        "maxNs": 359167,
+        "medianNs": 17166,
+        "p95Ns": 44167
+      },
+      "publishedEvents": 4000,
+      "replayLatencyNs": 38899042,
+      "replayScanUpperBound": 4000,
+      "replayedEvents": 4000,
+      "retainedBytesJson": 1104676,
+      "retainedEvents": 4000
+    }
+  ],
+  "implementation": "app.server.ProviderRunBridge",
+  "measurementNotes": [
+    "lockCallCountProxy counts public bridge lock acquisitions, not wall-clock lock hold instrumentation",
+    "provider and downstream call counts are zero because fixed fixtures use the in-memory bridge only",
+    "timings are comparative evidence; call counts and capacity bounds are release gates"
+  ],
+  "runFixtures": [
+    {
+      "adapterLaunches": 1,
+      "fixtureCount": 1,
+      "lockCallCountProxy": 5,
+      "operationLatency": {
+        "maxNs": 347166,
+        "medianNs": 347166,
+        "p95Ns": 347166
+      },
+      "peakAllocatedBytes": 8375,
+      "registeredRuns": 1,
+      "retainedBytesJson": 1098,
+      "retainedEvents": 2,
+      "terminalEvents": 1
+    },
+    {
+      "adapterLaunches": 20,
+      "fixtureCount": 20,
+      "lockCallCountProxy": 100,
+      "operationLatency": {
+        "maxNs": 246958,
+        "medianNs": 163791,
+        "p95Ns": 189750
+      },
+      "peakAllocatedBytes": 89747,
+      "registeredRuns": 20,
+      "retainedBytesJson": 21785,
+      "retainedEvents": 40,
+      "terminalEvents": 20
+    },
+    {
+      "adapterLaunches": 100,
+      "fixtureCount": 100,
+      "lockCallCountProxy": 500,
+      "operationLatency": {
+        "maxNs": 286542,
+        "medianNs": 177458,
+        "p95Ns": 219958
+      },
+      "peakAllocatedBytes": 431284,
+      "registeredRuns": 100,
+      "retainedBytesJson": 109828,
+      "retainedEvents": 200,
+      "terminalEvents": 100
+    }
+  ],
+  "schema": 1,
+  "scopedReplayFixture": {
+    "replayLatencyNs": 142459,
+    "replayScanUpperBound": 40,
+    "retainedEvents": 4000,
+    "scopeCount": 100,
+    "targetEvents": 40
+  }
+}
