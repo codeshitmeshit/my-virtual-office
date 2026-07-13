@@ -1,0 +1,37 @@
+docs/VIRTUAL_OFFICE_AGENT_TOOLS.md
+  s_5852bad622de94::t_b554df54884edd 182
+docs/VO_AGENT_USAGE_GUIDE.md
+  s_5852bad622de94::t_b1fda00eb1fe8c 351,618,644,663,665-666,1087
+openspec/changes/archive/2026-07-13-extract-meeting-and-collaboration-services/acceptance-phase8.md
+  s_5852bad622de94::t_2aee671c066b3e 19
+openspec/changes/archive/2026-07-13-extract-meeting-and-collaboration-services/design.md
+  s_5852bad622de94::t_a19697e789ce58 140
+openspec/changes/archive/2026-07-13-extract-meeting-and-collaboration-services/proposal.md
+  s_5852bad622de94::t_647e4128263d94 8
+openspec/changes/archive/2026-07-13-extract-meeting-and-collaboration-services/specs/meeting-collaboration-service-boundaries/spec.md
+  s_5852bad622de94::t_3239a4cf41ae92 73,76-78,81-83
+openspec/changes/archive/2026-07-13-extract-meeting-and-collaboration-services/tasks.md
+  s_5852bad622de94::t_672dac07309573 23,38
+openspec/changes/archive/2026-07-13-extract-meeting-and-collaboration-services/writer-inventory.md
+  s_5852bad622de94::t_630620b96732fa 9
+openspec/specs/meeting-collaboration-service-boundaries/spec.md
+  s_5852bad622de94::t_15bee920f4539f 79,82-84,87-89
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "609f8dd7c3a9039bf36fec922658967e4fd47603",
+  "prompts": {},
+  "sessions": {
+    "s_5852bad622de94": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f5163-cd74-7df3-a25d-7fd6dd323b5d",
+        "model": "unknown"
+      },
+      "human_author": "codeshitmeshit <codeshitmeshit@126.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
