@@ -1,0 +1,25 @@
+openspec/changes/archive/2026-07-13-extract-meeting-and-collaboration-services/design.md
+  s_36f54f1f883d4f::t_35c7e843f6f8d8 181
+openspec/changes/archive/2026-07-13-extract-meeting-and-collaboration-services/tasks.md
+  s_36f54f1f883d4f::t_3d0e90bbf58d51 21
+openspec/changes/archive/2026-07-13-extract-meeting-and-collaboration-services/writer-inventory.md
+  s_36f54f1f883d4f::t_86feff6eef9672 38
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "39ded841f1b74490d95554801ad7b52c783ee806",
+  "prompts": {},
+  "sessions": {
+    "s_36f54f1f883d4f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f59d6-b068-7c60-bcf4-b2cf1148840e",
+        "model": "unknown"
+      },
+      "human_author": "codeshitmeshit <codeshitmeshit@126.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
