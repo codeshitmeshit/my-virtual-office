@@ -1,0 +1,25 @@
+app/server.py
+  s_5852bad622de94::t_be369742819779 11882,11917
+app/services/meeting_callbacks.py
+  s_5852bad622de94::t_bab446ad860835 12,79,112,114,122,128-129
+tests/test_meeting_collaboration_services.py
+  s_5852bad622de94::t_a6f50982928b8e 22,25-26,32,34,48,59-61,64-77
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "c9c874f8fb7ec70eef7df19f9331e3ec983b71e8",
+  "prompts": {},
+  "sessions": {
+    "s_5852bad622de94": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f5163-cd74-7df3-a25d-7fd6dd323b5d",
+        "model": "unknown"
+      },
+      "human_author": "codeshitmeshit <codeshitmeshit@126.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
