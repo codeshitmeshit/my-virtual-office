@@ -54,6 +54,16 @@ def test_repository_serializes_concurrent_callback_claims(tmp_path):
     assert sum(bool(result.get("inProgress")) for result in results) == 1
 
 
+def test_callback_processing_claim_can_be_recovered_after_lease_expires():
+    data = unified()
+    first = begin(data, "confirm_meeting_request", "r1", context(), "2026-07-13T00:00:00Z")
+    active = begin(data, "confirm_meeting_request", "r1", context(), "2026-07-13T00:04:59Z")
+    reclaimed = begin(data, "confirm_meeting_request", "r1", context(), "2026-07-13T00:05:00Z")
+    assert first["claimed"] is True and active["inProgress"] is True
+    assert reclaimed["claimed"] is True
+    assert data["idempotency"]["callbacks"][reclaimed["key"]]["startedAt"] == "2026-07-13T00:05:00Z"
+
+
 def test_notification_dto_redacts_secrets_paths_raw_and_transcripts():
     value = sanitize({"summary": "password=hunter2 failed at /tmp/private/file", "path": "/Users/private/secret", "appSecret": "plain-secret", "raw": "token=abc", "transcript": "private", "nested": ["api_key=xyz"]})
     text = str(value)

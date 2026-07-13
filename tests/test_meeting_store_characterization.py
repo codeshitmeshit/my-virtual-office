@@ -11,6 +11,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SERVER = ROOT / "app" / "server.py"
+CHANGE = ROOT / "openspec" / "changes" / "archive" / "2026-07-13-extract-meeting-and-collaboration-services"
 
 
 EXPECTED_WRITERS = {
@@ -87,13 +88,13 @@ def test_generated_meeting_call_inventory_matches_every_definition_and_edge():
     generated = subprocess.check_output(
         [sys.executable, "tests/generate_meeting_inventory.py"], cwd=ROOT, text=True,
     )
-    tracked = ROOT / "openspec/changes/extract-meeting-and-collaboration-services/meeting-call-inventory.json"
+    tracked = CHANGE / "meeting-call-inventory.json"
     assert json.loads(generated) == json.loads(tracked.read_text(encoding="utf-8"))
 
 
 def test_characterization_manifest_points_to_executable_test_functions():
     manifest = json.loads((
-        ROOT / "openspec/changes/extract-meeting-and-collaboration-services/characterization-manifest.json"
+        CHANGE / "characterization-manifest.json"
     ).read_text(encoding="utf-8"))
     assert len(manifest["nodeIds"]) == 10
     for node_id in manifest["nodeIds"]:
@@ -105,8 +106,7 @@ def test_characterization_manifest_points_to_executable_test_functions():
 
 def test_baseline_artifact_has_fixed_fixtures_and_two_write_conversion_contract():
     artifact = json.loads((
-        ROOT / "openspec" / "changes" / "extract-meeting-and-collaboration-services"
-        / "performance-baseline.json"
+        CHANGE / "performance-baseline.json"
     ).read_text(encoding="utf-8"))
     assert sorted(artifact["fixtures"]) == ["1", "100", "20"]
     observed = artifact["observedRequestConversion"]

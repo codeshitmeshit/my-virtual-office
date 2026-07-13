@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import copy
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Callable, Mapping, MutableMapping
 
 
 ALLOWED_ACTIONS = frozenset({"confirm_meeting_request", "reject_meeting_request"})
+PROCESSING_LEASE_SECONDS = 300
 
 
 @dataclass(frozen=True)
@@ -57,6 +59,21 @@ def callback_key(action: str, request_id: str, context: TrustedCallbackContext) 
     return f"feishu:{event}:{action}:{request_id}" if event else f"feishu:{action}:{request_id}:{context.actor_id}"
 
 
+def _processing_claim_is_stale(record: Mapping[str, Any], now: str) -> bool:
+    try:
+        started_text = str(record.get("startedAt") or "")
+        current_text = str(now or "")
+        if started_text.endswith("Z"):
+            started_text = started_text[:-1] + "+00:00"
+        if current_text.endswith("Z"):
+            current_text = current_text[:-1] + "+00:00"
+        started = datetime.fromisoformat(started_text)
+        current = datetime.fromisoformat(current_text)
+        return (current - started).total_seconds() >= PROCESSING_LEASE_SECONDS
+    except (TypeError, ValueError):
+        return False
+
+
 def begin(
     data: MutableMapping[str, Any], action: str, request_id: str, context: TrustedCallbackContext, now: str,
     claimed_linkage: Mapping[str, Any] | None = None,
@@ -87,7 +104,8 @@ def begin(
     if isinstance(existing, Mapping):
         if existing.get("status") == "completed" and isinstance(existing.get("response"), Mapping):
             return {"handled": True, "ok": True, "replay": True, "key": key, "response": copy.deepcopy(existing["response"])}
-        return {"handled": True, "ok": True, "replay": True, "inProgress": True, "key": key}
+        if existing.get("status") == "processing" and not _processing_claim_is_stale(existing, now):
+            return {"handled": True, "ok": True, "replay": True, "inProgress": True, "key": key}
     callbacks[key] = {
         "status": "processing", "action": action, "requestId": request_id,
         "actorId": context.actor_id, "messageId": context.message_id, "chatId": context.chat_id,

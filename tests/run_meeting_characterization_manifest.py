@@ -8,7 +8,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-manifest_path = ROOT / "openspec/changes/extract-meeting-and-collaboration-services/characterization-manifest.json"
+manifest_path = ROOT / "openspec/changes/archive/2026-07-13-extract-meeting-and-collaboration-services/characterization-manifest.json"
 manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
 command = [sys.executable, "-m", "pytest", "-q", *manifest["nodeIds"]]
 completed = subprocess.run(command, cwd=ROOT, text=True, capture_output=True)

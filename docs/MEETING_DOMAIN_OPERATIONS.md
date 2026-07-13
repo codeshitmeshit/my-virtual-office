@@ -59,7 +59,7 @@ Use migration status/schema, operation, ID digest, phase/status, stale commit, r
 
 ## Evidence
 
-- Fixed migration rehearsal: `openspec/changes/extract-meeting-and-collaboration-services/migration-rehearsal.json`.
+- Fixed migration rehearsal: `openspec/changes/archive/2026-07-13-extract-meeting-and-collaboration-services/migration-rehearsal.json`.
 - Performance: `performance-final.json` and `performance-result.md` in the same change.
 - Automated regression: `regression-phase7.md`.
 - Runtime/manual/release rehearsal: `acceptance-phase8.md` and `release-rehearsal.md`.

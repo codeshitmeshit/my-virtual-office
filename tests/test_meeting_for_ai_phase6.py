@@ -320,3 +320,27 @@ def test_phase6_project_success_meeting_commit_failure_retries_without_duplicate
             assert len(task["meetingActionItems"]) == 1
         finally:
             restore_store(old)
+
+
+def test_phase6_stale_meeting_commit_reports_partial_success_as_retryable():
+    with tempfile.TemporaryDirectory() as status_dir:
+        old = with_store(status_dir)
+        try:
+            project = create_project(); source_task = create_project_task(project)
+            meeting = create_completed_task_meeting(project["id"], source_task["id"])
+            draft = meeting["actionItemDrafts"][0]
+            with mock.patch.object(
+                server.meeting_action_items_service,
+                "commit_confirmation",
+                return_value={"error": "stale", "code": "action_item_stale", "_status": 409},
+            ):
+                failed = server._handle_executable_meeting_action_item(
+                    meeting["id"], draft["id"], {"action": "confirm", "idempotencyKey": "stale-partial"},
+                )
+            assert failed["code"] == "action_item_commit_pending" and failed["_status"] == 503
+            assert failed["reasonCode"] == "action_item_stale"
+            current = server._handle_project_get(project["id"])["project"]
+            task = next(item for item in current["tasks"] if item["id"] == source_task["id"])
+            assert len(task["meetingActionItems"]) == 1
+        finally:
+            restore_store(old)

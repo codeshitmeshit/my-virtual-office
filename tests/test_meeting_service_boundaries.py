@@ -7,7 +7,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 APP = ROOT / "app"
-CHANGE = ROOT / "openspec" / "changes" / "extract-meeting-and-collaboration-services"
+CHANGE = ROOT / "openspec" / "changes" / "archive" / "2026-07-13-extract-meeting-and-collaboration-services"
 SERVICES = [
     APP / "services" / name for name in (
         "meeting_lifecycle.py", "meeting_requests.py", "meeting_action_items.py",

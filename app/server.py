@@ -13560,6 +13560,14 @@ def _handle_executable_meeting_action_item(meeting_id, action_item_id, body):
             "taskId": (project_result.get("task") or {}).get("id"),
             "meetingActionItemId": (project_result.get("record") or {}).get("id"),
         }
+    if not committed.get("ok"):
+        return {
+            "error": "Project action item was created but Meeting confirmation is pending retry",
+            "code": "action_item_commit_pending", "_status": 503,
+            "reasonCode": committed.get("code") or "meeting_confirmation_failed",
+            "taskId": (project_result.get("task") or {}).get("id"),
+            "meetingActionItemId": (project_result.get("record") or {}).get("id"),
+        }
     return committed
 
 

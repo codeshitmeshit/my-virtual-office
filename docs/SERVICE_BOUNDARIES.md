@@ -97,10 +97,10 @@ Each intentional correction has a failing-before regression. Other public behavi
 
 The fixed harness uses small (`5×10`), medium (`50×50`), and large (`200×100`) project/task fixtures, 3 warmups, and 20 measured runs. Store/Provider/notification/Gateway/Git-scan counts are the primary gate; median and p95 are secondary evidence.
 
-Final results are in `openspec/changes/extract-project-execution-services/performance-result.md`. No measured call count increased. Archived Cron dispatch strictly improves from `2 loads / 1 save` to `1 load / 1 save`; medium and large Cron p95 also improve. The medium fixture is the staging release/rollback fixture.
+Final results are in `openspec/changes/archive/2026-07-13-extract-project-execution-services/performance-result.md`. No measured call count increased. Archived Cron dispatch strictly improves from `2 loads / 1 save` to `1 load / 1 save`; medium and large Cron p95 also improve. The medium fixture is the staging release/rollback fixture.
 
 ## Verification
 
-- Full automated Python, script-style Python, JavaScript/static, syntax, and OpenSpec commands are recorded in `openspec/changes/extract-project-execution-services/full-regression.md`.
+- Full automated Python, script-style Python, JavaScript/static, syntax, and OpenSpec commands are recorded in `openspec/changes/archive/2026-07-13-extract-project-execution-services/full-regression.md`.
 - Live-browser/CDP and end-to-end operator acceptance must start through `./start.sh`; do not invoke `python app/server.py` directly for acceptance.
 - Release rehearsal must back up project Markdown and Cron bindings, record active attempts/reviews/claims, drain work, validate the new version, and prove rollback restores the snapshots.
