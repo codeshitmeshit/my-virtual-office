@@ -663,6 +663,7 @@ curl -sS -X POST http://127.0.0.1:8090/api/meetings/executable/MEETING_ID/action
 - 挂载到已有任务需要用户确认，并且会议必须有有效来源关联或显式指定已有项目/任务目标。
 - 确认时使用 `idempotencyKey`。
 - 已有目标任务会保存一条去重的 `meetingActionItems` 记录，其中包含来源会议/行动项元数据。
+- 已确认草稿会返回 `targetTaskId`；为兼容旧调用方，`sourceTaskId` 字段和 `source_task_required` 错误码仍作为别名保留，显式选择的未绑定目标也适用。
 - 被拒绝的草稿保留审计痕迹，不会挂载到项目任务。
 
 ## 11. 项目与任务

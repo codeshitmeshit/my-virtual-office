@@ -13525,7 +13525,7 @@ def _handle_executable_meeting_action_item(meeting_id, action_item_id, body):
     )
     if not prepared.get("ok") or not prepared.get("prepared"):
         return prepared
-    project_id = prepared.get("targetProjectId"); task_id = prepared.get("sourceTaskId")
+    project_id = prepared.get("targetProjectId"); task_id = prepared.get("targetTaskId") or prepared.get("sourceTaskId")
     if not project_id or not task_id:
         return {"error": "Meeting action items must be attached to an existing project task", "code": "source_task_required", "_status": 400}
     def attach(project):

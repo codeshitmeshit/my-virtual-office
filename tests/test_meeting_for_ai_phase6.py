@@ -242,6 +242,9 @@ def test_phase6_unbound_meeting_requires_target_project_or_keep():
                 "idempotencyKey": "explicit-existing-target",
             })
             assert confirmed["ok"] is True and confirmed["taskId"] == target["id"]
+            assert confirmed["targetTaskId"] == target["id"]
+            assert confirmed["actionItem"]["targetTaskId"] == target["id"]
+            assert confirmed["actionItem"]["sourceTaskId"] == target["id"]  # compatibility alias
             current = server._handle_project_get(project["id"])["project"]
             projected = next(item for item in current["tasks"] if item["id"] == target["id"])["meetingActionItems"]
             assert len(projected) == 1 and projected[0]["sourceActionItemId"] == draft["id"]

@@ -664,6 +664,7 @@ Rules:
 - Existing-task action-item attachment requires user confirmation and either valid Meeting source linkage or an explicit existing project/task destination.
 - Use `idempotencyKey` for confirmation.
 - The existing target task stores a deduplicated `meetingActionItems` record with source Meeting/action-item metadata.
+- Confirmed drafts expose `targetTaskId`; the legacy `sourceTaskId` field and `source_task_required` error code remain compatibility aliases, including for explicitly selected unbound targets.
 - Rejected drafts remain auditable and are not attached to a project task.
 
 ## 11. Projects and Tasks

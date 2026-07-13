@@ -88,19 +88,21 @@ def mutate_command(
     idem_key = f"{meeting_id}:action-item:{action_item_id}:{action}:{idem_value}" if idem_value else ""
     idem = _idempotency(data).get(idem_key) if idem_key else None
     if isinstance(idem, Mapping):
-        return {"ok": True, "meeting": meeting, "actionItem": draft, "taskId": idem.get("taskId") or draft.get("sourceTaskId") or draft.get("taskId"), "meetingActionItemId": idem.get("meetingActionItemId") or draft.get("meetingActionItemId"), "idempotent": True}
+        task_id = idem.get("taskId") or draft.get("targetTaskId") or draft.get("sourceTaskId") or draft.get("taskId")
+        return {"ok": True, "meeting": meeting, "actionItem": draft, "taskId": task_id, "targetTaskId": task_id, "meetingActionItemId": idem.get("meetingActionItemId") or draft.get("meetingActionItemId"), "idempotent": True}
     before = snapshot(draft); now = hooks.now()
     if action == "confirm":
         if draft.get("status") == "confirmed":
-            task_id = draft.get("sourceTaskId") or draft.get("taskId")
+            task_id = draft.get("targetTaskId") or draft.get("sourceTaskId") or draft.get("taskId")
             if idem_key: _idempotency(data)[idem_key] = {"meetingId": meeting_id, "taskId": task_id}
-            return {"ok": True, "meeting": meeting, "actionItem": draft, "taskId": task_id, "idempotent": True}
+            return {"ok": True, "meeting": meeting, "actionItem": draft, "taskId": task_id, "targetTaskId": task_id, "idempotent": True}
         source = meeting.get("source") if isinstance(meeting.get("source"), Mapping) else {}
+        target_task_id = str(source.get("taskId") or body.get("taskId") or draft.get("targetTaskId") or draft.get("sourceTaskId") or "").strip()
         return {
             "ok": True, "prepared": True, "meeting": copy.deepcopy(meeting), "actionItem": copy.deepcopy(draft),
             "before": before, "actorId": actor_id, "idempotencyKey": idem_key, "rawIdempotencyKey": idem_value,
             "targetProjectId": str(source.get("projectId") or meeting.get("projectId") or body.get("targetProjectId") or body.get("projectId") or draft.get("targetProjectId") or "").strip(),
-            "sourceTaskId": str(source.get("taskId") or body.get("taskId") or draft.get("sourceTaskId") or "").strip(),
+            "targetTaskId": target_task_id, "sourceTaskId": target_task_id,
             "compare": {"status": draft.get("status"), "updatedAt": draft.get("updatedAt"), "meetingVersion": meeting.get("version")},
         }
     if draft.get("status") == "confirmed":
@@ -130,15 +132,15 @@ def attach_to_project(
 ) -> dict[str, Any]:
     if project.get("status") == "archived": return {"error": "Archived projects cannot receive meeting action items", "_status": 400}
     task = next((item for item in project.get("tasks", []) if item.get("id") == task_id), None)
-    if not task: return {"error": "Source task not found", "_status": 404}
+    if not task: return {"error": "Target project task not found", "_status": 404}
     meeting_id = str(meeting.get("id") or ""); item_id = project_action_key(meeting_id, action_item_id)
     meeting_source = meeting.get("source") if isinstance(meeting.get("source"), Mapping) else {}
     request_id = str(meeting_source.get("meetingRequestId") or "")
     blocker = task.get("meetingBlocker") if isinstance(task.get("meetingBlocker"), Mapping) else {}
     if request_id and blocker.get("requestId") and blocker.get("requestId") != request_id:
-        return {"error": "Source task Meeting linkage is stale", "code": "action_item_meeting_link_stale", "_status": 409}
+        return {"error": "Target task Meeting linkage is stale", "code": "action_item_meeting_link_stale", "_status": 409}
     if blocker.get("meetingId") and str(blocker.get("meetingId")) != meeting_id:
-        return {"error": "Source task is linked to a different Meeting", "code": "action_item_meeting_link_stale", "_status": 409}
+        return {"error": "Target task is linked to a different Meeting", "code": "action_item_meeting_link_stale", "_status": 409}
     items = task.setdefault("meetingActionItems", [])
     existing = next((item for item in items if isinstance(item, Mapping) and str(item.get("id") or "") == item_id), None)
     record = {
@@ -163,17 +165,20 @@ def commit_confirmation(
 ) -> dict[str, Any]:
     meeting = data.get("meetings", {}).get(meeting_id)
     if not isinstance(meeting, MutableMapping):
-        return {"ok": True, "task": project_result.get("task"), "taskId": (project_result.get("task") or {}).get("id")}
+        task_id = (project_result.get("task") or {}).get("id")
+        return {"ok": True, "task": project_result.get("task"), "taskId": task_id, "targetTaskId": task_id}
     ensure_drafts(data, meeting, hooks); draft = find_draft(meeting, action_item_id)
     if not draft: return {"error": "Action item draft not found", "_status": 404}
     compare = prepared.get("compare") if isinstance(prepared.get("compare"), Mapping) else {}
     if draft.get("status") == "confirmed" and draft.get("meetingActionItemId") == (project_result.get("record") or {}).get("id"):
-        return {"ok": True, "meeting": meeting, "actionItem": draft, "task": project_result.get("task"), "taskId": (project_result.get("task") or {}).get("id"), "idempotent": True}
+        task_id = (project_result.get("task") or {}).get("id")
+        return {"ok": True, "meeting": meeting, "actionItem": draft, "task": project_result.get("task"), "taskId": task_id, "targetTaskId": task_id, "idempotent": True}
     if draft.get("status") != compare.get("status") or draft.get("updatedAt") != compare.get("updatedAt"):
         return {"error": "Action item changed while project task was being updated", "code": "action_item_stale", "_status": 409}
     task = project_result.get("task") or {}; record = project_result.get("record") or {}; before = snapshot(draft); now = hooks.now()
     draft.update({
-        "status": "confirmed", "targetProjectId": prepared.get("targetProjectId"), "sourceTaskId": task.get("id"),
+        "status": "confirmed", "targetProjectId": prepared.get("targetProjectId"),
+        "targetTaskId": task.get("id"), "sourceTaskId": task.get("id"),
         "meetingActionItemId": record.get("id"), "confirmedBy": prepared.get("actorId"),
         "confirmedAt": record.get("confirmedAt") or now, "updatedAt": now,
     })
@@ -181,4 +186,4 @@ def commit_confirmation(
     event = hooks.append_event(data, meeting, "action_item_confirmed", actor={"type": "user", "id": prepared.get("actorId")}, payload={"actionItemId": action_item_id, "projectId": prepared.get("targetProjectId"), "taskId": task.get("id"), "meetingActionItemId": record.get("id")}, idempotency_key=prepared.get("rawIdempotencyKey"))
     if prepared.get("idempotencyKey"):
         _idempotency(data)[prepared["idempotencyKey"]] = {"meetingId": meeting_id, "taskId": task.get("id"), "meetingActionItemId": record.get("id"), "sequence": event["sequence"]}
-    return {"ok": True, "meeting": meeting, "actionItem": draft, "task": task, "taskId": task.get("id"), "meetingActionItem": record}
+    return {"ok": True, "meeting": meeting, "actionItem": draft, "task": task, "taskId": task.get("id"), "targetTaskId": task.get("id"), "meetingActionItem": record}
