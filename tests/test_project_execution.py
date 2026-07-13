@@ -2673,7 +2673,13 @@ def review_project_execution_task(project_id, task_id):
     def reviewed():
         current = server._handle_project_get(project_id)["project"]
         task = next(t for t in current["tasks"] if t["id"] == task_id)
-        return task if task.get("executionState") == "awaiting_user_acceptance" else None
+        attempt = next(item for item in task.get("attempts", []) if item.get("id") == attempt_id)
+        intents = attempt.get("notificationIntents") if isinstance(attempt.get("notificationIntents"), dict) else {}
+        delivery_finished = bool(intents) and all(
+            marker.get("deliveryStatus") not in {"pending", "sending"}
+            for marker in intents.values() if isinstance(marker, dict)
+        )
+        return task if task.get("executionState") == "awaiting_user_acceptance" and delivery_finished else None
 
     return wait_for(reviewed)
 
