@@ -9,7 +9,7 @@
     <link rel="apple-touch-icon" href="icon-192.png">
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#1a1a2e">
-    <link rel="stylesheet" href="style.css?v=1783785601-chat-markdown-headings-weather-form-layout-chat-sessions">
+    <link rel="stylesheet" href="style.css?v=1784143900-chat-bottom-follow-feishu-media-display">
     <link rel="stylesheet" href="projects.css?v=1783041181-meeting-request-status-colors">
     <link rel="stylesheet" href="archive-room.css?v=1783041181-phase13">
     <link rel="stylesheet" href="fonts.css?v=1783041181.05.07">
@@ -298,6 +298,11 @@
                             <label class="mm-label" data-i18n="feishu_representative_agent">Representative Agent ID</label>
                             <select id="mm-feishu-chat-agent-id" class="mm-input">
                                 <option value="" data-i18n="feishu_chat_select_agent">Select an agent...</option>
+                            </select>
+                            <label class="mm-label">Chat Transport</label>
+                            <select id="mm-feishu-chat-transport" class="mm-input">
+                                <option value="channel-sdk-node">Channel SDK (Node)</option>
+                                <option value="legacy-python">Legacy Python (Rollback)</option>
                             </select>
                             <div id="mm-feishu-chat-long-connection-status" style="font-size:9px;color:#888;margin:4px 0 8px;line-height:1.4;" data-i18n="feishu_long_connection_pending">Long connection starts after saving config.</div>
                             <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
@@ -1322,8 +1327,8 @@
     <!-- marked.js v15.0.12 - bundled locally for airgapped/offline use -->
     <script src="marked.min.js"></script>
     <script src="codex-reasoning.js?v=1783041181"></script>
-    <script src="chat-history.js?v=1783699200"></script>
-    <script src="chat.js?v=1783785603-codex-terminal-dedupe"></script>
+    <script src="chat-history.js?v=1784143900-live-history-reconcile-feishu-media-display"></script>
+    <script src="chat.js?v=1784143900-live-history-reconcile-feishu-media-display"></script>
     <script src="sms-panel.js?v=1783041181"></script>
     <script src="pc-monitor.js?v=1783041181"></script>
     <script src="api-usage.js?v=1783190741-usage-tabs"></script>

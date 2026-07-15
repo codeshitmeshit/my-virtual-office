@@ -79,17 +79,34 @@ _FEISHU_CHANNEL_LOCKS_LOCK = threading.Lock()
 _FEISHU_CHANNEL_RECORD_LOCK = threading.Lock()
 _FEISHU_CHAT_EVENT_SUBSCRIBERS = {}
 _FEISHU_CHAT_EVENT_SUBSCRIBERS_LOCK = threading.Lock()
+_FEISHU_CHAT_SSE_METRICS = {
+    "publishAttempts": 0,
+    "queueTargets": 0,
+    "queued": 0,
+    "written": 0,
+    "replayed": 0,
+    "writeFailures": 0,
+    "lastPublishAt": 0,
+    "lastWriteAt": 0,
+    "lastReplayAt": 0,
+    "lastError": "",
+}
 _FEISHU_CHAT_WORKER_TOKEN = uuid.uuid4().hex
 
 
 class FeishuChatWorkerProcess:
-    def __init__(self, *, app_id, app_secret, callback_url, status_dir):
+    def __init__(self, *, app_id, app_secret, callback_url, status_dir, transport=""):
         self.app_id = str(app_id or "").strip()
         self.app_secret = str(app_secret or "").strip()
         self.callback_url = str(callback_url or "").strip()
         self.status_dir = str(status_dir or "")
+        self.transport = str(transport or "").strip()
         self._process = None
         self._started_at = 0
+        self._worker_instance_id = ""
+        self._command_token = ""
+        self._log_file = None
+        self._last_status = {}
 
     def _status_path(self):
         return os.path.join(self.status_dir, "feishu-chat-worker-status.json")
@@ -115,64 +132,80 @@ class FeishuChatWorkerProcess:
             "mode": "subprocess",
         }
 
-    def _terminate_stale_workers(self):
-        current_pid = os.getpid()
+    def _effective_transport(self):
+        return self.transport or _effective_feishu_chat_transport()
+
+    def _node_worker_root(self):
+        return os.path.join(os.path.dirname(os.path.dirname(__file__)), "integrations", "feishu-channel-worker")
+
+    def _node_preflight(self):
+        node = shutil.which("node")
+        if not node:
+            return {**self._base_status("missing_node_runtime", running=False, enabled=False), "transport": "channel-sdk-node", "action": "Install Node.js 18 or newer."}
+        script = os.path.join(self._node_worker_root(), "src", "preflight.mjs")
+        if not os.path.isfile(script):
+            return {**self._base_status("missing_channel_sdk", running=False, enabled=False), "transport": "channel-sdk-node", "action": f"Restore {self._node_worker_root()} and run npm ci --omit=dev."}
         try:
-            result = subprocess.run(
-                ["pgrep", "-f", "feishu_chat_worker.py"],
-                capture_output=True,
-                text=True,
-                timeout=3,
-            )
-        except Exception:
-            return
-        for raw in (result.stdout or "").splitlines():
-            raw = raw.strip()
-            if not raw.isdigit():
-                continue
-            pid = int(raw)
-            if pid == current_pid:
-                continue
-            proc = self._process
-            if proc and proc.poll() is None and pid == proc.pid:
-                continue
-            try:
-                os.kill(pid, signal.SIGTERM)
-            except Exception:
-                continue
+            result = subprocess.run([node, script], cwd=self._node_worker_root(), capture_output=True, text=True, timeout=15)
+            payload = json.loads((result.stdout or "").strip().splitlines()[-1])
+            return payload if isinstance(payload, dict) else {"ok": False, "status": "dependency_install_failed"}
+        except (subprocess.TimeoutExpired, OSError, json.JSONDecodeError, IndexError) as exc:
+            return {
+                **self._base_status("dependency_install_failed", running=False, enabled=False),
+                "transport": "channel-sdk-node",
+                "lastError": f"{type(exc).__name__}: {exc}",
+                "action": f"Run npm ci --omit=dev in {self._node_worker_root()}.",
+            }
 
     def start(self):
         if not self.app_id or not self.app_secret:
-            return self._base_status("missing_app_credentials", running=False, enabled=False)
+            self._last_status = self._base_status("missing_app_credentials", running=False, enabled=False)
+            return dict(self._last_status)
         if self._process and self._process.poll() is None:
             return self.status()
+        transport = self._effective_transport()
+        if transport == "channel-sdk-node":
+            preflight = self._node_preflight()
+            if not preflight.get("ok"):
+                self._last_status = {**self._base_status(preflight.get("status") or "dependency_install_failed", running=False, enabled=False), **preflight, "transport": transport}
+                return dict(self._last_status)
+        self._last_status = {}
         self._started_at = int(time.time())
+        self._worker_instance_id = uuid.uuid4().hex
+        self._command_token = secrets.token_hex(32)
+        global _FEISHU_CHAT_WORKER_TOKEN
+        _FEISHU_CHAT_WORKER_TOKEN = self._command_token
         env = os.environ.copy()
         env.update({
             "VO_STATUS_DIR": self.status_dir,
             "VO_FEISHU_CHAT_APP_ID": self.app_id,
             "VO_FEISHU_CHAT_APP_SECRET": self.app_secret,
             "VO_FEISHU_CHAT_WORKER_CALLBACK_URL": self.callback_url,
-            "VO_FEISHU_CHAT_WORKER_TOKEN": _FEISHU_CHAT_WORKER_TOKEN,
+            "VO_FEISHU_CHAT_WORKER_TOKEN": self._command_token,
             "VO_FEISHU_CHAT_PARENT_PID": str(os.getpid()),
+            "VO_FEISHU_CHAT_WORKER_INSTANCE_ID": self._worker_instance_id,
         })
-        worker_path = os.path.join(os.path.dirname(__file__), "feishu_chat_worker.py")
+        if transport == "channel-sdk-node":
+            command = [shutil.which("node"), os.path.join(self._node_worker_root(), "src", "index.mjs")]
+            cwd = self._node_worker_root()
+        else:
+            command = [sys.executable, os.path.join(os.path.dirname(__file__), "feishu_chat_worker.py")]
+            cwd = os.path.dirname(__file__)
         os.makedirs(self.status_dir, exist_ok=True)
         log_path = os.path.join(self.status_dir, "feishu-chat-worker.log")
-        self._terminate_stale_workers()
         try:
             os.remove(self._status_path())
         except FileNotFoundError:
             pass
         except Exception:
             pass
-        log_file = open(log_path, "a", encoding="utf-8")
+        self._log_file = open(log_path, "a", encoding="utf-8")
         self._process = subprocess.Popen(
-            [sys.executable, worker_path],
-            cwd=os.path.dirname(__file__),
+            command,
+            cwd=cwd,
             env=env,
-            stdout=log_file,
-            stderr=log_file,
+            stdout=self._log_file,
+            stderr=self._log_file,
             start_new_session=True,
         )
         return self.status()
@@ -188,11 +221,56 @@ class FeishuChatWorkerProcess:
                 proc.kill()
             except Exception:
                 pass
-        return self._base_status("stopped", running=False, enabled=False)
+        if self._log_file:
+            try:
+                self._log_file.close()
+            except Exception:
+                pass
+            self._log_file = None
+        self._command_token = ""
+        self._last_status = {**self._base_status("stopped", running=False, enabled=False), "transport": self._effective_transport(), "workerInstanceId": self._worker_instance_id}
+        return dict(self._last_status)
+
+    def command(self, operation, payload, timeout=30):
+        if self._effective_transport() != "channel-sdk-node":
+            return {"ok": False, "status": "legacy_transport", "category": "unsupported_transport"}
+        status = self.status()
+        command_status = status.get("command") if isinstance(status.get("command"), dict) else {}
+        port = int(command_status.get("port") or 0)
+        if not port or not command_status.get("ready") or not self._command_token:
+            return {"ok": False, "status": "command_unavailable", "category": "not_connected"}
+        body = {
+            "schema": "vo.feishu-chat.command/v1",
+            "requestId": uuid.uuid4().hex,
+            "workerInstanceId": self._worker_instance_id,
+            "operation": operation,
+            "payload": payload if isinstance(payload, dict) else {},
+        }
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{port}/command",
+            data=json.dumps(body).encode("utf-8"),
+            headers={"Content-Type": "application/json", "X-VO-Feishu-Chat-Worker-Token": self._command_token},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=max(1, min(float(timeout or 30), 900))) as response:
+                result = json.loads(response.read().decode("utf-8"))
+            return result if isinstance(result, dict) else {"ok": False, "status": "invalid_command_response"}
+        except urllib.error.HTTPError as exc:
+            try:
+                result = json.loads(exc.read().decode("utf-8"))
+            except Exception:
+                result = {"ok": False, "status": "command_http_error", "category": "unknown", "error": f"HTTP {exc.code}"}
+            return result
+        except Exception as exc:
+            return {"ok": False, "status": "command_error", "category": "not_connected", "error": f"{type(exc).__name__}: {exc}"}
 
     def status(self):
         proc = self._process
         worker_status = self._read_worker_status()
+        worker_instance_id = str(worker_status.get("workerInstanceId") or "")
+        if self._worker_instance_id and worker_instance_id and worker_instance_id != self._worker_instance_id:
+            worker_status = {"status": "stale_worker_status", "lastError": "Worker status belongs to a different instance."}
         if proc and proc.poll() is None:
             result = self._base_status("starting", running=True, enabled=True)
             result.update(worker_status)
@@ -200,6 +278,8 @@ class FeishuChatWorkerProcess:
             result["enabled"] = True
             result["startedAt"] = self._started_at
             result["mode"] = "subprocess"
+            result["transport"] = self._effective_transport()
+            result["workerInstanceId"] = self._worker_instance_id
             return result
         if proc:
             result = self._base_status("error", running=False, enabled=True)
@@ -208,11 +288,16 @@ class FeishuChatWorkerProcess:
             result["status"] = worker_status.get("status") or "exited"
             result["returnCode"] = proc.returncode
             result["mode"] = "subprocess"
+            result["transport"] = self._effective_transport()
+            result["workerInstanceId"] = self._worker_instance_id
             return result
         result = self._base_status("not_started", running=False, enabled=False)
+        result.update(self._last_status)
         result.update(worker_status)
         result["running"] = False
         result["mode"] = "subprocess"
+        result["transport"] = self._effective_transport()
+        result["workerInstanceId"] = self._worker_instance_id
         return result
 
 
@@ -644,6 +729,7 @@ def _load_vo_config():
                 "appSecret": _env_or("VO_FEISHU_CHAT_APP_SECRET", feishu_chat_cfg.get("appSecret", "")),
                 "receiveMode": "long_connection",
                 "representativeAgentId": _env_or("VO_FEISHU_CHAT_AGENT_ID", feishu_chat_cfg.get("representativeAgentId", "")),
+                "transportImplementation": _env_or("VO_FEISHU_CHAT_TRANSPORT", feishu_chat_cfg.get("transportImplementation", "channel-sdk-node")),
                 "requireBoundVoUser": False,
                 "allowedChatTypes": ["p2p"],
                 "replyMode": "same_chat",
@@ -753,6 +839,12 @@ def _feishu_chat_app_config():
     return ((VO_CONFIG.get("feishu") or {}).get("chatApp") or {})
 
 
+def _effective_feishu_chat_transport(cfg=None):
+    cfg = cfg if isinstance(cfg, dict) else _feishu_chat_app_config()
+    value = str(os.environ.get("VO_FEISHU_CHAT_TRANSPORT") or cfg.get("transportImplementation") or "channel-sdk-node").strip().lower()
+    return value if value in {"channel-sdk-node", "legacy-python"} else "channel-sdk-node"
+
+
 def _feishu_chat_app_configured(cfg=None):
     cfg = cfg if isinstance(cfg, dict) else _feishu_chat_app_config()
     return bool(cfg.get("appId") and cfg.get("appSecret"))
@@ -778,11 +870,14 @@ def _feishu_chat_config_response(include_ok=True):
         "configured": _feishu_chat_app_configured(cfg),
         "maskedAppId": _mask_secret_value(cfg.get("appId"), 5, 4),
         "receiveMode": "long_connection",
+        "transportImplementation": cfg.get("transportImplementation") or "channel-sdk-node",
+        "effectiveTransportImplementation": _effective_feishu_chat_transport(cfg),
         "representativeAgentId": cfg.get("representativeAgentId") or "",
         "requireBoundVoUser": False,
         "allowedChatTypes": ["p2p"],
         "replyMode": "same_chat",
         "longConnection": long_connection,
+        "sse": _feishu_chat_sse_metrics_snapshot(),
     }
     if include_ok:
         result["ok"] = True
@@ -6213,28 +6308,38 @@ def _append_codex_user_comm_event(agent, agent_id, conversation_id, message, bod
     if idempotency_key:
         metadata["idempotencyKey"] = idempotency_key
     source_message_id = metadata.get("sourceMessageId")
-    if source_message_id:
-        existing = _find_comm_request_by_source_message(source_message_id)
-        if existing:
-            return existing
-    event = _append_comm_event({
-        "type": "message",
-        "direction": "request",
-        "conversationId": conversation_id,
-        "from": {
-            "id": "user",
-            "providerKind": "human",
-            "name": sender_name,
-            "emoji": "",
-            "sourceApp": source_app,
-            "sourceSurface": source_surface,
-            "sourceLabel": source_label,
-        },
-        "to": _office_agent_ref(agent_id),
-        "text": message,
-        "metadata": metadata,
-        "visibleInOffice": True,
-    })
+    with _COMM_REQUEST_IDEMPOTENCY_LOCK:
+        if source_message_id:
+            existing = _find_comm_request_by_source_message(source_message_id)
+            if existing:
+                return existing
+        if idempotency_key:
+            existing = _find_comm_request_by_idempotency(
+                idempotency_key,
+                conversation_id=conversation_id,
+                agent_id=agent_id,
+            )
+            if existing:
+                return existing
+        event = _append_comm_event({
+            "type": "message",
+            "direction": "request",
+            "conversationId": conversation_id,
+            "from": {
+                "id": "user",
+                "providerKind": "human",
+                "name": sender_name,
+                "emoji": "",
+                "sourceApp": source_app,
+                "sourceSurface": source_surface,
+                "sourceLabel": source_label,
+            },
+            "to": _office_agent_ref(agent_id),
+            "text": message,
+            "attachments": list(body.get("attachments") or []),
+            "metadata": metadata,
+            "visibleInOffice": True,
+        })
     _publish_feishu_chat_comm_event(event, "message")
     return event
 
@@ -6278,6 +6383,12 @@ def _handle_codex_chat(body):
         provider.workspace = os.path.realpath(os.path.expanduser(requested_workspace))
     elif agent.get("workspace"):
         provider.workspace = os.path.realpath(os.path.expanduser(str(agent.get("workspace"))))
+    try:
+        validated_attachments = _validated_provider_attachments(body.get("attachments") or [])
+    except (TypeError, ValueError, OSError) as exc:
+        operation_lock.release()
+        return {"ok": False, "error": str(exc), "code": "invalid_attachment", "_status": 400}
+    body = {**body, "attachments": validated_attachments}
     inbound_event = _append_codex_user_comm_event(agent, agent_id, conversation_id, message, body)
     before_paths = _codex_git_paths(provider.workspace)
     allow_interaction = str(body.get("fromType") or "agent").lower() in {"human", "user", "chat", "ui"}
@@ -6345,13 +6456,18 @@ def _handle_codex_chat(body):
     initial_thread_id = _get_codex_thread_id(agent_id, conversation_id)
 
     def send_to_provider(thread_id):
+        kwargs = {
+            "conversation_id": conversation_id,
+            "timeout_sec": int(body.get("timeoutSec") or 600),
+            "thread_id": thread_id,
+            "event_callback": on_event,
+            "allow_interaction": allow_interaction,
+        }
+        if validated_attachments:
+            kwargs["attachments"] = validated_attachments
         return provider.send_message(
             message,
-            conversation_id=conversation_id,
-            timeout_sec=int(body.get("timeoutSec") or 600),
-            thread_id=thread_id,
-            event_callback=on_event,
-            allow_interaction=allow_interaction,
+            **kwargs,
         )
 
     try:
@@ -8374,6 +8490,8 @@ def _handle_agent_platforms():
 
 # ─── AGENT PLATFORM COMMUNICATION LAYER ─────────────────────────
 
+_COMM_REQUEST_IDEMPOTENCY_LOCK = threading.Lock()
+
 def _comm_log_path():
     return os.path.join(STATUS_DIR, "agent-platform-communications.jsonl")
 
@@ -8446,6 +8564,11 @@ def _comm_source_message_id(event):
     return str(metadata.get("sourceMessageId") or (event or {}).get("sourceMessageId") or "").strip()
 
 
+def _comm_idempotency_key(event):
+    metadata = _comm_metadata(event)
+    return str(metadata.get("idempotencyKey") or (event or {}).get("idempotencyKey") or "").strip()
+
+
 def _comm_is_feishu(event):
     event = event if isinstance(event, dict) else {}
     metadata = _comm_metadata(event)
@@ -8467,6 +8590,22 @@ def _find_comm_request_by_source_message(source_message_id, *, limit=1000):
     for event in reversed(_load_comm_history(limit=limit)):
         if event.get("direction") == "request" and _comm_source_message_id(event) == source_message_id:
             return event
+    return None
+
+
+def _find_comm_request_by_idempotency(idempotency_key, *, conversation_id="", agent_id="", limit=1000):
+    idempotency_key = str(idempotency_key or "").strip()
+    if not idempotency_key:
+        return None
+    for event in reversed(_load_comm_history(limit=limit, conversation_id=conversation_id or None)):
+        if event.get("direction") != "request" or _comm_idempotency_key(event) != idempotency_key:
+            continue
+        if agent_id:
+            refs = [event.get("from"), event.get("to")]
+            ids = {str(ref.get("id") or "") for ref in refs if isinstance(ref, dict)}
+            if str(agent_id) not in ids:
+                continue
+        return event
     return None
 
 
@@ -8541,6 +8680,47 @@ def _feishu_chat_event_agent_ids(event):
     return ids
 
 
+def _feishu_chat_sse_metrics_snapshot():
+    with _FEISHU_CHAT_EVENT_SUBSCRIBERS_LOCK:
+        subscribers = {
+            agent_id: len(queues)
+            for agent_id, queues in _FEISHU_CHAT_EVENT_SUBSCRIBERS.items()
+            if queues
+        }
+        return {
+            **_FEISHU_CHAT_SSE_METRICS,
+            "subscribers": subscribers,
+            "subscriberCount": sum(subscribers.values()),
+        }
+
+
+def _feishu_chat_replay_comm_events(agent_id, *, after_ts, seen_ids=None, limit=500):
+    agent_id = str(agent_id or "").strip()
+    if not agent_id:
+        return []
+    after_ts = int(after_ts or 0)
+    seen_ids = seen_ids if isinstance(seen_ids, set) else set(seen_ids or [])
+    payloads = []
+    for event in _load_comm_history(limit=max(1, min(int(limit or 500), 2000))):
+        if not isinstance(event, dict) or not _comm_is_feishu(event):
+            continue
+        event_id = str(event.get("id") or "").strip()
+        if not event_id or event_id in seen_ids or int(event.get("ts") or 0) < after_ts:
+            continue
+        if agent_id not in _feishu_chat_event_agent_ids(event):
+            continue
+        event_name = "delivery" if event.get("operation") == "feishu_delivery" or event.get("direction") == "delivery" else "message"
+        payloads.append({
+            "ok": True,
+            "event": event_name,
+            "commEvent": event,
+            "conversationId": event.get("conversationId") or "",
+            "ts": int(event.get("ts") or time.time() * 1000),
+            "replayed": True,
+        })
+    return payloads
+
+
 def _publish_feishu_chat_comm_event(event, event_name="message"):
     event = event if isinstance(event, dict) else {}
     if not event or not _comm_is_feishu(event):
@@ -8560,9 +8740,14 @@ def _publish_feishu_chat_comm_event(event, event_name="message"):
         for agent_id in agent_ids:
             queues = _FEISHU_CHAT_EVENT_SUBSCRIBERS.get(agent_id) or []
             targets.extend(queues)
+        _FEISHU_CHAT_SSE_METRICS["publishAttempts"] += 1
+        _FEISHU_CHAT_SSE_METRICS["queueTargets"] += len(targets)
+        _FEISHU_CHAT_SSE_METRICS["lastPublishAt"] = payload["ts"]
     for q in targets:
         try:
             q.put_nowait(payload)
+            with _FEISHU_CHAT_EVENT_SUBSCRIBERS_LOCK:
+                _FEISHU_CHAT_SSE_METRICS["queued"] += 1
         except Exception:
             pass
 
@@ -8577,6 +8762,7 @@ def _feishu_chat_stream_events(handler, agent_id):
         handler.end_headers()
         handler.wfile.write(b'event: error\ndata: {"ok": false, "error": "agentId is required"}\n\n')
         return
+    stream_started_at = int(time.time() * 1000)
     q = queue.Queue(maxsize=100)
     with _FEISHU_CHAT_EVENT_SUBSCRIBERS_LOCK:
         _FEISHU_CHAT_EVENT_SUBSCRIBERS.setdefault(agent_id, []).append(q)
@@ -8592,17 +8778,42 @@ def _feishu_chat_stream_events(handler, agent_id):
         data = json.dumps(payload, ensure_ascii=False)
         handler.wfile.write(f"event: {event_name}\ndata: {data}\n\n".encode("utf-8"))
         handler.wfile.flush()
+        with _FEISHU_CHAT_EVENT_SUBSCRIBERS_LOCK:
+            _FEISHU_CHAT_SSE_METRICS["written"] += 1
+            _FEISHU_CHAT_SSE_METRICS["lastWriteAt"] = int(time.time() * 1000)
+            _FEISHU_CHAT_SSE_METRICS["lastError"] = ""
 
+    seen_ids = set()
+    next_keepalive_at = time.monotonic() + 15
     try:
         send_sse("ready", {"ok": True, "agentId": agent_id, "ts": int(time.time() * 1000)})
         while True:
             try:
-                item = q.get(timeout=15)
+                item = q.get(timeout=1)
+                comm_event = item.get("commEvent") if isinstance(item.get("commEvent"), dict) else {}
+                if comm_event.get("id"):
+                    seen_ids.add(str(comm_event.get("id")))
                 send_sse(str(item.get("event") or "message"), item)
             except queue.Empty:
+                pass
+            for replay in _feishu_chat_replay_comm_events(agent_id, after_ts=stream_started_at, seen_ids=seen_ids):
+                comm_event = replay.get("commEvent") if isinstance(replay.get("commEvent"), dict) else {}
+                event_id = str(comm_event.get("id") or "")
+                if event_id:
+                    seen_ids.add(event_id)
+                send_sse(str(replay.get("event") or "message"), replay)
+                with _FEISHU_CHAT_EVENT_SUBSCRIBERS_LOCK:
+                    _FEISHU_CHAT_SSE_METRICS["replayed"] += 1
+                    _FEISHU_CHAT_SSE_METRICS["lastReplayAt"] = int(time.time() * 1000)
+            if time.monotonic() >= next_keepalive_at:
                 send_sse("keepalive", {"ok": True, "agentId": agent_id, "ts": int(time.time() * 1000)})
+                next_keepalive_at = time.monotonic() + 15
     except (BrokenPipeError, ConnectionResetError):
         pass
+    except OSError as exc:
+        with _FEISHU_CHAT_EVENT_SUBSCRIBERS_LOCK:
+            _FEISHU_CHAT_SSE_METRICS["writeFailures"] += 1
+            _FEISHU_CHAT_SSE_METRICS["lastError"] = f"{type(exc).__name__}: {exc}"
     finally:
         with _FEISHU_CHAT_EVENT_SUBSCRIBERS_LOCK:
             queues = _FEISHU_CHAT_EVENT_SUBSCRIBERS.get(agent_id) or []
@@ -8897,7 +9108,9 @@ def _chat_history_extract_content(row):
     message = row.get("message") if isinstance(row.get("message"), dict) else row
     content = message.get("content")
     text = str(row.get("text") or message.get("text") or "")
-    media = list(row.get("media") or row.get("attachments") or [])
+    # Keep attachments in their canonical field. Falling back to attachments
+    # here duplicates the same resource when the normalized payload is rendered.
+    media = list(row.get("media") or [])
     tools = [dict(item) for item in (row.get("tools") or []) if isinstance(item, dict)]
     if isinstance(content, str):
         text = content
@@ -8948,9 +9161,39 @@ def _chat_history_extract_content(row):
     return text, media, tools
 
 
+def _clean_feishu_image_history_text(row, metadata, text):
+    """Remove transport-only image details persisted by older Feishu adapters."""
+    if str(metadata.get("sourceApp") or "").lower() != "feishu":
+        return text
+    if str(metadata.get("messageType") or "").lower() != "image":
+        return text
+    attachments = row.get("attachments") if isinstance(row.get("attachments"), list) else []
+    file_keys = {str(item.get("fileKey") or "").strip() for item in attachments if isinstance(item, dict)}
+    names = {str(item.get("name") or "").strip() for item in attachments if isinstance(item, dict)}
+    paths = {str(item.get("path") or "").strip() for item in attachments if isinstance(item, dict)}
+    urls = {str(item.get("url") or "").strip() for item in attachments if isinstance(item, dict)}
+    visible = []
+    for line in str(text or "").splitlines():
+        stripped = line.strip()
+        image_match = re.fullmatch(r"!\[[^\]]*\]\(\s*([^\s)]+)\s*\)", stripped, re.IGNORECASE)
+        if image_match and image_match.group(1) in file_keys:
+            continue
+        if stripped == "图片附件已同步到 VO。":
+            continue
+        if stripped.startswith("文件名：") and stripped.removeprefix("文件名：").strip() in names:
+            continue
+        if stripped.startswith("本地路径：") and stripped.removeprefix("本地路径：").strip() in paths:
+            continue
+        if stripped.startswith("预览 URL：") and stripped.removeprefix("预览 URL：").strip() in urls:
+            continue
+        visible.append(line)
+    return "\n".join(visible).strip()
+
+
 def _normalize_chat_history_message(request, row, source="", ordinal=0):
     row = row if isinstance(row, dict) else {}
     message = row.get("message") if isinstance(row.get("message"), dict) else row
+    metadata = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
     from_ref = row.get("from") if isinstance(row.get("from"), dict) else {}
     to_ref = row.get("to") if isinstance(row.get("to"), dict) else {}
     from_id = str(row.get("fromAgentId") or from_ref.get("id") or "")
@@ -8965,6 +9208,7 @@ def _normalize_chat_history_message(request, row, source="", ordinal=0):
     else:
         role = "assistant"
     text, media, tools = _chat_history_extract_content(row)
+    text = _clean_feishu_image_history_text(row, metadata, text)
     epoch_ms = _parse_iso_epoch_ms(
         row.get("epochMs") or row.get("ts") or row.get("timestamp") or message.get("timestamp")
     )
@@ -9006,10 +9250,11 @@ def _normalize_chat_history_message(request, row, source="", ordinal=0):
         "status": str(row.get("status") or "done"),
         "source": source,
         "identityFields": canonical_identity,
+        "idempotencyKey": str(row.get("idempotencyKey") or metadata.get("idempotencyKey") or ""),
     }
     version_fields = {key: normalized[key] for key in (
         "role", "text", "from", "fromAgentId", "to", "toAgentId", "media", "attachments",
-        "tools", "thinking", "reasoningTokens", "approval", "status", "source",
+        "tools", "thinking", "reasoningTokens", "approval", "status", "source", "idempotencyKey",
     )}
     normalized["version"] = _chat_history_hash(json.dumps(version_fields, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
     return normalized
@@ -9082,15 +9327,24 @@ def _page_provider_history(request, rows, source, limit_plus_one):
     return _page_chat_history_messages(normalized, request.before, limit_plus_one)
 
 
+def _chat_history_comm_event_matches(request, event):
+    event = event if isinstance(event, dict) else {}
+    if event.get("visibleInOffice", True) is False:
+        return False
+    if event.get("type") == "operation" and event.get("operation") == "feishu_delivery":
+        return False
+    src = (event.get("from") or {}).get("id")
+    dst = (event.get("to") or {}).get("id")
+    if request.agent_id not in (src, dst):
+        return False
+    if not request.conversation_id or event.get("conversationId") == request.conversation_id:
+        return True
+    return _comm_is_feishu(event)
+
+
 def _chat_history_comm_page(request, limit_plus_one):
     def matches(event):
-        if event.get("visibleInOffice", True) is False:
-            return False
-        if request.conversation_id and event.get("conversationId") != request.conversation_id:
-            return False
-        src = (event.get("from") or {}).get("id")
-        dst = (event.get("to") or {}).get("id")
-        return request.agent_id in (src, dst)
+        return _chat_history_comm_event_matches(request, event)
 
     events = _load_cached_chat_history_jsonl(
         _comm_log_path(),
@@ -9229,6 +9483,19 @@ def _dedupe_visible_comm_history(events):
     for event in events or []:
         if _is_a2a_envelope_text(event.get("text") if isinstance(event, dict) else ""):
             continue
+        direction = event.get("direction") or ""
+        idempotency_key = _comm_idempotency_key(event) if direction == "request" else ""
+        if idempotency_key:
+            request_key = (
+                "idempotency",
+                event.get("conversationId") or "",
+                (event.get("from") or {}).get("id") or "",
+                (event.get("to") or {}).get("id") or "",
+                idempotency_key,
+            )
+            if request_key in seen:
+                continue
+            seen.add(request_key)
         event_id = event.get("id") or ""
         if event_id:
             key = ("id", event_id)
@@ -9237,7 +9504,6 @@ def _dedupe_visible_comm_history(events):
             seen.add(key)
             deduped.append(event)
             continue
-        direction = event.get("direction") or ""
         key = (
             event.get("conversationId") or "",
             direction,
@@ -11274,6 +11540,9 @@ def _save_feishu_chat_config(body):
     app_id = str(body.get("appId") or "").strip()
     app_secret = str(body.get("appSecret") or "").strip()
     representative_agent_id = str(body.get("representativeAgentId") or "").strip()
+    transport = str(body.get("transportImplementation") or "").strip().lower()
+    if transport and transport not in {"channel-sdk-node", "legacy-python"}:
+        return {"ok": False, "error": "Invalid Feishu Chat transport implementation", "code": "invalid_transport", "_status": 400}
     if representative_agent_id and not _find_agent_record(representative_agent_id):
         return {"ok": False, "error": "Representative agent not found", "code": "agent_not_found", "_status": 404}
     chat_app = {
@@ -11289,6 +11558,8 @@ def _save_feishu_chat_config(body):
         chat_app["appSecret"] = app_secret
     if "representativeAgentId" in body or body.get("clearRepresentativeAgent"):
         chat_app["representativeAgentId"] = representative_agent_id
+    if "transportImplementation" in body:
+        chat_app["transportImplementation"] = transport or "channel-sdk-node"
     payload = {"feishu": {"chatApp": chat_app}}
     if body.get("clearApp"):
         payload.setdefault("_clearSecrets", []).append("feishu.chatApp.appSecret")
@@ -11727,18 +11998,25 @@ def _start_feishu_chat_long_connection():
         return _stop_feishu_chat_long_connection("disabled")
     app_id = str(cfg.get("appId") or "").strip()
     app_secret = str(cfg.get("appSecret") or "").strip()
+    transport = _effective_feishu_chat_transport(cfg)
     if not app_id or not app_secret:
         return _stop_feishu_chat_long_connection("missing_app_credentials")
     with _FEISHU_CHAT_LONG_CONNECTION_LOCK:
         existing = _FEISHU_CHAT_LONG_CONNECTION_RECEIVER
-        if existing and existing.app_id == app_id and existing.app_secret == app_secret:
+        if existing and existing.app_id == app_id and existing.app_secret == app_secret and getattr(existing, "transport", transport) == transport:
             return existing.start()
+        if existing:
+            try:
+                existing.stop()
+            except Exception:
+                pass
         callback_url = f"http://127.0.0.1:{PORT}/api/feishu-chat/inbound-worker"
         _FEISHU_CHAT_LONG_CONNECTION_RECEIVER = FeishuChatWorkerProcess(
             app_id=app_id,
             app_secret=app_secret,
             callback_url=callback_url,
             status_dir=STATUS_DIR,
+            transport=transport,
         )
         return _FEISHU_CHAT_LONG_CONNECTION_RECEIVER.start()
 
@@ -11924,7 +12202,16 @@ def _find_feishu_bound_user(identity, chat_id=""):
     return feishu_chat_channel.find_bound_user(bindings, identity, chat_id)
 
 
+def _feishu_chat_worker_command(operation, payload, timeout=30):
+    receiver = _get_feishu_chat_long_connection_receiver()
+    if not receiver or not hasattr(receiver, "command"):
+        return {"ok": False, "status": "command_unavailable", "category": "not_connected"}
+    return receiver.command(operation, payload, timeout=timeout)
+
+
 def _feishu_chat_app_text_send(chat_id, text, urlopen=None):
+    if _effective_feishu_chat_transport() == "channel-sdk-node":
+        return _feishu_chat_worker_command("send", {"to": chat_id, "content": str(text or ""), "contentType": "markdown", "timeoutMs": 20000}, timeout=25)
     return send_feishu_markdown_message(
         text,
         app_config=_feishu_chat_app_send_config(),
@@ -11936,6 +12223,8 @@ def _feishu_chat_app_text_send(chat_id, text, urlopen=None):
 
 
 def _feishu_chat_app_receipt_send(chat_id, text, urlopen=None):
+    if _effective_feishu_chat_transport() == "channel-sdk-node":
+        return _feishu_chat_worker_command("send", {"to": chat_id, "content": str(text or ""), "contentType": "text", "timeoutMs": 10000}, timeout=15)
     return send_feishu_text_message(
         text,
         app_config=_feishu_chat_app_send_config(),
@@ -11947,6 +12236,8 @@ def _feishu_chat_app_receipt_send(chat_id, text, urlopen=None):
 
 
 def _feishu_chat_app_message_recall(message_id, urlopen=None):
+    if _effective_feishu_chat_transport() == "channel-sdk-node":
+        return _feishu_chat_worker_command("recall", {"messageId": message_id, "timeoutMs": 10000}, timeout=15)
     return recall_feishu_message(
         message_id,
         app_config=_feishu_chat_app_send_config(),
@@ -11956,6 +12247,8 @@ def _feishu_chat_app_message_recall(message_id, urlopen=None):
 
 
 def _feishu_chat_app_reaction_add(message_id, emoji_type, urlopen=None):
+    if _effective_feishu_chat_transport() == "channel-sdk-node":
+        return _feishu_chat_worker_command("addReaction", {"messageId": message_id, "emojiType": emoji_type, "timeoutMs": 10000}, timeout=15)
     return add_feishu_message_reaction(
         message_id,
         emoji_type,
@@ -11966,6 +12259,8 @@ def _feishu_chat_app_reaction_add(message_id, emoji_type, urlopen=None):
 
 
 def _feishu_chat_app_reaction_delete(message_id, reaction_id, urlopen=None):
+    if _effective_feishu_chat_transport() == "channel-sdk-node":
+        return _feishu_chat_worker_command("removeReaction", {"messageId": message_id, "reactionId": reaction_id, "timeoutMs": 10000}, timeout=15)
     return delete_feishu_message_reaction(
         message_id,
         reaction_id,
@@ -11976,6 +12271,8 @@ def _feishu_chat_app_reaction_delete(message_id, reaction_id, urlopen=None):
 
 
 def _feishu_chat_app_image_download(message_id, image_key, urlopen=None):
+    if _effective_feishu_chat_transport() == "channel-sdk-node":
+        return _feishu_chat_worker_command("downloadResource", {"messageId": message_id, "fileKey": image_key, "resourceType": "image", "timeoutMs": 20000}, timeout=25)
     return download_feishu_message_resource(
         message_id,
         image_key,
@@ -12047,6 +12344,90 @@ def _dispatch_representative_agent_message(agent_id, message, conversation_id, s
         "error": "" if ok else reply,
         "conversationId": conversation_id,
         "agent": {"id": agent.get("id"), "name": agent.get("name"), "providerKind": provider_kind},
+    }
+
+
+def _adapt_feishu_chat_inbound_envelope(body):
+    if not isinstance(body, dict) or body.get("schema") != "vo.feishu-chat.inbound/v1":
+        return body, None
+    allowed = {"schema", "requestId", "workerInstanceId", "transport", "attempt", "receivedAt", "message", "source"}
+    unknown = sorted(set(body) - allowed)
+    if unknown:
+        raise ValueError(f"Unknown inbound envelope field: {unknown[0]}")
+    request_id = str(body.get("requestId") or "").strip()
+    worker_instance_id = str(body.get("workerInstanceId") or "").strip()
+    if not request_id or not worker_instance_id or body.get("transport") != "channel-sdk-node":
+        raise ValueError("Invalid Feishu inbound envelope identity")
+    message = body.get("message") if isinstance(body.get("message"), dict) else {}
+    sender = message.get("sender") if isinstance(message.get("sender"), dict) else {}
+    message_id = str(message.get("messageId") or "").strip()
+    chat_id = str(message.get("chatId") or "").strip()
+    if not message_id or not chat_id:
+        raise ValueError("Feishu inbound envelope requires messageId and chatId")
+    raw_type = str(message.get("rawContentType") or "text").strip().lower()
+    resources = message.get("resources") if isinstance(message.get("resources"), list) else []
+    image_resource = next((
+        item for item in resources
+        if isinstance(item, dict)
+        and str(item.get("type") or item.get("resourceType") or "").strip().lower() == "image"
+        and (item.get("fileKey") or item.get("file_key"))
+    ), {})
+    message_type = "image" if raw_type == "post" and image_resource else raw_type
+    content = {"text": str(message.get("content") or "")}
+    if message_type == "image":
+        resource = image_resource or next((item for item in resources if isinstance(item, dict) and (item.get("fileKey") or item.get("file_key"))), {})
+        content["image_key"] = resource.get("fileKey") or resource.get("file_key") or ""
+    legacy = {
+        "schema": body.get("schema"),
+        "requestId": request_id,
+        "workerInstanceId": worker_instance_id,
+        "transport": "channel-sdk-node",
+        "event": {
+            "sender": {
+                "sender_id": {
+                    "open_id": str(sender.get("openId") or ""),
+                    "user_id": str(sender.get("userId") or ""),
+                    "union_id": str(sender.get("unionId") or ""),
+                },
+                "sender_type": str(sender.get("type") or ""),
+            },
+            "message": {
+                "message_id": message_id,
+                "chat_id": chat_id,
+                "chat_type": str(message.get("chatType") or ""),
+                "message_type": message_type,
+                "text": str(message.get("content") or ""),
+                "content": content,
+                "createTime": message.get("createTime") or 0,
+                "rootId": message.get("rootId") or "",
+                "threadId": message.get("threadId") or "",
+                "replyToMessageId": message.get("replyToMessageId") or "",
+                "mentions": message.get("mentions") if isinstance(message.get("mentions"), list) else [],
+                "resources": resources,
+            },
+        },
+    }
+    return legacy, {"requestId": request_id, "messageId": message_id}
+
+
+def _handle_feishu_chat_worker_envelope(body):
+    adapted, envelope = _adapt_feishu_chat_inbound_envelope(body)
+    result = _handle_feishu_chat_message_event(adapted)
+    if not envelope:
+        return result
+    record = result.get("record") if isinstance(result, dict) and isinstance(result.get("record"), dict) else {}
+    durable = bool(record.get("id") and record.get("sourceMessageId") == envelope["messageId"])
+    if result.get("idempotent") and record:
+        durable = True
+    if not durable:
+        return {"ok": False, "error": "Feishu inbound result is not durably recorded", "code": "durability_not_proven", "_status": 503}
+    return {
+        "schema": "vo.feishu-chat.ack/v1",
+        "requestId": envelope["requestId"],
+        "messageId": envelope["messageId"],
+        "durable": True,
+        "state": str(result.get("status") or "accepted"),
+        "idempotent": bool(result.get("idempotent")),
     }
 
 
@@ -24183,7 +24564,10 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
         self.connection.settimeout(15)
 
     def end_headers(self):
-        if urllib.parse.urlparse(self.path).path.endswith(".woff2"):
+        request_path = urllib.parse.urlparse(self.path).path
+        if request_path in {"", "/"} or request_path.endswith(".html"):
+            self.send_header("Cache-Control", "no-cache")
+        elif request_path.endswith(".woff2"):
             self.send_header("Cache-Control", "public, max-age=31536000, immutable")
         super().end_headers()
 
@@ -27132,16 +27516,22 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
         elif self.path == "/api/feishu-chat/inbound-worker":
             token = self.headers.get("X-VO-Feishu-Chat-Worker-Token") or ""
             length = int(self.headers.get('Content-Length', 0))
-            try:
-                body = json.loads(self.rfile.read(length)) if length else {}
-            except json.JSONDecodeError as e:
-                body = {}
-                result = {"ok": False, "error": f"Invalid JSON: {str(e)}", "_status": 400}
+            if length > 1024 * 1024:
+                result = {"ok": False, "error": "Feishu inbound envelope exceeds 1048576 bytes", "code": "payload_too_large", "_status": 413}
             else:
-                if not token or token != _FEISHU_CHAT_WORKER_TOKEN:
-                    result = {"ok": False, "error": "Invalid Feishu chat worker token", "_status": 403}
+                try:
+                    body = json.loads(self.rfile.read(length)) if length else {}
+                except json.JSONDecodeError as e:
+                    body = {}
+                    result = {"ok": False, "error": f"Invalid JSON: {str(e)}", "_status": 400}
                 else:
-                    result = _handle_feishu_chat_message_event(body)
+                    if not token or not secrets.compare_digest(str(token), str(_FEISHU_CHAT_WORKER_TOKEN)):
+                        result = {"ok": False, "error": "Invalid Feishu chat worker token", "_status": 403}
+                    else:
+                        try:
+                            result = _handle_feishu_chat_worker_envelope(body)
+                        except ValueError as exc:
+                            result = {"ok": False, "error": str(exc), "code": "invalid_inbound_envelope", "_status": 400}
             self.send_response(result.get("_status", 200))
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")

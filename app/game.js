@@ -14673,7 +14673,12 @@ function mmRenderFeishuChatLongConnectionStatus(cfg) {
     if (!el) return;
     var lc = (cfg || {}).longConnection || {};
     var status = lc.status || 'not_started';
-    el.textContent = _tr('feishu_long_connection_status', { status: status });
+    var transport = (cfg || {}).effectiveTransportImplementation || lc.transport || 'channel-sdk-node';
+    var details = [];
+    if (lc.sdk && lc.sdk.state) details.push('SDK: ' + lc.sdk.state);
+    if (lc.spool && typeof lc.spool.entries === 'number') details.push('spool: ' + lc.spool.entries);
+    if (lc.action) details.push(lc.action);
+    el.textContent = _tr('feishu_long_connection_status', { status: status }) + ' · ' + transport + (details.length ? ' · ' + details.join(' · ') : '');
     el.style.color = lc.running ? '#81c784' : (status === 'error' ? '#ff8a80' : '#888');
 }
 
@@ -14774,10 +14779,12 @@ function mmFillFeishuChatMaskedInputs(cfg) {
     var appIdEl = document.getElementById('mm-feishu-chat-app-id');
     var appSecretEl = document.getElementById('mm-feishu-chat-app-secret');
     var agentEl = document.getElementById('mm-feishu-chat-agent-id');
+    var transportEl = document.getElementById('mm-feishu-chat-transport');
     if (enabledEl) enabledEl.checked = cfg.enabled === true;
     if (appIdEl) appIdEl.value = cfg.maskedAppId || '';
     if (appSecretEl) appSecretEl.value = cfg.configured ? '••••••••' : '';
     if (agentEl) mmPopulateFeishuChatAgentSelect(cfg.representativeAgentId || '');
+    if (transportEl) transportEl.value = cfg.transportImplementation || cfg.effectiveTransportImplementation || 'channel-sdk-node';
     mmRenderFeishuChatMask(cfg);
     mmRenderFeishuChatLongConnectionStatus(cfg);
 }
@@ -14832,11 +14839,13 @@ function mmSaveFeishuChatConfig() {
     var appIdEl = document.getElementById('mm-feishu-chat-app-id');
     var appSecretEl = document.getElementById('mm-feishu-chat-app-secret');
     var agentEl = document.getElementById('mm-feishu-chat-agent-id');
+    var transportEl = document.getElementById('mm-feishu-chat-transport');
     var statusEl = document.getElementById('mm-feishu-chat-status');
     var enabled = enabledEl ? enabledEl.checked : true;
     var appId = (appIdEl ? appIdEl.value : '').trim();
     var appSecret = (appSecretEl ? appSecretEl.value : '').trim();
     var agentId = (agentEl ? agentEl.value : '').trim();
+    var transport = (transportEl ? transportEl.value : 'channel-sdk-node') || 'channel-sdk-node';
     var appConfigured = mmIsMaskedFeishuValue(appId) && mmIsMaskedFeishuValue(appSecret);
     if (!(appConfigured || (appId && appSecret))) {
         if (statusEl) statusEl.innerHTML = '<div class="mm-status err">' + escHtml(_tr('feishu_chat_save_requires_config')) + '</div>';
@@ -14850,7 +14859,8 @@ function mmSaveFeishuChatConfig() {
             enabled: enabled,
             appId: mmIsMaskedFeishuValue(appId) ? '' : appId,
             appSecret: mmIsMaskedFeishuValue(appSecret) ? '' : appSecret,
-            representativeAgentId: agentId
+            representativeAgentId: agentId,
+            transportImplementation: transport
         })
     }).then(function(r) {
         return r.json().then(function(d) { d._httpOk = r.ok; return d; });
@@ -15104,6 +15114,7 @@ function mmSaveSettings() {
         var _feishuChatAppIdValue = ((document.getElementById('mm-feishu-chat-app-id') || {}).value || '').trim();
         var _feishuChatAppSecretValue = ((document.getElementById('mm-feishu-chat-app-secret') || {}).value || '').trim();
         var _feishuChatAgentValue = ((document.getElementById('mm-feishu-chat-agent-id') || {}).value || '').trim();
+        var _feishuChatTransportValue = ((document.getElementById('mm-feishu-chat-transport') || {}).value || 'channel-sdk-node').trim();
         config.feishu = {
             chatApp: {
                 enabled: _feishuChatCb.checked,
@@ -15111,7 +15122,8 @@ function mmSaveSettings() {
                 requireBoundVoUser: false,
                 allowedChatTypes: ['p2p'],
                 replyMode: 'same_chat',
-                representativeAgentId: _feishuChatAgentValue
+                representativeAgentId: _feishuChatAgentValue,
+                transportImplementation: _feishuChatTransportValue
             }
         };
         if (_feishuChatAppIdValue && !mmIsMaskedFeishuValue(_feishuChatAppIdValue)) config.feishu.chatApp.appId = _feishuChatAppIdValue;

@@ -20,6 +20,7 @@ from feishu_notifications import (  # noqa: E402
     send_feishu_text_message,
     validate_notification_intent,
 )
+import feishu_chat_channel  # noqa: E402
 
 
 def base_intent(kind="notification"):
@@ -636,11 +637,12 @@ def test_feishu_chat_config_is_separate_from_notification_app():
     import server
 
     class FakeChatWorker:
-        def __init__(self, app_id="", app_secret="", callback_url="", status_dir=""):
+        def __init__(self, app_id="", app_secret="", callback_url="", status_dir="", transport=""):
             self.app_id = app_id
             self.app_secret = app_secret
             self.callback_url = callback_url
             self.status_dir = status_dir
+            self.transport = transport
 
         def start(self):
             return {"enabled": True, "running": True, "status": "running", "mode": "subprocess"}
@@ -895,6 +897,92 @@ def test_feishu_channel_adapter_records_and_dedupes():
     assert visible_rows[1]["text"] == "CEO reply"
     delivery_rows = [row for row in comm_rows if row.get("operation") == "feishu_delivery"]
     assert delivery_rows[0]["metadata"]["feishuSendResult"]["status"] == "sent"
+
+
+def test_feishu_sse_replays_real_comm_event_when_in_memory_publish_is_missed():
+    os.environ.setdefault("VO_HERMES_ENABLED", "0")
+    os.environ.setdefault("VO_CODEX_ENABLED", "0")
+    os.environ["VO_STATUS_DIR"] = tempfile.mkdtemp(prefix="vo-feishu-sse-replay-")
+    import server
+
+    real_event = {
+        "id": "comm-real-message",
+        "type": "message",
+        "direction": "request",
+        "conversationId": "feishu-dm:real",
+        "from": {"id": "user", "providerKind": "human", "sourceApp": "feishu"},
+        "to": {"id": "codex-local", "providerKind": "codex"},
+        "text": "真实飞书消息",
+        "metadata": {
+            "sourceApp": "feishu",
+            "channel": "feishu",
+            "representativeAgentId": "codex-local",
+            "sourceMessageId": "om_real",
+        },
+        "ts": 2000,
+    }
+    other_agent_event = {
+        **real_event,
+        "id": "comm-other-agent",
+        "to": {"id": "codex-main", "providerKind": "codex"},
+        "metadata": {**real_event["metadata"], "representativeAgentId": "codex-main"},
+    }
+    previous_load = server._load_comm_history
+    server._load_comm_history = lambda limit=200: [real_event, other_agent_event]
+    try:
+        replay = server._feishu_chat_replay_comm_events(
+            "codex-local", after_ts=1500, seen_ids=set(), limit=200
+        )
+    finally:
+        server._load_comm_history = previous_load
+
+    assert len(replay) == 1
+    assert replay[0]["event"] == "message"
+    assert replay[0]["commEvent"]["id"] == "comm-real-message"
+
+
+def test_feishu_sse_stream_writes_replayed_event_without_queue_publish():
+    import server
+
+    event = {
+        "id": "comm-stream-replay",
+        "type": "message",
+        "direction": "request",
+        "conversationId": "feishu-dm:stream",
+        "from": {"id": "user", "providerKind": "human", "sourceApp": "feishu"},
+        "to": {"id": "codex-local", "providerKind": "codex"},
+        "text": "未命中内存队列的真实消息",
+        "metadata": {
+            "sourceApp": "feishu",
+            "channel": "feishu",
+            "representativeAgentId": "codex-local",
+            "sourceMessageId": "om_stream_replay",
+        },
+        "ts": 9999999999999,
+    }
+
+    class ReplayBuffer(io.BytesIO):
+        def flush(self):
+            if b"comm-stream-replay" in self.getvalue():
+                raise BrokenPipeError("test completed")
+
+    handler = types.SimpleNamespace(
+        wfile=ReplayBuffer(),
+        send_response=lambda status: None,
+        send_header=lambda key, value: None,
+        end_headers=lambda: None,
+    )
+    previous_load = server._load_comm_history
+    server._load_comm_history = lambda limit=500: [event]
+    try:
+        server._feishu_chat_stream_events(handler, "codex-local")
+    finally:
+        server._load_comm_history = previous_load
+
+    output = handler.wfile.getvalue().decode("utf-8")
+    assert "event: message" in output
+    assert '"id": "comm-stream-replay"' in output
+    assert '"replayed": true' in output
 
 
 def test_feishu_channel_adds_and_deletes_message_reaction_receipt():
@@ -1494,6 +1582,69 @@ def test_feishu_channel_metadata_is_written_to_hermes_history():
     assert user_message["channel"] == "feishu"
 
 
+def test_feishu_representative_dispatch_preserves_source_metadata_for_native_providers():
+    os.environ.setdefault("VO_HERMES_ENABLED", "0")
+    os.environ.setdefault("VO_CODEX_ENABLED", "0")
+    os.environ["VO_STATUS_DIR"] = tempfile.mkdtemp(prefix="vo-feishu-provider-contract-")
+    import server
+
+    previous_find_agent = server._find_agent_record
+    previous_hermes = server._handle_hermes_chat
+    previous_codex = server._handle_codex_chat
+    previous_claude = server._handle_claude_code_chat
+    provider_kind = "hermes"
+    calls = []
+
+    def fake_find_agent(agent_id):
+        return {"id": agent_id, "name": "Representative", "providerKind": provider_kind}
+
+    def capture(expected_provider):
+        def handler(body):
+            calls.append({"providerKind": expected_provider, "body": body})
+            return {"ok": True, "reply": expected_provider, "conversationId": body["conversationId"]}
+
+        return handler
+
+    source_meta = {
+        "senderName": "Feishu User",
+        "sourceMessageId": "om_provider_contract",
+        "feishuChatId": "oc_provider_contract",
+        "attachments": [{"name": "contract.png", "path": "/tmp/contract.png"}],
+    }
+    try:
+        server._find_agent_record = fake_find_agent
+        server._handle_hermes_chat = capture("hermes")
+        server._handle_codex_chat = capture("codex")
+        server._handle_claude_code_chat = capture("claude-code")
+        for provider_kind in ("hermes", "codex", "claude-code"):
+            result = server._dispatch_representative_agent_message(
+                "representative-agent",
+                "hello from Feishu",
+                "feishu-dm:provider-contract",
+                source_meta,
+            )
+            assert result["ok"] is True
+    finally:
+        server._find_agent_record = previous_find_agent
+        server._handle_hermes_chat = previous_hermes
+        server._handle_codex_chat = previous_codex
+        server._handle_claude_code_chat = previous_claude
+
+    assert [call["providerKind"] for call in calls] == ["hermes", "codex", "claude-code"]
+    for call in calls:
+        body = call["body"]
+        assert body["agentId"] == "representative-agent"
+        assert body["conversationId"] == "feishu-dm:provider-contract"
+        assert body["sourceApp"] == "feishu"
+        assert body["sourceSurface"] == "feishu-dm"
+        assert body["sourceLabel"] == "Feishu DM"
+        assert body["channel"] == "feishu"
+        assert body["sourceMessageId"] == "om_provider_contract"
+        assert body["feishuChatId"] == "oc_provider_contract"
+        assert body["representativeAgentId"] == "representative-agent"
+        assert body["attachments"] == source_meta["attachments"]
+
+
 def test_feishu_chat_inbound_test_route_dispatches_and_records():
     os.environ.setdefault("VO_HERMES_ENABLED", "0")
     os.environ.setdefault("VO_CODEX_ENABLED", "0")
@@ -1644,6 +1795,390 @@ def test_feishu_chat_worker_route_requires_token_and_dispatches():
     assert calls[0]["agentId"] == "hermes-default"
     assert calls[0]["message"] == "hello worker"
     assert calls[0]["sourceMeta"]["sourceMessageId"] == "om_worker"
+
+
+def test_feishu_chat_worker_v1_envelope_returns_durable_ack_and_persists_metadata():
+    os.environ.setdefault("VO_HERMES_ENABLED", "0")
+    os.environ.setdefault("VO_CODEX_ENABLED", "0")
+    status_dir = tempfile.mkdtemp(prefix="vo-feishu-worker-v1-")
+    os.environ["VO_STATUS_DIR"] = status_dir
+    import server
+
+    previous_status_dir = server.STATUS_DIR
+    previous_config = server.VO_CONFIG
+    previous_dispatch = server._dispatch_representative_agent_message
+    previous_command = server._feishu_chat_worker_command
+    previous_token = server._FEISHU_CHAT_WORKER_TOKEN
+    server.STATUS_DIR = status_dir
+    server._FEISHU_CHAT_WORKER_TOKEN = "worker-v1-token"
+    server.VO_CONFIG = {
+        **previous_config,
+        "feishu": {
+            "chatApp": {
+                "enabled": True,
+                "appId": "cli_chat",
+                "appSecret": "chat-secret",
+                "representativeAgentId": "hermes-default",
+                "transportImplementation": "channel-sdk-node",
+            },
+            "bindings": {"union_id:on_worker": "user-worker-v1"},
+        },
+    }
+    dispatches = []
+    commands = []
+
+    def fake_dispatch(agent_id, message, conversation_id, source_meta):
+        dispatches.append({"agentId": agent_id, "message": message, "sourceMeta": source_meta})
+        return {"ok": True, "reply": "v1 reply", "conversationId": conversation_id}
+
+    def fake_command(operation, payload, timeout=30):
+        commands.append({"operation": operation, "payload": payload})
+        if operation == "addReaction":
+            return {"ok": True, "status": "added", "reactionId": "reaction-v1"}
+        return {"ok": True, "status": "sent", "messageId": "om_v1_reply"}
+
+    body = {
+        "schema": "vo.feishu-chat.inbound/v1",
+        "requestId": "req-v1",
+        "workerInstanceId": "worker-v1",
+        "transport": "channel-sdk-node",
+        "attempt": 1,
+        "receivedAt": 1710000000,
+        "message": {
+            "messageId": "om_v1",
+            "chatId": "oc_v1",
+            "chatType": "p2p",
+            "content": "hello v1",
+            "rawContentType": "text",
+            "createTime": 1710000001,
+            "rootId": "om_root",
+            "threadId": "omt_thread",
+            "replyToMessageId": "om_parent",
+            "mentions": [{"id": "ou_mentioned"}],
+            "resources": [],
+            "sender": {"primaryId": "ou_worker", "openId": "ou_worker", "userId": "u_worker", "unionId": "on_worker", "name": "Worker User"},
+        },
+        "source": {"eventId": "evt-v1"},
+    }
+    try:
+        server._dispatch_representative_agent_message = fake_dispatch
+        server._feishu_chat_worker_command = fake_command
+        status, ack = call_office_handler(server, "POST", "/api/feishu-chat/inbound-worker", body, headers={"X-VO-Feishu-Chat-Worker-Token": "worker-v1-token"})
+        duplicate_status, duplicate_ack = call_office_handler(server, "POST", "/api/feishu-chat/inbound-worker", body, headers={"X-VO-Feishu-Chat-Worker-Token": "worker-v1-token"})
+    finally:
+        server._dispatch_representative_agent_message = previous_dispatch
+        server._feishu_chat_worker_command = previous_command
+        server._FEISHU_CHAT_WORKER_TOKEN = previous_token
+        server.STATUS_DIR = previous_status_dir
+        server.VO_CONFIG = previous_config
+
+    assert status == duplicate_status == 200
+    assert ack == {"schema": "vo.feishu-chat.ack/v1", "requestId": "req-v1", "messageId": "om_v1", "durable": True, "state": "completed", "idempotent": False}
+    assert duplicate_ack["durable"] is True
+    assert duplicate_ack["idempotent"] is True
+    assert len(dispatches) == 1
+    assert dispatches[0]["sourceMeta"]["sourceMessageId"] == "om_v1"
+    with open(os.path.join(status_dir, "feishu-channel-records.jsonl"), "r", encoding="utf-8") as f:
+        rows = [json.loads(line) for line in f if line.strip()]
+    completed = next(row for row in rows if row["event"] == "turn_completed")
+    assert completed["voUserId"] == "user-worker-v1"
+    assert completed["transport"] == "channel-sdk-node"
+    assert completed["workerInstanceId"] == "worker-v1"
+    assert completed["threadId"] == "omt_thread"
+    assert completed["replyToMessageId"] == "om_parent"
+
+
+def test_feishu_chat_worker_normalizes_rich_post_with_image_resource_as_multimodal_message():
+    os.environ.setdefault("VO_HERMES_ENABLED", "0")
+    os.environ.setdefault("VO_CODEX_ENABLED", "0")
+    os.environ["VO_STATUS_DIR"] = tempfile.mkdtemp(prefix="vo-feishu-worker-post-image-")
+    import server
+
+    body = {
+        "schema": "vo.feishu-chat.inbound/v1",
+        "requestId": "req-post-image",
+        "workerInstanceId": "worker-post-image",
+        "transport": "channel-sdk-node",
+        "attempt": 1,
+        "receivedAt": 1784117462819,
+        "message": {
+            "messageId": "om_x100b6a43c3a6f8a4b1605fe871902a2",
+            "chatId": "oc_461274bf70a53a438434132f53afdb51",
+            "chatType": "p2p",
+            "content": "你能看到这个图吗",
+            "rawContentType": "post",
+            "resources": [{
+                "type": "image",
+                "fileKey": "img_v3_0213k_ba20d685-8a2e-4cb1-a458-3bb6b540087g",
+            }],
+            "sender": {"openId": "ou_6ab18937262885924868d34ea5957abd"},
+        },
+        "source": {"eventId": "evt-post-image"},
+    }
+
+    adapted, _ = server._adapt_feishu_chat_inbound_envelope(body)
+    message = adapted["event"]["message"]
+
+    assert message["message_type"] == "image"
+    assert message["text"] == "你能看到这个图吗"
+    assert message["content"]["text"] == "你能看到这个图吗"
+    assert message["content"]["image_key"] == "img_v3_0213k_ba20d685-8a2e-4cb1-a458-3bb6b540087g"
+
+
+def test_feishu_chat_worker_rejects_forged_and_oversized_v1_callbacks_without_secret_leakage():
+    os.environ.setdefault("VO_HERMES_ENABLED", "0")
+    os.environ.setdefault("VO_CODEX_ENABLED", "0")
+    os.environ["VO_STATUS_DIR"] = tempfile.mkdtemp(prefix="vo-feishu-worker-security-")
+    import server
+
+    previous_token = server._FEISHU_CHAT_WORKER_TOKEN
+    canary = "worker-token-canary-should-never-return"
+    server._FEISHU_CHAT_WORKER_TOKEN = canary
+    try:
+        denied_status, denied = call_office_handler(
+            server,
+            "POST",
+            "/api/feishu-chat/inbound-worker",
+            {"schema": "vo.feishu-chat.inbound/v1"},
+            headers={"X-VO-Feishu-Chat-Worker-Token": "forged-token"},
+        )
+        huge = {"content": "x" * (1024 * 1024 + 1)}
+        oversized_status, oversized = call_office_handler(
+            server,
+            "POST",
+            "/api/feishu-chat/inbound-worker",
+            huge,
+            headers={"X-VO-Feishu-Chat-Worker-Token": canary},
+        )
+    finally:
+        server._FEISHU_CHAT_WORKER_TOKEN = previous_token
+
+    assert denied_status == 403
+    assert oversized_status == 413
+    assert oversized["code"] == "payload_too_large"
+    rendered = json.dumps({"denied": denied, "oversized": oversized})
+    assert canary not in rendered
+    assert "forged-token" not in rendered
+
+
+def test_feishu_chat_transport_selection_and_node_command_ports_are_backward_compatible():
+    os.environ.setdefault("VO_HERMES_ENABLED", "0")
+    os.environ.setdefault("VO_CODEX_ENABLED", "0")
+    os.environ["VO_STATUS_DIR"] = tempfile.mkdtemp(prefix="vo-feishu-transport-")
+    import server
+
+    previous_config = server.VO_CONFIG
+    previous_receiver = server._FEISHU_CHAT_LONG_CONNECTION_RECEIVER
+    previous_override = os.environ.get("VO_FEISHU_CHAT_TRANSPORT")
+    calls = []
+
+    class FakeNodeReceiver:
+        def command(self, operation, payload, timeout=30):
+            calls.append({"operation": operation, "payload": payload, "timeout": timeout})
+            return {"ok": True, "status": "sent", "messageId": "om_node"}
+
+    server.VO_CONFIG = {
+        **previous_config,
+        "feishu": {"chatApp": {"transportImplementation": "legacy-python"}, "bindings": {}},
+    }
+    try:
+        assert server._effective_feishu_chat_transport() == "legacy-python"
+        os.environ["VO_FEISHU_CHAT_TRANSPORT"] = "channel-sdk-node"
+        assert server._effective_feishu_chat_transport() == "channel-sdk-node"
+        server._FEISHU_CHAT_LONG_CONNECTION_RECEIVER = FakeNodeReceiver()
+        sent = server._feishu_chat_app_text_send("oc_node", "hello node")
+    finally:
+        if previous_override is None:
+            os.environ.pop("VO_FEISHU_CHAT_TRANSPORT", None)
+        else:
+            os.environ["VO_FEISHU_CHAT_TRANSPORT"] = previous_override
+        server.VO_CONFIG = previous_config
+        server._FEISHU_CHAT_LONG_CONNECTION_RECEIVER = previous_receiver
+
+    assert sent["messageId"] == "om_node"
+    assert calls == [{"operation": "send", "payload": {"to": "oc_node", "content": "hello node", "contentType": "markdown", "timeoutMs": 20000}, "timeout": 25}]
+
+
+def test_feishu_chat_supervisor_owns_only_its_child_and_dependency_failure_is_chat_only():
+    os.environ.setdefault("VO_HERMES_ENABLED", "0")
+    os.environ.setdefault("VO_CODEX_ENABLED", "0")
+    status_dir = tempfile.mkdtemp(prefix="vo-feishu-supervisor-")
+    os.environ["VO_STATUS_DIR"] = status_dir
+    import server
+
+    class FakeProcess:
+        pid = 42420
+        returncode = None
+
+        def __init__(self):
+            self.terminated = False
+
+        def poll(self):
+            return None if not self.terminated else 0
+
+        def terminate(self):
+            self.terminated = True
+
+        def wait(self, timeout=None):
+            return 0
+
+    previous_popen = server.subprocess.Popen
+    previous_run = server.subprocess.run
+    previous_token = server._FEISHU_CHAT_WORKER_TOKEN
+    popen_calls = []
+    run_calls = []
+    process = FakeProcess()
+
+    def fake_popen(command, **kwargs):
+        popen_calls.append({"command": command, **kwargs})
+        return process
+
+    def fake_run(*args, **kwargs):
+        run_calls.append((args, kwargs))
+        raise AssertionError("legacy owned-child startup must not scan processes")
+
+    worker = server.FeishuChatWorkerProcess(
+        app_id="cli_chat",
+        app_secret="chat-secret",
+        callback_url="http://127.0.0.1/inbound",
+        status_dir=status_dir,
+        transport="legacy-python",
+    )
+    try:
+        server.subprocess.Popen = fake_popen
+        server.subprocess.run = fake_run
+        first = worker.start()
+        second = worker.start()
+        stopped = worker.stop()
+    finally:
+        server.subprocess.Popen = previous_popen
+        server.subprocess.run = previous_run
+        server._FEISHU_CHAT_WORKER_TOKEN = previous_token
+
+    assert first["running"] is True
+    assert second["running"] is True
+    assert len(popen_calls) == 1
+    assert popen_calls[0]["command"][1].endswith("feishu_chat_worker.py")
+    assert run_calls == []
+    assert process.terminated is True
+    assert stopped["status"] == "stopped"
+
+    notification_receiver = object()
+    previous_notification_receiver = server._FEISHU_LONG_CONNECTION_RECEIVER
+    server._FEISHU_LONG_CONNECTION_RECEIVER = notification_receiver
+    node_worker = server.FeishuChatWorkerProcess(
+        app_id="cli_chat",
+        app_secret="chat-secret",
+        callback_url="http://127.0.0.1/inbound",
+        status_dir=status_dir,
+        transport="channel-sdk-node",
+    )
+    node_worker._node_preflight = lambda: {
+        "ok": False,
+        "status": "missing_channel_sdk",
+        "scope": "feishu_chat",
+        "affectsVoStartup": False,
+        "action": "Run npm ci --omit=dev.",
+    }
+    try:
+        failure = node_worker.start()
+        isolated = server._FEISHU_LONG_CONNECTION_RECEIVER is notification_receiver
+    finally:
+        server._FEISHU_LONG_CONNECTION_RECEIVER = previous_notification_receiver
+    assert failure["status"] == "missing_channel_sdk"
+    assert failure["affectsVoStartup"] is False
+    assert node_worker.status()["status"] == "missing_channel_sdk"
+    assert node_worker.status()["action"] == "Run npm ci --omit=dev."
+    assert isolated is True
+
+
+def test_feishu_chat_worker_status_and_card_action_state_are_isolated():
+    os.environ.setdefault("VO_HERMES_ENABLED", "0")
+    os.environ.setdefault("VO_CODEX_ENABLED", "0")
+    status_dir = tempfile.mkdtemp(prefix="vo-feishu-worker-status-contract-")
+    os.environ["VO_STATUS_DIR"] = status_dir
+    import server
+
+    class FakeRunningProcess:
+        returncode = None
+
+        def poll(self):
+            return None
+
+    previous_status_dir = server.STATUS_DIR
+    previous_config = server.VO_CONFIG
+    previous_notification_receiver = server._FEISHU_LONG_CONNECTION_RECEIVER
+    previous_chat_receiver = server._FEISHU_CHAT_LONG_CONNECTION_RECEIVER
+    notification_receiver = object()
+    worker = server.FeishuChatWorkerProcess(
+        app_id="cli_chat",
+        app_secret="chat-secret",
+        callback_url="http://127.0.0.1/api/feishu-chat/inbound-worker",
+        status_dir=status_dir,
+    )
+    worker._started_at = 1710000000
+    worker._process = FakeRunningProcess()
+    with open(os.path.join(status_dir, "feishu-chat-worker-status.json"), "w", encoding="utf-8") as f:
+        json.dump({
+            "status": "running",
+            "lastEventAt": 1710000123,
+            "lastError": "",
+            "pid": 4242,
+        }, f)
+
+    server.STATUS_DIR = status_dir
+    server.VO_CONFIG = {
+        **previous_config,
+        "feishu": {
+            "chatApp": {
+                "enabled": True,
+                "appId": "cli_chat",
+                "appSecret": "chat-secret",
+                "representativeAgentId": "hermes-default",
+            },
+            "bindings": {},
+        },
+    }
+    server._FEISHU_LONG_CONNECTION_RECEIVER = notification_receiver
+    server._FEISHU_CHAT_LONG_CONNECTION_RECEIVER = worker
+    try:
+        config = server._feishu_chat_config_response()
+        action = server._handle_feishu_card_action({
+            "header": {"event_type": "card.action.trigger"},
+            "event": {
+                "operator": {"open_id": "ou_isolation"},
+                "open_message_id": "om_isolation",
+                "action": {"value": {"action": "contract_check"}},
+            },
+        })
+        receivers_remained_isolated = (
+            server._FEISHU_LONG_CONNECTION_RECEIVER is notification_receiver
+            and server._FEISHU_CHAT_LONG_CONNECTION_RECEIVER is worker
+        )
+    finally:
+        server.STATUS_DIR = previous_status_dir
+        server.VO_CONFIG = previous_config
+        server._FEISHU_LONG_CONNECTION_RECEIVER = previous_notification_receiver
+        server._FEISHU_CHAT_LONG_CONNECTION_RECEIVER = previous_chat_receiver
+
+    assert config["longConnection"] == {
+        "enabled": True,
+        "running": True,
+        "status": "running",
+        "startedAt": 1710000000,
+        "lastEventAt": 1710000123,
+        "lastError": "",
+        "mode": "subprocess",
+        "pid": 4242,
+        "transport": "channel-sdk-node",
+        "workerInstanceId": "",
+    }
+    assert action["ok"] is True
+    assert receivers_remained_isolated is True
+    with open(os.path.join(status_dir, "feishu-card-actions.jsonl"), "r", encoding="utf-8") as f:
+        rows = [json.loads(line) for line in f if line.strip()]
+    assert rows[-1]["action"] == "contract_check"
+    assert os.path.exists(os.path.join(status_dir, "feishu-chat-worker-status.json"))
 
 
 def test_feishu_chat_self_test_route_dispatches_without_real_feishu_send():
@@ -2094,7 +2629,8 @@ def test_feishu_channel_image_message_downloads_records_and_dispatches():
     assert downloads == [{"message_id": "om_image", "image_key": "img_123"}]
     assert len(calls) == 1
     assert calls[0]["agent_id"] == "hermes-default"
-    assert "图片附件已同步到 VO" in calls[0]["message"]
+    assert calls[0]["message"] == "用户通过飞书发送了一张图片。"
+    assert "本地路径" not in calls[0]["message"]
     assert calls[0]["source_meta"]["attachments"][0]["fileKey"] == "img_123"
     assert sends == [{"chat_id": "oc_1", "text": "收到图片了"}]
     with open(os.path.join(status_dir, "feishu-channel-records.jsonl"), "r", encoding="utf-8") as f:
@@ -2109,6 +2645,23 @@ def test_feishu_channel_image_message_downloads_records_and_dispatches():
     request = next(row for row in comm_rows if row["direction"] == "request")
     assert request["attachments"][0]["name"] == "image.png"
     assert request["metadata"]["attachments"][0]["fileKey"] == "img_123"
+
+
+def test_feishu_channel_image_message_hides_transport_placeholder_and_debug_details():
+    text = feishu_chat_channel._image_prompt_text(
+        "![image](img_123)\n他在说什么",
+        {
+            "ok": True,
+            "name": "resource-secret.jpg",
+            "path": "/private/vo/feishu-chat-attachments/resource-secret.jpg",
+        },
+        "img_123",
+    )
+
+    assert text == "他在说什么"
+    assert "img_123" not in text
+    assert "resource-secret.jpg" not in text
+    assert "/private/vo" not in text
 
 
 def test_feishu_channel_unbound_user_dispatches_with_feishu_source_identity():
@@ -2175,11 +2728,16 @@ def test_feishu_channel_unbound_user_dispatches_with_feishu_source_identity():
 
 
 def test_feishu_long_connection_response_uses_plain_toast_dict():
-    from lark_oapi.core.json import JSON
-    from lark_oapi.event.callback.model.p2_card_action_trigger import P2CardActionTriggerResponse
+    from feishu_long_connection import FeishuLongConnectionReceiver
 
-    response = P2CardActionTriggerResponse({"toast": {"type": "success", "content": "操作已收到"}})
-    serialized = JSON.marshal(response)
+    receiver = FeishuLongConnectionReceiver(
+        app_id="cli_notification",
+        app_secret="notification-secret",
+        action_handler=lambda body: {"toast": {"type": "success", "content": "操作已收到"}},
+    )
+    toast = receiver._handle_card_action_event({"event": {"action": {"value": {"action": "test"}}}})
+    serialized = json.dumps({"toast": toast}, ensure_ascii=False)
+    assert toast == {"type": "success", "content": "操作已收到"}
     assert '"toast"' in serialized
     assert "操作已收到" in serialized
 

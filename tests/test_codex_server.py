@@ -167,6 +167,45 @@ def test_review_codex_chat_forces_provider_read_only_sandbox():
             server._codex_provider_from_config = old_provider
 
 
+def test_codex_chat_forwards_validated_image_attachments_to_provider():
+    with tempfile.TemporaryDirectory() as workspace, tempfile.TemporaryDirectory() as status_dir:
+        image_path = os.path.join(status_dir, "latest.png")
+        with open(image_path, "wb") as stream:
+            stream.write(b"image")
+        calls = []
+
+        class AttachmentProvider:
+            def __init__(self):
+                self.workspace = workspace
+
+            def send_message(self, message, conversation_id="", timeout_sec=None, thread_id="", event_callback=None, allow_interaction=False, attachments=None):
+                calls.append(list(attachments or []))
+                return {"ok": True, "status": "completed", "reply": "saw latest image", "threadId": "thr-image", "turnId": "turn-image", "modifiedFiles": []}
+
+        old_status_dir = server.STATUS_DIR
+        old_roster = server.get_roster
+        old_provider = server._codex_provider_from_config
+        server.STATUS_DIR = status_dir
+        server.get_roster = lambda: [AGENT]
+        server._codex_provider_from_config = AttachmentProvider
+        try:
+            result = server._handle_codex_chat({
+                "agentId": "codex-local",
+                "message": "inspect image",
+                "conversationId": "conv-image",
+                "attachments": [{"path": image_path, "mimeType": "image/png", "name": "latest.png"}],
+            })
+            assert result["ok"] is True
+            assert len(calls) == 1 and len(calls[0]) == 1
+            assert calls[0][0]["path"] == os.path.realpath(image_path)
+            assert calls[0][0]["mimeType"] == "image/png"
+            assert calls[0][0]["name"] == "latest.png"
+        finally:
+            server.STATUS_DIR = old_status_dir
+            server.get_roster = old_roster
+            server._codex_provider_from_config = old_provider
+
+
 def test_human_codex_chat_persists_user_and_reply_to_comm_history():
     old_status_dir = server.STATUS_DIR
     old_roster = server.get_roster

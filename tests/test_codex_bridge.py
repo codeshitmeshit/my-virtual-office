@@ -57,6 +57,9 @@ for raw in sys.stdin:
             send({"id": request_id, "error": {"message": "reasoning summary was not requested"}})
             continue
         prompt = params["input"][0]["text"]
+        if "inspect image" in prompt and not any(item.get("type") == "localImage" for item in params["input"]):
+            send({"id": request_id, "error": {"message": "local image input missing"}})
+            continue
         if "hang forever" in prompt:
             send({"id": request_id, "result": {"turn": {"id": "turn_hang"}}})
             send({"method": "turn/started", "params": {"threadId": params["threadId"], "turn": {"id": "turn_hang"}}})
@@ -185,6 +188,24 @@ def test_execute_collects_reply_files_and_thread():
             resumed = client.execute("continue", thread_id=result["threadId"], timeout_sec=5)
             assert resumed["ok"] is True
             assert resumed["threadId"] == result["threadId"]
+        finally:
+            client.close()
+
+
+def test_execute_sends_image_attachment_as_local_image_input():
+    with tempfile.TemporaryDirectory() as tmp:
+        image_path = os.path.join(tmp, "latest.png")
+        with open(image_path, "wb") as stream:
+            stream.write(b"not-a-real-image-needed-for-protocol-test")
+        client = CodexAppServerClient(tmp, binary=make_fake_codex(tmp))
+        try:
+            result = client.execute(
+                "inspect image",
+                attachments=[{"path": image_path, "mimeType": "image/png", "name": "latest.png"}],
+                timeout_sec=5,
+            )
+            assert result["ok"] is True
+            assert result["reply"] == "real fake reply"
         finally:
             client.close()
 

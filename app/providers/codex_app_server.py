@@ -44,6 +44,33 @@ def _error_result(code: str, message: str, **extra: Any) -> dict[str, Any]:
     }
 
 
+def _turn_user_input(message: str, attachments: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+    """Build the version-matched app-server V2 input array."""
+    inputs: list[dict[str, Any]] = [{"type": "text", "text": str(message or "")}]
+    seen = set()
+    for item in attachments or []:
+        if not isinstance(item, dict):
+            continue
+        mime_type = str(item.get("mimeType") or item.get("contentType") or "").lower()
+        if not mime_type.startswith("image/"):
+            continue
+        path = str(item.get("path") or item.get("filePath") or "").strip()
+        if path:
+            path = os.path.realpath(os.path.expanduser(path))
+            key = ("localImage", path)
+            if os.path.isfile(path) and key not in seen:
+                seen.add(key)
+                inputs.append({"type": "localImage", "path": path})
+                continue
+        url = str(item.get("url") or item.get("mediaUrl") or "").strip()
+        if url and not url.startswith("/"):
+            key = ("image", url)
+            if key not in seen:
+                seen.add(key)
+                inputs.append({"type": "image", "url": url})
+    return inputs
+
+
 def _reasoning_item_text(item: dict[str, Any]) -> str:
     for key in ("text", "summaryText", "content"):
         value = item.get(key)
@@ -926,6 +953,7 @@ class CodexAppServerClient:
         timeout_sec: int = 600,
         event_callback: Any = None,
         allow_interaction: bool = False,
+        attachments: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         with self._run_lock:
             return self._execute_locked(
@@ -934,6 +962,7 @@ class CodexAppServerClient:
                 timeout_sec=timeout_sec,
                 event_callback=event_callback,
                 allow_interaction=allow_interaction,
+                attachments=attachments,
             )
 
     def _execute_locked(
@@ -943,6 +972,7 @@ class CodexAppServerClient:
         timeout_sec: int = 600,
         event_callback: Any = None,
         allow_interaction: bool = False,
+        attachments: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         started = time.monotonic()
         try:
@@ -964,7 +994,7 @@ class CodexAppServerClient:
                 self._operations[active_thread_id] = operation
             turn_result = self._request_with_restart("turn/start", {
                 "threadId": active_thread_id,
-                "input": [{"type": "text", "text": message}],
+                "input": _turn_user_input(message, attachments),
                 "summary": self.reasoning_summary,
                 "cwd": self.workspace,
                 "approvalPolicy": "on-request",
@@ -1178,8 +1208,8 @@ class CodexHttpBridgeClient:
         except Exception as exc:
             return _error_result("bridge_unavailable", str(exc))
 
-    def execute(self, message: str, thread_id: str = "", timeout_sec: int = 600) -> dict[str, Any]:
-        return self._post("/execute", {"message": message, "threadId": thread_id, "workspace": self.workspace, "model": self.model, "timeoutSec": timeout_sec}, timeout_sec + 10)
+    def execute(self, message: str, thread_id: str = "", timeout_sec: int = 600, attachments: list[dict[str, Any]] | None = None, **_kwargs: Any) -> dict[str, Any]:
+        return self._post("/execute", {"message": message, "threadId": thread_id, "workspace": self.workspace, "model": self.model, "timeoutSec": timeout_sec, "attachments": attachments or []}, timeout_sec + 10)
 
     def compact(self, thread_id: str, timeout_sec: int = 120) -> dict[str, Any]:
         return self._post("/compact", {"threadId": thread_id, "workspace": self.workspace, "timeoutSec": timeout_sec}, timeout_sec + 10)

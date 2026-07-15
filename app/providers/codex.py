@@ -335,6 +335,7 @@ class CodexProvider:
         thread_id: str = "",
         event_callback: Any = None,
         allow_interaction: bool = False,
+        attachments: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         text = str(message or "").strip()
         if not self.enabled:
@@ -360,6 +361,7 @@ class CodexProvider:
             timeout_sec=int(timeout_sec or 600),
             event_callback=event_callback,
             allow_interaction=allow_interaction,
+            attachments=attachments,
         )
         result["conversationId"] = conversation_id
         result["mode"] = "externalBridge" if self.bridge_url else "appServer"

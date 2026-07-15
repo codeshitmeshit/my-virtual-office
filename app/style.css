@@ -3038,6 +3038,10 @@ button:active { transform: translateY(3px); box-shadow: none; }
     width: 100%;
 }
 
+.chat-history-layer {
+    overflow-anchor: none;
+}
+
 .chat-history-layer:empty,
 .chat-live-layer:empty {
     display: none;

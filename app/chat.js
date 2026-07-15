@@ -30,6 +30,8 @@
   const PROVIDER_PROGRESS_MAX_AGE_MS = 120000;
   const HERMES_APPROVAL_POLL_MS = 1500;
   const HERMES_HISTORY_POLL_MS = 1000;
+  const FEISHU_SSE_WATCHDOG_MS = 10000;
+  const FEISHU_SSE_STALE_MS = 45000;
   const CHAT_HISTORY_V2_ENABLED = true;
   const sharedChatHistoryStore = new ChatHistoryRuntime.ChatHistoryStore({ fetchImpl: (...args) => fetch(...args) });
   function setVoChatShiftEnterToSend(value) {
@@ -167,6 +169,9 @@
 
   class ChatWindow {
     constructor(root, options = {}) {
+      if (!root) throw new Error('ChatWindow requires a root element');
+      if (root.__voChatWindowInstance) return root.__voChatWindowInstance;
+      root.__voChatWindowInstance = this;
       this.root = root;
       this.isPrimary = !!options.isPrimary;
       this.slot = options.slot || null;
@@ -186,6 +191,8 @@
       this.streamRenderTimer = null;
       this.historyRenderToken = 0;
       this.scrollFrame = null;
+      this.historyStickToBottom = true;
+      this.historyBottomSettleTimers = [];
       this.lastLiveEventAt = 0;
       this.providerEventSource = null;
       this.providerEventKey = '';
@@ -202,7 +209,12 @@
       this.hermesStreamCancel = null;
       this.hermesSendStartedAt = 0;
       this.feishuEventSource = null;
+      this.feishuEventActivityAt = 0;
+      this.feishuEventWatchdog = null;
+      this.feishuEventReconnectTimer = null;
       this.feishuHistoryRefreshTimer = null;
+      this.feishuHistoryRefreshRunning = false;
+      this.feishuHistoryRefreshPending = false;
       this.hermesCompletedToolKeys = new Set();
       this.codexHistoryPollTimer = null;
       this.codexEventSource = null;
@@ -248,7 +260,8 @@
         scrollElement: this.messages,
         historyLayer: this.historyLayer,
         liveLayer: this.liveLayer,
-        renderMessage: (message, renderOptions) => this.renderNormalizedHistoryMessage(message, renderOptions)
+        renderMessage: (message, renderOptions) => this.renderNormalizedHistoryMessage(message, renderOptions),
+        onReconciled: reconciled => this.reconcileOptimisticMessages(reconciled)
       });
       this.status = root.querySelector('.chat-status');
       this.feishuLiveStatus = root.querySelector('.chat-feishu-live-status');
@@ -277,7 +290,10 @@
           openImageLightbox(e.target.src);
         }
       });
-      this.messages.addEventListener('scroll', () => this.handleHistoryScroll(), { passive: true });
+      this.messages.addEventListener('scroll', () => {
+        this.updateHistoryBottomFollow();
+        this.handleHistoryScroll();
+      }, { passive: true });
 
       this.agentSelect?.addEventListener('change', (event) => {
         event.__voChatHandledByInstance = true;
@@ -529,6 +545,8 @@
       this.syncAgentSelect();
       this.resetConversation(`${systemPrefix} ${opt.textContent.trim()}`);
       this.activateHistory();
+      this.prepareHistoryBottomFollow({ newest: true });
+      this.scheduleHistoryBottomFollow();
       this.updateProviderControls();
       this.updateProviderEventSource();
       if (this.isHermesSelected()) this.startHermesApprovalPolling();
@@ -536,7 +554,7 @@
       if (this.isCodexSelected()) this.startCodexApprovalPolling();
       else this.stopCodexApprovalPolling();
       this.updateFeishuEventSource();
-      this.loadHistory();
+      this.loadHistory({ forceBottom: true });
       if (connected || this.isHermesSelected() || this.isCodexSelected() || this.isClaudeCodeSelected()) {
         this.fetchSessionInfo();
       }
@@ -1080,7 +1098,7 @@
       const { entry } = this.historyStore.activate(context, this.historyView);
       if (options.coldEmpty && entry.order.length) this.historyStore.invalidate(context);
       const activeEntry = options.coldEmpty ? this.historyStore.activate(context, this.historyView).entry : entry;
-      this.historyView.activate(activeEntry);
+      if (this.historyView.entry !== activeEntry) this.historyView.activate(activeEntry);
       if (typeof performance !== 'undefined' && performance.mark && performance.measure) {
         performance.mark('vo-chat-history:switch:paint');
         performance.measure('vo-chat-history:switch', 'vo-chat-history:switch:start', 'vo-chat-history:switch:paint');
@@ -1099,7 +1117,7 @@
             reasoningTokens: message.reasoningTokens || 0,
             approval: message.approval || null
           }
-        : { label: message.from || _ct('chat_you_label'), kind: message.fromAgentId && message.fromAgentId !== 'user' ? 'agent' : 'human' };
+        : { label: message.from || _ct('chat_you_label'), kind: message.fromAgentId && message.fromAgentId !== 'user' ? 'agent' : 'human', idempotencyKey: message.idempotencyKey || '' };
       const media = [...(message.media || []), ...(message.attachments || [])];
       const tools = normalizeHermesTools(message.tools || []);
       const cacheable = !['queued', 'starting', 'running', 'streaming'].includes(String(message.status || '').toLowerCase());
@@ -1115,6 +1133,8 @@
 
     async loadHistory(opts = {}) {
       if (!CHAT_HISTORY_V2_ENABLED) return this.loadLegacyHistory(opts);
+      if (opts.forceBottom) this.historyStickToBottom = true;
+      const shouldStickToBottom = !!(opts.forceBottom || this.historyStickToBottom);
       const activation = this.activateHistory();
       if (!activation) return;
       const { context, entry } = activation;
@@ -1125,6 +1145,7 @@
         if (this.historyStore.viewKeys.get(this.historyView) !== refreshed.key) return;
         this.applySessionMetrics(refreshed.session);
         this.setStatus(this.isCodexSelected() ? _ct('codex_ready') : _ct('connected'), 'connected');
+        if (shouldStickToBottom && this.historyStickToBottom) this.scheduleHistoryBottomFollow();
       } catch (e) {
         if (e?.name === 'AbortError') return;
         console.warn('Failed to load history:', e);
@@ -1536,6 +1557,17 @@
       let text = this.input.value.trim();
       const hasAttachments = this.pendingAttachments.length > 0;
       if (this.sendInFlight || (!text && !hasAttachments) || (!connected && !this.isHermesSelected() && !this.isCodexSelected() && !this.isClaudeCodeSelected()) || this.codexBusy) return;
+      const submissionFingerprint = JSON.stringify({
+        agent: this.getSelectedAgentId() || this.selectedAgentKey,
+        text,
+        attachments: this.pendingAttachments.map(item => [
+          item?.name || '',
+          item?.mimeType || '',
+          Number(item?.size || 0),
+          String(item?.dataUrl || '').length
+        ])
+      });
+      if (!ChatHistoryRuntime.claimChatSubmission(this.root, submissionFingerprint)) return;
       this.sendInFlight = true;
 
       this.input.value = '';
@@ -1548,7 +1580,8 @@
       if (nonImageNames.length) displayText += (displayText ? '\n' : '') + '📎 ' + nonImageNames.join(', ');
       const historyContext = this.getHistoryContext();
       const optimisticEpochMs = Date.now();
-      const localUserMessage = this.appendMessage('user', displayText, optimisticEpochMs, imageDataUrls, { label: _ct('chat_you_label'), kind: 'human' });
+      const idempotencyKey = `office-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const localUserMessage = this.appendMessage('user', displayText, optimisticEpochMs, imageDataUrls, { label: _ct('chat_you_label'), kind: 'human', idempotencyKey });
       const optimisticHistoryMessage = this.historyStore.insertOptimistic(historyContext, {
         id: `optimistic-${this.slotId}-${optimisticEpochMs}`,
         version: 'optimistic',
@@ -1556,6 +1589,7 @@
         text: displayText,
         epochMs: optimisticEpochMs,
         media: imageDataUrls.map(url => ({ url })),
+        idempotencyKey,
         status: 'running'
       }, { notify: false });
       this.scrollBottom();
@@ -1668,7 +1702,6 @@
         return;
       }
 
-      const idempotencyKey = `office-${Date.now()}-${Math.random().toString(36).slice(2)}`;
       const params = { sessionKey: this.sessionKey, message: text || '(attached files)', idempotencyKey };
       if (attachments?.length) params.attachments = attachments;
 
@@ -1720,7 +1753,9 @@
           }
           codexAccepted = true;
           this.currentRunId = data.runId || null;
-          await this.streamCodexRunEvents(data.runId, label);
+          const completed = await this.streamCodexRunEvents(data.runId, label);
+          await this.loadHistory({ recoverFinal: true, startedAt: codexSendStartedAt }).catch(() => {});
+          this.reconcileCodexLiveReply(data.runId, completed?.reply || completed?.text || '');
           this.removeTypingIndicator();
           finalStatusText = _ct('codex_ready');
           finalStatusClass = 'connected';
@@ -2159,16 +2194,18 @@
         this.flushToolEvents(true);
         this.clearActivityFeed();
         this.removeTypingIndicator();
+        let finalReplyNode = null;
         if (this.streamingMsg && replyAlreadyInHistory) {
           this.messages.querySelector('.streaming-msg')?.remove();
           this.pendingStreamContent = '';
           this.streamingMsg = null;
         } else if (this.streamingMsg) {
-          this.finalizeStreamingMessage(finalText);
+          finalReplyNode = this.finalizeStreamingMessage(finalText);
           this.streamingMsg = null;
         } else if (finalText && !replyAlreadyInHistory) {
-          this.appendMessage('assistant', finalText, Date.now(), [], { label: label || 'Codex', kind: 'agent' });
+          finalReplyNode = this.appendMessage('assistant', finalText, Date.now(), [], { label: label || 'Codex', kind: 'agent' });
         }
+        if (finalReplyNode && runId) finalReplyNode.dataset.providerRunId = String(runId);
         if (runId) this.finalizeRunToolCards(runId);
         const finalStatus = eventName === 'run.completed' ? 'completed' : 'failed';
         const finalStatusText = eventName === 'run.completed' ? 'Codex run 已完成' : (data.error || 'Codex run 未完成');
@@ -2887,6 +2924,7 @@
       }
       meta = normalizeSenderMeta(meta, role, this);
       if (meta.kind) div.dataset.senderKind = meta.kind;
+      if (meta.idempotencyKey) div.dataset.idempotencyKey = String(meta.idempotencyKey);
       if (role === 'tool' && displayContent.length > 3000) {
         displayContent = displayContent.substring(0, 2000) + '\n\n... [truncated - ' + displayContent.length + ' chars total] ...';
       }
@@ -2930,6 +2968,20 @@
       if (!options.skipTypingCleanup) this.removeTypingIndicator();
       (options.parent || (CHAT_HISTORY_V2_ENABLED ? this.liveLayer : this.messages)).appendChild(div);
       return div;
+    }
+
+    reconcileOptimisticMessages(reconciled = []) {
+      const optimisticRemoved = ChatHistoryRuntime.removeReconciledOptimisticNodes(this.liveLayer, reconciled);
+      const providerRemoved = reconciled.reduce(
+        (count, item) => count + ChatHistoryRuntime.removeProviderRunNodes(this.liveLayer, item?.providerRunId),
+        0
+      );
+      return optimisticRemoved + providerRemoved;
+    }
+
+    reconcileCodexLiveReply(runId, reply) {
+      if (!this.hasCurrentCodexReplyInHistory(reply)) return 0;
+      return ChatHistoryRuntime.removeProviderRunNodes(this.liveLayer, runId);
     }
 
     appendLiveNode(node, before = null) {
@@ -2981,6 +3033,7 @@
       time.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       bubble.appendChild(time);
       div.classList.remove('streaming-msg');
+      return div;
     }
 
     appendSystem(text) {
@@ -3208,6 +3261,7 @@
 
     mergeLiveHistoryRecord(eventName, payload) {
       if (eventName === 'message.delta') return;
+      const shouldStickToBottom = this.historyStickToBottom;
       payload = payload && typeof payload === 'object' ? payload : {};
       const context = this.getHistoryContext();
       const runId = payload.runId || payload.turnId || this.currentRunId || '';
@@ -3250,6 +3304,7 @@
         }] : (payload.tools || [])
       };
       this.historyStore.applyLiveEvent(context, eventName, record, { notify: false });
+      if (shouldStickToBottom && this.historyStickToBottom) this.scheduleHistoryBottomFollow();
     }
 
     handleProviderHistoryRecovered(providerKind, progress) {
@@ -3344,6 +3399,16 @@
         clearTimeout(this.feishuHistoryRefreshTimer);
         this.feishuHistoryRefreshTimer = null;
       }
+      this.feishuHistoryRefreshPending = false;
+      if (this.feishuEventWatchdog) {
+        clearInterval(this.feishuEventWatchdog);
+        this.feishuEventWatchdog = null;
+      }
+      if (this.feishuEventReconnectTimer) {
+        clearTimeout(this.feishuEventReconnectTimer);
+        this.feishuEventReconnectTimer = null;
+      }
+      this.feishuEventActivityAt = 0;
       if (this.feishuEventSource) {
         try { this.feishuEventSource.close(); } catch (_) {}
         this.feishuEventSource = null;
@@ -3351,13 +3416,55 @@
       this.setFeishuLiveStatus('hidden');
     }
 
+    markFeishuEventActivity(source) {
+      if (this.feishuEventSource === source) this.feishuEventActivityAt = Date.now();
+    }
+
+    startFeishuEventWatchdog(source, agentId) {
+      if (this.feishuEventWatchdog) clearInterval(this.feishuEventWatchdog);
+      this.feishuEventActivityAt = Date.now();
+      this.feishuEventWatchdog = setInterval(() => {
+        if (this.feishuEventSource !== source || !this.root.classList.contains('open')) return;
+        if (Date.now() - this.feishuEventActivityAt <= FEISHU_SSE_STALE_MS) return;
+        try { source.close(); } catch (_) {}
+        this.feishuEventSource = null;
+        clearInterval(this.feishuEventWatchdog);
+        this.feishuEventWatchdog = null;
+        this.setFeishuLiveStatus('disconnected', agentId);
+        this.feishuEventReconnectTimer = setTimeout(() => {
+          this.feishuEventReconnectTimer = null;
+          if (this.root.classList.contains('open')) this.updateFeishuEventSource();
+        }, 250);
+      }, FEISHU_SSE_WATCHDOG_MS);
+    }
+
     scheduleFeishuHistoryRefresh() {
-      if (this.feishuHistoryRefreshTimer) return;
+      this.feishuHistoryRefreshPending = true;
+      if (this.feishuHistoryRefreshTimer || this.feishuHistoryRefreshRunning) return;
       this.feishuHistoryRefreshTimer = setTimeout(() => {
         this.feishuHistoryRefreshTimer = null;
-        if (!this.root.classList.contains('open')) return;
-        this.loadHistory({ showError: false }).catch(() => {});
+        this.flushFeishuHistoryRefresh();
       }, 120);
+    }
+
+    async flushFeishuHistoryRefresh() {
+      if (this.feishuHistoryRefreshRunning) return;
+      if (!this.root.classList.contains('open')) {
+        this.feishuHistoryRefreshPending = false;
+        return;
+      }
+      this.feishuHistoryRefreshRunning = true;
+      try {
+        while (this.feishuHistoryRefreshPending && this.root.classList.contains('open')) {
+          this.feishuHistoryRefreshPending = false;
+          await this.loadHistory({ showError: false }).catch(() => {});
+        }
+      } finally {
+        this.feishuHistoryRefreshRunning = false;
+        if (this.feishuHistoryRefreshPending && this.root.classList.contains('open')) {
+          this.scheduleFeishuHistoryRefresh();
+        }
+      }
     }
 
     async updateFeishuEventSource() {
@@ -3384,15 +3491,30 @@
         const source = new EventSource('/api/feishu-chat/events?agentId=' + encodeURIComponent(agentId));
         source.__agentId = agentId;
         this.feishuEventSource = source;
+        this.startFeishuEventWatchdog(source, agentId);
         this.setFeishuLiveStatus('connecting', agentId);
         source.addEventListener('open', () => {
-          if (this.feishuEventSource === source) this.setFeishuLiveStatus('connected', agentId);
+          if (this.feishuEventSource === source) {
+            this.markFeishuEventActivity(source);
+            this.setFeishuLiveStatus('connected', agentId);
+          }
         });
         source.addEventListener('ready', () => {
-          if (this.feishuEventSource === source) this.setFeishuLiveStatus('connected', agentId);
+          if (this.feishuEventSource === source) {
+            this.markFeishuEventActivity(source);
+            this.setFeishuLiveStatus('connected', agentId);
+            this.scheduleFeishuHistoryRefresh();
+          }
         });
-        source.addEventListener('message', () => this.scheduleFeishuHistoryRefresh());
-        source.addEventListener('delivery', () => this.scheduleFeishuHistoryRefresh());
+        source.addEventListener('keepalive', () => this.markFeishuEventActivity(source));
+        source.addEventListener('message', () => {
+          this.markFeishuEventActivity(source);
+          this.scheduleFeishuHistoryRefresh();
+        });
+        source.addEventListener('delivery', () => {
+          this.markFeishuEventActivity(source);
+          this.scheduleFeishuHistoryRefresh();
+        });
         source.onerror = () => {
           if (this.feishuEventSource === source && this.root.classList.contains('open')) {
             this.setFeishuLiveStatus('disconnected', agentId);
@@ -3964,6 +4086,33 @@
       return this.messages.scrollHeight - this.messages.scrollTop - this.messages.clientHeight <= threshold;
     }
 
+    cancelHistoryBottomSettle() {
+      for (const timer of this.historyBottomSettleTimers) clearTimeout(timer);
+      this.historyBottomSettleTimers = [];
+    }
+
+    prepareHistoryBottomFollow(options = {}) {
+      this.cancelHistoryBottomSettle();
+      this.historyStickToBottom = true;
+      if (options.newest) this.historyView?.navigateToNewest();
+    }
+
+    updateHistoryBottomFollow() {
+      const shouldFollow = this.isNearBottom();
+      if (!shouldFollow) this.cancelHistoryBottomSettle();
+      this.historyStickToBottom = shouldFollow;
+    }
+
+    scheduleHistoryBottomFollow() {
+      if (!this.historyStickToBottom) return;
+      this.cancelHistoryBottomSettle();
+      const settle = () => {
+        if (this.historyStickToBottom) this.scrollBottom(true);
+      };
+      settle();
+      this.historyBottomSettleTimers = [80, 300].map(delay => setTimeout(settle, delay));
+    }
+
     handleHistoryScroll() {
       if (!CHAT_HISTORY_V2_ENABLED || !this.historyView.entry || this.historyScrollFrame) return;
       this.historyScrollFrame = requestAnimationFrame(() => {
@@ -4303,9 +4452,10 @@
       panel.dataset.hiddenByUser = 'false';
       setActiveSecondarySlot(slotKey);
       windowInstance?.activateHistory();
-      windowInstance?.scrollBottom();
+      windowInstance?.prepareHistoryBottomFollow({ newest: true });
+      windowInstance?.scheduleHistoryBottomFollow();
       if (connected || windowInstance?.isHermesSelected() || windowInstance?.isCodexSelected()) {
-        windowInstance?.loadHistory();
+        windowInstance?.loadHistory({ forceBottom: true });
         windowInstance?.fetchSessionInfo();
       }
       windowInstance?.updateFeishuEventSource();
@@ -4993,7 +5143,14 @@
   function normalizeChatMedia(items) {
     if (!items) return [];
     if (!Array.isArray(items)) items = [items];
-    return items.map(normalizeOneChatMedia).filter(Boolean);
+    const seen = new Set();
+    return items.map(normalizeOneChatMedia).filter(item => {
+      if (!item) return false;
+      const key = item.originalUrl || item.url;
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
   }
 
   function guessMimeFromName(name, url) {
@@ -5042,7 +5199,8 @@
         link.textContent = '📎 ' + (item.name || (typeof i18n !== 'undefined' ? i18n.t('chat_open_attachment') : 'Open attachment'));
         card.appendChild(link);
       }
-      if (item.name && (type.startsWith('image/') || type.startsWith('video/') || type.startsWith('audio/') || type.endsWith('/*'))) {
+      const opaqueGeneratedName = /^resource-[0-9a-f]{8}-[0-9a-f-]{27,}\.[a-z0-9]+$/i.test(item.name || '');
+      if (item.name && !opaqueGeneratedName && (type.startsWith('image/') || type.startsWith('video/') || type.startsWith('audio/') || type.endsWith('/*'))) {
         const cap = document.createElement('figcaption');
         cap.textContent = item.name;
         card.appendChild(cap);
@@ -5338,9 +5496,10 @@
     if (shouldOpen) {
       primaryWindow.input.focus();
       primaryWindow.activateHistory();
-      primaryWindow.scrollBottom();
+      primaryWindow.prepareHistoryBottomFollow({ newest: true });
+      primaryWindow.scheduleHistoryBottomFollow();
       if (connected || primaryWindow.isHermesSelected() || primaryWindow.isCodexSelected()) {
-        primaryWindow.loadHistory();
+        primaryWindow.loadHistory({ forceBottom: true });
         primaryWindow.fetchSessionInfo();
       }
       primaryWindow.updateFeishuEventSource();

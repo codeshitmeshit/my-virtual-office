@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 import random
+import re
 import uuid
 
 ACK_EMOJIS = ("LGTM",)
@@ -204,17 +205,11 @@ def _normalize_attachment(result, *, fallback_name=""):
 
 def _image_prompt_text(text, attachment_result, image_key):
     attachment_result = attachment_result if isinstance(attachment_result, dict) else {}
-    base = text or "用户通过飞书发送了一张图片。"
+    placeholder = re.compile(r"^\s*!\[[^\]]*\]\(\s*" + re.escape(str(image_key or "")) + r"\s*\)\s*$", re.IGNORECASE)
+    visible_lines = [line for line in str(text or "").splitlines() if not placeholder.match(line)]
+    base = "\n".join(visible_lines).strip() or "用户通过飞书发送了一张图片。"
     if attachment_result.get("ok"):
-        details = [
-            "图片附件已同步到 VO。",
-            f"文件名：{attachment_result.get('name') or image_key}",
-        ]
-        if attachment_result.get("path"):
-            details.append(f"本地路径：{attachment_result.get('path')}")
-        if attachment_result.get("url"):
-            details.append(f"预览 URL：{attachment_result.get('url')}")
-        return base + "\n\n" + "\n".join(details)
+        return base
     reason = attachment_result.get("message") or attachment_result.get("error") or attachment_result.get("status") or "unknown_error"
     return base + f"\n\n图片附件暂时无法下载，飞书 image_key：{image_key}，错误：{reason}"
 
@@ -277,6 +272,10 @@ def handle_message_event(
         "messageType": message_type,
         "sender": identity,
     }
+    for key in ("transport", "workerInstanceId", "requestId", "createTime", "rootId", "threadId", "replyToMessageId", "mentions", "resources"):
+        value = message.get(key) if key in {"createTime", "rootId", "threadId", "replyToMessageId", "mentions", "resources"} else (body or {}).get(key)
+        if value not in (None, "", [], {}):
+            base_record[key] = value
     if not cfg.get("enabled", False):
         record = record_event({**base_record, "event": "rejected", "reason": "chat_app_disabled"})
         return {"ok": False, "status": "disabled", "record": record, "_status": 503}

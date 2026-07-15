@@ -425,6 +425,25 @@ start_local() {
     fi
     echo -e "  ${GREEN}✓${NC} lark-oapi 可用"
 
+    # The Feishu Agent Chat channel uses an isolated Node worker. Dependency
+    # failures are Chat-only: keep VO and the notification app startable and
+    # expose the actionable failure through the Chat status surface.
+    local feishu_worker_dir="$SCRIPT_DIR/integrations/feishu-channel-worker"
+    if ! command -v node &>/dev/null; then
+        echo -e "  ${YELLOW}⚠ Node.js 18+ 未安装；飞书 Agent 对话通道将报告 missing_node_runtime${NC}"
+    elif [ "$(node -p 'Number(process.versions.node.split(".")[0]) >= 18' 2>/dev/null)" != "true" ]; then
+        echo -e "  ${YELLOW}⚠ Node.js 版本低于 18；飞书 Agent 对话通道将报告 incompatible_node_runtime${NC}"
+    elif ! (cd "$feishu_worker_dir" && node src/preflight.mjs >/dev/null 2>&1); then
+        echo -e "  ${YELLOW}⚠ 正在安装飞书 Agent 对话通道锁定依赖...${NC}"
+        if (cd "$feishu_worker_dir" && npm ci --omit=dev --ignore-scripts --no-audit --no-fund); then
+            echo -e "  ${GREEN}✓${NC} @larksuite/channel 锁定依赖已安装"
+        else
+            echo -e "  ${YELLOW}⚠ 飞书 Agent 对话依赖安装失败；VO 将继续启动，Chat 状态会提供修复命令${NC}"
+        fi
+    else
+        echo -e "  ${GREEN}✓${NC} 飞书 Agent 对话 Node Worker 依赖可用"
+    fi
+
     setup_env
 
     echo -e "${CYAN}[2/3] 准备数据目录...${NC}"

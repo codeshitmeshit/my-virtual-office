@@ -3,10 +3,17 @@ FROM python:3.12-slim
 WORKDIR /app
 
 # Install dependencies
-RUN pip install --no-cache-dir websockets "lark-oapi>=1.7,<2"
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends nodejs npm \
+    && rm -rf /var/lib/apt/lists/* \
+    && pip install --no-cache-dir websockets "lark-oapi>=1.7,<2"
 
 # Copy application files
-COPY . .
+COPY app/ .
+COPY integrations/feishu-channel-worker/ /integrations/feishu-channel-worker/
+RUN cd /integrations/feishu-channel-worker \
+    && npm ci --omit=dev --ignore-scripts --no-audit --no-fund \
+    && npm cache clean --force
 
 # Create data directory
 RUN mkdir -p /data

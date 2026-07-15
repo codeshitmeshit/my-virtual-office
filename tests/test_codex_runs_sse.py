@@ -257,6 +257,22 @@ def test_visible_comm_history_keeps_distinct_same_text_requests():
     assert [event["id"] for event in deduped] == ["req-1", "req-2"]
 
 
+def test_visible_comm_history_collapses_legacy_authoritative_idempotency_duplicates():
+    first = {
+        "id": "req-1",
+        "direction": "request",
+        "conversationId": "conv",
+        "from": {"id": "user"},
+        "to": {"id": "codex-local"},
+        "text": "你好",
+        "ts": 10,
+        "metadata": {"idempotencyKey": "office-same-request"},
+    }
+    fallback = {**first, "id": "req-2", "ts": 11}
+    deduped = server._dedupe_visible_comm_history([first, fallback])
+    assert [event["id"] for event in deduped] == ["req-1"]
+
+
 def test_codex_run_stop_uses_existing_cancel_and_emits_terminal_event():
     old = (server.STATUS_DIR, server.get_roster, server._codex_provider_from_config)
     server.STATUS_DIR = STATUS_DIR

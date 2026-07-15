@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-07-14
+goal: Migrate the Feishu Agent chat channel transport from the Python lark_oapi
+  integration to @larksuite/channel while preserving VO routing, history, audit,
+  compatibility, and rollback behavior.

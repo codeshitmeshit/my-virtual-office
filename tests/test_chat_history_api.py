@@ -26,6 +26,14 @@ class ChatHistoryContractTest(unittest.TestCase):
         self.assertTrue(hasattr(server, name), f"server.{name} is missing")
         return getattr(server, name)
 
+    def test_html_entrypoint_revalidates_cached_asset_versions(self):
+        handler = object.__new__(server.OfficeHandler)
+        handler.path = "/"
+        handler.send_header = mock.Mock()
+        with mock.patch.object(server.http.server.SimpleHTTPRequestHandler, "end_headers"):
+            handler.end_headers()
+        handler.send_header.assert_any_call("Cache-Control", "no-cache")
+
     def test_utf8_fnv1a_vectors(self):
         history_hash = self.require("_chat_history_hash")
         self.assertEqual(history_hash(""), "811c9dc5")
@@ -134,6 +142,33 @@ class ChatHistoryContractTest(unittest.TestCase):
         self.assertEqual(message["tools"][0]["result"], "done")
         self.assertTrue(message["version"])
 
+    def test_feishu_image_history_keeps_one_attachment_and_hides_transport_details(self):
+        normalize = self.require("_normalize_chat_history_message")
+        request = self.request("codex")
+        path = "/private/vo/feishu-chat-attachments/resource-12345678-1234-1234-1234-123456789abc.jpg"
+        attachment = {
+            "type": "image",
+            "fileKey": "img_v3_example",
+            "name": "resource-12345678-1234-1234-1234-123456789abc.jpg",
+            "path": path,
+            "mimeType": "image/jpeg",
+        }
+        message = normalize(request, {
+            "id": "feishu-image",
+            "direction": "request",
+            "text": (
+                "![image](img_v3_example)\n他在说什么\n\n"
+                "图片附件已同步到 VO。\n"
+                f"文件名：{attachment['name']}\n本地路径：{path}"
+            ),
+            "attachments": [attachment],
+            "metadata": {"sourceApp": "feishu", "messageType": "image"},
+        }, source="agent-platform-communications")
+
+        self.assertEqual(message["text"], "他在说什么")
+        self.assertEqual(message["media"], [])
+        self.assertEqual(message["attachments"], [attachment])
+
     def test_merge_pages_returns_newest_then_older_without_duplicates(self):
         normalize = self.require("_normalize_chat_history_message")
         merge = self.require("_merge_chat_history_source_pages")
@@ -192,6 +227,120 @@ class ChatHistoryContractTest(unittest.TestCase):
         }, source="agent-platform-communications")
         self.assertEqual(user_message["role"], "user")
         self.assertEqual(assistant_message["role"], "assistant")
+
+    def test_communication_history_exposes_idempotency_key_for_optimistic_reconciliation(self):
+        normalize = self.require("_normalize_chat_history_message")
+        request = self.request("codex")
+        message = normalize(request, {
+            "id": "request-optimistic",
+            "direction": "request",
+            "from": {"id": "user", "providerKind": "human"},
+            "to": {"id": "codex-local", "providerKind": "codex"},
+            "text": "same text",
+            "ts": 10,
+            "metadata": {"idempotencyKey": "office-exact-request"},
+        }, source="agent-platform-communications")
+        self.assertEqual(message["idempotencyKey"], "office-exact-request")
+        self.assertIn("idempotencyKey", message)
+
+    def test_codex_user_communication_is_idempotent_across_run_fallback(self):
+        old_status_dir = server.STATUS_DIR
+        old_roster = server.get_roster
+        agent = {
+            "id": "codex-local",
+            "statusKey": "codex-local",
+            "providerAgentId": "local",
+            "providerKind": "codex",
+            "name": "Codex",
+        }
+        with tempfile.TemporaryDirectory() as status_dir:
+            server.STATUS_DIR = status_dir
+            server.get_roster = lambda: [agent]
+            body = {
+                "fromType": "human",
+                "fromDisplayName": "User",
+                "sourceApp": "virtual-office",
+                "sourceSurface": "chat-window",
+                "idempotencyKey": "office-run-fallback-same-request",
+            }
+            try:
+                with mock.patch.object(server, "_publish_feishu_chat_comm_event"):
+                    first = server._append_codex_user_comm_event(agent, "codex-local", "conv", "你好", body)
+                    fallback = server._append_codex_user_comm_event(agent, "codex-local", "conv", "你好", body)
+                self.assertEqual(fallback["id"], first["id"])
+                history = server._load_comm_history(limit=20, conversation_id="conv", agent_id="codex-local")
+                requests = [row for row in history if row.get("direction") == "request"]
+                self.assertEqual(len(requests), 1)
+            finally:
+                server.STATUS_DIR = old_status_dir
+                server.get_roster = old_roster
+
+    def test_comm_history_includes_only_selected_agent_feishu_cross_conversation(self):
+        request = self.request("codex")
+        matches = self.require("_chat_history_comm_event_matches")
+
+        def event(event_id, conversation_id, source_app="virtual-office", agent_id="codex-local", **extra):
+            row = {
+                "id": event_id,
+                "type": "message",
+                "conversationId": conversation_id,
+                "from": {"id": "user", "providerKind": "human", "sourceApp": source_app},
+                "to": {"id": agent_id, "providerKind": "codex"},
+                "metadata": {"sourceApp": source_app},
+                "visibleInOffice": True,
+            }
+            row.update(extra)
+            return row
+
+        self.assertTrue(matches(request, event("same", "conv-1")))
+        self.assertTrue(matches(request, event("feishu", "feishu-dm:one", source_app="feishu")))
+        self.assertTrue(matches(request, event("feishu-metadata", "external", source_app="feishu")))
+        self.assertFalse(matches(request, event("other-agent", "feishu-dm:two", source_app="feishu", agent_id="codex-other")))
+        self.assertFalse(matches(request, event("other-conversation", "conv-2")))
+        self.assertFalse(matches(request, event(
+            "delivery", "feishu-dm:one", source_app="feishu",
+            type="operation", operation="feishu_delivery",
+        )))
+        self.assertFalse(matches(request, event("hidden", "feishu-dm:one", source_app="feishu", visibleInOffice=False)))
+
+    def test_comm_history_page_merges_feishu_rows_with_stable_pagination(self):
+        request = self.request("codex")
+        rows = [
+            {
+                "id": "same-conversation", "type": "message", "direction": "request",
+                "conversationId": "conv-1", "from": {"id": "user", "providerKind": "human"},
+                "to": {"id": "codex-local", "providerKind": "codex"}, "text": "same", "ts": 1,
+            },
+            {
+                "id": "feishu-request", "type": "message", "direction": "request",
+                "conversationId": "feishu-dm:one", "from": {"id": "user", "providerKind": "human", "sourceApp": "feishu"},
+                "to": {"id": "codex-local", "providerKind": "codex"}, "metadata": {"sourceApp": "feishu"},
+                "text": "from feishu", "ts": 2,
+            },
+            {
+                "id": "feishu-reply", "type": "message", "direction": "reply",
+                "conversationId": "feishu-dm:one", "from": {"id": "codex-local", "providerKind": "codex"},
+                "to": {"id": "user", "providerKind": "human", "sourceApp": "feishu"}, "metadata": {"channel": "feishu"},
+                "text": "to feishu", "ts": 3,
+            },
+            {
+                "id": "unrelated", "type": "message", "direction": "request",
+                "conversationId": "conv-2", "from": {"id": "user", "providerKind": "human"},
+                "to": {"id": "codex-local", "providerKind": "codex"}, "text": "unrelated", "ts": 4,
+            },
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "communications.jsonl")
+            with open(path, "w", encoding="utf-8") as stream:
+                for row in rows:
+                    stream.write(json.dumps(row) + "\n")
+            with mock.patch.object(server, "_comm_log_path", return_value=path):
+                page = self.require("_chat_history_comm_page")(request, 3)
+        self.assertEqual([row["id"] for row in page["messages"]], [
+            "same-conversation", "feishu-request", "feishu-reply",
+        ])
+        self.assertFalse(page["hasMore"])
+        self.assertEqual([row["epochMs"] for row in page["messages"]], [1000, 2000, 3000])
 
     def test_handler_returns_page_and_session_for_every_provider(self):
         handle = self.require("_handle_chat_history_page")

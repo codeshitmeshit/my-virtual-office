@@ -98,6 +98,47 @@
     return `${messageId}${KEY_SEPARATOR}${part}`;
   }
 
+  function removeReconciledOptimisticNodes(root, reconciled = []) {
+    if (!root?.querySelectorAll) return 0;
+    const keys = new Set(reconciled.map(item => String(item?.idempotencyKey || '')).filter(Boolean));
+    if (!keys.size) return 0;
+    let removed = 0;
+    for (const node of root.querySelectorAll('[data-idempotency-key]')) {
+      if (!keys.has(String(node.dataset?.idempotencyKey || ''))) continue;
+      node.remove?.();
+      removed += 1;
+    }
+    return removed;
+  }
+
+  function removeProviderRunNodes(root, runId) {
+    const key = String(runId || '');
+    if (!root?.querySelectorAll || !key) return 0;
+    let removed = 0;
+    for (const node of root.querySelectorAll('[data-provider-run-id]')) {
+      if (String(node.dataset?.providerRunId || '') !== key) continue;
+      node.remove?.();
+      removed += 1;
+    }
+    return removed;
+  }
+
+  function claimChatSubmission(root, fingerprint, now = Date.now(), debounceMs = 1500) {
+    if (!root || !fingerprint) return true;
+    const previous = root.__voLastChatSubmission;
+    const submittedAt = Number(now) || 0;
+    if (
+      previous
+      && previous.fingerprint === fingerprint
+      && submittedAt >= previous.submittedAt
+      && submittedAt - previous.submittedAt < debounceMs
+    ) {
+      return false;
+    }
+    root.__voLastChatSubmission = { fingerprint, submittedAt };
+    return true;
+  }
+
   function normalizedMessage(message = {}, context = {}) {
     const rawEpochMs = message.epochMs ?? message.ts ?? Date.now();
     const epochMs = Number(rawEpochMs) || 0;
@@ -218,8 +259,51 @@
       const previousOrder = entry.order.slice();
       const previousIds = new Set(previousOrder);
       const changedIds = [];
+      const reconciled = [];
       for (const raw of page.messages || []) {
         const message = normalizedMessage(raw, entry.context);
+        const idempotencyKey = String(message.idempotencyKey || '');
+        if (message.role === 'user' && idempotencyKey && !message.id.startsWith('optimistic-')) {
+          let skipIncoming = false;
+          for (const [candidateId, candidate] of entry.messages) {
+            if (candidateId === message.id || candidate.role !== 'user') continue;
+            if (String(candidate.idempotencyKey || '') !== idempotencyKey) continue;
+            if (!candidateId.startsWith('optimistic-')) {
+              const candidateOrder = [Number(candidate.epochMs) || 0, candidateId];
+              const messageOrder = [Number(message.epochMs) || 0, message.id];
+              if (candidateOrder[0] < messageOrder[0] || (candidateOrder[0] === messageOrder[0] && candidateOrder[1] < messageOrder[1])) {
+                skipIncoming = true;
+                continue;
+              }
+              entry.messages.delete(candidateId);
+              continue;
+            }
+            entry.messages.delete(candidateId);
+            reconciled.push({
+              optimisticId: candidateId,
+              authoritativeId: message.id,
+              idempotencyKey,
+            });
+          }
+          if (skipIncoming) continue;
+        }
+        if (message.role === 'assistant' && message.source === 'agent-platform-communications' && String(message.text || '').trim()) {
+          let matchedRun = null;
+          for (const [candidateId, candidate] of entry.messages) {
+            if (!candidateId.startsWith('run-') || !candidateId.endsWith('-final')) continue;
+            if (candidate.role !== 'assistant' || String(candidate.text || '').trim() !== String(message.text || '').trim()) continue;
+            const delta = Math.abs((Number(candidate.epochMs) || 0) - (Number(message.epochMs) || 0));
+            if (delta > 10000 || (matchedRun && matchedRun.delta <= delta)) continue;
+            matchedRun = { candidateId, delta };
+          }
+          if (matchedRun) {
+            entry.messages.delete(matchedRun.candidateId);
+            reconciled.push({
+              providerRunId: matchedRun.candidateId.slice(4, -6),
+              authoritativeId: message.id,
+            });
+          }
+        }
         const existing = entry.messages.get(message.id);
         if (existing && isTerminalStatus(existing.status) && !isTerminalStatus(message.status)) continue;
         if (!existing || existing.version !== message.version || existing.status !== message.status) {
@@ -244,7 +328,7 @@
       entry.estimatedBytes = Array.from(entry.messages.values()).reduce((sum, message) => sum + estimateMessageBytes(message), 0);
       entry.revision += 1;
       entry.lastAccessAt = ++this.sequence;
-      if (options.notify !== false) this._notify(entry, { type: 'page', mode, messageIds: changedIds, addedBefore });
+      if (options.notify !== false) this._notify(entry, { type: 'page', mode, messageIds: changedIds, addedBefore, reconciled });
       this._evictInactive();
       return entry;
     }
@@ -403,6 +487,7 @@
       this.historyLayer = options.historyLayer || this._createLayer('chat-history-layer');
       this.liveLayer = options.liveLayer || this._createLayer('chat-live-layer');
       this.renderMessage = options.renderMessage;
+      this.onReconciled = options.onReconciled;
       this.heights = new Map();
       this.fallbackHeight = Number(options.fallbackHeight) || 72;
       this.entry = null;
@@ -467,8 +552,17 @@
       this.renderAll({ preserveViewport: true });
     }
 
+    navigateToNewest() {
+      if (!this.entry) return;
+      const next = computeWindowRange(this.entry.order.length);
+      if (next.start === this.range.start && next.end === this.range.end) return;
+      this.range = next;
+      this.renderAll();
+    }
+
     onHistoryEntryChanged(entry, mutation = {}) {
       if (entry !== this.entry) return;
+      if (mutation.reconciled?.length) this.onReconciled?.(mutation.reconciled);
       const changedIds = mutation.messageIds || [];
       const canPatch = mutation.mode === 'live' && changedIds.length === 1;
       if (canPatch && this._patchMessage(changedIds[0])) return;
@@ -482,12 +576,13 @@
         };
       }
       const wasAtNewest = this.range.end >= Math.max(0, entry.order.length - changedIds.length);
-      if (mutation.mode === 'live' && wasAtNewest) {
+      if ((mutation.mode === 'live' || mutation.mode === 'latest' || mutation.reconciled?.length) && wasAtNewest) {
         this.range = computeWindowRange(entry.order.length, { current: this.range, direction: 'newer' });
       } else if (this.range.end > entry.order.length) {
         this.range = computeWindowRange(entry.order.length);
       }
-      this.renderAll({ preserveViewport: mutation.mode === 'older' });
+      const preserveViewport = mutation.mode === 'older' || (mutation.mode === 'latest' && !wasAtNewest);
+      this.renderAll({ preserveViewport });
     }
 
     renderAll(options = {}) {
@@ -520,6 +615,7 @@
     }
 
     _renderRoot(message) {
+      if (String(message?.id || '').startsWith('optimistic-')) return null;
       const fragment = global.document.createDocumentFragment();
       const rendered = this.renderMessage(message, { parent: fragment, skipTypingCleanup: true });
       const root = rendered || fragment.firstElementChild;
@@ -631,8 +727,11 @@
     computeSpacerHeights,
     computeWindowRange,
     createConversationKey,
+    claimChatSubmission,
     normalizedMessage,
     presentationStateKey,
+    removeReconciledOptimisticNodes,
+    removeProviderRunNodes,
     stableHistoryHash,
     constants,
   });

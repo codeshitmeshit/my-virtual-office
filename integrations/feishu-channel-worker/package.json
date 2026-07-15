@@ -1,0 +1,17 @@
+{
+  "name": "@virtual-office/feishu-channel-worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "preflight": "node ./src/preflight.mjs",
+    "start": "node ./src/index.mjs",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@larksuite/channel": "0.4.0"
+  }
+}

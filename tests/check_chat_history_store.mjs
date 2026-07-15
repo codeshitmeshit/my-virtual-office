@@ -31,6 +31,35 @@ assert.deepEqual(
 );
 
 {
+  const root = {};
+  assert.equal(runtime.claimChatSubmission(root, 'same-message', 1000), true);
+  assert.equal(runtime.claimChatSubmission(root, 'same-message', 1001), false, 'one UI action must only claim one submission');
+  assert.equal(runtime.claimChatSubmission(root, 'different-message', 1001), true, 'different input must remain sendable');
+  assert.equal(runtime.claimChatSubmission(root, 'same-message', 2501), true, 'an intentional later retry must remain sendable');
+}
+
+{
+  let renderCalls = 0;
+  const fakeView = { renderMessage: () => { renderCalls += 1; } };
+  const rendered = runtime.ChatHistoryView.prototype._renderRoot.call(fakeView, {
+    id: 'optimistic-primary-1', version: 'optimistic', role: 'user', text: 'hello',
+  });
+  assert.equal(rendered, null, 'store optimistic messages must stay out of the history DOM');
+  assert.equal(renderCalls, 0, 'the live layer is the only optimistic renderer');
+}
+
+{
+  const nodes = [
+    { dataset: { providerRunId: 'run-1' }, removed: false, remove() { this.removed = true; } },
+    { dataset: { providerRunId: 'run-2' }, removed: false, remove() { this.removed = true; } },
+  ];
+  const removed = runtime.removeProviderRunNodes({ querySelectorAll: () => nodes }, 'run-1');
+  assert.equal(removed, 1);
+  assert.equal(nodes[0].removed, true, 'the authoritative provider reply must replace its live reply');
+  assert.equal(nodes[1].removed, false, 'another run reply must remain');
+}
+
+{
   assert.deepEqual(
     JSON.parse(JSON.stringify(runtime.computeWindowRange(1000))),
     { start: 950, end: 1000 },
@@ -65,6 +94,18 @@ assert.deepEqual(
   );
   assert.equal(runtime.computeAnchorDelta(125.5, 173.25), 47.75);
   assert.equal(runtime.presentationStateKey('message', 'details:tool'), 'message\u001fdetails:tool');
+
+  const nodes = [
+    { dataset: { idempotencyKey: 'request-1' }, removed: false, remove() { this.removed = true; } },
+    { dataset: { idempotencyKey: 'request-2' }, removed: false, remove() { this.removed = true; } },
+  ];
+  const removed = runtime.removeReconciledOptimisticNodes(
+    { querySelectorAll: () => nodes },
+    [{ idempotencyKey: 'request-1' }]
+  );
+  assert.equal(removed, 1);
+  assert.equal(nodes[0].removed, true, 'the exact live optimistic node must be removed');
+  assert.equal(nodes[1].removed, false, 'a distinct same-text request key must remain');
 }
 
 const makeContext = (name) => ({ providerKind: 'codex', agentId: `agent-${name}`, conversationId: `conv-${name}` });
@@ -99,6 +140,17 @@ const makeMessage = (id, epochMs, overrides = {}) => ({
   store.mergePage(entry, { messages: [makeMessage('m2', 2, { version: 'v2', text: 'updated' })] }, 'latest');
   assert.equal(entry.messages.get('m2').text, 'updated');
   assert.equal(entry.order.filter(id => id === 'm2').length, 1);
+}
+
+{
+  const store = new runtime.ChatHistoryStore({ fetchImpl: context.fetch });
+  const entry = store.getOrCreate(makeContext('authoritative-idempotency'));
+  store.mergePage(entry, { messages: [
+    makeMessage('authoritative-first', 10, { role: 'user', text: '你好', idempotencyKey: 'office-same-request' }),
+    makeMessage('authoritative-fallback', 11, { role: 'user', text: '你好', idempotencyKey: 'office-same-request' }),
+  ] }, 'latest');
+  assert.deepEqual(Array.from(entry.order), ['authoritative-first'], 'two authoritative records for one request must render once');
+  assert.equal(entry.messages.has('authoritative-fallback'), false);
 }
 
 {
@@ -226,6 +278,67 @@ const makeMessage = (id, epochMs, overrides = {}) => ({
   assert.equal(store.getOrCreate(ctx).messages.has('optimistic'), false);
   store.invalidate(ctx);
   assert.equal(store.entries.has(runtime.createConversationKey(ctx)), false);
+}
+
+{
+  const reconciliations = [];
+  const store = new runtime.ChatHistoryStore({ fetchImpl: context.fetch });
+  const ctx = makeContext('optimistic-reconcile');
+  const view = { activation: 0, onHistoryEntryChanged: (_entry, mutation) => reconciliations.push(...(mutation.reconciled || [])) };
+  const { entry } = store.activate(ctx, view);
+  store.insertOptimistic(ctx, makeMessage('optimistic-slot-1', 10, {
+    role: 'user', text: 'same text', status: 'running', idempotencyKey: 'request-1',
+    media: [{ url: 'data:image/png;base64,one' }],
+  }), { notify: false });
+  store.insertOptimistic(ctx, makeMessage('optimistic-slot-2', 11, {
+    role: 'user', text: 'same text', status: 'running', idempotencyKey: 'request-2',
+  }), { notify: false });
+  store.mergePage(entry, { messages: [makeMessage('persisted-1', 12, {
+    role: 'user', text: 'same text', status: 'done', idempotencyKey: 'request-1',
+    attachments: [{ name: 'one.png', path: '/safe/one.png' }],
+  })] }, 'latest');
+  assert.equal(entry.messages.has('optimistic-slot-1'), false, 'the exact optimistic request must be replaced');
+  assert.equal(entry.messages.has('persisted-1'), true, 'the authoritative message must remain');
+  assert.equal(entry.messages.get('persisted-1').attachments[0].name, 'one.png', 'authoritative attachment metadata must win');
+  assert.equal(entry.messages.has('optimistic-slot-2'), true, 'same text under a different request key must remain distinct');
+  assert.deepEqual(JSON.parse(JSON.stringify(reconciliations)), [{
+    optimisticId: 'optimistic-slot-1', authoritativeId: 'persisted-1', idempotencyKey: 'request-1',
+  }]);
+}
+
+{
+  const reconciliations = [];
+  const store = new runtime.ChatHistoryStore({ fetchImpl: context.fetch });
+  const ctx = makeContext('provider-final-reconcile');
+  const view = { activation: 0, onHistoryEntryChanged: (_entry, mutation) => reconciliations.push(...(mutation.reconciled || [])) };
+  const { entry } = store.activate(ctx, view);
+  store.applyLiveEvent(ctx, 'run.completed', makeMessage('run-codex-run-1-final', 1000, {
+    role: 'assistant', text: '验收通过', status: 'done',
+  }), { notify: false });
+  store.mergePage(entry, { messages: [makeMessage('communication-reply-1', 1005, {
+    role: 'assistant', text: '验收通过', status: 'done', source: 'agent-platform-communications',
+  })] }, 'latest');
+  assert.equal(entry.messages.has('run-codex-run-1-final'), false, 'authoritative communication history must replace the transient run final');
+  assert.equal(entry.messages.has('communication-reply-1'), true);
+  assert.deepEqual(JSON.parse(JSON.stringify(reconciliations)), [{
+    providerRunId: 'codex-run-1', authoritativeId: 'communication-reply-1',
+  }]);
+}
+
+{
+  let nextRange = null;
+  const fakeEntry = { order: Array.from({ length: 51 }, (_, index) => `m-${index}`) };
+  const fakeView = {
+    entry: fakeEntry,
+    range: { start: 0, end: 50 },
+    onReconciled() {},
+    _patchMessage: () => false,
+    renderAll() { nextRange = { ...this.range }; },
+  };
+  runtime.ChatHistoryView.prototype.onHistoryEntryChanged.call(fakeView, fakeEntry, {
+    mode: 'latest', messageIds: ['m-50'], reconciled: [{ idempotencyKey: 'request-1' }],
+  });
+  assert.deepEqual(nextRange, { start: 0, end: 51 }, 'a reconciled latest-page message must enter the visible newest window');
 }
 
 console.log('chat history store checks passed');
