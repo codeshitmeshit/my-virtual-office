@@ -42,9 +42,9 @@ def test_first_fragment_bypasses_and_later_fragments_reconstruct_in_order():
     emitted, emit = _collector()
     coalescer = CodexTransientCoalescer(clock_ns=clock, start_dispatcher=False)
 
-    assert coalescer.submit("agent", "conv", "run", "message.delta", {"delta": "A"}, emit) == "first"
-    assert coalescer.submit("agent", "conv", "run", "message.delta", {"delta": "B"}, emit) == "buffered"
-    assert coalescer.submit("agent", "conv", "run", "message.delta", {"delta": "C"}, emit) == "buffered"
+    assert coalescer.submit("agent", "conv", "run", "message.delta", {"delta": "A", "text": "A", "activity": {"delta": "A", "text": "A"}}, emit) == "first"
+    assert coalescer.submit("agent", "conv", "run", "message.delta", {"delta": "B", "text": "B", "activity": {"delta": "B", "text": "B"}}, emit) == "buffered"
+    assert coalescer.submit("agent", "conv", "run", "message.delta", {"delta": "C", "text": "C", "activity": {"delta": "C", "text": "C"}}, emit) == "buffered"
     assert [payload["delta"] for _, payload in emitted] == ["A"]
 
     clock.advance_ms(32)
@@ -52,6 +52,9 @@ def test_first_fragment_bypasses_and_later_fragments_reconstruct_in_order():
     clock.advance_ms(2)
     assert coalescer.drain_due() == 1
     assert [payload["delta"] for _, payload in emitted] == ["A", "BC"]
+    assert emitted[-1][1]["text"] == "BC"
+    assert emitted[-1][1]["activity"]["delta"] == "BC"
+    assert emitted[-1][1]["activity"]["text"] == "BC"
     assert emitted[-1][1]["coalescedCount"] == 2
 
 
@@ -174,4 +177,39 @@ def test_single_dispatcher_flushes_due_bucket():
         assert [payload["delta"] for _, payload in emitted] == ["A", "B"]
         assert coalescer.diagnostics()["dispatcherFlushes"] == 1
     finally:
+        coalescer.close()
+
+
+def test_barrier_waits_for_dispatcher_flush_already_in_flight():
+    emitted = []
+    flush_entered = threading.Event()
+    release_flush = threading.Event()
+
+    def blocking_emit(name, payload):
+        if payload.get("coalescedCount"):
+            flush_entered.set()
+            release_flush.wait(1)
+        emitted.append((name, payload.get("delta") or payload.get("text")))
+
+    coalescer = CodexTransientCoalescer(min_ms=10, max_ms=10, start_dispatcher=True)
+    try:
+        coalescer.submit("agent", "conv", "run", "message.delta", {"delta": "A"}, blocking_emit)
+        coalescer.submit("agent", "conv", "run", "message.delta", {"delta": "B"}, blocking_emit)
+        assert flush_entered.wait(0.5)
+        barrier_done = threading.Event()
+
+        def publish_barrier():
+            coalescer.submit("agent", "conv", "run", "tool.started", {"text": "tool"}, blocking_emit)
+            barrier_done.set()
+
+        worker = threading.Thread(target=publish_barrier)
+        worker.start()
+        assert not barrier_done.wait(0.05)
+        assert emitted == [("message.delta", "A")]
+        release_flush.set()
+        worker.join(1)
+        assert barrier_done.is_set()
+        assert emitted == [("message.delta", "A"), ("message.delta", "B"), ("tool.started", "tool")]
+    finally:
+        release_flush.set()
         coalescer.close()

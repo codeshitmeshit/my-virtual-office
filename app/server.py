@@ -56,7 +56,7 @@ from services.provider_conversations import CallableConversationStatePort, Calla
 from services.provider_ports import AdapterCapabilities, AdapterEvent, AdapterResult, CallableProviderAdapter, RunCommand
 from services.provider_registry import ProviderRunRepository
 from services.provider_runs import ProviderRunCoordinator
-from services.codex_fast_path import CodexEventFastPath, load_codex_fast_path_settings
+from services.codex_fast_path import CodexEventFastPath, CodexTransientCoalescer, load_codex_fast_path_settings
 from provider_sse_transport import ProviderSSETransport
 from services.project_repository import ProjectConflictError, ProjectNotFoundError, ProjectRepository
 from zoneinfo import ZoneInfo
@@ -1174,7 +1174,12 @@ def _first_provider_agent_model(provider_kind):
     return ""
 
 VO_CONFIG = _load_vo_config()
-_CODEX_EVENT_FAST_PATH = CodexEventFastPath(load_codex_fast_path_settings(os.environ, VO_CONFIG.get("codex") or {}))
+_CODEX_FAST_PATH_SETTINGS = load_codex_fast_path_settings(os.environ, VO_CONFIG.get("codex") or {})
+_CODEX_EVENT_FAST_PATH = CodexEventFastPath(_CODEX_FAST_PATH_SETTINGS)
+_CODEX_EVENT_COALESCER = CodexTransientCoalescer(
+    min_ms=_CODEX_FAST_PATH_SETTINGS.coalesce_min_ms,
+    max_ms=_CODEX_FAST_PATH_SETTINGS.coalesce_max_ms,
+) if _CODEX_FAST_PATH_SETTINGS.enabled else None
 
 try:
     SMS_DEFAULT_TZ = ZoneInfo(os.environ.get("VO_SMS_TIMEZONE") or os.environ.get("TZ") or "UTC")
@@ -8241,6 +8246,7 @@ def _provider_kind_from_run(meta, run_id=""):
 PROVIDER_RUN_REPOSITORY = ProviderRunRepository(retention_ms=10 * 60 * 1000)
 PROVIDER_EVENT_JOURNAL = ProviderEventJournal(max_events=4000)
 PROVIDER_RUN_COORDINATOR = ProviderRunCoordinator(PROVIDER_RUN_REPOSITORY, PROVIDER_EVENT_JOURNAL)
+PROVIDER_RUN_COORDINATOR.event_pipeline = _CODEX_EVENT_COALESCER
 PROVIDER_SSE_TRANSPORT = _provider_sse_transport_for(PROVIDER_RUN_REPOSITORY, PROVIDER_EVENT_JOURNAL)
 
 

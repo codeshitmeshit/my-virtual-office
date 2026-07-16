@@ -106,6 +106,10 @@ def test_server_load_and_safe_projection_expose_only_bounded_diagnostics(monkeyp
         server._handle_codex_test = old_codex_test
         server._handle_hermes_test = old_hermes_test
         server._handle_claude_code_test = old_claude_test
+        if server._CODEX_EVENT_COALESCER is not None:
+            server._CODEX_EVENT_COALESCER.close()
+        server._CODEX_EVENT_COALESCER = None
+        server.PROVIDER_RUN_COORDINATOR.event_pipeline = None
         server._CODEX_EVENT_FAST_PATH = CodexEventFastPath(CodexFastPathSettings(enabled=False))
 
 

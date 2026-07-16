@@ -16,7 +16,7 @@
 ## 4. Bounded Streaming Coalescing
 
 - [x] 4.1 Implement and unit-test the single-dispatcher per-run coalescer: first-fragment bypass, adaptive 33-100 ms windows, ordered text reconstruction, 256-scope/200-fragment/64-KiB-per-bucket/16-MiB-global bounds, forced flush, direct bypass, cleanup, and deterministic clocks.
-- [ ] 4.2 Integrate coalescing before Provider journal publication, flush ordering barriers for approval/tool transitions/reset/replacement/cancel/failure/completion/final events, preserve critical event names and attribution, and verify SSE reconnect/replay contains no missing, duplicated, cross-conversation, or reordered content.
+- [x] 4.2 Integrate coalescing before Provider journal publication, flush ordering barriers for approval/tool transitions/reset/replacement/cancel/failure/completion/final events, preserve critical event names and attribution, and verify SSE reconnect/replay contains no missing, duplicated, cross-conversation, or reordered content.
 
 ## 5. Terminal Completion Fence
 

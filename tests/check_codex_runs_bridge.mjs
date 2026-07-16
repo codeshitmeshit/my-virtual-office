@@ -40,7 +40,8 @@ if (!runStart.includes('_handle_codex_chat(run_body)')) {
 }
 
 const chatHandler = server.slice(server.indexOf('def _handle_codex_chat'), server.indexOf('def _handle_codex_activity'));
-if (!chatHandler.includes('_append_codex_activity(agent_id, conversation_id, event)')) {
+if (!chatHandler.includes('_append_codex_activity(agent_id, conversation_id, event)') &&
+    !chatHandler.includes('legacy_callback=lambda item: _append_codex_activity(agent_id, conversation_id, item)')) {
   throw new Error('Codex chat should still append legacy activity');
 }
 if (!chatHandler.includes('activity_callback(record)')) {

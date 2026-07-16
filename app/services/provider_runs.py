@@ -65,12 +65,14 @@ class ProviderRunCoordinator:
         *,
         launcher=None,
         clock: Callable[[], float] | None = None,
+        event_pipeline=None,
     ) -> None:
         self.repository = repository
         self.journal = journal
         self.adapters = adapters or ProviderAdapterRegistry()
         self.launcher = launcher or ThreadTaskLauncher()
         self._clock = clock or time.monotonic
+        self.event_pipeline = event_pipeline
         self._handles: dict[str, _RuntimeHandle] = {}
         self._handles_lock = threading.Lock()
 
@@ -256,6 +258,16 @@ class ProviderRunCoordinator:
                 self._handles.pop(run_id, None)
 
     def _publish(self, provider_kind: str, agent_id: str, conversation_id: str, event_name: str, payload: Mapping[str, Any], run_id: str):
+        if self.event_pipeline is not None and str(provider_kind or "").strip().lower() == "codex":
+            return self.event_pipeline.publish_event(
+                provider_kind,
+                agent_id,
+                conversation_id,
+                event_name,
+                dict(payload or {}),
+                run_id,
+                lambda name, data: self.journal.publish(provider_kind, agent_id, conversation_id, name, data, run_id),
+            )
         return self.journal.publish(provider_kind, agent_id, conversation_id, event_name, dict(payload or {}), run_id)
 
     def diagnostics(self) -> dict[str, Any]:

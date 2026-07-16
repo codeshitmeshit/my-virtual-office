@@ -16,6 +16,7 @@ from .provider_events import sanitize_payload
 TRUE_VALUES = {"1", "true", "yes", "on", "enabled"}
 FALSE_VALUES = {"0", "false", "no", "off", "disabled"}
 TERMINAL_STATUSES = {"completed", "done", "success", "failed", "error", "cancelled", "canceled"}
+TERMINAL_JOURNAL_EVENTS = {"run.completed", "run.failed", "run.cancelled", "run.canceled"}
 MAX_LIVE_SCOPES = 4_096
 MAX_COALESCE_BUCKETS = 256
 MAX_BUCKET_FRAGMENTS = 200
@@ -193,20 +194,42 @@ class CodexTransientCoalescer:
                     else:
                         self._buckets.move_to_end(bucket_key)
                         self._condition.notify()
-        self._emit_all(emissions)
+            self._emit_all(emissions)
         return disposition
+
+    def publish_event(
+        self,
+        provider_kind: str,
+        agent_id: str,
+        conversation_id: str,
+        event_name: str,
+        payload: dict[str, Any],
+        run_id: str,
+        publish: Callable[[str, dict[str, Any]], Any],
+    ) -> bool:
+        """Publish immediately or accept for later publication through one callback."""
+        published = {"result": True}
+
+        def emit(name, data):
+            published["result"] = publish(name, data)
+            return published["result"]
+
+        disposition = self.submit(agent_id, conversation_id, run_id, event_name, payload, emit)
+        if str(event_name or "").lower() in TERMINAL_JOURNAL_EVENTS:
+            self.end(agent_id, conversation_id, run_id)
+        return True if disposition == "buffered" else bool(published["result"])
 
     def barrier(self, agent_id: str, conversation_id: str, run_id: str) -> int:
         run_key = self._run_key(agent_id, conversation_id, run_id)
         with self._condition:
             emissions = self._take_run_locked(run_key, barrier=True)
-        self._emit_all(emissions)
+            self._emit_all(emissions)
         return len(emissions)
 
     def drain_due(self) -> int:
         with self._condition:
             emissions = self._take_due_locked(self._clock_ns(), dispatcher=False)
-        self._emit_all(emissions)
+            self._emit_all(emissions)
         return len(emissions)
 
     def end(self, agent_id: str, conversation_id: str, run_id: str) -> int:
@@ -222,7 +245,7 @@ class CodexTransientCoalescer:
             emissions = self._take_all_locked(barrier=True)
             self._seen_runs.clear()
             self._condition.notify_all()
-        self._emit_all(emissions)
+            self._emit_all(emissions)
         if self._dispatcher and self._dispatcher is not threading.current_thread():
             self._dispatcher.join(timeout=1.0)
 
@@ -302,11 +325,23 @@ class CodexTransientCoalescer:
     @staticmethod
     def _merge(bucket: _CoalesceBucket) -> dict[str, Any]:
         payload = copy.deepcopy(bucket.payloads[0])
-        text = "".join(str(item.get(bucket.text_key) or "") for item in bucket.payloads)
         for key, value in bucket.payloads[-1].items():
-            if key != bucket.text_key:
+            if key not in {"delta", "text", "thinking", "content", "activity"}:
                 payload[key] = copy.deepcopy(value)
-        payload[bucket.text_key] = text
+        for text_key in ("delta", "text", "thinking", "content"):
+            if any(isinstance(item.get(text_key), str) for item in bucket.payloads):
+                payload[text_key] = "".join(str(item.get(text_key) or "") for item in bucket.payloads)
+        activities = [item.get("activity") for item in bucket.payloads if isinstance(item.get("activity"), dict)]
+        if activities:
+            activity = copy.deepcopy(activities[0])
+            for key, value in activities[-1].items():
+                if key not in {"delta", "text", "thinking", "content"}:
+                    activity[key] = copy.deepcopy(value)
+            for text_key in ("delta", "text", "thinking", "content"):
+                if any(isinstance(item.get(text_key), str) for item in activities):
+                    activity[text_key] = "".join(str(item.get(text_key) or "") for item in activities)
+            activity["coalescedCount"] = len(activities)
+            payload["activity"] = activity
         payload["coalescedCount"] = len(bucket.payloads)
         return payload
 
@@ -327,7 +362,7 @@ class CodexTransientCoalescer:
                     timeout = max(0.001, (due_ns - now_ns) / 1_000_000_000) if due_ns else None
                     self._condition.wait(timeout=timeout)
                     continue
-            self._emit_all(emissions)
+                self._emit_all(emissions)
 
 
 def classify_codex_event(event: Mapping[str, Any] | None) -> str:
