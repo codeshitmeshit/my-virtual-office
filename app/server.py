@@ -12313,6 +12313,30 @@ def _feishu_chat_app_text_send(chat_id, text, urlopen=None):
     )
 
 
+def _feishu_chat_app_group_reply(chat_id, source_message_id, text, reply_in_thread=False):
+    if _effective_feishu_chat_transport() != "channel-sdk-node":
+        return {"ok": False, "status": "unsupported_transport", "category": "unsupported_transport"}
+    expected_chat_id = str(chat_id or "")
+    expected_message_id = str(source_message_id or "")
+    result = _feishu_chat_worker_command(
+        "reply",
+        {
+            "to": expected_chat_id,
+            "messageId": expected_message_id,
+            "content": str(text or ""),
+            "contentType": "markdown",
+            "replyInThread": bool(reply_in_thread),
+            "timeoutMs": 20000,
+        },
+        timeout=25,
+    )
+    if result.get("ok") and result.get("chatId") and str(result.get("chatId")) != expected_chat_id:
+        return {"ok": False, "status": "wrong_chat", "category": "wrong_chat"}
+    if result.get("ok") and result.get("replyToMessageId") and str(result.get("replyToMessageId")) != expected_message_id:
+        return {"ok": False, "status": "wrong_reply_target", "category": "wrong_reply_target"}
+    return result
+
+
 def _feishu_chat_app_receipt_send(chat_id, text, urlopen=None):
     if _effective_feishu_chat_transport() == "channel-sdk-node":
         return _feishu_chat_worker_command("send", {"to": chat_id, "content": str(text or ""), "contentType": "text", "timeoutMs": 10000}, timeout=15)
@@ -12550,7 +12574,11 @@ def _handle_feishu_chat_worker_envelope(body):
     }
 
 
-def _handle_feishu_chat_message_event(body, *, send_text=None, download_image=None):
+def _handle_feishu_chat_message_event(body, *, send_text=None, reply_text=None, download_image=None):
+    injected_send = send_text
+    group_reply = reply_text
+    if group_reply is None and injected_send is not None:
+        group_reply = lambda chat_id, source_message_id, text, reply_in_thread: injected_send(chat_id, text)
     return feishu_chat_channel.handle_message_event(
         body,
         cfg=_feishu_chat_app_config(),
@@ -12560,6 +12588,7 @@ def _handle_feishu_chat_message_event(body, *, send_text=None, download_image=No
         lock_for=_feishu_channel_lock,
         dispatch_agent=_dispatch_representative_agent_message,
         send_text=send_text or _feishu_chat_app_text_send,
+        reply_text=group_reply or _feishu_chat_app_group_reply,
         send_receipt=None if send_text else _feishu_chat_app_receipt_send,
         recall_message=None if send_text else _feishu_chat_app_message_recall,
         add_reaction=None if send_text else _feishu_chat_app_reaction_add,

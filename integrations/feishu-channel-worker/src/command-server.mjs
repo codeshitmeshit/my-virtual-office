@@ -103,7 +103,15 @@ export class CommandServer {
       }
       if (operation === 'reply') {
         const result = await this.channel.send(payload.to, inputFor(payload), { replyTo: payload.messageId, replyInThread: Boolean(payload.replyInThread) });
-        return { ok: true, status: 'sent', messageId: result.messageId, chunkIds: result.chunkIds || [] };
+        return {
+          ok: true,
+          status: 'sent',
+          messageId: result.messageId,
+          chunkIds: result.chunkIds || [],
+          chatId: payload.to,
+          replyToMessageId: payload.messageId,
+          replyInThread: Boolean(payload.replyInThread),
+        };
       }
       if (operation === 'addReaction') return { ok: true, status: 'added', reactionId: await this.channel.addReaction(payload.messageId, payload.emojiType) };
       if (operation === 'removeReaction') {

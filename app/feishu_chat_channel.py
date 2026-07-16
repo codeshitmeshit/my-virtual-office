@@ -258,6 +258,8 @@ def _safe_channel_call(func, *args):
     try:
         result = func(*args)
         return result if isinstance(result, dict) else {"ok": bool(result), "result": result}
+    except TimeoutError as exc:
+        return {"ok": False, "status": "timeout", "category": "send_timeout", "error": str(exc)}
     except Exception as exc:
         return {"ok": False, "status": "exception", "error": str(exc)}
 
@@ -273,6 +275,13 @@ def _reaction_id_from_result(result):
     return str(result.get("reactionId") or result.get("reaction_id") or data.get("reaction_id") or "").strip()
 
 
+def _delivery_classification(result):
+    result = result if isinstance(result, dict) else {}
+    if result.get("ok"):
+        return "sent"
+    return str(result.get("category") or result.get("status") or "delivery_failed").strip()[:128] or "delivery_failed"
+
+
 def handle_message_event(
     body,
     *,
@@ -283,6 +292,7 @@ def handle_message_event(
     lock_for,
     dispatch_agent,
     send_text,
+    reply_text,
     find_agent,
     send_receipt=None,
     recall_message=None,
@@ -312,6 +322,14 @@ def handle_message_event(
         "messageType": message_type,
         "sender": identity,
     }
+    reply_in_thread = bool(message.get("rootId") or message.get("threadId") or message.get("root_id") or message.get("thread_id"))
+
+    def deliver(text_to_send):
+        if chat_type == "group":
+            if not reply_text:
+                return {"ok": False, "status": "reply_unavailable", "category": "reply_unavailable"}
+            return _safe_channel_call(reply_text, chat_id, source_message_id, text_to_send, reply_in_thread)
+        return _safe_channel_call(send_text, chat_id, text_to_send)
     for key in ("transport", "workerInstanceId", "requestId", "createTime", "rootId", "threadId", "replyToMessageId", "mentions", "resources"):
         value = message.get(key) if key in {"createTime", "rootId", "threadId", "replyToMessageId", "mentions", "resources"} else (body or {}).get(key)
         if value not in (None, "", [], {}):
@@ -364,7 +382,7 @@ def handle_message_event(
     representative_agent_id = str(cfg.get("representativeAgentId") or "").strip()
     if not representative_agent_id:
         reply = "VO 尚未配置当前 CEO Agent，请先在 VO 设置中选择一个代表 Agent。"
-        send_result = send_text(chat_id, reply)
+        send_result = deliver(reply)
         record = record_event({
             **base_record,
             "event": "rejected",
@@ -372,6 +390,8 @@ def handle_message_event(
             "voUserId": vo_user_id,
             "reply": reply,
             "sendResult": send_result,
+            "deliveryStatus": _delivery_classification(send_result),
+            "replyInThread": reply_in_thread if chat_type == "group" else False,
         })
         return {"ok": False, "status": "missing_representative_agent", "record": record, "sendResult": send_result, "_status": 400}
     conversation_id = group_conversation_id(chat_id) if chat_type == "group" else representative_conversation_id(vo_user_id, chat_id)
@@ -416,7 +436,7 @@ def handle_message_event(
         )
         reply = str(result.get("reply") or result.get("error") or "").strip() or "处理完成，但没有可发送的文本回复。"
         feishu_reply = representative_display_reply(representative_agent_id, reply, find_agent=find_agent)
-        send_result = send_text(chat_id, feishu_reply)
+        send_result = deliver(feishu_reply)
         reaction_delete_result = _safe_channel_call(delete_reaction, source_message_id, reaction_id) if reaction_id and delete_reaction else {}
         receipt_recall_result = _safe_channel_call(recall_message, receipt_message_id) if receipt_message_id and recall_message else {}
         completed_record = record_event({
@@ -433,6 +453,8 @@ def handle_message_event(
             "imageKey": image_key,
             "agentResult": {k: v for k, v in result.items() if k not in {"tools", "thinking"}},
             "sendResult": send_result,
+            "deliveryStatus": _delivery_classification(send_result),
+            "replyInThread": reply_in_thread if chat_type == "group" else False,
             "reactionType": reaction_type,
             "reactionResult": reaction_result,
             "reactionDeleteResult": reaction_delete_result,
@@ -443,7 +465,10 @@ def handle_message_event(
         })
         return {
             "ok": bool(result.get("ok")) and bool(send_result.get("ok")),
-            "status": "completed" if result.get("ok") else "agent_failed",
+            "status": (
+                "agent_failed" if not result.get("ok")
+                else ("delivery_failed" if chat_type == "group" and not send_result.get("ok") else "completed")
+            ),
             "reply": reply,
             "agentResult": result,
             "sendResult": send_result,

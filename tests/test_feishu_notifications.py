@@ -2593,6 +2593,112 @@ def test_feishu_group_rejections_and_agent_failures_do_not_corrupt_shared_contex
     assert [item["agentId"] for item in dispatches] == ["agent-a", "agent-a", "agent-b"]
 
 
+def test_feishu_group_reply_uses_source_message_and_preserves_thread_without_fallback():
+    os.environ.setdefault("VO_HERMES_ENABLED", "0")
+    os.environ.setdefault("VO_CODEX_ENABLED", "0")
+    status_dir = tempfile.mkdtemp(prefix="vo-feishu-group-reply-")
+    os.environ["VO_STATUS_DIR"] = status_dir
+    import server
+
+    previous_status_dir = server.STATUS_DIR
+    previous_config = server.VO_CONFIG
+    previous_dispatch = server._dispatch_representative_agent_message
+    previous_reply = server._feishu_chat_app_group_reply
+    previous_send = server._feishu_chat_app_text_send
+    previous_add = server._feishu_chat_app_reaction_add
+    previous_delete = server._feishu_chat_app_reaction_delete
+    previous_receipt = server._feishu_chat_app_receipt_send
+    previous_recall = server._feishu_chat_app_message_recall
+    server.STATUS_DIR = status_dir
+    server.VO_CONFIG = {
+        **previous_config,
+        "feishu": {
+            "chatApp": {
+                "enabled": True, "groupChatEnabled": True,
+                "appId": "cli_chat", "appSecret": "chat-secret",
+                "representativeAgentId": "agent-a", "transportImplementation": "channel-sdk-node",
+            },
+            "bindings": {},
+        },
+    }
+    replies = []
+    sends = []
+    reaction_deletes = []
+
+    def inbound(message_id, *, root_id="", thread_id=""):
+        return {
+            "event": {
+                "sender": {
+                    "sender_id": {"open_id": "ou_member"}, "sender_name": "Member",
+                    "sender_type": "user", "sender_is_bot": False,
+                },
+                "message": {
+                    "message_id": message_id, "chat_id": "oc_group_reply", "chat_type": "group",
+                    "message_type": "text", "text": f"text:{message_id}",
+                    "rootId": root_id, "threadId": thread_id,
+                    "mentions": [{"openId": "ou_vo", "name": "VO", "isBot": True}],
+                },
+            }
+        }
+
+    def fake_dispatch(agent_id, text, conversation_id, source_meta):
+        return {"ok": True, "reply": f"reply:{source_meta['sourceMessageId']}", "conversationId": conversation_id}
+
+    def fake_reply(chat_id, source_message_id, text, reply_in_thread=False):
+        replies.append({
+            "chatId": chat_id, "sourceMessageId": source_message_id,
+            "text": text, "replyInThread": reply_in_thread,
+        })
+        if source_message_id == "om_revoked":
+            return {"ok": False, "status": "rejected", "category": "target_revoked"}
+        if source_message_id == "om_timeout":
+            raise TimeoutError("reply timed out")
+        return {
+            "ok": True, "status": "sent", "messageId": f"reply-{source_message_id}",
+            "chatId": chat_id, "replyToMessageId": source_message_id, "replyInThread": reply_in_thread,
+        }
+
+    try:
+        server._dispatch_representative_agent_message = fake_dispatch
+        server._feishu_chat_app_group_reply = fake_reply
+        server._feishu_chat_app_text_send = lambda chat_id, text: sends.append((chat_id, text)) or {"ok": True}
+        server._feishu_chat_app_reaction_add = lambda message_id, emoji: {
+            "ok": True, "reactionId": f"reaction-{message_id}"
+        }
+        server._feishu_chat_app_reaction_delete = lambda message_id, reaction_id: (
+            reaction_deletes.append((message_id, reaction_id)) or {"ok": True, "status": "deleted"}
+        )
+        server._feishu_chat_app_receipt_send = lambda *_: {"ok": True, "messageId": "receipt"}
+        server._feishu_chat_app_message_recall = lambda *_: {"ok": True, "status": "recalled"}
+        flat = server._handle_feishu_chat_message_event(inbound("om_flat"))
+        threaded = server._handle_feishu_chat_message_event(inbound("om_thread", root_id="om_root", thread_id="omt_1"))
+        revoked = server._handle_feishu_chat_message_event(inbound("om_revoked"))
+        timed_out = server._handle_feishu_chat_message_event(inbound("om_timeout"))
+    finally:
+        server._dispatch_representative_agent_message = previous_dispatch
+        server._feishu_chat_app_group_reply = previous_reply
+        server._feishu_chat_app_text_send = previous_send
+        server._feishu_chat_app_reaction_add = previous_add
+        server._feishu_chat_app_reaction_delete = previous_delete
+        server._feishu_chat_app_receipt_send = previous_receipt
+        server._feishu_chat_app_message_recall = previous_recall
+        server.STATUS_DIR = previous_status_dir
+        server.VO_CONFIG = previous_config
+
+    assert flat["status"] == threaded["status"] == "completed"
+    assert revoked["status"] == timed_out["status"] == "delivery_failed"
+    assert flat["record"]["sendResult"]["messageId"] == "reply-om_flat"
+    assert flat["record"]["replyInThread"] is False
+    assert threaded["record"]["replyInThread"] is True
+    assert revoked["record"]["deliveryStatus"] == "target_revoked"
+    assert timed_out["record"]["deliveryStatus"] == "send_timeout"
+    assert [item["sourceMessageId"] for item in replies] == ["om_flat", "om_thread", "om_revoked", "om_timeout"]
+    assert [item["replyInThread"] for item in replies] == [False, True, False, False]
+    assert all(item["chatId"] == "oc_group_reply" for item in replies)
+    assert sends == []
+    assert [item[0] for item in reaction_deletes] == ["om_flat", "om_thread", "om_revoked", "om_timeout"]
+
+
 def test_feishu_chat_worker_rejects_forged_and_oversized_v1_callbacks_without_secret_leakage():
     os.environ.setdefault("VO_HERMES_ENABLED", "0")
     os.environ.setdefault("VO_CODEX_ENABLED", "0")
@@ -2643,6 +2749,12 @@ def test_feishu_chat_transport_selection_and_node_command_ports_are_backward_com
     class FakeNodeReceiver:
         def command(self, operation, payload, timeout=30):
             calls.append({"operation": operation, "payload": payload, "timeout": timeout})
+            if operation == "reply":
+                return {
+                    "ok": True, "status": "sent", "messageId": "om_node_reply",
+                    "chatId": "oc_other" if payload["to"] == "oc_wrong" else payload["to"],
+                    "replyToMessageId": payload["messageId"], "replyInThread": payload["replyInThread"],
+                }
             return {"ok": True, "status": "sent", "messageId": "om_node"}
 
     server.VO_CONFIG = {
@@ -2655,6 +2767,8 @@ def test_feishu_chat_transport_selection_and_node_command_ports_are_backward_com
         assert server._effective_feishu_chat_transport() == "channel-sdk-node"
         server._FEISHU_CHAT_LONG_CONNECTION_RECEIVER = FakeNodeReceiver()
         sent = server._feishu_chat_app_text_send("oc_node", "hello node")
+        replied = server._feishu_chat_app_group_reply("oc_group", "om_source", "hello group", True)
+        wrong_chat = server._feishu_chat_app_group_reply("oc_wrong", "om_source_wrong", "must not redirect", False)
     finally:
         if previous_override is None:
             os.environ.pop("VO_FEISHU_CHAT_TRANSPORT", None)
@@ -2664,7 +2778,14 @@ def test_feishu_chat_transport_selection_and_node_command_ports_are_backward_com
         server._FEISHU_CHAT_LONG_CONNECTION_RECEIVER = previous_receiver
 
     assert sent["messageId"] == "om_node"
-    assert calls == [{"operation": "send", "payload": {"to": "oc_node", "content": "hello node", "contentType": "markdown", "timeoutMs": 20000}, "timeout": 25}]
+    assert replied["messageId"] == "om_node_reply"
+    assert replied["replyToMessageId"] == "om_source"
+    assert wrong_chat == {"ok": False, "status": "wrong_chat", "category": "wrong_chat"}
+    assert calls == [
+        {"operation": "send", "payload": {"to": "oc_node", "content": "hello node", "contentType": "markdown", "timeoutMs": 20000}, "timeout": 25},
+        {"operation": "reply", "payload": {"to": "oc_group", "messageId": "om_source", "content": "hello group", "contentType": "markdown", "replyInThread": True, "timeoutMs": 20000}, "timeout": 25},
+        {"operation": "reply", "payload": {"to": "oc_wrong", "messageId": "om_source_wrong", "content": "must not redirect", "contentType": "markdown", "replyInThread": False, "timeoutMs": 20000}, "timeout": 25},
+    ]
 
 
 def test_feishu_chat_supervisor_owns_only_its_child_and_dependency_failure_is_chat_only():
@@ -3445,6 +3566,7 @@ if __name__ == "__main__":
     test_feishu_group_admission_and_conversation_identity_are_isolated()
     test_feishu_chat_worker_normalizes_rich_post_with_image_resource_as_multimodal_message()
     test_feishu_group_rejections_and_agent_failures_do_not_corrupt_shared_context()
+    test_feishu_group_reply_uses_source_message_and_preserves_thread_without_fallback()
     test_feishu_chat_inbound_test_route_dispatches_and_records()
     test_feishu_chat_self_test_route_dispatches_without_real_feishu_send()
     test_feishu_chat_bindings_config_is_persisted_and_lookupable()

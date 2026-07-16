@@ -56,7 +56,12 @@ test('command server executes send, reply, reactions, recall and classifies SDK 
   await server.start();
   try {
     assert.equal((await request(server.port, command('send', { to: 'oc_1', content: 'hello', contentType: 'text' }))).body.status, 'sent');
-    assert.equal((await request(server.port, command('reply', { to: 'oc_1', messageId: 'om_source', content: '**hi**', contentType: 'markdown', replyInThread: true }))).body.status, 'sent');
+    const replied = await request(server.port, command('reply', { to: 'oc_1', messageId: 'om_source', content: '**hi**', contentType: 'markdown', replyInThread: true }));
+    assert.equal(replied.body.status, 'sent');
+    assert.deepEqual(
+      { chatId: replied.body.chatId, replyToMessageId: replied.body.replyToMessageId, replyInThread: replied.body.replyInThread },
+      { chatId: 'oc_1', replyToMessageId: 'om_source', replyInThread: true },
+    );
     assert.equal((await request(server.port, command('addReaction', { messageId: 'om_source', emojiType: 'LGTM' }))).body.reactionId, 'reaction-1');
     assert.equal((await request(server.port, command('removeReaction', { messageId: 'om_source', reactionId: 'reaction-1' }))).body.status, 'deleted');
     assert.equal((await request(server.port, command('recall', { messageId: 'om_source' }))).body.status, 'recalled');
