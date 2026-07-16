@@ -1,7 +1,7 @@
 ## 1. Baseline and Characterization
 
 - [x] 1.1 Add a deterministic warm continued-Codex-chat performance harness with 10 warm-ups and at least 100 measured turns, record browser/backend stage boundaries, p50/p95/max/errors and operation counts, and save failing-before baseline evidence for working feedback, first native event, first fragment, terminal tail, activity JSON writes, communication progress rewrites, and reader callback duration.
-- [ ] 1.2 Add characterization coverage for existing Codex run acceptance, same-Agent busy behavior, thread resume/new-thread fallback, activity polling, Provider SSE event names/order, approval, cancellation, final reply recovery, cold start, and non-Codex Provider behavior so the flag-off compatibility contract is executable before implementation.
+- [x] 1.2 Add characterization coverage for existing Codex run acceptance, same-Agent busy behavior, thread resume/new-thread fallback, activity polling, Provider SSE event names/order, approval, cancellation, final reply recovery, cold start, and non-Codex Provider behavior so the flag-off compatibility contract is executable before implementation.
 
 ## 2. Guarded Fast-Path Foundation
 

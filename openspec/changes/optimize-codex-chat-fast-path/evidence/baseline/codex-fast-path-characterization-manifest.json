@@ -1,0 +1,93 @@
+{
+  "schema": 1,
+  "commands": [
+    {
+      "id": "codex-chat-contracts",
+      "command": [
+        "{python}", "-m", "pytest", "-q",
+        "tests/test_codex_server.py::test_busy_rejects_second_request_and_releases_lock",
+        "tests/test_codex_server.py::test_provider_exception_clears_active_operation",
+        "tests/test_codex_server.py::test_human_codex_chat_persists_user_and_reply_to_comm_history",
+        "tests/test_codex_server.py::test_thread_mapping_persists_and_resets",
+        "tests/test_codex_server.py::test_archived_codex_thread_mapping_is_reset_and_retried",
+        "tests/test_codex_server.py::test_activity_persists_redacted_and_reports_active_conversation"
+      ]
+    },
+    {
+      "id": "codex-bridge-contracts",
+      "command": [
+        "{python}", "-m", "pytest", "-q",
+        "tests/test_codex_bridge.py::test_thread_start_timeout_restarts_app_server_once",
+        "tests/test_codex_bridge.py::test_execute_collects_reply_files_and_thread",
+        "tests/test_codex_bridge.py::test_interactive_approval_continues_original_turn",
+        "tests/test_codex_bridge.py::test_timeout_returns_terminal_result"
+      ]
+    },
+    {
+      "id": "codex-run-sse",
+      "command": [
+        "{python}", "-m", "pytest", "-q",
+        "tests/test_codex_runs_sse.py::test_codex_run_start_publishes_bridge_events_and_keeps_activity",
+        "tests/test_codex_runs_sse.py::test_codex_progress_history_is_recoverable_while_run_active_and_upserts",
+        "tests/test_codex_runs_sse.py::test_codex_run_stop_uses_existing_cancel_and_emits_terminal_event"
+      ]
+    },
+    {
+      "id": "provider-sse-recovery",
+      "command": [
+        "{python}", "-m", "pytest", "-q",
+        "tests/test_provider_sse_transport.py::test_run_transport_replays_after_max_cursor_with_exact_frames",
+        "tests/test_provider_sse_transport.py::test_snapshot_pending_recovery_and_sensitive_canaries_are_transport_sanitized",
+        "tests/test_provider_sse_transport.py::test_pending_or_history_recovery_failure_does_not_close_event_replay"
+      ]
+    },
+    {
+      "id": "non-codex-provider-compatibility",
+      "command": [
+        "{python}", "-m", "pytest", "-q",
+        "tests/test_claude_code_runs_sse.py::test_claude_code_run_start_publishes_sse_events_and_progress_history",
+        "tests/test_hermes_server_native_api.py::test_hermes_run_start_publishes_provider_bridge_events"
+      ]
+    },
+    {
+      "id": "codex-static-contract",
+      "command": ["{node}", "tests/check_codex_runs_bridge.mjs"],
+      "expectedExitCodes": [1],
+      "baselineExpectation": "Known failing-before contract: the current Codex SSE completion path still performs a full history reload. A later compatibility task must resolve or explicitly supersede this baseline defect."
+    }
+  ],
+  "scenarios": [
+    {
+      "id": "run-acceptance-and-same-agent-busy",
+      "commands": ["codex-chat-contracts", "codex-run-sse"],
+      "covers": "background run acceptance, second-request busy response, provider exception cleanup and exactly one terminal event"
+    },
+    {
+      "id": "thread-resume-new-thread-and-cold-restart",
+      "commands": ["codex-chat-contracts", "codex-bridge-contracts"],
+      "covers": "persisted thread mapping, archived-thread reset/fallback, app-server cold restart and resumed thread execution"
+    },
+    {
+      "id": "activity-polling-and-provider-sse",
+      "commands": ["codex-chat-contracts", "codex-run-sse", "provider-sse-recovery", "codex-static-contract"],
+      "covers": "legacy activity polling, normalized event names/order, cursor replay, history recovery and browser bridge source contract"
+    },
+    {
+      "id": "approval-cancellation-and-final-recovery",
+      "commands": ["codex-bridge-contracts", "codex-run-sse", "codex-chat-contracts"],
+      "covers": "interactive approval continuation, timeout/cancellation terminal behavior, durable user/final communication history"
+    },
+    {
+      "id": "shared-provider-isolation",
+      "commands": ["provider-sse-recovery", "non-codex-provider-compatibility"],
+      "covers": "shared SSE behavior and unchanged Claude Code/Hermes run paths"
+    }
+  ],
+  "knownBaselineRisks": [
+    {
+      "id": "codex-sse-completion-history-reload",
+      "current": "The checked-in static contract fails because the Codex success path reloads full history after SSE completion.",
+      "required": "Task 8.1 must make the contract pass or update the confirmed specification before changing the expected behavior."
+    }
+  ]
+}
