@@ -24,7 +24,7 @@
 
 ## 6. Conversation Isolation and Bounded Provider Concurrency
 
-- [ ] 6.1 Add a deterministic app-server multiplexing fixture that interleaves two different native threads and verifies request responses, notifications, activity, approvals, cancellation, terminal results, and cleanup never cross-deliver; retain capacity 1 as the required result if this proof fails.
+- [x] 6.1 Add a deterministic app-server multiplexing fixture that interleaves two different native threads and verifies request responses, notifications, activity, approvals, cancellation, terminal results, and cleanup never cross-deliver; retain capacity 1 as the required result if this proof fails.
 - [ ] 6.2 Replace Agent-wide Codex admission with `(agent, conversation)` admission, replace the client-wide run lock with per-thread ordering plus a non-blocking bounded semaphore, preserve same-conversation busy and archived-thread recovery semantics, expose distinct conversation/capacity busy counters, and verify concurrency 1, proven concurrency 2, capacity exhaustion, timeout, and runtime restart.
 
 ## 7. End-to-End Timing and User-Visible SLOs
