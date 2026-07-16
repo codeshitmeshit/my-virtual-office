@@ -44,3 +44,11 @@
 - [x] 9.2 Contain durable approval-write failures inside the affected operation without terminating the JSONL reader, and retain terminal operations from the actual terminal path so post-terminal diagnostics do not depend on reasoning events.
 - [x] 9.3 Preserve per-run fragment order when coalescer bounds force direct bypass, treat nested `activity.replace` snapshots as barriers, and add reconstruction tests for both pressure and replacement paths.
 - [x] 9.4 Restrict fast-path SSE telemetry to Codex runs/conversations, clean review-artifact whitespace, and re-run focused, full, performance, concurrency, rollback, and strict OpenSpec verification before declaring the review findings resolved.
+
+## 10. Second Push Review Remediation
+
+- [x] 10.1 Correlate app-server notifications with the active turn identity so late notifications from a completed turn cannot mutate a later turn on the same thread, and make the terminal callback fence bounded even when the terminal callback itself blocks; add deterministic regressions for both paths.
+- [x] 10.2 Commit final-reply durability before the matching terminal outcome, clear recovered write errors after a successful retry, and ensure the public terminal status always agrees with the durable authorities; add durable failure and recovery tests.
+- [x] 10.3 Preserve stable-ID idempotency beyond the communication-history display window using a durable lookup that does not duplicate old approval or terminal operations; add a restart-style test with more than 1,000 later records.
+- [x] 10.4 Measure browser first-native latency only from matching native Agent events and retain working-feedback correlation after submission tokens are bound to run IDs; add synthetic-start and animation-frame ordering regressions.
+- [x] 10.5 Re-run focused Python/JavaScript suites, full repository tests, the deterministic performance/concurrency/rollback gates, strict OpenSpec validation, and update acceptance evidence before declaring the second push-review findings resolved.

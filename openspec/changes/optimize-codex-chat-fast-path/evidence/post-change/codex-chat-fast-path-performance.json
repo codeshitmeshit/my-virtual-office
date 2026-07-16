@@ -5,7 +5,7 @@
     "firstTextSlo": "Observed only; no fixed product SLO is asserted.",
     "terminalGrace": "CodexAppServerClient uses callback-drain completion with a bounded malformed-order fallback and no unconditional sleep."
   },
-  "capturedAt": "2026-07-16T12:41:30Z",
+  "capturedAt": "2026-07-16T13:22:34Z",
   "failures": [],
   "fixture": {
     "appServerAlreadyRunningForMeasuredTurns": true,
@@ -22,7 +22,7 @@
     "activityJsonLoads": 300,
     "activityJsonWrites": 200,
     "communicationAppends": 300,
-    "communicationHistoryLoads": 300,
+    "communicationHistoryLoads": 200,
     "communicationProgressRewrites": 0
   },
   "operationCounts": {
@@ -42,9 +42,9 @@
       "total": 300
     },
     "communicationHistoryLoads": {
-      "perTurnMax": 3,
-      "perTurnMedian": 3.0,
-      "total": 300
+      "perTurnMax": 2,
+      "perTurnMedian": 2.0,
+      "total": 200
     },
     "communicationProgressRewrites": {
       "perTurnMax": 0,
@@ -56,69 +56,69 @@
   "schemaVersion": 1,
   "stages": {
     "durableTerminalCommitMs": {
-      "maxMs": 100.346,
-      "p50Ms": 27.194,
-      "p95Ms": 35.602,
+      "maxMs": 58.172,
+      "p50Ms": 31.72,
+      "p95Ms": 41.789,
       "samples": 100
     },
     "firstFragmentSseMs": {
-      "maxMs": 33.426,
-      "p50Ms": 20.83,
-      "p95Ms": 27.583,
+      "maxMs": 49.912,
+      "p50Ms": 25.989,
+      "p95Ms": 35.758,
       "samples": 100
     },
     "firstNativeEventMs": {
-      "maxMs": 31.596,
-      "p50Ms": 16.937,
-      "p95Ms": 23.918,
+      "maxMs": 47.087,
+      "p50Ms": 21.686,
+      "p95Ms": 29.181,
       "samples": 100
     },
     "firstNativeSseMs": {
-      "maxMs": 33.426,
-      "p50Ms": 20.83,
-      "p95Ms": 27.583,
+      "maxMs": 49.912,
+      "p50Ms": 25.989,
+      "p95Ms": 35.758,
       "samples": 100
     },
     "firstTextSseMs": {
-      "maxMs": 36.286,
-      "p50Ms": 20.968,
-      "p95Ms": 29.633,
+      "maxMs": 50.012,
+      "p50Ms": 26.442,
+      "p95Ms": 35.845,
       "samples": 100
     },
     "providerRequestMs": {
-      "maxMs": 31.105,
-      "p50Ms": 16.583,
-      "p95Ms": 23.557,
+      "maxMs": 46.665,
+      "p50Ms": 21.209,
+      "p95Ms": 28.1,
       "samples": 100
     },
     "providerTerminalMs": {
-      "maxMs": 36.034,
-      "p50Ms": 21.933,
-      "p95Ms": 30.222,
+      "maxMs": 53.124,
+      "p50Ms": 27.72,
+      "p95Ms": 36.478,
       "samples": 100
     },
     "readerCallbackMaxMs": {
-      "maxMs": 78.175,
-      "p50Ms": 5.247,
-      "p95Ms": 8.229,
+      "maxMs": 14.008,
+      "p50Ms": 3.99,
+      "p95Ms": 5.439,
       "samples": 100
     },
     "readerCallbackTotalMs": {
-      "maxMs": 82.61,
-      "p50Ms": 9.496,
-      "p95Ms": 13.059,
+      "maxMs": 18.719,
+      "p50Ms": 8.734,
+      "p95Ms": 10.879,
       "samples": 100
     },
     "runAcceptanceMs": {
-      "maxMs": 0.798,
-      "p50Ms": 0.289,
-      "p95Ms": 0.427,
+      "maxMs": 0.671,
+      "p50Ms": 0.309,
+      "p95Ms": 0.553,
       "samples": 100
     },
     "terminalTailMs": {
-      "maxMs": 108.114,
-      "p50Ms": 20.24,
-      "p95Ms": 30.221,
+      "maxMs": 191.554,
+      "p50Ms": 20.322,
+      "p95Ms": 32.102,
       "samples": 100
     },
     "workingFeedbackMs": {
@@ -131,57 +131,57 @@
   "trends": {
     "firstFragmentSseMs": {
       "firstHalf": {
-        "maxMs": 33.426,
-        "p50Ms": 19.856,
-        "p95Ms": 26.461,
+        "maxMs": 44.23,
+        "p50Ms": 25.318,
+        "p95Ms": 32.99,
         "samples": 50
       },
       "secondHalf": {
-        "maxMs": 32.673,
-        "p50Ms": 22.347,
-        "p95Ms": 29.628,
+        "maxMs": 49.912,
+        "p50Ms": 27.346,
+        "p95Ms": 43.965,
         "samples": 50
       }
     },
     "firstNativeSseMs": {
       "firstHalf": {
-        "maxMs": 33.426,
-        "p50Ms": 19.856,
-        "p95Ms": 26.461,
+        "maxMs": 44.23,
+        "p50Ms": 25.318,
+        "p95Ms": 32.99,
         "samples": 50
       },
       "secondHalf": {
-        "maxMs": 32.673,
-        "p50Ms": 22.347,
-        "p95Ms": 29.628,
+        "maxMs": 49.912,
+        "p50Ms": 27.346,
+        "p95Ms": 43.965,
         "samples": 50
       }
     },
     "readerCallbackTotalMs": {
       "firstHalf": {
-        "maxMs": 82.61,
-        "p50Ms": 8.473,
-        "p95Ms": 11.784,
+        "maxMs": 18.719,
+        "p50Ms": 7.881,
+        "p95Ms": 12.822,
         "samples": 50
       },
       "secondHalf": {
-        "maxMs": 14.521,
-        "p50Ms": 10.749,
-        "p95Ms": 13.361,
+        "maxMs": 11.196,
+        "p50Ms": 9.128,
+        "p95Ms": 10.667,
         "samples": 50
       }
     },
     "terminalTailMs": {
       "firstHalf": {
-        "maxMs": 108.114,
-        "p50Ms": 19.195,
-        "p95Ms": 24.948,
+        "maxMs": 40.956,
+        "p50Ms": 20.141,
+        "p95Ms": 25.435,
         "samples": 50
       },
       "secondHalf": {
-        "maxMs": 37.287,
-        "p50Ms": 21.377,
-        "p95Ms": 31.034,
+        "maxMs": 191.554,
+        "p50Ms": 20.411,
+        "p95Ms": 160.791,
         "samples": 50
       }
     }

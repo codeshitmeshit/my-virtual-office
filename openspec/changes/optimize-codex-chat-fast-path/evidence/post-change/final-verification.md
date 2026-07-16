@@ -21,19 +21,19 @@ The fixture identity is unchanged from baseline: warm resumed conversation, exis
 | Stage | Baseline p95 | Candidate p95 | Delta |
 | --- | ---: | ---: | ---: |
 | Working feedback | 0.000 ms | 0.000 ms | 0.000 ms |
-| Provider request | 30.895 ms | 23.557 ms | -7.338 ms |
-| First native event | 31.442 ms | 23.918 ms | -7.524 ms |
-| First native SSE | 69.762 ms | 27.583 ms | -42.179 ms |
-| First fragment SSE | 69.762 ms | 27.583 ms | -42.179 ms |
-| First text SSE (observation only) | 133.724 ms | 29.633 ms | -104.091 ms |
-| Provider terminal | 1063.628 ms | 30.222 ms | -1033.406 ms |
-| Durable terminal commit | 1100.180 ms | 35.602 ms | -1064.578 ms |
-| Terminal tail | 271.926 ms | 30.221 ms | -241.705 ms |
-| Reader callback total | 1084.045 ms | 13.059 ms | -1070.986 ms |
+| Provider request | 30.895 ms | 28.100 ms | -2.795 ms |
+| First native event | 31.442 ms | 29.181 ms | -2.261 ms |
+| First native SSE | 69.762 ms | 35.758 ms | -34.004 ms |
+| First fragment SSE | 69.762 ms | 35.758 ms | -34.004 ms |
+| First text SSE (observation only) | 133.724 ms | 35.845 ms | -97.879 ms |
+| Provider terminal | 1063.628 ms | 36.478 ms | -1027.150 ms |
+| Durable terminal commit | 1100.180 ms | 41.789 ms | -1058.391 ms |
+| Terminal tail | 271.926 ms | 32.102 ms | -239.824 ms |
+| Reader callback total | 1084.045 ms | 10.879 ms | -1073.166 ms |
 
 Every listed stage has 100 samples. The simulated synchronous browser boundary is useful for exact before/after fixture identity, but is not presented as a real browser paint measurement.
 
-The independent browser-local timing fixture excludes 10 warm-ups and measures 100 turns using one monotonic browser clock. Its p95 values are 16 ms working feedback, 86 ms first matching native event, 105 ms first fragment, and 289 ms first text. First text remains a separate observation. Deliberately extreme service timestamps do not affect these values.
+The independent browser-local timing fixture excludes 10 warm-ups and measures 100 turns using one monotonic browser clock. Its p95 values are 16 ms working feedback, 105 ms first matching native Agent event, 105 ms first fragment, and 289 ms first text. Synthetic coordinator `run.started` events are explicitly excluded from the native-event sample. First text remains a separate observation. Deliberately extreme service timestamps do not affect these values.
 
 ## Operation counts
 
@@ -41,7 +41,7 @@ The independent browser-local timing fixture excludes 10 warm-ups and measures 1
 | --- | ---: | ---: | --- |
 | Activity JSON loads | 3100 / 31 | 300 / 3 | reduced by 2800 |
 | Activity JSON writes | 3100 / 31 | 200 / 2 | reduced by 2900 |
-| Communication history loads | 3500 / 35 | 300 / 3 | reduced by 3200 |
+| Communication history loads | 3500 / 35 | 200 / 2 | reduced by 3300 |
 | Communication progress rewrites | 3300 / 33 | 0 / 0 | eliminated |
 | Durable communication appends | 200 / 2 | 300 / 3 | +1 idempotent terminal outcome per turn |
 
@@ -50,12 +50,13 @@ The additional append is the intentional durable terminal record introduced for 
 ## Capacity, compatibility, durability, and security
 
 - Push-review remediation added deterministic coverage for conversation-lock identity, shared-runtime timeout isolation, callback failure containment and reader reuse, terminal diagnostics without reasoning, pressure-order reconstruction, nested replacement snapshots, and non-Codex telemetry exclusion.
+- Second push-review remediation added turn-identity rejection for reused threads, an async bounded terminal callback fence, reply-before-terminal durability ordering, full-journal stable-ID lookup, synthetic-start exclusion, and post-bind working-feedback correlation.
 - Capacity 1 remains supported. Capacity 2 is approved by the deterministic multiplexing fixture: two native threads interleave start, reasoning, approval, user input, cancellation, completion, result delivery, and cleanup without cross-delivery. Capacity 3–4 remains unproven and is not approved for rollout.
-- Flag-off focused regression: 128 passed. Flag-on focused regression at capacity 2 and 33–100 ms coalescing: 85 passed.
+- Focused Codex/provider regression after the second remediation: 100 passed. The explicit app-server concurrency and rollback subset passed 32 tests.
 - Rollback rehearsal: passed. It writes accepted user content, approval request/resolution, final reply, terminal outcome, and thread mapping while enabled; replaces the live view with a fresh flag-off instance; reads every durable surface; and proves that recovery did not mutate any status file.
 - Browser/static compatibility: Codex runs, approval UI, Provider SSE, app-server split, runtime settings, history store/navigation, chat bug regressions, Claude Code SSE, and browser timing checks passed. The in-app browser loaded the cache-busted `chat.js` and timing script with zero console errors.
 - Bounded/redacted diagnostics: config, event service, coalescer, telemetry, and browser-timing tests passed. Diagnostics contain fixed-cardinality counters, bounded samples, digested/run IDs, and stage durations; prompt, reply, reasoning, credential, approval content, raw payload, and unrestricted path canaries are absent.
-- Complete Python regression was split to avoid a known cross-module temporary-directory cleanup race: 678 non-Project tests passed and 100 Project Execution tests passed, for 778 passed total. The generated Provider inventory was refreshed after the remediation source changes and reproduced exactly.
+- Complete supported Python regression passed 783 tests. One manifest test that expects a repository-local `.venv/bin/python` was deselected in the linked worktree and then passed separately against the shared main-worktree venv without changing repository files. The generated Provider inventory was refreshed after the remediation source changes and reproduced exactly.
 - Strict OpenSpec validation passed: one change valid, zero failed, zero issues.
 
 ## Environment-gated and unverified checks
