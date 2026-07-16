@@ -19,7 +19,7 @@
 ## 4. Routing and Traceability Verification
 
 - [x] 4.1 Add communication routing regressions that verify current roster identities, stable `conversationId`, request/reply or terminal-failure history, busy/timeout/empty-reply handling, and the canonical prohibition on private session/CLI fallback.
-- [ ] 4.2 Enforce communication readiness for agent-originated OpenClaw sends, returning the actual non-ready state before history or provider execution while preserving human and non-OpenClaw routes; add routing-gate regressions.
+- [x] 4.2 Enforce communication readiness for agent-originated OpenClaw sends, returning the actual non-ready state before history or provider execution while preserving human and non-OpenClaw routes; add routing-gate regressions.
 - [ ] 4.3 Add and execute a real OpenClaw delegation acceptance check for “让分析师看一下最近市场动向”, recording evidence that VO history contains the request/reply and the corresponding activity contains no `sessions_list`, `sessions_send`, or `openclaw agents` fallback.
 
 ## 5. Final Verification

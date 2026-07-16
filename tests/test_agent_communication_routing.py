@@ -66,6 +66,58 @@ def test_sender_and_target_must_resolve_from_current_roster(monkeypatch):
         assert server._load_comm_history() == []
 
 
+def test_non_ready_openclaw_sender_is_rejected_before_history_or_provider(monkeypatch):
+    with tempfile.TemporaryDirectory() as status_dir:
+        provider_calls = []
+        non_ready = {
+            **SENDER,
+            "communicationSkill": {"ready": False, "status": "conflict", "updated": False},
+        }
+        monkeypatch.setattr(server, "STATUS_DIR", status_dir)
+        monkeypatch.setattr(server, "get_roster", lambda: [non_ready, TARGET])
+        monkeypatch.setattr(server, "_archive_manager_chat_guard", lambda *args: None)
+        monkeypatch.setattr(server, "_handle_codex_chat", lambda body: provider_calls.append(body) or {"ok": True, "reply": "unexpected"})
+        result = server._handle_agent_platform_comm_send({
+            "fromAgentId": SENDER["id"],
+            "toAgentId": TARGET["id"],
+            "conversationId": "blocked-conv",
+            "message": "review",
+        })
+        assert result["ok"] is False
+        assert result["_status"] == 409
+        assert result["code"] == "communication_skill_not_ready"
+        assert result["status"] == "conflict"
+        assert provider_calls == []
+        assert server._load_comm_history(conversation_id="blocked-conv") == []
+
+
+def test_readiness_gate_preserves_human_and_non_openclaw_senders(monkeypatch):
+    with tempfile.TemporaryDirectory() as status_dir:
+        claude_sender = {
+            "id": "claude-code-local",
+            "statusKey": "claude-code-local",
+            "providerKind": "claude-code",
+            "providerAgentId": "local",
+            "name": "Claude Code",
+            "communicationSkill": {"ready": False, "status": "not_applicable"},
+        }
+        monkeypatch.setattr(server, "STATUS_DIR", status_dir)
+        monkeypatch.setattr(server, "get_roster", lambda: [claude_sender, TARGET])
+        monkeypatch.setattr(server, "_archive_manager_chat_guard", lambda *args: None)
+        monkeypatch.setattr(server, "_handle_codex_chat", lambda body: {"ok": True, "status": "completed", "reply": "ok"})
+        monkeypatch.setattr(server.gateway_presence, "set_manual_override", lambda *args, **kwargs: None)
+        agent_result = server._handle_agent_platform_comm_send({
+            "fromAgentId": claude_sender["id"], "toAgentId": TARGET["id"],
+            "conversationId": "claude-conv", "message": "review",
+        })
+        human_result = server._handle_agent_platform_comm_send({
+            "fromType": "human", "fromDisplayName": "User", "toAgentId": TARGET["id"],
+            "conversationId": "human-conv", "message": "review",
+        })
+        assert agent_result["ok"] is True
+        assert human_result["ok"] is True
+
+
 def test_success_uses_stable_conversation_and_persists_actual_identities(monkeypatch):
     with tempfile.TemporaryDirectory() as status_dir:
         _patch_routing(monkeypatch, status_dir, {"ok": True, "status": "completed", "reply": "looks good"})

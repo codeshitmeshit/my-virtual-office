@@ -9935,8 +9935,20 @@ def _handle_agent_platform_comm_send(body):
     to_agent = _office_agent_lookup(to_agent_id)
     if not to_agent:
         return {"ok": False, "error": f"Target agent '{to_agent_id}' not found", "_status": 404}
-    if not is_human_source and not _office_agent_lookup(from_agent_id):
+    from_agent = None if is_human_source else _office_agent_lookup(from_agent_id)
+    if not is_human_source and not from_agent:
         return {"ok": False, "error": f"Sender agent '{from_agent_id}' not found", "_status": 404}
+    if from_agent and from_agent.get("providerKind", "openclaw") == "openclaw":
+        communication_skill = from_agent.get("communicationSkill")
+        if isinstance(communication_skill, dict) and communication_skill.get("ready") is False:
+            return {
+                "ok": False,
+                "error": f"Sender agent '{from_agent_id}' communication skill is not ready",
+                "code": "communication_skill_not_ready",
+                "status": communication_skill.get("status") or "not_ready",
+                "communicationSkill": communication_skill,
+                "_status": 409,
+            }
     archive_guard = _archive_manager_chat_guard(to_agent_id, message)
 
     source_app = str(body.get("sourceApp") or body.get("app") or "virtual-office").strip() or "virtual-office"
