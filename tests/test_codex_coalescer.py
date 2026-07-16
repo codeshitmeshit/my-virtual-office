@@ -117,6 +117,44 @@ def test_bucket_and_global_capacity_use_direct_bypass_and_remain_bounded():
     assert diagnostics["directBypass"] == 2
 
 
+def test_global_byte_pressure_flushes_older_run_fragment_before_direct_bypass():
+    clock = ManualClock()
+    emitted, emit = _collector()
+    coalescer = CodexTransientCoalescer(
+        max_bucket_bytes=256,
+        max_bytes=30,
+        clock_ns=clock,
+        start_dispatcher=False,
+    )
+
+    assert coalescer.submit("agent", "conv", "run", "message.delta", {"delta": "A"}, emit) == "first"
+    assert coalescer.submit("agent", "conv", "run", "message.delta", {"delta": "BBBBBBBBBB"}, emit) == "buffered"
+    assert coalescer.submit("agent", "conv", "run", "message.delta", {"delta": "CCCCCCCCCC"}, emit) == "direct"
+
+    assert [payload["delta"] for _, payload in emitted] == ["A", "BBBBBBBBBB", "CCCCCCCCCC"]
+    assert coalescer.diagnostics()["activeBuckets"] == 0
+
+
+def test_nested_activity_replace_snapshot_is_never_concatenated():
+    clock = ManualClock()
+    emitted, emit = _collector()
+    coalescer = CodexTransientCoalescer(clock_ns=clock, start_dispatcher=False)
+
+    for text in ("A", "AB", "ABC"):
+        coalescer.submit(
+            "agent",
+            "conv",
+            "run",
+            "reasoning.available",
+            {"text": text, "activity": {"text": text, "replace": True}},
+            emit,
+        )
+
+    assert [payload["text"] for _, payload in emitted] == ["A", "AB", "ABC"]
+    assert [payload["activity"]["text"] for _, payload in emitted] == ["A", "AB", "ABC"]
+    assert coalescer.diagnostics()["activeBuckets"] == 0
+
+
 def test_event_class_change_replace_and_barrier_preserve_order():
     clock = ManualClock()
     emitted, emit = _collector()

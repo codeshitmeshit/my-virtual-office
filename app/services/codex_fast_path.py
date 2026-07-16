@@ -269,6 +269,11 @@ class CodexTransientCoalescer:
     def _payload_bytes(payload: Mapping[str, Any]) -> int:
         return len(json.dumps(payload, ensure_ascii=False, separators=(",", ":"), default=str).encode("utf-8"))
 
+    @staticmethod
+    def _is_replace_snapshot(payload: Mapping[str, Any]) -> bool:
+        activity = payload.get("activity") if isinstance(payload.get("activity"), Mapping) else {}
+        return bool(payload.get("replace") or activity.get("replace"))
+
     def submit(
         self,
         agent_id: str,
@@ -287,7 +292,7 @@ class CodexTransientCoalescer:
         disposition = "buffered"
         with self._condition:
             emissions.extend(self._take_due_locked(self._clock_ns(), dispatcher=False))
-            if self._closed or name not in COALESCE_EVENT_NAMES or not text_key or clean_payload.get("replace"):
+            if self._closed or name not in COALESCE_EVENT_NAMES or not text_key or self._is_replace_snapshot(clean_payload):
                 emissions.extend(self._take_run_locked(run_key, barrier=True))
                 emissions.append((emit, name, clean_payload))
                 self._counters["directBypass"] += 1
@@ -315,6 +320,9 @@ class CodexTransientCoalescer:
                     emissions.extend(self._take_bucket_locked(bucket_key, forced=True))
                     bucket = None
                 if size > self.max_bucket_bytes or self._total_bytes + size > self.max_bytes or (bucket is None and len(self._buckets) >= self.max_buckets):
+                    # A direct fragment cannot overtake older buffered content
+                    # from the same run when any capacity bound is reached.
+                    emissions.extend(self._take_run_locked(run_key, barrier=True))
                     emissions.append((emit, name, clean_payload))
                     self._counters["directBypass"] += 1
                     disposition = "direct"
