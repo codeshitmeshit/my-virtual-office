@@ -56,3 +56,7 @@
 ## 11. Terminal Callback Drain Remediation
 
 - [x] 11.1 Keep same-conversation admission closed after a terminal fallback until the late callback has actually drained and the current turn has finished durable finalization; preserve bounded reader/response behavior and add deterministic cross-turn ordering coverage.
+
+## 12. Accepted Run Retry Remediation
+
+- [x] 12.1 Prevent any accepted Codex run from falling back to the blocking chat endpoint after SSE, terminal, or durable failure; recover the accepted run/history and surface an explicit error without re-executing the prompt, while retaining pre-acceptance compatibility fallback and adding a static control-flow regression.
