@@ -10235,7 +10235,10 @@ You are **{name}** {emoji} — {role}.
 - Complete the full loop: working → work → report → idle
 
 ## Communication
-- Use Virtual Office communication tools when talking to other office agents
+- Use the installed `vo-agent-communication` skill whenever you ask, delegate to, notify, or hand off to another office agent
+- Resolve current agent identities through Virtual Office and send through `/api/agent-platform-communications/send`
+- Never fall back to `sessions_list`, `sessions_send`, `openclaw agents`, a provider-private CLI, or a local subagent for office-agent communication
+- If Virtual Office routing is unavailable, report the real failure and stop
 - Your text reply IS your response — write it directly
 
 ## Memory
@@ -10302,6 +10305,24 @@ def _handle_agent_create(body):
             if not file_result.get("ok"):
                 return {"error": f"Agent created but failed to write {filename}: {file_result.get('error', 'unknown error')}", "_status": 500}
 
+        communication_skill = _sync_openclaw_communication_skill({
+            "id": agent_id,
+            "statusKey": agent_id,
+            "providerKind": "openclaw",
+            "workspace": workspace_dir,
+        })
+        if not communication_skill.get("ready"):
+            return {
+                "ok": False,
+                "error": f"Agent '{agent_id}' was created but its VO communication skill is not ready",
+                "code": "agent_created_communication_skill_not_ready",
+                "agentCreated": True,
+                "agentId": agent_id,
+                "workspace": workspace_dir,
+                "communicationSkill": communication_skill,
+                "_status": 500,
+            }
+
         # Refresh discovery
         global _discovered_at
         _discovered_at = 0
@@ -10312,6 +10333,7 @@ def _handle_agent_create(body):
             "agentId": agent_id,
             "name": name,
             "workspace": workspace_dir,
+            "communicationSkill": communication_skill,
             "message": f"Agent '{name}' ({agent_id}) created successfully"
         }
 
@@ -19276,6 +19298,18 @@ def _archive_manager_create_if_missing():
         state["name"] = ARCHIVE_MANAGER_NAME
         state["providerKind"] = existing.get("providerKind", "openclaw")
         state["workspace"] = profile_result.get("workspace") or existing.get("workspace", "")
+        communication_skill = _sync_openclaw_communication_skill({
+            **existing,
+            "providerKind": "openclaw",
+            "workspace": state["workspace"],
+        })
+        state["communicationSkill"] = communication_skill
+        if not communication_skill.get("ready"):
+            state["status"] = "error"
+            state["label"] = "档案管理员通信技能未就绪"
+            state["lastError"] = communication_skill.get("status", "communication skill sync failed")
+            _archive_manager_append_activity(state, "skill_sync", "error", "档案管理员通信技能同步失败", error=state["lastError"])
+            return _archive_manager_save_state(state)
         state["profileFiles"] = profile_result.get("profileFiles", [])
         state["profileVersion"] = profile_result.get("profileVersion", "")
         if profile_result.get("updated"):
@@ -19316,6 +19350,21 @@ def _archive_manager_create_if_missing():
             _archive_manager_append_activity(state, "auto_create", "error", "档案管理员已创建但 profile 写入失败", error=state["lastError"])
             return _archive_manager_save_state(state)
 
+        communication_skill = _sync_openclaw_communication_skill({
+            "id": agent_id,
+            "statusKey": agent_id,
+            "providerKind": "openclaw",
+            "workspace": profile_result.get("workspace") or workspace_dir,
+        })
+        if not communication_skill.get("ready"):
+            state["status"] = "error"
+            state["label"] = "档案管理员创建后通信技能未就绪"
+            state["agentId"] = agent_id
+            state["communicationSkill"] = communication_skill
+            state["lastError"] = communication_skill.get("status", "communication skill sync failed")
+            _archive_manager_append_activity(state, "auto_create", "error", "档案管理员已创建但通信技能未就绪", error=state["lastError"])
+            return _archive_manager_save_state(state)
+
         global _discovered_at
         _discovered_at = 0
         refresh_agent_maps()
@@ -19332,6 +19381,7 @@ def _archive_manager_create_if_missing():
             "profileFiles": profile_result.get("profileFiles", []),
             "profileVersion": profile_result.get("profileVersion", ""),
             "profileUpdatedAt": now if profile_result.get("updated") else None,
+            "communicationSkill": communication_skill,
             "lastError": "",
         })
         _archive_manager_append_activity(state, "auto_create", "ok", "已自动创建档案管理员")
@@ -19380,6 +19430,7 @@ def _archive_manager_public_state(ensure=True):
         "updatedAt": state.get("updatedAt"),
         "profileVersion": state.get("profileVersion", ""),
         "profileUpdatedAt": state.get("profileUpdatedAt"),
+        "communicationSkill": state.get("communicationSkill"),
         "lastAction": state.get("lastAction", ""),
         "lastError": state.get("lastError", ""),
         "recentActivity": (state.get("recentActivity") or [])[-12:],

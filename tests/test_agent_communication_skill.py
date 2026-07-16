@@ -247,3 +247,94 @@ def test_workspace_payload_exposes_discovery_readiness():
             server._discovered_at = old_discovered_at
             server.WORKSPACE_BASE = old_base
             server.refresh_agent_maps()
+
+
+def test_openclaw_agent_template_requires_vo_routing_without_private_fallback():
+    agents_md = server._agent_template_files("Analyst", "Market analyst", "📊")["AGENTS.md"]
+    assert "`vo-agent-communication`" in agents_md
+    assert "/api/agent-platform-communications/send" in agents_md
+    assert "`sessions_list`" in agents_md
+    assert "`sessions_send`" in agents_md
+    assert "`openclaw agents`" in agents_md
+    assert "report the real failure and stop" in agents_md
+
+
+def test_openclaw_agent_creation_installs_skill_and_reports_partial_failure():
+    old_base = server.WORKSPACE_BASE
+    old_gateway = server._gateway_rpc_call
+    old_model = server._default_openclaw_agent_model
+    old_refresh = server.refresh_agent_maps
+    old_sync = server._sync_openclaw_communication_skill
+    with tempfile.TemporaryDirectory() as home:
+        server.WORKSPACE_BASE = home
+        server._default_openclaw_agent_model = lambda: ""
+        server.refresh_agent_maps = lambda: None
+
+        def fake_gateway(method, params=None, timeout=20):
+            if method == "agents.create":
+                os.makedirs(params["workspace"], exist_ok=True)
+                return {"ok": True, "agentId": "analyst"}
+            return {"ok": True}
+
+        server._gateway_rpc_call = fake_gateway
+        try:
+            server._sync_openclaw_communication_skill = old_sync
+            created = server._handle_agent_create({"name": "Analyst", "id": "analyst"})
+            assert created["ok"] is True
+            assert created["communicationSkill"]["ready"] is True
+
+            server._sync_openclaw_communication_skill = lambda agent: {
+                "ready": False, "status": "conflict", "updated": False,
+            }
+            partial = server._handle_agent_create({"name": "Blocked", "id": "blocked"})
+            assert partial["ok"] is False
+            assert partial["agentCreated"] is True
+            assert partial["code"] == "agent_created_communication_skill_not_ready"
+            assert partial["communicationSkill"]["status"] == "conflict"
+        finally:
+            server.WORKSPACE_BASE = old_base
+            server._gateway_rpc_call = old_gateway
+            server._default_openclaw_agent_model = old_model
+            server.refresh_agent_maps = old_refresh
+            server._sync_openclaw_communication_skill = old_sync
+
+
+def test_existing_archive_manager_repairs_communication_skill():
+    old_load = server._archive_manager_load_state
+    old_roster = server._archive_manager_roster_agent
+    old_profiles = server._archive_manager_write_profile_files
+    old_sync = server._sync_openclaw_communication_skill
+    old_save = server._archive_manager_save_state
+    old_activity = server._archive_manager_append_activity
+    calls = []
+    server._archive_manager_load_state = lambda: {}
+    server._archive_manager_roster_agent = lambda: {
+        "id": server.ARCHIVE_MANAGER_AGENT_ID,
+        "statusKey": server.ARCHIVE_MANAGER_AGENT_ID,
+        "providerKind": "openclaw",
+        "workspace": "/tmp/archive-manager",
+    }
+    server._archive_manager_write_profile_files = lambda agent_id: {
+        "ok": True,
+        "workspace": "/tmp/archive-manager",
+        "profileFiles": [],
+        "profileVersion": "test",
+        "updated": False,
+    }
+    server._sync_openclaw_communication_skill = lambda agent: calls.append(agent) or {
+        "ready": True, "status": "ready", "updated": False,
+    }
+    server._archive_manager_save_state = lambda state: state
+    server._archive_manager_append_activity = lambda *args, **kwargs: None
+    try:
+        state = server._archive_manager_create_if_missing()
+        assert state["status"] == "idle"
+        assert state["communicationSkill"]["ready"] is True
+        assert calls[0]["workspace"] == "/tmp/archive-manager"
+    finally:
+        server._archive_manager_load_state = old_load
+        server._archive_manager_roster_agent = old_roster
+        server._archive_manager_write_profile_files = old_profiles
+        server._sync_openclaw_communication_skill = old_sync
+        server._archive_manager_save_state = old_save
+        server._archive_manager_append_activity = old_activity

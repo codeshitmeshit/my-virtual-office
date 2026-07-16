@@ -10,7 +10,7 @@
 ## 3. Agent Lifecycle Integration
 
 - [x] 3.1 Run managed communication-skill synchronization at OpenClaw discovery refresh, attach non-sensitive readiness states to roster/workspace payloads, and ensure one agent failure does not suppress other discovered agents; add focused integration tests.
-- [ ] 3.2 Install the canonical skill during normal OpenClaw and archive-manager creation, return precise partial-creation failures, and strengthen the new-agent `AGENTS.md` communication rules; add creation and template regression tests.
+- [x] 3.2 Install the canonical skill during normal OpenClaw and archive-manager creation, return precise partial-creation failures, and strengthen the new-agent `AGENTS.md` communication rules; add creation and template regression tests.
 
 ## 4. Routing and Traceability Verification
 
