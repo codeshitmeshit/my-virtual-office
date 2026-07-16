@@ -81,6 +81,7 @@ class CodexEventFastPath:
         self._sanitize = sanitizer or sanitize_payload
         self._lock = threading.Lock()
         self._scopes: OrderedDict[tuple[str, str, str], _LiveScope] = OrderedDict()
+        self._conversation_sequences: OrderedDict[tuple[str, str], int] = OrderedDict()
         self._counters = {
             "disabledPassThrough": 0,
             "normalized": 0,
@@ -99,7 +100,9 @@ class CodexEventFastPath:
             str(run_id or "")[:200],
         )
 
-    def begin(self, agent_id: str, conversation_id: str, run_id: str) -> bool:
+    def begin(self, agent_id: str, conversation_id: str, run_id: str, *, initial_sequence: int = 0) -> bool:
+        if not self.settings.enabled:
+            return False
         key = self.scope_key(agent_id, conversation_id, run_id)
         with self._lock:
             scope = self._get_or_create_locked(key)
@@ -108,6 +111,13 @@ class CodexEventFastPath:
                 return False
             scope.active += 1
             scope.last_used_ns = self._clock_ns()
+            sequence_key = key[:2]
+            self._conversation_sequences[sequence_key] = max(
+                self._conversation_sequences.get(sequence_key, 0),
+                max(0, int(initial_sequence or 0)),
+            )
+            self._conversation_sequences.move_to_end(sequence_key)
+            self._prune_sequences_locked()
             return True
 
     def end(self, agent_id: str, conversation_id: str, run_id: str) -> None:
@@ -144,10 +154,15 @@ class CodexEventFastPath:
             if scope is None:
                 self._counters["capacityBypass"] += 1
                 return legacy_callback(event) if legacy_callback else event
-            scope.sequence += 1
+            sequence_key = key[:2]
+            sequence = self._conversation_sequences.get(sequence_key, 0) + 1
+            self._conversation_sequences[sequence_key] = sequence
+            self._conversation_sequences.move_to_end(sequence_key)
+            self._prune_sequences_locked()
+            scope.sequence = sequence
             scope.last_used_ns = self._clock_ns()
             cleaned.setdefault("providerSequence", int(event.get("sequence") or 0))
-            cleaned["sequence"] = scope.sequence
+            cleaned["sequence"] = sequence
             cleaned["agentId"] = key[0]
             cleaned["conversationId"] = key[1]
             if key[2]:
@@ -165,6 +180,16 @@ class CodexEventFastPath:
         with self._lock:
             scope = self._scopes.get(key)
             return copy.deepcopy(scope.last_event) if scope and scope.last_event else None
+
+    def live_events(self, agent_id: str, conversation_id: str, *, after: int = 0) -> list[dict[str, Any]]:
+        prefix = self.scope_key(agent_id, conversation_id, "")[:2]
+        with self._lock:
+            events = [
+                copy.deepcopy(scope.last_event)
+                for key, scope in self._scopes.items()
+                if key[:2] == prefix and scope.last_event and int(scope.last_event.get("sequence") or 0) > int(after or 0)
+            ]
+        return sorted(events, key=lambda item: int(item.get("sequence") or 0))
 
     def diagnostics(self) -> dict[str, Any]:
         with self._lock:
@@ -197,6 +222,10 @@ class CodexEventFastPath:
             if scope.active == 0:
                 self._scopes.pop(key, None)
                 self._counters["scopeEvictions"] += 1
+
+    def _prune_sequences_locked(self) -> None:
+        while len(self._conversation_sequences) > self.max_scopes:
+            self._conversation_sequences.popitem(last=False)
 
 
 def _configured_value(environ: Mapping[str, Any], env_key: str, config: Mapping[str, Any], config_key: str, default: Any):

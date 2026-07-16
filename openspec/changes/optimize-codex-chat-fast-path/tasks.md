@@ -11,7 +11,7 @@
 ## 3. Durable and Transient State Separation
 
 - [x] 3.1 Make accepted user messages, stable approval requests/resolutions, final replies, and reply-less failure/cancellation/terminal outcomes idempotently durable in their confirmed existing authorities, keyed by stable request/run/turn/approval identity; add duplicate, partial-write, restart, and durable-write-failure tests.
-- [ ] 3.2 Route transient Codex reasoning, delta, tool-progress, and replaceable progress activity through the bounded in-memory live view when the fast path is enabled, eliminate per-native-event activity JSON and communication-ledger full rewrites, preserve legacy activity/polling compatibility, and verify process restart may lose transient data without losing durable state.
+- [x] 3.2 Route transient Codex reasoning, delta, tool-progress, and replaceable progress activity through the bounded in-memory live view when the fast path is enabled, eliminate per-native-event activity JSON and communication-ledger full rewrites, preserve legacy activity/polling compatibility, and verify process restart may lose transient data without losing durable state.
 
 ## 4. Bounded Streaming Coalescing
 

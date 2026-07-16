@@ -106,6 +106,7 @@ def test_server_load_and_safe_projection_expose_only_bounded_diagnostics(monkeyp
         server._handle_codex_test = old_codex_test
         server._handle_hermes_test = old_hermes_test
         server._handle_claude_code_test = old_claude_test
+        server._CODEX_EVENT_FAST_PATH = CodexEventFastPath(CodexFastPathSettings(enabled=False))
 
 
 def test_disabled_event_service_is_exact_passthrough():
@@ -151,3 +152,16 @@ def test_event_classification_and_active_scope_capacity_are_bounded():
     assert diagnostics["liveScopes"] == 2
     assert diagnostics["scopeEvictions"] == 1
     assert diagnostics["capacityBypass"] == 1
+
+
+def test_sequences_continue_across_runs_and_live_events_are_replaceable():
+    service = CodexEventFastPath(CodexFastPathSettings(requested_enabled=True, enabled=True), max_scopes=4)
+    assert service.begin("agent", "conversation", "run-1", initial_sequence=7) is True
+    first = service.process_event("agent", "conversation", "run-1", {"id": "delta-1", "type": "reasoning", "text": "one"})
+    service.end("agent", "conversation", "run-1")
+    assert service.begin("agent", "conversation", "run-2") is True
+    second = service.process_event("agent", "conversation", "run-2", {"id": "delta-2", "type": "reasoning", "text": "two"})
+
+    assert [first["sequence"], second["sequence"]] == [8, 9]
+    assert [event["id"] for event in service.live_events("agent", "conversation", after=7)] == ["delta-1", "delta-2"]
+    assert service.live_events("agent", "conversation", after=8)[0]["id"] == "delta-2"

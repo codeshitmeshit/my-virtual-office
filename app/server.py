@@ -56,7 +56,7 @@ from services.provider_conversations import CallableConversationStatePort, Calla
 from services.provider_ports import AdapterCapabilities, AdapterEvent, AdapterResult, CallableProviderAdapter, RunCommand
 from services.provider_registry import ProviderRunRepository
 from services.provider_runs import ProviderRunCoordinator
-from services.codex_fast_path import load_codex_fast_path_settings
+from services.codex_fast_path import CodexEventFastPath, load_codex_fast_path_settings
 from provider_sse_transport import ProviderSSETransport
 from services.project_repository import ProjectConflictError, ProjectNotFoundError, ProjectRepository
 from zoneinfo import ZoneInfo
@@ -1174,6 +1174,7 @@ def _first_provider_agent_model(provider_kind):
     return ""
 
 VO_CONFIG = _load_vo_config()
+_CODEX_EVENT_FAST_PATH = CodexEventFastPath(load_codex_fast_path_settings(os.environ, VO_CONFIG.get("codex") or {}))
 
 try:
     SMS_DEFAULT_TZ = ZoneInfo(os.environ.get("VO_SMS_TIMEZONE") or os.environ.get("TZ") or "UTC")
@@ -6203,22 +6204,7 @@ def _save_codex_activity(events):
     os.replace(tmp, path)
 
 
-def _append_codex_activity(agent_id, conversation_id, event):
-    with _CODEX_ACTIVITY_LOCK:
-        events = _load_codex_activity()
-        last_sequence = max(
-            (int(item.get("sequence") or 0) for item in events if item.get("agentId") == agent_id and item.get("conversationId") == conversation_id),
-            default=0,
-        )
-        record = _sanitize_codex_value({
-            **event,
-            "providerSequence": int(event.get("sequence") or 0),
-            "sequence": last_sequence + 1,
-            "agentId": agent_id,
-            "conversationId": conversation_id,
-        })
-        events.append(record)
-        _save_codex_activity(events)
+def _update_codex_active_from_record(agent_id, conversation_id, record):
     with _CODEX_ACTIVE_LOCK:
         active = _CODEX_ACTIVE_OPERATIONS.get(agent_id)
         if active and active.get("conversationId") == conversation_id:
@@ -6230,15 +6216,57 @@ def _append_codex_activity(agent_id, conversation_id, event):
                 if record.get("status") == "pending":
                     active["pending"] = normalize_approval_record("codex", agent_id, conversation_id, record)
                     active["pending"]["raw"] = record
-                elif active.get("pending", {}).get("interactionId") == record.get("interactionId"):
+                elif isinstance(active.get("pending"), dict) and active["pending"].get("interactionId") == record.get("interactionId"):
                     active["pending"] = None
+
+
+def _append_codex_activity(agent_id, conversation_id, event, *, preserve_sequence=False):
+    with _CODEX_ACTIVITY_LOCK:
+        events = _load_codex_activity()
+        last_sequence = max(
+            (int(item.get("sequence") or 0) for item in events if item.get("agentId") == agent_id and item.get("conversationId") == conversation_id),
+            default=0,
+        )
+        provider_sequence = int(event.get("providerSequence") or event.get("sequence") or 0)
+        record = _sanitize_codex_value({
+            **event,
+            "providerSequence": provider_sequence,
+            "sequence": int(event.get("sequence") or 0) if preserve_sequence else last_sequence + 1,
+            "agentId": agent_id,
+            "conversationId": conversation_id,
+        })
+        events.append(record)
+        _save_codex_activity(events)
+    _update_codex_active_from_record(agent_id, conversation_id, record)
     return record
 
 
 def _get_codex_activity(agent_id, conversation_id, after=0):
     with _CODEX_ACTIVITY_LOCK:
         events = _load_codex_activity()
-    return [event for event in events if event.get("agentId") == agent_id and event.get("conversationId") == conversation_id and int(event.get("sequence") or 0) > int(after or 0)]
+    matching = [event for event in events if event.get("agentId") == agent_id and event.get("conversationId") == conversation_id and int(event.get("sequence") or 0) > int(after or 0)]
+    if _CODEX_EVENT_FAST_PATH.settings.enabled:
+        live = _CODEX_EVENT_FAST_PATH.live_events(agent_id, conversation_id, after=after)
+        by_identity = {
+            (event.get("id") or "", int(event.get("sequence") or 0)): event
+            for event in matching
+        }
+        for event in live:
+            by_identity[(event.get("id") or "", int(event.get("sequence") or 0))] = event
+        matching = list(by_identity.values())
+    return sorted(matching, key=lambda event: int(event.get("sequence") or 0))
+
+
+def _last_persisted_codex_activity_sequence(agent_id, conversation_id):
+    with _CODEX_ACTIVITY_LOCK:
+        return max(
+            (
+                int(event.get("sequence") or 0)
+                for event in _load_codex_activity()
+                if event.get("agentId") == agent_id and event.get("conversationId") == conversation_id
+            ),
+            default=0,
+        )
 
 
 def _get_codex_active(agent_id):
@@ -6505,6 +6533,15 @@ def _handle_codex_chat(body):
             conversation_id,
             thread_id=_get_codex_thread_id(agent_id, conversation_id),
         )
+    fast_scope_run_id = str(body.get("_streamRunId") or operation_stable_id)
+    fast_scope_started = False
+    if _CODEX_EVENT_FAST_PATH.settings.enabled:
+        fast_scope_started = _CODEX_EVENT_FAST_PATH.begin(
+            agent_id,
+            conversation_id,
+            fast_scope_run_id,
+            initial_sequence=_last_persisted_codex_activity_sequence(agent_id, conversation_id),
+        )
     activity_callback = body.get("_onActivity")
     reply_event_appended = {"done": False, "error": None}
 
@@ -6548,7 +6585,18 @@ def _handle_codex_chat(body):
         reply_event_appended["done"] = True
 
     def on_event(event):
-        record = _append_codex_activity(agent_id, conversation_id, event)
+        record = _CODEX_EVENT_FAST_PATH.process_event(
+            agent_id,
+            conversation_id,
+            fast_scope_run_id,
+            event,
+            legacy_callback=lambda item: _append_codex_activity(agent_id, conversation_id, item),
+        )
+        if _CODEX_EVENT_FAST_PATH.settings.enabled and record.get("eventClass"):
+            if record.get("eventClass") == "transient":
+                _update_codex_active_from_record(agent_id, conversation_id, record)
+            else:
+                record = _append_codex_activity(agent_id, conversation_id, record, preserve_sequence=True)
         if record.get("type") in {"interaction", "approval"} and str(record.get("status") or "").lower() == "pending":
             approval_id = str(record.get("approval_id") or record.get("approvalId") or record.get("interactionId") or record.get("id") or "").strip()
             if approval_id:
@@ -6680,6 +6728,8 @@ def _handle_codex_chat(body):
             "error": "Codex completed but durable result persistence failed",
             "errorCategory": type(reply_event_appended["error"]).__name__[:80],
         })
+    if fast_scope_started:
+        _CODEX_EVENT_FAST_PATH.end(agent_id, conversation_id, fast_scope_run_id)
     normalized["_status"] = provider_http_status(normalized)
     return normalized
 
@@ -6778,11 +6828,12 @@ def _handle_codex_run_start(body):
 
     def run_codex(command, emit, cancel_event):
         progress_id = f"codex-progress-{run_id}"
-        _append_codex_progress_comm_event(agent, agent.get("id") or agent_key, conversation_id, progress_id, {
-            "runId": run_id,
-            "status": "running",
-            "thinking": "Waiting for Codex run events.",
-        })
+        if not _CODEX_EVENT_FAST_PATH.settings.enabled:
+            _append_codex_progress_comm_event(agent, agent.get("id") or agent_key, conversation_id, progress_id, {
+                "runId": run_id,
+                "status": "running",
+                "thinking": "Waiting for Codex run events.",
+            })
         if hasattr(gateway_presence, "set_provider_event"):
             gateway_presence.set_provider_event(status_key, "codex", {"event": "run.started", "run_id": run_id})
 
@@ -6797,7 +6848,8 @@ def _handle_codex_run_start(body):
                 "tools": [record] if record.get("type") in {"activity", "tool", "command"} else [],
                 "approval": record if record.get("type") == "interaction" and record.get("status") == "pending" else None,
             }
-            _append_codex_progress_comm_event(agent, agent.get("id") or agent_key, conversation_id, progress_id, progress_state)
+            if not _CODEX_EVENT_FAST_PATH.settings.enabled:
+                _append_codex_progress_comm_event(agent, agent.get("id") or agent_key, conversation_id, progress_id, progress_state)
             event_name = _codex_activity_bridge_event_name(record)
             terminal_event = event_name in {"run.completed", "run.failed", "run.cancelled", "run.canceled"}
             # The worker publishes the single canonical terminal event after
@@ -6833,7 +6885,8 @@ def _handle_codex_run_start(body):
             result = _handle_codex_chat(run_body)
         except Exception as exc:
             result = {"ok": False, "status": "execution_failed", "error": str(exc), "_status": 500}
-        _remove_comm_progress_events("codex-progress", progress_id, conversation_id)
+        if not _CODEX_EVENT_FAST_PATH.settings.enabled:
+            _remove_comm_progress_events("codex-progress", progress_id, conversation_id)
         terminal_payload = _codex_stream_event_payload(run_id, agent, result=result, conversationId=conversation_id)
         status = str(result.get("status") or "").lower()
         if result.get("ok"):
