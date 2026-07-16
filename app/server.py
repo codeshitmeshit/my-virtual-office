@@ -6631,12 +6631,19 @@ def _handle_codex_chat(body):
             initial_sequence=_last_persisted_codex_activity_sequence(agent_id, conversation_id),
         )
     activity_callback = body.get("_onActivity")
-    reply_event_appended = {"done": False, "error": None}
+    reply_event_appended = {"done": False, "writing": False, "error": None, "operationError": None}
+    reply_event_lock = threading.Lock()
 
     def append_reply_event(reply, metadata=None, ok=True):
         text = str(reply or "")
-        if not inbound_event or not text or reply_event_appended["done"]:
-            return
+        if not inbound_event or not text:
+            return True
+        with reply_event_lock:
+            if reply_event_appended["done"]:
+                return True
+            if reply_event_appended["writing"]:
+                return False
+            reply_event_appended["writing"] = True
         meta = metadata if isinstance(metadata, dict) else {}
         source_metadata = _comm_metadata(inbound_event)
         source_metadata = {
@@ -6644,8 +6651,11 @@ def _handle_codex_chat(body):
             if k in {"sourceApp", "sourceSurface", "sourceLabel", "channel", "sourceMessageId", "feishuChatId", "representativeAgentId", "fromType"}
         }
         if _find_comm_reply_for_request(inbound_event):
-            reply_event_appended["done"] = True
-            return
+            with reply_event_lock:
+                reply_event_appended["done"] = True
+                reply_event_appended["writing"] = False
+                reply_event_appended["error"] = None
+            return True
         try:
             event = _append_comm_event({
                 "type": "message",
@@ -6667,10 +6677,16 @@ def _handle_codex_chat(body):
                 "ok": bool(ok),
             }, require_durable=True)
         except OSError as exc:
-            reply_event_appended["error"] = exc
-            return None
+            with reply_event_lock:
+                reply_event_appended["writing"] = False
+                reply_event_appended["error"] = exc
+            return False
         _publish_feishu_chat_comm_event(event, "message")
-        reply_event_appended["done"] = True
+        with reply_event_lock:
+            reply_event_appended["done"] = True
+            reply_event_appended["writing"] = False
+            reply_event_appended["error"] = None
+        return True
 
     def on_event(event):
         _CODEX_FAST_PATH_TELEMETRY.mark(fast_scope_run_id, "first_native_event")
@@ -6709,7 +6725,8 @@ def _handle_codex_chat(body):
                         },
                     )
                 except OSError as exc:
-                    reply_event_appended["error"] = reply_event_appended.get("error") or exc
+                    with reply_event_lock:
+                        reply_event_appended["operationError"] = reply_event_appended.get("operationError") or exc
                     raise
         if record.get("type") == "turn" and str(record.get("status") or "").lower() in {"completed", "done", "success"}:
             output = record.get("output") if isinstance(record.get("output"), dict) else {}
@@ -6792,12 +6809,25 @@ def _handle_codex_chat(body):
         run_id=normalized.get("runId") or result.get("runId", ""),
     )
     if inbound_event and normalized.get("reply"):
-        append_reply_event(normalized.get("reply") or "", {
+        reply_persisted = append_reply_event(normalized.get("reply") or "", {
             "threadId": normalized.get("threadId") or thread_id,
             "turnId": normalized.get("turnId") or result.get("turnId", ""),
             "modifiedFiles": modified_files,
             "needsHumanIntervention": bool(normalized.get("needsHumanIntervention")),
         }, ok=bool(normalized.get("ok")))
+        if not reply_persisted:
+            with reply_event_lock:
+                if reply_event_appended["writing"] and not reply_event_appended.get("error"):
+                    reply_event_appended["error"] = TimeoutError("durable reply write did not finish before terminal fence")
+    with reply_event_lock:
+        persistence_error = reply_event_appended.get("error") or reply_event_appended.get("operationError")
+    if persistence_error:
+        normalized.update({
+            "ok": False,
+            "status": "durable_write_failed",
+            "error": "Codex completed but durable result persistence failed",
+            "errorCategory": type(persistence_error).__name__[:80],
+        })
     stream_run_id = str(
         body.get("_streamRunId")
         or normalized.get("runId")
@@ -6822,13 +6852,11 @@ def _handle_codex_chat(body):
         )
         _CODEX_FAST_PATH_TELEMETRY.mark(fast_scope_run_id, "durable_terminal_committed")
     except OSError as exc:
-        reply_event_appended["error"] = reply_event_appended.get("error") or exc
-    if reply_event_appended.get("error"):
         normalized.update({
             "ok": False,
             "status": "durable_write_failed",
             "error": "Codex completed but durable result persistence failed",
-            "errorCategory": type(reply_event_appended["error"]).__name__[:80],
+            "errorCategory": type(exc).__name__[:80],
         })
     if fast_scope_started:
         _CODEX_EVENT_FAST_PATH.end(agent_id, conversation_id, fast_scope_run_id)
@@ -8917,6 +8945,33 @@ def _append_comm_event(event, *, require_durable=False):
     return event
 
 
+def _find_comm_event_by_id(event_id, *, conversation_id=None, agent_id=None):
+    """Find a durable communication event without the display-history limit."""
+    event_id = str(event_id or "").strip()
+    if not event_id:
+        return None
+    try:
+        with open(_comm_log_path(), "r") as stream:
+            for line in stream:
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if event.get("id") != event_id:
+                    continue
+                if conversation_id and event.get("conversationId") != conversation_id:
+                    continue
+                if agent_id:
+                    source = (event.get("from") or {}).get("id")
+                    destination = (event.get("to") or {}).get("id")
+                    if agent_id not in (source, destination):
+                        continue
+                return event
+    except FileNotFoundError:
+        return None
+    return None
+
+
 def _append_codex_durable_operation(agent_id, conversation_id, operation, stable_id, metadata=None, *, ok=True):
     """Append one idempotent, content-free Codex key-state record."""
     agent_id = str(agent_id or "").strip()[:160]
@@ -8934,9 +8989,10 @@ def _append_codex_durable_operation(agent_id, conversation_id, operation, stable
         if key in {"status", "runId", "turnId", "threadId", "approvalId", "approvalStatus", "choice", "errorCategory"}
     }
     with _COMM_REQUEST_IDEMPOTENCY_LOCK:
-        existing = next(
-            (item for item in reversed(_load_comm_history(limit=1000, conversation_id=conversation_id, agent_id=agent_id)) if item.get("id") == event_id),
-            None,
+        existing = _find_comm_event_by_id(
+            event_id,
+            conversation_id=conversation_id,
+            agent_id=agent_id,
         )
         if existing:
             return existing

@@ -5,6 +5,7 @@ import json
 import os
 import sys
 import tempfile
+import threading
 
 import pytest
 
@@ -76,6 +77,33 @@ def test_durable_operation_is_idempotent_across_file_backed_restart(monkeypatch)
 
         assert first["id"] == second["id"]
         assert len(_events(status_dir)) == 1
+
+
+def test_durable_operation_idempotency_survives_more_than_history_window(monkeypatch):
+    with tempfile.TemporaryDirectory() as status_dir:
+        monkeypatch.setattr(server, "STATUS_DIR", status_dir)
+        monkeypatch.setattr(server, "get_roster", lambda: [AGENT])
+
+        first = server._append_codex_durable_operation(
+            "codex-local", "conv-long", "terminal", "run-stable", {"status": "completed"}
+        )
+        for index in range(1001):
+            server._append_comm_event({
+                "id": f"later-{index}",
+                "type": "message",
+                "direction": "system",
+                "conversationId": "conv-long",
+                "from": {"id": "codex-local"},
+                "to": {"id": "user"},
+                "text": "",
+            })
+
+        retried = server._append_codex_durable_operation(
+            "codex-local", "conv-long", "terminal", "run-stable", {"status": "completed"}
+        )
+        matching = [event for event in _events(status_dir) if event.get("id") == first["id"]]
+        assert retried["id"] == first["id"]
+        assert len(matching) == 1
 
 
 def test_partial_fsync_failure_remains_retry_idempotent(monkeypatch):
@@ -177,6 +205,150 @@ def test_terminal_write_failure_overrides_success(monkeypatch):
         assert result["ok"] is False
         assert result["status"] == "durable_write_failed"
         assert provider.calls == 1
+
+
+def test_reply_write_retry_clears_error_before_success_terminal(monkeypatch):
+    with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as workspace:
+        provider = ResultProvider(
+            workspace,
+            {"ok": True, "status": "completed", "reply": "durable reply", "threadId": "thr-retry", "turnId": "turn-retry"},
+            event={
+                "type": "turn",
+                "status": "completed",
+                "threadId": "thr-retry",
+                "turnId": "turn-retry",
+                "output": {"reply": "durable reply", "modifiedFiles": []},
+            },
+        )
+        _configure(monkeypatch, status_dir, provider)
+        original_append = server._append_comm_event
+        reply_attempts = 0
+
+        def fail_first_reply(event, *, require_durable=False):
+            nonlocal reply_attempts
+            if event.get("direction") == "reply":
+                reply_attempts += 1
+                if reply_attempts == 1:
+                    raise OSError("transient reply fsync failure")
+            return original_append(event, require_durable=require_durable)
+
+        monkeypatch.setattr(server, "_append_comm_event", fail_first_reply)
+        result = server._handle_codex_chat({
+            "agentId": "codex-local",
+            "conversationId": "conv-retry",
+            "message": "complete after retry",
+            "fromType": "human",
+            "_streamRunId": "run-retry",
+        })
+
+        events = _events(status_dir)
+        terminals = [event for event in events if event.get("operation") == "terminal"]
+        replies = [event for event in events if event.get("direction") == "reply"]
+        assert result["ok"] is True
+        assert result["status"] == "completed"
+        assert reply_attempts == 2
+        assert len(replies) == 1
+        assert len(terminals) == 1
+        assert terminals[0]["ok"] is True
+        assert terminals[0]["metadata"]["status"] == "completed"
+
+
+def test_reply_write_failure_commits_only_failed_terminal(monkeypatch):
+    with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as workspace:
+        provider = ResultProvider(
+            workspace,
+            {"ok": True, "status": "completed", "reply": "lost reply", "threadId": "thr-failed-reply", "turnId": "turn-failed-reply"},
+            event={
+                "type": "turn",
+                "status": "completed",
+                "threadId": "thr-failed-reply",
+                "turnId": "turn-failed-reply",
+                "output": {"reply": "lost reply", "modifiedFiles": []},
+            },
+        )
+        _configure(monkeypatch, status_dir, provider)
+        original_append = server._append_comm_event
+
+        def fail_all_replies(event, *, require_durable=False):
+            if event.get("direction") == "reply":
+                raise OSError("reply disk unavailable")
+            return original_append(event, require_durable=require_durable)
+
+        monkeypatch.setattr(server, "_append_comm_event", fail_all_replies)
+        result = server._handle_codex_chat({
+            "agentId": "codex-local",
+            "conversationId": "conv-failed-reply",
+            "message": "complete without durable reply",
+            "fromType": "human",
+            "_streamRunId": "run-failed-reply",
+        })
+
+        terminals = [event for event in _events(status_dir) if event.get("operation") == "terminal"]
+        assert result["ok"] is False
+        assert result["status"] == "durable_write_failed"
+        assert len(terminals) == 1
+        assert terminals[0]["ok"] is False
+        assert terminals[0]["metadata"]["status"] == "durable_write_failed"
+
+
+def test_inflight_terminal_reply_write_fails_closed_without_duplicate(monkeypatch):
+    with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as workspace:
+        entered = threading.Event()
+        release = threading.Event()
+
+        class ConcurrentTerminalProvider:
+            def __init__(self):
+                self.workspace = workspace
+                self.worker = None
+
+            def send_message(self, *args, event_callback=None, **kwargs):
+                event = {
+                    "type": "turn",
+                    "status": "completed",
+                    "threadId": "thr-inflight",
+                    "turnId": "turn-inflight",
+                    "output": {"reply": "event reply", "modifiedFiles": []},
+                }
+                self.worker = threading.Thread(target=lambda: event_callback(event), daemon=True)
+                self.worker.start()
+                assert entered.wait(0.5)
+                return {
+                    "ok": True,
+                    "status": "completed",
+                    "reply": "event reply",
+                    "threadId": "thr-inflight",
+                    "turnId": "turn-inflight",
+                }
+
+        provider = ConcurrentTerminalProvider()
+        _configure(monkeypatch, status_dir, provider)
+        original_append = server._append_comm_event
+
+        def block_reply(event, *, require_durable=False):
+            if event.get("direction") == "reply":
+                entered.set()
+                release.wait(1)
+            return original_append(event, require_durable=require_durable)
+
+        monkeypatch.setattr(server, "_append_comm_event", block_reply)
+        result = server._handle_codex_chat({
+            "agentId": "codex-local",
+            "conversationId": "conv-inflight",
+            "message": "finish with a blocked terminal callback",
+            "fromType": "human",
+            "_streamRunId": "run-inflight",
+        })
+        release.set()
+        provider.worker.join(1)
+
+        events = _events(status_dir)
+        replies = [event for event in events if event.get("direction") == "reply"]
+        terminals = [event for event in events if event.get("operation") == "terminal"]
+        assert result["ok"] is False
+        assert result["status"] == "durable_write_failed"
+        assert len(replies) == 1
+        assert len(terminals) == 1
+        assert terminals[0]["ok"] is False
 
 
 def test_pending_approval_is_durable_and_deduplicated(monkeypatch):
