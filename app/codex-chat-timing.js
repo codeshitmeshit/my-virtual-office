@@ -10,6 +10,9 @@
     'message.delta', 'reasoning.available', 'tool.started', 'tool.completed',
     'tool.failed', 'provider.activity', 'approval.request'
   ]);
+  const NATIVE_EVENTS = new Set([
+    ...FRAGMENT_EVENTS, 'session.metrics', 'approval.resolved'
+  ]);
   const TERMINAL_EVENTS = new Set(['run.completed', 'run.failed', 'run.cancelled', 'run.canceled']);
   const trackers = new Set();
 
@@ -40,6 +43,7 @@
       this.pending = new Map();
       this.runs = new Map();
       this.orphans = new Map();
+      this.tokenToRun = new Map();
     }
 
     beginSubmission() {
@@ -49,7 +53,8 @@
     }
 
     markWorkingVisible(token) {
-      const record = this.pending.get(token) || this.runs.get(token);
+      const runId = this.tokenToRun.get(token);
+      const record = this.pending.get(token) || (runId ? this.runs.get(runId) : null);
       if (!record || record.workingAt !== null) return false;
       record.workingAt = this.clock();
       return true;
@@ -67,11 +72,13 @@
         this.orphans.delete(runId);
       }
       this.runs.set(runId, record);
-      this._trim(this.runs, this.maxRuns);
+      this.tokenToRun.set(token, runId);
+      this._trimRuns();
       return true;
     }
 
     abandon(token) {
+      this.tokenToRun.delete(token);
       return this.pending.delete(token);
     }
 
@@ -80,7 +87,7 @@
       if (!runId) return false;
       const now = this.clock();
       const record = this.runs.get(runId) || this.orphans.get(runId) || { runId };
-      if (record.firstNativeAt == null) record.firstNativeAt = now;
+      if (NATIVE_EVENTS.has(eventName) && record.firstNativeAt == null) record.firstNativeAt = now;
       if (FRAGMENT_EVENTS.has(eventName) && record.firstFragmentAt == null) record.firstFragmentAt = now;
       const text = eventName === 'message.delta' ? String(data.delta || data.text || data.reply || '') : '';
       if (text && record.firstTextAt == null) record.firstTextAt = now;
@@ -133,6 +140,15 @@
 
     _trim(map, limit) {
       while (map.size > limit) map.delete(map.keys().next().value);
+    }
+
+    _trimRuns() {
+      while (this.runs.size > this.maxRuns) {
+        const runId = this.runs.keys().next().value;
+        const record = this.runs.get(runId);
+        this.runs.delete(runId);
+        if (record?.token) this.tokenToRun.delete(record.token);
+      }
     }
   }
 

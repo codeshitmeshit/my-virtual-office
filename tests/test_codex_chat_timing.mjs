@@ -31,8 +31,8 @@ for (let index = 0; index < 100; index += 1) {
   tracker.markWorkingVisible(token);
   const runId = `measured-${index}`;
 
-  // Exercise the race where shared SSE beats the POST response. The tracker
-  // stores only the browser-local arrival time and binds it later by runId.
+  // Exercise the race where shared SSE beats the POST response. Synthetic
+  // run.started must not count as a native Agent event.
   now = submittedAt + 80 + (index % 7);
   tracker.observeEvent(runId, 'run.started', { ts: 9999999999999 });
   now = submittedAt + 95 + (index % 11);
@@ -63,6 +63,26 @@ assert.equal(diagnostics.backendCorrelation, 'runId-only-no-clock-subtraction');
 assert.ok(diagnostics.stages.firstTextMs.p95Ms > diagnostics.stages.firstFragmentMs.p95Ms);
 assert.ok(!JSON.stringify(diagnostics).includes('fragment-99'));
 assert.ok(!JSON.stringify(diagnostics).includes('text-99'));
+
+const nativeGate = new CodexChatTimingTracker({ clock: () => now });
+const nativeToken = nativeGate.beginSubmission();
+nativeGate.bindRun(nativeToken, 'native-gate');
+advance(5);
+nativeGate.observeEvent('native-gate', 'run.started');
+assert.equal(nativeGate.diagnostics().stages.firstNativeEventMs.samples, 0);
+advance(40);
+nativeGate.observeEvent('native-gate', 'provider.activity');
+assert.equal(nativeGate.diagnostics().stages.firstNativeEventMs.samples, 1);
+assert.equal(nativeGate.diagnostics().stages.firstNativeEventMs.p95Ms, 45);
+
+const workingRace = new CodexChatTimingTracker({ clock: () => now });
+const workingToken = workingRace.beginSubmission();
+advance(2);
+assert.equal(workingRace.bindRun(workingToken, 'working-race'), true);
+advance(8);
+assert.equal(workingRace.markWorkingVisible(workingToken), true);
+assert.equal(workingRace.diagnostics().stages.workingFeedbackMs.samples, 1);
+assert.equal(workingRace.diagnostics().stages.workingFeedbackMs.p95Ms, 10);
 
 const abandoned = tracker.beginSubmission();
 tracker.markWorkingVisible(abandoned);
