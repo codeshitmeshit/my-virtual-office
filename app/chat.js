@@ -1800,6 +1800,13 @@
             finalStatusText = _ct('codex_working');
             finalStatusClass = 'connecting';
             this.setStatus(finalStatusText, finalStatusClass);
+          } else if (codexAccepted) {
+            await this.recoverProviderStateOnce().catch(() => {});
+            await this.loadHistory({ recoverFinal: true, startedAt: codexSendStartedAt }).catch(() => {});
+            this.appendSystem(_ct('codex_error') + ': ' + (e?.message || 'accepted run failed'));
+            finalStatusText = _ct('codex_error');
+            finalStatusClass = 'disconnected';
+            this.setStatus(finalStatusText, finalStatusClass);
           } else try {
             await this.sendCodexBlockingMessage(codexBody, codexSendStartedAt, label);
             codexAccepted = true;

@@ -105,6 +105,23 @@ const codexSuccessPath = codexSendBranch.slice(codexSendBranch.indexOf('await th
 if (codexSuccessPath.includes('loadHistory({ recoverFinal: true, startedAt: codexSendStartedAt })')) {
   throw new Error('Codex SSE completion should not fully redraw history and drop locally appended user bubbles');
 }
+const codexCatchPath = codexSendBranch.slice(codexSendBranch.indexOf('} catch (e) {'), codexSendBranch.indexOf('} finally {'));
+const acceptedGuard = codexCatchPath.indexOf('else if (codexAccepted)');
+const preAcceptanceFallback = codexCatchPath.indexOf('} else try {');
+if (acceptedGuard < 0 || preAcceptanceFallback < 0 || acceptedGuard > preAcceptanceFallback) {
+  throw new Error('Accepted Codex runs must be handled before the pre-acceptance blocking fallback');
+}
+const acceptedFailurePath = codexCatchPath.slice(acceptedGuard, preAcceptanceFallback);
+if (acceptedFailurePath.includes('sendCodexBlockingMessage(')) {
+  throw new Error('Accepted Codex run failures must not re-execute the prompt through blocking chat');
+}
+if (!acceptedFailurePath.includes('recoverProviderStateOnce()') || !acceptedFailurePath.includes('loadHistory({ recoverFinal: true, startedAt: codexSendStartedAt })')) {
+  throw new Error('Accepted Codex run failures should recover existing run and history state');
+}
+const compatibilityFallbackPath = codexCatchPath.slice(preAcceptanceFallback, codexCatchPath.indexOf('} catch (fallbackError)'));
+if (!compatibilityFallbackPath.includes('sendCodexBlockingMessage(codexBody')) {
+  throw new Error('Pre-acceptance Codex run creation failures should retain the compatibility fallback');
+}
 const codexFinallyPath = codexSendBranch.slice(codexSendBranch.indexOf('} finally {'), codexSendBranch.indexOf('return;', codexSendBranch.indexOf('} finally {')));
 if (codexFinallyPath.includes('pollCodexActivity()')) {
   throw new Error('Codex SSE finally should not poll legacy activity after the run has already settled');
