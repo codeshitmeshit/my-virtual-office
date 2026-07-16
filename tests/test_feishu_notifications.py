@@ -3656,6 +3656,7 @@ def test_feishu_chat_public_worker_status_is_strictly_whitelisted_and_redacted()
         "enabled": True,
         "running": True,
         "status": "connected",
+        "heartbeatAt": 1710000000500,
         "lastError": f"network failure {canary}",
         "callbackUrl": f"http://user:{canary}@localhost/private",
         "message": {"content": canary},
@@ -3672,6 +3673,7 @@ def test_feishu_chat_public_worker_status_is_strictly_whitelisted_and_redacted()
     })
 
     assert projected["lastError"] == "Worker reported an error; see local worker logs."
+    assert projected["heartbeatAt"] == 1710000000500
     assert projected["sdk"] == {"connected": True, "state": "connected"}
     assert projected["command"] == {"ready": True}
     assert projected["spool"] == {

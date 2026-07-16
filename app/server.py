@@ -916,7 +916,7 @@ def _public_feishu_chat_worker_status(value):
             result[key] = boolean_field(source, key)
     if "status" in source:
         result["status"] = text_field(source, "status", top_statuses, "error")
-    for key in ("startedAt", "lastEventAt", "pid", "returnCode"):
+    for key in ("startedAt", "lastEventAt", "heartbeatAt", "pid", "returnCode"):
         if key in source:
             result[key] = number_field(source, key)
     for key in ("mode", "transport", "workerInstanceId"):
