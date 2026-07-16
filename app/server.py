@@ -3423,7 +3423,17 @@ def _ensure_builtin_communication_skill():
                 first_path = skill_file
         legacy_dir = os.path.join(lib_dir, LEGACY_AGENT_PLATFORM_COMM_SKILL_NAME)
         if os.path.isdir(legacy_dir):
-            shutil.rmtree(legacy_dir)
+            entries = sorted(os.listdir(legacy_dir)) if not os.path.islink(legacy_dir) else []
+            legacy_file = os.path.join(legacy_dir, "SKILL.md")
+            legacy_content = ""
+            if entries == ["SKILL.md"] and os.path.isfile(legacy_file) and not os.path.islink(legacy_file):
+                with open(legacy_file, "r", encoding="utf-8", errors="replace") as f:
+                    legacy_content = f.read()
+            if entries == ["SKILL.md"] and _is_known_legacy_agent_comm_content(legacy_content):
+                os.unlink(legacy_file)
+                os.rmdir(legacy_dir)
+            else:
+                print("[SKILLS] Preserved conflicting legacy communication skill data")
         return first_path
     except Exception as e:
         print(f"[SKILLS] Failed to seed built-in office skills: {e}")
@@ -10621,7 +10631,14 @@ def _handle_skills_library_list():
         if not description:
             description = _extract_skill_description(skill_md)
         skills.append({"name": entry, "description": description, "path": skill_md})
-    return {"skills": skills}
+    conflicts = []
+    legacy_dir = os.path.join(lib_dir, LEGACY_AGENT_PLATFORM_COMM_SKILL_NAME)
+    if os.path.lexists(legacy_dir):
+        conflicts.append({
+            "skill": LEGACY_AGENT_PLATFORM_COMM_SKILL_NAME,
+            "reason": "legacy_content_unverified",
+        })
+    return {"skills": skills, "migrationConflicts": conflicts}
 
 
 def _handle_skills_library_get(skill_name):

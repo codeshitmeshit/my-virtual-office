@@ -57,7 +57,13 @@ def test_library_seed_uses_canonical_content_and_migrates_only_reserved_legacy()
         os.makedirs(legacy)
         os.makedirs(unrelated)
         with open(os.path.join(legacy, "SKILL.md"), "w", encoding="utf-8") as f:
-            f.write("legacy managed content")
+            f.write("""---
+name: AgentPlatform-to-AgentPlatform_Communications
+---
+# AgentPlatform-to-AgentPlatform Communications
+Do **not** bypass the office.
+POST /api/agent-platform-communications/send
+""")
         with open(os.path.join(unrelated, "SKILL.md"), "w", encoding="utf-8") as f:
             f.write("user content")
         try:
@@ -70,6 +76,43 @@ def test_library_seed_uses_canonical_content_and_migrates_only_reserved_legacy()
                 assert f.read() == "user content"
         finally:
             server.VO_CONFIG = old_config
+
+
+def test_library_read_preserves_unknown_modified_and_auxiliary_legacy_data():
+    old_config = server.VO_CONFIG
+    cases = {
+        "unknown": {"SKILL.md": "user-owned content"},
+        "augmented": {
+            "SKILL.md": """---
+name: AgentPlatform-to-AgentPlatform_Communications
+---
+# AgentPlatform-to-AgentPlatform Communications
+Do **not** bypass the office.
+POST /api/agent-platform-communications/send
+""",
+            "notes.txt": "keep auxiliary data",
+        },
+    }
+    for case_name, files in cases.items():
+        with tempfile.TemporaryDirectory() as home:
+            server.VO_CONFIG = {**server.VO_CONFIG, "openclaw": {**server.VO_CONFIG["openclaw"], "homePath": home}}
+            legacy = os.path.join(home, "skills-library", server.LEGACY_AGENT_PLATFORM_COMM_SKILL_NAME)
+            os.makedirs(legacy)
+            for name, content in files.items():
+                with open(os.path.join(legacy, name), "w", encoding="utf-8") as f:
+                    f.write(content)
+            try:
+                result = server._handle_skills_library_list()
+                assert result["migrationConflicts"] == [{
+                    "skill": server.LEGACY_AGENT_PLATFORM_COMM_SKILL_NAME,
+                    "reason": "legacy_content_unverified",
+                }], case_name
+                assert sorted(os.listdir(legacy)) == sorted(files), case_name
+                for name, content in files.items():
+                    with open(os.path.join(legacy, name), "r", encoding="utf-8") as f:
+                        assert f.read() == content, case_name
+            finally:
+                server.VO_CONFIG = old_config
 
 
 def _openclaw_agent(workspace, agent_id="analyst"):
