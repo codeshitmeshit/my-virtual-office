@@ -13,7 +13,7 @@ APP_DIR = ROOT / "app"
 if str(APP_DIR) not in sys.path:
     sys.path.insert(0, str(APP_DIR))
 
-from services.codex_fast_path import load_codex_fast_path_settings
+from services.codex_fast_path import CodexEventFastPath, CodexFastPathSettings, classify_codex_event, load_codex_fast_path_settings
 
 
 def test_defaults_are_valid_and_disabled():
@@ -106,3 +106,48 @@ def test_server_load_and_safe_projection_expose_only_bounded_diagnostics(monkeyp
         server._handle_codex_test = old_codex_test
         server._handle_hermes_test = old_hermes_test
         server._handle_claude_code_test = old_claude_test
+
+
+def test_disabled_event_service_is_exact_passthrough():
+    service = CodexEventFastPath(CodexFastPathSettings(enabled=False))
+    event = {"type": "reasoning", "text": "unchanged", "nested": {"value": 1}}
+    seen = []
+    result = service.process_event("agent", "conversation", "run", event, legacy_callback=lambda item: seen.append(item) or item)
+    assert result is event
+    assert seen == [event]
+    assert seen[0] is event
+    assert service.diagnostics()["disabledPassThrough"] == 1
+    assert service.diagnostics()["liveScopes"] == 0
+
+
+def test_enabled_event_service_classifies_sanitizes_and_sequences_by_scope():
+    service = CodexEventFastPath(CodexFastPathSettings(requested_enabled=True, enabled=True), max_scopes=4)
+    first = service.process_event("agent", "conversation", "run", {
+        "type": "reasoning", "sequence": 9, "text": "safe", "authorization": "Bearer secret-token-value",
+    })
+    second = service.process_event("agent", "conversation", "run", {"type": "interaction", "status": "pending"})
+    terminal = service.process_event("agent", "conversation", "run", {"type": "turn", "status": "completed"})
+    assert [first["sequence"], second["sequence"], terminal["sequence"]] == [1, 2, 3]
+    assert first["providerSequence"] == 9
+    assert "authorization" not in first
+    assert [first["eventClass"], second["eventClass"], terminal["eventClass"]] == ["transient", "durable_key", "terminal"]
+    assert service.live_snapshot("agent", "conversation", "run")["status"] == "completed"
+    diagnostics = service.diagnostics()
+    assert diagnostics["normalized"] == 3
+    assert diagnostics["transient"] == diagnostics["durableKey"] == diagnostics["terminal"] == 1
+
+
+def test_event_classification_and_active_scope_capacity_are_bounded():
+    assert classify_codex_event({"type": "tool", "status": "running"}) == "transient"
+    assert classify_codex_event({"type": "approval", "status": "pending"}) == "durable_key"
+    assert classify_codex_event({"type": "run", "status": "failed"}) == "terminal"
+    service = CodexEventFastPath(CodexFastPathSettings(requested_enabled=True, enabled=True), max_scopes=2)
+    assert service.begin("agent", "conversation-1", "run-1") is True
+    assert service.begin("agent", "conversation-2", "run-2") is True
+    assert service.begin("agent", "conversation-3", "run-3") is False
+    service.end("agent", "conversation-1", "run-1")
+    assert service.begin("agent", "conversation-3", "run-3") is True
+    diagnostics = service.diagnostics()
+    assert diagnostics["liveScopes"] == 2
+    assert diagnostics["scopeEvictions"] == 1
+    assert diagnostics["capacityBypass"] == 1

@@ -2,12 +2,20 @@
 
 from __future__ import annotations
 
+from collections import OrderedDict
+import copy
 from dataclasses import dataclass
-from typing import Any, Mapping
+import threading
+import time
+from typing import Any, Callable, Mapping
+
+from .provider_events import sanitize_payload
 
 
 TRUE_VALUES = {"1", "true", "yes", "on", "enabled"}
 FALSE_VALUES = {"0", "false", "no", "off", "disabled"}
+TERMINAL_STATUSES = {"completed", "done", "success", "failed", "error", "cancelled", "canceled"}
+MAX_LIVE_SCOPES = 4_096
 
 
 @dataclass(frozen=True)
@@ -31,6 +39,164 @@ class CodexFastPathSettings:
             "streamCoalesceMaxMs": self.coalesce_max_ms,
             "issues": list(self.issues),
         }
+
+
+@dataclass
+class _LiveScope:
+    sequence: int = 0
+    active: int = 0
+    last_used_ns: int = 0
+    last_event: dict[str, Any] | None = None
+
+
+def classify_codex_event(event: Mapping[str, Any] | None) -> str:
+    event = event if isinstance(event, Mapping) else {}
+    event_type = str(event.get("type") or "").strip().lower()
+    status = str(event.get("status") or "").strip().lower()
+    if event_type in {"turn", "run"} and status in TERMINAL_STATUSES:
+        return "terminal"
+    if event_type in {"interaction", "approval"}:
+        return "durable_key"
+    if event_type in {"message", "assistant_message", "assistant", "text", "output"} and status in TERMINAL_STATUSES:
+        return "durable_key"
+    if event_type in {"reasoning", "thinking", "message", "assistant_message", "assistant", "text", "output", "activity", "tool", "command"}:
+        return "transient"
+    return "durable_key"
+
+
+class CodexEventFastPath:
+    """Bounded Codex event normalization without owning run or SSE state."""
+
+    def __init__(
+        self,
+        settings: CodexFastPathSettings,
+        *,
+        max_scopes: int = MAX_LIVE_SCOPES,
+        clock_ns: Callable[[], int] | None = None,
+        sanitizer: Callable[[Any], Any] | None = None,
+    ) -> None:
+        self.settings = settings
+        self.max_scopes = max(1, int(max_scopes))
+        self._clock_ns = clock_ns or time.monotonic_ns
+        self._sanitize = sanitizer or sanitize_payload
+        self._lock = threading.Lock()
+        self._scopes: OrderedDict[tuple[str, str, str], _LiveScope] = OrderedDict()
+        self._counters = {
+            "disabledPassThrough": 0,
+            "normalized": 0,
+            "transient": 0,
+            "durableKey": 0,
+            "terminal": 0,
+            "scopeEvictions": 0,
+            "capacityBypass": 0,
+        }
+
+    @staticmethod
+    def scope_key(agent_id: str, conversation_id: str, run_id: str) -> tuple[str, str, str]:
+        return (
+            str(agent_id or "")[:160],
+            str(conversation_id or "")[:240],
+            str(run_id or "")[:200],
+        )
+
+    def begin(self, agent_id: str, conversation_id: str, run_id: str) -> bool:
+        key = self.scope_key(agent_id, conversation_id, run_id)
+        with self._lock:
+            scope = self._get_or_create_locked(key)
+            if scope is None:
+                self._counters["capacityBypass"] += 1
+                return False
+            scope.active += 1
+            scope.last_used_ns = self._clock_ns()
+            return True
+
+    def end(self, agent_id: str, conversation_id: str, run_id: str) -> None:
+        key = self.scope_key(agent_id, conversation_id, run_id)
+        with self._lock:
+            scope = self._scopes.get(key)
+            if not scope:
+                return
+            scope.active = max(0, scope.active - 1)
+            scope.last_used_ns = self._clock_ns()
+            self._scopes.move_to_end(key)
+            self._prune_locked()
+
+    def process_event(
+        self,
+        agent_id: str,
+        conversation_id: str,
+        run_id: str,
+        event: dict[str, Any],
+        *,
+        legacy_callback: Callable[[dict[str, Any]], Any] | None = None,
+    ) -> Any:
+        if not self.settings.enabled:
+            with self._lock:
+                self._counters["disabledPassThrough"] += 1
+            return legacy_callback(event) if legacy_callback else event
+
+        event_class = classify_codex_event(event)
+        cleaned = self._sanitize(event)
+        cleaned = copy.deepcopy(cleaned) if isinstance(cleaned, dict) else {}
+        key = self.scope_key(agent_id, conversation_id, run_id)
+        with self._lock:
+            scope = self._get_or_create_locked(key)
+            if scope is None:
+                self._counters["capacityBypass"] += 1
+                return legacy_callback(event) if legacy_callback else event
+            scope.sequence += 1
+            scope.last_used_ns = self._clock_ns()
+            cleaned.setdefault("providerSequence", int(event.get("sequence") or 0))
+            cleaned["sequence"] = scope.sequence
+            cleaned["agentId"] = key[0]
+            cleaned["conversationId"] = key[1]
+            if key[2]:
+                cleaned.setdefault("runId", key[2])
+            cleaned["eventClass"] = event_class
+            scope.last_event = copy.deepcopy(cleaned)
+            self._scopes.move_to_end(key)
+            self._counters["normalized"] += 1
+            counter = "transient" if event_class == "transient" else "terminal" if event_class == "terminal" else "durableKey"
+            self._counters[counter] += 1
+        return cleaned
+
+    def live_snapshot(self, agent_id: str, conversation_id: str, run_id: str) -> dict[str, Any] | None:
+        key = self.scope_key(agent_id, conversation_id, run_id)
+        with self._lock:
+            scope = self._scopes.get(key)
+            return copy.deepcopy(scope.last_event) if scope and scope.last_event else None
+
+    def diagnostics(self) -> dict[str, Any]:
+        with self._lock:
+            active = sum(scope.active for scope in self._scopes.values())
+            return {
+                **self.settings.diagnostics(),
+                **self._counters,
+                "liveScopes": len(self._scopes),
+                "activeScopes": active,
+                "maxLiveScopes": self.max_scopes,
+            }
+
+    def _get_or_create_locked(self, key: tuple[str, str, str]) -> _LiveScope | None:
+        scope = self._scopes.get(key)
+        if scope is not None:
+            self._scopes.move_to_end(key)
+            return scope
+        self._prune_locked(required=1)
+        if len(self._scopes) >= self.max_scopes:
+            return None
+        scope = _LiveScope(last_used_ns=self._clock_ns())
+        self._scopes[key] = scope
+        return scope
+
+    def _prune_locked(self, required: int = 0) -> None:
+        target = max(0, self.max_scopes - max(0, int(required)))
+        for key, scope in list(self._scopes.items()):
+            if len(self._scopes) <= target:
+                break
+            if scope.active == 0:
+                self._scopes.pop(key, None)
+                self._counters["scopeEvictions"] += 1
 
 
 def _configured_value(environ: Mapping[str, Any], env_key: str, config: Mapping[str, Any], config_key: str, default: Any):

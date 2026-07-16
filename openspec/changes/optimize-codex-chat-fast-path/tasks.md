@@ -6,7 +6,7 @@
 ## 2. Guarded Fast-Path Foundation
 
 - [x] 2.1 Add validated startup configuration and diagnostics for `VO_CODEX_CHAT_FAST_PATH_ENABLED`, `VO_CODEX_MAX_CONCURRENT_TURNS`, and the 33-100 ms coalescing bounds; keep the fast path off by default, clamp capacity to 1-4, fail invalid configuration to the legacy path, and test sanitized status output.
-- [ ] 2.2 Introduce an isolated Codex event fast-path service with bounded event classification, one-time ingress redaction, per-conversation live sequence state, active-scope lifecycle, content-free counters/timestamps, and no new run or SSE state machine; prove the disabled service does not alter existing callbacks or payloads.
+- [x] 2.2 Introduce an isolated Codex event fast-path service with bounded event classification, one-time ingress redaction, per-conversation live sequence state, active-scope lifecycle, content-free counters/timestamps, and no new run or SSE state machine; prove the disabled service does not alter existing callbacks or payloads.
 
 ## 3. Durable and Transient State Separation
 
