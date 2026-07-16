@@ -1130,6 +1130,35 @@
     background: #101422;
     border-radius: 8px;
 }
+.proj-scheduled-history-summary {
+    cursor: pointer;
+    list-style: none;
+    user-select: none;
+}
+.proj-scheduled-history-summary::-webkit-details-marker {
+    display: none;
+}
+.proj-scheduled-history-panel:not([open]) .proj-scheduled-history-summary {
+    margin-bottom: 0;
+    padding-bottom: 0;
+    border-bottom-color: transparent;
+}
+.proj-scheduled-history-chevron {
+    width: 8px;
+    height: 8px;
+    margin-right: 4px;
+    border-right: 2px solid #8f96a8;
+    border-bottom: 2px solid #8f96a8;
+    transform: rotate(45deg);
+    transition: transform 0.15s ease;
+    flex-shrink: 0;
+}
+.proj-scheduled-history-panel[open] .proj-scheduled-history-chevron {
+    transform: rotate(225deg);
+}
+.proj-scheduled-history-summary:hover .proj-scheduled-history-chevron {
+    border-color: #ffd700;
+}
 .proj-scheduled-history-list {
     display: flex;
     flex-direction: column;

@@ -229,6 +229,59 @@ def test_workflow_chat_reads_project_execution_codex_attempt_reasoning():
             restore_store(old)
 
 
+def test_workflow_chat_recovers_active_attempt_after_workflow_timeout():
+    with tempfile.TemporaryDirectory() as status_dir:
+        old = with_store(status_dir)
+        old_activity = server._get_codex_activity
+        try:
+            project = server._handle_project_create({
+                "title": "Timed Out Workflow Chat Project",
+                "projectExecutionEnabled": True,
+                "workspacePath": status_dir,
+                "defaultExecutorAgentId": "codex-executor",
+                "defaultReviewerAgentId": "reviewer",
+            })["project"]
+            in_progress_column = next(c for c in project["columns"] if c["title"] == "In Progress")
+            task = server._handle_task_create(project["id"], {
+                "title": "Keep showing live chat",
+                "columnId": in_progress_column["id"],
+                "assignee": "codex-executor",
+            })["task"]
+            project = server._handle_project_get(project["id"])["project"]
+            task = next(t for t in project["tasks"] if t["id"] == task["id"])
+            attempt_id = "attempt-after-workflow-timeout"
+            task.update({
+                "activeAttemptId": attempt_id,
+                "executorAgentId": "codex-executor",
+                "executionState": "executing",
+                "attempts": [{"id": attempt_id, "status": "executing", "executor": {"id": "codex-executor", "providerKind": "codex"}}],
+            })
+            project.update({"workflowActive": False, "workflowPhase": "idle", "activeTaskId": "", "activeAgent": ""})
+            server._save_projects({"projects": [project]})
+
+            calls = []
+            def fake_activity(agent_id, conversation_id, after=0):
+                calls.append((agent_id, conversation_id, after))
+                if conversation_id != attempt_id:
+                    return []
+                return [{
+                    "id": "evt-timeout-1",
+                    "type": "reasoning",
+                    "text": "The task is still running after the workflow request timed out.",
+                    "status": "running",
+                    "ts": 456,
+                    "operationId": "op-timeout-1",
+                }]
+
+            server._get_codex_activity = fake_activity
+            result = server._handle_workflow_chat(project["id"])
+            assert calls == [("codex-executor", attempt_id, 0)]
+            assert result["messages"][0]["thinking"] == "The task is still running after the workflow request timed out."
+        finally:
+            server._get_codex_activity = old_activity
+            restore_store(old)
+
+
 def test_openclaw_workflow_chat_reads_gateway_prefixed_session_file():
     with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as openclaw_home:
         old = with_store(status_dir)
@@ -3618,6 +3671,7 @@ if __name__ == "__main__":
     test_workflow_provider_message_activity_does_not_count_as_review_evidence()
     test_project_store_round_trip_and_legacy_defaults()
     test_workflow_chat_reads_project_execution_codex_attempt_reasoning()
+    test_workflow_chat_recovers_active_attempt_after_workflow_timeout()
     test_openclaw_workflow_chat_reads_gateway_prefixed_session_file()
     test_workflow_chat_reads_project_execution_hermes_attempt_history_only()
     test_project_execution_hermes_call_uses_attempt_conversation_id()

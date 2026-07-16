@@ -1088,26 +1088,28 @@
 
     function renderScheduledCronHistoryPanel(p) {
         if (p.scheduledCronLoading) {
-            return `<div class="proj-scheduled-history-panel">
-                <div class="proj-section-header">
+            return `<details class="proj-scheduled-history-panel">
+                <summary class="proj-section-header proj-scheduled-history-summary">
                     <div>
                         <div class="proj-section-title">${_t('proj_scheduled_cron_history_title')}</div>
                         <div class="proj-scheduled-cron-subtitle">${_t('proj_loading_projects')}</div>
                     </div>
-                </div>
+                    <span class="proj-scheduled-history-chevron" aria-hidden="true"></span>
+                </summary>
                 <div class="proj-scheduled-cron-empty">${_t('proj_loading_projects')}</div>
-            </div>`;
+            </details>`;
         }
         const history = Array.isArray(p.scheduledCronHistory) ? p.scheduledCronHistory.slice() : [];
         history.sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
         const recent = history.slice(0, 20);
-        return `<div class="proj-scheduled-history-panel">
-            <div class="proj-section-header">
+        return `<details class="proj-scheduled-history-panel">
+            <summary class="proj-section-header proj-scheduled-history-summary">
                 <div>
                     <div class="proj-section-title">${_t('proj_scheduled_cron_history_title')}</div>
                     <div class="proj-scheduled-cron-subtitle">${_t('proj_scheduled_cron_history_subtitle', { count: recent.length })}</div>
                 </div>
-            </div>
+                <span class="proj-scheduled-history-chevron" aria-hidden="true"></span>
+            </summary>
             ${recent.length ? `<div class="proj-scheduled-history-list">${recent.map(item => `
                 <div class="proj-scheduled-history-item status-${escHtml(item.status || 'unknown')}">
                     <div class="proj-scheduled-history-main">
@@ -1118,7 +1120,7 @@
                     <div class="proj-scheduled-history-reason">${escHtml(item.message || item.reason || item.error || _t('proj_scheduled_cron_no_extra_info'))}</div>
                     <div class="proj-scheduled-history-time">${escHtml(timeAgo(item.createdAt))}</div>
                 </div>`).join('')}</div>` : `<div class="proj-scheduled-cron-empty">${_t('proj_scheduled_cron_history_empty')}</div>`}
-        </div>`;
+        </details>`;
     }
 
     function renderScheduledCronPanel(p) {
@@ -2088,6 +2090,11 @@
     function isProjectExecutionColumnLocked(task) {
         const stateValue = task && task.executionState;
         return ['executing', 'retrying', 'reworking', 'reviewing', 'execution_complete', 'awaiting_user_acceptance', 'awaiting_meeting_resolution'].includes(stateValue);
+    }
+
+    function projectExecutionHasRunningTask(project) {
+        const runningStates = ['validating', 'executing', 'retrying', 'reworking', 'reviewing'];
+        return ((project && project.tasks) || []).some(task => task.activeAttemptId && runningStates.includes(task.executionState));
     }
 
     function projectExecutionReviewStatusLabel(status) {
@@ -4235,7 +4242,7 @@
                 const openTaskId = state.currentTask && state.currentTask.id;
                 await refreshProjectExecutionProject(openTaskId || null, { lightweight: true });
                 pollWorkflowChat();
-                if (!d.active) stopWorkflowPolling();
+                if (!d.active && !projectExecutionHasRunningTask(state.currentProject)) stopWorkflowPolling();
             } catch (e) { /* keep the last visible state */ }
         }, 2500);
     }
@@ -4665,7 +4672,8 @@
                 state.workflow.flowStopReason = d.flowStopReason || null;
                 p.projectExecutionStartMode = d.startMode || p.projectExecutionStartMode || 'continuous';
                 updateWorkflowUI();
-                if (d.active) startProjectExecutionPolling();
+                pollWorkflowChat();
+                if (d.active || projectExecutionHasRunningTask(p)) startProjectExecutionPolling();
             } catch (e) { /* non-fatal */ }
             return;
         }

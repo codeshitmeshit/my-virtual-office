@@ -23160,28 +23160,44 @@ def _handle_workflow_chat(project_id):
     agent_key = p.get("activeAgent") if project_execution_active else None
     task_id = p.get("activeTaskId") if project_execution_active else current_task_id
     conversation_id = None
+    task = None
 
     # First try the tracked current task
     if task_id:
         task = next((t for t in p["tasks"] if t["id"] == task_id), None)
         if task:
-            if project_execution_active:
+            task_execution_active = (
+                _project_execution_enabled(p)
+                and task.get("activeAttemptId")
+                and str(task.get("executionState") or "") in _PROJECT_EXECUTION_WORKING_STATES
+            )
+            if project_execution_active or task_execution_active:
                 phase = p.get("workflowPhase") or phase
                 conversation_id = task.get("activeAttemptId")
-                if phase == "reviewing":
-                    agent_key = agent_key or task.get("reviewerAgentId")
-                else:
-                    agent_key = agent_key or task.get("executorAgentId")
+                agent_key = agent_key or _project_execution_task_agent_id(p, task)
+                if task_execution_active and phase in {"", "idle", "stopped"}:
+                    phase = str(task.get("executionState") or "executing")
             agent_key = agent_key or task.get("assignee")
 
     # If no tracked task, find the most recently active task (in progress or review)
     if not agent_key:
         ip_cols = [c["id"] for c in p.get("columns", []) if c.get("title", "").lower() in ("in progress", "review", "to do")]
-        active_tasks = [t for t in p.get("tasks", []) if t.get("columnId") in ip_cols]
+        execution_tasks = [
+            t for t in p.get("tasks", [])
+            if t.get("activeAttemptId") and str(t.get("executionState") or "") in _PROJECT_EXECUTION_WORKING_STATES
+        ] if _project_execution_enabled(p) else []
+        active_tasks = execution_tasks or [t for t in p.get("tasks", []) if t.get("columnId") in ip_cols]
         if active_tasks:
             active_tasks.sort(key=lambda t: t.get("updatedAt", ""), reverse=True)
-            task_id = active_tasks[0]["id"]
-            agent_key = active_tasks[0].get("assignee")
+            task = active_tasks[0]
+            task_id = task["id"]
+            if execution_tasks:
+                conversation_id = task.get("activeAttemptId")
+                agent_key = _project_execution_task_agent_id(p, task)
+                if phase in {"", "idle", "stopped"}:
+                    phase = str(task.get("executionState") or "executing")
+            else:
+                agent_key = task.get("assignee")
 
     if not agent_key or not task_id:
         return {"ok": True, "messages": [], "agent": None, "phase": phase}
@@ -23189,7 +23205,8 @@ def _handle_workflow_chat(project_id):
     # Read ONLY from the execution-scoped session. Project Execution uses the
     # active attempt/review id for OpenClaw sessions so repeat triggers do not
     # continue a prior run's transcript.
-    session_task_id = conversation_id if (project_execution_active and conversation_id and not (_is_hermes_agent(agent_key) or _is_codex_agent(agent_key))) else task_id
+    project_execution_session = _project_execution_enabled(p) and bool(conversation_id)
+    session_task_id = conversation_id if (project_execution_session and not (_is_hermes_agent(agent_key) or _is_codex_agent(agent_key))) else task_id
     msgs = _wf_get_task_session_messages(agent_key, project_id, session_task_id, conversation_id=conversation_id)
 
     # Check if the workflow session is still actively running
