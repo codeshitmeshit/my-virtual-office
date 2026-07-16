@@ -1074,6 +1074,7 @@ def _persist_setup_payload(body):
 def _build_safe_vo_config():
     lic = get_license_status()
     hermes_test = _handle_hermes_test()
+    openclaw_inspection = inspect_openclaw_home(VO_CONFIG["openclaw"]["homePath"])
     return {
         "office": VO_CONFIG["office"],
         "skills": {
@@ -1087,7 +1088,9 @@ def _build_safe_vo_config():
             "gatewayUrl": VO_CONFIG["openclaw"]["gatewayUrl"],
             "gatewayHttp": VO_CONFIG["openclaw"]["gatewayHttp"],
             "homePath": VO_CONFIG["openclaw"]["homePath"],
-            "detected": os.path.isdir(VO_CONFIG["openclaw"]["homePath"]),
+            "detected": bool(openclaw_inspection.get("detected")),
+            "detectionReason": openclaw_inspection.get("reason") or "unavailable",
+            "agentCount": len(openclaw_inspection.get("agents") or []),
         },
         "browser": {
             "cdpUrl": VO_CONFIG.get("browser", {}).get("cdpUrl"),
@@ -2472,7 +2475,7 @@ def _save_openclaw_api_key(provider, api_key, profile_id=""):
     return {"ok": True, "provider": provider, "profileId": profile_id, "maskedKey": _mask_secret(api_key)}
 
 # ─── DYNAMIC AGENT DISCOVERY ─────────────────────────────────
-from discovery import discover_all_agents, get_agent_workspace_dir, get_agent_session_id
+from discovery import discover_all_agents, get_agent_workspace_dir, get_agent_session_id, inspect_openclaw_home
 from providers.hermes import HermesApiClient, HermesDesktopBackendClient, HermesProvider, discover_desktop_backend
 from providers.codex import CodexProvider
 from providers.claude_code import ClaudeCodeProvider

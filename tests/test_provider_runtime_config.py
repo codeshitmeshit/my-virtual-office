@@ -121,6 +121,7 @@ def test_safe_vo_config_round_trips_provider_fields_without_secret_exposure():
     old_hermes = server._handle_hermes_test
     old_codex = server._handle_codex_test
     old_claude = server._handle_claude_code_test
+    old_openclaw_inspection = server.inspect_openclaw_home
     server.VO_CONFIG = {
         **server.VO_CONFIG,
         "hermes": {
@@ -171,8 +172,16 @@ def test_safe_vo_config_round_trips_provider_fields_without_secret_exposure():
     server._handle_hermes_test = lambda body=None: {"ok": True, "api": {"ok": True}}
     server._handle_codex_test = lambda body=None: {"ok": True}
     server._handle_claude_code_test = lambda body=None: {"ok": True}
+    server.inspect_openclaw_home = lambda home: {
+        "detected": False,
+        "reason": "residual_home",
+        "agents": [],
+    }
     try:
         safe = server._build_safe_vo_config()
+        assert safe["openclaw"]["detected"] is False
+        assert safe["openclaw"]["detectionReason"] == "residual_home"
+        assert safe["openclaw"]["agentCount"] == 0
         assert safe["hermes"]["apiEnabled"] is True
         assert safe["hermes"]["preferApi"] is True
         assert safe["hermes"]["apiUrl"] == "http://127.0.0.1:8642"
@@ -195,6 +204,7 @@ def test_safe_vo_config_round_trips_provider_fields_without_secret_exposure():
         server._handle_hermes_test = old_hermes
         server._handle_codex_test = old_codex
         server._handle_claude_code_test = old_claude
+        server.inspect_openclaw_home = old_openclaw_inspection
 
 
 def test_model_provider_config_includes_safe_native_runtime_status():

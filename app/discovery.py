@@ -16,6 +16,45 @@ from providers.codex import CodexProvider
 from providers.claude_code import ClaudeCodeProvider
 from providers.hermes import HermesProvider, discover_api_agents, discover_desktop_agents
 
+def inspect_openclaw_home(oc_home):
+    """Inspect whether an OpenClaw home contains usable agent data.
+
+    A present but empty/skills-only directory is not a usable OpenClaw
+    installation.  If openclaw.json exists it is authoritative: malformed
+    configuration must not silently fall back to guessed directory agents.
+    """
+    home = os.path.abspath(os.path.expanduser(str(oc_home or ""))) if oc_home else ""
+    if not home or not os.path.isdir(home):
+        return {"detected": False, "reason": "home_missing", "agents": []}
+
+    config_path = os.path.join(home, "openclaw.json")
+    agents_dir = os.path.join(home, "agents")
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+        except (OSError, json.JSONDecodeError, TypeError):
+            return {"detected": False, "reason": "malformed_config", "agents": []}
+
+        raw_agents = (cfg.get("agents") or {}).get("list") if isinstance(cfg, dict) else None
+        if not isinstance(raw_agents, list):
+            return {"detected": False, "reason": "malformed_config", "agents": []}
+        agents = [item for item in raw_agents if isinstance(item, dict) and str(item.get("id") or "").strip()]
+        if not agents:
+            return {"detected": False, "reason": "no_configured_agents", "agents": []}
+        return {"detected": True, "reason": "configured_agents", "agents": agents}
+
+    agents = []
+    if os.path.isdir(agents_dir):
+        for entry in sorted(os.listdir(agents_dir)):
+            agent_path = os.path.join(agents_dir, entry)
+            if os.path.isdir(agent_path) and os.path.isdir(os.path.join(agent_path, "sessions")):
+                agents.append({"id": entry})
+    if agents:
+        return {"detected": True, "reason": "agent_directories", "agents": agents}
+    return {"detected": False, "reason": "residual_home", "agents": []}
+
+
 def discover_agents(oc_home):
     """
     Discover all agents from an OpenClaw installation.
@@ -26,26 +65,9 @@ def discover_agents(oc_home):
     Returns:
         list of agent dicts: [{id, name, emoji, role, model, workspace, lastActiveAt, sessionKey}, ...]
     """
-    config_path = os.path.join(oc_home, "openclaw.json")
     agents_dir = os.path.join(oc_home, "agents")
-
-    # Step 1: Read agents from openclaw.json
-    config_agents = []
-    try:
-        with open(config_path, "r") as f:
-            cfg = json.load(f)
-        config_agents = cfg.get("agents", {}).get("list", [])
-        if not isinstance(config_agents, list):
-            config_agents = []
-    except (FileNotFoundError, json.JSONDecodeError, KeyError):
-        pass
-
-    # Step 2: If no config, fall back to scanning agents/ directory
-    if not config_agents and os.path.isdir(agents_dir):
-        for d in sorted(os.listdir(agents_dir)):
-            agent_path = os.path.join(agents_dir, d)
-            if os.path.isdir(agent_path) and os.path.isdir(os.path.join(agent_path, "sessions")):
-                config_agents.append({"id": d})
+    inspection = inspect_openclaw_home(oc_home)
+    config_agents = inspection["agents"] if inspection["detected"] else []
 
     # Step 3: Enrich each agent with workspace metadata
     roster = []
