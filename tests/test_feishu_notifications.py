@@ -2403,6 +2403,27 @@ def test_feishu_group_admission_and_conversation_identity_are_isolated():
     assert legacy["status"] == "ignored_unsupported_group_transport"
     assert feishu_chat_channel.group_conversation_id("oc_group_shared") == shared_id
     assert feishu_chat_channel.group_conversation_id("oc_group_other") != shared_id
+    with open(os.path.join(status_dir, "agent-platform-communications.jsonl"), "r", encoding="utf-8") as f:
+        comm_rows = [json.loads(line) for line in f if line.strip()]
+    group_rows = [row for row in comm_rows if server._comm_is_feishu_group(row)]
+    private_rows = [row for row in comm_rows if server._comm_is_feishu(row) and not server._comm_is_feishu_group(row)]
+    assert len(group_rows) == 9
+    assert all(row["visibleInOffice"] is False for row in group_rows)
+    assert all(row["metadata"]["sourceSurface"] == "feishu-group" for row in group_rows)
+    assert all(row["metadata"]["sourceLabel"] == "Feishu Group" for row in group_rows)
+    assert all(row["metadata"]["chatType"] == "group" for row in group_rows)
+    group_requests = [row for row in group_rows if row.get("direction") == "request"]
+    member_a_refs = [row["from"]["id"] for row in group_requests if row["from"]["nativeId"] == "ou_member_a"]
+    member_b_ref = next(row["from"]["id"] for row in group_requests if row["from"]["nativeId"] == "ou_member_b")
+    assert len(set(member_a_refs)) == 1
+    assert member_a_refs[0] != member_b_ref
+    assert all(row["from"]["providerType"] == "feishu-group-member" for row in group_requests)
+    assert len(private_rows) == 3
+    private_messages = [row for row in private_rows if row.get("type") == "message"]
+    assert all(row["visibleInOffice"] is True for row in private_messages)
+    assert all(row["metadata"]["sourceSurface"] == "feishu-dm" for row in private_rows)
+    assert server._comm_is_feishu_group({"conversationId": "feishu-group:prefix-only"}) is False
+    assert server._comm_is_feishu_group({"metadata": {"sourceSurface": "feishu-group"}}) is True
 
 
 def test_feishu_chat_worker_normalizes_rich_post_with_image_resource_as_multimodal_message():

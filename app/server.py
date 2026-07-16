@@ -8668,6 +8668,37 @@ def _comm_is_feishu(event):
     )
 
 
+def _comm_is_feishu_group(event):
+    event = event if isinstance(event, dict) else {}
+    metadata = _comm_metadata(event)
+    from_ref = event.get("from") if isinstance(event.get("from"), dict) else {}
+    to_ref = event.get("to") if isinstance(event.get("to"), dict) else {}
+    return (
+        str(metadata.get("sourceSurface") or "").lower() == "feishu-group"
+        or str(metadata.get("chatType") or "").lower() == "group"
+        or str(from_ref.get("sourceSurface") or "").lower() == "feishu-group"
+        or str(to_ref.get("sourceSurface") or "").lower() == "feishu-group"
+    )
+
+
+def _feishu_group_member_ref(record):
+    record = record if isinstance(record, dict) else {}
+    sender = record.get("sender") if isinstance(record.get("sender"), dict) else {}
+    native_id = str(sender.get("openId") or sender.get("userId") or sender.get("unionId") or record.get("voUserId") or "feishu-user").strip()[:256]
+    display_name = re.sub(r"[\x00-\x1f\x7f]+", " ", str(sender.get("name") or native_id or "Feishu User")).strip()[:512] or "Feishu User"
+    return {
+        "id": f"feishu-member:{hashlib.sha256(native_id.encode('utf-8')).hexdigest()[:16]}",
+        "nativeId": native_id,
+        "providerKind": "human",
+        "providerType": "feishu-group-member",
+        "name": display_name,
+        "emoji": "",
+        "sourceApp": "feishu",
+        "sourceSurface": "feishu-group",
+        "sourceLabel": "Feishu Group",
+    }
+
+
 def _find_comm_request_by_source_message(source_message_id, *, limit=1000):
     source_message_id = str(source_message_id or "").strip()
     if not source_message_id:
@@ -8713,6 +8744,9 @@ def _append_feishu_delivery_comm_event(record):
     source_message_id = str(record.get("sourceMessageId") or "").strip()
     if not source_message_id:
         return None
+    is_group = str(record.get("chatType") or "").lower() == "group" or str(record.get("sourceSurface") or "").lower() == "feishu-group"
+    source_surface = "feishu-group" if is_group else "feishu-dm"
+    source_label = "Feishu Group" if is_group else "Feishu DM"
     send_result = record.get("sendResult") if isinstance(record.get("sendResult"), dict) else {}
     for event in reversed(_load_comm_history(limit=1000, conversation_id=record.get("conversationId") or None)):
         metadata = _comm_metadata(event)
@@ -8728,23 +8762,24 @@ def _append_feishu_delivery_comm_event(record):
         "direction": "delivery",
         "conversationId": record.get("conversationId") or "",
         "from": _office_agent_ref(record.get("representativeAgentId") or ""),
-        "to": {
+        "to": _feishu_group_member_ref(record) if is_group else {
             "id": str(record.get("voUserId") or "feishu-user"),
             "providerKind": "human",
             "name": "Feishu User",
             "sourceApp": "feishu",
-            "sourceSurface": "feishu-dm",
-            "sourceLabel": "Feishu DM",
+            "sourceSurface": source_surface,
+            "sourceLabel": source_label,
         },
         "text": "",
         "metadata": {
             "sourceApp": "feishu",
-            "sourceSurface": "feishu-dm",
-            "sourceLabel": "Feishu DM",
+            "sourceSurface": source_surface,
+            "sourceLabel": source_label,
             "channel": "feishu",
             "sourceMessageId": source_message_id,
             "feishuChatId": record.get("feishuChatId") or "",
             "representativeAgentId": record.get("representativeAgentId") or "",
+            "chatType": record.get("chatType") or "",
             "feishuSendResult": send_result,
         },
         "visibleInOffice": False,
@@ -12174,11 +12209,15 @@ def _sync_feishu_channel_record_to_comm_ledger(record):
     if not source_message_id or not conversation_id:
         return None
     representative_agent_id = str(record.get("representativeAgentId") or "").strip()
+    is_group = str(record.get("chatType") or "").lower() == "group" or str(record.get("sourceSurface") or "").lower() == "feishu-group"
+    source_surface = "feishu-group" if is_group else "feishu-dm"
+    source_label = "Feishu Group" if is_group else "Feishu DM"
+    visible_in_office = not is_group
     metadata = {
         "providerKind": (_office_agent_ref(representative_agent_id).get("providerKind") or ""),
         "sourceApp": "feishu",
-        "sourceSurface": "feishu-dm",
-        "sourceLabel": "Feishu DM",
+        "sourceSurface": source_surface,
+        "sourceLabel": source_label,
         "channel": "feishu",
         "sourceMessageId": source_message_id,
         "feishuChatId": record.get("feishuChatId") or "",
@@ -12194,31 +12233,26 @@ def _sync_feishu_channel_record_to_comm_ledger(record):
         if existing:
             return existing
         sender = record.get("sender") if isinstance(record.get("sender"), dict) else {}
-        sender_name = (
-            sender.get("openId")
-            or sender.get("userId")
-            or sender.get("unionId")
-            or record.get("voUserId")
-            or "Feishu User"
-        )
+        sender_name = (sender.get("openId") or sender.get("userId") or sender.get("unionId") or record.get("voUserId") or "Feishu User")
+        sender_ref = _feishu_group_member_ref(record) if is_group else {
+            "id": "user",
+            "providerKind": "human",
+            "name": str(sender_name),
+            "emoji": "",
+            "sourceApp": "feishu",
+            "sourceSurface": source_surface,
+            "sourceLabel": source_label,
+        }
         comm_event = _append_comm_event({
             "type": "message",
             "direction": "request",
             "conversationId": conversation_id,
-            "from": {
-                "id": "user",
-                "providerKind": "human",
-                "name": str(sender_name),
-                "emoji": "",
-                "sourceApp": "feishu",
-                "sourceSurface": "feishu-dm",
-                "sourceLabel": "Feishu DM",
-            },
+            "from": sender_ref,
             "to": _office_agent_ref(representative_agent_id),
             "text": record.get("text") or "",
             "attachments": attachments,
             "metadata": metadata,
-            "visibleInOffice": True,
+            "visibleInOffice": visible_in_office,
         })
         _publish_feishu_chat_comm_event(comm_event, "message")
         return comm_event
@@ -12238,13 +12272,13 @@ def _sync_feishu_channel_record_to_comm_ledger(record):
                     "providerKind": "human",
                     "name": "Feishu User",
                     "sourceApp": "feishu",
-                    "sourceSurface": "feishu-dm",
-                    "sourceLabel": "Feishu DM",
+                    "sourceSurface": source_surface,
+                    "sourceLabel": source_label,
                 },
                 "text": record.get("reply") or "",
                 "inReplyTo": (request_event or {}).get("id") or "",
                 "metadata": metadata,
-                "visibleInOffice": True,
+                "visibleInOffice": visible_in_office,
                 "ok": bool(((record.get("agentResult") or {}) if isinstance(record.get("agentResult"), dict) else {}).get("ok", True)),
             })
             _publish_feishu_chat_comm_event(reply_event, "message")
