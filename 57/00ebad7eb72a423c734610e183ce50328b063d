@@ -1,0 +1,23 @@
+app/index.html
+  s_5de6d872b0a739::t_3648b015fd504d 13,789
+app/projects.css
+  s_5de6d872b0a739::t_927051d3847411 302-303,2031-2032
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "5700ebad7eb72a423c734610e183ce50328b063d",
+  "prompts": {},
+  "sessions": {
+    "s_5de6d872b0a739": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f690d-9e97-7002-b2f9-b0a7ae062bdc",
+        "model": "unknown"
+      },
+      "human_author": "codeshitmeshit <codeshitmeshit@126.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
