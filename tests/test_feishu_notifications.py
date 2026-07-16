@@ -2800,6 +2800,145 @@ def test_feishu_source_message_index_is_atomic_persistent_and_not_window_bounded
     assert exception_index["record"]["agentResult"]["status"] == "agent_exception"
 
 
+def test_feishu_group_ordering_cross_group_progress_and_metrics_are_bounded():
+    import threading
+    import time
+
+    os.environ.setdefault("VO_HERMES_ENABLED", "0")
+    os.environ.setdefault("VO_CODEX_ENABLED", "0")
+    status_dir = tempfile.mkdtemp(prefix="vo-feishu-group-concurrency-")
+    os.environ["VO_STATUS_DIR"] = status_dir
+    import server
+
+    previous_status_dir = server.STATUS_DIR
+    previous_config = server.VO_CONFIG
+    previous_dispatch = server._dispatch_representative_agent_message
+    previous_receiver = server._FEISHU_CHAT_LONG_CONNECTION_RECEIVER
+    server.STATUS_DIR = status_dir
+    server.VO_CONFIG = {
+        **previous_config,
+        "feishu": {
+            "chatApp": {
+                "enabled": True, "groupChatEnabled": True,
+                "appId": "cli_chat", "appSecret": "chat-secret",
+                "representativeAgentId": "agent-a", "transportImplementation": "channel-sdk-node",
+            },
+            "bindings": {},
+        },
+    }
+    active = 0
+    max_active = 0
+    dispatch_order = []
+    active_lock = threading.Lock()
+    first_same_started = threading.Event()
+    cross_barrier = threading.Barrier(2)
+
+    class FakeReceiver:
+        def status(self):
+            return {
+                "enabled": True, "running": True, "status": "connected",
+                "queue": {"active": 2, "pending": 1, "pressure": True},
+                "spool": {"entries": 3, "bytes": 512, "pressure": True, "full": False},
+                "callback": {"active": 2, "failures": 0},
+                "counters": {"queuePressure": 1},
+            }
+
+    def inbound(message_id, chat_id, *, mention=True):
+        return {
+            "event": {
+                "sender": {
+                    "sender_id": {"open_id": "ou_member"}, "sender_name": "Member",
+                    "sender_type": "user", "sender_is_bot": False,
+                },
+                "message": {
+                    "message_id": message_id, "chat_id": chat_id, "chat_type": "group",
+                    "message_type": "text", "text": f"text:{message_id}",
+                    "mentions": ([{"openId": "ou_vo", "name": "VO", "isBot": True}] if mention else []),
+                },
+            }
+        }
+
+    def fake_dispatch(agent_id, text, conversation_id, source_meta):
+        nonlocal active, max_active
+        message_id = source_meta["sourceMessageId"]
+        with active_lock:
+            active += 1
+            max_active = max(max_active, active)
+            dispatch_order.append(message_id)
+        try:
+            if message_id == "om_same_1":
+                first_same_started.set()
+                time.sleep(0.08)
+            elif message_id.startswith("om_cross_"):
+                cross_barrier.wait(timeout=2)
+                time.sleep(0.03)
+            if message_id == "om_agent_fail":
+                return {"ok": False, "error": "agent failed", "conversationId": conversation_id}
+            return {"ok": True, "reply": f"reply:{message_id}", "conversationId": conversation_id}
+        finally:
+            with active_lock:
+                active -= 1
+
+    def fake_send(chat_id, text):
+        if "om_delivery_fail" in text:
+            return {"ok": False, "status": "timeout", "category": "send_timeout"}
+        return {"ok": True, "status": "sent", "messageId": f"reply-{chat_id}"}
+
+    results = {}
+
+    def run(name, body):
+        results[name] = server._handle_feishu_chat_message_event(body, send_text=fake_send)
+
+    try:
+        server._dispatch_representative_agent_message = fake_dispatch
+        server._FEISHU_CHAT_LONG_CONNECTION_RECEIVER = FakeReceiver()
+        same_one = threading.Thread(target=run, args=("same1", inbound("om_same_1", "oc_same")))
+        same_two = threading.Thread(target=run, args=("same2", inbound("om_same_2", "oc_same")))
+        same_one.start()
+        assert first_same_started.wait(timeout=2)
+        same_two.start()
+        same_one.join(timeout=3)
+        same_two.join(timeout=3)
+        assert not same_one.is_alive() and not same_two.is_alive()
+
+        cross_one = threading.Thread(target=run, args=("cross1", inbound("om_cross_1", "oc_cross_1")))
+        cross_two = threading.Thread(target=run, args=("cross2", inbound("om_cross_2", "oc_cross_2")))
+        cross_one.start()
+        cross_two.start()
+        cross_one.join(timeout=3)
+        cross_two.join(timeout=3)
+        assert not cross_one.is_alive() and not cross_two.is_alive()
+
+        agent_failed = server._handle_feishu_chat_message_event(inbound("om_agent_fail", "oc_fail"), send_text=fake_send)
+        delivery_failed = server._handle_feishu_chat_message_event(inbound("om_delivery_fail", "oc_fail"), send_text=fake_send)
+        duplicate = server._handle_feishu_chat_message_event(inbound("om_same_1", "oc_same"), send_text=fake_send)
+        ignored = server._handle_feishu_chat_message_event(inbound("om_ignored", "oc_same", mention=False), send_text=fake_send)
+        status = server._feishu_chat_config_response()
+    finally:
+        server._dispatch_representative_agent_message = previous_dispatch
+        server._FEISHU_CHAT_LONG_CONNECTION_RECEIVER = previous_receiver
+        server.STATUS_DIR = previous_status_dir
+        server.VO_CONFIG = previous_config
+
+    assert dispatch_order[:2] == ["om_same_1", "om_same_2"]
+    assert max_active >= 2
+    assert all(results[name]["status"] == "completed" for name in ("same1", "same2", "cross1", "cross2"))
+    assert agent_failed["status"] == "agent_failed"
+    assert delivery_failed["status"] == "delivery_failed"
+    assert duplicate["status"] == "duplicate"
+    assert ignored["status"] == "ignored_missing_bot_mention"
+    counters = status["groupMetrics"]["counters"]
+    assert counters["accepted"] == 6
+    assert counters["completed"] == 6
+    assert counters["duplicates"] == 1
+    assert counters["agentFailures"] == 1
+    assert counters["deliveryFailures"] == 1
+    assert counters["ignored.missing_bot_mention"] == 1
+    assert status["groupMetrics"]["pressure"]["queue"]["pending"] == 1
+    assert status["groupMetrics"]["pressure"]["spool"]["entries"] == 3
+    assert os.stat(feishu_chat_channel.group_metrics_path(status_dir)).st_mode & 0o777 == 0o600
+
+
 def test_feishu_chat_worker_rejects_forged_and_oversized_v1_callbacks_without_secret_leakage():
     os.environ.setdefault("VO_HERMES_ENABLED", "0")
     os.environ.setdefault("VO_CODEX_ENABLED", "0")
@@ -3669,6 +3808,7 @@ if __name__ == "__main__":
     test_feishu_group_rejections_and_agent_failures_do_not_corrupt_shared_context()
     test_feishu_group_reply_uses_source_message_and_preserves_thread_without_fallback()
     test_feishu_source_message_index_is_atomic_persistent_and_not_window_bounded()
+    test_feishu_group_ordering_cross_group_progress_and_metrics_are_bounded()
     test_feishu_chat_inbound_test_route_dispatches_and_records()
     test_feishu_chat_self_test_route_dispatches_without_real_feishu_send()
     test_feishu_chat_bindings_config_is_persisted_and_lookupable()

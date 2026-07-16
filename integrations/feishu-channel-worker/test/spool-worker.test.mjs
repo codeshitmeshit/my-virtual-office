@@ -252,4 +252,12 @@ test('worker bounds global callback concurrency and per-chat queue depth', async
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
   await Promise.all(sameChat);
+  worker.spool.maxEntries = 0;
+  await assert.rejects(worker.handleMessage(message('om_spool_full', 'oc_spool_full')), (error) => error instanceof SpoolFullError);
+  clearTimeout(worker.recoveryTimer);
+  worker.recoveryTimer = null;
+  const counters = worker.status.snapshot().counters;
+  assert.ok(counters.queuePressure >= 2);
+  assert.equal(counters.queueRejected, 1);
+  assert.equal(counters.spoolFull, 1);
 });

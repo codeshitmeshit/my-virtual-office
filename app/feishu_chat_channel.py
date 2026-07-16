@@ -42,6 +42,54 @@ def source_index_path(status_dir, source_message_id):
     return os.path.join(source_index_dir(status_dir), f"{digest}.json")
 
 
+def group_metrics_path(status_dir):
+    return os.path.join(status_dir, "feishu-group-metrics.json")
+
+
+def load_group_metrics(status_dir):
+    try:
+        with open(group_metrics_path(status_dir), "r", encoding="utf-8") as f:
+            item = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        item = {}
+    return item if isinstance(item, dict) else {}
+
+
+def increment_group_metrics(status_dir, increments, *, now, lock):
+    increments = increments if isinstance(increments, dict) else {}
+    if not increments:
+        return load_group_metrics(status_dir)
+    path = group_metrics_path(status_dir)
+    os.makedirs(status_dir, exist_ok=True)
+    with lock:
+        current = load_group_metrics(status_dir)
+        counters = current.get("counters") if isinstance(current.get("counters"), dict) else {}
+        for key, amount in increments.items():
+            clean_key = str(key or "").strip()[:128]
+            if clean_key:
+                counters[clean_key] = max(0, int(counters.get(clean_key) or 0) + int(amount or 0))
+        item = {
+            "schema": "vo.feishu-group-metrics/v1",
+            "updatedAt": now(),
+            "counters": counters,
+        }
+        temp_path = f"{path}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
+        try:
+            with open(temp_path, "w", encoding="utf-8") as f:
+                os.chmod(temp_path, 0o600)
+                f.write(json.dumps(item, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n")
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(temp_path, path)
+            os.chmod(path, 0o600)
+        finally:
+            try:
+                os.unlink(temp_path)
+            except FileNotFoundError:
+                pass
+    return item
+
+
 def load_source_index(status_dir, source_message_id):
     source_message_id = str(source_message_id or "").strip()
     if not source_message_id:

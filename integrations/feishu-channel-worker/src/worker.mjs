@@ -207,7 +207,10 @@ export class FeishuChannelWorker {
       this.chatDepth.set(chatId, depth - 1);
       throw Object.assign(new Error('per-chat queue is full'), { code: 'chat_queue_full' });
     }
-    if (this.activeCallbacks >= this.maxConcurrentCallbacks) await new Promise((resolve) => this.waiters.push(resolve));
+    if (this.activeCallbacks >= this.maxConcurrentCallbacks) {
+      this.status.increment('counters.queuePressure').catch(() => {});
+      await new Promise((resolve) => this.waiters.push(resolve));
+    }
     this.activeCallbacks += 1;
     await this.status.update({ callback: { active: this.activeCallbacks }, queue: { active: this.activeCallbacks, pending: this.waiters.length, pressure: this.waiters.length > 0 } });
   }
@@ -240,10 +243,12 @@ export class FeishuChannelWorker {
       return ack;
     } catch (error) {
       if (error instanceof SpoolFullError) {
+        await this.status.increment('counters.spoolFull');
         await this.status.update({ status: 'inbox_full', spool: { full: true }, lastError: redactSecretsString(error.message, this.secrets) });
         await this.channel?.disconnect?.().catch(() => {});
         this._scheduleRecovery();
       } else if (error?.code === 'chat_queue_full') {
+        await this.status.increment('counters.queueRejected');
         await this.status.update({ status: 'queue_pressure', queue: { pressure: true }, lastError: error.message });
       } else {
         await this.status.increment('callback.failures');

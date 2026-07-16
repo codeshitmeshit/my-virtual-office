@@ -893,6 +893,15 @@ def _feishu_chat_config_response(include_ok=True):
         long_connection = receiver.status() if receiver else {"enabled": False, "running": False, "status": "not_started"}
     group_requested = _feishu_group_chat_requested(cfg)
     group_enabled = _feishu_group_chat_enabled(cfg)
+    group_metrics = feishu_chat_channel.load_group_metrics(STATUS_DIR)
+    group_metrics = {
+        **group_metrics,
+        "pressure": {
+            "queue": (long_connection.get("queue") or {}) if isinstance(long_connection, dict) else {},
+            "spool": (long_connection.get("spool") or {}) if isinstance(long_connection, dict) else {},
+            "callback": (long_connection.get("callback") or {}) if isinstance(long_connection, dict) else {},
+        },
+    }
     result = {
         "enabled": bool(cfg.get("enabled", False)),
         "configured": _feishu_chat_app_configured(cfg),
@@ -908,6 +917,7 @@ def _feishu_chat_config_response(include_ok=True):
         "allowedChatTypes": _feishu_allowed_chat_types(cfg),
         "replyMode": "same_chat",
         "longConnection": long_connection,
+        "groupMetrics": group_metrics,
         "sse": _feishu_chat_sse_metrics_snapshot(),
     }
     if include_ok:
@@ -12129,6 +12139,29 @@ def _record_feishu_channel_event(record):
         now=_exec_meeting_now,
         lock=_FEISHU_CHANNEL_RECORD_LOCK,
     )
+    if str(item.get("chatType") or "").lower() == "group":
+        event_name = str(item.get("event") or "").strip()
+        increments = {}
+        if event_name == "user_message":
+            increments["accepted"] = 1
+        elif event_name in {"ignored", "rejected"}:
+            reason = re.sub(r"[^a-z0-9_.-]+", "_", str(item.get("reason") or "unknown").lower())[:80] or "unknown"
+            increments["ignored"] = 1
+            increments[f"ignored.{reason}"] = 1
+        elif event_name == "turn_completed":
+            increments["completed"] = 1
+            agent_result = item.get("agentResult") if isinstance(item.get("agentResult"), dict) else {}
+            send_result = item.get("sendResult") if isinstance(item.get("sendResult"), dict) else {}
+            if not agent_result.get("ok"):
+                increments["agentFailures"] = 1
+            if not send_result.get("ok"):
+                increments["deliveryFailures"] = 1
+        feishu_chat_channel.increment_group_metrics(
+            STATUS_DIR,
+            increments,
+            now=_exec_meeting_now,
+            lock=_FEISHU_CHANNEL_RECORD_LOCK,
+        )
     _sync_feishu_channel_record_to_comm_ledger(item)
     return item
 
@@ -12276,6 +12309,13 @@ def _feishu_channel_idempotency_hit(source_message_id):
     indexed = feishu_chat_channel.load_source_index(STATUS_DIR, source_message_id)
     if indexed:
         record = indexed.get("record") if isinstance(indexed.get("record"), dict) else {}
+        if str(record.get("chatType") or "").lower() == "group":
+            feishu_chat_channel.increment_group_metrics(
+                STATUS_DIR,
+                {"duplicates": 1},
+                now=_exec_meeting_now,
+                lock=_FEISHU_CHANNEL_RECORD_LOCK,
+            )
         return {**record, "sourceMessageId": source_message_id, "indexState": indexed.get("state") or ""}
     hit = feishu_chat_channel.channel_idempotency_hit(_load_feishu_channel_records, source_message_id)
     if hit:
