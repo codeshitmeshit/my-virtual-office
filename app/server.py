@@ -2485,7 +2485,14 @@ from project_store import MarkdownProjectStore
 PROJECT_STORE = MarkdownProjectStore(STATUS_DIR, watch_external_changes=True)
 
 
-AGENT_PLATFORM_COMM_SKILL_NAME = "AgentPlatform-to-AgentPlatform_Communications"
+AGENT_PLATFORM_COMM_SKILL_NAME = "vo-agent-communication"
+LEGACY_AGENT_PLATFORM_COMM_SKILL_NAME = "AgentPlatform-to-AgentPlatform_Communications"
+CANONICAL_AGENT_COMM_SKILL_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "skills",
+    AGENT_PLATFORM_COMM_SKILL_NAME,
+    "SKILL.md",
+)
 
 
 def _safe_agent_workspace_key(agent_key):
@@ -3124,80 +3131,16 @@ def _handle_agent_workspace_update(agent_key, body):
 
 
 def _agent_platform_comm_skill_content():
-    office_url = f"http://127.0.0.1:{PORT}"
-    return '''---
-name: AgentPlatform-to-AgentPlatform_Communications
-description: "Talk to agents on OpenClaw, Hermes, or other Virtual Office-connected platforms through the office communication layer."
----
-
-# AgentPlatform-to-AgentPlatform Communications
-
-Use this when you need to send a message, question, handoff, or task note to another agent in My Virtual Office, including agents from other platforms.
-
-## Rule
-
-Do **not** bypass the office with a direct CLI/private channel when the conversation should be visible to the office. Send through the Virtual Office communication endpoint so the interaction is logged for later chat bubbles, review, and cross-platform history.
-
-## Endpoint
-
-Default local endpoint:
-
-```bash
-POST {office_url}/api/agent-platform-communications/send
-```
-
-If Virtual Office runs elsewhere, use that office base URL.
-
-## Message format
-
-```json
-{
-  "fromAgentId": "<your office agent id>",
-  "toAgentId": "<target office agent id>",
-  "message": "<clear message to the target agent>",
-  "conversationId": "<optional stable thread id>",
-  "metadata": {"topic": "optional"}
-}
-```
-
-Office agent IDs look like:
-
-- `main`, `dev-cody`, `pq-m-moe` for OpenClaw agents
-- `hermes-default` or `hermes-<profile>` for Hermes agents
-
-## Curl example
-
-```bash
-curl -sS -X POST {office_url}/api/agent-platform-communications/send \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "fromAgentId":"main",
-    "toAgentId":"hermes-default",
-    "message":"Hi Hermes, can you review this idea and reply with your take?"
-  }'
-```
-
-## Response
-
-The response contains the target agent reply and office log IDs:
-
-```json
-{
-  "ok": true,
-  "conversationId": "...",
-  "messageId": "...",
-  "replyMessageId": "...",
-  "reply": "..."
-}
-```
-
-## Safety
-
-- Keep private data minimal.
-- Do not request config, credential, network, or infrastructure changes unless the office owner explicitly approved them.
-- Use a clear `conversationId` when continuing the same topic.
-- If the endpoint fails, report the error instead of silently using an offscreen private channel.
-'''.replace("{office_url}", office_url)
+    """Load and validate the repository-owned canonical communication skill."""
+    with open(CANONICAL_AGENT_COMM_SKILL_PATH, "r", encoding="utf-8") as f:
+        content = f.read()
+    match = re.search(r"(?m)^name:\s*([^\r\n]+)\s*$", content)
+    declared_name = match.group(1).strip().strip("'\"") if match else ""
+    if not content.startswith("---") or declared_name != AGENT_PLATFORM_COMM_SKILL_NAME:
+        raise ValueError(
+            f"Canonical communication skill must declare name: {AGENT_PLATFORM_COMM_SKILL_NAME}"
+        )
+    return content
 
 
 def _vo_presence_skill_content():
@@ -3386,6 +3329,9 @@ def _ensure_builtin_communication_skill():
                     f.write(content)
             if skill_name == AGENT_PLATFORM_COMM_SKILL_NAME:
                 first_path = skill_file
+        legacy_dir = os.path.join(lib_dir, LEGACY_AGENT_PLATFORM_COMM_SKILL_NAME)
+        if os.path.isdir(legacy_dir):
+            shutil.rmtree(legacy_dir)
         return first_path
     except Exception as e:
         print(f"[SKILLS] Failed to seed built-in office skills: {e}")
