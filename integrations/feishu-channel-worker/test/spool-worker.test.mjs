@@ -7,7 +7,12 @@ import { test } from 'node:test';
 import { ACK_SCHEMA, makeInboundEnvelope } from '../src/protocol.mjs';
 import { InboundSpool, SpoolFullError } from '../src/spool.mjs';
 import { CHANNEL_OPTIONS, FeishuChannelWorker, normalizeMessage } from '../src/worker.mjs';
-import { CallbackClient } from '../src/callback.mjs';
+import {
+  CallbackAttemptError,
+  CallbackClient,
+  DEFAULT_SINGLE_ATTEMPT_TIMEOUT_MS,
+  MAX_SINGLE_ATTEMPT_TIMEOUT_MS,
+} from '../src/callback.mjs';
 
 function message(id = 'om_1', chatId = 'oc_1') {
   return {
@@ -227,6 +232,82 @@ test('callback failure retains the spooled envelope for restart recovery', async
 
 test('callback timeout is capped at 15 minutes', () => {
   assert.equal(new CallbackClient({ timeoutMs: 99999999 }).timeoutMs, 900000);
+  assert.equal(new CallbackClient().singleAttemptTimeoutMs, DEFAULT_SINGLE_ATTEMPT_TIMEOUT_MS);
+  assert.equal(new CallbackClient({ singleAttemptTimeoutMs: 99999999 }).singleAttemptTimeoutMs, MAX_SINGLE_ATTEMPT_TIMEOUT_MS);
+});
+
+test('single callback attempt classifies terminal, processing, HTTP, invalid, network, and timeout outcomes', async () => {
+  const input = envelope('om_callback_once');
+  const response = (status, body) => ({ ok: status >= 200 && status < 300, status, async json() { return body; } });
+  const terminal = new CallbackClient({
+    fetchImpl: async () => response(200, {
+      schema: ACK_SCHEMA, requestId: input.requestId, messageId: input.message.messageId,
+      durable: true, state: 'completed',
+    }),
+  });
+  assert.equal((await terminal.deliverOnce(input)).state, 'completed');
+
+  const cases = [
+    {
+      category: 'callback_processing',
+      client: new CallbackClient({ fetchImpl: async () => response(202, {
+        schema: ACK_SCHEMA, requestId: input.requestId, messageId: input.message.messageId,
+        durable: false, state: 'processing', retryAfterMs: 2500,
+      }) }),
+      check: (error) => error.retryAfterMs === 2500,
+    },
+    {
+      category: 'callback_http_error',
+      client: new CallbackClient({ fetchImpl: async () => response(503, { error: 'unavailable' }) }),
+      check: (error) => error.status === 503,
+    },
+    {
+      category: 'callback_invalid_ack',
+      client: new CallbackClient({ fetchImpl: async () => response(200, { schema: ACK_SCHEMA, requestId: 'wrong', durable: true }) }),
+    },
+    {
+      category: 'callback_network_error',
+      client: new CallbackClient({ fetchImpl: async () => { throw new Error('connection refused'); } }),
+    },
+    {
+      category: 'callback_timeout',
+      client: new CallbackClient({
+        singleAttemptTimeoutMs: 5,
+        fetchImpl: async (_url, options) => new Promise((resolve, reject) => {
+          options.signal.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })), { once: true });
+        }),
+      }),
+    },
+  ];
+  for (const item of cases) {
+    await assert.rejects(
+      () => item.client.deliverOnce(input),
+      (error) => error instanceof CallbackAttemptError
+        && error.category === item.category
+        && (!item.check || item.check(error)),
+    );
+  }
+});
+
+test('legacy callback delivery keeps bounded multi-attempt behavior', async () => {
+  const input = envelope('om_callback_legacy');
+  let attempts = 0;
+  const client = new CallbackClient({
+    maxAttempts: 2,
+    baseDelayMs: 0,
+    fetchImpl: async () => {
+      attempts += 1;
+      if (attempts === 1) throw new Error('temporary offline');
+      return {
+        ok: true, status: 200,
+        async json() {
+          return { schema: ACK_SCHEMA, requestId: input.requestId, messageId: input.message.messageId, durable: true, state: 'completed' };
+        },
+      };
+    },
+  });
+  assert.equal((await client.deliver(input)).state, 'completed');
+  assert.equal(attempts, 2);
 });
 
 test('worker bounds global callback concurrency and per-chat queue depth', async () => {
