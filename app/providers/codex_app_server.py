@@ -348,6 +348,8 @@ class _Operation:
     _next_callback_id: int = 0
     _terminal_target: int = 0
     _terminal_observed: bool = False
+    _terminal_observed_ns: int = 0
+    _terminal_completed_ns: int = 0
     _terminal_timer_started: bool = False
     terminal_fence_fallbacks: int = 0
     late_notifications: int = 0
@@ -364,6 +366,7 @@ class _Operation:
             if terminal:
                 self._terminal_observed = True
                 self._terminal_target = callback_id
+                self._terminal_observed_ns = self._terminal_observed_ns or time.monotonic_ns()
             self.sequence += 1
             event = {
                 "id": f"codex-{uuid.uuid4().hex}",
@@ -392,6 +395,7 @@ class _Operation:
             if not self._terminal_observed:
                 self._terminal_observed = True
                 self._terminal_target = self._next_callback_id
+                self._terminal_observed_ns = time.monotonic_ns()
             self._release_completion_if_drained_locked()
             if not self.completed.is_set():
                 self._start_terminal_fallback_locked()
@@ -414,6 +418,8 @@ class _Operation:
                 "terminalFenceFallbacks": self.terminal_fence_fallbacks,
                 "lateNotifications": self.late_notifications,
                 "postTerminalMetrics": self.post_terminal_metrics,
+                "terminalFenceWaitMs": round(max(0, self._terminal_completed_ns - self._terminal_observed_ns) / 1_000_000, 3)
+                if self._terminal_observed_ns and self._terminal_completed_ns else 0.0,
             }
 
     def _release_completion_if_drained_locked(self) -> None:
@@ -421,6 +427,7 @@ class _Operation:
             return
         if any(callback_id <= self._terminal_target for callback_id in self._active_callback_ids):
             return
+        self._terminal_completed_ns = self._terminal_completed_ns or time.monotonic_ns()
         self.completed.set()
 
     def _start_terminal_fallback_locked(self) -> None:
@@ -433,6 +440,7 @@ class _Operation:
                 if self.completed.is_set():
                     return
                 self.terminal_fence_fallbacks += 1
+                self._terminal_completed_ns = self._terminal_completed_ns or time.monotonic_ns()
                 self.completed.set()
                 self._callback_condition.notify_all()
 

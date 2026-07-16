@@ -29,7 +29,7 @@
 
 ## 7. End-to-End Timing and User-Visible SLOs
 
-- [ ] 7.1 Instrument content-free backend timestamps and histograms for accepted request, run reservation, Provider request, first native event, first displayable fragment, journal publication, SSE write, Provider terminal, durable terminal commit, fence wait, coalescer pressure, and busy reasons; add redaction, bounded-cardinality, and instrumentation-overhead tests.
+- [x] 7.1 Instrument content-free backend timestamps and histograms for accepted request, run reservation, Provider request, first native event, first displayable fragment, journal publication, SSE write, Provider terminal, durable terminal commit, fence wait, coalescer pressure, and busy reasons; add redaction, bounded-cardinality, and instrumentation-overhead tests.
 - [ ] 7.2 Add browser-side run-correlated measurement for optimistic working feedback, first matching native event, first fragment, and first text without comparing browser and server clocks; verify warm working-feedback p95 is at most 200 ms, first-native-event p95 is at most 1 second, first text is reported separately, and the first fragment is not delayed by batching.
 
 ## 8. Compatibility, Rollout, and Final Evidence

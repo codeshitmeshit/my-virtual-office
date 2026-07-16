@@ -84,6 +84,8 @@ def normalize_provider_result(
         normalized["busyReason"] = str(result.get("busyReason"))[:80]
     if result.get("busyCode"):
         normalized["busyCode"] = str(result.get("busyCode"))[:80]
+    if isinstance(result.get("terminalFence"), dict):
+        normalized["terminalFence"] = dict(result.get("terminalFence") or {})
     if result.get("approval") is not None:
         normalized["approval"] = result.get("approval")
     if extra:

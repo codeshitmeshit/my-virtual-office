@@ -56,7 +56,7 @@ from services.provider_conversations import CallableConversationStatePort, Calla
 from services.provider_ports import AdapterCapabilities, AdapterEvent, AdapterResult, CallableProviderAdapter, RunCommand
 from services.provider_registry import ProviderRunRepository
 from services.provider_runs import ProviderRunCoordinator
-from services.codex_fast_path import CodexEventFastPath, CodexTransientCoalescer, load_codex_fast_path_settings
+from services.codex_fast_path import CodexEventFastPath, CodexFastPathTelemetry, CodexTransientCoalescer, classify_codex_event, load_codex_fast_path_settings
 from provider_sse_transport import ProviderSSETransport
 from services.project_repository import ProjectConflictError, ProjectNotFoundError, ProjectRepository
 from zoneinfo import ZoneInfo
@@ -1135,6 +1135,7 @@ def _build_safe_vo_config():
             "includeNativeAgents": VO_CONFIG.get("codex", {}).get("includeNativeAgents", True),
             "registerNativeAgents": VO_CONFIG.get("codex", {}).get("registerNativeAgents", True),
             "fastPath": dict(VO_CONFIG.get("codex", {}).get("fastPath") or {}),
+            "fastPathRuntime": _codex_fast_path_runtime_diagnostics(),
             "detected": bool(_handle_codex_test().get("ok")),
         },
         "claudeCode": {
@@ -1176,10 +1177,20 @@ def _first_provider_agent_model(provider_kind):
 VO_CONFIG = _load_vo_config()
 _CODEX_FAST_PATH_SETTINGS = load_codex_fast_path_settings(os.environ, VO_CONFIG.get("codex") or {})
 _CODEX_EVENT_FAST_PATH = CodexEventFastPath(_CODEX_FAST_PATH_SETTINGS)
+_CODEX_FAST_PATH_TELEMETRY = CodexFastPathTelemetry()
 _CODEX_EVENT_COALESCER = CodexTransientCoalescer(
     min_ms=_CODEX_FAST_PATH_SETTINGS.coalesce_min_ms,
     max_ms=_CODEX_FAST_PATH_SETTINGS.coalesce_max_ms,
 ) if _CODEX_FAST_PATH_SETTINGS.enabled else None
+
+
+def _codex_fast_path_runtime_diagnostics():
+    return {
+        "timing": _CODEX_FAST_PATH_TELEMETRY.diagnostics(),
+        "events": _CODEX_EVENT_FAST_PATH.diagnostics(),
+        "coalescer": _CODEX_EVENT_COALESCER.diagnostics() if _CODEX_EVENT_COALESCER is not None else None,
+        "admission": _codex_admission_diagnostics(),
+    }
 
 try:
     SMS_DEFAULT_TZ = ZoneInfo(os.environ.get("VO_SMS_TIMEZONE") or os.environ.get("TZ") or "UTC")
@@ -6531,6 +6542,7 @@ def _handle_codex_chat(body):
     if not operation_lock.acquire(blocking=False):
         with _CODEX_OPERATION_LOCKS_GUARD:
             _CODEX_ADMISSION_COUNTERS["busyByConversation"] += 1
+        _CODEX_FAST_PATH_TELEMETRY.increment_busy("conversation")
         active = _get_codex_active(agent_id, conversation_id) or {}
         return {
             "ok": False,
@@ -6634,6 +6646,12 @@ def _handle_codex_chat(body):
         reply_event_appended["done"] = True
 
     def on_event(event):
+        _CODEX_FAST_PATH_TELEMETRY.mark(fast_scope_run_id, "first_native_event")
+        event_class = classify_codex_event(event)
+        if event_class == "transient":
+            _CODEX_FAST_PATH_TELEMETRY.mark(fast_scope_run_id, "first_displayable_fragment")
+        if event_class == "terminal":
+            _CODEX_FAST_PATH_TELEMETRY.mark(fast_scope_run_id, "provider_terminal")
         record = _CODEX_EVENT_FAST_PATH.process_event(
             agent_id,
             conversation_id,
@@ -6683,6 +6701,7 @@ def _handle_codex_chat(body):
     initial_thread_id = _get_codex_thread_id(agent_id, conversation_id)
 
     def send_to_provider(thread_id):
+        _CODEX_FAST_PATH_TELEMETRY.mark(fast_scope_run_id, "provider_request_sent")
         kwargs = {
             "conversation_id": conversation_id,
             "timeout_sec": int(body.get("timeoutSec") or 600),
@@ -6730,6 +6749,12 @@ def _handle_codex_chat(body):
         modified_files=modified_files,
         extra={"recoveredFromArchivedThread": result.get("recoveredFromArchivedThread")},
     )
+    _CODEX_FAST_PATH_TELEMETRY.mark(fast_scope_run_id, "provider_terminal")
+    if normalized.get("busyReason"):
+        _CODEX_FAST_PATH_TELEMETRY.increment_busy(normalized.get("busyReason"))
+    terminal_fence = normalized.get("terminalFence") if isinstance(normalized.get("terminalFence"), dict) else {}
+    if terminal_fence.get("terminalFenceWaitMs") is not None:
+        _CODEX_FAST_PATH_TELEMETRY.observe("terminal_fence_wait_ms", terminal_fence.get("terminalFenceWaitMs"))
     _append_vo_usage_record(
         "codex",
         agent,
@@ -6768,6 +6793,7 @@ def _handle_codex_chat(body):
             },
             ok=bool(normalized.get("ok")),
         )
+        _CODEX_FAST_PATH_TELEMETRY.mark(fast_scope_run_id, "durable_terminal_committed")
     except OSError as exc:
         reply_event_appended["error"] = reply_event_appended.get("error") or exc
     if reply_event_appended.get("error"):
@@ -6859,6 +6885,7 @@ def _handle_codex_run_start(body):
     agent_id = agent.get("id") or agent_key
     idempotency_key = _codex_idempotency_key(body)
     run_id = f"codex-{int(time.time() * 1000)}-{str(uuid.uuid4())[:8]}"
+    _CODEX_FAST_PATH_TELEMETRY.start(run_id, conversation_id)
     profile = agent.get("profile") or agent.get("providerAgentId") or "local"
     status_key = agent.get("statusKey") or agent.get("id")
     meta = {
@@ -6986,6 +7013,7 @@ def _handle_codex_run_start(body):
         start_payload={"providerPath": "codex-app-server", "conversationId": conversation_id},
     )
     outcome = PROVIDER_RUN_COORDINATOR.start(command, adapter=adapter, compatibility_meta=meta)
+    _CODEX_FAST_PATH_TELEMETRY.mark(outcome.run_id, "run_reserved")
     if outcome.duplicate:
         response = {
             "ok": True,
@@ -8275,6 +8303,7 @@ def _provider_sse_transport_for(repository, journal):
         pending_lookup=_provider_pending_approval_snapshot,
         recovery_lookup=_provider_recovery_progress_snapshot,
         clock=lambda: time.time(),
+        telemetry=_CODEX_FAST_PATH_TELEMETRY,
     )
 
 
@@ -8296,6 +8325,7 @@ PROVIDER_RUN_REPOSITORY = ProviderRunRepository(retention_ms=10 * 60 * 1000)
 PROVIDER_EVENT_JOURNAL = ProviderEventJournal(max_events=4000)
 PROVIDER_RUN_COORDINATOR = ProviderRunCoordinator(PROVIDER_RUN_REPOSITORY, PROVIDER_EVENT_JOURNAL)
 PROVIDER_RUN_COORDINATOR.event_pipeline = _CODEX_EVENT_COALESCER
+PROVIDER_RUN_COORDINATOR.telemetry = _CODEX_FAST_PATH_TELEMETRY
 PROVIDER_SSE_TRANSPORT = _provider_sse_transport_for(PROVIDER_RUN_REPOSITORY, PROVIDER_EVENT_JOURNAL)
 
 
@@ -27189,6 +27219,7 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                 "registerNativeAgents": safe_vo_config.get("codex", {}).get("registerNativeAgents", True),
                 "preferAppServer": safe_vo_config.get("codex", {}).get("preferAppServer", True),
                 "fastPath": dict(safe_vo_config.get("codex", {}).get("fastPath") or {}),
+                "fastPathRuntime": dict(safe_vo_config.get("codex", {}).get("fastPathRuntime") or {}),
                 "configSurface": "models-native",
             },
             "claude-code": {

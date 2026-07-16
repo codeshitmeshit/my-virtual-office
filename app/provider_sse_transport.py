@@ -28,6 +28,7 @@ class ProviderSSETransport:
         pending_lookup: Callable[[str, str, str], dict[str, Any] | None] | None = None,
         recovery_lookup: Callable[[str, str, str], dict[str, Any] | None] | None = None,
         clock: Callable[[], float] | None = None,
+        telemetry=None,
     ) -> None:
         self.repository = repository
         self.journal = journal
@@ -35,6 +36,7 @@ class ProviderSSETransport:
         self.pending_lookup = pending_lookup or (lambda *_args: None)
         self.recovery_lookup = recovery_lookup or (lambda *_args: None)
         self.clock = clock or time.time
+        self.telemetry = telemetry
 
     @staticmethod
     def _cursor(handler, after=0) -> int:
@@ -94,6 +96,9 @@ class ProviderSSETransport:
                         payload.setdefault("agentId", meta.get("agentId") or "")
                         payload.setdefault("profile", meta.get("profile") or "")
                         self.write_event(handler, event_name, payload)
+                        if self.telemetry is not None:
+                            self.telemetry.mark(run_id, "sse_written")
+                            self.telemetry.mark(run_id, "terminal_sse_written")
                         handler.close_connection = True
                         break
                     if self.clock() - last_keepalive >= 10:
@@ -105,6 +110,10 @@ class ProviderSSETransport:
                     cursor = max(cursor, int(item.get("id") or 0))
                     event_name = str(item.get("event") or "message")
                     self.write_event(handler, event_name, item.get("data") or {}, item.get("id"))
+                    if self.telemetry is not None:
+                        self.telemetry.mark(run_id, "sse_written")
+                        if event_name in {"run.completed", "run.failed", "run.cancelled", "run.canceled"}:
+                            self.telemetry.mark(run_id, "terminal_sse_written")
                     if event_name in {"run.completed", "run.failed", "run.cancelled", "run.canceled"}:
                         handler.close_connection = True
                         return
@@ -187,6 +196,10 @@ class ProviderSSETransport:
                     for item in items:
                         cursor = max(cursor, int(item.get("id") or 0))
                         self.write_event(handler, item.get("event") or "message", item.get("data") or {}, item.get("id"))
+                        if self.telemetry is not None and item.get("runId"):
+                            self.telemetry.mark(item.get("runId"), "sse_written")
+                            if item.get("event") in {"run.completed", "run.failed", "run.cancelled", "run.canceled"}:
+                                self.telemetry.mark(item.get("runId"), "terminal_sse_written")
                     continue
                 if self.clock() - last_keepalive >= 10:
                     self.write_event(handler, "provider.heartbeat", {

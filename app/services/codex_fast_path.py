@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 from collections import OrderedDict
+from collections import deque
 import copy
 from dataclasses import dataclass
 import json
+import hashlib
+import math
 import threading
 import time
 from typing import Any, Callable, Mapping
@@ -23,6 +26,147 @@ MAX_BUCKET_FRAGMENTS = 200
 MAX_BUCKET_BYTES = 64 * 1024
 MAX_COALESCE_BYTES = 16 * 1024 * 1024
 COALESCE_EVENT_NAMES = {"message.delta", "message.delta.text", "reasoning.available", "reasoning.delta"}
+TIMING_STAGES = {
+    "request_accepted",
+    "run_reserved",
+    "provider_request_sent",
+    "first_native_event",
+    "first_displayable_fragment",
+    "journal_published",
+    "sse_written",
+    "terminal_sse_written",
+    "provider_terminal",
+    "durable_terminal_committed",
+}
+TIMING_METRICS = {f"accepted_to_{stage}_ms" for stage in TIMING_STAGES if stage != "request_accepted"} | {
+    "terminal_tail_ms",
+    "terminal_fence_wait_ms",
+}
+
+
+class CodexFastPathTelemetry:
+    """Bounded content-free run timing and fixed-cardinality counters."""
+
+    def __init__(self, *, max_runs: int = 1024, max_samples: int = 2048, clock_ns: Callable[[], int] | None = None) -> None:
+        self.max_runs = max(1, int(max_runs))
+        self.max_samples = max(1, int(max_samples))
+        self._clock_ns = clock_ns or time.monotonic_ns
+        self._lock = threading.Lock()
+        self._runs: OrderedDict[str, dict[str, Any]] = OrderedDict()
+        self._samples = {metric: deque(maxlen=self.max_samples) for metric in TIMING_METRICS}
+        self._counters = {
+            "busyByConversation": 0,
+            "busyByCapacity": 0,
+            "startedRuns": 0,
+            "evictedRuns": 0,
+        }
+
+    @staticmethod
+    def _digest(value: str) -> str:
+        return hashlib.sha256(str(value or "").encode("utf-8")).hexdigest()[:12]
+
+    def start(self, run_id: str, conversation_id: str = "", *, at_ns: int | None = None) -> None:
+        run_id = str(run_id or "")[:240]
+        if not run_id:
+            return
+        now_ns = int(at_ns if at_ns is not None else self._clock_ns())
+        with self._lock:
+            if run_id not in self._runs:
+                self._counters["startedRuns"] += 1
+            self._runs[run_id] = {
+                "runDigest": self._digest(run_id),
+                "conversationDigest": self._digest(str(conversation_id or "")),
+                "stages": {"request_accepted": now_ns},
+            }
+            self._runs.move_to_end(run_id)
+            while len(self._runs) > self.max_runs:
+                self._runs.popitem(last=False)
+                self._counters["evictedRuns"] += 1
+
+    def mark(self, run_id: str, stage: str, *, at_ns: int | None = None) -> bool:
+        run_id = str(run_id or "")[:240]
+        stage = str(stage or "")
+        if not run_id or stage not in TIMING_STAGES:
+            return False
+        now_ns = int(at_ns if at_ns is not None else self._clock_ns())
+        with self._lock:
+            record = self._runs.get(run_id)
+            if record is None:
+                record = {"runDigest": self._digest(run_id), "conversationDigest": self._digest(""), "stages": {}}
+                self._runs[run_id] = record
+            stages = record["stages"]
+            if stage in stages:
+                return False
+            stages[stage] = now_ns
+            self._runs.move_to_end(run_id)
+            accepted_ns = stages.get("request_accepted")
+            if accepted_ns is not None and stage != "request_accepted":
+                self._samples[f"accepted_to_{stage}_ms"].append(max(0.0, (now_ns - accepted_ns) / 1_000_000))
+            if "provider_terminal" in stages and "terminal_sse_written" in stages and not record.get("terminalTailObserved"):
+                self._samples["terminal_tail_ms"].append(max(0.0, (stages["terminal_sse_written"] - stages["provider_terminal"]) / 1_000_000))
+                record["terminalTailObserved"] = True
+            while len(self._runs) > self.max_runs:
+                self._runs.popitem(last=False)
+                self._counters["evictedRuns"] += 1
+            return True
+
+    def observe(self, metric: str, value_ms: float) -> bool:
+        metric = str(metric or "")
+        if metric not in TIMING_METRICS:
+            return False
+        try:
+            value = max(0.0, float(value_ms))
+        except (TypeError, ValueError):
+            return False
+        with self._lock:
+            self._samples[metric].append(value)
+        return True
+
+    def increment_busy(self, reason: str) -> None:
+        key = "busyByCapacity" if str(reason or "").lower() == "capacity" else "busyByConversation"
+        with self._lock:
+            self._counters[key] += 1
+
+    @staticmethod
+    def _summary(values) -> dict[str, float | int]:
+        ordered = sorted(float(value) for value in values)
+        if not ordered:
+            return {"samples": 0, "p50Ms": 0.0, "p95Ms": 0.0, "maxMs": 0.0}
+        percentile = lambda ratio: ordered[min(len(ordered) - 1, max(0, math.ceil(len(ordered) * ratio) - 1))]
+        return {
+            "samples": len(ordered),
+            "p50Ms": round(percentile(0.50), 3),
+            "p95Ms": round(percentile(0.95), 3),
+            "maxMs": round(ordered[-1], 3),
+        }
+
+    def diagnostics(self, *, recent_limit: int = 20) -> dict[str, Any]:
+        with self._lock:
+            samples = {key: list(values) for key, values in self._samples.items()}
+            recent = []
+            for record in list(self._runs.values())[-max(0, min(int(recent_limit), 100)):]:
+                stages = record.get("stages") or {}
+                accepted_ns = stages.get("request_accepted")
+                relative = {
+                    stage: round((value - accepted_ns) / 1_000_000, 3)
+                    for stage, value in stages.items()
+                    if accepted_ns is not None and value >= accepted_ns
+                }
+                recent.append({
+                    "runDigest": record.get("runDigest") or "",
+                    "conversationDigest": record.get("conversationDigest") or "",
+                    "stageMs": relative,
+                })
+            counters = dict(self._counters)
+            retained = len(self._runs)
+        return {
+            **counters,
+            "retainedRuns": retained,
+            "maxRuns": self.max_runs,
+            "maxSamplesPerMetric": self.max_samples,
+            "histograms": {key: self._summary(values) for key, values in samples.items()},
+            "recentRuns": recent,
+        }
 
 
 @dataclass(frozen=True)

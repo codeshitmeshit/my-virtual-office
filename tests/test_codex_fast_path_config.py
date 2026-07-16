@@ -100,6 +100,10 @@ def test_server_load_and_safe_projection_expose_only_bounded_diagnostics(monkeyp
         safe = server._build_safe_vo_config()["codex"]["fastPath"]
         assert safe == loaded["codex"]["fastPath"]
         assert "VO_CODEX" not in str(safe)
+        runtime = server._build_safe_vo_config()["codex"]["fastPathRuntime"]
+        assert runtime["timing"]["maxRuns"] == 1024
+        assert runtime["timing"]["maxSamplesPerMetric"] == 2048
+        assert "prompt" not in str(runtime).lower()
     finally:
         server.VO_CONFIG = old_config
         server.get_license_status = old_license

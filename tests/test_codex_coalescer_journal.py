@@ -6,7 +6,7 @@ import threading
 import time
 
 from app.provider_sse_transport import ProviderSSETransport
-from app.services.codex_fast_path import CodexTransientCoalescer
+from app.services.codex_fast_path import CodexFastPathTelemetry, CodexTransientCoalescer
 from app.services.provider_events import ProviderEventJournal
 from app.services.provider_ports import AdapterCapabilities, AdapterEvent, AdapterResult, RunCommand
 from app.services.provider_registry import ProviderRunRepository
@@ -64,13 +64,16 @@ def test_coalescing_precedes_journal_and_barriers_preserve_replay_order():
     repository = ProviderRunRepository()
     journal = ProviderEventJournal()
     coalescer = CodexTransientCoalescer(min_ms=33, max_ms=100)
-    coordinator = ProviderRunCoordinator(repository, journal, event_pipeline=coalescer)
+    telemetry = CodexFastPathTelemetry()
+    telemetry.start("coalesced-run-id", "conversation")
+    coordinator = ProviderRunCoordinator(repository, journal, event_pipeline=coalescer, telemetry=telemetry)
     command = RunCommand(
         provider_kind="codex",
         provider_path="fixture",
         agent_id="agent",
         conversation_id="conversation",
         idempotency_key="coalesced-run",
+        run_id="coalesced-run-id",
     )
     try:
         outcome = coordinator.start(command, adapter=BurstAdapter())
@@ -104,7 +107,13 @@ def test_coalescing_precedes_journal_and_barriers_preserve_replay_order():
             if event["event"] == "message.delta"
         ) == "ABCE"
 
-        transport = ProviderSSETransport(repository, journal, provider_kind_of=lambda meta, _run_id: meta.get("providerKind") or "codex")
+        telemetry.mark(outcome.run_id, "provider_terminal")
+        transport = ProviderSSETransport(
+            repository,
+            journal,
+            provider_kind_of=lambda meta, _run_id: meta.get("providerKind") or "codex",
+            telemetry=telemetry,
+        )
         handler = Handler(cursor)
         transport.stream_run(handler, outcome.run_id)
         body = handler.wfile.getvalue().decode()
@@ -113,6 +122,8 @@ def test_coalescing_precedes_journal_and_barriers_preserve_replay_order():
         assert "event: approval.request" in body
         assert body.count("event: run.completed") == 1
         assert handler.close_connection is True
+        stages = telemetry.diagnostics()["recentRuns"][-1]["stageMs"]
+        assert {"journal_published", "sse_written", "terminal_sse_written"}.issubset(stages)
     finally:
         coalescer.close()
 

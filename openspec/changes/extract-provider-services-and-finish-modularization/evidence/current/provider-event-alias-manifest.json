@@ -7,7 +7,7 @@
       },
       {
         "file": "app/provider_sse_transport.py",
-        "line": 164
+        "line": 173
       },
       {
         "file": "app/providers/hermes.py",
@@ -15,23 +15,23 @@
       },
       {
         "file": "app/server.py",
-        "line": 4311
+        "line": 4322
       },
       {
         "file": "app/server.py",
-        "line": 4697
+        "line": 4708
       },
       {
         "file": "app/server.py",
-        "line": 5122
+        "line": 5133
       },
       {
         "file": "app/server.py",
-        "line": 5903
+        "line": 5914
       },
       {
         "file": "app/server.py",
-        "line": 6825
+        "line": 6851
       },
       {
         "file": "app/services/provider_events.py",
@@ -41,7 +41,7 @@
     "approval.required": [
       {
         "file": "app/server.py",
-        "line": 5899
+        "line": 5910
       },
       {
         "file": "app/services/provider_events.py",
@@ -51,11 +51,11 @@
     "approval.resolved": [
       {
         "file": "app/server.py",
-        "line": 5685
+        "line": 5696
       },
       {
         "file": "app/server.py",
-        "line": 7280
+        "line": 7308
       },
       {
         "file": "app/services/provider_events.py",
@@ -69,27 +69,27 @@
       },
       {
         "file": "app/server.py",
-        "line": 5586
+        "line": 5597
       },
       {
         "file": "app/server.py",
-        "line": 5705
+        "line": 5716
       },
       {
         "file": "app/server.py",
-        "line": 7153
+        "line": 7181
       },
       {
         "file": "app/server.py",
-        "line": 7202
+        "line": 7230
       },
       {
         "file": "app/server.py",
-        "line": 7209
+        "line": 7237
       },
       {
         "file": "app/server.py",
-        "line": 7292
+        "line": 7320
       },
       {
         "file": "app/services/provider_events.py",
@@ -109,7 +109,7 @@
     "history.recovered": [
       {
         "file": "app/provider_sse_transport.py",
-        "line": 176
+        "line": 185
       },
       {
         "file": "app/services/provider_events.py",
@@ -133,15 +133,15 @@
       },
       {
         "file": "app/server.py",
-        "line": 4290
+        "line": 4301
       },
       {
         "file": "app/server.py",
-        "line": 5093
+        "line": 5104
       },
       {
         "file": "app/server.py",
-        "line": 5866
+        "line": 5877
       },
       {
         "file": "app/services/provider_events.py",
@@ -167,35 +167,35 @@
       },
       {
         "file": "app/server.py",
-        "line": 4288
+        "line": 4299
       },
       {
         "file": "app/server.py",
-        "line": 5090
+        "line": 5101
       },
       {
         "file": "app/server.py",
-        "line": 5866
+        "line": 5877
       },
       {
         "file": "app/server.py",
-        "line": 5867
+        "line": 5878
       },
       {
         "file": "app/server.py",
-        "line": 6827
+        "line": 6853
       },
       {
         "file": "app/server.py",
-        "line": 8415
+        "line": 8445
       },
       {
         "file": "app/server.py",
-        "line": 32900
+        "line": 32931
       },
       {
         "file": "app/services/codex_fast_path.py",
-        "line": 25
+        "line": 28
       },
       {
         "file": "app/services/provider_events.py",
@@ -205,19 +205,19 @@
     "message.delta.text": [
       {
         "file": "app/server.py",
-        "line": 4288
+        "line": 4299
       },
       {
         "file": "app/server.py",
-        "line": 5090
+        "line": 5101
       },
       {
         "file": "app/server.py",
-        "line": 5866
+        "line": 5877
       },
       {
         "file": "app/services/codex_fast_path.py",
-        "line": 25
+        "line": 28
       },
       {
         "file": "app/services/provider_events.py",
@@ -237,15 +237,15 @@
     "provider.activity": [
       {
         "file": "app/server.py",
-        "line": 6830
+        "line": 6856
       },
       {
         "file": "app/server.py",
-        "line": 6843
+        "line": 6869
       },
       {
         "file": "app/services/codex_fast_path.py",
-        "line": 138
+        "line": 282
       },
       {
         "file": "app/services/provider_events.py",
@@ -263,7 +263,7 @@
     "provider.heartbeat": [
       {
         "file": "app/provider_sse_transport.py",
-        "line": 192
+        "line": 205
       },
       {
         "file": "app/services/provider_events.py",
@@ -273,7 +273,7 @@
     "provider.snapshot": [
       {
         "file": "app/provider_sse_transport.py",
-        "line": 158
+        "line": 167
       },
       {
         "file": "app/services/provider_events.py",
@@ -295,35 +295,35 @@
       },
       {
         "file": "app/server.py",
-        "line": 4295
+        "line": 4306
       },
       {
         "file": "app/server.py",
-        "line": 5097
+        "line": 5108
       },
       {
         "file": "app/server.py",
-        "line": 5868
+        "line": 5879
       },
       {
         "file": "app/server.py",
-        "line": 5869
+        "line": 5880
       },
       {
         "file": "app/server.py",
-        "line": 6830
+        "line": 6856
       },
       {
         "file": "app/server.py",
-        "line": 8420
+        "line": 8450
       },
       {
         "file": "app/server.py",
-        "line": 32903
+        "line": 32934
       },
       {
         "file": "app/services/codex_fast_path.py",
-        "line": 25
+        "line": 28
       },
       {
         "file": "app/services/provider_events.py",
@@ -337,7 +337,7 @@
       },
       {
         "file": "app/services/codex_fast_path.py",
-        "line": 25
+        "line": 28
       },
       {
         "file": "app/services/provider_events.py",
@@ -351,27 +351,35 @@
       },
       {
         "file": "app/provider_sse_transport.py",
-        "line": 108
+        "line": 115
+      },
+      {
+        "file": "app/provider_sse_transport.py",
+        "line": 117
+      },
+      {
+        "file": "app/provider_sse_transport.py",
+        "line": 201
       },
       {
         "file": "app/server.py",
-        "line": 4323
+        "line": 4334
       },
       {
         "file": "app/server.py",
-        "line": 5131
+        "line": 5142
       },
       {
         "file": "app/server.py",
-        "line": 5150
+        "line": 5161
       },
       {
         "file": "app/server.py",
-        "line": 6903
+        "line": 6930
       },
       {
         "file": "app/services/codex_fast_path.py",
-        "line": 19
+        "line": 22
       },
       {
         "file": "app/services/provider_events.py",
@@ -397,55 +405,63 @@
       },
       {
         "file": "app/provider_sse_transport.py",
-        "line": 91
+        "line": 93
       },
       {
         "file": "app/provider_sse_transport.py",
-        "line": 108
+        "line": 115
+      },
+      {
+        "file": "app/provider_sse_transport.py",
+        "line": 117
+      },
+      {
+        "file": "app/provider_sse_transport.py",
+        "line": 201
       },
       {
         "file": "app/server.py",
-        "line": 4323
+        "line": 4334
       },
       {
         "file": "app/server.py",
-        "line": 5131
+        "line": 5142
       },
       {
         "file": "app/server.py",
-        "line": 5150
+        "line": 5161
       },
       {
         "file": "app/server.py",
-        "line": 5702
+        "line": 5713
       },
       {
         "file": "app/server.py",
-        "line": 5908
+        "line": 5919
       },
       {
         "file": "app/server.py",
-        "line": 6000
+        "line": 6011
       },
       {
         "file": "app/server.py",
-        "line": 6840
+        "line": 6866
       },
       {
         "file": "app/server.py",
-        "line": 6903
+        "line": 6930
       },
       {
         "file": "app/server.py",
-        "line": 6944
+        "line": 6971
       },
       {
         "file": "app/server.py",
-        "line": 7028
+        "line": 7056
       },
       {
         "file": "app/services/codex_fast_path.py",
-        "line": 19
+        "line": 22
       },
       {
         "file": "app/services/provider_events.py",
@@ -489,7 +505,7 @@
       },
       {
         "file": "app/services/provider_runs.py",
-        "line": 234
+        "line": 238
       }
     ],
     "run.completed": [
@@ -499,11 +515,19 @@
       },
       {
         "file": "app/provider_sse_transport.py",
-        "line": 91
+        "line": 93
       },
       {
         "file": "app/provider_sse_transport.py",
-        "line": 108
+        "line": 115
+      },
+      {
+        "file": "app/provider_sse_transport.py",
+        "line": 117
+      },
+      {
+        "file": "app/provider_sse_transport.py",
+        "line": 201
       },
       {
         "file": "app/providers/hermes.py",
@@ -511,59 +535,59 @@
       },
       {
         "file": "app/server.py",
-        "line": 4290
+        "line": 4301
       },
       {
         "file": "app/server.py",
-        "line": 4291
+        "line": 4302
       },
       {
         "file": "app/server.py",
-        "line": 4318
+        "line": 4329
       },
       {
         "file": "app/server.py",
-        "line": 5131
+        "line": 5142
       },
       {
         "file": "app/server.py",
-        "line": 5137
+        "line": 5148
       },
       {
         "file": "app/server.py",
-        "line": 5146
+        "line": 5157
       },
       {
         "file": "app/server.py",
-        "line": 5906
+        "line": 5917
       },
       {
         "file": "app/server.py",
-        "line": 6838
+        "line": 6864
       },
       {
         "file": "app/server.py",
-        "line": 6903
+        "line": 6930
       },
       {
         "file": "app/server.py",
-        "line": 6942
+        "line": 6969
       },
       {
         "file": "app/server.py",
-        "line": 8466
+        "line": 8496
       },
       {
         "file": "app/server.py",
-        "line": 8468
+        "line": 8498
       },
       {
         "file": "app/server.py",
-        "line": 32940
+        "line": 32971
       },
       {
         "file": "app/services/codex_fast_path.py",
-        "line": 19
+        "line": 22
       },
       {
         "file": "app/services/provider_events.py",
@@ -597,11 +621,19 @@
       },
       {
         "file": "app/provider_sse_transport.py",
-        "line": 91
+        "line": 93
       },
       {
         "file": "app/provider_sse_transport.py",
-        "line": 108
+        "line": 115
+      },
+      {
+        "file": "app/provider_sse_transport.py",
+        "line": 117
+      },
+      {
+        "file": "app/provider_sse_transport.py",
+        "line": 201
       },
       {
         "file": "app/providers/hermes.py",
@@ -609,11 +641,7 @@
       },
       {
         "file": "app/server.py",
-        "line": 4323
-      },
-      {
-        "file": "app/server.py",
-        "line": 5131
+        "line": 4334
       },
       {
         "file": "app/server.py",
@@ -621,47 +649,51 @@
       },
       {
         "file": "app/server.py",
-        "line": 5150
+        "line": 5153
       },
       {
         "file": "app/server.py",
-        "line": 5911
+        "line": 5161
       },
       {
         "file": "app/server.py",
-        "line": 6000
+        "line": 5922
       },
       {
         "file": "app/server.py",
-        "line": 6842
+        "line": 6011
       },
       {
         "file": "app/server.py",
-        "line": 6903
+        "line": 6868
       },
       {
         "file": "app/server.py",
-        "line": 6947
+        "line": 6930
       },
       {
         "file": "app/server.py",
-        "line": 7028
+        "line": 6974
       },
       {
         "file": "app/server.py",
-        "line": 8471
+        "line": 7056
       },
       {
         "file": "app/server.py",
-        "line": 8473
+        "line": 8501
       },
       {
         "file": "app/server.py",
-        "line": 32940
+        "line": 8503
+      },
+      {
+        "file": "app/server.py",
+        "line": 32971
       },
       {
         "file": "app/services/codex_fast_path.py",
-        "line": 19
+        "line": 22
       },
       {
         "file": "app/services/provider_events.py",
@@ -689,37 +721,37 @@
       },
       {
         "file": "app/services/provider_runs.py",
-        "line": 118
+        "line": 122
       },
       {
         "file": "app/services/provider_runs.py",
-        "line": 154
+        "line": 158
       },
       {
         "file": "app/services/provider_runs.py",
-        "line": 168
+        "line": 172
       },
       {
         "file": "app/services/provider_runs.py",
-        "line": 236
+        "line": 240
       },
       {
         "file": "app/services/provider_runs.py",
-        "line": 237
+        "line": 241
       }
     ],
     "run.native.started": [
       {
         "file": "app/server.py",
-        "line": 4275
+        "line": 4286
       },
       {
         "file": "app/server.py",
-        "line": 5864
+        "line": 5875
       },
       {
         "file": "app/server.py",
-        "line": 5865
+        "line": 5876
       },
       {
         "file": "app/services/provider_events.py",
@@ -753,31 +785,31 @@
       },
       {
         "file": "app/server.py",
-        "line": 5059
+        "line": 5070
       },
       {
         "file": "app/server.py",
-        "line": 5061
+        "line": 5072
       },
       {
         "file": "app/server.py",
-        "line": 5836
+        "line": 5847
       },
       {
         "file": "app/server.py",
-        "line": 5864
+        "line": 5875
       },
       {
         "file": "app/server.py",
-        "line": 6887
+        "line": 6914
       },
       {
         "file": "app/server.py",
-        "line": 8382
+        "line": 8412
       },
       {
         "file": "app/server.py",
-        "line": 32879
+        "line": 32910
       },
       {
         "file": "app/services/provider_events.py",
@@ -785,13 +817,13 @@
       },
       {
         "file": "app/services/provider_runs.py",
-        "line": 125
+        "line": 129
       }
     ],
     "run.stop_requested": [
       {
         "file": "app/server.py",
-        "line": 5197
+        "line": 5208
       },
       {
         "file": "app/services/provider_events.py",
@@ -839,7 +871,7 @@
       },
       {
         "file": "app/server.py",
-        "line": 22661
+        "line": 22691
       },
       {
         "file": "app/services/provider_events.py",
@@ -849,7 +881,7 @@
     "session.metrics": [
       {
         "file": "app/server.py",
-        "line": 8409
+        "line": 8439
       },
       {
         "file": "app/services/provider_events.py",
@@ -893,23 +925,23 @@
     "tool.call": [
       {
         "file": "app/server.py",
-        "line": 3872
+        "line": 3883
       },
       {
         "file": "app/server.py",
-        "line": 3896
+        "line": 3907
       },
       {
         "file": "app/server.py",
-        "line": 4299
+        "line": 4310
       },
       {
         "file": "app/server.py",
-        "line": 5101
+        "line": 5112
       },
       {
         "file": "app/server.py",
-        "line": 5870
+        "line": 5881
       },
       {
         "file": "app/services/provider_events.py",
@@ -951,31 +983,31 @@
       },
       {
         "file": "app/server.py",
-        "line": 4303
+        "line": 4314
       },
       {
         "file": "app/server.py",
-        "line": 5110
+        "line": 5121
       },
       {
         "file": "app/server.py",
-        "line": 5874
+        "line": 5885
       },
       {
         "file": "app/server.py",
-        "line": 5877
+        "line": 5888
       },
       {
         "file": "app/server.py",
-        "line": 6833
+        "line": 6859
       },
       {
         "file": "app/server.py",
-        "line": 8434
+        "line": 8464
       },
       {
         "file": "app/server.py",
-        "line": 32906
+        "line": 32937
       },
       {
         "file": "app/services/provider_events.py",
@@ -1027,39 +1059,39 @@
       },
       {
         "file": "app/server.py",
-        "line": 4303
+        "line": 4314
       },
       {
         "file": "app/server.py",
-        "line": 4304
+        "line": 4315
       },
       {
         "file": "app/server.py",
-        "line": 5110
+        "line": 5121
       },
       {
         "file": "app/server.py",
-        "line": 5116
+        "line": 5127
       },
       {
         "file": "app/server.py",
-        "line": 5878
+        "line": 5889
       },
       {
         "file": "app/server.py",
-        "line": 5881
+        "line": 5892
       },
       {
         "file": "app/server.py",
-        "line": 6835
+        "line": 6861
       },
       {
         "file": "app/server.py",
-        "line": 8434
+        "line": 8464
       },
       {
         "file": "app/server.py",
-        "line": 32906
+        "line": 32937
       },
       {
         "file": "app/services/provider_events.py",
@@ -1093,23 +1125,23 @@
       },
       {
         "file": "app/server.py",
-        "line": 3872
+        "line": 3883
       },
       {
         "file": "app/server.py",
-        "line": 3900
+        "line": 3911
       },
       {
         "file": "app/server.py",
-        "line": 4303
+        "line": 4314
       },
       {
         "file": "app/server.py",
-        "line": 5110
+        "line": 5121
       },
       {
         "file": "app/server.py",
-        "line": 5874
+        "line": 5885
       },
       {
         "file": "app/services/provider_events.py",
@@ -1141,35 +1173,35 @@
       },
       {
         "file": "app/server.py",
-        "line": 4299
+        "line": 4310
       },
       {
         "file": "app/server.py",
-        "line": 5101
+        "line": 5112
       },
       {
         "file": "app/server.py",
-        "line": 5870
+        "line": 5881
       },
       {
         "file": "app/server.py",
-        "line": 5873
+        "line": 5884
       },
       {
         "file": "app/server.py",
-        "line": 6836
+        "line": 6862
       },
       {
         "file": "app/server.py",
-        "line": 8430
+        "line": 8460
       },
       {
         "file": "app/server.py",
-        "line": 8432
+        "line": 8462
       },
       {
         "file": "app/server.py",
-        "line": 32906
+        "line": 32937
       },
       {
         "file": "app/services/provider_events.py",
@@ -1203,7 +1235,7 @@
       },
       {
         "file": "app/server.py",
-        "line": 8398
+        "line": 8428
       },
       {
         "file": "app/services/provider_events.py",

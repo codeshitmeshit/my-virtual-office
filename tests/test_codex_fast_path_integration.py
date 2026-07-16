@@ -18,7 +18,7 @@ os.environ["VO_HERMES_ENABLED"] = "0"
 os.environ["VO_CODEX_ENABLED"] = "0"
 
 import server
-from services.codex_fast_path import CodexEventFastPath, CodexFastPathSettings
+from services.codex_fast_path import CodexEventFastPath, CodexFastPathSettings, CodexFastPathTelemetry
 
 
 AGENT = {
@@ -151,3 +151,37 @@ def test_background_run_fast_path_never_upserts_or_removes_codex_progress_ledger
         assert snapshot["result"]["ok"] is True
         history = server._load_comm_history(limit=50, conversation_id="conv-fast-background", agent_id="codex-local")
         assert not [event for event in history if (event.get("metadata") or {}).get("ephemeral") == "codex-progress"]
+
+
+def test_chat_path_records_backend_stages_without_content(monkeypatch):
+    with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as workspace:
+        provider = EventProvider(workspace, [
+            {"id": "reasoning-timing", "sequence": 1, "type": "reasoning", "status": "running", "text": "sensitive response text", "ts": 1},
+            {"id": "turn-timing", "sequence": 2, "type": "turn", "status": "completed", "output": {"reply": "done"}, "ts": 2},
+        ])
+        _configure(monkeypatch, status_dir, provider)
+        telemetry = CodexFastPathTelemetry()
+        monkeypatch.setattr(server, "_CODEX_FAST_PATH_TELEMETRY", telemetry)
+        telemetry.start("run-timing", "conversation-timing")
+
+        result = server._handle_codex_chat({
+            "agentId": "codex-local",
+            "conversationId": "conversation-timing",
+            "message": "sensitive prompt text",
+            "fromType": "human",
+            "_streamRunId": "run-timing",
+        })
+
+        assert result["ok"] is True
+        diagnostics = telemetry.diagnostics()
+        stages = diagnostics["recentRuns"][-1]["stageMs"]
+        assert {
+            "request_accepted",
+            "provider_request_sent",
+            "first_native_event",
+            "first_displayable_fragment",
+            "provider_terminal",
+            "durable_terminal_committed",
+        }.issubset(stages)
+        assert "sensitive prompt text" not in str(diagnostics)
+        assert "sensitive response text" not in str(diagnostics)
