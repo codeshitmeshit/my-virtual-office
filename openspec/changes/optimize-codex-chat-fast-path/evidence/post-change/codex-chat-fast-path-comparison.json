@@ -1,0 +1,204 @@
+{
+  "checks": [
+    {
+      "gate": "fixtureIdentity",
+      "passed": true
+    },
+    {
+      "gate": "fastPathEnabled",
+      "passed": true
+    },
+    {
+      "gate": "noMeasuredFailures",
+      "passed": true
+    },
+    {
+      "gate": "allStageSamplesPresent",
+      "passed": true
+    },
+    {
+      "gate": "workingFeedbackP95AtMost200Ms",
+      "passed": true
+    },
+    {
+      "gate": "firstNativeEventP95AtMost1000Ms",
+      "passed": true
+    },
+    {
+      "gate": "firstFragmentNotDelayedBeyondCoalescingBound",
+      "passed": true
+    },
+    {
+      "gate": "firstTextReportedSeparately",
+      "passed": true
+    },
+    {
+      "gate": "noFixedTerminal200MsFloor",
+      "passed": true
+    },
+    {
+      "gate": "readerCallbackP95Improved",
+      "passed": true
+    },
+    {
+      "gate": "activityWritesReduced",
+      "passed": true
+    },
+    {
+      "gate": "communicationProgressRewritesEliminated",
+      "passed": true
+    },
+    {
+      "gate": "communicationHistoryLoadsReduced",
+      "passed": true
+    },
+    {
+      "gate": "durableCommunicationAppendsExpected",
+      "passed": true
+    }
+  ],
+  "fixture": {
+    "externalModelOrCredentials": false,
+    "kind": "deterministic-warm-resumed-codex-chat",
+    "measuredTurns": 100,
+    "warmups": 10
+  },
+  "operationCountComparison": {
+    "activityJsonLoads": {
+      "baselinePerTurnMedian": 31.0,
+      "baselineTotal": 3100,
+      "candidatePerTurnMedian": 3.0,
+      "candidateTotal": 300,
+      "totalDelta": -2800
+    },
+    "activityJsonWrites": {
+      "baselinePerTurnMedian": 31.0,
+      "baselineTotal": 3100,
+      "candidatePerTurnMedian": 2.0,
+      "candidateTotal": 200,
+      "totalDelta": -2900
+    },
+    "communicationAppends": {
+      "baselinePerTurnMedian": 2.0,
+      "baselineTotal": 200,
+      "candidatePerTurnMedian": 3.0,
+      "candidateTotal": 300,
+      "totalDelta": 100
+    },
+    "communicationHistoryLoads": {
+      "baselinePerTurnMedian": 35.0,
+      "baselineTotal": 3500,
+      "candidatePerTurnMedian": 3.0,
+      "candidateTotal": 300,
+      "totalDelta": -3200
+    },
+    "communicationProgressRewrites": {
+      "baselinePerTurnMedian": 33.0,
+      "baselineTotal": 3300,
+      "candidatePerTurnMedian": 0.0,
+      "candidateTotal": 0,
+      "totalDelta": -3300
+    }
+  },
+  "operationCountNote": "Communication appends rise from 2 to 3 per turn because terminal outcome is now an idempotent durable record; transient activity writes and progress rewrites are the performance targets.",
+  "passed": true,
+  "schemaVersion": 1,
+  "stageComparison": {
+    "durableTerminalCommitMs": {
+      "baselineMaxMs": 4206.4,
+      "baselineP95Ms": 1100.18,
+      "candidateMaxMs": 58.046,
+      "candidateP95Ms": 37.92,
+      "p95DeltaMs": -1062.26,
+      "samples": 100
+    },
+    "firstFragmentSseMs": {
+      "baselineMaxMs": 134.44,
+      "baselineP95Ms": 69.762,
+      "candidateMaxMs": 55.531,
+      "candidateP95Ms": 27.904,
+      "p95DeltaMs": -41.858,
+      "samples": 100
+    },
+    "firstNativeEventMs": {
+      "baselineMaxMs": 59.737,
+      "baselineP95Ms": 31.442,
+      "candidateMaxMs": 51.03,
+      "candidateP95Ms": 24.266,
+      "p95DeltaMs": -7.176,
+      "samples": 100
+    },
+    "firstNativeSseMs": {
+      "baselineMaxMs": 134.44,
+      "baselineP95Ms": 69.762,
+      "candidateMaxMs": 55.531,
+      "candidateP95Ms": 27.904,
+      "p95DeltaMs": -41.858,
+      "samples": 100
+    },
+    "firstTextSseMs": {
+      "baselineMaxMs": 283.542,
+      "baselineP95Ms": 133.724,
+      "candidateMaxMs": 55.613,
+      "candidateP95Ms": 27.992,
+      "p95DeltaMs": -105.732,
+      "samples": 100
+    },
+    "providerRequestMs": {
+      "baselineMaxMs": 59.036,
+      "baselineP95Ms": 30.895,
+      "candidateMaxMs": 50.684,
+      "candidateP95Ms": 23.814,
+      "p95DeltaMs": -7.081,
+      "samples": 100
+    },
+    "providerTerminalMs": {
+      "baselineMaxMs": 4139.982,
+      "baselineP95Ms": 1063.628,
+      "candidateMaxMs": 55.346,
+      "candidateP95Ms": 29.082,
+      "p95DeltaMs": -1034.546,
+      "samples": 100
+    },
+    "readerCallbackMaxMs": {
+      "baselineMaxMs": 397.087,
+      "baselineP95Ms": 64.1,
+      "candidateMaxMs": 14.633,
+      "candidateP95Ms": 10.058,
+      "p95DeltaMs": -54.042,
+      "samples": 100
+    },
+    "readerCallbackTotalMs": {
+      "baselineMaxMs": 4209.149,
+      "baselineP95Ms": 1084.045,
+      "candidateMaxMs": 19.237,
+      "candidateP95Ms": 14.512,
+      "p95DeltaMs": -1069.533,
+      "samples": 100
+    },
+    "runAcceptanceMs": {
+      "baselineMaxMs": 0.816,
+      "baselineP95Ms": 0.501,
+      "candidateMaxMs": 0.567,
+      "candidateP95Ms": 0.375,
+      "p95DeltaMs": -0.126,
+      "samples": 100
+    },
+    "terminalTailMs": {
+      "baselineMaxMs": 418.761,
+      "baselineP95Ms": 271.926,
+      "candidateMaxMs": 194.314,
+      "candidateP95Ms": 38.213,
+      "p95DeltaMs": -233.713,
+      "samples": 100
+    },
+    "workingFeedbackMs": {
+      "baselineMaxMs": 0.001,
+      "baselineP95Ms": 0.0,
+      "candidateMaxMs": 0.0,
+      "candidateP95Ms": 0.0,
+      "p95DeltaMs": 0.0,
+      "samples": 100
+    }
+  }
+}

@@ -294,7 +294,12 @@ def run_fixture(warmups: int, runs: int) -> dict[str, Any]:
         journal = ProviderEventJournal(max_events=4000)
         server.PROVIDER_RUN_REPOSITORY = repository
         server.PROVIDER_EVENT_JOURNAL = journal
-        server.PROVIDER_RUN_COORDINATOR = ProviderRunCoordinator(repository, journal)
+        server.PROVIDER_RUN_COORDINATOR = ProviderRunCoordinator(
+            repository,
+            journal,
+            event_pipeline=server._CODEX_EVENT_COALESCER,
+            telemetry=server._CODEX_FAST_PATH_TELEMETRY,
+        )
         server.PROVIDER_SSE_TRANSPORT = server._provider_sse_transport_for(repository, journal)
         provider = WarmCodexProvider(workspace, make_fake_codex(tmp))
         server._codex_provider_from_config = lambda: provider
@@ -409,6 +414,7 @@ def run_fixture(warmups: int, runs: int) -> dict[str, Any]:
             "browserBoundary": "simulated synchronous production boundary before HTTP fetch",
             "externalModelOrCredentials": False,
             "fakeAppServerEmitsReasoningDeltas": 20,
+            "fastPathEnabled": bool(server._CODEX_EVENT_FAST_PATH.settings.enabled),
         },
         "stages": stages,
         "trends": {
@@ -421,8 +427,16 @@ def run_fixture(warmups: int, runs: int) -> dict[str, Any]:
         "measuredCounterWindow": counter_delta(measured_counter_end, measured_counter_start or {}),
         "failures": failures,
         "baselineObservations": {
-            "activityPersistenceComplexity": "Each native event loads/scans and rewrites the bounded activity JSON file.",
-            "communicationProgressComplexity": "Initial progress, every native event, and terminal cleanup scan/rewrite communication history.",
+            "activityPersistenceComplexity": (
+                "Only durable-key and terminal activity is persisted; transient activity stays in the bounded live view."
+                if server._CODEX_EVENT_FAST_PATH.settings.enabled else
+                "Each native event loads/scans and rewrites the bounded activity JSON file."
+            ),
+            "communicationProgressComplexity": (
+                "Transient progress does not rewrite communication history on the fast path."
+                if server._CODEX_EVENT_FAST_PATH.settings.enabled else
+                "Initial progress, every native event, and terminal cleanup scan/rewrite communication history."
+            ),
             "terminalGrace": "CodexAppServerClient uses callback-drain completion with a bounded malformed-order fallback and no unconditional sleep.",
             "firstTextSlo": "Observed only; no fixed product SLO is asserted.",
         },
@@ -437,8 +451,12 @@ def validate(result: dict[str, Any]) -> None:
     assert result["stages"]["firstNativeEventMs"]["samples"] == fixture["measuredTurns"]
     assert result["stages"]["firstFragmentSseMs"]["samples"] == fixture["measuredTurns"]
     assert result["stages"]["terminalTailMs"]["samples"] == fixture["measuredTurns"]
-    assert result["operationCounts"]["activityJsonWrites"]["total"] > 0
-    assert result["operationCounts"]["communicationProgressRewrites"]["total"] > 0
+    if fixture.get("fastPathEnabled", False):
+        assert result["operationCounts"]["activityJsonWrites"]["total"] <= fixture["measuredTurns"] * 3
+        assert result["operationCounts"]["communicationProgressRewrites"]["total"] == 0
+    else:
+        assert result["operationCounts"]["activityJsonWrites"]["total"] > 0
+        assert result["operationCounts"]["communicationProgressRewrites"]["total"] > 0
     assert result["stages"]["readerCallbackTotalMs"]["p95Ms"] > 0
     assert result["failures"] == []
 
