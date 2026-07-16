@@ -7,6 +7,7 @@ import base64
 import copy
 import http.server
 import json
+import math
 import os
 import mimetypes
 import queue
@@ -77,6 +78,9 @@ _FEISHU_CHAT_LONG_CONNECTION_LOCK = threading.Lock()
 _FEISHU_CHANNEL_LOCKS = {}
 _FEISHU_CHANNEL_LOCKS_LOCK = threading.Lock()
 _FEISHU_CHANNEL_RECORD_LOCK = threading.Lock()
+_FEISHU_PROCESS_OWNER_ID = uuid.uuid4().hex
+_FEISHU_ACTIVE_SOURCE_MESSAGES = set()
+_FEISHU_ACTIVE_SOURCE_MESSAGES_LOCK = threading.Lock()
 _FEISHU_CHAT_EVENT_SUBSCRIBERS = {}
 _FEISHU_CHAT_EVENT_SUBSCRIBERS_LOCK = threading.Lock()
 _FEISHU_CHAT_SSE_METRICS = {
@@ -884,6 +888,89 @@ def _feishu_chat_app_send_config(cfg=None):
     }
 
 
+def _public_feishu_chat_worker_status(value):
+    """Project the worker status onto the secret-safe management contract."""
+    source = value if isinstance(value, dict) else {}
+
+    def boolean_field(container, key):
+        return container.get(key) if isinstance(container.get(key), bool) else False
+
+    def number_field(container, key):
+        raw = container.get(key)
+        return raw if isinstance(raw, (int, float)) and not isinstance(raw, bool) and math.isfinite(raw) and raw >= 0 else 0
+
+    def text_field(container, key, allowed=None, fallback=""):
+        raw = str(container.get(key) or "").strip()[:120]
+        return raw if not allowed or raw in allowed else fallback
+
+    top_statuses = {
+        "not_started", "starting", "running", "connected", "reconnecting", "inbox_full",
+        "queue_pressure", "disabled", "stopped", "interrupted", "error", "exited",
+        "callback_failure",
+        "missing_app_credentials", "missing_node_runtime", "missing_channel_sdk",
+        "dependency_install_failed", "stale_worker_status", "orphaned_parent_exited",
+    }
+    result = {}
+    for key in ("enabled", "running"):
+        if key in source:
+            result[key] = boolean_field(source, key)
+    if "status" in source:
+        result["status"] = text_field(source, "status", top_statuses, "error")
+    for key in ("startedAt", "lastEventAt", "heartbeatAt", "pid", "returnCode"):
+        if key in source:
+            result[key] = number_field(source, key)
+    for key in ("mode", "transport", "workerInstanceId"):
+        if key in source:
+            result[key] = text_field(source, key)
+    if "lastError" in source:
+        result["lastError"] = "" if not source.get("lastError") else "Worker reported an error; see local worker logs."
+
+    nested_contracts = {
+        "sdk": ({"connected"}, {"state"}, set()),
+        "reconnect": ({"active"}, set(), {"count", "lastAt"}),
+        "callback": (set(), set(), {"active", "failures", "lastFailureAt"}),
+        "command": ({"ready"}, set(), {"failures", "lastFailureAt"}),
+        "queue": ({"pressure"}, set(), {"active", "pending"}),
+        "spool": ({"pressure", "full"}, set(), {"entries", "valid", "blocked", "bytes", "oldestPendingAt", "replayed"}),
+    }
+    for name, (boolean_keys, text_keys, number_keys) in nested_contracts.items():
+        nested = source.get(name)
+        if not isinstance(nested, dict):
+            continue
+        projected = {key: boolean_field(nested, key) for key in boolean_keys if key in nested}
+        projected.update({key: text_field(nested, key) for key in text_keys if key in nested})
+        projected.update({key: number_field(nested, key) for key in number_keys if key in nested})
+        if name == "sdk" and "state" in projected:
+            projected["state"] = projected["state"] if projected["state"] in {
+                "not_started", "starting", "connected", "reconnecting", "failed",
+                "stopped", "interrupted", "orphaned_parent_exited",
+            } else "unknown"
+        result[name] = projected
+
+    processing = source.get("processing")
+    if isinstance(processing, dict):
+        states = {"healthy", "degraded", "recovering"}
+        categories = {
+            "", "callback_processing", "callback_http_error", "callback_invalid_ack",
+            "callback_network_error", "callback_timeout", "callback_failure",
+            "chat_queue_full", "inbox_full",
+        }
+        result["processing"] = {
+            "state": text_field(processing, "state", states, "degraded"),
+            "backlog": number_field(processing, "backlog"),
+            "blocked": number_field(processing, "blocked"),
+            "oldestPendingAt": number_field(processing, "oldestPendingAt"),
+            "lastAckAt": number_field(processing, "lastAckAt"),
+            "lastFailureAt": number_field(processing, "lastFailureAt"),
+            "nextRetryAt": number_field(processing, "nextRetryAt"),
+            "recoveryActive": boolean_field(processing, "recoveryActive"),
+            "consecutiveFailures": number_field(processing, "consecutiveFailures"),
+            "warning": boolean_field(processing, "warning"),
+            "lastErrorCategory": text_field(processing, "lastErrorCategory", categories, "callback_failure"),
+        }
+    return result
+
+
 def _feishu_chat_config_response(include_ok=True):
     cfg = _feishu_chat_app_config()
     receiver = _get_feishu_chat_long_connection_receiver()
@@ -891,6 +978,7 @@ def _feishu_chat_config_response(include_ok=True):
         long_connection = {"enabled": False, "running": False, "status": "disabled"}
     else:
         long_connection = receiver.status() if receiver else {"enabled": False, "running": False, "status": "not_started"}
+    long_connection = _public_feishu_chat_worker_status(long_connection)
     group_requested = _feishu_group_chat_requested(cfg)
     group_enabled = _feishu_group_chat_enabled(cfg)
     group_metrics = feishu_chat_channel.load_group_metrics(STATUS_DIR)
@@ -12381,6 +12469,7 @@ def _record_feishu_channel_event(record):
         item,
         now=_exec_meeting_now,
         lock=_FEISHU_CHANNEL_RECORD_LOCK,
+        owner_id=_FEISHU_PROCESS_OWNER_ID,
     )
     if str(item.get("chatType") or "").lower() == "group":
         event_name = str(item.get("event") or "").strip()
@@ -12547,9 +12636,11 @@ def _feishu_channel_records_response(limit=500):
     return feishu_chat_channel.channel_records_response(STATUS_DIR, limit=limit)
 
 
-def _feishu_channel_idempotency_hit(source_message_id):
+def _feishu_channel_idempotency_hit(source_message_id, *, allow_processing_reclaim=False):
     indexed = feishu_chat_channel.load_source_index(STATUS_DIR, source_message_id)
     if indexed:
+        if indexed.get("state") == "processing" and allow_processing_reclaim and indexed.get("executionPhase") == "claimed":
+            return None
         record = indexed.get("record") if isinstance(indexed.get("record"), dict) else {}
         if str(record.get("chatType") or "").lower() == "group":
             feishu_chat_channel.increment_group_metrics(
@@ -12558,7 +12649,12 @@ def _feishu_channel_idempotency_hit(source_message_id):
                 now=_exec_meeting_now,
                 lock=_FEISHU_CHANNEL_RECORD_LOCK,
             )
-        return {**record, "sourceMessageId": source_message_id, "indexState": indexed.get("state") or ""}
+        return {
+            **record,
+            "sourceMessageId": source_message_id,
+            "indexState": indexed.get("state") or "",
+            **({"executionPhase": indexed.get("executionPhase")} if indexed.get("executionPhase") else {}),
+        }
     hit = feishu_chat_channel.channel_idempotency_hit(_load_feishu_channel_records, source_message_id)
     if hit:
         feishu_chat_channel.save_source_index(
@@ -12568,6 +12664,45 @@ def _feishu_channel_idempotency_hit(source_message_id):
             lock=_FEISHU_CHANNEL_RECORD_LOCK,
         )
     return hit
+
+
+def _claim_feishu_source_message(source_message_id):
+    source_message_id = str(source_message_id or "").strip()
+    if not source_message_id:
+        return False
+    with _FEISHU_ACTIVE_SOURCE_MESSAGES_LOCK:
+        if source_message_id in _FEISHU_ACTIVE_SOURCE_MESSAGES:
+            return False
+        _FEISHU_ACTIVE_SOURCE_MESSAGES.add(source_message_id)
+        return True
+
+
+def _release_feishu_source_message(source_message_id):
+    with _FEISHU_ACTIVE_SOURCE_MESSAGES_LOCK:
+        _FEISHU_ACTIVE_SOURCE_MESSAGES.discard(str(source_message_id or "").strip())
+
+
+def _mark_feishu_source_dispatching(source_message_id):
+    return feishu_chat_channel.mark_source_index_dispatching(
+        STATUS_DIR,
+        source_message_id,
+        now=_exec_meeting_now,
+        lock=_FEISHU_CHANNEL_RECORD_LOCK,
+        owner_id=_FEISHU_PROCESS_OWNER_ID,
+    )
+
+
+def _feishu_processing_ack(envelope):
+    return {
+        "schema": "vo.feishu-chat.ack/v1",
+        "requestId": envelope["requestId"],
+        "messageId": envelope["messageId"],
+        "durable": False,
+        "state": "processing",
+        "idempotent": True,
+        "retryAfterMs": 1000,
+        "_status": 202,
+    }
 
 
 def _feishu_channel_lock(key):
@@ -12855,13 +12990,23 @@ def _adapt_feishu_chat_inbound_envelope(body):
 
 def _handle_feishu_chat_worker_envelope(body):
     adapted, envelope = _adapt_feishu_chat_inbound_envelope(body)
-    result = _handle_feishu_chat_message_event(adapted)
     if not envelope:
-        return result
+        return _handle_feishu_chat_message_event(adapted)
+    if not _claim_feishu_source_message(envelope["messageId"]):
+        return _feishu_processing_ack(envelope)
+    try:
+        result = _handle_feishu_chat_message_event(adapted, allow_processing_reclaim=True)
+    finally:
+        _release_feishu_source_message(envelope["messageId"])
     record = result.get("record") if isinstance(result, dict) and isinstance(result.get("record"), dict) else {}
-    durable = bool(record.get("id") and record.get("sourceMessageId") == envelope["messageId"])
-    if result.get("idempotent") and record:
-        durable = True
+    if result.get("status") == "processing" or record.get("indexState") == "processing":
+        return _feishu_processing_ack(envelope)
+    terminal_events = {"turn_completed", "ignored", "rejected"}
+    durable = bool(
+        record.get("id")
+        and record.get("sourceMessageId") == envelope["messageId"]
+        and (record.get("event") in terminal_events or record.get("indexState") == "completed")
+    )
     if not durable:
         return {"ok": False, "error": "Feishu inbound result is not durably recorded", "code": "durability_not_proven", "_status": 503}
     return {
@@ -12874,7 +13019,7 @@ def _handle_feishu_chat_worker_envelope(body):
     }
 
 
-def _handle_feishu_chat_message_event(body, *, send_text=None, reply_text=None, download_image=None):
+def _handle_feishu_chat_message_event(body, *, send_text=None, reply_text=None, download_image=None, allow_processing_reclaim=False):
     injected_send = send_text
     group_reply = reply_text
     if group_reply is None and injected_send is not None:
@@ -12884,7 +13029,10 @@ def _handle_feishu_chat_message_event(body, *, send_text=None, reply_text=None, 
         cfg=_feishu_chat_app_config(),
         bindings=(VO_CONFIG.get("feishu") or {}).get("bindings") or {},
         load_records=_load_feishu_channel_records,
-        idempotency_hit=_feishu_channel_idempotency_hit,
+        idempotency_hit=lambda source_message_id: _feishu_channel_idempotency_hit(
+            source_message_id,
+            allow_processing_reclaim=allow_processing_reclaim,
+        ),
         record_event=_record_feishu_channel_event,
         lock_for=_feishu_channel_lock,
         dispatch_agent=_dispatch_representative_agent_message,
@@ -12896,13 +13044,14 @@ def _handle_feishu_chat_message_event(body, *, send_text=None, reply_text=None, 
         delete_reaction=None if send_text else _feishu_chat_app_reaction_delete,
         find_agent=_find_agent_record,
         download_image=download_image if download_image is not None else (None if send_text else _feishu_chat_app_image_download),
+        mark_dispatching=_mark_feishu_source_dispatching,
     )
 
 
 def _test_feishu_chat_channel(body=None):
     body = body or {}
     cfg = _feishu_chat_app_config()
-    start_status = _start_feishu_chat_long_connection()
+    start_status = _public_feishu_chat_worker_status(_start_feishu_chat_long_connection())
     if cfg.get("enabled", False) is False:
         return {"ok": False, "status": "disabled", "error": "Feishu chat channel is disabled", "longConnection": start_status, "config": _feishu_chat_config_response(), "_status": 400}
     if not _feishu_chat_app_configured(cfg):

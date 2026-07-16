@@ -1,6 +1,7 @@
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { processingRecoveryConfig } from './config.mjs';
 import { createSafeLogger } from './logger.mjs';
 import { checkDependencies } from './preflight.mjs';
 import { FeishuChannelWorker } from './worker.mjs';
@@ -21,6 +22,7 @@ async function main() {
     process.exitCode = 2;
     return;
   }
+  const recovery = processingRecoveryConfig();
   const worker = new FeishuChannelWorker({
     appId: process.env.VO_FEISHU_CHAT_APP_ID || '',
     appSecret: process.env.VO_FEISHU_CHAT_APP_SECRET || '',
@@ -29,6 +31,16 @@ async function main() {
     callbackToken: process.env.VO_FEISHU_CHAT_WORKER_TOKEN || '',
     parentPid: Number(process.env.VO_FEISHU_CHAT_PARENT_PID || process.ppid),
     workerInstanceId: process.env.VO_FEISHU_CHAT_WORKER_INSTANCE_ID || undefined,
+    maxConcurrentCallbacks: recovery.maxConcurrentCallbacks,
+    recoveryConcurrency: recovery.recoveryConcurrency,
+    processingRecoveryEnabled: recovery.enabled,
+    processingWarningThresholdMs: recovery.warningThresholdMs,
+    processingRecoveryOptions: {
+      baseDelayMs: recovery.baseDelayMs,
+      maxDelayMs: recovery.maxDelayMs,
+      jitterMs: recovery.jitterMs,
+    },
+    callbackOptions: { singleAttemptTimeoutMs: recovery.callbackAttemptTimeoutMs },
     logger,
   });
   const shutdown = (signal) => worker.stop(signal === 'SIGTERM' ? 'stopped' : 'interrupted').finally(() => process.exit(0));

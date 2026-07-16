@@ -14034,6 +14034,8 @@ var _mainMenuOpen = false;
 
 var DEFAULT_BROWSER_CDP_URL = 'http://127.0.0.1:9224';
 var DEFAULT_BROWSER_VIEWER_URL = 'https://localhost:6901';
+var _feishuChatProcessingPollTimer = null;
+var _feishuChatProcessingPollInFlight = false;
 
 function toggleMainMenu() {
     var panel = document.getElementById('main-menu-panel');
@@ -14042,7 +14044,12 @@ function toggleMainMenu() {
     panel.classList.toggle('open', _mainMenuOpen);
     var btn = document.getElementById('btn-main-menu');
     if (btn) btn.classList.toggle('active-edit', _mainMenuOpen);
-    if (_mainMenuOpen) _mmLoadCurrentSettings();
+    if (_mainMenuOpen) {
+        _mmLoadCurrentSettings();
+        mmStartFeishuChatProcessingPolling();
+    } else {
+        mmStopFeishuChatProcessingPolling();
+    }
 }
 
 function _mmLoadCurrentSettings() {
@@ -14682,6 +14689,75 @@ function mmRenderFeishuChatLongConnectionStatus(cfg) {
     el.style.color = lc.running ? '#81c784' : (status === 'error' ? '#ff8a80' : '#888');
 }
 
+// Feishu chat processing health: intentionally separate from WebSocket health.
+function mmFormatFeishuChatProcessingAge(timestamp, future) {
+    var value = Number(timestamp || 0);
+    if (!value) return _tr('feishu_chat_processing_never');
+    var seconds = Math.max(0, Math.round((future ? value - Date.now() : Date.now() - value) / 1000));
+    if (seconds < 60) return _tr(future ? 'feishu_chat_processing_in_seconds' : 'feishu_chat_processing_seconds_ago', { count: seconds });
+    var minutes = Math.round(seconds / 60);
+    if (minutes < 60) return _tr(future ? 'feishu_chat_processing_in_minutes' : 'feishu_chat_processing_minutes_ago', { count: minutes });
+    var hours = Math.round(minutes / 60);
+    return _tr(future ? 'feishu_chat_processing_in_hours' : 'feishu_chat_processing_hours_ago', { count: hours });
+}
+
+function mmRenderFeishuChatProcessingStatus(cfg) {
+    var el = document.getElementById('mm-feishu-chat-processing-status');
+    if (!el) return;
+    var processing = (((cfg || {}).longConnection || {}).processing);
+    if (!processing || typeof processing !== 'object') {
+        el.textContent = _tr('feishu_chat_processing_legacy');
+        el.style.color = '#888';
+        return;
+    }
+    var state = ['healthy', 'degraded', 'recovering'].indexOf(processing.state) >= 0 ? processing.state : 'degraded';
+    var details = [
+        _tr('feishu_chat_processing_backlog', { count: Number(processing.backlog || 0) }),
+        _tr('feishu_chat_processing_oldest', { age: mmFormatFeishuChatProcessingAge(processing.oldestPendingAt, false) }),
+        _tr('feishu_chat_processing_last_ack', { age: mmFormatFeishuChatProcessingAge(processing.lastAckAt, false) })
+    ];
+    if (Number(processing.blocked || 0) > 0) details.push(_tr('feishu_chat_processing_blocked', { count: Number(processing.blocked) }));
+    if (processing.recoveryActive) details.push(_tr('feishu_chat_processing_active'));
+    else if (Number(processing.nextRetryAt || 0) > 0) {
+        details.push(_tr('feishu_chat_processing_next_retry', { age: mmFormatFeishuChatProcessingAge(processing.nextRetryAt, true) }));
+    }
+    if (processing.warning) details.push(_tr('feishu_chat_processing_warning'));
+    if (processing.lastErrorCategory) details.push(_tr('feishu_chat_processing_error', { category: String(processing.lastErrorCategory) }));
+    el.textContent = _tr('feishu_chat_processing_status', { state: _tr('feishu_chat_processing_state_' + state) }) + ' · ' + details.join(' · ');
+    el.style.color = state === 'healthy' ? '#81c784' : (state === 'recovering' ? '#ffca68' : (processing.warning ? '#ff8a80' : '#ffb74d'));
+}
+
+function mmRefreshFeishuChatProcessingStatus() {
+    if (!_mainMenuOpen || (typeof document.hidden === 'boolean' && document.hidden)) return Promise.resolve();
+    if (_feishuChatProcessingPollInFlight) return Promise.resolve();
+    _feishuChatProcessingPollInFlight = true;
+    return fetch('/api/feishu-chat/config')
+        .then(function(r) { return r.json(); })
+        .then(function(cfg) {
+            mmRenderFeishuChatLongConnectionStatus(cfg);
+            mmRenderFeishuChatProcessingStatus(cfg);
+        })
+        .catch(function() {})
+        .finally(function() { _feishuChatProcessingPollInFlight = false; });
+}
+
+function mmStopFeishuChatProcessingPolling() {
+    if (_feishuChatProcessingPollTimer !== null) clearInterval(_feishuChatProcessingPollTimer);
+    _feishuChatProcessingPollTimer = null;
+}
+
+function mmStartFeishuChatProcessingPolling() {
+    mmStopFeishuChatProcessingPolling();
+    if (!_mainMenuOpen || (typeof document.hidden === 'boolean' && document.hidden)) return;
+    mmRefreshFeishuChatProcessingStatus();
+    _feishuChatProcessingPollTimer = setInterval(mmRefreshFeishuChatProcessingStatus, 5000);
+}
+
+document.addEventListener('visibilitychange', function() {
+    if (document.hidden) mmStopFeishuChatProcessingPolling();
+    else if (_mainMenuOpen) mmStartFeishuChatProcessingPolling();
+});
+
 function mmClearMisplacedFeishuChatStatus() {
     var notificationStatusEl = document.getElementById('mm-feishu-status');
     if (!notificationStatusEl) return;
@@ -14793,6 +14869,7 @@ function mmFillFeishuChatMaskedInputs(cfg) {
     mmUpdateFeishuGroupChatControl();
     mmRenderFeishuChatMask(cfg);
     mmRenderFeishuChatLongConnectionStatus(cfg);
+    mmRenderFeishuChatProcessingStatus(cfg);
 }
 
 function mmUpdateFeishuGroupChatControl() {

@@ -2,6 +2,8 @@
 """Offline transport selection/failure/rollback rehearsal without Feishu credentials."""
 import json
 import os
+import pathlib
+import subprocess
 import sys
 import tempfile
 
@@ -19,6 +21,21 @@ os.environ.update({
 })
 
 import server  # noqa: E402
+
+
+def processing_recovery_config(enabled):
+    config_module = pathlib.Path(ROOT, "integrations", "feishu-channel-worker", "src", "config.mjs").as_uri()
+    env = os.environ.copy()
+    env["VO_FEISHU_CHAT_PROCESSING_RECOVERY_ENABLED"] = "true" if enabled else "false"
+    result = subprocess.run(
+        ["node", "--input-type=module", "-e", f"import {{ processingRecoveryConfig }} from '{config_module}'; console.log(JSON.stringify(processingRecoveryConfig(process.env)));"],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=15,
+    )
+    return json.loads(result.stdout.strip())
 
 
 def main():
@@ -105,6 +122,9 @@ def main():
         }
         injected_failure = worker.start()
 
+        recovery_off = processing_recovery_config(False)
+        recovery_on = processing_recovery_config(True)
+
         os.environ["VO_FEISHU_CHAT_TRANSPORT"] = "legacy-python"
         rollback = server._effective_feishu_chat_transport()
         rollback_status = server._feishu_chat_config_response()
@@ -118,6 +138,10 @@ def main():
             "nodeSelected": selected == "channel-sdk-node",
             "failureInjected": injected_failure.get("status") == "missing_channel_sdk",
             "startupIsolated": injected_failure.get("affectsVoStartup") is False,
+            "recoveryOffRetainsSpoolMode": recovery_off.get("enabled") is False,
+            "recoveryEnablementValidated": recovery_on.get("enabled") is True,
+            "retryWakeBelowOneMinute": recovery_on.get("maxDelayMs", 60000) + recovery_on.get("jitterMs", 0) < 60000,
+            "callbackAttemptBounded": recovery_on.get("callbackAttemptTimeoutMs", 60000) <= 55000,
             "legacyRestored": rollback == "legacy-python",
             "legacyGroupDisabled": rollback_status.get("groupChatEffective") is False,
             "privateHistoryPreserved": bool(persisted_private and persisted_private.get("sourceMessageId") == private_record.get("sourceMessageId")),
@@ -132,7 +156,7 @@ def main():
             "injectedFailure": {k: v for k, v in injected_failure.items() if k not in {"lastError"}},
             "rollback": rollback,
             "historyPreserved": bool(persisted_private and persisted_after_restart),
-            "statusDir": status_dir,
+            "statusDir": "<temporary>",
         }
         print(json.dumps(result, ensure_ascii=False, sort_keys=True))
         return 0 if result["ok"] else 1

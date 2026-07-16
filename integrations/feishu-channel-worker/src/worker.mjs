@@ -3,8 +3,10 @@ import { join } from 'node:path';
 
 import { CallbackClient } from './callback.mjs';
 import { CommandServer } from './command-server.mjs';
+import { ChatExecutionLaneScheduler } from './execution-lanes.mjs';
 import { createSafeLogger } from './logger.mjs';
 import { makeInboundEnvelope, redactSecretsString } from './protocol.mjs';
+import { ProcessingRecoveryCoordinator } from './recovery.mjs';
 import { ResourceStore } from './resources.mjs';
 import { InboundSpool, SpoolFullError } from './spool.mjs';
 import { StatusStore } from './status.mjs';
@@ -61,6 +63,17 @@ function normalizeMention(mention) {
   return normalized;
 }
 
+const PROCESSING_ERROR_CATEGORIES = new Set([
+  'callback_processing', 'callback_http_error', 'callback_invalid_ack',
+  'callback_network_error', 'callback_timeout', 'callback_failure',
+  'chat_queue_full', 'inbox_full',
+]);
+
+function processingErrorCategory(error) {
+  const category = String(error?.category || error?.code || 'callback_failure');
+  return PROCESSING_ERROR_CATEGORIES.has(category) ? category : 'callback_failure';
+}
+
 export function normalizeMessage(message) {
   const raw = rawEvent(message);
   const senderType = typeof message.senderType === 'string' ? message.senderType : '';
@@ -109,6 +122,11 @@ export class FeishuChannelWorker {
     logger,
     maxConcurrentCallbacks = 16,
     maxPerChatQueue = 20,
+    recoveryConcurrency = 4,
+    processingRecoveryEnabled = true,
+    processingWarningThresholdMs = 60_000,
+    processingRecoveryOptions = {},
+    callbackOptions = {},
   }) {
     this.appId = appId;
     this.appSecret = appSecret;
@@ -122,24 +140,86 @@ export class FeishuChannelWorker {
     this.logger = logger || createSafeLogger({ secrets: this.secrets });
     this.maxConcurrentCallbacks = maxConcurrentCallbacks;
     this.maxPerChatQueue = maxPerChatQueue;
+    this.processingWarningThresholdMs = processingWarningThresholdMs;
+    this.processingSpool = { entries: 0, valid: 0, blocked: 0, bytes: 0, oldestPendingAt: 0, pressure: false, full: false };
+    this.processingLastAckAt = 0;
+    this.processingLastFailureAt = 0;
+    this.processingLastProgressAt = 0;
+    this.processingLastErrorCategory = '';
+    this.processingRecoveryState = {
+      active: false, nextRetryAt: 0, consecutiveFailures: 0,
+    };
+    this.lanePressure = false;
     this.status = new StatusStore(join(statusDir, 'feishu-chat-worker-status.json'), { workerInstanceId, parentPid: this.parentPid });
     this.spool = new InboundSpool(join(statusDir, 'feishu-channel-inbox'));
-    this.callback = callbackClient || new CallbackClient({ url: callbackUrl, token: callbackToken, logger: this.logger });
+    this.callback = callbackClient || new CallbackClient({ url: callbackUrl, token: callbackToken, logger: this.logger, ...callbackOptions });
     this.channel = null;
     this.commandServer = null;
     this.running = false;
-    this.activeCallbacks = 0;
-    this.waiters = [];
-    this.chatDepth = new Map();
+    this.lanes = new ChatExecutionLaneScheduler({
+      maxConcurrent: maxConcurrentCallbacks,
+      maxRecoveryConcurrent: recoveryConcurrency,
+      maxPerChatQueue,
+      onState: (state) => {
+        if (state.pressure && !this.lanePressure) this.status.increment('counters.queuePressure').catch(() => {});
+        this.lanePressure = state.pressure;
+        return this.status.update({
+          callback: { active: state.active },
+          queue: { active: state.active, pending: state.pending, pressure: state.pressure },
+        });
+      },
+    });
+    this.processingRecovery = new ProcessingRecoveryCoordinator({
+      ...processingRecoveryOptions,
+      run: () => this._runRecoveryPass(),
+      enabled: processingRecoveryEnabled,
+      onState: (state) => {
+        this.processingRecoveryState = state;
+        return this._publishProcessing();
+      },
+    });
     this.parentTimer = null;
     this.heartbeatTimer = null;
-    this.recoveryTimer = null;
+    this.connectionRecoveryTimer = null;
   }
 
   async _factory(options) {
     if (this.createChannel) return this.createChannel(options);
     const { createLarkChannel } = await import('@larksuite/channel');
     return createLarkChannel(options);
+  }
+
+  _processingValue(spool = this.processingSpool) {
+    const backlog = Number(spool?.valid || 0);
+    const blocked = Number(spool?.blocked || 0);
+    const oldestPendingAt = Number(spool?.oldestPendingAt || 0);
+    const recoveryActive = Boolean(this.processingRecoveryState?.active);
+    let state = 'healthy';
+    if (backlog || blocked || recoveryActive) {
+      const makingProgress = recoveryActive
+        || (backlog > 0 && this.processingLastFailureAt === 0 && this.processingRecoveryState?.enabled)
+        || (backlog > 0 && this.processingLastFailureAt === 0 && Number(this.lanes?.snapshot().active || 0) > 0)
+        || this.processingLastProgressAt > this.processingLastFailureAt;
+      state = makingProgress && blocked === 0 ? 'recovering' : 'degraded';
+    }
+    return {
+      state,
+      backlog,
+      blocked,
+      oldestPendingAt,
+      lastAckAt: this.processingLastAckAt,
+      lastFailureAt: this.processingLastFailureAt,
+      nextRetryAt: Number(this.processingRecoveryState?.nextRetryAt || 0),
+      recoveryActive,
+      consecutiveFailures: Number(this.processingRecoveryState?.consecutiveFailures || 0),
+      warning: Boolean((backlog || blocked) && oldestPendingAt && Date.now() - oldestPendingAt >= this.processingWarningThresholdMs),
+      lastErrorCategory: this.processingLastErrorCategory,
+    };
+  }
+
+  _publishProcessing(spool = this.processingSpool, extra = {}) {
+    this.processingSpool = spool || this.processingSpool;
+    return this.status.update({ spool: this.processingSpool, processing: this._processingValue(), ...extra });
   }
 
   async start() {
@@ -169,7 +249,14 @@ export class FeishuChannelWorker {
     await this.status.update({ command });
     this.running = true;
     this._startWatchdogs();
-    await this.replay();
+    const retained = await this.spool.stats();
+    await this._publishProcessing(retained);
+    if (retained.entries > 0) this.processingRecovery.wake();
+    if (retained.full) {
+      await this.status.update({ status: 'inbox_full', spool: retained });
+      this._scheduleConnectionRecovery();
+      return this.status.snapshot();
+    }
     try {
       await this.channel.connect();
       const connection = this.channel.getConnectionStatus?.();
@@ -183,7 +270,7 @@ export class FeishuChannelWorker {
         lastError: redactSecretsString(error.message, this.secrets),
       });
       this.logger.warn('initial Feishu connection deferred', { error: error.message });
-      this._scheduleRecovery();
+      this._scheduleConnectionRecovery();
     }
     return this.status.snapshot();
   }
@@ -192,7 +279,9 @@ export class FeishuChannelWorker {
     this.running = false;
     clearInterval(this.parentTimer);
     clearInterval(this.heartbeatTimer);
-    clearTimeout(this.recoveryTimer);
+    clearTimeout(this.connectionRecoveryTimer);
+    this.processingRecovery.stop();
+    this.lanes.stop();
     await this.channel?.disconnect?.().catch((error) => this.logger.warn('channel disconnect failed', { error: error.message }));
     await this.commandServer?.stop().catch((error) => this.logger.warn('command server stop failed', { error: error.message }));
     await this.status.update({ enabled: false, running: false, status: reason, sdk: { connected: false, state: reason } });
@@ -200,7 +289,7 @@ export class FeishuChannelWorker {
   }
 
   _startWatchdogs() {
-    this.heartbeatTimer = setInterval(() => this.status.update({ heartbeatAt: Date.now() }).catch(() => {}), 5000);
+    this.heartbeatTimer = setInterval(() => this._heartbeat().catch(() => {}), 5000);
     this.heartbeatTimer.unref?.();
     this.parentTimer = setInterval(() => {
       if (!this.parentPid || this.parentPid === process.pid) return;
@@ -213,26 +302,8 @@ export class FeishuChannelWorker {
     this.parentTimer.unref?.();
   }
 
-  async _acquire(chatId) {
-    const depth = Number(this.chatDepth.get(chatId) || 0) + 1;
-    this.chatDepth.set(chatId, depth);
-    if (depth > this.maxPerChatQueue) {
-      this.chatDepth.set(chatId, depth - 1);
-      throw Object.assign(new Error('per-chat queue is full'), { code: 'chat_queue_full' });
-    }
-    if (this.activeCallbacks >= this.maxConcurrentCallbacks) {
-      this.status.increment('counters.queuePressure').catch(() => {});
-      await new Promise((resolve) => this.waiters.push(resolve));
-    }
-    this.activeCallbacks += 1;
-    await this.status.update({ callback: { active: this.activeCallbacks }, queue: { active: this.activeCallbacks, pending: this.waiters.length, pressure: this.waiters.length > 0 } });
-  }
-
-  async _release(chatId) {
-    this.activeCallbacks = Math.max(0, this.activeCallbacks - 1);
-    this.chatDepth.set(chatId, Math.max(0, Number(this.chatDepth.get(chatId) || 1) - 1));
-    this.waiters.shift()?.();
-    await this.status.update({ callback: { active: this.activeCallbacks }, queue: { active: this.activeCallbacks, pending: this.waiters.length, pressure: this.waiters.length > 0 } });
+  _heartbeat() {
+    return this._publishProcessing(this.processingSpool, { heartbeatAt: Date.now() });
   }
 
   async handleMessage(message) {
@@ -241,42 +312,44 @@ export class FeishuChannelWorker {
       workerInstanceId: this.workerInstanceId,
       source: { eventId: nested(rawEvent(message), ['header', 'event_id']), tenantKey: nested(rawEvent(message), ['header', 'tenant_key']) },
     });
-    let acquired = false;
     try {
       const spoolState = await this.spool.put(envelope);
       await this.status.increment('counters.received');
       await this.status.increment('counters.spooled', spoolState.duplicate ? 0 : 1);
-      await this.status.update({ lastEventAt: Date.now(), spool: spoolState });
-      await this._acquire(normalized.chatId);
-      acquired = true;
-      const ack = await this.callback.deliver(envelope);
-      const remaining = await this.spool.remove(normalized.messageId);
-      await this.status.increment('counters.callbackAcknowledged');
-      await this.status.update({ status: 'connected', spool: remaining, lastError: '' });
+      await this._publishProcessing(spoolState, { lastEventAt: Date.now() });
+      const snapshot = await this.spool.snapshot();
+      const head = snapshot.items.find((item) => item.envelope?.message?.chatId === normalized.chatId);
+      if (!head || head.envelope.message.messageId !== normalized.messageId) {
+        if (!this.processingRecovery.snapshot().enabled && head) {
+          return await this._drainLiveThrough(normalized.chatId, normalized.messageId);
+        }
+        this.processingRecovery.wake();
+        return { durable: false, state: 'queued', messageId: normalized.messageId };
+      }
+      const ack = await this._attemptItem(head, 'live');
+      if ((await this.spool.stats()).entries > 0) this.processingRecovery.wake();
       return ack;
     } catch (error) {
       if (error instanceof SpoolFullError) {
         await this.status.increment('counters.spoolFull');
         await this.status.update({ status: 'inbox_full', spool: { full: true }, lastError: redactSecretsString(error.message, this.secrets) });
         await this.channel?.disconnect?.().catch(() => {});
-        this._scheduleRecovery();
+        this.processingRecovery.wake();
+        this._scheduleConnectionRecovery();
       } else if (error?.code === 'chat_queue_full') {
         await this.status.increment('counters.queueRejected');
         await this.status.update({ status: 'queue_pressure', queue: { pressure: true }, lastError: error.message });
       } else {
-        await this.status.increment('callback.failures');
-        await this.status.update({ status: 'callback_failure', callback: { lastFailureAt: Date.now() }, lastError: redactSecretsString(error.message, this.secrets) });
+        this.processingRecovery.wake({ delayMs: Number(error?.retryAfterMs || 0) });
       }
       throw error;
-    } finally {
-      if (acquired) await this._release(normalized.chatId);
     }
   }
 
-  _scheduleRecovery(delayMs = 1000) {
-    if (this.recoveryTimer) return;
-    this.recoveryTimer = setTimeout(async () => {
-      this.recoveryTimer = null;
+  _scheduleConnectionRecovery(delayMs = 1000) {
+    if (this.connectionRecoveryTimer) return;
+    this.connectionRecoveryTimer = setTimeout(async () => {
+      this.connectionRecoveryTimer = null;
       try {
         if (await this._recoverConnection()) return;
       } catch (error) {
@@ -288,13 +361,12 @@ export class FeishuChannelWorker {
           lastError: redactSecretsString(error.message, this.secrets),
         }).catch(() => {});
       }
-      if (this.running) this._scheduleRecovery(Math.min(delayMs * 2, 30000));
+      if (this.running) this._scheduleConnectionRecovery(Math.min(delayMs * 2, 30000));
     }, delayMs);
-    this.recoveryTimer.unref?.();
+    this.connectionRecoveryTimer.unref?.();
   }
 
   async _recoverConnection() {
-    await this.replay();
     const spool = await this.spool.stats();
     if (spool.full || !this.running) return false;
     await this.channel?.connect?.();
@@ -311,19 +383,85 @@ export class FeishuChannelWorker {
   }
 
   async replay() {
-    const entries = await this.spool.list();
-    for (const item of entries) {
-      if (item.error) continue;
-      try {
-        await this.callback.deliver(item.envelope);
-        await this.spool.remove(item.envelope.message.messageId);
-        await this.status.increment('spool.replayed');
-        await this.status.increment('counters.replayed');
-      } catch (error) {
-        this.logger.warn('spool replay deferred', { messageId: item.envelope.message.messageId, error: error.message });
-      }
+    return this._runRecoveryPass();
+  }
+
+  async _drainLiveThrough(chatId, targetMessageId) {
+    while (this.running) {
+      const snapshot = await this.spool.snapshot();
+      const head = snapshot.items.find((item) => item.envelope?.message?.chatId === chatId);
+      if (!head) return { durable: false, state: 'queued', messageId: targetMessageId };
+      const ack = await this._attemptItem(head, 'live');
+      if (head.envelope.message.messageId === targetMessageId) return ack;
     }
-    await this.status.update({ spool: await this.spool.stats() });
+    return { durable: false, state: 'queued', messageId: targetMessageId };
+  }
+
+  _attemptItem(item, mode) {
+    const { envelope } = item;
+    return this.lanes.submit({
+      chatId: envelope.message.chatId,
+      messageId: envelope.message.messageId,
+      mode,
+      order: [Number(envelope.message.createTime || 0), Number(envelope.receivedAt || 0), envelope.message.messageId],
+      execute: async () => {
+        try {
+          const ack = await this.callback.deliverOnce(envelope);
+          const remaining = await this.spool.remove(envelope.message.messageId);
+          const acknowledgedAt = Date.now();
+          this.processingLastAckAt = acknowledgedAt;
+          this.processingLastProgressAt = acknowledgedAt;
+          if (remaining.entries === 0) this.processingLastErrorCategory = '';
+          await this.status.increment('counters.callbackAcknowledged');
+          if (mode === 'recovery') {
+            await this.status.increment('spool.replayed');
+            await this.status.increment('counters.replayed');
+          }
+          await this._publishProcessing(remaining);
+          return ack;
+        } catch (error) {
+          this.processingLastFailureAt = Date.now();
+          this.processingLastErrorCategory = processingErrorCategory(error);
+          await this.status.increment('callback.failures');
+          await this._publishProcessing(this.processingSpool, {
+            callback: { lastFailureAt: Date.now() },
+          });
+          throw error;
+        }
+      },
+    });
+  }
+
+  async _runRecoveryPass() {
+    if (!this.running) return { pending: false, progress: false, failed: false, retryAfterMs: 0 };
+    const snapshot = await this.spool.snapshot();
+    const heads = new Map();
+    for (const item of snapshot.items) {
+      const chatId = item.envelope?.message?.chatId;
+      if (chatId && !heads.has(chatId)) heads.set(chatId, item);
+    }
+    const attempts = await Promise.allSettled(
+      [...heads.values()].map((item) => this._attemptItem(item, 'recovery')),
+    );
+    let progress = false;
+    let failed = snapshot.blocked > 0;
+    let retryAfterMs = 0;
+    attempts.forEach((result, index) => {
+      if (result.status === 'fulfilled') progress = true;
+      else {
+        failed = true;
+        retryAfterMs = Math.max(retryAfterMs, Number(result.reason?.retryAfterMs || 0));
+        if (this.running) {
+          this.logger.warn('spool replay deferred', {
+            messageId: [...heads.values()][index]?.envelope?.message?.messageId,
+            category: result.reason?.category || result.reason?.code || 'callback_failure',
+          });
+        }
+      }
+    });
+    const remaining = await this.spool.stats();
+    await this._publishProcessing(remaining);
+    return { pending: remaining.entries > 0, progress, failed, retryAfterMs };
   }
 
   async handleReject(event) {
@@ -349,6 +487,7 @@ export class FeishuChannelWorker {
 
   async handleReconnected() {
     await this.status.update({ status: 'connected', reconnect: { active: false }, sdk: { connected: true, state: 'connected' }, lastError: '' });
+    this.processingRecovery.wake();
   }
 
   async handleCommandEvent(event) {

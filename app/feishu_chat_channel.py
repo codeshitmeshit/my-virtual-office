@@ -140,24 +140,26 @@ def load_source_index(status_dir, source_message_id):
     return item
 
 
-def save_source_index(status_dir, record, *, now, lock):
+def save_source_index(status_dir, record, *, now, lock, owner_id=""):
     record = record if isinstance(record, dict) else {}
     source_message_id = str(record.get("sourceMessageId") or "").strip()
     event = str(record.get("event") or "").strip()
-    if not source_message_id or event not in {"user_message", "turn_completed"}:
+    if not source_message_id or event not in {"user_message", "turn_completed", "ignored", "rejected"}:
         return None
-    state = "completed" if event == "turn_completed" else "processing"
+    state = "processing" if event == "user_message" else "completed"
     item = {
         "schema": "vo.feishu-source-message-index/v1",
         "sourceMessageId": source_message_id,
         "state": state,
         "updatedAt": now(),
+        **({"ownerId": str(owner_id or "").strip()} if state == "processing" and str(owner_id or "").strip() else {}),
+        **({"executionPhase": "claimed"} if state == "processing" else {}),
         "record": {
             key: record.get(key)
             for key in (
                 "id", "event", "sourceMessageId", "conversationId", "feishuChatId",
                 "representativeAgentId", "chatType", "messageType", "reply",
-                "feishuReply", "deliveryStatus", "sendResult", "agentResult",
+                "feishuReply", "deliveryStatus", "sendResult", "agentResult", "reason",
             )
             if record.get(key) not in (None, "", [], {})
         },
@@ -172,6 +174,45 @@ def save_source_index(status_dir, record, *, now, lock):
             with open(temp_path, "w", encoding="utf-8") as f:
                 os.chmod(temp_path, 0o600)
                 f.write(encoded)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(temp_path, path)
+            os.chmod(path, 0o600)
+        finally:
+            try:
+                os.unlink(temp_path)
+            except FileNotFoundError:
+                pass
+    return item
+
+
+def mark_source_index_dispatching(status_dir, source_message_id, *, now, lock, owner_id=""):
+    """Persist the external-dispatch boundary before invoking an Agent provider."""
+    source_message_id = str(source_message_id or "").strip()
+    if not source_message_id:
+        return None
+    path = source_index_path(status_dir, source_message_id)
+    with lock:
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                item = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
+            return None
+        if not isinstance(item, dict) or item.get("sourceMessageId") != source_message_id or item.get("state") != "processing":
+            return None
+        if item.get("executionPhase") != "claimed":
+            return None
+        item = {
+            **item,
+            "executionPhase": "dispatching",
+            "updatedAt": now(),
+            **({"ownerId": str(owner_id or "").strip()} if str(owner_id or "").strip() else {}),
+        }
+        temp_path = f"{path}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
+        try:
+            with open(temp_path, "w", encoding="utf-8") as f:
+                os.chmod(temp_path, 0o600)
+                f.write(json.dumps(item, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n")
                 f.flush()
                 os.fsync(f.fileno())
             os.replace(temp_path, path)
@@ -634,6 +675,7 @@ def handle_message_event(
     choose_receipt=random_ack_emoji,
     choose_reaction=ack_reaction_emoji_type,
     download_image=None,
+    mark_dispatching=None,
 ):
     event = (body or {}).get("event") if isinstance((body or {}).get("event"), dict) else {}
     message = event.get("message") if isinstance(event.get("message"), dict) else {}
@@ -667,6 +709,10 @@ def handle_message_event(
         value = message.get(key) if key in {"createTime", "rootId", "threadId", "replyToMessageId", "mentions", "resources"} else (body or {}).get(key)
         if value not in (None, "", [], {}):
             base_record[key] = value
+    if source_message_id:
+        hit = idempotency_hit(source_message_id) if idempotency_hit else channel_idempotency_hit(load_records, source_message_id)
+        if hit:
+            return {"ok": True, "status": "duplicate", "idempotent": True, "record": hit, "reply": hit.get("reply") or ""}
     if not cfg.get("enabled", False):
         record = record_event({**base_record, "event": "rejected", "reason": "chat_app_disabled"})
         return {"ok": False, "status": "disabled", "record": record, "_status": 503}
@@ -708,9 +754,6 @@ def handle_message_event(
     if not text:
         record = record_event({**base_record, "event": "ignored", "reason": "empty_text"})
         return {"ok": True, "status": "ignored_empty_text", "record": record}
-    hit = idempotency_hit(source_message_id) if idempotency_hit else channel_idempotency_hit(load_records, source_message_id)
-    if hit:
-        return {"ok": True, "status": "duplicate", "idempotent": True, "record": hit, "reply": hit.get("reply") or ""}
     vo_user_id = find_bound_user(bindings, identity, chat_id) or channel_user_id(identity, chat_id)
     representative_agent_id = str(cfg.get("representativeAgentId") or "").strip()
     if not representative_agent_id:
@@ -754,6 +797,19 @@ def handle_message_event(
             receipt_text = str((choose_receipt or random_ack_emoji)() or "").strip() or ACK_EMOJIS[0]
             receipt_result = _safe_channel_call(send_receipt, chat_id, receipt_text)
             receipt_message_id = _message_id_from_send_result(receipt_result)
+        if mark_dispatching:
+            try:
+                dispatch_state = mark_dispatching(source_message_id)
+            except Exception:
+                dispatch_state = None
+            if not dispatch_state:
+                return {
+                    "ok": False,
+                    "status": "processing",
+                    "idempotent": True,
+                    "record": {**inbound_record, "indexState": "processing", "executionPhase": "claimed"},
+                    "_status": 202,
+                }
         try:
             result = dispatch_agent(
                 representative_agent_id,

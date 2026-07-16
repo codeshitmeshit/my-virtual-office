@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, stat } from 'node:fs/promises';
+import { mkdtemp, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -7,7 +7,12 @@ import { test } from 'node:test';
 import { ACK_SCHEMA, makeInboundEnvelope } from '../src/protocol.mjs';
 import { InboundSpool, SpoolFullError } from '../src/spool.mjs';
 import { CHANNEL_OPTIONS, FeishuChannelWorker, normalizeMessage } from '../src/worker.mjs';
-import { CallbackClient } from '../src/callback.mjs';
+import {
+  CallbackAttemptError,
+  CallbackClient,
+  DEFAULT_SINGLE_ATTEMPT_TIMEOUT_MS,
+  MAX_SINGLE_ATTEMPT_TIMEOUT_MS,
+} from '../src/callback.mjs';
 
 function message(id = 'om_1', chatId = 'oc_1') {
   return {
@@ -20,6 +25,15 @@ function message(id = 'om_1', chatId = 'oc_1') {
 
 function envelope(id = 'om_1') {
   return makeInboundEnvelope(normalizeMessage(message(id)), { workerInstanceId: 'worker-test' });
+}
+
+async function waitUntil(predicate, { timeoutMs = 1_000, intervalMs = 5 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  assert.fail('condition was not met before timeout');
 }
 
 test('worker SDK options preserve one-message semantics and VO-owned stale decisions', () => {
@@ -56,7 +70,7 @@ test('worker accepts SDK-approved group mentions and counts policy rejects witho
     appId: 'cli_test', appSecret: 'secret', statusDir, callbackUrl: 'http://127.0.0.1', callbackToken: 'token',
     workerInstanceId: 'worker-group-policy', parentPid: process.pid, createChannel: () => channel, logger,
     callbackClient: {
-      async deliver(input) {
+      async deliverOnce(input) {
         deliveries.push(input);
         return { schema: ACK_SCHEMA, requestId: input.requestId, messageId: input.message.messageId, durable: true, state: 'completed' };
       },
@@ -145,6 +159,42 @@ test('spool is atomic, mode 0600, duplicate-safe, pressure-aware, and bounded', 
   assert.equal((await spool.stats()).entries, 1);
 });
 
+test('spool snapshot orders source messages and retains blocked entries with bounded stats', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'vo-feishu-spool-snapshot-'));
+  const spool = new InboundSpool(root, { maxEntries: 4, maxBytes: 2 * 1024 * 1024 });
+  const newer = envelope('om_a_newer');
+  newer.message.createTime = 1710000003;
+  newer.receivedAt = 1710000004000;
+  const sameTimeZ = envelope('om_z_tie');
+  sameTimeZ.message.createTime = 1710000001;
+  sameTimeZ.receivedAt = 1710000002000;
+  const sameTimeA = envelope('om_a_tie');
+  sameTimeA.message.createTime = 1710000001;
+  sameTimeA.receivedAt = 1710000002000;
+
+  await spool.put(newer);
+  await spool.put(sameTimeZ);
+  await spool.put(sameTimeA);
+  await writeFile(join(root, 'corrupt.json'), '{not-json', { mode: 0o600 });
+
+  const snapshot = await spool.snapshot();
+  assert.deepEqual(
+    snapshot.items.filter((item) => item.envelope).map((item) => item.envelope.message.messageId),
+    ['om_a_tie', 'om_z_tie', 'om_a_newer'],
+  );
+  assert.equal(snapshot.entries, 4);
+  assert.equal(snapshot.valid, 3);
+  assert.equal(snapshot.blocked, 1);
+  assert.equal(snapshot.oldestPendingAt, 1710000001000);
+  assert.equal(snapshot.pressure, true);
+  assert.equal(snapshot.full, true);
+  assert.equal(snapshot.items.at(-1).path, join(root, 'corrupt.json'));
+  assert.ok(snapshot.items.at(-1).error instanceof Error);
+  const statsOnly = await spool.stats();
+  assert.equal(Object.hasOwn(statsOnly, 'items'), false);
+  assert.deepEqual(await spool.list(), snapshot.items, 'list should expose the same deterministic snapshot order');
+});
+
 test('worker delivers durable callbacks, deletes acknowledged spool, and replays after restart', async () => {
   const statusDir = await mkdtemp(join(tmpdir(), 'vo-feishu-worker-'));
   const handlers = {};
@@ -155,7 +205,7 @@ test('worker delivers durable callbacks, deletes acknowledged spool, and replays
   };
   const deliveries = [];
   const callbackClient = {
-    async deliver(input) {
+    async deliverOnce(input) {
       deliveries.push(input.message.messageId);
       return { schema: ACK_SCHEMA, requestId: input.requestId, messageId: input.message.messageId, durable: true, state: 'completed' };
     },
@@ -200,8 +250,8 @@ test('worker keeps running and reconnects after a transient startup network fail
   assert.equal(starting.status, 'reconnecting');
   assert.equal(connectAttempts, 1);
 
-  clearTimeout(worker.recoveryTimer);
-  worker.recoveryTimer = null;
+  clearTimeout(worker.connectionRecoveryTimer);
+  worker.connectionRecoveryTimer = null;
   assert.equal(await worker._recoverConnection(), true);
   const recovered = worker.status.snapshot();
   assert.equal(recovered.status, 'connected');
@@ -210,32 +260,253 @@ test('worker keeps running and reconnects after a transient startup network fail
   await worker.stop();
 });
 
-test('callback failure retains the spooled envelope for restart recovery', async () => {
+test('callback failure retains the spooled envelope for restart recovery', async (t) => {
   const statusDir = await mkdtemp(join(tmpdir(), 'vo-feishu-worker-fail-'));
   const channel = { on() {}, async connect() {}, async disconnect() {}, getConnectionStatus() { return { state: 'connected' }; } };
   const worker = new FeishuChannelWorker({
     appId: 'cli_test', appSecret: 'secret', statusDir, callbackUrl: 'http://127.0.0.1', callbackToken: 'token',
     workerInstanceId: 'worker-test', parentPid: process.pid, createChannel: () => channel,
-    callbackClient: { async deliver() { throw Object.assign(new Error('offline'), { code: 'callback_failed' }); } },
+    processingRecoveryEnabled: false,
+    callbackClient: { async deliverOnce() { throw Object.assign(new Error('offline'), { code: 'callback_failed' }); } },
   });
+  t.after(() => worker.stop());
   await worker.start();
   await assert.rejects(() => worker.handleMessage(message('om_pending')), /offline/);
   assert.equal((await worker.spool.stats()).entries, 1);
-  assert.equal(worker.status.snapshot().status, 'callback_failure');
+  assert.equal(worker.status.snapshot().status, 'connected');
+  assert.equal(worker.status.snapshot().processing.state, 'degraded');
+});
+
+test('processing recovery drains a failed callback after VO returns without a new event or reconnect', async () => {
+  const statusDir = await mkdtemp(join(tmpdir(), 'vo-feishu-worker-auto-recovery-'));
+  let voAvailable = false;
+  let callbackAttempts = 0;
+  let connectAttempts = 0;
+  const channel = {
+    on() {},
+    async connect() { connectAttempts += 1; },
+    async disconnect() {},
+    getConnectionStatus() { return { state: 'connected' }; },
+  };
+  const worker = new FeishuChannelWorker({
+    appId: 'cli_test', appSecret: 'secret', statusDir, callbackUrl: 'http://127.0.0.1', callbackToken: 'token',
+    workerInstanceId: 'worker-auto-recovery', parentPid: process.pid, createChannel: () => channel,
+    processingRecoveryOptions: { baseDelayMs: 5, maxDelayMs: 10, jitterMs: 0 },
+    callbackClient: {
+      async deliverOnce(input) {
+        callbackAttempts += 1;
+        if (!voAvailable) throw Object.assign(new Error('VO unavailable'), { category: 'callback_network_error' });
+        return { schema: ACK_SCHEMA, requestId: input.requestId, messageId: input.message.messageId, durable: true, state: 'completed' };
+      },
+    },
+  });
+  await worker.start();
+  await assert.rejects(worker.handleMessage(message('om_auto_recover')), /VO unavailable/);
+  assert.equal((await worker.spool.stats()).entries, 1);
+  voAvailable = true;
+
+  await waitUntil(async () => (await worker.spool.stats()).entries === 0);
+  assert.ok(callbackAttempts >= 2);
+  assert.equal(connectAttempts, 1, 'processing recovery must not reconnect a healthy Feishu socket');
   await worker.stop();
+});
+
+test('a full retained spool blocks intake connection while recovery remains independently switchable', async () => {
+  const statusDir = await mkdtemp(join(tmpdir(), 'vo-feishu-worker-startup-full-'));
+  let connectAttempts = 0;
+  const worker = new FeishuChannelWorker({
+    appId: 'cli_test', appSecret: 'secret', statusDir, callbackUrl: 'http://127.0.0.1', callbackToken: 'token',
+    workerInstanceId: 'worker-startup-full', parentPid: process.pid,
+    processingRecoveryEnabled: false,
+    createChannel: () => ({
+      on() {}, async connect() { connectAttempts += 1; }, async disconnect() {},
+      getConnectionStatus() { return { state: 'not_connected' }; },
+    }),
+    callbackClient: { async deliverOnce() { throw new Error('must not run while recovery is disabled'); } },
+  });
+  worker.spool.maxEntries = 1;
+  await worker.spool.put(envelope('om_retained_full'));
+  const started = await worker.start();
+  assert.equal(started.status, 'inbox_full');
+  assert.equal(connectAttempts, 0);
+  assert.equal((await worker.spool.stats()).entries, 1);
+  clearTimeout(worker.connectionRecoveryTimer);
+  worker.connectionRecoveryTimer = null;
+  await worker.stop();
+});
+
+test('processing health transitions independently through degraded, recovering, and healthy states', async (t) => {
+  const statusDir = await mkdtemp(join(tmpdir(), 'vo-feishu-worker-processing-health-'));
+  let attempt = 'fail';
+  let releaseRecovery;
+  const recoveryHeld = new Promise((resolve) => { releaseRecovery = resolve; });
+  const worker = new FeishuChannelWorker({
+    appId: 'cli_test', appSecret: 'secret-canary', statusDir,
+    callbackUrl: 'http://callback-canary.invalid/private', callbackToken: 'token-canary',
+    workerInstanceId: 'worker-processing-health', parentPid: process.pid,
+    processingRecoveryEnabled: false,
+    processingWarningThresholdMs: 1,
+    createChannel: () => ({
+      on() {}, async connect() {}, async disconnect() {},
+      getConnectionStatus() { return { state: 'connected' }; },
+    }),
+    callbackClient: {
+      async deliverOnce(input) {
+        if (attempt === 'fail') throw Object.assign(new Error('raw-error-canary'), { category: 'callback_network_error' });
+        await recoveryHeld;
+        return { schema: ACK_SCHEMA, requestId: input.requestId, messageId: input.message.messageId, durable: true, state: 'completed' };
+      },
+    },
+  });
+  t.after(() => worker.stop());
+  await worker.start();
+  const oldMessage = message('om_processing_health');
+  oldMessage.createTime = Date.now() - 10_000;
+  await assert.rejects(worker.handleMessage(oldMessage), /raw-error-canary/);
+  const degraded = worker.status.snapshot();
+  assert.equal(degraded.sdk.connected, true);
+  assert.deepEqual(degraded.processing, {
+    state: 'degraded', backlog: 1, blocked: 0, oldestPendingAt: oldMessage.createTime,
+    lastAckAt: 0, lastFailureAt: degraded.processing.lastFailureAt, nextRetryAt: 0,
+    recoveryActive: false, consecutiveFailures: 0, warning: true,
+    lastErrorCategory: 'callback_network_error',
+  });
+  assert.ok(degraded.processing.lastFailureAt > 0);
+  assert.doesNotMatch(JSON.stringify(degraded.processing), /raw-error-canary|secret-canary|callback-canary|token-canary/);
+
+  attempt = 'recover';
+  worker.processingRecovery.setEnabled(true);
+  worker.processingRecovery.wake();
+  await waitUntil(() => worker.status.snapshot().processing.recoveryActive === true);
+  assert.equal(worker.status.snapshot().processing.state, 'recovering');
+  releaseRecovery();
+  await waitUntil(async () => (await worker.spool.stats()).entries === 0);
+  await waitUntil(() => worker.status.snapshot().processing.state === 'healthy');
+  const healthy = worker.status.snapshot().processing;
+  assert.equal(healthy.backlog, 0);
+  assert.equal(healthy.recoveryActive, false);
+  assert.ok(healthy.lastAckAt >= degraded.processing.lastFailureAt);
+  assert.equal(healthy.lastErrorCategory, '');
+});
+
+test('heartbeat raises a quiet recovery-off backlog warning after the age threshold', async (t) => {
+  const statusDir = await mkdtemp(join(tmpdir(), 'vo-feishu-worker-processing-warning-heartbeat-'));
+  const worker = new FeishuChannelWorker({
+    appId: 'cli_test', appSecret: 'secret', statusDir,
+    callbackUrl: 'http://127.0.0.1', callbackToken: 'token',
+    workerInstanceId: 'worker-warning-heartbeat', parentPid: process.pid,
+    processingRecoveryEnabled: false,
+    processingWarningThresholdMs: 60_000,
+    createChannel: () => ({
+      on() {}, async connect() {}, async disconnect() {},
+      getConnectionStatus() { return { state: 'connected' }; },
+    }),
+    callbackClient: {
+      async deliverOnce() { throw Object.assign(new Error('offline'), { category: 'callback_network_error' }); },
+    },
+  });
+  t.after(() => worker.stop());
+  await worker.start();
+  await assert.rejects(worker.handleMessage(message('om_warning_heartbeat')), /offline/);
+  assert.equal(worker.status.snapshot().processing.warning, false);
+
+  worker.processingSpool = {
+    ...worker.processingSpool,
+    oldestPendingAt: Date.now() - worker.processingWarningThresholdMs - 1,
+  };
+  await worker._heartbeat();
+  const status = worker.status.snapshot();
+  assert.equal(status.processing.warning, true);
+  assert.ok(status.heartbeatAt > 0);
 });
 
 test('callback timeout is capped at 15 minutes', () => {
   assert.equal(new CallbackClient({ timeoutMs: 99999999 }).timeoutMs, 900000);
+  assert.equal(new CallbackClient().singleAttemptTimeoutMs, DEFAULT_SINGLE_ATTEMPT_TIMEOUT_MS);
+  assert.equal(new CallbackClient({ singleAttemptTimeoutMs: 99999999 }).singleAttemptTimeoutMs, MAX_SINGLE_ATTEMPT_TIMEOUT_MS);
 });
 
-test('worker bounds global callback concurrency and per-chat queue depth', async () => {
+test('single callback attempt classifies terminal, processing, HTTP, invalid, network, and timeout outcomes', async () => {
+  const input = envelope('om_callback_once');
+  const response = (status, body) => ({ ok: status >= 200 && status < 300, status, async json() { return body; } });
+  const terminal = new CallbackClient({
+    fetchImpl: async () => response(200, {
+      schema: ACK_SCHEMA, requestId: input.requestId, messageId: input.message.messageId,
+      durable: true, state: 'completed',
+    }),
+  });
+  assert.equal((await terminal.deliverOnce(input)).state, 'completed');
+
+  const cases = [
+    {
+      category: 'callback_processing',
+      client: new CallbackClient({ fetchImpl: async () => response(202, {
+        schema: ACK_SCHEMA, requestId: input.requestId, messageId: input.message.messageId,
+        durable: false, state: 'processing', retryAfterMs: 2500,
+      }) }),
+      check: (error) => error.retryAfterMs === 2500,
+    },
+    {
+      category: 'callback_http_error',
+      client: new CallbackClient({ fetchImpl: async () => response(503, { error: 'unavailable' }) }),
+      check: (error) => error.status === 503,
+    },
+    {
+      category: 'callback_invalid_ack',
+      client: new CallbackClient({ fetchImpl: async () => response(200, { schema: ACK_SCHEMA, requestId: 'wrong', durable: true }) }),
+    },
+    {
+      category: 'callback_network_error',
+      client: new CallbackClient({ fetchImpl: async () => { throw new Error('connection refused'); } }),
+    },
+    {
+      category: 'callback_timeout',
+      client: new CallbackClient({
+        singleAttemptTimeoutMs: 5,
+        fetchImpl: async (_url, options) => new Promise((resolve, reject) => {
+          options.signal.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })), { once: true });
+        }),
+      }),
+    },
+  ];
+  for (const item of cases) {
+    await assert.rejects(
+      () => item.client.deliverOnce(input),
+      (error) => error instanceof CallbackAttemptError
+        && error.category === item.category
+        && (!item.check || item.check(error)),
+    );
+  }
+});
+
+test('legacy callback delivery keeps bounded multi-attempt behavior', async () => {
+  const input = envelope('om_callback_legacy');
+  let attempts = 0;
+  const client = new CallbackClient({
+    maxAttempts: 2,
+    baseDelayMs: 0,
+    fetchImpl: async () => {
+      attempts += 1;
+      if (attempts === 1) throw new Error('temporary offline');
+      return {
+        ok: true, status: 200,
+        async json() {
+          return { schema: ACK_SCHEMA, requestId: input.requestId, messageId: input.message.messageId, durable: true, state: 'completed' };
+        },
+      };
+    },
+  });
+  assert.equal((await client.deliver(input)).state, 'completed');
+  assert.equal(attempts, 2);
+});
+
+test('worker bounds global callback concurrency and preserves spool pressure handling', async () => {
   const statusDir = await mkdtemp(join(tmpdir(), 'vo-feishu-worker-capacity-'));
   const releases = [];
   let active = 0;
   let maximum = 0;
   const callbackClient = {
-    async deliver(input) {
+    async deliverOnce(input) {
       active += 1;
       maximum = Math.max(maximum, active);
       await new Promise((resolve) => releases.push(resolve));
@@ -249,38 +520,23 @@ test('worker bounds global callback concurrency and per-chat queue depth', async
     createChannel: () => ({ on() {}, async connect() {}, async disconnect() {}, getConnectionStatus() { return { state: 'connected' }; } }),
   });
   const tasks = Array.from({ length: 18 }, (_, index) => worker.handleMessage(message(`om_capacity_${index}`, `oc_${index}`)));
-  while (releases.length < 16) await new Promise((resolve) => setTimeout(resolve, 5));
-  assert.equal(worker.activeCallbacks, 16);
-  assert.equal(worker.waiters.length, 2);
+  await waitUntil(() => releases.length >= 16 && worker.lanes.snapshot().pending === 2);
+  assert.equal(worker.lanes.snapshot().active, 16);
+  assert.equal(worker.lanes.snapshot().pending, 2);
   while (tasks.some(Boolean) && releases.length) releases.shift()();
-  while (worker.waiters.length || worker.activeCallbacks) {
+  while (worker.lanes.snapshot().pending || worker.lanes.snapshot().active) {
     while (releases.length) releases.shift()();
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
   await Promise.all(tasks);
   assert.equal(maximum, 16);
 
-  const held = [];
-  worker.callback = {
-    async deliver(input) {
-      await new Promise((resolve) => held.push(resolve));
-      return { schema: ACK_SCHEMA, requestId: input.requestId, messageId: input.message.messageId, durable: true, state: 'completed' };
-    },
-  };
-  const sameChat = Array.from({ length: 20 }, (_, index) => worker.handleMessage(message(`om_same_${index}`, 'oc_same')));
-  await assert.rejects(worker.handleMessage(message('om_same_20', 'oc_same')), (error) => error.code === 'chat_queue_full');
-  while (held.length < 16) await new Promise((resolve) => setTimeout(resolve, 5));
-  while (worker.waiters.length || worker.activeCallbacks) {
-    while (held.length) held.shift()();
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
-  await Promise.all(sameChat);
   worker.spool.maxEntries = 0;
   await assert.rejects(worker.handleMessage(message('om_spool_full', 'oc_spool_full')), (error) => error instanceof SpoolFullError);
-  clearTimeout(worker.recoveryTimer);
-  worker.recoveryTimer = null;
+  clearTimeout(worker.connectionRecoveryTimer);
+  worker.connectionRecoveryTimer = null;
   const counters = worker.status.snapshot().counters;
-  assert.ok(counters.queuePressure >= 2);
-  assert.equal(counters.queueRejected, 1);
+  assert.ok(counters.queuePressure >= 1);
+  assert.equal(counters.queueRejected || 0, 0);
   assert.equal(counters.spoolFull, 1);
 });
