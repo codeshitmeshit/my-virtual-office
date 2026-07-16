@@ -30,3 +30,7 @@
 - [x] 6.1 Persist a pre-dispatch versus dispatch-uncertain source phase, reclaim only work proven not dispatched, fail closed for legacy/uncertain processing owners after VO restart, and verify that restart replay cannot invoke the Agent twice.
 - [x] 6.2 Preserve event-triggered ordered live delivery when background recovery is disabled by draining older same-chat heads through the newly received message, stopping on the first failed head; verify success order and failure retention.
 - [x] 6.3 Recompute processing warning age on heartbeat so a quiet recovery-off backlog crosses the operator threshold; add deterministic status coverage, rerun complete Node/Python/UI/OpenSpec/rehearsal checks, and record push-gate correction evidence.
+
+## 7. Retry Deadline Correction
+
+- [x] 7.1 Measure recovery backoff from the start of each recovery pass, subtract callback execution time before scheduling the next wake, verify timeout and partial-elapsed cases with a deterministic clock, rerun the Node regression suite, and record the corrected retry-start evidence.

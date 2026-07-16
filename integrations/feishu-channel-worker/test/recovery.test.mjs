@@ -22,6 +22,7 @@ function fakeClock() {
     },
     clearTimer(timer) { timers.delete(timer.id); },
     delays() { return [...timers.values()].map((timer) => timer.dueAt - now).sort((a, b) => a - b); },
+    elapse(ms) { now += ms; },
     async advance(ms = 0) {
       const target = now + ms;
       while (true) {
@@ -33,7 +34,7 @@ function fakeClock() {
         await Promise.resolve();
         await Promise.resolve();
       }
-      now = target;
+      now = Math.max(now, target);
       await Promise.resolve();
       await Promise.resolve();
     },
@@ -119,6 +120,38 @@ test('processing recovery resets failures after progress and honors retry guidan
   await clock.advance(1_000);
   assert.deepEqual(clock.delays(), []);
   assert.equal(coordinator.snapshot().consecutiveFailures, 0);
+});
+
+test('processing recovery measures retry deadlines from attempt start', async () => {
+  const clock = fakeClock();
+  let calls = 0;
+  const attemptStarts = [];
+  const coordinator = new ProcessingRecoveryCoordinator({
+    run: async () => {
+      calls += 1;
+      attemptStarts.push(clock.now());
+      clock.elapse(calls === 1 ? 45_000 : 10_000);
+      return { pending: true, failed: true, retryAfterMs: 35_000 };
+    },
+    baseDelayMs: 1_000,
+    maxDelayMs: 30_000,
+    jitterMs: 5_000,
+    random: () => 1,
+    now: clock.now,
+    setTimer: clock.setTimer,
+    clearTimer: clock.clearTimer,
+  });
+
+  coordinator.wake();
+  await clock.advance();
+  assert.equal(calls, 1);
+  assert.deepEqual(clock.delays(), [0]);
+
+  await clock.advance();
+  assert.equal(calls, 2);
+  assert.deepEqual(attemptStarts, [1_000, 46_000]);
+  assert.deepEqual(clock.delays(), [25_000]);
+  assert.equal(coordinator.snapshot().nextRetryAt - attemptStarts[1], 35_000);
 });
 
 test('processing recovery reschedules earlier wake-ups and stops cleanly behind the feature switch', async () => {

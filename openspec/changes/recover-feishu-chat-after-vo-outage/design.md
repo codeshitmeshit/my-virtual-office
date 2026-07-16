@@ -45,7 +45,7 @@ The processing coordinator is awakened when:
 - the SDK reports reconnected; or
 - spool pressure/full state needs reevaluation.
 
-It uses capped exponential backoff with bounded jitter. The default next-attempt delay starts at one second and is capped below 60 seconds (30 seconds plus at most five seconds jitter), so a newly responsive VO receives an attempt within the specified minute. Backoff resets after any durable acknowledgement. There is no maximum retry count and no failure path deletes a valid retained envelope.
+It uses capped exponential backoff with bounded jitter. Backoff is a retry-start interval measured from the beginning of the current recovery pass, not an additional sleep after callbacks finish. When a pass completes, the coordinator subtracts the pass elapsed time from the target interval and schedules only the remainder. The default retry-start interval starts at one second and is capped below 60 seconds (30 seconds plus at most five seconds jitter), so a 45-second callback timeout cannot be followed by another full 35-second sleep. Backoff resets after any durable acknowledgement. There is no maximum retry count and no failure path deletes a valid retained envelope.
 
 Alternatives considered:
 

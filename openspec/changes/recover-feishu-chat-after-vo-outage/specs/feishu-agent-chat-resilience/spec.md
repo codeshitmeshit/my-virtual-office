@@ -15,6 +15,10 @@ The Feishu Agent Chat channel SHALL retain every accepted inbound message that h
 - **WHEN** VO remains unavailable after any immediate retry sequence is exhausted
 - **THEN** the system SHALL continue bounded background recovery instead of abandoning, deleting, or permanently pausing the retained messages
 
+#### Scenario: A callback attempt consumes most of the retry interval
+- **WHEN** a recovery callback attempt remains active until its bounded transport timeout
+- **THEN** the next recovery wake SHALL subtract the elapsed attempt time from its retry-start interval instead of adding a full backoff after the timeout
+
 ### Requirement: Recovery preserves exactly-once outcomes and conversation order
 Recovery SHALL use the persistent Feishu source-message identity and VO business records so repeated delivery attempts produce at most one user-visible Agent turn and one authoritative reply outcome for each source message. Messages from the same Feishu conversation MUST become durable in source order, while failure in one conversation MUST NOT prevent unrelated conversations from making progress within configured safety capacity.
 

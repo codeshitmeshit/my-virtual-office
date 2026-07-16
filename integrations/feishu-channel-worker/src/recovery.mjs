@@ -100,6 +100,7 @@ export class ProcessingRecoveryCoordinator {
 
   async _execute() {
     if (!this.enabled || this.closed || this.active) return;
+    const attemptStartedAt = this.now();
     this.active = true;
     this._publish();
     let outcome;
@@ -128,10 +129,11 @@ export class ProcessingRecoveryCoordinator {
     this.wakeRequested = false;
     if (explicitWake) this._schedule(0);
     else if (outcome.pending) {
-      const delay = outcome.progress
+      const retryStartInterval = outcome.progress
         ? this.baseDelayMs
         : this._backoffDelay(outcome.retryAfterMs);
-      this._schedule(delay);
+      const attemptElapsed = Math.max(0, this.now() - attemptStartedAt);
+      this._schedule(Math.max(0, retryStartInterval - attemptElapsed));
     } else {
       this.nextRetryAt = 0;
       this._publish();
