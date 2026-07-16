@@ -12,7 +12,19 @@ import { StatusStore } from './status.mjs';
 export const CHANNEL_OPTIONS = {
   transport: 'websocket',
   includeRawEvent: true,
-  policy: { dmMode: 'open', groupAllowlist: [] },
+  policy: {
+    dmMode: 'open',
+    groupAllowlist: [],
+    requireMention: true,
+    respondToMentionAll: false,
+    botLoopGuard: {
+      enabled: true,
+      windowMs: 60_000,
+      maxBotMentions: 5,
+      scope: 'chat',
+      onTrip: 'reject',
+    },
+  },
   safety: {
     chatQueue: { enabled: true, mergeWhileBusy: false },
     batch: { text: { delayMs: 0, longDelayMs: 0, maxMessages: 1, maxChars: 512 * 1024 }, media: { delayMs: 0, maxItems: 1 } },
@@ -293,8 +305,14 @@ export class FeishuChannelWorker {
   }
 
   async handleReject(event) {
+    const allowedReasons = new Set([
+      'group_not_allowed', 'sender_not_allowed', 'no_mention', 'dm_disabled',
+      'mention_all_blocked', 'bot_loop',
+    ]);
+    const reason = allowedReasons.has(String(event?.reason || '')) ? String(event.reason) : 'unknown';
     await this.status.increment('counters.policyRejected');
-    this.logger.info('Feishu message rejected by SDK policy', { messageId: event.messageId, reason: event.reason });
+    await this.status.increment(`counters.policyRejectedByReason.${reason}`);
+    this.logger.info('Feishu message rejected by SDK policy', { messageId: String(event?.messageId || ''), reason });
   }
 
   async handleError(error) {

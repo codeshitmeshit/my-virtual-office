@@ -26,11 +26,69 @@ test('worker SDK options preserve one-message semantics and VO-owned stale decis
   assert.equal(CHANNEL_OPTIONS.transport, 'websocket');
   assert.equal(CHANNEL_OPTIONS.policy.dmMode, 'open');
   assert.deepEqual(CHANNEL_OPTIONS.policy.groupAllowlist, []);
+  assert.equal(CHANNEL_OPTIONS.policy.requireMention, true);
+  assert.equal(CHANNEL_OPTIONS.policy.respondToMentionAll, false);
+  assert.deepEqual(CHANNEL_OPTIONS.policy.botLoopGuard, {
+    enabled: true, windowMs: 60_000, maxBotMentions: 5, scope: 'chat', onTrip: 'reject',
+  });
   assert.equal(CHANNEL_OPTIONS.safety.chatQueue.mergeWhileBusy, false);
   assert.equal(CHANNEL_OPTIONS.safety.batch.text.delayMs, 0);
   assert.equal(CHANNEL_OPTIONS.safety.batch.text.maxMessages, 1);
   assert.equal(CHANNEL_OPTIONS.safety.staleMessageWindowMs, Number.MAX_SAFE_INTEGER);
   assert.equal(CHANNEL_OPTIONS.keepalive.enabled, true);
+});
+
+test('worker accepts SDK-approved group mentions and counts policy rejects without message content', async () => {
+  const statusDir = await mkdtemp(join(tmpdir(), 'vo-feishu-worker-group-policy-'));
+  const handlers = {};
+  const deliveries = [];
+  const logs = [];
+  const logger = {
+    info(label, context) { logs.push({ label, context }); },
+    warn() {}, error() {}, debug() {},
+  };
+  const channel = {
+    on(map) { Object.assign(handlers, map); },
+    async connect() {}, async disconnect() {},
+    getConnectionStatus() { return { state: 'connected' }; },
+  };
+  const worker = new FeishuChannelWorker({
+    appId: 'cli_test', appSecret: 'secret', statusDir, callbackUrl: 'http://127.0.0.1', callbackToken: 'token',
+    workerInstanceId: 'worker-group-policy', parentPid: process.pid, createChannel: () => channel, logger,
+    callbackClient: {
+      async deliver(input) {
+        deliveries.push(input);
+        return { schema: ACK_SCHEMA, requestId: input.requestId, messageId: input.message.messageId, durable: true, state: 'completed' };
+      },
+    },
+  });
+  await worker.start();
+
+  await handlers.message({
+    ...message('om_group_mention', 'oc_trusted'),
+    chatType: 'group',
+    content: 'approved group prompt',
+    mentions: [{ openId: 'ou_bot', name: 'VO', isBot: true }],
+  });
+  await handlers.reject({ messageId: 'om_no_mention', reason: 'no_mention', content: 'must-not-log-no-mention' });
+  await handlers.reject({ messageId: 'om_mention_all', reason: 'mention_all_blocked', content: 'must-not-log-mention-all' });
+  await handlers.reject({ messageId: 'om_bot_loop', reason: 'bot_loop', content: 'must-not-log-bot-loop' });
+  await handlers.reject({ messageId: 'om_unknown', reason: 'future_reason', content: 'must-not-log-unknown' });
+
+  assert.equal(deliveries.length, 1);
+  assert.equal(deliveries[0].message.chatType, 'group');
+  assert.equal(deliveries[0].message.mentions[0].isBot, true);
+  const counters = worker.status.snapshot().counters;
+  assert.equal(counters.policyRejected, 4);
+  assert.deepEqual(counters.policyRejectedByReason, {
+    no_mention: 1, mention_all_blocked: 1, bot_loop: 1, unknown: 1,
+  });
+  assert.deepEqual(logs.map((entry) => entry.context.reason), [
+    'no_mention', 'mention_all_blocked', 'bot_loop', 'unknown',
+  ]);
+  const renderedLogs = JSON.stringify(logs);
+  assert.equal(renderedLogs.includes('must-not-log'), false);
+  await worker.stop();
 });
 
 test('normalization preserves identity, thread, reply, and resource fields', () => {

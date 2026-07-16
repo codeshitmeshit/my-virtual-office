@@ -5,7 +5,7 @@
 
 ## 2. Worker Policy and Inbound Identity
 
-- [ ] 2.1 Configure the Node SDK policy explicitly for open private chat, membership-trusted groups, required direct bot mention, blocked `@all`, zero-delay single-message batching, and unchanged bounded queues; extend worker tests for accepted group mentions and SDK `no_mention`, `mention_all_blocked`, and bot-loop/policy counters without per-message content logging.
+- [x] 2.1 Configure the Node SDK policy explicitly for open private chat, membership-trusted groups, required direct bot mention, blocked `@all`, zero-delay single-message batching, and unchanged bounded queues; extend worker tests for accepted group mentions and SDK `no_mention`, `mention_all_blocked`, and bot-loop/policy counters without per-message content logging.
 - [ ] 2.2 Preserve bounded sender name/type/bot metadata and structured `mentions[].isBot` through Node normalization, strict v1 validation, durable spool replay, and Python envelope adaptation without changing the v1 shape; test restart/rollback compatibility and prove forged text `@`, missing bot identity, and non-human senders cannot reach the Agent.
 
 ## 3. Group Admission, Context, and Delivery
