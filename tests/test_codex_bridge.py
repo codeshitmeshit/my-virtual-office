@@ -490,6 +490,32 @@ def test_terminal_fence_releases_immediately_after_prior_callback_exits():
     assert operation.fence_diagnostics()["terminalFenceFallbacks"] == 0
 
 
+def test_callback_failure_is_contained_and_reader_serves_next_turn():
+    with tempfile.TemporaryDirectory() as tmp:
+        client = CodexAppServerClientImpl(tmp, binary=make_fake_codex(tmp))
+
+        def fail_approval_persistence(event):
+            if event.get("type") == "interaction" and event.get("status") == "pending":
+                raise OSError("approval fsync failed")
+
+        try:
+            failed = client.execute(
+                "needs approval",
+                timeout_sec=5,
+                event_callback=fail_approval_persistence,
+                allow_interaction=True,
+            )
+            assert failed["ok"] is False
+            assert failed["status"] == "event_callback_failed"
+            assert failed["terminalFence"]["callbackErrors"] == 1
+
+            recovered = client.execute("change one file", timeout_sec=5)
+            assert recovered["ok"] is True
+            assert recovered["reply"] == "real fake reply"
+        finally:
+            client.close()
+
+
 def test_terminal_fence_has_bounded_fallback_for_stuck_prior_callback():
     entered = threading.Event()
     release = threading.Event()
@@ -548,6 +574,26 @@ def test_post_terminal_metrics_are_diagnostic_and_late_content_cannot_mutate_rep
     diagnostics = client.terminal_diagnostics("thr-late")
     assert diagnostics["lateNotifications"] == 1
     assert diagnostics["postTerminalMetrics"] == 1
+
+
+def test_terminal_diagnostics_are_retained_without_reasoning_notifications():
+    client = object.__new__(CodexAppServerClientImpl)
+    client._operations_lock = threading.Lock()
+    client._operations = {}
+    client._terminal_operations = OrderedDict()
+    operation = _Operation("thr-no-reasoning")
+    client._operations[operation.thread_id] = operation
+
+    client._handle_notification("turn/completed", {
+        "threadId": operation.thread_id,
+        "turn": {"id": "turn-no-reasoning", "status": "completed", "items": []},
+    })
+    with client._operations_lock:
+        client._operations.pop(operation.thread_id, None)
+
+    diagnostics = client.terminal_diagnostics(operation.thread_id)
+    assert diagnostics["terminalObserved"] is True
+    assert diagnostics["callbackErrors"] == 0
 
 
 def test_runtime_exit_releases_operation_through_terminal_fence():

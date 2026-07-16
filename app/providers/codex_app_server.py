@@ -354,6 +354,8 @@ class _Operation:
     terminal_fence_fallbacks: int = 0
     late_notifications: int = 0
     post_terminal_metrics: int = 0
+    callback_errors: int = 0
+    callback_error_category: str = ""
 
     def emit(self, event_type: str, *, terminal: bool = False, **data: Any) -> bool:
         with self._callback_condition:
@@ -378,9 +380,15 @@ class _Operation:
                 "ts": int(time.time() * 1000),
                 **data,
             }
+        callback_ok = True
         try:
             if self.event_callback:
                 self.event_callback(event)
+        except Exception as exc:
+            callback_ok = False
+            with self._callback_condition:
+                self.callback_errors += 1
+                self.callback_error_category = type(exc).__name__[:80]
         finally:
             with self._callback_condition:
                 self._active_callback_ids.discard(callback_id)
@@ -388,7 +396,7 @@ class _Operation:
                 if terminal and not self.completed.is_set():
                     self._start_terminal_fallback_locked()
                 self._callback_condition.notify_all()
-        return True
+        return callback_ok
 
     def finish_without_event(self) -> None:
         with self._callback_condition:
@@ -418,6 +426,7 @@ class _Operation:
                 "terminalFenceFallbacks": self.terminal_fence_fallbacks,
                 "lateNotifications": self.late_notifications,
                 "postTerminalMetrics": self.post_terminal_metrics,
+                "callbackErrors": self.callback_errors,
                 "terminalFenceWaitMs": round(max(0, self._terminal_completed_ns - self._terminal_observed_ns) / 1_000_000, 3)
                 if self._terminal_observed_ns and self._terminal_completed_ns else 0.0,
             }
@@ -653,7 +662,7 @@ class CodexAppServerClient:
                         )
                         return
                     operation.state.set_approval(approval)
-                operation.emit(
+                emitted = operation.emit(
                     "interaction",
                     status="pending",
                     interactionId=request_key,
@@ -662,6 +671,25 @@ class CodexAppServerClient:
                     itemId=str(params.get("itemId") or ""),
                     input=params,
                 )
+                if not emitted:
+                    operation.pending_requests.pop(request_key, None)
+                    self._clear_pending_approvals(thread_id)
+                    if method == "item/tool/requestUserInput":
+                        failure_response = {"answers": {}}
+                    elif method == "mcpServer/elicitation/request":
+                        failure_response = {"action": "decline"}
+                    else:
+                        failure_response = self._approval_response(method, params, "cancel")
+                    self._send({"id": message["id"], "result": failure_response})
+                    operation.result = _error_result(
+                        "event_callback_failed",
+                        "Codex event handling failed before approval could be exposed",
+                        threadId=thread_id,
+                        turnId=operation.turn_id or str(params.get("turnId") or ""),
+                        errorCategory=operation.callback_error_category,
+                    )
+                    self._remember_terminal_operation(operation)
+                    operation.finish_without_event()
                 return
             if operation:
                 operation.needs_human = True
@@ -731,7 +759,6 @@ class CodexAppServerClient:
             "item/reasoning/summaryPartAdded",
             "item/reasoning/textDelta",
         }:
-            self._remember_terminal_operation(operation)
             operation.emit(
                 "reasoning",
                 status="running",
@@ -833,6 +860,7 @@ class CodexAppServerClient:
                     threadId=thread_id,
                     turnId=operation.turn_id,
                 )
+            self._remember_terminal_operation(operation)
             operation.emit(
                 "turn",
                 terminal=True,
@@ -869,6 +897,7 @@ class CodexAppServerClient:
             "terminalFenceFallbacks": 0,
             "lateNotifications": 0,
             "postTerminalMetrics": 0,
+            "callbackErrors": 0,
         }
 
     def _augment_result(self, operation: _Operation, result: dict[str, Any]) -> dict[str, Any]:
