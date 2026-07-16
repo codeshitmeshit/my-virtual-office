@@ -9948,7 +9948,8 @@ def _handle_agent_platform_comm_history(query):
     limit = int((query.get("limit") or [200])[0] or 200)
     conversation_id = (query.get("conversationId") or query.get("threadId") or [None])[0]
     agent_id = (query.get("agentId") or [None])[0]
-    return {"ok": True, "events": _load_comm_history(limit=limit, conversation_id=conversation_id, agent_id=agent_id)}
+    events = _load_comm_history(limit=limit, conversation_id=conversation_id, agent_id=agent_id)
+    return {"ok": True, "events": [event for event in events if not _comm_is_feishu_group(event)]}
 
 
 def _parse_a2a_envelope(text):

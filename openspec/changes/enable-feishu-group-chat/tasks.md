@@ -27,7 +27,7 @@
 
 ## 6. Security and Compatibility Regression
 
-- [ ] 6.1 Add end-to-end security tests for forged/unauthenticated worker callbacks, structured-mention tampering, bot/system/anonymous/unknown senders, display-name prompt injection, oversized or unsafe image resources, cross-group identifiers, and secret canaries; verify no unauthorized Agent/outbound effect and no credential or group-message leakage in logs, status, API responses, history, or SSE.
+- [x] 6.1 Add end-to-end security tests for forged/unauthenticated worker callbacks, structured-mention tampering, bot/system/anonymous/unknown senders, display-name prompt injection, oversized or unsafe image resources, cross-group identifiers, and secret canaries; verify no unauthorized Agent/outbound effect and no credential or group-message leakage in logs, status, API responses, history, or SSE.
 - [ ] 6.2 Run and fix the focused Node/Python Feishu suite covering worker protocol/spool/status, configuration and UI, private chat, group text/image, all providers, idempotency, ordering, capacity, ledger/history/SSE isolation, outbound failures, notification/card-action isolation, and legacy rollback; record exact commands, results, failures, and intentional compatibility changes in verification evidence.
 
 ## 7. Rollout, Real-Tenant Acceptance, and Final Verification

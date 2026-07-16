@@ -184,8 +184,34 @@ def channel_records_response(status_dir, *, limit=500):
     records = load_channel_records(status_dir, limit=limit)
     return {
         "ok": True,
-        "records": records,
+        "records": [_public_channel_record(item) for item in records],
         "count": len(records),
+    }
+
+
+def _public_channel_record(record):
+    record = record if isinstance(record, dict) else {}
+    if str(record.get("chatType") or "").lower() != "group" and str(record.get("sourceSurface") or "").lower() != "feishu-group":
+        return record
+    sender = record.get("sender") if isinstance(record.get("sender"), dict) else {}
+    sender_id = str(sender.get("openId") or sender.get("userId") or sender.get("unionId") or record.get("voUserId") or "feishu-user")
+    agent_result = record.get("agentResult") if isinstance(record.get("agentResult"), dict) else {}
+    send_result = record.get("sendResult") if isinstance(record.get("sendResult"), dict) else {}
+    return {
+        key: record.get(key)
+        for key in (
+            "id", "createdAt", "event", "reason", "channel", "sourceApp", "sourceSurface",
+            "sourceLabel", "sourceMessageId", "conversationId", "representativeAgentId",
+            "chatType", "messageType", "deliveryStatus", "replyInThread", "transport",
+            "workerInstanceId", "requestId", "createTime",
+        )
+        if record.get(key) not in (None, "", [], {})
+    } | {
+        "redacted": True,
+        "senderRef": f"feishu-member:{hashlib.sha256(sender_id.encode('utf-8')).hexdigest()[:16]}",
+        "attachmentCount": len(record.get("attachments") or []),
+        "agentOk": bool(agent_result.get("ok")) if agent_result else None,
+        "deliveryOk": bool(send_result.get("ok")) if send_result else None,
     }
 
 
