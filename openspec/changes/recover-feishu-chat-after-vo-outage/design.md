@@ -104,6 +104,8 @@ Terminal ignored/rejected decisions are also indexed so an uncertain response do
 
 Automatic takeover of a source still marked active in the same process is intentionally disallowed: exactly-once execution is preferred over launching a second Agent turn when the first thread may still be running. A stuck active execution remains degraded and warning-visible until it completes or VO is restarted.
 
+Restart takeover also uses a persisted execution phase. A source in `claimed` has not crossed the provider-dispatch boundary and can be reclaimed by a new VO process. A source in `dispatching` has crossed that boundary and is an uncertain external outcome; it MUST NOT be blindly dispatched again after restart. It remains non-terminal and warning-visible until durable provider evidence can be reconciled. Legacy processing indexes without a phase are treated as uncertain. This deliberately prefers at-most-once provider side effects over speculative liveness where the provider has no transactional idempotency contract.
+
 Alternatives considered:
 
 - **Treat persisted `user_message` as terminal:** rejected because a crash after that write can strand an incomplete Agent turn while causing the worker to delete its recovery copy.
@@ -155,6 +157,10 @@ Add environment-backed worker settings with validated defaults:
 - warning threshold, default 60 seconds.
 
 The recovery switch controls background replay scheduling only. Disabling it never deletes spool files and does not disable normal immediate delivery. This supports staged rollout and emergency rollback without data migration.
+
+When recovery is disabled and a newly received message is ordered behind older retained work in the same chat, the live event performs one ordered drain attempt through its own source message. This is not timer-driven background retry: it stops on the first failed head and leaves all remaining files intact.
+
+Processing warning age is recomputed by the worker heartbeat as well as spool/recovery mutations, so a quiet recovery-off worker still crosses the configured warning threshold.
 
 ## Protocol and State Flow
 

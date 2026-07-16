@@ -22,6 +22,10 @@ Recovery SHALL use the persistent Feishu source-message identity and VO business
 - **WHEN** a callback attempt may have reached VO but the worker did not receive a valid durable acknowledgement before failure
 - **THEN** a later recovery attempt SHALL reuse the same source-message identity and VO SHALL reuse the existing outcome instead of invoking the Agent or delivering the authoritative reply twice
 
+#### Scenario: VO restarts after provider dispatch becomes uncertain
+- **WHEN** VO restarts after persisting that provider dispatch began but before a terminal provider outcome is durably reconcilable
+- **THEN** VO SHALL retain a non-terminal processing state and MUST NOT invoke the Agent again merely because the prior process owner disappeared
+
 #### Scenario: Multiple messages accumulate in one conversation
 - **WHEN** two or more accepted messages from the same Feishu conversation remain unacknowledged during a VO outage
 - **THEN** recovery SHALL preserve their deterministic source order and MUST NOT complete a later message ahead of an earlier retained message in that conversation
@@ -49,6 +53,10 @@ VO SHALL expose message-processing health independently from Feishu WebSocket co
 - **WHEN** processing remains degraded beyond the configured operator-warning threshold
 - **THEN** VO SHALL display an actionable warning while retaining messages and continuing automatic recovery
 
+#### Scenario: Recovery is disabled while backlog remains quiet
+- **WHEN** background recovery is disabled and retained work crosses the warning threshold without another message or callback attempt
+- **THEN** the heartbeat-driven status surface SHALL still raise the operator warning
+
 ### Requirement: Control panel shows Feishu message-processing health
 The VO control panel SHALL include a Feishu message-processing status bar that is distinct from connection status and reflects the authoritative processing-health surface. It SHALL make healthy, degraded, and recovering states understandable to an operator and SHALL update as backlog and recovery state change.
 
@@ -70,6 +78,10 @@ This resilience change SHALL preserve existing Feishu Agent selection, private a
 #### Scenario: Existing Agent Chat message is processed without outage
 - **WHEN** VO is healthy and a supported Feishu Agent Chat message arrives
 - **THEN** the message SHALL follow the existing routing, persistence, Agent execution, reply, history, and audit behavior without an additional user-visible turn
+
+#### Scenario: Live message follows retained work while background recovery is disabled
+- **WHEN** a new message arrives behind older retained work in the same conversation while background recovery is disabled
+- **THEN** the live path SHALL attempt the retained heads in order through the new message, stop on the first failure, and leave failed work retained
 
 #### Scenario: Notification or card action is used
 - **WHEN** the separate Feishu notification/card-action application receives an event

@@ -153,6 +153,7 @@ def save_source_index(status_dir, record, *, now, lock, owner_id=""):
         "state": state,
         "updatedAt": now(),
         **({"ownerId": str(owner_id or "").strip()} if state == "processing" and str(owner_id or "").strip() else {}),
+        **({"executionPhase": "claimed"} if state == "processing" else {}),
         "record": {
             key: record.get(key)
             for key in (
@@ -173,6 +174,45 @@ def save_source_index(status_dir, record, *, now, lock, owner_id=""):
             with open(temp_path, "w", encoding="utf-8") as f:
                 os.chmod(temp_path, 0o600)
                 f.write(encoded)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(temp_path, path)
+            os.chmod(path, 0o600)
+        finally:
+            try:
+                os.unlink(temp_path)
+            except FileNotFoundError:
+                pass
+    return item
+
+
+def mark_source_index_dispatching(status_dir, source_message_id, *, now, lock, owner_id=""):
+    """Persist the external-dispatch boundary before invoking an Agent provider."""
+    source_message_id = str(source_message_id or "").strip()
+    if not source_message_id:
+        return None
+    path = source_index_path(status_dir, source_message_id)
+    with lock:
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                item = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
+            return None
+        if not isinstance(item, dict) or item.get("sourceMessageId") != source_message_id or item.get("state") != "processing":
+            return None
+        if item.get("executionPhase") != "claimed":
+            return None
+        item = {
+            **item,
+            "executionPhase": "dispatching",
+            "updatedAt": now(),
+            **({"ownerId": str(owner_id or "").strip()} if str(owner_id or "").strip() else {}),
+        }
+        temp_path = f"{path}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
+        try:
+            with open(temp_path, "w", encoding="utf-8") as f:
+                os.chmod(temp_path, 0o600)
+                f.write(json.dumps(item, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n")
                 f.flush()
                 os.fsync(f.fileno())
             os.replace(temp_path, path)
@@ -635,6 +675,7 @@ def handle_message_event(
     choose_receipt=random_ack_emoji,
     choose_reaction=ack_reaction_emoji_type,
     download_image=None,
+    mark_dispatching=None,
 ):
     event = (body or {}).get("event") if isinstance((body or {}).get("event"), dict) else {}
     message = event.get("message") if isinstance(event.get("message"), dict) else {}
@@ -756,6 +797,19 @@ def handle_message_event(
             receipt_text = str((choose_receipt or random_ack_emoji)() or "").strip() or ACK_EMOJIS[0]
             receipt_result = _safe_channel_call(send_receipt, chat_id, receipt_text)
             receipt_message_id = _message_id_from_send_result(receipt_result)
+        if mark_dispatching:
+            try:
+                dispatch_state = mark_dispatching(source_message_id)
+            except Exception:
+                dispatch_state = None
+            if not dispatch_state:
+                return {
+                    "ok": False,
+                    "status": "processing",
+                    "idempotent": True,
+                    "record": {**inbound_record, "indexState": "processing", "executionPhase": "claimed"},
+                    "_status": 202,
+                }
         try:
             result = dispatch_agent(
                 representative_agent_id,

@@ -12496,7 +12496,7 @@ def _feishu_channel_records_response(limit=500):
 def _feishu_channel_idempotency_hit(source_message_id, *, allow_processing_reclaim=False):
     indexed = feishu_chat_channel.load_source_index(STATUS_DIR, source_message_id)
     if indexed:
-        if indexed.get("state") == "processing" and allow_processing_reclaim:
+        if indexed.get("state") == "processing" and allow_processing_reclaim and indexed.get("executionPhase") == "claimed":
             return None
         record = indexed.get("record") if isinstance(indexed.get("record"), dict) else {}
         if str(record.get("chatType") or "").lower() == "group":
@@ -12506,7 +12506,12 @@ def _feishu_channel_idempotency_hit(source_message_id, *, allow_processing_recla
                 now=_exec_meeting_now,
                 lock=_FEISHU_CHANNEL_RECORD_LOCK,
             )
-        return {**record, "sourceMessageId": source_message_id, "indexState": indexed.get("state") or ""}
+        return {
+            **record,
+            "sourceMessageId": source_message_id,
+            "indexState": indexed.get("state") or "",
+            **({"executionPhase": indexed.get("executionPhase")} if indexed.get("executionPhase") else {}),
+        }
     hit = feishu_chat_channel.channel_idempotency_hit(_load_feishu_channel_records, source_message_id)
     if hit:
         feishu_chat_channel.save_source_index(
@@ -12532,6 +12537,16 @@ def _claim_feishu_source_message(source_message_id):
 def _release_feishu_source_message(source_message_id):
     with _FEISHU_ACTIVE_SOURCE_MESSAGES_LOCK:
         _FEISHU_ACTIVE_SOURCE_MESSAGES.discard(str(source_message_id or "").strip())
+
+
+def _mark_feishu_source_dispatching(source_message_id):
+    return feishu_chat_channel.mark_source_index_dispatching(
+        STATUS_DIR,
+        source_message_id,
+        now=_exec_meeting_now,
+        lock=_FEISHU_CHANNEL_RECORD_LOCK,
+        owner_id=_FEISHU_PROCESS_OWNER_ID,
+    )
 
 
 def _feishu_processing_ack(envelope):
@@ -12886,6 +12901,7 @@ def _handle_feishu_chat_message_event(body, *, send_text=None, reply_text=None, 
         delete_reaction=None if send_text else _feishu_chat_app_reaction_delete,
         find_agent=_find_agent_record,
         download_image=download_image if download_image is not None else (None if send_text else _feishu_chat_app_image_download),
+        mark_dispatching=_mark_feishu_source_dispatching,
     )
 
 

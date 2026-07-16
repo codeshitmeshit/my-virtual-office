@@ -2352,6 +2352,8 @@ def test_feishu_worker_processing_ack_is_non_durable_and_terminal_retry_is_idemp
         }
         assert server._FEISHU_PROCESS_OWNER_ID not in json.dumps(processing)
         assert dispatches == ["om_processing_ack"]
+        active_index = feishu_chat_channel.load_source_index(status_dir, "om_processing_ack")
+        assert active_index["executionPhase"] == "dispatching"
         release.set()
         first.join(timeout=3)
         assert not first.is_alive()
@@ -2430,6 +2432,73 @@ def test_feishu_worker_reclaims_stale_processing_and_indexes_terminal_ignored_ou
     ignored_index = feishu_chat_channel.load_source_index(status_dir, "om_terminal_ignored")
     assert ignored_index["state"] == "completed"
     assert ignored_index["record"]["event"] == "ignored"
+
+
+def test_feishu_worker_does_not_redispatch_uncertain_or_legacy_processing_after_restart():
+    os.environ.setdefault("VO_HERMES_ENABLED", "0")
+    os.environ.setdefault("VO_CODEX_ENABLED", "0")
+    status_dir = tempfile.mkdtemp(prefix="vo-feishu-worker-uncertain-dispatch-")
+    import server
+
+    previous_status_dir = server.STATUS_DIR
+    previous_config = server.VO_CONFIG
+    previous_dispatch = server._dispatch_representative_agent_message
+    dispatches = []
+    server.STATUS_DIR = status_dir
+    server.VO_CONFIG = {
+        **previous_config,
+        "feishu": {"chatApp": {"enabled": True, "appId": "cli_chat", "appSecret": "secret", "representativeAgentId": "hermes-default", "transportImplementation": "channel-sdk-node"}, "bindings": {}},
+    }
+
+    def seed(message_id, *, dispatching):
+        feishu_chat_channel.save_source_index(
+            status_dir,
+            {"id": f"record-{message_id}", "event": "user_message", "sourceMessageId": message_id, "conversationId": f"feishu-dm:{message_id}", "feishuChatId": "oc_worker_recovery", "chatType": "p2p", "messageType": "text"},
+            now=lambda: "2026-07-16T00:00:00Z",
+            lock=server._FEISHU_CHANNEL_RECORD_LOCK,
+            owner_id="previous-vo-process",
+        )
+        if dispatching:
+            feishu_chat_channel.mark_source_index_dispatching(
+                status_dir,
+                message_id,
+                now=lambda: "2026-07-16T00:00:01Z",
+                lock=server._FEISHU_CHANNEL_RECORD_LOCK,
+                owner_id="previous-vo-process",
+            )
+        else:
+            path = feishu_chat_channel.source_index_path(status_dir, message_id)
+            with open(path, "r", encoding="utf-8") as f:
+                legacy = json.load(f)
+            legacy.pop("executionPhase", None)
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(legacy, f)
+
+    seed("om_uncertain_dispatch", dispatching=True)
+    seed("om_legacy_processing", dispatching=False)
+
+    def fake_dispatch(agent_id, message, conversation_id, source_meta):
+        dispatches.append(source_meta["sourceMessageId"])
+        return {"ok": True, "reply": "must not execute", "conversationId": conversation_id}
+
+    try:
+        server._dispatch_representative_agent_message = fake_dispatch
+        uncertain = server._handle_feishu_chat_worker_envelope(feishu_worker_envelope("om_uncertain_dispatch"))
+        legacy = server._handle_feishu_chat_worker_envelope(feishu_worker_envelope("om_legacy_processing"))
+    finally:
+        server._dispatch_representative_agent_message = previous_dispatch
+        server.STATUS_DIR = previous_status_dir
+        server.VO_CONFIG = previous_config
+
+    assert uncertain == {
+        "schema": "vo.feishu-chat.ack/v1", "requestId": "req-om_uncertain_dispatch", "messageId": "om_uncertain_dispatch",
+        "durable": False, "state": "processing", "idempotent": True, "retryAfterMs": 1000, "_status": 202,
+    }
+    assert legacy == {
+        "schema": "vo.feishu-chat.ack/v1", "requestId": "req-om_legacy_processing", "messageId": "om_legacy_processing",
+        "durable": False, "state": "processing", "idempotent": True, "retryAfterMs": 1000, "_status": 202,
+    }
+    assert dispatches == []
 
 
 def test_feishu_worker_v1_untrusted_group_identity_cannot_dispatch():

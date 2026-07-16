@@ -24,3 +24,9 @@
 - [x] 5.1 Add integrated fault-injection coverage for connection refusal, accepted-but-unresponsive callbacks, long Agent turns, VO restart during processing, terminal response loss, same-chat backlog, cross-chat concurrency, corrupt/full spool, worker restart, and recovery switch off/on; prove sub-minute retry start, no unexplained loss/duplicate, and deterministic order.
 - [x] 5.2 Document the new recovery controls, processing-health fields, operator warning/diagnosis flow, server-first recovery-off rollout, enablement gates, and rollback procedure without exposing internal endpoints or secrets.
 - [x] 5.3 Run the focused Node and Python suites, relevant Feishu regression coverage, control-panel checks, OpenSpec validation, and an offline rollout/rollback rehearsal; save reproducible commands and redacted results under the change evidence directory for the test-results confirmation gate.
+
+## 6. Push-Gate Corrections
+
+- [x] 6.1 Persist a pre-dispatch versus dispatch-uncertain source phase, reclaim only work proven not dispatched, fail closed for legacy/uncertain processing owners after VO restart, and verify that restart replay cannot invoke the Agent twice.
+- [ ] 6.2 Preserve event-triggered ordered live delivery when background recovery is disabled by draining older same-chat heads through the newly received message, stopping on the first failed head; verify success order and failure retention.
+- [ ] 6.3 Recompute processing warning age on heartbeat so a quiet recovery-off backlog crosses the operator threshold; add deterministic status coverage, rerun complete Node/Python/UI/OpenSpec/rehearsal checks, and record push-gate correction evidence.
