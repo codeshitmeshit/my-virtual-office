@@ -423,7 +423,7 @@ def run_fixture(warmups: int, runs: int) -> dict[str, Any]:
         "baselineObservations": {
             "activityPersistenceComplexity": "Each native event loads/scans and rewrites the bounded activity JSON file.",
             "communicationProgressComplexity": "Initial progress, every native event, and terminal cleanup scan/rewrite communication history.",
-            "terminalGrace": "CodexAppServerClient applies an unconditional 200 ms sleep after terminal completion.",
+            "terminalGrace": "CodexAppServerClient uses callback-drain completion with a bounded malformed-order fallback and no unconditional sleep.",
             "firstTextSlo": "Observed only; no fixed product SLO is asserted.",
         },
     }

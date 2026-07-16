@@ -20,7 +20,7 @@
 
 ## 5. Terminal Completion Fence
 
-- [ ] 5.1 Replace the unconditional 200 ms Codex terminal sleep with operation callback entry/exit accounting and a bounded terminal-drain fence; cover prior callbacks, malformed late notifications, post-terminal metrics, timeout, runtime exit, cancellation, approval continuation, result augmentation, and prove successful turns have no fixed tail delay.
+- [x] 5.1 Replace the unconditional 200 ms Codex terminal sleep with operation callback entry/exit accounting and a bounded terminal-drain fence; cover prior callbacks, malformed late notifications, post-terminal metrics, timeout, runtime exit, cancellation, approval continuation, result augmentation, and prove successful turns have no fixed tail delay.
 
 ## 6. Conversation Isolation and Bounded Provider Concurrency
 

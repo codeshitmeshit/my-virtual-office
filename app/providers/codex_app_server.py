@@ -13,6 +13,7 @@ import urllib.error
 import urllib.request
 import uuid
 import hashlib
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -29,6 +30,9 @@ APPROVAL_METHODS = {
     "mcpServer/elicitation/request",
 }
 MAX_PENDING_APPROVALS = 100
+TERMINAL_DRAIN_TIMEOUT_SEC = 0.05
+POST_TERMINAL_METRIC_METHODS = {"thread/tokenUsage/updated", "session/metrics"}
+MAX_TERMINAL_DIAGNOSTICS = 100
 
 
 def _error_result(code: str, message: str, **extra: Any) -> dict[str, Any]:
@@ -339,21 +343,102 @@ class _Operation:
     pending_requests: dict[str, dict[str, Any]] = field(default_factory=dict)
     state: CodexAppRunState = field(default_factory=CodexAppRunState)
     cancel_requested: bool = False
+    _callback_condition: threading.Condition = field(default_factory=threading.Condition, repr=False)
+    _active_callback_ids: set[int] = field(default_factory=set, repr=False)
+    _next_callback_id: int = 0
+    _terminal_target: int = 0
+    _terminal_observed: bool = False
+    _terminal_timer_started: bool = False
+    terminal_fence_fallbacks: int = 0
+    late_notifications: int = 0
+    post_terminal_metrics: int = 0
 
-    def emit(self, event_type: str, **data: Any) -> None:
-        self.sequence += 1
-        event = {
-            "id": f"codex-{uuid.uuid4().hex}",
-            "sequence": self.sequence,
-            "type": event_type,
-            "operationId": self.operation_id,
-            "threadId": self.thread_id,
-            "turnId": self.turn_id,
-            "ts": int(time.time() * 1000),
-            **data,
-        }
-        if self.event_callback:
-            self.event_callback(event)
+    def emit(self, event_type: str, *, terminal: bool = False, **data: Any) -> bool:
+        with self._callback_condition:
+            if self._terminal_observed and not terminal:
+                self.late_notifications += 1
+                return False
+            self._next_callback_id += 1
+            callback_id = self._next_callback_id
+            self._active_callback_ids.add(callback_id)
+            if terminal:
+                self._terminal_observed = True
+                self._terminal_target = callback_id
+            self.sequence += 1
+            event = {
+                "id": f"codex-{uuid.uuid4().hex}",
+                "sequence": self.sequence,
+                "type": event_type,
+                "operationId": self.operation_id,
+                "threadId": self.thread_id,
+                "turnId": self.turn_id,
+                "ts": int(time.time() * 1000),
+                **data,
+            }
+        try:
+            if self.event_callback:
+                self.event_callback(event)
+        finally:
+            with self._callback_condition:
+                self._active_callback_ids.discard(callback_id)
+                self._release_completion_if_drained_locked()
+                if terminal and not self.completed.is_set():
+                    self._start_terminal_fallback_locked()
+                self._callback_condition.notify_all()
+        return True
+
+    def finish_without_event(self) -> None:
+        with self._callback_condition:
+            if not self._terminal_observed:
+                self._terminal_observed = True
+                self._terminal_target = self._next_callback_id
+            self._release_completion_if_drained_locked()
+            if not self.completed.is_set():
+                self._start_terminal_fallback_locked()
+
+    def accept_native_notification(self, method: str) -> bool:
+        with self._callback_condition:
+            if not self._terminal_observed:
+                return True
+            if method in POST_TERMINAL_METRIC_METHODS:
+                self.post_terminal_metrics += 1
+            else:
+                self.late_notifications += 1
+            return False
+
+    def fence_diagnostics(self) -> dict[str, int | bool]:
+        with self._callback_condition:
+            return {
+                "terminalObserved": self._terminal_observed,
+                "activeCallbacks": len(self._active_callback_ids),
+                "terminalFenceFallbacks": self.terminal_fence_fallbacks,
+                "lateNotifications": self.late_notifications,
+                "postTerminalMetrics": self.post_terminal_metrics,
+            }
+
+    def _release_completion_if_drained_locked(self) -> None:
+        if not self._terminal_observed:
+            return
+        if any(callback_id <= self._terminal_target for callback_id in self._active_callback_ids):
+            return
+        self.completed.set()
+
+    def _start_terminal_fallback_locked(self) -> None:
+        if self._terminal_timer_started:
+            return
+        self._terminal_timer_started = True
+
+        def fallback() -> None:
+            with self._callback_condition:
+                if self.completed.is_set():
+                    return
+                self.terminal_fence_fallbacks += 1
+                self.completed.set()
+                self._callback_condition.notify_all()
+
+        timer = threading.Timer(TERMINAL_DRAIN_TIMEOUT_SEC, fallback)
+        timer.daemon = True
+        timer.start()
 
 
 class CodexAppServerClient:
@@ -380,6 +465,7 @@ class CodexAppServerClient:
         self._runtime.on_notification = self._handle_notification
         self._runtime.on_exit = self._handle_runtime_exit
         self._operations: dict[str, _Operation] = {}
+        self._terminal_operations: OrderedDict[str, _Operation] = OrderedDict()
         self._operations_lock = threading.Lock()
         self._run_lock = threading.Lock()
         self._approval_lock = threading.Condition()
@@ -486,7 +572,8 @@ class CodexAppServerClient:
         for operation in operations:
             if not operation.completed.is_set():
                 operation.result = _error_result("bridge_unavailable", message, threadId=operation.thread_id, turnId=operation.turn_id)
-                operation.completed.set()
+                self._remember_terminal_operation(operation)
+                operation.finish_without_event()
         self._clear_pending_approvals()
 
     def _handle_server_request(self, message: dict[str, Any]) -> None:
@@ -494,8 +581,18 @@ class CodexAppServerClient:
         params = message.get("params") or {}
         thread_id = str(params.get("threadId") or "")
         with self._operations_lock:
-            operation = self._operations.get(thread_id)
+            operation = self._operations.get(thread_id) or self._terminal_operations.get(thread_id)
         if method in APPROVAL_METHODS:
+            if operation and operation.fence_diagnostics()["terminalObserved"]:
+                operation.accept_native_notification(method)
+                if method == "item/tool/requestUserInput":
+                    result = {"answers": {}}
+                elif method == "mcpServer/elicitation/request":
+                    result = {"action": "decline"}
+                else:
+                    result = self._approval_response(method, params, "cancel")
+                self._send({"id": message["id"], "result": result})
+                return
             if operation and operation.allow_interaction:
                 request_key = str(message["id"])
                 interaction_type = "input" if method in {"item/tool/requestUserInput", "mcpServer/elicitation/request"} else "approval"
@@ -556,15 +653,18 @@ class CodexAppServerClient:
                     threadId=thread_id,
                     turnId=operation.turn_id or str(params.get("turnId") or ""),
                 )
-                operation.completed.set()
+                self._remember_terminal_operation(operation)
+                operation.finish_without_event()
             return
         self._send({"id": message["id"], "error": {"code": -32601, "message": f"Unsupported server request: {method}"}})
 
     def _handle_notification(self, method: str, params: dict[str, Any]) -> None:
         thread_id = str(params.get("threadId") or "")
         with self._operations_lock:
-            operation = self._operations.get(thread_id)
+            operation = self._operations.get(thread_id) or self._terminal_operations.get(thread_id)
         if not operation:
+            return
+        if not operation.accept_native_notification(method):
             return
         operation.state.handle_notification(method, params)
         if method == "turn/started":
@@ -596,6 +696,7 @@ class CodexAppServerClient:
             "item/reasoning/summaryPartAdded",
             "item/reasoning/textDelta",
         }:
+            self._remember_terminal_operation(operation)
             operation.emit(
                 "reasoning",
                 status="running",
@@ -699,11 +800,11 @@ class CodexAppServerClient:
                 )
             operation.emit(
                 "turn",
+                terminal=True,
                 status=operation.result.get("status") if operation.result else str(turn.get("status") or "failed"),
                 output={"reply": operation.state.reply_text() or operation.reply, "modifiedFiles": sorted(operation.modified_files)},
                 error=(operation.result or {}).get("error"),
             )
-            operation.completed.set()
         elif method == "thread/compacted":
             operation.result = {
                 "ok": True,
@@ -714,7 +815,26 @@ class CodexAppServerClient:
                 "modifiedFiles": [],
                 "needsHumanIntervention": False,
             }
-            operation.completed.set()
+            self._remember_terminal_operation(operation)
+            operation.finish_without_event()
+
+    def _remember_terminal_operation(self, operation: _Operation) -> None:
+        with self._operations_lock:
+            self._terminal_operations[operation.thread_id] = operation
+            self._terminal_operations.move_to_end(operation.thread_id)
+            while len(self._terminal_operations) > MAX_TERMINAL_DIAGNOSTICS:
+                self._terminal_operations.popitem(last=False)
+
+    def terminal_diagnostics(self, thread_id: str) -> dict[str, int | bool]:
+        with self._operations_lock:
+            operation = self._operations.get(str(thread_id or "")) or self._terminal_operations.get(str(thread_id or ""))
+        return operation.fence_diagnostics() if operation else {
+            "terminalObserved": False,
+            "activeCallbacks": 0,
+            "terminalFenceFallbacks": 0,
+            "lateNotifications": 0,
+            "postTerminalMetrics": 0,
+        }
 
     def _augment_result(self, operation: _Operation, result: dict[str, Any]) -> dict[str, Any]:
         snapshot = operation.state.snapshot()
@@ -730,6 +850,7 @@ class CodexAppServerClient:
         result["thinking"] = result.get("thinking") or snapshot.get("thinking") or ""
         result["approval"] = result.get("approval") or snapshot.get("approval")
         result["tokenUsage"] = result.get("tokenUsage") or snapshot.get("tokenUsage") or {}
+        result["terminalFence"] = operation.fence_diagnostics()
         if snapshot.get("error") and not result.get("error"):
             result["error"] = snapshot["error"]
         return result
@@ -991,6 +1112,7 @@ class CodexAppServerClient:
                 allow_interaction=allow_interaction,
             )
             with self._operations_lock:
+                self._terminal_operations.pop(active_thread_id, None)
                 self._operations[active_thread_id] = operation
             turn_result = self._request_with_restart("turn/start", {
                 "threadId": active_thread_id,
@@ -1012,7 +1134,6 @@ class CodexAppServerClient:
                     pass
                 return _error_result("timeout", "Codex call timed out", threadId=active_thread_id, turnId=operation.turn_id)
             result = operation.result or _error_result("execution_failed", "Codex turn ended without a result", threadId=active_thread_id, turnId=operation.turn_id)
-            time.sleep(0.2)
             result = self._augment_result(operation, result)
             result["durationMs"] = int((time.monotonic() - started) * 1000)
             return result
@@ -1160,6 +1281,7 @@ class CodexAppServerClient:
             self._request_with_restart("thread/resume", {"threadId": thread_id, **self._thread_params()}, timeout=30)
             operation = _Operation(thread_id=thread_id, kind="compact")
             with self._operations_lock:
+                self._terminal_operations.pop(thread_id, None)
                 self._operations[thread_id] = operation
             self._request("thread/compact/start", {"threadId": thread_id}, timeout=30)
             if not operation.completed.wait(timeout=max(1, int(timeout_sec))):
