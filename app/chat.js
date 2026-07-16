@@ -1783,7 +1783,6 @@
           codexTimingBound = !!this.codexTiming?.bindRun(codexTimingToken, data.runId);
           this.currentRunId = data.runId || null;
           const completed = await this.streamCodexRunEvents(data.runId, label);
-          await this.loadHistory({ recoverFinal: true, startedAt: codexSendStartedAt }).catch(() => {});
           this.reconcileCodexLiveReply(data.runId, completed?.reply || completed?.text || '');
           this.removeTypingIndicator();
           finalStatusText = _ct('codex_ready');
