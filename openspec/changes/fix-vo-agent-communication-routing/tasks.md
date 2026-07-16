@@ -5,7 +5,7 @@
 ## 2. Canonical Communication Skill
 
 - [x] 2.1 Replace the generated legacy communication skill source with a validated loader for `skills/vo-agent-communication/SKILL.md`; seed the exact canonical content into Skills Library and safely migrate the reserved legacy library entry, with source-consistency and migration tests.
-- [ ] 2.2 Implement the locked, atomic, hash-based OpenClaw workspace skill synchronizer and managed marker; cover first install, no-op repeat, managed upgrade, unmarked conflict, known legacy migration, path-boundary rejection, and unrelated-file preservation.
+- [x] 2.2 Implement the locked, atomic, hash-based OpenClaw workspace skill synchronizer and managed marker; cover first install, no-op repeat, managed upgrade, unmarked conflict, known legacy migration, path-boundary rejection, and unrelated-file preservation.
 
 ## 3. Agent Lifecycle Integration
 

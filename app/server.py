@@ -2493,6 +2493,8 @@ CANONICAL_AGENT_COMM_SKILL_PATH = os.path.join(
     AGENT_PLATFORM_COMM_SKILL_NAME,
     "SKILL.md",
 )
+AGENT_COMM_SKILL_MARKER = ".vo-managed.json"
+_AGENT_COMM_SKILL_SYNC_LOCK = threading.RLock()
 
 
 def _safe_agent_workspace_key(agent_key):
@@ -3141,6 +3143,95 @@ def _agent_platform_comm_skill_content():
             f"Canonical communication skill must declare name: {AGENT_PLATFORM_COMM_SKILL_NAME}"
         )
     return content
+
+
+def _atomic_write_managed_skill_text(path, content):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(prefix=f".{os.path.basename(path)}.tmp-", dir=os.path.dirname(path))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(content)
+        os.replace(tmp_path, path)
+    finally:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+
+
+def _is_known_legacy_agent_comm_content(content):
+    text = str(content or "")
+    return all(fragment in text for fragment in (
+        "name: AgentPlatform-to-AgentPlatform_Communications",
+        "# AgentPlatform-to-AgentPlatform Communications",
+        "/api/agent-platform-communications/send",
+        "Do **not** bypass the office",
+    ))
+
+
+def _sync_openclaw_communication_skill(agent):
+    """Install or refresh the VO-managed communication skill for one agent."""
+    if not isinstance(agent, dict) or agent.get("providerKind", "openclaw") != "openclaw":
+        return {"ready": False, "status": "not_applicable", "updated": False}
+
+    workspace = str(agent.get("workspace") or "").strip()
+    base_real = os.path.realpath(WORKSPACE_BASE)
+    workspace_real = os.path.realpath(os.path.abspath(workspace)) if workspace else ""
+    if not workspace_real or not workspace_real.startswith(base_real + os.sep):
+        return {"ready": False, "status": "path_rejected", "updated": False}
+    if not os.path.isdir(workspace_real):
+        return {"ready": False, "status": "workspace_missing", "updated": False}
+
+    content = _agent_platform_comm_skill_content()
+    content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
+    skill_dir = os.path.join(workspace_real, "skills", AGENT_PLATFORM_COMM_SKILL_NAME)
+    skill_path = os.path.join(skill_dir, "SKILL.md")
+    marker_path = os.path.join(skill_dir, AGENT_COMM_SKILL_MARKER)
+    legacy_dir = os.path.join(workspace_real, "skills", LEGACY_AGENT_PLATFORM_COMM_SKILL_NAME)
+    updated = False
+
+    with _AGENT_COMM_SKILL_SYNC_LOCK:
+        marker = {}
+        if os.path.isfile(marker_path):
+            try:
+                with open(marker_path, "r", encoding="utf-8") as f:
+                    marker = json.load(f)
+            except (OSError, json.JSONDecodeError, TypeError):
+                marker = {}
+        existing = ""
+        if os.path.isfile(skill_path):
+            with open(skill_path, "r", encoding="utf-8", errors="replace") as f:
+                existing = f.read()
+
+        managed = marker.get("managedBy") == "virtual-office" and marker.get("skill") == AGENT_PLATFORM_COMM_SKILL_NAME
+        if existing and not managed and existing != content:
+            return {"ready": False, "status": "conflict", "updated": False}
+
+        if existing != content:
+            _atomic_write_managed_skill_text(skill_path, content)
+            updated = True
+        desired_marker = {
+            "managedBy": "virtual-office",
+            "skill": AGENT_PLATFORM_COMM_SKILL_NAME,
+            "sha256": content_hash,
+        }
+        if marker != desired_marker:
+            _atomic_write_managed_skill_text(marker_path, json.dumps(desired_marker, sort_keys=True, indent=2) + "\n")
+            updated = True
+
+        legacy_path = os.path.join(legacy_dir, "SKILL.md")
+        if os.path.isfile(legacy_path):
+            with open(legacy_path, "r", encoding="utf-8", errors="replace") as f:
+                legacy_content = f.read()
+            if not _is_known_legacy_agent_comm_content(legacy_content):
+                return {"ready": False, "status": "legacy_conflict", "updated": updated, "sha256": content_hash}
+            shutil.rmtree(legacy_dir)
+            updated = True
+
+    return {
+        "ready": True,
+        "status": "updated" if updated else "ready",
+        "updated": updated,
+        "sha256": content_hash,
+    }
 
 
 def _vo_presence_skill_content():

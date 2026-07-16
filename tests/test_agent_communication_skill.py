@@ -4,6 +4,7 @@
 import os
 import sys
 import tempfile
+import json
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 APP_DIR = os.path.join(ROOT, "app")
@@ -68,3 +69,111 @@ def test_library_seed_uses_canonical_content_and_migrates_only_reserved_legacy()
                 assert f.read() == "user content"
         finally:
             server.VO_CONFIG = old_config
+
+
+def _openclaw_agent(workspace, agent_id="analyst"):
+    return {"id": agent_id, "statusKey": agent_id, "providerKind": "openclaw", "workspace": workspace}
+
+
+def test_workspace_sync_installs_noops_and_upgrades_managed_copy():
+    old_base = server.WORKSPACE_BASE
+    with tempfile.TemporaryDirectory() as home:
+        workspace = os.path.join(home, "workspace-analyst")
+        os.makedirs(workspace)
+        server.WORKSPACE_BASE = home
+        try:
+            first = server._sync_openclaw_communication_skill(_openclaw_agent(workspace))
+            assert first["ready"] is True and first["status"] == "updated"
+            skill_dir = os.path.join(workspace, "skills", server.AGENT_PLATFORM_COMM_SKILL_NAME)
+            skill_path = os.path.join(skill_dir, "SKILL.md")
+            marker_path = os.path.join(skill_dir, server.AGENT_COMM_SKILL_MARKER)
+            with open(marker_path, "r", encoding="utf-8") as f:
+                marker = json.load(f)
+            assert marker["managedBy"] == "virtual-office"
+            assert marker["sha256"] == first["sha256"]
+
+            before_mtime = os.stat(skill_path).st_mtime_ns
+            second = server._sync_openclaw_communication_skill(_openclaw_agent(workspace))
+            assert second["ready"] is True and second["status"] == "ready"
+            assert os.stat(skill_path).st_mtime_ns == before_mtime
+
+            with open(skill_path, "w", encoding="utf-8") as f:
+                f.write("old managed content")
+            upgraded = server._sync_openclaw_communication_skill(_openclaw_agent(workspace))
+            assert upgraded["ready"] is True and upgraded["status"] == "updated"
+            with open(skill_path, "r", encoding="utf-8") as f:
+                assert f.read() == server._agent_platform_comm_skill_content()
+        finally:
+            server.WORKSPACE_BASE = old_base
+
+
+def test_workspace_sync_preserves_unmarked_conflict_and_unrelated_files():
+    old_base = server.WORKSPACE_BASE
+    with tempfile.TemporaryDirectory() as home:
+        workspace = os.path.join(home, "workspace-analyst")
+        skill_dir = os.path.join(workspace, "skills", server.AGENT_PLATFORM_COMM_SKILL_NAME)
+        unrelated = os.path.join(workspace, "skills", "user-skill", "SKILL.md")
+        os.makedirs(skill_dir)
+        os.makedirs(os.path.dirname(unrelated))
+        conflict_path = os.path.join(skill_dir, "SKILL.md")
+        with open(conflict_path, "w", encoding="utf-8") as f:
+            f.write("user-owned conflicting content")
+        with open(unrelated, "w", encoding="utf-8") as f:
+            f.write("keep me")
+        server.WORKSPACE_BASE = home
+        try:
+            result = server._sync_openclaw_communication_skill(_openclaw_agent(workspace))
+            assert result == {"ready": False, "status": "conflict", "updated": False}
+            with open(conflict_path, "r", encoding="utf-8") as f:
+                assert f.read() == "user-owned conflicting content"
+            with open(unrelated, "r", encoding="utf-8") as f:
+                assert f.read() == "keep me"
+        finally:
+            server.WORKSPACE_BASE = old_base
+
+
+def test_workspace_sync_migrates_known_legacy_and_rejects_unknown_legacy():
+    old_base = server.WORKSPACE_BASE
+    known_legacy = """---
+name: AgentPlatform-to-AgentPlatform_Communications
+---
+# AgentPlatform-to-AgentPlatform Communications
+Do **not** bypass the office.
+POST /api/agent-platform-communications/send
+"""
+    with tempfile.TemporaryDirectory() as home:
+        server.WORKSPACE_BASE = home
+        try:
+            for agent_id, legacy_content, expected in (
+                ("known", known_legacy, "updated"),
+                ("unknown", "user legacy content", "legacy_conflict"),
+            ):
+                workspace = os.path.join(home, f"workspace-{agent_id}")
+                legacy_dir = os.path.join(workspace, "skills", server.LEGACY_AGENT_PLATFORM_COMM_SKILL_NAME)
+                os.makedirs(legacy_dir)
+                with open(os.path.join(legacy_dir, "SKILL.md"), "w", encoding="utf-8") as f:
+                    f.write(legacy_content)
+                result = server._sync_openclaw_communication_skill(_openclaw_agent(workspace, agent_id))
+                assert result["status"] == expected
+                assert os.path.isdir(legacy_dir) is (expected == "legacy_conflict")
+        finally:
+            server.WORKSPACE_BASE = old_base
+
+
+def test_workspace_sync_rejects_outside_or_missing_workspace():
+    old_base = server.WORKSPACE_BASE
+    with tempfile.TemporaryDirectory() as root:
+        home = os.path.join(root, "home")
+        outside = os.path.join(root, "outside")
+        os.makedirs(home)
+        os.makedirs(outside)
+        server.WORKSPACE_BASE = home
+        try:
+            rejected = server._sync_openclaw_communication_skill(_openclaw_agent(outside))
+            assert rejected["status"] == "path_rejected"
+            missing = server._sync_openclaw_communication_skill(_openclaw_agent(os.path.join(home, "missing")))
+            assert missing["status"] == "workspace_missing"
+            not_applicable = server._sync_openclaw_communication_skill({"providerKind": "codex", "workspace": outside})
+            assert not_applicable["status"] == "not_applicable"
+        finally:
+            server.WORKSPACE_BASE = old_base
