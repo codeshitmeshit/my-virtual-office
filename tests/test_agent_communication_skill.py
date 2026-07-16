@@ -5,6 +5,7 @@ import os
 import sys
 import tempfile
 import json
+import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 APP_DIR = os.path.join(ROOT, "app")
@@ -177,3 +178,72 @@ def test_workspace_sync_rejects_outside_or_missing_workspace():
             assert not_applicable["status"] == "not_applicable"
         finally:
             server.WORKSPACE_BASE = old_base
+
+
+def test_discovery_sync_attaches_readiness_and_isolates_agent_failures():
+    old_discover = server.discover_all_agents
+    old_sync = server._sync_openclaw_communication_skill
+    old_hermes_gateway = server._hermes_platform_roster_agent
+    agents = [
+        {"id": "ready", "statusKey": "ready", "providerKind": "openclaw", "workspace": "/tmp/ready"},
+        {"id": "broken", "statusKey": "broken", "providerKind": "openclaw", "workspace": "/tmp/broken"},
+        {"id": "codex-local", "statusKey": "codex-local", "providerKind": "codex", "workspace": "/tmp/codex"},
+    ]
+    calls = []
+    server.discover_all_agents = lambda *args, **kwargs: [dict(agent) for agent in agents]
+    server._hermes_platform_roster_agent = lambda: None
+
+    def fake_sync(agent):
+        calls.append(agent["id"])
+        if agent["id"] == "broken":
+            raise PermissionError("fixture")
+        return {"ready": True, "status": "ready", "updated": False}
+
+    server._sync_openclaw_communication_skill = fake_sync
+    try:
+        roster = server._discover_roster()
+        assert [agent["id"] for agent in roster] == ["ready", "broken", "codex-local"]
+        assert calls == ["ready", "broken"]
+        assert roster[0]["communicationSkill"]["ready"] is True
+        assert roster[1]["communicationSkill"] == {
+            "ready": False,
+            "status": "error",
+            "updated": False,
+            "error": "PermissionError",
+        }
+        assert "communicationSkill" not in roster[2]
+    finally:
+        server.discover_all_agents = old_discover
+        server._sync_openclaw_communication_skill = old_sync
+        server._hermes_platform_roster_agent = old_hermes_gateway
+
+
+def test_workspace_payload_exposes_discovery_readiness():
+    old_roster = server._discovered_roster
+    old_discovered_at = server._discovered_at
+    old_base = server.WORKSPACE_BASE
+    with tempfile.TemporaryDirectory() as home:
+        workspace = os.path.join(home, "workspace-analyst")
+        os.makedirs(workspace)
+        readiness = {"ready": False, "status": "conflict", "updated": False}
+        server.WORKSPACE_BASE = home
+        server._discovered_roster = [{
+            "id": "analyst",
+            "statusKey": "analyst",
+            "providerKind": "openclaw",
+            "workspace": workspace,
+            "name": "Analyst",
+            "emoji": "📊",
+            "communicationSkill": readiness,
+        }]
+        server._discovered_at = time.time()
+        server.refresh_agent_maps()
+        try:
+            payload = server._get_agent_workspace_payload("analyst")
+            assert payload["ok"] is True
+            assert payload["agent"]["communicationSkill"] == readiness
+        finally:
+            server._discovered_roster = old_roster
+            server._discovered_at = old_discovered_at
+            server.WORKSPACE_BASE = old_base
+            server.refresh_agent_maps()

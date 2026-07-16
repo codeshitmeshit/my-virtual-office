@@ -2862,6 +2862,7 @@ def _get_agent_workspace_payload(agent_key):
         "model": agent.get("model", ""),
         "provider": agent.get("provider", ""),
         "lastActiveAt": agent.get("lastActiveAt", 0),
+        "communicationSkill": agent.get("communicationSkill"),
     }
     heartbeat = ""
     if agent.get("providerKind", "openclaw") == "openclaw":
@@ -3473,6 +3474,19 @@ def _discover_roster():
         codex=codex,
         claude_code=claude_code,
     )
+    for agent in agents:
+        if agent.get("providerKind", "openclaw") != "openclaw":
+            continue
+        try:
+            agent["communicationSkill"] = _sync_openclaw_communication_skill(agent)
+        except Exception as exc:
+            agent["communicationSkill"] = {
+                "ready": False,
+                "status": "error",
+                "updated": False,
+                "error": type(exc).__name__,
+            }
+            print(f"[SKILLS] Communication skill sync failed for {agent.get('id') or 'unknown'}: {type(exc).__name__}")
     gateway_agent = _hermes_platform_roster_agent()
     if gateway_agent and not any(a.get("statusKey") == gateway_agent.get("statusKey") for a in agents):
         agents.append(gateway_agent)
@@ -25294,6 +25308,7 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                     "provider": a.get("provider", ""),
                     "lastActiveAt": a.get("lastActiveAt", 0),
                     "branch": branch_name,
+                    "communicationSkill": a.get("communicationSkill"),
                 }
                 agent_payload.update(_agent_archive_manager_meta(a.get("statusKey") or a.get("id")))
                 agents.append(agent_payload)
@@ -25743,6 +25758,7 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                     "provider": a.get("provider", ""),
                     "lastActiveAt": a.get("lastActiveAt", 0),
                     "branch": branch_name,
+                    "communicationSkill": a.get("communicationSkill"),
                 }
                 agent_payload.update(_agent_archive_manager_meta(a.get("statusKey") or a.get("id")))
                 roster.append(agent_payload)
