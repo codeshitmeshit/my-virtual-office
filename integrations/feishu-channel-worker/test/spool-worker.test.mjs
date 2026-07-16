@@ -107,6 +107,29 @@ test('normalization preserves identity, thread, reply, and resource fields', () 
   assert.equal(Object.hasOwn(unknown.sender, 'isBot'), false);
 });
 
+test('normalization removes null optional mention identities from real group events', () => {
+  const normalized = normalizeMessage({
+    ...message('om_group_real', 'oc_group_real'),
+    chatType: 'group',
+    mentions: [{
+      key: '@_user_1',
+      openId: 'ou_bot',
+      userId: null,
+      unionId: null,
+      name: 'VO',
+      isBot: true,
+    }],
+  });
+
+  assert.deepEqual(normalized.mentions, [{
+    key: '@_user_1',
+    openId: 'ou_bot',
+    name: 'VO',
+    isBot: true,
+  }]);
+  assert.doesNotThrow(() => makeInboundEnvelope(normalized, { workerInstanceId: 'worker-real-group' }));
+});
+
 test('spool is atomic, mode 0600, duplicate-safe, pressure-aware, and bounded', async () => {
   const root = await mkdtemp(join(tmpdir(), 'vo-feishu-spool-'));
   const spool = new InboundSpool(root, { maxEntries: 2, maxBytes: 2 * 1024 * 1024 });

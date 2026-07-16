@@ -257,6 +257,80 @@ def test_human_codex_chat_persists_user_and_reply_to_comm_history():
             server._codex_provider_from_config = old_provider
 
 
+def test_feishu_group_codex_request_and_reply_are_never_visible_in_office():
+    old_status_dir = server.STATUS_DIR
+    old_roster = server.get_roster
+    old_provider = server._codex_provider_from_config
+    with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as workspace:
+        class ReplyProvider:
+            def __init__(self, workspace):
+                self.workspace = workspace
+
+            def send_message(self, message, conversation_id="", timeout_sec=None, thread_id="", event_callback=None, allow_interaction=False):
+                return {
+                    "ok": True,
+                    "status": "completed",
+                    "reply": "group reply from codex",
+                    "threadId": "thr-group-history",
+                    "turnId": "turn-group-history",
+                    "modifiedFiles": [],
+                }
+
+        server.STATUS_DIR = status_dir
+        server.get_roster = lambda: [AGENT]
+        server._codex_provider_from_config = lambda: ReplyProvider(workspace)
+        try:
+            result = server._handle_codex_chat({
+                "agentId": "codex-local",
+                "message": "group request to codex",
+                "conversationId": "feishu-group:visibility-test",
+                "fromType": "human",
+                "fromDisplayName": "Group Member",
+                "fromUserId": "ou_group_member",
+                "sourceApp": "feishu",
+                "sourceSurface": "feishu-group",
+                "sourceLabel": "Feishu Group",
+                "channel": "feishu",
+                "sourceMessageId": "om_group_visibility",
+                "idempotencyKey": "om_group_visibility",
+                "feishuChatId": "oc_group_visibility",
+                "representativeAgentId": "codex-local",
+            })
+            assert result["ok"] is True
+            events = server._load_comm_history(
+                limit=20,
+                conversation_id="feishu-group:visibility-test",
+                agent_id="codex-local",
+            )
+            messages = [event for event in events if event.get("type") == "message"]
+            assert [event.get("direction") for event in messages] == ["request", "reply"]
+            assert all(server._comm_is_feishu_group(event) for event in messages)
+            assert all(event.get("visibleInOffice") is False for event in messages)
+            request = type("Request", (), {
+                "agent_id": "codex-local", "conversation_id": "feishu-group:visibility-test",
+            })()
+            assert all(not server._chat_history_comm_event_matches(request, event) for event in messages)
+            server._append_comm_event({
+                "type": "message",
+                "direction": "reply",
+                "conversationId": "feishu-group:legacy-visibility",
+                "from": {"id": "codex-local", "providerKind": "codex"},
+                "to": {"id": "user", "providerKind": "human", "sourceSurface": "feishu-group"},
+                "text": "legacy group reply",
+                "metadata": {"sourceApp": "feishu", "sourceSurface": "feishu-group", "chatType": "group"},
+                "visibleInOffice": True,
+            })
+            assert server._repair_feishu_group_comm_visibility() == {"repaired": 1}
+            repaired = server._load_comm_history(limit=20, conversation_id="feishu-group:legacy-visibility")
+            assert len(repaired) == 1
+            assert repaired[0]["visibleInOffice"] is False
+            assert server._repair_feishu_group_comm_visibility() == {"repaired": 0}
+        finally:
+            server.STATUS_DIR = old_status_dir
+            server.get_roster = old_roster
+            server._codex_provider_from_config = old_provider
+
+
 def test_thread_mapping_persists_and_resets():
     old_status_dir = server.STATUS_DIR
     with tempfile.TemporaryDirectory() as status_dir:
@@ -282,7 +356,7 @@ def test_archived_codex_thread_mapping_is_reset_and_retried():
             self.calls = []
 
         def send_message(self, message, conversation_id="", timeout_sec=None, thread_id="", event_callback=None, allow_interaction=False):
-            self.calls.append(thread_id)
+            self.calls.append((thread_id, message))
             if thread_id == "thr-archived":
                 return {
                     "ok": False,
@@ -306,18 +380,40 @@ def test_archived_codex_thread_mapping_is_reset_and_retried():
         server.get_roster = lambda: [AGENT]
         server._codex_provider_from_config = lambda: provider
         try:
-            server._set_codex_thread_id("codex-local", "conv-archived", "thr-archived")
+            conversation_id = server.feishu_chat_channel.group_conversation_id("oc_recovery")
+            server._record_feishu_channel_event({
+                "event": "turn_completed", "sourceMessageId": "om_old",
+                "conversationId": conversation_id, "feishuChatId": "oc_recovery",
+                "chatType": "group", "sourceSurface": "feishu-group",
+                "text": "old group question", "reply": "old group answer",
+                "sender": {"name": "Alice", "openId": "ou_alice"},
+            })
+            server._record_feishu_channel_event({
+                "event": "turn_completed", "sourceMessageId": "om_other",
+                "conversationId": server.feishu_chat_channel.group_conversation_id("oc_other"),
+                "feishuChatId": "oc_other", "chatType": "group", "sourceSurface": "feishu-group",
+                "text": "other group secret", "reply": "other answer",
+                "sender": {"name": "Mallory", "openId": "ou_mallory"},
+            })
+            server._set_codex_thread_id("codex-local", conversation_id, "thr-archived")
             result = server._handle_codex_chat({
                 "agentId": "codex-local",
-                "message": "hello",
-                "conversationId": "conv-archived",
+                "message": "current group question",
+                "conversationId": conversation_id,
+                "sourceApp": "feishu", "sourceSurface": "feishu-group",
+                "sourceMessageId": "om_current", "feishuChatId": "oc_recovery",
+                "fromType": "human", "fromDisplayName": "Carol", "fromUserId": "ou_carol",
             })
             assert result["ok"] is True
             assert result["reply"] == "fresh thread reply"
             assert result["threadId"] == "thr-fresh"
             assert result["recoveredFromArchivedThread"] == "thr-archived"
-            assert provider.calls == ["thr-archived", ""]
-            assert server._get_codex_thread_id("codex-local", "conv-archived") == "thr-fresh"
+            assert [call[0] for call in provider.calls] == ["thr-archived", ""]
+            recovery_prompt = provider.calls[1][1]
+            assert "old group question" in recovery_prompt and "old group answer" in recovery_prompt
+            assert recovery_prompt.count("current group question") == 1
+            assert "other group secret" not in recovery_prompt
+            assert server._get_codex_thread_id("codex-local", conversation_id) == "thr-fresh"
         finally:
             server.STATUS_DIR = old_status_dir
             server.get_roster = old_roster

@@ -41,6 +41,22 @@ VO SHALL maintain one continuous Agent conversation identity per Feishu group ch
 - **WHEN** accepted messages arrive from two different Feishu group chat IDs
 - **THEN** VO SHALL route them to distinct conversation identities with no history leakage between groups
 
+### Requirement: Expired provider sessions recover bounded group context
+When a provider-native thread or session for a Feishu group is no longer usable, VO SHALL create a replacement native session through the shared Provider conversation bridge and SHALL seed it with a bounded canonical history derived only from that group's completed turns before delivering the current message. Recovery MUST NOT replay audit operations, delivery rows, ignored traffic, another group's turns, or the current source message twice.
+
+#### Scenario: Native group session expires
+- **WHEN** a provider reports that the persisted native session for a group is expired, archived, or missing
+- **THEN** VO SHALL load bounded completed user/Agent turns from that group's audit shard
+- **AND** create a replacement native session, persist its identifier, and deliver the current message exactly once
+
+#### Scenario: No completed history is available
+- **WHEN** the native session is invalid but the group has no earlier completed turns
+- **THEN** VO SHALL create a replacement session and deliver only the current message without failing recovery
+
+#### Scenario: Another group has recoverable history
+- **WHEN** group A is recovering and group B has persisted completed turns
+- **THEN** group B's turns MUST NOT be included in group A's recovery context
+
 ### Requirement: Group turns preserve human sender attribution
 Every accepted group turn SHALL preserve the triggering human member's available Feishu identity and SHALL provide unambiguous speaker attribution to the Agent and audit records without changing the group's shared conversation identity.
 
@@ -79,7 +95,7 @@ An Agent outcome for an accepted group turn SHALL be delivered to the originatin
 - **THEN** VO SHALL preserve the Agent outcome and record a classified delivery failure without retrying into a different conversation
 
 ### Requirement: Group processing is durable, idempotent, and ordered
-VO SHALL apply persistent source-message idempotency to group events and SHALL serialize accepted Agent turns within the same group conversation. Processing for different groups MAY proceed independently, but MUST NOT share ordering or idempotency state.
+VO SHALL apply persistent source-message idempotency to group events and SHALL serialize accepted Agent turns within the same group conversation. Processing for different groups MAY proceed independently, but MUST NOT share ordering or idempotency state. Durable group audit records SHALL be physically partitioned by the derived group identity so two Feishu groups never append message content to the same group-record file. Partition filenames MUST be derived from a one-way digest rather than an unredacted Feishu chat ID, and private-chat audit storage SHALL remain unchanged.
 
 #### Scenario: Feishu redelivers a group event
 - **WHEN** the same group source message is delivered more than once, including after a worker or server restart
@@ -92,6 +108,16 @@ VO SHALL apply persistent source-message idempotency to group events and SHALL s
 #### Scenario: Two groups invoke the bot concurrently
 - **WHEN** accepted messages arrive concurrently from different group chat IDs
 - **THEN** each message SHALL progress only within its own group conversation and failure in one group SHALL NOT block or contaminate the other
+
+#### Scenario: Two groups persist audit history
+- **WHEN** VO records accepted, completed, ignored, or rejected events for two different Feishu group chat IDs
+- **THEN** each group's records SHALL be appended only to that group's digest-named audit shard
+- **AND** no shared all-groups audit file SHALL contain both groups' message content
+
+#### Scenario: Existing shared audit records are read after upgrade
+- **WHEN** an earlier release left group-classified rows in the legacy shared channel audit
+- **THEN** VO SHALL continue to read those rows for diagnostics and idempotency compatibility
+- **AND** every newly written group row SHALL use the per-group audit shard
 
 ### Requirement: Existing private-chat behavior remains compatible
 Enabling group chat MUST NOT change the existing private-message admission, sender binding policy, conversation identity, supported content, delivery behavior, normalized VO history visibility, or Feishu SSE refresh behavior.

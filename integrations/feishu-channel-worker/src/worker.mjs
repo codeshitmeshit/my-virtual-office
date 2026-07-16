@@ -50,6 +50,17 @@ function nested(raw, ...paths) {
   return '';
 }
 
+function normalizeMention(mention) {
+  if (!mention || typeof mention !== 'object' || Array.isArray(mention)) return mention;
+  const normalized = { ...mention };
+  for (const field of ['id', 'key', 'openId', 'userId', 'unionId', 'name', 'isBot']) {
+    if (normalized[field] === null || normalized[field] === undefined || normalized[field] === '') {
+      delete normalized[field];
+    }
+  }
+  return normalized;
+}
+
 export function normalizeMessage(message) {
   const raw = rawEvent(message);
   const senderType = typeof message.senderType === 'string' ? message.senderType : '';
@@ -75,7 +86,9 @@ export function normalizeMessage(message) {
     rootId: String(message.rootId || ''),
     threadId: String(message.threadId || ''),
     replyToMessageId: String(message.replyToMessageId || ''),
-    mentions: Array.isArray(message.mentions) ? message.mentions.slice(0, 100) : [],
+    mentions: Array.isArray(message.mentions)
+      ? message.mentions.slice(0, 100).map(normalizeMention)
+      : [],
     resources: Array.isArray(message.resources) ? message.resources.slice(0, 100) : [],
     sender,
   };

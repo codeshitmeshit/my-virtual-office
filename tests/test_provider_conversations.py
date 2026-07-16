@@ -210,3 +210,76 @@ def test_new_service_instance_recovers_persisted_history_and_native_id():
     snapshot = restarted.read(key(conversation_id="after-restart"), port)
     assert snapshot.messages == [{"text": "persisted"}]
     assert snapshot.native_id == "native-persisted"
+
+
+def test_expired_native_session_recovers_bounded_history_and_persists_replacement():
+    service = ProviderConversationService()
+    port = MemoryPort({"messages": [], "threadId": "native-expired"})
+    calls = []
+    loads = []
+
+    def deliver(native_id, message):
+        calls.append((native_id, message))
+        if native_id == "native-expired":
+            return {"ok": False, "error": "session is archived", "threadId": native_id}
+        return {"ok": True, "reply": "recovered", "threadId": "native-fresh"}
+
+    result = service.recover_and_redeliver(
+        key(provider_kind="codex", conversation_id="group-a"),
+        "native-expired",
+        "current message",
+        state_port=port,
+        deliver=deliver,
+        is_invalid=lambda value: "archived" in str(value.get("error") or ""),
+        load_history=lambda scope: loads.append(scope) or [
+            {"role": "user", "name": "Alice", "text": "old question"},
+            {"role": "assistant", "text": "old answer"},
+        ],
+        native_id_from_result=lambda value: value.get("threadId") or "",
+    )
+
+    assert result["ok"] is True
+    assert result["recovered"] is True
+    assert result["recoveredFromNativeId"] == "native-expired"
+    assert calls[0] == ("native-expired", "current message")
+    assert calls[1][0] == ""
+    assert "old question" in calls[1][1] and "old answer" in calls[1][1]
+    assert calls[1][1].count("current message") == 1
+    assert loads == [key(provider_kind="codex", conversation_id="group-a").normalized()]
+    assert port.data["nativeId"] == "native-fresh"
+    assert port.data["recoveredFromNativeId"] == "native-expired"
+
+
+def test_live_or_empty_history_recovery_does_not_duplicate_delivery():
+    service = ProviderConversationService()
+    live_port = MemoryPort({"threadId": "native-live"})
+    live_calls = []
+    live = service.recover_and_redeliver(
+        key(provider_kind="codex", conversation_id="live"),
+        "native-live",
+        "current",
+        state_port=live_port,
+        deliver=lambda native, message: live_calls.append((native, message)) or {"ok": True, "threadId": native},
+        is_invalid=lambda _value: False,
+        load_history=lambda _scope: pytest.fail("history must not load for a live session"),
+        native_id_from_result=lambda value: value.get("threadId") or "",
+    )
+    assert live["ok"] is True and live.get("recovered") is not True
+    assert live_calls == [("native-live", "current")]
+
+    empty_port = MemoryPort({"threadId": "native-expired"})
+    empty_calls = []
+    empty = service.recover_and_redeliver(
+        key(provider_kind="codex", conversation_id="empty"),
+        "native-expired",
+        "only current",
+        state_port=empty_port,
+        deliver=lambda native, message: empty_calls.append((native, message)) or (
+            {"ok": False, "error": "expired"} if native else {"ok": True, "threadId": "native-new"}
+        ),
+        is_invalid=lambda value: value.get("error") == "expired",
+        load_history=lambda _scope: [],
+        native_id_from_result=lambda value: value.get("threadId") or "",
+    )
+    assert empty["recovered"] is True
+    assert empty_calls == [("native-expired", "only current"), ("", "only current")]

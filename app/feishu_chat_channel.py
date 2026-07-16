@@ -5,6 +5,7 @@ import os
 import random
 import re
 import uuid
+from datetime import datetime
 
 ACK_EMOJIS = ("LGTM",)
 ACK_REACTION_EMOJI_TYPE = "LGTM"
@@ -31,6 +32,41 @@ def chat_source_metadata(body):
 
 def channel_record_path(status_dir):
     return os.path.join(status_dir, "feishu-channel-records.jsonl")
+
+
+def group_record_dir(status_dir):
+    return os.path.join(status_dir, "feishu-group-records")
+
+
+def group_record_path(status_dir, chat_id):
+    seed = f"feishu-group-record:{str(chat_id or 'unknown').strip() or 'unknown'}"
+    digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()
+    return os.path.join(group_record_dir(status_dir), f"{digest}.jsonl")
+
+
+def _is_group_record(record):
+    record = record if isinstance(record, dict) else {}
+    return (
+        str(record.get("chatType") or "").strip().lower() == "group"
+        or str(record.get("sourceSurface") or "").strip().lower() == "feishu-group"
+    )
+
+
+def _record_sort_key(record):
+    record = record if isinstance(record, dict) else {}
+    created_at = record.get("createdAt")
+    if isinstance(created_at, (int, float)):
+        timestamp = float(created_at)
+    else:
+        value = str(created_at or "").strip()
+        try:
+            timestamp = float(value)
+        except ValueError:
+            try:
+                timestamp = datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp() * 1000
+            except (ValueError, OverflowError):
+                timestamp = 0.0
+    return timestamp, str(record.get("id") or "")
 
 
 def source_index_dir(status_dir):
@@ -155,29 +191,184 @@ def record_channel_event(status_dir, record, *, now, lock):
         "createdAt": now(),
         **record,
     }
-    path = channel_record_path(status_dir)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    path = (
+        group_record_path(status_dir, record.get("feishuChatId"))
+        if _is_group_record(record)
+        else channel_record_path(status_dir)
+    )
+    os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
     with lock:
         with open(path, "a", encoding="utf-8") as f:
+            os.chmod(path, 0o600)
             f.write(json.dumps(item, ensure_ascii=False, sort_keys=True) + "\n")
     return item
 
 
 def load_channel_records(status_dir, *, limit=500):
-    path = channel_record_path(status_dir)
+    bounded_limit = max(1, min(int(limit or 500), 2000))
     rows = []
+    paths = [channel_record_path(status_dir)]
+    directory = group_record_dir(status_dir)
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        paths.extend(
+            os.path.join(directory, name)
+            for name in sorted(os.listdir(directory))
+            if name.endswith(".jsonl")
+        )
+    except FileNotFoundError:
+        pass
+    for path in paths:
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                for line in f:
+                    if not line.strip():
+                        continue
+                    try:
+                        item = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if isinstance(item, dict):
+                        rows.append(item)
+                    if len(rows) > bounded_limit * 2:
+                        rows.sort(key=_record_sort_key)
+                        del rows[:-bounded_limit]
+        except FileNotFoundError:
+            continue
+    rows.sort(key=_record_sort_key)
+    deduped = {}
+    anonymous = []
+    for row in rows:
+        record_id = str(row.get("id") or "").strip()
+        if record_id:
+            deduped[record_id] = row
+        else:
+            anonymous.append(row)
+    merged = [*deduped.values(), *anonymous]
+    merged.sort(key=_record_sort_key)
+    return merged[-bounded_limit:]
+
+
+def load_group_recovery_turns(status_dir, chat_id, *, exclude_source_message_id="", max_turns=80):
+    """Load bounded, completed history from exactly one physical group shard."""
+    clean_chat_id = str(chat_id or "").strip()
+    if not clean_chat_id:
+        return []
+    excluded_id = str(exclude_source_message_id or "").strip()
+    completed = []
+    try:
+        with open(group_record_path(status_dir, clean_chat_id), "r", encoding="utf-8") as f:
             for line in f:
                 if not line.strip():
                     continue
                 try:
-                    rows.append(json.loads(line))
+                    item = json.loads(line)
                 except json.JSONDecodeError:
                     continue
-    except FileNotFoundError:
+                if not isinstance(item, dict):
+                    continue
+                source_id = str(item.get("sourceMessageId") or "").strip()
+                if (
+                    str(item.get("event") or "").strip() != "turn_completed"
+                    or str(item.get("feishuChatId") or "").strip() != clean_chat_id
+                    or not source_id
+                    or source_id == excluded_id
+                ):
+                    continue
+                text = str(item.get("text") or "").strip()
+                reply = str(item.get("reply") or "").strip()
+                if text or reply:
+                    completed.append(item)
+    except (FileNotFoundError, OSError):
         return []
-    return rows[-max(1, min(int(limit or 500), 2000)):]
+
+    completed.sort(key=_record_sort_key)
+    completed = completed[-max(1, min(int(max_turns or 80), 500)):]
+    turns = []
+    for item in completed:
+        source_id = str(item.get("sourceMessageId") or "").strip()
+        text = str(item.get("text") or "").strip()
+        reply = str(item.get("reply") or "").strip()
+        sender = item.get("sender") if isinstance(item.get("sender"), dict) else {}
+        if text:
+            turn = {"role": "user", "text": text, "sourceMessageId": source_id}
+            sender_name = str(sender.get("name") or item.get("fromDisplayName") or "").strip()
+            sender_id = str(
+                sender.get("openId") or sender.get("userId") or sender.get("unionId")
+                or item.get("voUserId") or ""
+            ).strip()
+            if sender_name:
+                turn["name"] = sender_name
+            if sender_id:
+                turn["speakerId"] = sender_id
+            turns.append(turn)
+        if reply:
+            turns.append({"role": "assistant", "text": reply, "sourceMessageId": source_id})
+    return turns
+
+
+def migrate_legacy_group_records(status_dir, *, lock):
+    """Move legacy group rows out of the shared channel audit into per-group shards."""
+    shared_path = channel_record_path(status_dir)
+    with lock:
+        try:
+            with open(shared_path, "r", encoding="utf-8") as f:
+                rows = [json.loads(line) for line in f if line.strip()]
+        except FileNotFoundError:
+            return {"migrated": 0, "shards": 0}
+        except json.JSONDecodeError:
+            return {"migrated": 0, "shards": 0, "status": "invalid_legacy_jsonl"}
+
+        group_rows = [row for row in rows if isinstance(row, dict) and _is_group_record(row)]
+        if not group_rows:
+            return {"migrated": 0, "shards": 0}
+        private_rows = [row for row in rows if not (isinstance(row, dict) and _is_group_record(row))]
+        by_path = {}
+        for row in group_rows:
+            path = group_record_path(status_dir, row.get("feishuChatId"))
+            by_path.setdefault(path, []).append(row)
+
+        for path, pending in by_path.items():
+            os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
+            existing_ids = set()
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        try:
+                            existing = json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
+                        if isinstance(existing, dict) and existing.get("id"):
+                            existing_ids.add(str(existing["id"]))
+            except FileNotFoundError:
+                pass
+            with open(path, "a", encoding="utf-8") as f:
+                os.chmod(path, 0o600)
+                for row in pending:
+                    record_id = str(row.get("id") or "")
+                    if record_id and record_id in existing_ids:
+                        continue
+                    f.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
+                    if record_id:
+                        existing_ids.add(record_id)
+                f.flush()
+                os.fsync(f.fileno())
+
+        temp_path = f"{shared_path}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
+        try:
+            with open(temp_path, "w", encoding="utf-8") as f:
+                os.chmod(temp_path, 0o600)
+                for row in private_rows:
+                    f.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(temp_path, shared_path)
+            os.chmod(shared_path, 0o600)
+        finally:
+            try:
+                os.unlink(temp_path)
+            except FileNotFoundError:
+                pass
+    return {"migrated": len(group_rows), "shards": len(by_path)}
 
 
 def channel_records_response(status_dir, *, limit=500):

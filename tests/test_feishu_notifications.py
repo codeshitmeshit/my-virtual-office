@@ -3,6 +3,7 @@ import json
 import os
 import sys
 import tempfile
+import threading
 import types
 import urllib.error
 
@@ -949,8 +950,7 @@ def test_feishu_channel_adapter_records_and_dedupes():
     assert calls[0]["agent_id"] == "hermes-default"
     assert calls[0]["source_meta"]["sourceMessageId"] == "om_1"
     assert sends == [{"chat_id": "oc_1", "text": "CEO reply"}]
-    with open(os.path.join(status_dir, "feishu-channel-records.jsonl"), "r", encoding="utf-8") as f:
-        rows = [json.loads(line) for line in f if line.strip()]
+    rows = feishu_chat_channel.load_channel_records(status_dir, limit=20)
     assert {row["event"] for row in rows} >= {"user_message", "turn_completed"}
     completed = [row for row in rows if row["event"] == "turn_completed"][0]
     assert completed["sourceMessageId"] == "om_1"
@@ -1098,8 +1098,7 @@ def test_feishu_private_only_baseline_contract_before_group_enablement():
     assert len(sends) == 2
     assert all(item["chatId"] == "oc_baseline" for item in sends)
 
-    with open(os.path.join(status_dir, "feishu-channel-records.jsonl"), "r", encoding="utf-8") as f:
-        channel_rows = [json.loads(line) for line in f if line.strip()]
+    channel_rows = feishu_chat_channel.load_channel_records(status_dir, limit=20)
     group_rows = [row for row in channel_rows if row.get("sourceMessageId") == "om_baseline_group"]
     assert len(group_rows) == 1
     assert group_rows[0]["event"] == "ignored"
@@ -1514,8 +1513,7 @@ def test_feishu_channel_missing_representative_agent_does_not_dispatch():
     assert result["status"] == "missing_representative_agent"
     assert calls == []
     assert sends and "CEO Agent" in sends[0]["text"]
-    with open(os.path.join(status_dir, "feishu-channel-records.jsonl"), "r", encoding="utf-8") as f:
-        rows = [json.loads(line) for line in f if line.strip()]
+    rows = feishu_chat_channel.load_channel_records(status_dir, limit=20)
     assert rows[0]["event"] == "rejected"
     assert rows[0]["reason"] == "missing_representative_agent"
     assert rows[0]["voUserId"] == "user-1"
@@ -2345,8 +2343,7 @@ def test_feishu_worker_v1_untrusted_group_identity_cannot_dispatch():
 
     assert dispatches == []
     assert all(item["durable"] is True for item in results)
-    with open(os.path.join(status_dir, "feishu-channel-records.jsonl"), "r", encoding="utf-8") as f:
-        rows = [json.loads(line) for line in f if line.strip()]
+    rows = feishu_chat_channel.load_channel_records(status_dir, limit=20)
     assert {row["sourceMessageId"] for row in rows} == {
         "om_forged_text_at", "om_bot_sender", "om_unknown_sender",
     }
@@ -2876,6 +2873,129 @@ def test_feishu_source_message_index_is_atomic_persistent_and_not_window_bounded
     assert agent_exception["status"] == "agent_failed"
     assert exception_index["state"] == "completed"
     assert exception_index["record"]["agentResult"]["status"] == "agent_exception"
+
+
+def test_feishu_group_channel_audit_is_physically_sharded_per_group_with_legacy_reads():
+    status_dir = tempfile.mkdtemp(prefix="vo-feishu-group-audit-shards-")
+    lock = threading.Lock()
+    now_value = iter(range(1, 10))
+    now = lambda: next(now_value)
+
+    private = feishu_chat_channel.record_channel_event(
+        status_dir,
+        {
+            "event": "user_message", "sourceMessageId": "om_private",
+            "feishuChatId": "oc_private", "chatType": "p2p", "sourceSurface": "feishu-dm",
+            "text": "private text",
+        },
+        now=now,
+        lock=lock,
+    )
+    group_a_request = feishu_chat_channel.record_channel_event(
+        status_dir,
+        {
+            "event": "user_message", "sourceMessageId": "om_group_a_request",
+            "feishuChatId": "oc_group_a", "chatType": "group", "sourceSurface": "feishu-group",
+            "text": "group a request",
+        },
+        now=now,
+        lock=lock,
+    )
+    group_a_reply = feishu_chat_channel.record_channel_event(
+        status_dir,
+        {
+            "event": "turn_completed", "sourceMessageId": "om_group_a_reply",
+            "feishuChatId": "oc_group_a", "chatType": "group", "sourceSurface": "feishu-group",
+            "reply": "group a reply",
+        },
+        now=now,
+        lock=lock,
+    )
+    group_b = feishu_chat_channel.record_channel_event(
+        status_dir,
+        {
+            "event": "user_message", "sourceMessageId": "om_group_b",
+            "feishuChatId": "oc_group_b", "chatType": "group", "sourceSurface": "feishu-group",
+            "text": "group b request",
+        },
+        now=now,
+        lock=lock,
+    )
+
+    shared_path = feishu_chat_channel.channel_record_path(status_dir)
+    with open(shared_path, "r", encoding="utf-8") as f:
+        shared_rows = [json.loads(line) for line in f if line.strip()]
+    assert shared_rows == [private]
+
+    group_dir = feishu_chat_channel.group_record_dir(status_dir)
+    shard_names = sorted(name for name in os.listdir(group_dir) if name.endswith(".jsonl"))
+    assert len(shard_names) == 2
+    assert all("oc_group" not in name for name in shard_names)
+    group_a_path = feishu_chat_channel.group_record_path(status_dir, "oc_group_a")
+    group_b_path = feishu_chat_channel.group_record_path(status_dir, "oc_group_b")
+    assert group_a_path != group_b_path
+    assert os.path.basename(group_a_path) in shard_names
+    assert os.path.basename(group_b_path) in shard_names
+    with open(group_a_path, "r", encoding="utf-8") as f:
+        assert [json.loads(line) for line in f if line.strip()] == [group_a_request, group_a_reply]
+    with open(group_b_path, "r", encoding="utf-8") as f:
+        assert [json.loads(line) for line in f if line.strip()] == [group_b]
+
+    legacy_group = {
+        "id": "legacy-group", "createdAt": 0, "event": "turn_completed",
+        "sourceMessageId": "om_legacy_group", "feishuChatId": "oc_legacy_group",
+        "chatType": "group", "sourceSurface": "feishu-group", "reply": "legacy reply",
+    }
+    with open(shared_path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(legacy_group, ensure_ascii=False) + "\n")
+    migration = feishu_chat_channel.migrate_legacy_group_records(status_dir, lock=lock)
+    assert migration == {"migrated": 1, "shards": 1}
+    with open(shared_path, "r", encoding="utf-8") as f:
+        assert [json.loads(line) for line in f if line.strip()] == [private]
+    with open(feishu_chat_channel.group_record_path(status_dir, "oc_legacy_group"), "r", encoding="utf-8") as f:
+        assert [json.loads(line) for line in f if line.strip()] == [legacy_group]
+    assert feishu_chat_channel.migrate_legacy_group_records(status_dir, lock=lock) == {"migrated": 0, "shards": 0}
+    loaded = feishu_chat_channel.load_channel_records(status_dir, limit=20)
+    assert [row["sourceMessageId"] for row in loaded] == [
+        "om_legacy_group", "om_private", "om_group_a_request", "om_group_a_reply", "om_group_b",
+    ]
+
+
+def test_feishu_group_recovery_turns_use_only_completed_current_group_history():
+    status_dir = tempfile.mkdtemp(prefix="vo-feishu-group-recovery-turns-")
+    lock = threading.Lock()
+    now_value = iter(range(1, 10))
+    for chat_id, source_id, text, reply, sender in (
+        ("oc_group_a", "om_old_a", "question a", "answer a", "Alice"),
+        ("oc_group_b", "om_old_b", "question b", "answer b", "Bob"),
+    ):
+        feishu_chat_channel.record_channel_event(
+            status_dir,
+            {
+                "event": "turn_completed", "sourceMessageId": source_id,
+                "feishuChatId": chat_id, "chatType": "group", "sourceSurface": "feishu-group",
+                "text": text, "reply": reply, "sender": {"name": sender, "openId": f"ou_{sender.lower()}"},
+            },
+            now=lambda: next(now_value),
+            lock=lock,
+        )
+    feishu_chat_channel.record_channel_event(
+        status_dir,
+        {
+            "event": "user_message", "sourceMessageId": "om_current",
+            "feishuChatId": "oc_group_a", "chatType": "group", "sourceSurface": "feishu-group",
+            "text": "current question", "sender": {"name": "Carol", "openId": "ou_carol"},
+        },
+        now=lambda: next(now_value),
+        lock=lock,
+    )
+    turns = feishu_chat_channel.load_group_recovery_turns(
+        status_dir, "oc_group_a", exclude_source_message_id="om_current",
+    )
+    assert turns == [
+        {"role": "user", "name": "Alice", "speakerId": "ou_alice", "text": "question a", "sourceMessageId": "om_old_a"},
+        {"role": "assistant", "text": "answer a", "sourceMessageId": "om_old_a"},
+    ]
 
 
 def test_feishu_group_ordering_cross_group_progress_and_metrics_are_bounded():
@@ -3722,8 +3842,7 @@ def test_feishu_channel_unsupported_chat_or_message_type_is_ignored():
     assert file_result["status"] == "ignored_unsupported_message_type"
     assert calls == []
     assert sends == []
-    with open(os.path.join(status_dir, "feishu-channel-records.jsonl"), "r", encoding="utf-8") as f:
-        rows = [json.loads(line) for line in f if line.strip()]
+    rows = feishu_chat_channel.load_channel_records(status_dir, limit=20)
     assert [row["reason"] for row in rows] == ["unsupported_chat_type", "unsupported_message_type"]
 
 

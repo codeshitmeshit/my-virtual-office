@@ -21,3 +21,17 @@ Required inputs before acceptance:
 4. Keep broader group activation disabled until every Task 7.2 scenario passes.
 
 No credential value, group message, member list, or chat identifier was written to this evidence.
+
+### Provisional owner acceptance after restart
+
+Later on 2026-07-16, the service was restarted on the completed implementation and
+reported `groupChatEffective=true`, `allowedChatTypes=["p2p", "group"]`, a connected
+Node Channel SDK worker, and an empty non-pressured spool. The requirement owner then
+reported that no further issue had been observed and explicitly accepted the
+requirement for the current push.
+
+This owner acceptance confirms the test-result gate for the observed deployment. It
+does not claim that every destructive/failure-injection item in the exhaustive Task
+7.2 matrix was independently rerun, so Task 7.2 remains open and broader activation
+must still follow that checklist. Final OpenSpec archival also remains a separate
+explicit confirmation gate.

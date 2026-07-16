@@ -6423,7 +6423,7 @@ def _append_codex_user_comm_event(agent, agent_id, conversation_id, message, bod
             "text": message,
             "attachments": list(body.get("attachments") or []),
             "metadata": metadata,
-            "visibleInOffice": True,
+            "visibleInOffice": source_surface != "feishu-group",
         })
     _publish_feishu_chat_comm_event(event, "message")
     return event
@@ -6516,7 +6516,10 @@ def _handle_codex_chat(body):
                 "modifiedFiles": meta.get("modifiedFiles") or [],
                 "needsHumanIntervention": bool(meta.get("needsHumanIntervention")),
             },
-            "visibleInOffice": True,
+            "visibleInOffice": (
+                inbound_event.get("visibleInOffice", True) is not False
+                and not _comm_is_feishu_group(inbound_event)
+            ),
             "ok": bool(ok),
         })
         _publish_feishu_chat_comm_event(event, "message")
@@ -6540,7 +6543,9 @@ def _handle_codex_chat(body):
 
     initial_thread_id = _get_codex_thread_id(agent_id, conversation_id)
 
-    def send_to_provider(thread_id):
+    current_provider_message = _feishu_group_provider_message(message, body)
+
+    def send_to_provider(thread_id, delivery_message=None):
         kwargs = {
             "conversation_id": conversation_id,
             "timeout_sec": int(body.get("timeoutSec") or 600),
@@ -6551,17 +6556,34 @@ def _handle_codex_chat(body):
         if validated_attachments:
             kwargs["attachments"] = validated_attachments
         return provider.send_message(
-            _feishu_group_provider_message(message, body),
+            current_provider_message if delivery_message is None else delivery_message,
             **kwargs,
         )
 
     try:
-        result = send_to_provider(initial_thread_id)
-        if initial_thread_id and _codex_result_is_archived_session(result):
-            _reset_codex_thread_id(agent_id, conversation_id, continue_operation=True)
-            result = send_to_provider("")
-            if isinstance(result, dict):
-                result["recoveredFromArchivedThread"] = initial_thread_id
+        conversation_key = _provider_conversation_key("codex", agent_id, conversation_id, agent_id)
+
+        def load_recovery_history(_key):
+            if str(body.get("sourceSurface") or "").strip().lower() != "feishu-group":
+                return []
+            return feishu_chat_channel.load_group_recovery_turns(
+                STATUS_DIR,
+                body.get("feishuChatId"),
+                exclude_source_message_id=body.get("sourceMessageId"),
+            )
+
+        result = PROVIDER_CONVERSATION_SERVICE.recover_and_redeliver(
+            conversation_key,
+            initial_thread_id,
+            current_provider_message,
+            state_port=_codex_thread_port(),
+            deliver=lambda native_id, delivery_message: send_to_provider(native_id, delivery_message),
+            is_invalid=_codex_result_is_archived_session,
+            load_history=load_recovery_history,
+            native_id_from_result=lambda value: value.get("threadId") or "",
+        )
+        if result.get("recoveredFromNativeId"):
+            result["recoveredFromArchivedThread"] = result.get("recoveredFromNativeId")
     except Exception as exc:
         result = {
             "ok": False,
@@ -8679,6 +8701,42 @@ def _comm_is_feishu_group(event):
         or str(from_ref.get("sourceSurface") or "").lower() == "feishu-group"
         or str(to_ref.get("sourceSurface") or "").lower() == "feishu-group"
     )
+
+
+def _repair_feishu_group_comm_visibility():
+    """Repair legacy group ledger rows that predate the false-visibility invariant."""
+    path = _comm_log_path()
+    with _COMM_REQUEST_IDEMPOTENCY_LOCK:
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                rows = [json.loads(line) for line in f if line.strip()]
+        except FileNotFoundError:
+            return {"repaired": 0}
+        except (json.JSONDecodeError, OSError):
+            return {"repaired": 0, "status": "invalid_ledger_jsonl"}
+        repaired = 0
+        for row in rows:
+            if isinstance(row, dict) and _comm_is_feishu_group(row) and row.get("visibleInOffice") is not False:
+                row["visibleInOffice"] = False
+                repaired += 1
+        if not repaired:
+            return {"repaired": 0}
+        temp_path = f"{path}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
+        try:
+            with open(temp_path, "w", encoding="utf-8") as f:
+                os.chmod(temp_path, 0o600)
+                for row in rows:
+                    f.write(json.dumps(row, ensure_ascii=False) + "\n")
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(temp_path, path)
+            os.chmod(path, 0o600)
+        finally:
+            try:
+                os.unlink(temp_path)
+            except FileNotFoundError:
+                pass
+    return {"repaired": repaired}
 
 
 def _feishu_group_member_ref(record):

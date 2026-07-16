@@ -33,7 +33,7 @@ Stakeholders are the administrator who intentionally adds the bot to trusted gro
 
 The Node worker will set the SDK policy explicitly to `requireMention: true`, `respondToMentionAll: false`, `dmMode: "open"`, and an empty `groupAllowlist`. In SDK 0.4.0 an empty group allowlist accepts any group in which Feishu can deliver an event to the bot, while `requireMention` rejects ordinary traffic before batching, spooling, or callback delivery. Existing zero-delay, one-message batching and `mergeWhileBusy: false` remain unchanged.
 
-The worker envelope already preserves normalized `mentions`; the SDK marks the mention that targets its resolved bot identity with `isBot: true` and removes that addressing token from readable content. VO will independently require `chatType == "group"`, `groupChatEnabled == true`, at least one `mentions[].isBot == true`, and a sender positively identified as a human user. Known bot, system, or anonymous senders and missing/ambiguous bot-mention evidence are ignored with stable policy reasons. This is defense in depth against a forged or legacy callback and preserves the confirmed human-only scope.
+The worker envelope already preserves normalized `mentions`; the SDK marks the mention that targets its resolved bot identity with `isBot: true` and removes that addressing token from readable content. Real Feishu group events may represent unavailable optional mention identifiers as `null`, so the worker normalization boundary removes null/empty optional mention fields before strict v1 validation while retaining every available identity and the boolean bot marker. VO will independently require `chatType == "group"`, `groupChatEnabled == true`, at least one `mentions[].isBot == true`, and a sender positively identified as a human user. Known bot, system, or anonymous senders and missing/ambiguous bot-mention evidence are ignored with stable policy reasons. This is defense in depth against a forged or legacy callback and preserves the confirmed human-only scope.
 
 The group switch will be represented as `feishu.chatApp.groupChatEnabled`, with `VO_FEISHU_GROUP_CHAT_ENABLED` as an environment override. It defaults to `false` when absent. The management response will project `allowedChatTypes` dynamically as `["p2p"]` or `["p2p", "group"]`; saving unrelated Feishu settings must preserve the switch. Enabling the switch requires the `channel-sdk-node` transport; status reports a clear unsupported-transport reason otherwise.
 
@@ -93,11 +93,16 @@ Alternatives considered:
 
 Group channel and communication records use `sourceSurface=feishu-group`, `sourceLabel=Feishu Group`, `chatType=group`, and `visibleInOffice=false`. Private rows keep `feishu-dm`, `Feishu DM`, and their existing visibility. A dedicated `_comm_is_feishu_group` classification based on structured metadata/source surface, not a conversation-prefix substring alone, will be used at every projection boundary.
 
+Channel audit persistence is physically partitioned per group under `feishu-group-records/<group-digest>.jsonl`. The digest is derived from the Feishu chat ID with domain separation; the raw chat ID is never used as a filename. Different groups therefore never append message content to one shared group log. The existing `feishu-channel-records.jsonl` remains the private-chat audit and a legacy read source for group rows written before this refinement. New group writes never return to the shared file, while bounded diagnostic loading merges the private/legacy file with all group shards in timestamp order.
+
 The communication-ledger synchronizer persists group request, reply, and delivery outcomes for audit and idempotency but does not call `_publish_feishu_chat_comm_event` for them. The SSE replay scanner also excludes group-classified rows, preventing reconnect from reintroducing events that were intentionally not published. Normalized history already rejects `visibleInOffice=false`; it will additionally have focused group-classification tests so a future visibility default cannot leak group rows. Private invisible delivery events continue to publish their existing invalidation signal, so the filter must be group-specific rather than a blanket `visibleInOffice` check.
+
+Provider-native request/reply writers must inherit the group visibility decision from the structured inbound communication event. They may not default a group reply back to `visibleInOffice=true`; all request, reply, and delivery rows for every provider remain false even though the structured group filters are retained as defense in depth.
 
 Alternatives considered:
 
 - Omitting group communication records entirely was rejected because delivery diagnosis, durable source-message reconciliation, and sender audit would be lost.
+- A single `feishu-group-records.jsonl` for all groups was rejected because it creates an unnecessary cross-group physical content boundary and prevents independent retention or inspection of one trusted group.
 - Filtering only in the frontend was rejected because initial history, pagination, reconnect replay, legacy history surfaces, and other consumers could still leak rows.
 - Suppressing every invisible Feishu SSE event was rejected because private delivery invalidations are intentionally invisible records that refresh visible private replies.
 
@@ -120,6 +125,14 @@ Alternatives considered:
 The management API changes only add `groupChatEnabled` and the dynamic allowed-chat projection. Existing credentials, representative Agent selection, transport selection, private bindings, route paths, worker authentication, notification/card-action application, and provider request contracts remain compatible. Group records are additive and old code ignores the new config field; their `visibleInOffice=false` marker prevents old normalized history from rendering them after rollback.
 
 No database migration is required. Existing private histories remain unchanged, and group conversation state begins only after the switch is enabled. Disabling the switch rejects new group callbacks before provider dispatch; an already executing turn is allowed to finish and record its delivery outcome so the state is not left ambiguous.
+
+### 9. Recover expired native sessions through the shared Provider bridge
+
+Provider-native session continuity and audit persistence are separate concerns. The shared `ProviderConversationService` owns one bounded recovery orchestration: attempt delivery to the stored native ID, classify an invalid-session result through the provider adapter, request normalized historical turns from a source-owned loader, build a provider-neutral recovery envelope under message/character limits, create a replacement native session, persist its new ID, and retry the current turn once. It never reads Feishu files directly.
+
+For Feishu groups, the source loader reads only the current group's digest shard and converts completed records into canonical `user`/`assistant` turns keyed by source message ID. It excludes ignored/rejected/delivery records, excludes the current source message already durably recorded before dispatch, and never consults another group shard. The recovery envelope contains bounded speaker attribution and conversational text but no transport, reaction, delivery, secret, tool, or hidden-reasoning fields.
+
+The first wired provider is Codex, replacing its server-local archived-thread retry. Provider adapters retain responsibility for recognizing their own invalid-session responses and extracting the replacement native ID. Hermes, Claude Code, and OpenClaw can adopt the same bridge orchestration without making the bridge aware of their native protocols or of Feishu storage.
 
 ## Risks / Trade-offs
 
