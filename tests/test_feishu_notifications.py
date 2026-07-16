@@ -899,6 +899,161 @@ def test_feishu_channel_adapter_records_and_dedupes():
     assert delivery_rows[0]["metadata"]["feishuSendResult"]["status"] == "sent"
 
 
+def test_feishu_private_only_baseline_contract_before_group_enablement():
+    """Lock the pre-change Chat behavior before group admission is implemented."""
+    os.environ.setdefault("VO_HERMES_ENABLED", "0")
+    os.environ.setdefault("VO_CODEX_ENABLED", "0")
+    status_dir = tempfile.mkdtemp(prefix="vo-feishu-private-only-baseline-")
+    previous_status_env = os.environ.get("VO_STATUS_DIR")
+    os.environ["VO_STATUS_DIR"] = status_dir
+    import server
+
+    previous_status_dir = server.STATUS_DIR
+    previous_config = server.VO_CONFIG
+    previous_dispatch = server._dispatch_representative_agent_message
+    calls = []
+    sends = []
+    downloads = []
+    server.STATUS_DIR = status_dir
+    server.VO_CONFIG = {
+        **previous_config,
+        "notifications": {
+            **(previous_config.get("notifications") or {}),
+            "feishuAppId": "cli_notification_baseline",
+            "feishuAppSecret": "notification-secret-baseline",
+        },
+        "feishu": {
+            "chatApp": {
+                "enabled": True,
+                "appId": "cli_chat_baseline",
+                "appSecret": "chat-secret-baseline",
+                "representativeAgentId": "hermes-default",
+                "transportImplementation": "channel-sdk-node",
+            },
+            "bindings": {"open_id:ou_baseline": "vo-user-baseline"},
+        },
+    }
+
+    def fake_dispatch(agent_id, message, conversation_id, source_meta):
+        calls.append({
+            "agentId": agent_id,
+            "message": message,
+            "conversationId": conversation_id,
+            "sourceMeta": source_meta,
+        })
+        return {"ok": True, "reply": f"reply:{message}", "conversationId": conversation_id}
+
+    def fake_send(chat_id, text):
+        sends.append({"chatId": chat_id, "text": text})
+        return {"ok": True, "status": "sent", "messageId": f"sent-{len(sends)}"}
+
+    def fake_download(message_id, image_key):
+        downloads.append({"messageId": message_id, "imageKey": image_key})
+        path = os.path.join(status_dir, "feishu-chat-attachments", "baseline.png")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as f:
+            f.write(b"baseline")
+        return {
+            "ok": True,
+            "resourceType": "image",
+            "messageId": message_id,
+            "fileKey": image_key,
+            "name": "baseline.png",
+            "path": path,
+            "mimeType": "image/png",
+            "size": 8,
+        }
+
+    def message(message_id, message_type, *, chat_type="p2p", content=None, text=""):
+        return {
+            "event": {
+                "sender": {"sender_id": {"open_id": "ou_baseline"}},
+                "message": {
+                    "message_id": message_id,
+                    "chat_id": "oc_baseline",
+                    "chat_type": chat_type,
+                    "message_type": message_type,
+                    "content": content or {},
+                    "text": text,
+                    "mentions": [{"openId": "ou_bot", "isBot": True}],
+                },
+            }
+        }
+
+    try:
+        server._dispatch_representative_agent_message = fake_dispatch
+        config = server._feishu_chat_config_response()
+        text_result = server._handle_feishu_chat_message_event(
+            message("om_baseline_text", "text", text="private baseline"),
+            send_text=fake_send,
+        )
+        image_result = server._handle_feishu_chat_message_event(
+            message("om_baseline_image", "image", content={"image_key": "img_baseline"}),
+            send_text=fake_send,
+            download_image=fake_download,
+        )
+        group_result = server._handle_feishu_chat_message_event(
+            message("om_baseline_group", "text", chat_type="group", text="mentioned group baseline"),
+            send_text=fake_send,
+        )
+        replay = server._feishu_chat_replay_comm_events(
+            "hermes-default", after_ts=0, seen_ids=set(), limit=100
+        )
+        notification_snapshot = dict(server.VO_CONFIG["notifications"])
+    finally:
+        server._dispatch_representative_agent_message = previous_dispatch
+        server.STATUS_DIR = previous_status_dir
+        server.VO_CONFIG = previous_config
+        if previous_status_env is None:
+            os.environ.pop("VO_STATUS_DIR", None)
+        else:
+            os.environ["VO_STATUS_DIR"] = previous_status_env
+
+    assert config["allowedChatTypes"] == ["p2p"]
+    assert config["requireBoundVoUser"] is False
+    assert config["replyMode"] == "same_chat"
+    assert config["effectiveTransportImplementation"] == "channel-sdk-node"
+    assert text_result["status"] == "completed"
+    assert image_result["status"] == "completed"
+    assert group_result["status"] == "ignored_unsupported_chat_type"
+    assert len(calls) == 2
+    assert {call["conversationId"] for call in calls} == {text_result["record"]["conversationId"]}
+    assert text_result["record"]["conversationId"].startswith("feishu-dm:")
+    assert {call["sourceMeta"]["sourceMessageId"] for call in calls} == {
+        "om_baseline_text", "om_baseline_image",
+    }
+    assert all(call["sourceMeta"]["feishuChatId"] == "oc_baseline" for call in calls)
+    assert text_result["record"]["voUserId"] == "vo-user-baseline"
+    assert image_result["record"]["voUserId"] == "vo-user-baseline"
+    assert downloads == [{"messageId": "om_baseline_image", "imageKey": "img_baseline"}]
+    assert len(sends) == 2
+    assert all(item["chatId"] == "oc_baseline" for item in sends)
+
+    with open(os.path.join(status_dir, "feishu-channel-records.jsonl"), "r", encoding="utf-8") as f:
+        channel_rows = [json.loads(line) for line in f if line.strip()]
+    group_rows = [row for row in channel_rows if row.get("sourceMessageId") == "om_baseline_group"]
+    assert len(group_rows) == 1
+    assert group_rows[0]["event"] == "ignored"
+    assert group_rows[0]["reason"] == "unsupported_chat_type"
+    assert "conversationId" not in group_rows[0]
+
+    with open(os.path.join(status_dir, "agent-platform-communications.jsonl"), "r", encoding="utf-8") as f:
+        comm_rows = [json.loads(line) for line in f if line.strip()]
+    visible_messages = [row for row in comm_rows if row.get("visibleInOffice", True) and row.get("type") == "message"]
+    assert [row["direction"] for row in visible_messages] == ["request", "reply", "request", "reply"]
+    assert all(row["metadata"]["sourceSurface"] == "feishu-dm" for row in visible_messages)
+    assert all(row["conversationId"].startswith("feishu-dm:") for row in visible_messages)
+    assert not any((row.get("metadata") or {}).get("sourceMessageId") == "om_baseline_group" for row in comm_rows)
+
+    replay_source_ids = {
+        (item["commEvent"].get("metadata") or {}).get("sourceMessageId")
+        for item in replay
+    }
+    assert replay_source_ids == {"om_baseline_text", "om_baseline_image"}
+    assert notification_snapshot["feishuAppId"] == "cli_notification_baseline"
+    assert notification_snapshot["feishuAppSecret"] == "notification-secret-baseline"
+
+
 def test_feishu_sse_replays_real_comm_event_when_in_memory_publish_is_missed():
     os.environ.setdefault("VO_HERMES_ENABLED", "0")
     os.environ.setdefault("VO_CODEX_ENABLED", "0")
