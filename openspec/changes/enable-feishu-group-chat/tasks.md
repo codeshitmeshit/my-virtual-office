@@ -10,7 +10,7 @@
 
 ## 3. Group Admission, Context, and Delivery
 
-- [ ] 3.1 Implement pure group admission and identity helpers in the Feishu channel adapter: default-off policy, Node-transport requirement, human-sender validation, identity-backed mention validation, stable ignored reasons, `feishu-group:<digest>` derivation from chat ID only, private-ID preservation, group source metadata, and stable sender attribution; cover same-group cross-member continuity plus cross-group/private isolation with focused unit tests.
+- [x] 3.1 Implement pure group admission and identity helpers in the Feishu channel adapter: default-off policy, Node-transport requirement, human-sender validation, identity-backed mention validation, stable ignored reasons, `feishu-group:<digest>` derivation from chat ID only, private-ID preservation, group source metadata, and stable sender attribution; cover same-group cross-member continuity plus cross-group/private isolation with focused unit tests.
 - [ ] 3.2 Route accepted group text and rich-post image turns through the representative Agent with original audit text, bounded untrusted speaker metadata, source-message provider idempotency, existing attachment protections, and all four provider paths; verify unsupported files, empty prompts, image download failure, representative-Agent absence/switch, and provider failure do not corrupt group context.
 - [ ] 3.3 Add a group-only outbound reply port using the existing authenticated worker `reply` command, preserve flat-group versus topic/thread placement, keep private send behavior unchanged, and record successful message identity or classified delivery failure without redirect fallback; test reaction/receipt cleanup, revoked targets, timeouts, and wrong-chat prevention.
 

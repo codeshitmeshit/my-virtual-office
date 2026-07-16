@@ -2205,6 +2205,112 @@ def test_feishu_worker_v1_untrusted_group_identity_cannot_dispatch():
     assert bot_row["sender"]["isBot"] is True
 
 
+def test_feishu_group_admission_and_conversation_identity_are_isolated():
+    os.environ.setdefault("VO_HERMES_ENABLED", "0")
+    os.environ.setdefault("VO_CODEX_ENABLED", "0")
+    status_dir = tempfile.mkdtemp(prefix="vo-feishu-group-admission-")
+    os.environ["VO_STATUS_DIR"] = status_dir
+    import server
+
+    previous_status_dir = server.STATUS_DIR
+    previous_config = server.VO_CONFIG
+    previous_dispatch = server._dispatch_representative_agent_message
+    server.STATUS_DIR = status_dir
+    server.VO_CONFIG = {
+        **previous_config,
+        "feishu": {
+            "chatApp": {
+                "enabled": True,
+                "groupChatEnabled": True,
+                "appId": "cli_chat",
+                "appSecret": "chat-secret",
+                "representativeAgentId": "hermes-default",
+                "transportImplementation": "channel-sdk-node",
+            },
+            "bindings": {},
+        },
+    }
+    calls = []
+    sends = []
+
+    def fake_dispatch(agent_id, text, conversation_id, source_meta):
+        calls.append({
+            "agentId": agent_id, "text": text, "conversationId": conversation_id,
+            "sourceMeta": source_meta,
+        })
+        return {"ok": True, "reply": f"reply:{text}", "conversationId": conversation_id}
+
+    def fake_send(chat_id, text):
+        sends.append({"chatId": chat_id, "text": text})
+        return {"ok": True, "status": "sent", "messageId": f"om_sent_{len(sends)}"}
+
+    def inbound(message_id, chat_id, sender_id, *, chat_type="group", sender_type="user", is_bot=False, mentions=None):
+        return {
+            "event": {
+                "sender": {
+                    "sender_id": {"open_id": sender_id},
+                    "sender_name": f"Member {sender_id}",
+                    "sender_type": sender_type,
+                    "sender_is_bot": is_bot,
+                },
+                "message": {
+                    "message_id": message_id, "chat_id": chat_id, "chat_type": chat_type,
+                    "message_type": "text", "text": f"text:{message_id}",
+                    "mentions": [{"openId": "ou_vo", "name": "VO", "isBot": True}] if mentions is None else mentions,
+                },
+            }
+        }
+
+    try:
+        server._dispatch_representative_agent_message = fake_dispatch
+        first = server._handle_feishu_chat_message_event(inbound("om_group_a", "oc_group_shared", "ou_member_a"), send_text=fake_send)
+        second = server._handle_feishu_chat_message_event(inbound("om_group_b", "oc_group_shared", "ou_member_b"), send_text=fake_send)
+        other = server._handle_feishu_chat_message_event(inbound("om_group_other", "oc_group_other", "ou_member_a"), send_text=fake_send)
+        private = server._handle_feishu_chat_message_event(inbound(
+            "om_private_a", "oc_private_a", "ou_member_a", chat_type="p2p", mentions=[]
+        ), send_text=fake_send)
+        forged = server._handle_feishu_chat_message_event(inbound(
+            "om_group_forged", "oc_group_shared", "ou_member_a", mentions=[]
+        ), send_text=fake_send)
+        bot_sender = server._handle_feishu_chat_message_event(inbound(
+            "om_group_bot", "oc_group_shared", "ou_other_bot", sender_type="bot", is_bot=True
+        ), send_text=fake_send)
+        unknown_sender = server._handle_feishu_chat_message_event(inbound(
+            "om_group_unknown", "oc_group_shared", "ou_unknown", sender_type="", is_bot=False
+        ), send_text=fake_send)
+        server.VO_CONFIG["feishu"]["chatApp"]["transportImplementation"] = "legacy-python"
+        legacy = server._handle_feishu_chat_message_event(inbound(
+            "om_group_legacy", "oc_group_shared", "ou_member_a"
+        ), send_text=fake_send)
+    finally:
+        server._dispatch_representative_agent_message = previous_dispatch
+        server.STATUS_DIR = previous_status_dir
+        server.VO_CONFIG = previous_config
+
+    shared_id = first["record"]["conversationId"]
+    assert first["status"] == second["status"] == other["status"] == private["status"] == "completed"
+    assert shared_id == second["record"]["conversationId"]
+    assert shared_id.startswith("feishu-group:")
+    assert other["record"]["conversationId"].startswith("feishu-group:")
+    assert other["record"]["conversationId"] != shared_id
+    assert private["record"]["conversationId"].startswith("feishu-dm:")
+    assert private["record"]["conversationId"] != shared_id
+    assert first["record"]["voUserId"] == "feishu:open_id:ou_member_a"
+    assert second["record"]["voUserId"] == "feishu:open_id:ou_member_b"
+    assert first["record"]["sourceSurface"] == "feishu-group"
+    assert first["record"]["sourceLabel"] == "Feishu Group"
+    assert calls[0]["sourceMeta"]["sender"]["name"] == "Member ou_member_a"
+    assert calls[0]["sourceMeta"]["sourceSurface"] == "feishu-group"
+    assert len(calls) == 4
+    assert len(sends) == 4
+    assert forged["status"] == "ignored_missing_bot_mention"
+    assert bot_sender["status"] == "ignored_non_human_sender"
+    assert unknown_sender["status"] == "ignored_non_human_sender"
+    assert legacy["status"] == "ignored_unsupported_group_transport"
+    assert feishu_chat_channel.group_conversation_id("oc_group_shared") == shared_id
+    assert feishu_chat_channel.group_conversation_id("oc_group_other") != shared_id
+
+
 def test_feishu_chat_worker_normalizes_rich_post_with_image_resource_as_multimodal_message():
     os.environ.setdefault("VO_HERMES_ENABLED", "0")
     os.environ.setdefault("VO_CODEX_ENABLED", "0")

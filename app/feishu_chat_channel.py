@@ -146,6 +146,38 @@ def representative_conversation_id(vo_user_id, chat_id):
     return f"feishu-dm:{digest}"
 
 
+def group_conversation_id(chat_id):
+    seed = f"feishu-group:{chat_id or 'unknown'}"
+    digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()[:16]
+    return f"feishu-group:{digest}"
+
+
+def source_projection(chat_type):
+    if str(chat_type or "").strip().lower() == "group":
+        return {"sourceSurface": "feishu-group", "sourceLabel": "Feishu Group"}
+    return {"sourceSurface": "feishu-dm", "sourceLabel": "Feishu DM"}
+
+
+def bot_is_explicitly_mentioned(mentions):
+    return any(
+        isinstance(item, dict) and item.get("isBot") is True
+        for item in (mentions or [])
+    )
+
+
+def group_admission_reason(cfg, identity, mentions):
+    cfg = cfg if isinstance(cfg, dict) else {}
+    if not cfg.get("groupChatEnabled", False):
+        return "unsupported_chat_type"
+    if str(cfg.get("transportImplementation") or "channel-sdk-node").strip().lower() != "channel-sdk-node":
+        return "unsupported_group_transport"
+    if str((identity or {}).get("type") or "").strip().lower() != "user" or (identity or {}).get("isBot") is not False:
+        return "non_human_sender"
+    if not bot_is_explicitly_mentioned(mentions):
+        return "missing_bot_mention"
+    return ""
+
+
 def representative_display_reply(agent_id, reply, *, find_agent):
     text = str(reply or "").strip()
     return text
@@ -268,10 +300,12 @@ def handle_message_event(
     source_message_id = str(message.get("message_id") or "").strip()
     text = _message_text(message)
     identity = sender_identity(event)
+    projection = source_projection(chat_type)
+    mentions = message.get("mentions") if isinstance(message.get("mentions"), list) else []
     base_record = {
         "channel": "feishu",
         "sourceApp": "feishu",
-        "sourceSurface": "feishu-dm",
+        **projection,
         "sourceMessageId": source_message_id,
         "feishuChatId": chat_id,
         "chatType": chat_type,
@@ -288,7 +322,12 @@ def handle_message_event(
     if not chat_app_configured(cfg):
         record = record_event({**base_record, "event": "rejected", "reason": "missing_chat_app_credentials"})
         return {"ok": False, "status": "missing_chat_app_credentials", "record": record, "_status": 503}
-    if chat_type != "p2p":
+    if chat_type == "group":
+        group_reason = group_admission_reason(cfg, identity, mentions)
+        if group_reason:
+            record = record_event({**base_record, "event": "ignored", "reason": group_reason})
+            return {"ok": True, "status": f"ignored_{group_reason}", "record": record}
+    elif chat_type != "p2p":
         record = record_event({**base_record, "event": "ignored", "reason": "unsupported_chat_type"})
         return {"ok": True, "status": "ignored_unsupported_chat_type", "record": record}
     if not source_message_id:
@@ -335,7 +374,7 @@ def handle_message_event(
             "sendResult": send_result,
         })
         return {"ok": False, "status": "missing_representative_agent", "record": record, "sendResult": send_result, "_status": 400}
-    conversation_id = representative_conversation_id(vo_user_id, chat_id)
+    conversation_id = group_conversation_id(chat_id) if chat_type == "group" else representative_conversation_id(vo_user_id, chat_id)
     lock = lock_for(conversation_id)
     with lock:
         hit = channel_idempotency_hit(load_records, source_message_id)
@@ -369,7 +408,9 @@ def handle_message_event(
             {
                 "sourceMessageId": source_message_id,
                 "feishuChatId": chat_id,
-                "senderName": identity.get("openId") or identity.get("userId") or "Feishu User",
+                "senderName": identity.get("name") or identity.get("openId") or identity.get("userId") or "Feishu User",
+                "sender": identity,
+                **projection,
                 "attachments": attachments,
             },
         )
