@@ -132,8 +132,32 @@ export function validateInboundEnvelope(input) {
     throw new ProtocolError('field_too_large', 'message.content exceeds 524288 bytes', 413);
   }
   const sender = requireObject(message.sender, 'message.sender');
+  rejectUnknown(sender, new Set(['primaryId', 'openId', 'userId', 'unionId', 'name', 'type', 'isBot']), 'message.sender');
   if (![sender.openId, sender.userId, sender.unionId, sender.primaryId].some((value) => typeof value === 'string' && value)) {
     throw new ProtocolError('invalid_shape', 'message.sender requires at least one identifier');
+  }
+  for (const field of ['primaryId', 'openId', 'userId', 'unionId']) {
+    if (sender[field] !== undefined && sender[field] !== '') requireString(sender[field], `message.sender.${field}`, { max: 256 });
+  }
+  if (sender.name !== undefined && sender.name !== '') requireString(sender.name, 'message.sender.name', { max: 512 });
+  if (sender.type !== undefined && sender.type !== '') requireString(sender.type, 'message.sender.type', { max: 64 });
+  if (sender.isBot !== undefined && typeof sender.isBot !== 'boolean') {
+    throw new ProtocolError('invalid_shape', 'message.sender.isBot must be a boolean');
+  }
+  if (!Array.isArray(message.mentions) || message.mentions.length > 100) {
+    throw new ProtocolError('invalid_shape', 'message.mentions must be an array with at most 100 entries');
+  }
+  for (const [index, rawMention] of message.mentions.entries()) {
+    const mention = requireObject(rawMention, `message.mentions[${index}]`);
+    rejectUnknown(mention, new Set(['id', 'key', 'openId', 'userId', 'unionId', 'name', 'isBot']), `message.mentions[${index}]`);
+    for (const field of ['id', 'key', 'openId', 'userId', 'unionId', 'name']) {
+      if (mention[field] !== undefined && mention[field] !== '') {
+        requireString(mention[field], `message.mentions[${index}].${field}`, { max: field === 'name' ? 512 : 256 });
+      }
+    }
+    if (mention.isBot !== undefined && typeof mention.isBot !== 'boolean') {
+      throw new ProtocolError('invalid_shape', `message.mentions[${index}].isBot must be a boolean`);
+    }
   }
   return envelope;
 }

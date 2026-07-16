@@ -52,14 +52,18 @@ function nested(raw, ...paths) {
 
 export function normalizeMessage(message) {
   const raw = rawEvent(message);
+  const senderType = typeof message.senderType === 'string' ? message.senderType : '';
+  const senderIsBot = typeof message.senderIsBot === 'boolean'
+    ? message.senderIsBot
+    : (senderType ? senderType === 'bot' : undefined);
   const sender = {
     primaryId: String(message.senderId || ''),
     openId: String(nested(raw, ['event', 'sender', 'sender_id', 'open_id'], ['sender', 'sender_id', 'open_id']) || (String(message.senderId || '').startsWith('ou_') ? message.senderId : '')),
     userId: String(nested(raw, ['event', 'sender', 'sender_id', 'user_id'], ['sender', 'sender_id', 'user_id']) || ''),
     unionId: String(nested(raw, ['event', 'sender', 'sender_id', 'union_id'], ['sender', 'sender_id', 'union_id']) || ''),
     name: String(message.senderName || ''),
-    type: String(message.senderType || ''),
-    isBot: Boolean(message.senderIsBot),
+    type: senderType,
+    ...(senderIsBot === undefined ? {} : { isBot: senderIsBot }),
   };
   return {
     messageId: String(message.messageId || ''),

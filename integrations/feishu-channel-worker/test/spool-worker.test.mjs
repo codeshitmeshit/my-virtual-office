@@ -92,12 +92,19 @@ test('worker accepts SDK-approved group mentions and counts policy rejects witho
 });
 
 test('normalization preserves identity, thread, reply, and resource fields', () => {
-  const normalized = normalizeMessage({ ...message(), resources: [{ type: 'image', fileKey: 'img_1' }] });
+  const normalized = normalizeMessage({
+    ...message(),
+    resources: [{ type: 'image', fileKey: 'img_1' }],
+    mentions: [{ key: '@_user_1', openId: 'ou_bot', name: 'VO', isBot: true }],
+  });
   assert.deepEqual(normalized.sender, { primaryId: 'ou_primary', openId: 'ou_open', userId: 'u_user', unionId: 'on_union', name: 'Alice', type: 'user', isBot: false });
+  assert.deepEqual(normalized.mentions, [{ key: '@_user_1', openId: 'ou_bot', name: 'VO', isBot: true }]);
   assert.equal(normalized.rootId, 'om_root');
   assert.equal(normalized.threadId, 'omt_thread');
   assert.equal(normalized.replyToMessageId, 'om_reply');
   assert.equal(normalized.resources[0].fileKey, 'img_1');
+  const unknown = normalizeMessage({ ...message(), senderType: undefined, senderIsBot: undefined });
+  assert.equal(Object.hasOwn(unknown.sender, 'isBot'), false);
 });
 
 test('spool is atomic, mode 0600, duplicate-safe, pressure-aware, and bounded', async () => {

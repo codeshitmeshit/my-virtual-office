@@ -86,10 +86,16 @@ def channel_idempotency_hit(load_records, source_message_id):
 def sender_identity(event):
     sender = ((event or {}).get("sender") or {})
     sender_id = sender.get("sender_id") if isinstance(sender.get("sender_id"), dict) else {}
+    name = str(sender.get("sender_name") or sender.get("name") or "").strip()[:512]
+    sender_type = str(sender.get("sender_type") or sender.get("type") or "").strip().lower()[:64]
+    raw_is_bot = sender.get("sender_is_bot") if "sender_is_bot" in sender else sender.get("is_bot")
     return {
         "openId": str(sender_id.get("open_id") or sender.get("open_id") or "").strip(),
         "userId": str(sender_id.get("user_id") or sender.get("user_id") or "").strip(),
         "unionId": str(sender_id.get("union_id") or sender.get("union_id") or "").strip(),
+        "name": name,
+        "type": sender_type,
+        **({"isBot": raw_is_bot} if isinstance(raw_is_bot, bool) else {}),
     }
 
 

@@ -33,7 +33,12 @@ function inbound(overrides = {}) {
 }
 
 test('validates strict inbound and command protocol envelopes', () => {
-  assert.equal(validateInboundEnvelope(inbound()).message.messageId, 'om_1');
+  const enriched = inbound();
+  enriched.message.sender = { ...enriched.message.sender, name: 'Alice', type: 'user', isBot: false };
+  enriched.message.mentions = [{ key: '@_user_1', openId: 'ou_bot', name: 'VO', isBot: true }];
+  assert.equal(validateInboundEnvelope(enriched).message.messageId, 'om_1');
+  assert.equal(enriched.message.sender.isBot, false);
+  assert.equal(enriched.message.mentions[0].isBot, true);
   const command = validateCommandEnvelope({
     schema: COMMAND_SCHEMA,
     requestId: 'cmd-1',
@@ -48,6 +53,10 @@ test('fails closed for malformed, oversized, unknown, and unsupported protocol i
   assert.throws(() => validateInboundEnvelope(inbound({ extra: true })), (error) => error instanceof ProtocolError && error.code === 'unknown_field');
   assert.throws(() => validateInboundEnvelope(inbound({ schema: 'v0' })), (error) => error.code === 'unsupported_schema');
   assert.throws(() => validateInboundEnvelope(inbound({ message: { ...inbound().message, content: 'x'.repeat(600000) } })), (error) => error.code === 'field_too_large');
+  assert.throws(() => validateInboundEnvelope(inbound({ message: { ...inbound().message, sender: { ...inbound().message.sender, name: 'x'.repeat(513) } } })), (error) => error.code === 'field_too_large');
+  assert.throws(() => validateInboundEnvelope(inbound({ message: { ...inbound().message, sender: { ...inbound().message.sender, isBot: 'false' } } })), (error) => error.code === 'invalid_shape');
+  assert.throws(() => validateInboundEnvelope(inbound({ message: { ...inbound().message, mentions: Array.from({ length: 101 }, () => ({ openId: 'ou_1' })) } })), (error) => error.code === 'invalid_shape');
+  assert.throws(() => validateInboundEnvelope(inbound({ message: { ...inbound().message, mentions: [{ openId: 'ou_1', isBot: 'yes' }] } })), (error) => error.code === 'invalid_shape');
   assert.throws(() => validateCommandEnvelope({ schema: COMMAND_SCHEMA, requestId: '1', workerInstanceId: '1', operation: 'shell', payload: {} }), (error) => error.code === 'unknown_operation');
 });
 

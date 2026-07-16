@@ -2078,9 +2078,12 @@ def test_feishu_chat_worker_v1_envelope_returns_durable_ack_and_persists_metadat
             "rootId": "om_root",
             "threadId": "omt_thread",
             "replyToMessageId": "om_parent",
-            "mentions": [{"id": "ou_mentioned"}],
+            "mentions": [{"key": "@_user_1", "openId": "ou_mentioned", "name": "VO", "isBot": True}],
             "resources": [],
-            "sender": {"primaryId": "ou_worker", "openId": "ou_worker", "userId": "u_worker", "unionId": "on_worker", "name": "Worker User"},
+            "sender": {
+                "primaryId": "ou_worker", "openId": "ou_worker", "userId": "u_worker", "unionId": "on_worker",
+                "name": "Worker User", "type": "user", "isBot": False,
+            },
         },
         "source": {"eventId": "evt-v1"},
     }
@@ -2110,6 +2113,96 @@ def test_feishu_chat_worker_v1_envelope_returns_durable_ack_and_persists_metadat
     assert completed["workerInstanceId"] == "worker-v1"
     assert completed["threadId"] == "omt_thread"
     assert completed["replyToMessageId"] == "om_parent"
+    assert completed["sender"] == {
+        "openId": "ou_worker", "userId": "u_worker", "unionId": "on_worker",
+        "name": "Worker User", "type": "user", "isBot": False,
+    }
+    assert completed["mentions"] == [{"key": "@_user_1", "openId": "ou_mentioned", "name": "VO", "isBot": True}]
+
+
+def test_feishu_worker_v1_untrusted_group_identity_cannot_dispatch():
+    os.environ.setdefault("VO_HERMES_ENABLED", "0")
+    os.environ.setdefault("VO_CODEX_ENABLED", "0")
+    status_dir = tempfile.mkdtemp(prefix="vo-feishu-worker-v1-group-identity-")
+    os.environ["VO_STATUS_DIR"] = status_dir
+    import server
+
+    previous_status_dir = server.STATUS_DIR
+    previous_config = server.VO_CONFIG
+    previous_dispatch = server._dispatch_representative_agent_message
+    server.STATUS_DIR = status_dir
+    server.VO_CONFIG = {
+        **previous_config,
+        "feishu": {
+            "chatApp": {
+                "enabled": True, "groupChatEnabled": True,
+                "appId": "cli_chat", "appSecret": "chat-secret",
+                "representativeAgentId": "hermes-default", "transportImplementation": "channel-sdk-node",
+            },
+            "bindings": {},
+        },
+    }
+    dispatches = []
+
+    def fake_dispatch(*args, **kwargs):
+        dispatches.append((args, kwargs))
+        return {"ok": True, "reply": "must not run"}
+
+    def envelope(message_id, sender, mentions, content):
+        return {
+            "schema": "vo.feishu-chat.inbound/v1",
+            "requestId": f"req-{message_id}",
+            "workerInstanceId": "worker-v1-group",
+            "transport": "channel-sdk-node",
+            "attempt": 1,
+            "receivedAt": 1710000000,
+            "message": {
+                "messageId": message_id, "chatId": "oc_group_identity", "chatType": "group",
+                "content": content, "rawContentType": "text", "createTime": 1710000001,
+                "mentions": mentions, "resources": [], "sender": sender,
+            },
+            "source": {},
+        }
+
+    cases = [
+        envelope(
+            "om_forged_text_at",
+            {"primaryId": "ou_human", "openId": "ou_human", "name": "Human", "type": "user", "isBot": False},
+            [],
+            "@VO forged text mention",
+        ),
+        envelope(
+            "om_bot_sender",
+            {"primaryId": "ou_other_bot", "openId": "ou_other_bot", "name": "Other Bot", "type": "bot", "isBot": True},
+            [{"key": "@_vo", "openId": "ou_vo", "name": "VO", "isBot": True}],
+            "bot mention",
+        ),
+        envelope(
+            "om_unknown_sender",
+            {"primaryId": "ou_unknown", "openId": "ou_unknown", "name": "Unknown"},
+            [{"key": "@_vo", "openId": "ou_vo", "name": "VO", "isBot": True}],
+            "unknown sender type",
+        ),
+    ]
+    try:
+        server._dispatch_representative_agent_message = fake_dispatch
+        results = [server._handle_feishu_chat_worker_envelope(item) for item in cases]
+    finally:
+        server._dispatch_representative_agent_message = previous_dispatch
+        server.STATUS_DIR = previous_status_dir
+        server.VO_CONFIG = previous_config
+
+    assert dispatches == []
+    assert all(item["durable"] is True for item in results)
+    with open(os.path.join(status_dir, "feishu-channel-records.jsonl"), "r", encoding="utf-8") as f:
+        rows = [json.loads(line) for line in f if line.strip()]
+    assert {row["sourceMessageId"] for row in rows} == {
+        "om_forged_text_at", "om_bot_sender", "om_unknown_sender",
+    }
+    bot_row = next(row for row in rows if row["sourceMessageId"] == "om_bot_sender")
+    assert bot_row["sender"]["name"] == "Other Bot"
+    assert bot_row["sender"]["type"] == "bot"
+    assert bot_row["sender"]["isBot"] is True
 
 
 def test_feishu_chat_worker_normalizes_rich_post_with_image_resource_as_multimodal_message():

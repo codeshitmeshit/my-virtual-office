@@ -12453,7 +12453,9 @@ def _adapt_feishu_chat_inbound_envelope(body):
                     "user_id": str(sender.get("userId") or ""),
                     "union_id": str(sender.get("unionId") or ""),
                 },
+                "sender_name": str(sender.get("name") or "")[:512],
                 "sender_type": str(sender.get("type") or ""),
+                **({"sender_is_bot": sender.get("isBot")} if isinstance(sender.get("isBot"), bool) else {}),
             },
             "message": {
                 "message_id": message_id,
