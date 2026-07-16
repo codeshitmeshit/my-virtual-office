@@ -7,7 +7,7 @@
 
 - [x] 2.1 Replace the generated legacy communication skill source with a validated loader for `skills/vo-agent-communication/SKILL.md`; seed the exact canonical content into Skills Library and safely migrate the reserved legacy library entry, with source-consistency and migration tests.
 - [x] 2.2 Implement the locked, atomic, hash-based OpenClaw workspace skill synchronizer and managed marker; cover first install, no-op repeat, managed upgrade, unmarked conflict, known legacy migration, path-boundary rejection, and unrelated-file preservation.
-- [ ] 2.3 Revise `vo-agent-communication` into the single ordinary-chat contract for all target providers, including Codex, and add OpenClaw-to-Codex routing tests proving no provider-specific chat skill is required.
+- [x] 2.3 Revise `vo-agent-communication` into the single ordinary-chat contract for all target providers, including Codex, and add OpenClaw-to-Codex routing tests proving no provider-specific chat skill is required.
 - [ ] 2.4 Replace recursive Skills Library legacy deletion with ownership-checked, exact-file migration; preserve modified content and auxiliary files, report conflicts, and add read-path data-preservation tests.
 - [ ] 2.5 Reject workspace-internal symlink escapes for `skills`, canonical skill, marker, and legacy paths before managed reads or writes; add focused symlink boundary tests.
 

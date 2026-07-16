@@ -1,17 +1,15 @@
 ---
 name: vo-agent-communication
-description: 任意 CLI 或 agent 需要通过 Virtual Office 联系 OpenClaw、Hermes、Claude Code 或其他非 Codex 办公室 Agent 时使用；查询实际 Agent ID，通过统一通信 API 提问、委派任务、转交信息或复用 conversationId 延续跨平台会话，并返回可在 history 中追踪的真实响应。目标为 codex-local 或 providerKind=codex 时改用 vo-codex-communication。
+description: 任意 CLI 或 agent 需要通过 Virtual Office 联系 OpenClaw、Hermes、Claude Code、Codex 或其他办公室 Agent 时使用；查询实际 Agent ID 和 providerKind，通过统一通信 API 提问、委派任务、转交信息或复用 conversationId 延续跨平台会话，并返回可在 history 中追踪的真实响应。
 ---
 
 # Virtual Office Agent 通信
 
 ## 目标
 
-通过 Virtual Office 与非 Codex 办公室 Agent 通信，包括 OpenClaw、Hermes、Claude Code 等 provider，确保请求、回复和状态均可在 Virtual Office history 中追踪。
+通过 Virtual Office 与所有办公室 Agent 通信，包括 OpenClaw、Hermes、Claude Code、Codex 等 provider，确保请求、回复和状态均可在 Virtual Office history 中追踪。
 
-目标为 `codex-local` 或 `providerKind=codex` 时，不使用本技能，改用 本地 `/skills/vo-codex-communication/SKILL.md`。
-
-如果任务是在判断是否处于 VO、选择哪个 VO skill、或决定普通沟通是否应升级为正式 AI 会议，先使用 本地 `/skills/vo-operating-guidelines/SKILL.md`。本技能只处理已确定要进行的普通非 Codex agent 通信。
+如果任务是在判断是否处于 VO、选择哪个 VO skill、或决定普通沟通是否应升级为正式 AI 会议，先使用 本地 `/skills/vo-operating-guidelines/SKILL.md`。本技能处理已确定要进行的普通跨 agent 通信，不按目标 provider 拆分聊天法则。
 
 ## 核心规则
 
@@ -59,7 +57,7 @@ curl -sS "${VO_BASE_URL:-http://127.0.0.1:8090}/api/agents"
 - `main`：OpenClaw 默认 Agent。
 - `hermes-default`：Hermes 默认 Agent。
 - `claude-code-local`：Claude Code 本地 Agent。
-- `codex-local`：Codex；遇到此目标必须改用 本地 `/skills/vo-codex-communication/SKILL.md`。
+- `codex-local`：Codex 协作者，同样通过本技能的统一 VO 通信 endpoint 联系。
 
 始终以 `/api/agents` 当前返回的实际 ID 和 provider 信息为准，不要把常见 ID 当作存在性证明。
 
@@ -70,7 +68,7 @@ curl -sS "${VO_BASE_URL:-http://127.0.0.1:8090}/api/agents"
 - 唯一匹配：使用返回的实际 ID。
 - 多个可能目标：停止发送，列出候选项并要求用户明确选择。
 - 目标不存在：报告不可用并停止，不自动转交给 `main` 或其他替代 Agent。
-- 目标为 `codex-local` 或 `providerKind=codex`：停止本流程并改用 本地 `/skills/vo-codex-communication/SKILL.md`。
+- 目标为 `codex-local` 或 `providerKind=codex`：继续使用本流程和同一 VO 通信 endpoint，不启动私人 Codex CLI 或 OpenClaw session。
 - 无法确认发送方身份：报告缺失信息并停止。
 
 ### 3. 选择 Conversation ID
@@ -137,7 +135,21 @@ curl -sS \
   }'
 ```
 
-示例中的 `fromAgentId` 仅适用于实际发送方为 `codex-local` 的场景。其他调用方必须替换为其经确认的 Virtual Office Agent ID。
+向 Codex 发送消息：
+
+```bash
+curl -sS \
+  -X POST "${VO_BASE_URL:-http://127.0.0.1:8090}/api/agent-platform-communications/send" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "fromAgentId": "main",
+    "toAgentId": "codex-local",
+    "conversationId": "main__codex__review",
+    "message": "请评审当前方案并返回高风险问题。"
+  }'
+```
+
+示例中的 `fromAgentId` 仅用于展示对应发送方。实际调用方必须替换为自己经确认的 Virtual Office Agent ID，不得冒用 `main`、`codex-local` 或其他 Agent。
 
 消息应包含明确目标、必要上下文、任务边界和期望输出。默认委派短任务；复杂任务可以发送，但应提示超时和协调风险，不要将本技能用于长期项目编排。
 
@@ -202,7 +214,7 @@ curl -sS \
 
 - 已使用当前可访问的 Virtual Office 地址。
 - 已查询 `/api/agents` 并确认发送方和唯一目标的实际 ID。
-- 目标不是 `codex-local`，provider 也不是 `codex`。
+- 已确认目标的实际 `providerKind`，包括目标为 Codex 的情况。
 - 没有使用目标平台的私有 session、CLI 或本地 subagent 绕过 Virtual Office。
 - 延续任务复用了原 `conversationId`，隔离任务使用了新的稳定 ID。
 - 消息范围清晰，且不包含凭据或敏感配置。

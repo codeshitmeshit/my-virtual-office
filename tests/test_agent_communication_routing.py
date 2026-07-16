@@ -116,3 +116,6 @@ def test_canonical_skill_forbids_private_fallback_and_preserves_terminal_statuse
     assert "status=busy" in content
     assert "status=timeout" in content
     assert "reply` 为空" in content
+    assert "OpenClaw、Hermes、Claude Code、Codex" in content
+    assert "vo-codex-communication" not in content
+    assert '"toAgentId": "codex-local"' in content
