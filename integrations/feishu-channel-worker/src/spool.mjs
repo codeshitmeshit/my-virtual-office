@@ -13,6 +13,32 @@ function safeId(value) {
   return normalized;
 }
 
+function epochMs(value) {
+  const parsed = Number(value || 0);
+  if (!Number.isFinite(parsed) || parsed <= 0) return 0;
+  return parsed < 1_000_000_000_000 ? parsed * 1000 : parsed;
+}
+
+function envelopeOrder(item) {
+  const envelope = item?.envelope || {};
+  const message = envelope.message || {};
+  return [
+    epochMs(message.createTime) || epochMs(envelope.receivedAt) || Number(item?.mtimeMs || 0),
+    epochMs(envelope.receivedAt) || Number(item?.mtimeMs || 0),
+    String(message.messageId || ''),
+  ];
+}
+
+function compareEntries(left, right) {
+  const a = envelopeOrder(left);
+  const b = envelopeOrder(right);
+  for (let index = 0; index < a.length; index += 1) {
+    if (a[index] < b[index]) return -1;
+    if (a[index] > b[index]) return 1;
+  }
+  return String(left?.path || '').localeCompare(String(right?.path || ''));
+}
+
 export class SpoolFullError extends Error {
   constructor(message = 'Feishu inbound spool is full') {
     super(message);
@@ -86,34 +112,53 @@ export class InboundSpool {
   }
 
   async list() {
-    await this.initialize();
+    return (await this.snapshot()).items;
+  }
+
+  async snapshot() {
+    await mkdir(this.root, { recursive: true, mode: 0o700 });
     const names = (await readdir(this.root)).filter((name) => name.endsWith('.json')).sort();
-    const results = [];
+    const validItems = [];
+    const blockedItems = [];
+    let bytes = 0;
+    let oldestPendingAt = 0;
     for (const name of names) {
       const path = join(this.root, basename(name));
       try {
-        const envelope = validateInboundEnvelope(JSON.parse(await readFile(path, 'utf8')));
-        results.push({ path, envelope });
-      } catch (error) {
-        results.push({ path, error });
-      }
-    }
-    return results;
-  }
-
-  async stats() {
-    await mkdir(this.root, { recursive: true, mode: 0o700 });
-    const names = (await readdir(this.root)).filter((name) => name.endsWith('.json'));
-    let bytes = 0;
-    for (const name of names) {
-      try {
-        bytes += (await stat(join(this.root, name))).size;
+        const fileStat = await stat(path);
+        bytes += fileStat.size;
+        try {
+          const envelope = validateInboundEnvelope(JSON.parse(await readFile(path, 'utf8')));
+          const item = { path, envelope, mtimeMs: fileStat.mtimeMs };
+          validItems.push(item);
+          const pendingAt = envelopeOrder(item)[0];
+          if (pendingAt > 0 && (!oldestPendingAt || pendingAt < oldestPendingAt)) oldestPendingAt = pendingAt;
+        } catch (error) {
+          blockedItems.push({ path, error, mtimeMs: fileStat.mtimeMs });
+          if (!oldestPendingAt || fileStat.mtimeMs < oldestPendingAt) oldestPendingAt = fileStat.mtimeMs;
+        }
       } catch (error) {
         if (error.code !== 'ENOENT') throw error;
       }
     }
-    const entries = names.length;
+    validItems.sort(compareEntries);
+    const items = [...validItems, ...blockedItems];
+    const entries = items.length;
     const ratio = Math.max(entries / this.maxEntries, bytes / this.maxBytes);
-    return { entries, bytes, pressure: ratio >= DEFAULT_PRESSURE_RATIO, full: entries >= this.maxEntries || bytes >= this.maxBytes };
+    return {
+      items,
+      entries,
+      valid: validItems.length,
+      blocked: blockedItems.length,
+      bytes,
+      oldestPendingAt: Math.round(oldestPendingAt || 0),
+      pressure: ratio >= DEFAULT_PRESSURE_RATIO,
+      full: entries >= this.maxEntries || bytes >= this.maxBytes,
+    };
+  }
+
+  async stats() {
+    const { items: _items, ...stats } = await this.snapshot();
+    return stats;
   }
 }

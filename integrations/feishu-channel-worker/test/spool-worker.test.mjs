@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, stat } from 'node:fs/promises';
+import { mkdtemp, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -148,6 +148,42 @@ test('spool is atomic, mode 0600, duplicate-safe, pressure-aware, and bounded', 
   assert.equal((await spool.stats()).full, true);
   await spool.remove('om_1');
   assert.equal((await spool.stats()).entries, 1);
+});
+
+test('spool snapshot orders source messages and retains blocked entries with bounded stats', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'vo-feishu-spool-snapshot-'));
+  const spool = new InboundSpool(root, { maxEntries: 4, maxBytes: 2 * 1024 * 1024 });
+  const newer = envelope('om_a_newer');
+  newer.message.createTime = 1710000003;
+  newer.receivedAt = 1710000004000;
+  const sameTimeZ = envelope('om_z_tie');
+  sameTimeZ.message.createTime = 1710000001;
+  sameTimeZ.receivedAt = 1710000002000;
+  const sameTimeA = envelope('om_a_tie');
+  sameTimeA.message.createTime = 1710000001;
+  sameTimeA.receivedAt = 1710000002000;
+
+  await spool.put(newer);
+  await spool.put(sameTimeZ);
+  await spool.put(sameTimeA);
+  await writeFile(join(root, 'corrupt.json'), '{not-json', { mode: 0o600 });
+
+  const snapshot = await spool.snapshot();
+  assert.deepEqual(
+    snapshot.items.filter((item) => item.envelope).map((item) => item.envelope.message.messageId),
+    ['om_a_tie', 'om_z_tie', 'om_a_newer'],
+  );
+  assert.equal(snapshot.entries, 4);
+  assert.equal(snapshot.valid, 3);
+  assert.equal(snapshot.blocked, 1);
+  assert.equal(snapshot.oldestPendingAt, 1710000001000);
+  assert.equal(snapshot.pressure, true);
+  assert.equal(snapshot.full, true);
+  assert.equal(snapshot.items.at(-1).path, join(root, 'corrupt.json'));
+  assert.ok(snapshot.items.at(-1).error instanceof Error);
+  const statsOnly = await spool.stats();
+  assert.equal(Object.hasOwn(statsOnly, 'items'), false);
+  assert.deepEqual(await spool.list(), snapshot.items, 'list should expose the same deterministic snapshot order');
 });
 
 test('worker delivers durable callbacks, deletes acknowledged spool, and replays after restart', async () => {

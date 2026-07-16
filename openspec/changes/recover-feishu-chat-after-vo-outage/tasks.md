@@ -6,7 +6,7 @@
 
 - [x] 2.1 Extend the VO source-message index and inbound callback contract to distinguish active `processing` ownership from terminal durable outcomes, return fast non-durable processing acknowledgements, reclaim work after a VO process restart, index terminal ignored/rejected outcomes, and add focused Python tests for concurrent duplicates, restart reclaim, terminal uniqueness, and secret-safe responses.
 - [x] 2.2 Add a single-attempt callback-client API with a bounded transport deadline and stable classifications for network failure, timeout, HTTP failure, invalid acknowledgement, non-terminal processing, and terminal durable acknowledgement while preserving the existing API until coordinator integration; verify it with deterministic Node tests.
-- [ ] 2.3 Extend the inbound spool with deterministic source ordering and one bounded snapshot containing valid, blocked, size, pressure/full, and oldest-pending metadata; verify ordering tie-breakers, corrupt-entry retention, limits, and mode-safe persistence with Node tests.
+- [x] 2.3 Extend the inbound spool with deterministic source ordering and one bounded snapshot containing valid, blocked, size, pressure/full, and oldest-pending metadata; verify ordering tie-breakers, corrupt-entry retention, limits, and mode-safe persistence with Node tests.
 
 ## 3. Independent Processing Recovery
 
