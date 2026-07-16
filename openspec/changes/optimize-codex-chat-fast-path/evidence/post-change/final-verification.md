@@ -21,15 +21,15 @@ The fixture identity is unchanged from baseline: warm resumed conversation, exis
 | Stage | Baseline p95 | Candidate p95 | Delta |
 | --- | ---: | ---: | ---: |
 | Working feedback | 0.000 ms | 0.000 ms | 0.000 ms |
-| Provider request | 30.895 ms | 23.814 ms | -7.081 ms |
-| First native event | 31.442 ms | 24.266 ms | -7.176 ms |
-| First native SSE | 69.762 ms | 27.904 ms | -41.858 ms |
-| First fragment SSE | 69.762 ms | 27.904 ms | -41.858 ms |
-| First text SSE (observation only) | 133.724 ms | 27.992 ms | -105.732 ms |
-| Provider terminal | 1063.628 ms | 29.082 ms | -1034.546 ms |
-| Durable terminal commit | 1100.180 ms | 37.920 ms | -1062.260 ms |
-| Terminal tail | 271.926 ms | 38.213 ms | -233.713 ms |
-| Reader callback total | 1084.045 ms | 14.512 ms | -1069.533 ms |
+| Provider request | 30.895 ms | 23.557 ms | -7.338 ms |
+| First native event | 31.442 ms | 23.918 ms | -7.524 ms |
+| First native SSE | 69.762 ms | 27.583 ms | -42.179 ms |
+| First fragment SSE | 69.762 ms | 27.583 ms | -42.179 ms |
+| First text SSE (observation only) | 133.724 ms | 29.633 ms | -104.091 ms |
+| Provider terminal | 1063.628 ms | 30.222 ms | -1033.406 ms |
+| Durable terminal commit | 1100.180 ms | 35.602 ms | -1064.578 ms |
+| Terminal tail | 271.926 ms | 30.221 ms | -241.705 ms |
+| Reader callback total | 1084.045 ms | 13.059 ms | -1070.986 ms |
 
 Every listed stage has 100 samples. The simulated synchronous browser boundary is useful for exact before/after fixture identity, but is not presented as a real browser paint measurement.
 
@@ -49,12 +49,13 @@ The additional append is the intentional durable terminal record introduced for 
 
 ## Capacity, compatibility, durability, and security
 
+- Push-review remediation added deterministic coverage for conversation-lock identity, shared-runtime timeout isolation, callback failure containment and reader reuse, terminal diagnostics without reasoning, pressure-order reconstruction, nested replacement snapshots, and non-Codex telemetry exclusion.
 - Capacity 1 remains supported. Capacity 2 is approved by the deterministic multiplexing fixture: two native threads interleave start, reasoning, approval, user input, cancellation, completion, result delivery, and cleanup without cross-delivery. Capacity 3–4 remains unproven and is not approved for rollout.
 - Flag-off focused regression: 128 passed. Flag-on focused regression at capacity 2 and 33–100 ms coalescing: 85 passed.
 - Rollback rehearsal: passed. It writes accepted user content, approval request/resolution, final reply, terminal outcome, and thread mapping while enabled; replaces the live view with a fresh flag-off instance; reads every durable surface; and proves that recovery did not mutate any status file.
 - Browser/static compatibility: Codex runs, approval UI, Provider SSE, app-server split, runtime settings, history store/navigation, chat bug regressions, Claude Code SSE, and browser timing checks passed. The in-app browser loaded the cache-busted `chat.js` and timing script with zero console errors.
 - Bounded/redacted diagnostics: config, event service, coalescer, telemetry, and browser-timing tests passed. Diagnostics contain fixed-cardinality counters, bounded samples, digested/run IDs, and stage durations; prompt, reply, reasoning, credential, approval content, raw payload, and unrestricted path canaries are absent.
-- Complete Python regression was split to avoid a known cross-module temporary-directory cleanup race: 671 non-Project tests passed and 100 Project Execution tests passed, for 771 passed total. Two prior monolithic attempts each reached 770 passed and failed only in a different Project Execution temporary-directory cleanup; each failed test passed immediately in isolation.
+- Complete Python regression was split to avoid a known cross-module temporary-directory cleanup race: 678 non-Project tests passed and 100 Project Execution tests passed, for 778 passed total. The generated Provider inventory was refreshed after the remediation source changes and reproduced exactly.
 - Strict OpenSpec validation passed: one change valid, zero failed, zero issues.
 
 ## Environment-gated and unverified checks

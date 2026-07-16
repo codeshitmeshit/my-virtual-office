@@ -20,19 +20,19 @@
 
 ## 关键追问
 
-**Q：为什么不先优化 Provider journal/SSE？**  
+**Q：为什么不先优化 Provider journal/SSE？**
 A：现有固定基准显示它们是有界、索引化的微秒级路径；实际 Codex callback 在到达 journal 前执行两类全量文件重写，优先级更高。
 
-**Q：为什么 transient 不继续同步落盘？**  
+**Q：为什么 transient 不继续同步落盘？**
 A：确认规格允许 reasoning/delta 在崩溃后丢失；用户、审批、final 和 terminal 分别进入现有 durable authority，同步保存 transient 只放大首事件延迟。
 
-**Q：为什么不直接解除 `_run_lock`？**  
+**Q：为什么不直接解除 `_run_lock`？**
 A：JSONL request ID 支持多 pending request 不等于 Provider 支持多 active turn；必须保留 per-thread ordering、全局 semaphore 和并发证明门禁。
 
-**Q：为什么 coalescer 不丢弃高频文本？**  
+**Q：为什么 coalescer 不丢弃高频文本？**
 A：规格要求最终有序内容一致；压力下采用 force flush 或 bypass，不能以静默丢文本换性能。
 
-**Q：为什么需要总开关和重启？**  
+**Q：为什么需要总开关和重启？**
 A：本次同时改变事件调度、持久化频率和并发边界；启动时固定配置可以避免运行中半旧半新的状态，并提供确定性回滚。
 
 ## 测试与上线建议
