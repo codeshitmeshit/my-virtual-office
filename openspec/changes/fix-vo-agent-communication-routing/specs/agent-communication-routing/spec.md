@@ -1,15 +1,23 @@
 ## ADDED Requirements
 
 ### Requirement: Canonical office communication skill
-Virtual Office SHALL expose one canonical agent communication skill whose instructions require office-visible routing for ordinary cross-agent communication. The runtime copy, Skills Library copy, and agent-installed copy of that skill SHALL express the same routing rules and SHALL NOT retain a divergent legacy communication contract.
+Virtual Office SHALL expose `vo-agent-communication` as the single canonical ordinary-chat contract shared by all office agents and target provider kinds, including OpenClaw, Hermes, Claude Code, and Codex. Its instructions SHALL require office-visible routing for ordinary cross-agent communication and SHALL NOT redirect Codex targets to a separately installed communication skill. The runtime copy, Skills Library copy, and agent-installed copy SHALL express the same routing rules and SHALL NOT retain a divergent legacy or provider-split communication contract.
 
 #### Scenario: Runtime skill is seeded
 - **WHEN** Virtual Office initializes or refreshes its built-in Skills Library entries
 - **THEN** the canonical agent communication skill is available under its current skill identity with the same normative routing rules as the VO-served communication guidance
 
+#### Scenario: Target provider is Codex
+- **WHEN** an office agent using `vo-agent-communication` resolves a target whose `providerKind` is `codex`
+- **THEN** the same skill instructs it to use the Virtual Office communication endpoint and does not require `vo-codex-communication` or another provider-specific chat skill
+
 #### Scenario: Legacy skill data exists
 - **WHEN** Virtual Office finds an older built-in communication skill managed by a previous VO version
-- **THEN** it migrates or replaces that managed entry without deleting unrelated user-created skills
+- **THEN** it migrates or replaces only content positively identified as VO-managed and does not delete unrelated user-created skills, modified legacy content, or auxiliary files
+
+#### Scenario: Legacy directory ownership is unknown
+- **WHEN** the reserved legacy skill directory contains content that does not match a known VO-managed legacy form or contains additional files not owned by VO
+- **THEN** Virtual Office preserves the directory unchanged, reports a non-sensitive migration conflict, and does not perform recursive deletion from a read-only Skills Library request
 
 ### Requirement: Communication skill lifecycle for OpenClaw agents
 Virtual Office SHALL install the canonical communication skill into every discovered or newly created OpenClaw agent workspace that supports workspace skills. Virtual Office SHALL refresh VO-managed copies when the canonical version changes while preserving unrelated workspace skills and user-authored files.
@@ -27,7 +35,7 @@ Virtual Office SHALL install the canonical communication skill into every discov
 - **THEN** each eligible OpenClaw workspace receives the updated managed copy without overwriting unrelated skills or files
 
 ### Requirement: Provider-aware office routing
-An office agent handling an ordinary cross-agent request SHALL resolve the current sender identity, target identity, and target provider from the Virtual Office roster before sending. It SHALL send the request through `POST /api/agent-platform-communications/send` with a stable conversation identifier instead of guessing an agent ID or provider route.
+An office agent handling an ordinary cross-agent request SHALL resolve the current sender identity, target identity, and target provider from the Virtual Office roster before sending. For every supported target provider, including Codex, it SHALL send the request through `POST /api/agent-platform-communications/send` with a stable conversation identifier instead of guessing an agent ID, redirecting to a provider-specific chat skill, or using a private provider route.
 
 #### Scenario: Unique target exists
 - **WHEN** the current VO roster contains one target matching the requested office agent

@@ -1,11 +1,15 @@
 ## 1. OpenClaw Availability
 
 - [x] 1.1 Implement centralized OpenClaw home inspection for valid configuration, directory fallback, residual homes, and malformed configuration; use it for both roster discovery and `/vo-config.openclaw.detected`, with focused discovery/config tests.
+- [x] 1.2 Harden OpenClaw inspection for structurally invalid but syntactically valid JSON, including scalar, array, null, and malformed nested `agents` values; return `malformed_config` without startup or `/vo-config` exceptions.
 
 ## 2. Canonical Communication Skill
 
 - [x] 2.1 Replace the generated legacy communication skill source with a validated loader for `skills/vo-agent-communication/SKILL.md`; seed the exact canonical content into Skills Library and safely migrate the reserved legacy library entry, with source-consistency and migration tests.
 - [x] 2.2 Implement the locked, atomic, hash-based OpenClaw workspace skill synchronizer and managed marker; cover first install, no-op repeat, managed upgrade, unmarked conflict, known legacy migration, path-boundary rejection, and unrelated-file preservation.
+- [ ] 2.3 Revise `vo-agent-communication` into the single ordinary-chat contract for all target providers, including Codex, and add OpenClaw-to-Codex routing tests proving no provider-specific chat skill is required.
+- [ ] 2.4 Replace recursive Skills Library legacy deletion with ownership-checked, exact-file migration; preserve modified content and auxiliary files, report conflicts, and add read-path data-preservation tests.
+- [ ] 2.5 Reject workspace-internal symlink escapes for `skills`, canonical skill, marker, and legacy paths before managed reads or writes; add focused symlink boundary tests.
 
 ## 3. Agent Lifecycle Integration
 
@@ -15,7 +19,8 @@
 ## 4. Routing and Traceability Verification
 
 - [x] 4.1 Add communication routing regressions that verify current roster identities, stable `conversationId`, request/reply or terminal-failure history, busy/timeout/empty-reply handling, and the canonical prohibition on private session/CLI fallback.
-- [ ] 4.2 Add and execute a real OpenClaw delegation acceptance check for “让分析师看一下最近市场动向”, recording evidence that VO history contains the request/reply and the corresponding activity contains no `sessions_list`, `sessions_send`, or `openclaw agents` fallback.
+- [ ] 4.2 Enforce communication readiness for agent-originated OpenClaw sends, returning the actual non-ready state before history or provider execution while preserving human and non-OpenClaw routes; add routing-gate regressions.
+- [ ] 4.3 Add and execute a real OpenClaw delegation acceptance check for “让分析师看一下最近市场动向”, recording evidence that VO history contains the request/reply and the corresponding activity contains no `sessions_list`, `sessions_send`, or `openclaw agents` fallback.
 
 ## 5. Final Verification
 

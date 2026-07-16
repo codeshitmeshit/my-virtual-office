@@ -36,7 +36,12 @@ def inspect_openclaw_home(oc_home):
         except (OSError, json.JSONDecodeError, TypeError):
             return {"detected": False, "reason": "malformed_config", "agents": []}
 
-        raw_agents = (cfg.get("agents") or {}).get("list") if isinstance(cfg, dict) else None
+        if not isinstance(cfg, dict):
+            return {"detected": False, "reason": "malformed_config", "agents": []}
+        agents_config = cfg.get("agents")
+        if not isinstance(agents_config, dict):
+            return {"detected": False, "reason": "malformed_config", "agents": []}
+        raw_agents = agents_config.get("list")
         if not isinstance(raw_agents, list):
             return {"detected": False, "reason": "malformed_config", "agents": []}
         agents = [item for item in raw_agents if isinstance(item, dict) and str(item.get("id") or "").strip()]

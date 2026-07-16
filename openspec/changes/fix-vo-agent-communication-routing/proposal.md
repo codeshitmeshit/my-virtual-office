@@ -4,9 +4,10 @@ Virtual Office agents can currently interpret cross-agent delegation as a reason
 
 ## What Changes
 
-- Make the current VO agent communication contract the canonical runtime skill for office agents, replacing the divergent legacy built-in communication skill.
+- Make `vo-agent-communication` the canonical runtime communication contract shared by all office agents and target providers, including Codex, replacing divergent or provider-split ordinary-chat rules.
+- Migrate the reserved legacy communication skill only when its ownership is positively identified, preserving unknown, modified, or auxiliary user content.
 - Ensure eligible OpenClaw agents receive and can refresh the canonical communication skill when they are created or discovered.
-- Require ordinary cross-agent requests to resolve current VO identities and provider kinds before using the VO communication endpoint.
+- Require ordinary cross-agent requests to resolve current VO identities and provider kinds before using the VO communication endpoint, without redirecting Codex targets to a separately installed communication skill.
 - Prevent cross-agent routing from silently falling back to provider-private sessions or CLIs when the VO route is required or unavailable.
 - Report OpenClaw availability from usable configuration and agent data instead of directory existence alone.
 - Add regression coverage for skill distribution, roster availability, routing, history traceability, and forbidden private fallbacks.

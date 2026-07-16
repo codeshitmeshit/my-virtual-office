@@ -69,3 +69,28 @@ def test_malformed_or_empty_config_does_not_fall_back_to_directories():
         assert inspected["detected"] is False
         assert inspected["reason"] == "no_configured_agents"
         assert discover_agents(home) == []
+
+
+def test_structurally_invalid_json_is_reported_as_malformed_config():
+    invalid_documents = [
+        [],
+        "invalid-root",
+        None,
+        {"agents": "invalid"},
+        {"agents": []},
+        {"agents": 1},
+        {"agents": {"list": "invalid"}},
+    ]
+    with tempfile.TemporaryDirectory() as home:
+        config_path = os.path.join(home, "openclaw.json")
+        os.makedirs(os.path.join(home, "agents", "guessed", "sessions"))
+        for document in invalid_documents:
+            with open(config_path, "w", encoding="utf-8") as f:
+                json.dump(document, f)
+            inspected = inspect_openclaw_home(home)
+            assert inspected == {
+                "detected": False,
+                "reason": "malformed_config",
+                "agents": [],
+            }
+            assert discover_agents(home) == []
