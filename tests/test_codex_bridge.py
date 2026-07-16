@@ -24,6 +24,7 @@ import os
 import sys
 
 thread_id = "thr_fake"
+turn_counts = {}
 
 def send(value):
     sys.stdout.write(json.dumps(value) + "\n")
@@ -65,7 +66,9 @@ for raw in sys.stdin:
             send({"id": request_id, "result": {"turn": {"id": "turn_hang"}}})
             send({"method": "turn/started", "params": {"threadId": params["threadId"], "turn": {"id": "turn_hang"}}})
             continue
-        turn_id = "turn_permissions" if "permissions" in prompt else "turn_approval" if "approval" in prompt else "turn_input" if "question" in prompt else "turn_ok"
+        turn_base = "turn_permissions" if "permissions" in prompt else "turn_approval" if "approval" in prompt else "turn_input" if "question" in prompt else "turn_ok"
+        turn_counts[turn_base] = turn_counts.get(turn_base, 0) + 1
+        turn_id = turn_base if turn_counts[turn_base] == 1 else f"{turn_base}_{turn_counts[turn_base]}"
         send({"id": request_id, "result": {"turn": {"id": turn_id}}})
         send({"method": "turn/started", "params": {"threadId": params["threadId"], "turn": {"id": turn_id}}})
         if "approval" in prompt:
@@ -534,6 +537,69 @@ def test_terminal_fence_has_bounded_fallback_for_stuck_prior_callback():
     assert operation.fence_diagnostics()["terminalFenceFallbacks"] == 1
     release.set()
     prior.join(0.5)
+
+
+def test_terminal_fence_bounds_terminal_callback_and_releases_reader():
+    entered = threading.Event()
+    release = threading.Event()
+
+    def callback(event):
+        if event["type"] == "turn":
+            entered.set()
+            release.wait(1)
+
+    operation = _Operation("thr-terminal-callback", event_callback=callback)
+    started = time.perf_counter()
+    assert operation.emit("turn", terminal=True, status="completed") is True
+    assert time.perf_counter() - started < 0.02
+    assert entered.wait(0.2)
+    assert operation.completed.wait(TERMINAL_DRAIN_TIMEOUT_SEC + 0.2)
+    assert operation.fence_diagnostics()["terminalFenceFallbacks"] == 1
+    release.set()
+
+
+def test_late_turn_notifications_and_approvals_do_not_cross_into_reused_thread():
+    client = object.__new__(CodexAppServerClientImpl)
+    client._operations_lock = threading.Lock()
+    client._terminal_operations = OrderedDict()
+    client._approval_lock = threading.Condition()
+    client._pending_approvals = {}
+    sent = []
+    client._send = lambda message: sent.append(message)
+
+    previous = _Operation("thr-reused", turn_id="turn-old")
+    current = _Operation("thr-reused", allow_interaction=True)
+    current.inherit_turn_history(previous)
+    client._operations = {"thr-reused": current}
+
+    client._handle_notification("item/agentMessage/delta", {
+        "threadId": "thr-reused",
+        "turnId": "turn-old",
+        "delta": "stale reply",
+    })
+    client._handle_server_request({
+        "id": 91,
+        "method": "item/commandExecution/requestApproval",
+        "params": {"threadId": "thr-reused", "turnId": "turn-old", "itemId": "old-tool"},
+    })
+
+    assert current.state.reply_text() == ""
+    assert current.pending_requests == {}
+    assert sent[-1]["id"] == 91
+    assert sent[-1]["result"]["decision"] == "cancel"
+    assert current.fence_diagnostics()["lateNotifications"] == 2
+
+    client._handle_notification("turn/started", {
+        "threadId": "thr-reused",
+        "turn": {"id": "turn-new", "status": "inProgress"},
+    })
+    client._handle_notification("turn/completed", {
+        "threadId": "thr-reused",
+        "turn": {"id": "turn-new", "status": "completed", "items": []},
+    })
+    assert current.turn_id == "turn-new"
+    assert current.result["status"] == "completed"
+    assert current.completed.wait(0.2)
 
 
 def test_successful_terminal_has_no_fixed_sleep_tail():

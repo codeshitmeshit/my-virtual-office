@@ -119,6 +119,12 @@ def _normalize_status(value: Any, completed: bool = False) -> str:
     return "running"
 
 
+def _native_turn_id(params: dict[str, Any]) -> str:
+    params = params if isinstance(params, dict) else {}
+    turn = params.get("turn") if isinstance(params.get("turn"), dict) else {}
+    return str(params.get("turnId") or turn.get("id") or "").strip()
+
+
 class CodexAppRunState:
     """Collect Codex app-server notifications into Office chat artifacts."""
 
@@ -356,6 +362,7 @@ class _Operation:
     post_terminal_metrics: int = 0
     callback_errors: int = 0
     callback_error_category: str = ""
+    stale_turn_ids: set[str] = field(default_factory=set, repr=False)
 
     def emit(self, event_type: str, *, terminal: bool = False, **data: Any) -> bool:
         with self._callback_condition:
@@ -380,23 +387,75 @@ class _Operation:
                 "ts": int(time.time() * 1000),
                 **data,
             }
+            if terminal and self.event_callback:
+                self._start_terminal_fallback_locked()
+
+        if terminal and self.event_callback:
+            def invoke_terminal_callback() -> None:
+                try:
+                    self.event_callback(event)
+                except Exception as exc:
+                    self._record_callback_error(exc)
+                finally:
+                    self._finish_callback(callback_id, terminal=True)
+
+            try:
+                worker = threading.Thread(
+                    target=invoke_terminal_callback,
+                    name=f"codex-terminal-callback-{self.operation_id[:8]}",
+                    daemon=True,
+                )
+                worker.start()
+                return True
+            except Exception as exc:
+                self._record_callback_error(exc)
+                self._finish_callback(callback_id, terminal=True)
+                return False
+
         callback_ok = True
         try:
             if self.event_callback:
                 self.event_callback(event)
         except Exception as exc:
             callback_ok = False
-            with self._callback_condition:
-                self.callback_errors += 1
-                self.callback_error_category = type(exc).__name__[:80]
+            self._record_callback_error(exc)
         finally:
-            with self._callback_condition:
-                self._active_callback_ids.discard(callback_id)
-                self._release_completion_if_drained_locked()
-                if terminal and not self.completed.is_set():
-                    self._start_terminal_fallback_locked()
-                self._callback_condition.notify_all()
+            self._finish_callback(callback_id, terminal=terminal)
         return callback_ok
+
+    def _record_callback_error(self, exc: BaseException) -> None:
+        with self._callback_condition:
+            self.callback_errors += 1
+            self.callback_error_category = type(exc).__name__[:80]
+
+    def _finish_callback(self, callback_id: int, *, terminal: bool) -> None:
+        with self._callback_condition:
+            self._active_callback_ids.discard(callback_id)
+            self._release_completion_if_drained_locked()
+            if terminal and not self.completed.is_set():
+                self._start_terminal_fallback_locked()
+            self._callback_condition.notify_all()
+
+    def inherit_turn_history(self, previous: "_Operation | None") -> None:
+        if previous is None:
+            return
+        with self._callback_condition:
+            inherited = set(previous.stale_turn_ids)
+            if previous.turn_id:
+                inherited.add(previous.turn_id)
+            self.stale_turn_ids.update(sorted(inherited)[-64:])
+
+    def accept_turn_identity(self, params: dict[str, Any]) -> bool:
+        incoming = _native_turn_id(params)
+        if not incoming:
+            return True
+        with self._callback_condition:
+            if incoming in self.stale_turn_ids or (self.turn_id and incoming != self.turn_id):
+                self.late_notifications += 1
+                return False
+            if not self.turn_id:
+                self.turn_id = incoming
+            return True
 
     def finish_without_event(self) -> None:
         with self._callback_condition:
@@ -627,6 +686,15 @@ class CodexAppServerClient:
         with self._operations_lock:
             operation = self._operations.get(thread_id) or self._terminal_operations.get(thread_id)
         if method in APPROVAL_METHODS:
+            if operation and not operation.accept_turn_identity(params):
+                if method == "item/tool/requestUserInput":
+                    result = {"answers": {}}
+                elif method == "mcpServer/elicitation/request":
+                    result = {"action": "decline"}
+                else:
+                    result = self._approval_response(method, params, "cancel")
+                self._send({"id": message["id"], "result": result})
+                return
             if operation and operation.fence_diagnostics()["terminalObserved"]:
                 operation.accept_native_notification(method)
                 if method == "item/tool/requestUserInput":
@@ -726,6 +794,8 @@ class CodexAppServerClient:
         with self._operations_lock:
             operation = self._operations.get(thread_id) or self._terminal_operations.get(thread_id)
         if not operation:
+            return
+        if not operation.accept_turn_identity(params):
             return
         if not operation.accept_native_notification(method):
             return
@@ -1232,7 +1302,8 @@ class CodexAppServerClient:
                     allow_interaction=allow_interaction,
                 )
                 with self._operations_lock:
-                    self._terminal_operations.pop(active_thread_id, None)
+                    previous = self._terminal_operations.pop(active_thread_id, None)
+                    operation.inherit_turn_history(previous)
                     self._operations[active_thread_id] = operation
             turn_result = self._request_with_restart("turn/start", {
                 "threadId": active_thread_id,
@@ -1246,7 +1317,14 @@ class CodexAppServerClient:
                     "networkAccess": False,
                 },
             }, timeout=30, retry=False)
-            operation.turn_id = str((turn_result.get("turn") or {}).get("id") or "")
+            returned_turn_id = str((turn_result.get("turn") or {}).get("id") or "")
+            if returned_turn_id and not operation.accept_turn_identity({"turnId": returned_turn_id}):
+                return _error_result(
+                    "protocol_error",
+                    "Codex turn/start response did not match the active turn",
+                    threadId=active_thread_id,
+                    turnId=returned_turn_id,
+                )
             if not operation.completed.wait(timeout=max(1, int(timeout_sec))):
                 try:
                     self._request("turn/interrupt", {"threadId": active_thread_id, "turnId": operation.turn_id}, timeout=5)
@@ -1410,7 +1488,8 @@ class CodexAppServerClient:
             self._request_with_restart("thread/resume", {"threadId": thread_id, **self._thread_params()}, timeout=30)
             operation = _Operation(thread_id=thread_id, kind="compact")
             with self._operations_lock:
-                self._terminal_operations.pop(thread_id, None)
+                previous = self._terminal_operations.pop(thread_id, None)
+                operation.inherit_turn_history(previous)
                 self._operations[thread_id] = operation
             self._request("thread/compact/start", {"threadId": thread_id}, timeout=30)
             if not operation.completed.wait(timeout=max(1, int(timeout_sec))):
