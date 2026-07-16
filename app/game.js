@@ -14800,7 +14800,10 @@ function mmUpdateFeishuGroupChatControl() {
     var transportEl = document.getElementById('mm-feishu-chat-transport');
     var warningEl = document.getElementById('mm-feishu-group-chat-warning');
     var isNode = !transportEl || transportEl.value === 'channel-sdk-node';
-    if (groupEnabledEl) groupEnabledEl.disabled = !isNode;
+    if (groupEnabledEl) {
+        if (!isNode) groupEnabledEl.checked = false;
+        groupEnabledEl.disabled = !isNode;
+    }
     if (warningEl) {
         warningEl.textContent = _tr(isNode ? 'feishu_group_chat_warning' : 'feishu_group_chat_requires_node');
         warningEl.style.color = isNode ? '#ffb74d' : '#ff8a80';

@@ -11,6 +11,7 @@ assert.match(html, /id="mm-feishu-group-chat-warning"/, 'settings must show the 
 assert.match(game, /groupChatEnabled:\s*groupChatEnabled/, 'dedicated Chat save must send the group switch');
 assert.match(game, /groupChatEnabled:\s*_feishuGroupChatEnabled/, 'generic setup save must preserve the group switch');
 assert.match(game, /transport !== 'channel-sdk-node'/, 'UI must reject group chat on legacy transport');
+assert.match(game, /if \(!isNode\) groupEnabledEl\.checked = false/, 'switching to legacy must clear a stale checked group switch before save');
 assert.match(game, /allowedChatTypes:\s*_feishuGroupChatEnabled[^\n]+\['p2p', 'group'\]/, 'setup payload must project dynamic chat types');
 assert.ok(en.feishu_group_chat_warning.includes('every human member'));
 assert.ok(zh.feishu_group_chat_warning.includes('所有真人成员'));
