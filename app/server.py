@@ -9893,6 +9893,8 @@ def _handle_agent_platform_comm_send(body):
     to_agent = _office_agent_lookup(to_agent_id)
     if not to_agent:
         return {"ok": False, "error": f"Target agent '{to_agent_id}' not found", "_status": 404}
+    if not is_human_source and not _office_agent_lookup(from_agent_id):
+        return {"ok": False, "error": f"Sender agent '{from_agent_id}' not found", "_status": 404}
     archive_guard = _archive_manager_chat_guard(to_agent_id, message)
 
     source_app = str(body.get("sourceApp") or body.get("app") or "virtual-office").strip() or "virtual-office"
@@ -10010,6 +10012,10 @@ def _handle_agent_platform_comm_send(body):
         else:
             reply = _wf_call_agent(to_ref["id"], target_prompt, timeout=timeout, project_id="agent-platform-communications", task_id=conversation_id)
             ok = not str(reply or "").startswith("[ERROR]")
+        if ok and not str(reply or "").strip():
+            ok = False
+            if provider_result is not None:
+                provider_result["status"] = "empty_reply"
     except Exception as e:
         reply = f"[ERROR] {e}"
         ok = False
@@ -10048,7 +10054,7 @@ def _handle_agent_platform_comm_send(body):
         "from": from_ref,
         "to": to_ref,
         "reply": reply,
-        "status": provider_result.get("status") if provider_result else ("completed" if ok else "execution_failed"),
+        "status": provider_result.get("status") if provider_result else ("completed" if ok else ("empty_reply" if not str(reply or "").strip() else "execution_failed")),
         "modifiedFiles": provider_result.get("modifiedFiles") if provider_result else [],
         "needsHumanIntervention": bool(provider_result and provider_result.get("needsHumanIntervention")),
         "activeConversationId": provider_result.get("activeConversationId", "") if provider_result else "",

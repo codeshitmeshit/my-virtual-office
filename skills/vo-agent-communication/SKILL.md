@@ -24,6 +24,7 @@ POST /api/agent-platform-communications/send
 不要：
 
 - 直接调用 OpenClaw 私有 session。
+- 使用 `sessions_list`、`sessions_send`、`openclaw agents` 或等价的 provider-private 发现/消息路径完成办公室 Agent 通信。
 - 直接执行 Hermes、Claude Code CLI 或其他目标平台的私人 CLI。
 - 绕过 Virtual Office 建立不可见通信。
 - 把目标 Agent 当成本地 Codex subagent。
