@@ -686,6 +686,75 @@ def test_feishu_chat_config_is_separate_from_notification_app():
     assert saved["feishu"]["chatApp"]["appSecret"] == "chat-secret"
 
 
+def test_feishu_group_chat_config_switch_overrides_and_legacy_guard():
+    os.environ.setdefault("VO_HERMES_ENABLED", "0")
+    os.environ.setdefault("VO_CODEX_ENABLED", "0")
+    status_dir = tempfile.mkdtemp(prefix="vo-feishu-group-config-")
+    os.environ["VO_STATUS_DIR"] = status_dir
+    import server
+
+    previous_config = server.VO_CONFIG
+    previous_group_override = os.environ.get("VO_FEISHU_GROUP_CHAT_ENABLED")
+    previous_transport_override = os.environ.get("VO_FEISHU_CHAT_TRANSPORT")
+    server.VO_CONFIG = {
+        **previous_config,
+        "feishu": {
+            "chatApp": {
+                "enabled": True,
+                "appId": "cli_chat",
+                "appSecret": "chat-secret",
+                "transportImplementation": "channel-sdk-node",
+            },
+            "bindings": {},
+        },
+    }
+    try:
+        default = server._feishu_chat_config_response()
+        os.environ["VO_FEISHU_GROUP_CHAT_ENABLED"] = "1"
+        enabled = server._feishu_chat_config_response()
+        os.environ["VO_FEISHU_CHAT_TRANSPORT"] = "legacy-python"
+        unsupported = server._feishu_chat_config_response()
+        os.environ.pop("VO_FEISHU_GROUP_CHAT_ENABLED", None)
+        os.environ.pop("VO_FEISHU_CHAT_TRANSPORT", None)
+        rejected = server._save_feishu_chat_config({
+            "enabled": True,
+            "groupChatEnabled": True,
+            "transportImplementation": "legacy-python",
+        })
+        merged = server._merge_setup_config(
+            {"feishu": {"chatApp": {"groupChatEnabled": True, "transportImplementation": "channel-sdk-node"}}},
+            {"notifications": {"feishuEnabled": False}},
+        )
+    finally:
+        server.VO_CONFIG = previous_config
+        if previous_group_override is None:
+            os.environ.pop("VO_FEISHU_GROUP_CHAT_ENABLED", None)
+        else:
+            os.environ["VO_FEISHU_GROUP_CHAT_ENABLED"] = previous_group_override
+        if previous_transport_override is None:
+            os.environ.pop("VO_FEISHU_CHAT_TRANSPORT", None)
+        else:
+            os.environ["VO_FEISHU_CHAT_TRANSPORT"] = previous_transport_override
+
+    assert default["groupChatEnabled"] is False
+    assert default["groupChatEffective"] is False
+    assert default["groupChatStatus"] == "disabled"
+    assert default["allowedChatTypes"] == ["p2p"]
+    assert enabled["groupChatEnabled"] is True
+    assert enabled["groupChatEffective"] is True
+    assert enabled["groupChatStatus"] == "enabled"
+    assert enabled["allowedChatTypes"] == ["p2p", "group"]
+    assert unsupported["groupChatEnabled"] is True
+    assert unsupported["groupChatEffective"] is False
+    assert unsupported["groupChatStatus"] == "unsupported_transport"
+    assert unsupported["allowedChatTypes"] == ["p2p"]
+    assert rejected["ok"] is False
+    assert rejected["code"] == "group_chat_requires_channel_sdk"
+    assert rejected["_status"] == 400
+    assert merged["feishu"]["chatApp"]["groupChatEnabled"] is True
+    assert merged["notifications"]["feishuEnabled"] is False
+
+
 def test_disabling_feishu_chat_config_stops_existing_long_connection():
     os.environ.setdefault("VO_HERMES_ENABLED", "0")
     os.environ.setdefault("VO_CODEX_ENABLED", "0")

@@ -651,6 +651,17 @@ def _load_vo_config():
     claude_code_workspace_root = _env_or("VO_CLAUDE_CODE_WORKSPACE_ROOT", claude_code_cfg.get("workspaceRoot", os.path.join(_env_or("VO_STATUS_DIR", presence.get("statusDir", "/data")), "claude-code-agents")))
     claude_code_workspace = _env_or("VO_CLAUDE_CODE_WORKSPACE", claude_code_cfg.get("workspace", os.path.dirname(os.path.dirname(__file__))))
     hermes_api_enabled = hermes_cfg.get("apiEnabled", hermes_cfg.get("preferApi", False))
+    feishu_chat_transport = str(_env_or(
+        "VO_FEISHU_CHAT_TRANSPORT",
+        feishu_chat_cfg.get("transportImplementation", "channel-sdk-node"),
+    ) or "channel-sdk-node").strip().lower()
+    if feishu_chat_transport not in {"channel-sdk-node", "legacy-python"}:
+        feishu_chat_transport = "channel-sdk-node"
+    feishu_group_chat_requested = _env_bool(
+        "VO_FEISHU_GROUP_CHAT_ENABLED",
+        feishu_chat_cfg.get("groupChatEnabled", False),
+    )
+    feishu_group_chat_enabled = feishu_group_chat_requested and feishu_chat_transport == "channel-sdk-node"
     gateway_port = "18789"
     try:
         oc_cfg_path = os.path.join(os.path.expanduser(oc_home), "openclaw.json")
@@ -729,9 +740,10 @@ def _load_vo_config():
                 "appSecret": _env_or("VO_FEISHU_CHAT_APP_SECRET", feishu_chat_cfg.get("appSecret", "")),
                 "receiveMode": "long_connection",
                 "representativeAgentId": _env_or("VO_FEISHU_CHAT_AGENT_ID", feishu_chat_cfg.get("representativeAgentId", "")),
-                "transportImplementation": _env_or("VO_FEISHU_CHAT_TRANSPORT", feishu_chat_cfg.get("transportImplementation", "channel-sdk-node")),
+                "transportImplementation": feishu_chat_transport,
+                "groupChatEnabled": feishu_group_chat_requested,
                 "requireBoundVoUser": False,
-                "allowedChatTypes": ["p2p"],
+                "allowedChatTypes": ["p2p", "group"] if feishu_group_chat_enabled else ["p2p"],
                 "replyMode": "same_chat",
             },
             "bindings": feishu_cfg.get("bindings", {}) if isinstance(feishu_cfg.get("bindings"), dict) else {},
@@ -845,6 +857,20 @@ def _effective_feishu_chat_transport(cfg=None):
     return value if value in {"channel-sdk-node", "legacy-python"} else "channel-sdk-node"
 
 
+def _feishu_group_chat_requested(cfg=None):
+    cfg = cfg if isinstance(cfg, dict) else _feishu_chat_app_config()
+    return _env_bool("VO_FEISHU_GROUP_CHAT_ENABLED", cfg.get("groupChatEnabled", False))
+
+
+def _feishu_group_chat_enabled(cfg=None):
+    cfg = cfg if isinstance(cfg, dict) else _feishu_chat_app_config()
+    return _feishu_group_chat_requested(cfg) and _effective_feishu_chat_transport(cfg) == "channel-sdk-node"
+
+
+def _feishu_allowed_chat_types(cfg=None):
+    return ["p2p", "group"] if _feishu_group_chat_enabled(cfg) else ["p2p"]
+
+
 def _feishu_chat_app_configured(cfg=None):
     cfg = cfg if isinstance(cfg, dict) else _feishu_chat_app_config()
     return bool(cfg.get("appId") and cfg.get("appSecret"))
@@ -865,6 +891,8 @@ def _feishu_chat_config_response(include_ok=True):
         long_connection = {"enabled": False, "running": False, "status": "disabled"}
     else:
         long_connection = receiver.status() if receiver else {"enabled": False, "running": False, "status": "not_started"}
+    group_requested = _feishu_group_chat_requested(cfg)
+    group_enabled = _feishu_group_chat_enabled(cfg)
     result = {
         "enabled": bool(cfg.get("enabled", False)),
         "configured": _feishu_chat_app_configured(cfg),
@@ -872,9 +900,12 @@ def _feishu_chat_config_response(include_ok=True):
         "receiveMode": "long_connection",
         "transportImplementation": cfg.get("transportImplementation") or "channel-sdk-node",
         "effectiveTransportImplementation": _effective_feishu_chat_transport(cfg),
+        "groupChatEnabled": group_requested,
+        "groupChatEffective": group_enabled,
+        "groupChatStatus": "enabled" if group_enabled else ("unsupported_transport" if group_requested else "disabled"),
         "representativeAgentId": cfg.get("representativeAgentId") or "",
         "requireBoundVoUser": False,
-        "allowedChatTypes": ["p2p"],
+        "allowedChatTypes": _feishu_allowed_chat_types(cfg),
         "replyMode": "same_chat",
         "longConnection": long_connection,
         "sse": _feishu_chat_sse_metrics_snapshot(),
@@ -987,6 +1018,23 @@ def _persist_setup_payload(body):
             break
         except (FileNotFoundError, json.JSONDecodeError):
             continue
+    incoming_feishu = body.get("feishu") if isinstance(body, dict) and isinstance(body.get("feishu"), dict) else {}
+    incoming_chat = incoming_feishu.get("chatApp") if isinstance(incoming_feishu.get("chatApp"), dict) else {}
+    if incoming_chat.get("groupChatEnabled") is True:
+        existing_chat = ((existing.get("feishu") or {}).get("chatApp") or {}) if isinstance(existing, dict) else {}
+        selected_transport = str(
+            os.environ.get("VO_FEISHU_CHAT_TRANSPORT")
+            or incoming_chat.get("transportImplementation")
+            or existing_chat.get("transportImplementation")
+            or "channel-sdk-node"
+        ).strip().lower()
+        if selected_transport != "channel-sdk-node":
+            return {
+                "ok": False,
+                "error": "Feishu group chat requires the Channel SDK (Node) transport",
+                "code": "group_chat_requires_channel_sdk",
+                "_status": 400,
+            }
     existing = _merge_setup_config(existing, body)
     _clear_setup_secret_paths(existing, body.get("_clearSecrets") if isinstance(body, dict) else None)
     existing["_setupComplete"] = True
@@ -11545,11 +11593,27 @@ def _save_feishu_chat_config(body):
         return {"ok": False, "error": "Invalid Feishu Chat transport implementation", "code": "invalid_transport", "_status": 400}
     if representative_agent_id and not _find_agent_record(representative_agent_id):
         return {"ok": False, "error": "Representative agent not found", "code": "agent_not_found", "_status": 404}
+    current_cfg = _feishu_chat_app_config()
+    group_chat_enabled = bool(body.get("groupChatEnabled")) if "groupChatEnabled" in body else bool(current_cfg.get("groupChatEnabled", False))
+    selected_transport = str(
+        os.environ.get("VO_FEISHU_CHAT_TRANSPORT")
+        or transport
+        or current_cfg.get("transportImplementation")
+        or "channel-sdk-node"
+    ).strip().lower()
+    if group_chat_enabled and selected_transport != "channel-sdk-node":
+        return {
+            "ok": False,
+            "error": "Feishu group chat requires the Channel SDK (Node) transport",
+            "code": "group_chat_requires_channel_sdk",
+            "_status": 400,
+        }
     chat_app = {
         "enabled": enabled,
         "receiveMode": "long_connection",
+        "groupChatEnabled": group_chat_enabled,
         "requireBoundVoUser": False,
-        "allowedChatTypes": ["p2p"],
+        "allowedChatTypes": ["p2p", "group"] if group_chat_enabled else ["p2p"],
         "replyMode": "same_chat",
     }
     if app_id or body.get("clearApp"):

@@ -1,7 +1,7 @@
 ## 1. Baseline and Rollout Controls
 
 - [x] 1.1 Add characterization tests for the current private-only configuration, group rejection, private conversation identity, sender binding, text/image handling, communication-ledger visibility, normalized history, Feishu SSE publish/replay, notification isolation, and Node/legacy transport behavior; save the reproducible baseline command and result under this change.
-- [ ] 1.2 Add the default-off `feishu.chatApp.groupChatEnabled` setting and `VO_FEISHU_GROUP_CHAT_ENABLED` override, preserve it across unrelated settings saves, project dynamic `allowedChatTypes`, reject group enablement on legacy transport, and expose the switch plus trust warning in the existing Feishu settings/status UI with focused API/UI tests.
+- [x] 1.2 Add the default-off `feishu.chatApp.groupChatEnabled` setting and `VO_FEISHU_GROUP_CHAT_ENABLED` override, preserve it across unrelated settings saves, project dynamic `allowedChatTypes`, reject group enablement on legacy transport, and expose the switch plus trust warning in the existing Feishu settings/status UI with focused API/UI tests.
 
 ## 2. Worker Policy and Inbound Identity
 

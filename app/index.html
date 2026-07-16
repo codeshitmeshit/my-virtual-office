@@ -290,6 +290,10 @@
                             <label class="mm-label" style="display:flex;align-items:center;gap:6px;">
                                 <input type="checkbox" id="mm-feishu-chat-enable"> <span data-i18n="feishu_chat_enable">Enable Feishu chat channel</span>
                             </label>
+                            <label class="mm-label" style="display:flex;align-items:center;gap:6px;">
+                                <input type="checkbox" id="mm-feishu-group-chat-enable"> <span data-i18n="feishu_group_chat_enable">Enable trusted-group chat</span>
+                            </label>
+                            <div id="mm-feishu-group-chat-warning" style="font-size:9px;color:#ffb74d;margin:4px 0 8px;line-height:1.4;" data-i18n="feishu_group_chat_warning">Adding the bot to a group grants every human member access to the representative Agent. Group chat requires the Channel SDK (Node) transport.</div>
                             <div id="mm-feishu-chat-mask" style="font-size:10px;color:#888;margin:4px 0 8px;" data-i18n="feishu_not_configured">Not configured</div>
                             <label class="mm-label" data-i18n="feishu_chat_app_id">Chat App ID</label>
                             <input type="text" id="mm-feishu-chat-app-id" class="mm-input" placeholder="cli_xxx" autocomplete="off">
