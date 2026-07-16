@@ -389,6 +389,37 @@ test('processing health transitions independently through degraded, recovering, 
   assert.equal(healthy.lastErrorCategory, '');
 });
 
+test('heartbeat raises a quiet recovery-off backlog warning after the age threshold', async (t) => {
+  const statusDir = await mkdtemp(join(tmpdir(), 'vo-feishu-worker-processing-warning-heartbeat-'));
+  const worker = new FeishuChannelWorker({
+    appId: 'cli_test', appSecret: 'secret', statusDir,
+    callbackUrl: 'http://127.0.0.1', callbackToken: 'token',
+    workerInstanceId: 'worker-warning-heartbeat', parentPid: process.pid,
+    processingRecoveryEnabled: false,
+    processingWarningThresholdMs: 60_000,
+    createChannel: () => ({
+      on() {}, async connect() {}, async disconnect() {},
+      getConnectionStatus() { return { state: 'connected' }; },
+    }),
+    callbackClient: {
+      async deliverOnce() { throw Object.assign(new Error('offline'), { category: 'callback_network_error' }); },
+    },
+  });
+  t.after(() => worker.stop());
+  await worker.start();
+  await assert.rejects(worker.handleMessage(message('om_warning_heartbeat')), /offline/);
+  assert.equal(worker.status.snapshot().processing.warning, false);
+
+  worker.processingSpool = {
+    ...worker.processingSpool,
+    oldestPendingAt: Date.now() - worker.processingWarningThresholdMs - 1,
+  };
+  await worker._heartbeat();
+  const status = worker.status.snapshot();
+  assert.equal(status.processing.warning, true);
+  assert.ok(status.heartbeatAt > 0);
+});
+
 test('callback timeout is capped at 15 minutes', () => {
   assert.equal(new CallbackClient({ timeoutMs: 99999999 }).timeoutMs, 900000);
   assert.equal(new CallbackClient().singleAttemptTimeoutMs, DEFAULT_SINGLE_ATTEMPT_TIMEOUT_MS);

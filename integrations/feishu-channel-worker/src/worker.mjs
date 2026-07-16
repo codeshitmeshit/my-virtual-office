@@ -289,7 +289,7 @@ export class FeishuChannelWorker {
   }
 
   _startWatchdogs() {
-    this.heartbeatTimer = setInterval(() => this.status.update({ heartbeatAt: Date.now() }).catch(() => {}), 5000);
+    this.heartbeatTimer = setInterval(() => this._heartbeat().catch(() => {}), 5000);
     this.heartbeatTimer.unref?.();
     this.parentTimer = setInterval(() => {
       if (!this.parentPid || this.parentPid === process.pid) return;
@@ -300,6 +300,10 @@ export class FeishuChannelWorker {
       }
     }, 3000);
     this.parentTimer.unref?.();
+  }
+
+  _heartbeat() {
+    return this._publishProcessing(this.processingSpool, { heartbeatAt: Date.now() });
   }
 
   async handleMessage(message) {

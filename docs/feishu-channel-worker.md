@@ -131,6 +131,8 @@ Pending envelopes live in `VO_STATUS_DIR/feishu-channel-inbox` as mode-0600 JSON
 4. Confirm backlog falls, `lastAckAt` advances, and state returns to `healthy`. A failed chat may remain ordered behind its oldest source while unrelated chats continue.
 5. If `blocked` is non-zero or the spool is full, stop intake before manual inspection. Reconcile retained source IDs against terminal VO records. Never edit or delete an entry merely to clear the warning.
 
+After a VO restart, a source whose persisted execution phase is `dispatching` is intentionally not sent to the Agent again: the prior provider may already have produced external side effects. Legacy processing indexes without an execution phase are treated the same way. Reconcile provider/session evidence and the source index manually; do not clear or replay the entry merely to remove the warning. Sources still in `claimed` are safe for automatic restart reclaim because provider dispatch had not begun.
+
 ## Staged rollout
 
 1. Deploy the VO callback/index changes first so active work returns non-durable `processing` and only terminal persisted outcomes return durable acknowledgements.
