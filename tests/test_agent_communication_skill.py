@@ -223,6 +223,42 @@ def test_workspace_sync_rejects_outside_or_missing_workspace():
             server.WORKSPACE_BASE = old_base
 
 
+def test_workspace_sync_rejects_internal_symlink_escapes():
+    old_base = server.WORKSPACE_BASE
+    with tempfile.TemporaryDirectory() as root:
+        home = os.path.join(root, "home")
+        outside = os.path.join(root, "outside")
+        os.makedirs(home)
+        os.makedirs(outside)
+        server.WORKSPACE_BASE = home
+        try:
+            scenarios = ("skills", "canonical_dir", "marker", "legacy_dir")
+            for scenario in scenarios:
+                workspace = os.path.join(home, f"workspace-{scenario}")
+                os.makedirs(workspace)
+                skills = os.path.join(workspace, "skills")
+                canonical = os.path.join(skills, server.AGENT_PLATFORM_COMM_SKILL_NAME)
+                legacy = os.path.join(skills, server.LEGACY_AGENT_PLATFORM_COMM_SKILL_NAME)
+                if scenario == "skills":
+                    os.symlink(outside, skills)
+                else:
+                    os.makedirs(skills)
+                    if scenario == "canonical_dir":
+                        os.symlink(outside, canonical)
+                    elif scenario == "marker":
+                        os.makedirs(canonical)
+                        with open(os.path.join(canonical, "SKILL.md"), "w", encoding="utf-8") as f:
+                            f.write(server._agent_platform_comm_skill_content())
+                        os.symlink(os.path.join(outside, "marker.json"), os.path.join(canonical, server.AGENT_COMM_SKILL_MARKER))
+                    elif scenario == "legacy_dir":
+                        os.symlink(outside, legacy)
+                result = server._sync_openclaw_communication_skill(_openclaw_agent(workspace, scenario))
+                assert result == {"ready": False, "status": "path_rejected", "updated": False}, scenario
+            assert os.listdir(outside) == []
+        finally:
+            server.WORKSPACE_BASE = old_base
+
+
 def test_discovery_sync_attaches_readiness_and_isolates_agent_failures():
     old_discover = server.discover_all_agents
     old_sync = server._sync_openclaw_communication_skill

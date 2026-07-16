@@ -3168,6 +3168,28 @@ def _is_known_legacy_agent_comm_content(content):
     ))
 
 
+def _managed_skill_path_is_safe(workspace_real, path):
+    """Return False if a managed skill path escapes or crosses a symlink."""
+    workspace_real = os.path.realpath(workspace_real)
+    lexical_path = os.path.abspath(path)
+    if lexical_path != workspace_real and not lexical_path.startswith(workspace_real + os.sep):
+        return False
+    relative = os.path.relpath(lexical_path, workspace_real)
+    current = workspace_real
+    for part in relative.split(os.sep):
+        if part in ("", "."):
+            continue
+        current = os.path.join(current, part)
+        if os.path.islink(current):
+            return False
+        if os.path.lexists(current):
+            resolved = os.path.realpath(current)
+            if resolved != workspace_real and not resolved.startswith(workspace_real + os.sep):
+                return False
+    resolved_target = os.path.realpath(lexical_path)
+    return resolved_target == workspace_real or resolved_target.startswith(workspace_real + os.sep)
+
+
 def _sync_openclaw_communication_skill(agent):
     """Install or refresh the VO-managed communication skill for one agent."""
     if not isinstance(agent, dict) or agent.get("providerKind", "openclaw") != "openclaw":
@@ -3187,6 +3209,17 @@ def _sync_openclaw_communication_skill(agent):
     skill_path = os.path.join(skill_dir, "SKILL.md")
     marker_path = os.path.join(skill_dir, AGENT_COMM_SKILL_MARKER)
     legacy_dir = os.path.join(workspace_real, "skills", LEGACY_AGENT_PLATFORM_COMM_SKILL_NAME)
+    legacy_path = os.path.join(legacy_dir, "SKILL.md")
+    managed_paths = (
+        os.path.join(workspace_real, "skills"),
+        skill_dir,
+        skill_path,
+        marker_path,
+        legacy_dir,
+        legacy_path,
+    )
+    if not all(_managed_skill_path_is_safe(workspace_real, path) for path in managed_paths):
+        return {"ready": False, "status": "path_rejected", "updated": False}
     updated = False
 
     with _AGENT_COMM_SKILL_SYNC_LOCK:
@@ -3218,7 +3251,6 @@ def _sync_openclaw_communication_skill(agent):
             _atomic_write_managed_skill_text(marker_path, json.dumps(desired_marker, sort_keys=True, indent=2) + "\n")
             updated = True
 
-        legacy_path = os.path.join(legacy_dir, "SKILL.md")
         if os.path.isfile(legacy_path):
             with open(legacy_path, "r", encoding="utf-8", errors="replace") as f:
                 legacy_content = f.read()
