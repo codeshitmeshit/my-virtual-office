@@ -21,15 +21,15 @@ The fixture identity is unchanged from baseline: warm resumed conversation, exis
 | Stage | Baseline p95 | Candidate p95 | Delta |
 | --- | ---: | ---: | ---: |
 | Working feedback | 0.000 ms | 0.000 ms | 0.000 ms |
-| Provider request | 30.895 ms | 28.100 ms | -2.795 ms |
-| First native event | 31.442 ms | 29.181 ms | -2.261 ms |
-| First native SSE | 69.762 ms | 35.758 ms | -34.004 ms |
-| First fragment SSE | 69.762 ms | 35.758 ms | -34.004 ms |
-| First text SSE (observation only) | 133.724 ms | 35.845 ms | -97.879 ms |
-| Provider terminal | 1063.628 ms | 36.478 ms | -1027.150 ms |
-| Durable terminal commit | 1100.180 ms | 41.789 ms | -1058.391 ms |
-| Terminal tail | 271.926 ms | 32.102 ms | -239.824 ms |
-| Reader callback total | 1084.045 ms | 10.879 ms | -1073.166 ms |
+| Provider request | 30.895 ms | 17.219 ms | -13.676 ms |
+| First native event | 31.442 ms | 17.473 ms | -13.969 ms |
+| First native SSE | 69.762 ms | 21.944 ms | -47.818 ms |
+| First fragment SSE | 69.762 ms | 21.944 ms | -47.818 ms |
+| First text SSE (observation only) | 133.724 ms | 22.020 ms | -111.704 ms |
+| Provider terminal | 1063.628 ms | 22.455 ms | -1041.173 ms |
+| Durable terminal commit | 1100.180 ms | 29.903 ms | -1070.277 ms |
+| Terminal tail | 271.926 ms | 24.888 ms | -247.038 ms |
+| Reader callback total | 1084.045 ms | 12.747 ms | -1071.298 ms |
 
 Every listed stage has 100 samples. The simulated synchronous browser boundary is useful for exact before/after fixture identity, but is not presented as a real browser paint measurement.
 
@@ -51,12 +51,13 @@ The additional append is the intentional durable terminal record introduced for 
 
 - Push-review remediation added deterministic coverage for conversation-lock identity, shared-runtime timeout isolation, callback failure containment and reader reuse, terminal diagnostics without reasoning, pressure-order reconstruction, nested replacement snapshots, and non-Codex telemetry exclusion.
 - Second push-review remediation added turn-identity rejection for reused threads, an async bounded terminal callback fence, reply-before-terminal durability ordering, full-journal stable-ID lookup, synthetic-start exclusion, and post-bind working-feedback correlation.
+- Terminal-drain remediation keeps same-conversation admission closed after watchdog fallback until the late callback exits and current-turn durable finalization completes; other conversations and the app-server reader remain unblocked.
 - Capacity 1 remains supported. Capacity 2 is approved by the deterministic multiplexing fixture: two native threads interleave start, reasoning, approval, user input, cancellation, completion, result delivery, and cleanup without cross-delivery. Capacity 3–4 remains unproven and is not approved for rollout.
-- Focused Codex/provider regression after the second remediation: 100 passed. The explicit app-server concurrency and rollback subset passed 32 tests.
+- Focused Codex/provider regression after terminal-drain remediation: 101 passed. The explicit app-server concurrency and rollback subset passed 32 tests.
 - Rollback rehearsal: passed. It writes accepted user content, approval request/resolution, final reply, terminal outcome, and thread mapping while enabled; replaces the live view with a fresh flag-off instance; reads every durable surface; and proves that recovery did not mutate any status file.
 - Browser/static compatibility: Codex runs, approval UI, Provider SSE, app-server split, runtime settings, history store/navigation, chat bug regressions, Claude Code SSE, and browser timing checks passed. The in-app browser loaded the cache-busted `chat.js` and timing script with zero console errors.
 - Bounded/redacted diagnostics: config, event service, coalescer, telemetry, and browser-timing tests passed. Diagnostics contain fixed-cardinality counters, bounded samples, digested/run IDs, and stage durations; prompt, reply, reasoning, credential, approval content, raw payload, and unrestricted path canaries are absent.
-- Complete supported Python regression passed 783 tests. One manifest test that expects a repository-local `.venv/bin/python` was deselected in the linked worktree and then passed separately against the shared main-worktree venv without changing repository files. The generated Provider inventory was refreshed after the remediation source changes and reproduced exactly.
+- Complete supported Python regression passed 784 tests. One manifest test that expects a repository-local `.venv/bin/python` was deselected in the linked worktree and then passed separately against the shared main-worktree venv without changing repository files. The generated Provider inventory was refreshed after the remediation source changes and reproduced exactly.
 - Strict OpenSpec validation passed: one change valid, zero failed, zero issues.
 
 ## Environment-gated and unverified checks

@@ -52,3 +52,7 @@
 - [x] 10.3 Preserve stable-ID idempotency beyond the communication-history display window using a durable lookup that does not duplicate old approval or terminal operations; add a restart-style test with more than 1,000 later records.
 - [x] 10.4 Measure browser first-native latency only from matching native Agent events and retain working-feedback correlation after submission tokens are bound to run IDs; add synthetic-start and animation-frame ordering regressions.
 - [x] 10.5 Re-run focused Python/JavaScript suites, full repository tests, the deterministic performance/concurrency/rollback gates, strict OpenSpec validation, and update acceptance evidence before declaring the second push-review findings resolved.
+
+## 11. Terminal Callback Drain Remediation
+
+- [x] 11.1 Keep same-conversation admission closed after a terminal fallback until the late callback has actually drained and the current turn has finished durable finalization; preserve bounded reader/response behavior and add deterministic cross-turn ordering coverage.

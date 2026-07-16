@@ -107,89 +107,89 @@
     "durableTerminalCommitMs": {
       "baselineMaxMs": 4206.4,
       "baselineP95Ms": 1100.18,
-      "candidateMaxMs": 58.172,
-      "candidateP95Ms": 41.789,
-      "p95DeltaMs": -1058.391,
+      "candidateMaxMs": 49.952,
+      "candidateP95Ms": 29.903,
+      "p95DeltaMs": -1070.277,
       "samples": 100
     },
     "firstFragmentSseMs": {
       "baselineMaxMs": 134.44,
       "baselineP95Ms": 69.762,
-      "candidateMaxMs": 49.912,
-      "candidateP95Ms": 35.758,
-      "p95DeltaMs": -34.004,
+      "candidateMaxMs": 43.526,
+      "candidateP95Ms": 21.944,
+      "p95DeltaMs": -47.818,
       "samples": 100
     },
     "firstNativeEventMs": {
       "baselineMaxMs": 59.737,
       "baselineP95Ms": 31.442,
-      "candidateMaxMs": 47.087,
-      "candidateP95Ms": 29.181,
-      "p95DeltaMs": -2.261,
+      "candidateMaxMs": 41.13,
+      "candidateP95Ms": 17.473,
+      "p95DeltaMs": -13.969,
       "samples": 100
     },
     "firstNativeSseMs": {
       "baselineMaxMs": 134.44,
       "baselineP95Ms": 69.762,
-      "candidateMaxMs": 49.912,
-      "candidateP95Ms": 35.758,
-      "p95DeltaMs": -34.004,
+      "candidateMaxMs": 43.526,
+      "candidateP95Ms": 21.944,
+      "p95DeltaMs": -47.818,
       "samples": 100
     },
     "firstTextSseMs": {
       "baselineMaxMs": 283.542,
       "baselineP95Ms": 133.724,
-      "candidateMaxMs": 50.012,
-      "candidateP95Ms": 35.845,
-      "p95DeltaMs": -97.879,
+      "candidateMaxMs": 45.945,
+      "candidateP95Ms": 22.02,
+      "p95DeltaMs": -111.704,
       "samples": 100
     },
     "providerRequestMs": {
       "baselineMaxMs": 59.036,
       "baselineP95Ms": 30.895,
-      "candidateMaxMs": 46.665,
-      "candidateP95Ms": 28.1,
-      "p95DeltaMs": -2.795,
+      "candidateMaxMs": 40.841,
+      "candidateP95Ms": 17.219,
+      "p95DeltaMs": -13.676,
       "samples": 100
     },
     "providerTerminalMs": {
       "baselineMaxMs": 4139.982,
       "baselineP95Ms": 1063.628,
-      "candidateMaxMs": 53.124,
-      "candidateP95Ms": 36.478,
-      "p95DeltaMs": -1027.15,
+      "candidateMaxMs": 46.392,
+      "candidateP95Ms": 22.455,
+      "p95DeltaMs": -1041.173,
       "samples": 100
     },
     "readerCallbackMaxMs": {
       "baselineMaxMs": 397.087,
       "baselineP95Ms": 64.1,
-      "candidateMaxMs": 14.008,
-      "candidateP95Ms": 5.439,
-      "p95DeltaMs": -58.661,
+      "candidateMaxMs": 16.288,
+      "candidateP95Ms": 9.173,
+      "p95DeltaMs": -54.927,
       "samples": 100
     },
     "readerCallbackTotalMs": {
       "baselineMaxMs": 4209.149,
       "baselineP95Ms": 1084.045,
-      "candidateMaxMs": 18.719,
-      "candidateP95Ms": 10.879,
-      "p95DeltaMs": -1073.166,
+      "candidateMaxMs": 20.468,
+      "candidateP95Ms": 12.747,
+      "p95DeltaMs": -1071.298,
       "samples": 100
     },
     "runAcceptanceMs": {
       "baselineMaxMs": 0.816,
       "baselineP95Ms": 0.501,
-      "candidateMaxMs": 0.671,
-      "candidateP95Ms": 0.553,
-      "p95DeltaMs": 0.052,
+      "candidateMaxMs": 0.683,
+      "candidateP95Ms": 0.257,
+      "p95DeltaMs": -0.244,
       "samples": 100
     },
     "terminalTailMs": {
       "baselineMaxMs": 418.761,
       "baselineP95Ms": 271.926,
-      "candidateMaxMs": 191.554,
-      "candidateP95Ms": 32.102,
-      "p95DeltaMs": -239.824,
+      "candidateMaxMs": 248.079,
+      "candidateP95Ms": 24.888,
+      "p95DeltaMs": -247.038,
       "samples": 100
     },
     "workingFeedbackMs": {

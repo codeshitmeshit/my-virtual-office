@@ -5,7 +5,7 @@
     "firstTextSlo": "Observed only; no fixed product SLO is asserted.",
     "terminalGrace": "CodexAppServerClient uses callback-drain completion with a bounded malformed-order fallback and no unconditional sleep."
   },
-  "capturedAt": "2026-07-16T13:22:34Z",
+  "capturedAt": "2026-07-16T13:44:56Z",
   "failures": [],
   "fixture": {
     "appServerAlreadyRunningForMeasuredTurns": true,
@@ -56,69 +56,69 @@
   "schemaVersion": 1,
   "stages": {
     "durableTerminalCommitMs": {
-      "maxMs": 58.172,
-      "p50Ms": 31.72,
-      "p95Ms": 41.789,
+      "maxMs": 49.952,
+      "p50Ms": 24.779,
+      "p95Ms": 29.903,
       "samples": 100
     },
     "firstFragmentSseMs": {
-      "maxMs": 49.912,
-      "p50Ms": 25.989,
-      "p95Ms": 35.758,
+      "maxMs": 43.526,
+      "p50Ms": 17.801,
+      "p95Ms": 21.944,
       "samples": 100
     },
     "firstNativeEventMs": {
-      "maxMs": 47.087,
-      "p50Ms": 21.686,
-      "p95Ms": 29.181,
+      "maxMs": 41.13,
+      "p50Ms": 14.001,
+      "p95Ms": 17.473,
       "samples": 100
     },
     "firstNativeSseMs": {
-      "maxMs": 49.912,
-      "p50Ms": 25.989,
-      "p95Ms": 35.758,
+      "maxMs": 43.526,
+      "p50Ms": 17.801,
+      "p95Ms": 21.944,
       "samples": 100
     },
     "firstTextSseMs": {
-      "maxMs": 50.012,
-      "p50Ms": 26.442,
-      "p95Ms": 35.845,
+      "maxMs": 45.945,
+      "p50Ms": 18.007,
+      "p95Ms": 22.02,
       "samples": 100
     },
     "providerRequestMs": {
-      "maxMs": 46.665,
-      "p50Ms": 21.209,
-      "p95Ms": 28.1,
+      "maxMs": 40.841,
+      "p50Ms": 13.739,
+      "p95Ms": 17.219,
       "samples": 100
     },
     "providerTerminalMs": {
-      "maxMs": 53.124,
-      "p50Ms": 27.72,
-      "p95Ms": 36.478,
+      "maxMs": 46.392,
+      "p50Ms": 18.493,
+      "p95Ms": 22.455,
       "samples": 100
     },
     "readerCallbackMaxMs": {
-      "maxMs": 14.008,
-      "p50Ms": 3.99,
-      "p95Ms": 5.439,
+      "maxMs": 16.288,
+      "p50Ms": 5.827,
+      "p95Ms": 9.173,
       "samples": 100
     },
     "readerCallbackTotalMs": {
-      "maxMs": 18.719,
-      "p50Ms": 8.734,
-      "p95Ms": 10.879,
+      "maxMs": 20.468,
+      "p50Ms": 9.37,
+      "p95Ms": 12.747,
       "samples": 100
     },
     "runAcceptanceMs": {
-      "maxMs": 0.671,
-      "p50Ms": 0.309,
-      "p95Ms": 0.553,
+      "maxMs": 0.683,
+      "p50Ms": 0.212,
+      "p95Ms": 0.257,
       "samples": 100
     },
     "terminalTailMs": {
-      "maxMs": 191.554,
-      "p50Ms": 20.322,
-      "p95Ms": 32.102,
+      "maxMs": 248.079,
+      "p50Ms": 19.975,
+      "p95Ms": 24.888,
       "samples": 100
     },
     "workingFeedbackMs": {
@@ -131,57 +131,57 @@
   "trends": {
     "firstFragmentSseMs": {
       "firstHalf": {
-        "maxMs": 44.23,
-        "p50Ms": 25.318,
-        "p95Ms": 32.99,
+        "maxMs": 23.887,
+        "p50Ms": 16.97,
+        "p95Ms": 20.606,
         "samples": 50
       },
       "secondHalf": {
-        "maxMs": 49.912,
-        "p50Ms": 27.346,
-        "p95Ms": 43.965,
+        "maxMs": 43.526,
+        "p50Ms": 18.765,
+        "p95Ms": 22.047,
         "samples": 50
       }
     },
     "firstNativeSseMs": {
       "firstHalf": {
-        "maxMs": 44.23,
-        "p50Ms": 25.318,
-        "p95Ms": 32.99,
+        "maxMs": 23.887,
+        "p50Ms": 16.97,
+        "p95Ms": 20.606,
         "samples": 50
       },
       "secondHalf": {
-        "maxMs": 49.912,
-        "p50Ms": 27.346,
-        "p95Ms": 43.965,
+        "maxMs": 43.526,
+        "p50Ms": 18.765,
+        "p95Ms": 22.047,
         "samples": 50
       }
     },
     "readerCallbackTotalMs": {
       "firstHalf": {
-        "maxMs": 18.719,
-        "p50Ms": 7.881,
-        "p95Ms": 12.822,
+        "maxMs": 13.073,
+        "p50Ms": 8.473,
+        "p95Ms": 10.738,
         "samples": 50
       },
       "secondHalf": {
-        "maxMs": 11.196,
-        "p50Ms": 9.128,
-        "p95Ms": 10.667,
+        "maxMs": 20.468,
+        "p50Ms": 10.632,
+        "p95Ms": 15.788,
         "samples": 50
       }
     },
     "terminalTailMs": {
       "firstHalf": {
-        "maxMs": 40.956,
-        "p50Ms": 20.141,
-        "p95Ms": 25.435,
+        "maxMs": 153.706,
+        "p50Ms": 18.374,
+        "p95Ms": 22.377,
         "samples": 50
       },
       "secondHalf": {
-        "maxMs": 191.554,
-        "p50Ms": 20.411,
-        "p95Ms": 160.791,
+        "maxMs": 248.079,
+        "p50Ms": 21.302,
+        "p95Ms": 26.861,
         "samples": 50
       }
     }
