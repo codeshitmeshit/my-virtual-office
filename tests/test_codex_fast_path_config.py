@@ -1,0 +1,108 @@
+#!/usr/bin/env python3
+"""Codex fast-path startup configuration and safe diagnostics."""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+import sys
+
+
+ROOT = Path(__file__).resolve().parents[1]
+APP_DIR = ROOT / "app"
+if str(APP_DIR) not in sys.path:
+    sys.path.insert(0, str(APP_DIR))
+
+from services.codex_fast_path import load_codex_fast_path_settings
+
+
+def test_defaults_are_valid_and_disabled():
+    settings = load_codex_fast_path_settings({}, {})
+    assert settings.enabled is False
+    assert settings.requested_enabled is False
+    assert settings.valid is True
+    assert settings.max_concurrent_turns == 1
+    assert settings.coalesce_min_ms == 33
+    assert settings.coalesce_max_ms == 100
+    assert settings.diagnostics()["startupOnly"] is True
+
+
+def test_environment_overrides_valid_persisted_values():
+    settings = load_codex_fast_path_settings(
+        {
+            "VO_CODEX_CHAT_FAST_PATH_ENABLED": "true",
+            "VO_CODEX_MAX_CONCURRENT_TURNS": "2",
+            "VO_CODEX_STREAM_COALESCE_MIN_MS": "40",
+            "VO_CODEX_STREAM_COALESCE_MAX_MS": "80",
+        },
+        {"fastPath": {"enabled": False, "maxConcurrentTurns": 1}},
+    )
+    assert settings.enabled is True
+    assert settings.valid is True
+    assert settings.max_concurrent_turns == 2
+    assert (settings.coalesce_min_ms, settings.coalesce_max_ms) == (40, 80)
+
+
+def test_invalid_configuration_fails_closed_without_echoing_values():
+    secret_canary = "Bearer do-not-expose-fast-path-config"
+    settings = load_codex_fast_path_settings(
+        {
+            "VO_CODEX_CHAT_FAST_PATH_ENABLED": "true",
+            "VO_CODEX_MAX_CONCURRENT_TURNS": secret_canary,
+            "VO_CODEX_STREAM_COALESCE_MIN_MS": "99",
+            "VO_CODEX_STREAM_COALESCE_MAX_MS": "40",
+        },
+        {},
+    )
+    diagnostics = settings.diagnostics()
+    assert settings.requested_enabled is True
+    assert settings.enabled is False
+    assert settings.valid is False
+    assert settings.max_concurrent_turns == 1
+    assert (settings.coalesce_min_ms, settings.coalesce_max_ms) == (33, 100)
+    assert set(diagnostics["issues"]) == {"invalid_max_concurrent_turns", "invalid_coalesce_window"}
+    assert secret_canary not in str(diagnostics)
+
+
+def test_server_load_and_safe_projection_expose_only_bounded_diagnostics(monkeypatch, tmp_path):
+    config_path = tmp_path / "vo-config.json"
+    config_path.write_text('{"codex":{"enabled":true}}', encoding="utf-8")
+    monkeypatch.setenv("VO_CONFIG", str(config_path))
+    monkeypatch.setenv("VO_STATUS_DIR", str(tmp_path / "status"))
+    monkeypatch.setenv("VO_CODEX_CHAT_FAST_PATH_ENABLED", "1")
+    monkeypatch.setenv("VO_CODEX_MAX_CONCURRENT_TURNS", "2")
+    monkeypatch.setenv("VO_CODEX_STREAM_COALESCE_MIN_MS", "33")
+    monkeypatch.setenv("VO_CODEX_STREAM_COALESCE_MAX_MS", "100")
+    import server
+
+    loaded = server._load_vo_config()
+    assert loaded["codex"]["fastPath"] == {
+        "requestedEnabled": True,
+        "enabled": True,
+        "valid": True,
+        "startupOnly": True,
+        "maxConcurrentTurns": 2,
+        "streamCoalesceMinMs": 33,
+        "streamCoalesceMaxMs": 100,
+        "issues": [],
+    }
+    old_config = server.VO_CONFIG
+    old_license = server.get_license_status
+    old_codex_test = server._handle_codex_test
+    old_hermes_test = server._handle_hermes_test
+    old_claude_test = server._handle_claude_code_test
+    server.VO_CONFIG = loaded
+    server.get_license_status = lambda: {"licensed": True, "tier": "dev", "tierName": "Dev", "demo": False, "limits": {}}
+    server._handle_codex_test = lambda body=None: {"ok": True}
+    server._handle_hermes_test = lambda body=None: {"ok": False, "api": {}}
+    server._handle_claude_code_test = lambda body=None: {"ok": False}
+    try:
+        safe = server._build_safe_vo_config()["codex"]["fastPath"]
+        assert safe == loaded["codex"]["fastPath"]
+        assert "VO_CODEX" not in str(safe)
+    finally:
+        server.VO_CONFIG = old_config
+        server.get_license_status = old_license
+        server._handle_codex_test = old_codex_test
+        server._handle_hermes_test = old_hermes_test
+        server._handle_claude_code_test = old_claude_test

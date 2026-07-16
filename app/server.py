@@ -56,6 +56,7 @@ from services.provider_conversations import CallableConversationStatePort, Calla
 from services.provider_ports import AdapterCapabilities, AdapterEvent, AdapterResult, CallableProviderAdapter, RunCommand
 from services.provider_registry import ProviderRunRepository
 from services.provider_runs import ProviderRunCoordinator
+from services.codex_fast_path import load_codex_fast_path_settings
 from provider_sse_transport import ProviderSSETransport
 from services.project_repository import ProjectConflictError, ProjectNotFoundError, ProjectRepository
 from zoneinfo import ZoneInfo
@@ -675,6 +676,7 @@ def _load_vo_config():
     default_gateway_url = f"ws://127.0.0.1:{gateway_port}"
     default_gateway_http = f"http://127.0.0.1:{gateway_port}"
     codex_reply_text = os.environ.get("VO_CODEX_REPLY_TEXT")
+    codex_fast_path = load_codex_fast_path_settings(os.environ, codex_cfg)
 
     return {
         "office": {
@@ -786,6 +788,7 @@ def _load_vo_config():
             "includeMain": _env_bool("VO_CODEX_INCLUDE_MAIN", codex_cfg.get("includeMain", True)),
             "includeNativeAgents": _env_bool("VO_CODEX_INCLUDE_NATIVE_AGENTS", codex_cfg.get("includeNativeAgents", True)),
             "registerNativeAgents": _env_bool("VO_CODEX_REGISTER_NATIVE_AGENTS", codex_cfg.get("registerNativeAgents", True)),
+            "fastPath": codex_fast_path.diagnostics(),
         },
         "claudeCode": {
             "enabled": _env_bool("VO_CLAUDE_CODE_ENABLED", claude_code_cfg.get("enabled", False)),
@@ -1131,6 +1134,7 @@ def _build_safe_vo_config():
             "includeMain": VO_CONFIG.get("codex", {}).get("includeMain", True),
             "includeNativeAgents": VO_CONFIG.get("codex", {}).get("includeNativeAgents", True),
             "registerNativeAgents": VO_CONFIG.get("codex", {}).get("registerNativeAgents", True),
+            "fastPath": dict(VO_CONFIG.get("codex", {}).get("fastPath") or {}),
             "detected": bool(_handle_codex_test().get("ok")),
         },
         "claudeCode": {
@@ -26930,6 +26934,7 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                 "includeNativeAgents": safe_vo_config.get("codex", {}).get("includeNativeAgents", True),
                 "registerNativeAgents": safe_vo_config.get("codex", {}).get("registerNativeAgents", True),
                 "preferAppServer": safe_vo_config.get("codex", {}).get("preferAppServer", True),
+                "fastPath": dict(safe_vo_config.get("codex", {}).get("fastPath") or {}),
                 "configSurface": "models-native",
             },
             "claude-code": {
