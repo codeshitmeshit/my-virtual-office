@@ -324,6 +324,27 @@ try {
   })()`);
   await waitFor("window.__voChatWindows?.[0]?.historyStickToBottom && window.__voChatWindows[0].isNearBottom()");
   await waitFor("window.__voFakeEventSources?.some(source => !source.closed && source.url.includes('agentId=agent-b'))");
+  await waitFor("!window.__voChatWindows?.[0]?.feishuHistoryRefreshPending && !window.__voChatWindows[0].feishuHistoryRefreshRunning && !window.__voChatWindows[0].feishuHistoryRefreshTimer");
+  const beforeGroupEvents = requestCounts.get('agent-b') || 0;
+  await evaluate(`(() => {
+    const commEvent = {
+      id: 'feishu-group-hidden', type: 'message', direction: 'request',
+      conversationId: 'feishu-group:hidden', visibleInOffice: false,
+      text: 'FEISHU GROUP MUST NEVER APPEAR IN VO',
+      metadata: { sourceApp: 'feishu', sourceSurface: 'feishu-group', chatType: 'group' },
+      from: { id: 'feishu-member:hidden', providerKind: 'human', sourceSurface: 'feishu-group' },
+      to: { id: 'agent-b', providerKind: 'codex' },
+    };
+    for (const source of window.__voFakeEventSources.filter(item => !item.closed && item.url.includes('agentId=agent-b'))) {
+      source.emit('message', { event: 'message', commEvent });
+      source.emit('delivery', { event: 'delivery', commEvent: { ...commEvent, id: 'feishu-group-delivery', direction: 'delivery' } });
+      source.emit('ready', { event: 'ready', replayed: true, commEvent });
+    }
+  })()`);
+  await new Promise(resolve => setTimeout(resolve, 400));
+  assert.equal(requestCounts.get('agent-b') || 0, beforeGroupEvents, 'group SSE and reconnect payloads must not refresh VO history');
+  assert.equal(await evaluate("document.body.textContent.includes('FEISHU GROUP MUST NEVER APPEAR IN VO')"), false, 'group request/reply/delivery must not render a bubble');
+
   feishuHistory.set('agent-b', [{
     id: 'feishu-live-request', version: 'v1', providerKind: 'codex', conversationId: 'fixture',
     role: 'user', text: 'Feishu live request appeared automatically', epochMs: 2001, status: 'done',
@@ -335,6 +356,7 @@ try {
     }
   })()`);
   await new Promise(resolve => setTimeout(resolve, 500));
+  assert.equal(requestCounts.get('agent-b') || 0, beforeGroupEvents + 1, 'one private Feishu event must refresh history exactly once');
   const feishuDebugState = await evaluate(`(() => {
     const win = window.__voChatWindows?.[0];
     return {

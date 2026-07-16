@@ -23,7 +23,7 @@
 
 - [x] 5.1 Persist group request, reply, and delivery audit/communication rows with stable member references, `feishu-group` source metadata, and `visibleInOffice=false`; add structured group classification and tests proving records remain diagnosable/idempotent while private ledger fields and notification/card-action records remain unchanged.
 - [x] 5.2 Exclude group-classified rows from normalized history initial load, pagination, caches, legacy agent-chat merging, Feishu SSE live publication, replay, and reconnect recovery while preserving existing private request/reply visibility and invisible private-delivery invalidations; add server and history-store regressions for mixed private/group data and representative-Agent filtering.
-- [ ] 5.3 Add deterministic browser acceptance that opens the representative Agent chat, injects accepted group request/reply/delivery records and SSE reconnect conditions, proves no group bubble or refresh is produced, and simultaneously proves private Feishu events still refresh and render exactly once.
+- [x] 5.3 Add deterministic browser acceptance that opens the representative Agent chat, injects accepted group request/reply/delivery records and SSE reconnect conditions, proves no group bubble or refresh is produced, and simultaneously proves private Feishu events still refresh and render exactly once.
 
 ## 6. Security and Compatibility Regression
 

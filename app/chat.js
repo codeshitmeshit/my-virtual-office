@@ -1183,6 +1183,7 @@
         const data = await res.json();
         if (!data.ok || !Array.isArray(data.events)) return [];
         const rows = data.events.filter(event => {
+          if (this.isFeishuGroupCommEvent(event)) return false;
           const meta = event && typeof event.metadata === 'object' ? event.metadata : {};
           const fromRef = event && typeof event.from === 'object' ? event.from : {};
           const toRef = event && typeof event.to === 'object' ? event.to : {};
@@ -1228,6 +1229,26 @@
       } catch (e) {
         console.warn('[chat] Failed to load Feishu channel history:', e);
         return [];
+      }
+    }
+
+    isFeishuGroupCommEvent(event) {
+      event = event && typeof event === 'object' ? event : {};
+      const meta = event.metadata && typeof event.metadata === 'object' ? event.metadata : {};
+      const fromRef = event.from && typeof event.from === 'object' ? event.from : {};
+      const toRef = event.to && typeof event.to === 'object' ? event.to : {};
+      return String(meta.sourceSurface || '').toLowerCase() === 'feishu-group' ||
+        String(meta.chatType || '').toLowerCase() === 'group' ||
+        String(fromRef.sourceSurface || '').toLowerCase() === 'feishu-group' ||
+        String(toRef.sourceSurface || '').toLowerCase() === 'feishu-group';
+    }
+
+    isFeishuGroupSseEvent(rawEvent) {
+      try {
+        const payload = JSON.parse(String(rawEvent?.data || '{}'));
+        return this.isFeishuGroupCommEvent(payload.commEvent);
+      } catch (_) {
+        return false;
       }
     }
 
@@ -3499,20 +3520,23 @@
             this.setFeishuLiveStatus('connected', agentId);
           }
         });
-        source.addEventListener('ready', () => {
+        source.addEventListener('ready', (event) => {
           if (this.feishuEventSource === source) {
             this.markFeishuEventActivity(source);
             this.setFeishuLiveStatus('connected', agentId);
+            if (this.isFeishuGroupSseEvent(event)) return;
             this.scheduleFeishuHistoryRefresh();
           }
         });
         source.addEventListener('keepalive', () => this.markFeishuEventActivity(source));
-        source.addEventListener('message', () => {
+        source.addEventListener('message', (event) => {
           this.markFeishuEventActivity(source);
+          if (this.isFeishuGroupSseEvent(event)) return;
           this.scheduleFeishuHistoryRefresh();
         });
-        source.addEventListener('delivery', () => {
+        source.addEventListener('delivery', (event) => {
           this.markFeishuEventActivity(source);
+          if (this.isFeishuGroupSseEvent(event)) return;
           this.scheduleFeishuHistoryRefresh();
         });
         source.onerror = () => {
