@@ -299,7 +299,8 @@
 .proj-board-desc-toggle:hover { color: #888; }
 
 .proj-board-body {
-    flex: 1;
+    flex: 0 0 clamp(320px, 45vh, 520px);
+    min-height: 320px;
     display: flex;
     overflow-x: hidden;
     overflow-y: hidden;
@@ -2027,6 +2028,8 @@
         border-radius: 0;
     }
     .proj-board-body {
+        flex-basis: auto;
+        min-height: 0;
         flex-direction: column;
         overflow-x: hidden;
         overflow-y: auto;

@@ -10,7 +10,7 @@
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#1a1a2e">
     <link rel="stylesheet" href="style.css?v=1784143900-chat-bottom-follow-feishu-media-display">
-    <link rel="stylesheet" href="projects.css?v=1783041181-meeting-request-status-colors">
+    <link rel="stylesheet" href="projects.css?v=1784174400-project-board-scroll">
     <link rel="stylesheet" href="archive-room.css?v=1783041181-phase13">
     <link rel="stylesheet" href="fonts.css?v=1783041181.05.07">
     <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
@@ -786,7 +786,7 @@
                 <h2 style="font-size:16px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif" data-i18n="projects_title">Projects</h2>
                 <span class="close-btn" onclick="closeProjectsModal()">&times;</span>
             </div>
-            <div id="proj-main-content" style="flex:1;display:flex;flex-direction:column;overflow:hidden">
+            <div id="proj-main-content" style="flex:1;min-height:0;display:flex;flex-direction:column;overflow-x:hidden;overflow-y:auto">
                 <!-- Populated by projects.js -->
             </div>
         </div>
