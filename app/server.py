@@ -6428,7 +6428,7 @@ def _append_codex_user_comm_event(agent, agent_id, conversation_id, message, bod
             "attachments": list(body.get("attachments") or []),
             "metadata": metadata,
             "visibleInOffice": True,
-        })
+        }, require_durable=True)
     _publish_feishu_chat_comm_event(event, "message")
     return event
 
@@ -6450,6 +6450,12 @@ def _handle_codex_chat(body):
         return {"ok": False, "status": "invalid_request", "error": "conversationId is required", "_status": 400}
     agent_id = agent.get("id") or agent_key
     inbound_event = None
+    operation_stable_id = str(
+        body.get("_streamRunId")
+        or _codex_idempotency_key(body)
+        or _chat_source_metadata(body).get("sourceMessageId")
+        or uuid.uuid4()
+    ).strip()
     operation_lock = _codex_operation_lock(agent_id)
     if not operation_lock.acquire(blocking=False):
         active = _get_codex_active(agent_id) or {}
@@ -6478,7 +6484,18 @@ def _handle_codex_chat(body):
         operation_lock.release()
         return {"ok": False, "error": str(exc), "code": "invalid_attachment", "_status": 400}
     body = {**body, "attachments": validated_attachments}
-    inbound_event = _append_codex_user_comm_event(agent, agent_id, conversation_id, message, body)
+    try:
+        inbound_event = _append_codex_user_comm_event(agent, agent_id, conversation_id, message, body)
+    except OSError as exc:
+        operation_lock.release()
+        return {
+            "ok": False,
+            "status": "durable_write_failed",
+            "error": "Unable to persist the accepted Codex message",
+            "errorCategory": type(exc).__name__[:80],
+            "conversationId": conversation_id,
+            "_status": 500,
+        }
     before_paths = _codex_git_paths(provider.workspace)
     allow_interaction = str(body.get("fromType") or "agent").lower() in {"human", "user", "chat", "ui"}
     with _CODEX_ACTIVE_LOCK:
@@ -6489,7 +6506,7 @@ def _handle_codex_chat(body):
             thread_id=_get_codex_thread_id(agent_id, conversation_id),
         )
     activity_callback = body.get("_onActivity")
-    reply_event_appended = {"done": False}
+    reply_event_appended = {"done": False, "error": None}
 
     def append_reply_event(reply, metadata=None, ok=True):
         text = str(reply or "")
@@ -6504,30 +6521,54 @@ def _handle_codex_chat(body):
         if _find_comm_reply_for_request(inbound_event):
             reply_event_appended["done"] = True
             return
-        event = _append_comm_event({
-            "type": "message",
-            "direction": "reply",
-            "conversationId": conversation_id,
-            "from": _office_agent_ref(agent_id),
-            "to": inbound_event.get("from") or {"id": "user", "providerKind": "human", "name": "User"},
-            "text": text,
-            "inReplyTo": inbound_event.get("id"),
-            "metadata": {
-                "providerKind": "codex",
-                **source_metadata,
-                "threadId": meta.get("threadId") or "",
-                "turnId": meta.get("turnId") or "",
-                "modifiedFiles": meta.get("modifiedFiles") or [],
-                "needsHumanIntervention": bool(meta.get("needsHumanIntervention")),
-            },
-            "visibleInOffice": True,
-            "ok": bool(ok),
-        })
+        try:
+            event = _append_comm_event({
+                "type": "message",
+                "direction": "reply",
+                "conversationId": conversation_id,
+                "from": _office_agent_ref(agent_id),
+                "to": inbound_event.get("from") or {"id": "user", "providerKind": "human", "name": "User"},
+                "text": text,
+                "inReplyTo": inbound_event.get("id"),
+                "metadata": {
+                    "providerKind": "codex",
+                    **source_metadata,
+                    "threadId": meta.get("threadId") or "",
+                    "turnId": meta.get("turnId") or "",
+                    "modifiedFiles": meta.get("modifiedFiles") or [],
+                    "needsHumanIntervention": bool(meta.get("needsHumanIntervention")),
+                },
+                "visibleInOffice": True,
+                "ok": bool(ok),
+            }, require_durable=True)
+        except OSError as exc:
+            reply_event_appended["error"] = exc
+            return None
         _publish_feishu_chat_comm_event(event, "message")
         reply_event_appended["done"] = True
 
     def on_event(event):
         record = _append_codex_activity(agent_id, conversation_id, event)
+        if record.get("type") in {"interaction", "approval"} and str(record.get("status") or "").lower() == "pending":
+            approval_id = str(record.get("approval_id") or record.get("approvalId") or record.get("interactionId") or record.get("id") or "").strip()
+            if approval_id:
+                try:
+                    _append_codex_durable_operation(
+                        agent_id,
+                        conversation_id,
+                        "approval_request",
+                        approval_id,
+                        {
+                            "approvalId": approval_id,
+                            "approvalStatus": "pending",
+                            "runId": record.get("runId") or record.get("turnId") or "",
+                            "turnId": record.get("turnId") or "",
+                            "threadId": record.get("threadId") or "",
+                        },
+                    )
+                except OSError as exc:
+                    reply_event_appended["error"] = reply_event_appended.get("error") or exc
+                    raise
         if record.get("type") == "turn" and str(record.get("status") or "").lower() in {"completed", "done", "success"}:
             output = record.get("output") if isinstance(record.get("output"), dict) else {}
             append_reply_event(output.get("reply") or record.get("reply") or "", {
@@ -6608,6 +6649,37 @@ def _handle_codex_chat(body):
             "modifiedFiles": modified_files,
             "needsHumanIntervention": bool(normalized.get("needsHumanIntervention")),
         }, ok=bool(normalized.get("ok")))
+    stream_run_id = str(
+        body.get("_streamRunId")
+        or normalized.get("runId")
+        or normalized.get("turnId")
+        or (inbound_event or {}).get("id")
+        or operation_stable_id
+    ).strip()
+    try:
+        _append_codex_durable_operation(
+            agent_id,
+            conversation_id,
+            "terminal",
+            stream_run_id,
+            {
+                "status": normalized.get("status") or "",
+                "runId": stream_run_id,
+                "turnId": normalized.get("turnId") or "",
+                "threadId": normalized.get("threadId") or "",
+                "errorCategory": normalized.get("errorCode") or normalized.get("errorCategory") or "",
+            },
+            ok=bool(normalized.get("ok")),
+        )
+    except OSError as exc:
+        reply_event_appended["error"] = reply_event_appended.get("error") or exc
+    if reply_event_appended.get("error"):
+        normalized.update({
+            "ok": False,
+            "status": "durable_write_failed",
+            "error": "Codex completed but durable result persistence failed",
+            "errorCategory": type(reply_event_appended["error"]).__name__[:80],
+        })
     normalized["_status"] = provider_http_status(normalized)
     return normalized
 
@@ -6971,6 +7043,12 @@ def _codex_history_has_approval(conversation_id, agent_id, approval_id):
         metadata = metadata if isinstance(metadata, dict) else {}
         codex_meta = metadata.get("codex") if isinstance(metadata.get("codex"), dict) else {}
         approval = metadata.get("approval") if isinstance(metadata.get("approval"), dict) else {}
+        is_resolution = (
+            str(metadata.get("event") or codex_meta.get("event") or "").lower() == "approval.responded"
+            or str(event.get("operation") or "").lower() == "approval_resolution"
+        )
+        if not is_resolution:
+            continue
         candidates = {
             str(metadata.get("approvalId") or ""),
             str(metadata.get("approval_id") or ""),
@@ -7029,7 +7107,7 @@ def _append_codex_approval_result_comm_event(agent, agent_id, conversation_id, a
         },
         "visibleInOffice": True,
         "ok": True,
-    })
+    }, require_durable=True)
 
 
 def _handle_codex_approval_respond(body):
@@ -7063,7 +7141,32 @@ def _handle_codex_approval_respond(body):
     result_message = _codex_approval_result_message(merged_approval, normalized_choice)
     history_event = None
     if result.get("ok"):
-        history_event = _append_codex_approval_result_comm_event(agent, agent_id, conversation_id, merged_approval, normalized_choice)
+        try:
+            history_event = _append_codex_approval_result_comm_event(agent, agent_id, conversation_id, merged_approval, normalized_choice)
+            if conversation_id:
+                _append_codex_durable_operation(
+                    agent_id,
+                    conversation_id,
+                    "approval_resolution",
+                    approval_id,
+                    {
+                        "approvalId": approval_id,
+                        "approvalStatus": merged_approval.get("status") or "",
+                        "choice": normalized_choice,
+                        "runId": merged_approval.get("runId") or merged_approval.get("turnId") or "",
+                        "turnId": merged_approval.get("turnId") or "",
+                        "threadId": merged_approval.get("threadId") or "",
+                    },
+                )
+        except OSError as exc:
+            return {
+                "ok": False,
+                "status": "durable_write_failed",
+                "error": "Codex approval was resolved but persistence failed",
+                "errorCategory": type(exc).__name__[:80],
+                "approval": merged_approval,
+                "_status": 500,
+            }
         PROVIDER_EVENT_JOURNAL.publish(
             "codex",
             agent_id,
@@ -8617,7 +8720,7 @@ def _office_agent_ref(agent_id_or_key):
     }
 
 
-def _append_comm_event(event):
+def _append_comm_event(event, *, require_durable=False):
     event = dict(event)
     if "text" in event:
         event["text"] = _extract_openclaw_text(event.get("text"))
@@ -8634,13 +8737,56 @@ def _append_comm_event(event):
         fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
         with os.fdopen(fd, "a") as f:
             f.write(json.dumps(event, ensure_ascii=False) + "\n")
+            if require_durable:
+                f.flush()
+                os.fsync(f.fileno())
         try:
             os.chmod(path, 0o600)
         except OSError:
             pass
     except OSError as e:
         print(f"[COMM] Failed to append communication event: {e}")
+        if require_durable:
+            raise
     return event
+
+
+def _append_codex_durable_operation(agent_id, conversation_id, operation, stable_id, metadata=None, *, ok=True):
+    """Append one idempotent, content-free Codex key-state record."""
+    agent_id = str(agent_id or "").strip()[:160]
+    conversation_id = str(conversation_id or "").strip()[:240]
+    operation = str(operation or "").strip()[:80]
+    stable_id = str(stable_id or "").strip()[:240]
+    if not agent_id or not conversation_id or not operation or not stable_id:
+        raise ValueError("durable Codex operation requires agent, conversation, operation and stable id")
+    digest = hashlib.sha256(f"{agent_id}|{conversation_id}|{operation}|{stable_id}".encode("utf-8")).hexdigest()[:24]
+    event_id = f"codex-{operation}-{digest}"
+    safe_meta = metadata if isinstance(metadata, dict) else {}
+    safe_meta = {
+        key: value
+        for key, value in safe_meta.items()
+        if key in {"status", "runId", "turnId", "threadId", "approvalId", "approvalStatus", "choice", "errorCategory"}
+    }
+    with _COMM_REQUEST_IDEMPOTENCY_LOCK:
+        existing = next(
+            (item for item in reversed(_load_comm_history(limit=1000, conversation_id=conversation_id, agent_id=agent_id)) if item.get("id") == event_id),
+            None,
+        )
+        if existing:
+            return existing
+        return _append_comm_event({
+            "id": event_id,
+            "type": "operation",
+            "operation": operation,
+            "direction": "system",
+            "conversationId": conversation_id,
+            "from": _office_agent_ref(agent_id),
+            "to": {"id": "user", "providerKind": "human", "name": "User"},
+            "text": "",
+            "metadata": {"providerKind": "codex", "stableId": stable_id, **safe_meta},
+            "visibleInOffice": False,
+            "ok": bool(ok),
+        }, require_durable=True)
 
 
 def _comm_metadata(event):
