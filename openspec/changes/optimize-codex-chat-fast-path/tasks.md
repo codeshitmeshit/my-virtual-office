@@ -37,3 +37,10 @@
 - [x] 8.1 Run and fix focused Python/JavaScript/static/browser regressions for Codex API fields/statuses, conversation/thread mapping, history, SSE/polling reconciliation, approval, cancellation, terminal dedupe, restart recovery, cold/new-thread behavior, attachments, archived-thread recovery, and shared Provider infrastructure with the flag both off and on.
 - [x] 8.2 Document startup-only configuration, capacity and memory bounds, metrics interpretation, code-deployed/flag-off rollout, concurrency-1 and concurrency-2 gates, stop/drain/cancel/discard/restart rollback, and perform a rollback rehearsal proving durable history/thread/approval/final state remains readable without data repair.
 - [x] 8.3 Re-run the exact baseline harness and app-server concurrency fixture, publish post-change and comparison evidence with sample counts and call/write counts, prove all confirmed SLO/capacity/compatibility/security gates or keep unproven concurrency at 1, run strict OpenSpec validation, and record every environment-gated or unverified real-Provider check without claiming it passed.
+
+## 9. Push Review Remediation
+
+- [x] 9.1 Make conversation admission lock ownership race-free and prevent one timed-out concurrent request from restarting the shared app-server underneath unrelated active turns; add deterministic race and cross-turn timeout isolation tests.
+- [ ] 9.2 Contain durable approval-write failures inside the affected operation without terminating the JSONL reader, and retain terminal operations from the actual terminal path so post-terminal diagnostics do not depend on reasoning events.
+- [ ] 9.3 Preserve per-run fragment order when coalescer bounds force direct bypass, treat nested `activity.replace` snapshots as barriers, and add reconstruction tests for both pressure and replacement paths.
+- [ ] 9.4 Restrict fast-path SSE telemetry to Codex runs/conversations, clean review-artifact whitespace, and re-run focused, full, performance, concurrency, rollback, and strict OpenSpec verification before declaring the review findings resolved.

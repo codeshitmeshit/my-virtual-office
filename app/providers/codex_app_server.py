@@ -473,6 +473,7 @@ class CodexAppServerClient:
         self._runtime.on_notification = self._handle_notification
         self._runtime.on_exit = self._handle_runtime_exit
         self._initialize_lock = threading.Lock()
+        self._runtime_generation_lock = threading.RLock()
         self._initialized = False
         self._operations: dict[str, _Operation] = {}
         self._terminal_operations: OrderedDict[str, _Operation] = OrderedDict()
@@ -552,6 +553,10 @@ class CodexAppServerClient:
         except Exception:
             pass
 
+    def _has_active_operations(self) -> bool:
+        with self._operations_lock:
+            return any(not operation.completed.is_set() for operation in self._operations.values())
+
     def _request_with_restart(
         self,
         method: str,
@@ -565,9 +570,14 @@ class CodexAppServerClient:
         except TimeoutError:
             if not retry:
                 raise
-            self._restart_runtime()
-            self._ensure_started()
-            return self._request(method, params, timeout=timeout)
+            with self._runtime_generation_lock:
+                # The runtime is shared by all active native threads. Restarting
+                # it to recover one startup request would fail unrelated turns.
+                if self._has_active_operations():
+                    raise
+                self._restart_runtime()
+                self._ensure_started()
+                return self._request(method, params, timeout=timeout)
 
     @staticmethod
     def _account_status(account_result: dict[str, Any]) -> tuple[bool, str]:
@@ -1175,23 +1185,26 @@ class CodexAppServerClient:
     ) -> dict[str, Any]:
         started = time.monotonic()
         try:
-            self._ensure_started()
-            if thread_id:
-                result = self._request_with_restart("thread/resume", {"threadId": thread_id, **self._thread_params()}, timeout=self.start_timeout_sec)
-            else:
-                result = self._request_with_restart("thread/start", self._thread_params(), timeout=self.start_timeout_sec)
-            thread = result.get("thread") or {}
-            active_thread_id = str(thread.get("id") or thread_id)
-            if not active_thread_id:
-                return _error_result("protocol_error", "Codex did not return a thread id")
-            operation = _Operation(
-                thread_id=active_thread_id,
-                event_callback=event_callback,
-                allow_interaction=allow_interaction,
-            )
-            with self._operations_lock:
-                self._terminal_operations.pop(active_thread_id, None)
-                self._operations[active_thread_id] = operation
+            # Serialize only runtime generation/startup and operation
+            # registration. Turns remain concurrent after this short fence.
+            with self._runtime_generation_lock:
+                self._ensure_started()
+                if thread_id:
+                    result = self._request_with_restart("thread/resume", {"threadId": thread_id, **self._thread_params()}, timeout=self.start_timeout_sec)
+                else:
+                    result = self._request_with_restart("thread/start", self._thread_params(), timeout=self.start_timeout_sec)
+                thread = result.get("thread") or {}
+                active_thread_id = str(thread.get("id") or thread_id)
+                if not active_thread_id:
+                    return _error_result("protocol_error", "Codex did not return a thread id")
+                operation = _Operation(
+                    thread_id=active_thread_id,
+                    event_callback=event_callback,
+                    allow_interaction=allow_interaction,
+                )
+                with self._operations_lock:
+                    self._terminal_operations.pop(active_thread_id, None)
+                    self._operations[active_thread_id] = operation
             turn_result = self._request_with_restart("turn/start", {
                 "threadId": active_thread_id,
                 "input": _turn_user_input(message, attachments),

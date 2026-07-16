@@ -615,6 +615,31 @@ def test_codex_approval_respond_persists_history_once_and_emits_presence():
             server.gateway_presence.set_provider_event = old_presence
 
 
+def test_conversation_lock_reference_prevents_split_lock_identity():
+    agent_id = "codex-lock-race"
+    conversation_id = "conv-lock-race"
+    key = (agent_id, conversation_id)
+    first = server._codex_operation_lock(agent_id, conversation_id)
+    assert first.acquire(blocking=False)
+    waiting_reference = server._codex_operation_lock(agent_id, conversation_id)
+    try:
+        assert waiting_reference is first
+        server._release_codex_operation_lock(agent_id, conversation_id, first)
+
+        newcomer = server._codex_operation_lock(agent_id, conversation_id)
+        assert newcomer is waiting_reference
+        assert waiting_reference.acquire(blocking=False)
+        assert newcomer.acquire(blocking=False) is False
+        server._discard_codex_operation_lock(agent_id, conversation_id, newcomer)
+        server._release_codex_operation_lock(agent_id, conversation_id, waiting_reference)
+        assert key not in server._CODEX_OPERATION_LOCKS
+        assert key not in server._CODEX_OPERATION_LOCK_REFERENCES
+    finally:
+        with server._CODEX_OPERATION_LOCKS_GUARD:
+            server._CODEX_OPERATION_LOCKS.pop(key, None)
+            server._CODEX_OPERATION_LOCK_REFERENCES.pop(key, None)
+
+
 if __name__ == "__main__":
     test_busy_rejects_second_request_and_releases_lock()
     test_provider_exception_clears_active_operation()
@@ -625,4 +650,5 @@ if __name__ == "__main__":
     test_codex_agent_create_delete_handlers_use_native_provider()
     test_codex_approval_pending_and_respond_handlers_delegate_to_provider()
     test_codex_approval_respond_persists_history_once_and_emits_presence()
+    test_conversation_lock_reference_prevents_split_lock_identity()
     print("ok")

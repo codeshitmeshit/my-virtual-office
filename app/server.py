@@ -6172,6 +6172,7 @@ def _codex_provider_from_config():
 
 
 _CODEX_OPERATION_LOCKS = {}
+_CODEX_OPERATION_LOCK_REFERENCES = {}
 _CODEX_OPERATION_LOCKS_GUARD = threading.Lock()
 _CODEX_ADMISSION_COUNTERS = {"acceptedConversations": 0, "busyByConversation": 0}
 _CODEX_THREAD_STATE_LOCK = threading.Lock()
@@ -6375,16 +6376,35 @@ def _codex_result_is_archived_session(result):
 
 
 def _codex_operation_lock(agent_id, conversation_id=""):
+    key = (str(agent_id or ""), str(conversation_id or ""))
     with _CODEX_OPERATION_LOCKS_GUARD:
-        return _CODEX_OPERATION_LOCKS.setdefault((str(agent_id or ""), str(conversation_id or "")), threading.Lock())
+        lock = _CODEX_OPERATION_LOCKS.setdefault(key, threading.Lock())
+        _CODEX_OPERATION_LOCK_REFERENCES[key] = int(_CODEX_OPERATION_LOCK_REFERENCES.get(key) or 0) + 1
+        return lock
+
+
+def _release_codex_operation_lock_reference(agent_id, conversation_id, lock, *, release=False):
+    if release:
+        lock.release()
+    key = (str(agent_id or ""), str(conversation_id or ""))
+    with _CODEX_OPERATION_LOCKS_GUARD:
+        if _CODEX_OPERATION_LOCKS.get(key) is not lock:
+            return
+        references = max(0, int(_CODEX_OPERATION_LOCK_REFERENCES.get(key) or 0) - 1)
+        if references:
+            _CODEX_OPERATION_LOCK_REFERENCES[key] = references
+        else:
+            _CODEX_OPERATION_LOCK_REFERENCES.pop(key, None)
+        if references == 0 and not lock.locked():
+            _CODEX_OPERATION_LOCKS.pop(key, None)
 
 
 def _release_codex_operation_lock(agent_id, conversation_id, lock):
-    lock.release()
-    key = (str(agent_id or ""), str(conversation_id or ""))
-    with _CODEX_OPERATION_LOCKS_GUARD:
-        if _CODEX_OPERATION_LOCKS.get(key) is lock and not lock.locked():
-            _CODEX_OPERATION_LOCKS.pop(key, None)
+    _release_codex_operation_lock_reference(agent_id, conversation_id, lock, release=True)
+
+
+def _discard_codex_operation_lock(agent_id, conversation_id, lock):
+    _release_codex_operation_lock_reference(agent_id, conversation_id, lock)
 
 
 def _codex_operation_is_locked(agent_id, conversation_id):
@@ -6397,7 +6417,13 @@ def _codex_operation_is_locked(agent_id, conversation_id):
 def _codex_admission_diagnostics():
     with _CODEX_OPERATION_LOCKS_GUARD:
         active = sum(1 for lock in _CODEX_OPERATION_LOCKS.values() if lock.locked())
-        return {**_CODEX_ADMISSION_COUNTERS, "activeConversations": active, "trackedConversationLocks": len(_CODEX_OPERATION_LOCKS)}
+        references = sum(int(value or 0) for value in _CODEX_OPERATION_LOCK_REFERENCES.values())
+        return {
+            **_CODEX_ADMISSION_COUNTERS,
+            "activeConversations": active,
+            "trackedConversationLocks": len(_CODEX_OPERATION_LOCKS),
+            "conversationLockReferences": references,
+        }
 
 
 def _codex_idempotency_key(body):
@@ -6540,6 +6566,7 @@ def _handle_codex_chat(body):
     ).strip()
     operation_lock = _codex_operation_lock(agent_id, conversation_id)
     if not operation_lock.acquire(blocking=False):
+        _discard_codex_operation_lock(agent_id, conversation_id, operation_lock)
         with _CODEX_OPERATION_LOCKS_GUARD:
             _CODEX_ADMISSION_COUNTERS["busyByConversation"] += 1
         _CODEX_FAST_PATH_TELEMETRY.increment_busy("conversation")
@@ -7388,6 +7415,7 @@ def _handle_codex_compact(body):
         return {"ok": False, "status": "not_found", "error": "No Codex context exists for this conversation", "_status": 404}
     operation_lock = _codex_operation_lock(agent_id, conversation_id)
     if not operation_lock.acquire(blocking=False):
+        _discard_codex_operation_lock(agent_id, conversation_id, operation_lock)
         return {"ok": False, "status": "busy", "error": "Codex is already working", "_status": 409}
     gateway_presence.set_manual_override(agent_id, "working", "Compressing Codex context")
     try:

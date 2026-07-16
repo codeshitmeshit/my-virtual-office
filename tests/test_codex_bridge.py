@@ -160,6 +160,27 @@ def test_thread_start_timeout_restarts_app_server_once():
                 os.environ["VO_CODEX_START_TIMEOUT_SEC"] = old_timeout
 
 
+def test_start_timeout_does_not_restart_runtime_with_unrelated_active_turn():
+    with tempfile.TemporaryDirectory() as tmp:
+        client = CodexAppServerClientImpl(tmp, binary=make_fake_codex(tmp), max_concurrent_turns=2)
+        active = _Operation("thr-active")
+        client._operations[active.thread_id] = active
+        restart_calls = []
+        client._request = lambda *_args, **_kwargs: (_ for _ in ()).throw(TimeoutError("startup stalled"))
+        client._restart_runtime = lambda: restart_calls.append(True)
+        try:
+            try:
+                client._request_with_restart("thread/resume", {"threadId": "thr-stalled"}, timeout=0.01)
+                raise AssertionError("expected startup timeout")
+            except TimeoutError as exc:
+                assert "startup stalled" in str(exc)
+            assert restart_calls == []
+            assert client._operations[active.thread_id] is active
+            assert active.completed.is_set() is False
+        finally:
+            client.close()
+
+
 def test_reasoning_summary_defaults_to_detailed():
     with tempfile.TemporaryDirectory() as tmp:
         old = os.environ.pop("VO_CODEX_REASONING_SUMMARY", None)
