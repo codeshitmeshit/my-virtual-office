@@ -8822,7 +8822,7 @@ def _feishu_chat_replay_comm_events(agent_id, *, after_ts, seen_ids=None, limit=
     seen_ids = seen_ids if isinstance(seen_ids, set) else set(seen_ids or [])
     payloads = []
     for event in _load_comm_history(limit=max(1, min(int(limit or 500), 2000))):
-        if not isinstance(event, dict) or not _comm_is_feishu(event):
+        if not isinstance(event, dict) or not _comm_is_feishu(event) or _comm_is_feishu_group(event):
             continue
         event_id = str(event.get("id") or "").strip()
         if not event_id or event_id in seen_ids or int(event.get("ts") or 0) < after_ts:
@@ -8843,7 +8843,7 @@ def _feishu_chat_replay_comm_events(agent_id, *, after_ts, seen_ids=None, limit=
 
 def _publish_feishu_chat_comm_event(event, event_name="message"):
     event = event if isinstance(event, dict) else {}
-    if not event or not _comm_is_feishu(event):
+    if not event or not _comm_is_feishu(event) or _comm_is_feishu_group(event):
         return
     agent_ids = _feishu_chat_event_agent_ids(event)
     if not agent_ids:
@@ -9449,6 +9449,8 @@ def _page_provider_history(request, rows, source, limit_plus_one):
 
 def _chat_history_comm_event_matches(request, event):
     event = event if isinstance(event, dict) else {}
+    if _comm_is_feishu_group(event):
+        return False
     if event.get("visibleInOffice", True) is False:
         return False
     if event.get("type") == "operation" and event.get("operation") == "feishu_delivery":
@@ -9601,6 +9603,8 @@ def _dedupe_visible_comm_history(events):
     deduped = []
     seen = set()
     for event in events or []:
+        if _comm_is_feishu_group(event):
+            continue
         if _is_a2a_envelope_text(event.get("text") if isinstance(event, dict) else ""):
             continue
         direction = event.get("direction") or ""
@@ -9685,6 +9689,8 @@ def _merge_comm_events_into_agent_chat(result, per_agent_limit=500):
         return result
     valid_keys = set(AGENT_SESSION_IDS.keys()) | {a.get("statusKey") or a.get("id") for a in get_roster()}
     for event in events:
+        if _comm_is_feishu_group(event):
+            continue
         if not event.get("visibleInOffice", True):
             continue
         refs = [event.get("from") or {}, event.get("to") or {}]

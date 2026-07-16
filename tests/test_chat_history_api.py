@@ -302,6 +302,37 @@ class ChatHistoryContractTest(unittest.TestCase):
             type="operation", operation="feishu_delivery",
         )))
         self.assertFalse(matches(request, event("hidden", "feishu-dm:one", source_app="feishu", visibleInOffice=False)))
+        self.assertFalse(matches(request, event(
+            "group-defense", "feishu-group:one", source_app="feishu",
+            metadata={"sourceApp": "feishu", "sourceSurface": "feishu-group", "chatType": "group"},
+            visibleInOffice=True,
+        )))
+
+    def test_group_rows_are_excluded_from_visible_cache_and_legacy_merge(self):
+        private = {
+            "id": "private-visible", "type": "message", "direction": "request",
+            "conversationId": "feishu-dm:one",
+            "from": {"id": "user", "providerKind": "human", "sourceApp": "feishu", "sourceSurface": "feishu-dm"},
+            "to": {"id": "codex-local", "providerKind": "codex"},
+            "metadata": {"sourceApp": "feishu", "sourceSurface": "feishu-dm", "chatType": "p2p"},
+            "visibleInOffice": True, "text": "private", "ts": 1,
+        }
+        group = {
+            **private,
+            "id": "group-hidden",
+            "conversationId": "feishu-group:one",
+            "from": {**private["from"], "sourceSurface": "feishu-group"},
+            "metadata": {"sourceApp": "feishu", "sourceSurface": "feishu-group", "chatType": "group"},
+            "visibleInOffice": True,
+            "text": "group must remain hidden",
+            "ts": 2,
+        }
+        deduped = self.require("_dedupe_visible_comm_history")([private, group])
+        self.assertEqual([row["id"] for row in deduped], ["private-visible"])
+        roster = [{"id": "codex-local", "statusKey": "codex-local", "providerKind": "codex"}]
+        with mock.patch.object(server, "_load_comm_history", return_value=[private, group]), mock.patch.object(server, "get_roster", return_value=roster):
+            merged = self.require("_merge_comm_events_into_agent_chat")({"codex-local": []})
+        self.assertEqual([row["commEventId"] for row in merged["codex-local"]], ["private-visible"])
 
     def test_comm_history_page_merges_feishu_rows_with_stable_pagination(self):
         request = self.request("codex")

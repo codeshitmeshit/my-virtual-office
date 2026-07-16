@@ -1165,6 +1165,63 @@ def test_feishu_sse_replays_real_comm_event_when_in_memory_publish_is_missed():
     assert replay[0]["commEvent"]["id"] == "comm-real-message"
 
 
+def test_feishu_group_rows_never_publish_or_replay_but_private_delivery_still_invalidates():
+    import queue
+    import server
+
+    private = {
+        "id": "comm-private-message", "type": "message", "direction": "request",
+        "conversationId": "feishu-dm:private",
+        "from": {"id": "user", "providerKind": "human", "sourceApp": "feishu", "sourceSurface": "feishu-dm"},
+        "to": {"id": "codex-local", "providerKind": "codex"},
+        "metadata": {
+            "sourceApp": "feishu", "sourceSurface": "feishu-dm", "chatType": "p2p",
+            "representativeAgentId": "codex-local", "sourceMessageId": "om_private",
+        },
+        "visibleInOffice": True, "text": "private", "ts": 2000,
+    }
+    private_delivery = {
+        **private,
+        "id": "comm-private-delivery", "type": "operation", "operation": "feishu_delivery",
+        "direction": "delivery", "visibleInOffice": False, "text": "", "ts": 2001,
+    }
+    group = {
+        **private,
+        "id": "comm-group-message", "conversationId": "feishu-group:hidden",
+        "metadata": {
+            **private["metadata"], "sourceSurface": "feishu-group", "chatType": "group",
+            "sourceMessageId": "om_group",
+        },
+        "visibleInOffice": True, "text": "group", "ts": 2002,
+    }
+    group_delivery = {
+        **group,
+        "id": "comm-group-delivery", "type": "operation", "operation": "feishu_delivery",
+        "direction": "delivery", "visibleInOffice": False, "text": "", "ts": 2003,
+    }
+    subscriber = queue.Queue()
+    previous_load = server._load_comm_history
+    with server._FEISHU_CHAT_EVENT_SUBSCRIBERS_LOCK:
+        previous_subscribers = server._FEISHU_CHAT_EVENT_SUBSCRIBERS
+        server._FEISHU_CHAT_EVENT_SUBSCRIBERS = {"codex-local": [subscriber]}
+    server._load_comm_history = lambda limit=500: [private, private_delivery, group, group_delivery]
+    try:
+        server._publish_feishu_chat_comm_event(group, "message")
+        server._publish_feishu_chat_comm_event(group_delivery, "delivery")
+        server._publish_feishu_chat_comm_event(private, "message")
+        server._publish_feishu_chat_comm_event(private_delivery, "delivery")
+        queued = [subscriber.get_nowait(), subscriber.get_nowait()]
+        replay = server._feishu_chat_replay_comm_events("codex-local", after_ts=0, seen_ids=set(), limit=50)
+    finally:
+        server._load_comm_history = previous_load
+        with server._FEISHU_CHAT_EVENT_SUBSCRIBERS_LOCK:
+            server._FEISHU_CHAT_EVENT_SUBSCRIBERS = previous_subscribers
+
+    assert [item["commEvent"]["id"] for item in queued] == ["comm-private-message", "comm-private-delivery"]
+    assert [item["commEvent"]["id"] for item in replay] == ["comm-private-message", "comm-private-delivery"]
+    assert [item["event"] for item in replay] == ["message", "delivery"]
+
+
 def test_feishu_sse_stream_writes_replayed_event_without_queue_publish():
     import server
 
@@ -3830,6 +3887,7 @@ if __name__ == "__main__":
     test_feishu_group_reply_uses_source_message_and_preserves_thread_without_fallback()
     test_feishu_source_message_index_is_atomic_persistent_and_not_window_bounded()
     test_feishu_group_ordering_cross_group_progress_and_metrics_are_bounded()
+    test_feishu_group_rows_never_publish_or_replay_but_private_delivery_still_invalidates()
     test_feishu_chat_inbound_test_route_dispatches_and_records()
     test_feishu_chat_self_test_route_dispatches_without_real_feishu_send()
     test_feishu_chat_bindings_config_is_persisted_and_lookupable()
