@@ -17,7 +17,7 @@
 ## 4. Processing Health and Control Panel
 
 - [x] 4.1 Add the additive worker `processing` health state, counters, warning threshold, retry/ack timestamps, blocked/backlog metadata, and server-side public status whitelist; verify healthy/degraded/recovering transitions and canary redaction for credentials, message content, callback URLs, errors, and local paths.
-- [ ] 4.2 Add the localized Feishu message-processing status bar beside the existing connection status, render healthy/degraded/recovering/legacy states with backlog and age/progress details, poll only while the management panel is visible, and add focused DOM/static tests for state transitions, escaping, missing legacy data, and poll cleanup.
+- [x] 4.2 Add the localized Feishu message-processing status bar beside the existing connection status, render healthy/degraded/recovering/legacy states with backlog and age/progress details, poll only while the management panel is visible, and add focused DOM/static tests for state transitions, escaping, missing legacy data, and poll cleanup.
 
 ## 5. Integrated Verification and Rollout
 
