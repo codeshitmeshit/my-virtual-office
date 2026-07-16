@@ -3646,6 +3646,51 @@ def test_feishu_chat_worker_status_and_card_action_state_are_isolated():
     assert os.path.exists(os.path.join(status_dir, "feishu-chat-worker-status.json"))
 
 
+def test_feishu_chat_public_worker_status_is_strictly_whitelisted_and_redacted():
+    os.environ.setdefault("VO_HERMES_ENABLED", "0")
+    os.environ.setdefault("VO_CODEX_ENABLED", "0")
+    import server
+
+    canary = "message-secret-path-token-canary"
+    projected = server._public_feishu_chat_worker_status({
+        "enabled": True,
+        "running": True,
+        "status": "connected",
+        "lastError": f"network failure {canary}",
+        "callbackUrl": f"http://user:{canary}@localhost/private",
+        "message": {"content": canary},
+        "sdk": {"connected": True, "state": "connected", "connection": {"raw": canary}},
+        "command": {"ready": True, "port": 4567, "token": canary},
+        "spool": {"entries": 2, "valid": 1, "blocked": 1, "bytes": 99, "oldestPendingAt": 1710000000000, "pressure": True, "full": False, "path": f"/tmp/{canary}"},
+        "processing": {
+            "state": "degraded", "backlog": 1, "blocked": 1, "oldestPendingAt": 1710000000000,
+            "lastAckAt": 0, "lastFailureAt": 1710000001000, "nextRetryAt": 1710000002000,
+            "recoveryActive": False, "consecutiveFailures": 3, "warning": True,
+            "lastErrorCategory": "callback_network_error", "rawError": canary,
+        },
+        "arbitrary": {"secret": canary},
+    })
+
+    assert projected["lastError"] == "Worker reported an error; see local worker logs."
+    assert projected["sdk"] == {"connected": True, "state": "connected"}
+    assert projected["command"] == {"ready": True}
+    assert projected["spool"] == {
+        "entries": 2, "valid": 1, "blocked": 1, "bytes": 99,
+        "oldestPendingAt": 1710000000000, "pressure": True, "full": False,
+    }
+    assert projected["processing"] == {
+        "state": "degraded", "backlog": 1, "blocked": 1, "oldestPendingAt": 1710000000000,
+        "lastAckAt": 0, "lastFailureAt": 1710000001000, "nextRetryAt": 1710000002000,
+        "recoveryActive": False, "consecutiveFailures": 3, "warning": True,
+        "lastErrorCategory": "callback_network_error",
+    }
+    rendered = json.dumps(projected)
+    assert canary not in rendered
+    assert "callbackUrl" not in projected
+    assert "message" not in projected
+    assert "arbitrary" not in projected
+
+
 def test_feishu_chat_self_test_route_dispatches_without_real_feishu_send():
     os.environ.setdefault("VO_HERMES_ENABLED", "0")
     os.environ.setdefault("VO_CODEX_ENABLED", "0")

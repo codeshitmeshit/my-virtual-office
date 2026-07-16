@@ -18,6 +18,11 @@ export function initialStatus(overrides = {}) {
     sdk: { connected: false, state: 'not_started' },
     reconnect: { active: false, count: 0, lastAt: 0 },
     callback: { active: 0, failures: 0, lastFailureAt: 0 },
+    processing: {
+      state: 'healthy', backlog: 0, blocked: 0, oldestPendingAt: 0,
+      lastAckAt: 0, lastFailureAt: 0, nextRetryAt: 0, recoveryActive: false,
+      consecutiveFailures: 0, warning: false, lastErrorCategory: '',
+    },
     command: { ready: false, port: 0, failures: 0, lastFailureAt: 0 },
     queue: { active: 0, pending: 0, pressure: false },
     spool: { entries: 0, bytes: 0, pressure: false, full: false, replayed: 0 },

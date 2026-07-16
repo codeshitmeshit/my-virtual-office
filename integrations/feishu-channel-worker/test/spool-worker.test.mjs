@@ -260,19 +260,21 @@ test('worker keeps running and reconnects after a transient startup network fail
   await worker.stop();
 });
 
-test('callback failure retains the spooled envelope for restart recovery', async () => {
+test('callback failure retains the spooled envelope for restart recovery', async (t) => {
   const statusDir = await mkdtemp(join(tmpdir(), 'vo-feishu-worker-fail-'));
   const channel = { on() {}, async connect() {}, async disconnect() {}, getConnectionStatus() { return { state: 'connected' }; } };
   const worker = new FeishuChannelWorker({
     appId: 'cli_test', appSecret: 'secret', statusDir, callbackUrl: 'http://127.0.0.1', callbackToken: 'token',
     workerInstanceId: 'worker-test', parentPid: process.pid, createChannel: () => channel,
+    processingRecoveryEnabled: false,
     callbackClient: { async deliverOnce() { throw Object.assign(new Error('offline'), { code: 'callback_failed' }); } },
   });
+  t.after(() => worker.stop());
   await worker.start();
   await assert.rejects(() => worker.handleMessage(message('om_pending')), /offline/);
   assert.equal((await worker.spool.stats()).entries, 1);
-  assert.equal(worker.status.snapshot().status, 'callback_failure');
-  await worker.stop();
+  assert.equal(worker.status.snapshot().status, 'connected');
+  assert.equal(worker.status.snapshot().processing.state, 'degraded');
 });
 
 test('processing recovery drains a failed callback after VO returns without a new event or reconnect', async () => {
@@ -331,6 +333,60 @@ test('a full retained spool blocks intake connection while recovery remains inde
   clearTimeout(worker.connectionRecoveryTimer);
   worker.connectionRecoveryTimer = null;
   await worker.stop();
+});
+
+test('processing health transitions independently through degraded, recovering, and healthy states', async (t) => {
+  const statusDir = await mkdtemp(join(tmpdir(), 'vo-feishu-worker-processing-health-'));
+  let attempt = 'fail';
+  let releaseRecovery;
+  const recoveryHeld = new Promise((resolve) => { releaseRecovery = resolve; });
+  const worker = new FeishuChannelWorker({
+    appId: 'cli_test', appSecret: 'secret-canary', statusDir,
+    callbackUrl: 'http://callback-canary.invalid/private', callbackToken: 'token-canary',
+    workerInstanceId: 'worker-processing-health', parentPid: process.pid,
+    processingRecoveryEnabled: false,
+    processingWarningThresholdMs: 1,
+    createChannel: () => ({
+      on() {}, async connect() {}, async disconnect() {},
+      getConnectionStatus() { return { state: 'connected' }; },
+    }),
+    callbackClient: {
+      async deliverOnce(input) {
+        if (attempt === 'fail') throw Object.assign(new Error('raw-error-canary'), { category: 'callback_network_error' });
+        await recoveryHeld;
+        return { schema: ACK_SCHEMA, requestId: input.requestId, messageId: input.message.messageId, durable: true, state: 'completed' };
+      },
+    },
+  });
+  t.after(() => worker.stop());
+  await worker.start();
+  const oldMessage = message('om_processing_health');
+  oldMessage.createTime = Date.now() - 10_000;
+  await assert.rejects(worker.handleMessage(oldMessage), /raw-error-canary/);
+  const degraded = worker.status.snapshot();
+  assert.equal(degraded.sdk.connected, true);
+  assert.deepEqual(degraded.processing, {
+    state: 'degraded', backlog: 1, blocked: 0, oldestPendingAt: oldMessage.createTime,
+    lastAckAt: 0, lastFailureAt: degraded.processing.lastFailureAt, nextRetryAt: 0,
+    recoveryActive: false, consecutiveFailures: 0, warning: true,
+    lastErrorCategory: 'callback_network_error',
+  });
+  assert.ok(degraded.processing.lastFailureAt > 0);
+  assert.doesNotMatch(JSON.stringify(degraded.processing), /raw-error-canary|secret-canary|callback-canary|token-canary/);
+
+  attempt = 'recover';
+  worker.processingRecovery.setEnabled(true);
+  worker.processingRecovery.wake();
+  await waitUntil(() => worker.status.snapshot().processing.recoveryActive === true);
+  assert.equal(worker.status.snapshot().processing.state, 'recovering');
+  releaseRecovery();
+  await waitUntil(async () => (await worker.spool.stats()).entries === 0);
+  await waitUntil(() => worker.status.snapshot().processing.state === 'healthy');
+  const healthy = worker.status.snapshot().processing;
+  assert.equal(healthy.backlog, 0);
+  assert.equal(healthy.recoveryActive, false);
+  assert.ok(healthy.lastAckAt >= degraded.processing.lastFailureAt);
+  assert.equal(healthy.lastErrorCategory, '');
 });
 
 test('callback timeout is capped at 15 minutes', () => {

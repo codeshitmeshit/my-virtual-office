@@ -63,6 +63,17 @@ function normalizeMention(mention) {
   return normalized;
 }
 
+const PROCESSING_ERROR_CATEGORIES = new Set([
+  'callback_processing', 'callback_http_error', 'callback_invalid_ack',
+  'callback_network_error', 'callback_timeout', 'callback_failure',
+  'chat_queue_full', 'inbox_full',
+]);
+
+function processingErrorCategory(error) {
+  const category = String(error?.category || error?.code || 'callback_failure');
+  return PROCESSING_ERROR_CATEGORIES.has(category) ? category : 'callback_failure';
+}
+
 export function normalizeMessage(message) {
   const raw = rawEvent(message);
   const senderType = typeof message.senderType === 'string' ? message.senderType : '';
@@ -130,6 +141,14 @@ export class FeishuChannelWorker {
     this.maxConcurrentCallbacks = maxConcurrentCallbacks;
     this.maxPerChatQueue = maxPerChatQueue;
     this.processingWarningThresholdMs = processingWarningThresholdMs;
+    this.processingSpool = { entries: 0, valid: 0, blocked: 0, bytes: 0, oldestPendingAt: 0, pressure: false, full: false };
+    this.processingLastAckAt = 0;
+    this.processingLastFailureAt = 0;
+    this.processingLastProgressAt = 0;
+    this.processingLastErrorCategory = '';
+    this.processingRecoveryState = {
+      active: false, nextRetryAt: 0, consecutiveFailures: 0,
+    };
     this.lanePressure = false;
     this.status = new StatusStore(join(statusDir, 'feishu-chat-worker-status.json'), { workerInstanceId, parentPid: this.parentPid });
     this.spool = new InboundSpool(join(statusDir, 'feishu-channel-inbox'));
@@ -151,9 +170,13 @@ export class FeishuChannelWorker {
       },
     });
     this.processingRecovery = new ProcessingRecoveryCoordinator({
+      ...processingRecoveryOptions,
       run: () => this._runRecoveryPass(),
       enabled: processingRecoveryEnabled,
-      ...processingRecoveryOptions,
+      onState: (state) => {
+        this.processingRecoveryState = state;
+        return this._publishProcessing();
+      },
     });
     this.parentTimer = null;
     this.heartbeatTimer = null;
@@ -164,6 +187,39 @@ export class FeishuChannelWorker {
     if (this.createChannel) return this.createChannel(options);
     const { createLarkChannel } = await import('@larksuite/channel');
     return createLarkChannel(options);
+  }
+
+  _processingValue(spool = this.processingSpool) {
+    const backlog = Number(spool?.valid || 0);
+    const blocked = Number(spool?.blocked || 0);
+    const oldestPendingAt = Number(spool?.oldestPendingAt || 0);
+    const recoveryActive = Boolean(this.processingRecoveryState?.active);
+    let state = 'healthy';
+    if (backlog || blocked || recoveryActive) {
+      const makingProgress = recoveryActive
+        || (backlog > 0 && this.processingLastFailureAt === 0 && this.processingRecoveryState?.enabled)
+        || (backlog > 0 && this.processingLastFailureAt === 0 && Number(this.lanes?.snapshot().active || 0) > 0)
+        || this.processingLastProgressAt > this.processingLastFailureAt;
+      state = makingProgress && blocked === 0 ? 'recovering' : 'degraded';
+    }
+    return {
+      state,
+      backlog,
+      blocked,
+      oldestPendingAt,
+      lastAckAt: this.processingLastAckAt,
+      lastFailureAt: this.processingLastFailureAt,
+      nextRetryAt: Number(this.processingRecoveryState?.nextRetryAt || 0),
+      recoveryActive,
+      consecutiveFailures: Number(this.processingRecoveryState?.consecutiveFailures || 0),
+      warning: Boolean((backlog || blocked) && oldestPendingAt && Date.now() - oldestPendingAt >= this.processingWarningThresholdMs),
+      lastErrorCategory: this.processingLastErrorCategory,
+    };
+  }
+
+  _publishProcessing(spool = this.processingSpool, extra = {}) {
+    this.processingSpool = spool || this.processingSpool;
+    return this.status.update({ spool: this.processingSpool, processing: this._processingValue(), ...extra });
   }
 
   async start() {
@@ -194,7 +250,7 @@ export class FeishuChannelWorker {
     this.running = true;
     this._startWatchdogs();
     const retained = await this.spool.stats();
-    await this.status.update({ spool: retained });
+    await this._publishProcessing(retained);
     if (retained.entries > 0) this.processingRecovery.wake();
     if (retained.full) {
       await this.status.update({ status: 'inbox_full', spool: retained });
@@ -256,7 +312,7 @@ export class FeishuChannelWorker {
       const spoolState = await this.spool.put(envelope);
       await this.status.increment('counters.received');
       await this.status.increment('counters.spooled', spoolState.duplicate ? 0 : 1);
-      await this.status.update({ lastEventAt: Date.now(), spool: spoolState });
+      await this._publishProcessing(spoolState, { lastEventAt: Date.now() });
       const snapshot = await this.spool.snapshot();
       const head = snapshot.items.find((item) => item.envelope?.message?.chatId === normalized.chatId);
       if (!head || head.envelope.message.messageId !== normalized.messageId) {
@@ -334,19 +390,23 @@ export class FeishuChannelWorker {
         try {
           const ack = await this.callback.deliverOnce(envelope);
           const remaining = await this.spool.remove(envelope.message.messageId);
+          const acknowledgedAt = Date.now();
+          this.processingLastAckAt = acknowledgedAt;
+          this.processingLastProgressAt = acknowledgedAt;
+          if (remaining.entries === 0) this.processingLastErrorCategory = '';
           await this.status.increment('counters.callbackAcknowledged');
           if (mode === 'recovery') {
             await this.status.increment('spool.replayed');
             await this.status.increment('counters.replayed');
           }
-          await this.status.update({ status: 'connected', spool: remaining, lastError: '' });
+          await this._publishProcessing(remaining);
           return ack;
         } catch (error) {
+          this.processingLastFailureAt = Date.now();
+          this.processingLastErrorCategory = processingErrorCategory(error);
           await this.status.increment('callback.failures');
-          await this.status.update({
-            status: 'callback_failure',
+          await this._publishProcessing(this.processingSpool, {
             callback: { lastFailureAt: Date.now() },
-            lastError: redactSecretsString(error?.message || String(error), this.secrets),
           });
           throw error;
         }
@@ -382,7 +442,7 @@ export class FeishuChannelWorker {
       }
     });
     const remaining = await this.spool.stats();
-    await this.status.update({ spool: remaining });
+    await this._publishProcessing(remaining);
     return { pending: remaining.entries > 0, progress, failed, retryAfterMs };
   }
 
