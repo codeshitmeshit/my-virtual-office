@@ -6828,93 +6828,113 @@ def _handle_codex_chat(body):
         )
         if not release_deferred:
             _release_codex_operation_lock(agent_id, conversation_id, operation_lock)
-    thread_id = str(result.get("threadId") or "")
-    if thread_id:
-        _set_codex_thread_id(agent_id, conversation_id, thread_id)
-    after_paths = _codex_git_paths(provider.workspace)
-    modified_files = collect_modified_files(result.get("modifiedFiles") or [], before_paths, after_paths)
-    with _CODEX_ACTIVE_LOCK:
-        _CODEX_ACTIVE_OPERATIONS.pop((agent_id, conversation_id), None)
-    normalized = normalize_provider_result(
-        "codex",
-        agent,
-        result,
-        conversation_id=conversation_id,
-        thread_id=thread_id,
-        turn_id=result.get("turnId", ""),
-        modified_files=modified_files,
-        extra={"recoveredFromArchivedThread": result.get("recoveredFromArchivedThread")},
-    )
-    _CODEX_FAST_PATH_TELEMETRY.mark(fast_scope_run_id, "provider_terminal")
-    if normalized.get("busyReason"):
-        _CODEX_FAST_PATH_TELEMETRY.increment_busy(normalized.get("busyReason"))
-    terminal_fence = normalized.get("terminalFence") if isinstance(normalized.get("terminalFence"), dict) else {}
-    if terminal_fence.get("terminalFenceWaitMs") is not None:
-        _CODEX_FAST_PATH_TELEMETRY.observe("terminal_fence_wait_ms", terminal_fence.get("terminalFenceWaitMs"))
-    _append_vo_usage_record(
-        "codex",
-        agent,
-        normalized,
-        conversation_id=conversation_id,
-        thread_id=thread_id,
-        turn_id=normalized.get("turnId") or result.get("turnId", ""),
-        run_id=normalized.get("runId") or result.get("runId", ""),
-    )
-    if inbound_event and normalized.get("reply"):
-        reply_persisted = append_reply_event(normalized.get("reply") or "", {
-            "threadId": normalized.get("threadId") or thread_id,
-            "turnId": normalized.get("turnId") or result.get("turnId", ""),
-            "modifiedFiles": modified_files,
-            "needsHumanIntervention": bool(normalized.get("needsHumanIntervention")),
-        }, ok=bool(normalized.get("ok")))
-        if not reply_persisted:
-            with reply_event_lock:
-                if reply_event_appended["writing"] and not reply_event_appended.get("error"):
-                    reply_event_appended["error"] = TimeoutError("durable reply write did not finish before terminal fence")
-    with reply_event_lock:
-        persistence_error = reply_event_appended.get("error") or reply_event_appended.get("operationError")
-    if persistence_error:
-        normalized.update({
-            "ok": False,
-            "status": "durable_write_failed",
-            "error": "Codex completed but durable result persistence failed",
-            "errorCategory": type(persistence_error).__name__[:80],
-        })
-    stream_run_id = str(
-        body.get("_streamRunId")
-        or normalized.get("runId")
-        or normalized.get("turnId")
-        or (inbound_event or {}).get("id")
-        or operation_stable_id
-    ).strip()
-    try:
-        _append_codex_durable_operation(
-            agent_id,
-            conversation_id,
-            "terminal",
-            stream_run_id,
-            {
-                "status": normalized.get("status") or "",
-                "runId": stream_run_id,
-                "turnId": normalized.get("turnId") or "",
-                "threadId": normalized.get("threadId") or "",
-                "errorCategory": normalized.get("errorCode") or normalized.get("errorCategory") or "",
-            },
-            ok=bool(normalized.get("ok")),
+    def finalize_result():
+        thread_id = str(result.get("threadId") or "")
+        turn_id = str(result.get("turnId") or "")
+        terminal_fence = result.get("terminalFence") if isinstance(result.get("terminalFence"), dict) else {}
+        terminal_waiter = getattr(provider, "wait_for_terminal_callbacks", None)
+        if int(terminal_fence.get("activeCallbacks") or 0) > 0 and callable(terminal_waiter) and thread_id:
+            # The app-server reader may use its bounded fence to return while a
+            # terminal callback is still doing durable work.  That releases the
+            # reader, not the durability contract: wait for the callback's real
+            # outcome before deciding and committing the public terminal state.
+            terminal_waiter(thread_id, turn_id=turn_id, timeout=None)
+
+        if thread_id:
+            _set_codex_thread_id(agent_id, conversation_id, thread_id)
+        after_paths = _codex_git_paths(provider.workspace)
+        modified_files = collect_modified_files(result.get("modifiedFiles") or [], before_paths, after_paths)
+        normalized = normalize_provider_result(
+            "codex",
+            agent,
+            result,
+            conversation_id=conversation_id,
+            thread_id=thread_id,
+            turn_id=turn_id,
+            modified_files=modified_files,
+            extra={"recoveredFromArchivedThread": result.get("recoveredFromArchivedThread")},
         )
-        _CODEX_FAST_PATH_TELEMETRY.mark(fast_scope_run_id, "durable_terminal_committed")
-    except OSError as exc:
-        normalized.update({
-            "ok": False,
-            "status": "durable_write_failed",
-            "error": "Codex completed but durable result persistence failed",
-            "errorCategory": type(exc).__name__[:80],
-        })
-    if fast_scope_started:
-        _CODEX_EVENT_FAST_PATH.end(agent_id, conversation_id, fast_scope_run_id)
-    normalized["_status"] = provider_http_status(normalized)
-    finalization_done.set()
-    return normalized
+        _CODEX_FAST_PATH_TELEMETRY.mark(fast_scope_run_id, "provider_terminal")
+        if normalized.get("busyReason"):
+            _CODEX_FAST_PATH_TELEMETRY.increment_busy(normalized.get("busyReason"))
+        normalized_terminal_fence = (
+            normalized.get("terminalFence") if isinstance(normalized.get("terminalFence"), dict) else {}
+        )
+        if normalized_terminal_fence.get("terminalFenceWaitMs") is not None:
+            _CODEX_FAST_PATH_TELEMETRY.observe(
+                "terminal_fence_wait_ms",
+                normalized_terminal_fence.get("terminalFenceWaitMs"),
+            )
+        _append_vo_usage_record(
+            "codex",
+            agent,
+            normalized,
+            conversation_id=conversation_id,
+            thread_id=thread_id,
+            turn_id=normalized.get("turnId") or turn_id,
+            run_id=normalized.get("runId") or result.get("runId", ""),
+        )
+        if inbound_event and normalized.get("reply"):
+            append_reply_event(normalized.get("reply") or "", {
+                "threadId": normalized.get("threadId") or thread_id,
+                "turnId": normalized.get("turnId") or turn_id,
+                "modifiedFiles": modified_files,
+                "needsHumanIntervention": bool(normalized.get("needsHumanIntervention")),
+            }, ok=bool(normalized.get("ok")))
+        with reply_event_lock:
+            persistence_error = reply_event_appended.get("error") or reply_event_appended.get("operationError")
+        if persistence_error:
+            normalized.update({
+                "ok": False,
+                "status": "durable_write_failed",
+                "error": "Codex completed but durable result persistence failed",
+                "errorCategory": type(persistence_error).__name__[:80],
+            })
+        stream_run_id = str(
+            body.get("_streamRunId")
+            or normalized.get("runId")
+            or normalized.get("turnId")
+            or (inbound_event or {}).get("id")
+            or operation_stable_id
+        ).strip()
+        try:
+            _append_codex_durable_operation(
+                agent_id,
+                conversation_id,
+                "terminal",
+                stream_run_id,
+                {
+                    "status": normalized.get("status") or "",
+                    "runId": stream_run_id,
+                    "turnId": normalized.get("turnId") or "",
+                    "threadId": normalized.get("threadId") or "",
+                    "errorCategory": normalized.get("errorCode") or normalized.get("errorCategory") or "",
+                },
+                ok=bool(normalized.get("ok")),
+            )
+            _CODEX_FAST_PATH_TELEMETRY.mark(fast_scope_run_id, "durable_terminal_committed")
+        except OSError as exc:
+            normalized.update({
+                "ok": False,
+                "status": "durable_write_failed",
+                "error": "Codex completed but durable result persistence failed",
+                "errorCategory": type(exc).__name__[:80],
+            })
+        normalized["_status"] = provider_http_status(normalized)
+        return normalized
+
+    try:
+        return finalize_result()
+    finally:
+        try:
+            with _CODEX_ACTIVE_LOCK:
+                _CODEX_ACTIVE_OPERATIONS.pop((agent_id, conversation_id), None)
+        finally:
+            try:
+                if fast_scope_started:
+                    _CODEX_EVENT_FAST_PATH.end(agent_id, conversation_id, fast_scope_run_id)
+            finally:
+                finalization_done.set()
 
 
 def _codex_stream_event_payload(run_id, agent, record=None, result=None, **extra):

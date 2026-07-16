@@ -2156,810 +2156,792 @@
     },
     {
       "callee": "_set_codex_thread_id",
-      "caller": "_handle_codex_chat",
+      "caller": "_handle_codex_chat.finalize_result",
       "file": "app/server.py",
-      "line": 6833
+      "line": 6844
     },
     {
       "callee": "_codex_git_paths",
-      "caller": "_handle_codex_chat",
+      "caller": "_handle_codex_chat.finalize_result",
       "file": "app/server.py",
-      "line": 6834
+      "line": 6845
     },
     {
       "callee": "normalize_provider_result",
-      "caller": "_handle_codex_chat",
+      "caller": "_handle_codex_chat.finalize_result",
       "file": "app/server.py",
-      "line": 6838
+      "line": 6847
     },
     {
       "callee": "_append_codex_durable_operation",
-      "caller": "_handle_codex_chat",
+      "caller": "_handle_codex_chat.finalize_result",
       "file": "app/server.py",
-      "line": 6891
+      "line": 6901
     },
     {
       "callee": "provider_http_status",
-      "caller": "_handle_codex_chat",
+      "caller": "_handle_codex_chat.finalize_result",
       "file": "app/server.py",
-      "line": 6915
+      "line": 6923
     },
     {
       "callee": "_provider_visible_thinking",
       "caller": "_codex_stream_event_payload",
       "file": "app/server.py",
-      "line": 6938
+      "line": 6958
     },
     {
       "callee": "_provider_visible_thinking",
       "caller": "_codex_activity_bridge_event_name",
       "file": "app/server.py",
-      "line": 6964
+      "line": 6984
     },
     {
       "callee": "_get_codex_agent",
       "caller": "_handle_codex_run_start",
       "file": "app/server.py",
-      "line": 6986
+      "line": 7006
     },
     {
       "callee": "_codex_idempotency_key",
       "caller": "_handle_codex_run_start",
       "file": "app/server.py",
-      "line": 6994
+      "line": 7014
     },
     {
       "callee": "_append_codex_progress_comm_event",
       "caller": "_handle_codex_run_start.run_codex",
       "file": "app/server.py",
-      "line": 7016
+      "line": 7036
     },
     {
       "callee": "set_provider_event",
       "caller": "_handle_codex_run_start.run_codex",
       "file": "app/server.py",
-      "line": 7022
+      "line": 7042
     },
     {
       "callee": "_provider_visible_thinking",
       "caller": "_handle_codex_run_start.run_codex.on_activity",
       "file": "app/server.py",
-      "line": 7031
+      "line": 7051
     },
     {
       "callee": "_append_codex_progress_comm_event",
       "caller": "_handle_codex_run_start.run_codex.on_activity",
       "file": "app/server.py",
-      "line": 7036
+      "line": 7056
     },
     {
       "callee": "_codex_activity_bridge_event_name",
       "caller": "_handle_codex_run_start.run_codex.on_activity",
       "file": "app/server.py",
-      "line": 7037
+      "line": 7057
     },
     {
       "callee": "_codex_stream_event_payload",
       "caller": "_handle_codex_run_start.run_codex.on_activity",
       "file": "app/server.py",
-      "line": 7045
+      "line": 7065
     },
     {
       "callee": "set_provider_event",
       "caller": "_handle_codex_run_start.run_codex.on_activity",
       "file": "app/server.py",
-      "line": 7052
+      "line": 7072
     },
     {
       "callee": "_handle_codex_chat",
       "caller": "_handle_codex_run_start.run_codex",
       "file": "app/server.py",
-      "line": 7069
+      "line": 7089
     },
     {
       "callee": "_codex_stream_event_payload",
       "caller": "_handle_codex_run_start.run_codex",
       "file": "app/server.py",
-      "line": 7074
+      "line": 7094
     },
     {
       "callee": "set_provider_event",
       "caller": "_handle_codex_run_start.run_codex",
       "file": "app/server.py",
-      "line": 7084
+      "line": 7104
     },
     {
       "callee": "_handle_codex_cancel",
       "caller": "_handle_codex_run_start.cancel_codex",
       "file": "app/server.py",
-      "line": 7094
+      "line": 7114
     },
     {
       "callee": "CallableProviderAdapter",
       "caller": "_handle_codex_run_start",
       "file": "app/server.py",
-      "line": 7096
+      "line": 7116
     },
     {
       "callee": "_handle_codex_cancel",
       "caller": "_handle_codex_run_stop",
       "file": "app/server.py",
-      "line": 7162
+      "line": 7182
     },
     {
       "callee": "_get_codex_active",
       "caller": "_handle_codex_activity",
       "file": "app/server.py",
-      "line": 7186
+      "line": 7206
     },
     {
       "callee": "_get_codex_activity",
       "caller": "_handle_codex_activity",
       "file": "app/server.py",
-      "line": 7187
+      "line": 7207
     },
     {
       "callee": "_get_codex_activity",
       "caller": "_handle_codex_activity",
       "file": "app/server.py",
-      "line": 7191
+      "line": 7211
     },
     {
       "callee": "_get_codex_active",
       "caller": "_handle_codex_interaction",
       "file": "app/server.py",
-      "line": 7219
+      "line": 7239
     },
     {
       "callee": "_codex_provider_from_config",
       "caller": "_handle_codex_interaction",
       "file": "app/server.py",
-      "line": 7224
+      "line": 7244
     },
     {
       "callee": "_get_codex_agent",
       "caller": "_handle_codex_approval_pending",
       "file": "app/server.py",
-      "line": 7237
+      "line": 7257
     },
     {
       "callee": "_get_codex_active",
       "caller": "_handle_codex_approval_pending",
       "file": "app/server.py",
-      "line": 7242
+      "line": 7262
     },
     {
       "callee": "_codex_provider_from_config",
       "caller": "_handle_codex_approval_pending",
       "file": "app/server.py",
-      "line": 7244
+      "line": 7264
     },
     {
       "callee": "pending_approval",
       "caller": "_handle_codex_approval_pending",
       "file": "app/server.py",
-      "line": 7245
+      "line": 7265
     },
     {
       "callee": "_normalize_codex_approval_choice",
       "caller": "_codex_approval_result_message",
       "file": "app/server.py",
-      "line": 7261
+      "line": 7281
     },
     {
       "callee": "_get_codex_active",
       "caller": "_codex_approval_conversation_id",
       "file": "app/server.py",
-      "line": 7312
+      "line": 7332
     },
     {
       "callee": "_codex_history_has_approval",
       "caller": "_append_codex_approval_result_comm_event",
       "file": "app/server.py",
-      "line": 7324
+      "line": 7344
     },
     {
       "callee": "_codex_approval_result_message",
       "caller": "_append_codex_approval_result_comm_event",
       "file": "app/server.py",
-      "line": 7326
+      "line": 7346
     },
     {
       "callee": "_normalize_codex_approval_choice",
       "caller": "_append_codex_approval_result_comm_event",
       "file": "app/server.py",
-      "line": 7328
+      "line": 7348
     },
     {
       "callee": "_get_codex_agent",
       "caller": "_handle_codex_approval_respond",
       "file": "app/server.py",
-      "line": 7359
+      "line": 7379
     },
     {
       "callee": "_codex_provider_from_config",
       "caller": "_handle_codex_approval_respond",
       "file": "app/server.py",
-      "line": 7368
+      "line": 7388
     },
     {
       "callee": "respond_approval",
       "caller": "_handle_codex_approval_respond",
       "file": "app/server.py",
-      "line": 7368
+      "line": 7388
     },
     {
       "callee": "_normalize_codex_approval_choice",
       "caller": "_handle_codex_approval_respond",
       "file": "app/server.py",
-      "line": 7369
+      "line": 7389
     },
     {
       "callee": "_codex_approval_conversation_id",
       "caller": "_handle_codex_approval_respond",
       "file": "app/server.py",
-      "line": 7382
+      "line": 7402
     },
     {
       "callee": "_codex_approval_result_message",
       "caller": "_handle_codex_approval_respond",
       "file": "app/server.py",
-      "line": 7383
+      "line": 7403
     },
     {
       "callee": "_append_codex_approval_result_comm_event",
       "caller": "_handle_codex_approval_respond",
       "file": "app/server.py",
-      "line": 7387
+      "line": 7407
     },
     {
       "callee": "_append_codex_durable_operation",
       "caller": "_handle_codex_approval_respond",
       "file": "app/server.py",
-      "line": 7389
+      "line": 7409
     },
     {
       "callee": "set_provider_event",
       "caller": "_handle_codex_approval_respond",
       "file": "app/server.py",
-      "line": 7427
+      "line": 7447
     },
     {
       "callee": "_get_codex_active",
       "caller": "_handle_codex_cancel",
       "file": "app/server.py",
-      "line": 7459
+      "line": 7479
     },
     {
       "callee": "_codex_provider_from_config",
       "caller": "_handle_codex_cancel",
       "file": "app/server.py",
-      "line": 7462
+      "line": 7482
     },
     {
       "callee": "_get_codex_agent",
       "caller": "_handle_codex_reset",
       "file": "app/server.py",
-      "line": 7473
+      "line": 7493
     },
     {
       "callee": "_codex_operation_is_locked",
       "caller": "_handle_codex_reset",
       "file": "app/server.py",
-      "line": 7479
+      "line": 7499
     },
     {
       "callee": "_reset_codex_thread_id",
       "caller": "_handle_codex_reset",
       "file": "app/server.py",
-      "line": 7481
+      "line": 7501
     },
     {
       "callee": "_get_codex_agent",
       "caller": "_handle_codex_compact",
       "file": "app/server.py",
-      "line": 7488
+      "line": 7508
     },
     {
       "callee": "_get_codex_thread_id",
       "caller": "_handle_codex_compact",
       "file": "app/server.py",
-      "line": 7494
+      "line": 7514
     },
     {
       "callee": "_codex_operation_lock",
       "caller": "_handle_codex_compact",
       "file": "app/server.py",
-      "line": 7497
+      "line": 7517
     },
     {
       "callee": "_discard_codex_operation_lock",
       "caller": "_handle_codex_compact",
       "file": "app/server.py",
-      "line": 7499
+      "line": 7519
     },
     {
       "callee": "_codex_provider_from_config",
       "caller": "_handle_codex_compact",
       "file": "app/server.py",
-      "line": 7503
+      "line": 7523
     },
     {
       "callee": "_release_codex_operation_lock",
       "caller": "_handle_codex_compact",
       "file": "app/server.py",
-      "line": 7506
+      "line": 7526
     },
     {
       "callee": "_codex_provider_from_config",
       "caller": "_handle_codex_test",
       "file": "app/server.py",
-      "line": 7528
+      "line": 7548
     },
     {
       "callee": "_codex_history_path",
       "caller": "_load_codex_state",
       "file": "app/server.py",
-      "line": 7537
+      "line": 7557
     },
     {
       "callee": "_load_codex_state",
       "caller": "_load_codex_history",
       "file": "app/server.py",
-      "line": 7553
+      "line": 7573
     },
     {
       "callee": "_codex_history_path",
       "caller": "_save_codex_state",
       "file": "app/server.py",
-      "line": 7604
+      "line": 7624
     },
     {
       "callee": "_load_codex_state",
       "caller": "_save_codex_history",
       "file": "app/server.py",
-      "line": 7613
+      "line": 7633
     },
     {
       "callee": "_save_codex_state",
       "caller": "_save_codex_history",
       "file": "app/server.py",
-      "line": 7615
+      "line": 7635
     },
     {
       "callee": "_load_codex_state",
       "caller": "_get_codex_session_id",
       "file": "app/server.py",
-      "line": 7619
+      "line": 7639
     },
     {
       "callee": "_load_codex_state",
       "caller": "_set_codex_session_id",
-      "file": "app/server.py",
-      "line": 7625
-    },
-    {
-      "callee": "_save_codex_state",
-      "caller": "_set_codex_session_id",
-      "file": "app/server.py",
-      "line": 7632
-    },
-    {
-      "callee": "_load_codex_state",
-      "caller": "_set_codex_active_run",
-      "file": "app/server.py",
-      "line": 7636
-    },
-    {
-      "callee": "_save_codex_state",
-      "caller": "_set_codex_active_run",
       "file": "app/server.py",
       "line": 7645
+    },
+    {
+      "callee": "_save_codex_state",
+      "caller": "_set_codex_session_id",
+      "file": "app/server.py",
+      "line": 7652
+    },
+    {
+      "callee": "_load_codex_state",
+      "caller": "_set_codex_active_run",
+      "file": "app/server.py",
+      "line": 7656
+    },
+    {
+      "callee": "_save_codex_state",
+      "caller": "_set_codex_active_run",
+      "file": "app/server.py",
+      "line": 7665
     },
     {
       "callee": "_load_codex_state",
       "caller": "_get_codex_token_usage",
       "file": "app/server.py",
-      "line": 7649
+      "line": 7669
     },
     {
       "callee": "_load_codex_state",
       "caller": "_set_codex_token_usage",
       "file": "app/server.py",
-      "line": 7656
+      "line": 7676
     },
     {
       "callee": "_provider_context_used_from_token_usage",
       "caller": "_set_codex_token_usage",
       "file": "app/server.py",
-      "line": 7659
+      "line": 7679
     },
     {
       "callee": "_provider_context_window_from_token_usage",
       "caller": "_set_codex_token_usage",
       "file": "app/server.py",
-      "line": 7660
+      "line": 7680
     },
     {
       "callee": "_save_codex_state",
       "caller": "_set_codex_token_usage",
       "file": "app/server.py",
-      "line": 7667
+      "line": 7687
     },
     {
       "callee": "_load_codex_state",
       "caller": "_clear_codex_token_usage",
       "file": "app/server.py",
-      "line": 7671
+      "line": 7691
     },
     {
       "callee": "_save_codex_state",
       "caller": "_clear_codex_token_usage",
       "file": "app/server.py",
-      "line": 7675
+      "line": 7695
     },
     {
       "callee": "ClaudeCodeProvider",
       "caller": "_claude_code_provider_from_config",
       "file": "app/server.py",
-      "line": 7680
+      "line": 7700
     },
     {
       "callee": "_claude_code_history_path",
       "caller": "_load_claude_code_state",
       "file": "app/server.py",
-      "line": 7710
+      "line": 7730
     },
     {
       "callee": "_load_claude_code_state",
       "caller": "_load_claude_code_history",
       "file": "app/server.py",
-      "line": 7722
+      "line": 7742
     },
     {
       "callee": "_claude_code_visible_thinking",
       "caller": "_sanitize_claude_code_history_messages",
       "file": "app/server.py",
-      "line": 7733
+      "line": 7753
     },
     {
       "callee": "_claude_code_history_path",
       "caller": "_save_claude_code_history",
       "file": "app/server.py",
-      "line": 7739
+      "line": 7759
     },
     {
       "callee": "_load_claude_code_state",
       "caller": "_save_claude_code_history",
       "file": "app/server.py",
-      "line": 7740
+      "line": 7760
     },
     {
       "callee": "_load_claude_code_state",
       "caller": "_get_claude_code_session_id",
       "file": "app/server.py",
-      "line": 7762
+      "line": 7782
     },
     {
       "callee": "_load_claude_code_state",
       "caller": "_get_claude_code_token_usage",
       "file": "app/server.py",
-      "line": 7768
+      "line": 7788
     },
     {
       "callee": "_load_claude_code_state",
       "caller": "_set_claude_code_token_usage",
       "file": "app/server.py",
-      "line": 7774
+      "line": 7794
     },
     {
       "callee": "_provider_context_used_from_token_usage",
       "caller": "_set_claude_code_token_usage",
       "file": "app/server.py",
-      "line": 7777
+      "line": 7797
     },
     {
       "callee": "_provider_context_window_from_token_usage",
       "caller": "_set_claude_code_token_usage",
       "file": "app/server.py",
-      "line": 7778
+      "line": 7798
     },
     {
       "callee": "_save_claude_code_history",
       "caller": "_set_claude_code_token_usage",
       "file": "app/server.py",
-      "line": 7785
+      "line": 7805
     },
     {
       "callee": "_load_claude_code_state",
       "caller": "_clear_claude_code_token_usage",
       "file": "app/server.py",
-      "line": 7789
+      "line": 7809
     },
     {
       "callee": "_save_claude_code_history",
       "caller": "_clear_claude_code_token_usage",
       "file": "app/server.py",
-      "line": 7793
+      "line": 7813
     },
     {
       "callee": "_provider_context_used_from_token_usage",
       "caller": "_codex_context_used_from_token_usage",
       "file": "app/server.py",
-      "line": 8171
+      "line": 8191
     },
     {
       "callee": "_provider_context_window_from_token_usage",
       "caller": "_codex_context_window_from_token_usage",
       "file": "app/server.py",
-      "line": 8175
+      "line": 8195
     },
     {
       "callee": "_provider_progress_status",
       "caller": "_is_recoverable_provider_progress",
       "file": "app/server.py",
-      "line": 8209
+      "line": 8229
     },
     {
       "callee": "_is_recoverable_provider_progress",
       "caller": "_filter_recoverable_provider_progress_messages",
       "file": "app/server.py",
-      "line": 8229
+      "line": 8249
     },
     {
       "callee": "_is_recoverable_provider_progress",
       "caller": "_filter_recoverable_comm_progress_events",
       "file": "app/server.py",
-      "line": 8244
+      "line": 8264
     },
     {
       "callee": "_provider_visible_thinking",
       "caller": "_provider_progress_message",
       "file": "app/server.py",
-      "line": 8276
+      "line": 8296
     },
     {
       "callee": "_provider_context_used_from_token_usage",
       "caller": "_provider_progress_message",
       "file": "app/server.py",
-      "line": 8285
+      "line": 8305
     },
     {
       "callee": "_provider_context_window_from_token_usage",
       "caller": "_provider_progress_message",
       "file": "app/server.py",
-      "line": 8286
+      "line": 8306
     },
     {
       "callee": "_claude_code_history_path",
       "caller": "_set_claude_code_session_id",
       "file": "app/server.py",
-      "line": 8318
+      "line": 8338
     },
     {
       "callee": "_load_claude_code_state",
       "caller": "_set_claude_code_session_id",
       "file": "app/server.py",
-      "line": 8319
+      "line": 8339
     },
     {
       "callee": "_claude_code_history_path",
       "caller": "_set_claude_code_active_run",
       "file": "app/server.py",
-      "line": 8333
+      "line": 8353
     },
     {
       "callee": "_load_claude_code_state",
       "caller": "_set_claude_code_active_run",
       "file": "app/server.py",
-      "line": 8334
+      "line": 8354
     },
     {
       "callee": "_load_claude_code_history",
       "caller": "_publish_claude_code_progress",
       "file": "app/server.py",
-      "line": 8352
+      "line": 8372
     },
     {
       "callee": "_get_claude_code_session_id",
       "caller": "_publish_claude_code_progress",
       "file": "app/server.py",
-      "line": 8353
+      "line": 8373
     },
     {
       "callee": "_provider_progress_message",
       "caller": "_publish_claude_code_progress",
       "file": "app/server.py",
-      "line": 8355
+      "line": 8375
     },
     {
       "callee": "_save_claude_code_history",
       "caller": "_publish_claude_code_progress",
       "file": "app/server.py",
-      "line": 8357
+      "line": 8377
     },
     {
       "callee": "_set_claude_code_active_run",
       "caller": "_publish_claude_code_progress",
       "file": "app/server.py",
-      "line": 8359
+      "line": 8379
     },
     {
       "callee": "_remove_provider_progress_messages",
       "caller": "_remove_claude_code_progress_messages",
       "file": "app/server.py",
-      "line": 8363
+      "line": 8383
     },
     {
       "callee": "_get_hermes_agent",
       "caller": "_provider_recovery_progress_snapshot",
       "file": "app/server.py",
-      "line": 8369
+      "line": 8389
     },
     {
       "callee": "_load_hermes_history",
       "caller": "_provider_recovery_progress_snapshot",
       "file": "app/server.py",
-      "line": 8371
+      "line": 8391
     },
     {
       "callee": "_get_claude_code_agent",
       "caller": "_provider_recovery_progress_snapshot",
       "file": "app/server.py",
-      "line": 8374
+      "line": 8394
     },
     {
       "callee": "_load_claude_code_history",
       "caller": "_provider_recovery_progress_snapshot",
       "file": "app/server.py",
-      "line": 8376
+      "line": 8396
     },
     {
       "callee": "_sanitize_claude_code_history_messages",
       "caller": "_provider_recovery_progress_snapshot",
       "file": "app/server.py",
-      "line": 8376
+      "line": 8396
     },
     {
       "callee": "_get_codex_agent",
       "caller": "_provider_recovery_progress_snapshot",
       "file": "app/server.py",
-      "line": 8379
+      "line": 8399
     },
     {
       "callee": "_load_codex_history",
       "caller": "_provider_recovery_progress_snapshot",
       "file": "app/server.py",
-      "line": 8381
+      "line": 8401
     },
     {
       "callee": "_filter_recoverable_provider_progress_messages",
       "caller": "_provider_recovery_progress_snapshot",
       "file": "app/server.py",
-      "line": 8385
+      "line": 8405
     },
     {
       "callee": "_get_hermes_approval_pending",
       "caller": "_provider_pending_approval_snapshot",
       "file": "app/server.py",
-      "line": 8398
+      "line": 8418
     },
     {
       "callee": "_get_codex_active",
       "caller": "_provider_pending_approval_snapshot",
       "file": "app/server.py",
-      "line": 8400
+      "line": 8420
     },
     {
       "callee": "ProviderSSETransport",
       "caller": "_provider_sse_transport_for",
       "file": "app/server.py",
-      "line": 8408
+      "line": 8428
     },
     {
       "callee": "ProviderRunRepository",
       "caller": "<module>",
       "file": "app/server.py",
-      "line": 8433
+      "line": 8453
     },
     {
       "callee": "ProviderEventJournal",
       "caller": "<module>",
       "file": "app/server.py",
-      "line": 8434
+      "line": 8454
     },
     {
       "callee": "ProviderRunCoordinator",
       "caller": "<module>",
       "file": "app/server.py",
-      "line": 8435
+      "line": 8455
     },
     {
       "callee": "_provider_sse_transport_for",
       "caller": "<module>",
       "file": "app/server.py",
-      "line": 8438
+      "line": 8458
     },
     {
       "callee": "_provider_visible_thinking",
       "caller": "_claude_code_visible_thinking",
       "file": "app/server.py",
-      "line": 8442
+      "line": 8462
     },
     {
       "callee": "_get_claude_code_session_id",
       "caller": "_claude_code_stream_event_payload",
       "file": "app/server.py",
-      "line": 8452
+      "line": 8472
     },
     {
       "callee": "_claude_code_visible_thinking",
       "caller": "_claude_code_stream_event_payload",
       "file": "app/server.py",
-      "line": 8456
+      "line": 8476
     },
     {
       "callee": "_provider_context_used_from_token_usage",
       "caller": "_claude_code_stream_event_payload",
       "file": "app/server.py",
-      "line": 8463
+      "line": 8483
     },
     {
       "callee": "_provider_context_window_from_token_usage",
       "caller": "_claude_code_stream_event_payload",
       "file": "app/server.py",
-      "line": 8464
+      "line": 8484
     },
     {
       "callee": "_get_claude_code_agent",
       "caller": "_handle_claude_code_run_start",
       "file": "app/server.py",
-      "line": 8484
+      "line": 8504
     },
     {
       "callee": "_provider_run_idempotency_key",
       "caller": "_handle_claude_code_run_start",
       "file": "app/server.py",
-      "line": 8491
+      "line": 8511
     },
     {
       "callee": "_publish_claude_code_progress",
       "caller": "_handle_claude_code_run_start.run_claude_code",
       "file": "app/server.py",
-      "line": 8515
+      "line": 8535
     },
     {
       "callee": "set_provider_event",
       "caller": "_handle_claude_code_run_start.run_claude_code",
       "file": "app/server.py",
-      "line": 8521
+      "line": 8541
     },
     {
       "callee": "_publish_claude_code_progress",
       "caller": "_handle_claude_code_run_start.run_claude_code.on_progress",
       "file": "app/server.py",
-      "line": 8530
+      "line": 8550
     },
     {
       "callee": "set_provider_event",
-      "caller": "_handle_claude_code_run_start.run_claude_code.on_progress",
-      "file": "app/server.py",
-      "line": 8536
-    },
-    {
-      "callee": "_claude_code_stream_event_payload",
-      "caller": "_handle_claude_code_run_start.run_claude_code.on_progress",
-      "file": "app/server.py",
-      "line": 8548
-    },
-    {
-      "callee": "_claude_code_stream_event_payload",
-      "caller": "_handle_claude_code_run_start.run_claude_code.on_progress",
-      "file": "app/server.py",
-      "line": 8554
-    },
-    {
-      "callee": "_claude_code_visible_thinking",
       "caller": "_handle_claude_code_run_start.run_claude_code.on_progress",
       "file": "app/server.py",
       "line": 8556
@@ -2968,25 +2950,7 @@
       "callee": "_claude_code_stream_event_payload",
       "caller": "_handle_claude_code_run_start.run_claude_code.on_progress",
       "file": "app/server.py",
-      "line": 8559
-    },
-    {
-      "callee": "_claude_code_tool_stream_key",
-      "caller": "_handle_claude_code_run_start.run_claude_code.on_progress",
-      "file": "app/server.py",
-      "line": 8564
-    },
-    {
-      "callee": "_claude_code_stream_event_payload",
-      "caller": "_handle_claude_code_run_start.run_claude_code.on_progress",
-      "file": "app/server.py",
-      "line": 8569
-    },
-    {
-      "callee": "set_provider_event",
-      "caller": "_handle_claude_code_run_start.run_claude_code.on_progress",
-      "file": "app/server.py",
-      "line": 8571
+      "line": 8568
     },
     {
       "callee": "_claude_code_stream_event_payload",
@@ -2995,280 +2959,298 @@
       "line": 8574
     },
     {
-      "callee": "set_provider_event",
+      "callee": "_claude_code_visible_thinking",
       "caller": "_handle_claude_code_run_start.run_claude_code.on_progress",
       "file": "app/server.py",
       "line": 8576
     },
     {
-      "callee": "_handle_claude_code_chat",
-      "caller": "_handle_claude_code_run_start.run_claude_code",
+      "callee": "_claude_code_stream_event_payload",
+      "caller": "_handle_claude_code_run_start.run_claude_code.on_progress",
+      "file": "app/server.py",
+      "line": 8579
+    },
+    {
+      "callee": "_claude_code_tool_stream_key",
+      "caller": "_handle_claude_code_run_start.run_claude_code.on_progress",
       "file": "app/server.py",
       "line": 8584
     },
     {
-      "callee": "_load_claude_code_history",
-      "caller": "_handle_claude_code_run_start.run_claude_code",
+      "callee": "_claude_code_stream_event_payload",
+      "caller": "_handle_claude_code_run_start.run_claude_code.on_progress",
       "file": "app/server.py",
-      "line": 8587
+      "line": 8589
     },
     {
-      "callee": "_remove_claude_code_progress_messages",
-      "caller": "_handle_claude_code_run_start.run_claude_code",
+      "callee": "set_provider_event",
+      "caller": "_handle_claude_code_run_start.run_claude_code.on_progress",
       "file": "app/server.py",
-      "line": 8587
+      "line": 8591
     },
     {
-      "callee": "_get_claude_code_session_id",
-      "caller": "_handle_claude_code_run_start.run_claude_code",
-      "file": "app/server.py",
-      "line": 8588
-    },
-    {
-      "callee": "_save_claude_code_history",
-      "caller": "_handle_claude_code_run_start.run_claude_code",
-      "file": "app/server.py",
-      "line": 8588
-    },
-    {
-      "callee": "_get_claude_code_session_id",
-      "caller": "_handle_claude_code_run_start.run_claude_code",
+      "callee": "_claude_code_stream_event_payload",
+      "caller": "_handle_claude_code_run_start.run_claude_code.on_progress",
       "file": "app/server.py",
       "line": 8594
     },
     {
-      "callee": "_provider_context_used_from_token_usage",
-      "caller": "_handle_claude_code_run_start.run_claude_code",
-      "file": "app/server.py",
-      "line": 8600
-    },
-    {
-      "callee": "_provider_context_window_from_token_usage",
-      "caller": "_handle_claude_code_run_start.run_claude_code",
-      "file": "app/server.py",
-      "line": 8601
-    },
-    {
       "callee": "set_provider_event",
+      "caller": "_handle_claude_code_run_start.run_claude_code.on_progress",
+      "file": "app/server.py",
+      "line": 8596
+    },
+    {
+      "callee": "_handle_claude_code_chat",
+      "caller": "_handle_claude_code_run_start.run_claude_code",
+      "file": "app/server.py",
+      "line": 8604
+    },
+    {
+      "callee": "_load_claude_code_history",
       "caller": "_handle_claude_code_run_start.run_claude_code",
       "file": "app/server.py",
       "line": 8607
     },
     {
+      "callee": "_remove_claude_code_progress_messages",
+      "caller": "_handle_claude_code_run_start.run_claude_code",
+      "file": "app/server.py",
+      "line": 8607
+    },
+    {
+      "callee": "_get_claude_code_session_id",
+      "caller": "_handle_claude_code_run_start.run_claude_code",
+      "file": "app/server.py",
+      "line": 8608
+    },
+    {
+      "callee": "_save_claude_code_history",
+      "caller": "_handle_claude_code_run_start.run_claude_code",
+      "file": "app/server.py",
+      "line": 8608
+    },
+    {
+      "callee": "_get_claude_code_session_id",
+      "caller": "_handle_claude_code_run_start.run_claude_code",
+      "file": "app/server.py",
+      "line": 8614
+    },
+    {
+      "callee": "_provider_context_used_from_token_usage",
+      "caller": "_handle_claude_code_run_start.run_claude_code",
+      "file": "app/server.py",
+      "line": 8620
+    },
+    {
+      "callee": "_provider_context_window_from_token_usage",
+      "caller": "_handle_claude_code_run_start.run_claude_code",
+      "file": "app/server.py",
+      "line": 8621
+    },
+    {
       "callee": "set_provider_event",
       "caller": "_handle_claude_code_run_start.run_claude_code",
       "file": "app/server.py",
-      "line": 8612
+      "line": 8627
+    },
+    {
+      "callee": "set_provider_event",
+      "caller": "_handle_claude_code_run_start.run_claude_code",
+      "file": "app/server.py",
+      "line": 8632
     },
     {
       "callee": "_handle_claude_code_cancel",
       "caller": "_handle_claude_code_run_start.cancel_claude_code",
       "file": "app/server.py",
-      "line": 8616
+      "line": 8636
     },
     {
       "callee": "CallableProviderAdapter",
       "caller": "_handle_claude_code_run_start",
       "file": "app/server.py",
-      "line": 8623
+      "line": 8643
     },
     {
       "callee": "_provider_run_duplicate_response",
       "caller": "_handle_claude_code_run_start",
       "file": "app/server.py",
-      "line": 8651
+      "line": 8671
     },
     {
       "callee": "_get_claude_code_agent",
       "caller": "_handle_claude_code_interrupt",
       "file": "app/server.py",
-      "line": 8678
+      "line": 8698
     },
     {
       "callee": "_handle_claude_code_cancel",
       "caller": "_handle_claude_code_interrupt",
       "file": "app/server.py",
-      "line": 8689
+      "line": 8709
     },
     {
       "callee": "_load_claude_code_history",
       "caller": "_handle_claude_code_interrupt",
       "file": "app/server.py",
-      "line": 8691
+      "line": 8711
     },
     {
       "callee": "_get_claude_code_session_id",
       "caller": "_handle_claude_code_interrupt",
       "file": "app/server.py",
-      "line": 8701
+      "line": 8721
     },
     {
       "callee": "_save_claude_code_history",
       "caller": "_handle_claude_code_interrupt",
       "file": "app/server.py",
-      "line": 8701
+      "line": 8721
     },
     {
       "callee": "_get_claude_code_agent",
       "caller": "_handle_claude_code_history_clear",
       "file": "app/server.py",
-      "line": 8707
+      "line": 8727
     },
     {
       "callee": "_get_claude_code_session_id",
       "caller": "_handle_claude_code_history_clear",
       "file": "app/server.py",
-      "line": 8710
+      "line": 8730
     },
     {
       "callee": "_reset_provider_conversation_state",
       "caller": "_handle_claude_code_history_clear",
       "file": "app/server.py",
-      "line": 8711
+      "line": 8731
     },
     {
       "callee": "_get_claude_code_agent",
-      "caller": "_handle_claude_code_chat",
-      "file": "app/server.py",
-      "line": 8729
-    },
-    {
-      "callee": "ClaudeCodeProvider",
-      "caller": "_handle_claude_code_chat",
-      "file": "app/server.py",
-      "line": 8736
-    },
-    {
-      "callee": "_load_claude_code_history",
       "caller": "_handle_claude_code_chat",
       "file": "app/server.py",
       "line": 8749
     },
     {
-      "callee": "_get_claude_code_session_id",
+      "callee": "ClaudeCodeProvider",
       "caller": "_handle_claude_code_chat",
       "file": "app/server.py",
-      "line": 8761
-    },
-    {
-      "callee": "_save_claude_code_history",
-      "caller": "_handle_claude_code_chat",
-      "file": "app/server.py",
-      "line": 8761
-    },
-    {
-      "callee": "_get_claude_code_session_id",
-      "caller": "_handle_claude_code_chat",
-      "file": "app/server.py",
-      "line": 8763
-    },
-    {
-      "callee": "_feishu_group_provider_message",
-      "caller": "_handle_claude_code_chat",
-      "file": "app/server.py",
-      "line": 8766
-    },
-    {
-      "callee": "_publish_claude_code_progress",
-      "caller": "_handle_claude_code_chat",
-      "file": "app/server.py",
-      "line": 8801
+      "line": 8756
     },
     {
       "callee": "_load_claude_code_history",
       "caller": "_handle_claude_code_chat",
       "file": "app/server.py",
-      "line": 8802
+      "line": 8769
     },
     {
-      "callee": "_remove_claude_code_progress_messages",
+      "callee": "_get_claude_code_session_id",
       "caller": "_handle_claude_code_chat",
       "file": "app/server.py",
-      "line": 8803
+      "line": 8781
     },
     {
       "callee": "_save_claude_code_history",
       "caller": "_handle_claude_code_chat",
       "file": "app/server.py",
-      "line": 8816
+      "line": 8781
+    },
+    {
+      "callee": "_get_claude_code_session_id",
+      "caller": "_handle_claude_code_chat",
+      "file": "app/server.py",
+      "line": 8783
+    },
+    {
+      "callee": "_feishu_group_provider_message",
+      "caller": "_handle_claude_code_chat",
+      "file": "app/server.py",
+      "line": 8786
+    },
+    {
+      "callee": "_publish_claude_code_progress",
+      "caller": "_handle_claude_code_chat",
+      "file": "app/server.py",
+      "line": 8821
+    },
+    {
+      "callee": "_load_claude_code_history",
+      "caller": "_handle_claude_code_chat",
+      "file": "app/server.py",
+      "line": 8822
+    },
+    {
+      "callee": "_remove_claude_code_progress_messages",
+      "caller": "_handle_claude_code_chat",
+      "file": "app/server.py",
+      "line": 8823
+    },
+    {
+      "callee": "_save_claude_code_history",
+      "caller": "_handle_claude_code_chat",
+      "file": "app/server.py",
+      "line": 8836
     },
     {
       "callee": "normalize_provider_result",
       "caller": "_handle_claude_code_chat",
       "file": "app/server.py",
-      "line": 8818
+      "line": 8838
     },
     {
       "callee": "provider_http_status",
       "caller": "_handle_claude_code_chat",
       "file": "app/server.py",
-      "line": 8835
+      "line": 8855
     },
     {
       "callee": "ClaudeCodeProvider",
       "caller": "_handle_claude_code_test",
       "file": "app/server.py",
-      "line": 8842
+      "line": 8862
     },
     {
       "callee": "_get_claude_code_agent",
       "caller": "_handle_claude_code_cancel",
       "file": "app/server.py",
-      "line": 8858
+      "line": 8878
     },
     {
       "callee": "ClaudeCodeProvider",
       "caller": "_handle_claude_code_cancel",
       "file": "app/server.py",
-      "line": 8860
+      "line": 8880
     },
     {
       "callee": "HermesProvider",
       "caller": "_handle_agent_platforms",
       "file": "app/server.py",
-      "line": 8879
+      "line": 8899
     },
     {
       "callee": "_handle_codex_test",
       "caller": "_handle_agent_platforms",
       "file": "app/server.py",
-      "line": 8884
+      "line": 8904
     },
     {
       "callee": "_handle_claude_code_test",
       "caller": "_handle_agent_platforms",
       "file": "app/server.py",
-      "line": 8885
+      "line": 8905
     },
     {
       "callee": "_extract_openclaw_text",
       "caller": "_append_comm_event",
       "file": "app/server.py",
-      "line": 8973
+      "line": 8993
     },
     {
       "callee": "_comm_idempotency_key",
       "caller": "_find_comm_request_by_idempotency",
       "file": "app/server.py",
-      "line": 9142
-    },
-    {
-      "callee": "send_sse",
-      "caller": "_feishu_chat_stream_events",
-      "file": "app/server.py",
-      "line": 9334
-    },
-    {
-      "callee": "send_sse",
-      "caller": "_feishu_chat_stream_events",
-      "file": "app/server.py",
-      "line": 9341
-    },
-    {
-      "callee": "send_sse",
-      "caller": "_feishu_chat_stream_events",
-      "file": "app/server.py",
-      "line": 9349
+      "line": 9162
     },
     {
       "callee": "send_sse",
@@ -3277,628 +3259,640 @@
       "line": 9354
     },
     {
+      "callee": "send_sse",
+      "caller": "_feishu_chat_stream_events",
+      "file": "app/server.py",
+      "line": 9361
+    },
+    {
+      "callee": "send_sse",
+      "caller": "_feishu_chat_stream_events",
+      "file": "app/server.py",
+      "line": 9369
+    },
+    {
+      "callee": "send_sse",
+      "caller": "_feishu_chat_stream_events",
+      "file": "app/server.py",
+      "line": 9374
+    },
+    {
       "callee": "_extract_openclaw_text",
       "caller": "_upsert_comm_progress_event",
       "file": "app/server.py",
-      "line": 9395
+      "line": 9415
     },
     {
       "callee": "_provider_progress_message",
       "caller": "_append_codex_progress_comm_event",
       "file": "app/server.py",
-      "line": 9437
+      "line": 9457
     },
     {
       "callee": "_openclaw_session_paths",
       "caller": "_page_openclaw_session_history",
       "file": "app/server.py",
-      "line": 9846
+      "line": 9866
     },
     {
       "callee": "_page_provider_history",
       "caller": "_chat_history_comm_page",
       "file": "app/server.py",
-      "line": 9902
+      "line": 9922
     },
     {
       "callee": "_load_codex_state",
       "caller": "_history_session_metrics",
       "file": "app/server.py",
-      "line": 9908
+      "line": 9928
     },
     {
       "callee": "_get_codex_token_usage",
       "caller": "_history_session_metrics",
       "file": "app/server.py",
-      "line": 9909
+      "line": 9929
     },
     {
       "callee": "_get_codex_session_id",
       "caller": "_history_session_metrics",
       "file": "app/server.py",
-      "line": 9911
+      "line": 9931
     },
     {
       "callee": "_codex_context_used_from_token_usage",
       "caller": "_history_session_metrics",
       "file": "app/server.py",
-      "line": 9912
+      "line": 9932
     },
     {
       "callee": "_codex_int",
       "caller": "_history_session_metrics",
       "file": "app/server.py",
-      "line": 9912
+      "line": 9932
     },
     {
       "callee": "_codex_context_window_from_token_usage",
       "caller": "_history_session_metrics",
       "file": "app/server.py",
-      "line": 9913
+      "line": 9933
     },
     {
       "callee": "_codex_int",
       "caller": "_history_session_metrics",
       "file": "app/server.py",
-      "line": 9913
+      "line": 9933
     },
     {
       "callee": "_get_hermes_session_id",
       "caller": "_history_session_metrics",
       "file": "app/server.py",
-      "line": 9917
+      "line": 9937
     },
     {
       "callee": "_load_claude_code_state",
       "caller": "_history_session_metrics",
       "file": "app/server.py",
-      "line": 9919
+      "line": 9939
     },
     {
       "callee": "_get_claude_code_token_usage",
       "caller": "_history_session_metrics",
       "file": "app/server.py",
-      "line": 9920
+      "line": 9940
     },
     {
       "callee": "_get_claude_code_session_id",
       "caller": "_history_session_metrics",
       "file": "app/server.py",
-      "line": 9922
+      "line": 9942
     },
     {
       "callee": "_codex_context_used_from_token_usage",
       "caller": "_history_session_metrics",
       "file": "app/server.py",
-      "line": 9923
+      "line": 9943
     },
     {
       "callee": "_codex_int",
       "caller": "_history_session_metrics",
       "file": "app/server.py",
-      "line": 9923
+      "line": 9943
     },
     {
       "callee": "_codex_context_window_from_token_usage",
       "caller": "_history_session_metrics",
       "file": "app/server.py",
-      "line": 9924
+      "line": 9944
     },
     {
       "callee": "_codex_int",
       "caller": "_history_session_metrics",
       "file": "app/server.py",
-      "line": 9924
+      "line": 9944
     },
     {
       "callee": "_page_openclaw_session_history",
       "caller": "_load_chat_history_source_pages",
       "file": "app/server.py",
-      "line": 9933
+      "line": 9953
     },
     {
       "callee": "_get_codex_agent",
       "caller": "_load_chat_history_source_pages",
       "file": "app/server.py",
-      "line": 9935
+      "line": 9955
     },
     {
       "callee": "_filter_recoverable_provider_progress_messages",
       "caller": "_load_chat_history_source_pages",
       "file": "app/server.py",
-      "line": 9938
+      "line": 9958
     },
     {
       "callee": "_load_codex_history",
       "caller": "_load_chat_history_source_pages",
       "file": "app/server.py",
-      "line": 9938
+      "line": 9958
     },
     {
       "callee": "_page_provider_history",
       "caller": "_load_chat_history_source_pages",
       "file": "app/server.py",
-      "line": 9942
+      "line": 9962
     },
     {
       "callee": "_get_hermes_agent",
       "caller": "_load_chat_history_source_pages",
       "file": "app/server.py",
-      "line": 9944
+      "line": 9964
     },
     {
       "callee": "_page_provider_history",
       "caller": "_load_chat_history_source_pages",
       "file": "app/server.py",
-      "line": 9946
+      "line": 9966
     },
     {
       "callee": "_filter_recoverable_provider_progress_messages",
       "caller": "_load_chat_history_source_pages",
       "file": "app/server.py",
-      "line": 9948
+      "line": 9968
     },
     {
       "callee": "_load_hermes_history",
       "caller": "_load_chat_history_source_pages",
       "file": "app/server.py",
-      "line": 9948
+      "line": 9968
     },
     {
       "callee": "_get_claude_code_agent",
       "caller": "_load_chat_history_source_pages",
       "file": "app/server.py",
-      "line": 9953
+      "line": 9973
     },
     {
       "callee": "_page_provider_history",
       "caller": "_load_chat_history_source_pages",
       "file": "app/server.py",
-      "line": 9955
+      "line": 9975
     },
     {
       "callee": "_load_claude_code_history",
       "caller": "_load_chat_history_source_pages",
       "file": "app/server.py",
-      "line": 9957
+      "line": 9977
     },
     {
       "callee": "_sanitize_claude_code_history_messages",
       "caller": "_load_chat_history_source_pages",
       "file": "app/server.py",
-      "line": 9957
+      "line": 9977
     },
     {
       "callee": "_comm_idempotency_key",
       "caller": "_dedupe_visible_comm_history",
       "file": "app/server.py",
-      "line": 10036
+      "line": 10056
     },
     {
       "callee": "_extract_openclaw_text",
       "caller": "_comm_event_to_chat_message",
       "file": "app/server.py",
-      "line": 10081
+      "line": 10101
     },
     {
       "callee": "_extract_openclaw_text",
       "caller": "_merge_comm_events_into_agent_chat",
       "file": "app/server.py",
-      "line": 10136
+      "line": 10156
     },
     {
       "callee": "_extract_openclaw_text",
       "caller": "_merge_comm_events_into_agent_chat",
       "file": "app/server.py",
-      "line": 10166
+      "line": 10186
     },
     {
       "callee": "_extract_openclaw_text",
       "caller": "_merge_comm_events_into_agent_chat",
       "file": "app/server.py",
-      "line": 10173
+      "line": 10193
     },
     {
       "callee": "_extract_openclaw_text",
       "caller": "_merge_comm_events_into_agent_chat",
       "file": "app/server.py",
-      "line": 10177
+      "line": 10197
     },
     {
       "callee": "_handle_codex_chat",
       "caller": "_handle_agent_platform_comm_send",
       "file": "app/server.py",
-      "line": 10304
+      "line": 10324
     },
     {
       "callee": "_handle_claude_code_chat",
       "caller": "_handle_agent_platform_comm_send",
       "file": "app/server.py",
-      "line": 10314
+      "line": 10334
     },
     {
       "callee": "_get_openclaw_version",
       "caller": "_gateway_rpc_call_async",
       "file": "app/server.py",
-      "line": 10470
+      "line": 10490
     },
     {
       "callee": "_handle_hermes_agent_create",
       "caller": "_handle_agent_create",
       "file": "app/server.py",
-      "line": 10588
+      "line": 10608
     },
     {
       "callee": "_handle_codex_agent_create",
       "caller": "_handle_agent_create",
       "file": "app/server.py",
-      "line": 10590
+      "line": 10610
     },
     {
       "callee": "_handle_claude_code_agent_create",
       "caller": "_handle_agent_create",
       "file": "app/server.py",
-      "line": 10592
+      "line": 10612
     },
     {
       "callee": "_default_openclaw_agent_model",
       "caller": "_handle_agent_create",
       "file": "app/server.py",
-      "line": 10604
+      "line": 10624
     },
     {
       "callee": "HermesProvider",
       "caller": "_handle_hermes_agent_create",
       "file": "app/server.py",
-      "line": 10640
+      "line": 10660
     },
     {
       "callee": "_codex_provider_from_config",
       "caller": "_handle_codex_agent_create",
       "file": "app/server.py",
-      "line": 10672
+      "line": 10692
     },
     {
       "callee": "_claude_code_provider_from_config",
       "caller": "_handle_claude_code_agent_create",
       "file": "app/server.py",
-      "line": 10710
+      "line": 10730
     },
     {
       "callee": "_meeting_request_processed",
       "caller": "_meeting_request_sort_key",
       "file": "app/server.py",
-      "line": 11593
+      "line": 11613
     },
     {
       "callee": "_handle_hermes_approval_respond",
       "caller": "_dispatch_feishu_hermes_approval_action",
       "file": "app/server.py",
-      "line": 12400
+      "line": 12420
     },
     {
       "callee": "_dispatch_feishu_hermes_approval_action",
       "caller": "_handle_feishu_card_action",
       "file": "app/server.py",
-      "line": 12475
+      "line": 12495
     },
     {
       "callee": "channel_idempotency_hit",
       "caller": "_feishu_channel_idempotency_hit",
       "file": "app/server.py",
-      "line": 12786
+      "line": 12806
     },
     {
       "callee": "_handle_hermes_chat",
       "caller": "_dispatch_representative_agent_message",
       "file": "app/server.py",
-      "line": 12983
+      "line": 13003
     },
     {
       "callee": "_handle_codex_chat",
       "caller": "_dispatch_representative_agent_message",
       "file": "app/server.py",
-      "line": 12985
+      "line": 13005
     },
     {
       "callee": "_handle_claude_code_chat",
       "caller": "_dispatch_representative_agent_message",
       "file": "app/server.py",
-      "line": 12987
+      "line": 13007
     },
     {
       "callee": "_validated_provider_attachments",
       "caller": "_dispatch_representative_agent_message",
       "file": "app/server.py",
-      "line": 12989
+      "line": 13009
     },
     {
       "callee": "_feishu_group_provider_message",
       "caller": "_dispatch_representative_agent_message",
       "file": "app/server.py",
-      "line": 12992
+      "line": 13012
     },
     {
       "callee": "_format_hermes_attachment_context",
       "caller": "_dispatch_representative_agent_message",
       "file": "app/server.py",
-      "line": 12993
+      "line": 13013
     },
     {
       "callee": "_provider_conversation_key",
       "caller": "_dispatch_representative_agent_message",
       "file": "app/server.py",
-      "line": 12996
+      "line": 13016
     },
     {
       "callee": "_openclaw_conversation_session_key",
       "caller": "_dispatch_representative_agent_message",
       "file": "app/server.py",
-      "line": 12997
+      "line": 13017
     },
     {
       "callee": "_openclaw_queued_conversation_port",
       "caller": "_dispatch_representative_agent_message",
       "file": "app/server.py",
-      "line": 13002
+      "line": 13022
     },
     {
       "callee": "_meeting_pending_provider_agents",
       "caller": "_meeting_busy_context_for_agent",
       "file": "app/server.py",
-      "line": 13638
+      "line": 13658
     },
     {
       "callee": "_meeting_call_provider",
       "caller": "_meeting_call_advisory_provider",
       "file": "app/server.py",
-      "line": 13749
+      "line": 13769
     },
     {
       "callee": "_meeting_call_advisory_provider",
       "caller": "_meeting_complete_live_advisories",
       "file": "app/server.py",
-      "line": 13805
+      "line": 13825
     },
     {
       "callee": "_meeting_provider_ref",
       "caller": "_append_ignored_provider_completion",
       "file": "app/server.py",
-      "line": 13915
+      "line": 13935
     },
     {
       "callee": "_meeting_provider_ref",
       "caller": "_meeting_skip_timed_out_provider_call",
       "file": "app/server.py",
-      "line": 13959
+      "line": 13979
     },
     {
       "callee": "_meeting_provider_timeout",
       "caller": "_exec_meeting_pending_calls_projection",
       "file": "app/server.py",
-      "line": 14096
+      "line": 14116
     },
     {
       "callee": "_meeting_call_provider",
       "caller": "_handle_executable_meeting_targeted_question",
       "file": "app/server.py",
-      "line": 14659
+      "line": 14679
     },
     {
       "callee": "_meeting_provider_raw_summary",
       "caller": "_meeting_normalize_provider_reply",
       "file": "app/server.py",
-      "line": 14850
+      "line": 14870
     },
     {
       "callee": "_meeting_call_provider",
       "caller": "_handle_executable_meeting_end_with_moderator",
       "file": "app/server.py",
-      "line": 14993
+      "line": 15013
     },
     {
       "callee": "_meeting_provider_timeout",
       "caller": "_meeting_call_provider",
       "file": "app/server.py",
-      "line": 15096
+      "line": 15116
     },
     {
       "callee": "_handle_codex_chat",
       "caller": "_meeting_call_provider",
       "file": "app/server.py",
-      "line": 15099
+      "line": 15119
     },
     {
       "callee": "_handle_hermes_chat",
       "caller": "_meeting_call_provider",
       "file": "app/server.py",
-      "line": 15104
+      "line": 15124
     },
     {
       "callee": "_handle_claude_code_chat",
       "caller": "_meeting_call_provider",
       "file": "app/server.py",
-      "line": 15109
+      "line": 15129
     },
     {
       "callee": "_meeting_skip_timed_out_provider_call",
       "caller": "_handle_executable_meeting_run",
       "file": "app/server.py",
-      "line": 15146
+      "line": 15166
     },
     {
       "callee": "_meeting_call_provider",
       "caller": "_handle_executable_meeting_run",
       "file": "app/server.py",
-      "line": 15254
+      "line": 15274
     },
     {
       "callee": "_archive_processed_history",
       "caller": "_archive_add_governance_history",
       "file": "app/server.py",
-      "line": 19285
+      "line": 19305
     },
     {
       "callee": "_default_openclaw_agent_model",
       "caller": "_archive_manager_create_if_missing",
       "file": "app/server.py",
-      "line": 19611
+      "line": 19631
     },
     {
       "callee": "_archive_project_processed_events",
       "caller": "_archive_maintenance_trigger",
       "file": "app/server.py",
-      "line": 20118
+      "line": 20138
     },
     {
       "callee": "_handle_codex_chat",
       "caller": "_project_execution_call_executor",
       "file": "app/server.py",
-      "line": 21459
+      "line": 21479
     },
     {
       "callee": "_handle_hermes_chat",
       "caller": "_project_execution_call_executor",
       "file": "app/server.py",
-      "line": 21461
+      "line": 21481
     },
     {
       "callee": "_handle_claude_code_chat",
       "caller": "_project_execution_call_executor",
       "file": "app/server.py",
-      "line": 21463
+      "line": 21483
     },
     {
       "callee": "_handle_codex_chat",
       "caller": "_project_execution_call_reviewer",
       "file": "app/server.py",
-      "line": 21516
+      "line": 21536
     },
     {
       "callee": "_handle_hermes_chat",
       "caller": "_project_execution_call_reviewer",
       "file": "app/server.py",
-      "line": 21518
+      "line": 21538
     },
     {
       "callee": "_handle_claude_code_chat",
       "caller": "_project_execution_call_reviewer",
       "file": "app/server.py",
-      "line": 21520
+      "line": 21540
     },
     {
       "callee": "_handle_codex_cancel",
       "caller": "_project_execution_cancel_provider",
       "file": "app/server.py",
-      "line": 21790
+      "line": 21810
     },
     {
       "callee": "_openclaw_gateway_session_key",
       "caller": "_project_execution_cancel_provider",
       "file": "app/server.py",
-      "line": 21793
+      "line": 21813
     },
     {
       "callee": "_is_hermes_agent",
       "caller": "_wf_extract_session_activity",
       "file": "app/server.py",
-      "line": 22245
+      "line": 22265
     },
     {
       "callee": "_get_hermes_agent",
       "caller": "_wf_extract_session_activity",
       "file": "app/server.py",
-      "line": 22246
+      "line": 22266
     },
     {
       "callee": "_load_hermes_history",
       "caller": "_wf_extract_session_activity",
       "file": "app/server.py",
-      "line": 22248
+      "line": 22268
     },
     {
       "callee": "_is_codex_agent",
       "caller": "_wf_extract_session_activity",
       "file": "app/server.py",
-      "line": 22250
+      "line": 22270
     },
     {
       "callee": "_openclaw_get_session_info",
       "caller": "_wf_extract_session_activity",
       "file": "app/server.py",
-      "line": 22283
+      "line": 22303
     },
     {
       "callee": "_is_hermes_agent",
       "caller": "_wf_cleanup_task_sessions",
       "file": "app/server.py",
-      "line": 22617
+      "line": 22637
     },
     {
       "callee": "_openclaw_gateway_session_key",
       "caller": "_wf_cleanup_task_sessions",
       "file": "app/server.py",
-      "line": 22630
+      "line": 22650
     },
     {
       "callee": "_openclaw_get_session_info",
       "caller": "_wf_cleanup_task_sessions",
       "file": "app/server.py",
-      "line": 22647
+      "line": 22667
     },
     {
       "callee": "_is_hermes_agent",
       "caller": "_wf_call_agent",
       "file": "app/server.py",
-      "line": 22688
+      "line": 22708
     },
     {
       "callee": "_handle_hermes_chat",
       "caller": "_wf_call_agent",
       "file": "app/server.py",
-      "line": 22689
+      "line": 22709
     },
     {
       "callee": "_is_codex_agent",
       "caller": "_wf_call_agent",
       "file": "app/server.py",
-      "line": 22693
+      "line": 22713
     },
     {
       "callee": "_handle_codex_chat",
       "caller": "_wf_call_agent",
       "file": "app/server.py",
-      "line": 22694
+      "line": 22714
     },
     {
       "callee": "_extract_openclaw_text",
       "caller": "_extract_openclaw_text",
       "file": "app/server.py",
-      "line": 22736
+      "line": 22756
     },
     {
       "callee": "_get_openclaw_version",
       "caller": "_wf_call_agent_ws._call",
       "file": "app/server.py",
-      "line": 22772
+      "line": 22792
     },
     {
       "callee": "_extract_openclaw_text",
       "caller": "_wf_call_agent_ws._call",
       "file": "app/server.py",
-      "line": 22817
+      "line": 22837
     },
     {
       "callee": "_extract_openclaw_text",
       "caller": "_wf_call_agent_ws._call",
       "file": "app/server.py",
-      "line": 22823
-    },
-    {
-      "callee": "_extract_openclaw_text",
-      "caller": "_wf_call_agent_ws._call",
-      "file": "app/server.py",
-      "line": 22832
+      "line": 22843
     },
     {
       "callee": "_extract_openclaw_text",
@@ -3907,421 +3901,361 @@
       "line": 22852
     },
     {
+      "callee": "_extract_openclaw_text",
+      "caller": "_wf_call_agent_ws._call",
+      "file": "app/server.py",
+      "line": 22872
+    },
+    {
       "callee": "_is_codex_agent",
       "caller": "_handle_workflow_chat",
       "file": "app/server.py",
-      "line": 23882
+      "line": 23902
     },
     {
       "callee": "_is_hermes_agent",
       "caller": "_handle_workflow_chat",
       "file": "app/server.py",
-      "line": 23882
+      "line": 23902
     },
     {
       "callee": "_provider_visible_thinking",
       "caller": "_codex_reasoning_events_to_chat_messages",
       "file": "app/server.py",
-      "line": 23915
+      "line": 23935
     },
     {
       "callee": "_is_hermes_agent",
       "caller": "_wf_get_task_session_messages",
       "file": "app/server.py",
-      "line": 23946
+      "line": 23966
     },
     {
       "callee": "_get_hermes_agent",
       "caller": "_wf_get_task_session_messages",
       "file": "app/server.py",
-      "line": 23947
+      "line": 23967
     },
     {
       "callee": "_load_hermes_history",
       "caller": "_wf_get_task_session_messages",
       "file": "app/server.py",
-      "line": 23949
+      "line": 23969
     },
     {
       "callee": "_is_codex_agent",
       "caller": "_wf_get_task_session_messages",
       "file": "app/server.py",
-      "line": 23950
+      "line": 23970
     },
     {
       "callee": "_codex_reasoning_events_to_chat_messages",
       "caller": "_wf_get_task_session_messages",
       "file": "app/server.py",
-      "line": 23957
+      "line": 23977
     },
     {
       "callee": "_get_codex_activity",
       "caller": "_wf_get_task_session_messages",
       "file": "app/server.py",
-      "line": 23958
+      "line": 23978
     },
     {
       "callee": "_openclaw_get_session_info",
       "caller": "_wf_get_task_session_messages",
       "file": "app/server.py",
-      "line": 23977
+      "line": 23997
     },
     {
       "callee": "_is_codex_agent",
       "caller": "_wf_is_task_session_active",
       "file": "app/server.py",
-      "line": 24070
+      "line": 24090
     },
     {
       "callee": "_is_hermes_agent",
       "caller": "_wf_is_task_session_active",
       "file": "app/server.py",
-      "line": 24070
+      "line": 24090
     },
     {
       "callee": "_openclaw_get_session_info",
       "caller": "_wf_is_task_session_active",
       "file": "app/server.py",
-      "line": 24082
+      "line": 24102
     },
     {
       "callee": "_codex_provider_from_config",
       "caller": "_handle_agent_delete",
       "file": "app/server.py",
-      "line": 24314
+      "line": 24334
     },
     {
       "callee": "_claude_code_provider_from_config",
       "caller": "_handle_agent_delete",
       "file": "app/server.py",
-      "line": 24319
+      "line": 24339
     },
     {
       "callee": "_claude_code_history_path",
       "caller": "_handle_agent_delete",
       "file": "app/server.py",
-      "line": 24323
+      "line": 24343
     },
     {
       "callee": "HermesProvider",
       "caller": "_handle_agent_delete",
       "file": "app/server.py",
-      "line": 24330
+      "line": 24350
     },
     {
       "callee": "_hermes_history_path",
       "caller": "_handle_agent_delete",
       "file": "app/server.py",
-      "line": 24340
+      "line": 24360
     },
     {
       "callee": "_codex_provider",
       "caller": "_handle_agent_delete",
       "file": "app/server.py",
-      "line": 24347
+      "line": 24367
     },
     {
       "callee": "_codex_history_path",
       "caller": "_handle_agent_delete",
       "file": "app/server.py",
-      "line": 24351
+      "line": 24371
     },
     {
       "callee": "_claude_code_provider",
       "caller": "_handle_agent_delete",
       "file": "app/server.py",
-      "line": 24358
+      "line": 24378
     },
     {
       "callee": "_claude_code_history_path",
       "caller": "_handle_agent_delete",
       "file": "app/server.py",
-      "line": 24362
+      "line": 24382
     },
     {
       "callee": "_remove_openclaw_agent_paths",
       "caller": "_handle_agent_delete",
       "file": "app/server.py",
-      "line": 24372
+      "line": 24392
     },
     {
       "callee": "_openclaw_session_paths",
       "caller": "get_agent_messages",
       "file": "app/server.py",
-      "line": 24404
+      "line": 24424
     },
     {
       "callee": "_load_codex_history",
-      "caller": "get_codex_agent_messages",
-      "file": "app/server.py",
-      "line": 24577
-    },
-    {
-      "callee": "_codex_int",
-      "caller": "get_codex_agent_messages",
-      "file": "app/server.py",
-      "line": 24587
-    },
-    {
-      "callee": "_codex_int",
       "caller": "get_codex_agent_messages",
       "file": "app/server.py",
       "line": 24597
     },
     {
-      "callee": "_load_claude_code_history",
-      "caller": "get_claude_code_agent_messages",
+      "callee": "_codex_int",
+      "caller": "get_codex_agent_messages",
       "file": "app/server.py",
       "line": 24607
     },
     {
       "callee": "_codex_int",
+      "caller": "get_codex_agent_messages",
+      "file": "app/server.py",
+      "line": 24617
+    },
+    {
+      "callee": "_load_claude_code_history",
       "caller": "get_claude_code_agent_messages",
       "file": "app/server.py",
-      "line": 24616
+      "line": 24627
     },
     {
       "callee": "_codex_int",
       "caller": "get_claude_code_agent_messages",
       "file": "app/server.py",
-      "line": 24626
+      "line": 24636
+    },
+    {
+      "callee": "_codex_int",
+      "caller": "get_claude_code_agent_messages",
+      "file": "app/server.py",
+      "line": 24646
     },
     {
       "callee": "_fetch_claude",
       "caller": "ApiUsageCollector._collect",
       "file": "app/server.py",
-      "line": 24936
+      "line": 24956
     },
     {
       "callee": "_fetch_codex",
       "caller": "ApiUsageCollector._collect",
       "file": "app/server.py",
-      "line": 24938
+      "line": 24958
     },
     {
       "callee": "_serve_website_asset",
       "caller": "OfficeHandler.do_GET",
       "file": "app/server.py",
-      "line": 25491
+      "line": 25511
     },
     {
       "callee": "_serve_browser_viewer_asset",
       "caller": "OfficeHandler.do_GET",
       "file": "app/server.py",
-      "line": 25505
+      "line": 25525
     },
     {
       "callee": "_handle_hermes_platform_status",
       "caller": "OfficeHandler.do_GET",
       "file": "app/server.py",
-      "line": 25560
+      "line": 25580
     },
     {
       "callee": "_handle_hermes_platform_poll",
       "caller": "OfficeHandler.do_GET",
       "file": "app/server.py",
-      "line": 25567
+      "line": 25587
     },
     {
       "callee": "_hermes_platform_auth_error",
       "caller": "OfficeHandler.do_GET",
       "file": "app/server.py",
-      "line": 25567
+      "line": 25587
     },
     {
       "callee": "_get_openclaw_version",
       "caller": "OfficeHandler.do_GET",
       "file": "app/server.py",
-      "line": 25640
+      "line": 25660
     },
     {
       "callee": "_is_hermes_agent",
       "caller": "OfficeHandler.do_GET",
       "file": "app/server.py",
-      "line": 25669
+      "line": 25689
     },
     {
       "callee": "_get_hermes_agent",
       "caller": "OfficeHandler.do_GET",
       "file": "app/server.py",
-      "line": 25670
+      "line": 25690
     },
     {
       "callee": "_load_provider_histories_for_bubbles",
       "caller": "OfficeHandler.do_GET",
       "file": "app/server.py",
-      "line": 25672
+      "line": 25692
     },
     {
       "callee": "_is_codex_agent",
       "caller": "OfficeHandler.do_GET",
       "file": "app/server.py",
-      "line": 25673
+      "line": 25693
     },
     {
       "callee": "_is_claude_code_agent",
       "caller": "OfficeHandler.do_GET",
       "file": "app/server.py",
-      "line": 25675
+      "line": 25695
     },
     {
       "callee": "_get_claude_code_agent",
       "caller": "OfficeHandler.do_GET",
       "file": "app/server.py",
-      "line": 25676
+      "line": 25696
     },
     {
       "callee": "_load_provider_histories_for_bubbles",
       "caller": "OfficeHandler.do_GET",
       "file": "app/server.py",
-      "line": 25678
+      "line": 25698
     },
     {
       "callee": "_is_claude_code_agent",
       "caller": "OfficeHandler.do_GET",
       "file": "app/server.py",
-      "line": 25692
+      "line": 25712
     },
     {
       "callee": "_is_codex_agent",
       "caller": "OfficeHandler.do_GET",
       "file": "app/server.py",
-      "line": 25692
+      "line": 25712
     },
     {
       "callee": "_is_hermes_agent",
       "caller": "OfficeHandler.do_GET",
       "file": "app/server.py",
-      "line": 25692
+      "line": 25712
     },
     {
       "callee": "_get_providers",
       "caller": "OfficeHandler.do_GET",
       "file": "app/server.py",
-      "line": 25922
+      "line": 25942
     },
     {
       "callee": "_get_hermes_agent",
       "caller": "OfficeHandler.do_GET",
       "file": "app/server.py",
-      "line": 26106
+      "line": 26126
     },
     {
       "callee": "_filter_recoverable_provider_progress_messages",
       "caller": "OfficeHandler.do_GET",
       "file": "app/server.py",
-      "line": 26114
+      "line": 26134
     },
     {
       "callee": "_load_hermes_history",
       "caller": "OfficeHandler.do_GET",
       "file": "app/server.py",
-      "line": 26114
+      "line": 26134
     },
     {
       "callee": "_get_hermes_session_id",
       "caller": "OfficeHandler.do_GET",
       "file": "app/server.py",
-      "line": 26115
+      "line": 26135
     },
     {
       "callee": "_get_codex_agent",
       "caller": "OfficeHandler.do_GET",
       "file": "app/server.py",
-      "line": 26122
+      "line": 26142
     },
     {
       "callee": "_load_codex_state",
       "caller": "OfficeHandler.do_GET",
       "file": "app/server.py",
-      "line": 26124
+      "line": 26144
     },
     {
       "callee": "_get_codex_token_usage",
       "caller": "OfficeHandler.do_GET",
       "file": "app/server.py",
-      "line": 26125
+      "line": 26145
     },
     {
       "callee": "_filter_recoverable_provider_progress_messages",
       "caller": "OfficeHandler.do_GET",
       "file": "app/server.py",
-      "line": 26126
+      "line": 26146
     },
     {
       "callee": "_load_codex_history",
       "caller": "OfficeHandler.do_GET",
       "file": "app/server.py",
-      "line": 26126
+      "line": 26146
     },
     {
       "callee": "_get_codex_session_id",
-      "caller": "OfficeHandler.do_GET",
-      "file": "app/server.py",
-      "line": 26136
-    },
-    {
-      "callee": "_codex_context_used_from_token_usage",
-      "caller": "OfficeHandler.do_GET",
-      "file": "app/server.py",
-      "line": 26138
-    },
-    {
-      "callee": "_codex_int",
-      "caller": "OfficeHandler.do_GET",
-      "file": "app/server.py",
-      "line": 26138
-    },
-    {
-      "callee": "_codex_context_window_from_token_usage",
-      "caller": "OfficeHandler.do_GET",
-      "file": "app/server.py",
-      "line": 26139
-    },
-    {
-      "callee": "_codex_int",
-      "caller": "OfficeHandler.do_GET",
-      "file": "app/server.py",
-      "line": 26139
-    },
-    {
-      "callee": "_get_claude_code_agent",
-      "caller": "OfficeHandler.do_GET",
-      "file": "app/server.py",
-      "line": 26145
-    },
-    {
-      "callee": "_load_claude_code_state",
-      "caller": "OfficeHandler.do_GET",
-      "file": "app/server.py",
-      "line": 26147
-    },
-    {
-      "callee": "_get_claude_code_token_usage",
-      "caller": "OfficeHandler.do_GET",
-      "file": "app/server.py",
-      "line": 26148
-    },
-    {
-      "callee": "_filter_recoverable_provider_progress_messages",
-      "caller": "OfficeHandler.do_GET",
-      "file": "app/server.py",
-      "line": 26155
-    },
-    {
-      "callee": "_load_claude_code_history",
-      "caller": "OfficeHandler.do_GET",
-      "file": "app/server.py",
-      "line": 26155
-    },
-    {
-      "callee": "_sanitize_claude_code_history_messages",
-      "caller": "OfficeHandler.do_GET",
-      "file": "app/server.py",
-      "line": 26155
-    },
-    {
-      "callee": "_get_claude_code_session_id",
       "caller": "OfficeHandler.do_GET",
       "file": "app/server.py",
       "line": 26156
@@ -4330,277 +4264,337 @@
       "callee": "_codex_context_used_from_token_usage",
       "caller": "OfficeHandler.do_GET",
       "file": "app/server.py",
-      "line": 26159
+      "line": 26158
     },
     {
       "callee": "_codex_int",
       "caller": "OfficeHandler.do_GET",
       "file": "app/server.py",
-      "line": 26159
+      "line": 26158
     },
     {
       "callee": "_codex_context_window_from_token_usage",
       "caller": "OfficeHandler.do_GET",
       "file": "app/server.py",
-      "line": 26160
+      "line": 26159
     },
     {
       "callee": "_codex_int",
       "caller": "OfficeHandler.do_GET",
       "file": "app/server.py",
-      "line": 26160
+      "line": 26159
     },
     {
-      "callee": "_get_hermes_approval_pending",
+      "callee": "_get_claude_code_agent",
       "caller": "OfficeHandler.do_GET",
       "file": "app/server.py",
       "line": 26165
     },
     {
+      "callee": "_load_claude_code_state",
+      "caller": "OfficeHandler.do_GET",
+      "file": "app/server.py",
+      "line": 26167
+    },
+    {
+      "callee": "_get_claude_code_token_usage",
+      "caller": "OfficeHandler.do_GET",
+      "file": "app/server.py",
+      "line": 26168
+    },
+    {
+      "callee": "_filter_recoverable_provider_progress_messages",
+      "caller": "OfficeHandler.do_GET",
+      "file": "app/server.py",
+      "line": 26175
+    },
+    {
+      "callee": "_load_claude_code_history",
+      "caller": "OfficeHandler.do_GET",
+      "file": "app/server.py",
+      "line": 26175
+    },
+    {
+      "callee": "_sanitize_claude_code_history_messages",
+      "caller": "OfficeHandler.do_GET",
+      "file": "app/server.py",
+      "line": 26175
+    },
+    {
+      "callee": "_get_claude_code_session_id",
+      "caller": "OfficeHandler.do_GET",
+      "file": "app/server.py",
+      "line": 26176
+    },
+    {
+      "callee": "_codex_context_used_from_token_usage",
+      "caller": "OfficeHandler.do_GET",
+      "file": "app/server.py",
+      "line": 26179
+    },
+    {
+      "callee": "_codex_int",
+      "caller": "OfficeHandler.do_GET",
+      "file": "app/server.py",
+      "line": 26179
+    },
+    {
+      "callee": "_codex_context_window_from_token_usage",
+      "caller": "OfficeHandler.do_GET",
+      "file": "app/server.py",
+      "line": 26180
+    },
+    {
+      "callee": "_codex_int",
+      "caller": "OfficeHandler.do_GET",
+      "file": "app/server.py",
+      "line": 26180
+    },
+    {
       "callee": "_get_hermes_approval_pending",
       "caller": "OfficeHandler.do_GET",
       "file": "app/server.py",
-      "line": 26174
+      "line": 26185
+    },
+    {
+      "callee": "_get_hermes_approval_pending",
+      "caller": "OfficeHandler.do_GET",
+      "file": "app/server.py",
+      "line": 26194
     },
     {
       "callee": "send_sse",
       "caller": "OfficeHandler.do_GET",
       "file": "app/server.py",
-      "line": 26199
+      "line": 26219
     },
     {
       "callee": "send_sse",
       "caller": "OfficeHandler.do_GET",
       "file": "app/server.py",
-      "line": 26202
+      "line": 26222
     },
     {
       "callee": "send_sse",
-      "caller": "OfficeHandler.do_GET",
-      "file": "app/server.py",
-      "line": 26204
-    },
-    {
-      "callee": "_handle_hermes_run_events",
-      "caller": "OfficeHandler.do_GET",
-      "file": "app/server.py",
-      "line": 26207
-    },
-    {
-      "callee": "_handle_hermes_test",
-      "caller": "OfficeHandler.do_GET",
-      "file": "app/server.py",
-      "line": 26209
-    },
-    {
-      "callee": "_handle_codex_test",
-      "caller": "OfficeHandler.do_GET",
-      "file": "app/server.py",
-      "line": 26216
-    },
-    {
-      "callee": "_handle_codex_activity",
       "caller": "OfficeHandler.do_GET",
       "file": "app/server.py",
       "line": 26224
     },
     {
-      "callee": "_handle_codex_approval_pending",
+      "callee": "_handle_hermes_run_events",
       "caller": "OfficeHandler.do_GET",
       "file": "app/server.py",
-      "line": 26231
+      "line": 26227
     },
     {
-      "callee": "_handle_codex_run_events",
+      "callee": "_handle_hermes_test",
       "caller": "OfficeHandler.do_GET",
       "file": "app/server.py",
-      "line": 26239
+      "line": 26229
     },
     {
-      "callee": "_handle_claude_code_run_events",
+      "callee": "_handle_codex_test",
       "caller": "OfficeHandler.do_GET",
       "file": "app/server.py",
-      "line": 26242
+      "line": 26236
     },
     {
-      "callee": "_handle_claude_code_test",
+      "callee": "_handle_codex_activity",
       "caller": "OfficeHandler.do_GET",
       "file": "app/server.py",
       "line": 26244
     },
     {
+      "callee": "_handle_codex_approval_pending",
+      "caller": "OfficeHandler.do_GET",
+      "file": "app/server.py",
+      "line": 26251
+    },
+    {
+      "callee": "_handle_codex_run_events",
+      "caller": "OfficeHandler.do_GET",
+      "file": "app/server.py",
+      "line": 26259
+    },
+    {
+      "callee": "_handle_claude_code_run_events",
+      "caller": "OfficeHandler.do_GET",
+      "file": "app/server.py",
+      "line": 26262
+    },
+    {
+      "callee": "_handle_claude_code_test",
+      "caller": "OfficeHandler.do_GET",
+      "file": "app/server.py",
+      "line": 26264
+    },
+    {
       "callee": "_read_openclaw_auth_sqlite",
       "caller": "OfficeHandler._discover_oauth_provider_models",
       "file": "app/server.py",
-      "line": 26947
+      "line": 26967
     },
     {
       "callee": "_provider_from_model_id",
       "caller": "OfficeHandler._provider_for_model",
       "file": "app/server.py",
-      "line": 27080
+      "line": 27100
     },
     {
       "callee": "_is_hermes_agent",
       "caller": "OfficeHandler._get_configured_model",
       "file": "app/server.py",
-      "line": 27091
+      "line": 27111
     },
     {
       "callee": "_get_hermes_agent",
       "caller": "OfficeHandler._get_configured_model",
       "file": "app/server.py",
-      "line": 27092
+      "line": 27112
     },
     {
       "callee": "_is_codex_agent",
       "caller": "OfficeHandler._get_configured_model",
       "file": "app/server.py",
-      "line": 27096
+      "line": 27116
     },
     {
       "callee": "_get_codex_agent",
       "caller": "OfficeHandler._get_configured_model",
       "file": "app/server.py",
-      "line": 27097
+      "line": 27117
     },
     {
       "callee": "_is_claude_code_agent",
       "caller": "OfficeHandler._get_configured_model",
       "file": "app/server.py",
-      "line": 27101
+      "line": 27121
     },
     {
       "callee": "_get_claude_code_agent",
       "caller": "OfficeHandler._get_configured_model",
       "file": "app/server.py",
-      "line": 27102
+      "line": 27122
     },
     {
       "callee": "_provider_for_model",
       "caller": "OfficeHandler._get_configured_model",
       "file": "app/server.py",
-      "line": 27108
+      "line": 27128
     },
     {
       "callee": "_is_hermes_agent",
       "caller": "OfficeHandler._get_session_info",
       "file": "app/server.py",
-      "line": 27177
+      "line": 27197
     },
     {
       "callee": "_get_hermes_agent",
       "caller": "OfficeHandler._get_session_info",
       "file": "app/server.py",
-      "line": 27178
+      "line": 27198
     },
     {
       "callee": "_is_codex_agent",
       "caller": "OfficeHandler._get_session_info",
       "file": "app/server.py",
-      "line": 27182
+      "line": 27202
     },
     {
       "callee": "_get_codex_agent",
       "caller": "OfficeHandler._get_session_info",
       "file": "app/server.py",
-      "line": 27183
+      "line": 27203
     },
     {
       "callee": "_get_codex_token_usage",
       "caller": "OfficeHandler._get_session_info",
       "file": "app/server.py",
-      "line": 27187
+      "line": 27207
     },
     {
       "callee": "_load_codex_state",
       "caller": "OfficeHandler._get_session_info",
       "file": "app/server.py",
-      "line": 27188
+      "line": 27208
     },
     {
       "callee": "_codex_context_used_from_token_usage",
       "caller": "OfficeHandler._get_session_info",
       "file": "app/server.py",
-      "line": 27189
+      "line": 27209
     },
     {
       "callee": "_codex_int",
       "caller": "OfficeHandler._get_session_info",
       "file": "app/server.py",
-      "line": 27189
+      "line": 27209
     },
     {
       "callee": "_codex_context_window_from_token_usage",
       "caller": "OfficeHandler._get_session_info",
       "file": "app/server.py",
-      "line": 27190
+      "line": 27210
     },
     {
       "callee": "_codex_int",
       "caller": "OfficeHandler._get_session_info",
       "file": "app/server.py",
-      "line": 27190
+      "line": 27210
     },
     {
       "callee": "_is_claude_code_agent",
       "caller": "OfficeHandler._get_session_info",
       "file": "app/server.py",
-      "line": 27199
+      "line": 27219
     },
     {
       "callee": "_get_claude_code_agent",
       "caller": "OfficeHandler._get_session_info",
       "file": "app/server.py",
-      "line": 27200
+      "line": 27220
     },
     {
       "callee": "_get_claude_code_token_usage",
       "caller": "OfficeHandler._get_session_info",
       "file": "app/server.py",
-      "line": 27206
+      "line": 27226
     },
     {
       "callee": "_load_claude_code_state",
       "caller": "OfficeHandler._get_session_info",
       "file": "app/server.py",
-      "line": 27207
+      "line": 27227
     },
     {
       "callee": "_codex_context_used_from_token_usage",
       "caller": "OfficeHandler._get_session_info",
       "file": "app/server.py",
-      "line": 27208
+      "line": 27228
     },
     {
       "callee": "_codex_int",
       "caller": "OfficeHandler._get_session_info",
       "file": "app/server.py",
-      "line": 27208
+      "line": 27228
     },
     {
       "callee": "_codex_context_window_from_token_usage",
       "caller": "OfficeHandler._get_session_info",
       "file": "app/server.py",
-      "line": 27209
+      "line": 27229
     },
     {
       "callee": "_codex_int",
       "caller": "OfficeHandler._get_session_info",
       "file": "app/server.py",
-      "line": 27209
+      "line": 27229
     },
     {
       "callee": "_fetch_provider_models",
       "caller": "OfficeHandler._get_providers",
       "file": "app/server.py",
-      "line": 27285
-    },
-    {
-      "callee": "_first_provider_agent_model",
-      "caller": "OfficeHandler._get_providers",
-      "file": "app/server.py",
-      "line": 27325
+      "line": 27305
     },
     {
       "callee": "_first_provider_agent_model",
@@ -4615,1813 +4609,1777 @@
       "line": 27365
     },
     {
+      "callee": "_first_provider_agent_model",
+      "caller": "OfficeHandler._get_providers",
+      "file": "app/server.py",
+      "line": 27385
+    },
+    {
       "callee": "_openclaw_managed_auth_report",
       "caller": "OfficeHandler._get_providers",
       "file": "app/server.py",
-      "line": 27380
+      "line": 27400
     },
     {
       "callee": "_handle_save_custom_provider",
       "caller": "OfficeHandler._send_watcher_request",
       "file": "app/server.py",
-      "line": 27430
+      "line": 27450
     },
     {
       "callee": "_handle_delete_custom_provider",
       "caller": "OfficeHandler._send_watcher_request",
       "file": "app/server.py",
-      "line": 27432
+      "line": 27452
     },
     {
       "callee": "_write_openclaw_config",
       "caller": "OfficeHandler._handle_set_model",
       "file": "app/server.py",
-      "line": 27475
+      "line": 27495
     },
     {
       "callee": "_save_openclaw_api_key",
       "caller": "OfficeHandler._handle_save_key",
       "file": "app/server.py",
-      "line": 27487
+      "line": 27507
     },
     {
       "callee": "_safe_provider_id",
       "caller": "OfficeHandler._handle_delete_key",
       "file": "app/server.py",
-      "line": 27491
+      "line": 27511
     },
     {
       "callee": "_delete_openclaw_auth",
       "caller": "OfficeHandler._handle_delete_key",
       "file": "app/server.py",
-      "line": 27495
+      "line": 27515
     },
     {
       "callee": "_safe_provider_id",
       "caller": "OfficeHandler._handle_save_custom_provider",
       "file": "app/server.py",
-      "line": 27499
+      "line": 27519
     },
     {
       "callee": "_write_openclaw_config",
       "caller": "OfficeHandler._handle_save_custom_provider",
       "file": "app/server.py",
-      "line": 27566
+      "line": 27586
     },
     {
       "callee": "_safe_provider_id",
       "caller": "OfficeHandler._handle_delete_custom_provider",
       "file": "app/server.py",
-      "line": 27577
+      "line": 27597
     },
     {
       "callee": "_write_openclaw_config",
       "caller": "OfficeHandler._handle_delete_custom_provider",
       "file": "app/server.py",
-      "line": 27593
+      "line": 27613
     },
     {
       "callee": "_discover_oauth_provider_models",
       "caller": "OfficeHandler._get_models",
       "file": "app/server.py",
-      "line": 27659
+      "line": 27679
     },
     {
       "callee": "_fetch_provider_models",
       "caller": "OfficeHandler._get_models",
       "file": "app/server.py",
-      "line": 27683
+      "line": 27703
     },
     {
       "callee": "_hermes_platform_auth_error",
       "caller": "OfficeHandler.do_POST",
       "file": "app/server.py",
-      "line": 28069
+      "line": 28089
     },
     {
       "callee": "_sync_openclaw_static_auth_from_main",
       "caller": "OfficeHandler.do_POST",
       "file": "app/server.py",
-      "line": 28094
+      "line": 28114
     },
     {
       "callee": "_reset_openclaw_static_auth_overrides",
       "caller": "OfficeHandler.do_POST",
       "file": "app/server.py",
-      "line": 28110
+      "line": 28130
     },
     {
       "callee": "_handle_hermes_desktop_discover",
       "caller": "OfficeHandler.do_POST",
       "file": "app/server.py",
-      "line": 28121
+      "line": 28141
     },
     {
       "callee": "_handle_hermes_run_start",
       "caller": "OfficeHandler.do_POST",
       "file": "app/server.py",
-      "line": 28616
+      "line": 28636
     },
     {
       "callee": "_handle_hermes_interrupt",
       "caller": "OfficeHandler.do_POST",
       "file": "app/server.py",
-      "line": 28627
+      "line": 28647
     },
     {
       "callee": "_handle_hermes_run_stop",
       "caller": "OfficeHandler.do_POST",
       "file": "app/server.py",
-      "line": 28640
+      "line": 28660
     },
     {
       "callee": "_handle_hermes_chat",
       "caller": "OfficeHandler.do_POST",
       "file": "app/server.py",
-      "line": 28651
+      "line": 28671
     },
     {
       "callee": "_handle_codex_run_start",
       "caller": "OfficeHandler.do_POST",
       "file": "app/server.py",
-      "line": 28662
+      "line": 28682
     },
     {
       "callee": "_handle_claude_code_run_start",
       "caller": "OfficeHandler.do_POST",
       "file": "app/server.py",
-      "line": 28673
+      "line": 28693
     },
     {
       "callee": "_handle_codex_run_stop",
       "caller": "OfficeHandler.do_POST",
       "file": "app/server.py",
-      "line": 28686
+      "line": 28706
     },
     {
       "callee": "_handle_claude_code_interrupt",
       "caller": "OfficeHandler.do_POST",
       "file": "app/server.py",
-      "line": 28699
+      "line": 28719
     },
     {
       "callee": "_handle_codex_chat",
       "caller": "OfficeHandler.do_POST",
       "file": "app/server.py",
-      "line": 28710
+      "line": 28730
     },
     {
       "callee": "_handle_claude_code_chat",
       "caller": "OfficeHandler.do_POST",
       "file": "app/server.py",
-      "line": 28721
+      "line": 28741
     },
     {
       "callee": "_handle_codex_interrupt",
       "caller": "OfficeHandler.do_POST",
       "file": "app/server.py",
-      "line": 28732
+      "line": 28752
     },
     {
       "callee": "_handle_claude_code_interrupt",
       "caller": "OfficeHandler.do_POST",
       "file": "app/server.py",
-      "line": 28743
+      "line": 28763
     },
     {
       "callee": "_handle_codex_approval_respond",
       "caller": "OfficeHandler.do_POST",
       "file": "app/server.py",
-      "line": 28754
+      "line": 28774
     },
     {
       "callee": "_handle_hermes_approval_respond",
       "caller": "OfficeHandler.do_POST",
       "file": "app/server.py",
-      "line": 28765
+      "line": 28785
     },
     {
       "callee": "_handle_hermes_approval_feishu_e2e_create",
       "caller": "OfficeHandler.do_POST",
       "file": "app/server.py",
-      "line": 28777
+      "line": 28797
     },
     {
       "callee": "_handle_hermes_approval_feishu_e2e_action",
       "caller": "OfficeHandler.do_POST",
       "file": "app/server.py",
-      "line": 28791
+      "line": 28811
     },
     {
       "callee": "_handle_hermes_history_clear",
       "caller": "OfficeHandler.do_POST",
       "file": "app/server.py",
-      "line": 28804
+      "line": 28824
     },
     {
       "callee": "_get_codex_agent",
       "caller": "OfficeHandler.do_POST",
       "file": "app/server.py",
-      "line": 28814
+      "line": 28834
     },
     {
       "callee": "_get_codex_session_id",
       "caller": "OfficeHandler.do_POST",
       "file": "app/server.py",
-      "line": 28816
+      "line": 28836
     },
     {
       "callee": "_reset_provider_conversation_state",
-      "caller": "OfficeHandler.do_POST",
-      "file": "app/server.py",
-      "line": 28817
-    },
-    {
-      "callee": "_handle_claude_code_history_clear",
-      "caller": "OfficeHandler.do_POST",
-      "file": "app/server.py",
-      "line": 28827
-    },
-    {
-      "callee": "_handle_hermes_test",
       "caller": "OfficeHandler.do_POST",
       "file": "app/server.py",
       "line": 28837
     },
     {
-      "callee": "_handle_codex_test",
+      "callee": "_handle_claude_code_history_clear",
       "caller": "OfficeHandler.do_POST",
       "file": "app/server.py",
       "line": 28847
     },
     {
-      "callee": "_handle_codex_reset",
+      "callee": "_handle_hermes_test",
       "caller": "OfficeHandler.do_POST",
       "file": "app/server.py",
       "line": 28857
     },
     {
+      "callee": "_handle_codex_test",
+      "caller": "OfficeHandler.do_POST",
+      "file": "app/server.py",
+      "line": 28867
+    },
+    {
+      "callee": "_handle_codex_reset",
+      "caller": "OfficeHandler.do_POST",
+      "file": "app/server.py",
+      "line": 28877
+    },
+    {
       "callee": "_handle_codex_compact",
-      "caller": "OfficeHandler.do_POST",
-      "file": "app/server.py",
-      "line": 28878
-    },
-    {
-      "callee": "_handle_codex_interaction",
-      "caller": "OfficeHandler.do_POST",
-      "file": "app/server.py",
-      "line": 28888
-    },
-    {
-      "callee": "_handle_codex_approval_respond",
       "caller": "OfficeHandler.do_POST",
       "file": "app/server.py",
       "line": 28898
     },
     {
-      "callee": "_handle_codex_cancel",
+      "callee": "_handle_codex_interaction",
       "caller": "OfficeHandler.do_POST",
       "file": "app/server.py",
       "line": 28908
     },
     {
-      "callee": "_handle_claude_code_test",
+      "callee": "_handle_codex_approval_respond",
       "caller": "OfficeHandler.do_POST",
       "file": "app/server.py",
       "line": 28918
     },
     {
-      "callee": "_handle_claude_code_cancel",
+      "callee": "_handle_codex_cancel",
       "caller": "OfficeHandler.do_POST",
       "file": "app/server.py",
       "line": 28928
     },
     {
+      "callee": "_handle_claude_code_test",
+      "caller": "OfficeHandler.do_POST",
+      "file": "app/server.py",
+      "line": 28938
+    },
+    {
+      "callee": "_handle_claude_code_cancel",
+      "caller": "OfficeHandler.do_POST",
+      "file": "app/server.py",
+      "line": 28948
+    },
+    {
       "callee": "_save_openclaw_api_key",
       "caller": "OfficeHandler.do_POST",
       "file": "app/server.py",
-      "line": 29017
+      "line": 29037
     },
     {
       "callee": "_delete_openclaw_auth",
       "caller": "OfficeHandler.do_POST",
       "file": "app/server.py",
-      "line": 29029
+      "line": 29049
     },
     {
       "callee": "_save_custom_provider",
       "caller": "OfficeHandler.do_POST",
       "file": "app/server.py",
-      "line": 29038
+      "line": 29058
     },
     {
       "callee": "_safe_provider_id",
       "caller": "OfficeHandler.do_POST",
       "file": "app/server.py",
-      "line": 29039
+      "line": 29059
     },
     {
       "callee": "_delete_custom_provider",
       "caller": "OfficeHandler.do_POST",
       "file": "app/server.py",
-      "line": 29054
+      "line": 29074
     },
     {
       "callee": "_set_hermes_profile_model",
       "caller": "OfficeHandler.do_POST",
       "file": "app/server.py",
-      "line": 29063
+      "line": 29083
     },
     {
       "callee": "_save_hermes_api_key",
       "caller": "OfficeHandler.do_POST",
       "file": "app/server.py",
-      "line": 29077
+      "line": 29097
     },
     {
       "callee": "_delete_hermes_auth",
       "caller": "OfficeHandler.do_POST",
       "file": "app/server.py",
-      "line": 29086
+      "line": 29106
     },
     {
       "callee": "_save_hermes_custom_provider",
       "caller": "OfficeHandler.do_POST",
       "file": "app/server.py",
-      "line": 29095
+      "line": 29115
     },
     {
       "callee": "_delete_hermes_custom_provider",
       "caller": "OfficeHandler.do_POST",
       "file": "app/server.py",
-      "line": 29109
+      "line": 29129
     },
     {
       "callee": "_save_provider_key",
       "caller": "OfficeHandler.do_POST",
       "file": "app/server.py",
-      "line": 29121
+      "line": 29141
     },
     {
       "callee": "_delete_provider_key",
       "caller": "OfficeHandler.do_POST",
       "file": "app/server.py",
-      "line": 29133
+      "line": 29153
     },
     {
       "callee": "_save_custom_provider",
       "caller": "OfficeHandler.do_POST",
       "file": "app/server.py",
-      "line": 29142
+      "line": 29162
     },
     {
       "callee": "_get_openclaw_version",
       "caller": "OfficeHandler._test_gateway_connection._do_test",
       "file": "app/server.py",
-      "line": 29634
+      "line": 29654
     },
     {
       "callee": "_get_openclaw_version",
       "caller": "start_http_server",
       "file": "app/server.py",
-      "line": 30470
+      "line": 30490
     },
     {
       "callee": "_openclaw_get_session_info",
       "caller": "_wf_auto_resume_on_startup",
       "file": "app/server.py",
-      "line": 30519
+      "line": 30539
     },
     {
       "callee": "_openclaw_config_path",
       "caller": "_load_openclaw_model_config",
       "file": "app/server.py",
-      "line": 30587
+      "line": 30607
     },
     {
       "callee": "_safe_openclaw_agent_id",
       "caller": "_openclaw_agent_dir",
       "file": "app/server.py",
-      "line": 30599
+      "line": 30619
     },
     {
       "callee": "_openclaw_agent_dir",
       "caller": "_openclaw_auth_profiles_path",
       "file": "app/server.py",
-      "line": 30603
+      "line": 30623
     },
     {
       "callee": "_load_openclaw_model_config",
       "caller": "_primary_openclaw_model",
       "file": "app/server.py",
-      "line": 30625
+      "line": 30645
     },
     {
       "callee": "_load_openclaw_model_config",
       "caller": "_default_openclaw_model",
       "file": "app/server.py",
-      "line": 30630
+      "line": 30650
     },
     {
       "callee": "_primary_openclaw_model",
       "caller": "_default_openclaw_model",
       "file": "app/server.py",
-      "line": 30634
+      "line": 30654
     },
     {
       "callee": "_provider_from_model_id",
       "caller": "_context_window_for_model",
       "file": "app/server.py",
-      "line": 30639
+      "line": 30659
     },
     {
       "callee": "_load_openclaw_model_config",
       "caller": "_context_window_for_model",
       "file": "app/server.py",
-      "line": 30640
+      "line": 30660
     },
     {
       "callee": "_openclaw_agent_dir",
       "caller": "_read_openclaw_auth_sqlite",
       "file": "app/server.py",
-      "line": 30671
+      "line": 30691
     },
     {
       "callee": "_openclaw_auth_profiles_path",
       "caller": "_read_openclaw_auth_json",
       "file": "app/server.py",
-      "line": 30744
+      "line": 30764
     },
     {
       "callee": "_read_openclaw_auth_sqlite",
       "caller": "_read_openclaw_auth_profiles",
       "file": "app/server.py",
-      "line": 30765
+      "line": 30785
     },
     {
       "callee": "_read_openclaw_auth_json",
       "caller": "_read_openclaw_auth_profiles",
       "file": "app/server.py",
-      "line": 30768
+      "line": 30788
     },
     {
       "callee": "_load_openclaw_model_config",
       "caller": "_openclaw_agent_ids",
       "file": "app/server.py",
-      "line": 30777
+      "line": 30797
     },
     {
       "callee": "_safe_openclaw_agent_id",
       "caller": "_openclaw_agent_ids",
       "file": "app/server.py",
-      "line": 30780
+      "line": 30800
     },
     {
       "callee": "_safe_openclaw_agent_id",
       "caller": "_openclaw_agent_ids",
       "file": "app/server.py",
-      "line": 30788
+      "line": 30808
     },
     {
       "callee": "_openclaw_profile_type",
       "caller": "_is_openclaw_portable_static_profile",
       "file": "app/server.py",
-      "line": 30809
+      "line": 30829
     },
     {
       "callee": "_openclaw_agent_dir",
       "caller": "_read_openclaw_auth_profile_map",
       "file": "app/server.py",
-      "line": 30818
+      "line": 30838
     },
     {
       "callee": "_openclaw_auth_profiles_path",
       "caller": "_read_openclaw_auth_profile_map",
       "file": "app/server.py",
-      "line": 30846
+      "line": 30866
     },
     {
       "callee": "_openclaw_profile_type",
       "caller": "_openclaw_profile_public",
       "file": "app/server.py",
-      "line": 30856
+      "line": 30876
     },
     {
       "callee": "_openclaw_profile_provider",
       "caller": "_openclaw_profile_public",
       "file": "app/server.py",
-      "line": 30858
+      "line": 30878
     },
     {
       "callee": "_is_openclaw_portable_static_profile",
       "caller": "_openclaw_profile_public",
       "file": "app/server.py",
-      "line": 30866
+      "line": 30886
     },
     {
       "callee": "_openclaw_agent_ids",
       "caller": "_openclaw_managed_auth_report",
       "file": "app/server.py",
-      "line": 30874
+      "line": 30894
     },
     {
       "callee": "_read_openclaw_auth_profile_map",
       "caller": "_openclaw_managed_auth_report",
       "file": "app/server.py",
-      "line": 30875
+      "line": 30895
     },
     {
       "callee": "_is_openclaw_portable_static_profile",
       "caller": "_openclaw_managed_auth_report",
       "file": "app/server.py",
-      "line": 30879
+      "line": 30899
     },
     {
       "callee": "_read_openclaw_auth_profile_map",
       "caller": "_openclaw_managed_auth_report",
       "file": "app/server.py",
-      "line": 30883
+      "line": 30903
     },
     {
       "callee": "_is_openclaw_portable_static_profile",
       "caller": "_openclaw_managed_auth_report",
       "file": "app/server.py",
-      "line": 30896
+      "line": 30916
     },
     {
       "callee": "_openclaw_profile_type",
       "caller": "_openclaw_managed_auth_report",
       "file": "app/server.py",
-      "line": 30901
+      "line": 30921
     },
     {
       "callee": "_openclaw_profile_public",
       "caller": "_openclaw_managed_auth_report",
       "file": "app/server.py",
-      "line": 30907
+      "line": 30927
     },
     {
       "callee": "_openclaw_profile_public",
       "caller": "_openclaw_managed_auth_report",
       "file": "app/server.py",
-      "line": 30919
+      "line": 30939
     },
     {
       "callee": "_openclaw_agent_dir",
       "caller": "_update_openclaw_sqlite_auth_stores",
       "file": "app/server.py",
-      "line": 30927
+      "line": 30947
     },
     {
       "callee": "_openclaw_auth_profiles_path",
       "caller": "_update_openclaw_auth_profiles_json",
       "file": "app/server.py",
-      "line": 30971
+      "line": 30991
     },
     {
       "callee": "_openclaw_config_path",
       "caller": "_mirror_openclaw_config_auth_profile",
       "file": "app/server.py",
-      "line": 30994
+      "line": 31014
     },
     {
       "callee": "_load_openclaw_model_config",
       "caller": "_mirror_openclaw_config_auth_profile",
       "file": "app/server.py",
-      "line": 30995
+      "line": 31015
     },
     {
       "callee": "_openclaw_config_path",
       "caller": "_remove_openclaw_config_auth_profiles",
       "file": "app/server.py",
-      "line": 31010
+      "line": 31030
     },
     {
       "callee": "_load_openclaw_model_config",
       "caller": "_remove_openclaw_config_auth_profiles",
       "file": "app/server.py",
-      "line": 31011
+      "line": 31031
     },
     {
       "callee": "_openclaw_agent_dir",
       "caller": "_cleanup_openclaw_sqlite_auth_state",
       "file": "app/server.py",
-      "line": 31031
+      "line": 31051
     },
     {
       "callee": "_safe_provider_id",
       "caller": "_sync_openclaw_static_auth_from_main",
       "file": "app/server.py",
-      "line": 31093
+      "line": 31113
     },
     {
       "callee": "_safe_openclaw_agent_id",
       "caller": "_sync_openclaw_static_auth_from_main",
       "file": "app/server.py",
-      "line": 31095
+      "line": 31115
     },
     {
       "callee": "_read_openclaw_auth_profile_map",
       "caller": "_sync_openclaw_static_auth_from_main",
       "file": "app/server.py",
-      "line": 31096
+      "line": 31116
     },
     {
       "callee": "_is_openclaw_portable_static_profile",
       "caller": "_sync_openclaw_static_auth_from_main",
       "file": "app/server.py",
-      "line": 31100
+      "line": 31120
     },
     {
       "callee": "_openclaw_profile_provider",
       "caller": "_sync_openclaw_static_auth_from_main",
       "file": "app/server.py",
-      "line": 31101
+      "line": 31121
     },
     {
       "callee": "_openclaw_agent_ids",
       "caller": "_sync_openclaw_static_auth_from_main",
       "file": "app/server.py",
-      "line": 31107
+      "line": 31127
     },
     {
       "callee": "_is_openclaw_portable_static_profile",
       "caller": "_sync_openclaw_static_auth_from_main.updater",
       "file": "app/server.py",
-      "line": 31127
+      "line": 31147
     },
     {
       "callee": "_openclaw_profile_provider",
       "caller": "_sync_openclaw_static_auth_from_main.updater",
       "file": "app/server.py",
-      "line": 31128
+      "line": 31148
     },
     {
       "callee": "_update_openclaw_sqlite_auth_stores",
       "caller": "_sync_openclaw_static_auth_from_main",
       "file": "app/server.py",
-      "line": 31143
+      "line": 31163
     },
     {
       "callee": "_update_openclaw_auth_profiles_json",
       "caller": "_sync_openclaw_static_auth_from_main",
       "file": "app/server.py",
-      "line": 31144
+      "line": 31164
     },
     {
       "callee": "_cleanup_openclaw_sqlite_auth_state",
       "caller": "_sync_openclaw_static_auth_from_main",
       "file": "app/server.py",
-      "line": 31147
+      "line": 31167
     },
     {
       "callee": "_signal_openclaw_gateway",
       "caller": "_sync_openclaw_static_auth_from_main",
       "file": "app/server.py",
-      "line": 31159
+      "line": 31179
     },
     {
       "callee": "_safe_openclaw_agent_id",
       "caller": "_reset_openclaw_static_auth_overrides",
       "file": "app/server.py",
-      "line": 31173
+      "line": 31193
     },
     {
       "callee": "_sync_openclaw_static_auth_from_main",
       "caller": "_reset_openclaw_static_auth_overrides",
       "file": "app/server.py",
-      "line": 31176
+      "line": 31196
     },
     {
       "callee": "_safe_openclaw_agent_id",
       "caller": "_save_openclaw_api_key_direct",
       "file": "app/server.py",
-      "line": 31181
+      "line": 31201
     },
     {
       "callee": "_update_openclaw_sqlite_auth_stores",
       "caller": "_save_openclaw_api_key_direct",
       "file": "app/server.py",
-      "line": 31193
+      "line": 31213
     },
     {
       "callee": "_update_openclaw_auth_profiles_json",
       "caller": "_save_openclaw_api_key_direct",
       "file": "app/server.py",
-      "line": 31194
+      "line": 31214
     },
     {
       "callee": "_mirror_openclaw_config_auth_profile",
       "caller": "_save_openclaw_api_key_direct",
       "file": "app/server.py",
-      "line": 31204
+      "line": 31224
     },
     {
       "callee": "_signal_openclaw_gateway",
       "caller": "_save_openclaw_api_key_direct",
       "file": "app/server.py",
-      "line": 31205
+      "line": 31225
     },
     {
       "callee": "_safe_openclaw_agent_id",
       "caller": "_delete_openclaw_auth_direct",
       "file": "app/server.py",
-      "line": 31218
+      "line": 31238
     },
     {
       "callee": "_update_openclaw_sqlite_auth_stores",
       "caller": "_delete_openclaw_auth_direct",
       "file": "app/server.py",
-      "line": 31241
+      "line": 31261
     },
     {
       "callee": "_update_openclaw_auth_profiles_json",
       "caller": "_delete_openclaw_auth_direct",
       "file": "app/server.py",
-      "line": 31242
+      "line": 31262
     },
     {
       "callee": "_cleanup_openclaw_sqlite_auth_state",
       "caller": "_delete_openclaw_auth_direct",
       "file": "app/server.py",
-      "line": 31247
+      "line": 31267
     },
     {
       "callee": "_remove_openclaw_config_auth_profiles",
       "caller": "_delete_openclaw_auth_direct",
       "file": "app/server.py",
-      "line": 31251
+      "line": 31271
     },
     {
       "callee": "_signal_openclaw_gateway",
       "caller": "_delete_openclaw_auth_direct",
       "file": "app/server.py",
-      "line": 31252
+      "line": 31272
     },
     {
       "callee": "_safe_provider_id",
       "caller": "_save_openclaw_api_key",
       "file": "app/server.py",
-      "line": 31257
+      "line": 31277
     },
     {
       "callee": "_safe_openclaw_agent_id",
       "caller": "_save_openclaw_api_key",
       "file": "app/server.py",
-      "line": 31258
+      "line": 31278
     },
     {
       "callee": "_save_openclaw_api_key",
       "caller": "_save_openclaw_api_key",
       "file": "app/server.py",
-      "line": 31264
+      "line": 31284
     },
     {
       "callee": "_sync_openclaw_static_auth_from_main",
       "caller": "_save_openclaw_api_key",
       "file": "app/server.py",
-      "line": 31267
+      "line": 31287
     },
     {
       "callee": "_openclaw_binary",
       "caller": "_save_openclaw_api_key",
       "file": "app/server.py",
-      "line": 31275
+      "line": 31295
     },
     {
       "callee": "_mirror_openclaw_config_auth_profile",
       "caller": "_save_openclaw_api_key",
       "file": "app/server.py",
-      "line": 31283
+      "line": 31303
     },
     {
       "callee": "_signal_openclaw_gateway",
       "caller": "_save_openclaw_api_key",
       "file": "app/server.py",
-      "line": 31284
+      "line": 31304
     },
     {
       "callee": "_save_openclaw_api_key_direct",
       "caller": "_save_openclaw_api_key",
       "file": "app/server.py",
-      "line": 31286
+      "line": 31306
     },
     {
       "callee": "_safe_provider_id",
       "caller": "_delete_openclaw_auth",
       "file": "app/server.py",
-      "line": 31290
+      "line": 31310
     },
     {
       "callee": "_safe_openclaw_agent_id",
       "caller": "_delete_openclaw_auth",
       "file": "app/server.py",
-      "line": 31291
+      "line": 31311
     },
     {
       "callee": "_openclaw_agent_ids",
       "caller": "_delete_openclaw_auth",
       "file": "app/server.py",
-      "line": 31298
+      "line": 31318
     },
     {
       "callee": "_delete_openclaw_auth_direct",
       "caller": "_delete_openclaw_auth",
       "file": "app/server.py",
-      "line": 31299
+      "line": 31319
     },
     {
       "callee": "_signal_openclaw_gateway",
       "caller": "_delete_openclaw_auth",
       "file": "app/server.py",
-      "line": 31302
+      "line": 31322
     },
     {
       "callee": "_delete_openclaw_auth_direct",
       "caller": "_delete_openclaw_auth",
       "file": "app/server.py",
-      "line": 31312
+      "line": 31332
     },
     {
       "callee": "_hermes_platform_queue_path",
       "caller": "_load_hermes_platform_state",
       "file": "app/server.py",
-      "line": 31373
+      "line": 31393
     },
     {
       "callee": "_hermes_platform_state_default",
       "caller": "_load_hermes_platform_state",
       "file": "app/server.py",
-      "line": 31378
+      "line": 31398
     },
     {
       "callee": "_hermes_platform_state_default",
       "caller": "_load_hermes_platform_state",
       "file": "app/server.py",
-      "line": 31388
+      "line": 31408
     },
     {
       "callee": "_hermes_platform_message_active",
       "caller": "_save_hermes_platform_state",
       "file": "app/server.py",
-      "line": 31395
+      "line": 31415
     },
     {
       "callee": "_hermes_platform_message_active",
       "caller": "_save_hermes_platform_state",
       "file": "app/server.py",
-      "line": 31396
+      "line": 31416
     },
     {
       "callee": "_hermes_platform_queue_path",
       "caller": "_save_hermes_platform_state",
       "file": "app/server.py",
-      "line": 31403
+      "line": 31423
     },
     {
       "callee": "_hermes_platform_queue_path",
       "caller": "_save_hermes_platform_state",
       "file": "app/server.py",
-      "line": 31410
+      "line": 31430
     },
     {
       "callee": "_hermes_platform_request_token",
       "caller": "_hermes_platform_auth_error",
       "file": "app/server.py",
-      "line": 31520
+      "line": 31540
     },
     {
       "callee": "_load_hermes_platform_state",
       "caller": "_handle_hermes_platform_status",
       "file": "app/server.py",
-      "line": 31530
+      "line": 31550
     },
     {
       "callee": "_hermes_platform_counts",
       "caller": "_handle_hermes_platform_status",
       "file": "app/server.py",
-      "line": 31549
+      "line": 31569
     },
     {
       "callee": "_hermes_platform_ready",
-      "caller": "_handle_hermes_platform_enqueue",
-      "file": "app/server.py",
-      "line": 31555
-    },
-    {
-      "callee": "_hermes_platform_agent_ref",
-      "caller": "_handle_hermes_platform_enqueue",
-      "file": "app/server.py",
-      "line": 31574
-    },
-    {
-      "callee": "_hermes_platform_source_ref",
       "caller": "_handle_hermes_platform_enqueue",
       "file": "app/server.py",
       "line": 31575
     },
     {
+      "callee": "_hermes_platform_agent_ref",
+      "caller": "_handle_hermes_platform_enqueue",
+      "file": "app/server.py",
+      "line": 31594
+    },
+    {
+      "callee": "_hermes_platform_source_ref",
+      "caller": "_handle_hermes_platform_enqueue",
+      "file": "app/server.py",
+      "line": 31595
+    },
+    {
       "callee": "_load_hermes_platform_state",
       "caller": "_handle_hermes_platform_enqueue",
       "file": "app/server.py",
-      "line": 31617
+      "line": 31637
     },
     {
       "callee": "_hermes_platform_message_active",
       "caller": "_handle_hermes_platform_enqueue",
       "file": "app/server.py",
-      "line": 31618
+      "line": 31638
     },
     {
       "callee": "_save_hermes_platform_state",
       "caller": "_handle_hermes_platform_enqueue",
       "file": "app/server.py",
-      "line": 31623
+      "line": 31643
     },
     {
       "callee": "_hermes_platform_public_message",
       "caller": "_handle_hermes_platform_enqueue",
-      "file": "app/server.py",
-      "line": 31631
-    },
-    {
-      "callee": "_hermes_platform_ready",
-      "caller": "_handle_hermes_platform_poll",
-      "file": "app/server.py",
-      "line": 31636
-    },
-    {
-      "callee": "_hermes_platform_adapter_id",
-      "caller": "_handle_hermes_platform_poll",
-      "file": "app/server.py",
-      "line": 31638
-    },
-    {
-      "callee": "_load_hermes_platform_state",
-      "caller": "_handle_hermes_platform_poll",
       "file": "app/server.py",
       "line": 31651
     },
     {
+      "callee": "_hermes_platform_ready",
+      "caller": "_handle_hermes_platform_poll",
+      "file": "app/server.py",
+      "line": 31656
+    },
+    {
+      "callee": "_hermes_platform_adapter_id",
+      "caller": "_handle_hermes_platform_poll",
+      "file": "app/server.py",
+      "line": 31658
+    },
+    {
+      "callee": "_load_hermes_platform_state",
+      "caller": "_handle_hermes_platform_poll",
+      "file": "app/server.py",
+      "line": 31671
+    },
+    {
       "callee": "_hermes_platform_public_message",
       "caller": "_handle_hermes_platform_poll",
       "file": "app/server.py",
-      "line": 31675
+      "line": 31695
     },
     {
       "callee": "_save_hermes_platform_state",
       "caller": "_handle_hermes_platform_poll",
       "file": "app/server.py",
-      "line": 31678
+      "line": 31698
     },
     {
       "callee": "_load_hermes_platform_state",
       "caller": "_handle_hermes_platform_ack",
       "file": "app/server.py",
-      "line": 31689
+      "line": 31709
     },
     {
       "callee": "_save_hermes_platform_state",
       "caller": "_handle_hermes_platform_ack",
       "file": "app/server.py",
-      "line": 31710
+      "line": 31730
     },
     {
       "callee": "_hermes_platform_ready",
       "caller": "_handle_hermes_platform_reply",
       "file": "app/server.py",
-      "line": 31729
+      "line": 31749
     },
     {
       "callee": "_hermes_platform_adapter_id",
       "caller": "_handle_hermes_platform_reply",
       "file": "app/server.py",
-      "line": 31736
+      "line": 31756
     },
     {
       "callee": "_load_hermes_platform_state",
       "caller": "_handle_hermes_platform_reply",
       "file": "app/server.py",
-      "line": 31740
+      "line": 31760
     },
     {
       "callee": "_find_hermes_platform_message",
       "caller": "_handle_hermes_platform_reply",
       "file": "app/server.py",
-      "line": 31741
+      "line": 31761
     },
     {
       "callee": "_hermes_platform_agent_ref",
       "caller": "_handle_hermes_platform_reply",
       "file": "app/server.py",
-      "line": 31743
+      "line": 31763
     },
     {
       "callee": "_hermes_platform_source_ref",
       "caller": "_handle_hermes_platform_reply",
       "file": "app/server.py",
-      "line": 31744
+      "line": 31764
     },
     {
       "callee": "_save_hermes_platform_state",
       "caller": "_handle_hermes_platform_reply",
       "file": "app/server.py",
-      "line": 31768
+      "line": 31788
     },
     {
       "callee": "_hermes_platform_agent_ref",
       "caller": "_handle_hermes_platform_reply",
       "file": "app/server.py",
-      "line": 31777
+      "line": 31797
     },
     {
       "callee": "_hermes_platform_source_ref",
       "caller": "_handle_hermes_platform_reply",
       "file": "app/server.py",
-      "line": 31778
+      "line": 31798
     },
     {
       "callee": "_hermes_platform_ready",
       "caller": "_handle_hermes_platform_heartbeat",
       "file": "app/server.py",
-      "line": 31800
+      "line": 31820
     },
     {
       "callee": "_hermes_platform_adapter_id",
       "caller": "_handle_hermes_platform_heartbeat",
       "file": "app/server.py",
-      "line": 31802
+      "line": 31822
     },
     {
       "callee": "_load_hermes_platform_state",
       "caller": "_handle_hermes_platform_heartbeat",
       "file": "app/server.py",
-      "line": 31806
+      "line": 31826
     },
     {
       "callee": "_save_hermes_platform_state",
       "caller": "_handle_hermes_platform_heartbeat",
       "file": "app/server.py",
-      "line": 31815
+      "line": 31835
     },
     {
       "callee": "_load_hermes_platform_state",
       "caller": "_get_hermes_platform_message",
       "file": "app/server.py",
-      "line": 31828
+      "line": 31848
     },
     {
       "callee": "_find_hermes_platform_message",
       "caller": "_get_hermes_platform_message",
       "file": "app/server.py",
-      "line": 31829
+      "line": 31849
     },
     {
       "callee": "_get_hermes_platform_message",
       "caller": "_wait_for_hermes_platform_reply",
       "file": "app/server.py",
-      "line": 31835
+      "line": 31855
     },
     {
       "callee": "_load_hermes_history",
       "caller": "_handle_hermes_platform_chat",
       "file": "app/server.py",
-      "line": 31851
+      "line": 31871
     },
     {
       "callee": "_save_hermes_history",
       "caller": "_handle_hermes_platform_chat",
       "file": "app/server.py",
-      "line": 31865
+      "line": 31885
     },
     {
       "callee": "_handle_hermes_platform_enqueue",
       "caller": "_handle_hermes_platform_chat",
       "file": "app/server.py",
-      "line": 31867
+      "line": 31887
     },
     {
       "callee": "_wait_for_hermes_platform_reply",
       "caller": "_handle_hermes_platform_chat",
       "file": "app/server.py",
-      "line": 31882
+      "line": 31902
     },
     {
       "callee": "_set_hermes_session_id",
       "caller": "_handle_hermes_platform_chat",
       "file": "app/server.py",
-      "line": 31895
+      "line": 31915
     },
     {
       "callee": "_load_hermes_history",
       "caller": "_handle_hermes_platform_chat",
       "file": "app/server.py",
-      "line": 31897
+      "line": 31917
     },
     {
       "callee": "_save_hermes_history",
       "caller": "_handle_hermes_platform_chat",
       "file": "app/server.py",
-      "line": 31911
+      "line": 31931
     },
     {
       "callee": "_codex_history_path",
       "caller": "_save_codex_state",
       "file": "app/server.py",
-      "line": 31928
+      "line": 31948
     },
     {
       "callee": "_claude_code_history_path",
       "caller": "_save_claude_code_state",
       "file": "app/server.py",
-      "line": 31941
+      "line": 31961
     },
     {
       "callee": "_hermes_history_path",
       "caller": "_save_hermes_state",
       "file": "app/server.py",
-      "line": 31954
+      "line": 31974
     },
     {
       "callee": "_codex_history_path",
       "caller": "_provider_state_port",
       "file": "app/server.py",
-      "line": 32026
+      "line": 32046
     },
     {
       "callee": "_claude_code_history_path",
       "caller": "_provider_state_port",
       "file": "app/server.py",
-      "line": 32028
+      "line": 32048
     },
     {
       "callee": "_hermes_history_path",
       "caller": "_provider_state_port",
       "file": "app/server.py",
-      "line": 32030
+      "line": 32050
     },
     {
       "callee": "_read_provider_state_file",
       "caller": "_provider_state_port",
       "file": "app/server.py",
-      "line": 32034
+      "line": 32054
     },
     {
       "callee": "_write_provider_state_file",
       "caller": "_provider_state_port",
       "file": "app/server.py",
-      "line": 32035
-    },
-    {
-      "callee": "_provider_conversation_key",
-      "caller": "_reset_provider_conversation_state",
-      "file": "app/server.py",
-      "line": 32041
-    },
-    {
-      "callee": "_provider_state_port",
-      "caller": "_reset_provider_conversation_state",
-      "file": "app/server.py",
-      "line": 32042
-    },
-    {
-      "callee": "_provider_conversation_key",
-      "caller": "_load_codex_state",
-      "file": "app/server.py",
-      "line": 32046
-    },
-    {
-      "callee": "_provider_state_port",
-      "caller": "_load_codex_state",
-      "file": "app/server.py",
-      "line": 32047
-    },
-    {
-      "callee": "_load_codex_state",
-      "caller": "_load_codex_history",
-      "file": "app/server.py",
-      "line": 32051
-    },
-    {
-      "callee": "_provider_conversation_key",
-      "caller": "_save_codex_state",
-      "file": "app/server.py",
       "line": 32055
     },
     {
-      "callee": "_provider_conversation_replace",
-      "caller": "_save_codex_state",
+      "callee": "_provider_conversation_key",
+      "caller": "_reset_provider_conversation_state",
       "file": "app/server.py",
-      "line": 32056
+      "line": 32061
     },
     {
       "callee": "_provider_state_port",
-      "caller": "_save_codex_state",
-      "file": "app/server.py",
-      "line": 32056
-    },
-    {
-      "callee": "_load_codex_state",
-      "caller": "_save_codex_history",
-      "file": "app/server.py",
-      "line": 32060
-    },
-    {
-      "callee": "_save_codex_state",
-      "caller": "_save_codex_history",
+      "caller": "_reset_provider_conversation_state",
       "file": "app/server.py",
       "line": 32062
     },
     {
       "callee": "_provider_conversation_key",
-      "caller": "_get_codex_session_id",
+      "caller": "_load_codex_state",
       "file": "app/server.py",
       "line": 32066
     },
     {
       "callee": "_provider_state_port",
+      "caller": "_load_codex_state",
+      "file": "app/server.py",
+      "line": 32067
+    },
+    {
+      "callee": "_load_codex_state",
+      "caller": "_load_codex_history",
+      "file": "app/server.py",
+      "line": 32071
+    },
+    {
+      "callee": "_provider_conversation_key",
+      "caller": "_save_codex_state",
+      "file": "app/server.py",
+      "line": 32075
+    },
+    {
+      "callee": "_provider_conversation_replace",
+      "caller": "_save_codex_state",
+      "file": "app/server.py",
+      "line": 32076
+    },
+    {
+      "callee": "_provider_state_port",
+      "caller": "_save_codex_state",
+      "file": "app/server.py",
+      "line": 32076
+    },
+    {
+      "callee": "_load_codex_state",
+      "caller": "_save_codex_history",
+      "file": "app/server.py",
+      "line": 32080
+    },
+    {
+      "callee": "_save_codex_state",
+      "caller": "_save_codex_history",
+      "file": "app/server.py",
+      "line": 32082
+    },
+    {
+      "callee": "_provider_conversation_key",
       "caller": "_get_codex_session_id",
       "file": "app/server.py",
-      "line": 32066
+      "line": 32086
+    },
+    {
+      "callee": "_provider_state_port",
+      "caller": "_get_codex_session_id",
+      "file": "app/server.py",
+      "line": 32086
     },
     {
       "callee": "_load_codex_state",
       "caller": "_set_codex_session_id",
       "file": "app/server.py",
-      "line": 32070
+      "line": 32090
     },
     {
       "callee": "_save_codex_state",
       "caller": "_set_codex_session_id",
       "file": "app/server.py",
-      "line": 32078
+      "line": 32098
     },
     {
       "callee": "_provider_conversation_key",
       "caller": "_load_claude_code_state",
       "file": "app/server.py",
-      "line": 32082
+      "line": 32102
     },
     {
       "callee": "_provider_state_port",
       "caller": "_load_claude_code_state",
       "file": "app/server.py",
-      "line": 32083
+      "line": 32103
     },
     {
       "callee": "_load_claude_code_state",
       "caller": "_load_claude_code_history",
       "file": "app/server.py",
-      "line": 32087
+      "line": 32107
     },
     {
       "callee": "_provider_conversation_key",
       "caller": "_save_claude_code_state",
       "file": "app/server.py",
-      "line": 32091
+      "line": 32111
     },
     {
       "callee": "_provider_conversation_replace",
       "caller": "_save_claude_code_state",
       "file": "app/server.py",
-      "line": 32092
+      "line": 32112
     },
     {
       "callee": "_provider_state_port",
       "caller": "_save_claude_code_state",
       "file": "app/server.py",
-      "line": 32092
+      "line": 32112
     },
     {
       "callee": "_load_claude_code_state",
       "caller": "_save_claude_code_history",
       "file": "app/server.py",
-      "line": 32096
+      "line": 32116
     },
     {
       "callee": "_save_claude_code_state",
       "caller": "_save_claude_code_history",
       "file": "app/server.py",
-      "line": 32100
+      "line": 32120
     },
     {
       "callee": "_provider_conversation_key",
       "caller": "_get_claude_code_session_id",
       "file": "app/server.py",
-      "line": 32104
+      "line": 32124
     },
     {
       "callee": "_provider_state_port",
       "caller": "_get_claude_code_session_id",
       "file": "app/server.py",
-      "line": 32104
+      "line": 32124
     },
     {
       "callee": "_load_claude_code_state",
       "caller": "_set_claude_code_session_id",
       "file": "app/server.py",
-      "line": 32108
+      "line": 32128
     },
     {
       "callee": "_save_claude_code_state",
       "caller": "_set_claude_code_session_id",
       "file": "app/server.py",
-      "line": 32114
+      "line": 32134
     },
     {
       "callee": "_load_claude_code_state",
       "caller": "_set_claude_code_active_run",
       "file": "app/server.py",
-      "line": 32118
+      "line": 32138
     },
     {
       "callee": "_save_claude_code_state",
       "caller": "_set_claude_code_active_run",
       "file": "app/server.py",
-      "line": 32122
+      "line": 32142
     },
     {
       "callee": "_provider_conversation_key",
       "caller": "_load_hermes_state",
       "file": "app/server.py",
-      "line": 32126
+      "line": 32146
     },
     {
       "callee": "_provider_state_port",
       "caller": "_load_hermes_state",
       "file": "app/server.py",
-      "line": 32127
+      "line": 32147
     },
     {
       "callee": "_load_hermes_state",
       "caller": "_load_hermes_history",
       "file": "app/server.py",
-      "line": 32131
+      "line": 32151
     },
     {
       "callee": "_provider_conversation_key",
       "caller": "_save_hermes_state",
       "file": "app/server.py",
-      "line": 32135
+      "line": 32155
     },
     {
       "callee": "_provider_conversation_replace",
       "caller": "_save_hermes_state",
       "file": "app/server.py",
-      "line": 32136
+      "line": 32156
     },
     {
       "callee": "_provider_state_port",
       "caller": "_save_hermes_state",
       "file": "app/server.py",
-      "line": 32136
+      "line": 32156
     },
     {
       "callee": "_load_hermes_state",
       "caller": "_save_hermes_history",
       "file": "app/server.py",
-      "line": 32141
+      "line": 32161
     },
     {
       "callee": "_save_hermes_state",
       "caller": "_save_hermes_history",
       "file": "app/server.py",
-      "line": 32143
+      "line": 32163
     },
     {
       "callee": "_provider_conversation_key",
       "caller": "_get_hermes_session_id",
       "file": "app/server.py",
-      "line": 32149
+      "line": 32169
     },
     {
       "callee": "_provider_state_port",
       "caller": "_get_hermes_session_id",
       "file": "app/server.py",
-      "line": 32149
+      "line": 32169
     },
     {
       "callee": "_load_hermes_state",
       "caller": "_set_hermes_session_id",
       "file": "app/server.py",
-      "line": 32154
+      "line": 32174
     },
     {
       "callee": "_save_hermes_state",
       "caller": "_set_hermes_session_id",
       "file": "app/server.py",
-      "line": 32160
+      "line": 32180
     },
     {
       "callee": "_codex_thread_key",
       "caller": "_codex_thread_port.load",
       "file": "app/server.py",
-      "line": 32167
+      "line": 32187
     },
     {
       "callee": "_load_codex_thread_state",
       "caller": "_codex_thread_port.load",
       "file": "app/server.py",
-      "line": 32167
+      "line": 32187
     },
     {
       "callee": "_load_codex_thread_state",
       "caller": "_codex_thread_port.save",
       "file": "app/server.py",
-      "line": 32171
+      "line": 32191
     },
     {
       "callee": "_codex_thread_key",
       "caller": "_codex_thread_port.save",
       "file": "app/server.py",
-      "line": 32173
+      "line": 32193
     },
     {
       "callee": "_save_codex_thread_state",
       "caller": "_codex_thread_port.save",
       "file": "app/server.py",
-      "line": 32178
+      "line": 32198
     },
     {
       "callee": "_provider_conversation_key",
       "caller": "_get_codex_thread_id",
       "file": "app/server.py",
-      "line": 32186
+      "line": 32206
     },
     {
       "callee": "_codex_thread_port",
       "caller": "_get_codex_thread_id",
       "file": "app/server.py",
-      "line": 32188
+      "line": 32208
     },
     {
       "callee": "_provider_conversation_key",
       "caller": "_set_codex_thread_id",
       "file": "app/server.py",
-      "line": 32194
+      "line": 32214
     },
     {
       "callee": "_codex_thread_port",
       "caller": "_set_codex_thread_id",
       "file": "app/server.py",
-      "line": 32196
+      "line": 32216
     },
     {
       "callee": "_provider_conversation_replace",
       "caller": "_set_codex_thread_id",
       "file": "app/server.py",
-      "line": 32199
+      "line": 32219
     },
     {
       "callee": "_provider_conversation_key",
       "caller": "_reset_codex_thread_id",
       "file": "app/server.py",
-      "line": 32205
+      "line": 32225
     },
     {
       "callee": "_codex_thread_port",
       "caller": "_reset_codex_thread_id",
       "file": "app/server.py",
-      "line": 32207
+      "line": 32227
     },
     {
       "callee": "_get_codex_agent",
       "caller": "_conversation_fenced_handler.wrapped",
       "file": "app/server.py",
-      "line": 32223
+      "line": 32243
     },
     {
       "callee": "_get_claude_code_agent",
       "caller": "_conversation_fenced_handler.wrapped",
       "file": "app/server.py",
-      "line": 32226
+      "line": 32246
     },
     {
       "callee": "_get_hermes_agent",
       "caller": "_conversation_fenced_handler.wrapped",
       "file": "app/server.py",
-      "line": 32229
+      "line": 32249
     },
     {
       "callee": "_provider_conversation_key",
       "caller": "_conversation_fenced_handler.wrapped",
       "file": "app/server.py",
-      "line": 32233
+      "line": 32253
     },
     {
       "callee": "_provider_state_port",
       "caller": "_conversation_fenced_handler.wrapped",
       "file": "app/server.py",
-      "line": 32234
+      "line": 32254
     },
     {
       "callee": "_provider_conversation_key",
       "caller": "_conversation_fenced_handler.wrapped",
       "file": "app/server.py",
-      "line": 32236
+      "line": 32256
     },
     {
       "callee": "_codex_thread_port",
       "caller": "_conversation_fenced_handler.wrapped",
       "file": "app/server.py",
-      "line": 32238
+      "line": 32258
     },
     {
       "callee": "_safe_openclaw_agent_id",
       "caller": "_openclaw_session_key_for_agent",
       "file": "app/server.py",
-      "line": 32287
+      "line": 32307
     },
     {
       "callee": "_openclaw_session_key_for_agent",
       "caller": "_openclaw_conversation_session_key",
       "file": "app/server.py",
-      "line": 32303
+      "line": 32323
     },
     {
       "callee": "_openclaw_session_key_for_agent",
       "caller": "_openclaw_conversation_session_key",
       "file": "app/server.py",
-      "line": 32304
+      "line": 32324
     },
     {
       "callee": "_openclaw_session_key_for_agent",
       "caller": "_openclaw_conversation_session_key",
       "file": "app/server.py",
-      "line": 32308
+      "line": 32328
     },
     {
       "callee": "_openclaw_session_key_for_agent",
       "caller": "_openclaw_queued_conversation_port.deliver",
       "file": "app/server.py",
-      "line": 32314
+      "line": 32334
     },
     {
       "callee": "_openclaw_session_key_for_agent",
       "caller": "_openclaw_queued_conversation_port.control",
       "file": "app/server.py",
-      "line": 32320
+      "line": 32340
     },
     {
       "callee": "_openclaw_session_key_for_agent",
       "caller": "_chat_sessions_openclaw_entry",
       "file": "app/server.py",
-      "line": 32330
+      "line": 32350
     },
     {
       "callee": "_safe_openclaw_agent_id",
       "caller": "_chat_sessions_openclaw_entry",
       "file": "app/server.py",
-      "line": 32333
+      "line": 32353
     },
     {
       "callee": "_safe_openclaw_agent_id",
       "caller": "_chat_sessions_list_openclaw_files",
       "file": "app/server.py",
-      "line": 32353
+      "line": 32373
     },
     {
       "callee": "_chat_sessions_openclaw_entry",
       "caller": "_chat_sessions_list_openclaw_files",
       "file": "app/server.py",
-      "line": 32366
+      "line": 32386
     },
     {
       "callee": "_openclaw_live_mode_enabled",
       "caller": "_chat_sessions_list_openclaw",
       "file": "app/server.py",
-      "line": 32390
+      "line": 32410
     },
     {
       "callee": "_chat_sessions_list_openclaw_files",
       "caller": "_chat_sessions_list_openclaw",
       "file": "app/server.py",
-      "line": 32391
+      "line": 32411
     },
     {
       "callee": "_chat_sessions_openclaw_entry",
       "caller": "_chat_sessions_list_openclaw",
       "file": "app/server.py",
-      "line": 32403
+      "line": 32423
     },
     {
       "callee": "_merge_openclaw_session_entries",
       "caller": "_chat_sessions_list_openclaw",
       "file": "app/server.py",
-      "line": 32408
+      "line": 32428
     },
     {
       "callee": "_openclaw_live_mode_session_key",
       "caller": "_chat_sessions_list_openclaw",
       "file": "app/server.py",
-      "line": 32411
+      "line": 32431
     },
     {
       "callee": "_openclaw_live_mode_session_key",
       "caller": "_chat_sessions_list_openclaw",
       "file": "app/server.py",
-      "line": 32412
+      "line": 32432
     },
     {
       "callee": "_is_hermes_gateway_platform_agent",
       "caller": "_chat_sessions_list_hermes",
       "file": "app/server.py",
-      "line": 32428
+      "line": 32448
     },
     {
       "callee": "_load_hermes_platform_state",
       "caller": "_chat_sessions_list_hermes",
       "file": "app/server.py",
-      "line": 32430
+      "line": 32450
     },
     {
       "callee": "_hermes_provider",
       "caller": "_chat_sessions_list_hermes",
       "file": "app/server.py",
-      "line": 32451
+      "line": 32471
     },
     {
       "callee": "_get_hermes_session_id",
       "caller": "_chat_sessions_list_hermes",
       "file": "app/server.py",
-      "line": 32456
+      "line": 32476
     },
     {
       "callee": "_codex_provider",
       "caller": "_chat_sessions_list_codex",
       "file": "app/server.py",
-      "line": 32473
+      "line": 32493
     },
     {
       "callee": "_get_codex_session_id",
       "caller": "_chat_sessions_list_codex",
       "file": "app/server.py",
-      "line": 32478
+      "line": 32498
     },
     {
       "callee": "_claude_code_home_path",
       "caller": "_claude_code_projects_dir",
       "file": "app/server.py",
-      "line": 32501
+      "line": 32521
     },
     {
       "callee": "_claude_code_projects_dir",
       "caller": "_claude_code_session_records",
       "file": "app/server.py",
-      "line": 32521
+      "line": 32541
     },
     {
       "callee": "_claude_code_valid_session_id",
       "caller": "_claude_code_session_records",
       "file": "app/server.py",
-      "line": 32528
+      "line": 32548
     },
     {
       "callee": "_claude_code_text_from_content",
       "caller": "_claude_code_session_records",
       "file": "app/server.py",
-      "line": 32556
+      "line": 32576
     },
     {
       "callee": "_claude_code_valid_session_id",
       "caller": "_claude_code_find_session_file",
       "file": "app/server.py",
-      "line": 32568
+      "line": 32588
     },
     {
       "callee": "_claude_code_session_records",
       "caller": "_claude_code_find_session_file",
       "file": "app/server.py",
-      "line": 32571
+      "line": 32591
     },
     {
       "callee": "_claude_code_home_path",
       "caller": "_chat_sessions_list_claude_code",
       "file": "app/server.py",
-      "line": 32578
+      "line": 32598
     },
     {
       "callee": "_get_claude_code_session_id",
       "caller": "_chat_sessions_list_claude_code",
       "file": "app/server.py",
-      "line": 32581
+      "line": 32601
     },
     {
       "callee": "_claude_code_session_records",
       "caller": "_chat_sessions_list_claude_code",
       "file": "app/server.py",
-      "line": 32583
+      "line": 32603
     },
     {
       "callee": "_chat_sessions_list_hermes",
       "caller": "handle_chat_sessions_list",
       "file": "app/server.py",
-      "line": 32605
+      "line": 32625
     },
     {
       "callee": "_chat_sessions_list_codex",
       "caller": "handle_chat_sessions_list",
       "file": "app/server.py",
-      "line": 32607
+      "line": 32627
     },
     {
       "callee": "_chat_sessions_list_openclaw",
       "caller": "handle_chat_sessions_list",
       "file": "app/server.py",
-      "line": 32609
+      "line": 32629
     },
     {
       "callee": "_chat_sessions_list_claude_code",
       "caller": "handle_chat_sessions_list",
       "file": "app/server.py",
-      "line": 32611
+      "line": 32631
     },
     {
       "callee": "_reset_provider_conversation_state",
       "caller": "handle_chat_session_create",
       "file": "app/server.py",
-      "line": 32624
+      "line": 32644
     },
     {
       "callee": "_reset_provider_conversation_state",
       "caller": "handle_chat_session_create",
       "file": "app/server.py",
-      "line": 32627
+      "line": 32647
     },
     {
       "callee": "_reset_provider_conversation_state",
       "caller": "handle_chat_session_create",
       "file": "app/server.py",
-      "line": 32630
+      "line": 32650
     },
     {
       "callee": "_openclaw_session_key_for_agent",
       "caller": "handle_chat_session_create",
       "file": "app/server.py",
-      "line": 32633
+      "line": 32653
     },
     {
       "callee": "_provider_conversation_key",
       "caller": "handle_chat_session_create",
       "file": "app/server.py",
-      "line": 32636
+      "line": 32656
     },
     {
       "callee": "_openclaw_queued_conversation_port",
       "caller": "handle_chat_session_create",
       "file": "app/server.py",
-      "line": 32637
+      "line": 32657
     },
     {
       "callee": "_hermes_provider",
       "caller": "handle_chat_session_delete",
       "file": "app/server.py",
-      "line": 32653
+      "line": 32673
     },
     {
       "callee": "_get_hermes_session_id",
-      "caller": "handle_chat_session_delete",
-      "file": "app/server.py",
-      "line": 32654
-    },
-    {
-      "callee": "_reset_provider_conversation_state",
-      "caller": "handle_chat_session_delete",
-      "file": "app/server.py",
-      "line": 32656
-    },
-    {
-      "callee": "_reset_provider_conversation_state",
-      "caller": "handle_chat_session_delete",
-      "file": "app/server.py",
-      "line": 32658
-    },
-    {
-      "callee": "_codex_provider",
-      "caller": "handle_chat_session_delete",
-      "file": "app/server.py",
-      "line": 32661
-    },
-    {
-      "callee": "_get_codex_session_id",
-      "caller": "handle_chat_session_delete",
-      "file": "app/server.py",
-      "line": 32662
-    },
-    {
-      "callee": "_reset_provider_conversation_state",
-      "caller": "handle_chat_session_delete",
-      "file": "app/server.py",
-      "line": 32663
-    },
-    {
-      "callee": "_claude_code_find_session_file",
-      "caller": "handle_chat_session_delete",
-      "file": "app/server.py",
-      "line": 32666
-    },
-    {
-      "callee": "_get_claude_code_session_id",
       "caller": "handle_chat_session_delete",
       "file": "app/server.py",
       "line": 32674
@@ -6439,304 +6397,346 @@
       "line": 32678
     },
     {
-      "callee": "_openclaw_session_key_for_agent",
+      "callee": "_codex_provider",
       "caller": "handle_chat_session_delete",
       "file": "app/server.py",
       "line": 32681
     },
     {
-      "callee": "_provider_conversation_key",
+      "callee": "_get_codex_session_id",
+      "caller": "handle_chat_session_delete",
+      "file": "app/server.py",
+      "line": 32682
+    },
+    {
+      "callee": "_reset_provider_conversation_state",
+      "caller": "handle_chat_session_delete",
+      "file": "app/server.py",
+      "line": 32683
+    },
+    {
+      "callee": "_claude_code_find_session_file",
       "caller": "handle_chat_session_delete",
       "file": "app/server.py",
       "line": 32686
     },
     {
+      "callee": "_get_claude_code_session_id",
+      "caller": "handle_chat_session_delete",
+      "file": "app/server.py",
+      "line": 32694
+    },
+    {
+      "callee": "_reset_provider_conversation_state",
+      "caller": "handle_chat_session_delete",
+      "file": "app/server.py",
+      "line": 32696
+    },
+    {
+      "callee": "_reset_provider_conversation_state",
+      "caller": "handle_chat_session_delete",
+      "file": "app/server.py",
+      "line": 32698
+    },
+    {
+      "callee": "_openclaw_session_key_for_agent",
+      "caller": "handle_chat_session_delete",
+      "file": "app/server.py",
+      "line": 32701
+    },
+    {
+      "callee": "_provider_conversation_key",
+      "caller": "handle_chat_session_delete",
+      "file": "app/server.py",
+      "line": 32706
+    },
+    {
       "callee": "_openclaw_queued_conversation_port",
       "caller": "handle_chat_session_delete",
       "file": "app/server.py",
-      "line": 32687
+      "line": 32707
     },
     {
       "callee": "_is_hermes_gateway_platform_agent",
       "caller": "handle_chat_session_switch",
       "file": "app/server.py",
-      "line": 32702
+      "line": 32722
     },
     {
       "callee": "_load_hermes_history",
       "caller": "handle_chat_session_switch",
       "file": "app/server.py",
-      "line": 32703
+      "line": 32723
     },
     {
       "callee": "_set_hermes_session_id",
-      "caller": "handle_chat_session_switch",
-      "file": "app/server.py",
-      "line": 32706
-    },
-    {
-      "callee": "_hermes_provider",
-      "caller": "handle_chat_session_switch",
-      "file": "app/server.py",
-      "line": 32714
-    },
-    {
-      "callee": "_hermes_session_to_chat_messages",
-      "caller": "handle_chat_session_switch",
-      "file": "app/server.py",
-      "line": 32717
-    },
-    {
-      "callee": "_save_hermes_history",
-      "caller": "handle_chat_session_switch",
-      "file": "app/server.py",
-      "line": 32718
-    },
-    {
-      "callee": "_set_hermes_session_id",
-      "caller": "handle_chat_session_switch",
-      "file": "app/server.py",
-      "line": 32719
-    },
-    {
-      "callee": "_codex_provider",
-      "caller": "handle_chat_session_switch",
-      "file": "app/server.py",
-      "line": 32722
-    },
-    {
-      "callee": "_codex_thread_to_chat_messages",
-      "caller": "handle_chat_session_switch",
-      "file": "app/server.py",
-      "line": 32725
-    },
-    {
-      "callee": "_load_codex_state",
       "caller": "handle_chat_session_switch",
       "file": "app/server.py",
       "line": 32726
     },
     {
-      "callee": "_save_codex_state",
+      "callee": "_hermes_provider",
       "caller": "handle_chat_session_switch",
       "file": "app/server.py",
-      "line": 32729
+      "line": 32734
     },
     {
-      "callee": "_claude_code_find_session_file",
+      "callee": "_hermes_session_to_chat_messages",
       "caller": "handle_chat_session_switch",
       "file": "app/server.py",
-      "line": 32732
+      "line": 32737
     },
     {
-      "callee": "_claude_code_jsonl_to_chat_messages",
+      "callee": "_save_hermes_history",
       "caller": "handle_chat_session_switch",
       "file": "app/server.py",
-      "line": 32735
+      "line": 32738
     },
     {
-      "callee": "_save_claude_code_history",
-      "caller": "handle_chat_session_switch",
-      "file": "app/server.py",
-      "line": 32736
-    },
-    {
-      "callee": "_openclaw_session_key_for_agent",
+      "callee": "_set_hermes_session_id",
       "caller": "handle_chat_session_switch",
       "file": "app/server.py",
       "line": 32739
     },
     {
+      "callee": "_codex_provider",
+      "caller": "handle_chat_session_switch",
+      "file": "app/server.py",
+      "line": 32742
+    },
+    {
+      "callee": "_codex_thread_to_chat_messages",
+      "caller": "handle_chat_session_switch",
+      "file": "app/server.py",
+      "line": 32745
+    },
+    {
+      "callee": "_load_codex_state",
+      "caller": "handle_chat_session_switch",
+      "file": "app/server.py",
+      "line": 32746
+    },
+    {
+      "callee": "_save_codex_state",
+      "caller": "handle_chat_session_switch",
+      "file": "app/server.py",
+      "line": 32749
+    },
+    {
+      "callee": "_claude_code_find_session_file",
+      "caller": "handle_chat_session_switch",
+      "file": "app/server.py",
+      "line": 32752
+    },
+    {
+      "callee": "_claude_code_jsonl_to_chat_messages",
+      "caller": "handle_chat_session_switch",
+      "file": "app/server.py",
+      "line": 32755
+    },
+    {
+      "callee": "_save_claude_code_history",
+      "caller": "handle_chat_session_switch",
+      "file": "app/server.py",
+      "line": 32756
+    },
+    {
+      "callee": "_openclaw_session_key_for_agent",
+      "caller": "handle_chat_session_switch",
+      "file": "app/server.py",
+      "line": 32759
+    },
+    {
       "callee": "_claude_code_text_from_content",
       "caller": "_claude_code_jsonl_to_chat_messages",
       "file": "app/server.py",
-      "line": 32798
+      "line": 32818
     },
     {
       "callee": "_get_hermes_agent",
       "caller": "_is_hermes_gateway_platform_agent",
       "file": "app/server.py",
-      "line": 32841
+      "line": 32861
     },
     {
       "callee": "_flatten_hermes_history_content",
       "caller": "_normalize_hermes_run_history_message",
       "file": "app/server.py",
-      "line": 32888
+      "line": 32908
     },
     {
       "callee": "_hermes_run_history_limits",
       "caller": "_load_hermes_run_conversation_history",
       "file": "app/server.py",
-      "line": 32932
+      "line": 32952
     },
     {
       "callee": "_normalize_hermes_run_history_message",
       "caller": "_load_hermes_run_conversation_history",
       "file": "app/server.py",
-      "line": 32935
+      "line": 32955
     },
     {
       "callee": "_limit_hermes_run_history",
       "caller": "_load_hermes_run_conversation_history",
       "file": "app/server.py",
-      "line": 32940
+      "line": 32960
     },
     {
       "callee": "HermesDesktopBackendClient",
       "caller": "_hermes_desktop_client",
       "file": "app/server.py",
-      "line": 32948
+      "line": 32968
     },
     {
       "callee": "HermesDesktopBackendClient",
       "caller": "_handle_hermes_desktop_chat",
       "file": "app/server.py",
-      "line": 32964
+      "line": 32984
     },
     {
       "callee": "_get_hermes_session_id",
       "caller": "_handle_hermes_desktop_chat",
       "file": "app/server.py",
-      "line": 32980
+      "line": 33000
     },
     {
       "callee": "HermesDesktopBackendClient",
-      "caller": "_handle_hermes_desktop_run_start",
-      "file": "app/server.py",
-      "line": 32994
-    },
-    {
-      "callee": "_build_hermes_delivery_message",
-      "caller": "_handle_hermes_desktop_run_start",
-      "file": "app/server.py",
-      "line": 33008
-    },
-    {
-      "callee": "_get_hermes_session_id",
       "caller": "_handle_hermes_desktop_run_start",
       "file": "app/server.py",
       "line": 33014
     },
     {
+      "callee": "_build_hermes_delivery_message",
+      "caller": "_handle_hermes_desktop_run_start",
+      "file": "app/server.py",
+      "line": 33028
+    },
+    {
+      "callee": "_get_hermes_session_id",
+      "caller": "_handle_hermes_desktop_run_start",
+      "file": "app/server.py",
+      "line": 33034
+    },
+    {
       "callee": "_provider_run_idempotency_key",
       "caller": "_handle_hermes_desktop_run_start",
       "file": "app/server.py",
-      "line": 33015
+      "line": 33035
     },
     {
       "callee": "_load_hermes_history",
       "caller": "_handle_hermes_desktop_run_start.run_desktop",
       "file": "app/server.py",
-      "line": 33037
+      "line": 33057
     },
     {
       "callee": "_save_hermes_history",
       "caller": "_handle_hermes_desktop_run_start.run_desktop",
       "file": "app/server.py",
-      "line": 33046
+      "line": 33066
     },
     {
       "callee": "set_provider_event",
       "caller": "_handle_hermes_desktop_run_start.run_desktop",
       "file": "app/server.py",
-      "line": 33047
+      "line": 33067
     },
     {
       "callee": "_publish_hermes_api_progress",
       "caller": "_handle_hermes_desktop_run_start.run_desktop",
       "file": "app/server.py",
-      "line": 33048
+      "line": 33068
     },
     {
       "callee": "set_provider_event",
       "caller": "_handle_hermes_desktop_run_start.run_desktop.on_desktop_event",
       "file": "app/server.py",
-      "line": 33078
+      "line": 33098
     },
     {
       "callee": "_publish_hermes_api_progress",
       "caller": "_handle_hermes_desktop_run_start.run_desktop.on_desktop_event",
       "file": "app/server.py",
-      "line": 33080
+      "line": 33100
     },
     {
       "callee": "_set_hermes_session_id",
       "caller": "_handle_hermes_desktop_run_start.run_desktop",
       "file": "app/server.py",
-      "line": 33092
+      "line": 33112
     },
     {
       "callee": "_load_hermes_history",
       "caller": "_handle_hermes_desktop_run_start.run_desktop",
       "file": "app/server.py",
-      "line": 33098
+      "line": 33118
     },
     {
       "callee": "_remove_hermes_progress_messages",
       "caller": "_handle_hermes_desktop_run_start.run_desktop",
       "file": "app/server.py",
-      "line": 33098
+      "line": 33118
     },
     {
       "callee": "_hermes_tool_activity_messages",
       "caller": "_handle_hermes_desktop_run_start.run_desktop",
       "file": "app/server.py",
-      "line": 33100
+      "line": 33120
     },
     {
       "callee": "_save_hermes_history",
       "caller": "_handle_hermes_desktop_run_start.run_desktop",
       "file": "app/server.py",
-      "line": 33107
+      "line": 33127
     },
     {
       "callee": "_hermes_stream_event_payload",
       "caller": "_handle_hermes_desktop_run_start.run_desktop",
       "file": "app/server.py",
-      "line": 33109
+      "line": 33129
     },
     {
       "callee": "set_provider_event",
       "caller": "_handle_hermes_desktop_run_start.run_desktop",
       "file": "app/server.py",
-      "line": 33110
+      "line": 33130
     },
     {
       "callee": "_hermes_api_client_for_profile",
       "caller": "_handle_hermes_desktop_run_start.cancel_desktop",
       "file": "app/server.py",
-      "line": 33116
+      "line": 33136
     },
     {
       "callee": "TrustedApprovalContext",
       "caller": "_handle_hermes_desktop_run_start.cancel_desktop",
       "file": "app/server.py",
-      "line": 33119
+      "line": 33139
     },
     {
       "callee": "CallableProviderAdapter",
       "caller": "_handle_hermes_desktop_run_start",
       "file": "app/server.py",
-      "line": 33124
+      "line": 33144
     },
     {
       "callee": "_provider_run_duplicate_response",
       "caller": "_handle_hermes_desktop_run_start",
       "file": "app/server.py",
-      "line": 33128
+      "line": 33148
     },
     {
       "callee": "HermesApiClient",
       "caller": "_test_hermes_api",
       "file": "app/server.py",
-      "line": 33142
+      "line": 33162
     },
     {
       "callee": "HermesDesktopBackendClient",
       "caller": "_test_hermes_desktop",
       "file": "app/server.py",
-      "line": 33189
+      "line": 33209
     },
     {
       "callee": "classify_codex_event",
@@ -7829,1227 +7829,1227 @@
     },
     {
       "file": "app/server.py",
-      "line": 6920,
+      "line": 6940,
       "name": "_codex_stream_event_payload"
     },
     {
       "file": "app/server.py",
-      "line": 6954,
+      "line": 6974,
       "name": "_codex_activity_bridge_event_name"
     },
     {
       "file": "app/server.py",
-      "line": 6980,
+      "line": 7000,
       "name": "_handle_codex_run_start"
     },
     {
       "file": "app/server.py",
-      "line": 7013,
+      "line": 7033,
       "name": "_handle_codex_run_start.run_codex"
     },
     {
       "file": "app/server.py",
-      "line": 7087,
+      "line": 7107,
       "name": "_handle_codex_run_start.cancel_codex"
     },
     {
       "file": "app/server.py",
-      "line": 7150,
+      "line": 7170,
       "name": "_handle_codex_run_events"
     },
     {
       "file": "app/server.py",
-      "line": 7154,
+      "line": 7174,
       "name": "_handle_codex_run_stop"
     },
     {
       "file": "app/server.py",
-      "line": 7180,
+      "line": 7200,
       "name": "_handle_codex_activity"
     },
     {
       "file": "app/server.py",
-      "line": 7214,
+      "line": 7234,
       "name": "_handle_codex_interaction"
     },
     {
       "file": "app/server.py",
-      "line": 7230,
+      "line": 7250,
       "name": "_handle_codex_approval_pending"
     },
     {
       "file": "app/server.py",
-      "line": 7252,
+      "line": 7272,
       "name": "_normalize_codex_approval_choice"
     },
     {
       "file": "app/server.py",
-      "line": 7259,
+      "line": 7279,
       "name": "_codex_approval_result_message"
     },
     {
       "file": "app/server.py",
-      "line": 7280,
+      "line": 7300,
       "name": "_codex_history_has_approval"
     },
     {
       "file": "app/server.py",
-      "line": 7308,
+      "line": 7328,
       "name": "_codex_approval_conversation_id"
     },
     {
       "file": "app/server.py",
-      "line": 7319,
+      "line": 7339,
       "name": "_append_codex_approval_result_comm_event"
     },
     {
       "file": "app/server.py",
-      "line": 7355,
+      "line": 7375,
       "name": "_handle_codex_approval_respond"
     },
     {
       "file": "app/server.py",
-      "line": 7456,
+      "line": 7476,
       "name": "_handle_codex_cancel"
     },
     {
       "file": "app/server.py",
-      "line": 7470,
+      "line": 7490,
       "name": "_handle_codex_reset"
     },
     {
       "file": "app/server.py",
-      "line": 7485,
+      "line": 7505,
       "name": "_handle_codex_compact"
     },
     {
       "file": "app/server.py",
-      "line": 7526,
+      "line": 7546,
       "name": "_handle_codex_test"
     },
     {
       "file": "app/server.py",
-      "line": 7531,
+      "line": 7551,
       "name": "_codex_history_path"
     },
     {
       "file": "app/server.py",
-      "line": 7536,
+      "line": 7556,
       "name": "_load_codex_state"
     },
     {
       "file": "app/server.py",
-      "line": 7552,
+      "line": 7572,
       "name": "_load_codex_history"
     },
     {
       "file": "app/server.py",
-      "line": 7583,
+      "line": 7603,
       "name": "_merge_openclaw_session_entries"
     },
     {
       "file": "app/server.py",
-      "line": 7599,
+      "line": 7619,
       "name": "_save_codex_state"
     },
     {
       "file": "app/server.py",
-      "line": 7612,
+      "line": 7632,
       "name": "_save_codex_history"
     },
     {
       "file": "app/server.py",
-      "line": 7618,
+      "line": 7638,
       "name": "_get_codex_session_id"
     },
     {
       "file": "app/server.py",
-      "line": 7624,
+      "line": 7644,
       "name": "_set_codex_session_id"
     },
     {
       "file": "app/server.py",
-      "line": 7635,
+      "line": 7655,
       "name": "_set_codex_active_run"
     },
     {
       "file": "app/server.py",
-      "line": 7648,
+      "line": 7668,
       "name": "_get_codex_token_usage"
     },
     {
       "file": "app/server.py",
-      "line": 7654,
+      "line": 7674,
       "name": "_set_codex_token_usage"
     },
     {
       "file": "app/server.py",
-      "line": 7670,
+      "line": 7690,
       "name": "_clear_codex_token_usage"
     },
     {
       "file": "app/server.py",
-      "line": 7678,
+      "line": 7698,
       "name": "_claude_code_provider_from_config"
     },
     {
       "file": "app/server.py",
-      "line": 7699,
+      "line": 7719,
       "name": "_claude_code_history_path"
     },
     {
       "file": "app/server.py",
-      "line": 7709,
+      "line": 7729,
       "name": "_load_claude_code_state"
     },
     {
       "file": "app/server.py",
-      "line": 7721,
+      "line": 7741,
       "name": "_load_claude_code_history"
     },
     {
       "file": "app/server.py",
-      "line": 7727,
+      "line": 7747,
       "name": "_sanitize_claude_code_history_messages"
     },
     {
       "file": "app/server.py",
-      "line": 7738,
+      "line": 7758,
       "name": "_save_claude_code_history"
     },
     {
       "file": "app/server.py",
-      "line": 7761,
+      "line": 7781,
       "name": "_get_claude_code_session_id"
     },
     {
       "file": "app/server.py",
-      "line": 7767,
+      "line": 7787,
       "name": "_get_claude_code_token_usage"
     },
     {
       "file": "app/server.py",
-      "line": 7772,
+      "line": 7792,
       "name": "_set_claude_code_token_usage"
     },
     {
       "file": "app/server.py",
-      "line": 7788,
+      "line": 7808,
       "name": "_clear_claude_code_token_usage"
     },
     {
       "file": "app/server.py",
-      "line": 7796,
+      "line": 7816,
       "name": "_codex_int"
     },
     {
       "file": "app/server.py",
-      "line": 7805,
+      "line": 7825,
       "name": "_provider_context_used_from_token_usage"
     },
     {
       "file": "app/server.py",
-      "line": 7823,
+      "line": 7843,
       "name": "_provider_context_window_from_token_usage"
     },
     {
       "file": "app/server.py",
-      "line": 8170,
+      "line": 8190,
       "name": "_codex_context_used_from_token_usage"
     },
     {
       "file": "app/server.py",
-      "line": 8174,
+      "line": 8194,
       "name": "_codex_context_window_from_token_usage"
     },
     {
       "file": "app/server.py",
-      "line": 8178,
+      "line": 8198,
       "name": "_provider_visible_thinking"
     },
     {
       "file": "app/server.py",
-      "line": 8199,
+      "line": 8219,
       "name": "_provider_progress_status"
     },
     {
       "file": "app/server.py",
-      "line": 8207,
+      "line": 8227,
       "name": "_is_recoverable_provider_progress"
     },
     {
       "file": "app/server.py",
-      "line": 8222,
+      "line": 8242,
       "name": "_filter_recoverable_provider_progress_messages"
     },
     {
       "file": "app/server.py",
-      "line": 8250,
+      "line": 8270,
       "name": "_provider_progress_message"
     },
     {
       "file": "app/server.py",
-      "line": 8305,
+      "line": 8325,
       "name": "_remove_provider_progress_messages"
     },
     {
       "file": "app/server.py",
-      "line": 8317,
+      "line": 8337,
       "name": "_set_claude_code_session_id"
     },
     {
       "file": "app/server.py",
-      "line": 8332,
+      "line": 8352,
       "name": "_set_claude_code_active_run"
     },
     {
       "file": "app/server.py",
-      "line": 8348,
+      "line": 8368,
       "name": "_publish_claude_code_progress"
     },
     {
       "file": "app/server.py",
-      "line": 8362,
+      "line": 8382,
       "name": "_remove_claude_code_progress_messages"
     },
     {
       "file": "app/server.py",
-      "line": 8366,
+      "line": 8386,
       "name": "_provider_recovery_progress_snapshot"
     },
     {
       "file": "app/server.py",
-      "line": 8396,
+      "line": 8416,
       "name": "_provider_pending_approval_snapshot"
     },
     {
       "file": "app/server.py",
-      "line": 8407,
+      "line": 8427,
       "name": "_provider_sse_transport_for"
     },
     {
       "file": "app/server.py",
-      "line": 8419,
+      "line": 8439,
       "name": "_provider_kind_from_run"
     },
     {
       "file": "app/server.py",
-      "line": 8441,
+      "line": 8461,
       "name": "_claude_code_visible_thinking"
     },
     {
       "file": "app/server.py",
-      "line": 8445,
+      "line": 8465,
       "name": "_claude_code_stream_event_payload"
     },
     {
       "file": "app/server.py",
-      "line": 8471,
+      "line": 8491,
       "name": "_claude_code_tool_stream_key"
     },
     {
       "file": "app/server.py",
-      "line": 8477,
+      "line": 8497,
       "name": "_handle_claude_code_run_start"
     },
     {
       "file": "app/server.py",
-      "line": 8510,
+      "line": 8530,
       "name": "_handle_claude_code_run_start.run_claude_code"
     },
     {
       "file": "app/server.py",
-      "line": 8615,
+      "line": 8635,
       "name": "_handle_claude_code_run_start.cancel_claude_code"
     },
     {
       "file": "app/server.py",
-      "line": 8670,
+      "line": 8690,
       "name": "_handle_claude_code_run_events"
     },
     {
       "file": "app/server.py",
-      "line": 8674,
+      "line": 8694,
       "name": "_handle_claude_code_interrupt"
     },
     {
       "file": "app/server.py",
-      "line": 8705,
+      "line": 8725,
       "name": "_handle_claude_code_history_clear"
     },
     {
       "file": "app/server.py",
-      "line": 8721,
+      "line": 8741,
       "name": "_handle_claude_code_chat"
     },
     {
       "file": "app/server.py",
-      "line": 8839,
+      "line": 8859,
       "name": "_handle_claude_code_test"
     },
     {
       "file": "app/server.py",
-      "line": 8856,
+      "line": 8876,
       "name": "_handle_claude_code_cancel"
     },
     {
       "file": "app/server.py",
-      "line": 9028,
+      "line": 9048,
       "name": "_append_codex_durable_operation"
     },
     {
       "file": "app/server.py",
-      "line": 9077,
+      "line": 9097,
       "name": "_comm_idempotency_key"
     },
     {
       "file": "app/server.py",
-      "line": 9137,
+      "line": 9157,
       "name": "_find_comm_request_by_idempotency"
     },
     {
       "file": "app/server.py",
-      "line": 9228,
+      "line": 9248,
       "name": "_feishu_chat_sse_metrics_snapshot"
     },
     {
       "file": "app/server.py",
-      "line": 9322,
+      "line": 9342,
       "name": "_feishu_chat_stream_events.send_sse"
     },
     {
       "file": "app/server.py",
-      "line": 9433,
+      "line": 9453,
       "name": "_append_codex_progress_comm_event"
     },
     {
       "file": "app/server.py",
-      "line": 9845,
+      "line": 9865,
       "name": "_page_openclaw_session_history"
     },
     {
       "file": "app/server.py",
-      "line": 9866,
+      "line": 9886,
       "name": "_page_provider_history"
     },
     {
       "file": "app/server.py",
-      "line": 10414,
+      "line": 10434,
       "name": "_remove_openclaw_agent_paths"
     },
     {
       "file": "app/server.py",
-      "line": 10566,
+      "line": 10586,
       "name": "_default_openclaw_agent_model"
     },
     {
       "file": "app/server.py",
-      "line": 10635,
+      "line": 10655,
       "name": "_handle_hermes_agent_create"
     },
     {
       "file": "app/server.py",
-      "line": 10664,
+      "line": 10684,
       "name": "_handle_codex_agent_create"
     },
     {
       "file": "app/server.py",
-      "line": 10702,
+      "line": 10722,
       "name": "_handle_claude_code_agent_create"
     },
     {
       "file": "app/server.py",
-      "line": 11037,
+      "line": 11057,
       "name": "_openclaw_skill_workshop_cli"
     },
     {
       "file": "app/server.py",
-      "line": 11583,
+      "line": 11603,
       "name": "_meeting_request_processed"
     },
     {
       "file": "app/server.py",
-      "line": 12378,
+      "line": 12398,
       "name": "_dispatch_feishu_hermes_approval_action"
     },
     {
       "file": "app/server.py",
-      "line": 12774,
+      "line": 12794,
       "name": "_feishu_channel_idempotency_hit"
     },
     {
       "file": "app/server.py",
-      "line": 13553,
+      "line": 13573,
       "name": "_meeting_provider_completion_should_be_ignored"
     },
     {
       "file": "app/server.py",
-      "line": 13608,
+      "line": 13628,
       "name": "_meeting_pending_provider_agents"
     },
     {
       "file": "app/server.py",
-      "line": 13739,
+      "line": 13759,
       "name": "_meeting_call_advisory_provider"
     },
     {
       "file": "app/server.py",
-      "line": 13901,
+      "line": 13921,
       "name": "_append_ignored_provider_completion"
     },
     {
       "file": "app/server.py",
-      "line": 13936,
+      "line": 13956,
       "name": "_meeting_skip_timed_out_provider_call"
     },
     {
       "file": "app/server.py",
-      "line": 14822,
+      "line": 14842,
       "name": "_meeting_provider_raw_summary"
     },
     {
       "file": "app/server.py",
-      "line": 14832,
+      "line": 14852,
       "name": "_meeting_normalize_provider_reply"
     },
     {
       "file": "app/server.py",
-      "line": 15058,
+      "line": 15078,
       "name": "_meeting_provider_ref"
     },
     {
       "file": "app/server.py",
-      "line": 15067,
+      "line": 15087,
       "name": "_meeting_provider_timeout"
     },
     {
       "file": "app/server.py",
-      "line": 15076,
+      "line": 15096,
       "name": "_meeting_call_provider"
     },
     {
       "file": "app/server.py",
-      "line": 19162,
+      "line": 19182,
       "name": "_archive_project_processed_events"
     },
     {
       "file": "app/server.py",
-      "line": 19276,
+      "line": 19296,
       "name": "_archive_processed_history"
     },
     {
       "file": "app/server.py",
-      "line": 21787,
+      "line": 21807,
       "name": "_project_execution_cancel_provider"
     },
     {
       "file": "app/server.py",
-      "line": 22721,
+      "line": 22741,
       "name": "_extract_openclaw_text"
     },
     {
       "file": "app/server.py",
-      "line": 23898,
+      "line": 23918,
       "name": "_codex_reasoning_events_to_chat_messages"
     },
     {
       "file": "app/server.py",
-      "line": 24574,
+      "line": 24594,
       "name": "get_codex_agent_messages"
     },
     {
       "file": "app/server.py",
-      "line": 24604,
+      "line": 24624,
       "name": "get_claude_code_agent_messages"
     },
     {
       "file": "app/server.py",
-      "line": 24978,
+      "line": 24998,
       "name": "ApiUsageCollector._fetch_claude"
     },
     {
       "file": "app/server.py",
-      "line": 25030,
+      "line": 25050,
       "name": "ApiUsageCollector._fetch_codex"
     },
     {
       "file": "app/server.py",
-      "line": 25369,
+      "line": 25389,
       "name": "OfficeHandler._serve_website_asset"
     },
     {
       "file": "app/server.py",
-      "line": 25385,
+      "line": 25405,
       "name": "OfficeHandler._serve_browser_viewer_asset"
     },
     {
       "file": "app/server.py",
-      "line": 26192,
+      "line": 26212,
       "name": "OfficeHandler.do_GET.send_sse"
     },
     {
       "file": "app/server.py",
-      "line": 26873,
+      "line": 26893,
       "name": "OfficeHandler._fetch_provider_models"
     },
     {
       "file": "app/server.py",
-      "line": 26939,
+      "line": 26959,
       "name": "OfficeHandler._discover_oauth_provider_models"
     },
     {
       "file": "app/server.py",
-      "line": 27071,
+      "line": 27091,
       "name": "OfficeHandler._provider_for_model"
     },
     {
       "file": "app/server.py",
-      "line": 27231,
+      "line": 27251,
       "name": "OfficeHandler._get_providers"
     },
     {
       "file": "app/server.py",
-      "line": 27382,
+      "line": 27402,
       "name": "OfficeHandler._save_provider_key"
     },
     {
       "file": "app/server.py",
-      "line": 27391,
+      "line": 27411,
       "name": "OfficeHandler._delete_provider_key"
     },
     {
       "file": "app/server.py",
-      "line": 27400,
+      "line": 27420,
       "name": "OfficeHandler._save_custom_provider"
     },
     {
       "file": "app/server.py",
-      "line": 27439,
+      "line": 27459,
       "name": "OfficeHandler._write_openclaw_config"
     },
     {
       "file": "app/server.py",
-      "line": 27497,
+      "line": 27517,
       "name": "OfficeHandler._handle_save_custom_provider"
     },
     {
       "file": "app/server.py",
-      "line": 27573,
+      "line": 27593,
       "name": "OfficeHandler._delete_custom_provider"
     },
     {
       "file": "app/server.py",
-      "line": 27576,
+      "line": 27596,
       "name": "OfficeHandler._handle_delete_custom_provider"
     },
     {
       "file": "app/server.py",
-      "line": 30551,
+      "line": 30571,
       "name": "_openclaw_config_path"
     },
     {
       "file": "app/server.py",
-      "line": 30585,
+      "line": 30605,
       "name": "_load_openclaw_model_config"
     },
     {
       "file": "app/server.py",
-      "line": 30593,
+      "line": 30613,
       "name": "_safe_openclaw_agent_id"
     },
     {
       "file": "app/server.py",
-      "line": 30598,
+      "line": 30618,
       "name": "_openclaw_agent_dir"
     },
     {
       "file": "app/server.py",
-      "line": 30602,
+      "line": 30622,
       "name": "_openclaw_auth_profiles_path"
     },
     {
       "file": "app/server.py",
-      "line": 30606,
+      "line": 30626,
       "name": "_openclaw_binary"
     },
     {
       "file": "app/server.py",
-      "line": 30624,
+      "line": 30644,
       "name": "_primary_openclaw_model"
     },
     {
       "file": "app/server.py",
-      "line": 30629,
+      "line": 30649,
       "name": "_default_openclaw_model"
     },
     {
       "file": "app/server.py",
-      "line": 30670,
+      "line": 30690,
       "name": "_read_openclaw_auth_sqlite"
     },
     {
       "file": "app/server.py",
-      "line": 30741,
+      "line": 30761,
       "name": "_read_openclaw_auth_json"
     },
     {
       "file": "app/server.py",
-      "line": 30764,
+      "line": 30784,
       "name": "_read_openclaw_auth_profiles"
     },
     {
       "file": "app/server.py",
-      "line": 30775,
+      "line": 30795,
       "name": "_openclaw_agent_ids"
     },
     {
       "file": "app/server.py",
-      "line": 30796,
+      "line": 30816,
       "name": "_openclaw_profile_provider"
     },
     {
       "file": "app/server.py",
-      "line": 30801,
+      "line": 30821,
       "name": "_openclaw_profile_type"
     },
     {
       "file": "app/server.py",
-      "line": 30806,
+      "line": 30826,
       "name": "_is_openclaw_portable_static_profile"
     },
     {
       "file": "app/server.py",
-      "line": 30817,
+      "line": 30837,
       "name": "_read_openclaw_auth_profile_map"
     },
     {
       "file": "app/server.py",
-      "line": 30854,
+      "line": 30874,
       "name": "_openclaw_profile_public"
     },
     {
       "file": "app/server.py",
-      "line": 30873,
+      "line": 30893,
       "name": "_openclaw_managed_auth_report"
     },
     {
       "file": "app/server.py",
-      "line": 30926,
+      "line": 30946,
       "name": "_update_openclaw_sqlite_auth_stores"
     },
     {
       "file": "app/server.py",
-      "line": 30970,
+      "line": 30990,
       "name": "_update_openclaw_auth_profiles_json"
     },
     {
       "file": "app/server.py",
-      "line": 30993,
+      "line": 31013,
       "name": "_mirror_openclaw_config_auth_profile"
     },
     {
       "file": "app/server.py",
-      "line": 31007,
+      "line": 31027,
       "name": "_remove_openclaw_config_auth_profiles"
     },
     {
       "file": "app/server.py",
-      "line": 31027,
+      "line": 31047,
       "name": "_cleanup_openclaw_sqlite_auth_state"
     },
     {
       "file": "app/server.py",
-      "line": 31092,
+      "line": 31112,
       "name": "_sync_openclaw_static_auth_from_main"
     },
     {
       "file": "app/server.py",
-      "line": 31172,
+      "line": 31192,
       "name": "_reset_openclaw_static_auth_overrides"
     },
     {
       "file": "app/server.py",
-      "line": 31179,
+      "line": 31199,
       "name": "_save_openclaw_api_key_direct"
     },
     {
       "file": "app/server.py",
-      "line": 31216,
+      "line": 31236,
       "name": "_delete_openclaw_auth_direct"
     },
     {
       "file": "app/server.py",
-      "line": 31256,
+      "line": 31276,
       "name": "_save_openclaw_api_key"
     },
     {
       "file": "app/server.py",
-      "line": 31289,
+      "line": 31309,
       "name": "_delete_openclaw_auth"
     },
     {
       "file": "app/server.py",
-      "line": 31319,
+      "line": 31339,
       "name": "_hermes_platform_roster_agent"
     },
     {
       "file": "app/server.py",
-      "line": 31354,
+      "line": 31374,
       "name": "_hermes_platform_queue_path"
     },
     {
       "file": "app/server.py",
-      "line": 31358,
+      "line": 31378,
       "name": "_hermes_platform_ready"
     },
     {
       "file": "app/server.py",
-      "line": 31363,
+      "line": 31383,
       "name": "_hermes_platform_state_default"
     },
     {
       "file": "app/server.py",
-      "line": 31372,
+      "line": 31392,
       "name": "_load_hermes_platform_state"
     },
     {
       "file": "app/server.py",
-      "line": 31391,
+      "line": 31411,
       "name": "_save_hermes_platform_state"
     },
     {
       "file": "app/server.py",
-      "line": 31415,
+      "line": 31435,
       "name": "_hermes_platform_message_active"
     },
     {
       "file": "app/server.py",
-      "line": 31431,
+      "line": 31451,
       "name": "_hermes_platform_counts"
     },
     {
       "file": "app/server.py",
-      "line": 31439,
+      "line": 31459,
       "name": "_hermes_platform_public_message"
     },
     {
       "file": "app/server.py",
-      "line": 31459,
+      "line": 31479,
       "name": "_hermes_platform_adapter_id"
     },
     {
       "file": "app/server.py",
-      "line": 31464,
+      "line": 31484,
       "name": "_hermes_platform_agent_ref"
     },
     {
       "file": "app/server.py",
-      "line": 31482,
+      "line": 31502,
       "name": "_hermes_platform_source_ref"
     },
     {
       "file": "app/server.py",
-      "line": 31502,
+      "line": 31522,
       "name": "_hermes_platform_request_token"
     },
     {
       "file": "app/server.py",
-      "line": 31513,
+      "line": 31533,
       "name": "_hermes_platform_auth_error"
     },
     {
       "file": "app/server.py",
-      "line": 31528,
+      "line": 31548,
       "name": "_handle_hermes_platform_status"
     },
     {
       "file": "app/server.py",
-      "line": 31554,
+      "line": 31574,
       "name": "_handle_hermes_platform_enqueue"
     },
     {
       "file": "app/server.py",
-      "line": 31635,
+      "line": 31655,
       "name": "_handle_hermes_platform_poll"
     },
     {
       "file": "app/server.py",
-      "line": 31682,
+      "line": 31702,
       "name": "_handle_hermes_platform_ack"
     },
     {
       "file": "app/server.py",
-      "line": 31715,
+      "line": 31735,
       "name": "_find_hermes_platform_message"
     },
     {
       "file": "app/server.py",
-      "line": 31728,
+      "line": 31748,
       "name": "_handle_hermes_platform_reply"
     },
     {
       "file": "app/server.py",
-      "line": 31799,
+      "line": 31819,
       "name": "_handle_hermes_platform_heartbeat"
     },
     {
       "file": "app/server.py",
-      "line": 31826,
+      "line": 31846,
       "name": "_get_hermes_platform_message"
     },
     {
       "file": "app/server.py",
-      "line": 31832,
+      "line": 31852,
       "name": "_wait_for_hermes_platform_reply"
     },
     {
       "file": "app/server.py",
-      "line": 31842,
+      "line": 31862,
       "name": "_handle_hermes_platform_chat"
     },
     {
       "file": "app/server.py",
-      "line": 31927,
+      "line": 31947,
       "name": "_save_codex_state"
     },
     {
       "file": "app/server.py",
-      "line": 31940,
+      "line": 31960,
       "name": "_save_claude_code_state"
     },
     {
       "file": "app/server.py",
-      "line": 31953,
+      "line": 31973,
       "name": "_save_hermes_state"
     },
     {
       "file": "app/server.py",
-      "line": 31971,
+      "line": 31991,
       "name": "_provider_conversation_key"
     },
     {
       "file": "app/server.py",
-      "line": 31979,
+      "line": 31999,
       "name": "_provider_conversation_replace"
     },
     {
       "file": "app/server.py",
-      "line": 31987,
+      "line": 32007,
       "name": "_read_provider_state_file"
     },
     {
       "file": "app/server.py",
-      "line": 32000,
+      "line": 32020,
       "name": "_write_provider_state_file"
     },
     {
       "file": "app/server.py",
-      "line": 32024,
+      "line": 32044,
       "name": "_provider_state_port"
     },
     {
       "file": "app/server.py",
-      "line": 32039,
+      "line": 32059,
       "name": "_reset_provider_conversation_state"
     },
     {
       "file": "app/server.py",
-      "line": 32045,
+      "line": 32065,
       "name": "_load_codex_state"
     },
     {
       "file": "app/server.py",
-      "line": 32050,
+      "line": 32070,
       "name": "_load_codex_history"
     },
     {
       "file": "app/server.py",
-      "line": 32054,
+      "line": 32074,
       "name": "_save_codex_state"
     },
     {
       "file": "app/server.py",
-      "line": 32059,
+      "line": 32079,
       "name": "_save_codex_history"
     },
     {
       "file": "app/server.py",
-      "line": 32065,
+      "line": 32085,
       "name": "_get_codex_session_id"
     },
     {
       "file": "app/server.py",
-      "line": 32069,
+      "line": 32089,
       "name": "_set_codex_session_id"
     },
     {
       "file": "app/server.py",
-      "line": 32081,
+      "line": 32101,
       "name": "_load_claude_code_state"
     },
     {
       "file": "app/server.py",
-      "line": 32086,
+      "line": 32106,
       "name": "_load_claude_code_history"
     },
     {
       "file": "app/server.py",
-      "line": 32090,
+      "line": 32110,
       "name": "_save_claude_code_state"
     },
     {
       "file": "app/server.py",
-      "line": 32095,
+      "line": 32115,
       "name": "_save_claude_code_history"
     },
     {
       "file": "app/server.py",
-      "line": 32103,
+      "line": 32123,
       "name": "_get_claude_code_session_id"
     },
     {
       "file": "app/server.py",
-      "line": 32107,
+      "line": 32127,
       "name": "_set_claude_code_session_id"
     },
     {
       "file": "app/server.py",
-      "line": 32117,
+      "line": 32137,
       "name": "_set_claude_code_active_run"
     },
     {
       "file": "app/server.py",
-      "line": 32125,
+      "line": 32145,
       "name": "_load_hermes_state"
     },
     {
       "file": "app/server.py",
-      "line": 32130,
+      "line": 32150,
       "name": "_load_hermes_history"
     },
     {
       "file": "app/server.py",
-      "line": 32134,
+      "line": 32154,
       "name": "_save_hermes_state"
     },
     {
       "file": "app/server.py",
-      "line": 32139,
+      "line": 32159,
       "name": "_save_hermes_history"
     },
     {
       "file": "app/server.py",
-      "line": 32148,
+      "line": 32168,
       "name": "_get_hermes_session_id"
     },
     {
       "file": "app/server.py",
-      "line": 32152,
+      "line": 32172,
       "name": "_set_hermes_session_id"
     },
     {
       "file": "app/server.py",
-      "line": 32165,
+      "line": 32185,
       "name": "_codex_thread_port"
     },
     {
       "file": "app/server.py",
-      "line": 32183,
+      "line": 32203,
       "name": "_get_codex_thread_id"
     },
     {
       "file": "app/server.py",
-      "line": 32191,
+      "line": 32211,
       "name": "_set_codex_thread_id"
     },
     {
       "file": "app/server.py",
-      "line": 32202,
+      "line": 32222,
       "name": "_reset_codex_thread_id"
     },
     {
       "file": "app/server.py",
-      "line": 32270,
+      "line": 32290,
       "name": "_openclaw_live_mode_session_key"
     },
     {
       "file": "app/server.py",
-      "line": 32273,
+      "line": 32293,
       "name": "_openclaw_live_mode_enabled"
     },
     {
       "file": "app/server.py",
-      "line": 32286,
+      "line": 32306,
       "name": "_openclaw_session_key_for_agent"
     },
     {
       "file": "app/server.py",
-      "line": 32299,
+      "line": 32319,
       "name": "_openclaw_conversation_session_key"
     },
     {
       "file": "app/server.py",
-      "line": 32311,
+      "line": 32331,
       "name": "_openclaw_queued_conversation_port"
     },
     {
       "file": "app/server.py",
-      "line": 32329,
+      "line": 32349,
       "name": "_chat_sessions_openclaw_entry"
     },
     {
       "file": "app/server.py",
-      "line": 32352,
+      "line": 32372,
       "name": "_chat_sessions_list_openclaw_files"
     },
     {
       "file": "app/server.py",
-      "line": 32388,
+      "line": 32408,
       "name": "_chat_sessions_list_openclaw"
     },
     {
       "file": "app/server.py",
-      "line": 32427,
+      "line": 32447,
       "name": "_chat_sessions_list_hermes"
     },
     {
       "file": "app/server.py",
-      "line": 32472,
+      "line": 32492,
       "name": "_chat_sessions_list_codex"
     },
     {
       "file": "app/server.py",
-      "line": 32496,
+      "line": 32516,
       "name": "_claude_code_home_path"
     },
     {
       "file": "app/server.py",
-      "line": 32500,
+      "line": 32520,
       "name": "_claude_code_projects_dir"
     },
     {
       "file": "app/server.py",
-      "line": 32503,
+      "line": 32523,
       "name": "_claude_code_valid_session_id"
     },
     {
       "file": "app/server.py",
-      "line": 32507,
+      "line": 32527,
       "name": "_claude_code_text_from_content"
     },
     {
       "file": "app/server.py",
-      "line": 32520,
+      "line": 32540,
       "name": "_claude_code_session_records"
     },
     {
       "file": "app/server.py",
-      "line": 32567,
+      "line": 32587,
       "name": "_claude_code_find_session_file"
     },
     {
       "file": "app/server.py",
-      "line": 32576,
+      "line": 32596,
       "name": "_chat_sessions_list_claude_code"
     },
     {
       "file": "app/server.py",
-      "line": 32745,
+      "line": 32765,
       "name": "_hermes_session_to_chat_messages"
     },
     {
       "file": "app/server.py",
-      "line": 32761,
+      "line": 32781,
       "name": "_codex_thread_to_chat_messages"
     },
     {
       "file": "app/server.py",
-      "line": 32782,
+      "line": 32802,
       "name": "_claude_code_jsonl_to_chat_messages"
     },
     {
       "file": "app/server.py",
-      "line": 32808,
+      "line": 32828,
       "name": "_openclaw_session_meta_for_bubble"
     },
     {
       "file": "app/server.py",
-      "line": 32834,
+      "line": 32854,
       "name": "_default_hermes_api_url"
     },
     {
       "file": "app/server.py",
-      "line": 32837,
+      "line": 32857,
       "name": "_default_hermes_desktop_url"
     },
     {
       "file": "app/server.py",
-      "line": 32840,
+      "line": 32860,
       "name": "_is_hermes_gateway_platform_agent"
     },
     {
       "file": "app/server.py",
-      "line": 32844,
+      "line": 32864,
       "name": "_hermes_run_history_limits"
     },
     {
       "file": "app/server.py",
-      "line": 32860,
+      "line": 32880,
       "name": "_flatten_hermes_history_content"
     },
     {
       "file": "app/server.py",
-      "line": 32882,
+      "line": 32902,
       "name": "_normalize_hermes_run_history_message"
     },
     {
       "file": "app/server.py",
-      "line": 32895,
+      "line": 32915,
       "name": "_limit_hermes_run_history"
     },
     {
       "file": "app/server.py",
-      "line": 32914,
+      "line": 32934,
       "name": "_load_hermes_run_conversation_history"
     },
     {
       "file": "app/server.py",
-      "line": 32946,
+      "line": 32966,
       "name": "_hermes_desktop_client"
     },
     {
       "file": "app/server.py",
-      "line": 32957,
+      "line": 32977,
       "name": "_handle_hermes_desktop_chat"
     },
     {
       "file": "app/server.py",
-      "line": 32987,
+      "line": 33007,
       "name": "_handle_hermes_desktop_run_start"
     },
     {
       "file": "app/server.py",
-      "line": 33141,
+      "line": 33161,
       "name": "_test_hermes_api"
     },
     {
       "file": "app/server.py",
-      "line": 33188,
+      "line": 33208,
       "name": "_test_hermes_desktop"
     },
     {
       "file": "app/server.py",
-      "line": 33199,
+      "line": 33219,
       "name": "_handle_hermes_desktop_discover"
     },
     {
       "file": "app/server.py",
-      "line": 33251,
+      "line": 33271,
       "name": "_history_has_approval"
     },
     {
       "file": "app/server.py",
-      "line": 33261,
+      "line": 33281,
       "name": "_signal_openclaw_gateway"
     },
     {
@@ -9171,407 +9171,407 @@
   "routes": [
     {
       "file": "app/server.py",
-      "line": 25546,
+      "line": 25566,
       "path": "/api/chat-sessions"
     },
     {
       "file": "app/server.py",
-      "line": 28045,
+      "line": 28065,
       "path": "/api/chat-sessions/create"
     },
     {
       "file": "app/server.py",
-      "line": 28045,
+      "line": 28065,
       "path": "/api/chat-sessions/delete"
     },
     {
       "file": "app/server.py",
-      "line": 28045,
+      "line": 28065,
       "path": "/api/chat-sessions/switch"
     },
     {
       "file": "app/server.py",
-      "line": 26094,
+      "line": 26114,
       "path": "/api/chat/history"
     },
     {
       "file": "app/server.py",
-      "line": 28925,
+      "line": 28945,
       "path": "/api/claude-code/cancel"
     },
     {
       "file": "app/server.py",
-      "line": 28718,
+      "line": 28738,
       "path": "/api/claude-code/chat"
     },
     {
       "file": "app/server.py",
-      "line": 26141,
+      "line": 26161,
       "path": "/api/claude-code/history"
     },
     {
       "file": "app/server.py",
-      "line": 28824,
+      "line": 28844,
       "path": "/api/claude-code/history/clear"
     },
     {
       "file": "app/server.py",
-      "line": 26141,
+      "line": 26161,
       "path": "/api/claude-code/history?"
     },
     {
       "file": "app/server.py",
-      "line": 28740,
+      "line": 28760,
       "path": "/api/claude-code/interrupt"
     },
     {
       "file": "app/server.py",
-      "line": 28670,
+      "line": 28690,
       "path": "/api/claude-code/runs"
     },
     {
       "file": "app/server.py",
-      "line": 26240,
+      "line": 26260,
       "path": "/api/claude-code/runs/"
     },
     {
       "file": "app/server.py",
-      "line": 26241,
+      "line": 26261,
       "path": "/api/claude-code/runs/"
     },
     {
       "file": "app/server.py",
-      "line": 28694,
+      "line": 28714,
       "path": "/api/claude-code/runs/"
     },
     {
       "file": "app/server.py",
-      "line": 28695,
+      "line": 28715,
       "path": "/api/claude-code/runs/"
     },
     {
       "file": "app/server.py",
-      "line": 26243,
+      "line": 26263,
       "path": "/api/claude-code/test"
     },
     {
       "file": "app/server.py",
-      "line": 28915,
+      "line": 28935,
       "path": "/api/claude-code/test"
     },
     {
       "file": "app/server.py",
-      "line": 26222,
+      "line": 26242,
       "path": "/api/codex/activity"
     },
     {
       "file": "app/server.py",
-      "line": 26222,
+      "line": 26242,
       "path": "/api/codex/activity?"
     },
     {
       "file": "app/server.py",
-      "line": 26230,
+      "line": 26250,
       "path": "/api/codex/approval/pending"
     },
     {
       "file": "app/server.py",
-      "line": 28751,
+      "line": 28771,
       "path": "/api/codex/approval/respond"
     },
     {
       "file": "app/server.py",
-      "line": 28895,
+      "line": 28915,
       "path": "/api/codex/approval/respond"
     },
     {
       "file": "app/server.py",
-      "line": 28905,
+      "line": 28925,
       "path": "/api/codex/cancel"
     },
     {
       "file": "app/server.py",
-      "line": 28707,
+      "line": 28727,
       "path": "/api/codex/chat"
     },
     {
       "file": "app/server.py",
-      "line": 28875,
+      "line": 28895,
       "path": "/api/codex/compact"
     },
     {
       "file": "app/server.py",
-      "line": 26118,
+      "line": 26138,
       "path": "/api/codex/history"
     },
     {
       "file": "app/server.py",
-      "line": 28811,
+      "line": 28831,
       "path": "/api/codex/history/clear"
     },
     {
       "file": "app/server.py",
-      "line": 26118,
+      "line": 26138,
       "path": "/api/codex/history?"
     },
     {
       "file": "app/server.py",
-      "line": 28885,
+      "line": 28905,
       "path": "/api/codex/interaction"
     },
     {
       "file": "app/server.py",
-      "line": 28729,
+      "line": 28749,
       "path": "/api/codex/interrupt"
     },
     {
       "file": "app/server.py",
-      "line": 28854,
+      "line": 28874,
       "path": "/api/codex/reset"
     },
     {
       "file": "app/server.py",
-      "line": 28659,
+      "line": 28679,
       "path": "/api/codex/runs"
     },
     {
       "file": "app/server.py",
-      "line": 26237,
+      "line": 26257,
       "path": "/api/codex/runs/"
     },
     {
       "file": "app/server.py",
-      "line": 26238,
+      "line": 26258,
       "path": "/api/codex/runs/"
     },
     {
       "file": "app/server.py",
-      "line": 28681,
+      "line": 28701,
       "path": "/api/codex/runs/"
     },
     {
       "file": "app/server.py",
-      "line": 28682,
+      "line": 28702,
       "path": "/api/codex/runs/"
     },
     {
       "file": "app/server.py",
-      "line": 26215,
+      "line": 26235,
       "path": "/api/codex/test"
     },
     {
       "file": "app/server.py",
-      "line": 28844,
+      "line": 28864,
       "path": "/api/codex/test"
-    },
-    {
-      "file": "app/server.py",
-      "line": 28064,
-      "path": "/api/hermes-platform/ack"
-    },
-    {
-      "file": "app/server.py",
-      "line": 28073,
-      "path": "/api/hermes-platform/ack"
-    },
-    {
-      "file": "app/server.py",
-      "line": 28064,
-      "path": "/api/hermes-platform/enqueue"
-    },
-    {
-      "file": "app/server.py",
-      "line": 28072,
-      "path": "/api/hermes-platform/enqueue"
-    },
-    {
-      "file": "app/server.py",
-      "line": 28064,
-      "path": "/api/hermes-platform/heartbeat"
-    },
-    {
-      "file": "app/server.py",
-      "line": 28075,
-      "path": "/api/hermes-platform/heartbeat"
-    },
-    {
-      "file": "app/server.py",
-      "line": 25566,
-      "path": "/api/hermes-platform/poll"
-    },
-    {
-      "file": "app/server.py",
-      "line": 28064,
-      "path": "/api/hermes-platform/reply"
-    },
-    {
-      "file": "app/server.py",
-      "line": 28074,
-      "path": "/api/hermes-platform/reply"
-    },
-    {
-      "file": "app/server.py",
-      "line": 25559,
-      "path": "/api/hermes-platform/status"
-    },
-    {
-      "file": "app/server.py",
-      "line": 28787,
-      "path": "/api/hermes/approval/feishu-e2e-action"
-    },
-    {
-      "file": "app/server.py",
-      "line": 28773,
-      "path": "/api/hermes/approval/feishu-e2e-create"
-    },
-    {
-      "file": "app/server.py",
-      "line": 26162,
-      "path": "/api/hermes/approval/pending"
-    },
-    {
-      "file": "app/server.py",
-      "line": 28762,
-      "path": "/api/hermes/approval/respond"
-    },
-    {
-      "file": "app/server.py",
-      "line": 26171,
-      "path": "/api/hermes/approval/stream"
-    },
-    {
-      "file": "app/server.py",
-      "line": 28648,
-      "path": "/api/hermes/chat"
-    },
-    {
-      "file": "app/server.py",
-      "line": 28116,
-      "path": "/api/hermes/desktop/discover"
-    },
-    {
-      "file": "app/server.py",
-      "line": 26102,
-      "path": "/api/hermes/history"
-    },
-    {
-      "file": "app/server.py",
-      "line": 28801,
-      "path": "/api/hermes/history/clear"
-    },
-    {
-      "file": "app/server.py",
-      "line": 26102,
-      "path": "/api/hermes/history?"
-    },
-    {
-      "file": "app/server.py",
-      "line": 28624,
-      "path": "/api/hermes/interrupt"
-    },
-    {
-      "file": "app/server.py",
-      "line": 28613,
-      "path": "/api/hermes/runs"
-    },
-    {
-      "file": "app/server.py",
-      "line": 26205,
-      "path": "/api/hermes/runs/"
-    },
-    {
-      "file": "app/server.py",
-      "line": 26206,
-      "path": "/api/hermes/runs/"
-    },
-    {
-      "file": "app/server.py",
-      "line": 28635,
-      "path": "/api/hermes/runs/"
-    },
-    {
-      "file": "app/server.py",
-      "line": 28636,
-      "path": "/api/hermes/runs/"
-    },
-    {
-      "file": "app/server.py",
-      "line": 26208,
-      "path": "/api/hermes/test"
-    },
-    {
-      "file": "app/server.py",
-      "line": 28834,
-      "path": "/api/hermes/test"
-    },
-    {
-      "file": "app/server.py",
-      "line": 29074,
-      "path": "/api/native-models/hermes/auth/api-key"
-    },
-    {
-      "file": "app/server.py",
-      "line": 29083,
-      "path": "/api/native-models/hermes/auth/delete"
-    },
-    {
-      "file": "app/server.py",
-      "line": 29060,
-      "path": "/api/native-models/hermes/profile-model"
-    },
-    {
-      "file": "app/server.py",
-      "line": 29092,
-      "path": "/api/native-models/hermes/provider"
-    },
-    {
-      "file": "app/server.py",
-      "line": 29106,
-      "path": "/api/native-models/hermes/provider/delete"
-    },
-    {
-      "file": "app/server.py",
-      "line": 29002,
-      "path": "/api/native-models/openclaw/agent-model"
-    },
-    {
-      "file": "app/server.py",
-      "line": 29011,
-      "path": "/api/native-models/openclaw/auth/api-key"
-    },
-    {
-      "file": "app/server.py",
-      "line": 29023,
-      "path": "/api/native-models/openclaw/auth/delete"
-    },
-    {
-      "file": "app/server.py",
-      "line": 28100,
-      "path": "/api/native-models/openclaw/auth/reset-overrides"
     },
     {
       "file": "app/server.py",
       "line": 28084,
+      "path": "/api/hermes-platform/ack"
+    },
+    {
+      "file": "app/server.py",
+      "line": 28093,
+      "path": "/api/hermes-platform/ack"
+    },
+    {
+      "file": "app/server.py",
+      "line": 28084,
+      "path": "/api/hermes-platform/enqueue"
+    },
+    {
+      "file": "app/server.py",
+      "line": 28092,
+      "path": "/api/hermes-platform/enqueue"
+    },
+    {
+      "file": "app/server.py",
+      "line": 28084,
+      "path": "/api/hermes-platform/heartbeat"
+    },
+    {
+      "file": "app/server.py",
+      "line": 28095,
+      "path": "/api/hermes-platform/heartbeat"
+    },
+    {
+      "file": "app/server.py",
+      "line": 25586,
+      "path": "/api/hermes-platform/poll"
+    },
+    {
+      "file": "app/server.py",
+      "line": 28084,
+      "path": "/api/hermes-platform/reply"
+    },
+    {
+      "file": "app/server.py",
+      "line": 28094,
+      "path": "/api/hermes-platform/reply"
+    },
+    {
+      "file": "app/server.py",
+      "line": 25579,
+      "path": "/api/hermes-platform/status"
+    },
+    {
+      "file": "app/server.py",
+      "line": 28807,
+      "path": "/api/hermes/approval/feishu-e2e-action"
+    },
+    {
+      "file": "app/server.py",
+      "line": 28793,
+      "path": "/api/hermes/approval/feishu-e2e-create"
+    },
+    {
+      "file": "app/server.py",
+      "line": 26182,
+      "path": "/api/hermes/approval/pending"
+    },
+    {
+      "file": "app/server.py",
+      "line": 28782,
+      "path": "/api/hermes/approval/respond"
+    },
+    {
+      "file": "app/server.py",
+      "line": 26191,
+      "path": "/api/hermes/approval/stream"
+    },
+    {
+      "file": "app/server.py",
+      "line": 28668,
+      "path": "/api/hermes/chat"
+    },
+    {
+      "file": "app/server.py",
+      "line": 28136,
+      "path": "/api/hermes/desktop/discover"
+    },
+    {
+      "file": "app/server.py",
+      "line": 26122,
+      "path": "/api/hermes/history"
+    },
+    {
+      "file": "app/server.py",
+      "line": 28821,
+      "path": "/api/hermes/history/clear"
+    },
+    {
+      "file": "app/server.py",
+      "line": 26122,
+      "path": "/api/hermes/history?"
+    },
+    {
+      "file": "app/server.py",
+      "line": 28644,
+      "path": "/api/hermes/interrupt"
+    },
+    {
+      "file": "app/server.py",
+      "line": 28633,
+      "path": "/api/hermes/runs"
+    },
+    {
+      "file": "app/server.py",
+      "line": 26225,
+      "path": "/api/hermes/runs/"
+    },
+    {
+      "file": "app/server.py",
+      "line": 26226,
+      "path": "/api/hermes/runs/"
+    },
+    {
+      "file": "app/server.py",
+      "line": 28655,
+      "path": "/api/hermes/runs/"
+    },
+    {
+      "file": "app/server.py",
+      "line": 28656,
+      "path": "/api/hermes/runs/"
+    },
+    {
+      "file": "app/server.py",
+      "line": 26228,
+      "path": "/api/hermes/test"
+    },
+    {
+      "file": "app/server.py",
+      "line": 28854,
+      "path": "/api/hermes/test"
+    },
+    {
+      "file": "app/server.py",
+      "line": 29094,
+      "path": "/api/native-models/hermes/auth/api-key"
+    },
+    {
+      "file": "app/server.py",
+      "line": 29103,
+      "path": "/api/native-models/hermes/auth/delete"
+    },
+    {
+      "file": "app/server.py",
+      "line": 29080,
+      "path": "/api/native-models/hermes/profile-model"
+    },
+    {
+      "file": "app/server.py",
+      "line": 29112,
+      "path": "/api/native-models/hermes/provider"
+    },
+    {
+      "file": "app/server.py",
+      "line": 29126,
+      "path": "/api/native-models/hermes/provider/delete"
+    },
+    {
+      "file": "app/server.py",
+      "line": 29022,
+      "path": "/api/native-models/openclaw/agent-model"
+    },
+    {
+      "file": "app/server.py",
+      "line": 29031,
+      "path": "/api/native-models/openclaw/auth/api-key"
+    },
+    {
+      "file": "app/server.py",
+      "line": 29043,
+      "path": "/api/native-models/openclaw/auth/delete"
+    },
+    {
+      "file": "app/server.py",
+      "line": 28120,
+      "path": "/api/native-models/openclaw/auth/reset-overrides"
+    },
+    {
+      "file": "app/server.py",
+      "line": 28104,
       "path": "/api/native-models/openclaw/auth/sync-static"
     },
     {
       "file": "app/server.py",
-      "line": 29035,
+      "line": 29055,
       "path": "/api/native-models/openclaw/provider"
     },
     {
       "file": "app/server.py",
-      "line": 29051,
+      "line": 29071,
       "path": "/api/native-models/openclaw/provider/delete"
     },
     {
       "file": "app/server.py",
-      "line": 25573,
+      "line": 25593,
       "path": "/api/provider/events"
     },
     {
       "file": "app/server.py",
-      "line": 26183,
+      "line": 26203,
       "path": "/api/sse/test"
     }
   ],
@@ -9593,7 +9593,7 @@
     "app/providers/codex_app_server.py": "320257cee19f29b1c93cdf221f212b853bb4914a11338676df556680e41f3cf2",
     "app/providers/codex_bridge.py": "89cb41dc31d522709fdaa346199bbd29e304da61e8815dad969c6d8bed8c9ff0",
     "app/providers/hermes.py": "a10dd77653382ba3b91a81e008ff82938f1f944df4d69504691415f01b6df067",
-    "app/server.py": "6bb024a7bd293893c7f18130bf281917bc6e36fe7456b2a00b95657eb0a3894e",
+    "app/server.py": "de32df341ca0b3b83151c8dba42f61d1a655a86b68f0733efa248b858f04b517",
     "app/services/artifacts.py": "fe0a894fd93d77acfd9ee862fa3457915344256821c7ea25608a8f333cd2f189",
     "app/services/codex_fast_path.py": "3d266612b1d37b027113aaca157e9e74d17d1299f61e03abc26a5788ea320274",
     "app/services/execution_lifecycle.py": "a9fb7deaf1ad75caeafe60d41b8f321a9b63efb3661e42c5244324bc30d9f4a7",

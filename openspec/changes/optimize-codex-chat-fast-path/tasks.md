@@ -60,3 +60,7 @@
 ## 12. Accepted Run Retry Remediation
 
 - [x] 12.1 Prevent any accepted Codex run from falling back to the blocking chat endpoint after SSE, terminal, or durable failure; recover the accepted run/history and surface an explicit error without re-executing the prompt, while retaining pre-acceptance compatibility fallback and adding a static control-flow regression.
+
+## 13. Terminal Durability Finalization Remediation
+
+- [x] 13.1 Separate bounded reader release from durable terminal completion so a slow successful reply write cannot be reported as failed, and guarantee finalization signaling, active-state cleanup, and same-conversation admission release on every terminal exception path; add deterministic regressions for slow reply persistence and exceptional finalization.

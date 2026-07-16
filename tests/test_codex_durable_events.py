@@ -292,7 +292,7 @@ def test_reply_write_failure_commits_only_failed_terminal(monkeypatch):
         assert terminals[0]["metadata"]["status"] == "durable_write_failed"
 
 
-def test_inflight_terminal_reply_write_fails_closed_without_duplicate(monkeypatch):
+def test_inflight_terminal_reply_write_finishes_before_success_terminal(monkeypatch):
     with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as workspace:
         entered = threading.Event()
         release = threading.Event()
@@ -345,16 +345,28 @@ def test_inflight_terminal_reply_write_fails_closed_without_duplicate(monkeypatc
             return original_append(event, require_durable=require_durable)
 
         monkeypatch.setattr(server, "_append_comm_event", block_reply)
-        result = server._handle_codex_chat({
-            "agentId": "codex-local",
-            "conversationId": "conv-inflight",
-            "message": "finish with a blocked terminal callback",
-            "fromType": "human",
-            "_streamRunId": "run-inflight",
-        })
+        result = {}
+
+        def handle_chat():
+            result.update(server._handle_codex_chat({
+                "agentId": "codex-local",
+                "conversationId": "conv-inflight",
+                "message": "finish with a blocked terminal callback",
+                "fromType": "human",
+                "_streamRunId": "run-inflight",
+            }))
+
+        request = threading.Thread(target=handle_chat)
+        request.start()
+        assert entered.wait(0.5)
+        time.sleep(0.08)
+        assert request.is_alive()
         assert server._codex_operation_is_locked("codex-local", "conv-inflight") is True
+        assert [event for event in _events(status_dir) if event.get("operation") == "terminal"] == []
         release.set()
+        request.join(1)
         provider.worker.join(1)
+        assert request.is_alive() is False
         deadline = time.monotonic() + 0.5
         while server._codex_operation_is_locked("codex-local", "conv-inflight") and time.monotonic() < deadline:
             time.sleep(0.005)
@@ -363,11 +375,58 @@ def test_inflight_terminal_reply_write_fails_closed_without_duplicate(monkeypatc
         events = _events(status_dir)
         replies = [event for event in events if event.get("direction") == "reply"]
         terminals = [event for event in events if event.get("operation") == "terminal"]
-        assert result["ok"] is False
-        assert result["status"] == "durable_write_failed"
+        assert result["ok"] is True
+        assert result["status"] == "completed"
         assert len(replies) == 1
         assert len(terminals) == 1
-        assert terminals[0]["ok"] is False
+        assert terminals[0]["ok"] is True
+        assert terminals[0]["metadata"]["status"] == "completed"
+
+
+def test_finalization_exception_always_cleans_active_state_and_releases_admission(monkeypatch):
+    with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as workspace:
+        callbacks_drained = threading.Event()
+        callbacks_drained.set()
+
+        class DeferredProvider(ResultProvider):
+            def wait_for_terminal_callbacks(self, thread_id, turn_id="", timeout=None):
+                assert thread_id == "thr-finalize-error"
+                assert turn_id == "turn-finalize-error"
+                return callbacks_drained.wait(timeout=timeout)
+
+        provider = DeferredProvider(workspace, {
+            "ok": True,
+            "status": "completed",
+            "reply": "reply",
+            "threadId": "thr-finalize-error",
+            "turnId": "turn-finalize-error",
+            "terminalFence": {"activeCallbacks": 1, "terminalFenceFallbacks": 1},
+        })
+        _configure(monkeypatch, status_dir, provider)
+        monkeypatch.setattr(
+            server,
+            "_set_codex_thread_id",
+            lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("mapping write failed")),
+        )
+
+        with pytest.raises(RuntimeError, match="mapping write failed"):
+            server._handle_codex_chat({
+                "agentId": "codex-local",
+                "conversationId": "conv-finalize-error",
+                "message": "finish with exceptional finalization",
+                "fromType": "human",
+                "_streamRunId": "run-finalize-error",
+            })
+
+        deadline = time.monotonic() + 0.5
+        while server._codex_operation_is_locked("codex-local", "conv-finalize-error") and time.monotonic() < deadline:
+            time.sleep(0.005)
+        assert server._codex_operation_is_locked("codex-local", "conv-finalize-error") is False
+        assert server._get_codex_active("codex-local", "conv-finalize-error") is None
+
+        available = server._codex_operation_lock("codex-local", "conv-finalize-error")
+        assert available.acquire(blocking=False)
+        server._release_codex_operation_lock("codex-local", "conv-finalize-error", available)
 
 
 def test_callback_drain_defers_same_conversation_admission_until_finalization():
