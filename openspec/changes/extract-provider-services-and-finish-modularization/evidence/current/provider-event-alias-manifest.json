@@ -194,6 +194,10 @@
         "line": 32845
       },
       {
+        "file": "app/services/codex_fast_path.py",
+        "line": 24
+      },
+      {
         "file": "app/services/provider_events.py",
         "line": 22
       }
@@ -210,6 +214,10 @@
       {
         "file": "app/server.py",
         "line": 5861
+      },
+      {
+        "file": "app/services/codex_fast_path.py",
+        "line": 24
       },
       {
         "file": "app/services/provider_events.py",
@@ -234,6 +242,10 @@
       {
         "file": "app/server.py",
         "line": 6794
+      },
+      {
+        "file": "app/services/codex_fast_path.py",
+        "line": 137
       },
       {
         "file": "app/services/provider_events.py",
@@ -310,6 +322,10 @@
         "line": 32848
       },
       {
+        "file": "app/services/codex_fast_path.py",
+        "line": 24
+      },
+      {
         "file": "app/services/provider_events.py",
         "line": 23
       }
@@ -318,6 +334,10 @@
       {
         "file": "app/providers/hermes.py",
         "line": 1126
+      },
+      {
+        "file": "app/services/codex_fast_path.py",
+        "line": 24
       },
       {
         "file": "app/services/provider_events.py",

@@ -6670,13 +6670,13 @@
       "callee": "classify_codex_event",
       "caller": "CodexEventFastPath.process_event",
       "file": "app/services/codex_fast_path.py",
-      "line": 148
+      "line": 429
     },
     {
       "callee": "CodexFastPathSettings",
       "caller": "load_codex_fast_path_settings",
       "file": "app/services/codex_fast_path.py",
-      "line": 303
+      "line": 584
     },
     {
       "callee": "provider",
@@ -8947,22 +8947,27 @@
     },
     {
       "file": "app/services/codex_fast_path.py",
-      "line": 22,
+      "line": 28,
       "name": "CodexFastPathSettings"
     },
     {
       "file": "app/services/codex_fast_path.py",
-      "line": 52,
+      "line": 70,
+      "name": "CodexTransientCoalescer"
+    },
+    {
+      "file": "app/services/codex_fast_path.py",
+      "line": 333,
       "name": "classify_codex_event"
     },
     {
       "file": "app/services/codex_fast_path.py",
-      "line": 67,
+      "line": 348,
       "name": "CodexEventFastPath"
     },
     {
       "file": "app/services/codex_fast_path.py",
-      "line": 264,
+      "line": 545,
       "name": "load_codex_fast_path_settings"
     },
     {
@@ -9478,7 +9483,7 @@
     "app/providers/hermes.py": "a10dd77653382ba3b91a81e008ff82938f1f944df4d69504691415f01b6df067",
     "app/server.py": "2459c108b372f40899e244c8d819d2eb1f624c25e12041169dec4e3b05029887",
     "app/services/artifacts.py": "fe0a894fd93d77acfd9ee862fa3457915344256821c7ea25608a8f333cd2f189",
-    "app/services/codex_fast_path.py": "c647eced0af728c0295c618ef50481929958e5c8e6e08aa86af299ebc953ae01",
+    "app/services/codex_fast_path.py": "17cc0ce7292fe1c1f466830e9dd6539d50b58fe92f1b5fc82647e0129296489e",
     "app/services/execution_lifecycle.py": "a9fb7deaf1ad75caeafe60d41b8f321a9b63efb3661e42c5244324bc30d9f4a7",
     "app/services/meeting_action_items.py": "31b6c7aa49b42b357439ecaf116de31b9842347d23db0c9c52c3cfbba85f8c20",
     "app/services/meeting_callbacks.py": "dcfe95028ef5a8549e10f1df0e1003f92be42d39fb8c67711f970e432858da5a",
