@@ -77,6 +77,9 @@ _FEISHU_CHAT_LONG_CONNECTION_LOCK = threading.Lock()
 _FEISHU_CHANNEL_LOCKS = {}
 _FEISHU_CHANNEL_LOCKS_LOCK = threading.Lock()
 _FEISHU_CHANNEL_RECORD_LOCK = threading.Lock()
+_FEISHU_PROCESS_OWNER_ID = uuid.uuid4().hex
+_FEISHU_ACTIVE_SOURCE_MESSAGES = set()
+_FEISHU_ACTIVE_SOURCE_MESSAGES_LOCK = threading.Lock()
 _FEISHU_CHAT_EVENT_SUBSCRIBERS = {}
 _FEISHU_CHAT_EVENT_SUBSCRIBERS_LOCK = threading.Lock()
 _FEISHU_CHAT_SSE_METRICS = {
@@ -12238,6 +12241,7 @@ def _record_feishu_channel_event(record):
         item,
         now=_exec_meeting_now,
         lock=_FEISHU_CHANNEL_RECORD_LOCK,
+        owner_id=_FEISHU_PROCESS_OWNER_ID,
     )
     if str(item.get("chatType") or "").lower() == "group":
         event_name = str(item.get("event") or "").strip()
@@ -12404,9 +12408,11 @@ def _feishu_channel_records_response(limit=500):
     return feishu_chat_channel.channel_records_response(STATUS_DIR, limit=limit)
 
 
-def _feishu_channel_idempotency_hit(source_message_id):
+def _feishu_channel_idempotency_hit(source_message_id, *, allow_processing_reclaim=False):
     indexed = feishu_chat_channel.load_source_index(STATUS_DIR, source_message_id)
     if indexed:
+        if indexed.get("state") == "processing" and allow_processing_reclaim:
+            return None
         record = indexed.get("record") if isinstance(indexed.get("record"), dict) else {}
         if str(record.get("chatType") or "").lower() == "group":
             feishu_chat_channel.increment_group_metrics(
@@ -12425,6 +12431,35 @@ def _feishu_channel_idempotency_hit(source_message_id):
             lock=_FEISHU_CHANNEL_RECORD_LOCK,
         )
     return hit
+
+
+def _claim_feishu_source_message(source_message_id):
+    source_message_id = str(source_message_id or "").strip()
+    if not source_message_id:
+        return False
+    with _FEISHU_ACTIVE_SOURCE_MESSAGES_LOCK:
+        if source_message_id in _FEISHU_ACTIVE_SOURCE_MESSAGES:
+            return False
+        _FEISHU_ACTIVE_SOURCE_MESSAGES.add(source_message_id)
+        return True
+
+
+def _release_feishu_source_message(source_message_id):
+    with _FEISHU_ACTIVE_SOURCE_MESSAGES_LOCK:
+        _FEISHU_ACTIVE_SOURCE_MESSAGES.discard(str(source_message_id or "").strip())
+
+
+def _feishu_processing_ack(envelope):
+    return {
+        "schema": "vo.feishu-chat.ack/v1",
+        "requestId": envelope["requestId"],
+        "messageId": envelope["messageId"],
+        "durable": False,
+        "state": "processing",
+        "idempotent": True,
+        "retryAfterMs": 1000,
+        "_status": 202,
+    }
 
 
 def _feishu_channel_lock(key):
@@ -12712,13 +12747,23 @@ def _adapt_feishu_chat_inbound_envelope(body):
 
 def _handle_feishu_chat_worker_envelope(body):
     adapted, envelope = _adapt_feishu_chat_inbound_envelope(body)
-    result = _handle_feishu_chat_message_event(adapted)
     if not envelope:
-        return result
+        return _handle_feishu_chat_message_event(adapted)
+    if not _claim_feishu_source_message(envelope["messageId"]):
+        return _feishu_processing_ack(envelope)
+    try:
+        result = _handle_feishu_chat_message_event(adapted, allow_processing_reclaim=True)
+    finally:
+        _release_feishu_source_message(envelope["messageId"])
     record = result.get("record") if isinstance(result, dict) and isinstance(result.get("record"), dict) else {}
-    durable = bool(record.get("id") and record.get("sourceMessageId") == envelope["messageId"])
-    if result.get("idempotent") and record:
-        durable = True
+    if result.get("status") == "processing" or record.get("indexState") == "processing":
+        return _feishu_processing_ack(envelope)
+    terminal_events = {"turn_completed", "ignored", "rejected"}
+    durable = bool(
+        record.get("id")
+        and record.get("sourceMessageId") == envelope["messageId"]
+        and (record.get("event") in terminal_events or record.get("indexState") == "completed")
+    )
     if not durable:
         return {"ok": False, "error": "Feishu inbound result is not durably recorded", "code": "durability_not_proven", "_status": 503}
     return {
@@ -12731,7 +12776,7 @@ def _handle_feishu_chat_worker_envelope(body):
     }
 
 
-def _handle_feishu_chat_message_event(body, *, send_text=None, reply_text=None, download_image=None):
+def _handle_feishu_chat_message_event(body, *, send_text=None, reply_text=None, download_image=None, allow_processing_reclaim=False):
     injected_send = send_text
     group_reply = reply_text
     if group_reply is None and injected_send is not None:
@@ -12741,7 +12786,10 @@ def _handle_feishu_chat_message_event(body, *, send_text=None, reply_text=None, 
         cfg=_feishu_chat_app_config(),
         bindings=(VO_CONFIG.get("feishu") or {}).get("bindings") or {},
         load_records=_load_feishu_channel_records,
-        idempotency_hit=_feishu_channel_idempotency_hit,
+        idempotency_hit=lambda source_message_id: _feishu_channel_idempotency_hit(
+            source_message_id,
+            allow_processing_reclaim=allow_processing_reclaim,
+        ),
         record_event=_record_feishu_channel_event,
         lock_for=_feishu_channel_lock,
         dispatch_agent=_dispatch_representative_agent_message,

@@ -140,24 +140,25 @@ def load_source_index(status_dir, source_message_id):
     return item
 
 
-def save_source_index(status_dir, record, *, now, lock):
+def save_source_index(status_dir, record, *, now, lock, owner_id=""):
     record = record if isinstance(record, dict) else {}
     source_message_id = str(record.get("sourceMessageId") or "").strip()
     event = str(record.get("event") or "").strip()
-    if not source_message_id or event not in {"user_message", "turn_completed"}:
+    if not source_message_id or event not in {"user_message", "turn_completed", "ignored", "rejected"}:
         return None
-    state = "completed" if event == "turn_completed" else "processing"
+    state = "processing" if event == "user_message" else "completed"
     item = {
         "schema": "vo.feishu-source-message-index/v1",
         "sourceMessageId": source_message_id,
         "state": state,
         "updatedAt": now(),
+        **({"ownerId": str(owner_id or "").strip()} if state == "processing" and str(owner_id or "").strip() else {}),
         "record": {
             key: record.get(key)
             for key in (
                 "id", "event", "sourceMessageId", "conversationId", "feishuChatId",
                 "representativeAgentId", "chatType", "messageType", "reply",
-                "feishuReply", "deliveryStatus", "sendResult", "agentResult",
+                "feishuReply", "deliveryStatus", "sendResult", "agentResult", "reason",
             )
             if record.get(key) not in (None, "", [], {})
         },
@@ -667,6 +668,10 @@ def handle_message_event(
         value = message.get(key) if key in {"createTime", "rootId", "threadId", "replyToMessageId", "mentions", "resources"} else (body or {}).get(key)
         if value not in (None, "", [], {}):
             base_record[key] = value
+    if source_message_id:
+        hit = idempotency_hit(source_message_id) if idempotency_hit else channel_idempotency_hit(load_records, source_message_id)
+        if hit:
+            return {"ok": True, "status": "duplicate", "idempotent": True, "record": hit, "reply": hit.get("reply") or ""}
     if not cfg.get("enabled", False):
         record = record_event({**base_record, "event": "rejected", "reason": "chat_app_disabled"})
         return {"ok": False, "status": "disabled", "record": record, "_status": 503}
@@ -708,9 +713,6 @@ def handle_message_event(
     if not text:
         record = record_event({**base_record, "event": "ignored", "reason": "empty_text"})
         return {"ok": True, "status": "ignored_empty_text", "record": record}
-    hit = idempotency_hit(source_message_id) if idempotency_hit else channel_idempotency_hit(load_records, source_message_id)
-    if hit:
-        return {"ok": True, "status": "duplicate", "idempotent": True, "record": hit, "reply": hit.get("reply") or ""}
     vo_user_id = find_bound_user(bindings, identity, chat_id) or channel_user_id(identity, chat_id)
     representative_agent_id = str(cfg.get("representativeAgentId") or "").strip()
     if not representative_agent_id:
