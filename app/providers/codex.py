@@ -385,6 +385,13 @@ class CodexProvider:
         result["mode"] = "externalBridge" if self.bridge_url else "appServer"
         return result
 
+    def wait_for_terminal_callbacks(self, thread_id: str, turn_id: str = "", timeout: float | None = None) -> bool:
+        bridge = self._bridge()
+        waiter = getattr(bridge, "wait_for_terminal_callbacks", None)
+        if not callable(waiter):
+            return True
+        return bool(waiter(thread_id, turn_id=turn_id, timeout=timeout))
+
     def create_agent(
         self,
         name: str,

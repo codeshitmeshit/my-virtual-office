@@ -6407,6 +6407,47 @@ def _discard_codex_operation_lock(agent_id, conversation_id, lock):
     _release_codex_operation_lock_reference(agent_id, conversation_id, lock)
 
 
+def _defer_codex_operation_lock_release(
+    agent_id,
+    conversation_id,
+    lock,
+    provider,
+    result,
+    finalization_done,
+    *,
+    finalization_timeout_sec=630,
+):
+    fence = result.get("terminalFence") if isinstance(result, dict) and isinstance(result.get("terminalFence"), dict) else {}
+    if int(fence.get("activeCallbacks") or 0) <= 0:
+        return False
+    waiter = getattr(provider, "wait_for_terminal_callbacks", None)
+    thread_id = str((result or {}).get("threadId") or "")
+    turn_id = str((result or {}).get("turnId") or "")
+    if not callable(waiter) or not thread_id:
+        return False
+
+    def release_after_drain():
+        try:
+            waiter(thread_id, turn_id=turn_id, timeout=None)
+        finally:
+            finalization_done.wait(timeout=max(1.0, float(finalization_timeout_sec or 630)))
+            _release_codex_operation_lock(agent_id, conversation_id, lock)
+
+    try:
+        worker = threading.Thread(
+            target=release_after_drain,
+            name=f"codex-callback-drain-{hashlib.sha256(f'{agent_id}|{conversation_id}'.encode()).hexdigest()[:8]}",
+            daemon=True,
+        )
+        worker.start()
+        return True
+    except Exception:
+        # Thread creation failure is rare; preserve ordering by draining in the
+        # request thread before falling back to the normal lock release path.
+        waiter(thread_id, turn_id=turn_id, timeout=None)
+        return False
+
+
 def _codex_operation_is_locked(agent_id, conversation_id):
     key = (str(agent_id or ""), str(conversation_id or ""))
     with _CODEX_OPERATION_LOCKS_GUARD:
@@ -6585,6 +6626,7 @@ def _handle_codex_chat(body):
         }
     with _CODEX_OPERATION_LOCKS_GUARD:
         _CODEX_ADMISSION_COUNTERS["acceptedConversations"] += 1
+    finalization_done = threading.Event()
     provider = _codex_provider_from_config()
     if body.get("_reviewReadOnly") is True:
         provider.sandbox = "read-only"
@@ -6775,7 +6817,17 @@ def _handle_codex_chat(body):
             "reply": "",
         }
     finally:
-        _release_codex_operation_lock(agent_id, conversation_id, operation_lock)
+        release_deferred = _defer_codex_operation_lock_release(
+            agent_id,
+            conversation_id,
+            operation_lock,
+            provider,
+            result,
+            finalization_done,
+            finalization_timeout_sec=int(body.get("timeoutSec") or 600) + 30,
+        )
+        if not release_deferred:
+            _release_codex_operation_lock(agent_id, conversation_id, operation_lock)
     thread_id = str(result.get("threadId") or "")
     if thread_id:
         _set_codex_thread_id(agent_id, conversation_id, thread_id)
@@ -6861,6 +6913,7 @@ def _handle_codex_chat(body):
     if fast_scope_started:
         _CODEX_EVENT_FAST_PATH.end(agent_id, conversation_id, fast_scope_run_id)
     normalized["_status"] = provider_http_status(normalized)
+    finalization_done.set()
     return normalized
 
 

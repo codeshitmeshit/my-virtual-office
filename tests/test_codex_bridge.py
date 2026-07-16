@@ -555,7 +555,9 @@ def test_terminal_fence_bounds_terminal_callback_and_releases_reader():
     assert entered.wait(0.2)
     assert operation.completed.wait(TERMINAL_DRAIN_TIMEOUT_SEC + 0.2)
     assert operation.fence_diagnostics()["terminalFenceFallbacks"] == 1
+    assert operation.wait_for_callbacks(timeout=0) is False
     release.set()
+    assert operation.wait_for_callbacks(timeout=0.5) is True
 
 
 def test_late_turn_notifications_and_approvals_do_not_cross_into_reused_thread():

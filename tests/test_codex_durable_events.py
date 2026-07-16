@@ -6,6 +6,7 @@ import os
 import sys
 import tempfile
 import threading
+import time
 
 import pytest
 
@@ -295,6 +296,7 @@ def test_inflight_terminal_reply_write_fails_closed_without_duplicate(monkeypatc
     with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as workspace:
         entered = threading.Event()
         release = threading.Event()
+        callback_finished = threading.Event()
 
         class ConcurrentTerminalProvider:
             def __init__(self):
@@ -309,7 +311,13 @@ def test_inflight_terminal_reply_write_fails_closed_without_duplicate(monkeypatc
                     "turnId": "turn-inflight",
                     "output": {"reply": "event reply", "modifiedFiles": []},
                 }
-                self.worker = threading.Thread(target=lambda: event_callback(event), daemon=True)
+                def invoke_callback():
+                    try:
+                        event_callback(event)
+                    finally:
+                        callback_finished.set()
+
+                self.worker = threading.Thread(target=invoke_callback, daemon=True)
                 self.worker.start()
                 assert entered.wait(0.5)
                 return {
@@ -318,7 +326,13 @@ def test_inflight_terminal_reply_write_fails_closed_without_duplicate(monkeypatc
                     "reply": "event reply",
                     "threadId": "thr-inflight",
                     "turnId": "turn-inflight",
+                    "terminalFence": {"activeCallbacks": 1, "terminalFenceFallbacks": 1},
                 }
+
+            def wait_for_terminal_callbacks(self, thread_id, turn_id="", timeout=None):
+                assert thread_id == "thr-inflight"
+                assert turn_id == "turn-inflight"
+                return callback_finished.wait(timeout=timeout)
 
         provider = ConcurrentTerminalProvider()
         _configure(monkeypatch, status_dir, provider)
@@ -338,8 +352,13 @@ def test_inflight_terminal_reply_write_fails_closed_without_duplicate(monkeypatc
             "fromType": "human",
             "_streamRunId": "run-inflight",
         })
+        assert server._codex_operation_is_locked("codex-local", "conv-inflight") is True
         release.set()
         provider.worker.join(1)
+        deadline = time.monotonic() + 0.5
+        while server._codex_operation_is_locked("codex-local", "conv-inflight") and time.monotonic() < deadline:
+            time.sleep(0.005)
+        assert server._codex_operation_is_locked("codex-local", "conv-inflight") is False
 
         events = _events(status_dir)
         replies = [event for event in events if event.get("direction") == "reply"]
@@ -349,6 +368,56 @@ def test_inflight_terminal_reply_write_fails_closed_without_duplicate(monkeypatc
         assert len(replies) == 1
         assert len(terminals) == 1
         assert terminals[0]["ok"] is False
+
+
+def test_callback_drain_defers_same_conversation_admission_until_finalization():
+    agent_id = "codex-drain-test"
+    conversation_id = "conv-drain-test"
+    operation_lock = server._codex_operation_lock(agent_id, conversation_id)
+    assert operation_lock.acquire(blocking=False)
+    callback_drained = threading.Event()
+    finalization_done = threading.Event()
+
+    class DrainProvider:
+        def wait_for_terminal_callbacks(self, thread_id, turn_id="", timeout=None):
+            assert thread_id == "thr-drain"
+            assert turn_id == "turn-drain"
+            return callback_drained.wait(timeout=timeout)
+
+    deferred = server._defer_codex_operation_lock_release(
+        agent_id,
+        conversation_id,
+        operation_lock,
+        DrainProvider(),
+        {
+            "threadId": "thr-drain",
+            "turnId": "turn-drain",
+            "terminalFence": {"activeCallbacks": 1},
+        },
+        finalization_done,
+        finalization_timeout_sec=1,
+    )
+    assert deferred is True
+
+    blocked = server._codex_operation_lock(agent_id, conversation_id)
+    assert blocked.acquire(blocking=False) is False
+    server._discard_codex_operation_lock(agent_id, conversation_id, blocked)
+
+    callback_drained.set()
+    time.sleep(0.02)
+    still_blocked = server._codex_operation_lock(agent_id, conversation_id)
+    assert still_blocked.acquire(blocking=False) is False
+    server._discard_codex_operation_lock(agent_id, conversation_id, still_blocked)
+
+    finalization_done.set()
+    deadline = time.monotonic() + 0.5
+    while server._codex_operation_is_locked(agent_id, conversation_id) and time.monotonic() < deadline:
+        time.sleep(0.005)
+    assert server._codex_operation_is_locked(agent_id, conversation_id) is False
+
+    available = server._codex_operation_lock(agent_id, conversation_id)
+    assert available.acquire(blocking=False)
+    server._release_codex_operation_lock(agent_id, conversation_id, available)
 
 
 def test_pending_approval_is_durable_and_deduplicated(monkeypatch):

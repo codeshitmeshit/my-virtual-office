@@ -363,6 +363,10 @@ class _Operation:
     callback_errors: int = 0
     callback_error_category: str = ""
     stale_turn_ids: set[str] = field(default_factory=set, repr=False)
+    _callbacks_drained: threading.Event = field(default_factory=threading.Event, repr=False)
+
+    def __post_init__(self) -> None:
+        self._callbacks_drained.set()
 
     def emit(self, event_type: str, *, terminal: bool = False, **data: Any) -> bool:
         with self._callback_condition:
@@ -371,6 +375,7 @@ class _Operation:
                 return False
             self._next_callback_id += 1
             callback_id = self._next_callback_id
+            self._callbacks_drained.clear()
             self._active_callback_ids.add(callback_id)
             if terminal:
                 self._terminal_observed = True
@@ -431,10 +436,15 @@ class _Operation:
     def _finish_callback(self, callback_id: int, *, terminal: bool) -> None:
         with self._callback_condition:
             self._active_callback_ids.discard(callback_id)
+            if not self._active_callback_ids:
+                self._callbacks_drained.set()
             self._release_completion_if_drained_locked()
             if terminal and not self.completed.is_set():
                 self._start_terminal_fallback_locked()
             self._callback_condition.notify_all()
+
+    def wait_for_callbacks(self, timeout: float | None = None) -> bool:
+        return self._callbacks_drained.wait(timeout=timeout)
 
     def inherit_turn_history(self, previous: "_Operation | None") -> None:
         if previous is None:
@@ -969,6 +979,16 @@ class CodexAppServerClient:
             "postTerminalMetrics": 0,
             "callbackErrors": 0,
         }
+
+    def wait_for_terminal_callbacks(self, thread_id: str, turn_id: str = "", timeout: float | None = None) -> bool:
+        with self._operations_lock:
+            operation = self._operations.get(str(thread_id or "")) or self._terminal_operations.get(str(thread_id or ""))
+        if operation is None:
+            return True
+        expected_turn_id = str(turn_id or "")
+        if expected_turn_id and operation.turn_id and operation.turn_id != expected_turn_id:
+            return True
+        return operation.wait_for_callbacks(timeout=timeout)
 
     def _augment_result(self, operation: _Operation, result: dict[str, Any]) -> dict[str, Any]:
         snapshot = operation.state.snapshot()
