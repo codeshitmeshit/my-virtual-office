@@ -316,6 +316,9 @@ export class FeishuChannelWorker {
       const snapshot = await this.spool.snapshot();
       const head = snapshot.items.find((item) => item.envelope?.message?.chatId === normalized.chatId);
       if (!head || head.envelope.message.messageId !== normalized.messageId) {
+        if (!this.processingRecovery.snapshot().enabled && head) {
+          return await this._drainLiveThrough(normalized.chatId, normalized.messageId);
+        }
         this.processingRecovery.wake();
         return { durable: false, state: 'queued', messageId: normalized.messageId };
       }
@@ -377,6 +380,17 @@ export class FeishuChannelWorker {
 
   async replay() {
     return this._runRecoveryPass();
+  }
+
+  async _drainLiveThrough(chatId, targetMessageId) {
+    while (this.running) {
+      const snapshot = await this.spool.snapshot();
+      const head = snapshot.items.find((item) => item.envelope?.message?.chatId === chatId);
+      if (!head) return { durable: false, state: 'queued', messageId: targetMessageId };
+      const ack = await this._attemptItem(head, 'live');
+      if (head.envelope.message.messageId === targetMessageId) return ack;
+    }
+    return { durable: false, state: 'queued', messageId: targetMessageId };
   }
 
   _attemptItem(item, mode) {

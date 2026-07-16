@@ -143,6 +143,46 @@ test('worker restart replays retained processing work only after recovery is ena
   assert.equal(reclaimed, 1);
 });
 
+test('recovery-off live delivery drains older same-chat heads in order', async (t) => {
+  const statusDir = await mkdtemp(join(tmpdir(), 'vo-feishu-fault-live-drain-'));
+  const delivered = [];
+  const worker = new FeishuChannelWorker(workerOptions(statusDir, {
+    async deliverOnce(input) { delivered.push(input.message.messageId); return terminal(input); },
+  }, { processingRecoveryEnabled: false }));
+  t.after(() => worker.stop());
+  await worker.spool.put(envelope('om_live_old', 'oc_live_drain', 1));
+  await worker.start();
+
+  const ack = await worker.handleMessage(message('om_live_new', 'oc_live_drain', 2));
+  assert.equal(ack.durable, true);
+  assert.deepEqual(delivered, ['om_live_old', 'om_live_new']);
+  assert.equal((await worker.spool.stats()).entries, 0);
+});
+
+test('recovery-off live delivery stops at a failed same-chat head and retains the tail', async (t) => {
+  const statusDir = await mkdtemp(join(tmpdir(), 'vo-feishu-fault-live-drain-fail-'));
+  const delivered = [];
+  const worker = new FeishuChannelWorker(workerOptions(statusDir, {
+    async deliverOnce(input) {
+      delivered.push(input.message.messageId);
+      throw new CallbackAttemptError('callback_network_error', 'VO remains unavailable');
+    },
+  }, { processingRecoveryEnabled: false }));
+  t.after(() => worker.stop());
+  await worker.spool.put(envelope('om_live_failed_head', 'oc_live_drain_fail', 1));
+  await worker.start();
+
+  await assert.rejects(
+    worker.handleMessage(message('om_live_retained_tail', 'oc_live_drain_fail', 2)),
+    (error) => error.category === 'callback_network_error',
+  );
+  assert.deepEqual(delivered, ['om_live_failed_head']);
+  assert.deepEqual(
+    (await worker.spool.list()).filter((item) => item.envelope).map((item) => item.envelope.message.messageId),
+    ['om_live_failed_head', 'om_live_retained_tail'],
+  );
+});
+
 test('ordered replay isolates failed chats and retains corrupt or full spool evidence', async (t) => {
   const statusDir = await mkdtemp(join(tmpdir(), 'vo-feishu-fault-order-'));
   const attempts = [];
