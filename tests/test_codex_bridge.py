@@ -7,6 +7,7 @@ import sys
 import tempfile
 import threading
 import time
+from collections import OrderedDict
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 APP_DIR = os.path.join(ROOT, "app")
@@ -14,7 +15,7 @@ if APP_DIR not in sys.path:
     sys.path.insert(0, APP_DIR)
 
 from providers.codex_bridge import CodexAppServerClient
-from providers.codex_app_server import CodexAppServerClient as CodexAppServerClientImpl
+from providers.codex_app_server import CodexAppServerClient as CodexAppServerClientImpl, TERMINAL_DRAIN_TIMEOUT_SEC, _Operation
 
 
 FAKE_SERVER = r'''#!/usr/bin/env python3
@@ -23,6 +24,7 @@ import os
 import sys
 
 thread_id = "thr_fake"
+turn_counts = {}
 
 def send(value):
     sys.stdout.write(json.dumps(value) + "\n")
@@ -64,7 +66,9 @@ for raw in sys.stdin:
             send({"id": request_id, "result": {"turn": {"id": "turn_hang"}}})
             send({"method": "turn/started", "params": {"threadId": params["threadId"], "turn": {"id": "turn_hang"}}})
             continue
-        turn_id = "turn_permissions" if "permissions" in prompt else "turn_approval" if "approval" in prompt else "turn_input" if "question" in prompt else "turn_ok"
+        turn_base = "turn_permissions" if "permissions" in prompt else "turn_approval" if "approval" in prompt else "turn_input" if "question" in prompt else "turn_ok"
+        turn_counts[turn_base] = turn_counts.get(turn_base, 0) + 1
+        turn_id = turn_base if turn_counts[turn_base] == 1 else f"{turn_base}_{turn_counts[turn_base]}"
         send({"id": request_id, "result": {"turn": {"id": turn_id}}})
         send({"method": "turn/started", "params": {"threadId": params["threadId"], "turn": {"id": turn_id}}})
         if "approval" in prompt:
@@ -95,8 +99,8 @@ for raw in sys.stdin:
             change = {"id": "file_1", "type": "fileChange", "status": "completed", "changes": [{"path": "app/demo.py", "kind": "update", "diff": ""}, {"file": "app/legacy.py"}, {"uri": "file:///tmp/out.txt"}]}
             send({"method": "item/completed", "params": {"threadId": params["threadId"], "turnId": turn_id, "item": item}})
             send({"method": "item/completed", "params": {"threadId": params["threadId"], "turnId": turn_id, "item": change}})
-            send({"method": "turn/completed", "params": {"threadId": params["threadId"], "turn": {"id": turn_id, "status": "completed", "items": [item, change]}}})
             send({"method": "thread/tokenUsage/updated", "params": {"threadId": params["threadId"], "tokenUsage": {"input_tokens": 11, "output_tokens": 7, "total_tokens": 18}}})
+            send({"method": "turn/completed", "params": {"threadId": params["threadId"], "turn": {"id": turn_id, "status": "completed", "items": [item, change]}}})
     elif request_id == 900:
         if msg.get("result", {}).get("decision") in ("accept", "acceptForSession"):
             item = {"id": "msg_approval", "type": "agentMessage", "text": "approved reply"}
@@ -159,6 +163,27 @@ def test_thread_start_timeout_restarts_app_server_once():
                 os.environ["VO_CODEX_START_TIMEOUT_SEC"] = old_timeout
 
 
+def test_start_timeout_does_not_restart_runtime_with_unrelated_active_turn():
+    with tempfile.TemporaryDirectory() as tmp:
+        client = CodexAppServerClientImpl(tmp, binary=make_fake_codex(tmp), max_concurrent_turns=2)
+        active = _Operation("thr-active")
+        client._operations[active.thread_id] = active
+        restart_calls = []
+        client._request = lambda *_args, **_kwargs: (_ for _ in ()).throw(TimeoutError("startup stalled"))
+        client._restart_runtime = lambda: restart_calls.append(True)
+        try:
+            try:
+                client._request_with_restart("thread/resume", {"threadId": "thr-stalled"}, timeout=0.01)
+                raise AssertionError("expected startup timeout")
+            except TimeoutError as exc:
+                assert "startup stalled" in str(exc)
+            assert restart_calls == []
+            assert client._operations[active.thread_id] is active
+            assert active.completed.is_set() is False
+        finally:
+            client.close()
+
+
 def test_reasoning_summary_defaults_to_detailed():
     with tempfile.TemporaryDirectory() as tmp:
         old = os.environ.pop("VO_CODEX_REASONING_SUMMARY", None)
@@ -184,6 +209,8 @@ def test_execute_collects_reply_files_and_thread():
             assert result["turnId"] == "turn_ok"
             assert result["reply"] == "real fake reply"
             assert result["modifiedFiles"] == ["app/demo.py", "app/legacy.py", "file:///tmp/out.txt"]
+            assert result["terminalFence"]["terminalObserved"] is True
+            assert result["terminalFence"]["terminalFenceFallbacks"] == 0
 
             resumed = client.execute("continue", thread_id=result["threadId"], timeout_sec=5)
             assert resumed["ok"] is True
@@ -440,6 +467,355 @@ def test_interactive_user_input_continues_original_turn():
             assert result["ok"] is True
             assert result["reply"] == "hello VO"
         finally:
+            client.close()
+
+
+def test_terminal_fence_releases_immediately_after_prior_callback_exits():
+    entered = threading.Event()
+    release = threading.Event()
+
+    def callback(event):
+        if event["type"] == "reasoning":
+            entered.set()
+            release.wait(1)
+
+    operation = _Operation("thr-fence", event_callback=callback)
+    prior = threading.Thread(target=lambda: operation.emit("reasoning", text="before terminal"))
+    prior.start()
+    assert entered.wait(0.5)
+    terminal = threading.Thread(target=lambda: operation.emit("turn", terminal=True, status="completed"))
+    terminal.start()
+    terminal.join(0.2)
+    assert not operation.completed.is_set()
+    release.set()
+    prior.join(0.5)
+    assert operation.completed.wait(0.1)
+    assert operation.fence_diagnostics()["terminalFenceFallbacks"] == 0
+
+
+def test_callback_failure_is_contained_and_reader_serves_next_turn():
+    with tempfile.TemporaryDirectory() as tmp:
+        client = CodexAppServerClientImpl(tmp, binary=make_fake_codex(tmp))
+
+        def fail_approval_persistence(event):
+            if event.get("type") == "interaction" and event.get("status") == "pending":
+                raise OSError("approval fsync failed")
+
+        try:
+            failed = client.execute(
+                "needs approval",
+                timeout_sec=5,
+                event_callback=fail_approval_persistence,
+                allow_interaction=True,
+            )
+            assert failed["ok"] is False
+            assert failed["status"] == "event_callback_failed"
+            assert failed["terminalFence"]["callbackErrors"] == 1
+
+            recovered = client.execute("change one file", timeout_sec=5)
+            assert recovered["ok"] is True
+            assert recovered["reply"] == "real fake reply"
+        finally:
+            client.close()
+
+
+def test_terminal_fence_has_bounded_fallback_for_stuck_prior_callback():
+    entered = threading.Event()
+    release = threading.Event()
+
+    def callback(event):
+        if event["type"] == "reasoning":
+            entered.set()
+            release.wait(1)
+
+    operation = _Operation("thr-fallback", event_callback=callback)
+    prior = threading.Thread(target=lambda: operation.emit("reasoning", text="stuck"))
+    prior.start()
+    assert entered.wait(0.5)
+    operation.emit("turn", terminal=True, status="completed")
+    assert operation.completed.wait(TERMINAL_DRAIN_TIMEOUT_SEC + 0.2)
+    assert operation.fence_diagnostics()["terminalFenceFallbacks"] == 1
+    release.set()
+    prior.join(0.5)
+
+
+def test_terminal_fence_bounds_terminal_callback_and_releases_reader():
+    entered = threading.Event()
+    release = threading.Event()
+
+    def callback(event):
+        if event["type"] == "turn":
+            entered.set()
+            release.wait(1)
+
+    operation = _Operation("thr-terminal-callback", event_callback=callback)
+    started = time.perf_counter()
+    assert operation.emit("turn", terminal=True, status="completed") is True
+    assert time.perf_counter() - started < 0.02
+    assert entered.wait(0.2)
+    assert operation.completed.wait(TERMINAL_DRAIN_TIMEOUT_SEC + 0.2)
+    assert operation.fence_diagnostics()["terminalFenceFallbacks"] == 1
+    assert operation.wait_for_callbacks(timeout=0) is False
+    release.set()
+    assert operation.wait_for_callbacks(timeout=0.5) is True
+
+
+def test_late_turn_notifications_and_approvals_do_not_cross_into_reused_thread():
+    client = object.__new__(CodexAppServerClientImpl)
+    client._operations_lock = threading.Lock()
+    client._terminal_operations = OrderedDict()
+    client._approval_lock = threading.Condition()
+    client._pending_approvals = {}
+    sent = []
+    client._send = lambda message: sent.append(message)
+
+    previous = _Operation("thr-reused", turn_id="turn-old")
+    current = _Operation("thr-reused", allow_interaction=True)
+    current.inherit_turn_history(previous)
+    client._operations = {"thr-reused": current}
+
+    client._handle_notification("item/agentMessage/delta", {
+        "threadId": "thr-reused",
+        "turnId": "turn-old",
+        "delta": "stale reply",
+    })
+    client._handle_server_request({
+        "id": 91,
+        "method": "item/commandExecution/requestApproval",
+        "params": {"threadId": "thr-reused", "turnId": "turn-old", "itemId": "old-tool"},
+    })
+
+    assert current.state.reply_text() == ""
+    assert current.pending_requests == {}
+    assert sent[-1]["id"] == 91
+    assert sent[-1]["result"]["decision"] == "cancel"
+    assert current.fence_diagnostics()["lateNotifications"] == 2
+
+    client._handle_notification("turn/started", {
+        "threadId": "thr-reused",
+        "turn": {"id": "turn-new", "status": "inProgress"},
+    })
+    client._handle_notification("turn/completed", {
+        "threadId": "thr-reused",
+        "turn": {"id": "turn-new", "status": "completed", "items": []},
+    })
+    assert current.turn_id == "turn-new"
+    assert current.result["status"] == "completed"
+    assert current.completed.wait(0.2)
+
+
+def test_successful_terminal_has_no_fixed_sleep_tail():
+    operation = _Operation("thr-immediate")
+    started = time.perf_counter()
+    operation.emit("turn", terminal=True, status="completed")
+    elapsed = time.perf_counter() - started
+    assert operation.completed.is_set()
+    assert elapsed < 0.02
+    import inspect
+    assert "time.sleep(0.2)" not in inspect.getsource(CodexAppServerClientImpl._execute_locked)
+
+
+def test_post_terminal_metrics_are_diagnostic_and_late_content_cannot_mutate_reply():
+    client = object.__new__(CodexAppServerClientImpl)
+    client._operations_lock = threading.Lock()
+    client._operations = {}
+    client._terminal_operations = OrderedDict()
+    operation = _Operation("thr-late")
+    client._operations["thr-late"] = operation
+
+    client._handle_notification("turn/completed", {
+        "threadId": "thr-late",
+        "turn": {"id": "turn-late", "status": "completed", "items": [{"id": "answer", "type": "agentMessage", "text": "final"}]},
+    })
+    assert operation.completed.is_set()
+    client._handle_notification("item/completed", {
+        "threadId": "thr-late",
+        "turnId": "turn-late",
+        "item": {"id": "late", "type": "agentMessage", "text": "must not replace final"},
+    })
+    client._handle_notification("thread/tokenUsage/updated", {
+        "threadId": "thr-late",
+        "tokenUsage": {"total_tokens": 99},
+    })
+
+    assert operation.state.reply_text() == "final"
+    diagnostics = client.terminal_diagnostics("thr-late")
+    assert diagnostics["lateNotifications"] == 1
+    assert diagnostics["postTerminalMetrics"] == 1
+
+
+def test_terminal_diagnostics_are_retained_without_reasoning_notifications():
+    client = object.__new__(CodexAppServerClientImpl)
+    client._operations_lock = threading.Lock()
+    client._operations = {}
+    client._terminal_operations = OrderedDict()
+    operation = _Operation("thr-no-reasoning")
+    client._operations[operation.thread_id] = operation
+
+    client._handle_notification("turn/completed", {
+        "threadId": operation.thread_id,
+        "turn": {"id": "turn-no-reasoning", "status": "completed", "items": []},
+    })
+    with client._operations_lock:
+        client._operations.pop(operation.thread_id, None)
+
+    diagnostics = client.terminal_diagnostics(operation.thread_id)
+    assert diagnostics["terminalObserved"] is True
+    assert diagnostics["callbackErrors"] == 0
+
+
+def test_runtime_exit_releases_operation_through_terminal_fence():
+    client = object.__new__(CodexAppServerClientImpl)
+    client._operations_lock = threading.Lock()
+    operation = _Operation("thr-exit")
+    client._operations = {"thr-exit": operation}
+    client._terminal_operations = OrderedDict()
+    client._runtime = type("Runtime", (), {"stderr_text": lambda self: "runtime ended"})()
+    client._approval_lock = threading.Condition()
+    client._pending_approvals = {}
+
+    client._handle_runtime_exit()
+    assert operation.completed.is_set()
+    assert operation.result["status"] == "bridge_unavailable"
+    assert client.terminal_diagnostics("thr-exit")["terminalObserved"] is True
+
+
+def test_cancelled_turn_completes_through_terminal_fence():
+    with tempfile.TemporaryDirectory() as tmp:
+        client = CodexAppServerClient(tmp, binary=make_fake_codex(tmp))
+        result = {}
+        worker = threading.Thread(target=lambda: result.update(client.execute("hang forever", timeout_sec=5)))
+        try:
+            worker.start()
+            deadline = time.time() + 2
+            while time.time() < deadline:
+                with client._operations_lock:
+                    operation = client._operations.get("thr_fake")
+                if operation and operation.turn_id == "turn_hang":
+                    break
+                time.sleep(0.01)
+            assert client.cancel("thr_fake") is True
+            worker.join(1)
+            assert result["status"] == "cancelled"
+            assert result["terminalFence"]["terminalFenceFallbacks"] == 0
+        finally:
+            client.close()
+
+
+def test_capacity_two_runs_different_threads_and_rejects_third_explicitly():
+    with tempfile.TemporaryDirectory() as tmp:
+        client = CodexAppServerClient(tmp, binary=make_fake_codex(tmp), max_concurrent_turns=2)
+        release = threading.Event()
+        both_started = threading.Event()
+        active = set()
+        active_lock = threading.Lock()
+        results = {}
+
+        def fake_execute(message, thread_id="", **_kwargs):
+            with active_lock:
+                active.add(thread_id)
+                if len(active) == 2:
+                    both_started.set()
+            release.wait(1)
+            with active_lock:
+                active.discard(thread_id)
+            return {"ok": True, "status": "completed", "threadId": thread_id, "reply": message}
+
+        client._execute_locked = fake_execute
+        workers = [
+            threading.Thread(target=lambda key=key: results.update({key: client.execute(key, thread_id=key)}))
+            for key in ("thr-one", "thr-two")
+        ]
+        try:
+            for worker in workers:
+                worker.start()
+            assert both_started.wait(0.5)
+            busy = client.execute("third", thread_id="thr-three")
+            assert busy["status"] == "busy"
+            assert busy["busyCode"] == "busy_by_capacity"
+            assert busy["busyReason"] == "capacity"
+            release.set()
+            for worker in workers:
+                worker.join(1)
+            diagnostics = client.admission_diagnostics()
+            assert diagnostics["acceptedTurns"] == 2
+            assert diagnostics["busyByCapacity"] == 1
+            assert diagnostics["peakActiveTurns"] == 2
+            assert diagnostics["activeTurns"] == 0
+            assert diagnostics["orderedThreads"] == 0
+        finally:
+            release.set()
+            client.close()
+
+
+def test_same_native_thread_is_ordered_without_consuming_parallel_capacity():
+    with tempfile.TemporaryDirectory() as tmp:
+        client = CodexAppServerClient(tmp, binary=make_fake_codex(tmp), max_concurrent_turns=2)
+        first_started = threading.Event()
+        release_first = threading.Event()
+        calls = []
+        results = []
+
+        def fake_execute(message, thread_id="", **_kwargs):
+            calls.append(message)
+            if message == "first":
+                first_started.set()
+                release_first.wait(1)
+            return {"ok": True, "status": "completed", "threadId": thread_id, "reply": message}
+
+        client._execute_locked = fake_execute
+        workers = [
+            threading.Thread(target=lambda message=message: results.append(client.execute(message, thread_id="shared-thread")))
+            for message in ("first", "second")
+        ]
+        try:
+            workers[0].start()
+            assert first_started.wait(0.5)
+            workers[1].start()
+            time.sleep(0.05)
+            assert calls == ["first"]
+            release_first.set()
+            for worker in workers:
+                worker.join(1)
+            assert calls == ["first", "second"]
+            assert client.admission_diagnostics()["peakActiveTurns"] == 1
+            assert client.admission_diagnostics()["orderedThreads"] == 0
+        finally:
+            release_first.set()
+            client.close()
+
+
+def test_capacity_configuration_is_clamped_and_invalid_values_fail_safe():
+    with tempfile.TemporaryDirectory() as tmp:
+        assert CodexAppServerClient(tmp, binary=make_fake_codex(tmp), max_concurrent_turns=99).max_concurrent_turns == 4
+        assert CodexAppServerClient(tmp, binary=make_fake_codex(tmp), max_concurrent_turns="invalid").max_concurrent_turns == 1
+
+
+def test_capacity_one_preserves_single_active_turn_behavior():
+    with tempfile.TemporaryDirectory() as tmp:
+        client = CodexAppServerClient(tmp, binary=make_fake_codex(tmp), max_concurrent_turns=1)
+        started = threading.Event()
+        release = threading.Event()
+
+        def fake_execute(message, thread_id="", **_kwargs):
+            started.set()
+            release.wait(1)
+            return {"ok": True, "status": "completed", "threadId": thread_id, "reply": message}
+
+        client._execute_locked = fake_execute
+        first_result = {}
+        worker = threading.Thread(target=lambda: first_result.update(client.execute("first", thread_id="thread-one")))
+        try:
+            worker.start()
+            assert started.wait(0.5)
+            second = client.execute("second", thread_id="thread-two")
+            assert second["status"] == "busy"
+            assert second["busyCode"] == "busy_by_capacity"
+            release.set()
+            worker.join(1)
+            assert first_result["ok"] is True
+        finally:
+            release.set()
             client.close()
 
 

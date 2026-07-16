@@ -1,0 +1,122 @@
+{
+  "commandCount": 6,
+  "manifest": "openspec/changes/optimize-codex-chat-fast-path/evidence/baseline/codex-fast-path-characterization-manifest.json",
+  "passed": true,
+  "results": [
+    {
+      "command": [
+        "/Users/bytedance/cosh/my-virtual-office/.venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/test_codex_server.py::test_busy_rejects_second_request_and_releases_lock",
+        "tests/test_codex_server.py::test_provider_exception_clears_active_operation",
+        "tests/test_codex_server.py::test_human_codex_chat_persists_user_and_reply_to_comm_history",
+        "tests/test_codex_server.py::test_thread_mapping_persists_and_resets",
+        "tests/test_codex_server.py::test_archived_codex_thread_mapping_is_reset_and_retried",
+        "tests/test_codex_server.py::test_activity_persists_redacted_and_reports_active_conversation"
+      ],
+      "durationMs": 552.81,
+      "exitCode": 0,
+      "expectedExitCodes": [
+        0
+      ],
+      "id": "codex-chat-contracts",
+      "outputTail": "......                                                                   [100%]\n6 passed in 0.25s\n",
+      "passed": true
+    },
+    {
+      "command": [
+        "/Users/bytedance/cosh/my-virtual-office/.venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/test_codex_bridge.py::test_thread_start_timeout_restarts_app_server_once",
+        "tests/test_codex_bridge.py::test_execute_collects_reply_files_and_thread",
+        "tests/test_codex_bridge.py::test_interactive_approval_continues_original_turn",
+        "tests/test_codex_bridge.py::test_timeout_returns_terminal_result"
+      ],
+      "durationMs": 3382.824,
+      "exitCode": 0,
+      "expectedExitCodes": [
+        0
+      ],
+      "id": "codex-bridge-contracts",
+      "outputTail": "....                                                                     [100%]\n4 passed in 3.10s\n",
+      "passed": true
+    },
+    {
+      "command": [
+        "/Users/bytedance/cosh/my-virtual-office/.venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/test_codex_runs_sse.py::test_codex_run_start_publishes_bridge_events_and_keeps_activity",
+        "tests/test_codex_runs_sse.py::test_codex_progress_history_is_recoverable_while_run_active_and_upserts",
+        "tests/test_codex_runs_sse.py::test_codex_run_stop_uses_existing_cancel_and_emits_terminal_event"
+      ],
+      "durationMs": 725.013,
+      "exitCode": 0,
+      "expectedExitCodes": [
+        0
+      ],
+      "id": "codex-run-sse",
+      "outputTail": "...                                                                      [100%]\n3 passed in 0.34s\n",
+      "passed": true
+    },
+    {
+      "command": [
+        "/Users/bytedance/cosh/my-virtual-office/.venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/test_provider_sse_transport.py::test_run_transport_replays_after_max_cursor_with_exact_frames",
+        "tests/test_provider_sse_transport.py::test_snapshot_pending_recovery_and_sensitive_canaries_are_transport_sanitized",
+        "tests/test_provider_sse_transport.py::test_pending_or_history_recovery_failure_does_not_close_event_replay"
+      ],
+      "durationMs": 287.081,
+      "exitCode": 0,
+      "expectedExitCodes": [
+        0
+      ],
+      "id": "provider-sse-recovery",
+      "outputTail": "...                                                                      [100%]\n3 passed in 0.01s\n",
+      "passed": true
+    },
+    {
+      "command": [
+        "/Users/bytedance/cosh/my-virtual-office/.venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/test_claude_code_runs_sse.py::test_claude_code_run_start_publishes_sse_events_and_progress_history",
+        "tests/test_hermes_server_native_api.py::test_hermes_run_start_publishes_provider_bridge_events"
+      ],
+      "durationMs": 448.561,
+      "exitCode": 0,
+      "expectedExitCodes": [
+        0
+      ],
+      "id": "non-codex-provider-compatibility",
+      "outputTail": "..                                                                       [100%]\n2 passed in 0.20s\n",
+      "passed": true
+    },
+    {
+      "baselineExpectation": "Known failing-before contract: the current Codex SSE completion path still performs a full history reload. A later compatibility task must resolve or explicitly supersede this baseline defect.",
+      "command": [
+        "/Users/bytedance/.nvm/versions/node/v20.20.2/bin/node",
+        "tests/check_codex_runs_bridge.mjs"
+      ],
+      "durationMs": 32.999,
+      "exitCode": 1,
+      "expectedExitCodes": [
+        1
+      ],
+      "id": "codex-static-contract",
+      "outputTail": "file:///Users/bytedance/code/my-virtual-office-codex-chat-fast-path/tests/check_codex_runs_bridge.mjs:105\n  throw new Error('Codex SSE completion should not fully redraw history and drop locally appended user bubbles');\n        ^\n\nError: Codex SSE completion should not fully redraw history and drop locally appended user bubbles\n    at file:///Users/bytedance/code/my-virtual-office-codex-chat-fast-path/tests/check_codex_runs_bridge.mjs:105:9\n    at ModuleJob.run (node:internal/modules/esm/module_job:325:25)\n    at async ModuleLoader.import (node:internal/modules/esm/loader:606:24)\n    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:117:5)\n\nNode.js v20.20.2\n",
+      "passed": true
+    }
+  ],
+  "scenarioCount": 5,
+  "schema": 1
+}

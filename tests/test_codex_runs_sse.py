@@ -6,6 +6,8 @@ import sys
 import tempfile
 import time
 
+import pytest
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 APP_DIR = os.path.join(ROOT, "app")
 if APP_DIR not in sys.path:
@@ -15,8 +17,10 @@ STATUS_DIR = tempfile.mkdtemp(prefix="vo-codex-runs-sse-")
 os.environ["VO_STATUS_DIR"] = STATUS_DIR
 os.environ["VO_HERMES_ENABLED"] = "0"
 os.environ["VO_CODEX_ENABLED"] = "0"
+os.environ["VO_CODEX_CHAT_FAST_PATH_ENABLED"] = "0"
 
 import server
+from services.codex_fast_path import CodexEventFastPath, CodexFastPathSettings
 
 
 AGENTS = [{
@@ -27,6 +31,13 @@ AGENTS = [{
     "providerKind": "codex",
     "name": "Codex Local",
 }]
+
+
+@pytest.fixture(autouse=True)
+def _legacy_fast_path_off(monkeypatch):
+    monkeypatch.setattr(server, "_CODEX_EVENT_FAST_PATH", CodexEventFastPath(CodexFastPathSettings(enabled=False)))
+    monkeypatch.setattr(server, "_CODEX_EVENT_COALESCER", None)
+    monkeypatch.setattr(server.PROVIDER_RUN_COORDINATOR, "event_pipeline", None)
 
 
 class FakeCodexProvider:

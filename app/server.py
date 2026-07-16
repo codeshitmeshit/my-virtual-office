@@ -57,6 +57,7 @@ from services.provider_conversations import CallableConversationStatePort, Calla
 from services.provider_ports import AdapterCapabilities, AdapterEvent, AdapterResult, CallableProviderAdapter, RunCommand
 from services.provider_registry import ProviderRunRepository
 from services.provider_runs import ProviderRunCoordinator
+from services.codex_fast_path import CodexEventFastPath, CodexFastPathTelemetry, CodexTransientCoalescer, classify_codex_event, load_codex_fast_path_settings
 from provider_sse_transport import ProviderSSETransport
 from services.project_repository import ProjectConflictError, ProjectNotFoundError, ProjectRepository
 from zoneinfo import ZoneInfo
@@ -679,6 +680,7 @@ def _load_vo_config():
     default_gateway_url = f"ws://127.0.0.1:{gateway_port}"
     default_gateway_http = f"http://127.0.0.1:{gateway_port}"
     codex_reply_text = os.environ.get("VO_CODEX_REPLY_TEXT")
+    codex_fast_path = load_codex_fast_path_settings(os.environ, codex_cfg)
 
     return {
         "office": {
@@ -790,6 +792,7 @@ def _load_vo_config():
             "includeMain": _env_bool("VO_CODEX_INCLUDE_MAIN", codex_cfg.get("includeMain", True)),
             "includeNativeAgents": _env_bool("VO_CODEX_INCLUDE_NATIVE_AGENTS", codex_cfg.get("includeNativeAgents", True)),
             "registerNativeAgents": _env_bool("VO_CODEX_REGISTER_NATIVE_AGENTS", codex_cfg.get("registerNativeAgents", True)),
+            "fastPath": codex_fast_path.diagnostics(),
         },
         "claudeCode": {
             "enabled": _env_bool("VO_CLAUDE_CODE_ENABLED", claude_code_cfg.get("enabled", False)),
@@ -1222,6 +1225,8 @@ def _build_safe_vo_config():
             "includeMain": VO_CONFIG.get("codex", {}).get("includeMain", True),
             "includeNativeAgents": VO_CONFIG.get("codex", {}).get("includeNativeAgents", True),
             "registerNativeAgents": VO_CONFIG.get("codex", {}).get("registerNativeAgents", True),
+            "fastPath": dict(VO_CONFIG.get("codex", {}).get("fastPath") or {}),
+            "fastPathRuntime": _codex_fast_path_runtime_diagnostics(),
             "detected": bool(_handle_codex_test().get("ok")),
         },
         "claudeCode": {
@@ -1261,6 +1266,22 @@ def _first_provider_agent_model(provider_kind):
     return ""
 
 VO_CONFIG = _load_vo_config()
+_CODEX_FAST_PATH_SETTINGS = load_codex_fast_path_settings(os.environ, VO_CONFIG.get("codex") or {})
+_CODEX_EVENT_FAST_PATH = CodexEventFastPath(_CODEX_FAST_PATH_SETTINGS)
+_CODEX_FAST_PATH_TELEMETRY = CodexFastPathTelemetry()
+_CODEX_EVENT_COALESCER = CodexTransientCoalescer(
+    min_ms=_CODEX_FAST_PATH_SETTINGS.coalesce_min_ms,
+    max_ms=_CODEX_FAST_PATH_SETTINGS.coalesce_max_ms,
+) if _CODEX_FAST_PATH_SETTINGS.enabled else None
+
+
+def _codex_fast_path_runtime_diagnostics():
+    return {
+        "timing": _CODEX_FAST_PATH_TELEMETRY.diagnostics(),
+        "events": _CODEX_EVENT_FAST_PATH.diagnostics(),
+        "coalescer": _CODEX_EVENT_COALESCER.diagnostics() if _CODEX_EVENT_COALESCER is not None else None,
+        "admission": _codex_admission_diagnostics(),
+    }
 
 try:
     SMS_DEFAULT_TZ = ZoneInfo(os.environ.get("VO_SMS_TIMEZONE") or os.environ.get("TZ") or "UTC")
@@ -6330,11 +6351,14 @@ def _codex_provider_from_config():
         include_main=cfg.get("includeMain", True),
         include_native_agents=cfg.get("includeNativeAgents", True),
         register_native_agents=cfg.get("registerNativeAgents", True),
+        max_concurrent_turns=_CODEX_FAST_PATH_SETTINGS.max_concurrent_turns if _CODEX_FAST_PATH_SETTINGS.enabled else 1,
     )
 
 
 _CODEX_OPERATION_LOCKS = {}
+_CODEX_OPERATION_LOCK_REFERENCES = {}
 _CODEX_OPERATION_LOCKS_GUARD = threading.Lock()
+_CODEX_ADMISSION_COUNTERS = {"acceptedConversations": 0, "busyByConversation": 0}
 _CODEX_THREAD_STATE_LOCK = threading.Lock()
 _CODEX_ACTIVITY_LOCK = threading.Lock()
 _CODEX_ACTIVE_LOCK = threading.Lock()
@@ -6383,24 +6407,9 @@ def _save_codex_activity(events):
     os.replace(tmp, path)
 
 
-def _append_codex_activity(agent_id, conversation_id, event):
-    with _CODEX_ACTIVITY_LOCK:
-        events = _load_codex_activity()
-        last_sequence = max(
-            (int(item.get("sequence") or 0) for item in events if item.get("agentId") == agent_id and item.get("conversationId") == conversation_id),
-            default=0,
-        )
-        record = _sanitize_codex_value({
-            **event,
-            "providerSequence": int(event.get("sequence") or 0),
-            "sequence": last_sequence + 1,
-            "agentId": agent_id,
-            "conversationId": conversation_id,
-        })
-        events.append(record)
-        _save_codex_activity(events)
+def _update_codex_active_from_record(agent_id, conversation_id, record):
     with _CODEX_ACTIVE_LOCK:
-        active = _CODEX_ACTIVE_OPERATIONS.get(agent_id)
+        active = _CODEX_ACTIVE_OPERATIONS.get((agent_id, conversation_id)) or _CODEX_ACTIVE_OPERATIONS.get(agent_id)
         if active and active.get("conversationId") == conversation_id:
             active["threadId"] = record.get("threadId") or active.get("threadId", "")
             active["turnId"] = record.get("turnId") or active.get("turnId", "")
@@ -6410,20 +6419,77 @@ def _append_codex_activity(agent_id, conversation_id, event):
                 if record.get("status") == "pending":
                     active["pending"] = normalize_approval_record("codex", agent_id, conversation_id, record)
                     active["pending"]["raw"] = record
-                elif active.get("pending", {}).get("interactionId") == record.get("interactionId"):
+                elif isinstance(active.get("pending"), dict) and active["pending"].get("interactionId") == record.get("interactionId"):
                     active["pending"] = None
+
+
+def _append_codex_activity(agent_id, conversation_id, event, *, preserve_sequence=False):
+    with _CODEX_ACTIVITY_LOCK:
+        events = _load_codex_activity()
+        last_sequence = max(
+            (int(item.get("sequence") or 0) for item in events if item.get("agentId") == agent_id and item.get("conversationId") == conversation_id),
+            default=0,
+        )
+        provider_sequence = int(event.get("providerSequence") or event.get("sequence") or 0)
+        record = _sanitize_codex_value({
+            **event,
+            "providerSequence": provider_sequence,
+            "sequence": int(event.get("sequence") or 0) if preserve_sequence else last_sequence + 1,
+            "agentId": agent_id,
+            "conversationId": conversation_id,
+        })
+        events.append(record)
+        _save_codex_activity(events)
+    _update_codex_active_from_record(agent_id, conversation_id, record)
     return record
 
 
 def _get_codex_activity(agent_id, conversation_id, after=0):
     with _CODEX_ACTIVITY_LOCK:
         events = _load_codex_activity()
-    return [event for event in events if event.get("agentId") == agent_id and event.get("conversationId") == conversation_id and int(event.get("sequence") or 0) > int(after or 0)]
+    matching = [event for event in events if event.get("agentId") == agent_id and event.get("conversationId") == conversation_id and int(event.get("sequence") or 0) > int(after or 0)]
+    if _CODEX_EVENT_FAST_PATH.settings.enabled:
+        live = _CODEX_EVENT_FAST_PATH.live_events(agent_id, conversation_id, after=after)
+        by_identity = {
+            (event.get("id") or "", int(event.get("sequence") or 0)): event
+            for event in matching
+        }
+        for event in live:
+            by_identity[(event.get("id") or "", int(event.get("sequence") or 0))] = event
+        matching = list(by_identity.values())
+    return sorted(matching, key=lambda event: int(event.get("sequence") or 0))
 
 
-def _get_codex_active(agent_id):
+def _last_persisted_codex_activity_sequence(agent_id, conversation_id):
+    with _CODEX_ACTIVITY_LOCK:
+        return max(
+            (
+                int(event.get("sequence") or 0)
+                for event in _load_codex_activity()
+                if event.get("agentId") == agent_id and event.get("conversationId") == conversation_id
+            ),
+            default=0,
+        )
+
+
+def _get_codex_active(agent_id, conversation_id="", thread_id=""):
     with _CODEX_ACTIVE_LOCK:
-        active = _CODEX_ACTIVE_OPERATIONS.get(agent_id)
+        active = _CODEX_ACTIVE_OPERATIONS.get((agent_id, conversation_id)) if conversation_id else None
+        if active:
+            return dict(active)
+        candidates = [
+            value
+            for key, value in _CODEX_ACTIVE_OPERATIONS.items()
+            if isinstance(key, tuple) and key[0] == agent_id and isinstance(value, dict)
+        ]
+        legacy = _CODEX_ACTIVE_OPERATIONS.get(agent_id)
+        if isinstance(legacy, dict):
+            candidates.append(legacy)
+        if conversation_id:
+            candidates = [item for item in candidates if item.get("conversationId") == conversation_id]
+        if thread_id:
+            candidates = [item for item in candidates if item.get("threadId") == thread_id]
+        active = max(candidates, key=lambda item: int(item.get("updatedAt") or 0), default=None)
         return dict(active) if active else None
 
 
@@ -6493,9 +6559,96 @@ def _codex_result_is_archived_session(result):
     return "is archived" in text and ("session" in text or "thread" in text or "codex unarchive" in text)
 
 
-def _codex_operation_lock(agent_id):
+def _codex_operation_lock(agent_id, conversation_id=""):
+    key = (str(agent_id or ""), str(conversation_id or ""))
     with _CODEX_OPERATION_LOCKS_GUARD:
-        return _CODEX_OPERATION_LOCKS.setdefault(agent_id, threading.Lock())
+        lock = _CODEX_OPERATION_LOCKS.setdefault(key, threading.Lock())
+        _CODEX_OPERATION_LOCK_REFERENCES[key] = int(_CODEX_OPERATION_LOCK_REFERENCES.get(key) or 0) + 1
+        return lock
+
+
+def _release_codex_operation_lock_reference(agent_id, conversation_id, lock, *, release=False):
+    if release:
+        lock.release()
+    key = (str(agent_id or ""), str(conversation_id or ""))
+    with _CODEX_OPERATION_LOCKS_GUARD:
+        if _CODEX_OPERATION_LOCKS.get(key) is not lock:
+            return
+        references = max(0, int(_CODEX_OPERATION_LOCK_REFERENCES.get(key) or 0) - 1)
+        if references:
+            _CODEX_OPERATION_LOCK_REFERENCES[key] = references
+        else:
+            _CODEX_OPERATION_LOCK_REFERENCES.pop(key, None)
+        if references == 0 and not lock.locked():
+            _CODEX_OPERATION_LOCKS.pop(key, None)
+
+
+def _release_codex_operation_lock(agent_id, conversation_id, lock):
+    _release_codex_operation_lock_reference(agent_id, conversation_id, lock, release=True)
+
+
+def _discard_codex_operation_lock(agent_id, conversation_id, lock):
+    _release_codex_operation_lock_reference(agent_id, conversation_id, lock)
+
+
+def _defer_codex_operation_lock_release(
+    agent_id,
+    conversation_id,
+    lock,
+    provider,
+    result,
+    finalization_done,
+    *,
+    finalization_timeout_sec=630,
+):
+    fence = result.get("terminalFence") if isinstance(result, dict) and isinstance(result.get("terminalFence"), dict) else {}
+    if int(fence.get("activeCallbacks") or 0) <= 0:
+        return False
+    waiter = getattr(provider, "wait_for_terminal_callbacks", None)
+    thread_id = str((result or {}).get("threadId") or "")
+    turn_id = str((result or {}).get("turnId") or "")
+    if not callable(waiter) or not thread_id:
+        return False
+
+    def release_after_drain():
+        try:
+            waiter(thread_id, turn_id=turn_id, timeout=None)
+        finally:
+            finalization_done.wait(timeout=max(1.0, float(finalization_timeout_sec or 630)))
+            _release_codex_operation_lock(agent_id, conversation_id, lock)
+
+    try:
+        worker = threading.Thread(
+            target=release_after_drain,
+            name=f"codex-callback-drain-{hashlib.sha256(f'{agent_id}|{conversation_id}'.encode()).hexdigest()[:8]}",
+            daemon=True,
+        )
+        worker.start()
+        return True
+    except Exception:
+        # Thread creation failure is rare; preserve ordering by draining in the
+        # request thread before falling back to the normal lock release path.
+        waiter(thread_id, turn_id=turn_id, timeout=None)
+        return False
+
+
+def _codex_operation_is_locked(agent_id, conversation_id):
+    key = (str(agent_id or ""), str(conversation_id or ""))
+    with _CODEX_OPERATION_LOCKS_GUARD:
+        lock = _CODEX_OPERATION_LOCKS.get(key)
+        return bool(lock and lock.locked())
+
+
+def _codex_admission_diagnostics():
+    with _CODEX_OPERATION_LOCKS_GUARD:
+        active = sum(1 for lock in _CODEX_OPERATION_LOCKS.values() if lock.locked())
+        references = sum(int(value or 0) for value in _CODEX_OPERATION_LOCK_REFERENCES.values())
+        return {
+            **_CODEX_ADMISSION_COUNTERS,
+            "activeConversations": active,
+            "trackedConversationLocks": len(_CODEX_OPERATION_LOCKS),
+            "conversationLockReferences": references,
+        }
 
 
 def _codex_idempotency_key(body):
@@ -6608,7 +6761,7 @@ def _append_codex_user_comm_event(agent, agent_id, conversation_id, message, bod
             "attachments": list(body.get("attachments") or []),
             "metadata": metadata,
             "visibleInOffice": source_surface != "feishu-group",
-        })
+        }, require_durable=True)
     _publish_feishu_chat_comm_event(event, "message")
     return event
 
@@ -6630,12 +6783,24 @@ def _handle_codex_chat(body):
         return {"ok": False, "status": "invalid_request", "error": "conversationId is required", "_status": 400}
     agent_id = agent.get("id") or agent_key
     inbound_event = None
-    operation_lock = _codex_operation_lock(agent_id)
+    operation_stable_id = str(
+        body.get("_streamRunId")
+        or _codex_idempotency_key(body)
+        or _chat_source_metadata(body).get("sourceMessageId")
+        or uuid.uuid4()
+    ).strip()
+    operation_lock = _codex_operation_lock(agent_id, conversation_id)
     if not operation_lock.acquire(blocking=False):
-        active = _get_codex_active(agent_id) or {}
+        _discard_codex_operation_lock(agent_id, conversation_id, operation_lock)
+        with _CODEX_OPERATION_LOCKS_GUARD:
+            _CODEX_ADMISSION_COUNTERS["busyByConversation"] += 1
+        _CODEX_FAST_PATH_TELEMETRY.increment_busy("conversation")
+        active = _get_codex_active(agent_id, conversation_id) or {}
         return {
             "ok": False,
             "status": "busy",
+            "busyReason": "conversation",
+            "busyCode": "busy_by_conversation",
             "error": "Codex is already working. Wait for the current operation to finish.",
             "reply": "Codex is already working. Please wait.",
             "conversationId": conversation_id,
@@ -6643,6 +6808,9 @@ def _handle_codex_chat(body):
             "activeStatus": active.get("status", "running"),
             "_status": 409,
         }
+    with _CODEX_OPERATION_LOCKS_GUARD:
+        _CODEX_ADMISSION_COUNTERS["acceptedConversations"] += 1
+    finalization_done = threading.Event()
     provider = _codex_provider_from_config()
     if body.get("_reviewReadOnly") is True:
         provider.sandbox = "read-only"
@@ -6655,26 +6823,53 @@ def _handle_codex_chat(body):
     try:
         validated_attachments = _validated_provider_attachments(body.get("attachments") or [])
     except (TypeError, ValueError, OSError) as exc:
-        operation_lock.release()
+        _release_codex_operation_lock(agent_id, conversation_id, operation_lock)
         return {"ok": False, "error": str(exc), "code": "invalid_attachment", "_status": 400}
     body = {**body, "attachments": validated_attachments}
-    inbound_event = _append_codex_user_comm_event(agent, agent_id, conversation_id, message, body)
+    try:
+        inbound_event = _append_codex_user_comm_event(agent, agent_id, conversation_id, message, body)
+    except OSError as exc:
+        _release_codex_operation_lock(agent_id, conversation_id, operation_lock)
+        return {
+            "ok": False,
+            "status": "durable_write_failed",
+            "error": "Unable to persist the accepted Codex message",
+            "errorCategory": type(exc).__name__[:80],
+            "conversationId": conversation_id,
+            "_status": 500,
+        }
     before_paths = _codex_git_paths(provider.workspace)
     allow_interaction = str(body.get("fromType") or "agent").lower() in {"human", "user", "chat", "ui"}
     with _CODEX_ACTIVE_LOCK:
-        _CODEX_ACTIVE_OPERATIONS[agent_id] = normalize_active_operation(
+        _CODEX_ACTIVE_OPERATIONS[(agent_id, conversation_id)] = normalize_active_operation(
             "codex",
             agent_id,
             conversation_id,
             thread_id=_get_codex_thread_id(agent_id, conversation_id),
         )
+    fast_scope_run_id = str(body.get("_streamRunId") or operation_stable_id)
+    fast_scope_started = False
+    if _CODEX_EVENT_FAST_PATH.settings.enabled:
+        fast_scope_started = _CODEX_EVENT_FAST_PATH.begin(
+            agent_id,
+            conversation_id,
+            fast_scope_run_id,
+            initial_sequence=_last_persisted_codex_activity_sequence(agent_id, conversation_id),
+        )
     activity_callback = body.get("_onActivity")
-    reply_event_appended = {"done": False}
+    reply_event_appended = {"done": False, "writing": False, "error": None, "operationError": None}
+    reply_event_lock = threading.Lock()
 
     def append_reply_event(reply, metadata=None, ok=True):
         text = str(reply or "")
-        if not inbound_event or not text or reply_event_appended["done"]:
-            return
+        if not inbound_event or not text:
+            return True
+        with reply_event_lock:
+            if reply_event_appended["done"]:
+                return True
+            if reply_event_appended["writing"]:
+                return False
+            reply_event_appended["writing"] = True
         meta = metadata if isinstance(metadata, dict) else {}
         source_metadata = _comm_metadata(inbound_event)
         source_metadata = {
@@ -6682,35 +6877,86 @@ def _handle_codex_chat(body):
             if k in {"sourceApp", "sourceSurface", "sourceLabel", "channel", "sourceMessageId", "feishuChatId", "representativeAgentId", "fromType"}
         }
         if _find_comm_reply_for_request(inbound_event):
-            reply_event_appended["done"] = True
-            return
-        event = _append_comm_event({
-            "type": "message",
-            "direction": "reply",
-            "conversationId": conversation_id,
-            "from": _office_agent_ref(agent_id),
-            "to": inbound_event.get("from") or {"id": "user", "providerKind": "human", "name": "User"},
-            "text": text,
-            "inReplyTo": inbound_event.get("id"),
-            "metadata": {
-                "providerKind": "codex",
-                **source_metadata,
-                "threadId": meta.get("threadId") or "",
-                "turnId": meta.get("turnId") or "",
-                "modifiedFiles": meta.get("modifiedFiles") or [],
-                "needsHumanIntervention": bool(meta.get("needsHumanIntervention")),
-            },
-            "visibleInOffice": (
-                inbound_event.get("visibleInOffice", True) is not False
-                and not _comm_is_feishu_group(inbound_event)
-            ),
-            "ok": bool(ok),
-        })
+            with reply_event_lock:
+                reply_event_appended["done"] = True
+                reply_event_appended["writing"] = False
+                reply_event_appended["error"] = None
+            return True
+        try:
+            event = _append_comm_event({
+                "type": "message",
+                "direction": "reply",
+                "conversationId": conversation_id,
+                "from": _office_agent_ref(agent_id),
+                "to": inbound_event.get("from") or {"id": "user", "providerKind": "human", "name": "User"},
+                "text": text,
+                "inReplyTo": inbound_event.get("id"),
+                "metadata": {
+                    "providerKind": "codex",
+                    **source_metadata,
+                    "threadId": meta.get("threadId") or "",
+                    "turnId": meta.get("turnId") or "",
+                    "modifiedFiles": meta.get("modifiedFiles") or [],
+                    "needsHumanIntervention": bool(meta.get("needsHumanIntervention")),
+                },
+                "visibleInOffice": (
+                    inbound_event.get("visibleInOffice", True) is not False
+                    and not _comm_is_feishu_group(inbound_event)
+                ),
+                "ok": bool(ok),
+            }, require_durable=True)
+        except OSError as exc:
+            with reply_event_lock:
+                reply_event_appended["writing"] = False
+                reply_event_appended["error"] = exc
+            return False
         _publish_feishu_chat_comm_event(event, "message")
-        reply_event_appended["done"] = True
+        with reply_event_lock:
+            reply_event_appended["done"] = True
+            reply_event_appended["writing"] = False
+            reply_event_appended["error"] = None
+        return True
 
     def on_event(event):
-        record = _append_codex_activity(agent_id, conversation_id, event)
+        _CODEX_FAST_PATH_TELEMETRY.mark(fast_scope_run_id, "first_native_event")
+        event_class = classify_codex_event(event)
+        if event_class == "transient":
+            _CODEX_FAST_PATH_TELEMETRY.mark(fast_scope_run_id, "first_displayable_fragment")
+        if event_class == "terminal":
+            _CODEX_FAST_PATH_TELEMETRY.mark(fast_scope_run_id, "provider_terminal")
+        record = _CODEX_EVENT_FAST_PATH.process_event(
+            agent_id,
+            conversation_id,
+            fast_scope_run_id,
+            event,
+            legacy_callback=lambda item: _append_codex_activity(agent_id, conversation_id, item),
+        )
+        if _CODEX_EVENT_FAST_PATH.settings.enabled and record.get("eventClass"):
+            if record.get("eventClass") == "transient":
+                _update_codex_active_from_record(agent_id, conversation_id, record)
+            else:
+                record = _append_codex_activity(agent_id, conversation_id, record, preserve_sequence=True)
+        if record.get("type") in {"interaction", "approval"} and str(record.get("status") or "").lower() == "pending":
+            approval_id = str(record.get("approval_id") or record.get("approvalId") or record.get("interactionId") or record.get("id") or "").strip()
+            if approval_id:
+                try:
+                    _append_codex_durable_operation(
+                        agent_id,
+                        conversation_id,
+                        "approval_request",
+                        approval_id,
+                        {
+                            "approvalId": approval_id,
+                            "approvalStatus": "pending",
+                            "runId": record.get("runId") or record.get("turnId") or "",
+                            "turnId": record.get("turnId") or "",
+                            "threadId": record.get("threadId") or "",
+                        },
+                    )
+                except OSError as exc:
+                    with reply_event_lock:
+                        reply_event_appended["operationError"] = reply_event_appended.get("operationError") or exc
+                    raise
         if record.get("type") == "turn" and str(record.get("status") or "").lower() in {"completed", "done", "success"}:
             output = record.get("output") if isinstance(record.get("output"), dict) else {}
             append_reply_event(output.get("reply") or record.get("reply") or "", {
@@ -6730,6 +6976,7 @@ def _handle_codex_chat(body):
     current_provider_message = _feishu_group_provider_message(message, body)
 
     def send_to_provider(thread_id, delivery_message=None):
+        _CODEX_FAST_PATH_TELEMETRY.mark(fast_scope_run_id, "provider_request_sent")
         kwargs = {
             "conversation_id": conversation_id,
             "timeout_sec": int(body.get("timeoutSec") or 600),
@@ -6776,42 +7023,124 @@ def _handle_codex_chat(body):
             "reply": "",
         }
     finally:
-        operation_lock.release()
-    thread_id = str(result.get("threadId") or "")
-    if thread_id:
-        _set_codex_thread_id(agent_id, conversation_id, thread_id)
-    after_paths = _codex_git_paths(provider.workspace)
-    modified_files = collect_modified_files(result.get("modifiedFiles") or [], before_paths, after_paths)
-    with _CODEX_ACTIVE_LOCK:
-        _CODEX_ACTIVE_OPERATIONS.pop(agent_id, None)
-    normalized = normalize_provider_result(
-        "codex",
-        agent,
-        result,
-        conversation_id=conversation_id,
-        thread_id=thread_id,
-        turn_id=result.get("turnId", ""),
-        modified_files=modified_files,
-        extra={"recoveredFromArchivedThread": result.get("recoveredFromArchivedThread")},
-    )
-    _append_vo_usage_record(
-        "codex",
-        agent,
-        normalized,
-        conversation_id=conversation_id,
-        thread_id=thread_id,
-        turn_id=normalized.get("turnId") or result.get("turnId", ""),
-        run_id=normalized.get("runId") or result.get("runId", ""),
-    )
-    if inbound_event and normalized.get("reply"):
-        append_reply_event(normalized.get("reply") or "", {
-            "threadId": normalized.get("threadId") or thread_id,
-            "turnId": normalized.get("turnId") or result.get("turnId", ""),
-            "modifiedFiles": modified_files,
-            "needsHumanIntervention": bool(normalized.get("needsHumanIntervention")),
-        }, ok=bool(normalized.get("ok")))
-    normalized["_status"] = provider_http_status(normalized)
-    return normalized
+        release_deferred = _defer_codex_operation_lock_release(
+            agent_id,
+            conversation_id,
+            operation_lock,
+            provider,
+            result,
+            finalization_done,
+            finalization_timeout_sec=int(body.get("timeoutSec") or 600) + 30,
+        )
+        if not release_deferred:
+            _release_codex_operation_lock(agent_id, conversation_id, operation_lock)
+    def finalize_result():
+        thread_id = str(result.get("threadId") or "")
+        turn_id = str(result.get("turnId") or "")
+        terminal_fence = result.get("terminalFence") if isinstance(result.get("terminalFence"), dict) else {}
+        terminal_waiter = getattr(provider, "wait_for_terminal_callbacks", None)
+        if int(terminal_fence.get("activeCallbacks") or 0) > 0 and callable(terminal_waiter) and thread_id:
+            # The app-server reader may use its bounded fence to return while a
+            # terminal callback is still doing durable work.  That releases the
+            # reader, not the durability contract: wait for the callback's real
+            # outcome before deciding and committing the public terminal state.
+            terminal_waiter(thread_id, turn_id=turn_id, timeout=None)
+
+        if thread_id:
+            _set_codex_thread_id(agent_id, conversation_id, thread_id)
+        after_paths = _codex_git_paths(provider.workspace)
+        modified_files = collect_modified_files(result.get("modifiedFiles") or [], before_paths, after_paths)
+        normalized = normalize_provider_result(
+            "codex",
+            agent,
+            result,
+            conversation_id=conversation_id,
+            thread_id=thread_id,
+            turn_id=turn_id,
+            modified_files=modified_files,
+            extra={"recoveredFromArchivedThread": result.get("recoveredFromArchivedThread")},
+        )
+        _CODEX_FAST_PATH_TELEMETRY.mark(fast_scope_run_id, "provider_terminal")
+        if normalized.get("busyReason"):
+            _CODEX_FAST_PATH_TELEMETRY.increment_busy(normalized.get("busyReason"))
+        normalized_terminal_fence = (
+            normalized.get("terminalFence") if isinstance(normalized.get("terminalFence"), dict) else {}
+        )
+        if normalized_terminal_fence.get("terminalFenceWaitMs") is not None:
+            _CODEX_FAST_PATH_TELEMETRY.observe(
+                "terminal_fence_wait_ms",
+                normalized_terminal_fence.get("terminalFenceWaitMs"),
+            )
+        _append_vo_usage_record(
+            "codex",
+            agent,
+            normalized,
+            conversation_id=conversation_id,
+            thread_id=thread_id,
+            turn_id=normalized.get("turnId") or turn_id,
+            run_id=normalized.get("runId") or result.get("runId", ""),
+        )
+        if inbound_event and normalized.get("reply"):
+            append_reply_event(normalized.get("reply") or "", {
+                "threadId": normalized.get("threadId") or thread_id,
+                "turnId": normalized.get("turnId") or turn_id,
+                "modifiedFiles": modified_files,
+                "needsHumanIntervention": bool(normalized.get("needsHumanIntervention")),
+            }, ok=bool(normalized.get("ok")))
+        with reply_event_lock:
+            persistence_error = reply_event_appended.get("error") or reply_event_appended.get("operationError")
+        if persistence_error:
+            normalized.update({
+                "ok": False,
+                "status": "durable_write_failed",
+                "error": "Codex completed but durable result persistence failed",
+                "errorCategory": type(persistence_error).__name__[:80],
+            })
+        stream_run_id = str(
+            body.get("_streamRunId")
+            or normalized.get("runId")
+            or normalized.get("turnId")
+            or (inbound_event or {}).get("id")
+            or operation_stable_id
+        ).strip()
+        try:
+            _append_codex_durable_operation(
+                agent_id,
+                conversation_id,
+                "terminal",
+                stream_run_id,
+                {
+                    "status": normalized.get("status") or "",
+                    "runId": stream_run_id,
+                    "turnId": normalized.get("turnId") or "",
+                    "threadId": normalized.get("threadId") or "",
+                    "errorCategory": normalized.get("errorCode") or normalized.get("errorCategory") or "",
+                },
+                ok=bool(normalized.get("ok")),
+            )
+            _CODEX_FAST_PATH_TELEMETRY.mark(fast_scope_run_id, "durable_terminal_committed")
+        except OSError as exc:
+            normalized.update({
+                "ok": False,
+                "status": "durable_write_failed",
+                "error": "Codex completed but durable result persistence failed",
+                "errorCategory": type(exc).__name__[:80],
+            })
+        normalized["_status"] = provider_http_status(normalized)
+        return normalized
+
+    try:
+        return finalize_result()
+    finally:
+        try:
+            with _CODEX_ACTIVE_LOCK:
+                _CODEX_ACTIVE_OPERATIONS.pop((agent_id, conversation_id), None)
+        finally:
+            try:
+                if fast_scope_started:
+                    _CODEX_EVENT_FAST_PATH.end(agent_id, conversation_id, fast_scope_run_id)
+            finally:
+                finalization_done.set()
 
 
 def _codex_stream_event_payload(run_id, agent, record=None, result=None, **extra):
@@ -6890,6 +7219,7 @@ def _handle_codex_run_start(body):
     agent_id = agent.get("id") or agent_key
     idempotency_key = _codex_idempotency_key(body)
     run_id = f"codex-{int(time.time() * 1000)}-{str(uuid.uuid4())[:8]}"
+    _CODEX_FAST_PATH_TELEMETRY.start(run_id, conversation_id)
     profile = agent.get("profile") or agent.get("providerAgentId") or "local"
     status_key = agent.get("statusKey") or agent.get("id")
     meta = {
@@ -6908,11 +7238,12 @@ def _handle_codex_run_start(body):
 
     def run_codex(command, emit, cancel_event):
         progress_id = f"codex-progress-{run_id}"
-        _append_codex_progress_comm_event(agent, agent.get("id") or agent_key, conversation_id, progress_id, {
-            "runId": run_id,
-            "status": "running",
-            "thinking": "Waiting for Codex run events.",
-        })
+        if not _CODEX_EVENT_FAST_PATH.settings.enabled:
+            _append_codex_progress_comm_event(agent, agent.get("id") or agent_key, conversation_id, progress_id, {
+                "runId": run_id,
+                "status": "running",
+                "thinking": "Waiting for Codex run events.",
+            })
         if hasattr(gateway_presence, "set_provider_event"):
             gateway_presence.set_provider_event(status_key, "codex", {"event": "run.started", "run_id": run_id})
 
@@ -6927,7 +7258,8 @@ def _handle_codex_run_start(body):
                 "tools": [record] if record.get("type") in {"activity", "tool", "command"} else [],
                 "approval": record if record.get("type") == "interaction" and record.get("status") == "pending" else None,
             }
-            _append_codex_progress_comm_event(agent, agent.get("id") or agent_key, conversation_id, progress_id, progress_state)
+            if not _CODEX_EVENT_FAST_PATH.settings.enabled:
+                _append_codex_progress_comm_event(agent, agent.get("id") or agent_key, conversation_id, progress_id, progress_state)
             event_name = _codex_activity_bridge_event_name(record)
             terminal_event = event_name in {"run.completed", "run.failed", "run.cancelled", "run.canceled"}
             # The worker publishes the single canonical terminal event after
@@ -6963,7 +7295,8 @@ def _handle_codex_run_start(body):
             result = _handle_codex_chat(run_body)
         except Exception as exc:
             result = {"ok": False, "status": "execution_failed", "error": str(exc), "_status": 500}
-        _remove_comm_progress_events("codex-progress", progress_id, conversation_id)
+        if not _CODEX_EVENT_FAST_PATH.settings.enabled:
+            _remove_comm_progress_events("codex-progress", progress_id, conversation_id)
         terminal_payload = _codex_stream_event_payload(run_id, agent, result=result, conversationId=conversation_id)
         status = str(result.get("status") or "").lower()
         if result.get("ok"):
@@ -7014,6 +7347,7 @@ def _handle_codex_run_start(body):
         start_payload={"providerPath": "codex-app-server", "conversationId": conversation_id},
     )
     outcome = PROVIDER_RUN_COORDINATOR.start(command, adapter=adapter, compatibility_meta=meta)
+    _CODEX_FAST_PATH_TELEMETRY.mark(outcome.run_id, "run_reserved")
     if outcome.duplicate:
         response = {
             "ok": True,
@@ -7075,7 +7409,7 @@ def _handle_codex_activity(query):
     after = int((query.get("after") or [0])[0] or 0)
     if not conversation_id:
         return {"ok": False, "error": "conversationId is required", "_status": 400}
-    active = _get_codex_active(agent_id)
+    active = _get_codex_active(agent_id, conversation_id)
     events = _get_codex_activity(agent_id, conversation_id, after)
     if not active or active.get("conversationId") != conversation_id:
         resolved = {
@@ -7108,7 +7442,7 @@ def _handle_codex_interaction(body):
     conversation_id = str(body.get("conversationId") or "")
     interaction_id = str(body.get("interactionId") or "")
     action = str(body.get("action") or "")
-    active = _get_codex_active(agent_id)
+    active = _get_codex_active(agent_id, conversation_id)
     if not active or active.get("conversationId") != conversation_id:
         return {"ok": False, "error": "No matching active Codex operation", "_status": 404}
     if not interaction_id or action not in {"accept", "acceptForSession", "decline", "cancel", "answer"}:
@@ -7130,7 +7464,11 @@ def _handle_codex_approval_pending(query_or_body=None):
     if not agent:
         return {"ok": False, "error": f"Codex agent '{agent_key}' not found", "_status": 404}
     profile = agent.get("profile") or agent.get("providerAgentId") or "local"
-    result = _codex_provider_from_config().pending_approval(profile)
+    conversation_id = str(_first(data.get("conversationId") or data.get("conversation_id"), "")).strip()
+    active = _get_codex_active(agent.get("id") or agent_key, conversation_id) if conversation_id else None
+    session_id = str((active or {}).get("threadId") or "")
+    provider = _codex_provider_from_config()
+    result = provider.pending_approval(profile, session_id) if session_id else provider.pending_approval(profile)
     result.setdefault("ok", True)
     result.setdefault("profile", profile)
     result.setdefault("agentId", agent.get("id") or agent_key)
@@ -7173,6 +7511,12 @@ def _codex_history_has_approval(conversation_id, agent_id, approval_id):
         metadata = metadata if isinstance(metadata, dict) else {}
         codex_meta = metadata.get("codex") if isinstance(metadata.get("codex"), dict) else {}
         approval = metadata.get("approval") if isinstance(metadata.get("approval"), dict) else {}
+        is_resolution = (
+            str(metadata.get("event") or codex_meta.get("event") or "").lower() == "approval.responded"
+            or str(event.get("operation") or "").lower() == "approval_resolution"
+        )
+        if not is_resolution:
+            continue
         candidates = {
             str(metadata.get("approvalId") or ""),
             str(metadata.get("approval_id") or ""),
@@ -7191,7 +7535,7 @@ def _codex_approval_conversation_id(body, approval, agent_id, session_id):
     conversation_id = str(body.get("conversationId") or body.get("conversation_id") or approval.get("conversationId") or approval.get("conversation_id") or "").strip()
     if conversation_id:
         return conversation_id
-    active = _get_codex_active(agent_id)
+    active = _get_codex_active(agent_id, thread_id=session_id)
     active_thread = str((active or {}).get("threadId") or "")
     if active and (not session_id or session_id == active_thread):
         return str(active.get("conversationId") or "")
@@ -7231,7 +7575,7 @@ def _append_codex_approval_result_comm_event(agent, agent_id, conversation_id, a
         },
         "visibleInOffice": True,
         "ok": True,
-    })
+    }, require_durable=True)
 
 
 def _handle_codex_approval_respond(body):
@@ -7265,7 +7609,32 @@ def _handle_codex_approval_respond(body):
     result_message = _codex_approval_result_message(merged_approval, normalized_choice)
     history_event = None
     if result.get("ok"):
-        history_event = _append_codex_approval_result_comm_event(agent, agent_id, conversation_id, merged_approval, normalized_choice)
+        try:
+            history_event = _append_codex_approval_result_comm_event(agent, agent_id, conversation_id, merged_approval, normalized_choice)
+            if conversation_id:
+                _append_codex_durable_operation(
+                    agent_id,
+                    conversation_id,
+                    "approval_resolution",
+                    approval_id,
+                    {
+                        "approvalId": approval_id,
+                        "approvalStatus": merged_approval.get("status") or "",
+                        "choice": normalized_choice,
+                        "runId": merged_approval.get("runId") or merged_approval.get("turnId") or "",
+                        "turnId": merged_approval.get("turnId") or "",
+                        "threadId": merged_approval.get("threadId") or "",
+                    },
+                )
+        except OSError as exc:
+            return {
+                "ok": False,
+                "status": "durable_write_failed",
+                "error": "Codex approval was resolved but persistence failed",
+                "errorCategory": type(exc).__name__[:80],
+                "approval": merged_approval,
+                "_status": 500,
+            }
         PROVIDER_EVENT_JOURNAL.publish(
             "codex",
             agent_id,
@@ -7313,7 +7682,7 @@ def _handle_codex_approval_respond(body):
 def _handle_codex_cancel(body):
     agent_id = str(body.get("agentId") or "codex-local")
     conversation_id = str(body.get("conversationId") or "")
-    active = _get_codex_active(agent_id)
+    active = _get_codex_active(agent_id, conversation_id)
     if not active or (conversation_id and active.get("conversationId") != conversation_id):
         return {"ok": False, "error": "No matching active Codex operation", "_status": 404}
     provider = _codex_provider_from_config()
@@ -7333,7 +7702,7 @@ def _handle_codex_reset(body):
     if not conversation_id:
         return {"ok": False, "error": "conversationId is required", "_status": 400}
     agent_id = agent.get("id") or agent_key
-    if _codex_operation_lock(agent_id).locked():
+    if _codex_operation_is_locked(agent_id, conversation_id):
         return {"ok": False, "status": "busy", "error": "Codex is already working", "_status": 409}
     removed = _reset_codex_thread_id(agent_id, conversation_id)
     return {"ok": True, "reset": removed, "conversationId": conversation_id}
@@ -7351,15 +7720,16 @@ def _handle_codex_compact(body):
     thread_id = _get_codex_thread_id(agent_id, conversation_id)
     if not thread_id:
         return {"ok": False, "status": "not_found", "error": "No Codex context exists for this conversation", "_status": 404}
-    operation_lock = _codex_operation_lock(agent_id)
+    operation_lock = _codex_operation_lock(agent_id, conversation_id)
     if not operation_lock.acquire(blocking=False):
+        _discard_codex_operation_lock(agent_id, conversation_id, operation_lock)
         return {"ok": False, "status": "busy", "error": "Codex is already working", "_status": 409}
     gateway_presence.set_manual_override(agent_id, "working", "Compressing Codex context")
     try:
         result = _codex_provider_from_config().compact_context(thread_id, int(body.get("timeoutSec") or 120))
     finally:
         gateway_presence.set_manual_override(agent_id, "idle", "")
-        operation_lock.release()
+        _release_codex_operation_lock(agent_id, conversation_id, operation_lock)
     event = _append_comm_event({
         "type": "operation",
         "operation": "context_compaction",
@@ -8253,9 +8623,10 @@ def _provider_pending_approval_snapshot(provider_kind, agent_id, conversation_id
     if provider_kind == "hermes":
         return _get_hermes_approval_pending(agent_id).get("pending")
     if provider_kind == "codex":
-        active = _get_codex_active(agent_id)
+        active = _get_codex_active(agent_id, conversation_id)
         if active and str(active.get("conversationId") or "") == conversation_id:
-            return _handle_codex_approval_pending({"agentId": agent_id}).get("pending")
+            pending = active.get("pending") if isinstance(active.get("pending"), dict) else None
+            return dict(pending) if pending else None
     return None
 
 
@@ -8267,6 +8638,7 @@ def _provider_sse_transport_for(repository, journal):
         pending_lookup=_provider_pending_approval_snapshot,
         recovery_lookup=_provider_recovery_progress_snapshot,
         clock=lambda: time.time(),
+        telemetry=_CODEX_FAST_PATH_TELEMETRY,
     )
 
 
@@ -8287,6 +8659,8 @@ def _provider_kind_from_run(meta, run_id=""):
 PROVIDER_RUN_REPOSITORY = ProviderRunRepository(retention_ms=10 * 60 * 1000)
 PROVIDER_EVENT_JOURNAL = ProviderEventJournal(max_events=4000)
 PROVIDER_RUN_COORDINATOR = ProviderRunCoordinator(PROVIDER_RUN_REPOSITORY, PROVIDER_EVENT_JOURNAL)
+PROVIDER_RUN_COORDINATOR.event_pipeline = _CODEX_EVENT_COALESCER
+PROVIDER_RUN_COORDINATOR.telemetry = _CODEX_FAST_PATH_TELEMETRY
 PROVIDER_SSE_TRANSPORT = _provider_sse_transport_for(PROVIDER_RUN_REPOSITORY, PROVIDER_EVENT_JOURNAL)
 
 
@@ -8819,7 +9193,7 @@ def _office_agent_ref(agent_id_or_key):
     }
 
 
-def _append_comm_event(event):
+def _append_comm_event(event, *, require_durable=False):
     event = dict(event)
     if "text" in event:
         event["text"] = _extract_openclaw_text(event.get("text"))
@@ -8836,13 +9210,84 @@ def _append_comm_event(event):
         fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
         with os.fdopen(fd, "a") as f:
             f.write(json.dumps(event, ensure_ascii=False) + "\n")
+            if require_durable:
+                f.flush()
+                os.fsync(f.fileno())
         try:
             os.chmod(path, 0o600)
         except OSError:
             pass
     except OSError as e:
         print(f"[COMM] Failed to append communication event: {e}")
+        if require_durable:
+            raise
     return event
+
+
+def _find_comm_event_by_id(event_id, *, conversation_id=None, agent_id=None):
+    """Find a durable communication event without the display-history limit."""
+    event_id = str(event_id or "").strip()
+    if not event_id:
+        return None
+    try:
+        with open(_comm_log_path(), "r") as stream:
+            for line in stream:
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if event.get("id") != event_id:
+                    continue
+                if conversation_id and event.get("conversationId") != conversation_id:
+                    continue
+                if agent_id:
+                    source = (event.get("from") or {}).get("id")
+                    destination = (event.get("to") or {}).get("id")
+                    if agent_id not in (source, destination):
+                        continue
+                return event
+    except FileNotFoundError:
+        return None
+    return None
+
+
+def _append_codex_durable_operation(agent_id, conversation_id, operation, stable_id, metadata=None, *, ok=True):
+    """Append one idempotent, content-free Codex key-state record."""
+    agent_id = str(agent_id or "").strip()[:160]
+    conversation_id = str(conversation_id or "").strip()[:240]
+    operation = str(operation or "").strip()[:80]
+    stable_id = str(stable_id or "").strip()[:240]
+    if not agent_id or not conversation_id or not operation or not stable_id:
+        raise ValueError("durable Codex operation requires agent, conversation, operation and stable id")
+    digest = hashlib.sha256(f"{agent_id}|{conversation_id}|{operation}|{stable_id}".encode("utf-8")).hexdigest()[:24]
+    event_id = f"codex-{operation}-{digest}"
+    safe_meta = metadata if isinstance(metadata, dict) else {}
+    safe_meta = {
+        key: value
+        for key, value in safe_meta.items()
+        if key in {"status", "runId", "turnId", "threadId", "approvalId", "approvalStatus", "choice", "errorCategory"}
+    }
+    with _COMM_REQUEST_IDEMPOTENCY_LOCK:
+        existing = _find_comm_event_by_id(
+            event_id,
+            conversation_id=conversation_id,
+            agent_id=agent_id,
+        )
+        if existing:
+            return existing
+        return _append_comm_event({
+            "id": event_id,
+            "type": "operation",
+            "operation": operation,
+            "direction": "system",
+            "conversationId": conversation_id,
+            "from": _office_agent_ref(agent_id),
+            "to": {"id": "user", "providerKind": "human", "name": "User"},
+            "text": "",
+            "metadata": {"providerKind": "codex", "stableId": stable_id, **safe_meta},
+            "visibleInOffice": False,
+            "ok": bool(ok),
+        }, require_durable=True)
 
 
 def _comm_metadata(event):
@@ -27311,6 +27756,8 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                 "includeNativeAgents": safe_vo_config.get("codex", {}).get("includeNativeAgents", True),
                 "registerNativeAgents": safe_vo_config.get("codex", {}).get("registerNativeAgents", True),
                 "preferAppServer": safe_vo_config.get("codex", {}).get("preferAppServer", True),
+                "fastPath": dict(safe_vo_config.get("codex", {}).get("fastPath") or {}),
+                "fastPathRuntime": dict(safe_vo_config.get("codex", {}).get("fastPathRuntime") or {}),
                 "configSurface": "models-native",
             },
             "claude-code": {

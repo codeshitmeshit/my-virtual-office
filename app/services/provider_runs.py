@@ -65,12 +65,16 @@ class ProviderRunCoordinator:
         *,
         launcher=None,
         clock: Callable[[], float] | None = None,
+        event_pipeline=None,
+        telemetry=None,
     ) -> None:
         self.repository = repository
         self.journal = journal
         self.adapters = adapters or ProviderAdapterRegistry()
         self.launcher = launcher or ThreadTaskLauncher()
         self._clock = clock or time.monotonic
+        self.event_pipeline = event_pipeline
+        self.telemetry = telemetry
         self._handles: dict[str, _RuntimeHandle] = {}
         self._handles_lock = threading.Lock()
 
@@ -102,6 +106,8 @@ class ProviderRunCoordinator:
         )
         if not reservation.created:
             return StartOutcome(True, True, reservation.token.run_id, reservation.snapshot)
+        if self.telemetry is not None and str(command.provider_kind or "").strip().lower() == "codex":
+            self.telemetry.mark(reservation.token.run_id, "run_reserved")
         handle = _RuntimeHandle(command, resolved, reservation.token.generation, threading.Event(), threading.Lock())
         with self._handles_lock:
             self._handles[reservation.token.run_id] = handle
@@ -256,7 +262,23 @@ class ProviderRunCoordinator:
                 self._handles.pop(run_id, None)
 
     def _publish(self, provider_kind: str, agent_id: str, conversation_id: str, event_name: str, payload: Mapping[str, Any], run_id: str):
-        return self.journal.publish(provider_kind, agent_id, conversation_id, event_name, dict(payload or {}), run_id)
+        def publish_direct(name, data):
+            result = self.journal.publish(provider_kind, agent_id, conversation_id, name, data, run_id)
+            if result is not None and self.telemetry is not None and str(provider_kind or "").strip().lower() == "codex":
+                self.telemetry.mark(run_id, "journal_published")
+            return result
+
+        if self.event_pipeline is not None and str(provider_kind or "").strip().lower() == "codex":
+            return self.event_pipeline.publish_event(
+                provider_kind,
+                agent_id,
+                conversation_id,
+                event_name,
+                dict(payload or {}),
+                run_id,
+                publish_direct,
+            )
+        return publish_direct(event_name, dict(payload or {}))
 
     def diagnostics(self) -> dict[str, Any]:
         with self._handles_lock:

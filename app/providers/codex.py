@@ -32,6 +32,13 @@ def _safe_suffix(value: str) -> str:
     return suffix[:80] or "local"
 
 
+def _bounded_turn_capacity(value: Any) -> int:
+    try:
+        return max(1, min(int(value or 1), 4))
+    except (TypeError, ValueError):
+        return 1
+
+
 @dataclass
 class CodexProvider:
     """Provider adapter for a local Codex collaborator harness."""
@@ -53,6 +60,7 @@ class CodexProvider:
     include_main: bool = True
     include_native_agents: bool = True
     register_native_agents: bool = True
+    max_concurrent_turns: int = 1
 
     provider_kind: str = "codex"
     provider_type: str = "app-server-bridge"
@@ -92,6 +100,15 @@ class CodexProvider:
         self.include_main = _env_bool("VO_CODEX_INCLUDE_MAIN", self.include_main)
         self.include_native_agents = _env_bool("VO_CODEX_INCLUDE_NATIVE_AGENTS", self.include_native_agents)
         self.register_native_agents = _env_bool("VO_CODEX_REGISTER_NATIVE_AGENTS", self.register_native_agents)
+        self.max_concurrent_turns = _bounded_turn_capacity(self.max_concurrent_turns)
+
+    def _bridge(self, workspace: str | None = None):
+        return get_codex_bridge(
+            workspace or self.workspace or os.getcwd(),
+            self.model or "",
+            self.bridge_url or "",
+            max_concurrent_turns=self.max_concurrent_turns,
+        )
 
     @classmethod
     def from_env(cls) -> "CodexProvider":
@@ -107,6 +124,7 @@ class CodexProvider:
             model=os.environ.get("VO_CODEX_MODEL") or os.environ.get("OPENAI_MODEL"),
             reply_text=os.environ.get("VO_CODEX_REPLY_TEXT"),
             bridge_url=os.environ.get("VO_CODEX_BRIDGE_URL"),
+            max_concurrent_turns=_bounded_turn_capacity(os.environ.get("VO_CODEX_MAX_CONCURRENT_TURNS")),
         )
 
     def send_chat_message(
@@ -142,7 +160,7 @@ class CodexProvider:
                 "tokenUsage": {},
             }
         else:
-            bridge = get_codex_bridge(self.workspace or os.getcwd(), self.model or "", self.bridge_url or "")
+            bridge = self._bridge()
             if hasattr(bridge, "send_chat_message"):
                 result = bridge.send_chat_message(
                     text,
@@ -178,7 +196,7 @@ class CodexProvider:
         return self.workspace or os.getcwd()
 
     def _thread_request(self, profile: str, method: str, params: dict[str, Any], timeout_sec: int = 30) -> dict[str, Any]:
-        bridge = get_codex_bridge(self._session_workspace(profile), self.model or "", self.bridge_url or "")
+        bridge = self._bridge(self._session_workspace(profile))
         if not hasattr(bridge, "_request"):
             return {"ok": False, "error": "Configured Codex HTTP bridge does not expose thread management"}
         try:
@@ -299,7 +317,7 @@ class CodexProvider:
             }
         if protocol == "app-server" and self.prefer_app_server:
             try:
-                bridge = get_codex_bridge(self.workspace or os.getcwd(), self.model or "", self.bridge_url or "")
+                bridge = self._bridge()
                 if hasattr(bridge, "probe_auth"):
                     probe = bridge.probe_auth(timeout_sec=15)
                     return {
@@ -355,7 +373,7 @@ class CodexProvider:
                 "modifiedFiles": [],
                 "needsHumanIntervention": False,
             }
-        result = get_codex_bridge(self.workspace or os.getcwd(), self.model or "", self.bridge_url or "").execute(
+        result = self._bridge().execute(
             text,
             thread_id=thread_id,
             timeout_sec=int(timeout_sec or 600),
@@ -366,6 +384,13 @@ class CodexProvider:
         result["conversationId"] = conversation_id
         result["mode"] = "externalBridge" if self.bridge_url else "appServer"
         return result
+
+    def wait_for_terminal_callbacks(self, thread_id: str, turn_id: str = "", timeout: float | None = None) -> bool:
+        bridge = self._bridge()
+        waiter = getattr(bridge, "wait_for_terminal_callbacks", None)
+        if not callable(waiter):
+            return True
+        return bool(waiter(thread_id, turn_id=turn_id, timeout=timeout))
 
     def create_agent(
         self,
@@ -465,11 +490,11 @@ class CodexProvider:
         return {"ok": True, "deleted": deleted, "profile": safe_profile, "agentId": f"codex-{safe_profile}"}
 
     def respond(self, thread_id: str, interaction_id: str, action: str, answers: dict[str, Any] | None = None) -> bool:
-        bridge = get_codex_bridge(self.workspace or os.getcwd(), self.model or "", self.bridge_url or "")
+        bridge = self._bridge()
         return bool(hasattr(bridge, "respond") and bridge.respond(thread_id, interaction_id, action, answers))
 
     def cancel(self, thread_id: str) -> bool:
-        bridge = get_codex_bridge(self.workspace or os.getcwd(), self.model or "", self.bridge_url or "")
+        bridge = self._bridge()
         return bool(hasattr(bridge, "cancel") and bridge.cancel(thread_id))
 
     def interrupt(self, profile: str, session_id: str | None = None) -> dict[str, Any]:
@@ -485,7 +510,7 @@ class CodexProvider:
             if not thread_id:
                 return {"ok": False, "status": "not_found", "error": "No active Codex turn is running for this agent."}
             return {"ok": False, "status": "stale", "approvalId": approval_id, "sessionId": thread_id, "threadId": thread_id}
-        bridge = get_codex_bridge(self.workspace or os.getcwd(), self.model or "", self.bridge_url or "")
+        bridge = self._bridge()
         if hasattr(bridge, "respond_approval"):
             result = bridge.respond_approval(approval_id, choice)
             result["profile"] = self._safe_profile_name(profile or self.agent_id or "local")
@@ -501,12 +526,12 @@ class CodexProvider:
         ok = self.respond(thread_id, approval_id, choice, {})
         return {"ok": ok, "status": "submitted" if ok else "stale", "approvalId": approval_id, "sessionId": thread_id, "threadId": thread_id}
 
-    def pending_approval(self, profile: str) -> dict[str, Any]:
+    def pending_approval(self, profile: str, session_id: str | None = None) -> dict[str, Any]:
         if self.reply_text:
             return {"ok": True, "pending": None, "pending_count": 0, "profile": self._safe_profile_name(profile or self.agent_id or "local")}
-        bridge = get_codex_bridge(self.workspace or os.getcwd(), self.model or "", self.bridge_url or "")
+        bridge = self._bridge()
         if hasattr(bridge, "pending_approval"):
-            result = bridge.pending_approval()
+            result = bridge.pending_approval(str(session_id or ""))
             result["profile"] = self._safe_profile_name(profile or self.agent_id or "local")
             return result
         return {"ok": True, "pending": None, "pending_count": 0, "profile": self._safe_profile_name(profile or self.agent_id or "local")}
@@ -516,7 +541,7 @@ class CodexProvider:
             return {"ok": False, "status": "disabled", "error": "Codex harness is disabled", "reply": ""}
         if self.reply_text:
             return {"ok": True, "status": "compacted", "reply": "Codex demo context compressed.", "threadId": thread_id, "modifiedFiles": []}
-        result = get_codex_bridge(self.workspace or os.getcwd(), self.model or "", self.bridge_url or "").compact(thread_id, timeout_sec=timeout_sec)
+        result = self._bridge().compact(thread_id, timeout_sec=timeout_sec)
         result["mode"] = "externalBridge" if self.bridge_url else "appServer"
         return result
 

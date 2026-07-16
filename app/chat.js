@@ -183,6 +183,7 @@
       this.sessionKey = options.sessionKey || savedSelection?.sessionKey || 'agent:main:main';
       this.hasExplicitAgentSelection = !!savedSelection;
       this.currentRunId = null;
+      this.codexTiming = typeof CodexChatTiming !== 'undefined' ? CodexChatTiming.createTracker() : null;
       this.streamingMsg = null;
       this.liveToolCards = new Map();
       this.pendingToolEvents = new Map();
@@ -1729,6 +1730,8 @@
       if (this.isCodexSelected()) {
         const label = this.agentSelect.selectedOptions[0]?.textContent.trim() || 'Codex';
         const codexSendStartedAt = Date.now();
+        const codexTimingToken = this.codexTiming?.beginSubmission();
+        let codexTimingBound = false;
         this.codexSendStartedAt = codexSendStartedAt;
         let finalStatusText = _ct('codex_ready');
         let finalStatusClass = 'connected';
@@ -1749,6 +1752,9 @@
         this.sendBtn.disabled = true;
         this.setStatus(_ct('codex_working'), 'connecting');
         this.updateTypingIndicator(label + ' ' + _ct('working'));
+        const markWorkingVisible = () => this.codexTiming?.markWorkingVisible(codexTimingToken);
+        if (typeof requestAnimationFrame === 'function') requestAnimationFrame(markWorkingVisible);
+        else markWorkingVisible();
         this.startCodexActivityPolling();
         try {
           await this.ensureProviderEventSourceReady();
@@ -1759,6 +1765,7 @@
           });
           const data = await resp.json();
           if (data.status === 'busy') {
+            this.codexTiming?.abandon(codexTimingToken);
             localUserMessage?.remove?.();
             this.historyStore.removeMessage(historyContext, optimisticHistoryMessage.id);
             this.appendCodexActiveConversationNotice(data.activeConversationId || '', data.activeStatus || 'running');
@@ -1773,9 +1780,9 @@
             return;
           }
           codexAccepted = true;
+          codexTimingBound = !!this.codexTiming?.bindRun(codexTimingToken, data.runId);
           this.currentRunId = data.runId || null;
           const completed = await this.streamCodexRunEvents(data.runId, label);
-          await this.loadHistory({ recoverFinal: true, startedAt: codexSendStartedAt }).catch(() => {});
           this.reconcileCodexLiveReply(data.runId, completed?.reply || completed?.text || '');
           this.removeTypingIndicator();
           finalStatusText = _ct('codex_ready');
@@ -1793,6 +1800,13 @@
             finalStatusText = _ct('codex_working');
             finalStatusClass = 'connecting';
             this.setStatus(finalStatusText, finalStatusClass);
+          } else if (codexAccepted) {
+            await this.recoverProviderStateOnce().catch(() => {});
+            await this.loadHistory({ recoverFinal: true, startedAt: codexSendStartedAt }).catch(() => {});
+            this.appendSystem(_ct('codex_error') + ': ' + (e?.message || 'accepted run failed'));
+            finalStatusText = _ct('codex_error');
+            finalStatusClass = 'disconnected';
+            this.setStatus(finalStatusText, finalStatusClass);
           } else try {
             await this.sendCodexBlockingMessage(codexBody, codexSendStartedAt, label);
             codexAccepted = true;
@@ -1808,6 +1822,7 @@
             this.setStatus(finalStatusText, finalStatusClass);
           }
         } finally {
+          if (!codexTimingBound) this.codexTiming?.abandon(codexTimingToken);
           this.codexBusy = !!this.codexCancelPending;
           this.codexRequestInFlight = false;
           this.codexSendStartedAt = 0;
@@ -2128,6 +2143,7 @@
       if (!this.isCodexSelected()) return;
       data = data && typeof data === 'object' ? data : {};
       const runId = data.runId || this.currentRunId || 'codex-run';
+      this.codexTiming?.observeEvent(runId, eventName, data);
       const terminalEvent = ['run.completed', 'run.failed', 'run.cancelled', 'run.canceled'].includes(eventName);
       if (!terminalEvent && runId && this.providerRunResults.has(runId)) return;
       this.markLiveEvent();

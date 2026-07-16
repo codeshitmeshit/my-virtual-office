@@ -15,6 +15,7 @@ STATUS_DIR = tempfile.mkdtemp(prefix="vo-codex-server-test-")
 os.environ["VO_STATUS_DIR"] = STATUS_DIR
 os.environ["VO_HERMES_ENABLED"] = "0"
 os.environ["VO_CODEX_ENABLED"] = "0"
+os.environ["VO_CODEX_CHAT_FAST_PATH_ENABLED"] = "0"
 
 import server
 
@@ -63,6 +64,60 @@ class RaisingProvider:
         raise RuntimeError("provider exploded")
 
 
+def test_different_conversations_do_not_share_agent_admission_lock():
+    with tempfile.TemporaryDirectory() as workspace, tempfile.TemporaryDirectory() as status_dir:
+        release = threading.Event()
+        both_started = threading.Event()
+        started = []
+        started_lock = threading.Lock()
+
+        class ParallelProvider:
+            def __init__(self):
+                self.workspace = workspace
+
+            def send_message(self, message, conversation_id="", **_kwargs):
+                with started_lock:
+                    started.append(conversation_id)
+                    if len(started) == 2:
+                        both_started.set()
+                release.wait(2)
+                return {"ok": True, "status": "completed", "reply": f"done-{conversation_id}", "threadId": f"thr-{conversation_id}", "turnId": f"turn-{conversation_id}"}
+
+        old = (server.STATUS_DIR, server.get_roster, server._codex_provider_from_config)
+        server.STATUS_DIR = status_dir
+        server.get_roster = lambda: [AGENT]
+        provider = ParallelProvider()
+        server._codex_provider_from_config = lambda: provider
+        results = {}
+
+        def run(conversation_id):
+            results[conversation_id] = server._handle_codex_chat({
+                "agentId": "codex-local",
+                "message": conversation_id,
+                "conversationId": conversation_id,
+            })
+
+        workers = [threading.Thread(target=run, args=(conversation_id,)) for conversation_id in ("conv-one", "conv-two")]
+        try:
+            for worker in workers:
+                worker.start()
+            assert both_started.wait(1)
+            diagnostics = server._codex_admission_diagnostics()
+            assert diagnostics["activeConversations"] >= 2
+            release.set()
+            for worker in workers:
+                worker.join(2)
+            assert set(started) == {"conv-one", "conv-two"}
+            assert all(result["ok"] for result in results.values())
+            assert server._get_codex_active("codex-local", "conv-one") is None
+            assert server._get_codex_active("codex-local", "conv-two") is None
+        finally:
+            release.set()
+            for worker in workers:
+                worker.join(2)
+            server.STATUS_DIR, server.get_roster, server._codex_provider_from_config = old
+
+
 def test_busy_rejects_second_request_and_releases_lock():
     with tempfile.TemporaryDirectory() as workspace:
         started = threading.Event()
@@ -92,6 +147,7 @@ def test_busy_rejects_second_request_and_releases_lock():
             })
             assert second["ok"] is False
             assert second["status"] == "busy"
+            assert second["busyCode"] == "busy_by_conversation"
             assert second["_status"] == 409
 
             release.set()
@@ -655,6 +711,31 @@ def test_codex_approval_respond_persists_history_once_and_emits_presence():
             server.gateway_presence.set_provider_event = old_presence
 
 
+def test_conversation_lock_reference_prevents_split_lock_identity():
+    agent_id = "codex-lock-race"
+    conversation_id = "conv-lock-race"
+    key = (agent_id, conversation_id)
+    first = server._codex_operation_lock(agent_id, conversation_id)
+    assert first.acquire(blocking=False)
+    waiting_reference = server._codex_operation_lock(agent_id, conversation_id)
+    try:
+        assert waiting_reference is first
+        server._release_codex_operation_lock(agent_id, conversation_id, first)
+
+        newcomer = server._codex_operation_lock(agent_id, conversation_id)
+        assert newcomer is waiting_reference
+        assert waiting_reference.acquire(blocking=False)
+        assert newcomer.acquire(blocking=False) is False
+        server._discard_codex_operation_lock(agent_id, conversation_id, newcomer)
+        server._release_codex_operation_lock(agent_id, conversation_id, waiting_reference)
+        assert key not in server._CODEX_OPERATION_LOCKS
+        assert key not in server._CODEX_OPERATION_LOCK_REFERENCES
+    finally:
+        with server._CODEX_OPERATION_LOCKS_GUARD:
+            server._CODEX_OPERATION_LOCKS.pop(key, None)
+            server._CODEX_OPERATION_LOCK_REFERENCES.pop(key, None)
+
+
 if __name__ == "__main__":
     test_busy_rejects_second_request_and_releases_lock()
     test_provider_exception_clears_active_operation()
@@ -665,4 +746,5 @@ if __name__ == "__main__":
     test_codex_agent_create_delete_handlers_use_native_provider()
     test_codex_approval_pending_and_respond_handlers_delegate_to_provider()
     test_codex_approval_respond_persists_history_once_and_emits_presence()
+    test_conversation_lock_reference_prevents_split_lock_identity()
     print("ok")

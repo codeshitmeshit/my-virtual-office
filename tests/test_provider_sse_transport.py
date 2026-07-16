@@ -142,3 +142,49 @@ def test_pending_or_history_recovery_failure_does_not_close_event_replay():
     assert "id: 2\nevent: message.delta" in body
     assert "history unavailable" not in body
     assert handler.close_connection is True
+
+
+def test_codex_telemetry_ignores_non_codex_run_and_conversation_streams():
+    class Telemetry:
+        def __init__(self):
+            self.marks = []
+
+        def mark(self, run_id, stage):
+            self.marks.append((run_id, stage))
+
+    repository = ProviderRunRepository()
+    journal = ProviderEventJournal()
+    telemetry = Telemetry()
+    adapter = ProviderSSETransport(
+        repository,
+        journal,
+        provider_kind_of=lambda meta, _run_id: meta.get("providerKind") or "",
+        telemetry=telemetry,
+    )
+
+    repository.reserve_start(provider_kind="hermes", agent_id="agent", conversation_id="conv", run_id="hermes-run")
+    journal.publish("hermes", "agent", "conv", "run.completed", {"ok": True}, "hermes-run")
+    adapter.stream_run(Handler(), "hermes-run")
+    assert telemetry.marks == []
+
+    class ConversationJournal:
+        next_event_id = 0
+
+        def wait_for_conversation_events(self, *_args, **_kwargs):
+            return [{"id": 1, "event": "run.completed", "runId": "hermes-run", "data": {"ok": True}}]
+
+    conversation_adapter = ProviderSSETransport(
+        repository,
+        ConversationJournal(),
+        provider_kind_of=lambda meta, _run_id: meta.get("providerKind") or "",
+        telemetry=telemetry,
+    )
+    conversation = Handler(stop_after=b"event: run.completed")
+    conversation_adapter.stream_conversation(conversation, "hermes", "agent", "conv")
+    assert telemetry.marks == []
+
+    repository.reserve_start(provider_kind="codex", agent_id="agent", conversation_id="codex-conv", run_id="codex-run")
+    journal.publish("codex", "agent", "codex-conv", "run.completed", {"ok": True}, "codex-run")
+    adapter.stream_run(Handler(), "codex-run")
+    assert ("codex-run", "sse_written") in telemetry.marks
+    assert ("codex-run", "terminal_sse_written") in telemetry.marks

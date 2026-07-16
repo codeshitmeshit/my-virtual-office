@@ -1,0 +1,189 @@
+{
+  "baselineObservations": {
+    "activityPersistenceComplexity": "Only durable-key and terminal activity is persisted; transient activity stays in the bounded live view.",
+    "communicationProgressComplexity": "Transient progress does not rewrite communication history on the fast path.",
+    "firstTextSlo": "Observed only; no fixed product SLO is asserted.",
+    "terminalGrace": "CodexAppServerClient uses callback-drain completion with a bounded malformed-order fallback and no unconditional sleep."
+  },
+  "capturedAt": "2026-07-16T13:44:56Z",
+  "failures": [],
+  "fixture": {
+    "appServerAlreadyRunningForMeasuredTurns": true,
+    "browserBoundary": "simulated synchronous production boundary before HTTP fetch",
+    "existingThread": true,
+    "externalModelOrCredentials": false,
+    "fakeAppServerEmitsReasoningDeltas": 20,
+    "fastPathEnabled": true,
+    "kind": "deterministic-warm-resumed-codex-chat",
+    "measuredTurns": 100,
+    "warmups": 10
+  },
+  "measuredCounterWindow": {
+    "activityJsonLoads": 300,
+    "activityJsonWrites": 200,
+    "communicationAppends": 300,
+    "communicationHistoryLoads": 200,
+    "communicationProgressRewrites": 0
+  },
+  "operationCounts": {
+    "activityJsonLoads": {
+      "perTurnMax": 3,
+      "perTurnMedian": 3.0,
+      "total": 300
+    },
+    "activityJsonWrites": {
+      "perTurnMax": 2,
+      "perTurnMedian": 2.0,
+      "total": 200
+    },
+    "communicationAppends": {
+      "perTurnMax": 3,
+      "perTurnMedian": 3.0,
+      "total": 300
+    },
+    "communicationHistoryLoads": {
+      "perTurnMax": 2,
+      "perTurnMedian": 2.0,
+      "total": 200
+    },
+    "communicationProgressRewrites": {
+      "perTurnMax": 0,
+      "perTurnMedian": 0.0,
+      "total": 0
+    }
+  },
+  "python": "3.12.13",
+  "schemaVersion": 1,
+  "stages": {
+    "durableTerminalCommitMs": {
+      "maxMs": 49.952,
+      "p50Ms": 24.779,
+      "p95Ms": 29.903,
+      "samples": 100
+    },
+    "firstFragmentSseMs": {
+      "maxMs": 43.526,
+      "p50Ms": 17.801,
+      "p95Ms": 21.944,
+      "samples": 100
+    },
+    "firstNativeEventMs": {
+      "maxMs": 41.13,
+      "p50Ms": 14.001,
+      "p95Ms": 17.473,
+      "samples": 100
+    },
+    "firstNativeSseMs": {
+      "maxMs": 43.526,
+      "p50Ms": 17.801,
+      "p95Ms": 21.944,
+      "samples": 100
+    },
+    "firstTextSseMs": {
+      "maxMs": 45.945,
+      "p50Ms": 18.007,
+      "p95Ms": 22.02,
+      "samples": 100
+    },
+    "providerRequestMs": {
+      "maxMs": 40.841,
+      "p50Ms": 13.739,
+      "p95Ms": 17.219,
+      "samples": 100
+    },
+    "providerTerminalMs": {
+      "maxMs": 46.392,
+      "p50Ms": 18.493,
+      "p95Ms": 22.455,
+      "samples": 100
+    },
+    "readerCallbackMaxMs": {
+      "maxMs": 16.288,
+      "p50Ms": 5.827,
+      "p95Ms": 9.173,
+      "samples": 100
+    },
+    "readerCallbackTotalMs": {
+      "maxMs": 20.468,
+      "p50Ms": 9.37,
+      "p95Ms": 12.747,
+      "samples": 100
+    },
+    "runAcceptanceMs": {
+      "maxMs": 0.683,
+      "p50Ms": 0.212,
+      "p95Ms": 0.257,
+      "samples": 100
+    },
+    "terminalTailMs": {
+      "maxMs": 248.079,
+      "p50Ms": 19.975,
+      "p95Ms": 24.888,
+      "samples": 100
+    },
+    "workingFeedbackMs": {
+      "maxMs": 0.0,
+      "p50Ms": 0.0,
+      "p95Ms": 0.0,
+      "samples": 100
+    }
+  },
+  "trends": {
+    "firstFragmentSseMs": {
+      "firstHalf": {
+        "maxMs": 23.887,
+        "p50Ms": 16.97,
+        "p95Ms": 20.606,
+        "samples": 50
+      },
+      "secondHalf": {
+        "maxMs": 43.526,
+        "p50Ms": 18.765,
+        "p95Ms": 22.047,
+        "samples": 50
+      }
+    },
+    "firstNativeSseMs": {
+      "firstHalf": {
+        "maxMs": 23.887,
+        "p50Ms": 16.97,
+        "p95Ms": 20.606,
+        "samples": 50
+      },
+      "secondHalf": {
+        "maxMs": 43.526,
+        "p50Ms": 18.765,
+        "p95Ms": 22.047,
+        "samples": 50
+      }
+    },
+    "readerCallbackTotalMs": {
+      "firstHalf": {
+        "maxMs": 13.073,
+        "p50Ms": 8.473,
+        "p95Ms": 10.738,
+        "samples": 50
+      },
+      "secondHalf": {
+        "maxMs": 20.468,
+        "p50Ms": 10.632,
+        "p95Ms": 15.788,
+        "samples": 50
+      }
+    },
+    "terminalTailMs": {
+      "firstHalf": {
+        "maxMs": 153.706,
+        "p50Ms": 18.374,
+        "p95Ms": 22.377,
+        "samples": 50
+      },
+      "secondHalf": {
+        "maxMs": 248.079,
+        "p50Ms": 21.302,
+        "p95Ms": 26.861,
+        "samples": 50
+      }
+    }
+  }
+}
