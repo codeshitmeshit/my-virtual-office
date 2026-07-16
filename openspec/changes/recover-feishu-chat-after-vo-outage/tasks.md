@@ -10,7 +10,7 @@
 
 ## 3. Independent Processing Recovery
 
-- [ ] 3.1 Implement an injectable single-flight processing recovery coordinator with capped exponential backoff, bounded jitter, sub-minute maximum wake-up delay, indefinite retries, success reset, coalesced wake-ups, feature-switch shutdown, and deterministic clock/random tests.
+- [x] 3.1 Implement an injectable single-flight processing recovery coordinator with capped exponential backoff, bounded jitter, sub-minute maximum wake-up delay, indefinite retries, success reset, coalesced wake-ups, feature-switch shutdown, and deterministic clock/random tests.
 - [ ] 3.2 Implement a shared per-chat execution-lane scheduler for live delivery and replay that attempts only the oldest retained message per chat, prevents duplicate active message IDs, preserves same-chat order, permits bounded cross-chat progress, and reuses the global callback capacity; verify ordering, starvation isolation, and queue-pressure behavior.
 - [ ] 3.3 Integrate callback attempts, ordered spool replay, per-chat lanes, and the processing coordinator into worker startup, immediate delivery, callback failure/success, SDK reconnect, spool pressure/full, and shutdown; keep connection recovery separate, expose validated environment controls, and prove automatic recovery without a new Feishu event, reconnect, configuration change, or restart.
 
