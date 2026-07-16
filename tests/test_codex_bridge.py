@@ -567,6 +567,123 @@ def test_cancelled_turn_completes_through_terminal_fence():
             client.close()
 
 
+def test_capacity_two_runs_different_threads_and_rejects_third_explicitly():
+    with tempfile.TemporaryDirectory() as tmp:
+        client = CodexAppServerClient(tmp, binary=make_fake_codex(tmp), max_concurrent_turns=2)
+        release = threading.Event()
+        both_started = threading.Event()
+        active = set()
+        active_lock = threading.Lock()
+        results = {}
+
+        def fake_execute(message, thread_id="", **_kwargs):
+            with active_lock:
+                active.add(thread_id)
+                if len(active) == 2:
+                    both_started.set()
+            release.wait(1)
+            with active_lock:
+                active.discard(thread_id)
+            return {"ok": True, "status": "completed", "threadId": thread_id, "reply": message}
+
+        client._execute_locked = fake_execute
+        workers = [
+            threading.Thread(target=lambda key=key: results.update({key: client.execute(key, thread_id=key)}))
+            for key in ("thr-one", "thr-two")
+        ]
+        try:
+            for worker in workers:
+                worker.start()
+            assert both_started.wait(0.5)
+            busy = client.execute("third", thread_id="thr-three")
+            assert busy["status"] == "busy"
+            assert busy["busyCode"] == "busy_by_capacity"
+            assert busy["busyReason"] == "capacity"
+            release.set()
+            for worker in workers:
+                worker.join(1)
+            diagnostics = client.admission_diagnostics()
+            assert diagnostics["acceptedTurns"] == 2
+            assert diagnostics["busyByCapacity"] == 1
+            assert diagnostics["peakActiveTurns"] == 2
+            assert diagnostics["activeTurns"] == 0
+            assert diagnostics["orderedThreads"] == 0
+        finally:
+            release.set()
+            client.close()
+
+
+def test_same_native_thread_is_ordered_without_consuming_parallel_capacity():
+    with tempfile.TemporaryDirectory() as tmp:
+        client = CodexAppServerClient(tmp, binary=make_fake_codex(tmp), max_concurrent_turns=2)
+        first_started = threading.Event()
+        release_first = threading.Event()
+        calls = []
+        results = []
+
+        def fake_execute(message, thread_id="", **_kwargs):
+            calls.append(message)
+            if message == "first":
+                first_started.set()
+                release_first.wait(1)
+            return {"ok": True, "status": "completed", "threadId": thread_id, "reply": message}
+
+        client._execute_locked = fake_execute
+        workers = [
+            threading.Thread(target=lambda message=message: results.append(client.execute(message, thread_id="shared-thread")))
+            for message in ("first", "second")
+        ]
+        try:
+            workers[0].start()
+            assert first_started.wait(0.5)
+            workers[1].start()
+            time.sleep(0.05)
+            assert calls == ["first"]
+            release_first.set()
+            for worker in workers:
+                worker.join(1)
+            assert calls == ["first", "second"]
+            assert client.admission_diagnostics()["peakActiveTurns"] == 1
+            assert client.admission_diagnostics()["orderedThreads"] == 0
+        finally:
+            release_first.set()
+            client.close()
+
+
+def test_capacity_configuration_is_clamped_and_invalid_values_fail_safe():
+    with tempfile.TemporaryDirectory() as tmp:
+        assert CodexAppServerClient(tmp, binary=make_fake_codex(tmp), max_concurrent_turns=99).max_concurrent_turns == 4
+        assert CodexAppServerClient(tmp, binary=make_fake_codex(tmp), max_concurrent_turns="invalid").max_concurrent_turns == 1
+
+
+def test_capacity_one_preserves_single_active_turn_behavior():
+    with tempfile.TemporaryDirectory() as tmp:
+        client = CodexAppServerClient(tmp, binary=make_fake_codex(tmp), max_concurrent_turns=1)
+        started = threading.Event()
+        release = threading.Event()
+
+        def fake_execute(message, thread_id="", **_kwargs):
+            started.set()
+            release.wait(1)
+            return {"ok": True, "status": "completed", "threadId": thread_id, "reply": message}
+
+        client._execute_locked = fake_execute
+        first_result = {}
+        worker = threading.Thread(target=lambda: first_result.update(client.execute("first", thread_id="thread-one")))
+        try:
+            worker.start()
+            assert started.wait(0.5)
+            second = client.execute("second", thread_id="thread-two")
+            assert second["status"] == "busy"
+            assert second["busyCode"] == "busy_by_capacity"
+            release.set()
+            worker.join(1)
+            assert first_result["ok"] is True
+        finally:
+            release.set()
+            client.close()
+
+
 if __name__ == "__main__":
     test_execute_collects_reply_files_and_thread()
     test_execute_exposes_run_state_tools_thinking_and_token_usage()

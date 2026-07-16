@@ -15,6 +15,7 @@ STATUS_DIR = tempfile.mkdtemp(prefix="vo-codex-server-test-")
 os.environ["VO_STATUS_DIR"] = STATUS_DIR
 os.environ["VO_HERMES_ENABLED"] = "0"
 os.environ["VO_CODEX_ENABLED"] = "0"
+os.environ["VO_CODEX_CHAT_FAST_PATH_ENABLED"] = "0"
 
 import server
 
@@ -63,6 +64,60 @@ class RaisingProvider:
         raise RuntimeError("provider exploded")
 
 
+def test_different_conversations_do_not_share_agent_admission_lock():
+    with tempfile.TemporaryDirectory() as workspace, tempfile.TemporaryDirectory() as status_dir:
+        release = threading.Event()
+        both_started = threading.Event()
+        started = []
+        started_lock = threading.Lock()
+
+        class ParallelProvider:
+            def __init__(self):
+                self.workspace = workspace
+
+            def send_message(self, message, conversation_id="", **_kwargs):
+                with started_lock:
+                    started.append(conversation_id)
+                    if len(started) == 2:
+                        both_started.set()
+                release.wait(2)
+                return {"ok": True, "status": "completed", "reply": f"done-{conversation_id}", "threadId": f"thr-{conversation_id}", "turnId": f"turn-{conversation_id}"}
+
+        old = (server.STATUS_DIR, server.get_roster, server._codex_provider_from_config)
+        server.STATUS_DIR = status_dir
+        server.get_roster = lambda: [AGENT]
+        provider = ParallelProvider()
+        server._codex_provider_from_config = lambda: provider
+        results = {}
+
+        def run(conversation_id):
+            results[conversation_id] = server._handle_codex_chat({
+                "agentId": "codex-local",
+                "message": conversation_id,
+                "conversationId": conversation_id,
+            })
+
+        workers = [threading.Thread(target=run, args=(conversation_id,)) for conversation_id in ("conv-one", "conv-two")]
+        try:
+            for worker in workers:
+                worker.start()
+            assert both_started.wait(1)
+            diagnostics = server._codex_admission_diagnostics()
+            assert diagnostics["activeConversations"] >= 2
+            release.set()
+            for worker in workers:
+                worker.join(2)
+            assert set(started) == {"conv-one", "conv-two"}
+            assert all(result["ok"] for result in results.values())
+            assert server._get_codex_active("codex-local", "conv-one") is None
+            assert server._get_codex_active("codex-local", "conv-two") is None
+        finally:
+            release.set()
+            for worker in workers:
+                worker.join(2)
+            server.STATUS_DIR, server.get_roster, server._codex_provider_from_config = old
+
+
 def test_busy_rejects_second_request_and_releases_lock():
     with tempfile.TemporaryDirectory() as workspace:
         started = threading.Event()
@@ -92,6 +147,7 @@ def test_busy_rejects_second_request_and_releases_lock():
             })
             assert second["ok"] is False
             assert second["status"] == "busy"
+            assert second["busyCode"] == "busy_by_conversation"
             assert second["_status"] == 409
 
             release.set()

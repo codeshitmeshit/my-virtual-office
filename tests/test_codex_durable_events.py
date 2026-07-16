@@ -117,7 +117,7 @@ def test_accepted_message_write_failure_blocks_provider_and_releases_lock(monkey
 
         assert result["status"] == "durable_write_failed"
         assert provider.calls == 0
-        lock = server._codex_operation_lock("codex-local")
+        lock = server._codex_operation_lock("codex-local", "conv-accept-failure")
         assert lock.acquire(blocking=False)
         lock.release()
 

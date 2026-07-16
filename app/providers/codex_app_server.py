@@ -444,7 +444,7 @@ class _Operation:
 class CodexAppServerClient:
     """Small synchronous facade over app-server's bidirectional JSONL RPC."""
 
-    def __init__(self, workspace: str, model: str = "", binary: str | None = None):
+    def __init__(self, workspace: str, model: str = "", binary: str | None = None, max_concurrent_turns: int = 1):
         self.workspace = os.path.abspath(workspace)
         self.model = model or ""
         self.binary = binary or os.environ.get("VO_CODEX_BIN") or shutil.which("codex") or "codex"
@@ -464,14 +464,25 @@ class CodexAppServerClient:
         self._runtime.on_server_request = self._handle_server_request
         self._runtime.on_notification = self._handle_notification
         self._runtime.on_exit = self._handle_runtime_exit
+        self._initialize_lock = threading.Lock()
+        self._initialized = False
         self._operations: dict[str, _Operation] = {}
         self._terminal_operations: OrderedDict[str, _Operation] = OrderedDict()
         self._operations_lock = threading.Lock()
-        self._run_lock = threading.Lock()
+        try:
+            self.max_concurrent_turns = max(1, min(int(max_concurrent_turns or 1), 4))
+        except (TypeError, ValueError):
+            self.max_concurrent_turns = 1
+        self._turn_capacity = threading.BoundedSemaphore(self.max_concurrent_turns)
+        self._thread_locks_guard = threading.Lock()
+        self._thread_locks: dict[str, dict[str, Any]] = {}
+        self._admission_lock = threading.Lock()
+        self._admission_counters = {"acceptedTurns": 0, "busyByCapacity": 0, "activeTurns": 0, "peakActiveTurns": 0}
         self._approval_lock = threading.Condition()
         self._pending_approvals: dict[str, dict[str, Any]] = {}
 
     def close(self) -> None:
+        self._initialized = False
         self._runtime.close()
 
     def probe_auth(self, timeout_sec: int = 15) -> dict[str, Any]:
@@ -502,19 +513,23 @@ class CodexAppServerClient:
             }
 
     def _ensure_started(self) -> dict[str, Any]:
-        if self._runtime.is_running():
+        if self._runtime.is_running() and self._initialized:
             return {}
-        self._runtime.start()
-        init = self._request("initialize", {
-            "clientInfo": {
-                "name": "my_virtual_office",
-                "title": "My Virtual Office",
-                "version": "codex-live-bridge",
-            },
-            "capabilities": {"experimentalApi": True},
-        }, timeout=15)
-        self._send({"method": "initialized", "params": {}})
-        return init
+        with self._initialize_lock:
+            if self._runtime.is_running() and self._initialized:
+                return {}
+            self._runtime.start()
+            init = self._request("initialize", {
+                "clientInfo": {
+                    "name": "my_virtual_office",
+                    "title": "My Virtual Office",
+                    "version": "codex-live-bridge",
+                },
+                "capabilities": {"experimentalApi": True},
+            }, timeout=15)
+            self._send({"method": "initialized", "params": {}})
+            self._initialized = True
+            return init
 
     def _send(self, message: dict[str, Any]) -> None:
         self._runtime.send(message)
@@ -523,6 +538,7 @@ class CodexAppServerClient:
         return self._runtime.request(method, params, timeout=timeout).get("result") or {}
 
     def _restart_runtime(self) -> None:
+        self._initialized = False
         try:
             self._runtime.close()
         except Exception:
@@ -563,6 +579,7 @@ class CodexAppServerClient:
         return self._runtime.allocate_id()
 
     def _handle_runtime_exit(self) -> None:
+        self._initialized = False
         with self._operations_lock:
             operations = list(self._operations.values())
         detail = self._runtime.stderr_text()
@@ -887,12 +904,13 @@ class CodexAppServerClient:
             else:
                 self._pending_approvals.clear()
 
-    def pending_approval(self) -> dict[str, Any]:
+    def pending_approval(self, thread_id: str = "") -> dict[str, Any]:
         with self._approval_lock:
             pending = [
                 dict(item["approval"])
                 for item in self._pending_approvals.values()
                 if isinstance(item.get("approval"), dict) and item["approval"].get("status") == "pending"
+                and (not thread_id or str(item["approval"].get("threadId") or "") == str(thread_id))
             ]
         return {"ok": True, "pending": pending[0] if pending else None, "pending_count": len(pending)}
 
@@ -1076,7 +1094,26 @@ class CodexAppServerClient:
         allow_interaction: bool = False,
         attachments: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
-        with self._run_lock:
+        order_key = str(thread_id or f"new:{uuid.uuid4().hex}")
+        thread_lock = self._acquire_thread_lock(order_key)
+        if not self._turn_capacity.acquire(blocking=False):
+            self._release_thread_lock(order_key, thread_lock)
+            with self._admission_lock:
+                self._admission_counters["busyByCapacity"] += 1
+            return _error_result(
+                "busy",
+                "Codex app-server turn capacity is exhausted",
+                busyReason="capacity",
+                busyCode="busy_by_capacity",
+                maxConcurrentTurns=self.max_concurrent_turns,
+            )
+        with self._admission_lock:
+            self._admission_counters["acceptedTurns"] += 1
+            self._admission_counters["activeTurns"] += 1
+            self._admission_counters["peakActiveTurns"] = max(
+                self._admission_counters["peakActiveTurns"], self._admission_counters["activeTurns"]
+            )
+        try:
             return self._execute_locked(
                 message,
                 thread_id=thread_id,
@@ -1085,6 +1122,39 @@ class CodexAppServerClient:
                 allow_interaction=allow_interaction,
                 attachments=attachments,
             )
+        finally:
+            with self._admission_lock:
+                self._admission_counters["activeTurns"] = max(0, self._admission_counters["activeTurns"] - 1)
+            self._turn_capacity.release()
+            self._release_thread_lock(order_key, thread_lock)
+
+    def _acquire_thread_lock(self, key: str) -> threading.Lock:
+        with self._thread_locks_guard:
+            entry = self._thread_locks.get(key)
+            if entry is None:
+                entry = {"lock": threading.Lock(), "references": 0}
+                self._thread_locks[key] = entry
+            entry["references"] += 1
+            lock = entry["lock"]
+        lock.acquire()
+        return lock
+
+    def _release_thread_lock(self, key: str, lock: threading.Lock) -> None:
+        lock.release()
+        with self._thread_locks_guard:
+            entry = self._thread_locks.get(key)
+            if not entry or entry.get("lock") is not lock:
+                return
+            entry["references"] = max(0, int(entry.get("references") or 0) - 1)
+            if entry["references"] == 0:
+                self._thread_locks.pop(key, None)
+
+    def admission_diagnostics(self) -> dict[str, int]:
+        with self._admission_lock:
+            counters = dict(self._admission_counters)
+        with self._thread_locks_guard:
+            ordered_threads = len(self._thread_locks)
+        return {**counters, "maxConcurrentTurns": self.max_concurrent_turns, "orderedThreads": ordered_threads}
 
     def _execute_locked(
         self,
@@ -1271,8 +1341,17 @@ class CodexAppServerClient:
     def compact(self, thread_id: str, timeout_sec: int = 120) -> dict[str, Any]:
         if not thread_id:
             return _error_result("not_found", "No Codex context exists for this conversation")
-        with self._run_lock:
+        thread_lock = self._acquire_thread_lock(thread_id)
+        if not self._turn_capacity.acquire(blocking=False):
+            self._release_thread_lock(thread_id, thread_lock)
+            with self._admission_lock:
+                self._admission_counters["busyByCapacity"] += 1
+            return _error_result("busy", "Codex app-server turn capacity is exhausted", busyReason="capacity", busyCode="busy_by_capacity")
+        try:
             return self._compact_locked(thread_id, timeout_sec=timeout_sec)
+        finally:
+            self._turn_capacity.release()
+            self._release_thread_lock(thread_id, thread_lock)
 
     def _compact_locked(self, thread_id: str, timeout_sec: int = 120) -> dict[str, Any]:
         started = time.monotonic()
@@ -1337,15 +1416,19 @@ class CodexHttpBridgeClient:
         return self._post("/compact", {"threadId": thread_id, "workspace": self.workspace, "timeoutSec": timeout_sec}, timeout_sec + 10)
 
 
-_CLIENTS: dict[tuple[str, str, str], CodexAppServerClient | CodexHttpBridgeClient] = {}
+_CLIENTS: dict[tuple[str, str, str, int], CodexAppServerClient | CodexHttpBridgeClient] = {}
 _CLIENTS_LOCK = threading.Lock()
 
 
-def get_codex_bridge(workspace: str, model: str = "", bridge_url: str = "") -> CodexAppServerClient | CodexHttpBridgeClient:
-    key = (os.path.abspath(workspace), model or "", bridge_url or "")
+def get_codex_bridge(workspace: str, model: str = "", bridge_url: str = "", *, max_concurrent_turns: int = 1) -> CodexAppServerClient | CodexHttpBridgeClient:
+    try:
+        capacity = max(1, min(int(max_concurrent_turns or 1), 4))
+    except (TypeError, ValueError):
+        capacity = 1
+    key = (os.path.abspath(workspace), model or "", bridge_url or "", capacity)
     with _CLIENTS_LOCK:
         client = _CLIENTS.get(key)
         if client is None:
-            client = CodexHttpBridgeClient(bridge_url, workspace, model) if bridge_url else CodexAppServerClient(workspace, model)
+            client = CodexHttpBridgeClient(bridge_url, workspace, model) if bridge_url else CodexAppServerClient(workspace, model, max_concurrent_turns=capacity)
             _CLIENTS[key] = client
         return client

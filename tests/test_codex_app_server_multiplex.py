@@ -24,6 +24,7 @@ import sys
 thread_count = 0
 turns = {}
 started = False
+initialized = False
 
 def send(value):
     sys.stdout.write(json.dumps(value) + "\n")
@@ -51,8 +52,11 @@ for raw in sys.stdin:
     if method == "initialize":
         send({"id": request_id, "result": {"userAgent": "multiplex-fixture"}})
     elif method == "initialized":
-        pass
+        initialized = True
     elif method == "thread/start":
+        if not initialized:
+            send({"id": request_id, "error": {"message": "thread started before initialization fence"}})
+            continue
         thread_count += 1
         send({"id": request_id, "result": {"thread": {"id": "thr-%s" % thread_count}}})
     elif method == "turn/start":
@@ -85,14 +89,12 @@ def _make_server(directory):
 
 def test_two_native_threads_interleave_without_cross_delivery():
     with tempfile.TemporaryDirectory() as workspace:
-        client = CodexAppServerClient(workspace, binary=_make_server(workspace))
+        client = CodexAppServerClient(workspace, binary=_make_server(workspace), max_concurrent_turns=2)
         results = {"one": {}, "two": {}}
         events = {"one": [], "two": []}
 
         def execute(label):
-            # Bypass the current client-wide admission lock only in this proof
-            # fixture. Task 6.2 changes admission after this protocol proof passes.
-            results[label].update(client._execute_locked(
+            results[label].update(client.execute(
                 f"message-{label}",
                 timeout_sec=5,
                 event_callback=events[label].append,
@@ -113,6 +115,8 @@ def test_two_native_threads_interleave_without_cross_delivery():
                 time.sleep(0.01)
             assert approval and user_input
             assert approval["threadId"] != user_input["threadId"]
+            assert client.pending_approval(approval["threadId"])["pending_count"] == 1
+            assert client.pending_approval(user_input["threadId"])["pending_count"] == 0
             assert client.respond(approval["threadId"], approval["interactionId"], "acceptForSession") is True
             assert client.cancel(user_input["threadId"]) is True
 

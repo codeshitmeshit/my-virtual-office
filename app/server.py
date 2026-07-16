@@ -6156,11 +6156,13 @@ def _codex_provider_from_config():
         include_main=cfg.get("includeMain", True),
         include_native_agents=cfg.get("includeNativeAgents", True),
         register_native_agents=cfg.get("registerNativeAgents", True),
+        max_concurrent_turns=_CODEX_FAST_PATH_SETTINGS.max_concurrent_turns if _CODEX_FAST_PATH_SETTINGS.enabled else 1,
     )
 
 
 _CODEX_OPERATION_LOCKS = {}
 _CODEX_OPERATION_LOCKS_GUARD = threading.Lock()
+_CODEX_ADMISSION_COUNTERS = {"acceptedConversations": 0, "busyByConversation": 0}
 _CODEX_THREAD_STATE_LOCK = threading.Lock()
 _CODEX_ACTIVITY_LOCK = threading.Lock()
 _CODEX_ACTIVE_LOCK = threading.Lock()
@@ -6211,7 +6213,7 @@ def _save_codex_activity(events):
 
 def _update_codex_active_from_record(agent_id, conversation_id, record):
     with _CODEX_ACTIVE_LOCK:
-        active = _CODEX_ACTIVE_OPERATIONS.get(agent_id)
+        active = _CODEX_ACTIVE_OPERATIONS.get((agent_id, conversation_id)) or _CODEX_ACTIVE_OPERATIONS.get(agent_id)
         if active and active.get("conversationId") == conversation_id:
             active["threadId"] = record.get("threadId") or active.get("threadId", "")
             active["turnId"] = record.get("turnId") or active.get("turnId", "")
@@ -6274,9 +6276,24 @@ def _last_persisted_codex_activity_sequence(agent_id, conversation_id):
         )
 
 
-def _get_codex_active(agent_id):
+def _get_codex_active(agent_id, conversation_id="", thread_id=""):
     with _CODEX_ACTIVE_LOCK:
-        active = _CODEX_ACTIVE_OPERATIONS.get(agent_id)
+        active = _CODEX_ACTIVE_OPERATIONS.get((agent_id, conversation_id)) if conversation_id else None
+        if active:
+            return dict(active)
+        candidates = [
+            value
+            for key, value in _CODEX_ACTIVE_OPERATIONS.items()
+            if isinstance(key, tuple) and key[0] == agent_id and isinstance(value, dict)
+        ]
+        legacy = _CODEX_ACTIVE_OPERATIONS.get(agent_id)
+        if isinstance(legacy, dict):
+            candidates.append(legacy)
+        if conversation_id:
+            candidates = [item for item in candidates if item.get("conversationId") == conversation_id]
+        if thread_id:
+            candidates = [item for item in candidates if item.get("threadId") == thread_id]
+        active = max(candidates, key=lambda item: int(item.get("updatedAt") or 0), default=None)
         return dict(active) if active else None
 
 
@@ -6346,9 +6363,30 @@ def _codex_result_is_archived_session(result):
     return "is archived" in text and ("session" in text or "thread" in text or "codex unarchive" in text)
 
 
-def _codex_operation_lock(agent_id):
+def _codex_operation_lock(agent_id, conversation_id=""):
     with _CODEX_OPERATION_LOCKS_GUARD:
-        return _CODEX_OPERATION_LOCKS.setdefault(agent_id, threading.Lock())
+        return _CODEX_OPERATION_LOCKS.setdefault((str(agent_id or ""), str(conversation_id or "")), threading.Lock())
+
+
+def _release_codex_operation_lock(agent_id, conversation_id, lock):
+    lock.release()
+    key = (str(agent_id or ""), str(conversation_id or ""))
+    with _CODEX_OPERATION_LOCKS_GUARD:
+        if _CODEX_OPERATION_LOCKS.get(key) is lock and not lock.locked():
+            _CODEX_OPERATION_LOCKS.pop(key, None)
+
+
+def _codex_operation_is_locked(agent_id, conversation_id):
+    key = (str(agent_id or ""), str(conversation_id or ""))
+    with _CODEX_OPERATION_LOCKS_GUARD:
+        lock = _CODEX_OPERATION_LOCKS.get(key)
+        return bool(lock and lock.locked())
+
+
+def _codex_admission_diagnostics():
+    with _CODEX_OPERATION_LOCKS_GUARD:
+        active = sum(1 for lock in _CODEX_OPERATION_LOCKS.values() if lock.locked())
+        return {**_CODEX_ADMISSION_COUNTERS, "activeConversations": active, "trackedConversationLocks": len(_CODEX_OPERATION_LOCKS)}
 
 
 def _codex_idempotency_key(body):
@@ -6489,12 +6527,16 @@ def _handle_codex_chat(body):
         or _chat_source_metadata(body).get("sourceMessageId")
         or uuid.uuid4()
     ).strip()
-    operation_lock = _codex_operation_lock(agent_id)
+    operation_lock = _codex_operation_lock(agent_id, conversation_id)
     if not operation_lock.acquire(blocking=False):
-        active = _get_codex_active(agent_id) or {}
+        with _CODEX_OPERATION_LOCKS_GUARD:
+            _CODEX_ADMISSION_COUNTERS["busyByConversation"] += 1
+        active = _get_codex_active(agent_id, conversation_id) or {}
         return {
             "ok": False,
             "status": "busy",
+            "busyReason": "conversation",
+            "busyCode": "busy_by_conversation",
             "error": "Codex is already working. Wait for the current operation to finish.",
             "reply": "Codex is already working. Please wait.",
             "conversationId": conversation_id,
@@ -6502,6 +6544,8 @@ def _handle_codex_chat(body):
             "activeStatus": active.get("status", "running"),
             "_status": 409,
         }
+    with _CODEX_OPERATION_LOCKS_GUARD:
+        _CODEX_ADMISSION_COUNTERS["acceptedConversations"] += 1
     provider = _codex_provider_from_config()
     if body.get("_reviewReadOnly") is True:
         provider.sandbox = "read-only"
@@ -6514,13 +6558,13 @@ def _handle_codex_chat(body):
     try:
         validated_attachments = _validated_provider_attachments(body.get("attachments") or [])
     except (TypeError, ValueError, OSError) as exc:
-        operation_lock.release()
+        _release_codex_operation_lock(agent_id, conversation_id, operation_lock)
         return {"ok": False, "error": str(exc), "code": "invalid_attachment", "_status": 400}
     body = {**body, "attachments": validated_attachments}
     try:
         inbound_event = _append_codex_user_comm_event(agent, agent_id, conversation_id, message, body)
     except OSError as exc:
-        operation_lock.release()
+        _release_codex_operation_lock(agent_id, conversation_id, operation_lock)
         return {
             "ok": False,
             "status": "durable_write_failed",
@@ -6532,7 +6576,7 @@ def _handle_codex_chat(body):
     before_paths = _codex_git_paths(provider.workspace)
     allow_interaction = str(body.get("fromType") or "agent").lower() in {"human", "user", "chat", "ui"}
     with _CODEX_ACTIVE_LOCK:
-        _CODEX_ACTIVE_OPERATIONS[agent_id] = normalize_active_operation(
+        _CODEX_ACTIVE_OPERATIONS[(agent_id, conversation_id)] = normalize_active_operation(
             "codex",
             agent_id,
             conversation_id,
@@ -6668,14 +6712,14 @@ def _handle_codex_chat(body):
             "reply": "",
         }
     finally:
-        operation_lock.release()
+        _release_codex_operation_lock(agent_id, conversation_id, operation_lock)
     thread_id = str(result.get("threadId") or "")
     if thread_id:
         _set_codex_thread_id(agent_id, conversation_id, thread_id)
     after_paths = _codex_git_paths(provider.workspace)
     modified_files = collect_modified_files(result.get("modifiedFiles") or [], before_paths, after_paths)
     with _CODEX_ACTIVE_LOCK:
-        _CODEX_ACTIVE_OPERATIONS.pop(agent_id, None)
+        _CODEX_ACTIVE_OPERATIONS.pop((agent_id, conversation_id), None)
     normalized = normalize_provider_result(
         "codex",
         agent,
@@ -7003,7 +7047,7 @@ def _handle_codex_activity(query):
     after = int((query.get("after") or [0])[0] or 0)
     if not conversation_id:
         return {"ok": False, "error": "conversationId is required", "_status": 400}
-    active = _get_codex_active(agent_id)
+    active = _get_codex_active(agent_id, conversation_id)
     events = _get_codex_activity(agent_id, conversation_id, after)
     if not active or active.get("conversationId") != conversation_id:
         resolved = {
@@ -7036,7 +7080,7 @@ def _handle_codex_interaction(body):
     conversation_id = str(body.get("conversationId") or "")
     interaction_id = str(body.get("interactionId") or "")
     action = str(body.get("action") or "")
-    active = _get_codex_active(agent_id)
+    active = _get_codex_active(agent_id, conversation_id)
     if not active or active.get("conversationId") != conversation_id:
         return {"ok": False, "error": "No matching active Codex operation", "_status": 404}
     if not interaction_id or action not in {"accept", "acceptForSession", "decline", "cancel", "answer"}:
@@ -7058,7 +7102,11 @@ def _handle_codex_approval_pending(query_or_body=None):
     if not agent:
         return {"ok": False, "error": f"Codex agent '{agent_key}' not found", "_status": 404}
     profile = agent.get("profile") or agent.get("providerAgentId") or "local"
-    result = _codex_provider_from_config().pending_approval(profile)
+    conversation_id = str(_first(data.get("conversationId") or data.get("conversation_id"), "")).strip()
+    active = _get_codex_active(agent.get("id") or agent_key, conversation_id) if conversation_id else None
+    session_id = str((active or {}).get("threadId") or "")
+    provider = _codex_provider_from_config()
+    result = provider.pending_approval(profile, session_id) if session_id else provider.pending_approval(profile)
     result.setdefault("ok", True)
     result.setdefault("profile", profile)
     result.setdefault("agentId", agent.get("id") or agent_key)
@@ -7125,7 +7173,7 @@ def _codex_approval_conversation_id(body, approval, agent_id, session_id):
     conversation_id = str(body.get("conversationId") or body.get("conversation_id") or approval.get("conversationId") or approval.get("conversation_id") or "").strip()
     if conversation_id:
         return conversation_id
-    active = _get_codex_active(agent_id)
+    active = _get_codex_active(agent_id, thread_id=session_id)
     active_thread = str((active or {}).get("threadId") or "")
     if active and (not session_id or session_id == active_thread):
         return str(active.get("conversationId") or "")
@@ -7272,7 +7320,7 @@ def _handle_codex_approval_respond(body):
 def _handle_codex_cancel(body):
     agent_id = str(body.get("agentId") or "codex-local")
     conversation_id = str(body.get("conversationId") or "")
-    active = _get_codex_active(agent_id)
+    active = _get_codex_active(agent_id, conversation_id)
     if not active or (conversation_id and active.get("conversationId") != conversation_id):
         return {"ok": False, "error": "No matching active Codex operation", "_status": 404}
     provider = _codex_provider_from_config()
@@ -7292,7 +7340,7 @@ def _handle_codex_reset(body):
     if not conversation_id:
         return {"ok": False, "error": "conversationId is required", "_status": 400}
     agent_id = agent.get("id") or agent_key
-    if _codex_operation_lock(agent_id).locked():
+    if _codex_operation_is_locked(agent_id, conversation_id):
         return {"ok": False, "status": "busy", "error": "Codex is already working", "_status": 409}
     removed = _reset_codex_thread_id(agent_id, conversation_id)
     return {"ok": True, "reset": removed, "conversationId": conversation_id}
@@ -7310,7 +7358,7 @@ def _handle_codex_compact(body):
     thread_id = _get_codex_thread_id(agent_id, conversation_id)
     if not thread_id:
         return {"ok": False, "status": "not_found", "error": "No Codex context exists for this conversation", "_status": 404}
-    operation_lock = _codex_operation_lock(agent_id)
+    operation_lock = _codex_operation_lock(agent_id, conversation_id)
     if not operation_lock.acquire(blocking=False):
         return {"ok": False, "status": "busy", "error": "Codex is already working", "_status": 409}
     gateway_presence.set_manual_override(agent_id, "working", "Compressing Codex context")
@@ -7318,7 +7366,7 @@ def _handle_codex_compact(body):
         result = _codex_provider_from_config().compact_context(thread_id, int(body.get("timeoutSec") or 120))
     finally:
         gateway_presence.set_manual_override(agent_id, "idle", "")
-        operation_lock.release()
+        _release_codex_operation_lock(agent_id, conversation_id, operation_lock)
     event = _append_comm_event({
         "type": "operation",
         "operation": "context_compaction",
@@ -8212,9 +8260,10 @@ def _provider_pending_approval_snapshot(provider_kind, agent_id, conversation_id
     if provider_kind == "hermes":
         return _get_hermes_approval_pending(agent_id).get("pending")
     if provider_kind == "codex":
-        active = _get_codex_active(agent_id)
+        active = _get_codex_active(agent_id, conversation_id)
         if active and str(active.get("conversationId") or "") == conversation_id:
-            return _handle_codex_approval_pending({"agentId": agent_id}).get("pending")
+            pending = active.get("pending") if isinstance(active.get("pending"), dict) else None
+            return dict(pending) if pending else None
     return None
 
 
