@@ -2699,6 +2699,107 @@ def test_feishu_group_reply_uses_source_message_and_preserves_thread_without_fal
     assert [item[0] for item in reaction_deletes] == ["om_flat", "om_thread", "om_revoked", "om_timeout"]
 
 
+def test_feishu_source_message_index_is_atomic_persistent_and_not_window_bounded():
+    os.environ.setdefault("VO_HERMES_ENABLED", "0")
+    os.environ.setdefault("VO_CODEX_ENABLED", "0")
+    status_dir = tempfile.mkdtemp(prefix="vo-feishu-source-index-")
+    os.environ["VO_STATUS_DIR"] = status_dir
+    import server
+
+    previous_status_dir = server.STATUS_DIR
+    previous_config = server.VO_CONFIG
+    previous_dispatch = server._dispatch_representative_agent_message
+    server.STATUS_DIR = status_dir
+    server.VO_CONFIG = {
+        **previous_config,
+        "feishu": {
+            "chatApp": {
+                "enabled": True, "groupChatEnabled": True,
+                "appId": "cli_chat", "appSecret": "chat-secret",
+                "representativeAgentId": "agent-a", "transportImplementation": "channel-sdk-node",
+            },
+            "bindings": {},
+        },
+    }
+    dispatches = []
+    sends = []
+
+    def inbound(message_id):
+        return {
+            "event": {
+                "sender": {
+                    "sender_id": {"open_id": "ou_member"}, "sender_name": "Member",
+                    "sender_type": "user", "sender_is_bot": False,
+                },
+                "message": {
+                    "message_id": message_id, "chat_id": "oc_group_index", "chat_type": "group",
+                    "message_type": "text", "text": f"text:{message_id}",
+                    "mentions": [{"openId": "ou_vo", "name": "VO", "isBot": True}],
+                },
+            }
+        }
+
+    def fake_dispatch(agent_id, text, conversation_id, source_meta):
+        dispatches.append(source_meta["sourceMessageId"])
+        if source_meta["sourceMessageId"] == "om_agent_exception":
+            raise RuntimeError("provider crashed")
+        return {"ok": True, "reply": f"reply:{source_meta['sourceMessageId']}", "conversationId": conversation_id}
+
+    def fake_send(chat_id, text):
+        sends.append((chat_id, text))
+        return {"ok": True, "status": "sent", "messageId": f"reply-{len(sends)}"}
+
+    try:
+        server._dispatch_representative_agent_message = fake_dispatch
+        first = server._handle_feishu_chat_message_event(inbound("om_persistent"), send_text=fake_send)
+        duplicate_after_ack = server._handle_feishu_chat_message_event(inbound("om_persistent"), send_text=fake_send)
+        index_path = feishu_chat_channel.source_index_path(status_dir, "om_persistent")
+        indexed = feishu_chat_channel.load_source_index(status_dir, "om_persistent")
+
+        for index in range(600):
+            feishu_chat_channel.record_channel_event(
+                status_dir,
+                {"event": "turn_completed", "sourceMessageId": f"om_noise_{index}"},
+                now=lambda index=index: index,
+                lock=server._FEISHU_CHANNEL_RECORD_LOCK,
+            )
+        duplicate_outside_window = server._handle_feishu_chat_message_event(inbound("om_persistent"), send_text=fake_send)
+
+        os.remove(feishu_chat_channel.channel_record_path(status_dir))
+        duplicate_after_restart = server._handle_feishu_chat_message_event(inbound("om_persistent"), send_text=fake_send)
+
+        server._record_feishu_channel_event({
+            "event": "user_message", "sourceMessageId": "om_processing",
+            "conversationId": feishu_chat_channel.group_conversation_id("oc_group_index"),
+            "feishuChatId": "oc_group_index", "chatType": "group", "messageType": "text",
+            "representativeAgentId": "agent-a",
+        })
+        duplicate_while_processing = server._handle_feishu_chat_message_event(inbound("om_processing"), send_text=fake_send)
+        agent_exception = server._handle_feishu_chat_message_event(inbound("om_agent_exception"), send_text=fake_send)
+        exception_index = feishu_chat_channel.load_source_index(status_dir, "om_agent_exception")
+    finally:
+        server._dispatch_representative_agent_message = previous_dispatch
+        server.STATUS_DIR = previous_status_dir
+        server.VO_CONFIG = previous_config
+
+    assert first["status"] == "completed"
+    assert duplicate_after_ack["status"] == "duplicate"
+    assert duplicate_outside_window["status"] == "duplicate"
+    assert duplicate_after_restart["status"] == "duplicate"
+    assert duplicate_while_processing["status"] == "duplicate"
+    assert duplicate_while_processing["record"]["indexState"] == "processing"
+    assert dispatches == ["om_persistent", "om_agent_exception"]
+    assert len(sends) == 2
+    assert indexed["state"] == "completed"
+    assert indexed["record"]["reply"] == "reply:om_persistent"
+    assert os.stat(index_path).st_mode & 0o777 == 0o600
+    assert "om_persistent" not in os.path.basename(index_path)
+    assert not [name for name in os.listdir(feishu_chat_channel.source_index_dir(status_dir)) if name.endswith(".tmp")]
+    assert agent_exception["status"] == "agent_failed"
+    assert exception_index["state"] == "completed"
+    assert exception_index["record"]["agentResult"]["status"] == "agent_exception"
+
+
 def test_feishu_chat_worker_rejects_forged_and_oversized_v1_callbacks_without_secret_leakage():
     os.environ.setdefault("VO_HERMES_ENABLED", "0")
     os.environ.setdefault("VO_CODEX_ENABLED", "0")
@@ -3567,6 +3668,7 @@ if __name__ == "__main__":
     test_feishu_chat_worker_normalizes_rich_post_with_image_resource_as_multimodal_message()
     test_feishu_group_rejections_and_agent_failures_do_not_corrupt_shared_context()
     test_feishu_group_reply_uses_source_message_and_preserves_thread_without_fallback()
+    test_feishu_source_message_index_is_atomic_persistent_and_not_window_bounded()
     test_feishu_chat_inbound_test_route_dispatches_and_records()
     test_feishu_chat_self_test_route_dispatches_without_real_feishu_send()
     test_feishu_chat_bindings_config_is_persisted_and_lookupable()

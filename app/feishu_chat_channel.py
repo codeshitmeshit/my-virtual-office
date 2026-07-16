@@ -33,6 +33,73 @@ def channel_record_path(status_dir):
     return os.path.join(status_dir, "feishu-channel-records.jsonl")
 
 
+def source_index_dir(status_dir):
+    return os.path.join(status_dir, "feishu-source-message-index")
+
+
+def source_index_path(status_dir, source_message_id):
+    digest = hashlib.sha256(str(source_message_id or "").encode("utf-8")).hexdigest()
+    return os.path.join(source_index_dir(status_dir), f"{digest}.json")
+
+
+def load_source_index(status_dir, source_message_id):
+    source_message_id = str(source_message_id or "").strip()
+    if not source_message_id:
+        return None
+    try:
+        with open(source_index_path(status_dir, source_message_id), "r", encoding="utf-8") as f:
+            item = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return None
+    if not isinstance(item, dict) or item.get("sourceMessageId") != source_message_id:
+        return None
+    return item
+
+
+def save_source_index(status_dir, record, *, now, lock):
+    record = record if isinstance(record, dict) else {}
+    source_message_id = str(record.get("sourceMessageId") or "").strip()
+    event = str(record.get("event") or "").strip()
+    if not source_message_id or event not in {"user_message", "turn_completed"}:
+        return None
+    state = "completed" if event == "turn_completed" else "processing"
+    item = {
+        "schema": "vo.feishu-source-message-index/v1",
+        "sourceMessageId": source_message_id,
+        "state": state,
+        "updatedAt": now(),
+        "record": {
+            key: record.get(key)
+            for key in (
+                "id", "event", "sourceMessageId", "conversationId", "feishuChatId",
+                "representativeAgentId", "chatType", "messageType", "reply",
+                "feishuReply", "deliveryStatus", "sendResult", "agentResult",
+            )
+            if record.get(key) not in (None, "", [], {})
+        },
+    }
+    directory = source_index_dir(status_dir)
+    path = source_index_path(status_dir, source_message_id)
+    os.makedirs(directory, mode=0o700, exist_ok=True)
+    temp_path = f"{path}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
+    encoded = json.dumps(item, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n"
+    with lock:
+        try:
+            with open(temp_path, "w", encoding="utf-8") as f:
+                os.chmod(temp_path, 0o600)
+                f.write(encoded)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(temp_path, path)
+            os.chmod(path, 0o600)
+        finally:
+            try:
+                os.unlink(temp_path)
+            except FileNotFoundError:
+                pass
+    return item
+
+
 def record_channel_event(status_dir, record, *, now, lock):
     record = record if isinstance(record, dict) else {}
     item = {
@@ -288,6 +355,7 @@ def handle_message_event(
     cfg,
     bindings,
     load_records,
+    idempotency_hit,
     record_event,
     lock_for,
     dispatch_agent,
@@ -375,7 +443,7 @@ def handle_message_event(
     if not text:
         record = record_event({**base_record, "event": "ignored", "reason": "empty_text"})
         return {"ok": True, "status": "ignored_empty_text", "record": record}
-    hit = channel_idempotency_hit(load_records, source_message_id)
+    hit = idempotency_hit(source_message_id) if idempotency_hit else channel_idempotency_hit(load_records, source_message_id)
     if hit:
         return {"ok": True, "status": "duplicate", "idempotent": True, "record": hit, "reply": hit.get("reply") or ""}
     vo_user_id = find_bound_user(bindings, identity, chat_id) or channel_user_id(identity, chat_id)
@@ -397,7 +465,7 @@ def handle_message_event(
     conversation_id = group_conversation_id(chat_id) if chat_type == "group" else representative_conversation_id(vo_user_id, chat_id)
     lock = lock_for(conversation_id)
     with lock:
-        hit = channel_idempotency_hit(load_records, source_message_id)
+        hit = idempotency_hit(source_message_id) if idempotency_hit else channel_idempotency_hit(load_records, source_message_id)
         if hit:
             return {"ok": True, "status": "duplicate", "idempotent": True, "record": hit, "reply": hit.get("reply") or ""}
         inbound_record = record_event({
@@ -421,19 +489,23 @@ def handle_message_event(
             receipt_text = str((choose_receipt or random_ack_emoji)() or "").strip() or ACK_EMOJIS[0]
             receipt_result = _safe_channel_call(send_receipt, chat_id, receipt_text)
             receipt_message_id = _message_id_from_send_result(receipt_result)
-        result = dispatch_agent(
-            representative_agent_id,
-            text,
-            conversation_id,
-            {
-                "sourceMessageId": source_message_id,
-                "feishuChatId": chat_id,
-                "senderName": identity.get("name") or identity.get("openId") or identity.get("userId") or "Feishu User",
-                "sender": identity,
-                **projection,
-                "attachments": attachments,
-            },
-        )
+        try:
+            result = dispatch_agent(
+                representative_agent_id,
+                text,
+                conversation_id,
+                {
+                    "sourceMessageId": source_message_id,
+                    "feishuChatId": chat_id,
+                    "senderName": identity.get("name") or identity.get("openId") or identity.get("userId") or "Feishu User",
+                    "sender": identity,
+                    **projection,
+                    "attachments": attachments,
+                },
+            )
+        except Exception as exc:
+            result = {"ok": False, "status": "agent_exception", "error": str(exc)}
+        result = result if isinstance(result, dict) else {"ok": False, "status": "invalid_agent_result", "error": "Agent returned an invalid result"}
         reply = str(result.get("reply") or result.get("error") or "").strip() or "处理完成，但没有可发送的文本回复。"
         feishu_reply = representative_display_reply(representative_agent_id, reply, find_agent=find_agent)
         send_result = deliver(feishu_reply)

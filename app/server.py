@@ -12123,6 +12123,12 @@ def _record_feishu_channel_event(record):
         now=_exec_meeting_now,
         lock=_FEISHU_CHANNEL_RECORD_LOCK,
     )
+    feishu_chat_channel.save_source_index(
+        STATUS_DIR,
+        item,
+        now=_exec_meeting_now,
+        lock=_FEISHU_CHANNEL_RECORD_LOCK,
+    )
     _sync_feishu_channel_record_to_comm_ledger(item)
     return item
 
@@ -12267,7 +12273,19 @@ def _feishu_channel_records_response(limit=500):
 
 
 def _feishu_channel_idempotency_hit(source_message_id):
-    return feishu_chat_channel.channel_idempotency_hit(_load_feishu_channel_records, source_message_id)
+    indexed = feishu_chat_channel.load_source_index(STATUS_DIR, source_message_id)
+    if indexed:
+        record = indexed.get("record") if isinstance(indexed.get("record"), dict) else {}
+        return {**record, "sourceMessageId": source_message_id, "indexState": indexed.get("state") or ""}
+    hit = feishu_chat_channel.channel_idempotency_hit(_load_feishu_channel_records, source_message_id)
+    if hit:
+        feishu_chat_channel.save_source_index(
+            STATUS_DIR,
+            hit,
+            now=_exec_meeting_now,
+            lock=_FEISHU_CHANNEL_RECORD_LOCK,
+        )
+    return hit
 
 
 def _feishu_channel_lock(key):
@@ -12584,6 +12602,7 @@ def _handle_feishu_chat_message_event(body, *, send_text=None, reply_text=None, 
         cfg=_feishu_chat_app_config(),
         bindings=(VO_CONFIG.get("feishu") or {}).get("bindings") or {},
         load_records=_load_feishu_channel_records,
+        idempotency_hit=_feishu_channel_idempotency_hit,
         record_event=_record_feishu_channel_event,
         lock_for=_feishu_channel_lock,
         dispatch_agent=_dispatch_representative_agent_message,

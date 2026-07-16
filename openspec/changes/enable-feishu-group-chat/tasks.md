@@ -16,7 +16,7 @@
 
 ## 4. Durability, Ordering, and Capacity
 
-- [ ] 4.1 Audit the existing bounded channel-record and communication-ledger lookup against cross-restart source-message idempotency; add a compact atomic status-directory source-ID index only if required, then fault-test duplicate delivery before/after acknowledgement and restart so one source message creates at most one provider turn and one authoritative reply outcome without an O(N) hot-path scan.
+- [x] 4.1 Audit the existing bounded channel-record and communication-ledger lookup against cross-restart source-message idempotency; add a compact atomic status-directory source-ID index only if required, then fault-test duplicate delivery before/after acknowledgement and restart so one source message creates at most one provider turn and one authoritative reply outcome without an O(N) hot-path scan.
 - [ ] 4.2 Prove deterministic same-group ordering and independent cross-group progress under the existing conversation locks, global callback limit 16, per-chat depth 20, spool pressure/full behavior, slow Agent, callback retry, and shutdown/restart; add observable accepted/ignored/duplicate/Agent/delivery/pressure counters and verify bounded memory, threads, queue, spool, and rate-limited logs.
 
 ## 5. Audit, History, and SSE Isolation
