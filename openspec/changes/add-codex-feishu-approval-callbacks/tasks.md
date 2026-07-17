@@ -4,7 +4,7 @@
 
 ## 2. Add durable Codex approval routing state
 
-- [ ] 2.1 Implement a bounded, TTL-pruned Codex Feishu approval route repository and coordinator-domain state transitions for register, delivery attempts, durable claim, commit, replay, failure, expiry, and delivery references, with concurrency and recovery tests that prove provider decisions are at most once.
+- [x] 2.1 Implement a bounded, TTL-pruned Codex Feishu approval route repository and coordinator-domain state transitions for register, delivery attempts, durable claim, commit, replay, failure, expiry, and delivery references, with concurrency and recovery tests that prove provider decisions are at most once.
 
 ## 3. Build approval intents and primary/fallback routing
 
