@@ -74,6 +74,7 @@ class CodexFeishuApprovalRouteStore:
         self._token_factory = token_factory or (lambda: uuid.uuid4().hex)
         self._lock = threading.RLock()
         self._records: dict[str, dict[str, Any]] = {}
+        self.startup_reconciled_route_ids: list[str] = []
         self._load_and_reconcile()
 
     @staticmethod
@@ -156,7 +157,7 @@ class CodexFeishuApprovalRouteStore:
         safe.setdefault("createdAt", now)
         with self._lock:
             current = self._records.get(str(route_id or "").strip())
-            if not current or current.get("status") in TERMINAL_STATES:
+            if not current:
                 return self._public(current)
             deliveries = list(current.get("deliveries") or [])
             attempt_id = str(safe.get("attemptId") or "").strip()
@@ -164,6 +165,10 @@ class CodexFeishuApprovalRouteStore:
                 return self._public(current)
             deliveries.append(safe)
             current["deliveries"] = deliveries[-self.max_deliveries :]
+            if current.get("status") in TERMINAL_STATES:
+                current["updatedAt"] = now
+                self._write_locked(now)
+                return self._public(current)
             delivered = bool(safe.get("ok")) and str(safe.get("status") or "") in {"sent", "delivered"}
             current.update({"status": "delivered" if delivered else "delivering", "updatedAt": now})
             self._write_locked(now)
@@ -285,11 +290,22 @@ class CodexFeishuApprovalRouteStore:
                     "resolvedAt": now,
                     "updatedAt": now,
                 })
+                self.startup_reconciled_route_ids.append(str(current.get("routeId") or ""))
                 changed += 1
             changed += self._prune_locked(now)
             if changed:
                 self._write_locked(now)
         return changed
+
+    def records(self, route_ids: list[str] | None = None) -> list[dict[str, Any]]:
+        with self._lock:
+            self._prune_and_write_locked(self._clock_ms())
+            selected = set(route_ids or [])
+            return [
+                self._public(record) or {}
+                for route_id, record in self._records.items()
+                if not selected or route_id in selected
+            ]
 
     def stats(self) -> dict[str, int]:
         with self._lock:
@@ -460,13 +476,27 @@ class CodexFeishuApprovalCoordinator:
         store: CodexFeishuApprovalRouteStore,
         *,
         send_notification: Callable[..., Mapping[str, Any]],
+        update_notification: Callable[..., Mapping[str, Any]] | None = None,
         status_dir: str = "",
         attempt_id_factory: Callable[[], str] | None = None,
     ) -> None:
         self.store = store
         self._send_notification = send_notification
+        self._update_notification = update_notification
         self.status_dir = str(status_dir or "")
         self._attempt_id_factory = attempt_id_factory or (lambda: uuid.uuid4().hex)
+        self._metrics_lock = threading.Lock()
+        self._metrics: dict[str, int] = {}
+
+    def metric(self, name: str, amount: int = 1) -> None:
+        key = str(name or "unknown")[:80]
+        with self._metrics_lock:
+            self._metrics[key] = self._metrics.get(key, 0) + max(0, int(amount))
+
+    def stats(self) -> dict[str, Any]:
+        with self._metrics_lock:
+            metrics = dict(self._metrics)
+        return {"routes": self.store.stats(), "metrics": metrics}
 
     @staticmethod
     def freeze_origin(context: Mapping[str, Any]) -> dict[str, Any]:
@@ -586,7 +616,10 @@ class CodexFeishuApprovalCoordinator:
             **origin,
         }
         record["intent"] = self.intent_for(record)
-        return self.store.register(record)
+        result = self.store.register(record)
+        if result[1]:
+            self.metric("eligible")
+        return result
 
     @staticmethod
     def _notification_target(record: Mapping[str, Any], notification_config: Mapping[str, Any], chat_config: Mapping[str, Any]) -> tuple[str, str]:
@@ -617,8 +650,17 @@ class CodexFeishuApprovalCoordinator:
         receive_id: str,
     ) -> dict[str, Any]:
         attempt_id = self._attempt_id_factory()
+        intent = {
+            **(record.get("intent") or self.intent_for(record)),
+            "audit": {
+                "routeId": record.get("routeId") or "",
+                "attemptId": attempt_id,
+                "application": application,
+                "operation": "send",
+            },
+        }
         result = dict(self._send_notification(
-            record.get("intent") or self.intent_for(record),
+            intent,
             webhook_url=None,
             app_config={
                 "appId": app_config.get("appId") or "",
@@ -641,7 +683,36 @@ class CodexFeishuApprovalCoordinator:
             "ambiguous": ambiguous,
             "errorCategory": result.get("errorCategory") or result.get("code") or "",
         }
-        self.store.record_delivery(str(record.get("routeId") or ""), delivery)
+        stored = self.store.record_delivery(str(record.get("routeId") or ""), delivery)
+        self.metric(f"{application}_attempt")
+        self.metric(f"{application}_{'success' if sent else 'failure'}")
+        if ambiguous:
+            self.metric(f"{application}_ambiguous")
+        if sent and stored and stored.get("status") in TERMINAL_STATES and callable(self._update_notification):
+            if stored.get("status") == "failed":
+                state = "no_longer_actionable"
+            elif stored.get("status") == "expired":
+                state = "expired"
+            else:
+                state = "approved" if stored.get("decision") == "approve" else "cancelled"
+            try:
+                late_update = self._update_notification(
+                    str(delivery.get("messageId") or ""),
+                    {
+                        **self.intent_for(stored, state=state, include_actions=False),
+                        "audit": {
+                            "routeId": stored.get("routeId") or "",
+                            "attemptId": attempt_id,
+                            "application": application,
+                            "operation": "late_update",
+                        },
+                    },
+                    app_config={"appId": app_config.get("appId") or "", "appSecret": app_config.get("appSecret") or ""},
+                    status_dir=self.status_dir or None,
+                )
+                self.metric("stale_card_update_success" if late_update.get("ok") else "stale_card_update_failure")
+            except Exception:
+                self.metric("stale_card_update_failure")
         return {"application": application, "attemptId": attempt_id, "sent": sent, "ambiguous": ambiguous, "result": result}
 
     def deliver(
@@ -684,3 +755,79 @@ class CodexFeishuApprovalCoordinator:
             if fallback["sent"]:
                 return {"ok": True, "status": "sent", "routeId": route_id, "application": "chat", "attempts": attempts}
         return {"ok": False, "status": "undeliverable", "routeId": route_id, "attempts": attempts}
+
+    def update_cards(
+        self,
+        route_id: str,
+        *,
+        state: str,
+        notification_config: Mapping[str, Any] | None = None,
+        chat_config: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        record = self.store.get(route_id)
+        if not record:
+            return {"ok": False, "status": "route_unavailable", "routeId": route_id, "results": []}
+        if not callable(self._update_notification):
+            return {"ok": False, "status": "update_unavailable", "routeId": route_id, "results": []}
+        notification_config = notification_config or {}
+        chat_config = chat_config or {}
+        base_intent = self.intent_for(record, state=state, include_actions=False)
+        results = []
+        for delivery in record.get("deliveries") or []:
+            if not isinstance(delivery, Mapping) or not delivery.get("messageId"):
+                continue
+            application = str(delivery.get("application") or "")
+            app_config = notification_config if application == "notification" else chat_config
+            intent = {
+                **base_intent,
+                "audit": {
+                    "routeId": route_id,
+                    "attemptId": delivery.get("attemptId") or "",
+                    "application": application,
+                    "operation": "update",
+                },
+            }
+            try:
+                result = dict(self._update_notification(
+                    str(delivery.get("messageId") or ""),
+                    intent,
+                    app_config={"appId": app_config.get("appId") or "", "appSecret": app_config.get("appSecret") or ""},
+                    status_dir=self.status_dir or None,
+                ))
+            except Exception as exc:
+                result = {"ok": False, "status": "update_error", "errorCategory": type(exc).__name__[:80]}
+            results.append({
+                "application": application,
+                "attemptId": delivery.get("attemptId") or "",
+                "messageId": delivery.get("messageId") or "",
+                "ok": bool(result.get("ok")),
+                "status": str(result.get("status") or "")[:80],
+            })
+            self.metric("card_update_success" if result.get("ok") else "card_update_failure")
+        return {
+            "ok": all(item.get("ok") for item in results) if results else True,
+            "status": "updated" if results and all(item.get("ok") for item in results) else ("partial_failure" if results else "no_known_cards"),
+            "routeId": route_id,
+            "results": results,
+        }
+
+    def reconcile_startup_cards(
+        self,
+        *,
+        notification_config: Mapping[str, Any] | None = None,
+        chat_config: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        route_ids = list(dict.fromkeys(self.store.startup_reconciled_route_ids))
+        results = []
+        for record in self.store.records(route_ids):
+            if record.get("status") != "expired":
+                continue
+            results.append(self.update_cards(
+                str(record.get("routeId") or ""),
+                state="expired",
+                notification_config=notification_config,
+                chat_config=chat_config,
+            ))
+        if route_ids:
+            self.metric("recovery_expired", len(route_ids))
+        return {"ok": all(item.get("ok") for item in results), "attempted": len(results), "results": results}

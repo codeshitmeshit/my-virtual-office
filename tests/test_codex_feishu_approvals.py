@@ -339,3 +339,85 @@ def test_bounded_delivery_executor_enforces_saturation_deadline_and_one_failure(
     time.sleep(0.05)
     assert len(failures) == 1
     executor.shutdown(wait=True)
+
+
+def test_terminal_card_updates_fan_out_and_failures_do_not_change_decision(tmp_path):
+    updates = []
+
+    def updater(message_id, intent, **kwargs):
+        updates.append((message_id, intent, kwargs))
+        return {"ok": message_id != "om_primary", "status": "updated" if message_id != "om_primary" else "network_error"}
+
+    store = CodexFeishuApprovalRouteStore(str(tmp_path / "routes.json"), token_factory=lambda: "decision-claim")
+    service = CodexFeishuApprovalCoordinator(store, send_notification=FakeNotificationSender([]), update_notification=updater)
+    record, _ = service.register(approval(), feishu_context())
+    store.record_delivery(record["routeId"], {
+        "attemptId": "primary-ambiguous", "application": "notification", "status": "network_error",
+        "ok": False, "ambiguous": True, "messageId": "om_primary",
+    })
+    store.record_delivery(record["routeId"], {
+        "attemptId": "fallback-sent", "application": "chat", "status": "sent", "ok": True,
+        "messageId": "om_fallback",
+    })
+    claim = store.claim(record["routeId"], "approve", {"openId": "ou_origin"})
+    assert store.commit(record["routeId"], claim.token, {"ok": True, "status": "submitted"}).claimed is True
+
+    result = service.update_cards(
+        record["routeId"], state="approved",
+        notification_config={"appId": "notification-app", "appSecret": "notification-secret"},
+        chat_config={"appId": "chat-app", "appSecret": "chat-secret"},
+    )
+    assert result["ok"] is False
+    assert result["status"] == "partial_failure"
+    assert [item[0] for item in updates] == ["om_primary", "om_fallback"]
+    assert all(item[1]["state"] == "approved" and item[1]["actions"] == [] for item in updates)
+    assert store.get(record["routeId"])["status"] == "resolved"
+    assert service.stats()["metrics"]["card_update_failure"] == 1
+
+
+def test_late_card_and_startup_uncertain_claim_are_made_non_actionable(tmp_path):
+    late_updates = []
+    sender = FakeNotificationSender([{"ok": True, "status": "sent", "channel": "app", "messageId": "om_late"}])
+    store = CodexFeishuApprovalRouteStore(str(tmp_path / "late-routes.json"), token_factory=lambda: "late-claim")
+    service = CodexFeishuApprovalCoordinator(
+        store,
+        send_notification=sender,
+        update_notification=lambda message_id, intent, **kwargs: late_updates.append((message_id, intent)) or {"ok": True, "status": "updated"},
+    )
+    record, _ = service.register(approval(), feishu_context())
+    store.begin_delivery(record["routeId"])
+    claim = store.claim_system(record["routeId"], "cancel")
+    store.commit(record["routeId"], claim.token, {"ok": False, "status": "approval_delivery_failed"}, terminal_status="failed")
+    service._attempt(
+        record,
+        application="chat",
+        app_config={"appId": "chat-app", "appSecret": "chat-secret"},
+        receive_id_type="chat_id",
+        receive_id="oc_origin",
+    )
+    assert late_updates[0][0] == "om_late"
+    assert late_updates[0][1]["state"] == "no_longer_actionable"
+    assert late_updates[0][1]["actions"] == []
+
+    recovery_path = tmp_path / "recovery-routes.json"
+    recovering = CodexFeishuApprovalRouteStore(str(recovery_path), token_factory=lambda: "uncertain")
+    recovering.register(route("route-recovery", "approval-recovery"))
+    recovering.record_delivery("route-recovery", {
+        "attemptId": "recovery-delivery", "application": "notification", "status": "sent", "ok": True,
+        "messageId": "om_recovery",
+    })
+    recovering.claim("route-recovery", "approve", {"openId": "ou_origin"})
+    reloaded = CodexFeishuApprovalRouteStore(str(recovery_path))
+    recovery_updates = []
+    recovery_service = CodexFeishuApprovalCoordinator(
+        reloaded,
+        send_notification=FakeNotificationSender([]),
+        update_notification=lambda message_id, intent, **kwargs: recovery_updates.append((message_id, intent)) or {"ok": True, "status": "updated"},
+    )
+    result = recovery_service.reconcile_startup_cards(
+        notification_config={"appId": "notification-app", "appSecret": "secret"},
+        chat_config={"appId": "chat-app", "appSecret": "secret"},
+    )
+    assert result["ok"] is True and result["attempted"] == 1
+    assert recovery_updates[0][0] == "om_recovery"
+    assert recovery_updates[0][1]["state"] == "expired"

@@ -323,3 +323,22 @@ def test_saturated_delivery_queue_cancels_registered_approval_once(tmp_path, mon
     assert calls == [("local", "approval-saturated", "cancel", "thread-saturated")]
     assert failure_state["reason"] == "queue_saturated"
     assert store.get(failure_state["routeId"])["status"] == "failed"
+
+
+def test_card_action_audit_is_route_linked_and_rotated(tmp_path, monkeypatch):
+    monkeypatch.setenv("VO_FEISHU_AUDIT_MAX_BYTES", "512")
+    monkeypatch.setenv("VO_FEISHU_AUDIT_BACKUPS", "2")
+    monkeypatch.setattr(server, "STATUS_DIR", str(tmp_path))
+    for index in range(20):
+        server._record_feishu_card_action(
+            {"schema": "2.0", "header": {"event_type": "card.action.trigger"}},
+            card_body(route_id="route-audit")["event"],
+            {"action": "codex_approval_once", "route_id": "route-audit", "padding": "x" * 120},
+            outcome={"businessStatus": f"replay-{index}"},
+        )
+    path = tmp_path / "feishu-card-actions.jsonl"
+    assert path.exists()
+    assert (tmp_path / "feishu-card-actions.jsonl.1").exists()
+    with open(path, "r", encoding="utf-8") as stream:
+        rows = [json.loads(line) for line in stream if line.strip()]
+    assert rows[-1]["routeId"] == "route-audit"

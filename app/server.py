@@ -73,7 +73,7 @@ from provider_execution import (
     normalize_provider_result,
     provider_http_status,
 )
-from feishu_notifications import add_feishu_message_reaction, delete_feishu_message_reaction, download_feishu_message_resource, recall_feishu_message, send_feishu_markdown_message, send_feishu_notification, send_feishu_text_message
+from feishu_notifications import add_feishu_message_reaction, delete_feishu_message_reaction, download_feishu_message_resource, recall_feishu_message, send_feishu_markdown_message, send_feishu_notification, send_feishu_text_message, update_feishu_notification
 from feishu_long_connection import FeishuLongConnectionReceiver
 
 
@@ -84,6 +84,7 @@ _FEISHU_CHAT_LONG_CONNECTION_LOCK = threading.Lock()
 _FEISHU_CHANNEL_LOCKS = {}
 _FEISHU_CHANNEL_LOCKS_LOCK = threading.Lock()
 _FEISHU_CHANNEL_RECORD_LOCK = threading.Lock()
+_FEISHU_CARD_ACTION_RECORD_LOCK = threading.Lock()
 _FEISHU_PROCESS_OWNER_ID = uuid.uuid4().hex
 _FEISHU_ACTIVE_SOURCE_MESSAGES = set()
 _FEISHU_ACTIVE_SOURCE_MESSAGES_LOCK = threading.Lock()
@@ -4386,6 +4387,7 @@ CODEX_FEISHU_APPROVAL_ROUTES = CodexFeishuApprovalRouteStore(
 CODEX_FEISHU_APPROVAL_COORDINATOR = CodexFeishuApprovalCoordinator(
     CODEX_FEISHU_APPROVAL_ROUTES,
     send_notification=send_feishu_notification,
+    update_notification=update_feishu_notification,
     status_dir=STATUS_DIR,
 )
 
@@ -6857,6 +6859,36 @@ def _codex_feishu_approval_delivery_configs():
     return notification_config, chat_config
 
 
+def _schedule_codex_feishu_card_updates(route_id, state):
+    if CODEX_FEISHU_APPROVAL_COORDINATOR.store is not CODEX_FEISHU_APPROVAL_ROUTES:
+        return False
+    notification_config, chat_config = _codex_feishu_approval_delivery_configs()
+
+    def note_failure(_reason, _result):
+        CODEX_FEISHU_APPROVAL_COORDINATOR.metric("card_update_job_failure")
+
+    accepted = CODEX_FEISHU_APPROVAL_DELIVERY_EXECUTOR.submit(
+        lambda: CODEX_FEISHU_APPROVAL_COORDINATOR.update_cards(
+            route_id,
+            state=state,
+            notification_config=notification_config,
+            chat_config=chat_config,
+        ),
+        note_failure,
+    )
+    if not accepted:
+        CODEX_FEISHU_APPROVAL_COORDINATOR.metric("card_update_queue_saturation")
+    return accepted
+
+
+def _reconcile_codex_feishu_approval_cards_on_startup():
+    notification_config, chat_config = _codex_feishu_approval_delivery_configs()
+    return CODEX_FEISHU_APPROVAL_COORDINATOR.reconcile_startup_cards(
+        notification_config=notification_config,
+        chat_config=chat_config,
+    )
+
+
 def _queue_codex_feishu_approval(approval, context, provider, failure_state):
     """Register and asynchronously deliver one approval from a live turn."""
     failure_lock = failure_state.setdefault("_lock", threading.Lock())
@@ -6866,6 +6898,7 @@ def _queue_codex_feishu_approval(approval, context, provider, failure_state):
         route, _created = CODEX_FEISHU_APPROVAL_COORDINATOR.register(approval, context)
     except (ValueError, OverflowError, OSError) as exc:
         failure_state["registrationError"] = type(exc).__name__[:80]
+        CODEX_FEISHU_APPROVAL_COORDINATOR.metric("registration_failure")
 
     def close_wait(reason, delivery_result=None):
         nonlocal route
@@ -6885,6 +6918,7 @@ def _queue_codex_feishu_approval(approval, context, provider, failure_state):
                 "reason": str(reason or "undeliverable")[:80],
                 "routeId": (route or {}).get("routeId") or "",
             })
+        CODEX_FEISHU_APPROVAL_COORDINATOR.metric(f"delivery_closure_{str(reason or 'undeliverable')[:40]}")
         try:
             provider_result = provider.respond_approval(
                 str((route or approval).get("profile") or ""),
@@ -6905,12 +6939,15 @@ def _queue_codex_feishu_approval(approval, context, provider, failure_state):
         if delivery_result:
             outcome["deliveryStatus"] = str(delivery_result.get("status") or "")[:80]
         if route and claim and claim.claimed:
-            CODEX_FEISHU_APPROVAL_ROUTES.commit(
+            committed = CODEX_FEISHU_APPROVAL_ROUTES.commit(
                 route.get("routeId") or "",
                 claim.token,
                 outcome,
                 terminal_status="failed",
             )
+            if committed.claimed:
+                CODEX_FEISHU_APPROVAL_COORDINATOR.metric("delivery_closure")
+                _schedule_codex_feishu_card_updates(route.get("routeId") or "", "no_longer_actionable")
 
     if not route:
         timer = threading.Timer(0, close_wait, args=("unroutable_origin", None))
@@ -6928,6 +6965,7 @@ def _queue_codex_feishu_approval(approval, context, provider, failure_state):
         close_wait,
     )
     if not accepted:
+        CODEX_FEISHU_APPROVAL_COORDINATOR.metric("queue_saturation")
         timer = threading.Timer(0, close_wait, args=("queue_saturated", None))
         timer.daemon = True
         timer.start()
@@ -12802,6 +12840,7 @@ def _record_feishu_card_action(body, event, value, outcome=None):
         "type": str(body.get("type") or body.get("header", {}).get("event_type") or ""),
         "action": str(value.get("action") or value.get("action_category") or ""),
         "notificationId": str(value.get("notification_id") or ""),
+        "routeId": str(value.get("route_id") or value.get("routeId") or ""),
         "requestId": str(value.get("request_id") or ""),
         "user": _feishu_card_action_user(event),
         "messageId": str(event.get("open_message_id") or event.get("message_id") or ""),
@@ -12810,9 +12849,28 @@ def _record_feishu_card_action(body, event, value, outcome=None):
     }
     if isinstance(outcome, dict):
         record["outcome"] = meeting_notifications_service.sanitize(outcome)
-    os.makedirs(os.path.dirname(_feishu_card_action_log_path()), exist_ok=True)
-    with open(_feishu_card_action_log_path(), "a", encoding="utf-8") as f:
-        f.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
+    path = _feishu_card_action_log_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    line = json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n"
+    try:
+        max_bytes = max(512, min(int(os.environ.get("VO_FEISHU_AUDIT_MAX_BYTES", 5 * 1024 * 1024)), 100 * 1024 * 1024))
+        backups = max(1, min(int(os.environ.get("VO_FEISHU_AUDIT_BACKUPS", 3)), 10))
+    except (TypeError, ValueError):
+        max_bytes, backups = 5 * 1024 * 1024, 3
+    with _FEISHU_CARD_ACTION_RECORD_LOCK:
+        current_size = os.path.getsize(path) if os.path.exists(path) else 0
+        if current_size and current_size + len(line.encode("utf-8")) > max_bytes:
+            try:
+                os.unlink(f"{path}.{backups}")
+            except FileNotFoundError:
+                pass
+            for index in range(backups - 1, 0, -1):
+                source = f"{path}.{index}"
+                if os.path.exists(source):
+                    os.replace(source, f"{path}.{index + 1}")
+            os.replace(path, f"{path}.1")
+        with open(path, "a", encoding="utf-8") as stream:
+            stream.write(line)
     return record
 
 
@@ -12982,6 +13040,7 @@ def _dispatch_feishu_codex_approval_action(action, value, event):
         }
     record = CODEX_FEISHU_APPROVAL_ROUTES.get(route_id)
     if not record or not _codex_feishu_callback_message_matches(record, event):
+        CODEX_FEISHU_APPROVAL_COORDINATOR.metric("callback_rejected")
         return {
             "handled": True,
             "ok": False,
@@ -12992,6 +13051,7 @@ def _dispatch_feishu_codex_approval_action(action, value, event):
     decision = decisions[action]
     claim = CODEX_FEISHU_APPROVAL_ROUTES.claim(route_id, decision, actor)
     if claim.unauthorized:
+        CODEX_FEISHU_APPROVAL_COORDINATOR.metric("callback_rejected")
         return {
             "handled": True,
             "ok": False,
@@ -12999,6 +13059,7 @@ def _dispatch_feishu_codex_approval_action(action, value, event):
             "toast": _feishu_card_action_error("你不能处理这条审批"),
         }
     if claim.replay:
+        CODEX_FEISHU_APPROVAL_COORDINATOR.metric("callback_replay")
         return {
             "handled": True,
             "ok": True,
@@ -13009,6 +13070,7 @@ def _dispatch_feishu_codex_approval_action(action, value, event):
             "toast": _feishu_card_action_success("审批已处理，结果未改变"),
         }
     if claim.busy:
+        CODEX_FEISHU_APPROVAL_COORDINATOR.metric("callback_busy")
         return {
             "handled": True,
             "ok": True,
@@ -13018,6 +13080,7 @@ def _dispatch_feishu_codex_approval_action(action, value, event):
             "toast": _feishu_card_action_success("审批处理中（已收到）"),
         }
     if claim.stale or not claim.claimed:
+        CODEX_FEISHU_APPROVAL_COORDINATOR.metric("callback_rejected")
         return {
             "handled": True,
             "ok": False,
@@ -13066,6 +13129,7 @@ def _dispatch_feishu_codex_approval_action(action, value, event):
     }
     committed = CODEX_FEISHU_APPROVAL_ROUTES.commit(route_id, claim.token, safe_outcome)
     if not committed.claimed:
+        CODEX_FEISHU_APPROVAL_COORDINATOR.metric("provider_resolution_failure")
         return {
             "handled": True,
             "ok": False,
@@ -13073,6 +13137,12 @@ def _dispatch_feishu_codex_approval_action(action, value, event):
             "routeId": route_id,
             "toast": _feishu_card_action_error("审批结果保存失败，请勿重复操作"),
         }
+    CODEX_FEISHU_APPROVAL_COORDINATOR.metric("callback_accepted")
+    CODEX_FEISHU_APPROVAL_COORDINATOR.metric("provider_resolution")
+    _schedule_codex_feishu_card_updates(
+        route_id,
+        ("approved" if decision == "approve" else "cancelled") if safe_outcome["ok"] else "no_longer_actionable",
+    )
     if safe_outcome["ok"]:
         return {
             "handled": True,
@@ -27068,6 +27138,16 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(json.dumps(result).encode())
+        elif request_path == "/api/codex/feishu-approvals/status":
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(json.dumps({
+                "ok": True,
+                "enabled": _codex_feishu_approval_cards_enabled(),
+                **CODEX_FEISHU_APPROVAL_COORDINATOR.stats(),
+            }).encode())
         elif request_path.startswith("/api/codex/runs/") and request_path.endswith("/events"):
             run_id = urllib.parse.unquote(request_path[len("/api/codex/runs/"):-len("/events")].strip("/"))
             _handle_codex_run_events(self, run_id)
@@ -34161,6 +34241,12 @@ if __name__ == "__main__":
     print(f"📣 Feishu long connection: {feishu_status.get('status')}")
     feishu_chat_status = _start_feishu_chat_long_connection()
     print(f"💬 Feishu chat long connection: {feishu_chat_status.get('status')}")
+    approval_reconcile_thread = threading.Thread(
+        target=_reconcile_codex_feishu_approval_cards_on_startup,
+        daemon=True,
+        name="codex-feishu-approval-reconcile",
+    )
+    approval_reconcile_thread.start()
 
     # Start HTTP server in main thread
     start_http_server()

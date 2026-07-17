@@ -387,6 +387,7 @@ def validate_notification_intent(intent: dict[str, Any]) -> dict[str, Any]:
             "value": value,
         })
 
+    audit = intent.get("audit") if isinstance(intent.get("audit"), dict) else {}
     return {
         "id": _string(intent.get("id") or str(uuid.uuid4()), 120),
         "type": kind,
@@ -402,6 +403,11 @@ def validate_notification_intent(intent: dict[str, Any]) -> dict[str, Any]:
         "inputs": inputs,
         "actions": actions,
         "diagnostic": redact_sensitive(intent.get("diagnostic") or ""),
+        "audit": {
+            key: _string(audit.get(key) or "", 240)
+            for key in ("routeId", "attemptId", "application", "operation")
+            if audit.get(key)
+        },
     }
 
 
@@ -472,6 +478,29 @@ def _secret_fingerprint(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()[:12]
 
 
+def _append_bounded_record(path: str, record: dict[str, Any]) -> None:
+    line = json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n"
+    try:
+        max_bytes = max(512, min(int(os.environ.get("VO_FEISHU_AUDIT_MAX_BYTES", 5 * 1024 * 1024)), 100 * 1024 * 1024))
+        backups = max(1, min(int(os.environ.get("VO_FEISHU_AUDIT_BACKUPS", 3)), 10))
+    except (TypeError, ValueError):
+        max_bytes, backups = 5 * 1024 * 1024, 3
+    current_size = os.path.getsize(path) if os.path.exists(path) else 0
+    if current_size and current_size + len(line.encode("utf-8")) > max_bytes:
+        oldest = f"{path}.{backups}"
+        try:
+            os.unlink(oldest)
+        except FileNotFoundError:
+            pass
+        for index in range(backups - 1, 0, -1):
+            source = f"{path}.{index}"
+            if os.path.exists(source):
+                os.replace(source, f"{path}.{index + 1}")
+        os.replace(path, f"{path}.1")
+    with open(path, "a", encoding="utf-8") as stream:
+        stream.write(line)
+
+
 def record_feishu_notification(intent: dict[str, Any], result: dict[str, Any], status_dir: str | None = None) -> dict[str, Any]:
     normalized = validate_notification_intent(intent)
     record = {
@@ -488,12 +517,15 @@ def record_feishu_notification(intent: dict[str, Any], result: dict[str, Any], s
         "appFingerprint": _string(result.get("appFingerprint") or "", 40),
         "channel": _string(result.get("channel") or "", 40),
         "messageId": _string(result.get("messageId") or "", 300),
+        "routeId": _string((normalized.get("audit") or {}).get("routeId") or "", 240),
+        "attemptId": _string((normalized.get("audit") or {}).get("attemptId") or "", 240),
+        "application": _string((normalized.get("audit") or {}).get("application") or "", 80),
+        "operation": _string((normalized.get("audit") or {}).get("operation") or "send", 80),
     }
     path = _record_path(status_dir)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with _RECORD_LOCK:
-        with open(path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
+        _append_bounded_record(path, record)
     return record
 
 
@@ -516,8 +548,7 @@ def _record_invalid_notification(intent: dict[str, Any], result: dict[str, Any],
     path = _record_path(status_dir)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with _RECORD_LOCK:
-        with open(path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
+        _append_bounded_record(path, record)
     return record
 
 

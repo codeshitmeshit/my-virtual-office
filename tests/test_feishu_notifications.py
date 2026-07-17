@@ -16,6 +16,7 @@ if APP_DIR not in sys.path:
 from feishu_notifications import (  # noqa: E402
     FeishuNotificationError,
     build_feishu_card,
+    record_feishu_notification,
     send_feishu_markdown_message,
     send_feishu_notification,
     send_feishu_text_message,
@@ -33,6 +34,35 @@ def base_intent(kind="notification"):
         "related": {"type": "task", "id": "task-1", "title": "Demo task"},
         "details": {"项目": "Demo", "状态": "Ready"},
     }
+
+
+def test_notification_audit_rotates_at_bounded_size(tmp_path, monkeypatch):
+    monkeypatch.setenv("VO_FEISHU_AUDIT_MAX_BYTES", "512")
+    monkeypatch.setenv("VO_FEISHU_AUDIT_BACKUPS", "2")
+    intent = {
+        **base_intent(),
+        "id": "codex-feishu-approval-route-audit",
+        "target": "feishu-codex-approval",
+        "audit": {
+            "routeId": "route-audit", "attemptId": "attempt-audit",
+            "application": "notification", "operation": "send",
+        },
+    }
+    for index in range(20):
+        record_feishu_notification(intent, {
+            "ok": False,
+            "status": "network_error",
+            "error": f"bounded audit failure {index} " + ("x" * 120),
+            "channel": "app",
+        }, str(tmp_path))
+    path = tmp_path / "feishu-notification-records.jsonl"
+    assert path.exists()
+    assert (tmp_path / "feishu-notification-records.jsonl.1").exists()
+    assert path.stat().st_size <= 1024
+    with open(path, "r", encoding="utf-8") as stream:
+        rows = [json.loads(line) for line in stream if line.strip()]
+    assert rows[-1]["routeId"] == "route-audit"
+    assert rows[-1]["attemptId"] == "attempt-audit"
 
 
 def read_records(status_dir):
@@ -308,7 +338,13 @@ def test_update_notification_uses_common_card_builder_and_records_message_id():
 
         result = update_feishu_notification(
             "om_update_1",
-            base_intent("notification"),
+            {
+                **base_intent("notification"),
+                "audit": {
+                    "routeId": "route-update", "attemptId": "attempt-update",
+                    "application": "chat", "operation": "update",
+                },
+            },
             app_config={"appId": "cli_update", "appSecret": "update-secret-should-not-leak"},
             status_dir=status_dir,
             urlopen=fake_urlopen,
@@ -322,6 +358,9 @@ def test_update_notification_uses_common_card_builder_and_records_message_id():
         records = read_records(status_dir)
         assert records[0]["status"] == "updated"
         assert records[0]["messageId"] == "om_update_1"
+        assert records[0]["routeId"] == "route-update"
+        assert records[0]["attemptId"] == "attempt-update"
+        assert records[0]["operation"] == "update"
         serialized = json.dumps({"result": result, "records": records}, ensure_ascii=False)
         assert "update-secret-should-not-leak" not in serialized
         assert "update-token-secret" not in serialized

@@ -28,7 +28,7 @@
 
 ## 7. Reconcile cards, audit, and recovery
 
-- [ ] 7.1 Fan out resolved/failed/expired intent updates to every known primary and fallback card using the common update helper; add bounded/rotated linked notification and card-action audit records plus metrics; and test update failure isolation, ambiguous dual delivery, startup reconciliation, and stale-card behavior.
+- [x] 7.1 Fan out resolved/failed/expired intent updates to every known primary and fallback card using the common update helper; add bounded/rotated linked notification and card-action audit records plus metrics; and test update failure isolation, ambiguous dual delivery, startup reconciliation, and stale-card behavior.
 
 ## 8. Validate the complete feature and document operations
 
