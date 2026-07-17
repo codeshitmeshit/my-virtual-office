@@ -5,6 +5,7 @@ import copy
 from datetime import datetime, timedelta, timezone
 import os
 import sys
+import threading
 
 import pytest
 
@@ -113,6 +114,9 @@ def test_occurrence_creates_one_independent_version_pinned_project(tmp_path):
     ]
     assert occurrence["state"] == "created"
     assert "claimToken" not in occurrence
+    history = root[RECURRENCES_KEY]["recurrence-request-1"]["occurrenceHistory"]
+    assert [item["status"] for item in history[-2:]] == ["claimed", "created"]
+    assert len(history) <= service.store.config.recurrence_history_limit
 
 
 def test_live_claim_is_not_stolen_and_expired_claim_recovers_after_restart(tmp_path):
@@ -224,3 +228,99 @@ def test_dispatch_feature_and_global_pause_are_enforced_before_claim(tmp_path):
     recurrence = markdown.load_all()[RECURRENCES_KEY]["recurrence-request-1"]
     assert recurrence.get("occurrences") in (None, {})
 
+
+def test_retryable_workspace_failure_can_safely_create_same_occurrence_once(tmp_path):
+    markdown, service, _, _ = _service(tmp_path, execution=True)
+    attempts = {"count": 0}
+
+    def prepare(_configuration, _project_id, _occurrence_id):
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            return {"ok": False, "error": "Temporary workspace failure"}
+        return {
+            "ok": True,
+            "path": "/tmp/recovered-recurring-workspace",
+            "kind": "directory",
+            "managed": True,
+            "created": True,
+        }
+
+    with pytest.raises(ProjectAuthoringCommandError):
+        service.materialize_recurrence_occurrence(
+            "recurrence-request-1", "retry-safe", prepare_workspace=prepare,
+        )
+    created = service.materialize_recurrence_occurrence(
+        "recurrence-request-1", "retry-safe", prepare_workspace=prepare,
+    )
+    repeated = service.materialize_recurrence_occurrence(
+        "recurrence-request-1", "retry-safe", prepare_workspace=prepare,
+    )
+
+    assert created["created"] is True and repeated["created"] is False
+    assert len(markdown.load_all()["projects"]) == 2
+    record = markdown.load_all()[RECURRENCES_KEY]["recurrence-request-1"]["occurrences"]["retry-safe"]
+    assert record["attempts"] == 2 and record["state"] == "created"
+
+
+def test_invalid_future_actor_records_bounded_intervention_alert(tmp_path):
+    markdown, service, _, _ = _service(tmp_path)
+    service.lookup_agent = lambda agent_id: None if agent_id == "builder" else AGENTS.get(agent_id)
+
+    with pytest.raises(ProjectAuthoringCommandError) as invalid:
+        service.materialize_recurrence_occurrence(
+            "recurrence-request-1", "invalid-actor",
+        )
+
+    assert invalid.value.code == "agent_not_found"
+    recurrence = markdown.load_all()[RECURRENCES_KEY]["recurrence-request-1"]
+    record = recurrence["occurrences"]["invalid-actor"]
+    assert record["state"] == "intervention_required"
+    assert record["retryable"] is False
+    assert recurrence["lastStatus"] == "intervention_required"
+    assert recurrence["interventionAlerts"][-1]["type"] == "invalid_template_actor"
+    repeated = service.materialize_recurrence_occurrence(
+        "recurrence-request-1", "invalid-actor",
+    )
+    assert repeated["status"] == "intervention_required"
+    assert repeated["_status"] == 409
+
+
+def test_concurrent_callbacks_share_one_live_claim_and_create_one_project(tmp_path):
+    markdown, service, _, _ = _service(tmp_path, execution=True)
+    prepared = threading.Event()
+    release = threading.Event()
+    results = []
+    errors = []
+
+    def prepare(_configuration, _project_id, _occurrence_id):
+        prepared.set()
+        assert release.wait(timeout=5)
+        return {
+            "ok": True,
+            "path": "/tmp/concurrent-recurring-workspace",
+            "kind": "directory",
+            "managed": True,
+            "created": True,
+        }
+
+    def dispatch():
+        try:
+            results.append(service.materialize_recurrence_occurrence(
+                "recurrence-request-1", "concurrent", prepare_workspace=prepare,
+            ))
+        except Exception as exc:
+            errors.append(exc)
+
+    first = threading.Thread(target=dispatch)
+    first.start()
+    assert prepared.wait(timeout=5)
+    second = threading.Thread(target=dispatch)
+    second.start()
+    second.join(timeout=5)
+    release.set()
+    first.join(timeout=5)
+
+    assert errors == []
+    assert sorted(result["status"] for result in results) == ["created", "in_progress"]
+    assert sum(result.get("created") is True for result in results) == 1
+    assert len(markdown.load_all()["projects"]) == 2

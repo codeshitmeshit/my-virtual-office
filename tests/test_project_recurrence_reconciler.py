@@ -201,3 +201,29 @@ def test_expired_processing_claim_is_recovered_after_restart(tmp_path):
     assert recovered[OUTBOX_KEY][0]["attempts"] == 2
     assert recovered[RECURRENCES_KEY]["recurrence-1"]["gatewayCronId"] == "cron-recovered"
 
+
+def test_pause_and_resume_keep_gateway_binding_and_root_state_aligned(tmp_path):
+    markdown, store = _store(tmp_path)
+    clock = [datetime(2025, 3, 1, tzinfo=timezone.utc)]
+    calls = []
+
+    def gateway(method, params, timeout):
+        calls.append((method, params, timeout))
+        if method == "cron.add":
+            return {"ok": True, "id": "cron-pause"}
+        return {"ok": True}
+
+    reconciler = ProjectRecurrenceReconciler(store, _ports(gateway, clock))
+    assert reconciler.reconcile_once()["registered"] == 1
+
+    paused = reconciler.set_paused("recurrence-1", True, actor="user:local")
+    resumed = reconciler.set_paused("recurrence-1", False, actor="user:local")
+
+    assert paused["recurrence"]["state"] == "paused"
+    assert paused["recurrence"]["binding"]["enabled"] is False
+    assert resumed["recurrence"]["state"] == "registered"
+    assert resumed["recurrence"]["binding"]["enabled"] is True
+    update_patches = [params["patch"] for method, params, _timeout in calls if method == "cron.update"]
+    assert update_patches == [{"enabled": False}, {"enabled": True}]
+    audit = markdown.load_all()[RECURRENCES_KEY]["recurrence-1"]["audit"]
+    assert [event["action"] for event in audit[-2:]] == ["recurrence_paused", "recurrence_resumed"]

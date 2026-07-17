@@ -47,6 +47,19 @@ class RecurrenceRegistrationPorts:
     new_token: Callable[[], str] = _token
 
 
+@dataclass
+class ProjectRecurrenceError(RuntimeError):
+    code: str
+    message: str
+    status: int
+
+    def __str__(self) -> str:
+        return self.message
+
+    def as_dict(self) -> dict[str, Any]:
+        return {"ok": False, "code": self.code, "error": self.message, "_status": self.status}
+
+
 class ProjectRecurrenceReconciler:
     """Claim bounded outbox batches and converge each recurrence to one Gateway job."""
 
@@ -77,6 +90,81 @@ class ProjectRecurrenceReconciler:
             "registered": registered,
             "failed": failed,
         }
+
+    def set_paused(self, recurrence_id: str, paused: bool, *, actor: str = "user") -> dict[str, Any]:
+        """Pause or resume registration/dispatch while keeping Gateway and root state aligned."""
+        clean_id = str(recurrence_id or "").strip()
+        root = self.store.snapshot()
+        recurrence = root[RECURRENCES_KEY].get(clean_id)
+        if not isinstance(recurrence, dict):
+            raise ProjectRecurrenceError(
+                "recurrence_not_found", "Recurring project definition was not found", 404,
+            )
+        previous_paused = recurrence.get("paused") is True
+        desired_paused = bool(paused)
+        if previous_paused == desired_paused:
+            return {"ok": True, "changed": False, "recurrence": copy.deepcopy(recurrence)}
+        binding = recurrence.get("binding") if isinstance(recurrence.get("binding"), Mapping) else {}
+        cron_id = str(binding.get("cronJobId") or recurrence.get("gatewayCronId") or "")
+        if cron_id:
+            try:
+                gateway_result = self.ports.gateway(
+                    "cron.update", {"id": cron_id, "patch": {"enabled": not desired_paused}}, 30,
+                )
+            except Exception as exc:
+                raise ProjectRecurrenceError(
+                    "recurrence_gateway_update_failed", "Gateway recurrence update failed", 502,
+                ) from exc
+            if not isinstance(gateway_result, dict) or not gateway_result.get("ok"):
+                raise ProjectRecurrenceError(
+                    "recurrence_gateway_update_failed", "Gateway recurrence update failed", 502,
+                )
+        now = _iso(self.ports.clock())
+
+        def update(current: dict[str, Any]) -> dict[str, Any]:
+            item = current[RECURRENCES_KEY].get(clean_id)
+            if not isinstance(item, dict):
+                raise ProjectRecurrenceError(
+                    "recurrence_not_found", "Recurring project definition was not found", 404,
+                )
+            if (item.get("paused") is True) != previous_paused:
+                raise ProjectRecurrenceError(
+                    "recurrence_state_conflict", "Recurring project state changed", 409,
+                )
+            item.update({
+                "paused": desired_paused,
+                "state": "paused" if desired_paused else (
+                    "registered" if item.get("gatewayCronId") else "pending_registration"
+                ),
+                "updatedAt": now,
+            })
+            current_binding = item.get("binding")
+            if isinstance(current_binding, dict):
+                current_binding.update({"enabled": not desired_paused, "updatedAt": now})
+            item.setdefault("audit", []).append(build_audit_event(
+                "recurrence_paused" if desired_paused else "recurrence_resumed",
+                actor,
+                "management",
+                now,
+                "accepted",
+                recurrenceId=clean_id,
+                templateId=item.get("templateId"),
+            ))
+            item["audit"] = item["audit"][-self.store.config.audit_history_limit:]
+            return copy.deepcopy(item)
+
+        try:
+            updated = self.store.update(update)
+        except Exception:
+            if cron_id:
+                try:
+                    self.ports.gateway(
+                        "cron.update", {"id": cron_id, "patch": {"enabled": not previous_paused}}, 30,
+                    )
+                except Exception:
+                    pass
+            raise
+        return {"ok": True, "changed": True, "recurrence": updated}
 
     def _claim_batch(self) -> list[dict[str, Any]]:
         now = self.ports.clock().astimezone(timezone.utc)

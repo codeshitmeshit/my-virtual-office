@@ -60,6 +60,10 @@ PROTECTED_MAINTENANCE_OPERATIONS = frozenset({
 AUTONOMOUS_ROUTINE_FIELDS = frozenset({
     "executionState", "description", "checklist", "evidence", "dueDate",
 })
+OCCURRENCE_ACTOR_INTERVENTION_CODES = frozenset({
+    "actor_required", "actor_id_required", "agent_actor_required", "agent_not_assignable",
+    "agent_not_found", "invalid_actor_reference", "unsupported_actor_type", "unsupported_user_actor",
+})
 
 
 def _now() -> datetime:
@@ -738,12 +742,13 @@ class ProjectAuthoringService:
             raise ProjectAuthoringCommandError(
                 "invalid_occurrence_reference", "Recurrence id and bounded occurrence id are required", 400,
             )
-        claim_token = f"occurrence-claim-{self.new_id()}"
+        claim_token = ""
         now_dt = self.clock().astimezone(timezone.utc)
         now = now_dt.isoformat()
         outcome: dict[str, Any] = {}
 
         def claim(root: dict[str, Any]) -> None:
+            nonlocal claim_token
             recurrence = root[RECURRENCES_KEY].get(clean_recurrence_id)
             if not isinstance(recurrence, dict):
                 raise ProjectAuthoringCommandError(
@@ -761,6 +766,13 @@ class ProjectAuthoringService:
                 return
             occurrences = recurrence.setdefault("occurrences", {})
             record = occurrences.get(clean_occurrence_id)
+            if isinstance(record, dict) and record.get("state") == "intervention_required":
+                outcome.update({
+                    "status": "intervention_required",
+                    "code": record.get("code"),
+                    "error": record.get("error"),
+                })
+                return
             if isinstance(record, dict) and record.get("state") == "created" and record.get("projectId"):
                 project = next(
                     (item for item in root.get("projects", []) if item.get("id") == record.get("projectId")),
@@ -782,6 +794,7 @@ class ProjectAuthoringService:
                 })
                 return
             attempts = int(record.get("attempts") or 0) + 1 if isinstance(record, dict) else 1
+            claim_token = f"occurrence-claim-{self.new_id()}"
             occurrences[clean_occurrence_id] = {
                 "occurrenceId": clean_occurrence_id,
                 "state": "claimed",
@@ -813,6 +826,15 @@ class ProjectAuthoringService:
                 "status": "in_progress",
                 "claimExpiresAt": outcome.get("claimExpiresAt"),
                 "_status": 202,
+            }
+        if outcome.get("status") == "intervention_required":
+            return {
+                "ok": False,
+                "created": False,
+                "status": "intervention_required",
+                "code": outcome.get("code"),
+                "error": outcome.get("error"),
+                "_status": 409,
             }
 
         workspace: dict[str, Any] = {"ok": True, "managed": False, "created": False}
@@ -1349,6 +1371,7 @@ class ProjectAuthoringService:
         now = self._timestamp()
         code = str(getattr(error, "code", "occurrence_materialization_failed"))
         safe_error = sanitize_audit_text(error, limit=1000)
+        actor_intervention = code in OCCURRENCE_ACTOR_INTERVENTION_CODES
 
         def fail(root: dict[str, Any]) -> None:
             recurrence = root[RECURRENCES_KEY].get(recurrence_id)
@@ -1358,8 +1381,8 @@ class ProjectAuthoringService:
             if record.get("claimToken") != claim_token or record.get("state") != "claimed":
                 return
             record.update({
-                "state": "failed",
-                "retryable": True,
+                "state": "intervention_required" if actor_intervention else "failed",
+                "retryable": not actor_intervention,
                 "code": code,
                 "error": safe_error,
                 "failedAt": now,
@@ -1369,14 +1392,26 @@ class ProjectAuthoringService:
                 record.pop(field, None)
             recurrence.update({
                 "lastOccurrenceId": occurrence_id,
-                "lastStatus": "failed",
+                "lastStatus": "intervention_required" if actor_intervention else "failed",
                 "lastError": {"code": code, "error": safe_error, "at": now},
                 "updatedAt": now,
             })
+            if actor_intervention:
+                recurrence.setdefault("interventionAlerts", []).append({
+                    "type": "invalid_template_actor",
+                    "occurrenceId": occurrence_id,
+                    "code": code,
+                    "error": safe_error,
+                    "createdAt": now,
+                    "resolved": False,
+                })
+                recurrence["interventionAlerts"] = recurrence["interventionAlerts"][
+                    -self.store.config.recurrence_history_limit:
+                ]
             self._append_occurrence_history(
                 recurrence,
                 occurrence_id,
-                "failed",
+                "intervention_required" if actor_intervention else "failed",
                 now,
                 {"code": code, "error": safe_error},
             )

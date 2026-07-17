@@ -36,7 +36,7 @@
 
 - [x] 6.1 Add a durable recurrence-registration outbox and bounded reconciler for a `projectTemplateInstance` binding that reuses schedule validation and Gateway integration without changing existing project/task execution target kinds.
 - [x] 6.2 Implement expiring token-owned occurrence claims and compare-and-set independent project materialization with template/version/source traceability, workspace cleanup, restart recovery, and duplicate-callback protection.
-- [ ] 6.3 Add pause/resume, retry-safe failure, invalid-actor intervention alerts, occurrence history, restart recovery, and concurrent-dispatch tests.
+- [x] 6.3 Add pause/resume, retry-safe failure, invalid-actor intervention alerts, occurrence history, restart recovery, and concurrent-dispatch tests.
 
 ## 7. Trusted User Review Surface
 

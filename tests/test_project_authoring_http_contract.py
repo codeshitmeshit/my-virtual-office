@@ -24,6 +24,7 @@ import server
 from project_store import MarkdownProjectStore
 from services.project_authoring import ProjectAuthoringService
 from services.project_authoring_store import ProjectAuthoringRootStore, REQUESTS_KEY
+from services.project_recurrence import ProjectRecurrenceReconciler, RecurrenceRegistrationPorts
 from services.project_repository import ProjectRepository
 
 
@@ -101,6 +102,22 @@ def authoring(tmp_path, monkeypatch):
         new_id=lambda: next(request_ids),
     )
     monkeypatch.setattr(server, "_PROJECT_AUTHORING_SERVICE", service)
+    monkeypatch.setattr(
+        server,
+        "_PROJECT_RECURRENCE_RECONCILER",
+        ProjectRecurrenceReconciler(
+            service.store,
+            RecurrenceRegistrationPorts(
+                gateway=lambda method, _params, _timeout: (
+                    {"ok": True, "id": "cron-http"} if method == "cron.add" else {"ok": True}
+                ),
+                validate_schedule=lambda _schedule: None,
+                extract_job_id=lambda result: str(result.get("id") or ""),
+                enabled=lambda: True,
+                paused=lambda: False,
+            ),
+        ),
+    )
     return markdown, service
 
 
@@ -294,6 +311,22 @@ def test_agent_recurrence_callback_uses_source_grant_and_deduplicates_occurrence
         "X-VO-Agent-Id": "author",
         "Authorization": f"Bearer {secret}",
     }
+    pause_endpoint = f"/api/project-authoring/recurrences/{recurrence_id}/pause"
+    resume_endpoint = f"/api/project-authoring/recurrences/{recurrence_id}/resume"
+    assert _call(_handler(pause_endpoint, {}), "POST")[0] == 403
+    paused_status, paused = _call(_handler(
+        pause_endpoint, {}, headers={"X-VO-Management-Token": server._MANAGEMENT_TOKEN},
+    ), "POST")
+    assert paused_status == 200 and paused["recurrence"]["paused"] is True
+    paused_dispatch_status, paused_dispatch = _call(_handler(
+        endpoint, {"occurrenceId": "paused-occurrence"}, headers=headers,
+    ), "POST")
+    assert paused_dispatch_status == 409
+    assert paused_dispatch["code"] == "recurrence_paused"
+    resumed_status, resumed = _call(_handler(
+        resume_endpoint, {}, headers={"X-VO-Management-Token": server._MANAGEMENT_TOKEN},
+    ), "POST")
+    assert resumed_status == 200 and resumed["recurrence"]["paused"] is False
 
     denied_status, denied = _call(_handler(
         endpoint,

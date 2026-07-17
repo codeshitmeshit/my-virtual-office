@@ -29505,6 +29505,23 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                 cleanup_workspace=_project_authoring_cleanup_workspace,
             ))
             return
+        management_recurrence_prefix = "/api/project-authoring/recurrences/"
+        if request_path.startswith(management_recurrence_prefix) and request_path.endswith(("/pause", "/resume")):
+            body = self._read_management_authoring_body()
+            if body is None:
+                return
+            recurrence_id = urllib.parse.unquote(
+                request_path[len(management_recurrence_prefix):].rsplit("/", 1)[0]
+            ).strip("/")
+            if not recurrence_id or "/" in recurrence_id:
+                self._send_json({"ok": False, "error": "Recurring project definition not found"}, status=404)
+                return
+            self._send_project_authoring_result(lambda: _project_recurrence_reconciler().set_paused(
+                recurrence_id,
+                request_path.endswith("/pause"),
+                actor="user:local",
+            ))
+            return
         agent_project_prefix = "/api/agent/projects/"
         if request_path.startswith(agent_project_prefix) and request_path.endswith("/maintenance"):
             project_id = urllib.parse.unquote(
