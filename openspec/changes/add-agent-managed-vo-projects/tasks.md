@@ -3,7 +3,7 @@
 - [x] 1.1 Add responsible, executor, and reviewer actor-reference validators plus legacy task-field projection helpers, with unit tests for same-actor roles, Agent, local-user, missing, and excluded actors.
 - [x] 1.2 Extend `MarkdownProjectStore` root serialization/read repair to round-trip bounded authoring requests, idempotency, grant hashes, versioned templates, recurrences, and outbox data plus backward-compatible project/task defaults.
 - [x] 1.3 Add Project Execution eligibility coverage proving human-executed tasks remain trackable but cannot start automated execution without an executable Agent.
-- [ ] 1.4 Add disabled-by-default authoring and recurrence feature flags plus configured body/task/pending/audit/history limits, outbox batch/concurrency/backoff settings, and stable overload errors before exposing any new write route.
+- [x] 1.4 Add disabled-by-default authoring and recurrence feature flags plus configured body/task/pending/audit/history limits, outbox batch/concurrency/backoff settings, and stable overload errors before exposing any new write route.
 
 ## 2. Project Authoring Request Domain
 
