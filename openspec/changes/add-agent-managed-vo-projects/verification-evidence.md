@@ -36,3 +36,43 @@ Run on 2026-07-18 after Task 9.2:
 The Python suite includes legacy markdown writer/repository characterization, all five scheduled-cron phases, browser-template compatibility, and the isolated Agent/management HTTP contract. `test_confirm_materializes_complete_project_once_without_starting_execution` proves repeated confirmation returns the same project, persists exactly one complete project/task aggregate, leaves `workflowActive` and `projectExecutionFlowActive` false, and leaves the task in `backlog`. The cron suites continue to use the legacy target kinds while recurrence tests use the new `projectTemplateInstance` target independently.
 
 The standalone `tests/test_workflow_e2e.py` was also attempted, but its import-time call targets the already-running external VO without a management token and was correctly rejected with `management_token_required`. It was not counted as a product failure or as passing evidence; the reproducible authoring E2E uses isolated storage and an explicit trusted management token in `tests/test_project_authoring_http_contract.py`.
+
+## Task 9.4 — Rollout rehearsal
+
+The rollout selection below was run on 2026-07-18 and completed with **17 passed in 0.35s**:
+
+```text
+tests/test_project_authoring_config.py::test_features_are_disabled_by_default_and_read_at_action_time
+tests/test_project_authoring_http_agent.py::test_agent_submission_is_loopback_only_originless_bounded_and_hash_only
+tests/test_project_authoring_service.py::test_autonomous_assigned_agent_can_apply_only_routine_task_fields
+tests/test_project_authoring_service.py::test_autonomous_routine_update_rejects_structural_and_role_fields
+tests/test_project_authoring_service.py::test_autonomous_routine_update_rejects_strict_unassigned_and_revoked_grants
+tests/test_project_authoring_service.py::test_recurring_confirmation_commits_template_recurrence_and_outbox_together
+tests/test_project_authoring_http_contract.py::test_project_grant_rotation_revocation_and_scope_are_enforced
+tests/test_project_recurrence_reconciler.py::test_reconciler_registers_bounded_batch_with_distinct_template_instance_binding
+tests/test_project_recurrence_reconciler.py::test_disabled_paused_and_live_claim_states_do_not_call_gateway
+tests/test_project_recurrence_reconciler.py::test_pause_and_resume_keep_gateway_binding_and_root_state_aligned
+tests/test_project_store_authoring_metadata.py::test_repository_root_update_persists_authoring_metadata_across_store_instances
+tests/test_project_store_authoring_metadata.py::test_legacy_projects_receive_conservative_authoring_defaults
+```
+
+Observed rollout gates:
+
+| Stage | Observed gate/result |
+| --- | --- |
+| Flag-off deployment | Both features default off and are read at action time; disabled authoring returns stable `503 project_authoring_disabled` without mutation. |
+| Local-only authoring | Non-loopback, browser-Origin, wrong action header, mismatched Agent, and oversized requests stop before service mutation. |
+| Autonomous allowlist | Assigned Agent routine fields apply; structural/role fields, strict mode, unassigned Agent, and revoked grant remain blocked or pending confirmation. |
+| Recurrence enablement | Confirmation durably commits the pinned template, recurrence, and outbox together; Gateway registration occurs only when recurrence is enabled and not paused. |
+| Grant rotation/revocation | Rotation invalidates the old value and returns one replacement; revocation, cross-project, and cross-Agent use fail. |
+| Outbox drain/pause | Bounded batches drain to one `projectTemplateInstance` binding; disabled/paused states make zero Gateway calls; pause/resume preserves and updates the existing binding. |
+| Code rollback preparation | With both write flags off and dispatch paused, root metadata survives store re-open; legacy projects receive conservative defaults and remain readable. No data down-migration is required. |
+
+Operational rollback order is: disable Agent authoring, pause recurrence dispatch, wait for current atomic writes to finish, capture `/api/project-authoring/health`, deploy the previous code, preserve the markdown root, and verify legacy project/cron reads before restoring traffic.
+
+Unresolved/intentional limitations:
+
+- The rehearsal did not replace the binary of the currently running user VO or execute a production Gateway job; those require the deployment owner and trusted management token. It exercised the same repository, HTTP boundary, and Gateway-port contracts in isolated storage.
+- In-memory counters and duration aggregates reset on process restart. Durable queue/request/recurrence state, queue age, audit, and intervention alerts are reconstructed from the root.
+- A lost request/grant secret cannot be recovered. The user must use the management surface, revoke, or rotate as applicable.
+- Rollback preserves new root metadata but an older binary will not expose the new authoring UI/API; re-enabling requires returning to a compatible version.
