@@ -53,6 +53,6 @@
 ## 9. Verification and Rollout
 
 - [x] 9.1 Add structured counters, duration measurements, redacted/rate-limited logs, health states, queue-age reporting, and intervention alerts for the authoring and recurrence pipelines.
-- [ ] 9.2 Run focused project command, repository, management-token, request-secret, execution-role, template, schedule, capacity-limit, observability, and authoring service tests and record the results as OpenSpec evidence.
+- [x] 9.2 Run focused project command, repository, management-token, request-secret, execution-role, template, schedule, capacity-limit, observability, and authoring service tests and record the results as OpenSpec evidence.
 - [ ] 9.3 Run compatibility and end-to-end verification proving legacy projects and cron bindings are unchanged, one confirmed draft produces one complete project, and materialization never starts execution automatically.
 - [ ] 9.4 Rehearse flag-off deployment, local-only authoring enablement, autonomous allowlist enablement, recurrence enablement, grant revocation/rotation, outbox drain/pause, and code rollback; document observed gates and unresolved limitations.
