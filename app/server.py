@@ -26504,6 +26504,32 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             ),
         })
 
+    def _handle_agent_project_maintenance(self, project_id):
+        if self._reject_untrusted_agent_authoring_request():
+            return
+        agent_id = self._agent_authoring_id()
+        grant_secret = self._agent_authoring_bearer_secret()
+        if not agent_id or not grant_secret:
+            self._send_json({
+                "ok": False,
+                "code": "project_grant_auth_required",
+                "error": "Agent id and project grant bearer secret are required",
+            }, status=403)
+            return
+        body, error = self._read_limited_json_body(
+            limit=project_authoring_config_service.DEFAULT_CONFIG.body_limit_bytes,
+        )
+        if error:
+            self._send_json_error(error)
+            return
+        self._send_project_authoring_result(lambda: _PROJECT_AUTHORING_SERVICE.create_maintenance_request(
+            project_id,
+            body.get("mutation"),
+            requesting_agent_id=agent_id,
+            grant_secret=grant_secret,
+            idempotency_key=body.get("idempotencyKey"),
+        ))
+
     def _request_id(self):
         request_id = getattr(self, "_vo_request_id", "")
         if not request_id:
@@ -29328,6 +29354,16 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
         if request_path == "/api/agent/project-authoring/requests":
             self._handle_agent_project_authoring_submit()
             return
+        agent_project_prefix = "/api/agent/projects/"
+        if request_path.startswith(agent_project_prefix) and request_path.endswith("/maintenance"):
+            project_id = urllib.parse.unquote(
+                request_path[len(agent_project_prefix):].rsplit("/maintenance", 1)[0]
+            ).strip("/")
+            if not project_id or "/" in project_id:
+                self._send_json({"ok": False, "error": "Project not found"}, status=404)
+                return
+            self._handle_agent_project_maintenance(project_id)
+            return
         management_authoring_prefix = "/api/project-authoring/requests/"
         if request_path.startswith(management_authoring_prefix) and request_path.endswith(("/confirm", "/reject")):
             body = self._read_management_authoring_body()
@@ -29364,6 +29400,37 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                 ))
             return
         management_grant_prefix = "/api/project-authoring/projects/"
+        if request_path.startswith(management_grant_prefix) and "/maintenance/" in request_path and request_path.endswith(("/confirm", "/reject")):
+            body = self._read_management_authoring_body()
+            if body is None:
+                return
+            rest = request_path[len(management_grant_prefix):]
+            project_id, maintenance_rest = rest.split("/maintenance/", 1)
+            maintenance_id, action = maintenance_rest.rsplit("/", 1)
+            project_id = urllib.parse.unquote(project_id).strip("/")
+            maintenance_id = urllib.parse.unquote(maintenance_id).strip("/")
+            if not project_id or not maintenance_id or "/" in project_id or "/" in maintenance_id:
+                self._send_json({"ok": False, "error": "Maintenance request not found"}, status=404)
+                return
+            revision = self._project_authoring_expected_revision(body)
+            if revision is None:
+                return
+            if action == "confirm":
+                self._send_project_authoring_result(lambda: _PROJECT_AUTHORING_SERVICE.confirm_maintenance_request(
+                    project_id,
+                    maintenance_id,
+                    expected_revision=revision,
+                    actor="user:local",
+                ))
+            else:
+                self._send_project_authoring_result(lambda: _PROJECT_AUTHORING_SERVICE.reject_maintenance_request(
+                    project_id,
+                    maintenance_id,
+                    expected_revision=revision,
+                    reason=body.get("reason"),
+                    actor="user:local",
+                ))
+            return
         if request_path.startswith(management_grant_prefix) and request_path.endswith(("/grant/revoke", "/grant/rotate")):
             body = self._read_management_authoring_body()
             if body is None:

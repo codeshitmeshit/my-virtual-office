@@ -462,3 +462,113 @@ def test_confirmed_project_persists_mode_and_hash_only_scoped_grant(
         project["id"], requesting_agent_id="author", grant_secret=plaintext,
     )
     assert "secretHash" not in public
+
+
+def test_strict_maintenance_request_is_idempotent_and_applies_only_after_confirmation(tmp_path):
+    markdown, _, service = _service(tmp_path)
+    secret = "strict-maintenance-secret"
+    _create(service, request_secret_hash=hash_request_secret(secret))
+    materialized = service.confirm_and_materialize(
+        "request-1", expected_revision=1, confirmation_key="confirm:maintenance",
+    )
+    project_id = materialized["project"]["id"]
+    mutation = {"operation": "update_project", "changes": {"title": "Managed title"}}
+
+    requested = service.create_maintenance_request(
+        project_id,
+        mutation,
+        requesting_agent_id="author",
+        grant_secret=secret,
+        idempotency_key="maintenance:key-1",
+    )
+    repeated = service.create_maintenance_request(
+        project_id,
+        {"invalid": "retry payload is ignored"},
+        requesting_agent_id="author",
+        grant_secret=secret,
+        idempotency_key="maintenance:key-1",
+    )
+
+    assert requested["created"] is True
+    assert repeated["created"] is False
+    assert repeated["request"]["id"] == requested["request"]["id"]
+    assert markdown.load_all()["projects"][0]["title"] == "Launch"
+
+    applied = service.confirm_maintenance_request(
+        project_id,
+        requested["request"]["id"],
+        expected_revision=1,
+        actor="user:local",
+    )
+    assert applied["project"]["title"] == "Managed title"
+    assert applied["request"]["state"] == "confirmed"
+    assert markdown.load_all()["projects"][0]["title"] == "Managed title"
+
+
+def test_autonomous_protected_role_change_stays_pending_and_revalidates_actors(tmp_path):
+    markdown, _, service = _service(tmp_path)
+    draft = _draft()
+    draft["agentMaintenanceMode"] = "autonomous"
+    secret = "autonomous-maintenance-secret"
+    _create(service, draft=draft, request_secret_hash=hash_request_secret(secret))
+    project = service.confirm_and_materialize(
+        "request-1", expected_revision=1, confirmation_key="confirm:autonomous",
+    )["project"]
+    task_id = project["tasks"][0]["id"]
+
+    pending = service.create_maintenance_request(
+        project["id"],
+        {
+            "operation": "reassign_roles",
+            "taskId": task_id,
+            "changes": {"executorActor": {"type": "agent", "id": "owner"}},
+        },
+        requesting_agent_id="author",
+        grant_secret=secret,
+        idempotency_key="maintenance:roles-1",
+    )
+    stored_task = markdown.load_all()["projects"][0]["tasks"][0]
+    assert stored_task["executorActor"]["id"] == "builder"
+
+    applied = service.confirm_maintenance_request(
+        project["id"], pending["request"]["id"], expected_revision=1,
+    )
+    assert applied["project"]["tasks"][0]["executorActor"]["id"] == "owner"
+    assert applied["project"]["tasks"][0]["executorAgentId"] == "owner"
+
+
+def test_invalid_maintenance_application_is_atomic_and_revoked_grant_cannot_request(tmp_path):
+    markdown, _, service = _service(tmp_path)
+    secret = "maintenance-failure-secret"
+    _create(service, request_secret_hash=hash_request_secret(secret))
+    project = service.confirm_and_materialize(
+        "request-1", expected_revision=1, confirmation_key="confirm:failure",
+    )["project"]
+    pending = service.create_maintenance_request(
+        project["id"],
+        {"operation": "update_project", "changes": {"id": "forbidden"}},
+        requesting_agent_id="author",
+        grant_secret=secret,
+        idempotency_key="maintenance:invalid-1",
+    )
+
+    with pytest.raises(ProjectAuthoringCommandError) as invalid:
+        service.confirm_maintenance_request(
+            project["id"], pending["request"]["id"], expected_revision=1,
+        )
+    assert invalid.value.code == "protected_maintenance_field"
+    root = markdown.load_all()
+    assert root["projects"][0]["id"] == project["id"]
+    grant_request = root["projectAuthoringGrants"][project["id"]]["maintenanceRequests"][pending["request"]["id"]]
+    assert grant_request["state"] == "pending"
+
+    service.revoke_project_grant(project["id"])
+    with pytest.raises(ProjectAuthoringCommandError) as revoked:
+        service.create_maintenance_request(
+            project["id"],
+            {"operation": "archive_project"},
+            requesting_agent_id="author",
+            grant_secret=secret,
+            idempotency_key="maintenance:revoked-1",
+        )
+    assert revoked.value.code == "invalid_project_grant"

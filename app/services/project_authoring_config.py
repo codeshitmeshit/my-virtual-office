@@ -179,6 +179,15 @@ def outbox_capacity_error() -> ProjectAuthoringCapacityError:
     )
 
 
+def maintenance_capacity_error() -> ProjectAuthoringCapacityError:
+    return ProjectAuthoringCapacityError(
+        code="project_maintenance_pending_limit",
+        message="Project maintenance pending request capacity reached",
+        status=429,
+        scope="project",
+    )
+
+
 def feature_disabled_error(feature: str) -> ProjectAuthoringCapacityError:
     normalized = "recurrence" if feature == "recurrence" else "authoring"
     return ProjectAuthoringCapacityError(

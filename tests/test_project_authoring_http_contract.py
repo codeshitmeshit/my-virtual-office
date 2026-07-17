@@ -281,3 +281,46 @@ def test_project_grant_rotation_revocation_and_scope_are_enforced(authoring):
     assert revoke_status == 200
     assert revoked["grant"]["state"] == "revoked"
     assert grant_status(new_secret)[0] == 403
+
+
+def test_agent_maintenance_request_needs_management_confirmation(authoring):
+    markdown, _ = authoring
+    _, created = _submit("Maintainable", "author:key-1")
+    secret = created["requestSecret"]
+    request_id = created["request"]["id"]
+    confirm_status, confirmed = _call(_handler(
+        f"/api/project-authoring/requests/{request_id}/confirm",
+        {"expectedRevision": 1, "confirmationKey": "confirm:maintenance-http"},
+        headers={"X-VO-Management-Token": server._MANAGEMENT_TOKEN},
+    ), "POST")
+    assert confirm_status == 200
+    project_id = confirmed["project"]["id"]
+
+    maintenance_status, maintenance = _call(_handler(
+        f"/api/agent/projects/{project_id}/maintenance",
+        {
+            "idempotencyKey": "maintenance:http-1",
+            "mutation": {"operation": "update_project", "changes": {"title": "Confirmed title"}},
+        },
+        headers={
+            "X-VO-Agent-Action": "project-authoring",
+            "X-VO-Agent-Id": "author",
+            "Authorization": f"Bearer {secret}",
+        },
+    ), "POST")
+    assert maintenance_status == 200
+    maintenance_id = maintenance["request"]["id"]
+    assert markdown.load_all()["projects"][0]["title"] == "Maintainable"
+
+    management_path = f"/api/project-authoring/projects/{project_id}/maintenance/{maintenance_id}/confirm"
+    assert _call(_handler(management_path, {"expectedRevision": 1}), "POST")[0] == 403
+    assert markdown.load_all()["projects"][0]["title"] == "Maintainable"
+
+    applied_status, applied = _call(_handler(
+        management_path,
+        {"expectedRevision": 1},
+        headers={"X-VO-Management-Token": server._MANAGEMENT_TOKEN},
+    ), "POST")
+    assert applied_status == 200
+    assert applied["project"]["title"] == "Confirmed title"
+    assert markdown.load_all()["projects"][0]["title"] == "Confirmed title"

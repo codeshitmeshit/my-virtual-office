@@ -10,6 +10,7 @@ from services.project_authoring_config import (
     DEFAULT_CONFIG,
     ProjectAuthoringConfig,
     outbox_capacity_error,
+    maintenance_capacity_error,
     pending_capacity_error,
 )
 
@@ -187,6 +188,19 @@ class ProjectAuthoringRootStore:
             root[GRANTS_KEY], history_fields=("audit",),
             history_limit=self.config.audit_history_limit,
         )
+        for grant in root[GRANTS_KEY].values():
+            maintenance = grant.get("maintenanceRequests")
+            grant["maintenanceRequests"] = self._repair_record_map(
+                maintenance if isinstance(maintenance, dict) else {},
+                history_fields=("audit", "history"),
+                history_limit=self.config.audit_history_limit,
+            )
+            idempotency = grant.get("maintenanceIdempotency")
+            grant["maintenanceIdempotency"] = {
+                str(key): str(value)
+                for key, value in (idempotency.items() if isinstance(idempotency, dict) else [])
+                if str(key).strip() and str(value).strip()
+            }
         root[RECURRENCES_KEY] = self._repair_record_map(
             root[RECURRENCES_KEY], history_fields=("audit",),
             history_limit=self.config.audit_history_limit,
@@ -217,6 +231,14 @@ class ProjectAuthoringRootStore:
             raise pending_capacity_error("agent")
         if len(root[OUTBOX_KEY]) > self.config.outbox_capacity:
             raise outbox_capacity_error()
+        for grant in root[GRANTS_KEY].values():
+            requests = grant.get("maintenanceRequests") or {}
+            open_count = sum(
+                1 for request in requests.values()
+                if str(request.get("state") or "pending") in {"pending", "applying", "failed"}
+            )
+            if open_count > self.config.max_maintenance_requests_per_project:
+                raise maintenance_capacity_error()
 
     def _repair_record_map(
         self,

@@ -25,9 +25,21 @@ from services.project_authoring_store import (
 )
 from services.project_authoring_validation import validate_idempotency_key, validate_project_draft
 from services.project_authoring_security import verify_request_secret
+from services.project_actors import ActorReferenceError, legacy_task_role_fields, validate_task_actor_references
 
 
 EDITABLE_STATES = frozenset({"pending", "failed"})
+PROTECTED_MAINTENANCE_OPERATIONS = frozenset({
+    "update_project",
+    "update_task",
+    "create_task",
+    "delete_task",
+    "reassign_roles",
+    "update_recurrence",
+    "archive_project",
+    "workspace_change",
+    "maintenance_mode_change",
+})
 
 
 def _now() -> datetime:
@@ -556,21 +568,170 @@ class ProjectAuthoringService:
         root = self.store.snapshot()
         grant = root[GRANTS_KEY].get(str(project_id or ""))
         agent_id = str(requesting_agent_id or "").strip()
-        allowed = grant.get("allowedOperations") if isinstance(grant, dict) else []
-        if (
-            not isinstance(grant, dict)
-            or grant.get("state") != "active"
-            or grant.get("projectId") != project_id
-            or grant.get("requestingAgentId") != agent_id
-            or not verify_request_secret(grant_secret, grant.get("secretHash"))
-            or (required_operation and required_operation not in (allowed or []))
-        ):
-            raise ProjectAuthoringCommandError(
-                "invalid_project_grant",
-                "Project grant authentication failed",
-                403,
-            )
+        self._validate_grant_record(
+            grant,
+            project_id=project_id,
+            requesting_agent_id=agent_id,
+            grant_secret=grant_secret,
+            required_operation=required_operation,
+        )
         return grant_public_view(grant)
+
+    def create_maintenance_request(
+        self,
+        project_id: str,
+        mutation: Any,
+        *,
+        requesting_agent_id: str,
+        grant_secret: str,
+        idempotency_key: Any,
+    ) -> dict[str, Any]:
+        key = validate_idempotency_key(idempotency_key)
+        now = self._timestamp()
+        maintenance_id = f"maintenance-{self.new_id()}"
+        outcome: dict[str, Any] = {}
+
+        def create(root: dict[str, Any]) -> None:
+            project = next((item for item in root.get("projects", []) if item.get("id") == project_id), None)
+            if project is None:
+                raise ProjectAuthoringCommandError("project_not_found", "Project not found", 404)
+            grant = root[GRANTS_KEY].get(project_id)
+            self._validate_grant_record(
+                grant,
+                project_id=project_id,
+                requesting_agent_id=requesting_agent_id,
+                grant_secret=grant_secret,
+                required_operation="maintenance_request",
+            )
+            scoped_key = f"{requesting_agent_id}:{key}"
+            existing_id = grant["maintenanceIdempotency"].get(scoped_key)
+            existing = grant["maintenanceRequests"].get(str(existing_id or ""))
+            if isinstance(existing, dict):
+                outcome.update({"created": False, "request": copy.deepcopy(existing)})
+                return
+            normalized = self._normalize_maintenance_mutation(mutation)
+            request = {
+                "id": maintenance_id,
+                "projectId": project_id,
+                "requestingAgentId": requesting_agent_id,
+                "idempotencyKey": key,
+                "state": "pending",
+                "revision": 1,
+                "mutation": copy.deepcopy(normalized),
+                "createdAt": now,
+                "updatedAt": now,
+                "audit": [self._audit("maintenance_requested", requesting_agent_id, "agent", now, "accepted")],
+                "history": [],
+            }
+            grant["maintenanceRequests"][maintenance_id] = request
+            grant["maintenanceIdempotency"][scoped_key] = maintenance_id
+            grant["updatedAt"] = now
+            outcome.update({"created": True, "request": copy.deepcopy(request)})
+
+        self.store.update(create)
+        return {
+            "ok": True,
+            "created": outcome["created"],
+            "request": management_request_view(outcome["request"]),
+        }
+
+    def confirm_maintenance_request(
+        self,
+        project_id: str,
+        maintenance_id: str,
+        *,
+        expected_revision: int,
+        actor: str = "user",
+    ) -> dict[str, Any]:
+        now = self._timestamp()
+
+        def confirm(root: dict[str, Any]) -> dict[str, Any]:
+            project = next((item for item in root.get("projects", []) if item.get("id") == project_id), None)
+            grant = root[GRANTS_KEY].get(project_id)
+            if project is None or not isinstance(grant, dict):
+                raise ProjectAuthoringCommandError("project_not_found", "Project not found", 404)
+            request = (grant.get("maintenanceRequests") or {}).get(maintenance_id)
+            if not isinstance(request, dict):
+                raise ProjectAuthoringCommandError(
+                    "maintenance_request_not_found", "Maintenance request not found", 404,
+                )
+            if request.get("state") == "confirmed":
+                return {"project": copy.deepcopy(project), "request": management_request_view(request)}
+            actual = int(request.get("revision") or 0)
+            if actual != int(expected_revision):
+                raise ProjectAuthoringCommandError(
+                    "maintenance_revision_conflict", "Maintenance request revision changed", 409,
+                    maintenance_id, int(expected_revision), actual,
+                )
+            if request.get("state") not in {"pending", "failed"}:
+                raise ProjectAuthoringCommandError(
+                    "invalid_maintenance_state", "Maintenance request cannot be confirmed", 409,
+                )
+            self._apply_maintenance_mutation(root, project, grant, request["mutation"], now)
+            request.update({
+                "state": "confirmed",
+                "revision": actual + 1,
+                "confirmedAt": now,
+                "confirmedBy": actor,
+                "updatedAt": now,
+            })
+            request.setdefault("audit", []).append(
+                self._audit("maintenance_confirmed", actor, "management", now, "accepted")
+            )
+            request["audit"] = request["audit"][-self.store.config.audit_history_limit:]
+            project["updatedAt"] = now
+            grant["updatedAt"] = now
+            self._append_grant_audit(grant, "maintenance_applied", actor, now)
+            return {"project": copy.deepcopy(project), "request": management_request_view(request)}
+
+        result = self.store.update(confirm)
+        return {"ok": True, **result}
+
+    def reject_maintenance_request(
+        self,
+        project_id: str,
+        maintenance_id: str,
+        *,
+        expected_revision: int,
+        reason: Any,
+        actor: str = "user",
+    ) -> dict[str, Any]:
+        rejection_reason = str(reason or "").strip()
+        if not rejection_reason:
+            raise ProjectAuthoringCommandError(
+                "rejection_reason_required", "A rejection reason is required", 400,
+            )
+        now = self._timestamp()
+
+        def reject(root: dict[str, Any]) -> dict[str, Any]:
+            grant = root[GRANTS_KEY].get(project_id)
+            request = (grant.get("maintenanceRequests") or {}).get(maintenance_id) if isinstance(grant, dict) else None
+            if not isinstance(request, dict):
+                raise ProjectAuthoringCommandError(
+                    "maintenance_request_not_found", "Maintenance request not found", 404,
+                )
+            if request.get("state") == "rejected":
+                return management_request_view(request)
+            actual = int(request.get("revision") or 0)
+            if actual != int(expected_revision) or request.get("state") not in {"pending", "failed"}:
+                raise ProjectAuthoringCommandError(
+                    "maintenance_revision_conflict", "Maintenance request changed", 409,
+                    maintenance_id, int(expected_revision), actual,
+                )
+            request.update({
+                "state": "rejected",
+                "revision": actual + 1,
+                "rejectionReason": rejection_reason,
+                "rejectedAt": now,
+                "rejectedBy": actor,
+                "updatedAt": now,
+            })
+            request.setdefault("audit", []).append(
+                self._audit("maintenance_rejected", actor, "management", now, "accepted")
+            )
+            return management_request_view(request)
+
+        return {"ok": True, "request": self.store.update(reject)}
 
     def revoke_project_grant(self, project_id: str, *, actor: str = "user") -> dict[str, Any]:
         now = self._timestamp()
@@ -919,6 +1080,185 @@ class ProjectAuthoringService:
     def _append_grant_audit(self, grant: dict[str, Any], action: str, actor: str, at: str) -> None:
         grant.setdefault("audit", []).append(self._audit(action, actor, "management", at, "accepted"))
         grant["audit"] = grant["audit"][-self.store.config.audit_history_limit:]
+
+    @staticmethod
+    def _validate_grant_record(
+        grant: Any,
+        *,
+        project_id: str,
+        requesting_agent_id: str,
+        grant_secret: str,
+        required_operation: str | None,
+    ) -> None:
+        allowed = grant.get("allowedOperations") if isinstance(grant, dict) else []
+        if (
+            not isinstance(grant, dict)
+            or grant.get("state") != "active"
+            or grant.get("projectId") != project_id
+            or grant.get("requestingAgentId") != str(requesting_agent_id or "").strip()
+            or not verify_request_secret(grant_secret, grant.get("secretHash"))
+            or (required_operation and required_operation not in (allowed or []))
+        ):
+            raise ProjectAuthoringCommandError(
+                "invalid_project_grant", "Project grant authentication failed", 403,
+            )
+
+    @staticmethod
+    def _normalize_maintenance_mutation(mutation: Any) -> dict[str, Any]:
+        if not isinstance(mutation, Mapping):
+            raise ProjectAuthoringCommandError(
+                "invalid_maintenance_mutation", "Maintenance mutation must be an object", 400,
+            )
+        operation = str(mutation.get("operation") or "").strip()
+        if operation not in PROTECTED_MAINTENANCE_OPERATIONS:
+            raise ProjectAuthoringCommandError(
+                "unsupported_maintenance_operation", "Maintenance operation is not supported", 400,
+            )
+        normalized = copy.deepcopy(dict(mutation))
+        normalized["operation"] = operation
+        if operation in {"update_task", "delete_task", "reassign_roles"}:
+            task_id = str(mutation.get("taskId") or "").strip()
+            if not task_id:
+                raise ProjectAuthoringCommandError(
+                    "maintenance_task_required", "Maintenance operation requires taskId", 400,
+                )
+            normalized["taskId"] = task_id
+        if operation in {"update_project", "update_task", "reassign_roles", "workspace_change", "maintenance_mode_change"}:
+            if not isinstance(mutation.get("changes"), Mapping):
+                raise ProjectAuthoringCommandError(
+                    "maintenance_changes_required", "Maintenance operation requires changes", 400,
+                )
+            normalized["changes"] = copy.deepcopy(dict(mutation["changes"]))
+        if operation == "create_task" and not isinstance(mutation.get("task"), Mapping):
+            raise ProjectAuthoringCommandError(
+                "maintenance_task_required", "create_task requires a task object", 400,
+            )
+        if operation == "update_recurrence" and not isinstance(mutation.get("changes"), Mapping):
+            raise ProjectAuthoringCommandError(
+                "maintenance_changes_required", "update_recurrence requires changes", 400,
+            )
+        return normalized
+
+    def _apply_maintenance_mutation(
+        self,
+        root: dict[str, Any],
+        project: dict[str, Any],
+        grant: dict[str, Any],
+        mutation: Mapping[str, Any],
+        now: str,
+    ) -> None:
+        operation = mutation["operation"]
+        if operation == "update_project":
+            allowed = {"title", "description", "priority", "dueDate", "tags", "longTermProject"}
+            self._apply_allowed_changes(project, mutation["changes"], allowed)
+            return
+        if operation in {"update_task", "reassign_roles"}:
+            task = self._maintenance_task(project, mutation["taskId"])
+            allowed = (
+                {"title", "description", "priority", "dueDate", "checklist", "evidence", "executionState"}
+                if operation == "update_task"
+                else {"responsibleActor", "executorActor", "reviewerActor", "reviewerRecommendation"}
+            )
+            self._apply_allowed_changes(task, mutation["changes"], allowed)
+            if operation == "reassign_roles":
+                actors = self._validate_maintenance_task_actors(task)
+                task.update({
+                    "responsibleActor": actors["responsible"],
+                    "executorActor": actors["executor"],
+                    "reviewerActor": actors["reviewer"],
+                    **legacy_task_role_fields(actors),
+                })
+            task["updatedAt"] = now
+            return
+        if operation == "create_task":
+            task = copy.deepcopy(dict(mutation["task"]))
+            if not str(task.get("title") or "").strip():
+                raise ProjectAuthoringCommandError(
+                    "maintenance_task_title_required", "Created task requires a title", 400,
+                )
+            actors = self._validate_maintenance_task_actors(task)
+            task.update({
+                "id": str(task.get("id") or f"task-{self.new_id()}"),
+                "responsibleActor": actors["responsible"],
+                "executorActor": actors["executor"],
+                "reviewerActor": actors["reviewer"],
+                **legacy_task_role_fields(actors),
+                "executionState": "backlog",
+                "createdAt": now,
+                "updatedAt": now,
+            })
+            if any(item.get("id") == task["id"] for item in project.get("tasks", [])):
+                raise ProjectAuthoringCommandError(
+                    "maintenance_task_id_conflict", "Created task id already exists", 409,
+                )
+            project.setdefault("tasks", []).append(task)
+            return
+        if operation == "delete_task":
+            before = len(project.get("tasks", []))
+            project["tasks"] = [item for item in project.get("tasks", []) if item.get("id") != mutation["taskId"]]
+            if len(project["tasks"]) == before:
+                raise ProjectAuthoringCommandError("task_not_found", "Task not found", 404)
+            return
+        if operation == "archive_project":
+            project["status"] = "archived"
+            return
+        if operation == "workspace_change":
+            allowed = {"workspacePath", "workspaceKind", "workspaceStatus", "projectExecutionEnabled"}
+            self._apply_allowed_changes(project, mutation["changes"], allowed)
+            return
+        if operation == "maintenance_mode_change":
+            mode = str(mutation["changes"].get("agentMaintenanceMode") or "")
+            if mode not in {"strict_confirmation", "autonomous"}:
+                raise ProjectAuthoringCommandError(
+                    "invalid_maintenance_mode", "Maintenance mode is invalid", 400,
+                )
+            project["agentMaintenanceMode"] = mode
+            grant["maintenanceMode"] = mode
+            grant["allowedOperations"] = ["status", "maintenance_request"] + (
+                ["routine_task_update"] if mode == "autonomous" else []
+            )
+            return
+        if operation == "update_recurrence":
+            recurrence_id = str((project.get("recurrenceRef") or {}).get("id") or "")
+            recurrence = root[RECURRENCES_KEY].get(recurrence_id)
+            if not isinstance(recurrence, dict):
+                raise ProjectAuthoringCommandError("recurrence_not_found", "Project recurrence not found", 404)
+            allowed = {"schedule", "paused"}
+            self._apply_allowed_changes(recurrence, mutation["changes"], allowed)
+            recurrence["updatedAt"] = now
+            return
+        raise ProjectAuthoringCommandError(
+            "unsupported_maintenance_operation", "Maintenance operation is not supported", 400,
+        )
+
+    @staticmethod
+    def _apply_allowed_changes(target: dict[str, Any], changes: Mapping[str, Any], allowed: set[str]) -> None:
+        unknown = set(changes) - allowed
+        if unknown:
+            raise ProjectAuthoringCommandError(
+                "protected_maintenance_field",
+                f"Maintenance fields are not allowed: {', '.join(sorted(unknown))}",
+                400,
+            )
+        for key, value in changes.items():
+            target[key] = copy.deepcopy(value)
+
+    @staticmethod
+    def _maintenance_task(project: Mapping[str, Any], task_id: str) -> dict[str, Any]:
+        task = next((item for item in project.get("tasks", []) if item.get("id") == task_id), None)
+        if not isinstance(task, dict):
+            raise ProjectAuthoringCommandError("task_not_found", "Task not found", 404)
+        return task
+
+    def _validate_maintenance_task_actors(self, task: Mapping[str, Any]) -> dict[str, Any]:
+        try:
+            return validate_task_actor_references(
+                task,
+                lookup_agent=self.lookup_agent,
+                is_excluded_agent=self.is_excluded_agent,
+            )
+        except ActorReferenceError as exc:
+            raise ProjectAuthoringCommandError(exc.code, exc.message, 400) from exc
 
     @staticmethod
     def _summary(request: Mapping[str, Any]) -> dict[str, Any]:
