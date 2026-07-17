@@ -12,6 +12,7 @@ from typing import Any, Callable, Mapping
 
 from services.project_authoring_config import feature_disabled_error, is_authoring_enabled
 from services.project_authoring_store import (
+    GRANTS_KEY,
     IDEMPOTENCY_KEY,
     OUTBOX_KEY,
     RECURRENCES_KEY,
@@ -19,6 +20,7 @@ from services.project_authoring_store import (
     TEMPLATES_KEY,
     ProjectAuthoringRootStore,
     agent_request_view,
+    grant_public_view,
     management_request_view,
 )
 from services.project_authoring_validation import validate_idempotency_key, validate_project_draft
@@ -499,6 +501,24 @@ class ProjectAuthoringService:
             now=now,
         )
         root.setdefault("projects", []).append(project)
+        maintenance_mode = str(approved.get("agentMaintenanceMode") or "strict_confirmation")
+        allowed_operations = ["status", "maintenance_request"]
+        if maintenance_mode == "autonomous":
+            allowed_operations.append("routine_task_update")
+        root[GRANTS_KEY][project_id] = {
+            "id": f"grant-{project_id}",
+            "projectId": project_id,
+            "requestId": request_id,
+            "requestingAgentId": request.get("requestingAgentId"),
+            "secretHash": request.get("requestSecretHash"),
+            "version": 1,
+            "state": "active",
+            "maintenanceMode": maintenance_mode,
+            "allowedOperations": allowed_operations,
+            "createdAt": now,
+            "updatedAt": now,
+            "audit": [self._audit("grant_activated", actor, "management", now, "accepted")],
+        }
         request.update({
             "state": "confirmed",
             "revision": int(request.get("revision") or 0) + 1,
@@ -524,6 +544,86 @@ class ProjectAuthoringService:
             "project": copy.deepcopy(project),
             "request": management_request_view(request),
         }
+
+    def authenticate_project_grant(
+        self,
+        project_id: str,
+        *,
+        requesting_agent_id: str,
+        grant_secret: str,
+        required_operation: str | None = None,
+    ) -> dict[str, Any]:
+        root = self.store.snapshot()
+        grant = root[GRANTS_KEY].get(str(project_id or ""))
+        agent_id = str(requesting_agent_id or "").strip()
+        allowed = grant.get("allowedOperations") if isinstance(grant, dict) else []
+        if (
+            not isinstance(grant, dict)
+            or grant.get("state") != "active"
+            or grant.get("projectId") != project_id
+            or grant.get("requestingAgentId") != agent_id
+            or not verify_request_secret(grant_secret, grant.get("secretHash"))
+            or (required_operation and required_operation not in (allowed or []))
+        ):
+            raise ProjectAuthoringCommandError(
+                "invalid_project_grant",
+                "Project grant authentication failed",
+                403,
+            )
+        return grant_public_view(grant)
+
+    def revoke_project_grant(self, project_id: str, *, actor: str = "user") -> dict[str, Any]:
+        now = self._timestamp()
+
+        def revoke(root: dict[str, Any]) -> dict[str, Any]:
+            grant = root[GRANTS_KEY].get(project_id)
+            if not isinstance(grant, dict):
+                raise ProjectAuthoringCommandError(
+                    "project_grant_not_found", "Project grant not found", 404,
+                )
+            if grant.get("state") != "revoked":
+                grant.update({
+                    "state": "revoked",
+                    "secretHash": "",
+                    "version": int(grant.get("version") or 0) + 1,
+                    "revokedAt": now,
+                    "revokedBy": actor,
+                    "updatedAt": now,
+                })
+                self._append_grant_audit(grant, "grant_revoked", actor, now)
+            return grant_public_view(grant)
+
+        return self.store.update(revoke)
+
+    def rotate_project_grant(
+        self,
+        project_id: str,
+        *,
+        secret_hash: str,
+        actor: str = "user",
+    ) -> dict[str, Any]:
+        now = self._timestamp()
+
+        def rotate(root: dict[str, Any]) -> dict[str, Any]:
+            grant = root[GRANTS_KEY].get(project_id)
+            if not isinstance(grant, dict):
+                raise ProjectAuthoringCommandError(
+                    "project_grant_not_found", "Project grant not found", 404,
+                )
+            grant.update({
+                "state": "active",
+                "secretHash": str(secret_hash or ""),
+                "version": int(grant.get("version") or 0) + 1,
+                "rotatedAt": now,
+                "rotatedBy": actor,
+                "updatedAt": now,
+            })
+            grant.pop("revokedAt", None)
+            grant.pop("revokedBy", None)
+            self._append_grant_audit(grant, "grant_rotated", actor, now)
+            return grant_public_view(grant)
+
+        return self.store.update(rotate)
 
     def _materialize_template(
         self,
@@ -815,6 +915,10 @@ class ProjectAuthoringService:
     def _append_audit(self, request: dict[str, Any], action: str, actor: str, source: str, at: str, result: str) -> None:
         request.setdefault("audit", []).append(self._audit(action, actor, source, at, result))
         request["audit"] = request["audit"][-self.store.config.audit_history_limit:]
+
+    def _append_grant_audit(self, grant: dict[str, Any], action: str, actor: str, at: str) -> None:
+        grant.setdefault("audit", []).append(self._audit(action, actor, "management", at, "accepted"))
+        grant["audit"] = grant["audit"][-self.store.config.audit_history_limit:]
 
     @staticmethod
     def _summary(request: Mapping[str, Any]) -> dict[str, Any]:

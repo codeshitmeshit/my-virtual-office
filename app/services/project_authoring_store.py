@@ -77,6 +77,11 @@ def management_request_view(request: Mapping[str, Any]) -> dict[str, Any]:
     return _scrub_secrets(request)
 
 
+def grant_public_view(grant: Mapping[str, Any]) -> dict[str, Any]:
+    """Expose grant policy and lifecycle without its bearer-secret hash."""
+    return _scrub_secrets(grant)
+
+
 def agent_request_view(
     request: Mapping[str, Any],
     *,

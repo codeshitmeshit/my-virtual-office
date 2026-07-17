@@ -26482,6 +26482,28 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             ),
         })
 
+    def _handle_agent_project_grant_status(self, project_id):
+        if self._reject_untrusted_agent_authoring_request():
+            return
+        agent_id = self._agent_authoring_id()
+        grant_secret = self._agent_authoring_bearer_secret()
+        if not agent_id or not grant_secret:
+            self._send_json({
+                "ok": False,
+                "code": "project_grant_auth_required",
+                "error": "Agent id and project grant bearer secret are required",
+            }, status=403)
+            return
+        self._send_project_authoring_result(lambda: {
+            "ok": True,
+            "grant": _PROJECT_AUTHORING_SERVICE.authenticate_project_grant(
+                project_id,
+                requesting_agent_id=agent_id,
+                grant_secret=grant_secret,
+                required_operation="status",
+            ),
+        })
+
     def _request_id(self):
         request_id = getattr(self, "_vo_request_id", "")
         if not request_id:
@@ -26676,6 +26698,16 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
         parsed_url = urllib.parse.urlparse(self.path)
         request_path = parsed_url.path
         query_params = urllib.parse.parse_qs(parsed_url.query)
+        agent_project_prefix = "/api/agent/projects/"
+        if request_path.startswith(agent_project_prefix) and request_path.endswith("/grant-status"):
+            project_id = urllib.parse.unquote(
+                request_path[len(agent_project_prefix):].rsplit("/grant-status", 1)[0]
+            ).strip("/")
+            if not project_id or "/" in project_id:
+                self._send_json({"ok": False, "error": "Project grant not found"}, status=404)
+                return
+            self._handle_agent_project_grant_status(project_id)
+            return
         agent_authoring_prefix = "/api/agent/project-authoring/requests/"
         if request_path.startswith(agent_authoring_prefix):
             request_id = urllib.parse.unquote(request_path[len(agent_authoring_prefix):]).strip("/")
@@ -29330,6 +29362,37 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                     prepare_workspace=_project_authoring_prepare_workspace,
                     cleanup_workspace=_project_authoring_cleanup_workspace,
                 ))
+            return
+        management_grant_prefix = "/api/project-authoring/projects/"
+        if request_path.startswith(management_grant_prefix) and request_path.endswith(("/grant/revoke", "/grant/rotate")):
+            body = self._read_management_authoring_body()
+            if body is None:
+                return
+            project_id = urllib.parse.unquote(
+                request_path[len(management_grant_prefix):].rsplit("/grant/", 1)[0]
+            ).strip("/")
+            if not project_id or "/" in project_id:
+                self._send_json({"ok": False, "error": "Project grant not found"}, status=404)
+                return
+            if request_path.endswith("/grant/revoke"):
+                self._send_project_authoring_result(lambda: {
+                    "ok": True,
+                    "grant": _PROJECT_AUTHORING_SERVICE.revoke_project_grant(
+                        project_id, actor="user:local",
+                    ),
+                })
+            else:
+                grant_secret = project_authoring_security_service.generate_request_secret()
+
+                def rotate_grant():
+                    grant = _PROJECT_AUTHORING_SERVICE.rotate_project_grant(
+                        project_id,
+                        secret_hash=project_authoring_security_service.hash_request_secret(grant_secret),
+                        actor="user:local",
+                    )
+                    return {"ok": True, "grant": grant, "grantSecret": grant_secret}
+
+                self._send_project_authoring_result(rotate_grant)
             return
         if _is_meeting_domain_path(request_path):
             authority = _meeting_domain_authority_status()

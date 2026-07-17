@@ -213,3 +213,71 @@ def test_management_detail_never_exposes_stored_request_hash(authoring):
     serialized = json.dumps(payload).lower()
     assert "requestsecrethash" not in serialized
     assert created["requestSecret"] not in serialized
+
+
+def test_project_grant_rotation_revocation_and_scope_are_enforced(authoring):
+    markdown, _ = authoring
+    _, created = _submit("Granted", "author:key-1")
+    request_secret = created["requestSecret"]
+    request_id = created["request"]["id"]
+    confirm = _handler(
+        f"/api/project-authoring/requests/{request_id}/confirm",
+        {"expectedRevision": 1, "confirmationKey": "confirm:grant-1"},
+        headers={"X-VO-Management-Token": server._MANAGEMENT_TOKEN},
+    )
+    confirm_status, confirmed = _call(confirm, "POST")
+    assert confirm_status == 200
+    project_id = confirmed["project"]["id"]
+
+    def grant_status(secret, *, target=project_id, agent="author"):
+        return _call(_handler(
+            f"/api/agent/projects/{target}/grant-status",
+            headers={
+                "X-VO-Agent-Action": "project-authoring",
+                "X-VO-Agent-Id": agent,
+                "Authorization": f"Bearer {secret}",
+            },
+        ), "GET")
+
+    status, grant_payload = grant_status(request_secret)
+    assert status == 200
+    assert grant_payload["grant"]["projectId"] == project_id
+    assert "secrethash" not in json.dumps(grant_payload).lower()
+
+    before_cross_scope = markdown.load_all()
+    assert grant_status(request_secret, target="different-project")[0] == 403
+    assert grant_status(request_secret, agent="other-agent")[0] == 403
+    after_cross_scope = markdown.load_all()
+    assert after_cross_scope["projects"] == before_cross_scope["projects"]
+    assert after_cross_scope["projectAuthoringGrants"] == before_cross_scope["projectAuthoringGrants"]
+
+    denied_revoke = _handler(
+        f"/api/project-authoring/projects/{project_id}/grant/revoke",
+        {},
+        headers={"X-VO-Management-Token": "invalid"},
+    )
+    assert _call(denied_revoke, "POST")[0] == 403
+    assert grant_status(request_secret)[0] == 200
+
+    rotate = _handler(
+        f"/api/project-authoring/projects/{project_id}/grant/rotate",
+        {},
+        headers={"X-VO-Management-Token": server._MANAGEMENT_TOKEN},
+    )
+    rotate_status, rotated = _call(rotate, "POST")
+    assert rotate_status == 200
+    new_secret = rotated["grantSecret"]
+    assert new_secret != request_secret
+    assert "secretHash" not in rotated["grant"]
+    assert grant_status(request_secret)[0] == 403
+    assert grant_status(new_secret)[0] == 200
+
+    revoke = _handler(
+        f"/api/project-authoring/projects/{project_id}/grant/revoke",
+        {},
+        headers={"X-VO-Management-Token": server._MANAGEMENT_TOKEN},
+    )
+    revoke_status, revoked = _call(revoke, "POST")
+    assert revoke_status == 200
+    assert revoked["grant"]["state"] == "revoked"
+    assert grant_status(new_secret)[0] == 403
