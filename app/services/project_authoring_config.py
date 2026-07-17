@@ -136,7 +136,7 @@ class ProjectAuthoringConfig:
 DEFAULT_CONFIG = ProjectAuthoringConfig.from_env()
 
 
-@dataclass(frozen=True)
+@dataclass
 class ProjectAuthoringCapacityError(RuntimeError):
     code: str
     message: str

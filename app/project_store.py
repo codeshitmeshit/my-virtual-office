@@ -493,6 +493,7 @@ class MarkdownProjectStore:
         meta = {
             "id": project.get("id"),
             "title": project.get("title", ""),
+            "projectType": project.get("projectType", "one_time"),
             "status": project.get("status", "active"),
             "priority": project.get("priority", "medium"),
             "createdAt": project.get("createdAt"),
@@ -662,6 +663,7 @@ class MarkdownProjectStore:
         project = {
             "id": meta.get("id") or self.new_id(),
             "title": meta.get("title", ""),
+            "projectType": meta.get("projectType", "one_time"),
             "description": self._extract_section(body, "Project"),
             "status": meta.get("status", "active"),
             "priority": meta.get("priority", "medium"),

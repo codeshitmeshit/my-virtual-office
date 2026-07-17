@@ -38,7 +38,7 @@ class DraftValidationIssue:
         return result
 
 
-@dataclass(frozen=True)
+@dataclass
 class DraftValidationError(ValueError):
     issues: tuple[DraftValidationIssue, ...]
     code: str = "invalid_project_draft"

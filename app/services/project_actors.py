@@ -14,7 +14,7 @@ AgentExclusionCheck = Callable[[str], bool]
 ActorReference = dict[str, str]
 
 
-@dataclass(frozen=True)
+@dataclass
 class ActorReferenceError(ValueError):
     """Stable validation error for an authored project role."""
 

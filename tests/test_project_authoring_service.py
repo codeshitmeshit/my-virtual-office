@@ -15,7 +15,14 @@ if APP_DIR not in sys.path:
 
 from project_store import MarkdownProjectStore
 from services.project_authoring import ProjectAuthoringCommandError, ProjectAuthoringService
-from services.project_authoring_store import IDEMPOTENCY_KEY, OUTBOX_KEY, REQUESTS_KEY, ProjectAuthoringRootStore
+from services.project_authoring_store import (
+    IDEMPOTENCY_KEY,
+    OUTBOX_KEY,
+    RECURRENCES_KEY,
+    REQUESTS_KEY,
+    TEMPLATES_KEY,
+    ProjectAuthoringRootStore,
+)
 from services.project_repository import ProjectRepository
 
 
@@ -214,3 +221,189 @@ def test_submission_checks_feature_and_requesting_agent_before_persistence(tmp_p
         _create(service, requesting_agent_id="missing")
     assert missing.value.code == "requesting_agent_not_found"
     assert repository.load_all()[REQUESTS_KEY] == {}
+
+
+def test_confirm_materializes_complete_project_once_without_starting_execution(tmp_path):
+    markdown, _, service = _service(tmp_path)
+    _create(service)
+
+    result = service.confirm_and_materialize(
+        "request-1",
+        expected_revision=1,
+        confirmation_key="confirm:key-1",
+        actor="user:local",
+    )
+    repeated = service.confirm_and_materialize(
+        "request-1",
+        expected_revision=1,
+        confirmation_key="confirm:key-1",
+        actor="user:local",
+    )
+
+    assert result["ok"] is True and result["created"] is True
+    assert repeated["ok"] is True and repeated["created"] is False
+    assert result["project"]["id"] == repeated["project"]["id"] == "project-request-1"
+    project = markdown.load_all()["projects"][0]
+    assert project["projectType"] == "one_time"
+    assert project["authoringRequestId"] == "request-1"
+    assert project["authoringAgentId"] == "author"
+    assert project["workflowActive"] is False
+    assert project["projectExecutionFlowActive"] is False
+    assert project["tasks"][0]["executionState"] == "backlog"
+    assert project["tasks"][0]["responsibleActor"] == {"type": "agent", "id": "owner"}
+    assert project["tasks"][0]["executorActor"] == {"type": "agent", "id": "builder"}
+    root = markdown.load_all()
+    assert root[REQUESTS_KEY]["request-1"]["state"] == "confirmed"
+    assert root[IDEMPOTENCY_KEY]["confirmation:request-1:confirm:key-1"]["projectId"] == "project-request-1"
+    assert len(root["projects"]) == 1
+
+
+def test_user_approved_reviewer_and_prepared_workspace_are_committed(tmp_path):
+    _, _, service = _service(tmp_path)
+    _create(service)
+    edited = _draft()
+    edited["tasks"][0]["reviewerActor"] = {"type": "agent", "id": "reviewer"}
+    service.edit_pending("request-1", edited, expected_revision=1)
+    cleanup_calls = []
+
+    result = service.confirm_and_materialize(
+        "request-1",
+        expected_revision=2,
+        confirmation_key="confirm:key-2",
+        prepare_workspace=lambda *_: {
+            "ok": True,
+            "path": "/tmp/managed-project-request-1",
+            "kind": "directory",
+            "managed": True,
+            "created": True,
+        },
+        cleanup_workspace=cleanup_calls.append,
+    )
+
+    task = result["project"]["tasks"][0]
+    assert task["reviewerActor"] == {"type": "agent", "id": "reviewer"}
+    assert task["reviewerAgentId"] == "reviewer"
+    assert result["project"]["workspaceManagedBy"] == "project_authoring"
+    assert cleanup_calls == []
+
+
+def test_recurring_confirmation_commits_template_recurrence_and_outbox_together(tmp_path):
+    markdown, _, service = _service(tmp_path)
+    recurring = _draft()
+    recurring.update({
+        "projectType": "recurring",
+        "template": {"mode": "create", "name": "Weekly launch"},
+        "recurrence": {
+            "enabled": True,
+            "schedule": {"kind": "cron", "expr": "0 9 * * 1", "timezone": "UTC"},
+        },
+    })
+    _create(service, draft=recurring)
+
+    result = service.confirm_and_materialize(
+        "request-1", expected_revision=1, confirmation_key="confirm:recurring-1",
+    )
+    root = markdown.load_all()
+
+    assert result["project"]["templateRef"] == {"id": "template-request-1", "version": 1}
+    assert result["project"]["recurrenceRef"] == {"id": "recurrence-request-1"}
+    assert root[TEMPLATES_KEY]["template-request-1"][0]["version"] == 1
+    recurrence = root[RECURRENCES_KEY]["recurrence-request-1"]
+    assert recurrence["targetType"] == "projectTemplateInstance"
+    assert recurrence["requestingAgentId"] == "author"
+    assert root[OUTBOX_KEY] == [{
+        "id": "outbox-recurrence-request-1",
+        "kind": "register_project_template_instance",
+        "recurrenceId": "recurrence-request-1",
+        "state": "pending",
+        "attempts": 0,
+        "createdAt": "2025-01-03T00:00:00+00:00",
+        "updatedAt": "2025-01-03T00:00:00+00:00",
+    }]
+
+
+def test_failed_workspace_preparation_cleans_up_and_leaves_retryable_request(tmp_path):
+    markdown, _, service = _service(tmp_path)
+    _create(service)
+    cleanup_calls = []
+    prepared = {
+        "ok": False,
+        "error": "Unable to initialize repository",
+        "path": "/tmp/partial-workspace",
+        "managed": True,
+        "created": True,
+    }
+
+    result = service.confirm_and_materialize(
+        "request-1",
+        expected_revision=1,
+        confirmation_key="confirm:workspace-1",
+        prepare_workspace=lambda *_: prepared,
+        cleanup_workspace=cleanup_calls.append,
+    )
+
+    assert result["ok"] is False
+    assert result["code"] == "workspace_preparation_failed"
+    assert cleanup_calls == [prepared]
+    root = markdown.load_all()
+    assert root["projects"] == []
+    assert root[REQUESTS_KEY]["request-1"]["state"] == "failed"
+    assert root[REQUESTS_KEY]["request-1"]["approvedSnapshot"]["title"] == "Launch"
+
+
+def test_failed_root_commit_cleans_managed_workspace_and_records_failure(tmp_path):
+    markdown, _, service = _service(tmp_path)
+    _create(service)
+    original_update = service.store.update
+    update_calls = {"count": 0}
+    cleanup_calls = []
+
+    def flaky_update(mutator):
+        update_calls["count"] += 1
+        if update_calls["count"] == 2:
+            raise OSError("simulated root commit failure")
+        return original_update(mutator)
+
+    service.store.update = flaky_update
+    workspace = {
+        "ok": True,
+        "path": "/tmp/new-managed-workspace",
+        "managed": True,
+        "created": True,
+    }
+    result = service.confirm_and_materialize(
+        "request-1",
+        expected_revision=1,
+        confirmation_key="confirm:commit-1",
+        prepare_workspace=lambda *_: workspace,
+        cleanup_workspace=cleanup_calls.append,
+    )
+
+    assert result["ok"] is False
+    assert result["code"] == "materialization_failed"
+    assert cleanup_calls == [workspace]
+    root = markdown.load_all()
+    assert root["projects"] == []
+    assert root[REQUESTS_KEY]["request-1"]["state"] == "failed"
+
+
+def test_missing_referenced_template_fails_without_partial_root_changes(tmp_path):
+    markdown, _, service = _service(tmp_path)
+    reusable = _draft()
+    reusable.update({
+        "projectType": "reusable",
+        "template": {"mode": "reference", "templateId": "missing", "version": 1},
+    })
+    _create(service, draft=reusable)
+
+    result = service.confirm_and_materialize(
+        "request-1", expected_revision=1, confirmation_key="confirm:template-1",
+    )
+
+    assert result["ok"] is False
+    assert result["code"] == "template_version_not_found"
+    root = markdown.load_all()
+    assert root["projects"] == []
+    assert root[TEMPLATES_KEY] == {}
+    assert root[RECURRENCES_KEY] == {}
+    assert root[OUTBOX_KEY] == []
