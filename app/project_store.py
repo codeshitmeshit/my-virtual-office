@@ -4,6 +4,7 @@ import json
 import os
 import re
 import shutil
+import tempfile
 import threading
 import time
 import uuid
@@ -11,8 +12,20 @@ import weakref
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
+from services.project_actors import task_actor_references
+
 PROJECTS_DIRNAME = "projects-md"
 LEGACY_PROJECTS_FILENAME = "projects.json"
+ROOT_METADATA_FILENAME = "projects-root.json"
+ROOT_METADATA_DEFAULTS = {
+    "templates": [],
+    "projectAuthoringRequests": {},
+    "projectAuthoringIdempotency": {},
+    "projectAuthoringGrants": {},
+    "projectTemplateVersions": {},
+    "projectRecurrences": {},
+    "projectAuthoringOutbox": [],
+}
 COMPLEX_JSON_FIELDS = {
     "columns_json", "templates_json", "reviewCheck_json", "lastReviewCheck_json",
     "checklist_json", "tags_json", "attachments_json", "workspaceStatus_json",
@@ -22,6 +35,9 @@ COMPLEX_JSON_FIELDS = {
     "meetingBlocker_json", "meetingBlockerHistory_json",
     "meetingActionItems_json", "meetingDecisionHistory_json", "meetingDiscussionPoints_json", "meetingRecords_json",
     "scheduledCronHistory_json", "archiveMaintenance_json", "feishuNotifications_json",
+    "authoringSource_json", "templateRef_json", "recurrenceRef_json",
+    "responsibleActor_json", "executorActor_json", "reviewerActor_json",
+    "reviewerRecommendation_json",
 }
 
 
@@ -135,6 +151,29 @@ def _atomic_write(path: str, content: str):
         pass
 
 
+def _atomic_write_private(path: str, content: str):
+    """Atomically write root metadata that may contain credential hashes."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix=os.path.basename(path) + ".", dir=os.path.dirname(path))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(content)
+        try:
+            os.chmod(tmp, 0o600)
+        except Exception:
+            pass
+        os.replace(tmp, path)
+        try:
+            os.chmod(path, 0o600)
+        except Exception:
+            pass
+    finally:
+        try:
+            os.unlink(tmp)
+        except FileNotFoundError:
+            pass
+
+
 class MarkdownProjectStore:
     def __init__(
         self,
@@ -147,6 +186,7 @@ class MarkdownProjectStore:
         self.status_dir = status_dir
         self.projects_dir = os.path.join(status_dir, PROJECTS_DIRNAME)
         self.legacy_json = os.path.join(status_dir, LEGACY_PROJECTS_FILENAME)
+        self.root_metadata = os.path.join(status_dir, ROOT_METADATA_FILENAME)
         self.lock = threading.Lock()
         self._revision_lock = threading.Lock()
         self._revision_generation = 0
@@ -201,6 +241,13 @@ class MarkdownProjectStore:
                 files_scanned += 1
             except OSError:
                 pass
+        if os.path.isfile(self.root_metadata):
+            try:
+                stat = os.stat(self.root_metadata, follow_symlinks=False)
+                digest.update(f"root:{stat.st_ino}:{stat.st_size}:{stat.st_mtime_ns}".encode())
+                files_scanned += 1
+            except OSError:
+                pass
         signature = digest.hexdigest()
         with self._revision_lock:
             changed = bool(self._revision_signature and signature != self._revision_signature)
@@ -230,6 +277,11 @@ class MarkdownProjectStore:
                 digest.update(f":{task_stat.st_mtime_ns}".encode())
             except OSError:
                 continue
+        try:
+            stat = os.stat(self.root_metadata, follow_symlinks=False)
+            digest.update(f"root:{stat.st_ino}:{stat.st_size}:{stat.st_mtime_ns}".encode())
+        except OSError:
+            pass
         return digest.hexdigest()
 
     def _watcher_poll(self) -> None:
@@ -263,10 +315,11 @@ class MarkdownProjectStore:
         with self.lock:
             self._migrate_legacy_if_needed()
             projects = self._read_all_projects()
-            templates: List[Dict[str, Any]] = []
+            root = self._read_root_metadata(repair=True)
+            derived_templates: List[Dict[str, Any]] = []
             for p in projects:
                 if p.get("template"):
-                    templates.append({
+                    derived_templates.append({
                         "id": p.get("id"),
                         "title": p.get("title", ""),
                         "description": p.get("description", ""),
@@ -282,7 +335,12 @@ class MarkdownProjectStore:
                             for t in p.get("tasks", [])
                         ],
                     })
-            return {"projects": projects, "templates": templates}
+            templates = copy.deepcopy(root["templates"])
+            known_template_ids = {item.get("id") for item in templates if isinstance(item, dict)}
+            templates.extend(item for item in derived_templates if item.get("id") not in known_template_ids)
+            root["projects"] = projects
+            root["templates"] = templates
+            return root
 
     def save_all(self, data: Dict[str, Any]):
         with self.lock:
@@ -327,6 +385,17 @@ class MarkdownProjectStore:
             if len(legacy["projects"]) != before_projects or len(legacy["templates"]) != before_templates:
                 _atomic_write(self.legacy_json, json.dumps(legacy, ensure_ascii=False, indent=2) + "\n")
                 deleted = True
+
+            root = self._read_root_metadata(repair=False)
+            root_templates = root.get("templates", [])
+            remaining_templates = [
+                template for template in root_templates
+                if not isinstance(template, dict) or template.get("id") != project_id
+            ]
+            if len(remaining_templates) != len(root_templates):
+                root["templates"] = remaining_templates
+                self._write_root_metadata(root)
+                deleted = True
             if deleted:
                 self._mark_written()
 
@@ -343,8 +412,9 @@ class MarkdownProjectStore:
 
     def _migrate_legacy_if_needed(self):
         with os.scandir(self.projects_dir) as entries:
-            if any(entries):
-                return
+            for entry in entries:
+                if entry.is_dir(follow_symlinks=False) and os.path.isfile(os.path.join(entry.path, "project.md")):
+                    return
         if not os.path.isfile(self.legacy_json):
             return
         try:
@@ -352,6 +422,10 @@ class MarkdownProjectStore:
                 data = json.load(f)
         except Exception:
             return
+        existing_root = self._read_root_metadata(repair=False)
+        for key in ROOT_METADATA_DEFAULTS:
+            if key not in data or data.get(key) in (None, [], {}):
+                data[key] = existing_root[key]
         self._rewrite_from_dict(data)
 
     def _rewrite_from_dict(self, data: Dict[str, Any]):
@@ -359,6 +433,50 @@ class MarkdownProjectStore:
         os.makedirs(self.projects_dir, exist_ok=True)
         for project in data.get("projects", []):
             self._write_project(project)
+        self._write_root_metadata(data)
+
+    def _read_root_metadata(self, *, repair: bool) -> Dict[str, Any]:
+        raw: Any = {}
+        damaged = False
+        if os.path.isfile(self.root_metadata):
+            try:
+                with open(self.root_metadata, "r", encoding="utf-8") as f:
+                    raw = json.load(f)
+            except Exception:
+                raw = {}
+                damaged = True
+        if not isinstance(raw, dict):
+            raw = {}
+            damaged = True
+
+        normalized: Dict[str, Any] = {}
+        for key, default in ROOT_METADATA_DEFAULTS.items():
+            value = raw.get(key, copy.deepcopy(default))
+            if not isinstance(value, type(default)):
+                value = copy.deepcopy(default)
+                damaged = True
+            normalized[key] = copy.deepcopy(value)
+        if set(raw) - set(ROOT_METADATA_DEFAULTS):
+            damaged = True
+        if os.path.isfile(self.root_metadata):
+            try:
+                if os.stat(self.root_metadata, follow_symlinks=False).st_mode & 0o777 != 0o600:
+                    damaged = True
+            except OSError:
+                damaged = True
+        if repair and (damaged or not os.path.isfile(self.root_metadata)):
+            self._write_root_metadata(normalized)
+        return normalized
+
+    def _write_root_metadata(self, data: Dict[str, Any]) -> None:
+        bounded: Dict[str, Any] = {}
+        for key, default in ROOT_METADATA_DEFAULTS.items():
+            value = data.get(key, copy.deepcopy(default))
+            bounded[key] = copy.deepcopy(value) if isinstance(value, type(default)) else copy.deepcopy(default)
+        _atomic_write_private(
+            self.root_metadata,
+            json.dumps(bounded, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        )
 
     def _project_dir(self, project: Dict[str, Any]) -> str:
         slug = _slugify(project.get("title", "project"))
@@ -411,6 +529,12 @@ class MarkdownProjectStore:
             "template": project.get("template", False),
             "columns_json": project.get("columns", []),
             "templates_json": project.get("templates", []),
+            "agentMaintenanceMode": project.get("agentMaintenanceMode", "strict_confirmation"),
+            "authoringAgentId": project.get("authoringAgentId"),
+            "authoringRequestId": project.get("authoringRequestId"),
+            "authoringSource_json": project.get("authoringSource", {}),
+            "templateRef_json": project.get("templateRef", {}),
+            "recurrenceRef_json": project.get("recurrenceRef", {}),
         }
         body_lines = [
             "# Project",
@@ -432,6 +556,10 @@ class MarkdownProjectStore:
 
     def _write_task_file(self, tasks_dir: str, task: Dict[str, Any]):
         task = copy.deepcopy(task)
+        try:
+            actors = task_actor_references(task)
+        except ValueError:
+            actors = {}
         task_id = task.get("id") or self.new_id()
         title_slug = _slugify(task.get("title", "task"))
         path = os.path.join(tasks_dir, f"{title_slug}--{task_id[:8]}.md")
@@ -449,6 +577,10 @@ class MarkdownProjectStore:
             "assigneeBranch": task.get("assigneeBranch"),
             "executorAgentId": task.get("executorAgentId"),
             "reviewerAgentId": task.get("reviewerAgentId"),
+            "responsibleActor_json": task.get("responsibleActor", actors.get("responsible")),
+            "executorActor_json": task.get("executorActor", actors.get("executor")),
+            "reviewerActor_json": task.get("reviewerActor", actors.get("reviewer")),
+            "reviewerRecommendation_json": task.get("reviewerRecommendation", {}),
             "requiresUserAcceptance": task.get("requiresUserAcceptance", True),
             "allowReviewerlessExecution": task.get("allowReviewerlessExecution", False),
             "scheduledRepeatEnabled": task.get("scheduledRepeatEnabled", False),
@@ -567,6 +699,12 @@ class MarkdownProjectStore:
             "autoMode": meta.get("autoMode", False),
             "template": meta.get("template", False),
             "templates": meta.get("templates_json", []),
+            "agentMaintenanceMode": meta.get("agentMaintenanceMode", "strict_confirmation"),
+            "authoringAgentId": meta.get("authoringAgentId"),
+            "authoringRequestId": meta.get("authoringRequestId"),
+            "authoringSource": meta.get("authoringSource_json", {}),
+            "templateRef": meta.get("templateRef_json", {}),
+            "recurrenceRef": meta.get("recurrenceRef_json", {}),
             "activity": self._parse_activity(self._extract_section(body, "Activity")),
             "tasks": [],
         }
@@ -596,6 +734,10 @@ class MarkdownProjectStore:
             "assigneeBranch": meta.get("assigneeBranch"),
             "executorAgentId": meta.get("executorAgentId") or meta.get("assignee"),
             "reviewerAgentId": meta.get("reviewerAgentId"),
+            "responsibleActor": meta.get("responsibleActor_json"),
+            "executorActor": meta.get("executorActor_json"),
+            "reviewerActor": meta.get("reviewerActor_json"),
+            "reviewerRecommendation": meta.get("reviewerRecommendation_json", {}),
             "requiresUserAcceptance": meta.get("requiresUserAcceptance", True),
             "allowReviewerlessExecution": meta.get("allowReviewerlessExecution", False),
             "scheduledRepeatEnabled": meta.get("scheduledRepeatEnabled", False),
@@ -634,6 +776,16 @@ class MarkdownProjectStore:
         last_review_check = meta.get("lastReviewCheck_json", [])
         if last_review_check:
             task["lastReviewCheck"] = last_review_check
+        try:
+            actors = task_actor_references(task)
+        except ValueError:
+            actors = {}
+        if task.get("responsibleActor") is None:
+            task["responsibleActor"] = actors.get("responsible")
+        if task.get("executorActor") is None:
+            task["executorActor"] = actors.get("executor")
+        if task.get("reviewerActor") is None:
+            task["reviewerActor"] = actors.get("reviewer")
         return task
 
     def _extract_section(self, body: str, heading: str) -> str:
