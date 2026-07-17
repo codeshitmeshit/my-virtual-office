@@ -17,6 +17,7 @@
         'vo-codex-communication': 'communication',
         'vo-browser-control': 'browser',
         'vo-agent-workspace': 'workspace',
+        'vo-project-authoring': 'workflow',
         'vo-project-workflow': 'workflow',
         'vo-meeting-execution': 'meeting'
     };
