@@ -1,0 +1,6 @@
+interface:
+  display_name: "Virtual Office 项目创作"
+  short_description: "在用户确认后创建完整 VO 项目、模板与独立周期实例"
+  default_prompt: "Use $vo-project-authoring to draft a complete Virtual Office project and submit it for explicit user confirmation."
+policy:
+  allow_implicit_invocation: false

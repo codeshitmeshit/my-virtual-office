@@ -1,0 +1,39 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+
+const skillPath = new URL("../skills/vo-project-authoring/SKILL.md", import.meta.url);
+const metadataPath = new URL("../skills/vo-project-authoring/agents/openai.yaml", import.meta.url);
+const [skill, metadata] = await Promise.all([
+  readFile(skillPath, "utf8"),
+  readFile(metadataPath, "utf8"),
+]);
+
+assert.match(skill, /^---\nname: vo-project-authoring\n/m);
+assert.match(skill, /仅当用户明确调用 `\$vo-project-authoring`/);
+assert.match(metadata, /allow_implicit_invocation:\s*false/);
+
+for (const required of [
+  "/api/agents",
+  "responsibleActor",
+  "executorActor",
+  "reviewerRecommendation",
+  "high_risk",
+  "cross_team",
+  "critical_delivery",
+  "/api/agent/project-authoring/requests",
+  "requestSecret",
+  "/grant-status",
+  "/maintenance",
+  "strict_confirmation",
+  "autonomous",
+  "X-VO-Management-Token",
+  "vo-project-workflow",
+]) {
+  assert.ok(skill.includes(required), `missing project-authoring contract: ${required}`);
+}
+
+assert.match(skill, /只保存在当前运行内存中/);
+assert.match(skill, /不写入文件、日志、项目、聊天消息或命令输出摘要/);
+assert.match(skill, /不自动启动项目、任务、review、验收、取消或会议/);
+
+console.log("VO project authoring skill contract passed");
