@@ -25,6 +25,7 @@ from services.project_authoring_store import (
 )
 from services.project_authoring_validation import validate_idempotency_key, validate_project_draft
 from services.project_authoring_security import verify_request_secret
+from services.project_authoring_audit import build_audit_event, sanitize_audit_text
 from services.project_actors import (
     ActorReferenceError,
     legacy_task_role_fields,
@@ -167,7 +168,9 @@ class ProjectAuthoringService:
                 "source": copy.deepcopy(dict(source or {})),
                 "createdAt": now,
                 "updatedAt": now,
-                "audit": [self._audit("draft_submitted", agent_id, "agent", now, "accepted")],
+                "audit": [self._audit(
+                    "draft_submitted", agent_id, "agent", now, "accepted", requestId=request_id,
+                )],
                 "history": [],
                 "approvalHistory": [],
             }
@@ -376,7 +379,7 @@ class ProjectAuthoringService:
                 "state": "failed",
                 "revision": int(request.get("revision") or 0) + 1,
                 "code": str(code or "materialization_failed"),
-                "error": str(error or "Project materialization failed")[:2000],
+                "error": sanitize_audit_text(error or "Project materialization failed", limit=2000),
                 "updatedAt": now,
             })
             self._append_audit(request, "materialization_failed", actor, "system", now, "failed")
@@ -537,7 +540,10 @@ class ProjectAuthoringService:
             "allowedOperations": allowed_operations,
             "createdAt": now,
             "updatedAt": now,
-            "audit": [self._audit("grant_activated", actor, "management", now, "accepted")],
+            "audit": [self._audit(
+                "grant_activated", actor, "management", now, "accepted",
+                requestId=request_id, projectId=project_id,
+            )],
         }
         request.update({
             "state": "confirmed",
@@ -628,7 +634,10 @@ class ProjectAuthoringService:
                 "mutation": copy.deepcopy(normalized),
                 "createdAt": now,
                 "updatedAt": now,
-                "audit": [self._audit("maintenance_requested", requesting_agent_id, "agent", now, "accepted")],
+                "audit": [self._audit(
+                    "maintenance_requested", requesting_agent_id, "agent", now, "accepted",
+                    projectId=project_id, maintenanceRequestId=maintenance_id,
+                )],
                 "history": [],
             }
             grant["maintenanceRequests"][maintenance_id] = request
@@ -684,15 +693,27 @@ class ProjectAuthoringService:
                 "updatedAt": now,
             })
             request.setdefault("audit", []).append(
-                self._audit("maintenance_confirmed", actor, "management", now, "accepted")
+                self._audit(
+                    "maintenance_confirmed", actor, "management", now, "accepted",
+                    projectId=project_id, maintenanceRequestId=maintenance_id,
+                )
             )
             request["audit"] = request["audit"][-self.store.config.audit_history_limit:]
             project["updatedAt"] = now
             grant["updatedAt"] = now
-            self._append_grant_audit(grant, "maintenance_applied", actor, now)
+            self._append_grant_audit(
+                grant, "maintenance_applied", actor, now,
+                maintenanceRequestId=maintenance_id,
+            )
             return {"project": copy.deepcopy(project), "request": management_request_view(request)}
 
-        result = self.store.update(confirm)
+        try:
+            result = self.store.update(confirm)
+        except Exception as exc:
+            self._record_maintenance_failure(
+                project_id, maintenance_id, exc, actor=actor,
+            )
+            raise
         return {"ok": True, **result}
 
     def reject_maintenance_request(
@@ -735,7 +756,10 @@ class ProjectAuthoringService:
                 "updatedAt": now,
             })
             request.setdefault("audit", []).append(
-                self._audit("maintenance_rejected", actor, "management", now, "accepted")
+                self._audit(
+                    "maintenance_rejected", actor, "management", now, "accepted",
+                    projectId=project_id, maintenanceRequestId=maintenance_id,
+                )
             )
             return management_request_view(request)
 
@@ -807,7 +831,10 @@ class ProjectAuthoringService:
             })
             task["maintenanceHistory"] = history[-self.store.config.audit_history_limit:]
             project["updatedAt"] = now
-            self._append_grant_audit(grant, "autonomous_routine_update", requesting_agent_id, now)
+            self._append_grant_audit(
+                grant, "autonomous_routine_update", requesting_agent_id, now,
+                taskId=task_id, changedFields=sorted(changes),
+            )
             result = {
                 "task": copy.deepcopy(task),
                 "changedFields": sorted(changes),
@@ -1160,16 +1187,84 @@ class ProjectAuthoringService:
         return self.clock().astimezone(timezone.utc).isoformat()
 
     @staticmethod
-    def _audit(action: str, actor: str, source: str, at: str, result: str) -> dict[str, Any]:
-        return {"action": action, "actor": actor, "source": source, "at": at, "result": result}
+    def _audit(
+        action: str,
+        actor: str,
+        source: str,
+        at: str,
+        result: str,
+        **context: Any,
+    ) -> dict[str, Any]:
+        return build_audit_event(action, actor, source, at, result, **context)
 
     def _append_audit(self, request: dict[str, Any], action: str, actor: str, source: str, at: str, result: str) -> None:
-        request.setdefault("audit", []).append(self._audit(action, actor, source, at, result))
+        request.setdefault("audit", []).append(self._audit(
+            action,
+            actor,
+            source,
+            at,
+            result,
+            requestId=request.get("id"),
+            projectId=request.get("projectId"),
+        ))
         request["audit"] = request["audit"][-self.store.config.audit_history_limit:]
 
-    def _append_grant_audit(self, grant: dict[str, Any], action: str, actor: str, at: str) -> None:
-        grant.setdefault("audit", []).append(self._audit(action, actor, "management", at, "accepted"))
+    def _append_grant_audit(
+        self,
+        grant: dict[str, Any],
+        action: str,
+        actor: str,
+        at: str,
+        **context: Any,
+    ) -> None:
+        grant.setdefault("audit", []).append(self._audit(
+            action,
+            actor,
+            "management",
+            at,
+            "accepted",
+            projectId=grant.get("projectId"),
+            requestId=grant.get("requestId"),
+            **context,
+        ))
         grant["audit"] = grant["audit"][-self.store.config.audit_history_limit:]
+
+    def _record_maintenance_failure(
+        self,
+        project_id: str,
+        maintenance_id: str,
+        error: Exception,
+        *,
+        actor: str,
+    ) -> None:
+        now = self._timestamp()
+
+        def record(root: dict[str, Any]) -> None:
+            grant = root[GRANTS_KEY].get(project_id)
+            request = (grant.get("maintenanceRequests") or {}).get(maintenance_id) if isinstance(grant, dict) else None
+            if not isinstance(request, dict):
+                return
+            code = str(getattr(error, "code", "maintenance_apply_failed"))
+            safe_error = sanitize_audit_text(error, limit=1000)
+            request.setdefault("audit", []).append(self._audit(
+                "maintenance_apply_failed",
+                actor,
+                "management",
+                now,
+                "failed",
+                projectId=project_id,
+                maintenanceRequestId=maintenance_id,
+                code=code,
+                error=safe_error,
+            ))
+            request["audit"] = request["audit"][-self.store.config.audit_history_limit:]
+            request["lastFailure"] = {"code": code, "error": safe_error, "at": now}
+            request["updatedAt"] = now
+
+        try:
+            self.store.update(record)
+        except Exception:
+            pass
 
     @staticmethod
     def _validate_grant_record(
