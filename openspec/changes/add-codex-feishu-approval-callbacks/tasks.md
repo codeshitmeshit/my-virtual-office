@@ -8,7 +8,7 @@
 
 ## 3. Build approval intents and primary/fallback routing
 
-- [ ] 3.1 Build redacted Codex `application_form` intents for command, file-change, and permission approvals; freeze the trusted Feishu origin; route through the notification application using the original user's transferable identity; and fall back through the same common notification sender using Chat App credentials and the originating chat id, with a complete routing-matrix test.
+- [x] 3.1 Build redacted Codex `application_form` intents for command, file-change, and permission approvals; freeze the trusted Feishu origin; route through the notification application using the original user's transferable identity; and fall back through the same common notification sender using Chat App credentials and the originating chat id, with a complete routing-matrix test.
 
 ## 4. Receive Chat App card actions
 

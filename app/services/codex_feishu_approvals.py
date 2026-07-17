@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import os
 import tempfile
@@ -14,11 +15,22 @@ from typing import Any, Callable, Mapping
 
 from .provider_events import sanitize_payload
 
+try:  # app/server.py imports services as a top-level package.
+    from feishu_notifications import redact_sensitive
+except ImportError:  # Tests may import through app.services.
+    from app.feishu_notifications import redact_sensitive
+
 
 SCHEMA = "vo.codex-feishu-approval-routes/v1"
 ACTIVE_STATES = frozenset({"pending", "delivering", "delivered", "resolving"})
 TERMINAL_STATES = frozenset({"resolved", "failed", "expired"})
 DECISIONS = frozenset({"approve", "cancel"})
+ELIGIBLE_KINDS = frozenset({"command", "file_change", "permissions"})
+KIND_LABELS = {
+    "command": "命令执行",
+    "file_change": "文件变更",
+    "permissions": "权限申请",
+}
 
 
 @dataclass(frozen=True)
@@ -347,3 +359,237 @@ class CodexFeishuApprovalRouteStore:
             except OSError:
                 pass
             raise
+
+
+class CodexFeishuApprovalCoordinator:
+    """Build and route Codex approval cards through the common notifier."""
+
+    def __init__(
+        self,
+        store: CodexFeishuApprovalRouteStore,
+        *,
+        send_notification: Callable[..., Mapping[str, Any]],
+        status_dir: str = "",
+        attempt_id_factory: Callable[[], str] | None = None,
+    ) -> None:
+        self.store = store
+        self._send_notification = send_notification
+        self.status_dir = str(status_dir or "")
+        self._attempt_id_factory = attempt_id_factory or (lambda: uuid.uuid4().hex)
+
+    @staticmethod
+    def freeze_origin(context: Mapping[str, Any]) -> dict[str, Any]:
+        context = context if isinstance(context, Mapping) else {}
+        surface = str(context.get("sourceSurface") or "").strip().lower()
+        if str(context.get("sourceApp") or "").strip().lower() != "feishu" or surface not in {"feishu-dm", "feishu-group"}:
+            raise ValueError("Codex approval is not from a trusted Feishu turn")
+        actor = context.get("sourceActor") if isinstance(context.get("sourceActor"), Mapping) else {}
+        actor_ids = {
+            key: str(actor.get(key) or "").strip()[:256]
+            for key in ("openId", "userId", "unionId")
+            if str(actor.get(key) or "").strip()
+        }
+        chat_id = str(context.get("feishuChatId") or "").strip()[:300]
+        source_message_id = str(context.get("sourceMessageId") or "").strip()[:300]
+        if not actor_ids or not chat_id or not source_message_id:
+            raise ValueError("trusted Feishu origin requires actor, chat, and source message identity")
+        return {
+            "sourceApp": "feishu",
+            "sourceSurface": surface,
+            "sourceMessageId": source_message_id,
+            "feishuChatId": chat_id,
+            "actorIds": actor_ids,
+            "actorName": str(actor.get("name") or context.get("fromDisplayName") or "Feishu User").strip()[:160],
+        }
+
+    @staticmethod
+    def _summary(approval: Mapping[str, Any]) -> str:
+        raw = str(
+            approval.get("command")
+            or approval.get("description")
+            or approval.get("title")
+            or "Codex 请求执行受保护操作"
+        ).strip()
+        cleaned = sanitize_payload({"summary": redact_sensitive(raw[:1800])}).get("summary")
+        return str(cleaned or "Codex 请求执行受保护操作")[:1200]
+
+    @staticmethod
+    def _kind(approval: Mapping[str, Any]) -> str:
+        raw = str(approval.get("kind") or "").strip().lower().replace("-", "_")
+        aliases = {"filechange": "file_change", "file": "file_change", "permission": "permissions"}
+        return aliases.get(raw, raw)
+
+    @staticmethod
+    def _route_id(approval: Mapping[str, Any], context: Mapping[str, Any], origin: Mapping[str, Any]) -> str:
+        approval_id = str(approval.get("approval_id") or approval.get("approvalId") or approval.get("id") or "").strip()
+        seed = "|".join((
+            str(context.get("agentId") or approval.get("agentId") or ""),
+            str(context.get("conversationId") or ""),
+            str(approval.get("threadId") or approval.get("session_id") or ""),
+            str(approval.get("turnId") or approval.get("runId") or ""),
+            approval_id,
+            str(origin.get("sourceMessageId") or ""),
+        ))
+        return "codex-feishu-approval-" + hashlib.sha256(seed.encode("utf-8")).hexdigest()[:24]
+
+    @classmethod
+    def intent_for(cls, record: Mapping[str, Any], *, state: str = "pending", include_actions: bool = True) -> dict[str, Any]:
+        kind = str(record.get("kind") or "")
+        route_id = str(record.get("routeId") or "")
+        actions = []
+        if include_actions:
+            actions = [
+                {
+                    "category": "confirm",
+                    "text": "允许一次",
+                    "value": {"action": "codex_approval_once", "route_id": route_id, "version": 1},
+                },
+                {
+                    "category": "cancel",
+                    "text": "取消",
+                    "value": {"action": "codex_approval_cancel", "route_id": route_id, "version": 1},
+                },
+            ]
+        return {
+            "id": route_id,
+            "type": "application_form",
+            "title": "Codex 操作待审批",
+            "summary": str(record.get("summary") or "Codex 请求执行受保护操作")[:1200],
+            "state": state,
+            "multi_participant": False,
+            "related": {
+                "type": "codex_approval",
+                "id": route_id,
+                "title": KIND_LABELS.get(kind, "受保护操作"),
+            },
+            "details": [
+                ("Agent", str(record.get("agentId") or "Codex")[:160]),
+                ("类型", KIND_LABELS.get(kind, kind or "受保护操作")),
+            ],
+            "actions": actions,
+            "target": "feishu-codex-approval",
+        }
+
+    def register(self, approval: Mapping[str, Any], context: Mapping[str, Any]) -> tuple[dict[str, Any], bool]:
+        approval = approval if isinstance(approval, Mapping) else {}
+        context = context if isinstance(context, Mapping) else {}
+        kind = self._kind(approval)
+        if kind not in ELIGIBLE_KINDS:
+            raise ValueError(f"unsupported Codex approval kind: {kind or '<empty>'}")
+        approval_id = str(approval.get("approval_id") or approval.get("approvalId") or approval.get("id") or "").strip()[:240]
+        if not approval_id:
+            raise ValueError("Codex approval identity is required")
+        origin = self.freeze_origin(context)
+        route_id = self._route_id(approval, context, origin)
+        record = {
+            "routeId": route_id,
+            "approvalId": approval_id,
+            "providerKind": "codex",
+            "profile": str(approval.get("profile") or context.get("profile") or "")[:160],
+            "agentId": str(context.get("agentId") or approval.get("agentId") or "codex-local")[:160],
+            "conversationId": str(context.get("conversationId") or "")[:240],
+            "threadId": str(approval.get("threadId") or approval.get("session_id") or "")[:240],
+            "turnId": str(approval.get("turnId") or approval.get("runId") or "")[:240],
+            "kind": kind,
+            "summary": self._summary(approval),
+            **origin,
+        }
+        record["intent"] = self.intent_for(record)
+        return self.store.register(record)
+
+    @staticmethod
+    def _notification_target(record: Mapping[str, Any], notification_config: Mapping[str, Any], chat_config: Mapping[str, Any]) -> tuple[str, str]:
+        actor = record.get("actorIds") if isinstance(record.get("actorIds"), Mapping) else {}
+        if actor.get("unionId"):
+            return "union_id", str(actor["unionId"])
+        if actor.get("userId"):
+            return "user_id", str(actor["userId"])
+        same_identity_domain = (
+            str(notification_config.get("appId") or "").strip()
+            and str(notification_config.get("appId") or "").strip() == str(chat_config.get("appId") or "").strip()
+        )
+        if same_identity_domain and actor.get("openId"):
+            return "open_id", str(actor["openId"])
+        return "", ""
+
+    @staticmethod
+    def _configured(config: Mapping[str, Any]) -> bool:
+        return bool(config.get("appId") and config.get("appSecret"))
+
+    def _attempt(
+        self,
+        record: Mapping[str, Any],
+        *,
+        application: str,
+        app_config: Mapping[str, Any],
+        receive_id_type: str,
+        receive_id: str,
+    ) -> dict[str, Any]:
+        attempt_id = self._attempt_id_factory()
+        result = dict(self._send_notification(
+            record.get("intent") or self.intent_for(record),
+            webhook_url=None,
+            app_config={
+                "appId": app_config.get("appId") or "",
+                "appSecret": app_config.get("appSecret") or "",
+                "receiveIdType": receive_id_type,
+                "receiveId": receive_id,
+            },
+            status_dir=self.status_dir or None,
+        ))
+        sent = bool(result.get("ok")) and result.get("status") == "sent" and bool(result.get("messageId"))
+        ambiguous = str(result.get("status") or "") in {"network_error", "timeout", "send_timeout"}
+        delivery = {
+            "attemptId": attempt_id,
+            "application": application,
+            "channel": result.get("channel") or "app",
+            "messageId": result.get("messageId") or "",
+            "receiveIdType": receive_id_type,
+            "status": "sent" if sent else str(result.get("status") or "failed"),
+            "ok": sent,
+            "ambiguous": ambiguous,
+            "errorCategory": result.get("errorCategory") or result.get("code") or "",
+        }
+        self.store.record_delivery(str(record.get("routeId") or ""), delivery)
+        return {"application": application, "attemptId": attempt_id, "sent": sent, "ambiguous": ambiguous, "result": result}
+
+    def deliver(
+        self,
+        route_id: str,
+        *,
+        notification_config: Mapping[str, Any] | None = None,
+        chat_config: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        record = self.store.begin_delivery(route_id)
+        if not record or record.get("status") in TERMINAL_STATES:
+            return {"ok": False, "status": "route_unavailable", "routeId": route_id, "attempts": []}
+        notification_config = notification_config or {}
+        chat_config = chat_config or {}
+        attempts = []
+        if self._configured(notification_config):
+            receive_type, receive_id = self._notification_target(record, notification_config, chat_config)
+            if receive_type and receive_id:
+                primary = self._attempt(
+                    record,
+                    application="notification",
+                    app_config=notification_config,
+                    receive_id_type=receive_type,
+                    receive_id=receive_id,
+                )
+                attempts.append(primary)
+                if primary["sent"]:
+                    return {"ok": True, "status": "sent", "routeId": route_id, "application": "notification", "attempts": attempts}
+            else:
+                attempts.append({"application": "notification", "sent": False, "ambiguous": False, "status": "unroutable_identity"})
+        if self._configured(chat_config) and record.get("feishuChatId"):
+            fallback = self._attempt(
+                record,
+                application="chat",
+                app_config=chat_config,
+                receive_id_type="chat_id",
+                receive_id=str(record.get("feishuChatId") or ""),
+            )
+            attempts.append(fallback)
+            if fallback["sent"]:
+                return {"ok": True, "status": "sent", "routeId": route_id, "application": "chat", "attempts": attempts}
+        return {"ok": False, "status": "undeliverable", "routeId": route_id, "attempts": attempts}

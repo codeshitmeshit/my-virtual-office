@@ -8,7 +8,11 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from app.services.codex_feishu_approvals import CodexFeishuApprovalRouteStore  # noqa: E402
+from app.feishu_notifications import build_feishu_card  # noqa: E402
+from app.services.codex_feishu_approvals import (  # noqa: E402
+    CodexFeishuApprovalCoordinator,
+    CodexFeishuApprovalRouteStore,
+)
 
 
 def route(route_id="route-1", approval_id="approval-1"):
@@ -156,3 +160,156 @@ def test_invalid_route_identity_and_symlink_store_fail_closed(tmp_path):
         pass
     else:
         raise AssertionError("symlink stores must fail closed")
+
+
+def feishu_context(**overrides):
+    value = {
+        "sourceApp": "feishu",
+        "sourceSurface": "feishu-dm",
+        "sourceMessageId": "om_source",
+        "feishuChatId": "oc_origin",
+        "sourceActor": {
+            "openId": "ou_origin",
+            "userId": "u_origin",
+            "unionId": "on_origin",
+            "name": "Origin User",
+        },
+        "agentId": "codex-local",
+        "conversationId": "feishu-dm:user-1:chat-1",
+    }
+    value.update(overrides)
+    return value
+
+
+def approval(kind="command", **overrides):
+    value = {
+        "approval_id": f"approval-{kind}",
+        "kind": kind,
+        "command": "printf api_key=super-secret /Users/demo/private.txt",
+        "threadId": "thread-1",
+        "turnId": "turn-1",
+        "profile": "local",
+    }
+    value.update(overrides)
+    return value
+
+
+class FakeNotificationSender:
+    def __init__(self, results):
+        self.results = list(results)
+        self.calls = []
+
+    def __call__(self, intent, **kwargs):
+        self.calls.append({"intent": intent, **kwargs})
+        return self.results.pop(0)
+
+
+def coordinator(tmp_path, sender):
+    return CodexFeishuApprovalCoordinator(
+        CodexFeishuApprovalRouteStore(str(tmp_path / "routes.json")),
+        send_notification=sender,
+        status_dir=str(tmp_path),
+        attempt_id_factory=iter((f"attempt-{index}" for index in range(20))).__next__,
+    )
+
+
+def test_intents_cover_only_eligible_kinds_and_expose_opaque_actions(tmp_path):
+    sender = FakeNotificationSender([])
+    service = coordinator(tmp_path, sender)
+    for kind in ("command", "file_change", "permissions"):
+        record, created = service.register(approval(kind), feishu_context())
+        assert created is True
+        intent = record["intent"]
+        assert intent["type"] == "application_form"
+        assert intent["state"] == "pending"
+        assert [item["value"]["action"] for item in intent["actions"]] == ["codex_approval_once", "codex_approval_cancel"]
+        assert all(set(item["value"]) == {"action", "route_id", "version"} for item in intent["actions"])
+        assert record["approvalId"] not in json.dumps(intent, ensure_ascii=False)
+        assert "super-secret" not in json.dumps(intent, ensure_ascii=False)
+        build_feishu_card(intent)
+    try:
+        service.register(approval("question"), feishu_context())
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("non-security interactions must not become approval cards")
+
+
+def test_notification_application_uses_origin_union_id_and_fixed_recipient_is_ignored(tmp_path):
+    sender = FakeNotificationSender([{"ok": True, "status": "sent", "channel": "app", "messageId": "om_primary"}])
+    service = coordinator(tmp_path, sender)
+    record, _ = service.register(approval(), feishu_context())
+    result = service.deliver(
+        record["routeId"],
+        notification_config={
+            "appId": "notification-app",
+            "appSecret": "notification-secret",
+            "receiveIdType": "chat_id",
+            "receiveId": "oc_fixed_must_not_be_used",
+        },
+        chat_config={"appId": "chat-app", "appSecret": "chat-secret"},
+    )
+    assert result["ok"] is True
+    assert result["application"] == "notification"
+    assert len(sender.calls) == 1
+    assert sender.calls[0]["app_config"]["receiveIdType"] == "union_id"
+    assert sender.calls[0]["app_config"]["receiveId"] == "on_origin"
+    assert "oc_fixed_must_not_be_used" not in json.dumps(sender.calls[0])
+
+
+def test_missing_or_unroutable_notification_application_falls_back_to_origin_chat(tmp_path):
+    for notification_config, source_actor in (
+        ({}, {"openId": "ou_origin"}),
+        ({"appId": "notification-app", "appSecret": "secret"}, {"openId": "ou_origin"}),
+    ):
+        case = "missing" if not notification_config else "unroutable"
+        sender = FakeNotificationSender([{"ok": True, "status": "sent", "channel": "app", "messageId": f"om_chat_{case}"}])
+        service = coordinator(tmp_path / case, sender)
+        record, _ = service.register(approval(), feishu_context(sourceActor=source_actor))
+        result = service.deliver(
+            record["routeId"],
+            notification_config=notification_config,
+            chat_config={"appId": "chat-app", "appSecret": "chat-secret"},
+        )
+        assert result["ok"] is True
+        assert result["application"] == "chat"
+        assert sender.calls[-1]["app_config"]["receiveIdType"] == "chat_id"
+        assert sender.calls[-1]["app_config"]["receiveId"] == "oc_origin"
+
+
+def test_primary_failure_and_ambiguous_result_fall_back_with_same_route(tmp_path):
+    for primary_status in ("feishu_error", "network_error"):
+        sender = FakeNotificationSender([
+            {"ok": False, "status": primary_status, "channel": "app", "code": 230001},
+            {"ok": True, "status": "sent", "channel": "app", "messageId": f"om_fallback_{primary_status}"},
+        ])
+        service = coordinator(tmp_path / primary_status, sender)
+        record, _ = service.register(approval(), feishu_context())
+        result = service.deliver(
+            record["routeId"],
+            notification_config={"appId": "notification-app", "appSecret": "notification-secret"},
+            chat_config={"appId": "chat-app", "appSecret": "chat-secret"},
+        )
+        assert result["ok"] is True
+        assert result["application"] == "chat"
+        assert len(sender.calls) == 2
+        assert sender.calls[0]["intent"]["id"] == sender.calls[1]["intent"]["id"] == record["routeId"]
+        assert result["attempts"][0]["ambiguous"] is (primary_status == "network_error")
+
+
+def test_skipped_or_failed_chat_delivery_is_undeliverable(tmp_path):
+    for chat_result in (
+        {"ok": True, "status": "skipped_disabled"},
+        {"ok": False, "status": "network_error"},
+    ):
+        sender = FakeNotificationSender([chat_result])
+        service = coordinator(tmp_path / str(chat_result["status"]), sender)
+        record, _ = service.register(approval(), feishu_context())
+        result = service.deliver(
+            record["routeId"],
+            notification_config={},
+            chat_config={"appId": "chat-app", "appSecret": "chat-secret"},
+        )
+        assert result["ok"] is False
+        assert result["status"] == "undeliverable"
+        assert service.store.get(record["routeId"])["status"] == "delivering"
