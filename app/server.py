@@ -58,6 +58,7 @@ from services.provider_ports import AdapterCapabilities, AdapterEvent, AdapterRe
 from services.provider_registry import ProviderRunRepository
 from services.provider_runs import ProviderRunCoordinator
 from services.codex_fast_path import CodexEventFastPath, CodexFastPathTelemetry, CodexTransientCoalescer, classify_codex_event, load_codex_fast_path_settings
+from services.codex_feishu_approvals import CodexFeishuApprovalRouteStore
 from provider_sse_transport import ProviderSSETransport
 from services.project_repository import ProjectConflictError, ProjectNotFoundError, ProjectRepository
 from zoneinfo import ZoneInfo
@@ -4374,6 +4375,10 @@ HERMES_TASK_BREAKDOWN_STEPS = [
 ]
 
 HERMES_APPROVAL_SERVICE = ProviderApprovalService(max_pending=1000, max_per_scope=100, max_resolved=2000)
+CODEX_FEISHU_APPROVAL_ROUTES = CodexFeishuApprovalRouteStore(
+    os.path.join(STATUS_DIR, "codex-feishu-approval-routes.json"),
+    max_records=2000,
+)
 PROVIDER_CONVERSATION_SERVICE = ProviderConversationService()
 
 
@@ -12738,6 +12743,141 @@ def _dispatch_feishu_hermes_approval_action(action, value, event):
     }
 
 
+def _codex_feishu_callback_message_matches(record, event):
+    message_id = str(event.get("open_message_id") or event.get("message_id") or "").strip()
+    deliveries = record.get("deliveries") if isinstance(record.get("deliveries"), list) else []
+    known = {
+        str(item.get("messageId") or "").strip()
+        for item in deliveries if isinstance(item, dict) and str(item.get("messageId") or "").strip()
+    }
+    if message_id and message_id in known:
+        return True
+    return bool(message_id and any(
+        isinstance(item, dict) and item.get("ambiguous") and not item.get("messageId")
+        for item in deliveries
+    ))
+
+
+def _dispatch_feishu_codex_approval_action(action, value, event):
+    decisions = {
+        "codex_approval_once": "approve",
+        "codex_approval_cancel": "cancel",
+    }
+    if action not in decisions:
+        return {"handled": False}
+    route_id = str(value.get("route_id") or value.get("routeId") or "").strip()
+    if not route_id:
+        return {
+            "handled": True,
+            "ok": False,
+            "businessStatus": "missing_route_id",
+            "toast": _feishu_card_action_error("审批关联信息无效"),
+        }
+    record = CODEX_FEISHU_APPROVAL_ROUTES.get(route_id)
+    if not record or not _codex_feishu_callback_message_matches(record, event):
+        return {
+            "handled": True,
+            "ok": False,
+            "businessStatus": "callback_linkage_invalid",
+            "toast": _feishu_card_action_error("审批关联信息无效或已过期"),
+        }
+    actor = _feishu_card_action_user(event)
+    decision = decisions[action]
+    claim = CODEX_FEISHU_APPROVAL_ROUTES.claim(route_id, decision, actor)
+    if claim.unauthorized:
+        return {
+            "handled": True,
+            "ok": False,
+            "businessStatus": "callback_actor_invalid",
+            "toast": _feishu_card_action_error("你不能处理这条审批"),
+        }
+    if claim.replay:
+        return {
+            "handled": True,
+            "ok": True,
+            "businessStatus": "already_processed",
+            "idempotent": True,
+            "routeId": route_id,
+            "decision": (claim.record or {}).get("decision") or "",
+            "toast": _feishu_card_action_success("审批已处理，结果未改变"),
+        }
+    if claim.busy:
+        return {
+            "handled": True,
+            "ok": True,
+            "businessStatus": "callback_in_progress",
+            "idempotent": True,
+            "routeId": route_id,
+            "toast": _feishu_card_action_success("审批处理中（已收到）"),
+        }
+    if claim.stale or not claim.claimed:
+        return {
+            "handled": True,
+            "ok": False,
+            "businessStatus": "approval_stale",
+            "routeId": route_id,
+            "toast": _feishu_card_action_error("审批已过期或不可处理"),
+        }
+    trusted = claim.record or record
+    try:
+        provider_result = _handle_codex_approval_respond({
+            "agentId": trusted.get("agentId") or "codex-local",
+            "approval_id": trusted.get("approvalId") or "",
+            "sessionId": trusted.get("threadId") or "",
+            "conversationId": trusted.get("conversationId") or "",
+            "approval": {
+                "id": trusted.get("approvalId") or "",
+                "approval_id": trusted.get("approvalId") or "",
+                "threadId": trusted.get("threadId") or "",
+                "turnId": trusted.get("turnId") or "",
+                "runId": trusted.get("turnId") or "",
+            },
+            "choice": decision,
+            "source": "feishu-card",
+            "recordChatHistory": False,
+        })
+        if not isinstance(provider_result, dict):
+            provider_result = {"ok": False, "status": "invalid_provider_result"}
+    except BaseException as exc:
+        provider_result = {
+            "ok": False,
+            "status": "provider_resolution_failed",
+            "errorCategory": type(exc).__name__[:80],
+        }
+    safe_outcome = {
+        "ok": bool(provider_result.get("ok")),
+        "status": str(provider_result.get("status") or ("approved" if decision == "approve" else "cancelled"))[:120],
+        "decision": decision,
+        "errorCategory": str(provider_result.get("errorCategory") or "")[:80],
+        "runId": str(provider_result.get("runId") or trusted.get("turnId") or "")[:240],
+    }
+    committed = CODEX_FEISHU_APPROVAL_ROUTES.commit(route_id, claim.token, safe_outcome)
+    if not committed.claimed:
+        return {
+            "handled": True,
+            "ok": False,
+            "businessStatus": "approval_commit_failed",
+            "routeId": route_id,
+            "toast": _feishu_card_action_error("审批结果保存失败，请勿重复操作"),
+        }
+    if safe_outcome["ok"]:
+        return {
+            "handled": True,
+            "ok": True,
+            "businessStatus": "approved_once" if decision == "approve" else "cancelled",
+            "routeId": route_id,
+            "decision": decision,
+            "toast": _feishu_card_action_success("已允许本次操作" if decision == "approve" else "已取消本次操作"),
+        }
+    return {
+        "handled": True,
+        "ok": False,
+        "businessStatus": safe_outcome["status"] or "provider_resolution_failed",
+        "routeId": route_id,
+        "toast": _feishu_card_action_error("审批未能提交，操作不会重复执行"),
+    }
+
+
 def _handle_feishu_card_action(body):
     if not isinstance(body, dict):
         return {"ok": False, "error": "Invalid Feishu callback body", "_status": 400}
@@ -12783,7 +12923,8 @@ def _handle_feishu_card_action(body):
     meeting_outcome = _dispatch_feishu_meeting_request_action(action, request_id, event)
     project_outcome = {"handled": False} if meeting_outcome.get("handled") else _dispatch_feishu_project_execution_action(action, value, event)
     hermes_outcome = {"handled": False} if meeting_outcome.get("handled") or project_outcome.get("handled") else _dispatch_feishu_hermes_approval_action(action, value, event)
-    outcome = meeting_outcome if meeting_outcome.get("handled") else (project_outcome if project_outcome.get("handled") else (hermes_outcome if hermes_outcome.get("handled") else None))
+    codex_outcome = {"handled": False} if meeting_outcome.get("handled") or project_outcome.get("handled") or hermes_outcome.get("handled") else _dispatch_feishu_codex_approval_action(action, value, event)
+    outcome = meeting_outcome if meeting_outcome.get("handled") else (project_outcome if project_outcome.get("handled") else (hermes_outcome if hermes_outcome.get("handled") else (codex_outcome if codex_outcome.get("handled") else None)))
     record = _record_feishu_card_action(body, event, value, outcome=outcome)
     if meeting_outcome.get("handled"):
         response = {
@@ -12812,6 +12953,13 @@ def _handle_feishu_card_action(body):
             "toast": hermes_outcome.get("toast") or _feishu_card_action_success("操作已收到"),
             "recordId": record["id"],
             "outcome": {k: v for k, v in hermes_outcome.items() if k not in {"toast"}},
+        }
+    if codex_outcome.get("handled"):
+        return {
+            "ok": bool(codex_outcome.get("ok")),
+            "toast": codex_outcome.get("toast") or _feishu_card_action_success("操作已收到"),
+            "recordId": record["id"],
+            "outcome": {k: v for k, v in codex_outcome.items() if k not in {"toast"}},
         }
     return {
         "ok": True,
