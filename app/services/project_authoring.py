@@ -26,6 +26,12 @@ from services.project_authoring_store import (
 from services.project_authoring_validation import validate_idempotency_key, validate_project_draft
 from services.project_authoring_security import verify_request_secret
 from services.project_authoring_audit import build_audit_event, sanitize_audit_text
+from services.project_templates import (
+    ProjectTemplateError,
+    adapt_legacy_template,
+    append_template_version,
+    resolve_template_version,
+)
 from services.project_actors import (
     ActorReferenceError,
     legacy_task_role_fields,
@@ -918,44 +924,54 @@ class ProjectAuthoringService:
         if mode == "reference":
             template_id = str(template.get("templateId") or "")
             version = int(template.get("version") or 0)
-            versions = root[TEMPLATES_KEY].get(template_id) or []
-            if not any(int(item.get("version") or 0) == version for item in versions if isinstance(item, dict)):
-                raise ProjectAuthoringCommandError(
-                    "template_version_not_found", "Referenced template version was not found", 409, request_id,
+            try:
+                resolve_template_version(
+                    root[TEMPLATES_KEY], root.get("templates") or [], template_id, version,
                 )
+            except ProjectTemplateError as exc:
+                raise ProjectAuthoringCommandError(
+                    exc.code, str(exc), 409, request_id,
+                ) from exc
             return {"id": template_id, "version": version}
 
         template_id = str(template.get("templateId") or f"template-{request_id}")
         versions = root[TEMPLATES_KEY].setdefault(template_id, [])
-        if versions:
-            raise ProjectAuthoringCommandError(
-                "template_id_conflict", "Created template id already exists", 409, request_id,
-            )
-        version = {
-            "id": template_id,
-            "templateId": template_id,
-            "version": 1,
-            "name": template.get("name") or approved.get("title"),
-            "createdAt": now,
-            "createdBy": actor,
-            "sourceRequestId": request_id,
-            "snapshot": {
-                "title": approved.get("title"),
-                "description": approved.get("description"),
-                "columns": copy.deepcopy(approved.get("columns") or []),
-                "tasks": copy.deepcopy(approved.get("tasks") or []),
-                "agentMaintenanceMode": approved.get("agentMaintenanceMode"),
-                "projectExecutionEnabled": approved.get("projectExecutionEnabled", False),
-            },
-        }
-        versions.append(version)
-        root.setdefault("templates", []).append({
-            "id": template_id,
-            "title": version["name"],
-            "description": approved.get("description") or "",
-            "version": 1,
-        })
-        return {"id": template_id, "version": 1}
+        legacy = next(
+            (
+                item for item in (root.get("templates") or [])
+                if isinstance(item, Mapping) and str(item.get("id") or "") == template_id
+            ),
+            None,
+        )
+        if legacy is not None and not versions:
+            versions.append(adapt_legacy_template(legacy))
+        version = append_template_version(
+            versions,
+            template_id=template_id,
+            name=template.get("name") or approved.get("title"),
+            draft=approved,
+            created_at=now,
+            created_by=actor,
+            source_request_id=request_id,
+        )
+        summaries = root.setdefault("templates", [])
+        summary = next(
+            (
+                item for item in summaries
+                if isinstance(item, dict) and str(item.get("id") or "") == template_id
+            ),
+            None,
+        )
+        if summary is None:
+            summaries.append({
+                "id": template_id,
+                "title": version["name"],
+                "description": approved.get("description") or "",
+                "version": version["version"],
+            })
+        else:
+            summary["version"] = version["version"]
+        return {"id": template_id, "version": version["version"]}
 
     def _materialize_recurrence(
         self,
