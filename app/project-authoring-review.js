@@ -8,6 +8,10 @@
         detail: null,
         loading: false,
         error: '',
+        actionMessage: '',
+        createdProject: null,
+        pendingActions: new Set(),
+        confirmationKeys: {},
     };
 
     const esc = value => String(value == null ? '' : value)
@@ -35,6 +39,41 @@
         const payload = await response.json();
         if (!response.ok || payload.ok === false) throw new Error(payload.error || 'Unable to load draft');
         return payload.request;
+    }
+
+    async function requestJson(input, init) {
+        const response = await requestFetch(input, init);
+        const payload = await response.json();
+        if (!response.ok || payload.ok === false) {
+            const error = new Error(payload.error || text('Review action failed', '评审操作失败'));
+            error.payload = payload;
+            throw error;
+        }
+        return payload;
+    }
+
+    async function editRequest(id, revision, draft) {
+        return requestJson(`/api/project-authoring/requests/${encodeURIComponent(id)}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ expectedRevision: revision, draft }),
+        });
+    }
+
+    async function confirmRequest(id, revision, confirmationKey) {
+        return requestJson(`/api/project-authoring/requests/${encodeURIComponent(id)}/confirm`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ expectedRevision: revision, confirmationKey }),
+        });
+    }
+
+    async function rejectRequest(id, revision, reason) {
+        return requestJson(`/api/project-authoring/requests/${encodeURIComponent(id)}/reject`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ expectedRevision: revision, reason }),
+        });
     }
 
     function container() {
@@ -95,6 +134,8 @@
         const original = request.originalDraft || {};
         const working = request.workingDraft || request.approvedSnapshot || {};
         const recommendations = reviewerRecommendations(working);
+        const mutable = request.state === 'pending' || request.state === 'failed';
+        const busy = state.pendingActions.has(request.id);
         return `
             <div class="par-detail" data-request-id="${esc(request.id)}" data-request-revision="${esc(request.revision)}">
                 <header class="par-detail-header">
@@ -105,6 +146,14 @@
                     <span class="par-state par-state-${esc(request.state)}">${esc(stateLabel(request.state))}</span>
                 </header>
                 ${renderIssues(request)}
+                ${state.actionMessage ? `<div class="par-action-message">${esc(state.actionMessage)}</div>` : ''}
+                ${state.createdProject ? `
+                    <div class="par-created-project">
+                        <span>${text('Project created successfully.', '项目已成功创建。')}</span>
+                        <button class="proj-btn proj-btn-primary" onclick="ProjectAuthoringReview.openCreatedProject()">
+                            ${text('Open project', '进入项目')} · ${esc(state.createdProject.title || state.createdProject.id)}
+                        </button>
+                    </div>` : ''}
                 <div class="par-two-column">
                     <section class="par-panel">
                         <h3>${text('Original Agent proposal', 'Agent 原始提案')}</h3>
@@ -141,7 +190,145 @@
                         <code>${esc(working.agentMaintenanceMode || '')}</code>
                     </section>
                 </div>
+                ${mutable ? `
+                    <div class="par-actions" data-project-authoring-actions>
+                        <button class="proj-btn" ${busy ? 'disabled' : ''} onclick="ProjectAuthoringReview.saveEdit()">
+                            ${busy ? text('Processing…', '处理中…') : text('Save edits', '保存编辑')}
+                        </button>
+                        <button class="proj-btn proj-btn-danger" ${busy ? 'disabled' : ''} onclick="ProjectAuthoringReview.reject()">
+                            ${text('Reject draft', '拒绝草稿')}
+                        </button>
+                        <button class="proj-btn proj-btn-primary" ${busy ? 'disabled' : ''} onclick="ProjectAuthoringReview.confirm()">
+                            ${text('Confirm and create project', '确认并创建项目')}
+                        </button>
+                    </div>` : ''}
             </div>`;
+    }
+
+    function editedDraft() {
+        const field = document.getElementById('project-authoring-approved-draft');
+        if (!field) throw new Error(text('Editable configuration was not found.', '未找到可编辑配置。'));
+        try {
+            return JSON.parse(field.value);
+        } catch (error) {
+            throw new Error(text('Approved configuration must be valid JSON.', '待确认配置必须是有效 JSON。'));
+        }
+    }
+
+    function draftChanged(request, draft) {
+        return JSON.stringify(draft) !== JSON.stringify(request.workingDraft || request.approvedSnapshot || {});
+    }
+
+    async function runAction(action, callback) {
+        const request = state.detail;
+        if (!request) return;
+        const key = `${request.id}:${action}`;
+        if (state.pendingActions.has(request.id)) {
+            state.actionMessage = text('This draft already has an action in progress.', '该草稿已有操作正在进行。');
+            render();
+            return;
+        }
+        state.pendingActions.add(request.id);
+        state.actionMessage = '';
+        state.error = '';
+        render();
+        try {
+            await callback(request, key);
+        } catch (error) {
+            const payload = error.payload || {};
+            state.error = String(error.message || error);
+            if (Array.isArray(payload.issues) && state.detail) state.detail.issues = payload.issues;
+            if (payload.code && state.detail) state.detail.code = payload.code;
+        } finally {
+            state.pendingActions.delete(request.id);
+            render();
+        }
+    }
+
+    async function saveEdit() {
+        let draft;
+        try {
+            draft = editedDraft();
+        } catch (error) {
+            state.error = String(error.message || error);
+            render();
+            return;
+        }
+        return runAction('edit', async request => {
+            if (!draftChanged(request, draft)) {
+                state.actionMessage = text('No edits to save.', '没有需要保存的修改。');
+                return;
+            }
+            const payload = await editRequest(request.id, request.revision, draft);
+            state.detail = payload.request;
+            state.actionMessage = text('Edits saved.', '编辑已保存。');
+            await reloadSummary(request.id);
+        });
+    }
+
+    function confirmationKey(requestId) {
+        if (!state.confirmationKeys[requestId]) {
+            const suffix = typeof crypto !== 'undefined' && crypto.randomUUID
+                ? crypto.randomUUID()
+                : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+            state.confirmationKeys[requestId] = `review:${suffix}`;
+        }
+        return state.confirmationKeys[requestId];
+    }
+
+    async function confirmDraft() {
+        if (!window.confirm(text(
+            'Create this complete project from the approved configuration?',
+            '确认按当前配置创建完整项目吗？',
+        ))) return;
+        let draft;
+        try {
+            draft = editedDraft();
+        } catch (error) {
+            state.error = String(error.message || error);
+            render();
+            return;
+        }
+        return runAction('confirm', async request => {
+            let current = request;
+            if (draftChanged(current, draft)) {
+                const edited = await editRequest(current.id, current.revision, draft);
+                current = edited.request;
+                state.detail = current;
+            }
+            const payload = await confirmRequest(
+                current.id,
+                current.revision,
+                confirmationKey(current.id),
+            );
+            state.detail = payload.request || current;
+            state.createdProject = payload.project || null;
+            state.actionMessage = text('Draft confirmed and project created.', '草稿已确认，项目已创建。');
+            await reloadSummary(current.id);
+        });
+    }
+
+    async function rejectDraft() {
+        return runAction('reject', async request => {
+            const reason = window.prompt(text('Why are you rejecting this draft?', '请输入拒绝该草稿的原因：'), '');
+            if (reason == null) return;
+            if (!String(reason).trim()) throw new Error(text('A rejection reason is required.', '必须填写拒绝原因。'));
+            const payload = await rejectRequest(request.id, request.revision, String(reason).trim());
+            state.detail = payload.request;
+            state.actionMessage = text('Draft rejected.', '草稿已拒绝。');
+            await reloadSummary(request.id);
+        });
+    }
+
+    async function reloadSummary(selectedId) {
+        state.requests = await listRequests();
+        state.selectedId = selectedId;
+    }
+
+    function openCreatedProject() {
+        if (state.createdProject && window.ProjMgr && window.ProjMgr.openProject) {
+            window.ProjMgr.openProject(state.createdProject.id);
+        }
     }
 
     function render() {
@@ -166,6 +353,8 @@
         state.selectedId = id;
         state.loading = true;
         state.error = '';
+        state.actionMessage = '';
+        state.createdProject = null;
         render();
         try {
             state.detail = await getRequest(id);
@@ -201,8 +390,18 @@
     async function show() {
         state.selectedId = '';
         state.detail = null;
+        state.actionMessage = '';
+        state.createdProject = null;
         await refresh();
     }
 
-    window.ProjectAuthoringReview = { show, refresh, select };
+    window.ProjectAuthoringReview = {
+        show,
+        refresh,
+        select,
+        saveEdit,
+        confirm: confirmDraft,
+        reject: rejectDraft,
+        openCreatedProject,
+    };
 }());
