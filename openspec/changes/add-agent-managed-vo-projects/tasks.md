@@ -48,7 +48,7 @@
 
 - [x] 8.1 Add `skills/vo-project-authoring/SKILL.md` and agent metadata covering explicit-only invocation, roster lookup, complete draft construction, candidate confirmation, high-risk/cross-team/critical-delivery reviewer recommendations, request-secret handling, status polling, and maintenance boundaries.
 - [x] 8.2 Update the live VO operating-guidelines routing and `skills/catalog.md` so authoring uses the new skill while execution/review/acceptance remains with `vo-project-workflow`.
-- [ ] 8.3 Document the Agent authoring APIs, user confirmation contract, actor semantics, template versioning, recurrence behavior, and operational failure/recovery procedures.
+- [x] 8.3 Document the Agent authoring APIs, user confirmation contract, actor semantics, template versioning, recurrence behavior, and operational failure/recovery procedures.
 
 ## 9. Verification and Rollout
 
