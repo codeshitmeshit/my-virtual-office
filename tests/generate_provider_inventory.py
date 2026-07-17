@@ -184,7 +184,7 @@ def approval_bounds() -> dict:
         "authorities": [
             {"name": "Hermes provider approval service", "state": "HERMES_APPROVAL_SERVICE", "file": "app/services/provider_approvals.py", "shape": "bounded records plus per-scope ordered queues", "bounded": True, "maxItems": 1000, "maxPerScope": 100, "cleanup": "fenced resolution plus resolved-retention pruning", "risk": "capacity eviction is explicit and tested"},
             {"name": "Codex app-server pending approvals", "state": "CodexAppServerProvider._pending_approvals", "file": "app/providers/codex_app_server.py", "shape": "dict[approvalId, approval]", "bounded": True, "maxItems": 100, "cleanup": "resolved/thread-close entries are removed; overflow is denied without registration", "risk": "bounded and fail-closed"},
-            {"name": "Provider app-server request replies", "state": "ProviderAppServerClient._pending", "file": "app/provider_app_server.py", "shape": "dict[requestId, Queue(maxsize=1)]", "bounded": True, "maxItems": 1000, "cleanup": "finally/close removes requests; overflow is rejected before send", "risk": "bounded and fail-closed"},
+            {"name": "Provider app-server request replies", "state": "ProviderAppServerClient._pending", "file": "app/provider_app_server.py", "shape": "pending response queues plus late-response cleanup callbacks", "bounded": True, "maxItems": 1000, "cleanup": "responses, close, and runtime exit remove pending and late-cleanup entries; aggregate overflow is rejected before send", "risk": "bounded and fail-closed"},
         ],
         "requiredFinalState": "All Provider approval/request authorities have explicit aggregate bounds and deterministic overflow behavior",
     }

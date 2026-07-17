@@ -17,24 +17,24 @@ description: Virtual Office 中任意 CLI 或 agent 需要判断是否处于 VO 
 
 优先使用当前运行环境或 `start.sh` 启动配置中的端口。`start.sh` 会加载 `.env` 并导出 `VO_PORT`，服务端按这个端口启动；因此不能因为 `127.0.0.1:8090` 不通就判断 VO 不可用。
 
-当 agent 位于当前 VO/VU 的本地项目目录中，并需要访问本 skill 或任一专用 VO skill 提到的 HTTP 接口时，不需要获取、询问或暴露外部 Base URL。先读取当前进程的 `VO_PORT`；如果没有，再读取当前 VO 项目 `.env` 中的 `VO_PORT`，然后把 skill 中给出的接口路径拼到 `http://127.0.0.1:$VO_PORT`。例如接口路径是 `/api/agents`，本地完整地址就是 `http://127.0.0.1:${VO_PORT:-8090}/api/agents`。只有调用方明确不在当前 VO/VU 本地运行环境中时，才使用显式提供的 `VO_BASE_URL`；不要自行猜测或传播外部部署地址。
+当 agent 位于当前 VO/VU 的本地项目目录中，并需要访问本 skill 或任一专用 VO skill 提到的 HTTP 接口时，不需要获取、询问或暴露外部 Base URL。先读取当前进程的 `VO_PORT`；如果没有，再读取当前 VO 项目 `.env` 中的 `VO_PORT`，然后把 skill 中给出的接口路径拼到 `http://127.0.0.1:$VO_PORT`。例如接口路径是 `/api/agents`，本地完整地址就是 `http://127.0.0.1:${VO_PORT:-8090}/api/agents`。只有调用方明确不在当前 VO/VU 本地运行环境中时，才设置 `VO_REMOTE_CALLER=1` 并使用显式提供的 `VO_BASE_URL`；不要自行猜测或传播外部部署地址。
 
 探测顺序：
 
 1. 当前 VO/VU 本地运行环境中，如果有 `VO_PORT`，使用 `http://127.0.0.1:$VO_PORT`。
 2. 如果能访问当前 VO 项目目录，读取其 `.env` 中的 `VO_PORT`，再拼成本地地址。
-3. 如果调用方明确不在当前 VO/VU 本地运行环境中，且已有显式提供的 `VO_BASE_URL`，使用该地址。
+3. 如果调用方明确不在当前 VO/VU 本地运行环境中，设置 `VO_REMOTE_CALLER=1`；此时必须已有显式提供的 `VO_BASE_URL`，才使用该地址。
 4. 本地场景最后才回退到 `http://127.0.0.1:8090`。测试环境可能使用 `8038`，但不要把它当作生产默认值。
 
 ```bash
-VO_PROJECT_ROOT="${VO_PROJECT_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
-if [ -z "${VO_PORT:-}" ] && [ -f "$VO_PROJECT_ROOT/.env" ]; then
-  VO_PORT="$(awk -F= '$1=="VO_PORT"{print $2; exit}' "$VO_PROJECT_ROOT/.env")"
-fi
-if [ -n "${VO_PORT:-}" ]; then
-  VO_BASE_URL="http://127.0.0.1:$VO_PORT"
+if [ "${VO_REMOTE_CALLER:-0}" = "1" ]; then
+  : "${VO_BASE_URL:?VO_BASE_URL is required for an explicitly remote caller}"
 else
-  VO_BASE_URL="${VO_BASE_URL:-http://127.0.0.1:8090}"
+  VO_PROJECT_ROOT="${VO_PROJECT_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
+  if [ -z "${VO_PORT:-}" ] && [ -f "$VO_PROJECT_ROOT/.env" ]; then
+    VO_PORT="$(awk -F= '$1=="VO_PORT"{print $2; exit}' "$VO_PROJECT_ROOT/.env")"
+  fi
+  VO_BASE_URL="http://127.0.0.1:${VO_PORT:-8090}"
 fi
 curl -sS "$VO_BASE_URL/status"
 curl -sS "$VO_BASE_URL/api/agents"

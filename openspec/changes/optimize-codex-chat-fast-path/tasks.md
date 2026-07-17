@@ -68,3 +68,7 @@
 ## 14. Turn Identity Response Race Remediation
 
 - [x] 14.1 Treat the `turn/start` response as the authoritative turn identity, buffer native notifications that arrive before that response within a fixed bound, replay only matching notifications in source order, and add a deterministic regression where a stale resumed-thread notification precedes the new turn response.
+
+## 15. Third Push Review Remediation
+
+- [x] 15.1 Extend pre-response isolation to approval and input server requests with response-time identity revalidation, interrupt and clean up the authoritative native turn on buffer overflow, bound the pre-response visibility delay without accepting stale events, make local VO endpoint fallback ignore inherited external URLs, and add deterministic security, cleanup, latency, and documentation regressions.

@@ -7,6 +7,7 @@ const style = fs.readFileSync('app/style.css', 'utf8');
 const zh = JSON.parse(fs.readFileSync('app/locales/zh.json', 'utf8'));
 const en = JSON.parse(fs.readFileSync('app/locales/en.json', 'utf8'));
 const catalog = fs.readFileSync('skills/catalog.md', 'utf8');
+const operatingGuidelines = fs.readFileSync('skills/vo-operating-guidelines/SKILL.md', 'utf8');
 
 const expectedSkills = [
   'vo-operating-guidelines',
@@ -99,5 +100,10 @@ for (const key of requiredLocaleKeys) {
 
 assert.ok(!/recommend/i.test(en.agent_guide_intro), 'English intro should not claim recommendation');
 assert.ok(!/推荐/.test(zh.agent_guide_intro), 'Chinese intro should not claim recommendation');
+
+assert.ok(operatingGuidelines.includes('VO_REMOTE_CALLER'), 'VO endpoint guidance should require an explicit remote-caller signal');
+assert.ok(operatingGuidelines.includes(': "${VO_BASE_URL:?VO_BASE_URL is required for an explicitly remote caller}"'), 'remote callers should provide an explicit base URL');
+assert.ok(operatingGuidelines.includes('VO_BASE_URL="http://127.0.0.1:${VO_PORT:-8090}"'), 'local callers should always derive a loopback base URL');
+assert.ok(!operatingGuidelines.includes('VO_BASE_URL="${VO_BASE_URL:-http://127.0.0.1:'), 'local callers must not inherit an external base URL');
 
 console.log('agent guide static checks passed');

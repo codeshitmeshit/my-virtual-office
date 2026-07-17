@@ -17,7 +17,7 @@ from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import Any
 
-from provider_app_server import JsonlAppServerRuntime
+from provider_app_server import AppServerResponseError, JsonlAppServerRuntime
 
 
 APPROVAL_METHODS = {
@@ -30,10 +30,16 @@ APPROVAL_METHODS = {
     "mcpServer/elicitation/request",
 }
 MAX_PENDING_APPROVALS = 100
-MAX_PRESTART_NOTIFICATIONS = 512
+MAX_PRESTART_MESSAGES = 512
+PRESTART_VISIBILITY_DELAY_SEC = 1.0
+TURN_START_RESPONSE_TIMEOUT_SEC = 30.0
 TERMINAL_DRAIN_TIMEOUT_SEC = 0.05
 POST_TERMINAL_METRIC_METHODS = {"thread/tokenUsage/updated", "session/metrics"}
 MAX_TERMINAL_DIAGNOSTICS = 100
+MAX_LATE_START_CLEANUPS = 100
+LATE_START_RECOVERY_DELAY_SEC = 5.0
+LATE_START_RECOVERY_MAX_ATTEMPTS = 12
+MAX_OBSERVED_TERMINAL_TURNS = 64
 
 
 def _error_result(code: str, message: str, **extra: Any) -> dict[str, Any]:
@@ -365,16 +371,23 @@ class _Operation:
     callback_error_category: str = ""
     stale_turn_ids: set[str] = field(default_factory=set, repr=False)
     _callbacks_drained: threading.Event = field(default_factory=threading.Event, repr=False)
-    _prestart_notifications: list[tuple[str, dict[str, Any]]] = field(default_factory=list, repr=False)
-    _native_notifications_ready: bool = False
-    prestart_notification_overflows: int = 0
+    _prestart_messages: list[tuple[str, dict[str, Any]]] = field(default_factory=list, repr=False)
+    _native_messages_ready: bool = False
+    prestart_message_overflows: int = 0
+    _prestart_visibility_timer: threading.Timer | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         self._callbacks_drained.set()
-        self._native_notifications_ready = self.kind != "turn"
+        self._native_messages_ready = self.kind != "turn"
 
     def emit(self, event_type: str, *, terminal: bool = False, **data: Any) -> bool:
         with self._callback_condition:
+            if (
+                event_type == "turn"
+                and data.get("status") == "starting"
+                and (self.cancel_requested or self.turn_id)
+            ):
+                return False
             if self._terminal_observed and not terminal:
                 self.late_notifications += 1
                 return False
@@ -472,15 +485,24 @@ class _Operation:
                 self.turn_id = incoming
             return True
 
-    def defer_native_notification(self, method: str, params: dict[str, Any]) -> bool:
+    def defer_native_message(self, kind: str, payload: dict[str, Any]) -> str:
         with self._callback_condition:
-            if self._native_notifications_ready:
-                return False
-            if len(self._prestart_notifications) >= MAX_PRESTART_NOTIFICATIONS:
-                self.prestart_notification_overflows += 1
-            else:
-                self._prestart_notifications.append((str(method or ""), dict(params or {})))
-            return True
+            if self._native_messages_ready:
+                return "ready"
+            if self._terminal_observed:
+                self.late_notifications += 1
+                return "closed"
+            if len(self._prestart_messages) >= MAX_PRESTART_MESSAGES:
+                self.prestart_message_overflows += 1
+                return "overflow"
+            self._prestart_messages.append((str(kind or ""), dict(payload or {})))
+            return "deferred"
+
+    def defer_native_notification(self, method: str, params: dict[str, Any]) -> bool:
+        return self.defer_native_message(
+            "notification",
+            {"method": str(method or ""), "params": dict(params or {})},
+        ) != "ready"
 
     def confirm_turn_identity(self, turn_id: str) -> bool:
         authoritative = str(turn_id or "").strip()
@@ -491,16 +513,48 @@ class _Operation:
                 self.turn_id = authoritative
                 self.state.thread_id = self.thread_id
                 self.state.turn_id = authoritative
-            return self.prestart_notification_overflows == 0
+            return self.prestart_message_overflows == 0
 
-    def take_prestart_notifications(self) -> list[tuple[str, dict[str, Any]]] | None:
+    def take_prestart_messages(self) -> list[tuple[str, dict[str, Any]]] | None:
         with self._callback_condition:
-            if self._prestart_notifications:
-                pending = self._prestart_notifications
-                self._prestart_notifications = []
+            if self._prestart_messages:
+                pending = self._prestart_messages
+                self._prestart_messages = []
                 return pending
-            self._native_notifications_ready = True
+            self._native_messages_ready = True
             return None
+
+    def discard_prestart_messages(self) -> list[tuple[str, dict[str, Any]]]:
+        with self._callback_condition:
+            pending = self._prestart_messages
+            self._prestart_messages = []
+            return pending
+
+    def prestart_turn_ids(self) -> list[str]:
+        with self._callback_condition:
+            turn_ids = set()
+            for kind, payload in self._prestart_messages:
+                params = payload.get("params") if isinstance(payload.get("params"), dict) else {}
+                turn_id = _native_turn_id(params)
+                if turn_id:
+                    turn_ids.add(turn_id)
+            return sorted(turn_ids)
+
+    def prestart_terminal_turn_ids(self) -> set[str]:
+        with self._callback_condition:
+            terminal_turn_ids = set()
+            for kind, payload in self._prestart_messages:
+                if kind != "notification" or payload.get("method") != "turn/completed":
+                    continue
+                params = payload.get("params") if isinstance(payload.get("params"), dict) else {}
+                turn_id = _native_turn_id(params)
+                if turn_id:
+                    terminal_turn_ids.add(turn_id)
+            return terminal_turn_ids
+
+    def prestart_overflowed(self) -> bool:
+        with self._callback_condition:
+            return self.prestart_message_overflows > 0
 
     def finish_without_event(self) -> None:
         with self._callback_condition:
@@ -511,6 +565,51 @@ class _Operation:
             self._release_completion_if_drained_locked()
             if not self.completed.is_set():
                 self._start_terminal_fallback_locked()
+
+    def set_prestart_visibility_timer(self, timer: threading.Timer) -> None:
+        with self._callback_condition:
+            self._prestart_visibility_timer = timer
+
+    def cancel_prestart_visibility(self, *, mark_cancelled: bool = False) -> None:
+        with self._callback_condition:
+            if mark_cancelled:
+                self.cancel_requested = True
+            timer = self._prestart_visibility_timer
+            self._prestart_visibility_timer = None
+        if timer:
+            timer.cancel()
+
+    def emit_prestart_starting(self) -> bool:
+        with self._callback_condition:
+            if self.cancel_requested or self._terminal_observed or self.turn_id:
+                return False
+            self._prestart_visibility_timer = None
+        return self.emit("turn", status="starting")
+
+    def terminal_observed(self) -> bool:
+        with self._callback_condition:
+            return self._terminal_observed
+
+    def register_pending_request(self, request_key: str, pending: dict[str, Any]) -> bool:
+        with self._callback_condition:
+            if self._terminal_observed or self.cancel_requested:
+                return False
+            self.pending_requests[request_key] = pending
+            return True
+
+    def pop_pending_request(self, request_key: str) -> dict[str, Any] | None:
+        with self._callback_condition:
+            return self.pending_requests.pop(request_key, None)
+
+    def has_pending_request(self, request_key: str) -> bool:
+        with self._callback_condition:
+            return request_key in self.pending_requests
+
+    def drain_pending_requests(self) -> list[tuple[str, dict[str, Any]]]:
+        with self._callback_condition:
+            pending = list(self.pending_requests.items())
+            self.pending_requests.clear()
+            return pending
 
     def accept_native_notification(self, method: str) -> bool:
         with self._callback_condition:
@@ -531,7 +630,7 @@ class _Operation:
                 "lateNotifications": self.late_notifications,
                 "postTerminalMetrics": self.post_terminal_metrics,
                 "callbackErrors": self.callback_errors,
-                "prestartNotificationOverflows": self.prestart_notification_overflows,
+                "prestartMessageOverflows": self.prestart_message_overflows,
                 "terminalFenceWaitMs": round(max(0, self._terminal_completed_ns - self._terminal_observed_ns) / 1_000_000, 3)
                 if self._terminal_observed_ns and self._terminal_completed_ns else 0.0,
             }
@@ -561,6 +660,17 @@ class _Operation:
         timer = threading.Timer(TERMINAL_DRAIN_TIMEOUT_SEC, fallback)
         timer.daemon = True
         timer.start()
+
+
+@dataclass
+class _LateStartCleanup:
+    event: threading.Event = field(default_factory=threading.Event)
+    turn_id: str = ""
+    interrupt_sent: bool = False
+    observed_terminal_turn_ids: set[str] = field(default_factory=set)
+    recovery_scheduled: bool = False
+    recovery_attempts: int = 0
+    force_recycle: bool = False
 
 
 class CodexAppServerClient:
@@ -603,18 +713,23 @@ class CodexAppServerClient:
         self._admission_counters = {"acceptedTurns": 0, "busyByCapacity": 0, "activeTurns": 0, "peakActiveTurns": 0}
         self._approval_lock = threading.Condition()
         self._pending_approvals: dict[str, dict[str, Any]] = {}
+        self._late_start_lock = threading.Lock()
+        self._late_start_cleanups: OrderedDict[str, _LateStartCleanup] = OrderedDict()
+        self._recovery_admission_lock = threading.RLock()
 
     def close(self) -> None:
         self._initialized = False
         self._runtime.close()
+        self._handle_runtime_exit()
 
     def probe_auth(self, timeout_sec: int = 15) -> dict[str, Any]:
         """Initialize Codex app-server and read account/auth state."""
         init: dict[str, Any] = {}
         account: dict[str, Any] = {}
         try:
-            init = self._ensure_started()
-            account = self._request("account/read", {"refreshToken": False}, timeout=float(timeout_sec or 15))
+            with self._runtime_generation_lock:
+                init = self._ensure_started()
+                account = self._request("account/read", {"refreshToken": False}, timeout=float(timeout_sec or 15))
             auth_ok, auth_status = self._account_status(account)
             return {
                 "ok": auth_ok,
@@ -657,8 +772,19 @@ class CodexAppServerClient:
     def _send(self, message: dict[str, Any]) -> None:
         self._runtime.send(message)
 
-    def _request(self, method: str, params: dict[str, Any], timeout: float = 30) -> dict[str, Any]:
-        return self._runtime.request(method, params, timeout=timeout).get("result") or {}
+    def _request(
+        self,
+        method: str,
+        params: dict[str, Any],
+        timeout: float = 30,
+        on_late_response: Any = None,
+    ) -> dict[str, Any]:
+        return self._runtime.request(
+            method,
+            params,
+            timeout=timeout,
+            on_late_response=on_late_response,
+        ).get("result") or {}
 
     def _restart_runtime(self) -> None:
         self._initialized = False
@@ -666,6 +792,7 @@ class CodexAppServerClient:
             self._runtime.close()
         except Exception:
             pass
+        self._handle_runtime_exit()
 
     def _has_active_operations(self) -> bool:
         with self._operations_lock:
@@ -678,9 +805,10 @@ class CodexAppServerClient:
         *,
         timeout: float = 30,
         retry: bool = True,
+        on_late_response: Any = None,
     ) -> dict[str, Any]:
         try:
-            return self._request(method, params, timeout=timeout)
+            return self._request(method, params, timeout=timeout, on_late_response=on_late_response)
         except TimeoutError:
             if not retry:
                 raise
@@ -711,60 +839,82 @@ class CodexAppServerClient:
         return self._runtime.allocate_id()
 
     def _handle_runtime_exit(self) -> None:
-        self._initialized = False
-        with self._operations_lock:
-            operations = list(self._operations.values())
-        detail = self._runtime.stderr_text()
-        message = "Codex app-server stopped unexpectedly"
-        if detail:
-            message = f"{message}: {detail}"
-        for operation in operations:
-            if not operation.completed.is_set():
-                operation.result = _error_result("bridge_unavailable", message, threadId=operation.thread_id, turnId=operation.turn_id)
-                self._remember_terminal_operation(operation)
-                operation.finish_without_event()
-        self._clear_pending_approvals()
+        with self._recovery_admission_lock:
+            self._initialized = False
+            with self._late_start_lock:
+                for cleanup in self._late_start_cleanups.values():
+                    cleanup.event.set()
+                self._late_start_cleanups.clear()
+            with self._operations_lock:
+                operations = list(self._operations.values())
+            detail = self._runtime.stderr_text()
+            message = "Codex app-server stopped unexpectedly"
+            if detail:
+                message = f"{message}: {detail}"
+            for operation in operations:
+                if not operation.completed.is_set():
+                    operation.result = _error_result("bridge_unavailable", message, threadId=operation.thread_id, turnId=operation.turn_id)
+                    self._remember_terminal_operation(operation)
+                    operation.finish_without_event()
+            self._clear_pending_approvals()
 
-    def _handle_server_request(self, message: dict[str, Any]) -> None:
+    @staticmethod
+    def _rejected_server_request_result(method: str, params: dict[str, Any]) -> dict[str, Any]:
+        if method == "item/tool/requestUserInput":
+            return {"answers": {}}
+        if method == "mcpServer/elicitation/request":
+            return {"action": "decline"}
+        return CodexAppServerClient._approval_response(method, params, "cancel")
+
+    def _handle_server_request(self, message: dict[str, Any], *, defer_prestart: bool = True) -> None:
         method = message.get("method", "")
         params = message.get("params") or {}
         thread_id = str(params.get("threadId") or "")
         with self._operations_lock:
             operation = self._operations.get(thread_id) or self._terminal_operations.get(thread_id)
         if method in APPROVAL_METHODS:
+            if operation and defer_prestart:
+                prestart_state = operation.defer_native_message("server_request", message)
+                if prestart_state == "deferred":
+                    return
+                if prestart_state in {"overflow", "closed"}:
+                    self._send({
+                        "id": message["id"],
+                        "result": self._rejected_server_request_result(method, params),
+                    })
+                    return
             if operation and not operation.accept_turn_identity(params):
-                if method == "item/tool/requestUserInput":
-                    result = {"answers": {}}
-                elif method == "mcpServer/elicitation/request":
-                    result = {"action": "decline"}
-                else:
-                    result = self._approval_response(method, params, "cancel")
+                result = self._rejected_server_request_result(method, params)
+                self._send({"id": message["id"], "result": result})
+                return
+            if operation and operation.cancel_requested:
+                result = self._rejected_server_request_result(method, params)
                 self._send({"id": message["id"], "result": result})
                 return
             if operation and operation.fence_diagnostics()["terminalObserved"]:
                 operation.accept_native_notification(method)
-                if method == "item/tool/requestUserInput":
-                    result = {"answers": {}}
-                elif method == "mcpServer/elicitation/request":
-                    result = {"action": "decline"}
-                else:
-                    result = self._approval_response(method, params, "cancel")
+                result = self._rejected_server_request_result(method, params)
                 self._send({"id": message["id"], "result": result})
                 return
             if operation and operation.allow_interaction:
                 request_key = str(message["id"])
                 interaction_type = "input" if method in {"item/tool/requestUserInput", "mcpServer/elicitation/request"} else "approval"
                 approval = self._approval_from_request(message) if interaction_type == "approval" else None
-                operation.pending_requests[request_key] = {
+                if not operation.register_pending_request(request_key, {
                     "id": message["id"],
                     "method": method,
                     "params": params,
                     "type": interaction_type,
                     "approval": approval,
-                }
+                }):
+                    self._send({
+                        "id": message["id"],
+                        "result": self._rejected_server_request_result(method, params),
+                    })
+                    return
                 if approval:
                     if not self._store_pending_approval(operation, request_key, method, params, approval):
-                        operation.pending_requests.pop(request_key, None)
+                        operation.pop_pending_request(request_key)
                         self._send({"id": message["id"], "result": self._approval_response(method, params, "cancel")})
                         operation.emit(
                             "interaction",
@@ -774,6 +924,10 @@ class CodexAppServerClient:
                             method=method,
                             error="Codex approval capacity reached",
                         )
+                        return
+                    if not operation.has_pending_request(request_key):
+                        with self._approval_lock:
+                            self._pending_approvals.pop(str(approval.get("id") or approval.get("approval_id") or request_key), None)
                         return
                     operation.state.set_approval(approval)
                 emitted = operation.emit(
@@ -786,15 +940,11 @@ class CodexAppServerClient:
                     input=params,
                 )
                 if not emitted:
-                    operation.pending_requests.pop(request_key, None)
+                    unresolved = operation.pop_pending_request(request_key)
                     self._clear_pending_approvals(thread_id)
-                    if method == "item/tool/requestUserInput":
-                        failure_response = {"answers": {}}
-                    elif method == "mcpServer/elicitation/request":
-                        failure_response = {"action": "decline"}
-                    else:
-                        failure_response = self._approval_response(method, params, "cancel")
-                    self._send({"id": message["id"], "result": failure_response})
+                    if unresolved:
+                        failure_response = self._rejected_server_request_result(method, params)
+                        self._send({"id": message["id"], "result": failure_response})
                     operation.result = _error_result(
                         "event_callback_failed",
                         "Codex event handling failed before approval could be exposed",
@@ -837,6 +987,14 @@ class CodexAppServerClient:
 
     def _handle_notification(self, method: str, params: dict[str, Any]) -> None:
         thread_id = str(params.get("threadId") or "")
+        late_turn_id = _native_turn_id(params)
+        if (
+            method == "turn/completed"
+            and thread_id
+            and late_turn_id
+            and self._handle_late_start_terminal(thread_id, late_turn_id)
+        ):
+            return
         with self._operations_lock:
             operation = self._operations.get(thread_id) or self._terminal_operations.get(thread_id)
         if not operation:
@@ -1008,13 +1166,263 @@ class CodexAppServerClient:
             self._remember_terminal_operation(operation)
             operation.finish_without_event()
 
-    def _replay_prestart_notifications(self, operation: _Operation) -> None:
+    def _replay_prestart_messages(self, operation: _Operation) -> bool:
         while True:
-            pending = operation.take_prestart_notifications()
+            pending = operation.take_prestart_messages()
+            if operation.prestart_overflowed():
+                self._reject_prestart_server_requests(pending or [])
+                self._cancel_prestart_requests(operation)
+                return False
             if pending is None:
+                return True
+            for index, (kind, payload) in enumerate(pending):
+                if operation.prestart_overflowed():
+                    self._reject_prestart_server_requests(pending[index:])
+                    self._cancel_prestart_requests(operation)
+                    return False
+                if kind == "notification":
+                    self._handle_operation_notification(
+                        operation,
+                        str(payload.get("method") or ""),
+                        payload.get("params") if isinstance(payload.get("params"), dict) else {},
+                    )
+                elif kind == "server_request":
+                    self._handle_server_request(payload, defer_prestart=False)
+
+    def _reject_prestart_server_requests(self, messages: list[tuple[str, dict[str, Any]]]) -> None:
+        for kind, payload in messages:
+            if kind != "server_request":
+                continue
+            method = str(payload.get("method") or "")
+            params = payload.get("params") if isinstance(payload.get("params"), dict) else {}
+            try:
+                self._send({
+                    "id": payload["id"],
+                    "result": self._rejected_server_request_result(method, params),
+                })
+            except Exception:
+                pass
+
+    def _cancel_prestart_requests(self, operation: _Operation) -> None:
+        messages = operation.discard_prestart_messages()
+        for kind, payload in messages:
+            if kind != "notification" or payload.get("method") != "turn/completed":
+                continue
+            params = payload.get("params") if isinstance(payload.get("params"), dict) else {}
+            turn_id = _native_turn_id(params)
+            if turn_id:
+                self._handle_late_start_terminal(operation.thread_id, turn_id)
+        self._reject_prestart_server_requests(messages)
+
+    def _cancel_operation_requests(self, operation: _Operation) -> None:
+        for _interaction_id, pending in operation.drain_pending_requests():
+            method = str(pending.get("method") or "")
+            params = pending.get("params") if isinstance(pending.get("params"), dict) else {}
+            try:
+                self._send({
+                    "id": pending["id"],
+                    "result": self._rejected_server_request_result(method, params),
+                })
+            except Exception:
+                pass
+        self._clear_pending_approvals(operation.thread_id)
+
+    def _interrupt_turn(self, thread_id: str, turn_id: str) -> bool:
+        if not thread_id or not turn_id:
+            return False
+        try:
+            self._send({
+                "id": self._allocate_id(),
+                "method": "turn/interrupt",
+                "params": {"threadId": thread_id, "turnId": turn_id},
+            })
+            return True
+        except Exception:
+            return False
+
+    def _register_late_start_cleanup(self, thread_id: str, cleanup: _LateStartCleanup) -> bool:
+        with self._late_start_lock:
+            existing = self._late_start_cleanups.get(thread_id)
+            if existing:
+                return existing is cleanup
+            if len(self._late_start_cleanups) >= MAX_LATE_START_CLEANUPS + 4:
+                return False
+            self._late_start_cleanups[thread_id] = cleanup
+            return True
+
+    def _late_start_cleanup_pending(self, thread_id: str) -> bool:
+        with self._late_start_lock:
+            return bool(thread_id and thread_id in self._late_start_cleanups)
+
+    def _late_start_cleanup_capacity_exhausted(self) -> bool:
+        with self._late_start_lock:
+            return len(self._late_start_cleanups) >= MAX_LATE_START_CLEANUPS
+
+    def _late_start_recycle_required(self) -> bool:
+        with self._late_start_lock:
+            return any(cleanup.force_recycle for cleanup in self._late_start_cleanups.values())
+
+    def _execute_cleanup_guard(self, thread_id: str) -> dict[str, Any] | None:
+        if thread_id and self._late_start_cleanup_pending(thread_id):
+            return _error_result(
+                "busy",
+                "Codex is still stopping a timed-out turn for this thread",
+                threadId=thread_id,
+                busyReason="late_turn_cleanup",
+                busyCode="busy_by_late_turn_cleanup",
+            )
+        if self._late_start_recycle_required():
+            return _error_result(
+                "busy",
+                "Codex is draining active turns before runtime recovery",
+                threadId=thread_id,
+                busyReason="late_turn_runtime_recovery",
+                busyCode="busy_by_late_turn_runtime_recovery",
+            )
+        if self._late_start_cleanup_capacity_exhausted():
+            return _error_result(
+                "busy",
+                "Codex late-turn cleanup capacity is exhausted",
+                threadId=thread_id,
+                busyReason="late_turn_cleanup_capacity",
+                busyCode="busy_by_late_turn_cleanup_capacity",
+            )
+        return None
+
+    def _register_late_start_cleanup_for_generation(
+        self,
+        thread_id: str,
+        cleanup: _LateStartCleanup,
+        runtime_generation: int,
+    ) -> str:
+        """Register cleanup only while the originating runtime is still current."""
+        with self._recovery_admission_lock:
+            with self._runtime.lifecycle_fence() as current_generation:
+                if current_generation != runtime_generation:
+                    return "runtime_changed"
+                if not self._register_late_start_cleanup(thread_id, cleanup):
+                    return "capacity"
+                return "registered"
+
+    def _complete_late_start_cleanup(
+        self,
+        thread_id: str,
+        cleanup: _LateStartCleanup,
+    ) -> bool:
+        with self._late_start_lock:
+            active_cleanup = self._late_start_cleanups.get(thread_id)
+            if active_cleanup is not cleanup:
+                return False
+            if self._late_start_cleanups.get(thread_id) is cleanup:
+                self._late_start_cleanups.pop(thread_id, None)
+                cleanup.event.set()
+        return True
+
+    def _bind_late_start_turn(
+        self,
+        thread_id: str,
+        turn_id: str,
+        cleanup: _LateStartCleanup,
+        operation: _Operation | None = None,
+    ) -> bool:
+        with self._late_start_lock:
+            active_cleanup = self._late_start_cleanups.get(thread_id)
+            if active_cleanup is not cleanup:
+                return False
+            if cleanup.turn_id and cleanup.turn_id != turn_id:
+                return False
+            cleanup.turn_id = turn_id
+            already_terminal = turn_id in cleanup.observed_terminal_turn_ids
+            should_interrupt = not cleanup.interrupt_sent and not already_terminal
+        if operation is not None and operation.turn_id == turn_id and operation.terminal_observed():
+            return self._complete_late_start_cleanup(thread_id, cleanup)
+        if already_terminal:
+            return self._complete_late_start_cleanup(thread_id, cleanup)
+        if should_interrupt and self._interrupt_turn(thread_id, turn_id):
+            with self._late_start_lock:
+                if self._late_start_cleanups.get(thread_id) is cleanup:
+                    cleanup.interrupt_sent = True
+        self._schedule_late_start_recovery(thread_id, cleanup)
+        return True
+
+    def _handle_late_start_terminal(self, thread_id: str, turn_id: str) -> bool:
+        with self._late_start_lock:
+            cleanup = self._late_start_cleanups.get(thread_id)
+            if cleanup is None:
+                return False
+            if not cleanup.turn_id:
+                if len(cleanup.observed_terminal_turn_ids) >= MAX_OBSERVED_TERMINAL_TURNS:
+                    cleanup.observed_terminal_turn_ids.pop()
+                cleanup.observed_terminal_turn_ids.add(turn_id)
+                return True
+            if cleanup.turn_id != turn_id:
+                return False
+        return self._complete_late_start_cleanup(thread_id, cleanup)
+
+    def _schedule_late_start_recovery(self, thread_id: str, cleanup: _LateStartCleanup) -> None:
+        with self._late_start_lock:
+            if self._late_start_cleanups.get(thread_id) is not cleanup or cleanup.recovery_scheduled:
                 return
-            for method, params in pending:
-                self._handle_operation_notification(operation, method, params)
+            cleanup.recovery_scheduled = True
+
+        def recover_when_idle() -> None:
+            with self._runtime_generation_lock:
+                with self._recovery_admission_lock:
+                    with self._late_start_lock:
+                        if self._late_start_cleanups.get(thread_id) is not cleanup:
+                            return
+                        cleanup.recovery_scheduled = False
+                        cleanup.recovery_attempts += 1
+                        if cleanup.recovery_attempts >= LATE_START_RECOVERY_MAX_ATTEMPTS:
+                            cleanup.force_recycle = True
+                    if self._has_active_operations():
+                        self._schedule_late_start_recovery(thread_id, cleanup)
+                        return
+                    self._restart_runtime()
+
+        timer = threading.Timer(LATE_START_RECOVERY_DELAY_SEC, recover_when_idle)
+        timer.daemon = True
+        timer.start()
+
+    def _handle_late_turn_start_response(
+        self,
+        thread_id: str,
+        cleanup: _LateStartCleanup,
+        response: dict[str, Any],
+    ) -> None:
+        if response.get("error"):
+            with self._late_start_lock:
+                if self._late_start_cleanups.get(thread_id) is cleanup:
+                    self._late_start_cleanups.pop(thread_id, None)
+                    cleanup.event.set()
+            return
+        result = response.get("result") if isinstance(response.get("result"), dict) else {}
+        turn_id = str((result.get("turn") or {}).get("id") or "")
+        if turn_id:
+            self._bind_late_start_turn(thread_id, turn_id, cleanup)
+
+    def _fail_prestart_operation(
+        self,
+        operation: _Operation,
+        result: dict[str, Any],
+        candidate_turn_ids: list[str],
+    ) -> dict[str, Any]:
+        operation.result = result
+        self._remember_terminal_operation(operation)
+        operation.cancel_prestart_visibility()
+        terminal_status = "cancelled" if str(result.get("status") or "").lower() in {"cancelled", "canceled"} else "failed"
+        operation.emit(
+            "turn",
+            terminal=True,
+            status=terminal_status,
+            resultStatus=str(result.get("status") or "failed"),
+            error=result.get("error"),
+        )
+        self._cancel_operation_requests(operation)
+        self._cancel_prestart_requests(operation)
+        for candidate_turn_id in dict.fromkeys(candidate_turn_ids):
+            self._interrupt_turn(operation.thread_id, candidate_turn_id)
+        return self._augment_result(operation, result)
 
     def _remember_terminal_operation(self, operation: _Operation) -> None:
         with self._operations_lock:
@@ -1033,7 +1441,7 @@ class CodexAppServerClient:
             "lateNotifications": 0,
             "postTerminalMetrics": 0,
             "callbackErrors": 0,
-            "prestartNotificationOverflows": 0,
+            "prestartMessageOverflows": 0,
         }
 
     def wait_for_terminal_callbacks(self, thread_id: str, turn_id: str = "", timeout: float | None = None) -> bool:
@@ -1131,8 +1539,25 @@ class CodexAppServerClient:
         if not isinstance(operation, _Operation):
             return {"ok": False, "error": "Codex approval request is detached from an active turn"}
         interaction_id = str(entry.get("interactionId") or "")
-        ok = self.respond(operation.thread_id, interaction_id, response_choice, {})
+        entry_params = entry.get("params") if isinstance(entry.get("params"), dict) else {}
+        entry_turn_id = _native_turn_id(entry_params)
+        with self._operations_lock:
+            active_operation = self._operations.get(operation.thread_id)
+        if active_operation is not operation or (
+            entry_turn_id and operation.turn_id and entry_turn_id != operation.turn_id
+        ):
+            self._reject_pending_approval_entry(operation, interaction_id, entry)
+            return {"ok": False, "error": "Codex approval request belongs to a different turn"}
+        ok = self.respond(
+            operation.thread_id,
+            interaction_id,
+            response_choice,
+            {},
+            _expected_operation=operation,
+        )
         if not ok:
+            if self._reject_pending_approval_entry(operation, interaction_id, entry):
+                return {"ok": False, "error": "Codex approval request belongs to a different turn"}
             return {"ok": False, "error": "Codex approval request is no longer pending"}
         resolved = {
             **dict(entry.get("approval") or {}),
@@ -1147,6 +1572,26 @@ class CodexAppServerClient:
             "choice": response_choice,
             "response": self._approval_response(entry.get("method") or "", entry.get("params") or {}, response_choice),
         }
+
+    def _reject_pending_approval_entry(
+        self,
+        operation: _Operation,
+        interaction_id: str,
+        entry: dict[str, Any],
+    ) -> bool:
+        pending = operation.pop_pending_request(interaction_id)
+        if pending:
+            pending_method = str(pending.get("method") or "")
+            pending_params = pending.get("params") if isinstance(pending.get("params"), dict) else {}
+            self._send({
+                "id": pending["id"],
+                "result": self._rejected_server_request_result(pending_method, pending_params),
+            })
+        with self._approval_lock:
+            for key, candidate in list(self._pending_approvals.items()):
+                if candidate is entry:
+                    self._pending_approvals.pop(key, None)
+        return pending is not None
 
     def _approval_from_request(self, message: dict[str, Any]) -> dict[str, Any]:
         method = str(message.get("method") or "")
@@ -1359,54 +1804,190 @@ class CodexAppServerClient:
         attachments: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         started = time.monotonic()
+        guard = self._execute_cleanup_guard(thread_id)
+        if guard:
+            return guard
         try:
             # Serialize only runtime generation/startup and operation
             # registration. Turns remain concurrent after this short fence.
             with self._runtime_generation_lock:
-                self._ensure_started()
-                if thread_id:
-                    result = self._request_with_restart("thread/resume", {"threadId": thread_id, **self._thread_params()}, timeout=self.start_timeout_sec)
-                else:
-                    result = self._request_with_restart("thread/start", self._thread_params(), timeout=self.start_timeout_sec)
-                thread = result.get("thread") or {}
-                active_thread_id = str(thread.get("id") or thread_id)
-                if not active_thread_id:
-                    return _error_result("protocol_error", "Codex did not return a thread id")
-                operation = _Operation(
-                    thread_id=active_thread_id,
-                    event_callback=event_callback,
-                    allow_interaction=allow_interaction,
+                with self._recovery_admission_lock:
+                    guard = self._execute_cleanup_guard(thread_id)
+                    if guard:
+                        return guard
+                    self._ensure_started()
+                    if thread_id:
+                        result = self._request_with_restart("thread/resume", {"threadId": thread_id, **self._thread_params()}, timeout=self.start_timeout_sec)
+                    else:
+                        result = self._request_with_restart("thread/start", self._thread_params(), timeout=self.start_timeout_sec)
+                    thread = result.get("thread") or {}
+                    active_thread_id = str(thread.get("id") or thread_id)
+                    if not active_thread_id:
+                        return _error_result("protocol_error", "Codex did not return a thread id")
+                    operation = _Operation(
+                        thread_id=active_thread_id,
+                        event_callback=event_callback,
+                        allow_interaction=allow_interaction,
+                    )
+                    with self._operations_lock:
+                        previous = self._terminal_operations.pop(active_thread_id, None)
+                        operation.inherit_turn_history(previous)
+                        self._operations[active_thread_id] = operation
+            try:
+                visibility_timer = None
+                late_response = {}
+                late_response_ready = threading.Event()
+                late_start_cleanup = _LateStartCleanup()
+                turn_start_generation = self._runtime.generation
+
+                def handle_late_response(response: dict[str, Any]) -> None:
+                    late_response["value"] = response
+                    late_response_ready.set()
+                    self._handle_late_turn_start_response(active_thread_id, late_start_cleanup, response)
+
+                if operation.event_callback:
+                    visibility_timer = threading.Timer(
+                        PRESTART_VISIBILITY_DELAY_SEC,
+                        operation.emit_prestart_starting,
+                    )
+                    visibility_timer.daemon = True
+                    operation.set_prestart_visibility_timer(visibility_timer)
+                    visibility_timer.start()
+                turn_result = self._request_with_restart("turn/start", {
+                    "threadId": active_thread_id,
+                    "input": _turn_user_input(message, attachments),
+                    "summary": self.reasoning_summary,
+                    "cwd": self.workspace,
+                    "approvalPolicy": "on-request",
+                    "sandboxPolicy": {
+                        "type": "workspaceWrite",
+                        "writableRoots": [self.workspace],
+                        "networkAccess": False,
+                    },
+                }, timeout=TURN_START_RESPONSE_TIMEOUT_SEC, retry=False, on_late_response=handle_late_response)
+            except TimeoutError:
+                late_start_cleanup.observed_terminal_turn_ids = operation.prestart_terminal_turn_ids()
+                cleanup_status = self._register_late_start_cleanup_for_generation(
+                    active_thread_id,
+                    late_start_cleanup,
+                    turn_start_generation,
                 )
-                with self._operations_lock:
-                    previous = self._terminal_operations.pop(active_thread_id, None)
-                    operation.inherit_turn_history(previous)
-                    self._operations[active_thread_id] = operation
-            turn_result = self._request_with_restart("turn/start", {
-                "threadId": active_thread_id,
-                "input": _turn_user_input(message, attachments),
-                "summary": self.reasoning_summary,
-                "cwd": self.workspace,
-                "approvalPolicy": "on-request",
-                "sandboxPolicy": {
-                    "type": "workspaceWrite",
-                    "writableRoots": [self.workspace],
-                    "networkAccess": False,
-                },
-            }, timeout=30, retry=False)
+                if cleanup_status == "runtime_changed":
+                    operation.completed.wait(timeout=1)
+                    existing = operation.result or _error_result(
+                        "bridge_unavailable",
+                        "Codex app-server stopped while starting the turn",
+                        threadId=active_thread_id,
+                    )
+                    return self._augment_result(operation, existing)
+                if cleanup_status == "capacity":
+                    return self._fail_prestart_operation(operation, _error_result(
+                        "bridge_unavailable",
+                        "Codex could not reserve late-turn cleanup capacity",
+                        threadId=active_thread_id,
+                    ), operation.prestart_turn_ids())
+                if late_response_ready.is_set():
+                    self._handle_late_turn_start_response(
+                        active_thread_id,
+                        late_start_cleanup,
+                        late_response.get("value") or {},
+                    )
+                self._schedule_late_start_recovery(active_thread_id, late_start_cleanup)
+                candidate_turn_ids = operation.prestart_turn_ids()
+                if operation.cancel_requested:
+                    failure = _error_result(
+                        "cancelled",
+                        "Codex turn was cancelled before turn/start completed",
+                        threadId=active_thread_id,
+                        turnId="",
+                    )
+                else:
+                    failure = _error_result(
+                        "timeout",
+                        "Codex turn/start did not confirm the active turn before the request timeout",
+                        threadId=active_thread_id,
+                        turnId="",
+                    )
+                result = self._fail_prestart_operation(operation, failure, candidate_turn_ids)
+                return result
+            except AppServerResponseError as exc:
+                candidate_turn_ids = operation.prestart_turn_ids()
+                return self._fail_prestart_operation(operation, _error_result(
+                    "execution_failed",
+                    str(exc),
+                    threadId=active_thread_id,
+                    turnId="",
+                ), candidate_turn_ids)
+            except Exception as exc:
+                late_start_cleanup.observed_terminal_turn_ids = operation.prestart_terminal_turn_ids()
+                cleanup_status = self._register_late_start_cleanup_for_generation(
+                    active_thread_id,
+                    late_start_cleanup,
+                    turn_start_generation,
+                )
+                if cleanup_status == "runtime_changed":
+                    operation.completed.wait(timeout=1)
+                    existing = operation.result or _error_result(
+                        "bridge_unavailable",
+                        "Codex app-server stopped while starting the turn",
+                        threadId=active_thread_id,
+                    )
+                    return self._augment_result(operation, existing)
+                if cleanup_status == "capacity":
+                    return self._fail_prestart_operation(operation, _error_result(
+                        "bridge_unavailable",
+                        "Codex could not reserve late-turn cleanup capacity",
+                        threadId=active_thread_id,
+                    ), operation.prestart_turn_ids())
+                self._schedule_late_start_recovery(active_thread_id, late_start_cleanup)
+                candidate_turn_ids = operation.prestart_turn_ids()
+                return self._fail_prestart_operation(operation, _error_result(
+                    "execution_failed",
+                    str(exc),
+                    threadId=active_thread_id,
+                    turnId="",
+                ), candidate_turn_ids)
+            finally:
+                operation.cancel_prestart_visibility()
             returned_turn_id = str((turn_result.get("turn") or {}).get("id") or "")
-            if not operation.confirm_turn_identity(returned_turn_id):
-                return _error_result(
+            if not returned_turn_id or not operation.confirm_turn_identity(returned_turn_id):
+                candidate_turn_ids = operation.prestart_turn_ids()
+                if returned_turn_id:
+                    candidate_turn_ids.append(returned_turn_id)
+                late_start_cleanup.observed_terminal_turn_ids = operation.prestart_terminal_turn_ids()
+                self._register_late_start_cleanup(active_thread_id, late_start_cleanup)
+                if returned_turn_id:
+                    self._bind_late_start_turn(active_thread_id, returned_turn_id, late_start_cleanup, operation)
+                else:
+                    self._schedule_late_start_recovery(active_thread_id, late_start_cleanup)
+                result = self._fail_prestart_operation(operation, _error_result(
                     "protocol_error",
-                    "Codex emitted too many notifications before the turn/start response",
+                    "Codex turn/start did not return a valid turn id" if not returned_turn_id
+                    else "Codex emitted too many messages before the turn/start response",
                     threadId=active_thread_id,
                     turnId=returned_turn_id,
+                ), candidate_turn_ids)
+                return result
+            if operation.cancel_requested:
+                self._interrupt_turn(active_thread_id, returned_turn_id)
+            if not self._replay_prestart_messages(operation):
+                cleanup = _LateStartCleanup(
+                    observed_terminal_turn_ids=operation.prestart_terminal_turn_ids(),
                 )
-            self._replay_prestart_notifications(operation)
+                self._register_late_start_cleanup(active_thread_id, cleanup)
+                self._bind_late_start_turn(active_thread_id, returned_turn_id, cleanup, operation)
+                return self._fail_prestart_operation(operation, _error_result(
+                    "protocol_error",
+                    "Codex emitted too many messages while replaying pre-start events",
+                    threadId=active_thread_id,
+                    turnId=returned_turn_id,
+                ), [returned_turn_id])
             if not operation.completed.wait(timeout=max(1, int(timeout_sec))):
-                try:
-                    self._request("turn/interrupt", {"threadId": active_thread_id, "turnId": operation.turn_id}, timeout=5)
-                except Exception:
-                    pass
+                cleanup = _LateStartCleanup()
+                if self._register_late_start_cleanup(active_thread_id, cleanup):
+                    self._bind_late_start_turn(active_thread_id, operation.turn_id, cleanup, operation)
+                else:
+                    self._interrupt_turn(active_thread_id, operation.turn_id)
                 return _error_result("timeout", "Codex call timed out", threadId=active_thread_id, turnId=operation.turn_id)
             result = operation.result or _error_result("execution_failed", "Codex turn ended without a result", threadId=active_thread_id, turnId=operation.turn_id)
             result = self._augment_result(operation, result)
@@ -1462,12 +2043,20 @@ class CodexAppServerClient:
             allow_interaction=True,
         )
 
-    def respond(self, thread_id: str, interaction_id: str, action: str, answers: dict[str, Any] | None = None) -> bool:
+    def respond(
+        self,
+        thread_id: str,
+        interaction_id: str,
+        action: str,
+        answers: dict[str, Any] | None = None,
+        *,
+        _expected_operation: _Operation | None = None,
+    ) -> bool:
         with self._operations_lock:
             operation = self._operations.get(thread_id)
-        if not operation:
-            return False
-        pending = operation.pending_requests.pop(str(interaction_id), None)
+            if not operation or (_expected_operation is not None and operation is not _expected_operation):
+                return False
+        pending = operation.pop_pending_request(str(interaction_id))
         if not pending:
             return False
         method = pending["method"]
@@ -1523,8 +2112,8 @@ class CodexAppServerClient:
             operation = self._operations.get(thread_id)
         if not operation:
             return False
-        operation.cancel_requested = True
-        for interaction_id, pending in list(operation.pending_requests.items()):
+        operation.cancel_prestart_visibility(mark_cancelled=True)
+        for _interaction_id, pending in operation.drain_pending_requests():
             method = pending["method"]
             if method == "item/tool/requestUserInput":
                 result = {"answers": {}}
@@ -1535,7 +2124,6 @@ class CodexAppServerClient:
             else:
                 result = {"decision": "cancel"}
             self._send({"id": pending["id"], "result": result})
-            operation.pending_requests.pop(interaction_id, None)
         self._clear_pending_approvals(thread_id)
         if operation.turn_id:
             request_id = self._allocate_id()
@@ -1543,10 +2131,36 @@ class CodexAppServerClient:
         operation.emit("turn", status="cancelling")
         return True
 
+    def _compact_cleanup_guard(self, thread_id: str) -> dict[str, Any] | None:
+        if self._late_start_cleanup_pending(thread_id):
+            return _error_result(
+                "busy",
+                "Codex is still stopping a timed-out turn for this thread",
+                threadId=thread_id,
+                busyReason="late_turn_cleanup",
+                busyCode="busy_by_late_turn_cleanup",
+            )
+        if self._late_start_recycle_required() or self._late_start_cleanup_capacity_exhausted():
+            return _error_result(
+                "busy",
+                "Codex runtime recovery must complete before context compression",
+                threadId=thread_id,
+                busyReason="late_turn_runtime_recovery",
+                busyCode="busy_by_late_turn_runtime_recovery",
+            )
+        return None
+
     def compact(self, thread_id: str, timeout_sec: int = 120) -> dict[str, Any]:
         if not thread_id:
             return _error_result("not_found", "No Codex context exists for this conversation")
+        guard = self._compact_cleanup_guard(thread_id)
+        if guard:
+            return guard
         thread_lock = self._acquire_thread_lock(thread_id)
+        guard = self._compact_cleanup_guard(thread_id)
+        if guard:
+            self._release_thread_lock(thread_id, thread_lock)
+            return guard
         if not self._turn_capacity.acquire(blocking=False):
             self._release_thread_lock(thread_id, thread_lock)
             with self._admission_lock:
@@ -1561,13 +2175,18 @@ class CodexAppServerClient:
     def _compact_locked(self, thread_id: str, timeout_sec: int = 120) -> dict[str, Any]:
         started = time.monotonic()
         try:
-            self._ensure_started()
-            self._request_with_restart("thread/resume", {"threadId": thread_id, **self._thread_params()}, timeout=30)
-            operation = _Operation(thread_id=thread_id, kind="compact")
-            with self._operations_lock:
-                previous = self._terminal_operations.pop(thread_id, None)
-                operation.inherit_turn_history(previous)
-                self._operations[thread_id] = operation
+            with self._runtime_generation_lock:
+                with self._recovery_admission_lock:
+                    guard = self._compact_cleanup_guard(thread_id)
+                    if guard:
+                        return guard
+                    self._ensure_started()
+                    self._request_with_restart("thread/resume", {"threadId": thread_id, **self._thread_params()}, timeout=30)
+                    operation = _Operation(thread_id=thread_id, kind="compact")
+                    with self._operations_lock:
+                        previous = self._terminal_operations.pop(thread_id, None)
+                        operation.inherit_turn_history(previous)
+                        self._operations[thread_id] = operation
             self._request("thread/compact/start", {"threadId": thread_id}, timeout=30)
             if not operation.completed.wait(timeout=max(1, int(timeout_sec))):
                 return _error_result("timeout", "Codex context compression timed out", threadId=thread_id)

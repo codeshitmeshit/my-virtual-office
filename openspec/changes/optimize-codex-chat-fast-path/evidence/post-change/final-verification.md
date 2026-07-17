@@ -1,6 +1,6 @@
 # Codex chat fast path: final verification
 
-Captured on 2026-07-16 in the dedicated `codex/optimize-codex-chat-fast-path` worktree. All performance fixtures are deterministic and use a fake local Codex app-server; they do not use a real model or external credentials.
+Captured on 2026-07-16 in the dedicated `codex/optimize-codex-chat-fast-path` worktree and reverified on 2026-07-17 after merge to `main`. All performance fixtures are deterministic and use a fake local Codex app-server; they do not use a real model or external credentials.
 
 ## Fixed warm-chat comparison
 
@@ -54,13 +54,14 @@ The additional append is the intentional durable terminal record introduced for 
 - Terminal-drain remediation keeps same-conversation admission closed after watchdog fallback until the late callback exits and current-turn durable finalization completes; other conversations and the app-server reader remain unblocked.
 - Terminal-durability remediation separates the bounded app-server reader fallback from the durable result decision: terminal persistence now waits for the real callback outcome, and exceptional finalization unconditionally clears active state and signals deferred admission release.
 - Turn-identity remediation treats the `turn/start` response as authoritative and buffers up to 512 pre-response native notifications; stale resumed-thread events are rejected while matching notifications are replayed in source order.
+- Runtime-recovery remediation serializes process-generation changes, late-start cleanup registration, recovery decisions, and new operation admission. Pre-response candidate turn IDs remain cleanup-only and are never exposed as authoritative terminal IDs.
 - Accepted-run retry remediation prevents SSE, terminal, and durable failures from falling back to blocking chat after a `runId` has been issued; the UI recovers existing state and surfaces an error without re-executing the prompt.
 - Capacity 1 remains supported. Capacity 2 is approved by the deterministic multiplexing fixture: two native threads interleave start, reasoning, approval, user input, cancellation, completion, result delivery, and cleanup without cross-delivery. Capacity 3–4 remains unproven and is not approved for rollout.
 - Focused Codex/provider regression after turn-identity remediation: 112 passed. The stale-before-response ordering and bounded-buffer regressions are included in this count.
 - Rollback rehearsal: passed. It writes accepted user content, approval request/resolution, final reply, terminal outcome, and thread mapping while enabled; replaces the live view with a fresh flag-off instance; reads every durable surface; and proves that recovery did not mutate any status file.
 - Browser/static compatibility: Codex runs, approval UI, Provider SSE, app-server split, runtime settings, history store/navigation, chat bug regressions, Claude Code SSE, and browser timing checks passed. The in-app browser loaded the cache-busted `chat.js` and timing script with zero console errors.
 - Bounded/redacted diagnostics: config, event service, coalescer, telemetry, and browser-timing tests passed. Diagnostics contain fixed-cardinality counters, bounded samples, digested/run IDs, and stage durations; prompt, reply, reasoning, credential, approval content, raw payload, and unrestricted path canaries are absent.
-- Complete supported Python regression passed 784 tests. One manifest test that expects a repository-local `.venv/bin/python` was deselected in the linked worktree and then passed separately against the shared main-worktree venv without changing repository files. The generated Provider inventory was refreshed after the remediation source changes and reproduced exactly.
+- Complete supported Python regression passed 862 tests via `.venv/bin/python -m pytest -q tests --ignore=tests/test_workflow_e2e.py`. The generated Provider inventory was refreshed after the remediation source changes and reproduced exactly.
 - Strict OpenSpec validation passed: one change valid, zero failed, zero issues.
 
 ## Environment-gated and unverified checks
