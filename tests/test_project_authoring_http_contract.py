@@ -215,6 +215,52 @@ def test_management_detail_never_exposes_stored_request_hash(authoring):
     assert created["requestSecret"] not in serialized
 
 
+def test_management_can_idempotently_instantiate_a_pinned_template_version(authoring):
+    markdown, _ = authoring
+    draft = _draft("Reusable HTTP")
+    draft["projectType"] = "reusable"
+    draft["template"] = {"mode": "create", "name": "Reusable HTTP template"}
+    status, submitted = _call(_handler(
+        "/api/agent/project-authoring/requests",
+        {"idempotencyKey": "author:template-http", "draft": draft},
+        headers={"X-VO-Agent-Action": "project-authoring", "X-VO-Agent-Id": "author"},
+    ), "POST")
+    assert status == 200
+    confirmed_status, confirmed = _call(_handler(
+        f"/api/project-authoring/requests/{submitted['request']['id']}/confirm",
+        {"expectedRevision": 1, "confirmationKey": "confirm:template-http"},
+        headers={"X-VO-Management-Token": server._MANAGEMENT_TOKEN},
+    ), "POST")
+    assert confirmed_status == 200
+    template_id = confirmed["project"]["templateRef"]["id"]
+    endpoint = f"/api/project-authoring/templates/{template_id}/instantiate"
+    body = {
+        "version": 1,
+        "idempotencyKey": "template:http-instance-1",
+        "overrides": {"title": "HTTP instance"},
+    }
+
+    denied_status, denied = _call(_handler(endpoint, body), "POST")
+    assert denied_status == 403
+    assert denied["code"] == "management_token_required"
+
+    first_status, first = _call(_handler(
+        endpoint, body, headers={"X-VO-Management-Token": server._MANAGEMENT_TOKEN},
+    ), "POST")
+    repeat_status, repeated = _call(_handler(
+        endpoint,
+        {**body, "overrides": {"title": "Ignored retry"}},
+        headers={"X-VO-Management-Token": server._MANAGEMENT_TOKEN},
+    ), "POST")
+
+    assert first_status == repeat_status == 200
+    assert first["created"] is True and repeated["created"] is False
+    assert first["project"]["id"] == repeated["project"]["id"]
+    assert first["project"]["title"] == "HTTP instance"
+    assert first["project"]["templateRef"] == {"id": template_id, "version": 1}
+    assert len(markdown.load_all()["projects"]) == 2
+
+
 def test_project_grant_rotation_revocation_and_scope_are_enforced(authoring):
     markdown, _ = authoring
     _, created = _submit("Granted", "author:key-1")

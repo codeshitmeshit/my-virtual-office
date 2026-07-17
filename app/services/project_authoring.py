@@ -597,6 +597,115 @@ class ProjectAuthoringService:
         )
         return grant_public_view(grant)
 
+    def instantiate_template(
+        self,
+        template_id: str,
+        version: int,
+        *,
+        idempotency_key: Any,
+        overrides: Mapping[str, Any] | None = None,
+        actor: str = "user",
+        prepare_workspace: Callable[[Mapping[str, Any], str, str], Mapping[str, Any]] | None = None,
+        cleanup_workspace: Callable[[Mapping[str, Any]], Any] | None = None,
+    ) -> dict[str, Any]:
+        """Create one independent project from one immutable template version."""
+        key = validate_idempotency_key(idempotency_key)
+        clean_template_id = str(template_id or "").strip()
+        try:
+            version_number = int(version)
+        except (TypeError, ValueError):
+            version_number = 0
+        if not clean_template_id or version_number < 1:
+            raise ProjectAuthoringCommandError(
+                "invalid_template_reference", "Template id and positive version are required", 400,
+            )
+        scoped_key = f"template-instantiation:{clean_template_id}:{version_number}:{key}"
+        root = self.store.snapshot()
+        existing = root[IDEMPOTENCY_KEY].get(scoped_key)
+        existing_project_id = existing.get("projectId") if isinstance(existing, Mapping) else existing
+        if existing_project_id:
+            project = next(
+                (item for item in root.get("projects", []) if item.get("id") == existing_project_id),
+                None,
+            )
+            if project is not None:
+                return {"ok": True, "created": False, "project": copy.deepcopy(project)}
+
+        template = self._resolve_template_record(root, clean_template_id, version_number)
+        snapshot = copy.deepcopy(template.get("snapshot") or {})
+        self._validate_template_snapshot_actors(snapshot)
+        configuration = self._template_instantiation_configuration(snapshot, overrides)
+        project_id = f"project-template-{self.new_id()}"
+        workspace: dict[str, Any] = {"ok": True, "managed": False, "created": False}
+        try:
+            execution = configuration.get("executionSettings") or {}
+            if execution.get("projectExecutionEnabled") is True:
+                if prepare_workspace is None:
+                    raise ProjectAuthoringCommandError(
+                        "workspace_preparation_required",
+                        "Execution-enabled template instances require workspace preparation",
+                        409,
+                    )
+                prepared = prepare_workspace(configuration, project_id, key)
+                workspace = dict(prepared) if isinstance(prepared, Mapping) else {
+                    "ok": False, "error": "Workspace preparation returned an invalid result",
+                }
+                if not workspace.get("ok"):
+                    raise ProjectAuthoringCommandError(
+                        str(workspace.get("code") or "workspace_preparation_failed"),
+                        str(workspace.get("error") or "Workspace preparation failed"),
+                        409,
+                    )
+
+            def commit(current: dict[str, Any]) -> dict[str, Any]:
+                existing = current[IDEMPOTENCY_KEY].get(scoped_key)
+                existing_id = existing.get("projectId") if isinstance(existing, Mapping) else existing
+                if existing_id:
+                    project = next(
+                        (item for item in current.get("projects", []) if item.get("id") == existing_id),
+                        None,
+                    )
+                    if project is not None:
+                        return {"ok": True, "created": False, "project": copy.deepcopy(project)}
+                latest = self._resolve_template_record(current, clean_template_id, version_number)
+                if latest.get("snapshotDigest") != template.get("snapshotDigest"):
+                    raise ProjectAuthoringCommandError(
+                        "template_version_changed", "Template version changed during instantiation", 409,
+                    )
+                current_snapshot = copy.deepcopy(latest.get("snapshot") or {})
+                self._validate_template_snapshot_actors(current_snapshot)
+                if any(item.get("id") == project_id for item in current.get("projects", [])):
+                    raise ProjectAuthoringCommandError(
+                        "project_id_conflict", "Generated project id already exists", 409,
+                    )
+                now = self._timestamp()
+                project = self._build_template_instance_project(
+                    project_id=project_id,
+                    template_id=clean_template_id,
+                    version=version_number,
+                    configuration=configuration,
+                    workspace=workspace,
+                    actor=actor,
+                    now=now,
+                )
+                current.setdefault("projects", []).append(project)
+                current[IDEMPOTENCY_KEY][scoped_key] = {
+                    "projectId": project_id,
+                    "templateId": clean_template_id,
+                    "templateVersion": version_number,
+                    "idempotencyKey": key,
+                    "createdAt": now,
+                }
+                return {"ok": True, "created": True, "project": copy.deepcopy(project)}
+
+            result = self.store.update(commit)
+            if not result.get("created"):
+                self._cleanup_prepared_workspace(workspace, cleanup_workspace)
+            return result
+        except Exception:
+            self._cleanup_prepared_workspace(workspace, cleanup_workspace)
+            raise
+
     def create_maintenance_request(
         self,
         project_id: str,
@@ -972,6 +1081,150 @@ class ProjectAuthoringService:
         else:
             summary["version"] = version["version"]
         return {"id": template_id, "version": version["version"]}
+
+    @staticmethod
+    def _resolve_template_record(
+        root: Mapping[str, Any], template_id: str, version: int,
+    ) -> dict[str, Any]:
+        try:
+            return resolve_template_version(
+                root.get(TEMPLATES_KEY) or {}, root.get("templates") or [], template_id, version,
+            )
+        except ProjectTemplateError as exc:
+            raise ProjectAuthoringCommandError(exc.code, str(exc), 404) from exc
+
+    def _validate_template_snapshot_actors(self, snapshot: Mapping[str, Any]) -> None:
+        tasks = snapshot.get("tasks") if isinstance(snapshot.get("tasks"), list) else []
+        if not tasks:
+            raise ProjectAuthoringCommandError(
+                "template_tasks_required", "Template version has no task blueprints", 409,
+            )
+        for index, task in enumerate(tasks):
+            if not isinstance(task, Mapping):
+                raise ProjectAuthoringCommandError(
+                    "invalid_template_task", f"Template task {index + 1} is invalid", 409,
+                )
+            try:
+                validate_task_actor_references(
+                    task,
+                    lookup_agent=self.lookup_agent,
+                    is_excluded_agent=self.is_excluded_agent,
+                )
+            except ActorReferenceError as exc:
+                raise ProjectAuthoringCommandError(
+                    exc.code, f"Template task {index + 1}: {exc.message}", 409,
+                ) from exc
+
+    @staticmethod
+    def _template_instantiation_configuration(
+        snapshot: Mapping[str, Any], overrides: Mapping[str, Any] | None,
+    ) -> dict[str, Any]:
+        result = copy.deepcopy(dict(snapshot))
+        allowed = {"title", "description", "priority", "dueDate", "tags", "branch", "longTermProject"}
+        supplied = dict(overrides or {})
+        unknown = set(supplied) - allowed
+        if unknown:
+            raise ProjectAuthoringCommandError(
+                "template_override_not_allowed",
+                f"Template instance overrides are not allowed: {', '.join(sorted(unknown))}",
+                400,
+            )
+        for field, value in supplied.items():
+            result[field] = copy.deepcopy(value)
+        title = str(result.get("title") or "").strip()
+        if not title or len(title) > 200:
+            raise ProjectAuthoringCommandError(
+                "invalid_project_title", "Template instance title is required and must not exceed 200 characters", 400,
+            )
+        result["title"] = title
+        return result
+
+    @staticmethod
+    def _build_template_instance_project(
+        *,
+        project_id: str,
+        template_id: str,
+        version: int,
+        configuration: Mapping[str, Any],
+        workspace: Mapping[str, Any],
+        actor: str,
+        now: str,
+    ) -> dict[str, Any]:
+        columns = copy.deepcopy(configuration.get("columns") or [])
+        default_column = columns[0].get("id") if columns else None
+        tasks = []
+        for index, blueprint in enumerate(configuration.get("tasks") or []):
+            task = copy.deepcopy(blueprint)
+            actors = task_actor_references(task)
+            raw_order = task.get("order")
+            task.update({
+                "id": f"{project_id}-task-{index + 1}",
+                "columnId": task.get("columnId") or default_column,
+                "order": index if raw_order is None else int(raw_order),
+                **legacy_task_role_fields(actors),
+                "executionState": "backlog",
+                "activeAttemptId": None,
+                "attempts": [],
+                "createdAt": now,
+                "updatedAt": now,
+                "completedAt": None,
+            })
+            tasks.append(task)
+        execution = configuration.get("executionSettings") if isinstance(
+            configuration.get("executionSettings"), Mapping,
+        ) else {}
+        project = {
+            "id": project_id,
+            "title": configuration.get("title"),
+            "description": configuration.get("description") or "",
+            "projectType": "one_time",
+            "status": "active",
+            "priority": configuration.get("priority") or "medium",
+            "dueDate": configuration.get("dueDate"),
+            "tags": copy.deepcopy(configuration.get("tags") or []),
+            "branch": configuration.get("branch") or "",
+            "longTermProject": configuration.get("longTermProject") is True,
+            "columns": columns,
+            "tasks": tasks,
+            "activity": [{
+                "type": "project_instantiated_from_template",
+                "by": actor,
+                "at": now,
+                "detail": f"Created from template {template_id} version {version}",
+            }],
+            "createdAt": now,
+            "updatedAt": now,
+            "createdBy": actor,
+            "agentMaintenanceMode": configuration.get("agentMaintenanceMode") or "strict_confirmation",
+            "authoringSource": {
+                "kind": "manual_template_instance",
+                "templateId": template_id,
+                "templateVersion": version,
+            },
+            "templateRef": {"id": template_id, "version": version},
+            "recurrenceRef": {},
+            "projectExecutionEnabled": execution.get("projectExecutionEnabled") is True,
+            "projectExecutionStartMode": execution.get("projectExecutionStartMode") or "continuous",
+            "executionPolicy": copy.deepcopy(execution.get("executionPolicy") or {"maxActiveTasks": 1}),
+            "defaultExecutorAgentId": execution.get("defaultExecutorAgentId"),
+            "defaultReviewerAgentId": execution.get("defaultReviewerAgentId"),
+            "projectExecutionFlowActive": False,
+            "workflowActive": False,
+            "workflowPhase": "idle",
+            "activeTaskId": None,
+            "activeAgent": None,
+        }
+        if workspace.get("path"):
+            project.update({
+                "workspacePath": workspace.get("path"),
+                "workspaceKind": workspace.get("kind") or "directory",
+                "workspaceManagedBy": "project_authoring" if workspace.get("managed") else None,
+                "workspaceCreatedAt": now if workspace.get("created") else None,
+                "workspaceStatus": copy.deepcopy(workspace.get("status") or {
+                    "ok": True, "path": workspace.get("path"),
+                }),
+            })
+        return project
 
     def _materialize_recurrence(
         self,

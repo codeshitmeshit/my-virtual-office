@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Project authoring request state-machine and idempotency tests."""
 
+import copy
 from datetime import datetime, timezone
 import os
 import sys
@@ -428,6 +429,83 @@ def test_missing_referenced_template_fails_without_partial_root_changes(tmp_path
     assert root[TEMPLATES_KEY] == {}
     assert root[RECURRENCES_KEY] == {}
     assert root[OUTBOX_KEY] == []
+
+
+def test_manual_template_instantiation_is_version_pinned_atomic_and_idempotent(tmp_path):
+    markdown, _, service = _service(tmp_path)
+    reusable = _draft("Reusable launch")
+    reusable.update({
+        "projectType": "reusable",
+        "template": {"mode": "create", "name": "Launch template"},
+    })
+    _create(service, draft=reusable)
+    source = service.confirm_and_materialize(
+        "request-1", expected_revision=1, confirmation_key="confirm:template-source",
+    )["project"]
+    root_before = markdown.load_all()
+    snapshot_before = copy.deepcopy(
+        root_before[TEMPLATES_KEY]["template-request-1"][0]["snapshot"],
+    )
+
+    created = service.instantiate_template(
+        "template-request-1",
+        1,
+        idempotency_key="template:manual-1",
+        overrides={"title": "Independent launch", "dueDate": "2025-05-01"},
+        actor="user:local",
+    )
+    repeated = service.instantiate_template(
+        "template-request-1",
+        1,
+        idempotency_key="template:manual-1",
+        overrides={"title": "Ignored retry"},
+        actor="user:local",
+    )
+
+    assert created["created"] is True
+    assert repeated["created"] is False
+    assert created["project"]["id"] == repeated["project"]["id"]
+    assert created["project"]["id"] != source["id"]
+    assert created["project"]["title"] == "Independent launch"
+    assert created["project"]["templateRef"] == {"id": "template-request-1", "version": 1}
+    assert created["project"]["authoringSource"] == {
+        "kind": "manual_template_instance",
+        "templateId": "template-request-1",
+        "templateVersion": 1,
+    }
+    task = created["project"]["tasks"][0]
+    assert task["responsibleActor"] == {"type": "agent", "id": "owner"}
+    assert task["executorActor"] == {"type": "agent", "id": "builder"}
+    assert task["executionState"] == "backlog"
+    assert task["attempts"] == []
+    root = markdown.load_all()
+    assert len(root["projects"]) == 2
+    assert root[TEMPLATES_KEY]["template-request-1"][0]["snapshot"] == snapshot_before
+
+
+def test_manual_template_instantiation_revalidates_actors_without_partial_project(tmp_path):
+    markdown, _, service = _service(tmp_path)
+    reusable = _draft("Reusable launch")
+    reusable.update({
+        "projectType": "reusable",
+        "template": {"mode": "create", "name": "Launch template"},
+    })
+    _create(service, draft=reusable)
+    service.confirm_and_materialize(
+        "request-1", expected_revision=1, confirmation_key="confirm:template-source",
+    )
+    before = copy.deepcopy(markdown.load_all()["projects"])
+    service.lookup_agent = lambda agent_id: None if agent_id == "builder" else AGENTS.get(agent_id)
+
+    with pytest.raises(ProjectAuthoringCommandError) as invalid:
+        service.instantiate_template(
+            "template-request-1", 1,
+            idempotency_key="template:invalid-actor",
+            actor="user:local",
+        )
+
+    assert invalid.value.code == "agent_not_found"
+    assert markdown.load_all()["projects"] == before
 
 
 @pytest.mark.parametrize(

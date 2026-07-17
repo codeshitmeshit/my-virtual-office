@@ -29,7 +29,7 @@
 ## 5. Versioned Templates
 
 - [x] 5.1 Add versioned template snapshots containing columns, complete task blueprints, actor references, reviewer policy, maintenance mode, and execution settings while adapting legacy templates as implicit version 1.
-- [ ] 5.2 Implement idempotent manual instantiation from an immutable template version with actor revalidation and one atomic project commit.
+- [x] 5.2 Implement idempotent manual instantiation from an immutable template version with actor revalidation and one atomic project commit.
 - [ ] 5.3 Add template compatibility tests proving new versions affect only future instances and existing browser template behavior remains readable and usable.
 
 ## 6. Independent Project Recurrence

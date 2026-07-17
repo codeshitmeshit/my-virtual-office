@@ -17815,6 +17815,13 @@ def _project_authoring_cleanup_workspace(workspace):
         _delete_managed_project_workspace(workspace.get("path"))
 
 
+def _project_template_prepare_workspace(configuration, project_id, idempotency_key):
+    body = copy.deepcopy(dict(configuration or {}))
+    execution = body.get("executionSettings") if isinstance(body.get("executionSettings"), dict) else {}
+    body.update(copy.deepcopy(execution))
+    return _project_authoring_prepare_workspace(body, project_id, idempotency_key)
+
+
 
 
 def _handle_task_create(project_id, body):
@@ -29364,6 +29371,27 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
         request_path = parsed_url.path
         if request_path == "/api/agent/project-authoring/requests":
             self._handle_agent_project_authoring_submit()
+            return
+        management_template_prefix = "/api/project-authoring/templates/"
+        if request_path.startswith(management_template_prefix) and request_path.endswith("/instantiate"):
+            body = self._read_management_authoring_body()
+            if body is None:
+                return
+            template_id = urllib.parse.unquote(
+                request_path[len(management_template_prefix):].rsplit("/instantiate", 1)[0]
+            ).strip("/")
+            if not template_id or "/" in template_id:
+                self._send_json({"ok": False, "error": "Template version not found"}, status=404)
+                return
+            self._send_project_authoring_result(lambda: _PROJECT_AUTHORING_SERVICE.instantiate_template(
+                template_id,
+                body.get("version"),
+                idempotency_key=body.get("idempotencyKey"),
+                overrides=body.get("overrides") if isinstance(body.get("overrides"), dict) else {},
+                actor="user:local",
+                prepare_workspace=_project_template_prepare_workspace,
+                cleanup_workspace=_project_authoring_cleanup_workspace,
+            ))
             return
         agent_project_prefix = "/api/agent/projects/"
         if request_path.startswith(agent_project_prefix) and request_path.endswith("/maintenance"):
