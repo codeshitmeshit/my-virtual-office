@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import concurrent.futures
 import hashlib
 import json
 import os
@@ -169,6 +170,20 @@ class CodexFeishuApprovalRouteStore:
             return self._public(current)
 
     def claim(self, route_id: str, decision: str, actor_ids: Mapping[str, Any] | None = None) -> RouteClaim:
+        return self._claim(route_id, decision, actor_ids=actor_ids, trusted_system=False)
+
+    def claim_system(self, route_id: str, decision: str = "cancel") -> RouteClaim:
+        """Claim a route for a fail-closed server decision, bypassing user identity only."""
+        return self._claim(route_id, decision, actor_ids=None, trusted_system=True)
+
+    def _claim(
+        self,
+        route_id: str,
+        decision: str,
+        *,
+        actor_ids: Mapping[str, Any] | None,
+        trusted_system: bool,
+    ) -> RouteClaim:
         route_id = str(route_id or "").strip()
         decision = str(decision or "").strip().lower()
         if decision not in DECISIONS:
@@ -181,7 +196,7 @@ class CodexFeishuApprovalRouteStore:
                 return RouteClaim(False, False, False, True, False, "", None, None)
             trusted_actors = self._actor_ids(current)
             presented = {str(value).strip() for value in (actor_ids or {}).values() if str(value or "").strip()}
-            if not trusted_actors or not presented or trusted_actors.isdisjoint(presented):
+            if not trusted_system and (not trusted_actors or not presented or trusted_actors.isdisjoint(presented)):
                 return RouteClaim(False, False, False, False, True, "", self._public(current), None)
             status = str(current.get("status") or "")
             if status == "resolved":
@@ -201,7 +216,16 @@ class CodexFeishuApprovalRouteStore:
             self._write_locked(now)
             return RouteClaim(True, False, False, False, False, token, self._public(current), None)
 
-    def commit(self, route_id: str, token: str, outcome: Mapping[str, Any]) -> RouteClaim:
+    def commit(
+        self,
+        route_id: str,
+        token: str,
+        outcome: Mapping[str, Any],
+        *,
+        terminal_status: str = "resolved",
+    ) -> RouteClaim:
+        if terminal_status not in {"resolved", "failed"}:
+            raise ValueError("claim commit status must be resolved or failed")
         route_id = str(route_id or "").strip()
         now = self._clock_ms()
         cleaned = self._bounded(outcome)
@@ -214,7 +238,7 @@ class CodexFeishuApprovalRouteStore:
             if current.get("status") != "resolving" or not token or current.get("claimToken") != token:
                 return RouteClaim(False, False, current.get("status") == "resolving", current.get("status") in TERMINAL_STATES, False, "", self._public(current), copy.deepcopy(current.get("outcome")))
             current.update({
-                "status": "resolved",
+                "status": terminal_status,
                 "claimToken": "",
                 "claimExpiresAt": 0,
                 "outcome": cleaned,
@@ -359,6 +383,73 @@ class CodexFeishuApprovalRouteStore:
             except OSError:
                 pass
             raise
+
+
+class BoundedApprovalDeliveryExecutor:
+    """Bounded delivery pool with a hard deadline and one failure closure."""
+
+    def __init__(self, *, max_workers: int = 2, max_queue: int = 16, deadline_sec: float = 12.0) -> None:
+        self.max_workers = max(1, min(int(max_workers), 16))
+        self.max_queue = max(0, min(int(max_queue), 256))
+        self.deadline_sec = max(0.05, min(float(deadline_sec), 60.0))
+        self._slots = threading.BoundedSemaphore(self.max_workers + self.max_queue)
+        self._pool = concurrent.futures.ThreadPoolExecutor(
+            max_workers=self.max_workers,
+            thread_name_prefix="codex-feishu-approval",
+        )
+        self._lock = threading.Lock()
+        self._closed = False
+
+    def submit(
+        self,
+        delivery: Callable[[], Mapping[str, Any]],
+        on_failure: Callable[[str, Mapping[str, Any] | None], None],
+    ) -> bool:
+        with self._lock:
+            if self._closed:
+                return False
+        if not self._slots.acquire(blocking=False):
+            return False
+        outcome_lock = threading.Lock()
+        finished = {"value": False}
+
+        def fail_once(reason: str, result: Mapping[str, Any] | None = None) -> None:
+            with outcome_lock:
+                if finished["value"]:
+                    return
+                finished["value"] = True
+            on_failure(reason, result)
+
+        timer = threading.Timer(self.deadline_sec, fail_once, args=("deadline", None))
+        timer.daemon = True
+        timer.start()
+
+        def run() -> None:
+            try:
+                result = delivery()
+                if not isinstance(result, Mapping) or not result.get("ok"):
+                    fail_once("undeliverable", result if isinstance(result, Mapping) else None)
+                else:
+                    with outcome_lock:
+                        finished["value"] = True
+            except Exception as exc:
+                fail_once("delivery_error", {"errorCategory": type(exc).__name__[:80]})
+            finally:
+                timer.cancel()
+                self._slots.release()
+
+        try:
+            self._pool.submit(run)
+        except RuntimeError:
+            timer.cancel()
+            self._slots.release()
+            return False
+        return True
+
+    def shutdown(self, *, wait: bool = False) -> None:
+        with self._lock:
+            self._closed = True
+        self._pool.shutdown(wait=wait, cancel_futures=True)
 
 
 class CodexFeishuApprovalCoordinator:

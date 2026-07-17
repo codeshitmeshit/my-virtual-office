@@ -2,6 +2,7 @@ import json
 import os
 import sys
 import tempfile
+import threading
 
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -14,7 +15,7 @@ os.environ.setdefault("VO_CODEX_ENABLED", "0")
 os.environ.setdefault("VO_STATUS_DIR", tempfile.mkdtemp(prefix="vo-codex-feishu-callbacks-import-"))
 
 import server  # noqa: E402
-from services.codex_feishu_approvals import CodexFeishuApprovalRouteStore  # noqa: E402
+from services.codex_feishu_approvals import CodexFeishuApprovalCoordinator, CodexFeishuApprovalRouteStore  # noqa: E402
 
 
 def install_route(store, route_id="route-1", message_id="om_card_1", actor="ou_origin"):
@@ -207,3 +208,118 @@ def test_feishu_card_decision_uses_isolated_history_policy_but_keeps_provider_ev
         action_rows = [json.loads(line) for line in stream if line.strip()]
     assert action_rows[-1]["outcome"]["businessStatus"] == "approved_once"
     assert store.get("route-1")["outcome"]["status"] == "submitted"
+
+
+def test_double_delivery_failure_closes_provider_once_and_marks_visible_failure(tmp_path):
+    store = CodexFeishuApprovalRouteStore(str(tmp_path / "routes.json"), token_factory=lambda: "failure-claim")
+    sends = []
+
+    def sender(intent, **kwargs):
+        sends.append((intent, kwargs))
+        return {"ok": False, "status": "network_error", "errorCategory": "TimeoutError"}
+
+    coordinator = CodexFeishuApprovalCoordinator(store, send_notification=sender, status_dir=str(tmp_path))
+
+    class ImmediateExecutor:
+        def submit(self, delivery, on_failure):
+            result = delivery()
+            on_failure("undeliverable", result)
+            return True
+
+    class Provider:
+        def __init__(self):
+            self.calls = []
+
+        def respond_approval(self, profile, approval_id, choice, session_id=None):
+            self.calls.append((profile, approval_id, choice, session_id))
+            return {"ok": True, "status": "submitted"}
+
+    provider = Provider()
+    failure_state = {"failed": False}
+    previous_store = server.CODEX_FEISHU_APPROVAL_ROUTES
+    previous_coordinator = server.CODEX_FEISHU_APPROVAL_COORDINATOR
+    previous_executor = server.CODEX_FEISHU_APPROVAL_DELIVERY_EXECUTOR
+    previous_notifications = server.VO_CONFIG.get("notifications")
+    previous_chat = (server.VO_CONFIG.get("feishu") or {}).get("chatApp")
+    server.CODEX_FEISHU_APPROVAL_ROUTES = store
+    server.CODEX_FEISHU_APPROVAL_COORDINATOR = coordinator
+    server.CODEX_FEISHU_APPROVAL_DELIVERY_EXECUTOR = ImmediateExecutor()
+    server.VO_CONFIG["notifications"] = {
+        "feishuEnabled": True, "feishuAppId": "notification-app", "feishuAppSecret": "notification-secret",
+    }
+    server.VO_CONFIG.setdefault("feishu", {})["chatApp"] = {
+        "enabled": True, "appId": "chat-app", "appSecret": "chat-secret",
+    }
+    try:
+        assert server._queue_codex_feishu_approval(
+            {
+                "id": "approval-live", "approval_id": "approval-live", "kind": "command",
+                "profile": "local", "threadId": "thread-live", "turnId": "turn-live",
+                "command": "printf safe",
+            },
+            {
+                "sourceApp": "feishu", "sourceSurface": "feishu-dm", "sourceMessageId": "om_source",
+                "feishuChatId": "oc_source", "sourceActor": {"openId": "ou_origin", "unionId": "on_origin"},
+                "agentId": "codex-local", "conversationId": "feishu-dm:user:chat",
+            },
+            provider,
+            failure_state,
+        ) is True
+    finally:
+        server.CODEX_FEISHU_APPROVAL_ROUTES = previous_store
+        server.CODEX_FEISHU_APPROVAL_COORDINATOR = previous_coordinator
+        server.CODEX_FEISHU_APPROVAL_DELIVERY_EXECUTOR = previous_executor
+        server.VO_CONFIG["notifications"] = previous_notifications
+        server.VO_CONFIG.setdefault("feishu", {})["chatApp"] = previous_chat
+
+    assert len(sends) == 2
+    assert provider.calls == [("local", "approval-live", "cancel", "thread-live")]
+    assert failure_state["failed"] is True
+    assert failure_state["reason"] == "undeliverable"
+    route_id = failure_state["routeId"]
+    assert store.get(route_id)["status"] == "failed"
+    assert store.get(route_id)["outcome"]["status"] == "approval_delivery_failed"
+
+
+def test_saturated_delivery_queue_cancels_registered_approval_once(tmp_path, monkeypatch):
+    store = CodexFeishuApprovalRouteStore(str(tmp_path / "routes.json"), token_factory=lambda: "saturation-claim")
+    coordinator = CodexFeishuApprovalCoordinator(
+        store,
+        send_notification=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("must not send")),
+        status_dir=str(tmp_path),
+    )
+
+    class RejectingExecutor:
+        def submit(self, _delivery, _on_failure):
+            return False
+
+    finished = threading.Event()
+    calls = []
+
+    class Provider:
+        def respond_approval(self, profile, approval_id, choice, session_id=None):
+            calls.append((profile, approval_id, choice, session_id))
+            finished.set()
+            return {"ok": True, "status": "submitted"}
+
+    monkeypatch.setattr(server, "CODEX_FEISHU_APPROVAL_ROUTES", store)
+    monkeypatch.setattr(server, "CODEX_FEISHU_APPROVAL_COORDINATOR", coordinator)
+    monkeypatch.setattr(server, "CODEX_FEISHU_APPROVAL_DELIVERY_EXECUTOR", RejectingExecutor())
+    failure_state = {"failed": False}
+    server._queue_codex_feishu_approval(
+        {
+            "id": "approval-saturated", "approval_id": "approval-saturated", "kind": "permissions",
+            "profile": "local", "threadId": "thread-saturated", "turnId": "turn-saturated",
+        },
+        {
+            "sourceApp": "feishu", "sourceSurface": "feishu-dm", "sourceMessageId": "om_saturated",
+            "feishuChatId": "oc_saturated", "sourceActor": {"openId": "ou_origin"},
+            "agentId": "codex-local", "conversationId": "conv-saturated",
+        },
+        Provider(),
+        failure_state,
+    )
+    assert finished.wait(1)
+    assert calls == [("local", "approval-saturated", "cancel", "thread-saturated")]
+    assert failure_state["reason"] == "queue_saturated"
+    assert store.get(failure_state["routeId"])["status"] == "failed"

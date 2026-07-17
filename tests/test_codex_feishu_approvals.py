@@ -2,6 +2,7 @@ import json
 import os
 import sys
 import threading
+import time
 
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -10,6 +11,7 @@ if ROOT not in sys.path:
 
 from app.feishu_notifications import build_feishu_card  # noqa: E402
 from app.services.codex_feishu_approvals import (  # noqa: E402
+    BoundedApprovalDeliveryExecutor,
     CodexFeishuApprovalCoordinator,
     CodexFeishuApprovalRouteStore,
 )
@@ -313,3 +315,27 @@ def test_skipped_or_failed_chat_delivery_is_undeliverable(tmp_path):
         assert result["ok"] is False
         assert result["status"] == "undeliverable"
         assert service.store.get(record["routeId"])["status"] == "delivering"
+
+
+def test_bounded_delivery_executor_enforces_saturation_deadline_and_one_failure():
+    executor = BoundedApprovalDeliveryExecutor(max_workers=1, max_queue=0, deadline_sec=0.05)
+    release = threading.Event()
+    failures = []
+    failed = threading.Event()
+
+    def slow_delivery():
+        release.wait(1)
+        return {"ok": False, "status": "undeliverable"}
+
+    def on_failure(reason, result):
+        failures.append((reason, result))
+        failed.set()
+
+    assert executor.submit(slow_delivery, on_failure) is True
+    assert executor.submit(lambda: {"ok": True}, on_failure) is False
+    assert failed.wait(1)
+    assert failures == [("deadline", None)]
+    release.set()
+    time.sleep(0.05)
+    assert len(failures) == 1
+    executor.shutdown(wait=True)

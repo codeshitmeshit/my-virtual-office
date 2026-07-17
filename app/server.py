@@ -58,7 +58,11 @@ from services.provider_ports import AdapterCapabilities, AdapterEvent, AdapterRe
 from services.provider_registry import ProviderRunRepository
 from services.provider_runs import ProviderRunCoordinator
 from services.codex_fast_path import CodexEventFastPath, CodexFastPathTelemetry, CodexTransientCoalescer, classify_codex_event, load_codex_fast_path_settings
-from services.codex_feishu_approvals import CodexFeishuApprovalRouteStore
+from services.codex_feishu_approvals import (
+    BoundedApprovalDeliveryExecutor,
+    CodexFeishuApprovalCoordinator,
+    CodexFeishuApprovalRouteStore,
+)
 from provider_sse_transport import ProviderSSETransport
 from services.project_repository import ProjectConflictError, ProjectNotFoundError, ProjectRepository
 from zoneinfo import ZoneInfo
@@ -4379,6 +4383,25 @@ CODEX_FEISHU_APPROVAL_ROUTES = CodexFeishuApprovalRouteStore(
     os.path.join(STATUS_DIR, "codex-feishu-approval-routes.json"),
     max_records=2000,
 )
+CODEX_FEISHU_APPROVAL_COORDINATOR = CodexFeishuApprovalCoordinator(
+    CODEX_FEISHU_APPROVAL_ROUTES,
+    send_notification=send_feishu_notification,
+    status_dir=STATUS_DIR,
+)
+
+
+def _bounded_codex_approval_setting(name, default, minimum, maximum, cast=int):
+    try:
+        return max(minimum, min(cast(os.environ.get(name, default)), maximum))
+    except (TypeError, ValueError):
+        return default
+
+
+CODEX_FEISHU_APPROVAL_DELIVERY_EXECUTOR = BoundedApprovalDeliveryExecutor(
+    max_workers=_bounded_codex_approval_setting("VO_CODEX_FEISHU_APPROVAL_WORKERS", 2, 1, 16),
+    max_queue=_bounded_codex_approval_setting("VO_CODEX_FEISHU_APPROVAL_QUEUE", 16, 0, 256),
+    deadline_sec=_bounded_codex_approval_setting("VO_CODEX_FEISHU_APPROVAL_DEADLINE_SEC", 12.0, 0.05, 60.0, float),
+)
 PROVIDER_CONVERSATION_SERVICE = ProviderConversationService()
 
 
@@ -6772,6 +6795,102 @@ def _append_codex_user_comm_event(agent, agent_id, conversation_id, message, bod
     return event
 
 
+def _codex_feishu_approval_cards_enabled():
+    return _env_bool("VO_CODEX_FEISHU_APPROVAL_CARDS_ENABLED", True)
+
+
+def _codex_feishu_approval_delivery_configs():
+    notifications = VO_CONFIG.get("notifications") if isinstance(VO_CONFIG.get("notifications"), dict) else {}
+    chat = _feishu_chat_app_config()
+    notification_config = {}
+    if notifications.get("feishuEnabled", True) is not False:
+        notification_config = {
+            "appId": notifications.get("feishuAppId") or "",
+            "appSecret": notifications.get("feishuAppSecret") or "",
+        }
+    chat_config = {}
+    if chat.get("enabled", False) is not False:
+        chat_config = _feishu_chat_app_send_config(chat)
+    return notification_config, chat_config
+
+
+def _queue_codex_feishu_approval(approval, context, provider, failure_state):
+    """Register and asynchronously deliver one approval from a live turn."""
+    failure_lock = failure_state.setdefault("_lock", threading.Lock())
+    local_closed = {"value": False}
+    route = None
+    try:
+        route, _created = CODEX_FEISHU_APPROVAL_COORDINATOR.register(approval, context)
+    except (ValueError, OverflowError, OSError) as exc:
+        failure_state["registrationError"] = type(exc).__name__[:80]
+
+    def close_wait(reason, delivery_result=None):
+        nonlocal route
+        claim = None
+        if route:
+            claim = CODEX_FEISHU_APPROVAL_ROUTES.claim_system(route.get("routeId") or "", "cancel")
+            if not claim.claimed:
+                return
+        else:
+            with failure_lock:
+                if local_closed["value"]:
+                    return
+                local_closed["value"] = True
+        with failure_lock:
+            failure_state.update({
+                "failed": True,
+                "reason": str(reason or "undeliverable")[:80],
+                "routeId": (route or {}).get("routeId") or "",
+            })
+        try:
+            provider_result = provider.respond_approval(
+                str((route or approval).get("profile") or ""),
+                str((route or approval).get("approvalId") or approval.get("approval_id") or approval.get("id") or ""),
+                "cancel",
+                session_id=str((route or approval).get("threadId") or approval.get("session_id") or ""),
+            )
+            if not isinstance(provider_result, dict):
+                provider_result = {"ok": False, "status": "invalid_provider_result"}
+        except Exception as exc:
+            provider_result = {"ok": False, "status": "provider_cancel_failed", "errorCategory": type(exc).__name__[:80]}
+        outcome = {
+            **provider_result,
+            "ok": False,
+            "status": "approval_delivery_failed",
+            "reason": str(reason or "undeliverable")[:80],
+        }
+        if delivery_result:
+            outcome["deliveryStatus"] = str(delivery_result.get("status") or "")[:80]
+        if route and claim and claim.claimed:
+            CODEX_FEISHU_APPROVAL_ROUTES.commit(
+                route.get("routeId") or "",
+                claim.token,
+                outcome,
+                terminal_status="failed",
+            )
+
+    if not route:
+        timer = threading.Timer(0, close_wait, args=("unroutable_origin", None))
+        timer.daemon = True
+        timer.start()
+        return True
+
+    notification_config, chat_config = _codex_feishu_approval_delivery_configs()
+    accepted = CODEX_FEISHU_APPROVAL_DELIVERY_EXECUTOR.submit(
+        lambda: CODEX_FEISHU_APPROVAL_COORDINATOR.deliver(
+            route.get("routeId") or "",
+            notification_config=notification_config,
+            chat_config=chat_config,
+        ),
+        close_wait,
+    )
+    if not accepted:
+        timer = threading.Timer(0, close_wait, args=("queue_saturated", None))
+        timer.daemon = True
+        timer.start()
+    return True
+
+
 def _handle_codex_chat(body):
     """Send one office-mediated message to the Codex harness adapter."""
     message = (body.get("message") or "").strip()
@@ -6865,6 +6984,7 @@ def _handle_codex_chat(body):
     activity_callback = body.get("_onActivity")
     reply_event_appended = {"done": False, "writing": False, "error": None, "operationError": None}
     reply_event_lock = threading.Lock()
+    approval_delivery_failure = {"failed": False}
 
     def append_reply_event(reply, metadata=None, ok=True):
         text = str(reply or "")
@@ -6944,7 +7064,34 @@ def _handle_codex_chat(body):
                 record = _append_codex_activity(agent_id, conversation_id, record, preserve_sequence=True)
         if record.get("type") in {"interaction", "approval"} and str(record.get("status") or "").lower() == "pending":
             approval_id = str(record.get("approval_id") or record.get("approvalId") or record.get("interactionId") or record.get("id") or "").strip()
-            if approval_id:
+            feishu_routed = False
+            if (
+                _codex_feishu_approval_cards_enabled()
+                and str(body.get("sourceApp") or "").strip().lower() == "feishu"
+                and str(body.get("sourceSurface") or "").strip().lower() in {"feishu-dm", "feishu-group"}
+                and str(record.get("interactionType") or "approval").strip().lower() == "approval"
+            ):
+                pending_approval = None
+                pending_lookup = getattr(provider, "pending_approval", None)
+                if callable(pending_lookup):
+                    pending_result = pending_lookup(
+                        str(agent.get("profile") or agent.get("providerAgentId") or ""),
+                        session_id=str(record.get("threadId") or ""),
+                    )
+                    pending_approval = pending_result.get("pending") if isinstance(pending_result, dict) else None
+                if isinstance(pending_approval, dict) and pending_approval:
+                    feishu_routed = _queue_codex_feishu_approval(
+                        pending_approval,
+                        {
+                            **body,
+                            "agentId": agent_id,
+                            "conversationId": conversation_id,
+                            "profile": agent.get("profile") or agent.get("providerAgentId") or "",
+                        },
+                        provider,
+                        approval_delivery_failure,
+                    )
+            if approval_id and not feishu_routed:
                 try:
                     _append_codex_durable_operation(
                         agent_id,
@@ -7040,6 +7187,17 @@ def _handle_codex_chat(body):
         )
         if not release_deferred:
             _release_codex_operation_lock(agent_id, conversation_id, operation_lock)
+    if approval_delivery_failure.get("failed"):
+        result.update({
+            "ok": False,
+            "status": "approval_delivery_failed",
+            "error": "Codex approval card could not be delivered; the protected action was cancelled.",
+            "reply": result.get("reply") or "审批卡片无法送达，操作已取消。",
+            "approvalDeliveryFailure": {
+                "reason": approval_delivery_failure.get("reason") or "undeliverable",
+                "routeId": approval_delivery_failure.get("routeId") or "",
+            },
+        })
     def finalize_result():
         thread_id = str(result.get("threadId") or "")
         turn_id = str(result.get("turnId") or "")

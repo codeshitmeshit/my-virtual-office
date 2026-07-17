@@ -22,7 +22,7 @@
 
 ## 6. Integrate asynchronous delivery and failure closure
 
-- [ ] 6.1 Register eligible approvals from the live Codex turn context and dispatch delivery on a bounded executor without blocking the app-server event reader; on queue saturation, deadline, or both delivery paths failing, cancel the guarded action exactly once and return a normal visible terminal failure through the originating turn, with timeout, saturation, and double-failure tests.
+- [x] 6.1 Register eligible approvals from the live Codex turn context and dispatch delivery on a bounded executor without blocking the app-server event reader; on queue saturation, deadline, or both delivery paths failing, cancel the guarded action exactly once and return a normal visible terminal failure through the originating turn, with timeout, saturation, and double-failure tests.
 
 - [ ] 6.2 Give pending/resolving approval state precedence in Codex presence projection until resolution, failure, turn terminal, or explicit cancellation, and add a regression test proving unrelated later activity cannot overwrite waiting-for-approval as idle.
 
