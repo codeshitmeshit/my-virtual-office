@@ -1,6 +1,6 @@
 import { setTimeout as delay } from 'node:timers/promises';
 
-import { ACK_SCHEMA, redact } from './protocol.mjs';
+import { ACK_SCHEMA, CARD_ACTION_ACK_SCHEMA, redact } from './protocol.mjs';
 
 export const DEFAULT_SINGLE_ATTEMPT_TIMEOUT_MS = 45_000;
 export const MAX_SINGLE_ATTEMPT_TIMEOUT_MS = 55_000;
@@ -102,5 +102,54 @@ export class CallbackClient {
       }
     }
     throw Object.assign(new Error(`callback failed after ${this.maxAttempts} attempts: ${lastError?.message || 'unknown'}`), { code: lastError?.code || 'callback_failed', cause: lastError });
+  }
+}
+
+export function cardActionCallbackUrl(inboundUrl) {
+  const parsed = new URL(String(inboundUrl || ''));
+  parsed.pathname = parsed.pathname.endsWith('/inbound-worker')
+    ? parsed.pathname.slice(0, -'/inbound-worker'.length) + '/card-action-worker'
+    : parsed.pathname.replace(/\/$/, '') + '/card-action-worker';
+  return parsed.toString();
+}
+
+export class CardActionCallbackClient {
+  constructor({ url, token, singleAttemptTimeoutMs = 5000, fetchImpl = globalThis.fetch } = {}) {
+    this.url = url;
+    this.token = token;
+    this.singleAttemptTimeoutMs = Math.min(Math.max(Number(singleAttemptTimeoutMs) || 1, 1), 10_000);
+    this.fetchImpl = fetchImpl;
+  }
+
+  async deliverOnce(envelope) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.singleAttemptTimeoutMs);
+    try {
+      let response;
+      try {
+        response = await this.fetchImpl(this.url, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', 'x-vo-feishu-chat-worker-token': this.token },
+          body: JSON.stringify(envelope),
+          signal: controller.signal,
+        });
+      } catch (error) {
+        const category = controller.signal.aborted || error?.name === 'AbortError' ? 'callback_timeout' : 'callback_network_error';
+        throw new CallbackAttemptError(category, 'card-action callback request failed', { cause: error });
+      }
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new CallbackAttemptError('callback_http_error', `callback HTTP ${response.status}`, { status: response.status });
+      if (
+        body.schema !== CARD_ACTION_ACK_SCHEMA
+        || body.requestId !== envelope.requestId
+        || body.messageId !== envelope.action.messageId
+        || body.durable !== true
+      ) {
+        throw new CallbackAttemptError('callback_invalid_ack', 'card-action callback acknowledgement is invalid');
+      }
+      return body;
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 }

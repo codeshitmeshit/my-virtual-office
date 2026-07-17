@@ -6,10 +6,12 @@ import { test } from 'node:test';
 
 import {
   COMMAND_SCHEMA,
+  CARD_ACTION_SCHEMA,
   INBOUND_SCHEMA,
   ProtocolError,
   redact,
   validateCommandEnvelope,
+  validateCardActionEnvelope,
   validateInboundEnvelope,
 } from '../src/protocol.mjs';
 import { StatusStore } from '../src/status.mjs';
@@ -47,6 +49,21 @@ test('validates strict inbound and command protocol envelopes', () => {
     payload: { to: 'oc_1', content: 'hello', contentType: 'text', timeoutMs: 1000 },
   });
   assert.equal(command.operation, 'send');
+  const action = validateCardActionEnvelope({
+    schema: CARD_ACTION_SCHEMA,
+    requestId: 'action-1',
+    workerInstanceId: 'worker-1',
+    transport: 'channel-sdk-node',
+    attempt: 1,
+    receivedAt: 1,
+    action: {
+      messageId: 'om_action', chatId: 'oc_action',
+      operator: { openId: 'ou_1' },
+      value: { action: 'codex_approval_once', route_id: 'route-1' }, tag: 'button',
+    },
+    source: { eventId: 'evt-1' },
+  });
+  assert.equal(action.action.value.route_id, 'route-1');
 });
 
 test('fails closed for malformed, oversized, unknown, and unsupported protocol input', () => {

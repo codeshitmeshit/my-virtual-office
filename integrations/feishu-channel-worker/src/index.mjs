@@ -28,6 +28,7 @@ async function main() {
     appSecret: process.env.VO_FEISHU_CHAT_APP_SECRET || '',
     statusDir,
     callbackUrl: process.env.VO_FEISHU_CHAT_WORKER_CALLBACK_URL || '',
+    cardActionCallbackUrl: process.env.VO_FEISHU_CHAT_WORKER_ACTION_CALLBACK_URL || '',
     callbackToken: process.env.VO_FEISHU_CHAT_WORKER_TOKEN || '',
     parentPid: Number(process.env.VO_FEISHU_CHAT_PARENT_PID || process.ppid),
     workerInstanceId: process.env.VO_FEISHU_CHAT_WORKER_INSTANCE_ID || undefined,

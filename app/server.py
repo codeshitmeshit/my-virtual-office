@@ -186,6 +186,7 @@ class FeishuChatWorkerProcess:
             "VO_FEISHU_CHAT_APP_ID": self.app_id,
             "VO_FEISHU_CHAT_APP_SECRET": self.app_secret,
             "VO_FEISHU_CHAT_WORKER_CALLBACK_URL": self.callback_url,
+            "VO_FEISHU_CHAT_WORKER_ACTION_CALLBACK_URL": self.callback_url.rsplit("/", 1)[0] + "/card-action-worker",
             "VO_FEISHU_CHAT_WORKER_TOKEN": self._command_token,
             "VO_FEISHU_CHAT_PARENT_PID": str(os.getpid()),
             "VO_FEISHU_CHAT_WORKER_INSTANCE_ID": self._worker_instance_id,
@@ -13461,6 +13462,77 @@ def _handle_feishu_chat_worker_envelope(body):
         "durable": True,
         "state": str(result.get("status") or "accepted"),
         "idempotent": bool(result.get("idempotent")),
+    }
+
+
+def _adapt_feishu_chat_card_action_envelope(body):
+    if not isinstance(body, dict) or body.get("schema") != "vo.feishu-chat.card-action/v1":
+        raise ValueError("Invalid Feishu Chat App card-action schema")
+    allowed = {"schema", "requestId", "workerInstanceId", "transport", "attempt", "receivedAt", "action", "source"}
+    unknown = sorted(set(body) - allowed)
+    if unknown:
+        raise ValueError(f"Unknown card-action envelope field: {unknown[0]}")
+    request_id = str(body.get("requestId") or "").strip()
+    worker_instance_id = str(body.get("workerInstanceId") or "").strip()
+    attempt = body.get("attempt")
+    if not request_id or len(request_id) > 128 or not worker_instance_id or len(worker_instance_id) > 128:
+        raise ValueError("Invalid Feishu card-action envelope identity")
+    if body.get("transport") != "channel-sdk-node" or not isinstance(attempt, int) or not 1 <= attempt <= 1000:
+        raise ValueError("Invalid Feishu card-action envelope transport or attempt")
+    action = body.get("action") if isinstance(body.get("action"), dict) else {}
+    source = body.get("source") if isinstance(body.get("source"), dict) else {}
+    source_unknown = sorted(set(source) - {"eventId", "tenantKey"})
+    if source_unknown:
+        raise ValueError(f"Unknown card-action source field: {source_unknown[0]}")
+    action_allowed = {"messageId", "chatId", "operator", "value", "tag", "name", "option", "formValue"}
+    action_unknown = sorted(set(action) - action_allowed)
+    if action_unknown:
+        raise ValueError(f"Unknown card-action field: {action_unknown[0]}")
+    message_id = str(action.get("messageId") or "").strip()
+    chat_id = str(action.get("chatId") or "").strip()
+    operator = action.get("operator") if isinstance(action.get("operator"), dict) else {}
+    operator_allowed = {"openId", "userId", "unionId", "name"}
+    operator_unknown = sorted(set(operator) - operator_allowed)
+    if operator_unknown:
+        raise ValueError(f"Unknown card-action operator field: {operator_unknown[0]}")
+    open_id = str(operator.get("openId") or "").strip()
+    value = action.get("value") if isinstance(action.get("value"), dict) else None
+    if not message_id or len(message_id) > 256 or not chat_id or len(chat_id) > 256 or not open_id or len(open_id) > 256 or value is None:
+        raise ValueError("Feishu card-action envelope requires message, chat, operator, and object value")
+    return {
+        "schema": "2.0",
+        "header": {"event_type": "card.action.trigger", "event_id": str(source.get("eventId") or "")[:256]},
+        "event": {
+            "open_message_id": message_id,
+            "open_chat_id": chat_id,
+            "operator": {
+                "open_id": open_id,
+                "user_id": str(operator.get("userId") or "")[:256],
+                "union_id": str(operator.get("unionId") or "")[:256],
+                "name": str(operator.get("name") or "")[:512],
+            },
+            "action": {
+                "value": value,
+                "tag": str(action.get("tag") or "unknown")[:64],
+                "name": str(action.get("name") or "")[:512],
+                "option": str(action.get("option") or "")[:512],
+                "form_value": action.get("formValue") if isinstance(action.get("formValue"), dict) else {},
+            },
+        },
+    }, {"requestId": request_id, "messageId": message_id}
+
+
+def _handle_feishu_chat_card_action_worker_envelope(body):
+    adapted, envelope = _adapt_feishu_chat_card_action_envelope(body)
+    result = _handle_feishu_card_action(adapted)
+    if not isinstance(result, dict) or not result.get("recordId"):
+        return {"ok": False, "error": "Feishu card action is not durably audited", "code": "durability_not_proven", "_status": 503}
+    return {
+        "schema": "vo.feishu-chat.card-action.ack/v1",
+        "requestId": envelope["requestId"],
+        "messageId": envelope["messageId"],
+        "durable": True,
+        "state": "completed" if result.get("ok") else "rejected",
     }
 
 
@@ -28625,6 +28697,31 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                             result = _handle_feishu_chat_worker_envelope(body)
                         except ValueError as exc:
                             result = {"ok": False, "error": str(exc), "code": "invalid_inbound_envelope", "_status": 400}
+            self.send_response(result.get("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            result.pop("_status", None)
+            self.wfile.write(json.dumps(result, ensure_ascii=False).encode())
+            return
+        elif self.path == "/api/feishu-chat/card-action-worker":
+            token = self.headers.get("X-VO-Feishu-Chat-Worker-Token") or ""
+            length = int(self.headers.get('Content-Length', 0))
+            if length > 64 * 1024:
+                result = {"ok": False, "error": "Feishu card-action envelope exceeds 65536 bytes", "code": "payload_too_large", "_status": 413}
+            else:
+                try:
+                    body = json.loads(self.rfile.read(length)) if length else {}
+                except json.JSONDecodeError as e:
+                    result = {"ok": False, "error": f"Invalid JSON: {str(e)}", "_status": 400}
+                else:
+                    if not token or not secrets.compare_digest(str(token), str(_FEISHU_CHAT_WORKER_TOKEN)):
+                        result = {"ok": False, "error": "Invalid Feishu chat worker token", "_status": 403}
+                    else:
+                        try:
+                            result = _handle_feishu_chat_card_action_worker_envelope(body)
+                        except ValueError as exc:
+                            result = {"ok": False, "error": str(exc), "code": "invalid_card_action_envelope", "_status": 400}
             self.send_response(result.get("_status", 200))
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")

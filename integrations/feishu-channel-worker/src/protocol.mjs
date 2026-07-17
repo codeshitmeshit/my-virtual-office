@@ -3,8 +3,11 @@ import { randomUUID } from 'node:crypto';
 export const INBOUND_SCHEMA = 'vo.feishu-chat.inbound/v1';
 export const COMMAND_SCHEMA = 'vo.feishu-chat.command/v1';
 export const ACK_SCHEMA = 'vo.feishu-chat.ack/v1';
+export const CARD_ACTION_SCHEMA = 'vo.feishu-chat.card-action/v1';
+export const CARD_ACTION_ACK_SCHEMA = 'vo.feishu-chat.card-action.ack/v1';
 export const MAX_INBOUND_BYTES = 1024 * 1024;
 export const MAX_COMMAND_BYTES = 256 * 1024;
+export const MAX_CARD_ACTION_BYTES = 64 * 1024;
 export const COMMAND_OPERATIONS = new Set([
   'send',
   'reply',
@@ -162,6 +165,52 @@ export function validateInboundEnvelope(input) {
   return envelope;
 }
 
+export function validateCardActionEnvelope(input) {
+  const envelope = requireObject(input, 'card action envelope');
+  if (byteLength(envelope) > MAX_CARD_ACTION_BYTES) {
+    throw new ProtocolError('payload_too_large', `card action envelope exceeds ${MAX_CARD_ACTION_BYTES} bytes`, 413);
+  }
+  rejectUnknown(envelope, new Set([
+    'schema', 'requestId', 'workerInstanceId', 'transport', 'attempt', 'receivedAt', 'action', 'source',
+  ]), 'card action envelope');
+  if (envelope.schema !== CARD_ACTION_SCHEMA) throw new ProtocolError('unsupported_schema', `expected ${CARD_ACTION_SCHEMA}`);
+  requireString(envelope.requestId, 'requestId', { max: 128 });
+  requireString(envelope.workerInstanceId, 'workerInstanceId', { max: 128 });
+  if (envelope.transport !== 'channel-sdk-node') throw new ProtocolError('unsupported_transport', 'transport must be channel-sdk-node');
+  if (!Number.isInteger(envelope.attempt) || envelope.attempt < 1 || envelope.attempt > 1000) {
+    throw new ProtocolError('invalid_shape', 'attempt must be an integer between 1 and 1000');
+  }
+  const action = requireObject(envelope.action, 'action');
+  rejectUnknown(action, new Set(['messageId', 'chatId', 'operator', 'value', 'tag', 'name', 'option', 'formValue']), 'action');
+  requireString(action.messageId, 'action.messageId', { max: 256 });
+  requireString(action.chatId, 'action.chatId', { max: 256 });
+  const operator = requireObject(action.operator, 'action.operator');
+  rejectUnknown(operator, new Set(['openId', 'userId', 'unionId', 'name']), 'action.operator');
+  requireString(operator.openId, 'action.operator.openId', { max: 256 });
+  for (const field of ['userId', 'unionId']) {
+    if (operator[field] !== undefined && operator[field] !== '') requireString(operator[field], `action.operator.${field}`, { max: 256 });
+  }
+  if (operator.name !== undefined && operator.name !== '') requireString(operator.name, 'action.operator.name', { max: 512 });
+  requireObject(action.value, 'action.value');
+  if (byteLength(action.value) > 16 * 1024) throw new ProtocolError('field_too_large', 'action.value exceeds 16384 bytes', 413);
+  requireString(action.tag || 'unknown', 'action.tag', { max: 64 });
+  for (const field of ['name', 'option']) {
+    if (action[field] !== undefined && action[field] !== '') requireString(action[field], `action.${field}`, { max: 512 });
+  }
+  if (action.formValue !== undefined) {
+    requireObject(action.formValue, 'action.formValue');
+    if (byteLength(action.formValue) > 16 * 1024) throw new ProtocolError('field_too_large', 'action.formValue exceeds 16384 bytes', 413);
+  }
+  if (envelope.source !== undefined) {
+    const source = requireObject(envelope.source, 'source');
+    rejectUnknown(source, new Set(['eventId', 'tenantKey']), 'source');
+    for (const field of ['eventId', 'tenantKey']) {
+      if (source[field] !== undefined && source[field] !== '') requireString(source[field], `source.${field}`, { max: 256 });
+    }
+  }
+  return envelope;
+}
+
 function validateOperationPayload(operation, payload) {
   payload = requireObject(payload, 'payload');
   const schemas = {
@@ -216,6 +265,19 @@ export function makeInboundEnvelope(message, { workerInstanceId, attempt = 1, so
     source: redact(source),
   };
   return validateInboundEnvelope(envelope);
+}
+
+export function makeCardActionEnvelope(action, { workerInstanceId, attempt = 1, source = {} } = {}) {
+  return validateCardActionEnvelope({
+    schema: CARD_ACTION_SCHEMA,
+    requestId: randomUUID(),
+    workerInstanceId,
+    transport: 'channel-sdk-node',
+    attempt,
+    receivedAt: Date.now(),
+    action,
+    source: redact(source),
+  });
 }
 
 export function makeAck(requestId, messageId, { durable, state, idempotent = false } = {}) {

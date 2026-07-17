@@ -12,7 +12,7 @@
 
 ## 4. Receive Chat App card actions
 
-- [ ] 4.1 Add a strictly validated, token-authenticated Chat App `cardAction` envelope and a bounded approval-action spool to the Node Channel SDK worker, forward it to a dedicated loopback endpoint without using the normal inbound-message path, and add worker protocol, retry, replay, size-limit, and authentication tests.
+- [x] 4.1 Add a strictly validated, token-authenticated Chat App `cardAction` envelope and a bounded approval-action spool to the Node Channel SDK worker, forward it to a dedicated loopback endpoint without using the normal inbound-message path, and add worker protocol, retry, replay, size-limit, and authentication tests.
 
 ## 5. Resolve Codex approvals from Feishu exactly once
 

@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 
-import { CallbackClient } from './callback.mjs';
+import { CallbackClient, CardActionCallbackClient, cardActionCallbackUrl } from './callback.mjs';
+import { ApprovalActionSpool } from './action-spool.mjs';
 import { CommandServer } from './command-server.mjs';
 import { ChatExecutionLaneScheduler } from './execution-lanes.mjs';
 import { createSafeLogger } from './logger.mjs';
-import { makeInboundEnvelope, redactSecretsString } from './protocol.mjs';
+import { makeCardActionEnvelope, makeInboundEnvelope, redactSecretsString } from './protocol.mjs';
 import { ProcessingRecoveryCoordinator } from './recovery.mjs';
 import { ResourceStore } from './resources.mjs';
 import { InboundSpool, SpoolFullError } from './spool.mjs';
@@ -107,6 +108,25 @@ export function normalizeMessage(message) {
   };
 }
 
+export function normalizeCardAction(event) {
+  const raw = event?.raw && typeof event.raw === 'object' ? event.raw : {};
+  return {
+    messageId: String(event?.messageId || ''),
+    chatId: String(event?.chatId || ''),
+    operator: {
+      openId: String(event?.operator?.openId || ''),
+      userId: String(event?.operator?.userId || ''),
+      unionId: String(nested(raw, ['operator', 'union_id']) || ''),
+      name: String(event?.operator?.name || ''),
+    },
+    value: event?.action?.value,
+    tag: String(event?.action?.tag || 'unknown'),
+    name: String(event?.action?.name || ''),
+    option: String(event?.action?.option || ''),
+    formValue: event?.action?.formValue,
+  };
+}
+
 export class FeishuChannelWorker {
   constructor({
     appId,
@@ -118,6 +138,8 @@ export class FeishuChannelWorker {
     workerInstanceId = randomUUID(),
     createChannel,
     callbackClient,
+    cardActionCallbackClient,
+    cardActionCallbackUrl: actionCallbackUrl,
     channelOptions = {},
     logger,
     maxConcurrentCallbacks = 16,
@@ -152,7 +174,12 @@ export class FeishuChannelWorker {
     this.lanePressure = false;
     this.status = new StatusStore(join(statusDir, 'feishu-chat-worker-status.json'), { workerInstanceId, parentPid: this.parentPid });
     this.spool = new InboundSpool(join(statusDir, 'feishu-channel-inbox'));
+    this.actionSpool = new ApprovalActionSpool(join(statusDir, 'feishu-card-action-inbox'));
     this.callback = callbackClient || new CallbackClient({ url: callbackUrl, token: callbackToken, logger: this.logger, ...callbackOptions });
+    this.actionCallback = cardActionCallbackClient || new CardActionCallbackClient({
+      url: actionCallbackUrl || cardActionCallbackUrl(callbackUrl), token: callbackToken,
+    });
+    this.actionInFlight = new Set();
     this.channel = null;
     this.commandServer = null;
     this.running = false;
@@ -181,6 +208,7 @@ export class FeishuChannelWorker {
     this.parentTimer = null;
     this.heartbeatTimer = null;
     this.connectionRecoveryTimer = null;
+    this.actionRecoveryTimer = null;
   }
 
   async _factory(options) {
@@ -228,10 +256,12 @@ export class FeishuChannelWorker {
       return this.status.snapshot();
     }
     await this.spool.initialize();
+    await this.actionSpool.initialize();
     await this.status.update({ running: true, status: 'starting', startedAt: Date.now(), heartbeatAt: Date.now() });
     this.channel = await this._factory({ appId: this.appId, appSecret: this.appSecret, logger: this.logger, ...CHANNEL_OPTIONS, ...this.channelOptions });
     this.channel.on({
       message: (message) => this.handleMessage(message),
+      cardAction: (event) => this.handleCardAction(event),
       reject: (event) => this.handleReject(event),
       error: (error) => this.handleError(error),
       reconnecting: () => this.handleReconnecting(),
@@ -280,6 +310,7 @@ export class FeishuChannelWorker {
     clearInterval(this.parentTimer);
     clearInterval(this.heartbeatTimer);
     clearTimeout(this.connectionRecoveryTimer);
+    clearInterval(this.actionRecoveryTimer);
     this.processingRecovery.stop();
     this.lanes.stop();
     await this.channel?.disconnect?.().catch((error) => this.logger.warn('channel disconnect failed', { error: error.message }));
@@ -291,6 +322,8 @@ export class FeishuChannelWorker {
   _startWatchdogs() {
     this.heartbeatTimer = setInterval(() => this._heartbeat().catch(() => {}), 5000);
     this.heartbeatTimer.unref?.();
+    this.actionRecoveryTimer = setInterval(() => this._runActionRecovery().catch(() => {}), 1000);
+    this.actionRecoveryTimer.unref?.();
     this.parentTimer = setInterval(() => {
       if (!this.parentPid || this.parentPid === process.pid) return;
       try {
@@ -344,6 +377,53 @@ export class FeishuChannelWorker {
       }
       throw error;
     }
+  }
+
+  async handleCardAction(event) {
+    let envelope;
+    try {
+      envelope = makeCardActionEnvelope(normalizeCardAction(event), {
+        workerInstanceId: this.workerInstanceId,
+        source: {
+          eventId: nested(event?.raw || {}, ['header', 'event_id']),
+          tenantKey: nested(event?.raw || {}, ['header', 'tenant_key']),
+        },
+      });
+      const state = await this.actionSpool.put(envelope);
+      await this.status.increment('counters.cardActionReceived');
+      await this.status.increment('counters.cardActionSpooled', state.duplicate ? 0 : 1);
+      this._attemptAction(envelope).catch(() => {});
+      return { toast: { type: 'loading', content: '审批处理中' } };
+    } catch (error) {
+      await this.status.increment('counters.cardActionRejected');
+      this.logger.warn('Feishu card action rejected', { category: error?.code || 'invalid_card_action' });
+      return { toast: { type: 'error', content: '审批操作无法处理' } };
+    }
+  }
+
+  async _attemptAction(envelope) {
+    if (this.actionInFlight.has(envelope.requestId)) return false;
+    this.actionInFlight.add(envelope.requestId);
+    try {
+      await this.actionCallback.deliverOnce(envelope);
+      await this.actionSpool.remove(envelope.requestId);
+      await this.status.increment('counters.cardActionAcknowledged');
+      return true;
+    } catch (error) {
+      await this.status.increment('counters.cardActionCallbackFailure');
+      throw error;
+    } finally {
+      this.actionInFlight.delete(envelope.requestId);
+    }
+  }
+
+  async _runActionRecovery() {
+    if (!this.running) return { pending: false };
+    const items = (await this.actionSpool.list()).filter((item) => item.envelope).slice(0, 4);
+    await Promise.allSettled(items.map((item) => this._attemptAction(item.envelope)));
+    const stats = await this.actionSpool.stats();
+    await this.status.update({ cardActions: stats });
+    return { pending: stats.entries > 0, ...stats };
   }
 
   _scheduleConnectionRecovery(delayMs = 1000) {

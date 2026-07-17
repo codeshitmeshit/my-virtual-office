@@ -2273,6 +2273,87 @@ def test_feishu_chat_worker_route_requires_token_and_dispatches():
     assert calls[0]["sourceMeta"]["sourceMessageId"] == "om_worker"
 
 
+def test_feishu_chat_card_action_worker_route_is_authenticated_strict_and_separate_from_chat_history():
+    os.environ.setdefault("VO_HERMES_ENABLED", "0")
+    os.environ.setdefault("VO_CODEX_ENABLED", "0")
+    status_dir = tempfile.mkdtemp(prefix="vo-feishu-card-action-worker-")
+    os.environ["VO_STATUS_DIR"] = status_dir
+    import server
+
+    previous_status_dir = server.STATUS_DIR
+    previous_token = server._FEISHU_CHAT_WORKER_TOKEN
+    server.STATUS_DIR = status_dir
+    server._FEISHU_CHAT_WORKER_TOKEN = "card-action-worker-token"
+    body = {
+        "schema": "vo.feishu-chat.card-action/v1",
+        "requestId": "request-card-action-1",
+        "workerInstanceId": "worker-card-action-1",
+        "transport": "channel-sdk-node",
+        "attempt": 1,
+        "receivedAt": 1710000000,
+        "action": {
+            "messageId": "om_card_action_1",
+            "chatId": "oc_card_action_1",
+            "operator": {
+                "openId": "ou_origin",
+                "userId": "u_origin",
+                "unionId": "on_origin",
+                "name": "Origin User",
+            },
+            "value": {"action": "future_action", "route_id": "route-1", "version": 1},
+            "tag": "button",
+        },
+        "source": {"eventId": "evt-card-action-1"},
+    }
+    try:
+        denied_status, denied = call_office_handler(server, "POST", "/api/feishu-chat/card-action-worker", body)
+        accepted_status, accepted = call_office_handler(
+            server,
+            "POST",
+            "/api/feishu-chat/card-action-worker",
+            body,
+            headers={"X-VO-Feishu-Chat-Worker-Token": "card-action-worker-token"},
+        )
+        invalid_status, invalid = call_office_handler(
+            server,
+            "POST",
+            "/api/feishu-chat/card-action-worker",
+            {**body, "unexpected": True},
+            headers={"X-VO-Feishu-Chat-Worker-Token": "card-action-worker-token"},
+        )
+        oversized_status, oversized = call_office_handler(
+            server,
+            "POST",
+            "/api/feishu-chat/card-action-worker",
+            {**body, "padding": "x" * (65 * 1024)},
+            headers={"X-VO-Feishu-Chat-Worker-Token": "card-action-worker-token"},
+        )
+    finally:
+        server._FEISHU_CHAT_WORKER_TOKEN = previous_token
+        server.STATUS_DIR = previous_status_dir
+
+    assert denied_status == 403
+    assert denied["ok"] is False
+    assert accepted_status == 200
+    assert accepted == {
+        "schema": "vo.feishu-chat.card-action.ack/v1",
+        "requestId": "request-card-action-1",
+        "messageId": "om_card_action_1",
+        "durable": True,
+        "state": "completed",
+    }
+    assert invalid_status == 400
+    assert invalid["code"] == "invalid_card_action_envelope"
+    assert oversized_status == 413
+    assert oversized["code"] == "payload_too_large"
+    with open(os.path.join(status_dir, "feishu-card-actions.jsonl"), "r", encoding="utf-8") as stream:
+        action_rows = [json.loads(line) for line in stream if line.strip()]
+    assert len(action_rows) == 1
+    assert action_rows[0]["action"] == "future_action"
+    assert not os.path.exists(os.path.join(status_dir, "feishu-channel-records.jsonl"))
+    assert not os.path.exists(os.path.join(status_dir, "agent-platform-communications.jsonl"))
+
+
 def test_feishu_chat_worker_v1_envelope_returns_durable_ack_and_persists_metadata():
     os.environ.setdefault("VO_HERMES_ENABLED", "0")
     os.environ.setdefault("VO_CODEX_ENABLED", "0")
