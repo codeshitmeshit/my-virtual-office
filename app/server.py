@@ -6,6 +6,7 @@ import asyncio
 import base64
 import copy
 import http.server
+import ipaddress
 import json
 import math
 import os
@@ -45,6 +46,10 @@ from services import execution_lifecycle as execution_lifecycle_service
 from services import review_acceptance as review_acceptance_service
 from services import artifacts as artifact_service
 from services import project_schedule as project_schedule_service
+from services import project_authoring as project_authoring_service
+from services import project_authoring_config as project_authoring_config_service
+from services import project_authoring_store as project_authoring_store_service
+from services import project_authoring_security as project_authoring_security_service
 from services import meeting_repository as meeting_repository_service
 from services import meeting_lifecycle as meeting_lifecycle_service
 from services import meeting_requests as meeting_requests_service
@@ -16728,7 +16733,6 @@ _PROJECT_REPOSITORY = ProjectRepository(
     cache_namespace=lambda: (PROJECT_STORE, PROJECT_STORE.revision()),
 )
 
-
 def _proj_uuid():
     """Generate a UUID4 string."""
     return str(uuid.uuid4())
@@ -20750,6 +20754,17 @@ def _is_archive_manager_agent(agent_id_or_key):
         return True
     state = _archive_manager_load_state()
     return bool(needle and needle in {str(state.get("agentId") or ""), str(state.get("name") or "")})
+
+
+_PROJECT_AUTHORING_ROOT_STORE = project_authoring_store_service.ProjectAuthoringRootStore(
+    _PROJECT_REPOSITORY,
+    config=project_authoring_config_service.DEFAULT_CONFIG,
+)
+_PROJECT_AUTHORING_SERVICE = project_authoring_service.ProjectAuthoringService(
+    _PROJECT_AUTHORING_ROOT_STORE,
+    lookup_agent=_office_agent_lookup,
+    is_excluded_agent=_is_archive_manager_agent,
+)
 
 
 def _is_archive_related_message(message):
@@ -26307,6 +26322,115 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
         }, status=403)
         return True
 
+    def _reject_untrusted_agent_authoring_request(self):
+        try:
+            remote = ipaddress.ip_address(str(self.client_address[0]))
+        except (AttributeError, IndexError, TypeError, ValueError):
+            remote = None
+        if remote is None or not remote.is_loopback:
+            self._send_json({
+                "ok": False,
+                "code": "agent_authoring_loopback_required",
+                "error": "Agent project authoring is available only on loopback",
+            }, status=403)
+            return True
+        if str(self.headers.get("Origin") or "").strip():
+            self._send_json({
+                "ok": False,
+                "code": "agent_authoring_browser_origin_rejected",
+                "error": "Browser-origin project authoring requests are not allowed",
+            }, status=403)
+            return True
+        if str(self.headers.get("X-VO-Agent-Action") or "").strip() != "project-authoring":
+            self._send_json({
+                "ok": False,
+                "code": "agent_authoring_action_required",
+                "error": "X-VO-Agent-Action: project-authoring is required",
+            }, status=400)
+            return True
+        return False
+
+    def _agent_authoring_id(self):
+        return str(self.headers.get("X-VO-Agent-Id") or "").strip()
+
+    def _agent_authoring_bearer_secret(self):
+        authorization = str(self.headers.get("Authorization") or "").strip()
+        if not authorization.lower().startswith("bearer "):
+            return ""
+        return authorization[7:].strip()
+
+    def _send_project_authoring_result(self, callback):
+        try:
+            result = callback()
+            self._send_json(result, status=int(result.get("_status") or 200))
+        except Exception as exc:
+            if hasattr(exc, "as_dict"):
+                self._send_json_error(exc.as_dict())
+            else:
+                self._send_unexpected_json_error(exc)
+
+    def _handle_agent_project_authoring_submit(self):
+        if self._reject_untrusted_agent_authoring_request():
+            return
+        agent_id = self._agent_authoring_id()
+        if not agent_id:
+            self._send_json({
+                "ok": False,
+                "code": "requesting_agent_required",
+                "error": "X-VO-Agent-Id is required",
+            }, status=400)
+            return
+        body, error = self._read_limited_json_body(
+            limit=project_authoring_config_service.DEFAULT_CONFIG.body_limit_bytes,
+        )
+        if error:
+            self._send_json_error(error)
+            return
+        body_agent_id = str(body.get("requestingAgentId") or agent_id).strip()
+        if body_agent_id != agent_id:
+            self._send_json({
+                "ok": False,
+                "code": "requesting_agent_mismatch",
+                "error": "Requesting Agent does not match X-VO-Agent-Id",
+            }, status=403)
+            return
+        request_secret = project_authoring_security_service.generate_request_secret()
+
+        def submit():
+            result = _PROJECT_AUTHORING_SERVICE.create_pending(
+                body.get("draft"),
+                requesting_agent_id=agent_id,
+                idempotency_key=body.get("idempotencyKey"),
+                request_secret_hash=project_authoring_security_service.hash_request_secret(request_secret),
+                source={"surface": "agent_http", "action": "project-authoring"},
+            )
+            if result.get("created"):
+                result["requestSecret"] = request_secret
+            return result
+
+        self._send_project_authoring_result(submit)
+
+    def _handle_agent_project_authoring_status(self, request_id):
+        if self._reject_untrusted_agent_authoring_request():
+            return
+        agent_id = self._agent_authoring_id()
+        request_secret = self._agent_authoring_bearer_secret()
+        if not agent_id or not request_secret:
+            self._send_json({
+                "ok": False,
+                "code": "project_authoring_auth_required",
+                "error": "Agent id and request bearer secret are required",
+            }, status=403)
+            return
+        self._send_project_authoring_result(lambda: {
+            "ok": True,
+            "request": _PROJECT_AUTHORING_SERVICE.authenticate_agent_status(
+                request_id,
+                requesting_agent_id=agent_id,
+                request_secret=request_secret,
+            ),
+        })
+
     def _request_id(self):
         request_id = getattr(self, "_vo_request_id", "")
         if not request_id:
@@ -26501,6 +26625,14 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
         parsed_url = urllib.parse.urlparse(self.path)
         request_path = parsed_url.path
         query_params = urllib.parse.parse_qs(parsed_url.query)
+        agent_authoring_prefix = "/api/agent/project-authoring/requests/"
+        if request_path.startswith(agent_authoring_prefix):
+            request_id = urllib.parse.unquote(request_path[len(agent_authoring_prefix):]).strip("/")
+            if not request_id or "/" in request_id:
+                self._send_json({"ok": False, "error": "Project authoring request not found"}, status=404)
+                return
+            self._handle_agent_project_authoring_status(request_id)
+            return
         if request_path == "/api/meetings/store-status":
             status = _meeting_domain_authority_status()
             self._send_json(status, status=status.get("_status", 200))
@@ -29061,6 +29193,9 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
     def do_POST(self):
         parsed_url = urllib.parse.urlparse(self.path)
         request_path = parsed_url.path
+        if request_path == "/api/agent/project-authoring/requests":
+            self._handle_agent_project_authoring_submit()
+            return
         if _is_meeting_domain_path(request_path):
             authority = _meeting_domain_authority_status()
             if not authority.get("ok"):

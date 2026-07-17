@@ -22,6 +22,7 @@ from services.project_authoring_store import (
     management_request_view,
 )
 from services.project_authoring_validation import validate_idempotency_key, validate_project_draft
+from services.project_authoring_security import verify_request_secret
 
 
 EDITABLE_STATES = frozenset({"pending", "failed"})
@@ -170,6 +171,30 @@ class ProjectAuthoringService:
     def get_agent_status(self, request_id: str, *, requesting_agent_id: str) -> dict[str, Any]:
         request = self._get_raw(request_id)
         view = agent_request_view(request, requesting_agent_id=requesting_agent_id)
+        if view is None:
+            raise self._not_found(request_id)
+        return view
+
+    def authenticate_agent_status(
+        self,
+        request_id: str,
+        *,
+        requesting_agent_id: str,
+        request_secret: str,
+    ) -> dict[str, Any]:
+        request = self._get_raw(request_id)
+        agent_id = str(requesting_agent_id or "").strip()
+        if (
+            str(request.get("requestingAgentId") or "") != agent_id
+            or not verify_request_secret(request_secret, request.get("requestSecretHash"))
+        ):
+            raise ProjectAuthoringCommandError(
+                "invalid_project_authoring_secret",
+                "Project authoring request authentication failed",
+                403,
+                request_id,
+            )
+        view = agent_request_view(request, requesting_agent_id=agent_id)
         if view is None:
             raise self._not_found(request_id)
         return view

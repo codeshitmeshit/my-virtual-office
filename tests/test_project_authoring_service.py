@@ -15,6 +15,7 @@ if APP_DIR not in sys.path:
 
 from project_store import MarkdownProjectStore
 from services.project_authoring import ProjectAuthoringCommandError, ProjectAuthoringService
+from services.project_authoring_security import hash_request_secret
 from services.project_authoring_store import (
     IDEMPOTENCY_KEY,
     OUTBOX_KEY,
@@ -134,6 +135,26 @@ def test_detail_list_and_agent_status_are_sanitized_and_bounded(tmp_path):
     with pytest.raises(ProjectAuthoringCommandError) as cross_agent:
         service.get_agent_status("request-1", requesting_agent_id="builder")
     assert cross_agent.value.code == "project_authoring_request_not_found"
+
+
+def test_agent_status_secret_is_bound_to_request_and_requesting_agent(tmp_path):
+    _, _, service = _service(tmp_path)
+    _create(service, request_secret_hash=hash_request_secret("opaque-request-secret"))
+
+    status = service.authenticate_agent_status(
+        "request-1", requesting_agent_id="author", request_secret="opaque-request-secret",
+    )
+
+    assert status["state"] == "pending"
+    with pytest.raises(ProjectAuthoringCommandError) as wrong_secret:
+        service.authenticate_agent_status(
+            "request-1", requesting_agent_id="author", request_secret="wrong",
+        )
+    assert wrong_secret.value.code == "invalid_project_authoring_secret"
+    with pytest.raises(ProjectAuthoringCommandError):
+        service.authenticate_agent_status(
+            "request-1", requesting_agent_id="builder", request_secret="opaque-request-secret",
+        )
 
 
 def test_edit_uses_revision_cas_preserves_original_and_allows_confirmed_reviewer(tmp_path):

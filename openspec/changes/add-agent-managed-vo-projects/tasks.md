@@ -10,7 +10,7 @@
 - [x] 2.1 Add bounded project-authoring root collections under `ProjectRepository.update_root`, with sanitized public views, terminal compaction/tombstones, retention metadata, and corruption-safe tests.
 - [x] 2.2 Implement complete draft validation for project fields, tasks, same-or-distinct required actors, optional user-confirmed reviewer recommendations, maintenance mode, template intent, recurrence rules, and request idempotency.
 - [x] 2.3 Implement pending draft creation, revisioned detail/list/status, edit, reject, and immutable approved-snapshot commands with the documented state machine and audit tests.
-- [ ] 2.4 Implement compare-and-set confirmed-draft materialization that commits the request, complete project/task aggregate, user-approved reviewer assignments, idempotency, template/recurrence metadata, and outbox intent once, cleans up failed managed-workspace preparation, preserves retryable failures, and does not start Project Execution.
+- [x] 2.4 Implement compare-and-set confirmed-draft materialization that commits the request, complete project/task aggregate, user-approved reviewer assignments, idempotency, template/recurrence metadata, and outbox intent once, cleans up failed managed-workspace preparation, preserves retryable failures, and does not start Project Execution.
 
 ## 3. Agent and User HTTP Boundaries
 
