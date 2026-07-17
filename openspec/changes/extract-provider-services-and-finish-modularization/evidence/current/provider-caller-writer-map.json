@@ -142,151 +142,151 @@
       "callee": "approval",
       "caller": "CodexAppRunState.snapshot",
       "file": "app/providers/codex_app_server.py",
-      "line": 213
+      "line": 214
     },
     {
       "callee": "_clear_pending_approvals",
       "caller": "CodexAppServerClient._handle_runtime_exit",
       "file": "app/providers/codex_app_server.py",
-      "line": 690
+      "line": 726
     },
     {
       "callee": "_approval_response",
       "caller": "CodexAppServerClient._handle_server_request",
       "file": "app/providers/codex_app_server.py",
-      "line": 705
+      "line": 741
     },
     {
       "callee": "_approval_response",
       "caller": "CodexAppServerClient._handle_server_request",
       "file": "app/providers/codex_app_server.py",
-      "line": 715
+      "line": 751
     },
     {
       "callee": "_approval_from_request",
       "caller": "CodexAppServerClient._handle_server_request",
       "file": "app/providers/codex_app_server.py",
-      "line": 721
+      "line": 757
     },
     {
       "callee": "_store_pending_approval",
       "caller": "CodexAppServerClient._handle_server_request",
       "file": "app/providers/codex_app_server.py",
-      "line": 730
+      "line": 766
     },
     {
       "callee": "_approval_response",
       "caller": "CodexAppServerClient._handle_server_request",
       "file": "app/providers/codex_app_server.py",
-      "line": 732
+      "line": 768
     },
     {
       "callee": "set_approval",
       "caller": "CodexAppServerClient._handle_server_request",
       "file": "app/providers/codex_app_server.py",
-      "line": 742
+      "line": 778
     },
     {
       "callee": "_clear_pending_approvals",
       "caller": "CodexAppServerClient._handle_server_request",
       "file": "app/providers/codex_app_server.py",
-      "line": 754
+      "line": 790
     },
     {
       "callee": "_approval_response",
       "caller": "CodexAppServerClient._handle_server_request",
       "file": "app/providers/codex_app_server.py",
-      "line": 760
+      "line": 796
     },
     {
       "callee": "_normalize_approval_choice",
       "caller": "CodexAppServerClient.respond_approval",
       "file": "app/providers/codex_app_server.py",
-      "line": 1056
+      "line": 1112
     },
     {
       "callee": "set_approval",
       "caller": "CodexAppServerClient.respond_approval",
       "file": "app/providers/codex_app_server.py",
-      "line": 1087
+      "line": 1143
     },
     {
       "callee": "_approval_response",
       "caller": "CodexAppServerClient.respond_approval",
       "file": "app/providers/codex_app_server.py",
-      "line": 1092
+      "line": 1148
     },
     {
       "callee": "_approval_command_preview",
       "caller": "CodexAppServerClient._approval_from_request",
       "file": "app/providers/codex_app_server.py",
-      "line": 1139
+      "line": 1195
     },
     {
       "callee": "_normalize_approval_choice",
       "caller": "CodexAppServerClient._approval_response",
       "file": "app/providers/codex_app_server.py",
-      "line": 1196
+      "line": 1252
     },
     {
       "callee": "_clear_pending_approvals",
       "caller": "CodexAppServerClient._execute_locked",
       "file": "app/providers/codex_app_server.py",
-      "line": 1366
+      "line": 1423
     },
     {
       "callee": "_is_approval_request",
       "caller": "CodexAppServerClient.respond",
       "file": "app/providers/codex_app_server.py",
-      "line": 1429
+      "line": 1486
     },
     {
       "callee": "_approval_response",
       "caller": "CodexAppServerClient.respond",
       "file": "app/providers/codex_app_server.py",
-      "line": 1430
+      "line": 1487
     },
     {
       "callee": "set_approval",
       "caller": "CodexAppServerClient.respond",
       "file": "app/providers/codex_app_server.py",
-      "line": 1451
+      "line": 1508
     },
     {
       "callee": "_is_approval_request",
       "caller": "CodexAppServerClient.cancel",
       "file": "app/providers/codex_app_server.py",
-      "line": 1476
+      "line": 1533
     },
     {
       "callee": "_approval_response",
       "caller": "CodexAppServerClient.cancel",
       "file": "app/providers/codex_app_server.py",
-      "line": 1477
+      "line": 1534
     },
     {
       "callee": "_clear_pending_approvals",
       "caller": "CodexAppServerClient.cancel",
       "file": "app/providers/codex_app_server.py",
-      "line": 1482
+      "line": 1539
     },
     {
       "callee": "_clear_pending_approvals",
       "caller": "CodexAppServerClient._compact_locked",
       "file": "app/providers/codex_app_server.py",
-      "line": 1531
+      "line": 1588
     },
     {
       "callee": "CodexAppServerClient",
       "caller": "get_codex_bridge",
       "file": "app/providers/codex_app_server.py",
-      "line": 1581
+      "line": 1638
     },
     {
       "callee": "CodexHttpBridgeClient",
       "caller": "get_codex_bridge",
       "file": "app/providers/codex_app_server.py",
-      "line": 1581
+      "line": 1638
     },
     {
       "callee": "HermesApiClient",
@@ -7065,77 +7065,77 @@
     },
     {
       "file": "app/providers/codex_app_server.py",
-      "line": 128,
+      "line": 129,
       "name": "CodexAppRunState"
     },
     {
       "file": "app/providers/codex_app_server.py",
-      "line": 232,
+      "line": 233,
       "name": "CodexAppRunState.approval"
     },
     {
       "file": "app/providers/codex_app_server.py",
-      "line": 235,
+      "line": 236,
       "name": "CodexAppRunState.set_approval"
     },
     {
       "file": "app/providers/codex_app_server.py",
-      "line": 530,
+      "line": 566,
       "name": "CodexAppServerClient"
     },
     {
       "file": "app/providers/codex_app_server.py",
-      "line": 1012,
+      "line": 1068,
       "name": "CodexAppServerClient._store_pending_approval"
     },
     {
       "file": "app/providers/codex_app_server.py",
-      "line": 1034,
+      "line": 1090,
       "name": "CodexAppServerClient._clear_pending_approvals"
     },
     {
       "file": "app/providers/codex_app_server.py",
-      "line": 1044,
+      "line": 1100,
       "name": "CodexAppServerClient.pending_approval"
     },
     {
       "file": "app/providers/codex_app_server.py",
-      "line": 1054,
+      "line": 1110,
       "name": "CodexAppServerClient.respond_approval"
     },
     {
       "file": "app/providers/codex_app_server.py",
-      "line": 1095,
+      "line": 1151,
       "name": "CodexAppServerClient._approval_from_request"
     },
     {
       "file": "app/providers/codex_app_server.py",
-      "line": 1156,
+      "line": 1212,
       "name": "CodexAppServerClient._approval_command_preview"
     },
     {
       "file": "app/providers/codex_app_server.py",
-      "line": 1178,
+      "line": 1234,
       "name": "CodexAppServerClient._is_approval_request"
     },
     {
       "file": "app/providers/codex_app_server.py",
-      "line": 1188,
+      "line": 1244,
       "name": "CodexAppServerClient._normalize_approval_choice"
     },
     {
       "file": "app/providers/codex_app_server.py",
-      "line": 1195,
+      "line": 1251,
       "name": "CodexAppServerClient._approval_response"
     },
     {
       "file": "app/providers/codex_app_server.py",
-      "line": 1536,
+      "line": 1593,
       "name": "CodexHttpBridgeClient"
     },
     {
       "file": "app/providers/codex_app_server.py",
-      "line": 1572,
+      "line": 1629,
       "name": "get_codex_bridge"
     },
     {
@@ -9636,7 +9636,7 @@
     "app/provider_sse_transport.py": "3bc4be1a5172efcb90991bd46841a58b198964048d06cb1efed08c7a9aa38e53",
     "app/providers/claude_code.py": "c6c078a7db6876f7a4bdc236ceacfed0f6220f5af7009ceaf03160b94d26d09d",
     "app/providers/codex.py": "5cffb77826584e6594c8f7989328b975c74b24cf51bcb01bf68b7d4ce5c44c31",
-    "app/providers/codex_app_server.py": "320257cee19f29b1c93cdf221f212b853bb4914a11338676df556680e41f3cf2",
+    "app/providers/codex_app_server.py": "950b1ecb3d3d7fc5d88351e7de7967f393c089574cc8ea4d7161eafb1caf6206",
     "app/providers/codex_bridge.py": "89cb41dc31d522709fdaa346199bbd29e304da61e8815dad969c6d8bed8c9ff0",
     "app/providers/hermes.py": "a10dd77653382ba3b91a81e008ff82938f1f944df4d69504691415f01b6df067",
     "app/server.py": "246ab26d84d583e401fea6068f85f79c8fb704aa4df30284b23edbb7dc63452e",

@@ -64,3 +64,7 @@
 ## 13. Terminal Durability Finalization Remediation
 
 - [x] 13.1 Separate bounded reader release from durable terminal completion so a slow successful reply write cannot be reported as failed, and guarantee finalization signaling, active-state cleanup, and same-conversation admission release on every terminal exception path; add deterministic regressions for slow reply persistence and exceptional finalization.
+
+## 14. Turn Identity Response Race Remediation
+
+- [x] 14.1 Treat the `turn/start` response as the authoritative turn identity, buffer native notifications that arrive before that response within a fixed bound, replay only matching notifications in source order, and add a deterministic regression where a stale resumed-thread notification precedes the new turn response.

@@ -15,7 +15,12 @@ if APP_DIR not in sys.path:
     sys.path.insert(0, APP_DIR)
 
 from providers.codex_bridge import CodexAppServerClient
-from providers.codex_app_server import CodexAppServerClient as CodexAppServerClientImpl, TERMINAL_DRAIN_TIMEOUT_SEC, _Operation
+from providers.codex_app_server import (
+    CodexAppServerClient as CodexAppServerClientImpl,
+    MAX_PRESTART_NOTIFICATIONS,
+    TERMINAL_DRAIN_TIMEOUT_SEC,
+    _Operation,
+)
 
 
 FAKE_SERVER = r'''#!/usr/bin/env python3
@@ -65,6 +70,17 @@ for raw in sys.stdin:
         if "hang forever" in prompt:
             send({"id": request_id, "result": {"turn": {"id": "turn_hang"}}})
             send({"method": "turn/started", "params": {"threadId": params["threadId"], "turn": {"id": "turn_hang"}}})
+            continue
+        if "stale start before response" in prompt:
+            stale_turn_id = "turn_stale"
+            turn_id = "turn_race"
+            send({"method": "turn/started", "params": {"threadId": params["threadId"], "turn": {"id": stale_turn_id}}})
+            send({"method": "item/agentMessage/delta", "params": {"threadId": params["threadId"], "turnId": stale_turn_id, "delta": "stale reply"}})
+            send({"method": "turn/started", "params": {"threadId": params["threadId"], "turn": {"id": turn_id}}})
+            item = {"id": "msg_race", "type": "agentMessage", "text": "current reply"}
+            send({"method": "item/completed", "params": {"threadId": params["threadId"], "turnId": turn_id, "item": item}})
+            send({"method": "turn/completed", "params": {"threadId": params["threadId"], "turn": {"id": turn_id, "status": "completed", "items": [item]}}})
+            send({"id": request_id, "result": {"turn": {"id": turn_id}}})
             continue
         turn_base = "turn_permissions" if "permissions" in prompt else "turn_approval" if "approval" in prompt else "turn_input" if "question" in prompt else "turn_ok"
         turn_counts[turn_base] = turn_counts.get(turn_base, 0) + 1
@@ -217,6 +233,43 @@ def test_execute_collects_reply_files_and_thread():
             assert resumed["threadId"] == result["threadId"]
         finally:
             client.close()
+
+
+def test_turn_start_response_rejects_stale_notifications_that_arrive_first():
+    with tempfile.TemporaryDirectory() as tmp:
+        events = []
+        client = CodexAppServerClient(tmp, binary=make_fake_codex(tmp))
+        try:
+            result = client.execute(
+                "stale start before response",
+                timeout_sec=5,
+                event_callback=events.append,
+            )
+            assert result["ok"] is True
+            assert result["status"] == "completed"
+            assert result["turnId"] == "turn_race"
+            assert result["reply"] == "current reply"
+            assert events
+            assert all(event.get("turnId") != "turn_stale" for event in events)
+            assert client.terminal_diagnostics("thr_fake")["lateNotifications"] == 2
+        finally:
+            client.close()
+
+
+def test_prestart_notification_buffer_is_bounded_and_fails_closed():
+    operation = _Operation("thr-prestart-bound")
+    for index in range(MAX_PRESTART_NOTIFICATIONS):
+        assert operation.defer_native_notification(
+            "item/reasoning/summaryTextDelta",
+            {"threadId": operation.thread_id, "turnId": "turn-bound", "delta": str(index)},
+        ) is True
+    assert operation.defer_native_notification(
+        "item/reasoning/summaryTextDelta",
+        {"threadId": operation.thread_id, "turnId": "turn-bound", "delta": "overflow"},
+    ) is True
+
+    assert operation.confirm_turn_identity("turn-bound") is False
+    assert operation.fence_diagnostics()["prestartNotificationOverflows"] == 1
 
 
 def test_execute_sends_image_attachment_as_local_image_input():
@@ -584,6 +637,8 @@ def test_late_turn_notifications_and_approvals_do_not_cross_into_reused_thread()
         "method": "item/commandExecution/requestApproval",
         "params": {"threadId": "thr-reused", "turnId": "turn-old", "itemId": "old-tool"},
     })
+    assert current.confirm_turn_identity("turn-new") is True
+    client._replay_prestart_notifications(current)
 
     assert current.state.reply_text() == ""
     assert current.pending_requests == {}
@@ -622,6 +677,8 @@ def test_post_terminal_metrics_are_diagnostic_and_late_content_cannot_mutate_rep
     client._terminal_operations = OrderedDict()
     operation = _Operation("thr-late")
     client._operations["thr-late"] = operation
+    assert operation.confirm_turn_identity("turn-late") is True
+    client._replay_prestart_notifications(operation)
 
     client._handle_notification("turn/completed", {
         "threadId": "thr-late",
@@ -651,6 +708,8 @@ def test_terminal_diagnostics_are_retained_without_reasoning_notifications():
     client._terminal_operations = OrderedDict()
     operation = _Operation("thr-no-reasoning")
     client._operations[operation.thread_id] = operation
+    assert operation.confirm_turn_identity("turn-no-reasoning") is True
+    client._replay_prestart_notifications(operation)
 
     client._handle_notification("turn/completed", {
         "threadId": operation.thread_id,

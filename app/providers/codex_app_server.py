@@ -30,6 +30,7 @@ APPROVAL_METHODS = {
     "mcpServer/elicitation/request",
 }
 MAX_PENDING_APPROVALS = 100
+MAX_PRESTART_NOTIFICATIONS = 512
 TERMINAL_DRAIN_TIMEOUT_SEC = 0.05
 POST_TERMINAL_METRIC_METHODS = {"thread/tokenUsage/updated", "session/metrics"}
 MAX_TERMINAL_DIAGNOSTICS = 100
@@ -364,9 +365,13 @@ class _Operation:
     callback_error_category: str = ""
     stale_turn_ids: set[str] = field(default_factory=set, repr=False)
     _callbacks_drained: threading.Event = field(default_factory=threading.Event, repr=False)
+    _prestart_notifications: list[tuple[str, dict[str, Any]]] = field(default_factory=list, repr=False)
+    _native_notifications_ready: bool = False
+    prestart_notification_overflows: int = 0
 
     def __post_init__(self) -> None:
         self._callbacks_drained.set()
+        self._native_notifications_ready = self.kind != "turn"
 
     def emit(self, event_type: str, *, terminal: bool = False, **data: Any) -> bool:
         with self._callback_condition:
@@ -467,6 +472,36 @@ class _Operation:
                 self.turn_id = incoming
             return True
 
+    def defer_native_notification(self, method: str, params: dict[str, Any]) -> bool:
+        with self._callback_condition:
+            if self._native_notifications_ready:
+                return False
+            if len(self._prestart_notifications) >= MAX_PRESTART_NOTIFICATIONS:
+                self.prestart_notification_overflows += 1
+            else:
+                self._prestart_notifications.append((str(method or ""), dict(params or {})))
+            return True
+
+    def confirm_turn_identity(self, turn_id: str) -> bool:
+        authoritative = str(turn_id or "").strip()
+        with self._callback_condition:
+            if authoritative:
+                if self.turn_id and self.turn_id != authoritative:
+                    self.stale_turn_ids.add(self.turn_id)
+                self.turn_id = authoritative
+                self.state.thread_id = self.thread_id
+                self.state.turn_id = authoritative
+            return self.prestart_notification_overflows == 0
+
+    def take_prestart_notifications(self) -> list[tuple[str, dict[str, Any]]] | None:
+        with self._callback_condition:
+            if self._prestart_notifications:
+                pending = self._prestart_notifications
+                self._prestart_notifications = []
+                return pending
+            self._native_notifications_ready = True
+            return None
+
     def finish_without_event(self) -> None:
         with self._callback_condition:
             if not self._terminal_observed:
@@ -496,6 +531,7 @@ class _Operation:
                 "lateNotifications": self.late_notifications,
                 "postTerminalMetrics": self.post_terminal_metrics,
                 "callbackErrors": self.callback_errors,
+                "prestartNotificationOverflows": self.prestart_notification_overflows,
                 "terminalFenceWaitMs": round(max(0, self._terminal_completed_ns - self._terminal_observed_ns) / 1_000_000, 3)
                 if self._terminal_observed_ns and self._terminal_completed_ns else 0.0,
             }
@@ -805,6 +841,17 @@ class CodexAppServerClient:
             operation = self._operations.get(thread_id) or self._terminal_operations.get(thread_id)
         if not operation:
             return
+        if operation.defer_native_notification(method, params):
+            return
+        self._handle_operation_notification(operation, method, params)
+
+    def _handle_operation_notification(
+        self,
+        operation: _Operation,
+        method: str,
+        params: dict[str, Any],
+    ) -> None:
+        thread_id = operation.thread_id
         if not operation.accept_turn_identity(params):
             return
         if not operation.accept_native_notification(method):
@@ -961,6 +1008,14 @@ class CodexAppServerClient:
             self._remember_terminal_operation(operation)
             operation.finish_without_event()
 
+    def _replay_prestart_notifications(self, operation: _Operation) -> None:
+        while True:
+            pending = operation.take_prestart_notifications()
+            if pending is None:
+                return
+            for method, params in pending:
+                self._handle_operation_notification(operation, method, params)
+
     def _remember_terminal_operation(self, operation: _Operation) -> None:
         with self._operations_lock:
             self._terminal_operations[operation.thread_id] = operation
@@ -978,6 +1033,7 @@ class CodexAppServerClient:
             "lateNotifications": 0,
             "postTerminalMetrics": 0,
             "callbackErrors": 0,
+            "prestartNotificationOverflows": 0,
         }
 
     def wait_for_terminal_callbacks(self, thread_id: str, turn_id: str = "", timeout: float | None = None) -> bool:
@@ -1338,13 +1394,14 @@ class CodexAppServerClient:
                 },
             }, timeout=30, retry=False)
             returned_turn_id = str((turn_result.get("turn") or {}).get("id") or "")
-            if returned_turn_id and not operation.accept_turn_identity({"turnId": returned_turn_id}):
+            if not operation.confirm_turn_identity(returned_turn_id):
                 return _error_result(
                     "protocol_error",
-                    "Codex turn/start response did not match the active turn",
+                    "Codex emitted too many notifications before the turn/start response",
                     threadId=active_thread_id,
                     turnId=returned_turn_id,
                 )
+            self._replay_prestart_notifications(operation)
             if not operation.completed.wait(timeout=max(1, int(timeout_sec))):
                 try:
                     self._request("turn/interrupt", {"threadId": active_thread_id, "turnId": operation.turn_id}, timeout=5)
