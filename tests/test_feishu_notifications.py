@@ -19,6 +19,7 @@ from feishu_notifications import (  # noqa: E402
     send_feishu_markdown_message,
     send_feishu_notification,
     send_feishu_text_message,
+    update_feishu_notification,
     validate_notification_intent,
 )
 import feishu_chat_channel  # noqa: E402
@@ -277,13 +278,89 @@ def test_sender_uses_app_credentials_and_records_success_without_leaking_secret(
         assert result["ok"] is True
         assert result["status"] == "sent"
         assert result["channel"] == "app"
+        assert result["messageId"] == "om_1"
         assert len(calls) == 2
         records = read_records(status_dir)
         serialized = json.dumps(records, ensure_ascii=False)
         assert records[0]["channel"] == "app"
+        assert records[0]["messageId"] == "om_1"
         assert records[0]["appFingerprint"]
         assert "app-secret-should-not-leak" not in serialized
         assert "tenant-token-secret" not in serialized
+
+
+def test_update_notification_uses_common_card_builder_and_records_message_id():
+    with tempfile.TemporaryDirectory() as status_dir:
+        calls = []
+
+        def fake_urlopen(request, timeout=0):
+            calls.append((request.get_method(), request.full_url, dict(request.header_items()), request.data.decode("utf-8")))
+            if "/auth/v3/tenant_access_token/internal" in request.full_url:
+                return FakeResponse('{"code":0,"msg":"ok","tenant_access_token":"update-token-secret","expire":7200}')
+            if "/im/v1/messages/om_update_1" in request.full_url:
+                assert request.get_method() == "PATCH"
+                assert any(k.lower() == "authorization" and v == "Bearer update-token-secret" for k, v in request.header_items())
+                body = json.loads(request.data.decode("utf-8"))
+                card = json.loads(body["content"])
+                assert card["header"]["title"]["content"] == "VO 测试通知"
+                return FakeResponse('{"code":0,"msg":"success"}')
+            raise AssertionError("unexpected URL: " + request.full_url)
+
+        result = update_feishu_notification(
+            "om_update_1",
+            base_intent("notification"),
+            app_config={"appId": "cli_update", "appSecret": "update-secret-should-not-leak"},
+            status_dir=status_dir,
+            urlopen=fake_urlopen,
+        )
+
+        assert result["ok"] is True
+        assert result["status"] == "updated"
+        assert result["channel"] == "app_card_update"
+        assert result["messageId"] == "om_update_1"
+        assert [call[0] for call in calls] == ["POST", "PATCH"]
+        records = read_records(status_dir)
+        assert records[0]["status"] == "updated"
+        assert records[0]["messageId"] == "om_update_1"
+        serialized = json.dumps({"result": result, "records": records}, ensure_ascii=False)
+        assert "update-secret-should-not-leak" not in serialized
+        assert "update-token-secret" not in serialized
+
+
+def test_update_notification_records_feishu_and_configuration_failures():
+    with tempfile.TemporaryDirectory() as status_dir:
+        def fake_urlopen(request, timeout=0):
+            if "/auth/v3/tenant_access_token/internal" in request.full_url:
+                return FakeResponse('{"code":0,"msg":"ok","tenant_access_token":"failure-token","expire":7200}')
+            raise urllib.error.HTTPError(
+                request.full_url,
+                400,
+                "Bad Request",
+                {},
+                FakeResponse('{"code":230001,"msg":"message cannot be updated"}'),
+            )
+
+        failed = update_feishu_notification(
+            "om_update_failed",
+            base_intent("notification"),
+            app_config={"appId": "cli_update_failure", "appSecret": "failure-secret"},
+            status_dir=status_dir,
+            urlopen=fake_urlopen,
+        )
+        missing = update_feishu_notification(
+            "om_update_missing",
+            base_intent("notification"),
+            app_config={},
+            status_dir=status_dir,
+        )
+
+        assert failed["ok"] is False
+        assert failed["status"] == "feishu_error"
+        assert failed["code"] == 230001
+        assert failed["messageId"] == "om_update_failed"
+        assert missing["ok"] is False
+        assert missing["status"] == "missing_app_config"
+        assert [record["status"] for record in read_records(status_dir)] == ["feishu_error", "missing_app_config"]
 
 
 def test_text_sender_uses_chat_app_credentials_without_leaking_secret():

@@ -487,6 +487,7 @@ def record_feishu_notification(intent: dict[str, Any], result: dict[str, Any], s
         "webhookFingerprint": _string(result.get("webhookFingerprint") or "", 40),
         "appFingerprint": _string(result.get("appFingerprint") or "", 40),
         "channel": _string(result.get("channel") or "", 40),
+        "messageId": _string(result.get("messageId") or "", 300),
     }
     path = _record_path(status_dir)
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -611,12 +612,20 @@ def _parse_json_response(response: Any) -> dict[str, Any]:
         return {"raw": raw[:500]}
 
 
-def _feishu_request(url: str, body: dict[str, Any], *, headers: dict[str, str] | None = None, urlopen: Callable[..., Any], timeout: int) -> dict[str, Any]:
+def _feishu_request(
+    url: str,
+    body: dict[str, Any],
+    *,
+    method: str = "POST",
+    headers: dict[str, str] | None = None,
+    urlopen: Callable[..., Any],
+    timeout: int,
+) -> dict[str, Any]:
     request = urllib.request.Request(
         url,
         data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
         headers={"Content-Type": "application/json", **(headers or {})},
-        method="POST",
+        method=method,
     )
     with urlopen(request, timeout=timeout) as response:
         return _parse_json_response(response)
@@ -821,12 +830,14 @@ def _send_feishu_app_message(payload: dict[str, Any], app_cfg: dict[str, Any], *
             timeout=timeout,
         )
         success = parsed.get("code") == 0
+        data = parsed.get("data") if isinstance(parsed.get("data"), dict) else {}
         return {
             "ok": bool(success),
             "status": "sent" if success else "feishu_error",
             "channel": "app",
             "code": parsed.get("code", ""),
             "message": redact_sensitive(parsed.get("msg") or parsed.get("message") or parsed.get("raw") or ""),
+            "messageId": _string(data.get("message_id") or data.get("messageId") or "", 300),
             "appFingerprint": token_result.get("appFingerprint") or _secret_fingerprint(app_id),
         }
     except urllib.error.HTTPError as exc:
@@ -853,6 +864,112 @@ def _send_feishu_app_message(payload: dict[str, Any], app_cfg: dict[str, Any], *
             "error": redact_sensitive(str(exc)),
             "appFingerprint": _secret_fingerprint(app_id),
         }
+
+
+def update_feishu_notification(
+    message_id: str,
+    intent: dict[str, Any],
+    *,
+    app_config: dict[str, Any] | None = None,
+    status_dir: str | None = None,
+    dry_run: bool = False,
+    urlopen: Callable[..., Any] | None = None,
+    timeout: int = 10,
+) -> dict[str, Any]:
+    """Update an application-sent interactive card using the common intent model."""
+    target_message_id = _string(message_id, 300)
+    try:
+        payload = build_feishu_card(intent)
+        normalized = validate_notification_intent(intent)
+    except FeishuNotificationError as exc:
+        result = {
+            "ok": False,
+            "status": "invalid_intent",
+            "channel": "app_card_update",
+            "error": str(exc),
+            "messageId": target_message_id,
+        }
+        result["record"] = _record_invalid_notification(intent or {}, result, status_dir)
+        return result
+
+    app_cfg = app_config or {}
+    app_id = _string(app_cfg.get("appId"), 160)
+    if not app_id or not app_cfg.get("appSecret") or not target_message_id:
+        result = {
+            "ok": False,
+            "status": "missing_app_config",
+            "channel": "app_card_update",
+            "error": "appId, appSecret, and message_id are required",
+            "messageId": target_message_id,
+            "appFingerprint": _secret_fingerprint(app_id),
+        }
+        result["record"] = record_feishu_notification(normalized, result, status_dir)
+        return result
+
+    if dry_run:
+        result = {
+            "ok": True,
+            "status": "dry_run",
+            "channel": "app_card_update",
+            "payload": payload,
+            "messageId": target_message_id,
+            "appFingerprint": _secret_fingerprint(app_id),
+        }
+        result["record"] = record_feishu_notification(normalized, result, status_dir)
+        return result
+
+    opener = urlopen or urllib.request.urlopen
+    try:
+        token_result = _get_tenant_access_token(app_cfg, urlopen=opener, timeout=timeout)
+        if not token_result.get("ok"):
+            result = {**token_result, "messageId": target_message_id}
+        else:
+            parsed = _feishu_request(
+                f"https://open.feishu.cn/open-apis/im/v1/messages/{urllib.parse.quote(target_message_id, safe='')}",
+                {"content": json.dumps(payload.get("card") or {}, ensure_ascii=False)},
+                method="PATCH",
+                headers={"Authorization": f"Bearer {token_result['token']}"},
+                urlopen=opener,
+                timeout=timeout,
+            )
+            success = parsed.get("code") == 0
+            result = {
+                "ok": bool(success),
+                "status": "updated" if success else "feishu_error",
+                "channel": "app_card_update",
+                "code": parsed.get("code", ""),
+                "message": redact_sensitive(parsed.get("msg") or parsed.get("message") or parsed.get("raw") or ""),
+                "messageId": target_message_id,
+                "appFingerprint": token_result.get("appFingerprint") or _secret_fingerprint(app_id),
+            }
+    except urllib.error.HTTPError as exc:
+        try:
+            parsed = _parse_json_response(exc)
+            message = parsed.get("msg") or parsed.get("message") or parsed.get("raw") or str(exc)
+            code = parsed.get("code", exc.code)
+        except Exception:
+            message = str(exc)
+            code = getattr(exc, "code", "")
+        result = {
+            "ok": False,
+            "status": "feishu_error",
+            "channel": "app_card_update",
+            "code": code,
+            "message": redact_sensitive(message),
+            "messageId": target_message_id,
+            "appFingerprint": _secret_fingerprint(app_id),
+        }
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        result = {
+            "ok": False,
+            "status": "network_error",
+            "channel": "app_card_update",
+            "error": redact_sensitive(str(exc)),
+            "messageId": target_message_id,
+            "appFingerprint": _secret_fingerprint(app_id),
+        }
+    result["record"] = record_feishu_notification(normalized, result, status_dir)
+    return result
 
 
 def send_feishu_text_message(
