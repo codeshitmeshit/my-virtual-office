@@ -50,7 +50,9 @@ from services import project_authoring as project_authoring_service
 from services import project_authoring_config as project_authoring_config_service
 from services import project_authoring_store as project_authoring_store_service
 from services import project_authoring_security as project_authoring_security_service
+from services import project_authoring_audit as project_authoring_audit_service
 from services import project_templates as project_templates_service
+from services import project_recurrence as project_recurrence_service
 from services import meeting_repository as meeting_repository_service
 from services import meeting_lifecycle as meeting_lifecycle_service
 from services import meeting_requests as meeting_requests_service
@@ -17369,6 +17371,37 @@ def _project_schedule_ports():
         now=_proj_now,
         next_occurrence_id=_project_schedule_next_occurrence_id,
     )
+
+
+_PROJECT_RECURRENCE_RECONCILER = None
+
+
+def _project_recurrence_reconciler():
+    global _PROJECT_RECURRENCE_RECONCILER
+    if _PROJECT_RECURRENCE_RECONCILER is None:
+        _PROJECT_RECURRENCE_RECONCILER = project_recurrence_service.ProjectRecurrenceReconciler(
+            _PROJECT_AUTHORING_ROOT_STORE,
+            project_recurrence_service.RecurrenceRegistrationPorts(
+                gateway=lambda method, params, timeout: _gateway_rpc_call(method, params, timeout=timeout),
+                validate_schedule=_project_cron_validate_schedule,
+                extract_job_id=_project_cron_extract_job_id,
+            ),
+        )
+    return _PROJECT_RECURRENCE_RECONCILER
+
+
+def _project_recurrence_reconcile_loop():
+    while True:
+        try:
+            _project_recurrence_reconciler().reconcile_once()
+        except Exception as exc:
+            safe_error = project_authoring_audit_service.sanitize_audit_text(exc, limit=360)
+            print(json.dumps({
+                "type": "project_recurrence_reconcile_failed",
+                "error": safe_error,
+                "timestamp": _proj_now(),
+            }, ensure_ascii=False), flush=True)
+        time.sleep(5)
 
 
 def _handle_project_scheduled_cron_list(project_id):
@@ -34854,6 +34887,13 @@ if __name__ == "__main__":
         name="codex-feishu-approval-reconcile",
     )
     approval_reconcile_thread.start()
+
+    recurrence_reconcile_thread = threading.Thread(
+        target=_project_recurrence_reconcile_loop,
+        daemon=True,
+        name="project-recurrence-reconciler",
+    )
+    recurrence_reconcile_thread.start()
 
     # Start HTTP server in main thread
     start_http_server()
