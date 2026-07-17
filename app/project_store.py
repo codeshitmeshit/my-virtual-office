@@ -481,8 +481,9 @@ class MarkdownProjectStore:
 
     def _project_dir(self, project: Dict[str, Any]) -> str:
         slug = _slugify(project.get("title", "project"))
-        pid = project.get("id") or self.new_id()
-        return os.path.join(self.projects_dir, f"{slug}--{pid[:8]}")
+        pid = str(project.get("id") or self.new_id())
+        suffix = f"{_slugify(pid)[:8]}-{hashlib.sha256(pid.encode()).hexdigest()[:10]}"
+        return os.path.join(self.projects_dir, f"{slug}--{suffix}")
 
     def _write_project(self, project: Dict[str, Any]):
         project = copy.deepcopy(project)
@@ -562,9 +563,10 @@ class MarkdownProjectStore:
             actors = task_actor_references(task)
         except ValueError:
             actors = {}
-        task_id = task.get("id") or self.new_id()
+        task_id = str(task.get("id") or self.new_id())
         title_slug = _slugify(task.get("title", "task"))
-        path = os.path.join(tasks_dir, f"{title_slug}--{task_id[:8]}.md")
+        suffix = f"{_slugify(task_id)[:8]}-{hashlib.sha256(task_id.encode()).hexdigest()[:10]}"
+        path = os.path.join(tasks_dir, f"{title_slug}--{suffix}.md")
         comments = task.pop("comments", [])
         attachments = task.pop("attachments", [])
         review_check = task.pop("reviewCheck", None)

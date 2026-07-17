@@ -67,6 +67,7 @@ class ProjectAuthoringConfig:
     outbox_retry_base_seconds: int
     outbox_retry_max_seconds: int
     outbox_max_attempts: int
+    occurrence_claim_seconds: int
 
     @classmethod
     def from_env(cls, environ: Environment | None = None) -> "ProjectAuthoringConfig":
@@ -129,6 +130,10 @@ class ProjectAuthoringConfig:
             outbox_max_attempts=_bounded_int(
                 env, "VO_PROJECT_AUTHORING_OUTBOX_MAX_ATTEMPTS", 10,
                 minimum=1, maximum=100,
+            ),
+            occurrence_claim_seconds=_bounded_int(
+                env, "VO_PROJECT_RECURRENCE_OCCURRENCE_CLAIM_SECONDS", 300,
+                minimum=30, maximum=3600,
             ),
         )
 

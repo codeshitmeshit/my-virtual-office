@@ -261,6 +261,65 @@ def test_management_can_idempotently_instantiate_a_pinned_template_version(autho
     assert len(markdown.load_all()["projects"]) == 2
 
 
+def test_agent_recurrence_callback_uses_source_grant_and_deduplicates_occurrence(authoring):
+    markdown, service = authoring
+    service.recurrence_enabled = lambda: True
+    service.recurrence_paused = lambda: False
+    draft = _draft("Recurring HTTP")
+    draft.update({
+        "projectType": "recurring",
+        "template": {"mode": "create", "name": "Recurring HTTP template"},
+        "recurrence": {
+            "enabled": True,
+            "schedule": {"kind": "cron", "expr": "0 9 * * 1", "timezone": "UTC"},
+        },
+    })
+    submit_status, submitted = _call(_handler(
+        "/api/agent/project-authoring/requests",
+        {"idempotencyKey": "author:recurrence-http", "draft": draft},
+        headers={"X-VO-Agent-Action": "project-authoring", "X-VO-Agent-Id": "author"},
+    ), "POST")
+    assert submit_status == 200
+    secret = submitted["requestSecret"]
+    confirmed_status, confirmed = _call(_handler(
+        f"/api/project-authoring/requests/{submitted['request']['id']}/confirm",
+        {"expectedRevision": 1, "confirmationKey": "confirm:recurrence-http"},
+        headers={"X-VO-Management-Token": server._MANAGEMENT_TOKEN},
+    ), "POST")
+    assert confirmed_status == 200
+    recurrence_id = confirmed["project"]["recurrenceRef"]["id"]
+    endpoint = f"/api/agent/project-recurrences/{recurrence_id}/occurrences"
+    headers = {
+        "X-VO-Agent-Action": "project-authoring",
+        "X-VO-Agent-Id": "author",
+        "Authorization": f"Bearer {secret}",
+    }
+
+    denied_status, denied = _call(_handler(
+        endpoint,
+        {"occurrenceId": "gateway-http-1"},
+        headers={**headers, "Authorization": "Bearer wrong"},
+    ), "POST")
+    assert denied_status == 403
+    assert denied["code"] == "invalid_project_grant"
+
+    first_status, first = _call(_handler(
+        endpoint, {"occurrenceId": "gateway-http-1"}, headers=headers,
+    ), "POST")
+    repeat_status, repeated = _call(_handler(
+        endpoint, {"occurrenceId": "gateway-http-1"}, headers=headers,
+    ), "POST")
+
+    assert first_status == repeat_status == 200
+    assert first["created"] is True and repeated["created"] is False
+    assert first["project"]["id"] == repeated["project"]["id"]
+    assert first["project"]["recurrenceRef"] == {
+        "id": recurrence_id,
+        "occurrenceId": "gateway-http-1",
+    }
+    assert len(markdown.load_all()["projects"]) == 2
+
+
 def test_project_grant_rotation_revocation_and_scope_are_enforced(authoring):
     markdown, _ = authoring
     _, created = _submit("Granted", "author:key-1")

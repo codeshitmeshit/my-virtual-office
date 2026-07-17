@@ -26616,6 +26616,40 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                 idempotency_key=body.get("idempotencyKey"),
             ))
 
+    def _handle_agent_project_recurrence_occurrence(self, recurrence_id):
+        if self._reject_untrusted_agent_authoring_request():
+            return
+        agent_id = self._agent_authoring_id()
+        grant_secret = self._agent_authoring_bearer_secret()
+        if not agent_id or not grant_secret:
+            self._send_json({
+                "ok": False,
+                "code": "project_grant_auth_required",
+                "error": "Agent id and source-project grant bearer secret are required",
+            }, status=403)
+            return
+        body, error = self._read_limited_json_body(
+            limit=project_authoring_config_service.DEFAULT_CONFIG.body_limit_bytes,
+        )
+        if error:
+            self._send_json_error(error)
+            return
+        try:
+            _PROJECT_AUTHORING_SERVICE.authenticate_recurrence_dispatch(
+                recurrence_id,
+                requesting_agent_id=agent_id,
+                grant_secret=grant_secret,
+            )
+        except Exception as exc:
+            self._send_project_authoring_result(lambda: (_ for _ in ()).throw(exc))
+            return
+        self._send_project_authoring_result(lambda: _PROJECT_AUTHORING_SERVICE.materialize_recurrence_occurrence(
+            recurrence_id,
+            body.get("occurrenceId"),
+            prepare_workspace=_project_template_prepare_workspace,
+            cleanup_workspace=_project_authoring_cleanup_workspace,
+        ))
+
     def _request_id(self):
         request_id = getattr(self, "_vo_request_id", "")
         if not request_id:
@@ -29439,6 +29473,16 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
         request_path = parsed_url.path
         if request_path == "/api/agent/project-authoring/requests":
             self._handle_agent_project_authoring_submit()
+            return
+        agent_recurrence_prefix = "/api/agent/project-recurrences/"
+        if request_path.startswith(agent_recurrence_prefix) and request_path.endswith("/occurrences"):
+            recurrence_id = urllib.parse.unquote(
+                request_path[len(agent_recurrence_prefix):].rsplit("/occurrences", 1)[0]
+            ).strip("/")
+            if not recurrence_id or "/" in recurrence_id:
+                self._send_json({"ok": False, "error": "Recurring project definition not found"}, status=404)
+                return
+            self._handle_agent_project_recurrence_occurrence(recurrence_id)
             return
         management_template_prefix = "/api/project-authoring/templates/"
         if request_path.startswith(management_template_prefix) and request_path.endswith("/instantiate"):

@@ -7,10 +7,15 @@ import hashlib
 import json
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Mapping
 
-from services.project_authoring_config import feature_disabled_error, is_authoring_enabled
+from services.project_authoring_config import (
+    feature_disabled_error,
+    is_authoring_enabled,
+    is_recurrence_dispatch_paused,
+    is_recurrence_enabled,
+)
 from services.project_authoring_store import (
     GRANTS_KEY,
     IDEMPOTENCY_KEY,
@@ -106,6 +111,8 @@ class ProjectAuthoringService:
         lookup_agent,
         is_excluded_agent,
         submission_enabled: Callable[[], bool] = is_authoring_enabled,
+        recurrence_enabled: Callable[[], bool] = is_recurrence_enabled,
+        recurrence_paused: Callable[[], bool] = is_recurrence_dispatch_paused,
         clock: Callable[[], datetime] = _now,
         new_id: Callable[[], str] = _new_id,
     ) -> None:
@@ -113,6 +120,8 @@ class ProjectAuthoringService:
         self.lookup_agent = lookup_agent
         self.is_excluded_agent = is_excluded_agent
         self.submission_enabled = submission_enabled
+        self.recurrence_enabled = recurrence_enabled
+        self.recurrence_paused = recurrence_paused
         self.clock = clock
         self.new_id = new_id
 
@@ -706,6 +715,254 @@ class ProjectAuthoringService:
             self._cleanup_prepared_workspace(workspace, cleanup_workspace)
             raise
 
+    def materialize_recurrence_occurrence(
+        self,
+        recurrence_id: str,
+        occurrence_id: str,
+        *,
+        prepare_workspace: Callable[[Mapping[str, Any], str, str], Mapping[str, Any]] | None = None,
+        cleanup_workspace: Callable[[Mapping[str, Any]], Any] | None = None,
+    ) -> dict[str, Any]:
+        """Claim and atomically materialize one independent recurrence occurrence."""
+        if not self.recurrence_enabled():
+            raise ProjectAuthoringCommandError(
+                "project_recurrence_disabled", "Recurring project dispatch is disabled", 503,
+            )
+        if self.recurrence_paused():
+            raise ProjectAuthoringCommandError(
+                "project_recurrence_dispatch_paused", "Recurring project dispatch is paused", 503,
+            )
+        clean_recurrence_id = str(recurrence_id or "").strip()
+        clean_occurrence_id = str(occurrence_id or "").strip()
+        if not clean_recurrence_id or not clean_occurrence_id or len(clean_occurrence_id) > 300:
+            raise ProjectAuthoringCommandError(
+                "invalid_occurrence_reference", "Recurrence id and bounded occurrence id are required", 400,
+            )
+        claim_token = f"occurrence-claim-{self.new_id()}"
+        now_dt = self.clock().astimezone(timezone.utc)
+        now = now_dt.isoformat()
+        outcome: dict[str, Any] = {}
+
+        def claim(root: dict[str, Any]) -> None:
+            recurrence = root[RECURRENCES_KEY].get(clean_recurrence_id)
+            if not isinstance(recurrence, dict):
+                raise ProjectAuthoringCommandError(
+                    "recurrence_not_found", "Recurring project definition was not found", 404,
+                )
+            if recurrence.get("paused") is True:
+                raise ProjectAuthoringCommandError(
+                    "recurrence_paused", "Recurring project definition is paused", 409,
+                )
+            existing_project = self._find_occurrence_project(
+                root.get("projects") or [], clean_recurrence_id, clean_occurrence_id,
+            )
+            if existing_project is not None:
+                outcome.update({"status": "created", "project": copy.deepcopy(existing_project)})
+                return
+            occurrences = recurrence.setdefault("occurrences", {})
+            record = occurrences.get(clean_occurrence_id)
+            if isinstance(record, dict) and record.get("state") == "created" and record.get("projectId"):
+                project = next(
+                    (item for item in root.get("projects", []) if item.get("id") == record.get("projectId")),
+                    None,
+                )
+                if project is not None:
+                    outcome.update({"status": "created", "project": copy.deepcopy(project)})
+                    return
+            expires_at = self._parse_timestamp(record.get("claimExpiresAt")) if isinstance(record, dict) else None
+            if (
+                isinstance(record, dict)
+                and record.get("state") == "claimed"
+                and expires_at is not None
+                and expires_at > now_dt
+            ):
+                outcome.update({
+                    "status": "claimed",
+                    "claimExpiresAt": record.get("claimExpiresAt"),
+                })
+                return
+            attempts = int(record.get("attempts") or 0) + 1 if isinstance(record, dict) else 1
+            occurrences[clean_occurrence_id] = {
+                "occurrenceId": clean_occurrence_id,
+                "state": "claimed",
+                "claimToken": claim_token,
+                "claimOwner": "project-recurrence-dispatch",
+                "claimedAt": now,
+                "claimExpiresAt": (
+                    now_dt + timedelta(seconds=self.store.config.occurrence_claim_seconds)
+                ).isoformat(),
+                "attempts": attempts,
+                "updatedAt": now,
+            }
+            self._append_occurrence_history(
+                recurrence,
+                clean_occurrence_id,
+                "claimed",
+                now,
+                {"attempt": attempts},
+            )
+            outcome.update({"status": "owned", "attempts": attempts})
+
+        self.store.update(claim)
+        if outcome.get("status") == "created":
+            return {"ok": True, "created": False, "status": "created", "project": outcome["project"]}
+        if outcome.get("status") == "claimed":
+            return {
+                "ok": True,
+                "created": False,
+                "status": "in_progress",
+                "claimExpiresAt": outcome.get("claimExpiresAt"),
+                "_status": 202,
+            }
+
+        workspace: dict[str, Any] = {"ok": True, "managed": False, "created": False}
+        try:
+            initial_root = self.store.snapshot()
+            recurrence = initial_root[RECURRENCES_KEY].get(clean_recurrence_id) or {}
+            template_id = str(recurrence.get("templateId") or "")
+            template_version = int(recurrence.get("templateVersion") or 0)
+            template = self._resolve_template_record(initial_root, template_id, template_version)
+            snapshot = copy.deepcopy(template.get("snapshot") or {})
+            self._validate_template_snapshot_actors(snapshot)
+            configuration = self._template_instantiation_configuration(snapshot, None)
+            suffix = hashlib.sha256(clean_occurrence_id.encode()).hexdigest()[:16]
+            project_id = f"project-{clean_recurrence_id}-{suffix}"
+            execution = configuration.get("executionSettings") or {}
+            if execution.get("projectExecutionEnabled") is True:
+                if prepare_workspace is None:
+                    raise ProjectAuthoringCommandError(
+                        "workspace_preparation_required",
+                        "Execution-enabled recurring instances require workspace preparation",
+                        409,
+                    )
+                prepared = prepare_workspace(configuration, project_id, clean_occurrence_id)
+                workspace = dict(prepared) if isinstance(prepared, Mapping) else {
+                    "ok": False, "error": "Workspace preparation returned an invalid result",
+                }
+                if not workspace.get("ok"):
+                    raise ProjectAuthoringCommandError(
+                        str(workspace.get("code") or "workspace_preparation_failed"),
+                        str(workspace.get("error") or "Workspace preparation failed"),
+                        409,
+                    )
+
+            def commit(root: dict[str, Any]) -> dict[str, Any]:
+                current = root[RECURRENCES_KEY].get(clean_recurrence_id)
+                record = (current.get("occurrences") or {}).get(clean_occurrence_id) if isinstance(current, dict) else None
+                if not isinstance(current, dict) or not isinstance(record, dict):
+                    raise ProjectAuthoringCommandError(
+                        "occurrence_claim_lost", "Recurring project occurrence claim was lost", 409,
+                    )
+                existing = self._find_occurrence_project(
+                    root.get("projects") or [], clean_recurrence_id, clean_occurrence_id,
+                )
+                if existing is not None:
+                    record.update({"state": "created", "projectId": existing.get("id"), "updatedAt": self._timestamp()})
+                    return {"ok": True, "created": False, "status": "created", "project": copy.deepcopy(existing)}
+                if record.get("claimToken") != claim_token or record.get("state") != "claimed":
+                    raise ProjectAuthoringCommandError(
+                        "occurrence_claim_lost", "Recurring project occurrence claim is owned by another worker", 409,
+                    )
+                latest = self._resolve_template_record(root, template_id, template_version)
+                if latest.get("snapshotDigest") != template.get("snapshotDigest"):
+                    raise ProjectAuthoringCommandError(
+                        "template_version_changed", "Recurring project template version changed", 409,
+                    )
+                latest_snapshot = copy.deepcopy(latest.get("snapshot") or {})
+                self._validate_template_snapshot_actors(latest_snapshot)
+                committed_at = self._timestamp()
+                project = self._build_template_instance_project(
+                    project_id=project_id,
+                    template_id=template_id,
+                    version=template_version,
+                    configuration=configuration,
+                    workspace=workspace,
+                    actor=current.get("requestingAgentId") or "project-recurrence",
+                    now=committed_at,
+                )
+                project.update({
+                    "projectType": "one_time",
+                    "authoringSource": {
+                        "kind": "recurrence_occurrence",
+                        "recurrenceId": clean_recurrence_id,
+                        "occurrenceId": clean_occurrence_id,
+                        "templateId": template_id,
+                        "templateVersion": template_version,
+                    },
+                    "recurrenceRef": {
+                        "id": clean_recurrence_id,
+                        "occurrenceId": clean_occurrence_id,
+                    },
+                })
+                root.setdefault("projects", []).append(project)
+                record.update({
+                    "state": "created",
+                    "projectId": project_id,
+                    "createdAt": committed_at,
+                    "updatedAt": committed_at,
+                })
+                for field in ("claimToken", "claimOwner", "claimExpiresAt"):
+                    record.pop(field, None)
+                current.update({
+                    "lastOccurrenceId": clean_occurrence_id,
+                    "lastProjectId": project_id,
+                    "lastStatus": "created",
+                    "updatedAt": committed_at,
+                })
+                self._append_occurrence_history(
+                    current,
+                    clean_occurrence_id,
+                    "created",
+                    committed_at,
+                    {"projectId": project_id},
+                )
+                self._prune_occurrences(current)
+                return {"ok": True, "created": True, "status": "created", "project": copy.deepcopy(project)}
+
+            result = self.store.update(commit)
+            if not result.get("created"):
+                self._cleanup_prepared_workspace(workspace, cleanup_workspace)
+            return result
+        except Exception as exc:
+            self._cleanup_prepared_workspace(workspace, cleanup_workspace)
+            self._record_occurrence_failure(
+                clean_recurrence_id,
+                clean_occurrence_id,
+                claim_token,
+                exc,
+            )
+            raise
+
+    def authenticate_recurrence_dispatch(
+        self,
+        recurrence_id: str,
+        *,
+        requesting_agent_id: str,
+        grant_secret: str,
+    ) -> dict[str, Any]:
+        root = self.store.snapshot()
+        recurrence = root[RECURRENCES_KEY].get(str(recurrence_id or ""))
+        agent_id = str(requesting_agent_id or "").strip()
+        source_project_id = recurrence.get("sourceProjectId") if isinstance(recurrence, dict) else ""
+        if not isinstance(recurrence, dict) or recurrence.get("requestingAgentId") != agent_id or not source_project_id:
+            raise ProjectAuthoringCommandError(
+                "recurrence_not_found", "Recurring project definition was not found", 404,
+            )
+        self._validate_grant_record(
+            root[GRANTS_KEY].get(source_project_id),
+            project_id=source_project_id,
+            requesting_agent_id=agent_id,
+            grant_secret=grant_secret,
+            required_operation="status",
+        )
+        return {
+            "id": recurrence.get("id"),
+            "sourceProjectId": source_project_id,
+            "requestingAgentId": agent_id,
+            "state": recurrence.get("state"),
+            "paused": recurrence.get("paused") is True,
+        }
+
     def create_maintenance_request(
         self,
         project_id: str,
@@ -1082,6 +1339,111 @@ class ProjectAuthoringService:
             summary["version"] = version["version"]
         return {"id": template_id, "version": version["version"]}
 
+    def _record_occurrence_failure(
+        self,
+        recurrence_id: str,
+        occurrence_id: str,
+        claim_token: str,
+        error: Exception,
+    ) -> None:
+        now = self._timestamp()
+        code = str(getattr(error, "code", "occurrence_materialization_failed"))
+        safe_error = sanitize_audit_text(error, limit=1000)
+
+        def fail(root: dict[str, Any]) -> None:
+            recurrence = root[RECURRENCES_KEY].get(recurrence_id)
+            record = (recurrence.get("occurrences") or {}).get(occurrence_id) if isinstance(recurrence, dict) else None
+            if not isinstance(recurrence, dict) or not isinstance(record, dict):
+                return
+            if record.get("claimToken") != claim_token or record.get("state") != "claimed":
+                return
+            record.update({
+                "state": "failed",
+                "retryable": True,
+                "code": code,
+                "error": safe_error,
+                "failedAt": now,
+                "updatedAt": now,
+            })
+            for field in ("claimToken", "claimOwner", "claimExpiresAt"):
+                record.pop(field, None)
+            recurrence.update({
+                "lastOccurrenceId": occurrence_id,
+                "lastStatus": "failed",
+                "lastError": {"code": code, "error": safe_error, "at": now},
+                "updatedAt": now,
+            })
+            self._append_occurrence_history(
+                recurrence,
+                occurrence_id,
+                "failed",
+                now,
+                {"code": code, "error": safe_error},
+            )
+            self._prune_occurrences(recurrence)
+
+        try:
+            self.store.update(fail)
+        except Exception:
+            pass
+
+    def _append_occurrence_history(
+        self,
+        recurrence: dict[str, Any],
+        occurrence_id: str,
+        status: str,
+        at: str,
+        detail: Mapping[str, Any] | None = None,
+    ) -> None:
+        recurrence.setdefault("occurrenceHistory", []).append({
+            "occurrenceId": occurrence_id,
+            "status": status,
+            "at": at,
+            **copy.deepcopy(dict(detail or {})),
+        })
+        recurrence["occurrenceHistory"] = recurrence["occurrenceHistory"][-self.store.config.recurrence_history_limit:]
+
+    def _prune_occurrences(self, recurrence: dict[str, Any]) -> None:
+        occurrences = recurrence.get("occurrences")
+        if not isinstance(occurrences, dict) or len(occurrences) <= self.store.config.recurrence_history_limit:
+            return
+        removable = sorted(
+            (
+                (str(record.get("updatedAt") or ""), occurrence_id)
+                for occurrence_id, record in occurrences.items()
+                if isinstance(record, dict) and record.get("state") in {"created", "failed"}
+            ),
+        )
+        for _updated_at, occurrence_id in removable:
+            if len(occurrences) <= self.store.config.recurrence_history_limit:
+                break
+            occurrences.pop(occurrence_id, None)
+
+    @staticmethod
+    def _find_occurrence_project(
+        projects: list[Any], recurrence_id: str, occurrence_id: str,
+    ) -> dict[str, Any] | None:
+        return next(
+            (
+                project for project in projects
+                if isinstance(project, dict)
+                and isinstance(project.get("recurrenceRef"), Mapping)
+                and project["recurrenceRef"].get("id") == recurrence_id
+                and project["recurrenceRef"].get("occurrenceId") == occurrence_id
+            ),
+            None,
+        )
+
+    @staticmethod
+    def _parse_timestamp(value: Any) -> datetime | None:
+        try:
+            parsed = datetime.fromisoformat(str(value or "").replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+
     @staticmethod
     def _resolve_template_record(
         root: Mapping[str, Any], template_id: str, version: int,
@@ -1258,6 +1620,7 @@ class ProjectAuthoringService:
             "state": "pending_registration",
             "requestingAgentId": request.get("requestingAgentId"),
             "sourceRequestId": request_id,
+            "sourceProjectId": f"project-{request_id}",
             "createdAt": now,
             "createdBy": actor,
             "audit": [],
