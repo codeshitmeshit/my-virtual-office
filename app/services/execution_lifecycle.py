@@ -68,6 +68,7 @@ class StartPorts:
     requires_acceptance: Callable[[Task], bool]
     reopen_completed_task: Callable[..., bool]
     clear_restart_bindings: Callable[..., Any]
+    seed_checklist: Callable[..., bool]
     has_pending_meeting_actions: Callable[[Task], bool]
     transition: Callable[[Project, Task, str, str, str, str | None], Any]
     now: Callable[[], str]
@@ -484,6 +485,7 @@ def start_task(
             reopened = ports.reopen_completed_task(project, task, actor=str(body.get("by") or "user"))
         if body.get("resetExecutionContext") is True:
             ports.clear_restart_bindings(task, ports.now(), str(body.get("by") or "user"), "manual task restart")
+        ports.seed_checklist(task, str(body.get("by") or "system"))
         if git_state.get("dirty"):
             project.setdefault("executionDirtyConfirmations", []).append(git_state.get("fingerprint"))
             project["executionDirtyConfirmations"] = project["executionDirtyConfirmations"][-100:]

@@ -18765,8 +18765,19 @@ def _project_execution_schedule_transient_retry(data, project_id, task_id, proje
 
 
 def _project_execution_prepare_incomplete_checklist(project, task, attempt_id, actor, done_result):
-    if not isinstance(done_result, dict) or done_result.get("code") != "checklist_incomplete":
+    if not isinstance(done_result, dict) or done_result.get("code") not in {"checklist_incomplete", "checklist_empty"}:
         return {"ok": False, "error": (done_result or {}).get("error") or "Unable to mark task done"}
+    if done_result.get("code") == "checklist_empty":
+        _project_execution_seed_acceptance_checklist(task, "system")
+        done_result = {
+            **done_result,
+            "code": "checklist_incomplete",
+            "unfinishedChecklist": [
+                {"id": item.get("id") or "", "text": item.get("text") or ""}
+                for item in _project_execution_acceptance_checklist(task)
+                if item.get("done") is not True
+            ],
+        }
     workspace = _project_execution_validate_workspace(project.get("workspacePath"))
     if not workspace.get("ok"):
         task["blockedReason"] = workspace.get("error") or "Project workspace is not available for checklist completion."
@@ -19035,7 +19046,7 @@ def _project_execution_acceptance_checklist(task):
     ]
 
 
-def _project_execution_seed_acceptance_checklist(task, actor="system"):
+def _project_execution_seed_acceptance_checklist(task, actor="system", include_meeting_context=False):
     if _project_execution_acceptance_checklist(task):
         return False
     now = _proj_now()
@@ -19051,7 +19062,8 @@ def _project_execution_seed_acceptance_checklist(task, actor="system"):
         if len(compact) > 96:
             compact = compact[:93].rstrip() + "..."
         items.append(f"交付内容覆盖任务描述：{compact}")
-    items.append("确认会议结论和行动项已纳入最终交付")
+    if include_meeting_context:
+        items.append("确认会议结论和行动项已纳入最终交付")
     checklist = task.setdefault("checklist", [])
     existing = {_project_execution_checklist_compact_key(item.get("text")) for item in checklist if isinstance(item, dict)}
     changed = False
@@ -19064,6 +19076,7 @@ def _project_execution_seed_acceptance_checklist(task, actor="system"):
             "text": text,
             "done": False,
             "source": "project_execution_acceptance",
+            "generatedBy": "project_execution_seed",
             "createdAt": now,
             "createdBy": actor or "system",
         })
@@ -19223,8 +19236,13 @@ def _project_execution_checklist_update_key(update):
 
 def _project_execution_apply_checklist_updates(task, result):
     checklist = _project_execution_acceptance_checklist(task)
-    allow_create = not checklist
+    generated_seed_items = [
+        item for item in checklist
+        if item.get("generatedBy") == "project_execution_seed" and item.get("done") is not True
+    ]
+    allow_create = not checklist or bool(generated_seed_items)
     changed = False
+    created_from_updates = False
     now = _proj_now()
     for update in _project_execution_result_checklist_updates(result):
         item = _project_execution_find_checklist_update_target(checklist, update)
@@ -19239,6 +19257,7 @@ def _project_execution_apply_checklist_updates(task, result):
             task.setdefault("checklist", []).append(item)
             checklist.append(item)
             changed = True
+            created_from_updates = True
         if not item:
             continue
         if update.get("done") is True and item.get("done") is not True:
@@ -19248,6 +19267,16 @@ def _project_execution_apply_checklist_updates(task, result):
             if update.get("evidence"):
                 item["completionEvidence"] = update["evidence"]
             changed = True
+    if created_from_updates and generated_seed_items:
+        generated_ids = {str(item.get("id") or "") for item in generated_seed_items}
+        task["checklist"] = [
+            item for item in task.get("checklist", [])
+            if not (
+                item.get("generatedBy") == "project_execution_seed"
+                and str(item.get("id") or "") in generated_ids
+            )
+        ]
+        changed = True
     return changed
 
 
@@ -19433,7 +19462,7 @@ def _project_execution_apply_meeting_output_to_task(project, task, meeting, resu
     applied = 0
     linked = 0
     risks_added = 0
-    checklist_seeded = _project_execution_seed_acceptance_checklist(task, "meeting")
+    checklist_seeded = _project_execution_seed_acceptance_checklist(task, "meeting", include_meeting_context=True)
     record_changed = _project_execution_upsert_meeting_record(task, meeting, result, request_id, "approved", now)
     task.setdefault("meetingActionItems", [])
     task.setdefault("meetingDecisionHistory", [])
@@ -22354,7 +22383,10 @@ def _handle_archive_governance_action(project_id, item_id, body):
 
 def _project_execution_build_prompt(project, task, attempt, workspace):
     checklist = _project_execution_acceptance_checklist(task)
-    checklist_text = "\n".join(f"- [{'x' if item.get('done') else ' '}] {item.get('text', '')}" for item in checklist) or "- No checklist supplied"
+    checklist_text = "\n".join(
+        f"- [{'x' if item.get('done') else ' '}] id={item.get('id', '')} text={item.get('text', '')}"
+        for item in checklist
+    ) or "- No checklist supplied"
     rework_feedback = task.get("reworkFeedback") or attempt.get("reworkFeedback") or ""
     archive_context = _archive_context_prompt_block(project, task)
     meeting_action_block = ""
@@ -22386,15 +22418,16 @@ def _project_execution_build_prompt(project, task, attempt, workspace):
         "You are the execution agent for a Virtual Office project task.\n"
         f"WORKSPACE: {workspace}\nWork only inside this workspace. Do not review or mark the task complete.\n"
         "EXPECTED WORKFLOW:\n"
-        "1. First read the task and determine what content or deliverable must be produced. Write the task/deliverable acceptance criteria into the task checklist. The checklist is only for deliverable acceptance criteria, not a meeting action-item queue. If the task checklist is empty, include the created acceptance criteria in checklistUpdates and, when possible, persist them with PUT /api/projects/{projectId}/tasks/{taskId}.\n"
-        "2. Execute the task. For any Virtual Office operation, first use the vo-operating-guidelines skill to detect the VO environment, choose the correct VO skill, and follow its boundaries. If you discover an issue that requires alignment, use vo-operating-guidelines to decide whether a formal AI meeting is appropriate; when it is, proactively request a meeting with POST /api/projects/{projectId}/tasks/{taskId}/meeting-requests. Do not confirm or reject meetings yourself. Add the corresponding action items and discussion points as meeting/task context. Do not put those meeting action items or risks into the checklist or comments.\n"
+        "1. First read the task and determine what content or deliverable must be produced. Write the task/deliverable acceptance criteria into the task checklist. The checklist is only for deliverable acceptance criteria, not a meeting action-item queue. The orchestration service will persist checklistUpdates from your final response; do not call the project API to persist checklist changes yourself.\n"
+        f"2. Execute the task. For any Virtual Office operation, first use the vo-operating-guidelines skill to detect the VO environment, choose the correct VO skill, and follow its boundaries. If you discover an issue that requires alignment, use vo-operating-guidelines to decide whether a formal AI meeting is appropriate; when it is, proactively request a meeting with POST /api/projects/{project.get('id', '')}/tasks/{task.get('id', '')}/meeting-requests. Do not confirm or reject meetings yourself. Add the corresponding action items and discussion points as meeting/task context. Do not put those meeting action items or risks into the checklist or comments.\n"
         "3. Before finishing, inspect whether every checklist item is complete. Mark completed checklist items done; if any item is unfinished, continue working until it is complete.\n"
         "FINAL RESPONSE FORMAT (strict):\n"
         "- First output a human-visible Markdown summary under 1200 characters. It may include short bullets for changed files, tests run, and remaining risks.\n"
-        "- Then output exactly one fenced ```json block containing a single object with these optional fields: checklistUpdates, meetingDiscussionPoints, tests.\n"
+        "- Then output exactly one fenced ```json block containing a single object. For a regular task, checklistUpdates is REQUIRED and must be a non-empty array containing every acceptance checklist item with its final status. meetingDiscussionPoints and tests are optional.\n"
         "- Do not print raw JSON outside the fenced json block. Do not put escaped JSON inside the Markdown summary.\n"
         "- tests must be an array of short strings only, each under 180 characters. Do not put full logs, full API responses, raw tool output, source material, or nested objects in tests.\n"
-        "- checklistUpdates is an array of {id, text, done, evidence}; set done=true only for checklist items you actually verified as complete.\n"
+        "- checklistUpdates is an array of {id, text, done, evidence}; preserve the checklist IDs shown below. If no checklist was supplied, create concrete acceptance criteria with stable short IDs. Set done=true only for items you actually verified as complete.\n"
+        "- Required JSON shape example: {\"checklistUpdates\":[{\"id\":\"deliverable\",\"text\":\"Produce the requested deliverable\",\"done\":true,\"evidence\":\"Verified output\"}],\"tests\":[\"verification passed\"]}.\n"
         "- meetingDiscussionPoints is an array of {kind, title, text, meetingId, requestId} for meeting conclusions, risks, and discussion notes that belong in the task details.\n\n"
         f"PROJECT: {project.get('title', '')}\nPROJECT DESCRIPTION: {project.get('description', '')}\n"
         f"PROJECT_ID: {project.get('id', '')}\nTASK_ID: {task.get('id', '')}\nTASK: {task.get('title', '')}\nTASK DESCRIPTION: {task.get('description', '')}\nATTEMPT: {attempt.get('id')}\n"
@@ -22720,6 +22753,7 @@ def _project_execution_start_ports():
         requires_acceptance=_project_execution_requires_user_acceptance,
         reopen_completed_task=_project_execution_reopen_completed_task,
         clear_restart_bindings=_project_execution_clear_restart_bindings,
+        seed_checklist=_project_execution_seed_acceptance_checklist,
         has_pending_meeting_actions=_project_execution_has_pending_meeting_actions,
         transition=_project_execution_transition,
         now=_proj_now,

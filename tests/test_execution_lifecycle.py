@@ -62,6 +62,7 @@ def _ports(launcher, *, git_snapshot=None):
         requires_acceptance=lambda task: task.get("requiresUserAcceptance") is True,
         reopen_completed_task=lambda project, task, actor: False,
         clear_restart_bindings=lambda *args: None,
+        seed_checklist=lambda task, actor: bool(task.setdefault("checklist", [{"id": "seeded", "text": "Complete task", "done": False}])),
         has_pending_meeting_actions=lambda task: False,
         transition=transition,
         now=lambda: "now",

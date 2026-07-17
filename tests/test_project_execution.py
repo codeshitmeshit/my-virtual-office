@@ -964,24 +964,65 @@ def test_task_role_overrides_project_defaults():
 
 
 def test_project_execution_prompt_requires_checklist_lifecycle_and_meeting_context():
-    project = {"title": "Daily Report", "description": "Publish a daily report."}
-    task = {"title": "日报", "description": "整理日报内容", "checklist": []}
+    project = {"id": "project-1", "title": "Daily Report", "description": "Publish a daily report."}
+    task = {"id": "task-1", "title": "日报", "description": "整理日报内容", "checklist": []}
     attempt = {"id": "attempt-1"}
     prompt = server._project_execution_build_prompt(project, task, attempt, "/tmp/workspace")
     assert "Write the task/deliverable acceptance criteria into the task checklist" in prompt
     assert "not a meeting action-item queue" in prompt
     assert "vo-operating-guidelines" in prompt
     assert "Do not confirm or reject meetings yourself" in prompt
-    assert "POST /api/projects/{projectId}/tasks/{taskId}/meeting-requests" in prompt
+    assert "POST /api/projects/project-1/tasks/task-1/meeting-requests" in prompt
+    assert "/api/projects/{projectId}/tasks/{taskId}" not in prompt
     assert "proactively request a meeting" in prompt
     assert "Do not put those meeting action items or risks into the checklist" in prompt
     assert "Mark completed checklist items done" in prompt
     assert "continue working until it is complete" in prompt
     assert "checklistUpdates" in prompt
+    assert "checklistUpdates is REQUIRED" in prompt
+    assert "PUT /api/projects/{projectId}/tasks/{taskId}" not in prompt
+    assert "The orchestration service will persist checklistUpdates" in prompt
     assert "meetingDiscussionPoints" in prompt
     assert "FINAL RESPONSE FORMAT (strict)" in prompt
     assert "Do not print raw JSON outside the fenced json block" in prompt
     assert "tests must be an array of short strings only" in prompt
+
+
+def test_project_execution_seeds_checklist_when_executor_omits_updates():
+    with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as workspace:
+        old = with_store(status_dir)
+        old_call = server._project_execution_call_executor
+        prompts = []
+
+        def executor_without_updates(executor, prompt, *args, **kwargs):
+            prompts.append(prompt)
+            return {
+                "ok": True,
+                "status": "completed",
+                "reply": "Execution completed, but the provider omitted structured checklistUpdates.",
+                "modifiedFiles": [],
+            }
+
+        server._project_execution_call_executor = executor_without_updates
+        try:
+            project, task = create_project_execution_project(workspace)
+            assert task["checklist"] == []
+
+            started = server._handle_project_execution_start(project["id"], task["id"], {})
+            assert started["ok"] is True
+
+            completed = wait_for(lambda: (
+                current if (current := server._handle_project_get(project["id"])["project"]["tasks"][0]).get("executionState") == "execution_complete" else None
+            ))
+            acceptance_items = server._project_execution_acceptance_checklist(completed)
+            assert acceptance_items
+            assert all(item.get("source") == "project_execution_acceptance" for item in acceptance_items)
+            assert all(item.get("done") is False for item in acceptance_items)
+            assert prompts
+            assert all(f"id={item['id']}" in prompts[0] for item in acceptance_items)
+        finally:
+            server._project_execution_call_executor = old_call
+            restore_store(old)
 
 
 def test_project_execution_test_evidence_does_not_render_full_json_reply():
@@ -1328,7 +1369,10 @@ def test_project_execution_manual_restart_clears_stale_meeting_bindings():
             assert current["meetingDiscussionPoints"] == []
             assert current["meetingRecords"] == []
             assert current["meetingBlocker"] == {}
-            assert current["checklist"] == []
+            acceptance_items = server._project_execution_acceptance_checklist(current)
+            assert acceptance_items
+            assert all(item.get("generatedBy") == "project_execution_seed" for item in acceptance_items)
+            assert all(item.get("done") is False for item in acceptance_items)
             assert current["meetingBlockerHistory"][0]["resetReason"] == "manual task restart"
         finally:
             server._project_execution_call_executor = old_executor
@@ -1495,7 +1539,8 @@ def test_selected_task_executes_and_stops_at_execution_complete():
             assert "implemented" in task["evidence"]["executorSummary"]
             assert task["evidence"]["changedFiles"] == ["result.txt"]
             assert task["evidence"]["testResults"] == ["pytest: 3 passed"]
-            assert task["evidence"]["checklist"] == []
+            assert task["evidence"]["checklist"]
+            assert all(item.get("generatedBy") == "project_execution_seed" for item in task["evidence"]["checklist"])
             untouched = next(t for t in server._handle_project_get(project["id"])["project"]["tasks"] if t["id"] == other["id"])
             assert untouched["executionState"] == "backlog"
 
@@ -1573,6 +1618,32 @@ def test_project_execution_mark_done_rejects_empty_checklist():
             assert result["code"] == "checklist_empty"
             assert task.get("executionState") != "done"
             assert task.get("completedAt") is None
+        finally:
+            restore_store(old)
+
+
+def test_project_execution_empty_checklist_is_seeded_for_automatic_rework():
+    with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as workspace:
+        old = with_store(status_dir)
+        try:
+            project, task = create_project_execution_project(workspace)
+            prepared = server._project_execution_prepare_incomplete_checklist(
+                project,
+                task,
+                "attempt-with-empty-checklist",
+                "reviewer",
+                {
+                    "ok": False,
+                    "code": "checklist_empty",
+                    "error": "Acceptance checklist is empty",
+                    "unfinishedChecklist": [],
+                },
+            )
+
+            assert prepared["continued"] is True
+            assert task["executionState"] == "reworking"
+            assert server._project_execution_acceptance_checklist(task)
+            assert "完成任务目标" in task["reworkFeedback"]
         finally:
             restore_store(old)
 
