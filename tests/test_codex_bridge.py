@@ -52,6 +52,9 @@ for raw in sys.stdin:
     elif method == "initialized":
         pass
     elif method == "thread/start":
+        if params.get("approvalsReviewer") != "user":
+            send({"id": request_id, "error": {"message": "app-server reviewer override missing"}})
+            continue
         if os.environ.get("FAKE_CODEX_EXIT_THREAD_START"):
             sys.exit(17)
         flaky_path = os.environ.get("FAKE_CODEX_FLAKY_THREAD_START")
@@ -64,8 +67,14 @@ for raw in sys.stdin:
                 pass
         send({"id": request_id, "result": {"thread": {"id": thread_id}}})
     elif method == "thread/resume":
+        if params.get("approvalsReviewer") != "user":
+            send({"id": request_id, "error": {"message": "resumed thread reviewer override missing"}})
+            continue
         send({"id": request_id, "result": {"thread": {"id": params["threadId"]}}})
     elif method == "turn/start":
+        if params.get("approvalsReviewer") != "user":
+            send({"id": request_id, "error": {"message": "turn reviewer override missing"}})
+            continue
         if params.get("summary") != "detailed":
             send({"id": request_id, "error": {"message": "reasoning summary was not requested"}})
             continue

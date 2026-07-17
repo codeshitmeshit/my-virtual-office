@@ -1716,6 +1716,10 @@ class CodexAppServerClient:
         params: dict[str, Any] = {
             "cwd": self.workspace,
             "approvalPolicy": "on-request",
+            # A resumed thread may have been created by Codex Desktop. Override
+            # its persisted reviewer so approvals are routed back to this
+            # app-server client, where VO can expose them on the source surface.
+            "approvalsReviewer": "user",
             "sandbox": "workspace-write",
             "ephemeral": False,
         }
@@ -1859,6 +1863,7 @@ class CodexAppServerClient:
                     "summary": self.reasoning_summary,
                     "cwd": self.workspace,
                     "approvalPolicy": "on-request",
+                    "approvalsReviewer": "user",
                     "sandboxPolicy": {
                         "type": "workspaceWrite",
                         "writableRoots": [self.workspace],
