@@ -42,7 +42,7 @@
 
 - [x] 7.1 Add a pending Agent project-drafts view that displays the original proposal, editable approved configuration, reviewer rationale, template/recurrence settings, and validation errors.
 - [x] 7.2 Wire management-authenticated edit, confirm, and reject actions with duplicate-action suppression and visible created-project navigation.
-- [ ] 7.3 Add static and browser-level tests for pending, edited, confirmed, rejected, failed, and idempotently repeated review flows.
+- [x] 7.3 Add static and browser-level tests for pending, edited, confirmed, rejected, failed, and idempotently repeated review flows.
 
 ## 8. VO Skills and Documentation
 
