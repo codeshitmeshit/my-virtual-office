@@ -18189,8 +18189,18 @@ def _project_execution_automatic_snapshot(project, workspace):
     return {"ok": True, "snapshot": snapshot}
 
 
+def _project_execution_executor_agent_id(project, task):
+    """Return an executable Agent id without projecting a human executor to legacy roles."""
+    actor = task.get("executorActor")
+    if isinstance(actor, dict):
+        if str(actor.get("type") or "").strip().lower() != "agent":
+            return ""
+        return str(actor.get("id") or "").strip()
+    return str(task.get("executorAgentId") or task.get("assignee") or project.get("defaultExecutorAgentId") or "").strip()
+
+
 def _project_execution_resolve_roles(project, task):
-    executor_id = task.get("executorAgentId") or task.get("assignee") or project.get("defaultExecutorAgentId")
+    executor_id = _project_execution_executor_agent_id(project, task)
     reviewer_id = task.get("reviewerAgentId") or project.get("defaultReviewerAgentId")
     if not executor_id or not _office_agent_lookup(executor_id):
         return {"ok": False, "error": "A valid executor agent is required", "code": "executor_required"}
@@ -18204,7 +18214,7 @@ def _project_execution_resolve_roles(project, task):
 
 
 def _project_execution_resolve_start_roles(project, task, allow_skip_reviewer=False):
-    executor_id = task.get("executorAgentId") or task.get("assignee") or project.get("defaultExecutorAgentId")
+    executor_id = _project_execution_executor_agent_id(project, task)
     reviewer_id = task.get("reviewerAgentId") or project.get("defaultReviewerAgentId")
     if not executor_id or not _office_agent_lookup(executor_id):
         return {"ok": False, "error": "A valid executor agent is required", "code": "executor_required"}
@@ -18310,6 +18320,9 @@ def _project_execution_next_task(project):
         if task.get("columnId") in done_cols:
             continue
         if not _project_execution_is_startable_task(task):
+            continue
+        executor_id = _project_execution_executor_agent_id(project, task)
+        if not executor_id or not _office_agent_lookup(executor_id):
             continue
         candidates.append((col_order.get(task.get("columnId"), 9999), task.get("order", idx), idx, task))
     candidates.sort(key=lambda item: (item[0], item[1], item[2]))
