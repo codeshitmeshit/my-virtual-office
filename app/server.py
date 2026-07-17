@@ -17792,6 +17792,29 @@ def _handle_project_create(body):
     return {**outcome.result.payload, **({"_status": outcome.result.status} if outcome.result.status != 200 else {})}
 
 
+def _project_authoring_prepare_workspace(snapshot, request_id, confirmation_key):
+    prepared = _project_prepare_workspace(snapshot.get("title"), dict(snapshot), _proj_now())
+    if not prepared.get("ok"):
+        return prepared
+    managed = prepared.get("workspaceManagedBy") == "system"
+    return {
+        "ok": True,
+        "path": prepared.get("workspacePath"),
+        "kind": prepared.get("workspaceKind"),
+        "status": copy.deepcopy(prepared.get("workspaceStatus") or {}),
+        "managed": managed,
+        "created": bool(managed and prepared.get("workspaceCreatedAt")),
+        "createdAt": prepared.get("workspaceCreatedAt"),
+        "requestId": request_id,
+        "confirmationKey": confirmation_key,
+    }
+
+
+def _project_authoring_cleanup_workspace(workspace):
+    if workspace.get("path"):
+        _delete_managed_project_workspace(workspace.get("path"))
+
+
 
 
 def _handle_task_create(project_id, body):
@@ -26369,6 +26392,34 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             else:
                 self._send_unexpected_json_error(exc)
 
+    def _project_authoring_expected_revision(self, body):
+        try:
+            revision = int(body.get("expectedRevision"))
+        except (TypeError, ValueError):
+            self._send_json({
+                "ok": False,
+                "code": "expected_revision_required",
+                "error": "expectedRevision must be an integer",
+            }, status=400)
+            return None
+        if revision < 1:
+            self._send_json({
+                "ok": False,
+                "code": "expected_revision_required",
+                "error": "expectedRevision must be positive",
+            }, status=400)
+            return None
+        return revision
+
+    def _read_management_authoring_body(self):
+        if self._reject_untrusted_management_request():
+            return None
+        body, error = self._read_limited_json_body(limit=self._MANAGEMENT_BODY_LIMIT)
+        if error:
+            self._send_json_error(error)
+            return None
+        return body
+
     def _handle_agent_project_authoring_submit(self):
         if self._reject_untrusted_agent_authoring_request():
             return
@@ -26632,6 +26683,35 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                 self._send_json({"ok": False, "error": "Project authoring request not found"}, status=404)
                 return
             self._handle_agent_project_authoring_status(request_id)
+            return
+        management_authoring_prefix = "/api/project-authoring/requests"
+        if request_path == management_authoring_prefix:
+            if self._reject_untrusted_management_request():
+                return
+            states = {
+                value.strip() for value in query_params.get("state", []) for value in value.split(",")
+                if value.strip()
+            }
+            try:
+                limit = int(query_params.get("limit", ["50"])[0])
+            except (TypeError, ValueError):
+                limit = 50
+            self._send_project_authoring_result(lambda: {
+                "ok": True,
+                "requests": _PROJECT_AUTHORING_SERVICE.list_management(states=states or None, limit=limit),
+            })
+            return
+        if request_path.startswith(management_authoring_prefix + "/"):
+            if self._reject_untrusted_management_request():
+                return
+            request_id = urllib.parse.unquote(request_path[len(management_authoring_prefix) + 1:]).strip("/")
+            if not request_id or "/" in request_id:
+                self._send_json({"ok": False, "error": "Project authoring request not found"}, status=404)
+                return
+            self._send_project_authoring_result(lambda: {
+                "ok": True,
+                "request": _PROJECT_AUTHORING_SERVICE.get_management(request_id),
+            })
             return
         if request_path == "/api/meetings/store-status":
             status = _meeting_domain_authority_status()
@@ -29001,8 +29081,11 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             if not authority.get("ok"):
                 self._send_json({"error": "Meeting store is not ready", **authority}, status=authority["_status"])
                 return
-        project_mutation = urllib.parse.urlparse(self.path).path.startswith("/api/projects/")
-        if project_mutation:
+        request_path = urllib.parse.urlparse(self.path).path
+        management_authoring_prefix = "/api/project-authoring/requests/"
+        authoring_mutation = request_path.startswith(management_authoring_prefix)
+        project_mutation = request_path.startswith("/api/projects/")
+        if project_mutation or authoring_mutation:
             if self._reject_untrusted_management_request():
                 return
             body, error = self._read_limited_json_body(limit=self._MANAGEMENT_BODY_LIMIT)
@@ -29013,7 +29096,24 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             length = int(self.headers.get('Content-Length', 0))
             body = json.loads(self.rfile.read(length)) if length else {}
         # ── PROJECTS PUT ─────────────────────────────────────────────
-        if self.path.startswith("/api/projects/") and self.path.endswith("/workflow/auto-mode"):
+        if authoring_mutation:
+            request_id = urllib.parse.unquote(request_path[len(management_authoring_prefix):]).strip("/")
+            if not request_id or "/" in request_id:
+                self._send_json({"ok": False, "error": "Project authoring request not found"}, status=404)
+                return
+            revision = self._project_authoring_expected_revision(body)
+            if revision is None:
+                return
+            self._send_project_authoring_result(lambda: {
+                "ok": True,
+                "request": _PROJECT_AUTHORING_SERVICE.edit_pending(
+                    request_id,
+                    body.get("draft"),
+                    expected_revision=revision,
+                    actor="user:local",
+                ),
+            })
+        elif self.path.startswith("/api/projects/") and self.path.endswith("/workflow/auto-mode"):
             proj_id = self.path.split("/api/projects/")[1].rsplit("/workflow/auto-mode", 1)[0]
             result = _handle_workflow_auto_mode(proj_id, body)
             self.send_response(result.get("_status", 200))
@@ -29195,6 +29295,41 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
         request_path = parsed_url.path
         if request_path == "/api/agent/project-authoring/requests":
             self._handle_agent_project_authoring_submit()
+            return
+        management_authoring_prefix = "/api/project-authoring/requests/"
+        if request_path.startswith(management_authoring_prefix) and request_path.endswith(("/confirm", "/reject")):
+            body = self._read_management_authoring_body()
+            if body is None:
+                return
+            action = "confirm" if request_path.endswith("/confirm") else "reject"
+            request_id = urllib.parse.unquote(
+                request_path[len(management_authoring_prefix):].rsplit("/", 1)[0]
+            ).strip("/")
+            if not request_id or "/" in request_id:
+                self._send_json({"ok": False, "error": "Project authoring request not found"}, status=404)
+                return
+            revision = self._project_authoring_expected_revision(body)
+            if revision is None:
+                return
+            if action == "reject":
+                self._send_project_authoring_result(lambda: {
+                    "ok": True,
+                    "request": _PROJECT_AUTHORING_SERVICE.reject_pending(
+                        request_id,
+                        expected_revision=revision,
+                        reason=body.get("reason"),
+                        actor="user:local",
+                    ),
+                })
+            else:
+                self._send_project_authoring_result(lambda: _PROJECT_AUTHORING_SERVICE.confirm_and_materialize(
+                    request_id,
+                    expected_revision=revision,
+                    confirmation_key=body.get("confirmationKey"),
+                    actor="user:local",
+                    prepare_workspace=_project_authoring_prepare_workspace,
+                    cleanup_workspace=_project_authoring_cleanup_workspace,
+                ))
             return
         if _is_meeting_domain_path(request_path):
             authority = _meeting_domain_authority_status()
