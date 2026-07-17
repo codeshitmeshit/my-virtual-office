@@ -324,3 +324,40 @@ def test_agent_maintenance_request_needs_management_confirmation(authoring):
     assert applied_status == 200
     assert applied["project"]["title"] == "Confirmed title"
     assert markdown.load_all()["projects"][0]["title"] == "Confirmed title"
+
+
+def test_agent_autonomous_routine_update_uses_same_scoped_maintenance_endpoint(authoring):
+    markdown, _ = authoring
+    draft = _draft("Autonomous HTTP")
+    draft["agentMaintenanceMode"] = "autonomous"
+    draft["tasks"][0]["executorActor"] = {"type": "agent", "id": "author"}
+    headers = {"X-VO-Agent-Action": "project-authoring", "X-VO-Agent-Id": "author"}
+    _, created = _call(_handler(
+        "/api/agent/project-authoring/requests",
+        {"idempotencyKey": "author:auto-http", "draft": draft},
+        headers=headers,
+    ), "POST")
+    secret = created["requestSecret"]
+    _, confirmed = _call(_handler(
+        f"/api/project-authoring/requests/{created['request']['id']}/confirm",
+        {"expectedRevision": 1, "confirmationKey": "confirm:auto-http"},
+        headers={"X-VO-Management-Token": server._MANAGEMENT_TOKEN},
+    ), "POST")
+    project = confirmed["project"]
+
+    status, updated = _call(_handler(
+        f"/api/agent/projects/{project['id']}/maintenance",
+        {
+            "idempotencyKey": "routine:http-direct",
+            "mutation": {
+                "operation": "routine_task_update",
+                "taskId": project["tasks"][0]["id"],
+                "changes": {"description": "Direct autonomous HTTP update"},
+            },
+        },
+        headers={**headers, "Authorization": f"Bearer {secret}"},
+    ), "POST")
+
+    assert status == 200
+    assert updated["created"] is True
+    assert markdown.load_all()["projects"][0]["tasks"][0]["description"] == "Direct autonomous HTTP update"

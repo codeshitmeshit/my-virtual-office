@@ -25,7 +25,12 @@ from services.project_authoring_store import (
 )
 from services.project_authoring_validation import validate_idempotency_key, validate_project_draft
 from services.project_authoring_security import verify_request_secret
-from services.project_actors import ActorReferenceError, legacy_task_role_fields, validate_task_actor_references
+from services.project_actors import (
+    ActorReferenceError,
+    legacy_task_role_fields,
+    task_actor_references,
+    validate_task_actor_references,
+)
 
 
 EDITABLE_STATES = frozenset({"pending", "failed"})
@@ -39,6 +44,9 @@ PROTECTED_MAINTENANCE_OPERATIONS = frozenset({
     "archive_project",
     "workspace_change",
     "maintenance_mode_change",
+})
+AUTONOMOUS_ROUTINE_FIELDS = frozenset({
+    "executionState", "description", "checklist", "evidence", "dueDate",
 })
 
 
@@ -732,6 +740,88 @@ class ProjectAuthoringService:
             return management_request_view(request)
 
         return {"ok": True, "request": self.store.update(reject)}
+
+    def apply_autonomous_routine_update(
+        self,
+        project_id: str,
+        task_id: str,
+        changes: Any,
+        *,
+        requesting_agent_id: str,
+        grant_secret: str,
+        idempotency_key: Any,
+    ) -> dict[str, Any]:
+        key = validate_idempotency_key(idempotency_key)
+        now = self._timestamp()
+        scoped_key = f"{requesting_agent_id}:{key}"
+
+        def apply(root: dict[str, Any]) -> dict[str, Any]:
+            project = next((item for item in root.get("projects", []) if item.get("id") == project_id), None)
+            grant = root[GRANTS_KEY].get(project_id)
+            if project is None:
+                raise ProjectAuthoringCommandError("project_not_found", "Project not found", 404)
+            self._validate_grant_record(
+                grant,
+                project_id=project_id,
+                requesting_agent_id=requesting_agent_id,
+                grant_secret=grant_secret,
+                required_operation="routine_task_update",
+            )
+            if project.get("agentMaintenanceMode") != "autonomous" or grant.get("maintenanceMode") != "autonomous":
+                raise ProjectAuthoringCommandError(
+                    "autonomous_maintenance_disabled", "Project autonomous maintenance is disabled", 403,
+                )
+            existing = grant["autonomousIdempotency"].get(scoped_key)
+            if isinstance(existing, dict):
+                return {"created": False, **copy.deepcopy(existing.get("result") or {})}
+            if not isinstance(changes, Mapping) or not changes:
+                raise ProjectAuthoringCommandError(
+                    "routine_update_changes_required", "Routine update requires changes", 400,
+                )
+            unknown = set(changes) - AUTONOMOUS_ROUTINE_FIELDS
+            if unknown:
+                raise ProjectAuthoringCommandError(
+                    "autonomous_field_not_allowed",
+                    f"Autonomous update fields are not allowed: {', '.join(sorted(unknown))}",
+                    403,
+                )
+            task = self._maintenance_task(project, task_id)
+            actors = task_actor_references(task)
+            assigned_agent_ids = {
+                actor.get("id") for actor in (actors.get("responsible"), actors.get("executor"))
+                if isinstance(actor, dict) and actor.get("type") == "agent"
+            }
+            if requesting_agent_id not in assigned_agent_ids:
+                raise ProjectAuthoringCommandError(
+                    "agent_not_assigned_to_task", "Agent is not assigned to this task", 403,
+                )
+            for field, value in changes.items():
+                task[field] = copy.deepcopy(value)
+            task["updatedAt"] = now
+            history = task.setdefault("maintenanceHistory", [])
+            history.append({
+                "actor": requesting_agent_id,
+                "source": "autonomous_grant",
+                "changedFields": sorted(changes),
+                "at": now,
+            })
+            task["maintenanceHistory"] = history[-self.store.config.audit_history_limit:]
+            project["updatedAt"] = now
+            self._append_grant_audit(grant, "autonomous_routine_update", requesting_agent_id, now)
+            result = {
+                "task": copy.deepcopy(task),
+                "changedFields": sorted(changes),
+                "updatedAt": now,
+            }
+            grant["autonomousIdempotency"][scoped_key] = {
+                "taskId": task_id,
+                "createdAt": now,
+                "result": copy.deepcopy(result),
+            }
+            return {"created": True, **result}
+
+        result = self.store.update(apply)
+        return {"ok": True, **result}
 
     def revoke_project_grant(self, project_id: str, *, actor: str = "user") -> dict[str, Any]:
         now = self._timestamp()

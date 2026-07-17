@@ -38,6 +38,7 @@ COMPLEX_JSON_FIELDS = {
     "authoringSource_json", "templateRef_json", "recurrenceRef_json",
     "responsibleActor_json", "executorActor_json", "reviewerActor_json",
     "reviewerRecommendation_json",
+    "maintenanceHistory_json",
 }
 
 
@@ -582,6 +583,7 @@ class MarkdownProjectStore:
             "executorActor_json": task.get("executorActor", actors.get("executor")),
             "reviewerActor_json": task.get("reviewerActor", actors.get("reviewer")),
             "reviewerRecommendation_json": task.get("reviewerRecommendation", {}),
+            "maintenanceHistory_json": task.get("maintenanceHistory", []),
             "requiresUserAcceptance": task.get("requiresUserAcceptance", True),
             "allowReviewerlessExecution": task.get("allowReviewerlessExecution", False),
             "scheduledRepeatEnabled": task.get("scheduledRepeatEnabled", False),
@@ -740,6 +742,7 @@ class MarkdownProjectStore:
             "executorActor": meta.get("executorActor_json"),
             "reviewerActor": meta.get("reviewerActor_json"),
             "reviewerRecommendation": meta.get("reviewerRecommendation_json", {}),
+            "maintenanceHistory": meta.get("maintenanceHistory_json", []),
             "requiresUserAcceptance": meta.get("requiresUserAcceptance", True),
             "allowReviewerlessExecution": meta.get("allowReviewerlessExecution", False),
             "scheduledRepeatEnabled": meta.get("scheduledRepeatEnabled", False),

@@ -572,3 +572,126 @@ def test_invalid_maintenance_application_is_atomic_and_revoked_grant_cannot_requ
             idempotency_key="maintenance:revoked-1",
         )
     assert revoked.value.code == "invalid_project_grant"
+
+
+def test_autonomous_assigned_agent_can_apply_only_routine_task_fields(tmp_path):
+    markdown, _, service = _service(tmp_path)
+    draft = _draft()
+    draft["agentMaintenanceMode"] = "autonomous"
+    draft["tasks"][0]["responsibleActor"] = {"type": "agent", "id": "author"}
+    draft["tasks"][0]["executorActor"] = {"type": "agent", "id": "author"}
+    secret = "autonomous-routine-secret"
+    _create(service, draft=draft, request_secret_hash=hash_request_secret(secret))
+    project = service.confirm_and_materialize(
+        "request-1", expected_revision=1, confirmation_key="confirm:routine",
+    )["project"]
+    task_id = project["tasks"][0]["id"]
+
+    updated = service.apply_autonomous_routine_update(
+        project["id"],
+        task_id,
+        {
+            "description": "Updated autonomously",
+            "executionState": "in_progress",
+            "evidence": {"summary": "Work started"},
+            "dueDate": "2025-04-01",
+        },
+        requesting_agent_id="author",
+        grant_secret=secret,
+        idempotency_key="routine:update-1",
+    )
+    repeated = service.apply_autonomous_routine_update(
+        project["id"],
+        task_id,
+        {"reviewerActor": {"type": "agent", "id": "reviewer"}},
+        requesting_agent_id="author",
+        grant_secret=secret,
+        idempotency_key="routine:update-1",
+    )
+
+    assert updated["created"] is True
+    assert repeated["created"] is False
+    stored = markdown.load_all()["projects"][0]["tasks"][0]
+    assert stored["description"] == "Updated autonomously"
+    assert stored["executionState"] == "in_progress"
+    assert stored["evidence"] == {"summary": "Work started"}
+    assert stored["maintenanceHistory"][-1]["changedFields"] == [
+        "description", "dueDate", "evidence", "executionState",
+    ]
+    assert len(stored["maintenanceHistory"]) == 1
+
+
+@pytest.mark.parametrize(
+    "forbidden_field",
+    ("reviewerActor", "executorActor", "workspacePath", "status", "tasks", "agentMaintenanceMode"),
+)
+def test_autonomous_routine_update_rejects_structural_and_role_fields(tmp_path, forbidden_field):
+    markdown, _, service = _service(tmp_path)
+    draft = _draft()
+    draft["agentMaintenanceMode"] = "autonomous"
+    draft["tasks"][0]["executorActor"] = {"type": "agent", "id": "author"}
+    secret = "autonomous-forbidden-secret"
+    _create(service, draft=draft, request_secret_hash=hash_request_secret(secret))
+    project = service.confirm_and_materialize(
+        "request-1", expected_revision=1, confirmation_key="confirm:forbidden",
+    )["project"]
+    before = markdown.load_all()["projects"][0]
+
+    with pytest.raises(ProjectAuthoringCommandError) as rejected:
+        service.apply_autonomous_routine_update(
+            project["id"],
+            project["tasks"][0]["id"],
+            {forbidden_field: "attempted escalation"},
+            requesting_agent_id="author",
+            grant_secret=secret,
+            idempotency_key=f"routine:forbidden-{forbidden_field}",
+        )
+
+    assert rejected.value.code == "autonomous_field_not_allowed"
+    assert markdown.load_all()["projects"][0] == before
+
+
+def test_autonomous_routine_update_rejects_strict_unassigned_and_revoked_grants(tmp_path):
+    markdown, _, service = _service(tmp_path)
+    secret = "routine-denied-secret"
+    _create(service, request_secret_hash=hash_request_secret(secret))
+    project = service.confirm_and_materialize(
+        "request-1", expected_revision=1, confirmation_key="confirm:strict-denied",
+    )["project"]
+    task_id = project["tasks"][0]["id"]
+
+    with pytest.raises(ProjectAuthoringCommandError) as strict:
+        service.apply_autonomous_routine_update(
+            project["id"], task_id, {"description": "No"},
+            requesting_agent_id="author", grant_secret=secret,
+            idempotency_key="routine:strict-denied",
+        )
+    assert strict.value.code == "invalid_project_grant"
+
+    service.confirm_maintenance_request(
+        project["id"],
+        service.create_maintenance_request(
+            project["id"],
+            {"operation": "maintenance_mode_change", "changes": {"agentMaintenanceMode": "autonomous"}},
+            requesting_agent_id="author", grant_secret=secret,
+            idempotency_key="maintenance:enable-auto",
+        )["request"]["id"],
+        expected_revision=1,
+    )
+    with pytest.raises(ProjectAuthoringCommandError) as unassigned:
+        service.apply_autonomous_routine_update(
+            project["id"], task_id, {"description": "No"},
+            requesting_agent_id="author", grant_secret=secret,
+            idempotency_key="routine:unassigned",
+        )
+    assert unassigned.value.code == "agent_not_assigned_to_task"
+
+    service.revoke_project_grant(project["id"])
+    with pytest.raises(ProjectAuthoringCommandError) as revoked:
+        service.apply_autonomous_routine_update(
+            project["id"], task_id, {"description": "No"},
+            requesting_agent_id="author", grant_secret=secret,
+            idempotency_key="routine:revoked",
+        )
+    assert revoked.value.code == "invalid_project_grant"
+    assert markdown.load_all()["projects"][0]["tasks"][0]["description"] != "No"

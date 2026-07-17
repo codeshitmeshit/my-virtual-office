@@ -26522,13 +26522,24 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
         if error:
             self._send_json_error(error)
             return
-        self._send_project_authoring_result(lambda: _PROJECT_AUTHORING_SERVICE.create_maintenance_request(
-            project_id,
-            body.get("mutation"),
-            requesting_agent_id=agent_id,
-            grant_secret=grant_secret,
-            idempotency_key=body.get("idempotencyKey"),
-        ))
+        mutation = body.get("mutation") if isinstance(body.get("mutation"), dict) else {}
+        if mutation.get("operation") == "routine_task_update":
+            self._send_project_authoring_result(lambda: _PROJECT_AUTHORING_SERVICE.apply_autonomous_routine_update(
+                project_id,
+                str(mutation.get("taskId") or ""),
+                mutation.get("changes"),
+                requesting_agent_id=agent_id,
+                grant_secret=grant_secret,
+                idempotency_key=body.get("idempotencyKey"),
+            ))
+        else:
+            self._send_project_authoring_result(lambda: _PROJECT_AUTHORING_SERVICE.create_maintenance_request(
+                project_id,
+                body.get("mutation"),
+                requesting_agent_id=agent_id,
+                grant_secret=grant_secret,
+                idempotency_key=body.get("idempotencyKey"),
+            ))
 
     def _request_id(self):
         request_id = getattr(self, "_vo_request_id", "")

@@ -201,6 +201,12 @@ class ProjectAuthoringRootStore:
                 for key, value in (idempotency.items() if isinstance(idempotency, dict) else [])
                 if str(key).strip() and str(value).strip()
             }
+            autonomous_idempotency = grant.get("autonomousIdempotency")
+            grant["autonomousIdempotency"] = {
+                str(key): copy.deepcopy(value)
+                for key, value in (autonomous_idempotency.items() if isinstance(autonomous_idempotency, dict) else [])
+                if str(key).strip() and isinstance(value, dict)
+            }
         root[RECURRENCES_KEY] = self._repair_record_map(
             root[RECURRENCES_KEY], history_fields=("audit",),
             history_limit=self.config.audit_history_limit,

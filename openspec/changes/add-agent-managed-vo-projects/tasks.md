@@ -22,7 +22,7 @@
 ## 4. Controlled Project Maintenance
 
 - [x] 4.1 Persist `strict_confirmation` and `autonomous` project maintenance modes plus a revocable, rotatable, hashed scoped grant bound to the approved authoring Agent and project.
-- [ ] 4.2 Add Agent-originated maintenance request commands for strict-mode and protected autonomous mutations, including management-confirmed atomic application.
+- [x] 4.2 Add Agent-originated maintenance request commands for strict-mode and protected autonomous mutations, including management-confirmed atomic application.
 - [ ] 4.3 Add the scoped-grant autonomous routine-update allowlist for assigned Agents and regression tests rejecting missing/revoked grants, unassigned actors, structural changes, workspace changes, archive/delete, and role escalation.
 - [ ] 4.4 Add sanitized audit events for draft, confirmation, rejection, materialization, maintenance, and failed actions without persisting credentials.
 
