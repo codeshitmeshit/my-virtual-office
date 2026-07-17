@@ -289,6 +289,10 @@
                     <label style="display:flex;align-items:center;gap:8px;margin-top:10px;">
                         <input type="checkbox" id="s-codex-register" checked> Register new standard agents in native Codex
                     </label>
+                    <label style="display:flex;align-items:center;gap:8px;margin-top:10px;">
+                        <input type="checkbox" id="s-codex-route-approvals-through-vo"> <span data-i18n="route_codex_approvals_through_vo">Route Codex approvals through VO</span>
+                    </label>
+                    <div style="font-size:12px;color:#999;margin:4px 0 10px;line-height:1.4;" data-i18n="route_codex_approvals_through_vo_hint">When enabled, VO handles Codex approvals instead of user-level approval hooks such as Desktop or Flux Island.</div>
                     <button onclick="testCodexConnection()" style="margin:0 0 12px;padding:8px 16px;font-size:9px;">🔍 TEST CODEX</button>
                     <div id="codex-test-status"></div>
                 </div>
@@ -661,6 +665,7 @@
             if (document.getElementById('s-codex-native')) document.getElementById('s-codex-native').checked = c.includeNativeAgents !== false;
             if (document.getElementById('s-codex-register')) document.getElementById('s-codex-register').checked = c.registerNativeAgents !== false;
             if (document.getElementById('s-codex-appserver')) document.getElementById('s-codex-appserver').checked = c.preferAppServer !== false;
+            if (document.getElementById('s-codex-route-approvals-through-vo')) document.getElementById('s-codex-route-approvals-through-vo').checked = c.routeApprovalsThroughVo === true;
             var cFields = document.getElementById('codex-fields');
             if (cFields && cEnable) cFields.style.display = cEnable.checked ? 'block' : 'none';
             var cc = cfg.claudeCode || {};
@@ -915,7 +920,8 @@
                 preferAppServer: document.getElementById('s-codex-appserver').checked,
                 includeMain: document.getElementById('s-codex-main').checked,
                 includeNativeAgents: document.getElementById('s-codex-native').checked,
-                registerNativeAgents: document.getElementById('s-codex-register').checked
+                registerNativeAgents: document.getElementById('s-codex-register').checked,
+                routeApprovalsThroughVo: document.getElementById('s-codex-route-approvals-through-vo').checked
             };
         }
 

@@ -9,6 +9,8 @@ Codex approval requests created by Feishu-originated turns are currently visible
 - Let either approval card approve once or cancel the original Codex turn, with one effective decision across duplicate, retried, or late card actions.
 - If neither Feishu application can deliver the card, stop the approval wait and send a visible failure reply to the originating chat instead of leaving the Agent stalled.
 - Keep approval cards and card-action messages out of Virtual Office chat history while retaining separate delivery, callback, decision, and failure audit records; normal final Agent replies remain in history.
+- Expose an i18n-enabled VIVO setting that opts Codex into VO-owned approvals. Leave it off by default so existing Codex/Desktop approval behavior remains unchanged; when enabled, override approval-hook routing only for the VO Codex process.
+- Keep best-effort Feishu acknowledgement reactions and receipt messages from delaying Agent dispatch when their network calls are slow.
 
 ## Capabilities
 

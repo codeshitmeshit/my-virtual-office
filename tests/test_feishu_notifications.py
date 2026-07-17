@@ -2631,7 +2631,7 @@ def test_feishu_worker_reclaims_stale_processing_and_indexes_terminal_ignored_ou
     assert ignored_index["record"]["event"] == "ignored"
 
 
-def test_feishu_worker_does_not_redispatch_uncertain_or_legacy_processing_after_restart():
+def test_feishu_worker_closes_uncertain_dispatch_without_redispatch_and_leaves_legacy_processing_safe():
     os.environ.setdefault("VO_HERMES_ENABLED", "0")
     os.environ.setdefault("VO_CODEX_ENABLED", "0")
     status_dir = tempfile.mkdtemp(prefix="vo-feishu-worker-uncertain-dispatch-")
@@ -2640,7 +2640,9 @@ def test_feishu_worker_does_not_redispatch_uncertain_or_legacy_processing_after_
     previous_status_dir = server.STATUS_DIR
     previous_config = server.VO_CONFIG
     previous_dispatch = server._dispatch_representative_agent_message
+    previous_command = server._feishu_chat_worker_command
     dispatches = []
+    sends = []
     server.STATUS_DIR = status_dir
     server.VO_CONFIG = {
         **previous_config,
@@ -2678,24 +2680,37 @@ def test_feishu_worker_does_not_redispatch_uncertain_or_legacy_processing_after_
         dispatches.append(source_meta["sourceMessageId"])
         return {"ok": True, "reply": "must not execute", "conversationId": conversation_id}
 
+    def fake_command(operation, payload, timeout=30):
+        sends.append((operation, payload))
+        return {"ok": True, "messageId": "om-interrupted-reply"}
+
     try:
         server._dispatch_representative_agent_message = fake_dispatch
+        server._feishu_chat_worker_command = fake_command
         uncertain = server._handle_feishu_chat_worker_envelope(feishu_worker_envelope("om_uncertain_dispatch"))
         legacy = server._handle_feishu_chat_worker_envelope(feishu_worker_envelope("om_legacy_processing"))
     finally:
         server._dispatch_representative_agent_message = previous_dispatch
+        server._feishu_chat_worker_command = previous_command
         server.STATUS_DIR = previous_status_dir
         server.VO_CONFIG = previous_config
 
     assert uncertain == {
         "schema": "vo.feishu-chat.ack/v1", "requestId": "req-om_uncertain_dispatch", "messageId": "om_uncertain_dispatch",
-        "durable": False, "state": "processing", "idempotent": True, "retryAfterMs": 1000, "_status": 202,
+        "durable": True, "state": "interrupted_by_restart", "idempotent": True,
     }
     assert legacy == {
         "schema": "vo.feishu-chat.ack/v1", "requestId": "req-om_legacy_processing", "messageId": "om_legacy_processing",
         "durable": False, "state": "processing", "idempotent": True, "retryAfterMs": 1000, "_status": 202,
     }
     assert dispatches == []
+    assert sends[0][0] == "send"
+    assert "服务重启已中断" in sends[0][1]["content"]
+    uncertain_index = feishu_chat_channel.load_source_index(status_dir, "om_uncertain_dispatch")
+    assert uncertain_index["state"] == "completed"
+    assert uncertain_index["record"]["agentResult"]["status"] == "interrupted_by_restart"
+    legacy_index = feishu_chat_channel.load_source_index(status_dir, "om_legacy_processing")
+    assert legacy_index["state"] == "processing"
 
 
 def test_feishu_worker_v1_untrusted_group_identity_cannot_dispatch():

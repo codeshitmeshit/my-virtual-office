@@ -676,11 +676,19 @@ class _LateStartCleanup:
 class CodexAppServerClient:
     """Small synchronous facade over app-server's bidirectional JSONL RPC."""
 
-    def __init__(self, workspace: str, model: str = "", binary: str | None = None, max_concurrent_turns: int = 1):
+    def __init__(self, workspace: str, model: str = "", binary: str | None = None, max_concurrent_turns: int = 1, route_approvals_through_vo: bool = False, home_path: str | None = None):
         self.workspace = os.path.abspath(workspace)
         self.model = model or ""
         self.binary = binary or os.environ.get("VO_CODEX_BIN") or shutil.which("codex") or "codex"
         self.profile = str(os.environ.get("VO_CODEX_PROFILE") or "").strip()
+        self.route_approvals_through_vo = bool(route_approvals_through_vo)
+        self.home_path = os.path.abspath(os.path.expanduser(home_path or os.environ.get("VO_CODEX_HOME") or os.environ.get("CODEX_HOME") or "~/.codex"))
+        runtime_command = [self.binary, "app-server"]
+        if self.route_approvals_through_vo:
+            runtime_command.extend(self._permission_hook_disable_args())
+        runtime_command.append("--stdio")
+        runtime_env = os.environ.copy()
+        runtime_env["CODEX_HOME"] = self.home_path
         try:
             self.start_timeout_sec = max(0.1, float(os.environ.get("VO_CODEX_START_TIMEOUT_SEC") or 30))
         except (TypeError, ValueError):
@@ -688,8 +696,9 @@ class CodexAppServerClient:
         summary = str(os.environ.get("VO_CODEX_REASONING_SUMMARY") or "detailed").strip().lower()
         self.reasoning_summary = summary if summary in {"auto", "concise", "detailed", "none"} else "detailed"
         self._runtime = JsonlAppServerRuntime(
-            [self.binary, "app-server", "--stdio"],
+            runtime_command,
             cwd=self.workspace,
+            env=runtime_env,
             name="codex-app-server",
             stderr=subprocess.PIPE,
         )
@@ -702,6 +711,7 @@ class CodexAppServerClient:
         self._operations: dict[str, _Operation] = {}
         self._terminal_operations: OrderedDict[str, _Operation] = OrderedDict()
         self._operations_lock = threading.Lock()
+        self._owned_thread_ids: set[str] = set()
         try:
             self.max_concurrent_turns = max(1, min(int(max_concurrent_turns or 1), 4))
         except (TypeError, ValueError):
@@ -716,6 +726,25 @@ class CodexAppServerClient:
         self._late_start_lock = threading.Lock()
         self._late_start_cleanups: OrderedDict[str, _LateStartCleanup] = OrderedDict()
         self._recovery_admission_lock = threading.RLock()
+
+    def _permission_hook_disable_args(self) -> list[str]:
+        """Disable user PermissionRequest hooks for this VO app-server only."""
+        hooks_path = os.path.join(self.home_path, "hooks.json")
+        try:
+            with open(hooks_path, encoding="utf-8") as source:
+                config = json.load(source)
+        except (FileNotFoundError, OSError, json.JSONDecodeError):
+            return []
+        groups = (config.get("hooks") or {}).get("PermissionRequest") if isinstance(config, dict) else None
+        state_entries: list[str] = []
+        for group_index, group in enumerate(groups if isinstance(groups, list) else []):
+            hooks = group.get("hooks") if isinstance(group, dict) else None
+            for hook_index, _hook in enumerate(hooks if isinstance(hooks, list) else []):
+                state_key = f"{hooks_path}:permission_request:{group_index}:{hook_index}"
+                state_entries.append(f"{json.dumps(state_key)} = {{ enabled = false }}")
+        if not state_entries:
+            return []
+        return ["-c", "hooks.state={ " + ", ".join(state_entries) + " }"]
 
     def close(self) -> None:
         self._initialized = False
@@ -841,6 +870,9 @@ class CodexAppServerClient:
     def _handle_runtime_exit(self) -> None:
         with self._recovery_admission_lock:
             self._initialized = False
+            owned_thread_ids = getattr(self, "_owned_thread_ids", None)
+            if owned_thread_ids is not None:
+                owned_thread_ids.clear()
             with self._late_start_lock:
                 for cleanup in self._late_start_cleanups.values():
                     cleanup.event.set()
@@ -1505,7 +1537,8 @@ class CodexAppServerClient:
             else:
                 self._pending_approvals.clear()
 
-    def pending_approval(self, thread_id: str = "") -> dict[str, Any]:
+    def pending_approval(self, thread_id: str = "", approval_id: str = "") -> dict[str, Any]:
+        approval_id = str(approval_id or "").strip()
         with self._approval_lock:
             pending = [
                 dict(item["approval"])
@@ -1513,7 +1546,21 @@ class CodexAppServerClient:
                 if isinstance(item.get("approval"), dict) and item["approval"].get("status") == "pending"
                 and (not thread_id or str(item["approval"].get("threadId") or "") == str(thread_id))
             ]
-        return {"ok": True, "pending": pending[0] if pending else None, "pending_count": len(pending)}
+        selected = None
+        if approval_id:
+            for approval in pending:
+                if approval_id in {
+                    str(approval.get("id") or ""),
+                    str(approval.get("approval_id") or ""),
+                    str(approval.get("requestId") or ""),
+                    str(approval.get("itemId") or ""),
+                    str(approval.get("callbackId") or ""),
+                }:
+                    selected = approval
+                    break
+        else:
+            selected = pending[0] if pending else None
+        return {"ok": True, "pending": selected, "pending_count": len(pending)}
 
     def respond_approval(self, approval_id: str, choice: str = "cancel") -> dict[str, Any]:
         approval_id = str(approval_id or "").strip()
@@ -1712,10 +1759,13 @@ class CodexAppServerClient:
             return {"decision": "approved" if approved else "abort"}
         return {"decision": "cancel"}
 
+    def _approval_policy(self) -> str:
+        return "untrusted" if self.route_approvals_through_vo else "on-request"
+
     def _thread_params(self) -> dict[str, Any]:
         params: dict[str, Any] = {
             "cwd": self.workspace,
-            "approvalPolicy": "on-request",
+            "approvalPolicy": self._approval_policy(),
             # A resumed thread may have been created by Codex Desktop. Override
             # its persisted reviewer so approvals are routed back to this
             # app-server client, where VO can expose them on the source surface.
@@ -1798,6 +1848,13 @@ class CodexAppServerClient:
             ordered_threads = len(self._thread_locks)
         return {**counters, "maxConcurrentTurns": self.max_concurrent_turns, "orderedThreads": ordered_threads}
 
+    def protocol_diagnostics(self) -> dict[str, Any]:
+        diagnostics = self._runtime.diagnostics()
+        with self._operations_lock:
+            diagnostics["activeThreadIds"] = sorted(self._operations.keys())
+        diagnostics["pendingApprovalCount"] = self.pending_approval().get("pending_count", 0)
+        return diagnostics
+
     def _execute_locked(
         self,
         message: str,
@@ -1820,14 +1877,21 @@ class CodexAppServerClient:
                     if guard:
                         return guard
                     self._ensure_started()
-                    if thread_id:
+                    created_or_forked = False
+                    if thread_id and allow_interaction and thread_id not in self._owned_thread_ids:
+                        result = self._request_with_restart("thread/fork", {"threadId": thread_id, **self._thread_params()}, timeout=self.start_timeout_sec)
+                        created_or_forked = True
+                    elif thread_id:
                         result = self._request_with_restart("thread/resume", {"threadId": thread_id, **self._thread_params()}, timeout=self.start_timeout_sec)
                     else:
                         result = self._request_with_restart("thread/start", self._thread_params(), timeout=self.start_timeout_sec)
+                        created_or_forked = True
                     thread = result.get("thread") or {}
                     active_thread_id = str(thread.get("id") or thread_id)
                     if not active_thread_id:
                         return _error_result("protocol_error", "Codex did not return a thread id")
+                    if created_or_forked:
+                        self._owned_thread_ids.add(active_thread_id)
                     operation = _Operation(
                         thread_id=active_thread_id,
                         event_callback=event_callback,
@@ -1857,19 +1921,20 @@ class CodexAppServerClient:
                     visibility_timer.daemon = True
                     operation.set_prestart_visibility_timer(visibility_timer)
                     visibility_timer.start()
-                turn_result = self._request_with_restart("turn/start", {
+                turn_params = {
                     "threadId": active_thread_id,
                     "input": _turn_user_input(message, attachments),
                     "summary": self.reasoning_summary,
                     "cwd": self.workspace,
-                    "approvalPolicy": "on-request",
+                    "approvalPolicy": self._approval_policy(),
                     "approvalsReviewer": "user",
                     "sandboxPolicy": {
                         "type": "workspaceWrite",
                         "writableRoots": [self.workspace],
                         "networkAccess": False,
                     },
-                }, timeout=TURN_START_RESPONSE_TIMEOUT_SEC, retry=False, on_late_response=handle_late_response)
+                }
+                turn_result = self._request_with_restart("turn/start", turn_params, timeout=TURN_START_RESPONSE_TIMEOUT_SEC, retry=False, on_late_response=handle_late_response)
             except TimeoutError:
                 late_start_cleanup.observed_terminal_turn_ids = operation.prestart_terminal_turn_ids()
                 cleanup_status = self._register_late_start_cleanup_for_generation(
@@ -2246,19 +2311,21 @@ class CodexHttpBridgeClient:
         return self._post("/compact", {"threadId": thread_id, "workspace": self.workspace, "timeoutSec": timeout_sec}, timeout_sec + 10)
 
 
-_CLIENTS: dict[tuple[str, str, str, int], CodexAppServerClient | CodexHttpBridgeClient] = {}
+_CLIENTS: dict[tuple[str, str, str, str, int, bool], CodexAppServerClient | CodexHttpBridgeClient] = {}
 _CLIENTS_LOCK = threading.Lock()
 
 
-def get_codex_bridge(workspace: str, model: str = "", bridge_url: str = "", *, max_concurrent_turns: int = 1) -> CodexAppServerClient | CodexHttpBridgeClient:
+def get_codex_bridge(workspace: str, model: str = "", bridge_url: str = "", *, max_concurrent_turns: int = 1, route_approvals_through_vo: bool = False, home_path: str = "") -> CodexAppServerClient | CodexHttpBridgeClient:
     try:
         capacity = max(1, min(int(max_concurrent_turns or 1), 4))
     except (TypeError, ValueError):
         capacity = 1
-    key = (os.path.abspath(workspace), model or "", bridge_url or "", capacity)
+    route_in_vo = bool(route_approvals_through_vo)
+    resolved_home = os.path.abspath(os.path.expanduser(home_path or os.environ.get("VO_CODEX_HOME") or os.environ.get("CODEX_HOME") or "~/.codex"))
+    key = (os.path.abspath(workspace), resolved_home, model or "", bridge_url or "", capacity, route_in_vo)
     with _CLIENTS_LOCK:
         client = _CLIENTS.get(key)
         if client is None:
-            client = CodexHttpBridgeClient(bridge_url, workspace, model) if bridge_url else CodexAppServerClient(workspace, model, max_concurrent_turns=capacity)
+            client = CodexHttpBridgeClient(bridge_url, workspace, model) if bridge_url else CodexAppServerClient(workspace, model, max_concurrent_turns=capacity, route_approvals_through_vo=route_in_vo, home_path=resolved_home)
             _CLIENTS[key] = client
         return client

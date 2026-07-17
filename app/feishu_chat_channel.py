@@ -4,6 +4,7 @@ import json
 import os
 import random
 import re
+import threading
 import uuid
 from datetime import datetime
 
@@ -207,6 +208,62 @@ def mark_source_index_dispatching(status_dir, source_message_id, *, now, lock, o
             "executionPhase": "dispatching",
             "updatedAt": now(),
             **({"ownerId": str(owner_id or "").strip()} if str(owner_id or "").strip() else {}),
+        }
+        temp_path = f"{path}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
+        try:
+            with open(temp_path, "w", encoding="utf-8") as f:
+                os.chmod(temp_path, 0o600)
+                f.write(json.dumps(item, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n")
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(temp_path, path)
+            os.chmod(path, 0o600)
+        finally:
+            try:
+                os.unlink(temp_path)
+            except FileNotFoundError:
+                pass
+    return item
+
+
+def finalize_orphaned_source_index(status_dir, source_message_id, terminal_record, *, now, lock, current_owner_id=""):
+    """Close a dispatch owned by a previous VO process without redispatching it."""
+    source_message_id = str(source_message_id or "").strip()
+    current_owner_id = str(current_owner_id or "").strip()
+    terminal_record = terminal_record if isinstance(terminal_record, dict) else {}
+    if not source_message_id or terminal_record.get("sourceMessageId") != source_message_id:
+        return None
+    path = source_index_path(status_dir, source_message_id)
+    with lock:
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                existing = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
+            return None
+        previous_owner_id = str(existing.get("ownerId") or "").strip() if isinstance(existing, dict) else ""
+        if (
+            not isinstance(existing, dict)
+            or existing.get("state") != "processing"
+            or existing.get("executionPhase") != "dispatching"
+            or not previous_owner_id
+            or not current_owner_id
+            or previous_owner_id == current_owner_id
+        ):
+            return None
+        item = {
+            "schema": "vo.feishu-source-message-index/v1",
+            "sourceMessageId": source_message_id,
+            "state": "completed",
+            "updatedAt": now(),
+            "record": {
+                key: terminal_record.get(key)
+                for key in (
+                    "id", "event", "sourceMessageId", "conversationId", "feishuChatId",
+                    "representativeAgentId", "chatType", "messageType", "reply",
+                    "feishuReply", "deliveryStatus", "sendResult", "agentResult", "reason",
+                )
+                if terminal_record.get(key) not in (None, "", [], {})
+            },
         }
         temp_path = f"{path}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
         try:
@@ -676,6 +733,7 @@ def handle_message_event(
     choose_reaction=ack_reaction_emoji_type,
     download_image=None,
     mark_dispatching=None,
+    async_acknowledgement=False,
 ):
     event = (body or {}).get("event") if isinstance((body or {}).get("event"), dict) else {}
     message = event.get("message") if isinstance(event.get("message"), dict) else {}
@@ -787,22 +845,65 @@ def handle_message_event(
             "attachmentResult": attachment_result if message_type == "image" else {},
             "imageKey": image_key,
         })
-        receipt_text = ""
-        receipt_result = {}
-        receipt_message_id = ""
         reaction_type = str((choose_reaction or ack_reaction_emoji_type)() or "").strip() or ACK_REACTION_EMOJI_TYPE
-        reaction_result = _safe_channel_call(add_reaction, source_message_id, reaction_type) if add_reaction else {}
-        reaction_id = _reaction_id_from_result(reaction_result)
-        if not reaction_result.get("ok") and send_receipt:
-            receipt_text = str((choose_receipt or random_ack_emoji)() or "").strip() or ACK_EMOJIS[0]
-            receipt_result = _safe_channel_call(send_receipt, chat_id, receipt_text)
-            receipt_message_id = _message_id_from_send_result(receipt_result)
+        acknowledgement = {
+            "reactionResult": {},
+            "reactionDeleteResult": {},
+            "receiptText": "",
+            "receiptResult": {},
+            "receiptRecallResult": {},
+        }
+        turn_finished = threading.Event()
+
+        def acknowledge_and_cleanup():
+            reaction_result = _safe_channel_call(add_reaction, source_message_id, reaction_type) if add_reaction else {}
+            acknowledgement["reactionResult"] = reaction_result
+            reaction_id = _reaction_id_from_result(reaction_result)
+            if not reaction_result.get("ok") and send_receipt:
+                receipt_text = str((choose_receipt or random_ack_emoji)() or "").strip() or ACK_EMOJIS[0]
+                receipt_result = _safe_channel_call(send_receipt, chat_id, receipt_text)
+                acknowledgement["receiptText"] = receipt_text
+                acknowledgement["receiptResult"] = receipt_result
+            turn_finished.wait()
+            if reaction_id and delete_reaction:
+                acknowledgement["reactionDeleteResult"] = _safe_channel_call(delete_reaction, source_message_id, reaction_id)
+            receipt_message_id = _message_id_from_send_result(acknowledgement["receiptResult"])
+            if receipt_message_id and recall_message:
+                acknowledgement["receiptRecallResult"] = _safe_channel_call(recall_message, receipt_message_id)
+            if async_acknowledgement:
+                record_event({
+                    **base_record,
+                    "event": "acknowledgement_completed",
+                    "conversationId": conversation_id,
+                    "reactionType": reaction_type,
+                    **acknowledgement,
+                })
+
+        acknowledgement_thread = None
+        if async_acknowledgement:
+            acknowledgement_thread = threading.Thread(
+                target=acknowledge_and_cleanup,
+                name=f"feishu-ack-{source_message_id[:24]}",
+                daemon=True,
+            )
+            acknowledgement_thread.start()
+        else:
+            # Preserve the deterministic synchronous mode used by direct callers and tests.
+            reaction_result = _safe_channel_call(add_reaction, source_message_id, reaction_type) if add_reaction else {}
+            acknowledgement["reactionResult"] = reaction_result
+            reaction_id = _reaction_id_from_result(reaction_result)
+            if not reaction_result.get("ok") and send_receipt:
+                receipt_text = str((choose_receipt or random_ack_emoji)() or "").strip() or ACK_EMOJIS[0]
+                receipt_result = _safe_channel_call(send_receipt, chat_id, receipt_text)
+                acknowledgement["receiptText"] = receipt_text
+                acknowledgement["receiptResult"] = receipt_result
         if mark_dispatching:
             try:
                 dispatch_state = mark_dispatching(source_message_id)
             except Exception:
                 dispatch_state = None
             if not dispatch_state:
+                turn_finished.set()
                 return {
                     "ok": False,
                     "status": "processing",
@@ -830,8 +931,14 @@ def handle_message_event(
         reply = str(result.get("reply") or result.get("error") or "").strip() or "处理完成，但没有可发送的文本回复。"
         feishu_reply = representative_display_reply(representative_agent_id, reply, find_agent=find_agent)
         send_result = deliver(feishu_reply)
-        reaction_delete_result = _safe_channel_call(delete_reaction, source_message_id, reaction_id) if reaction_id and delete_reaction else {}
-        receipt_recall_result = _safe_channel_call(recall_message, receipt_message_id) if receipt_message_id and recall_message else {}
+        turn_finished.set()
+        if not async_acknowledgement:
+            reaction_id = _reaction_id_from_result(acknowledgement["reactionResult"])
+            if reaction_id and delete_reaction:
+                acknowledgement["reactionDeleteResult"] = _safe_channel_call(delete_reaction, source_message_id, reaction_id)
+            receipt_message_id = _message_id_from_send_result(acknowledgement["receiptResult"])
+            if receipt_message_id and recall_message:
+                acknowledgement["receiptRecallResult"] = _safe_channel_call(recall_message, receipt_message_id)
         completed_record = record_event({
             **base_record,
             "event": "turn_completed",
@@ -849,11 +956,8 @@ def handle_message_event(
             "deliveryStatus": _delivery_classification(send_result),
             "replyInThread": reply_in_thread if chat_type == "group" else False,
             "reactionType": reaction_type,
-            "reactionResult": reaction_result,
-            "reactionDeleteResult": reaction_delete_result,
-            "receiptText": receipt_text if receipt_result else "",
-            "receiptResult": receipt_result,
-            "receiptRecallResult": receipt_recall_result,
+            **acknowledgement,
+            "acknowledgementPending": bool(acknowledgement_thread and acknowledgement_thread.is_alive()),
             "inboundRecordId": inbound_record.get("id"),
         })
         return {
@@ -865,9 +969,7 @@ def handle_message_event(
             "reply": reply,
             "agentResult": result,
             "sendResult": send_result,
-            "reactionResult": reaction_result,
-            "reactionDeleteResult": reaction_delete_result,
-            "receiptResult": receipt_result,
-            "receiptRecallResult": receipt_recall_result,
+            **acknowledgement,
+            "acknowledgementPending": bool(acknowledgement_thread and acknowledgement_thread.is_alive()),
             "record": completed_record,
         }

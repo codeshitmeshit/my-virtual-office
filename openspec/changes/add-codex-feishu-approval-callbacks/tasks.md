@@ -35,3 +35,15 @@
 - [x] 8.1 Add focused server integration tests for notification-primary, Chat-App-only, fallback, duplicate/conflicting callbacks, undeliverable approval closure, and VO chat-history isolation; run the affected Python and Node test suites plus strict OpenSpec validation and record the evidence for the test-result gate.
 
 - [x] 8.2 Document configuration, original-user identity selection, callback transport, audit/metrics, gray rollout, failure diagnosis, and rollback behavior, including that interactive approvals do not use webhook or the configured fixed notification recipient.
+
+- [x] 8.3 Close orphaned Feishu `dispatching` source indexes after a VO process restart without redispatching the uncertain provider action, emit a visible interrupted outcome, release the ordered worker spool, and add restart/poison-head regression coverage.
+
+- [x] 8.4 Re-home interactive Codex threads to the current VO app-server connection with a one-time context-preserving fork per runtime generation, so resumed Desktop/old-process threads deliver approval server requests to VO, with ownership and no-repeat-fork tests.
+
+- [x] 8.5 Add a default-off, i18n-enabled VIVO Codex option that process-locally disables configured `PermissionRequest` hooks only when VO approval routing is selected, preserve original behavior otherwise, and cover config persistence, bridge cache/runtime arguments, and UI surfaces.
+
+- [x] 8.6 Move production Feishu reaction/temporary-receipt acknowledgement off the synchronous Agent-dispatch path, keep deterministic synchronous compatibility for direct callers, audit asynchronous cleanup, and add a blocked-reaction regression test.
+
+- [x] 8.7 Validate the opt-in path against a live local app-server and Feishu-origin route, then run the affected Python/Node suites, UI/i18n checks, diff checks, and strict OpenSpec validation.
+
+- [x] 8.8 Suppress duplicate delivery for replayed pending interaction events and select concurrent native approvals by the event request/item identity so parallel command approvals receive distinct routes without leaving hidden provider pending state.

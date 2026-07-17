@@ -14075,6 +14075,7 @@ function _mmLoadCurrentSettings() {
         var codexBridgeUrl = document.getElementById('mm-codex-bridge-url');
         var codexIncludeMain = document.getElementById('mm-codex-include-main');
         var codexIncludeNative = document.getElementById('mm-codex-include-native');
+        var codexRouteApprovalsThroughVo = document.getElementById('mm-codex-route-approvals-through-vo');
         var claudeCodeEnabled = document.getElementById('mm-claude-code-enable');
         var claudeCodeHome = document.getElementById('mm-claude-code-home');
         var claudeCodeBin = document.getElementById('mm-claude-code-bin');
@@ -14125,6 +14126,7 @@ function _mmLoadCurrentSettings() {
         if (codexBridgeUrl) codexBridgeUrl.value = codexCfg.bridgeUrl || '';
         if (codexIncludeMain) codexIncludeMain.checked = codexCfg.includeMain !== false;
         if (codexIncludeNative) codexIncludeNative.checked = codexCfg.includeNativeAgents !== false;
+        if (codexRouteApprovalsThroughVo) codexRouteApprovalsThroughVo.checked = codexCfg.routeApprovalsThroughVo === true;
         var claudeCfg = cfg.claudeCode || {};
         if (claudeCodeEnabled) claudeCodeEnabled.checked = claudeCfg.enabled === true;
         if (claudeCodeHome) claudeCodeHome.value = claudeCfg.homePath || '';
@@ -14410,7 +14412,8 @@ function mmTestCodex() {
         model: ((document.getElementById('mm-codex-model') || {}).value || '').trim() || null,
         bridgeUrl: ((document.getElementById('mm-codex-bridge-url') || {}).value || '').trim() || null,
         includeMain: !!(document.getElementById('mm-codex-include-main') || {}).checked,
-        includeNativeAgents: !!(document.getElementById('mm-codex-include-native') || {}).checked
+        includeNativeAgents: !!(document.getElementById('mm-codex-include-native') || {}).checked,
+        routeApprovalsThroughVo: !!(document.getElementById('mm-codex-route-approvals-through-vo') || {}).checked
     };
     i18n.managementFetch('/setup/save', {
         method: 'POST',
@@ -15146,7 +15149,8 @@ function mmSaveSettings() {
             model: ((document.getElementById('mm-codex-model') || {}).value || '').trim() || null,
             bridgeUrl: ((document.getElementById('mm-codex-bridge-url') || {}).value || '').trim() || null,
             includeMain: !!(document.getElementById('mm-codex-include-main') || {}).checked,
-            includeNativeAgents: !!(document.getElementById('mm-codex-include-native') || {}).checked
+            includeNativeAgents: !!(document.getElementById('mm-codex-include-native') || {}).checked,
+            routeApprovalsThroughVo: !!(document.getElementById('mm-codex-route-approvals-through-vo') || {}).checked
         };
     }
     var _claudeCb = document.getElementById('mm-claude-code-enable');

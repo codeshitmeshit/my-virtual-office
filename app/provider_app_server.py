@@ -6,6 +6,7 @@ import json
 import queue
 import subprocess
 import threading
+import time
 from collections import OrderedDict
 from contextlib import contextmanager
 from typing import Any, Callable
@@ -13,6 +14,7 @@ from typing import Any, Callable
 
 MAX_PENDING_REQUESTS = 1000
 READER_DRAIN_WAIT_SEC = 0.25
+MAX_PROTOCOL_DIAGNOSTICS = 100
 
 
 class AppServerResponseError(RuntimeError):
@@ -58,6 +60,9 @@ class JsonlAppServerRuntime:
         self._stderr_reader: threading.Thread | None = None
         self._stderr_lines: list[str] = []
         self._stderr_lock = threading.Lock()
+        self._diagnostic_lock = threading.Lock()
+        self._inbound_counts: dict[str, int] = {}
+        self._recent_inbound: list[dict[str, Any]] = []
         self.on_server_request: Callable[[dict[str, Any]], None] | None = None
         self.on_notification: Callable[[str, dict[str, Any]], None] | None = None
         self.on_exit: Callable[[], None] | None = None
@@ -234,6 +239,7 @@ class JsonlAppServerRuntime:
                     message = json.loads(raw)
                 except json.JSONDecodeError:
                     continue
+                self._record_inbound(message, generation)
                 if "id" in message and ("result" in message or "error" in message) and not message.get("method"):
                     late_callback = None
                     with self._pending_lock:
@@ -263,6 +269,45 @@ class JsonlAppServerRuntime:
                 self._notify_exit(callback, exit_generation)
             finally:
                 reader_drained.set()
+
+    def _record_inbound(self, message: dict[str, Any], generation: int) -> None:
+        """Keep bounded, content-free protocol evidence for live diagnostics."""
+        method = str(message.get("method") or "")
+        if method:
+            kind = "server_request" if "id" in message else "notification"
+            label = method
+        else:
+            kind = "response"
+            label = "error" if message.get("error") else "result"
+        params = message.get("params") if isinstance(message.get("params"), dict) else {}
+        entry = {
+            "at": int(time.time() * 1000),
+            "generation": generation,
+            "kind": kind,
+            "method": method,
+            "label": label,
+            "threadId": str(params.get("threadId") or ""),
+            "turnId": str(params.get("turnId") or ""),
+        }
+        with self._diagnostic_lock:
+            key = f"{kind}:{label}"
+            self._inbound_counts[key] = self._inbound_counts.get(key, 0) + 1
+            self._recent_inbound.append(entry)
+            if len(self._recent_inbound) > MAX_PROTOCOL_DIAGNOSTICS:
+                self._recent_inbound = self._recent_inbound[-MAX_PROTOCOL_DIAGNOSTICS:]
+
+    def diagnostics(self) -> dict[str, Any]:
+        with self._diagnostic_lock:
+            counts = dict(self._inbound_counts)
+            recent = [dict(item) for item in self._recent_inbound]
+        proc = self._proc
+        return {
+            "running": bool(proc and proc.poll() is None),
+            "pid": int(proc.pid) if proc and getattr(proc, "pid", None) else 0,
+            "generation": self._generation,
+            "inboundCounts": counts,
+            "recentInbound": recent,
+        }
 
     def _read_stderr_loop(self, stderr: Any, generation: int) -> None:
         if not stderr:

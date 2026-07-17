@@ -799,6 +799,7 @@ def _load_vo_config():
             "includeMain": _env_bool("VO_CODEX_INCLUDE_MAIN", codex_cfg.get("includeMain", True)),
             "includeNativeAgents": _env_bool("VO_CODEX_INCLUDE_NATIVE_AGENTS", codex_cfg.get("includeNativeAgents", True)),
             "registerNativeAgents": _env_bool("VO_CODEX_REGISTER_NATIVE_AGENTS", codex_cfg.get("registerNativeAgents", True)),
+            "routeApprovalsThroughVo": _env_bool("VO_CODEX_ROUTE_APPROVALS_THROUGH_VO", codex_cfg.get("routeApprovalsThroughVo", False)),
             "fastPath": codex_fast_path.diagnostics(),
         },
         "claudeCode": {
@@ -6382,6 +6383,7 @@ def _codex_provider_from_config():
         include_main=cfg.get("includeMain", True),
         include_native_agents=cfg.get("includeNativeAgents", True),
         register_native_agents=cfg.get("registerNativeAgents", True),
+        route_approvals_through_vo=cfg.get("routeApprovalsThroughVo", False),
         max_concurrent_turns=_CODEX_FAST_PATH_SETTINGS.max_concurrent_turns if _CODEX_FAST_PATH_SETTINGS.enabled else 1,
     )
 
@@ -6895,7 +6897,7 @@ def _queue_codex_feishu_approval(approval, context, provider, failure_state):
     local_closed = {"value": False}
     route = None
     try:
-        route, _created = CODEX_FEISHU_APPROVAL_COORDINATOR.register(approval, context)
+        route, created = CODEX_FEISHU_APPROVAL_COORDINATOR.register(approval, context)
     except (ValueError, OverflowError, OSError) as exc:
         failure_state["registrationError"] = type(exc).__name__[:80]
         CODEX_FEISHU_APPROVAL_COORDINATOR.metric("registration_failure")
@@ -6953,6 +6955,11 @@ def _queue_codex_feishu_approval(approval, context, provider, failure_state):
         timer = threading.Timer(0, close_wait, args=("unroutable_origin", None))
         timer.daemon = True
         timer.start()
+        return True
+    if not created:
+        # The provider event stream may replay the same pending interaction.
+        # Registration is the durable idempotency fence; only its creator may deliver.
+        CODEX_FEISHU_APPROVAL_COORDINATOR.metric("duplicate_delivery_suppressed")
         return True
 
     notification_config, chat_config = _codex_feishu_approval_delivery_configs()
@@ -7158,6 +7165,7 @@ def _handle_codex_chat(body):
                     pending_result = pending_lookup(
                         str(agent.get("profile") or agent.get("providerAgentId") or ""),
                         session_id=str(record.get("threadId") or ""),
+                        approval_id=str(record.get("interactionId") or record.get("itemId") or approval_id or ""),
                     )
                     pending_approval = pending_result.get("pending") if isinstance(pending_result, dict) else None
                 if isinstance(pending_approval, dict) and pending_approval:
@@ -13582,6 +13590,53 @@ def _feishu_processing_ack(envelope):
     }
 
 
+def _finalize_orphaned_feishu_worker_message(adapted, envelope):
+    message = ((adapted or {}).get("event") or {}).get("message") or {}
+    source_message_id = str(envelope.get("messageId") or "").strip()
+    indexed = feishu_chat_channel.load_source_index(STATUS_DIR, source_message_id) or {}
+    indexed_record = indexed.get("record") if isinstance(indexed.get("record"), dict) else {}
+    reply = "上一轮处理因 VO 服务重启已中断，后续消息将继续按顺序处理。"
+    terminal_record = {
+        "id": str(uuid.uuid4()),
+        "event": "turn_completed",
+        "sourceMessageId": source_message_id,
+        "conversationId": indexed_record.get("conversationId") or "",
+        "feishuChatId": indexed_record.get("feishuChatId") or message.get("chat_id") or "",
+        "representativeAgentId": indexed_record.get("representativeAgentId") or "",
+        "chatType": indexed_record.get("chatType") or message.get("chat_type") or "",
+        "messageType": indexed_record.get("messageType") or message.get("message_type") or "text",
+        "text": str(message.get("text") or ""),
+        "reply": reply,
+        "feishuReply": reply,
+        "reason": "previous_process_interrupted",
+        "agentResult": {
+            "ok": False,
+            "status": "interrupted_by_restart",
+            "errorCode": "previous_process_interrupted",
+            "error": "The previous VO process exited after provider dispatch; the uncertain action was not replayed.",
+            "reply": reply,
+        },
+    }
+    finalized = feishu_chat_channel.finalize_orphaned_source_index(
+        STATUS_DIR,
+        source_message_id,
+        terminal_record,
+        now=_exec_meeting_now,
+        lock=_FEISHU_CHANNEL_RECORD_LOCK,
+        current_owner_id=_FEISHU_PROCESS_OWNER_ID,
+    )
+    if not finalized:
+        return None
+    chat_id = str(terminal_record.get("feishuChatId") or "").strip()
+    if str(terminal_record.get("chatType") or "").lower() == "group":
+        send_result = _feishu_chat_app_group_reply(chat_id, source_message_id, reply, False)
+    else:
+        send_result = _feishu_chat_app_text_send(chat_id, reply)
+    terminal_record["sendResult"] = send_result
+    terminal_record["deliveryStatus"] = "sent" if send_result.get("ok") else "failed"
+    return _record_feishu_channel_event(terminal_record)
+
+
 def _feishu_channel_lock(key):
     key = str(key or "default")
     with _FEISHU_CHANNEL_LOCKS_LOCK:
@@ -13783,13 +13838,17 @@ def _dispatch_representative_agent_message(agent_id, message, conversation_id, s
         delivery_message = f"{delivery_message}\n\n{attachment_context}" if delivery_message else attachment_context
     key = _provider_conversation_key("openclaw", agent_id, conversation_id, agent_id=agent_id)
     native_id = _openclaw_conversation_session_key(agent_id, conversation_id)
-    reply = PROVIDER_CONVERSATION_SERVICE.deliver_queued(
-        key,
-        native_id,
-        delivery_message,
-        _openclaw_queued_conversation_port(timeout=int(VO_CONFIG.get("openclaw", {}).get("timeoutSec") or 600)),
-        attachments=validated_attachments,
-    )
+    gateway_presence.set_manual_override(agent_id, "working", f"Replying to {sender_name}")
+    try:
+        reply = PROVIDER_CONVERSATION_SERVICE.deliver_queued(
+            key,
+            native_id,
+            delivery_message,
+            _openclaw_queued_conversation_port(timeout=int(VO_CONFIG.get("openclaw", {}).get("timeoutSec") or 600)),
+            attachments=validated_attachments,
+        )
+    finally:
+        gateway_presence.set_manual_override(agent_id, "idle", "")
     ok = not str(reply or "").startswith("[ERROR]")
     return {
         "ok": ok,
@@ -13869,10 +13928,24 @@ def _handle_feishu_chat_worker_envelope(body):
     adapted, envelope = _adapt_feishu_chat_inbound_envelope(body)
     if not envelope:
         return _handle_feishu_chat_message_event(adapted)
+    orphaned = _finalize_orphaned_feishu_worker_message(adapted, envelope)
+    if orphaned:
+        return {
+            "schema": "vo.feishu-chat.ack/v1",
+            "requestId": envelope["requestId"],
+            "messageId": envelope["messageId"],
+            "durable": True,
+            "state": "interrupted_by_restart",
+            "idempotent": True,
+        }
     if not _claim_feishu_source_message(envelope["messageId"]):
         return _feishu_processing_ack(envelope)
     try:
-        result = _handle_feishu_chat_message_event(adapted, allow_processing_reclaim=True)
+        result = _handle_feishu_chat_message_event(
+            adapted,
+            allow_processing_reclaim=True,
+            async_acknowledgement=True,
+        )
     finally:
         _release_feishu_source_message(envelope["messageId"])
     record = result.get("record") if isinstance(result, dict) and isinstance(result.get("record"), dict) else {}
@@ -13967,7 +14040,15 @@ def _handle_feishu_chat_card_action_worker_envelope(body):
     }
 
 
-def _handle_feishu_chat_message_event(body, *, send_text=None, reply_text=None, download_image=None, allow_processing_reclaim=False):
+def _handle_feishu_chat_message_event(
+    body,
+    *,
+    send_text=None,
+    reply_text=None,
+    download_image=None,
+    allow_processing_reclaim=False,
+    async_acknowledgement=False,
+):
     injected_send = send_text
     group_reply = reply_text
     if group_reply is None and injected_send is not None:
@@ -13993,6 +14074,7 @@ def _handle_feishu_chat_message_event(body, *, send_text=None, reply_text=None, 
         find_agent=_find_agent_record,
         download_image=download_image if download_image is not None else (None if send_text else _feishu_chat_app_image_download),
         mark_dispatching=_mark_feishu_source_dispatching,
+        async_acknowledgement=async_acknowledgement,
     )
 
 
@@ -27139,6 +27221,9 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(json.dumps(result).encode())
         elif request_path == "/api/codex/feishu-approvals/status":
+            provider = _codex_provider_from_config()
+            bridge = provider._bridge()
+            protocol_diagnostics = bridge.protocol_diagnostics() if hasattr(bridge, "protocol_diagnostics") else {}
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Cache-Control", "no-store")
@@ -27146,6 +27231,7 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             self.wfile.write(json.dumps({
                 "ok": True,
                 "enabled": _codex_feishu_approval_cards_enabled(),
+                "protocol": protocol_diagnostics,
                 **CODEX_FEISHU_APPROVAL_COORDINATOR.stats(),
             }).encode())
         elif request_path.startswith("/api/codex/runs/") and request_path.endswith("/events"):

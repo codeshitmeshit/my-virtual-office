@@ -2147,6 +2147,8 @@
   "optional_app_server_bridge_url": "Optional app-server bridge URL",
   "show_codex_main_agent": "Show Codex Main agent",
   "discover_native_codex_agents": "Discover native Codex agents",
+  "route_codex_approvals_through_vo": "Route Codex approvals through VO",
+  "route_codex_approvals_through_vo_hint": "When enabled, VO handles Codex approvals instead of user-level approval hooks such as Desktop or Flux Island.",
   "test_codex": "🔍 Test Codex",
   "enable_claude_code": "Enable Claude Code",
   "claude_code_home": "Claude Code Home",

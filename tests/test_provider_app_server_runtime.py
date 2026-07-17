@@ -174,6 +174,20 @@ def test_runtime_dispatches_server_request_and_notification():
         time.sleep(0.01)
     assert seen_requests[0]["method"] == "approval/request"
     assert seen_notifications[0][0] == "turn/started"
+    diagnostics = runtime.diagnostics()
+    assert diagnostics["inboundCounts"]["server_request:approval/request"] == 1
+    assert diagnostics["inboundCounts"]["notification:turn/started"] == 1
+    assert diagnostics["inboundCounts"]["response:result"] == 1
+    approval_diagnostic = next(item for item in diagnostics["recentInbound"] if item["method"] == "approval/request")
+    assert approval_diagnostic == {
+        "at": approval_diagnostic["at"],
+        "generation": diagnostics["generation"],
+        "kind": "server_request",
+        "method": "approval/request",
+        "label": "approval/request",
+        "threadId": "thr",
+        "turnId": "",
+    }
     runtime.close()
 
 

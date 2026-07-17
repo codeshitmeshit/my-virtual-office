@@ -71,6 +71,12 @@ for raw in sys.stdin:
             send({"id": request_id, "error": {"message": "resumed thread reviewer override missing"}})
             continue
         send({"id": request_id, "result": {"thread": {"id": params["threadId"]}}})
+    elif method == "thread/fork":
+        if params.get("approvalsReviewer") != "user":
+            send({"id": request_id, "error": {"message": "forked thread reviewer override missing"}})
+            continue
+        thread_id = params["threadId"] + "_vo"
+        send({"id": request_id, "result": {"thread": {"id": thread_id}}})
     elif method == "turn/start":
         if params.get("approvalsReviewer") != "user":
             send({"id": request_id, "error": {"message": "turn reviewer override missing"}})
@@ -1058,6 +1064,44 @@ def test_interactive_approval_continues_original_turn():
             client.close()
 
 
+def test_interactive_resume_forks_foreign_thread_once_per_runtime_generation():
+    with tempfile.TemporaryDirectory() as tmp:
+        events = []
+        result = {}
+        client = CodexAppServerClient(tmp, binary=make_fake_codex(tmp))
+        worker = threading.Thread(target=lambda: result.update(client.execute(
+            "needs approval",
+            thread_id="thr_desktop",
+            timeout_sec=5,
+            event_callback=events.append,
+            allow_interaction=True,
+        )))
+        try:
+            worker.start()
+            deadline = time.time() + 8
+            pending = None
+            while time.time() < deadline and not pending:
+                pending = client.pending_approval().get("pending")
+                time.sleep(0.02)
+            assert pending
+            assert pending["threadId"] == "thr_desktop_vo"
+            assert client.respond_approval(pending["id"], "approve")["ok"] is True
+            worker.join(3)
+            assert result["ok"] is True
+            assert result["threadId"] == "thr_desktop_vo"
+
+            resumed = client.execute(
+                "continue",
+                thread_id=result["threadId"],
+                timeout_sec=5,
+                allow_interaction=True,
+            )
+            assert resumed["ok"] is True
+            assert resumed["threadId"] == "thr_desktop_vo"
+        finally:
+            client.close()
+
+
 def test_reference_style_approval_response_continues_turn():
     with tempfile.TemporaryDirectory() as tmp:
         events = []
@@ -1736,6 +1780,62 @@ def test_capacity_one_preserves_single_active_turn_behavior():
             assert first_result["ok"] is True
         finally:
             release.set()
+            client.close()
+
+
+def test_vo_approval_routing_is_opt_in_and_disables_user_hooks_only_when_enabled():
+    with tempfile.TemporaryDirectory() as tmp:
+        hooks_path = os.path.join(tmp, "hooks.json")
+        with open(hooks_path, "w", encoding="utf-8") as source:
+            source.write('{"hooks":{"PermissionRequest":[{"hooks":[{"type":"command","command":"desktop-approval"}]}]}}')
+        default_client = CodexAppServerClient(tmp, binary=make_fake_codex(tmp), home_path=tmp)
+        vo_client = CodexAppServerClient(
+            tmp,
+            binary=make_fake_codex(tmp),
+            route_approvals_through_vo=True,
+            home_path=tmp,
+        )
+        try:
+            assert default_client._runtime.command == [default_client.binary, "app-server", "--stdio"]
+            assert default_client._thread_params()["approvalPolicy"] == "on-request"
+            assert vo_client._runtime.command == [
+                vo_client.binary,
+                "app-server",
+                "-c",
+                f'hooks.state={{ "{hooks_path}:permission_request:0:0" = {{ enabled = false }} }}',
+                "--stdio",
+            ]
+            assert vo_client._thread_params()["approvalPolicy"] == "untrusted"
+            assert vo_client._runtime.env["CODEX_HOME"] == tmp
+        finally:
+            default_client.close()
+            vo_client.close()
+
+
+def test_pending_approval_can_select_concurrent_request_by_request_or_item_id():
+    with tempfile.TemporaryDirectory() as tmp:
+        client = CodexAppServerClient(tmp, binary=make_fake_codex(tmp))
+        try:
+            with client._approval_lock:
+                client._pending_approvals = {
+                    "approval-1": {"approval": {
+                        "id": "approval-1", "approval_id": "approval-1", "requestId": "101",
+                        "itemId": "item-1", "threadId": "thread-1", "status": "pending",
+                    }},
+                    "approval-2": {"approval": {
+                        "id": "approval-2", "approval_id": "approval-2", "requestId": "102",
+                        "itemId": "item-2", "threadId": "thread-1", "status": "pending",
+                    }},
+                }
+            by_request = client.pending_approval("thread-1", approval_id="102")
+            by_item = client.pending_approval("thread-1", approval_id="item-2")
+            missing = client.pending_approval("thread-1", approval_id="unknown")
+            assert by_request["pending"]["id"] == "approval-2"
+            assert by_item["pending"]["id"] == "approval-2"
+            assert by_request["pending_count"] == 2
+            assert missing["pending"] is None
+            assert missing["pending_count"] == 2
+        finally:
             client.close()
 
 

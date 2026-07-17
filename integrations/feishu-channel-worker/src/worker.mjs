@@ -329,7 +329,7 @@ export class FeishuChannelWorker {
       try {
         process.kill(this.parentPid, 0);
       } catch {
-        this.stop('orphaned_parent_exited').finally(() => process.exitCode = 0);
+        this.stop('orphaned_parent_exited').finally(() => process.exit(0));
       }
     }, 3000);
     this.parentTimer.unref?.();

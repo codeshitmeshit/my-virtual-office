@@ -2147,6 +2147,8 @@
   "optional_app_server_bridge_url": "可选 app-server bridge 地址",
   "show_codex_main_agent": "显示 Codex Main agent",
   "discover_native_codex_agents": "发现原生 Codex agents",
+  "route_codex_approvals_through_vo": "在 VO 内处理 Codex 审批",
+  "route_codex_approvals_through_vo_hint": "开启后由 VO 接管 Codex 审批，不再使用 Desktop、Flux Island 等用户级审批 Hook。",
   "test_codex": "🔍 测试 Codex",
   "enable_claude_code": "启用 Claude Code",
   "claude_code_home": "Claude Code 主目录",

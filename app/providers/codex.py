@@ -60,6 +60,7 @@ class CodexProvider:
     include_main: bool = True
     include_native_agents: bool = True
     register_native_agents: bool = True
+    route_approvals_through_vo: bool = False
     max_concurrent_turns: int = 1
 
     provider_kind: str = "codex"
@@ -100,6 +101,7 @@ class CodexProvider:
         self.include_main = _env_bool("VO_CODEX_INCLUDE_MAIN", self.include_main)
         self.include_native_agents = _env_bool("VO_CODEX_INCLUDE_NATIVE_AGENTS", self.include_native_agents)
         self.register_native_agents = _env_bool("VO_CODEX_REGISTER_NATIVE_AGENTS", self.register_native_agents)
+        self.route_approvals_through_vo = bool(self.route_approvals_through_vo)
         self.max_concurrent_turns = _bounded_turn_capacity(self.max_concurrent_turns)
 
     def _bridge(self, workspace: str | None = None):
@@ -108,6 +110,8 @@ class CodexProvider:
             self.model or "",
             self.bridge_url or "",
             max_concurrent_turns=self.max_concurrent_turns,
+            route_approvals_through_vo=self.route_approvals_through_vo,
+            home_path=self.home_path or "",
         )
 
     @classmethod
@@ -526,12 +530,15 @@ class CodexProvider:
         ok = self.respond(thread_id, approval_id, choice, {})
         return {"ok": ok, "status": "submitted" if ok else "stale", "approvalId": approval_id, "sessionId": thread_id, "threadId": thread_id}
 
-    def pending_approval(self, profile: str, session_id: str | None = None) -> dict[str, Any]:
+    def pending_approval(self, profile: str, session_id: str | None = None, approval_id: str = "") -> dict[str, Any]:
         if self.reply_text:
             return {"ok": True, "pending": None, "pending_count": 0, "profile": self._safe_profile_name(profile or self.agent_id or "local")}
         bridge = self._bridge()
         if hasattr(bridge, "pending_approval"):
-            result = bridge.pending_approval(str(session_id or ""))
+            if approval_id:
+                result = bridge.pending_approval(str(session_id or ""), approval_id=str(approval_id))
+            else:
+                result = bridge.pending_approval(str(session_id or ""))
             result["profile"] = self._safe_profile_name(profile or self.agent_id or "local")
             return result
         return {"ok": True, "pending": None, "pending_count": 0, "profile": self._safe_profile_name(profile or self.agent_id or "local")}

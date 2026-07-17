@@ -325,6 +325,51 @@ def test_saturated_delivery_queue_cancels_registered_approval_once(tmp_path, mon
     assert store.get(failure_state["routeId"])["status"] == "failed"
 
 
+def test_duplicate_pending_event_delivers_existing_route_only_once(tmp_path, monkeypatch):
+    store = CodexFeishuApprovalRouteStore(str(tmp_path / "routes.json"))
+    sends = []
+    coordinator = CodexFeishuApprovalCoordinator(
+        store,
+        send_notification=lambda *_args, **_kwargs: sends.append(True) or {
+            "ok": True, "status": "sent", "messageId": "om_once",
+        },
+        status_dir=str(tmp_path),
+    )
+
+    class ImmediateExecutor:
+        def __init__(self):
+            self.submissions = 0
+
+        def submit(self, operation, _on_failure):
+            self.submissions += 1
+            operation()
+            return True
+
+    executor = ImmediateExecutor()
+    monkeypatch.setattr(server, "CODEX_FEISHU_APPROVAL_ROUTES", store)
+    monkeypatch.setattr(server, "CODEX_FEISHU_APPROVAL_COORDINATOR", coordinator)
+    monkeypatch.setattr(server, "CODEX_FEISHU_APPROVAL_DELIVERY_EXECUTOR", executor)
+    monkeypatch.setattr(server, "_codex_feishu_approval_delivery_configs", lambda: (
+        {}, {"appId": "chat", "appSecret": "secret"},
+    ))
+    approval_payload = {
+        "id": "approval-duplicate", "approval_id": "approval-duplicate", "kind": "command",
+        "profile": "local", "threadId": "thread-duplicate", "turnId": "turn-duplicate",
+        "command": "printf safe",
+    }
+    context = {
+        "sourceApp": "feishu", "sourceSurface": "feishu-dm", "sourceMessageId": "om_duplicate",
+        "feishuChatId": "oc_duplicate", "sourceActor": {"openId": "ou_origin"},
+        "agentId": "codex-local", "conversationId": "conv-duplicate",
+    }
+
+    assert server._queue_codex_feishu_approval(approval_payload, context, object(), {}) is True
+    assert server._queue_codex_feishu_approval(approval_payload, context, object(), {}) is True
+    assert executor.submissions == 1
+    assert sends == [True]
+    assert coordinator.stats()["metrics"]["duplicate_delivery_suppressed"] == 1
+
+
 def test_card_action_audit_is_route_linked_and_rotated(tmp_path, monkeypatch):
     monkeypatch.setenv("VO_FEISHU_AUDIT_MAX_BYTES", "512")
     monkeypatch.setenv("VO_FEISHU_AUDIT_BACKUPS", "2")

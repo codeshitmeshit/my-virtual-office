@@ -369,6 +369,8 @@ function renderCodexNativeForm(p) {
         <label class="checkbox-line"><input id="native-codex-include-native" type="checkbox" ${nativeChecked(p.includeNativeAgents, true)}> ${i18n.t('discover_native_codex_agents')}</label>
         <label class="checkbox-line"><input id="native-codex-register-native" type="checkbox" ${nativeChecked(p.registerNativeAgents, true)}> ${i18n.t('register_new_standard_agents_in_native_codex')}</label>
         <label class="checkbox-line"><input id="native-codex-appserver" type="checkbox" ${nativeChecked(p.preferAppServer, true)}> ${i18n.t('prefer_app_server_protocol')}</label>
+        <label class="checkbox-line"><input id="native-codex-route-approvals-through-vo" type="checkbox" ${nativeChecked(p.routeApprovalsThroughVo, false)}> ${i18n.t('route_codex_approvals_through_vo')}</label>
+        <p class="field-hint">${i18n.t('route_codex_approvals_through_vo_hint')}</p>
         <div class="row"><label>${i18n.t('native_home')}</label><input id="native-codex-home" value="${escAttr(p.homePath || '')}" placeholder="~/.codex"></div>
         <div class="row"><label>${i18n.t('native_cli')}</label><input id="native-codex-bin" value="${escAttr(p.binary || '')}" placeholder="codex"></div>
         <div class="row"><label>${i18n.t('native_workspace')}</label><input id="native-codex-workspace" value="${escAttr(p.workspace || '')}" placeholder="/workspace/project"></div>
@@ -508,7 +510,8 @@ function codexNativePayload() {
         preferAppServer: nativeCheckedValue('native-codex-appserver'),
         includeMain: nativeCheckedValue('native-codex-include-main'),
         includeNativeAgents: nativeCheckedValue('native-codex-include-native'),
-        registerNativeAgents: nativeCheckedValue('native-codex-register-native')
+        registerNativeAgents: nativeCheckedValue('native-codex-register-native'),
+        routeApprovalsThroughVo: nativeCheckedValue('native-codex-route-approvals-through-vo')
     };
 }
 

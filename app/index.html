@@ -117,6 +117,10 @@
                             <label class="mm-label" style="display:flex;align-items:center;gap:6px;">
                                 <input type="checkbox" id="mm-codex-include-native"> <span data-i18n="discover_native_codex_agents">Discover native Codex agents</span>
                             </label>
+                            <label class="mm-label" style="display:flex;align-items:center;gap:6px;">
+                                <input type="checkbox" id="mm-codex-route-approvals-through-vo"> <span data-i18n="route_codex_approvals_through_vo">Route Codex approvals through VO</span>
+                            </label>
+                            <div class="mm-help" data-i18n="route_codex_approvals_through_vo_hint">When enabled, VO handles Codex approvals instead of user-level approval hooks such as Desktop or Flux Island.</div>
                             <button class="mm-btn mm-btn-primary" onclick="mmTestCodex()" data-i18n="test_codex">🔍 Test Codex</button>
                             <div id="mm-codex-status"></div>
 
