@@ -151,3 +151,59 @@ def test_codex_card_action_busy_and_ambiguous_primary_are_safe(tmp_path):
     assert busy["outcome"]["businessStatus"] == "callback_in_progress"
     assert ambiguous["outcome"]["businessStatus"] == "approved_once"
     assert len(calls) == 1
+
+
+def test_feishu_card_decision_uses_isolated_history_policy_but_keeps_provider_event(tmp_path):
+    store = CodexFeishuApprovalRouteStore(str(tmp_path / "routes.json"), token_factory=lambda: "claim-isolated")
+    install_route(store)
+    provider_calls = []
+    published = []
+    presence = []
+
+    class ApprovalProvider:
+        def respond_approval(self, profile, approval_id, choice="cancel", session_id=None):
+            provider_calls.append((profile, approval_id, choice, session_id))
+            return {
+                "ok": True,
+                "status": "submitted",
+                "approval": {
+                    "id": approval_id,
+                    "threadId": session_id,
+                    "turnId": "turn-1",
+                },
+            }
+
+    previous_store = server.CODEX_FEISHU_APPROVAL_ROUTES
+    previous_provider = server._codex_provider_from_config
+    previous_roster = server.get_roster
+    previous_status_dir = server.STATUS_DIR
+    previous_publish = server.PROVIDER_EVENT_JOURNAL.publish
+    previous_presence = server.gateway_presence.set_provider_event
+    server.CODEX_FEISHU_APPROVAL_ROUTES = store
+    server.STATUS_DIR = str(tmp_path)
+    server._codex_provider_from_config = lambda: ApprovalProvider()
+    server.get_roster = lambda: [{
+        "id": "codex-local", "statusKey": "codex-local", "providerKind": "codex",
+        "profile": "local", "providerAgentId": "local", "name": "Codex",
+    }]
+    server.PROVIDER_EVENT_JOURNAL.publish = lambda *args, **kwargs: published.append((args, kwargs)) or {"id": 1}
+    server.gateway_presence.set_provider_event = lambda *args, **kwargs: presence.append((args, kwargs))
+    try:
+        result = server._handle_feishu_card_action(card_body())
+    finally:
+        server.CODEX_FEISHU_APPROVAL_ROUTES = previous_store
+        server._codex_provider_from_config = previous_provider
+        server.get_roster = previous_roster
+        server.STATUS_DIR = previous_status_dir
+        server.PROVIDER_EVENT_JOURNAL.publish = previous_publish
+        server.gateway_presence.set_provider_event = previous_presence
+
+    assert result["ok"] is True
+    assert provider_calls == [("local", "approval-route-1", "approve", "thread-1")]
+    assert published and published[-1][0][3] == "approval.resolved"
+    assert presence
+    assert not (tmp_path / "agent-platform-communications.jsonl").exists()
+    with open(tmp_path / "feishu-card-actions.jsonl", "r", encoding="utf-8") as stream:
+        action_rows = [json.loads(line) for line in stream if line.strip()]
+    assert action_rows[-1]["outcome"]["businessStatus"] == "approved_once"
+    assert store.get("route-1")["outcome"]["status"] == "submitted"

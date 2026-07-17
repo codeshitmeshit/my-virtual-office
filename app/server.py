@@ -7614,33 +7614,38 @@ def _handle_codex_approval_respond(body):
     conversation_id = _codex_approval_conversation_id(body, merged_approval, agent_id, session_id)
     result_message = _codex_approval_result_message(merged_approval, normalized_choice)
     history_event = None
+    isolate_approval_control = (
+        str(body.get("source") or "").strip().lower() == "feishu-card"
+        or body.get("recordChatHistory") is False
+    )
     if result.get("ok"):
-        try:
-            history_event = _append_codex_approval_result_comm_event(agent, agent_id, conversation_id, merged_approval, normalized_choice)
-            if conversation_id:
-                _append_codex_durable_operation(
-                    agent_id,
-                    conversation_id,
-                    "approval_resolution",
-                    approval_id,
-                    {
-                        "approvalId": approval_id,
-                        "approvalStatus": merged_approval.get("status") or "",
-                        "choice": normalized_choice,
-                        "runId": merged_approval.get("runId") or merged_approval.get("turnId") or "",
-                        "turnId": merged_approval.get("turnId") or "",
-                        "threadId": merged_approval.get("threadId") or "",
-                    },
-                )
-        except OSError as exc:
-            return {
-                "ok": False,
-                "status": "durable_write_failed",
-                "error": "Codex approval was resolved but persistence failed",
-                "errorCategory": type(exc).__name__[:80],
-                "approval": merged_approval,
-                "_status": 500,
-            }
+        if not isolate_approval_control:
+            try:
+                history_event = _append_codex_approval_result_comm_event(agent, agent_id, conversation_id, merged_approval, normalized_choice)
+                if conversation_id:
+                    _append_codex_durable_operation(
+                        agent_id,
+                        conversation_id,
+                        "approval_resolution",
+                        approval_id,
+                        {
+                            "approvalId": approval_id,
+                            "approvalStatus": merged_approval.get("status") or "",
+                            "choice": normalized_choice,
+                            "runId": merged_approval.get("runId") or merged_approval.get("turnId") or "",
+                            "turnId": merged_approval.get("turnId") or "",
+                            "threadId": merged_approval.get("threadId") or "",
+                        },
+                    )
+            except OSError as exc:
+                return {
+                    "ok": False,
+                    "status": "durable_write_failed",
+                    "error": "Codex approval was resolved but persistence failed",
+                    "errorCategory": type(exc).__name__[:80],
+                    "approval": merged_approval,
+                    "_status": 500,
+                }
         PROVIDER_EVENT_JOURNAL.publish(
             "codex",
             agent_id,
@@ -7678,6 +7683,7 @@ def _handle_codex_approval_respond(body):
     result["approval"] = merged_approval
     result.setdefault("message", result_message)
     result.setdefault("historyEventId", (history_event or {}).get("id") or "")
+    result.setdefault("approvalHistoryPolicy", "isolated" if isolate_approval_control else "conversation")
     result.setdefault("conversationId", conversation_id)
     result.setdefault("providerPath", "codex-app-server")
     status = str(result.get("status") or "").lower()
@@ -12835,6 +12841,7 @@ def _dispatch_feishu_codex_approval_action(action, value, event):
             "choice": decision,
             "source": "feishu-card",
             "recordChatHistory": False,
+            "routeId": route_id,
         })
         if not isinstance(provider_result, dict):
             provider_result = {"ok": False, "status": "invalid_provider_result"}

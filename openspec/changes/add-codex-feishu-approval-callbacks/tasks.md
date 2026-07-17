@@ -18,7 +18,7 @@
 
 - [x] 5.1 Add Codex actions to the shared Feishu card-action dispatcher; verify callback actor and route linkage; claim and resolve approve-once/cancel exactly once; return stable replay, busy, stale, and unauthorized outcomes; and add callback security/idempotency tests.
 
-- [ ] 5.2 Add a source-aware Codex approval response persistence policy so Feishu-card decisions skip synthetic approval chat/communication messages while retaining provider events and separate approval audit, with regression tests proving Web Chat behavior and normal final replies remain unchanged.
+- [x] 5.2 Add a source-aware Codex approval response persistence policy so Feishu-card decisions skip synthetic approval chat/communication messages while retaining provider events and separate approval audit, with regression tests proving Web Chat behavior and normal final replies remain unchanged.
 
 ## 6. Integrate asynchronous delivery and failure closure
 
