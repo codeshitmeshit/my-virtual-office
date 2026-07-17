@@ -17,7 +17,7 @@
 - [x] 3.1 Add loopback/no-Origin, size-limited Agent draft submission and request-secret-protected status routes that validate a registered requesting Agent and never expose management credentials or stored secret hashes.
 - [x] 3.2 Add management-authenticated draft list/detail/edit/confirm/reject routes with stable authorization, validation, conflict, and idempotency responses.
 - [x] 3.3 Add HTTP contract tests proving Agent routes cannot materialize projects, browser-origin requests are rejected, request secrets cannot cross requests, and protected routes reject missing or invalid management tokens before mutation.
-- [ ] 3.4 Add management-authenticated scoped-grant revoke/rotate endpoints and Agent grant-status handling, with tests proving old, lost, cross-project, and cross-Agent grants cannot mutate state.
+- [x] 3.4 Add management-authenticated scoped-grant revoke/rotate endpoints and Agent grant-status handling, with tests proving old, lost, cross-project, and cross-Agent grants cannot mutate state.
 
 ## 4. Controlled Project Maintenance
 

@@ -428,3 +428,37 @@ def test_missing_referenced_template_fails_without_partial_root_changes(tmp_path
     assert root[TEMPLATES_KEY] == {}
     assert root[RECURRENCES_KEY] == {}
     assert root[OUTBOX_KEY] == []
+
+
+@pytest.mark.parametrize(
+    ("maintenance_mode", "allows_routine_update"),
+    (("strict_confirmation", False), ("autonomous", True)),
+)
+def test_confirmed_project_persists_mode_and_hash_only_scoped_grant(
+    tmp_path, maintenance_mode, allows_routine_update,
+):
+    markdown, _, service = _service(tmp_path)
+    draft = _draft()
+    draft["agentMaintenanceMode"] = maintenance_mode
+    plaintext = "one-time-project-secret"
+    _create(service, draft=draft, request_secret_hash=hash_request_secret(plaintext))
+
+    result = service.confirm_and_materialize(
+        "request-1", expected_revision=1, confirmation_key="confirm:grant-mode",
+    )
+    root = markdown.load_all()
+    project = root["projects"][0]
+    grant = root["projectAuthoringGrants"][project["id"]]
+
+    assert result["project"]["agentMaintenanceMode"] == maintenance_mode
+    assert project["agentMaintenanceMode"] == maintenance_mode
+    assert grant["projectId"] == project["id"]
+    assert grant["requestingAgentId"] == "author"
+    assert grant["maintenanceMode"] == maintenance_mode
+    assert grant["secretHash"].startswith("sha256:")
+    assert plaintext not in grant["secretHash"]
+    assert ("routine_task_update" in grant["allowedOperations"]) is allows_routine_update
+    public = service.authenticate_project_grant(
+        project["id"], requesting_agent_id="author", grant_secret=plaintext,
+    )
+    assert "secretHash" not in public
