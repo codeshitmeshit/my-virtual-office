@@ -199,3 +199,38 @@ def resolve_template_version(
         if legacy is not None:
             return adapt_legacy_template(legacy)
     raise ProjectTemplateError("template_version_not_found", "Template version was not found")
+
+
+def template_version_to_legacy(record: Mapping[str, Any]) -> dict[str, Any]:
+    """Render a version snapshot through the existing browser template contract."""
+    snapshot = record.get("snapshot") if isinstance(record.get("snapshot"), Mapping) else {}
+    columns = copy.deepcopy(snapshot.get("columns") or [])
+    column_indexes = {
+        str(column.get("id") or ""): index
+        for index, column in enumerate(columns)
+        if isinstance(column, Mapping)
+    }
+    task_templates = []
+    for task in snapshot.get("tasks") or []:
+        if not isinstance(task, Mapping):
+            continue
+        item = _task_blueprint(task)
+        column_id = str(item.pop("columnId", "") or "")
+        item["columnIndex"] = column_indexes.get(column_id, 0)
+        task_templates.append(item)
+    return {
+        "id": record.get("templateId") or record.get("id"),
+        "title": record.get("name") or snapshot.get("title") or "Template",
+        "description": snapshot.get("description") or "",
+        "version": _version_number(record.get("version")) or 1,
+        "versioned": True,
+        "columns": columns,
+        "taskTemplates": task_templates,
+    }
+
+
+def latest_template_version(versions: Sequence[Any]) -> dict[str, Any] | None:
+    records = [item for item in versions if isinstance(item, Mapping)]
+    if not records:
+        return None
+    return copy.deepcopy(dict(max(records, key=lambda item: _version_number(item.get("version")))))

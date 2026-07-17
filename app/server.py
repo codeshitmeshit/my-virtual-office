@@ -50,6 +50,7 @@ from services import project_authoring as project_authoring_service
 from services import project_authoring_config as project_authoring_config_service
 from services import project_authoring_store as project_authoring_store_service
 from services import project_authoring_security as project_authoring_security_service
+from services import project_templates as project_templates_service
 from services import meeting_repository as meeting_repository_service
 from services import meeting_lifecycle as meeting_lifecycle_service
 from services import meeting_requests as meeting_requests_service
@@ -17649,8 +17650,31 @@ def _handle_project_get(project_id):
 def _handle_projects_templates():
     """GET /api/projects/templates — list built-in + user templates."""
     data = _load_projects()
-    all_templates = list(_BUILTIN_TEMPLATES) + data.get("templates", [])
+    all_templates = list(_BUILTIN_TEMPLATES) + _project_browser_templates(data)
     return {"ok": True, "templates": all_templates}
+
+
+def _project_browser_templates(data):
+    """Overlay latest immutable versions onto the legacy browser contract."""
+    templates = [copy.deepcopy(item) for item in data.get("templates", []) if isinstance(item, dict)]
+    indexes = {str(item.get("id") or ""): index for index, item in enumerate(templates)}
+    versions_by_id = data.get(project_authoring_store_service.TEMPLATES_KEY)
+    if not isinstance(versions_by_id, dict):
+        return templates
+    for template_id, versions in versions_by_id.items():
+        if not isinstance(versions, list):
+            continue
+        latest = project_templates_service.latest_template_version(versions)
+        if latest is None:
+            continue
+        rendered = project_templates_service.template_version_to_legacy(latest)
+        index = indexes.get(str(template_id))
+        if index is None:
+            indexes[str(template_id)] = len(templates)
+            templates.append(rendered)
+        else:
+            templates[index] = rendered
+    return templates
 
 
 def _handle_project_report(project_id):
@@ -17855,7 +17879,7 @@ def _handle_project_from_template(body):
     if not title:
         return {"error": "Project title is required", "_status": 400}
     data = _load_projects()
-    tpl = next((t for t in data.get("templates", []) if t["id"] == template_id), None)
+    tpl = next((t for t in _project_browser_templates(data) if t["id"] == template_id), None)
     # Also check built-in templates
     if not tpl:
         tpl = next((t for t in _BUILTIN_TEMPLATES if t["id"] == template_id), None)
@@ -17882,10 +17906,14 @@ def _handle_project_from_template(body):
                 "columnId": col_id,
                 "order": tt.get("order", 0),
                 "priority": tt.get("priority", "medium"),
-                "assignee": None,
+                "responsibleActor": copy.deepcopy(tt.get("responsibleActor")),
+                "executorActor": copy.deepcopy(tt.get("executorActor")),
+                "reviewerActor": copy.deepcopy(tt.get("reviewerActor")),
+                "reviewerRecommendation": copy.deepcopy(tt.get("reviewerRecommendation") or {}),
+                "assignee": tt.get("assignee"),
                 "assigneeBranch": None,
-                "executorAgentId": None,
-                "reviewerAgentId": None,
+                "executorAgentId": tt.get("executorAgentId"),
+                "reviewerAgentId": tt.get("reviewerAgentId"),
                 "requiresUserAcceptance": tt.get("requiresUserAcceptance", False) is True,
                 "allowReviewerlessExecution": tt.get("allowReviewerlessExecution", False) is True,
                 "scheduledRepeatEnabled": tt.get("scheduledRepeatEnabled", False) is True,
@@ -17951,6 +17979,13 @@ def _handle_project_from_template(body):
         "activity": [],
         "template": False,
     }
+    if tpl.get("versioned") is True:
+        project["templateRef"] = {"id": template_id, "version": int(tpl.get("version") or 1)}
+        project["authoringSource"] = {
+            "kind": "browser_template_instance",
+            "templateId": template_id,
+            "templateVersion": int(tpl.get("version") or 1),
+        }
     _log_activity(project, "project_created", created_by, f"Created from template '{tpl.get('title', '')}'")
     data["projects"].append(project)
     _save_projects(data)
