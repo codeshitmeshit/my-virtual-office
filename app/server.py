@@ -13351,13 +13351,17 @@ def _dispatch_representative_agent_message(agent_id, message, conversation_id, s
         delivery_message = f"{delivery_message}\n\n{attachment_context}" if delivery_message else attachment_context
     key = _provider_conversation_key("openclaw", agent_id, conversation_id, agent_id=agent_id)
     native_id = _openclaw_conversation_session_key(agent_id, conversation_id)
-    reply = PROVIDER_CONVERSATION_SERVICE.deliver_queued(
-        key,
-        native_id,
-        delivery_message,
-        _openclaw_queued_conversation_port(timeout=int(VO_CONFIG.get("openclaw", {}).get("timeoutSec") or 600)),
-        attachments=validated_attachments,
-    )
+    gateway_presence.set_manual_override(agent_id, "working", f"Replying to {sender_name}")
+    try:
+        reply = PROVIDER_CONVERSATION_SERVICE.deliver_queued(
+            key,
+            native_id,
+            delivery_message,
+            _openclaw_queued_conversation_port(timeout=int(VO_CONFIG.get("openclaw", {}).get("timeoutSec") or 600)),
+            attachments=validated_attachments,
+        )
+    finally:
+        gateway_presence.set_manual_override(agent_id, "idle", "")
     ok = not str(reply or "").startswith("[ERROR]")
     return {
         "ok": ok,
