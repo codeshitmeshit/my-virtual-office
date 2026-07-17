@@ -37,6 +37,18 @@ The system SHALL make the first displayable fragment of a Codex turn immediately
 ### Requirement: Unrelated Codex conversations do not share a Virtual Office execution bottleneck
 Virtual Office SHALL preserve ordered single-turn behavior within one Codex conversation while allowing different Codex conversations to make progress without waiting on a Virtual Office-wide execution or persistence lock. Provider concurrency MUST remain bounded, and capacity rejection or queueing MUST be explicit and observable.
 
+The Codex chat fast path SHALL be enabled by default when no environment or persisted configuration overrides it, and the default bounded Provider capacity SHALL be eight active turns. Operators MUST be able to explicitly disable the fast path for rollback, which restores the conservative single-turn capacity.
+
+#### Scenario: No fast-path configuration is supplied
+- **WHEN** Virtual Office starts without an explicit Codex fast-path enablement or capacity setting
+- **THEN** the effective fast-path setting is enabled
+- **AND** the effective bounded Provider capacity is eight active turns
+
+#### Scenario: Fast path is explicitly disabled
+- **WHEN** an operator explicitly disables the Codex fast path and restarts Virtual Office
+- **THEN** the legacy event path remains available
+- **AND** Provider capacity is conservatively limited to one active turn
+
 #### Scenario: Two different conversations run concurrently
 - **WHEN** two warm Codex chat turns target different conversation identifiers within available Provider capacity
 - **THEN** one conversation does not wait for the other conversation's full turn solely because of a Virtual Office-wide lock
@@ -101,6 +113,6 @@ The fast path MUST preserve public Codex chat routes, accepted request and respo
 - **AND** its correctness and measured latency do not regress beyond the accepted baseline tolerance
 
 #### Scenario: Another Provider or Agent workflow is invoked
-- **WHEN** Claude Code, Hermes, OpenClaw, Project execution, Meeting execution, or a Feishu entry point invokes an Agent
+- **WHEN** Claude Code, Hermes, OpenClaw, Project execution, Meeting execution, or a non-Codex Feishu path invokes an Agent
 - **THEN** this change does not require that path to adopt the Codex chat SLO or transient-event policy
 - **AND** shared infrastructure changes preserve that path's existing behavior

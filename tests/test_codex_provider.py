@@ -19,6 +19,7 @@ def test_disabled_provider_is_invisible():
     provider = CodexProvider(enabled=False)
     assert provider.discover_agents() == []
     assert provider.test()["ok"] is False
+    assert provider.max_concurrent_turns == 8
 
 
 def test_enabled_provider_discovers_collaborator_and_demo_reply():

@@ -676,7 +676,7 @@ class _LateStartCleanup:
 class CodexAppServerClient:
     """Small synchronous facade over app-server's bidirectional JSONL RPC."""
 
-    def __init__(self, workspace: str, model: str = "", binary: str | None = None, max_concurrent_turns: int = 1):
+    def __init__(self, workspace: str, model: str = "", binary: str | None = None, max_concurrent_turns: int = 8):
         self.workspace = os.path.abspath(workspace)
         self.model = model or ""
         self.binary = binary or os.environ.get("VO_CODEX_BIN") or shutil.which("codex") or "codex"
@@ -703,9 +703,9 @@ class CodexAppServerClient:
         self._terminal_operations: OrderedDict[str, _Operation] = OrderedDict()
         self._operations_lock = threading.Lock()
         try:
-            self.max_concurrent_turns = max(1, min(int(max_concurrent_turns or 1), 4))
+            self.max_concurrent_turns = max(1, min(int(max_concurrent_turns), 8))
         except (TypeError, ValueError):
-            self.max_concurrent_turns = 1
+            self.max_concurrent_turns = 8
         self._turn_capacity = threading.BoundedSemaphore(self.max_concurrent_turns)
         self._thread_locks_guard = threading.Lock()
         self._thread_locks: dict[str, dict[str, Any]] = {}
@@ -2245,11 +2245,11 @@ _CLIENTS: dict[tuple[str, str, str, int], CodexAppServerClient | CodexHttpBridge
 _CLIENTS_LOCK = threading.Lock()
 
 
-def get_codex_bridge(workspace: str, model: str = "", bridge_url: str = "", *, max_concurrent_turns: int = 1) -> CodexAppServerClient | CodexHttpBridgeClient:
+def get_codex_bridge(workspace: str, model: str = "", bridge_url: str = "", *, max_concurrent_turns: int = 8) -> CodexAppServerClient | CodexHttpBridgeClient:
     try:
-        capacity = max(1, min(int(max_concurrent_turns or 1), 4))
+        capacity = max(1, min(int(max_concurrent_turns), 8))
     except (TypeError, ValueError):
-        capacity = 1
+        capacity = 8
     key = (os.path.abspath(workspace), model or "", bridge_url or "", capacity)
     with _CLIENTS_LOCK:
         client = _CLIENTS.get(key)

@@ -124,19 +124,19 @@
       "callee": "get_codex_bridge",
       "caller": "CodexProvider._bridge",
       "file": "app/providers/codex.py",
-      "line": 106
+      "line": 107
     },
     {
       "callee": "respond_approval",
       "caller": "CodexProvider.respond_approval",
       "file": "app/providers/codex.py",
-      "line": 515
+      "line": 516
     },
     {
       "callee": "pending_approval",
       "caller": "CodexProvider.pending_approval",
       "file": "app/providers/codex.py",
-      "line": 534
+      "line": 535
     },
     {
       "callee": "approval",
@@ -7056,17 +7056,17 @@
     },
     {
       "file": "app/providers/codex.py",
-      "line": 43,
+      "line": 44,
       "name": "CodexProvider"
     },
     {
       "file": "app/providers/codex.py",
-      "line": 507,
+      "line": 508,
       "name": "CodexProvider.respond_approval"
     },
     {
       "file": "app/providers/codex.py",
-      "line": 529,
+      "line": 530,
       "name": "CodexProvider.pending_approval"
     },
     {
@@ -9646,13 +9646,13 @@
     "app/provider_execution.py": "6efb86d2388eefcc0a92f672cba82fdf40ceccf9dc1cdb775302c3fd79699f88",
     "app/provider_sse_transport.py": "3bc4be1a5172efcb90991bd46841a58b198964048d06cb1efed08c7a9aa38e53",
     "app/providers/claude_code.py": "c6c078a7db6876f7a4bdc236ceacfed0f6220f5af7009ceaf03160b94d26d09d",
-    "app/providers/codex.py": "5cffb77826584e6594c8f7989328b975c74b24cf51bcb01bf68b7d4ce5c44c31",
-    "app/providers/codex_app_server.py": "d352ec69e1fac4ded38395411f2ea8e7d24012f66000fdbadb420ab0fc3cd364",
+    "app/providers/codex.py": "8f3083398f4f933ea516e38b9a6160ff56d3ae6acb8d431bd8a889e2d4da2e68",
+    "app/providers/codex_app_server.py": "33b938e5ce5571ecefc27984253190f9c35bdba473f22f9aa5b2868876b70bfd",
     "app/providers/codex_bridge.py": "89cb41dc31d522709fdaa346199bbd29e304da61e8815dad969c6d8bed8c9ff0",
     "app/providers/hermes.py": "a10dd77653382ba3b91a81e008ff82938f1f944df4d69504691415f01b6df067",
     "app/server.py": "246ab26d84d583e401fea6068f85f79c8fb704aa4df30284b23edbb7dc63452e",
     "app/services/artifacts.py": "fe0a894fd93d77acfd9ee862fa3457915344256821c7ea25608a8f333cd2f189",
-    "app/services/codex_fast_path.py": "3d266612b1d37b027113aaca157e9e74d17d1299f61e03abc26a5788ea320274",
+    "app/services/codex_fast_path.py": "ac581be01e0685226a81da6840973ec5d32efc1ea8111e2ee7d6745fdb1efda5",
     "app/services/execution_lifecycle.py": "a9fb7deaf1ad75caeafe60d41b8f321a9b63efb3661e42c5244324bc30d9f4a7",
     "app/services/meeting_action_items.py": "31b6c7aa49b42b357439ecaf116de31b9842347d23db0c9c52c3cfbba85f8c20",
     "app/services/meeting_callbacks.py": "dcfe95028ef5a8549e10f1df0e1003f92be42d39fb8c67711f970e432858da5a",

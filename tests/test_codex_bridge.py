@@ -1698,8 +1698,54 @@ def test_same_native_thread_is_ordered_without_consuming_parallel_capacity():
 
 def test_capacity_configuration_is_clamped_and_invalid_values_fail_safe():
     with tempfile.TemporaryDirectory() as tmp:
-        assert CodexAppServerClient(tmp, binary=make_fake_codex(tmp), max_concurrent_turns=99).max_concurrent_turns == 4
-        assert CodexAppServerClient(tmp, binary=make_fake_codex(tmp), max_concurrent_turns="invalid").max_concurrent_turns == 1
+        assert CodexAppServerClient(tmp, binary=make_fake_codex(tmp), max_concurrent_turns=99).max_concurrent_turns == 8
+        assert CodexAppServerClient(tmp, binary=make_fake_codex(tmp), max_concurrent_turns=0).max_concurrent_turns == 1
+        assert CodexAppServerClient(tmp, binary=make_fake_codex(tmp), max_concurrent_turns="invalid").max_concurrent_turns == 8
+
+
+def test_default_capacity_eight_accepts_eight_turns_and_rejects_ninth():
+    with tempfile.TemporaryDirectory() as tmp:
+        client = CodexAppServerClient(tmp, binary=make_fake_codex(tmp))
+        release = threading.Event()
+        all_started = threading.Event()
+        active = set()
+        active_lock = threading.Lock()
+        results = {}
+
+        def fake_execute(message, thread_id="", **_kwargs):
+            with active_lock:
+                active.add(thread_id)
+                if len(active) == 8:
+                    all_started.set()
+            release.wait(1)
+            with active_lock:
+                active.discard(thread_id)
+            return {"ok": True, "status": "completed", "threadId": thread_id, "reply": message}
+
+        client._execute_locked = fake_execute
+        workers = [
+            threading.Thread(target=lambda index=index: results.update({index: client.execute(str(index), thread_id=f"thr-{index}")}))
+            for index in range(8)
+        ]
+        try:
+            assert client.max_concurrent_turns == 8
+            for worker in workers:
+                worker.start()
+            assert all_started.wait(0.5)
+            busy = client.execute("ninth", thread_id="thr-nine")
+            assert busy["busyCode"] == "busy_by_capacity"
+            assert busy["maxConcurrentTurns"] == 8
+            release.set()
+            for worker in workers:
+                worker.join(1)
+            assert len(results) == 8
+            assert all(result["ok"] for result in results.values())
+            diagnostics = client.admission_diagnostics()
+            assert diagnostics["peakActiveTurns"] == 8
+            assert diagnostics["busyByCapacity"] == 1
+        finally:
+            release.set()
+            client.close()
 
 
 def test_capacity_one_preserves_single_active_turn_behavior():

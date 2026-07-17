@@ -6,8 +6,8 @@ This runbook covers deployment, observation, capacity gating, and rollback of th
 
 | Variable | Default | Valid range | Purpose |
 | --- | ---: | ---: | --- |
-| `VO_CODEX_CHAT_FAST_PATH_ENABLED` | `0` | boolean | Enables transient live-view routing and stream coalescing. Invalid configuration fails closed to the legacy path. |
-| `VO_CODEX_MAX_CONCURRENT_TURNS` | `1` | `1`–`4` | Bounds active app-server turns. Same-conversation turns remain serialized. |
+| `VO_CODEX_CHAT_FAST_PATH_ENABLED` | `1` | boolean | Enables transient live-view routing and stream coalescing. Invalid configuration fails closed to the legacy path. |
+| `VO_CODEX_MAX_CONCURRENT_TURNS` | `8` | `1`–`8` | Bounds active app-server turns. Same-conversation turns remain serialized. |
 | `VO_CODEX_STREAM_COALESCE_MIN_MS` | `33` | `33`–`100` | Minimum adaptive window for compatible fragments after the immediate first fragment. |
 | `VO_CODEX_STREAM_COALESCE_MAX_MS` | `100` | `33`–`100` and not below min | Maximum adaptive fragment window. |
 
@@ -15,7 +15,7 @@ The sanitized runtime status reports `requestedEnabled`, effective `enabled`, `v
 
 ## Capacity and memory bounds
 
-- Provider concurrency is non-blocking and bounded to 1–4 active turns. A second turn for the same `(agent, conversation)` returns conversation-busy; a different conversation beyond capacity returns capacity-busy.
+- Provider concurrency is non-blocking and bounded to 1–8 active turns. A second turn for the same `(agent, conversation)` returns conversation-busy; a different conversation beyond capacity returns capacity-busy.
 - The first displayable fragment bypasses coalescing. Later compatible fragments use one dispatcher with at most 256 buckets, 200 fragments or 64 KiB per bucket, and 16 MiB globally. Pressure forces a flush or direct bypass; it must not drop a critical event.
 - Live Codex state is bounded to 4,096 scopes. The shared Provider journal retains 4,000 events, and run results expire under the existing repository retention policy.
 - Backend timing retains at most 1,024 runs and 2,048 samples per fixed metric. Browser timing retains 200 bound runs and 100 early-event correlations. Identifiers are digested or run-correlated; message and reasoning content is not recorded.
@@ -37,9 +37,9 @@ All metrics are bounded and content-free. Never add prompts, replies, reasoning,
 
 1. Deploy code with `VO_CODEX_CHAT_FAST_PATH_ENABLED=0` and capacity 1. Run the flag-off compatibility suite and compare baseline errors, fields, event names, history, approval, cancellation, and terminal outcomes.
 2. Enable the flag in deterministic/staging tests at capacity 1. Require durable restart recovery, rollback rehearsal, ordered reconstruction, immediate first fragment, browser/backend SLOs, and no increased durable write counts.
-3. Keep production capacity at 1 unless the app-server multiplexing fixture proves two different native threads can interleave responses, notifications, approvals, cancellation, terminal results, and cleanup without cross-delivery.
-4. After that proof, stage capacity 2 on a limited cohort. Watch conversation/capacity busy counters, terminal fence timeouts, coalescer pressure, errors, and memory bounds before widening exposure.
-5. Capacity 3–4 is configuration range, not an approved rollout target. It requires separate Provider evidence and capacity review.
+3. The product default is capacity 8. The app-server multiplexing fixture proves two different native threads can interleave responses, notifications, approvals, cancellation, terminal results, and cleanup without cross-delivery; it is not a capacity-8 saturation proof.
+4. Watch conversation/capacity busy counters, terminal fence timeouts, coalescer pressure, CPU, memory, workspace I/O, errors, and reader latency. Override the capacity downward if pressure or latency regresses.
+5. Capacity 8 is the bounded default, not a claim that eight simultaneous real-model turns improve per-turn inference latency.
 
 Stop rollout on content/order loss, cross-conversation delivery, durable-write failure, history/thread mismatch, approval misrouting, terminal duplication, unexplained SLO regression, unbounded growth, or sensitive diagnostic content.
 
