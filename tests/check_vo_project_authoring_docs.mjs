@@ -20,6 +20,7 @@ for (const contract of [
   "VO_AGENT_PROJECT_AUTHORING_ENABLED",
   "VO_PROJECT_INSTANCE_RECURRENCE_ENABLED",
   "Failure and recovery runbook",
+  "GET /api/project-authoring/health",
 ]) {
   assert.ok(doc.includes(contract), `authoring operations doc missing: ${contract}`);
 }

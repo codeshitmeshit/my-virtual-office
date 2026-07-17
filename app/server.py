@@ -53,6 +53,7 @@ from services import project_authoring_security as project_authoring_security_se
 from services import project_authoring_audit as project_authoring_audit_service
 from services import project_templates as project_templates_service
 from services import project_recurrence as project_recurrence_service
+from services import project_authoring_observability as project_authoring_observability_service
 from services import meeting_repository as meeting_repository_service
 from services import meeting_lifecycle as meeting_lifecycle_service
 from services import meeting_requests as meeting_requests_service
@@ -17386,16 +17387,25 @@ def _project_recurrence_reconciler():
                 validate_schedule=_project_cron_validate_schedule,
                 extract_job_id=_project_cron_extract_job_id,
             ),
+            observability=_PROJECT_AUTHORING_OBSERVABILITY,
         )
     return _PROJECT_RECURRENCE_RECONCILER
 
 
 def _project_recurrence_reconcile_loop():
     while True:
+        started_at = time.perf_counter()
         try:
             _project_recurrence_reconciler().reconcile_once()
         except Exception as exc:
             safe_error = project_authoring_audit_service.sanitize_audit_text(exc, limit=360)
+            _PROJECT_AUTHORING_OBSERVABILITY.observe(
+                "recurrence.reconcile_loop",
+                status="failure",
+                duration_ms=int((time.perf_counter() - started_at) * 1000),
+                code=type(exc).__name__,
+                intervention=True,
+            )
             print(json.dumps({
                 "type": "project_recurrence_reconcile_failed",
                 "error": safe_error,
@@ -20857,6 +20867,9 @@ def _is_archive_manager_agent(agent_id_or_key):
 _PROJECT_AUTHORING_ROOT_STORE = project_authoring_store_service.ProjectAuthoringRootStore(
     _PROJECT_REPOSITORY,
     config=project_authoring_config_service.DEFAULT_CONFIG,
+)
+_PROJECT_AUTHORING_OBSERVABILITY = project_authoring_observability_service.ProjectAuthoringObservability(
+    emit=lambda message: print(message, flush=True),
 )
 _PROJECT_AUTHORING_SERVICE = project_authoring_service.ProjectAuthoringService(
     _PROJECT_AUTHORING_ROOT_STORE,
@@ -26458,14 +26471,45 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
         return authorization[7:].strip()
 
     def _send_project_authoring_result(self, callback):
+        started_at = time.perf_counter()
+        operation = self._project_authoring_operation()
         try:
             result = callback()
-            self._send_json(result, status=int(result.get("_status") or 200))
+            response_status = int(result.get("_status") or 200)
+            code = str(result.get("code") or "")
+            status = "success" if response_status < 400 and result.get("ok", True) is not False else "failure"
+            _PROJECT_AUTHORING_OBSERVABILITY.observe(
+                operation,
+                status=status,
+                duration_ms=int((time.perf_counter() - started_at) * 1000),
+                code=code,
+                intervention=code.endswith("intervention_required"),
+            )
+            self._send_json(result, status=response_status)
         except Exception as exc:
+            error = exc.as_dict() if hasattr(exc, "as_dict") else {}
+            code = str(error.get("code") or type(exc).__name__)
+            _PROJECT_AUTHORING_OBSERVABILITY.observe(
+                operation,
+                status="failure",
+                duration_ms=int((time.perf_counter() - started_at) * 1000),
+                code=code,
+                intervention=code.endswith("intervention_required"),
+            )
             if hasattr(exc, "as_dict"):
-                self._send_json_error(exc.as_dict())
+                self._send_json_error(error)
             else:
                 self._send_unexpected_json_error(exc)
+
+    def _project_authoring_operation(self):
+        path = urllib.parse.urlparse(self.path).path
+        normalized = re.sub(
+            r"/(requests|projects|templates|recurrences)/[^/]+",
+            r"/\1/{id}",
+            path,
+        )
+        normalized = re.sub(r"/maintenance/[^/]+", "/maintenance/{id}", normalized)
+        return f"{str(getattr(self, 'command', 'http')).lower()} {normalized}"
 
     def _project_authoring_expected_revision(self, body):
         try:
@@ -26861,6 +26905,16 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                 self._send_json({"ok": False, "error": "Project authoring request not found"}, status=404)
                 return
             self._handle_agent_project_authoring_status(request_id)
+            return
+        if request_path == "/api/project-authoring/health":
+            if self._reject_untrusted_management_request():
+                return
+            self._send_json(_PROJECT_AUTHORING_OBSERVABILITY.snapshot(
+                _PROJECT_AUTHORING_ROOT_STORE.snapshot(),
+                authoring_enabled=project_authoring_config_service.is_authoring_enabled(),
+                recurrence_enabled=project_authoring_config_service.is_recurrence_enabled(),
+                recurrence_paused=project_authoring_config_service.is_recurrence_dispatch_paused(),
+            ))
             return
         management_authoring_prefix = "/api/project-authoring/requests"
         if request_path == management_authoring_prefix:

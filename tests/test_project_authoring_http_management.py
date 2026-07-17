@@ -78,6 +78,25 @@ class _FakeService:
         }
 
 
+def test_authoring_health_requires_management_token_and_reports_safe_aggregates():
+    denied = _handler("/api/project-authoring/health", authorized=False)
+    assert _call(denied, "GET")[0] == 403
+
+    health = _handler("/api/project-authoring/health")
+    status, payload = _call(health, "GET")
+    assert status == 200
+    assert payload["status"] in {"disabled", "healthy", "paused", "degraded", "intervention_required"}
+    assert set(payload["queues"]) == {
+        "pendingRequests",
+        "oldestPendingRequestAgeSeconds",
+        "recurrenceOutbox",
+        "oldestRecurrenceOutboxAgeSeconds",
+    }
+    encoded = json.dumps(payload)
+    assert "requestSecretHash" not in encoded
+    assert "claimToken" not in encoded
+
+
 def test_management_list_and_detail_require_token(monkeypatch):
     fake = _FakeService()
     monkeypatch.setattr(server, "_PROJECT_AUTHORING_SERVICE", fake)

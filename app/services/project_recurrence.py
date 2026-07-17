@@ -12,6 +12,7 @@ from typing import Any, Callable, Mapping
 from services.project_authoring_audit import build_audit_event, sanitize_audit_text
 from services.project_authoring_config import is_recurrence_dispatch_paused, is_recurrence_enabled
 from services.project_authoring_store import OUTBOX_KEY, RECURRENCES_KEY, ProjectAuthoringRootStore
+from services.project_authoring_observability import ProjectAuthoringObservability
 
 
 def _now() -> datetime:
@@ -65,15 +66,26 @@ class ProjectRecurrenceReconciler:
 
     CLAIM_SECONDS = 300
 
-    def __init__(self, store: ProjectAuthoringRootStore, ports: RecurrenceRegistrationPorts) -> None:
+    def __init__(
+        self,
+        store: ProjectAuthoringRootStore,
+        ports: RecurrenceRegistrationPorts,
+        observability: ProjectAuthoringObservability | None = None,
+    ) -> None:
         self.store = store
         self.ports = ports
+        self.observability = observability
 
     def reconcile_once(self) -> dict[str, Any]:
+        started = self.ports.clock()
         if not self.ports.enabled():
-            return {"ok": True, "status": "disabled", "claimed": 0, "registered": 0, "failed": 0}
+            result = {"ok": True, "status": "disabled", "claimed": 0, "registered": 0, "failed": 0}
+            self._observe_reconcile(result, started)
+            return result
         if self.ports.paused():
-            return {"ok": True, "status": "paused", "claimed": 0, "registered": 0, "failed": 0}
+            result = {"ok": True, "status": "paused", "claimed": 0, "registered": 0, "failed": 0}
+            self._observe_reconcile(result, started)
+            return result
         claims = self._claim_batch()
         worker_count = min(self.store.config.outbox_worker_count, len(claims))
         if worker_count > 1:
@@ -83,13 +95,31 @@ class ProjectRecurrenceReconciler:
             outcomes = [self._process_claim(claim) for claim in claims]
         registered = sum(outcome is True for outcome in outcomes)
         failed = len(outcomes) - registered
-        return {
+        result = {
             "ok": True,
             "status": "ready",
             "claimed": len(claims),
             "registered": registered,
             "failed": failed,
         }
+        self._observe_reconcile(result, started)
+        return result
+
+    def _observe_reconcile(self, result: Mapping[str, Any], started: datetime) -> None:
+        if self.observability is None:
+            return
+        duration_ms = int(max(0.0, (self.ports.clock() - started).total_seconds()) * 1000)
+        failed = int(result.get("failed") or 0)
+        self.observability.observe(
+            "recurrence.reconcile",
+            status="failure" if failed else "success",
+            duration_ms=duration_ms,
+            code="recurrence_registration_failed" if failed else str(result.get("status") or "ready"),
+            intervention=failed > 0 and any(
+                isinstance(item, Mapping) and item.get("state") == "intervention_required"
+                for item in self.store.snapshot()[RECURRENCES_KEY].values()
+            ),
+        )
 
     def set_paused(self, recurrence_id: str, paused: bool, *, actor: str = "user") -> dict[str, Any]:
         """Pause or resume registration/dispatch while keeping Gateway and root state aligned."""

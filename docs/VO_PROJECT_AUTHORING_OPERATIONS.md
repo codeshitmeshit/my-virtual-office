@@ -55,6 +55,7 @@ The local “Agent project drafts” view uses these management-authenticated ro
 | `POST /api/project-authoring/projects/{projectId}/maintenance/{maintenanceId}/reject` | `{expectedRevision,reason}` |
 | `POST /api/project-authoring/projects/{projectId}/grant/revoke` | Revoke all further Agent use of the current grant |
 | `POST /api/project-authoring/projects/{projectId}/grant/rotate` | Invalidate the old secret and return a replacement once |
+| `GET /api/project-authoring/health` | Health state, structured counters/durations, queue age, and credential-safe intervention alerts |
 
 The user reviews the original proposal and working approved draft, including reviewer rationale, candidate, template/version, recurrence, and validation errors. `expectedRevision` rejects stale browser actions; `confirmationKey` and compare-and-set materialization make repeated confirmation safe. A `confirmed` response with `projectId` means one complete project exists, not that execution has started.
 
@@ -82,3 +83,5 @@ Management pause/resume uses `POST /api/project-authoring/recurrences/{recurrenc
 10. **Emergency rollback**: turn off authoring, turn on recurrence dispatch pause, allow in-flight writes to finish, deploy the previous code, and preserve root metadata. New readers are backward compatible and legacy projects/cron target kinds are not rewritten.
 
 After any recovery, verify that credentials are absent from persisted root/audit data, the request or occurrence has one terminal result, recurrence bindings are converged, and no materialized task has an active Project Execution attempt unless a separate execution action explicitly started it.
+
+The health state is `disabled`, `healthy`, `paused`, `degraded`, or `intervention_required`. Pending-request age of one hour or recurrence-outbox age of fifteen minutes degrades health; a durable recurrence intervention takes priority. Failure logs are structured, credential-free, and rate-limited by operation/status/code, while suppressed log counts remain visible in metrics.
