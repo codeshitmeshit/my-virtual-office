@@ -6442,14 +6442,57 @@ def _update_codex_active_from_record(agent_id, conversation_id, record):
         if active and active.get("conversationId") == conversation_id:
             active["threadId"] = record.get("threadId") or active.get("threadId", "")
             active["turnId"] = record.get("turnId") or active.get("turnId", "")
-            active["status"] = record.get("status") or active.get("status", "running")
             active["updatedAt"] = record.get("ts") or int(time.time() * 1000)
-            if record.get("type") == "interaction":
-                if record.get("status") == "pending":
+            record_type = str(record.get("type") or "").lower()
+            record_status = str(record.get("status") or "").lower()
+            pending = active.get("pending") if isinstance(active.get("pending"), dict) else None
+            interaction_id = str(record.get("interactionId") or record.get("approvalId") or "")
+            pending_id = str((pending or {}).get("interactionId") or (pending or {}).get("approvalId") or "")
+            terminal_turn = record_type == "turn" and record_status in {
+                "completed", "done", "success", "failed", "error", "cancelled", "canceled",
+            }
+            approval_terminal = (
+                record_type in {"interaction", "approval"}
+                and record_status in {"resolved", "failed", "cancelled", "canceled", "declined"}
+                and (not pending_id or not interaction_id or pending_id == interaction_id)
+            )
+            if record_type in {"interaction", "approval"} and record_status == "pending":
+                if record_type == "interaction":
                     active["pending"] = normalize_approval_record("codex", agent_id, conversation_id, record)
                     active["pending"]["raw"] = record
-                elif isinstance(active.get("pending"), dict) and active["pending"].get("interactionId") == record.get("interactionId"):
-                    active["pending"] = None
+                else:
+                    active["pending"] = dict(record)
+                active["status"] = "pending"
+            elif terminal_turn or approval_terminal:
+                active["pending"] = None
+                active["status"] = record_status or active.get("status", "running")
+            elif pending:
+                # Approval wait is a projection priority: unrelated activity
+                # cannot make an actually blocked turn appear idle/completed.
+                active["status"] = "resolving" if str(pending.get("status") or "").lower() == "resolving" else "pending"
+            else:
+                active["status"] = record_status or active.get("status", "running")
+
+
+def _mark_codex_active_approval_resolving(agent_id, conversation_id, approval_id):
+    with _CODEX_ACTIVE_LOCK:
+        active = _CODEX_ACTIVE_OPERATIONS.get((agent_id, conversation_id)) or _CODEX_ACTIVE_OPERATIONS.get(agent_id)
+        if not active or active.get("conversationId") != conversation_id:
+            return False
+        pending = active.get("pending") if isinstance(active.get("pending"), dict) else None
+        if not pending:
+            return False
+        pending_id = str(pending.get("approvalId") or pending.get("interactionId") or "")
+        if approval_id and pending_id and approval_id != pending_id:
+            # App-server approval ids and interaction ids are distinct; the
+            # trusted route/turn linkage remains authoritative for that case.
+            raw = pending.get("raw") if isinstance(pending.get("raw"), dict) else {}
+            if str(raw.get("threadId") or "") != str(active.get("threadId") or ""):
+                return False
+        pending["status"] = "resolving"
+        active["status"] = "resolving"
+        active["updatedAt"] = int(time.time() * 1000)
+        return True
 
 
 def _append_codex_activity(agent_id, conversation_id, event, *, preserve_sequence=False):
@@ -12983,6 +13026,11 @@ def _dispatch_feishu_codex_approval_action(action, value, event):
             "toast": _feishu_card_action_error("审批已过期或不可处理"),
         }
     trusted = claim.record or record
+    _mark_codex_active_approval_resolving(
+        str(trusted.get("agentId") or "codex-local"),
+        str(trusted.get("conversationId") or ""),
+        str(trusted.get("approvalId") or ""),
+    )
     try:
         provider_result = _handle_codex_approval_respond({
             "agentId": trusted.get("agentId") or "codex-local",

@@ -736,6 +736,52 @@ def test_conversation_lock_reference_prevents_split_lock_identity():
             server._CODEX_OPERATION_LOCK_REFERENCES.pop(key, None)
 
 
+def test_pending_codex_approval_has_presence_priority_until_resolution():
+    agent_id = "codex-presence-priority"
+    conversation_id = "conv-presence-priority"
+    key = (agent_id, conversation_id)
+    previous = server._CODEX_ACTIVE_OPERATIONS.get(key)
+    server._CODEX_ACTIVE_OPERATIONS[key] = {
+        "agentId": agent_id,
+        "conversationId": conversation_id,
+        "status": "running",
+        "threadId": "thread-priority",
+    }
+    try:
+        server._update_codex_active_from_record(agent_id, conversation_id, {
+            "type": "interaction", "status": "pending", "interactionId": "interaction-1",
+            "threadId": "thread-priority", "turnId": "turn-priority",
+        })
+        active = server._CODEX_ACTIVE_OPERATIONS[key]
+        assert active["status"] == "pending"
+        assert active["pending"]["interactionId"] == "interaction-1"
+
+        server._update_codex_active_from_record(agent_id, conversation_id, {
+            "type": "activity", "status": "completed", "name": "tool.completed",
+            "threadId": "thread-priority", "turnId": "turn-priority",
+        })
+        assert active["status"] == "pending"
+        assert active["pending"] is not None
+
+        assert server._mark_codex_active_approval_resolving(agent_id, conversation_id, "approval-native") is True
+        server._update_codex_active_from_record(agent_id, conversation_id, {
+            "type": "activity", "status": "idle", "threadId": "thread-priority",
+        })
+        assert active["status"] == "resolving"
+
+        server._update_codex_active_from_record(agent_id, conversation_id, {
+            "type": "interaction", "status": "resolved", "interactionId": "interaction-1",
+            "threadId": "thread-priority", "turnId": "turn-priority",
+        })
+        assert active["status"] == "resolved"
+        assert active["pending"] is None
+    finally:
+        if previous is None:
+            server._CODEX_ACTIVE_OPERATIONS.pop(key, None)
+        else:
+            server._CODEX_ACTIVE_OPERATIONS[key] = previous
+
+
 if __name__ == "__main__":
     test_busy_rejects_second_request_and_releases_lock()
     test_provider_exception_clears_active_operation()
