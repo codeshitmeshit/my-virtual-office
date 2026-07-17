@@ -761,6 +761,7 @@
             <span class="proj-toolbar-title">${_t('proj_title')}</span>
             <button class="proj-btn proj-btn-primary" onclick="ProjMgr.newProjectDialog()">${_t('proj_new_project')}</button>
             <button class="proj-btn" onclick="ProjMgr.showTemplatesView()">${_t('proj_templates')}</button>
+            <button class="proj-btn" onclick="ProjectAuthoringReview.show()">${_tf('proj_agent_drafts', 'Agent drafts', 'Agent 草稿')}</button>
             <input class="proj-search" id="proj-search" type="text" placeholder="${_t('proj_search_placeholder')}" value="${escHtml(filters.search)}" oninput="ProjMgr.filterChange('search', this.value)">
             <div class="proj-filter-row">
                 <select class="proj-select" onchange="ProjMgr.filterChange('status', this.value)">
