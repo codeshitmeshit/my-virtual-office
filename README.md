@@ -268,6 +268,12 @@ http://localhost:8090/setup
 | `VO_FEISHU_APP_SECRET` | 空 | 飞书应用 App Secret |
 | `VO_FEISHU_RECEIVE_ID_TYPE` | `chat_id` | 飞书消息接收 ID 类型 |
 | `VO_FEISHU_RECEIVE_ID` | 空 | 飞书消息接收 ID |
+| `VO_CODEX_FEISHU_APPROVAL_CARDS_ENABLED` | `true` | 是否把飞书来源的 Codex 安全审批发送为交互卡片 |
+| `VO_CODEX_FEISHU_APPROVAL_WORKERS` | `2` | Codex 飞书审批后台投递并发 |
+| `VO_CODEX_FEISHU_APPROVAL_QUEUE` | `16` | Codex 飞书审批有界投递队列容量 |
+| `VO_CODEX_FEISHU_APPROVAL_DEADLINE_SEC` | `12` | Codex 飞书审批投递总 deadline（秒） |
+| `VO_FEISHU_AUDIT_MAX_BYTES` | `5242880` | 飞书通知/卡片动作 JSONL 轮转阈值 |
+| `VO_FEISHU_AUDIT_BACKUPS` | `3` | 飞书通知/卡片动作审计备份数 |
 | `VO_BROWSER_PANEL` | `true` | 是否显示 Browser Panel |
 | `VO_CDP_URL` | `http://127.0.0.1:9224` | 浏览器 CDP 地址 |
 | `VO_VIEWER_URL` | `https://localhost:6901` | 浏览器可视化/VNC 地址 |
@@ -348,6 +354,7 @@ npm test
 - VO 内 Agent 使用手册：[docs/VO_AGENT_USAGE_GUIDE.md](docs/VO_AGENT_USAGE_GUIDE.md)
 - 跨平台通信：[docs/AGENT_PLATFORM_COMMUNICATIONS.md](docs/AGENT_PLATFORM_COMMUNICATIONS.md)
 - Codex Provider：[docs/CODEX_PROVIDER_ADAPTER.md](docs/CODEX_PROVIDER_ADAPTER.md)
+- Codex 飞书审批卡片运维：[docs/CODEX_FEISHU_APPROVALS.md](docs/CODEX_FEISHU_APPROVALS.md)
 - Hermes Provider：[docs/HERMES_PROVIDER_ADAPTER.md](docs/HERMES_PROVIDER_ADAPTER.md)
 - 多 Provider 架构草案：[docs/UNIVERSAL-AGENT-HARNESS-SPEC.md](docs/UNIVERSAL-AGENT-HARNESS-SPEC.md)
 - Provider 服务架构与运维：[docs/PROVIDER_SERVICE_ARCHITECTURE.md](docs/PROVIDER_SERVICE_ARCHITECTURE.md)

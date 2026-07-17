@@ -34,4 +34,4 @@
 
 - [x] 8.1 Add focused server integration tests for notification-primary, Chat-App-only, fallback, duplicate/conflicting callbacks, undeliverable approval closure, and VO chat-history isolation; run the affected Python and Node test suites plus strict OpenSpec validation and record the evidence for the test-result gate.
 
-- [ ] 8.2 Document configuration, original-user identity selection, callback transport, audit/metrics, gray rollout, failure diagnosis, and rollback behavior, including that interactive approvals do not use webhook or the configured fixed notification recipient.
+- [x] 8.2 Document configuration, original-user identity selection, callback transport, audit/metrics, gray rollout, failure diagnosis, and rollback behavior, including that interactive approvals do not use webhook or the configured fixed notification recipient.
