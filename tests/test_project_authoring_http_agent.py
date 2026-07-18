@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Agent HTTP boundary for project draft submission and status."""
+"""Agent HTTP boundary for conversation-confirmed direct project creation."""
 
 import io
 import json
@@ -49,93 +49,94 @@ def _handler(path, body=None, *, headers=None, remote="127.0.0.1", content_lengt
 
 
 def _response(handler):
-    return handler.responses[-1], json.loads(handler.wfile.getvalue())
+    raw = handler.wfile.getvalue()
+    return handler.responses[-1], json.loads(raw) if raw else {}
 
 
 class _FakeService:
     def __init__(self):
-        self.submissions = []
-        self.status_calls = []
+        self.creations = []
 
-    def create_pending(self, draft, **kwargs):
-        self.submissions.append((draft, kwargs))
-        return {"ok": True, "created": True, "request": {"id": "request-1", "state": "pending"}}
+    def create_confirmed_project(self, project, **kwargs):
+        self.creations.append((project, kwargs))
+        return {
+            "ok": True,
+            "created": True,
+            "project": {"id": "project-1"},
+            "projectGrantSecret": "one-time-secret",
+        }
 
-    def authenticate_agent_status(self, request_id, **kwargs):
-        self.status_calls.append((request_id, kwargs))
-        return {"id": request_id, "state": "pending"}
+
+def _body():
+    return {
+        "idempotencyKey": "author:direct-1",
+        "confirmation": {"confirmed": True, "summaryDigest": "a" * 64},
+        "project": {"title": "Direct project"},
+    }
 
 
-def test_agent_submission_is_loopback_only_originless_bounded_and_hash_only(monkeypatch):
+def test_agent_direct_creation_is_loopback_only_originless_and_bounded(monkeypatch):
     fake = _FakeService()
     monkeypatch.setattr(server, "_PROJECT_AUTHORING_SERVICE", fake)
-    handler = _handler(
-        "/api/agent/project-authoring/requests",
-        {"idempotencyKey": "author:key-1", "draft": {"title": "Draft"}},
-    )
+    handler = _handler("/api/agent/project-authoring/projects", _body())
 
     handler.do_POST()
 
     status, payload = _response(handler)
     assert status == 200
-    assert payload["created"] is True
-    assert payload["requestSecret"]
-    assert len(fake.submissions) == 1
-    _, kwargs = fake.submissions[0]
+    assert payload["project"]["id"] == "project-1"
+    assert payload["projectGrantSecret"] == "one-time-secret"
+    assert len(fake.creations) == 1
+    project, kwargs = fake.creations[0]
+    assert project == {"title": "Direct project"}
     assert kwargs["requesting_agent_id"] == "author"
-    assert kwargs["request_secret_hash"].startswith("sha256:")
-    assert payload["requestSecret"] not in kwargs["request_secret_hash"]
+    assert kwargs["idempotency_key"] == "author:direct-1"
+    assert kwargs["confirmation"]["summaryDigest"] == "a" * 64
+    assert kwargs["prepare_workspace"] is server._project_authoring_prepare_workspace
+    assert kwargs["cleanup_workspace"] is server._project_authoring_cleanup_workspace
 
     for denied in (
-        _handler(handler.path, {}, remote="10.0.0.9"),
-        _handler(handler.path, {}, headers={"Origin": "http://localhost:3000"}),
-        _handler(handler.path, {}, headers={"X-VO-Agent-Action": "wrong"}),
+        _handler(handler.path, _body(), remote="10.0.0.9"),
+        _handler(handler.path, _body(), headers={"Origin": "http://localhost:3000"}),
+        _handler(handler.path, _body(), headers={"X-VO-Agent-Action": "wrong"}),
     ):
         denied.do_POST()
         assert _response(denied)[0] in {400, 403}
-    assert len(fake.submissions) == 1
+    assert len(fake.creations) == 1
 
     oversized = _handler(
-        handler.path, {},
+        handler.path,
+        _body(),
         content_length=server.project_authoring_config_service.DEFAULT_CONFIG.body_limit_bytes + 1,
     )
     oversized.do_POST()
     assert _response(oversized)[0] == 413
-    assert len(fake.submissions) == 1
+    assert len(fake.creations) == 1
 
 
-def test_agent_id_mismatch_is_rejected_before_service(monkeypatch):
+def test_agent_id_mismatch_is_rejected_before_direct_creation(monkeypatch):
     fake = _FakeService()
     monkeypatch.setattr(server, "_PROJECT_AUTHORING_SERVICE", fake)
     handler = _handler(
-        "/api/agent/project-authoring/requests",
-        {"requestingAgentId": "different", "idempotencyKey": "author:key-1", "draft": {}},
+        "/api/agent/project-authoring/projects",
+        {**_body(), "requestingAgentId": "different"},
     )
 
     handler.do_POST()
 
     assert _response(handler)[0] == 403
-    assert fake.submissions == []
+    assert fake.creations == []
 
 
-def test_agent_status_requires_same_agent_bearer_secret_and_exposes_no_hash(monkeypatch):
+def test_legacy_agent_draft_submission_and_status_routes_are_inactive(monkeypatch):
     fake = _FakeService()
     monkeypatch.setattr(server, "_PROJECT_AUTHORING_SERVICE", fake)
-    path = "/api/agent/project-authoring/requests/request-1"
-    handler = _handler(path, headers={"Authorization": "Bearer opaque-secret"})
 
-    handler.do_GET()
+    submission = _handler("/api/agent/project-authoring/requests", _body())
+    submission.do_POST()
+    status = _handler("/api/agent/project-authoring/requests/request-1")
+    status.do_GET()
 
-    status, payload = _response(handler)
-    assert status == 200
-    assert payload == {"ok": True, "request": {"id": "request-1", "state": "pending"}}
-    assert fake.status_calls == [("request-1", {
-        "requesting_agent_id": "author",
-        "request_secret": "opaque-secret",
-    })]
-    assert "hash" not in json.dumps(payload).lower()
-
-    missing = _handler(path)
-    missing.do_GET()
-    assert _response(missing)[0] == 403
-    assert len(fake.status_calls) == 1
+    assert _response(submission)[0] == 404
+    assert _response(status)[0] == 404
+    assert fake.creations == []

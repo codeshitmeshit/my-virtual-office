@@ -26539,7 +26539,7 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             return None
         return body
 
-    def _handle_agent_project_authoring_submit(self):
+    def _handle_agent_project_direct_create(self):
         if self._reject_untrusted_agent_authoring_request():
             return
         agent_id = self._agent_authoring_id()
@@ -26564,42 +26564,15 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                 "error": "Requesting Agent does not match X-VO-Agent-Id",
             }, status=403)
             return
-        request_secret = project_authoring_security_service.generate_request_secret()
-
-        def submit():
-            result = _PROJECT_AUTHORING_SERVICE.create_pending(
-                body.get("draft"),
-                requesting_agent_id=agent_id,
-                idempotency_key=body.get("idempotencyKey"),
-                request_secret_hash=project_authoring_security_service.hash_request_secret(request_secret),
-                source={"surface": "agent_http", "action": "project-authoring"},
-            )
-            if result.get("created"):
-                result["requestSecret"] = request_secret
-            return result
-
-        self._send_project_authoring_result(submit)
-
-    def _handle_agent_project_authoring_status(self, request_id):
-        if self._reject_untrusted_agent_authoring_request():
-            return
-        agent_id = self._agent_authoring_id()
-        request_secret = self._agent_authoring_bearer_secret()
-        if not agent_id or not request_secret:
-            self._send_json({
-                "ok": False,
-                "code": "project_authoring_auth_required",
-                "error": "Agent id and request bearer secret are required",
-            }, status=403)
-            return
-        self._send_project_authoring_result(lambda: {
-            "ok": True,
-            "request": _PROJECT_AUTHORING_SERVICE.authenticate_agent_status(
-                request_id,
-                requesting_agent_id=agent_id,
-                request_secret=request_secret,
-            ),
-        })
+        self._send_project_authoring_result(lambda: _PROJECT_AUTHORING_SERVICE.create_confirmed_project(
+            body.get("project"),
+            requesting_agent_id=agent_id,
+            idempotency_key=body.get("idempotencyKey"),
+            confirmation=body.get("confirmation"),
+            source={"surface": "agent_http", "action": "project-authoring"},
+            prepare_workspace=_project_authoring_prepare_workspace,
+            cleanup_workspace=_project_authoring_cleanup_workspace,
+        ))
 
     def _handle_agent_project_grant_status(self, project_id):
         if self._reject_untrusted_agent_authoring_request():
@@ -26888,6 +26861,16 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
         parsed_url = urllib.parse.urlparse(self.path)
         request_path = parsed_url.path
         query_params = urllib.parse.parse_qs(parsed_url.query)
+        if (
+            request_path.startswith("/api/agent/project-authoring/requests")
+            or request_path.startswith("/api/project-authoring/requests")
+        ):
+            self._send_json({
+                "ok": False,
+                "code": "project_draft_route_removed",
+                "error": "Persisted project draft routes are no longer available",
+            }, status=404)
+            return
         agent_project_prefix = "/api/agent/projects/"
         if request_path.startswith(agent_project_prefix) and request_path.endswith("/grant-status"):
             project_id = urllib.parse.unquote(
@@ -26898,14 +26881,6 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                 return
             self._handle_agent_project_grant_status(project_id)
             return
-        agent_authoring_prefix = "/api/agent/project-authoring/requests/"
-        if request_path.startswith(agent_authoring_prefix):
-            request_id = urllib.parse.unquote(request_path[len(agent_authoring_prefix):]).strip("/")
-            if not request_id or "/" in request_id:
-                self._send_json({"ok": False, "error": "Project authoring request not found"}, status=404)
-                return
-            self._handle_agent_project_authoring_status(request_id)
-            return
         if request_path == "/api/project-authoring/health":
             if self._reject_untrusted_management_request():
                 return
@@ -26915,35 +26890,6 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                 recurrence_enabled=project_authoring_config_service.is_recurrence_enabled(),
                 recurrence_paused=project_authoring_config_service.is_recurrence_dispatch_paused(),
             ))
-            return
-        management_authoring_prefix = "/api/project-authoring/requests"
-        if request_path == management_authoring_prefix:
-            if self._reject_untrusted_management_request():
-                return
-            states = {
-                value.strip() for value in query_params.get("state", []) for value in value.split(",")
-                if value.strip()
-            }
-            try:
-                limit = int(query_params.get("limit", ["50"])[0])
-            except (TypeError, ValueError):
-                limit = 50
-            self._send_project_authoring_result(lambda: {
-                "ok": True,
-                "requests": _PROJECT_AUTHORING_SERVICE.list_management(states=states or None, limit=limit),
-            })
-            return
-        if request_path.startswith(management_authoring_prefix + "/"):
-            if self._reject_untrusted_management_request():
-                return
-            request_id = urllib.parse.unquote(request_path[len(management_authoring_prefix) + 1:]).strip("/")
-            if not request_id or "/" in request_id:
-                self._send_json({"ok": False, "error": "Project authoring request not found"}, status=404)
-                return
-            self._send_project_authoring_result(lambda: {
-                "ok": True,
-                "request": _PROJECT_AUTHORING_SERVICE.get_management(request_id),
-            })
             return
         if request_path == "/api/meetings/store-status":
             status = _meeting_domain_authority_status()
@@ -29314,8 +29260,7 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                 self._send_json({"error": "Meeting store is not ready", **authority}, status=authority["_status"])
                 return
         request_path = urllib.parse.urlparse(self.path).path
-        management_authoring_prefix = "/api/project-authoring/requests/"
-        authoring_mutation = request_path.startswith(management_authoring_prefix)
+        authoring_mutation = False
         project_mutation = request_path.startswith("/api/projects/")
         if project_mutation or authoring_mutation:
             if self._reject_untrusted_management_request():
@@ -29328,24 +29273,7 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             length = int(self.headers.get('Content-Length', 0))
             body = json.loads(self.rfile.read(length)) if length else {}
         # ── PROJECTS PUT ─────────────────────────────────────────────
-        if authoring_mutation:
-            request_id = urllib.parse.unquote(request_path[len(management_authoring_prefix):]).strip("/")
-            if not request_id or "/" in request_id:
-                self._send_json({"ok": False, "error": "Project authoring request not found"}, status=404)
-                return
-            revision = self._project_authoring_expected_revision(body)
-            if revision is None:
-                return
-            self._send_project_authoring_result(lambda: {
-                "ok": True,
-                "request": _PROJECT_AUTHORING_SERVICE.edit_pending(
-                    request_id,
-                    body.get("draft"),
-                    expected_revision=revision,
-                    actor="user:local",
-                ),
-            })
-        elif self.path.startswith("/api/projects/") and self.path.endswith("/workflow/auto-mode"):
+        if self.path.startswith("/api/projects/") and self.path.endswith("/workflow/auto-mode"):
             proj_id = self.path.split("/api/projects/")[1].rsplit("/workflow/auto-mode", 1)[0]
             result = _handle_workflow_auto_mode(proj_id, body)
             self.send_response(result.get("_status", 200))
@@ -29525,8 +29453,8 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
     def do_POST(self):
         parsed_url = urllib.parse.urlparse(self.path)
         request_path = parsed_url.path
-        if request_path == "/api/agent/project-authoring/requests":
-            self._handle_agent_project_authoring_submit()
+        if request_path == "/api/agent/project-authoring/projects":
+            self._handle_agent_project_direct_create()
             return
         agent_recurrence_prefix = "/api/agent/project-recurrences/"
         if request_path.startswith(agent_recurrence_prefix) and request_path.endswith("/occurrences"):
@@ -29585,41 +29513,6 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                 self._send_json({"ok": False, "error": "Project not found"}, status=404)
                 return
             self._handle_agent_project_maintenance(project_id)
-            return
-        management_authoring_prefix = "/api/project-authoring/requests/"
-        if request_path.startswith(management_authoring_prefix) and request_path.endswith(("/confirm", "/reject")):
-            body = self._read_management_authoring_body()
-            if body is None:
-                return
-            action = "confirm" if request_path.endswith("/confirm") else "reject"
-            request_id = urllib.parse.unquote(
-                request_path[len(management_authoring_prefix):].rsplit("/", 1)[0]
-            ).strip("/")
-            if not request_id or "/" in request_id:
-                self._send_json({"ok": False, "error": "Project authoring request not found"}, status=404)
-                return
-            revision = self._project_authoring_expected_revision(body)
-            if revision is None:
-                return
-            if action == "reject":
-                self._send_project_authoring_result(lambda: {
-                    "ok": True,
-                    "request": _PROJECT_AUTHORING_SERVICE.reject_pending(
-                        request_id,
-                        expected_revision=revision,
-                        reason=body.get("reason"),
-                        actor="user:local",
-                    ),
-                })
-            else:
-                self._send_project_authoring_result(lambda: _PROJECT_AUTHORING_SERVICE.confirm_and_materialize(
-                    request_id,
-                    expected_revision=revision,
-                    confirmation_key=body.get("confirmationKey"),
-                    actor="user:local",
-                    prepare_workspace=_project_authoring_prepare_workspace,
-                    cleanup_workspace=_project_authoring_cleanup_workspace,
-                ))
             return
         management_grant_prefix = "/api/project-authoring/projects/"
         if request_path.startswith(management_grant_prefix) and "/maintenance/" in request_path and request_path.endswith(("/confirm", "/reject")):
