@@ -1,5 +1,41 @@
 # Verification Evidence
 
+## Task 10.5 — Conversation-confirmed direct creation
+
+Run on 2026-07-18 from `/Users/bytedance/cosh/my-virtual-office` against implementation commit `785a0da` and its ancestors.
+
+The prior Task 9.x sections below are retained as historical evidence for the original persisted-draft design. They are superseded by this section wherever they refer to request submission/status routes, draft review UI, pending-draft health, or confirmation-time materialization.
+
+### Regression and contract results
+
+- `.venv/bin/pytest -q tests/test_project*.py` — **319 passed in 11.00s**.
+- `node tests/check_project_authoring_ui_removed.mjs` — passed.
+- `node tests/check_vo_project_authoring_skill.mjs` — passed.
+- `node tests/check_vo_project_authoring_docs.mjs` — passed.
+- `node tests/check_agent_guide_static.mjs` — passed.
+- `openspec validate add-agent-managed-vo-projects --strict` — passed.
+- Live loopback reads of `/skills/index.md` and `/skills/vo-project-authoring/SKILL.md` exposed the natural-language confirmation flow and `POST /api/agent/project-authoring/projects` contract.
+
+### Verification matrix
+
+| Domain | Current evidence |
+| --- | --- |
+| Direct creation and confirmation assertion | `tests/test_project_authoring_direct_create.py` verifies explicit confirmation plus SHA-256 digest validation, complete aggregate creation, backlog state, and inactive workflow flags. |
+| Security boundary | Agent HTTP tests verify loopback-only, no browser Origin, registered Agent/action headers, bounded bodies, identity matching, management-token separation, and hash-only grant persistence. |
+| Idempotency and atomicity | Domain and HTTP tests verify same Agent/key/payload returns one project without reissuing `projectGrantSecret`; semantic reuse conflicts; workspace or root commit failure leaves no project, template, recurrence, outbox, grant, or idempotency residue. |
+| Reviewer and actor policy | Validation/template tests preserve one responsible and executor actor per task, optional confirmed `reviewerActor`, explicit recommendation metadata, eligible-Agent checks, and trackable but non-executable `user:local` work. |
+| No automatic execution | Direct domain and HTTP tests prove tasks begin in `backlog` with `workflowActive=false` and `projectExecutionFlowActive=false`; Project Execution boundary suites remain green. |
+| Draft removal | The UI-removal checker proves the review assets, index wiring, and old browser tests are absent. Old Agent/management request paths have no active handlers; HTTP contract tests require removed writes to return 404 and retained GET tombstones to return `project_draft_route_removed`. |
+| Skill and documentation | Static checks require proposal display before any API call, explicit confirmation, semantic-change reconfirmation/new key, reviewer default-none behavior, one-time in-memory grant handling, no management token, no auto execution, and the accepted unsigned provider-neutral chat limitation. |
+| Templates, recurrence, and legacy cron | Direct recurring creation atomically writes its immutable template, recurrence, and outbox. Template compatibility, recurrence claim/deduplication/reconciliation, and all legacy `projectWorkflow`/`projectTask` schedule phases pass. |
+| Maintenance and grant lifecycle | End-to-end HTTP tests preserve strict-confirmation versus assigned-task autonomous boundaries plus management-authenticated grant rotate/revoke and Agent/project scope. |
+| Observability | Health ignores inert legacy `projectAuthoringRequests`, keeps credential-safe counters/alerts, and degrades on recurrence outbox age rather than pending draft age. |
+| Flag-off and rollback compatibility | Configuration tests keep authoring and recurrence disabled by default and read at action time. Store/repository tests round-trip legacy root metadata and conservative project/template defaults without deleting old request records. |
+
+### Current rollout conclusion
+
+The supported authoring path is now: present the full natural-language proposal, wait for explicit confirmation of that version, compute its digest, and directly create one real but unstarted project. There is no active backend draft lifecycle or draft review UI. Existing `projectAuthoringRequests` data remains inert compatibility metadata, and disabling the authoring flag stops new writes without requiring a data down-migration.
+
 ## Task 9.2 — Focused verification matrix
 
 Run on 2026-07-18 from `/Users/bytedance/cosh/my-virtual-office` against implementation commit `805e7e6` and its ancestors.
