@@ -21,6 +21,27 @@ def _canonical_digest(value: Any) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def _text_digest(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+_CONFIRMED_PROPOSAL_REQUIRED_MARKERS = (
+    "我准备创建这个 VO 项目，请确认：",
+    "项目名称：",
+    "项目类型：",
+    "项目目标：",
+    "维护模式：",
+    "创建后状态：确认后会创建真实项目，但不会开始执行。",
+    "Reviewer 默认策略：",
+    "任务清单：",
+    "| # | 任务名称 | 所属列 | 任务细节 | 验收标准 | 负责人 | 执行人 | Reviewer |",
+    "模板/复用配置：",
+    "周期配置：",
+    "需要你确认的点：",
+    "请确认是否按以上方案创建真实项目。",
+)
+
+
 @dataclass
 class DirectProjectCreationError(RuntimeError):
     code: str
@@ -167,6 +188,25 @@ class DirectProjectCreationService:
             raise DirectProjectCreationError(
                 "invalid_confirmation_summary_digest",
                 "confirmation.summaryDigest must be a SHA-256 hex digest",
+                400,
+            )
+        summary_text = str(supplied.get("summaryText") or "")
+        if not summary_text.strip():
+            raise DirectProjectCreationError(
+                "confirmation_summary_text_required",
+                "confirmation.summaryText must contain the exact user-confirmed proposal",
+                400,
+            )
+        if any(marker not in summary_text for marker in _CONFIRMED_PROPOSAL_REQUIRED_MARKERS):
+            raise DirectProjectCreationError(
+                "invalid_confirmation_summary_format",
+                "confirmation.summaryText must use the VO project confirmation template",
+                400,
+            )
+        if _text_digest(summary_text) != digest:
+            raise DirectProjectCreationError(
+                "confirmation_summary_digest_mismatch",
+                "confirmation.summaryDigest must match confirmation.summaryText",
                 400,
             )
         return digest

@@ -29,7 +29,8 @@ Agent routes require loopback, no browser `Origin`, `X-VO-Agent-Action: project-
   "idempotencyKey": "agent:project:stable-key",
   "confirmation": {
     "confirmed": true,
-    "summaryDigest": "64 lowercase SHA-256 hex characters"
+    "summaryDigest": "64 lowercase SHA-256 hex characters",
+    "summaryText": "exact Markdown proposal confirmed by the user"
   },
   "project": {
     "title": "Release preparation",
@@ -50,6 +51,8 @@ Agent routes require loopback, no browser `Origin`, `X-VO-Agent-Action: project-
 ```
 
 Every task has one responsible actor and one executor actor; they may be the same. `user:local` work is trackable but cannot start automated execution. Reviewer is absent by default. A `reviewerActor` is included only when the confirmed proposal explicitly assigns it; risk recommendations alone do not assign authority.
+
+The server rejects direct creation unless `confirmation.summaryText` contains the fixed VO project confirmation template and `confirmation.summaryDigest` equals the SHA-256 digest of that exact UTF-8 text. This does not cryptographically prove chat authorship, but it prevents bare `confirmed=true` requests and makes the Agent submit the same full proposal it claims the user confirmed.
 
 The atomic commit contains the project, tasks, actor projections, authoring source/digest, grant hash, immutable template version, recurrence definition, and outbox intent as applicable. Tasks start in `backlog`; `workflowActive` and `projectExecutionFlowActive` are false.
 

@@ -2,6 +2,7 @@
 """Conversation-confirmed direct project creation domain tests."""
 
 from datetime import datetime, timezone
+import hashlib
 import os
 import sys
 
@@ -36,7 +37,27 @@ AGENTS = {
     "builder": {"id": "builder"},
     "reviewer": {"id": "reviewer"},
 }
-SUMMARY_DIGEST = "a" * 64
+SUMMARY_TEXT = """我准备创建这个 VO 项目，请确认：
+
+项目名称：Direct project
+项目类型：one_time
+项目目标：Created after conversation confirmation
+维护模式：strict_confirmation
+创建后状态：确认后会创建真实项目，但不会开始执行。
+Reviewer 默认策略：不指定；如有建议，仅作为建议，确认分配前不会写入 reviewer。
+
+任务清单：
+
+| # | 任务名称 | 所属列 | 任务细节 | 验收标准 | 负责人 | 执行人 | Reviewer |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | Implement | Backlog | Created after conversation confirmation | 完成任务 | owner | builder | 不指定 |
+
+模板/复用配置：无
+周期配置：无
+需要你确认的点：无
+
+请确认是否按以上方案创建真实项目。"""
+SUMMARY_DIGEST = hashlib.sha256(SUMMARY_TEXT.encode("utf-8")).hexdigest()
 
 
 def _project(title="Direct project"):
@@ -87,6 +108,7 @@ def _create(service, project=None, **kwargs):
         confirmation=kwargs.pop("confirmation", {
             "confirmed": True,
             "summaryDigest": SUMMARY_DIGEST,
+            "summaryText": SUMMARY_TEXT,
         }),
         source={"surface": "agent_http"},
         **kwargs,
@@ -129,8 +151,26 @@ def test_direct_creation_requires_confirmation_and_sha256_summary(tmp_path):
     markdown, service = _service(tmp_path)
 
     for confirmation, code in (
-        ({"confirmed": False, "summaryDigest": SUMMARY_DIGEST}, "project_confirmation_required"),
-        ({"confirmed": True, "summaryDigest": "not-a-digest"}, "invalid_confirmation_summary_digest"),
+        (
+            {"confirmed": False, "summaryDigest": SUMMARY_DIGEST, "summaryText": SUMMARY_TEXT},
+            "project_confirmation_required",
+        ),
+        (
+            {"confirmed": True, "summaryDigest": "not-a-digest", "summaryText": SUMMARY_TEXT},
+            "invalid_confirmation_summary_digest",
+        ),
+        (
+            {"confirmed": True, "summaryDigest": SUMMARY_DIGEST},
+            "confirmation_summary_text_required",
+        ),
+        (
+            {"confirmed": True, "summaryDigest": SUMMARY_DIGEST, "summaryText": "确认创建"},
+            "invalid_confirmation_summary_format",
+        ),
+        (
+            {"confirmed": True, "summaryDigest": "b" * 64, "summaryText": SUMMARY_TEXT},
+            "confirmation_summary_digest_mismatch",
+        ),
     ):
         with pytest.raises(DirectProjectCreationError) as raised:
             _create(service, confirmation=confirmation)

@@ -94,7 +94,7 @@ actor 使用注册 Agent 或本地 `user:local`。本地用户可以负责或执
 - 用户拒绝、未确认或只是继续讨论时，不调用 API。
 - 后端无法验证聊天消息的用户签名；不得伪造 `confirmed=true`。它只表示本 skill 已实际获得当前方案的对话确认。
 
-对用户确认的精确方案 UTF-8 文本计算 SHA-256 hex，不把方案写入临时文件：
+对用户确认的精确方案 UTF-8 文本计算 SHA-256 hex，不把方案写入临时文件。创建请求必须同时携带该精确文本和 digest；后端会拒绝缺少 `summaryText`、未使用固定确认模板或 digest 不匹配的请求：
 
 ```bash
 vo_proposal_digest="$(printf %s "$vo_confirmed_proposal" | shasum -a 256 | awk '{print $1}')"
@@ -120,7 +120,11 @@ curl -sS -X POST "$vo_authoring_url/api/agent/project-authoring/projects" \
   -H 'X-VO-Agent-Id: CURRENT_AGENT_ID' \
   -d '{
     "idempotencyKey":"agent-id:project:stable-key",
-    "confirmation":{"confirmed":true,"summaryDigest":"64_HEX_DIGEST"},
+    "confirmation":{
+      "confirmed":true,
+      "summaryDigest":"64_HEX_DIGEST",
+      "summaryText":"EXACT_CONFIRMED_MARKDOWN_PROPOSAL"
+    },
     "project":{
       "title":"发布准备",
       "description":"完成发布前准备并沉淀证据",

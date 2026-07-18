@@ -25,6 +25,7 @@ for (const required of [
   "critical_delivery",
   "/api/agent/project-authoring/projects",
   "summaryDigest",
+  "summaryText",
   "projectGrantSecret",
   "/grant-status",
   "/maintenance",
@@ -46,6 +47,8 @@ assert.match(skill, /未知项写“待确认”/);
 assert.match(skill, /Reviewer 默认策略：不指定/);
 assert.match(skill, /请确认是否按以上方案创建真实项目/);
 assert.match(skill, /“需要你确认的点”只列真正会影响创建结果的未决事项/);
+assert.match(skill, /创建请求必须同时携带该精确文本和 digest/);
+assert.match(skill, /后端会拒绝缺少 `summaryText`、未使用固定确认模板或 digest 不匹配的请求/);
 assert.match(skill, /只用这些只读 HTTP GET 获取 roster/);
 assert.match(skill, /不要运行内联 Python/);
 assert.match(skill, /不要调用 `_office_agent_lookup`/);

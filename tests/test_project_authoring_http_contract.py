@@ -3,6 +3,7 @@
 
 import io
 import json
+import hashlib
 import os
 import sys
 import tempfile
@@ -34,7 +35,27 @@ AGENTS = {
     "owner": {"id": "owner"},
     "builder": {"id": "builder"},
 }
-SUMMARY_DIGEST = "b" * 64
+SUMMARY_TEXT = """我准备创建这个 VO 项目，请确认：
+
+项目名称：HTTP project
+项目类型：one_time
+项目目标：HTTP contract project
+维护模式：strict_confirmation
+创建后状态：确认后会创建真实项目，但不会开始执行。
+Reviewer 默认策略：不指定；如有建议，仅作为建议，确认分配前不会写入 reviewer。
+
+任务清单：
+
+| # | 任务名称 | 所属列 | 任务细节 | 验收标准 | 负责人 | 执行人 | Reviewer |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | Implement | Backlog | HTTP contract project | 完成任务 | owner | builder | 不指定 |
+
+模板/复用配置：无
+周期配置：无
+需要你确认的点：无
+
+请确认是否按以上方案创建真实项目。"""
+SUMMARY_DIGEST = hashlib.sha256(SUMMARY_TEXT.encode("utf-8")).hexdigest()
 
 
 class _Connection:
@@ -135,7 +156,11 @@ def _create(project, key, *, agent="author", origin=""):
         "/api/agent/project-authoring/projects",
         {
             "idempotencyKey": key,
-            "confirmation": {"confirmed": True, "summaryDigest": SUMMARY_DIGEST},
+            "confirmation": {
+                "confirmed": True,
+                "summaryDigest": SUMMARY_DIGEST,
+                "summaryText": SUMMARY_TEXT,
+            },
             "project": project,
         },
         headers=headers,
@@ -172,6 +197,19 @@ def test_direct_create_is_atomic_idempotent_unstarted_and_origin_safe(authoring)
     )
     assert denied_status == 403
     assert denied["code"] == "agent_authoring_browser_origin_rejected"
+    assert len(markdown.load_all()["projects"]) == 1
+
+    missing_text_status, missing_text = _call(_handler(
+        "/api/agent/project-authoring/projects",
+        {
+            "idempotencyKey": "author:missing-summary-text",
+            "confirmation": {"confirmed": True, "summaryDigest": SUMMARY_DIGEST},
+            "project": _project("Missing summary text"),
+        },
+        headers={"X-VO-Agent-Action": "project-authoring", "X-VO-Agent-Id": "author"},
+    ), "POST")
+    assert missing_text_status == 400
+    assert missing_text["code"] == "confirmation_summary_text_required"
     assert len(markdown.load_all()["projects"]) == 1
 
 
