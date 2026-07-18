@@ -66,6 +66,9 @@ from services.provider_conversations import CallableConversationStatePort, Calla
 from services.provider_ports import AdapterCapabilities, AdapterEvent, AdapterResult, CallableProviderAdapter, RunCommand
 from services.provider_registry import ProviderRunRepository
 from services.provider_runs import ProviderRunCoordinator
+from services.chat_commands import ChatCommand, ChatCommandService, CommandRequest, CommandScope, parse_chat_command
+from services.chat_command_providers import ChatProviderCommandAdapter, CodexCompactAdapter, ScopedConversationResetAdapter
+from services.chat_command_runtime import CallbackCommandAuditPort, CommandFeatureFlags, CommandMetrics, ScopedCommandReservations
 from services.codex_fast_path import CodexEventFastPath, CodexFastPathTelemetry, CodexTransientCoalescer, classify_codex_event, load_codex_fast_path_settings
 from services.codex_feishu_approvals import (
     BoundedApprovalDeliveryExecutor,
@@ -111,6 +114,8 @@ _FEISHU_CHAT_SSE_METRICS = {
     "lastReplayAt": 0,
     "lastError": "",
 }
+_CHAT_COMMAND_RESERVATIONS = ScopedCommandReservations()
+_CHAT_COMMAND_METRICS = CommandMetrics()
 _FEISHU_CHAT_WORKER_TOKEN = uuid.uuid4().hex
 
 
@@ -29604,7 +29609,7 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                 self.send_error(413, "Request body is too large")
                 return
         # --- SETUP WIZARD ---
-        if request_path in {"/api/chat-sessions/create", "/api/chat-sessions/delete", "/api/chat-sessions/switch"}:
+        if request_path in {"/api/chat-sessions/create", "/api/chat-sessions/delete", "/api/chat-sessions/switch", "/api/chat/commands/execute"}:
             if self._reject_untrusted_management_request():
                 return
             body, error = self._read_limited_json_body()
@@ -29612,7 +29617,10 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                 result, status = error, error.pop("_status")
             else:
                 agent_id = body.get("agentId") or body.get("agent") or body.get("key") or "main"
-                if request_path.endswith("/create"):
+                if request_path == "/api/chat/commands/execute":
+                    result = _handle_chat_command_execute(body)
+                    status = result.pop("_status", 200)
+                elif request_path.endswith("/create"):
                     result, status = handle_chat_session_create(agent_id, body)
                 elif request_path.endswith("/delete"):
                     result, status = handle_chat_session_delete(agent_id, body.get("sessionId") or body.get("sessionKey") or "", body)
@@ -34226,6 +34234,146 @@ def handle_chat_session_create(agent_id, body=None):
             return {"ok": False, "error": str(res.get("error") or "sessions.reset failed")}, 502
         return {"ok": True, "providerKind": kind, "sessionKey": session_key}, 200
     return {"ok": False, "error": f"{kind} session management is not supported yet"}, 400
+
+
+class _ChatCommandIds:
+    def new_id(self):
+        return str(uuid.uuid4())
+
+
+class _ChatCommandClock:
+    def now_ms(self):
+        return int(time.time() * 1000)
+
+
+class _ChatCommandIdentities:
+    def new_conversation_id(self, scope):
+        return f"vo-{uuid.uuid4().hex}"
+
+    def new_session_key(self, scope):
+        return _openclaw_session_key_for_agent(scope.agent_id, f"conversation-{uuid.uuid4().hex[:20]}", default_bucket="main")
+
+
+class _ChatCommandKeys:
+    def resolve(self, scope):
+        if scope.provider_kind == "codex":
+            return _provider_conversation_key("codex", scope.agent_id, scope.conversation_id, scope.agent_id)
+        return _provider_conversation_key(scope.provider_kind, scope.profile, scope.conversation_id)
+
+
+class _ChatCommandStatePorts:
+    def resolve(self, scope):
+        if scope.provider_kind == "codex":
+            return _codex_thread_port()
+        return _provider_state_port(scope.provider_kind, scope.profile, scope.conversation_id)
+
+
+class _ChatCommandOpenClawReset:
+    def reset(self, scope):
+        session_key = _openclaw_conversation_session_key(scope.agent_id, scope.conversation_id)
+        key = _provider_conversation_key("openclaw", scope.agent_id, scope.conversation_id, agent_id=scope.agent_id)
+        return PROVIDER_CONVERSATION_SERVICE.control_queued(key, session_key, "reset", _openclaw_queued_conversation_port())
+
+
+class _ChatCommandCodexCompact:
+    def __init__(self):
+        self.lock = None
+
+    def thread_id(self, scope):
+        return _get_codex_thread_id(scope.agent_id, scope.conversation_id)
+
+    def try_acquire(self, scope):
+        self.lock = _codex_operation_lock(scope.agent_id, scope.conversation_id)
+        if not self.lock.acquire(blocking=False):
+            _discard_codex_operation_lock(scope.agent_id, scope.conversation_id, self.lock)
+            self.lock = None
+            return False
+        return True
+
+    def release(self, scope):
+        if self.lock:
+            _release_codex_operation_lock(scope.agent_id, scope.conversation_id, self.lock)
+            self.lock = None
+
+    def compact(self, scope, thread_id):
+        return _codex_provider_from_config().compact_context(thread_id, 120)
+
+
+def _chat_command_audit_lookup(request):
+    for event in reversed(_load_comm_history(limit=1000, conversation_id=request.scope.conversation_id, agent_id=request.scope.agent_id)):
+        metadata = event.get("metadata") if isinstance(event.get("metadata"), dict) else {}
+        if metadata.get("chatCommandAuditKey") == request.audit_key():
+            return metadata
+    return None
+
+
+def _chat_command_audit_append(row):
+    metadata = dict(row)
+    metadata["chatCommandAuditKey"] = "\x1f".join((
+        str(row.get("providerKind") or ""), str(row.get("agentId") or ""),
+        str(row.get("profile") or ""), str(row.get("conversationId") or ""),
+        str(row.get("sourceSurface") or ""), str(row.get("idempotencyKey") or ""),
+    ))
+    return _append_comm_event({
+        "type": "operation", "operation": "chat_command", "direction": "system",
+        "conversationId": row.get("conversationId") or "", "from": _office_agent_ref(row.get("agentId") or ""),
+        "to": {"id": "user", "providerKind": "human", "name": "User"},
+        "text": row.get("reply") or "", "metadata": metadata, "visibleInOffice": True,
+        "ok": bool(row.get("ok", row.get("state") == "started")),
+    }, require_durable=True)
+
+
+def _chat_command_provider_adapter():
+    resetter = ScopedConversationResetAdapter(
+        PROVIDER_CONVERSATION_SERVICE, _ChatCommandKeys(), _ChatCommandStatePorts()
+    )
+    compact = CodexCompactAdapter(_ChatCommandCodexCompact())
+    return ChatProviderCommandAdapter(_ChatCommandIdentities(), resetter, _ChatCommandOpenClawReset(), compact.compact)
+
+
+def _handle_chat_command_execute(body, *, surface="virtual-office", trusted_agent=None, trusted_conversation_id=""):
+    body = body if isinstance(body, dict) else {}
+    flags = CommandFeatureFlags.from_values(
+        os.environ.get("VO_CHAT_SLASH_COMMANDS_ENABLED"),
+        os.environ.get("VO_FEISHU_CHAT_SLASH_COMMANDS_ENABLED"),
+    )
+    if not flags.allows(surface):
+        return {"ok": False, "status": "disabled", "error": "Chat slash commands are disabled", "_status": 404}
+    command = parse_chat_command(body.get("command") or body.get("message"), body.get("attachments"))
+    if command is None:
+        return {"ok": False, "status": "not_command", "error": "Unsupported command", "_status": 400}
+    agent_key = trusted_agent or body.get("agentId") or body.get("agent") or body.get("key")
+    agent = _find_agent_record(agent_key)
+    if not agent:
+        return {"ok": False, "status": "not_found", "error": "Agent not found", "_status": 404}
+    provider = str(agent.get("providerKind") or "openclaw").lower()
+    if provider in {"claude", "claudecode"}:
+        provider = "claude-code"
+    supplied_provider = str(body.get("providerKind") or "").strip().lower()
+    if supplied_provider and supplied_provider != provider:
+        return {"ok": False, "status": "invalid_scope", "error": "Provider does not match Agent", "_status": 400}
+    agent_id = str(agent.get("id") or agent.get("statusKey") or agent_key)
+    profile = str(agent.get("profile") or agent.get("providerAgentId") or agent_id)
+    conversation_id = str(trusted_conversation_id or body.get("conversationId") or body.get("sessionKey") or "").strip()
+    if not conversation_id:
+        return {"ok": False, "status": "invalid_scope", "error": "conversationId is required", "_status": 400}
+    if provider == "openclaw" and surface == "virtual-office":
+        validated = _openclaw_session_key_for_agent(agent_id, conversation_id, default_bucket="")
+        if not validated or validated != conversation_id:
+            return {"ok": False, "status": "invalid_scope", "error": "Invalid session key for Agent", "_status": 400}
+    try:
+        scope = CommandScope.create(provider, agent_id, profile, conversation_id, surface)
+        request = CommandRequest.create(
+            command, scope, body.get("idempotencyKey") or body.get("sourceMessageId"), body.get("sourceMessageId")
+        )
+    except ValueError as exc:
+        return {"ok": False, "status": "invalid_request", "error": str(exc), "_status": 400}
+    audit = CallbackCommandAuditPort(_chat_command_audit_lookup, _chat_command_audit_append, _CHAT_COMMAND_METRICS)
+    result = ChatCommandService(
+        _chat_command_provider_adapter(), _CHAT_COMMAND_RESERVATIONS, audit, _ChatCommandIds(), _ChatCommandClock()
+    ).execute(request)
+    status_code = 200 if result.ok else 409 if result.status in {"busy", "stale", "indeterminate"} else 501 if result.status == "unsupported" else 500
+    return {**result.to_dict(), "_status": status_code}
 
 def handle_chat_session_delete(agent_id, session_id, body=None):
     agent_ref = _chat_sessions_agent(agent_id)

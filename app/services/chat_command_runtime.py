@@ -128,6 +128,8 @@ class CallbackCommandAuditPort:
             "sourceSurface": request.scope.surface, "command": request.command.value,
             "ok": result.ok, "status": result.status, "changed": result.changed,
             "reply": result.reply[:2000], "durationMs": result.duration_ms,
+            "nextConversationId": result.next_conversation_id,
+            "nextSessionKey": result.next_session_key,
         })
         if self._metrics:
             self._metrics.increment(request.scope.surface, request.scope.provider_kind, request.command.value, result.status)
