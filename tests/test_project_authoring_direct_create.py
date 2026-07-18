@@ -1,0 +1,237 @@
+#!/usr/bin/env python3
+"""Conversation-confirmed direct project creation domain tests."""
+
+from datetime import datetime, timezone
+import os
+import sys
+
+import pytest
+
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+APP_DIR = os.path.join(ROOT, "app")
+if APP_DIR not in sys.path:
+    sys.path.insert(0, APP_DIR)
+
+from project_store import MarkdownProjectStore
+from services.project_authoring import ProjectAuthoringService
+from services.project_authoring_config import ProjectAuthoringCapacityError
+from services.project_direct_creation import DirectProjectCreationError
+from services.project_authoring_security import hash_request_secret
+from services.project_authoring_store import (
+    GRANTS_KEY,
+    IDEMPOTENCY_KEY,
+    OUTBOX_KEY,
+    RECURRENCES_KEY,
+    REQUESTS_KEY,
+    TEMPLATES_KEY,
+    ProjectAuthoringRootStore,
+)
+from services.project_repository import ProjectRepository
+
+
+AGENTS = {
+    "author": {"id": "author"},
+    "owner": {"id": "owner"},
+    "builder": {"id": "builder"},
+    "reviewer": {"id": "reviewer"},
+}
+SUMMARY_DIGEST = "a" * 64
+
+
+def _project(title="Direct project"):
+    return {
+        "title": title,
+        "description": "Created after conversation confirmation",
+        "projectType": "one_time",
+        "agentMaintenanceMode": "strict_confirmation",
+        "columns": [{"id": "backlog", "title": "Backlog"}],
+        "tasks": [{
+            "title": "Implement",
+            "columnId": "backlog",
+            "responsibleActor": {"type": "agent", "id": "owner"},
+            "executorActor": {"type": "agent", "id": "builder"},
+            "reviewerRecommendation": {"recommended": False, "triggers": []},
+        }],
+        "template": {"mode": "none"},
+        "recurrence": {"enabled": False},
+    }
+
+
+def _service(tmp_path, *, recurrence_enabled=False):
+    markdown = MarkdownProjectStore(str(tmp_path))
+    markdown.save_all({"projects": [], "templates": []})
+    repository = ProjectRepository(
+        load_projects=markdown.load_all,
+        save_projects=markdown.save_all,
+        cache_namespace=lambda: (markdown, markdown.revision()),
+    )
+    service = ProjectAuthoringService(
+        ProjectAuthoringRootStore(repository),
+        lookup_agent=AGENTS.get,
+        is_excluded_agent=lambda _agent_id: False,
+        submission_enabled=lambda: True,
+        recurrence_enabled=lambda: recurrence_enabled,
+        clock=lambda: datetime(2026, 7, 18, 12, 0, tzinfo=timezone.utc),
+        new_id=lambda: "creation-1",
+        new_secret=lambda: "one-time-project-secret",
+    )
+    return markdown, service
+
+
+def _create(service, project=None, **kwargs):
+    return service.create_confirmed_project(
+        project or _project(),
+        requesting_agent_id=kwargs.pop("requesting_agent_id", "author"),
+        idempotency_key=kwargs.pop("idempotency_key", "author:direct-1"),
+        confirmation=kwargs.pop("confirmation", {
+            "confirmed": True,
+            "summaryDigest": SUMMARY_DIGEST,
+        }),
+        source={"surface": "agent_http"},
+        **kwargs,
+    )
+
+
+def test_direct_creation_commits_complete_unstarted_project_and_one_time_grant(tmp_path):
+    markdown, service = _service(tmp_path)
+
+    created = _create(service)
+    repeated = _create(service)
+    root = markdown.load_all()
+
+    assert created["ok"] is True and created["created"] is True
+    assert created["projectGrantSecret"] == "one-time-project-secret"
+    assert repeated["ok"] is True and repeated["created"] is False
+    assert "projectGrantSecret" not in repeated
+    assert created["project"]["id"] == repeated["project"]["id"] == "project-creation-1"
+    assert len(root["projects"]) == 1
+    assert root[REQUESTS_KEY] == {}
+    project = root["projects"][0]
+    assert project["authoringSource"] == {
+        "kind": "conversation_confirmed_agent",
+        "creationId": "creation-1",
+        "confirmationSummaryDigest": SUMMARY_DIGEST,
+        "surface": "agent_http",
+    }
+    assert project["workflowActive"] is False
+    assert project["projectExecutionFlowActive"] is False
+    assert project["tasks"][0]["executionState"] == "backlog"
+    assert project["tasks"][0]["responsibleActor"] == {"type": "agent", "id": "owner"}
+    assert project["tasks"][0]["executorActor"] == {"type": "agent", "id": "builder"}
+    grant = root[GRANTS_KEY][project["id"]]
+    assert grant["secretHash"] == hash_request_secret("one-time-project-secret")
+    assert "one-time-project-secret" not in str(root)
+    assert root[IDEMPOTENCY_KEY]["direct-create:author:author:direct-1"]["projectId"] == project["id"]
+
+
+def test_direct_creation_requires_confirmation_and_sha256_summary(tmp_path):
+    markdown, service = _service(tmp_path)
+
+    for confirmation, code in (
+        ({"confirmed": False, "summaryDigest": SUMMARY_DIGEST}, "project_confirmation_required"),
+        ({"confirmed": True, "summaryDigest": "not-a-digest"}, "invalid_confirmation_summary_digest"),
+    ):
+        with pytest.raises(DirectProjectCreationError) as raised:
+            _create(service, confirmation=confirmation)
+        assert raised.value.code == code
+    assert markdown.load_all()["projects"] == []
+
+
+def test_direct_creation_rejects_idempotency_key_reuse_for_changed_content(tmp_path):
+    markdown, service = _service(tmp_path)
+    _create(service)
+
+    with pytest.raises(DirectProjectCreationError) as raised:
+        _create(service, _project("Changed project"))
+
+    assert raised.value.code == "project_creation_idempotency_conflict"
+    assert len(markdown.load_all()["projects"]) == 1
+
+
+def test_direct_creation_workspace_failure_and_commit_failure_leave_no_partial_state(tmp_path, monkeypatch):
+    markdown, service = _service(tmp_path)
+    cleanup = []
+    failed_workspace = {
+        "ok": False,
+        "error": "workspace unavailable",
+        "path": "/tmp/direct-partial",
+        "managed": True,
+        "created": True,
+    }
+    with pytest.raises(DirectProjectCreationError) as raised:
+        _create(
+            service,
+            prepare_workspace=lambda *_args: failed_workspace,
+            cleanup_workspace=cleanup.append,
+        )
+    assert raised.value.code == "workspace_preparation_failed"
+    assert cleanup == [failed_workspace]
+    assert markdown.load_all()["projects"] == []
+
+    prepared = {
+        "ok": True,
+        "path": "/tmp/direct-created",
+        "managed": True,
+        "created": True,
+    }
+    original_update = service.store.update
+
+    def fail_commit(_mutator):
+        raise OSError("root commit failed")
+
+    monkeypatch.setattr(service.store, "update", fail_commit)
+    with pytest.raises(OSError, match="root commit failed"):
+        _create(
+            service,
+            prepare_workspace=lambda *_args: prepared,
+            cleanup_workspace=cleanup.append,
+        )
+    monkeypatch.setattr(service.store, "update", original_update)
+    assert cleanup[-1] == prepared
+    assert markdown.load_all()["projects"] == []
+
+
+def test_direct_recurring_creation_commits_template_recurrence_and_outbox(tmp_path):
+    markdown, service = _service(tmp_path, recurrence_enabled=True)
+    project = _project("Weekly direct")
+    project.update({
+        "projectType": "recurring",
+        "template": {"mode": "create", "name": "Weekly direct template"},
+        "recurrence": {
+            "enabled": True,
+            "schedule": {"kind": "cron", "expr": "0 9 * * 1", "timezone": "UTC"},
+        },
+    })
+
+    result = _create(service, project)
+    root = markdown.load_all()
+
+    assert result["project"]["templateRef"] == {"id": "template-creation-1", "version": 1}
+    assert result["project"]["recurrenceRef"] == {"id": "recurrence-creation-1"}
+    assert root[TEMPLATES_KEY]["template-creation-1"][0]["version"] == 1
+    assert root[RECURRENCES_KEY]["recurrence-creation-1"]["sourceProjectId"] == "project-creation-1"
+    assert root[OUTBOX_KEY][0]["recurrenceId"] == "recurrence-creation-1"
+
+
+def test_direct_recurring_creation_respects_action_time_feature_gate(tmp_path):
+    markdown, service = _service(tmp_path, recurrence_enabled=False)
+    project = _project("Disabled recurrence")
+    project.update({
+        "projectType": "recurring",
+        "template": {"mode": "create", "name": "Disabled recurrence template"},
+        "recurrence": {
+            "enabled": True,
+            "schedule": {"kind": "cron", "expr": "0 9 * * 1", "timezone": "UTC"},
+        },
+    })
+
+    with pytest.raises(ProjectAuthoringCapacityError) as raised:
+        _create(service, project)
+
+    assert getattr(raised.value, "code", "") == "project_recurrence_disabled"
+    root = markdown.load_all()
+    assert root["projects"] == []
+    assert root[TEMPLATES_KEY] == {}
+    assert root[RECURRENCES_KEY] == {}
+    assert root[OUTBOX_KEY] == []

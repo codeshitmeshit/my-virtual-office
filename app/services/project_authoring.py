@@ -30,6 +30,10 @@ from services.project_authoring_store import (
 )
 from services.project_authoring_validation import validate_idempotency_key, validate_project_draft
 from services.project_authoring_security import verify_request_secret
+from services.project_direct_creation import (
+    DirectProjectCreationPorts,
+    DirectProjectCreationService,
+)
 from services.project_authoring_audit import build_audit_event, sanitize_audit_text
 from services.project_templates import (
     ProjectTemplateError,
@@ -119,6 +123,8 @@ class ProjectAuthoringService:
         recurrence_paused: Callable[[], bool] = is_recurrence_dispatch_paused,
         clock: Callable[[], datetime] = _now,
         new_id: Callable[[], str] = _new_id,
+        new_secret: Callable[[], str] | None = None,
+        hash_secret: Callable[[str], str] | None = None,
     ) -> None:
         self.store = store
         self.lookup_agent = lookup_agent
@@ -128,6 +134,44 @@ class ProjectAuthoringService:
         self.recurrence_paused = recurrence_paused
         self.clock = clock
         self.new_id = new_id
+        direct_ports = DirectProjectCreationPorts(
+            store=store,
+            lookup_agent=lookup_agent,
+            is_excluded_agent=is_excluded_agent,
+            submission_enabled=submission_enabled,
+            recurrence_enabled=recurrence_enabled,
+            materialize_template=self._materialize_template,
+            materialize_recurrence=self._materialize_recurrence,
+            build_project=self._build_project,
+            audit=self._audit,
+            cleanup_workspace=self._cleanup_prepared_workspace,
+            clock=clock,
+            new_id=new_id,
+            **({"new_secret": new_secret} if new_secret is not None else {}),
+            **({"hash_secret": hash_secret} if hash_secret is not None else {}),
+        )
+        self.direct_creation = DirectProjectCreationService(direct_ports)
+
+    def create_confirmed_project(
+        self,
+        project: Any,
+        *,
+        requesting_agent_id: str,
+        idempotency_key: Any,
+        confirmation: Any,
+        source: Mapping[str, Any] | None = None,
+        prepare_workspace: Callable[[Mapping[str, Any], str, str], Mapping[str, Any]] | None = None,
+        cleanup_workspace: Callable[[Mapping[str, Any]], Any] | None = None,
+    ) -> dict[str, Any]:
+        return self.direct_creation.create(
+            project,
+            requesting_agent_id=requesting_agent_id,
+            idempotency_key=idempotency_key,
+            confirmation=confirmation,
+            source=source,
+            prepare_workspace=prepare_workspace,
+            cleanup_workspace=cleanup_workspace,
+        )
 
     def create_pending(
         self,

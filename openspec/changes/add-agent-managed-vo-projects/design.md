@@ -1,167 +1,140 @@
 ## Context
 
-VO already has a durable project store, browser CRUD routes, `ProjectRepository`, extracted project command services, reusable project templates, task `assignee`/`executorAgentId`/`reviewerAgentId` fields, and Gateway-backed scheduled execution. It also has an established AI-request pattern for meetings: an Agent creates a non-materializing pending request, while a management-authenticated user confirms, edits, or rejects it.
+VO now has the backend primitives for complete project validation, atomic project/task creation, actor references, scoped grants, immutable templates, independent recurrence, and Project Execution safety gates. The first design added a persisted pending-draft state machine and a management-authenticated browser review surface before project creation.
 
-The current `vo-project-workflow` skill intentionally covers execution rather than authoring. All `/api/projects` POST/PUT/DELETE mutations require the per-process management token, which an Agent skill must not receive or expose. Current project creation also creates an empty project before tasks are added, template cloning drops role details, and project cron starts existing work instead of generating independent project instances.
+The confirmed product change removes that backend draft concept. The Agent presents a natural-language proposal in the existing conversation, waits for explicit user confirmation there, then submits one structured direct-create request. Creation is considered low risk because it is reversible at the product level and never starts Project Execution; execution, review, acceptance, cancellation, and protected maintenance retain their separate gates.
 
-This change therefore spans runtime skills, HTTP routing, project-domain services, persistence, scheduling, and a small trusted user control surface. Existing local-first deployment and persisted projects must remain readable without a mandatory migration.
+The generic VO backend cannot cryptographically prove that an arbitrary provider conversation message came from the user. This design therefore treats conversational confirmation as a skill-level contract and records a bounded confirmation assertion/digest for audit. Backend safety comes from local-only registered-Agent access, complete validation, idempotency, atomic creation, scoped authority, and the invariant that creation does not execute work.
 
 ## Goals / Non-Goals
 
 **Goals:**
 
-- Let an Agent respond to an explicit user request by submitting a complete VO project draft without possessing management credentials.
-- Require a trustworthy user confirmation before the first project mutation.
-- Materialize a confirmed project and all initial tasks atomically and idempotently.
-- Represent one responsible actor and one executor actor per task, while projecting compatible Agent roles into current execution fields.
-- Keep reviewer absent by default and preserve existing reviewer-skip gates.
-- Support strict and autonomous Agent-maintenance policies with a narrow protected boundary.
-- Support versioned manual templates and scheduled creation of independent project instances.
-- Preserve current project CRUD, execution, reviews, acceptance, and scheduled-execution behavior.
+- Let an explicitly invoked Agent present a complete natural-language project proposal and create the real project immediately after the user confirms it.
+- Create the project, all tasks, role assignments, optional confirmed reviewer assignments, template version, recurrence intent, grant, and audit data in one idempotent root commit.
+- Return the created project identifier and a one-time scoped grant without exposing the management token.
+- Preserve responsible/executor semantics, optional reviewer defaults, controlled maintenance, immutable templates, independent recurrence, and legacy compatibility.
+- Keep every created task unstarted until a separate Project Execution action passes existing gates.
+- Remove the pending-draft API, state machine, polling, and browser review UI from the active product surface.
 
 **Non-Goals:**
 
-- Proactive project creation when the user did not ask for it.
-- Replacing the Project Execution, review, acceptance, or existing cron workflow.
-- Adding a general organization-wide human directory; the initial human actor is the current VO user identity.
-- Automatic task execution immediately after project materialization unless separately requested through existing execution gates.
-- Expanding the first release into reminders,催办, full project acceptance, or project-closing automation.
+- Persisting or rendering the natural-language proposal as a backend draft.
+- Cryptographic verification of provider chat confirmation in this release.
+- Proactive project creation when the user did not ask for it or did not confirm the displayed proposal.
+- Automatically executing, reviewing, accepting, cancelling, or closing a newly created project.
+- Weakening management authentication for protected maintenance, grant administration, recurrence administration, or existing browser CRUD.
 
 ## Decisions
 
-### 1. Add `vo-project-authoring` instead of expanding `vo-project-workflow`
+### 1. Keep `vo-project-authoring`, but make proposal confirmation conversational
 
-The new skill owns project drafting, candidate recommendation, pending-request status, template instantiation, recurrence authoring, and policy-controlled maintenance. `vo-project-workflow` remains the execution/review/acceptance skill.
+The skill first reads the local VO roster, resolves candidates, and renders a natural-language proposal containing project type, tasks, responsible actors, executors, optional reviewer decisions, maintenance mode, and template/recurrence settings. It must stop until the user explicitly confirms that version. Any semantic change causes the skill to show a revised proposal and obtain a new confirmation.
 
-This preserves a clear safety boundary: authoring decides what durable work should exist, while execution decides how approved work runs. The VO skills index and catalog will route between them.
+After confirmation, the skill converts the proposal to the structured direct-create payload. `vo-project-workflow` continues to own execution, review, acceptance, cancellation, blockers, and artifacts.
 
-Alternative considered: add creation commands to `vo-project-workflow`. Rejected because its current description and safety gates are execution-specific, and mixing management-token-free authoring requests with execution commands would make both the skill and authorization boundary harder to audit.
+This keeps the user interaction light while preserving an understandable confirmation moment. The natural-language proposal is conversation state, not a second durable product model.
 
-### 2. Reuse the pending-request pattern and the project-store atomic boundary
+### 2. Replace pending-request materialization with one atomic direct-create command
 
-Add a transport-independent `project_authoring` service, but persist its requests, idempotency records, approved grants, versioned templates, recurrence definitions, and recurrence outbox alongside `projects` under the existing project-store root. `MarkdownProjectStore` must be extended to round-trip these bounded root collections; storing them in a second file would make a draft transition and project creation impossible to commit atomically.
-
-The Agent-facing endpoint can submit and read its sanitized pending drafts but cannot materialize a project. Management-authenticated endpoints allow the user control surface to edit, confirm, or reject. The request state machine is:
-
-```text
-pending -> materializing -> confirmed
-   |            |
-   |            +-> failed -> materializing (retry)
-   +-> rejected
-```
-
-Every edit increments a request revision. Confirmation supplies the expected revision and uses a compare-and-set transition to `materializing`, preventing two browser actions from materializing different snapshots. It then validates actors and schedule data, prepares a workspace outside the repository lock, and performs one `update_root` commit containing the complete project aggregate, approved snapshot, confirmed request state, idempotency record, versioned-template changes, recurrence definition, and durable recurrence-registration outbox intent. A stable confirmation idempotency key maps the draft to exactly one project. Failed workspace preparation is cleaned up before the commit; a failed root commit also cleans up an uncommitted system-managed workspace.
-
-Gateway recurrence registration is not performed synchronously inside confirmation. A bounded reconciler consumes the durable outbox after commit, registers or repairs the Gateway job idempotently, and records success or an intervention alert. This avoids pretending a local file commit and an external Gateway call are one transaction while ensuring the confirmed recurrence intent is never lost.
-
-Alternative considered: let the skill call existing project CRUD with the management token after conversational confirmation. Rejected because it would expose a high-authority browser credential to arbitrary Agent execution and the backend could not distinguish a genuine user confirmation from an Agent assertion.
-
-### 3. Add explicit actor references with compatibility projections
-
-New authored tasks persist:
+Add a transport-independent `create_confirmed_project` command that accepts:
 
 ```json
 {
-  "responsibleActor": {"type": "user|agent", "id": "..."},
-  "executorActor": {"type": "user|agent", "id": "..."},
-  "reviewerActor": null
+  "idempotencyKey": "agent:project:stable-key",
+  "confirmation": {
+    "confirmed": true,
+    "summaryDigest": "sha256-of-displayed-proposal"
+  },
+  "project": {
+    "title": "...",
+    "projectType": "one_time|reusable|recurring",
+    "columns": [],
+    "tasks": [],
+    "agentMaintenanceMode": "strict_confirmation|autonomous",
+    "template": {},
+    "recurrence": {}
+  }
 }
 ```
 
-For an Agent executor, `executorAgentId` is populated for existing Project Execution. For an Agent responsible actor, `assignee` is populated for existing UI, score, and workload projections. The current VO user actor is valid for tracking-only human work; a human executor cannot start automated Project Execution until an Agent executor is assigned. Legacy tasks without actor references are read through a compatibility adapter derived from `assignee`, `executorAgentId`, and `reviewerAgentId`.
+The backend validates the registered requesting Agent, confirmation assertion shape, complete project, actors, reviewer assignments, schedule, template intent, limits, and idempotency key before side effects. It prepares a managed workspace outside the repository lock, then performs one compare-and-set root update containing the complete project/task aggregate, authoring audit/source metadata, scoped grant hash, template version, recurrence definition, recurrence outbox intent, and Agent-scoped idempotency result. Commit failure cleans an uncommitted managed workspace.
 
-Alternative considered: reinterpret `assignee` as the new owner field and leave all roles as untyped strings. Rejected because it cannot safely distinguish the current user from an Agent and would make execution eligibility ambiguous.
+The command never calls Project Execution. Created tasks use `backlog`, `workflowActive=false`, and `projectExecutionFlowActive=false`.
 
-### 4. Persist maintenance mode and protect structural mutations
+### 3. Bind direct-create idempotency to Agent and semantic payload
 
-Projects authored through this flow store `agentMaintenanceMode` and their approved requesting Agent. In strict mode, every Agent-originated management mutation becomes a pending maintenance request. In autonomous mode, only routine fields—task state, description, checklist, evidence, and due date—can be directly changed by an assigned Agent. Task creation/deletion, role or reviewer changes, recurrence changes, archive/delete, workspace changes, and maintenance-mode changes always require management-authenticated confirmation.
+The idempotency scope is `(requestingAgentId, idempotencyKey)`. A retry with the same semantic payload returns the original project and never creates another workspace, template, recurrence, or task set. Reusing the key with a different project/confirmation digest returns a stable conflict.
 
-Existing execution-service transitions are not reclassified as authoring mutations and continue to follow their current gates.
+The first successful response returns `projectGrantSecret`; only its hash is persisted. Later idempotent retries return the existing project and public grant status, not the secret. If the first response is lost, the user can rotate the grant through the trusted management surface. This is an intentional one-time-secret trade-off.
 
-Alternative considered: let autonomous mode use all current project PUT/POST routes. Rejected because those routes include destructive and authority-changing operations that exceed the user's approval of routine autonomous maintenance.
+### 4. Treat conversational confirmation as an auditable assertion, not backend authorization
 
-### 5. Version templates and instantiate from immutable snapshots
+The Agent payload must assert `confirmed=true` and include a bounded SHA-256 digest of the exact natural-language proposal it displayed. The project audit stores the digest, requesting Agent, source surface, and creation time, but not conversation text or credentials.
 
-Extend user templates with a stable template id and append-only versions. Each version contains columns, complete task blueprints, actor references, reviewer policy, maintenance mode, and execution settings. Manual and recurring instantiation records the exact template version. Editing a template creates a new version rather than changing old snapshots.
+The backend cannot independently validate that a provider chat message was user-authored. That limitation is accepted because the endpoint is loopback-only, requires a registered Agent action identity, creates only an unstarted project, and grants only project-scoped maintenance authority. If provider-neutral signed user-message evidence becomes available, it can be added without changing project creation semantics.
 
-Legacy templates remain readable as implicit version 1 and continue through the old browser route until explicitly upgraded. New authoring flows use the versioned service path.
+### 5. Preserve explicit actor references and reviewer defaults
 
-Alternative considered: clone the latest mutable template at dispatch time. Rejected because edits would silently alter already-approved recurring work and make historical instances irreproducible.
+Every task persists exactly one `responsibleActor` and `executorActor`; the same actor may hold both roles. Agent actors continue to project to `assignee` and `executorAgentId`; `user:local` remains trackable but not executable by Project Execution.
 
-### 6. Add a recurrence target that materializes projects
+The natural-language proposal may recommend a reviewer for `high_risk`, `cross_team`, or `critical_delivery`. The structured request omits `reviewerActor` by default. It includes a reviewer assignment only when that assignment appeared in the confirmed proposal. Existing execution-time reviewer-skip confirmation remains unchanged.
 
-Reuse current schedule validation and Gateway cron integration, but introduce a distinct target kind such as `projectTemplateInstance`. Its binding records recurrence id, template id/version, requesting Agent, pause state, last status, and bounded occurrence history. The outbox reconciler registers the Gateway job with an idempotency key derived from the recurrence id and can safely repair missing bindings after restart.
+### 6. Keep scoped maintenance grants and protected mutation boundaries
 
-A due callback performs an atomic root claim keyed by `(recurrenceId, occurrenceId)`, validates the immutable template actors, prepares any workspace outside the lock, and commits one complete project plus the occurrence result in a second compare-and-set root update. Other callbacks observe `claimed`, `created`, or `failed` rather than creating another instance. Claims have a configurable expiry and owner token so restart recovery can retry abandoned work without stealing a live dispatch. Failed workspace preparation releases the claim with retryable failure metadata; failed commits clean up uncommitted system-managed workspaces.
+Direct creation generates a grant bound to the project, creating Agent, grant version, and maintenance mode. `strict_confirmation` converts all Agent maintenance into pending maintenance requests. `autonomous` directly permits only assigned-task routine fields: execution state, description, checklist, evidence, and due date.
 
-This path does not invoke current project/task execution starts. Existing `projectWorkflow` and `projectTask` target kinds remain unchanged.
+Task creation/deletion, role/reviewer changes, recurrence changes, archive/delete, workspace changes, and maintenance-mode changes remain management-confirmed. Grant rotate/revoke and recurrence pause/resume remain management-authenticated.
 
-Alternative considered: reset or reopen tasks in one long-lived project. Rejected because the confirmed product model requires independently traceable project instances and future-only template changes.
+### 7. Keep immutable templates and independent recurrence
 
-### 7. Activate a scoped project grant only after trusted confirmation
+Reusable and recurring direct-create requests create or reference one immutable template version. Existing instances remain pinned; new versions affect only future instances. Legacy templates remain implicit version 1.
 
-Draft submission follows the existing local Agent-request threat model: the endpoint is loopback-only, rejects browser `Origin` requests, requires bounded JSON plus an Agent-action header, validates a registered non-excluded requesting Agent, and performs no project mutation. It returns a random request secret and stores only its hash. Pending requests are capped per Agent and globally, and idempotency prevents retries from filling the queue.
+Recurring creation commits a durable outbox intent with the project. The bounded reconciler registers a distinct `projectTemplateInstance` Gateway target. Every occurrence uses expiring claims and compare-and-set creation to produce one independent, unstarted project. Existing `projectWorkflow` and `projectTask` cron targets remain unchanged.
 
-When the user confirms the draft, the existing request secret becomes a revocable project grant bound to the created project, requesting Agent, approved maintenance mode, allowed operations, and grant version. The Agent supplies the bearer secret only to the Agent status and maintenance endpoints; the backend compares its hash and never returns or logs the secret again. Strict mode permits only status reads and maintenance-request submission. Autonomous mode additionally permits the explicit routine-update allowlist for tasks to which that Agent is assigned. Protected confirmation and structural changes retain the management-token gate. Revoking or rotating the grant immediately invalidates the old hash.
+### 8. Use a separate Agent direct-create route
 
-All Agent endpoints deny permissive CORS, all management endpoints keep the current management-token check, and all audit views redact secret material. This creates provider-neutral scoped authority without distributing the browser management token or trusting an arbitrary `requestingAgentId` field after confirmation.
+Add `POST /api/agent/project-authoring/projects`. It is loopback-only, rejects browser `Origin`, requires `X-VO-Agent-Action: project-authoring` and a registered `X-VO-Agent-Id`, enforces bounded JSON, and never accepts or exposes `X-VO-Management-Token`.
 
-Alternative considered: validate only the Agent id in the request body. Rejected because any local caller could impersonate an assigned Agent and exploit autonomous maintenance. Alternative considered: provision a reusable high-authority Agent token across all providers. Rejected because provider credential delivery is not uniform and the authority would be broader than one confirmed project.
+Keep `GET /api/agent/projects/{projectId}/grant-status` and `POST /api/agent/projects/{projectId}/maintenance`. Keep management-authenticated maintenance confirmation, grant rotate/revoke, template instantiation, recurrence pause/resume, and health routes.
 
-### 8. Add a minimal management-authenticated review surface
+Remove active routing for Agent draft submission/status and management draft list/detail/edit/confirm/reject. Existing `/api/projects` protection is unchanged.
 
-The project UI gains a pending Agent project drafts view with edit, confirm, and reject actions. This is necessary because confirmation must be trustworthy and the management token is currently held only by the browser control surface. The skill polls the sanitized request status and reports the resulting project id after confirmation.
+### 9. Remove the draft review surface and preserve inert legacy metadata
 
-Alternative considered: treat a chat response as sufficient backend authorization. Rejected because the generic skill/API layer has no provider-neutral signed proof that a particular message came from the user.
+Remove the “Agent project drafts” UI entry, JavaScript, CSS, locale strings, and related browser/static tests. The created real project becomes visible through the normal Projects UI immediately after direct creation.
 
-### 9. Use additive versioned HTTP contracts
+Previously persisted authoring-request collections remain readable as inert compatibility metadata so rollback and old data loading do not fail. No new request is written, legacy pending requests are not automatically materialized, and health/queue metrics stop counting them as active work. A later explicit retention change may compact them; this refactor performs no destructive migration.
 
-Add separate routes rather than weakening existing `/api/projects` management-token protection:
+### 10. Simplify capacity, observability, and rollout
 
-- `POST /api/agent/project-drafts` and `GET /api/agent/project-drafts/{id}` for low-authority Agent submission/status.
-- `POST /api/agent/projects/{projectId}/maintenance` for scoped-grant maintenance.
-- `GET /api/project-drafts`, `GET /api/project-drafts/{id}`, and management-authenticated edit/confirm/reject routes for the user control surface.
-- Management-authenticated recurrence pause/resume and grant revoke/rotate routes.
+Retain body size, initial task count, audit/history, maintenance queue, outbox capacity, worker, retry, and claim limits. Pending-draft per-Agent/global limits and terminal-draft retention are no longer active product limits, though old fields may remain readable for configuration compatibility.
 
-Agent responses expose only the caller's sanitized request/project result. Management responses may expose the full original and approved snapshots but never the request secret hash. All mutating calls accept an idempotency key and optimistic revision where applicable. Existing route paths, payloads, status codes, CORS behavior, and management checks remain unchanged.
+Observability records direct-create totals, failures, conflicts, durations, grant failures, maintenance results, recurrence outbox depth/age, occurrence outcomes, cleanup failures, and intervention alerts. Health no longer reports legacy pending drafts as live queue work.
 
-### 10. Bound capacity and persistence cost
-
-Defaults are configurable but conservative: 64 KiB request bodies, at most 100 initial tasks per draft, at most 20 pending drafts per Agent, at most 500 pending drafts globally, at most 20 open maintenance requests per project, 100 audit events per request/project, and 100 occurrence records per recurrence. Terminal drafts older than 30 days are compacted during an off-path maintenance pass, retaining a tombstone with identifiers and final result. The authoring list APIs use indexed root maps and bounded summaries rather than scanning task files.
-
-The outbox reconciler has a feature-configured worker count, batch size, retry backoff, and maximum attempts. Queue-full conditions reject new work with stable `429` or `503` errors without affecting existing project reads or execution. Configuration is read at process start for limits and worker sizing; feature-enable and dispatch-pause flags are checked on every relevant action.
-
-### 11. Add feature flags, observability, and rollback controls
-
-`VO_AGENT_PROJECT_AUTHORING_ENABLED` gates new draft submission and autonomous maintenance; `VO_PROJECT_INSTANCE_RECURRENCE_ENABLED` gates new recurrence registration and dispatch. Both default off during rollout. Disabling authoring stops new drafts and direct autonomous mutations but leaves management access to existing requests. Disabling recurrence stops new registrations and instance dispatch while preserving durable intents for later reconciliation.
-
-Structured counters and duration measurements cover draft submitted/rejected/confirmed/failed, confirmation conflicts, grant failures, autonomous updates, outbox depth/age/retries, recurrence claims/duplicates/created/failed, workspace cleanup failures, and materialization latency. Logs are rate-limited by request/recurrence key, and the control surface displays pending depth and intervention alerts. Health reporting distinguishes disabled, idle, queued, processing, failed, and reconciled states.
+`VO_AGENT_PROJECT_AUTHORING_ENABLED` gates direct creation and autonomous maintenance. `VO_PROJECT_INSTANCE_RECURRENCE_ENABLED` and dispatch pause retain their current behavior. Rollout starts with both flags off, enables local direct creation, verifies no execution starts, enables autonomous allowlist, then enables recurrence. Rollback disables creation, pauses recurrence, drains or accepts the outbox as inert, and preserves ordinary created projects.
 
 ## Risks / Trade-offs
 
-- [The change is broader than a skill-only update] → Keep the first release focused on one draft flow, one minimal review surface, and additive compatibility fields; reuse project commands, repository, and scheduler primitives.
-- [Workspace creation and Gateway registration are external side effects around an atomic project commit] → Prepare and clean up workspaces around compare-and-set commits; persist recurrence intents in an outbox and reconcile Gateway state idempotently outside the commit.
-- [Legacy `assignee` semantics may diverge from new responsible actors] → Centralize actor projection and compatibility reads; keep existing fields populated for Agent-backed roles and add regression coverage.
-- [A pending-request endpoint can be spammed by a local process] → Require loopback/no-Origin access, enforce registered Agent validation, body/rate/global pending limits, idempotency, bounded retention, and no materializing side effects.
-- [A confirmed Agent secret can leak from tool output or logs] → Return it only at draft creation, store only its hash, prohibit echoing it in skill output, redact authorization headers, support revocation/rotation, and scope it to one project.
-- [Autonomous maintenance can still make unwanted routine changes] → Require the scoped grant and task assignment, use a strict field allowlist, retain bounded audit/history, and make strict mode available per project.
-- [Recurring actor assignments can become stale] → Revalidate every occurrence, fail without partial creation, and surface an intervention alert rather than silently substituting another actor.
-- [Template versioning complicates the existing flat template schema] → Treat legacy templates as implicit v1 and add an adapter; do not rewrite existing project records during rollout.
+- **Conversation confirmation is not cryptographically provable by the backend.** Mitigation: explicit-only skill contract, digest audit, loopback registered-Agent boundary, atomic idempotent creation, and no automatic execution. This is the principal accepted product trade-off.
+- **A lost first response loses the grant secret.** Mitigation: the project remains created and visible; management grant rotation restores scoped access.
+- **Removing the review UI reduces post-proposal editing before creation.** Mitigation: edits happen naturally in conversation; every semantic revision requires the Agent to present the proposal again.
+- **Legacy pending requests become inert.** Mitigation: preserve data compatibility and do not auto-create from them; document that they require the old compatible version if recovery is needed.
+- **Workspace and Gateway effects remain outside one distributed transaction.** Mitigation: workspace cleanup around root CAS and durable recurrence outbox reconciliation.
+- **Autonomous maintenance and stale recurrence actors retain prior risks.** Mitigation: narrow allowlist, assignment checks, revocable grants, per-occurrence actor validation, and intervention alerts.
 
 ## Migration Plan
 
-1. Extend the project store to round-trip bounded authoring metadata and add actor-reference compatibility helpers without changing existing route behavior.
-2. Add project-authoring services, request-secret hashing, and unit tests for validation, atomic materialization, idempotency, and legacy projections behind disabled feature flags.
-3. Add Agent draft/status endpoints and management-authenticated edit/confirm/reject endpoints behind additive routes; keep authoring disabled by default.
-4. Add versioned template instantiation, durable recurrence outbox, reconciler, and the independent-project recurrence target while leaving existing cron target kinds unchanged.
-5. Add the minimal pending-draft control surface and runtime skill routing, then enable authoring for local test instances only.
-6. Observe request conflicts, grant failures, outbox age, recurrence duplicates/failures, cleanup failures, and latency before enabling recurrence.
-7. Run project command, persistence, management-token, Project Execution, template, scheduler, security, capacity, observability, and UI regression suites before broader enablement.
+1. Add direct-create command/tests by reusing complete draft validation and atomic materialization internals without writing request state.
+2. Add the Agent direct-create HTTP route and one-time project grant response; retain management authentication on all protected routes.
+3. Update the skill to present a natural-language proposal, wait for explicit confirmation, then call direct create; remove polling and request-secret instructions.
+4. Remove draft review UI/assets/routes and stop counting legacy request records as active health queue work.
+5. Update documentation and focused tests for idempotency, no partial state, one-time grant, reviewer default, and no auto-execution.
+6. Run legacy project/template/cron/Project Execution compatibility and rollout tests with flags off first.
 
-Rollback first disables both feature flags and pauses the recurrence reconciler, then removes skill routing if needed. Created projects remain ordinary backward-readable projects. Pending requests, grants, outbox intents, versioned templates, and recurrence bindings remain inert data; existing project APIs ignore additive fields. Code rollback is safe only after flags are off and outbox depth is stable at zero or explicitly accepted as inert.
+Rollback disables direct creation and autonomous maintenance, pauses recurrence, and deploys the previous compatible code. Real projects created by the new path remain ordinary backward-readable projects. Legacy authoring-request metadata remains preserved and ignored by the new active flow.
 
 ## Open Questions
 
-- Should the current VO user actor use a fixed local identifier or an existing profile identifier if VO later supports multiple human users? The first release can use a stable `user:local` identity behind an adapter.
-- Should confirmed project drafts appear in the existing meeting-request-style sidebar queue or a dedicated Projects queue? This affects UI placement but not the backend contract.
-- Should the request secret be stored by provider adapters for session recovery, or should a lost secret always require management-authenticated grant rotation? The safe first release requires rotation.
+- A future provider-neutral signed confirmation reference could replace the current assertion/digest without changing the direct-create project contract.
+- A future retention change may compact inert legacy authoring-request records, but this change intentionally performs no deletion.

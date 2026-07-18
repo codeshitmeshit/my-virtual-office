@@ -56,3 +56,11 @@
 - [x] 9.2 Run focused project command, repository, management-token, request-secret, execution-role, template, schedule, capacity-limit, observability, and authoring service tests and record the results as OpenSpec evidence.
 - [x] 9.3 Run compatibility and end-to-end verification proving legacy projects and cron bindings are unchanged, one confirmed draft produces one complete project, and materialization never starts execution automatically.
 - [x] 9.4 Rehearse flag-off deployment, local-only authoring enablement, autonomous allowlist enablement, recurrence enablement, grant revocation/rotation, outbox drain/pause, and code rollback; document observed gates and unresolved limitations.
+
+## 10. Conversation-Confirmed Direct Creation Simplification
+
+- [ ] 10.1 Add an Agent-scoped `create_confirmed_project` domain command that validates a confirmation assertion and proposal digest, atomically creates the complete unstarted project/task aggregate with template/recurrence/grant data, returns the grant secret only on first creation, and enforces same-payload idempotency with conflict on key reuse.
+- [ ] 10.2 Add the loopback/no-Origin `POST /api/agent/project-authoring/projects` HTTP contract and remove active Agent draft submission/status plus management draft list/detail/edit/confirm/reject routing, while preserving management authentication for maintenance, grant administration, recurrence administration, and existing project CRUD.
+- [ ] 10.3 Remove the Agent project-draft review UI wiring/assets and update authoring health so inert legacy request metadata is not treated as active pending work; retain backward-compatible root reads without deleting old request records.
+- [ ] 10.4 Rewrite `vo-project-authoring`, VO routing, metadata, and operations documentation around natural-language proposal confirmation followed by direct creation, including semantic-change reconfirmation, reviewer-default behavior, one-time grant handling, no-auto-execution, and the accepted unsigned-chat-confirmation limitation.
+- [ ] 10.5 Run and record focused direct-create, security, idempotency, atomicity, UI-removal, skill/docs, legacy project/template/cron, Project Execution, recurrence, observability, flag-off, and rollback-compatibility verification; update rollout evidence and confirm no active draft route or UI remains.

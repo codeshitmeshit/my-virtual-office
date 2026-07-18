@@ -1,63 +1,66 @@
 ## ADDED Requirements
 
 ### Requirement: Explicit project-authoring invocation
-The VO project-authoring skill SHALL create a project draft only after the user explicitly requests project creation, and SHALL NOT infer or proactively start project creation from an unrelated complex request.
+The VO project-authoring skill SHALL prepare a natural-language project proposal only after the user explicitly requests project creation, SHALL wait for the user to confirm that proposal in the conversation, and SHALL NOT infer or proactively create a project from an unrelated complex request.
 
 #### Scenario: User explicitly requests a project
 - **WHEN** a user asks the Agent to create a VO project
-- **THEN** the skill SHALL collect or derive a complete project draft
-- **AND** the skill SHALL submit the draft for user review without creating a project
+- **THEN** the skill SHALL collect or derive a complete natural-language project proposal
+- **AND** the proposal SHALL describe the project type, tasks, responsible actors, executor actors, optional reviewer decisions, maintenance mode, and template or recurrence settings
+- **AND** the skill SHALL wait for explicit user confirmation before calling the direct-create API
 
 #### Scenario: User gives a complex goal without requesting a project
 - **WHEN** a user describes multi-step work but does not request project creation
-- **THEN** the skill SHALL NOT create or submit a VO project draft
+- **THEN** the skill SHALL NOT propose or create a VO project
 
-### Requirement: Complete pending project draft
-An Agent-submitted project draft MUST contain the project identity and type, all initial tasks, one responsible actor and one executor actor for every task, reviewer recommendations, maintenance mode, and any template or recurrence configuration required for confirmation.
+### Requirement: Complete direct project creation
+After conversational confirmation, an Agent direct-create request MUST contain the project identity and type, all initial tasks, one responsible actor and one executor actor for every task, the user-confirmed reviewer decisions, maintenance mode, and any template or recurrence configuration required to create the real project atomically.
 
-#### Scenario: Complete draft is submitted
-- **WHEN** a registered VO Agent submits a syntactically and semantically valid complete draft with an idempotency key
-- **THEN** the backend SHALL persist one pending draft request
-- **AND** no project, task, template, recurrence, or workspace SHALL be created before confirmation
+#### Scenario: Confirmed proposal is submitted
+- **WHEN** a registered VO Agent submits a syntactically and semantically valid complete create request with an idempotency key after explicit conversational confirmation
+- **THEN** the backend SHALL atomically create one real project containing all initial tasks and role assignments
+- **AND** it SHALL return the created project identifier and a scoped project grant
+- **AND** it SHALL NOT persist a pending draft request
+- **AND** it SHALL NOT start Project Execution
 
 #### Scenario: Required role is unresolved
 - **WHEN** any task lacks a valid responsible actor or executor actor
-- **THEN** the backend SHALL reject the draft as incomplete
-- **AND** the skill SHALL ask the user to confirm an Agent-recommended candidate before resubmission
+- **THEN** the backend SHALL reject the create request without partial project state
+- **AND** the skill SHALL present the corrected candidate in natural language and obtain confirmation before retrying a semantically changed request
 
-#### Scenario: Draft submission is retried
-- **WHEN** the same requesting Agent retries the same draft idempotency key
-- **THEN** the backend SHALL return the original draft request
-- **AND** it SHALL NOT create a duplicate pending request
+#### Scenario: Direct creation is retried
+- **WHEN** the same requesting Agent retries the same create idempotency key
+- **THEN** the backend SHALL return the original created project and grant status
+- **AND** it SHALL NOT create a duplicate project, template, recurrence, task set, or workspace
 
-### Requirement: Trusted user review and atomic materialization
-The system MUST require a management-authenticated user action to edit, confirm, or reject a pending project draft, and confirmation MUST atomically materialize the approved project and all initial tasks.
+### Requirement: Conversational confirmation and atomic creation
+The skill MUST obtain explicit user confirmation of the natural-language proposal before calling the Agent direct-create API, and the backend MUST atomically create the confirmed project and all initial tasks without a separate persisted draft or management confirmation state.
 
-#### Scenario: User confirms an unchanged draft
-- **WHEN** an authorized user confirms a valid pending draft
-- **THEN** the backend SHALL create exactly one project containing all approved tasks and role assignments
-- **AND** the draft SHALL record the confirming user, confirmation time, immutable approved snapshot, and created project identifier
+#### Scenario: User confirms the proposal
+- **WHEN** the user explicitly confirms the natural-language proposal
+- **THEN** the Agent SHALL translate that confirmed proposal into one structured direct-create request
+- **AND** the created project SHALL record the requesting Agent, confirmation assertion, source summary digest, creation time, and complete created configuration
 
-#### Scenario: User edits before confirmation
-- **WHEN** an authorized user edits project, task, role, reviewer, maintenance, template, or recurrence fields and then confirms
-- **THEN** the edited snapshot SHALL be validated and become the materialized source of truth
-- **AND** the original Agent proposal SHALL remain available in audit history
+#### Scenario: User changes the proposal before confirmation
+- **WHEN** the user changes project, task, role, reviewer, maintenance, template, or recurrence intent before confirming
+- **THEN** the Agent SHALL present the revised natural-language proposal
+- **AND** the revised proposal SHALL require explicit confirmation before creation
 
-#### Scenario: Materialization fails
-- **WHEN** workspace creation, actor validation, template creation, recurrence registration, or project persistence fails during confirmation
+#### Scenario: Direct creation fails
+- **WHEN** workspace creation, actor validation, template creation, recurrence registration, or project persistence fails during direct creation
 - **THEN** the system SHALL return a stable failure result
 - **AND** it SHALL NOT leave a partially created project or task set
-- **AND** the pending draft SHALL remain recoverable for correction or retry
+- **AND** a transport retry with the same idempotency key SHALL be safe
 
-#### Scenario: Confirmation is retried
-- **WHEN** confirmation for an already materialized draft is repeated
+#### Scenario: Creation is retried
+- **WHEN** direct creation for an already materialized confirmation is repeated
 - **THEN** the backend SHALL return the same project identifier
 - **AND** it SHALL NOT create a duplicate project or recurrence
 
-#### Scenario: User rejects a draft
-- **WHEN** an authorized user rejects a pending draft with a reason
-- **THEN** the draft SHALL become rejected and remain auditable
-- **AND** no project SHALL be created from it
+#### Scenario: User does not confirm
+- **WHEN** the user rejects, changes, or does not confirm the natural-language proposal
+- **THEN** the Agent SHALL NOT call the direct-create API
+- **AND** the backend SHALL store no draft or project for that proposal
 
 ### Requirement: Responsible and executor actor semantics
 Every authored task SHALL have exactly one responsible actor accountable for the result and exactly one executor actor responsible for performing the work; the same supported actor MAY hold both roles.
@@ -76,13 +79,13 @@ Every authored task SHALL have exactly one responsible actor accountable for the
 - **THEN** the task SHALL remain trackable as human-executed work
 - **AND** automated Project Execution SHALL reject starting that task until a valid executable Agent is assigned
 
-#### Scenario: Actor is invalid at confirmation time
+#### Scenario: Actor is invalid at creation time
 - **WHEN** a referenced Agent no longer exists or is excluded from ordinary project assignment
-- **THEN** confirmation SHALL fail with the invalid role and candidate identified
+- **THEN** creation SHALL fail with the invalid role and candidate identified
 - **AND** no partial project SHALL be created
 
 ### Requirement: Reviewer is optional and user-confirmed
-Authored tasks SHALL have no reviewer by default. For a task classified as high-risk, cross-team, or critical-delivery, the Agent SHALL recommend a reviewer candidate and explain the trigger, but the reviewer SHALL be assigned only from the user-confirmed snapshot.
+Authored tasks SHALL have no reviewer by default. For a task classified as high-risk, cross-team, or critical-delivery, the Agent SHALL recommend a reviewer candidate and explain the trigger in the natural-language proposal, but the reviewer SHALL be assigned only when the user explicitly confirms that assignment.
 
 #### Scenario: Ordinary task has no reviewer
 - **WHEN** a task does not trigger a reviewer recommendation and the user does not add one
@@ -90,11 +93,11 @@ Authored tasks SHALL have no reviewer by default. For a task classified as high-
 
 #### Scenario: Reviewer rule is triggered
 - **WHEN** the Agent classifies a task as high-risk, cross-team, or critical-delivery
-- **THEN** the draft SHALL contain the trigger, rationale, and recommended registered reviewer
-- **AND** the backend SHALL NOT treat the recommendation as an assignment before user confirmation
+- **THEN** the natural-language proposal SHALL contain the trigger, rationale, and recommended registered reviewer
+- **AND** the direct-create request SHALL omit `reviewerActor` unless the user confirms the assignment
 
 #### Scenario: User removes a recommendation
-- **WHEN** the user confirms the draft after removing a recommended reviewer
+- **WHEN** the user confirms the proposal without the recommended reviewer
 - **THEN** the task SHALL remain reviewerless
 - **AND** any later execution attempt SHALL continue to use the existing reviewer-skip confirmation gate
 
@@ -121,7 +124,7 @@ Each authored project SHALL persist either `strict_confirmation` or `autonomous`
 - **AND** no project state SHALL change
 
 ### Requirement: Reusable versioned project templates
-The system SHALL allow a confirmed project draft to create or reference a reusable project template whose versioned snapshot contains the confirmed task structure, role rules, reviewer policy, maintenance mode, and execution settings needed to instantiate future projects.
+The system SHALL allow a conversation-confirmed direct-create request to create or reference a reusable project template whose versioned snapshot contains the confirmed task structure, role rules, reviewer policy, maintenance mode, and execution settings needed to instantiate future projects.
 
 #### Scenario: User manually creates from a template
 - **WHEN** the user or an authorized Agent workflow requests manual instantiation of a valid template version
@@ -134,7 +137,7 @@ The system SHALL allow a confirmed project draft to create or reference a reusab
 - **AND** existing project instances and their approved snapshots SHALL remain unchanged
 
 ### Requirement: Independent recurring project instances
-A confirmed recurring project definition SHALL create a new independently traceable project instance for each due occurrence rather than reopening tasks or starting execution in an existing project.
+A conversation-confirmed recurring project creation SHALL establish a definition that creates a new independently traceable project instance for each due occurrence rather than reopening tasks or starting execution in an existing project.
 
 #### Scenario: Recurrence becomes due
 - **WHEN** a confirmed recurrence reaches a due occurrence
@@ -156,19 +159,20 @@ A confirmed recurring project definition SHALL create a new independently tracea
 - **THEN** future due callbacks SHALL not create project instances until the recurrence is resumed
 
 ### Requirement: Agent-safe API and audit boundary
-Agent project-authoring APIs MUST NOT require or expose the VO management token. They SHALL limit unauthenticated or Agent-originated calls to draft submission, request status, and maintenance actions permitted by the confirmed project policy, while user confirm/edit/reject and protected mutations remain management-authenticated.
+Agent project-authoring APIs MUST NOT require or expose the VO management token. They SHALL limit Agent-originated calls to idempotent direct project creation and maintenance actions permitted by the created project policy, while protected maintenance mutations remain management-authenticated.
 
-#### Scenario: Agent submits a draft without management credentials
-- **WHEN** a local registered Agent submits a valid project draft through the Agent authoring endpoint
-- **THEN** the endpoint SHALL accept the non-materializing request without disclosing a management credential
+#### Scenario: Agent creates without management credentials
+- **WHEN** a local registered Agent submits a valid direct-create request through the Agent authoring endpoint after conversational confirmation
+- **THEN** the endpoint SHALL atomically create the project without disclosing a management credential
+- **AND** it SHALL return the project grant secret only on first creation
 
-#### Scenario: Agent calls a protected confirmation endpoint
-- **WHEN** a caller without a valid management token attempts to confirm, edit, reject, or directly materialize a draft
+#### Scenario: Agent calls a protected maintenance endpoint
+- **WHEN** a caller without a valid management token attempts to confirm protected maintenance, rotate or revoke another grant, or pause or resume recurrence
 - **THEN** the backend SHALL return the existing management authorization failure
 - **AND** no state SHALL change
 
 #### Scenario: Request or mutation is observed
-- **WHEN** a draft, confirmation, rejection, materialization, maintenance change, or recurrence occurrence is processed
+- **WHEN** a direct creation, maintenance change, or recurrence occurrence is processed
 - **THEN** the system SHALL retain a sanitized audit record containing request identity, actor, action, source, timestamp, result, and linked object identifiers
 - **AND** secrets or management credentials SHALL NOT be persisted in that record
 
@@ -186,7 +190,7 @@ The change MUST preserve existing browser project CRUD, stored project readabili
 - **AND** it SHALL NOT be converted into recurring project instantiation
 
 ### Requirement: Project-authoring skill routing and safety
-The VO skills index SHALL route project creation, draft confirmation status, template instantiation, recurrence authoring, and controlled maintenance to the new project-authoring skill, while execution, review, acceptance, cancellation, and artifact reading remain routed to `vo-project-workflow`.
+The VO skills index SHALL route natural-language project proposal confirmation, direct creation, template instantiation, recurrence authoring, and controlled maintenance to the new project-authoring skill, while execution, review, acceptance, cancellation, and artifact reading remain routed to `vo-project-workflow`.
 
 #### Scenario: Agent needs to create a project
 - **WHEN** the Agent follows the current VO skills index for an explicit project-creation request
