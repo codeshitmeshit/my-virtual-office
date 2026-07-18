@@ -23,6 +23,8 @@ curl -sS "$vo_authoring_url/skills/index.md"
 curl -sS "$vo_authoring_url/api/agents"
 ```
 
+只用这些只读 HTTP GET 获取 roster。不要运行内联 Python、不要导入 `app.server`、不要调用 `_office_agent_lookup` 等内部函数来探测角色；那会触发不必要的本地命令审批，且容易让用户误以为正在创建项目。
+
 从 roster 确认调用 Agent、负责人、执行人和 reviewer 候选均存在且可分配。不要冒用其他 Agent；排除角色不能承担普通项目工作。
 
 ## 2. 展示自然语言方案
