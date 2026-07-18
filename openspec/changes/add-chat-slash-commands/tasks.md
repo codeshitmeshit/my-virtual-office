@@ -1,6 +1,6 @@
 ## 1. Baseline and Command Domain
 
-- [ ] 1.1 Add passing characterization coverage for existing VO new-session behavior, Codex reset/compact outcomes, Feishu private/group admission and idempotency, provider conversation isolation, and unknown slash-prefixed ordinary messages before production behavior changes.
+- [x] 1.1 Add passing characterization coverage for existing VO new-session behavior, Codex reset/compact outcomes, Feishu private/group admission and idempotency, provider conversation isolation, and unknown slash-prefixed ordinary messages before production behavior changes.
 - [ ] 1.2 Create the independent `app/services/chat_commands.py` domain service with exact attachment-free parsing, bounded scope/request/result objects, injected provider-control, ID, clock, reservation, and audit ports, plus pure unit tests for command, no-op, busy, unsupported, failure, stale, and indeterminate outcomes.
 
 ## 2. Provider Control and Persistence
