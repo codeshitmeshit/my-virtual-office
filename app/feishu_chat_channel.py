@@ -8,6 +8,11 @@ import threading
 import uuid
 from datetime import datetime
 
+try:
+    from services.chat_commands import parse_chat_command
+except ModuleNotFoundError:  # Package import in direct unit tests.
+    from .services.chat_commands import parse_chat_command
+
 ACK_EMOJIS = ("LGTM",)
 ACK_REACTION_EMOJI_TYPE = "LGTM"
 
@@ -145,7 +150,7 @@ def save_source_index(status_dir, record, *, now, lock, owner_id=""):
     record = record if isinstance(record, dict) else {}
     source_message_id = str(record.get("sourceMessageId") or "").strip()
     event = str(record.get("event") or "").strip()
-    if not source_message_id or event not in {"user_message", "turn_completed", "ignored", "rejected"}:
+    if not source_message_id or event not in {"user_message", "turn_completed", "command_started", "command_completed", "ignored", "rejected"}:
         return None
     state = "processing" if event == "user_message" else "completed"
     item = {
@@ -508,7 +513,7 @@ def channel_idempotency_hit(load_records, source_message_id):
     if not source_message_id:
         return None
     for row in reversed(load_records()):
-        if row.get("sourceMessageId") == source_message_id and row.get("event") == "turn_completed":
+        if row.get("sourceMessageId") == source_message_id and row.get("event") in {"turn_completed", "command_completed"}:
             return row
     return None
 
@@ -733,6 +738,7 @@ def handle_message_event(
     choose_reaction=ack_reaction_emoji_type,
     download_image=None,
     mark_dispatching=None,
+    command_callback=None,
     async_acknowledgement=False,
 ):
     event = (body or {}).get("event") if isinstance((body or {}).get("event"), dict) else {}
@@ -830,6 +836,80 @@ def handle_message_event(
         return {"ok": False, "status": "missing_representative_agent", "record": record, "sendResult": send_result, "_status": 400}
     conversation_id = group_conversation_id(chat_id) if chat_type == "group" else representative_conversation_id(vo_user_id, chat_id)
     lock = lock_for(conversation_id)
+    command = parse_chat_command(text, message.get("resources") or []) if message_type == "text" else None
+    if command is not None and command_callback:
+        if not lock.acquire(blocking=False):
+            reply = "当前会话正在处理其他请求，请稍后重试。"
+            send_result = deliver(reply)
+            record = record_event({
+                **base_record,
+                "event": "command_completed",
+                "voUserId": vo_user_id,
+                "representativeAgentId": representative_agent_id,
+                "conversationId": conversation_id,
+                "command": command.value,
+                "commandStatus": "busy",
+                "reply": reply,
+                "sendResult": send_result,
+                "deliveryStatus": _delivery_classification(send_result),
+                "replyInThread": reply_in_thread if chat_type == "group" else False,
+            })
+            return {"ok": False, "status": "busy", "reply": reply, "sendResult": send_result, "record": record, "_status": 409}
+        try:
+            started = record_event({
+                **base_record,
+                "event": "command_started",
+                "voUserId": vo_user_id,
+                "representativeAgentId": representative_agent_id,
+                "conversationId": conversation_id,
+                "command": command.value,
+            })
+            try:
+                outcome = command_callback(command.value, {
+                    "sourceMessageId": source_message_id,
+                    "conversationId": conversation_id,
+                    "feishuChatId": chat_id,
+                    "chatType": chat_type,
+                    "sourceSurface": projection["sourceSurface"],
+                    "representativeAgentId": representative_agent_id,
+                    "voUserId": vo_user_id,
+                    "sender": identity,
+                })
+            except Exception:
+                outcome = {"ok": False, "status": "failed", "reply": "命令执行失败。"}
+            outcome = outcome if isinstance(outcome, dict) else {"ok": False, "status": "failed", "reply": "命令执行失败。"}
+            status = str(outcome.get("status") or ("success" if outcome.get("ok") else "failed"))[:64]
+            reply = str(outcome.get("reply") or outcome.get("error") or "命令执行完成。")[:1024]
+            send_result = deliver(reply)
+            completed = record_event({
+                **base_record,
+                "event": "command_completed",
+                "voUserId": vo_user_id,
+                "representativeAgentId": representative_agent_id,
+                "conversationId": conversation_id,
+                "command": command.value,
+                "commandStatus": status,
+                "commandResult": {
+                    key: outcome.get(key)
+                    for key in ("ok", "status", "changed", "operationId", "duplicate", "durationMs")
+                    if outcome.get(key) not in (None, "")
+                },
+                "reply": reply,
+                "sendResult": send_result,
+                "deliveryStatus": _delivery_classification(send_result),
+                "replyInThread": reply_in_thread if chat_type == "group" else False,
+                "inboundRecordId": started.get("id"),
+            })
+            return {
+                "ok": bool(outcome.get("ok")) and bool(send_result.get("ok")),
+                "status": status if send_result.get("ok") else "delivery_failed",
+                "reply": reply,
+                "commandResult": outcome,
+                "sendResult": send_result,
+                "record": completed,
+            }
+        finally:
+            lock.release()
     with lock:
         hit = idempotency_hit(source_message_id) if idempotency_hit else channel_idempotency_hit(load_records, source_message_id)
         if hit:
