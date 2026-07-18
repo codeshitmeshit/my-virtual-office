@@ -38,6 +38,45 @@ class ExternalResetPort(Protocol):
 NativeCleanup = Callable[[CommandScope, str], Mapping[str, Any] | None]
 
 
+class CodexCompactRuntime(Protocol):
+    def thread_id(self, scope: CommandScope) -> str: ...
+
+    def try_acquire(self, scope: CommandScope) -> bool: ...
+
+    def release(self, scope: CommandScope) -> None: ...
+
+    def compact(self, scope: CommandScope, thread_id: str) -> Mapping[str, Any]: ...
+
+
+class CodexCompactAdapter:
+    def __init__(self, runtime: CodexCompactRuntime) -> None:
+        self._runtime = runtime
+
+    def compact(self, scope: CommandScope) -> Mapping[str, Any]:
+        if scope.provider_kind != "codex":
+            return {"ok": False, "status": "unsupported", "error": "Context compaction is unavailable"}
+        thread_id = str(self._runtime.thread_id(scope) or "").strip()
+        if not thread_id:
+            return {"ok": True, "status": "no_op", "changed": False, "reply": "No compactable context"}
+        if not self._runtime.try_acquire(scope):
+            return {"ok": False, "status": "busy", "error": "Conversation is busy"}
+        try:
+            try:
+                result = self._runtime.compact(scope, thread_id)
+            except TimeoutError:
+                return {"ok": False, "status": "failed", "error": "Context compaction timed out"}
+            except Exception:
+                return {"ok": False, "status": "failed", "error": "Context compaction failed"}
+            if not isinstance(result, Mapping):
+                return {"ok": False, "status": "failed", "error": "Invalid compaction result"}
+            normalized = dict(result)
+            normalized.setdefault("status", "success" if normalized.get("ok") else "failed")
+            normalized.setdefault("changed", bool(normalized.get("ok")))
+            return normalized
+        finally:
+            self._runtime.release(scope)
+
+
 @dataclass(frozen=True)
 class ResetOutcome:
     changed: bool

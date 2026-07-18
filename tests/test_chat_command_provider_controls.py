@@ -10,7 +10,7 @@ APP = Path(__file__).resolve().parents[1] / "app"
 if str(APP) not in sys.path:
     sys.path.insert(0, str(APP))
 
-from services.chat_command_providers import ChatProviderCommandAdapter, ScopedConversationResetAdapter
+from services.chat_command_providers import CodexCompactAdapter, ChatProviderCommandAdapter, ScopedConversationResetAdapter
 from services.chat_commands import ChatCommand, CommandScope
 from services.provider_conversations import ConversationKey, ProviderConversationService
 
@@ -68,6 +68,31 @@ class OpenClawReset:
         return self.outcome
 
 
+class CompactRuntime:
+    def __init__(self, thread_id="thread-1", acquired=True, outcome=None, error=None):
+        self.selected_thread = thread_id
+        self.acquired = acquired
+        self.outcome = outcome or {"ok": True, "reply": "compacted"}
+        self.error = error
+        self.calls = []
+        self.released = []
+
+    def thread_id(self, scope):
+        return self.selected_thread
+
+    def try_acquire(self, scope):
+        return self.acquired
+
+    def release(self, scope):
+        self.released.append(scope)
+
+    def compact(self, scope, thread_id):
+        self.calls.append((scope, thread_id))
+        if self.error:
+            raise self.error
+        return self.outcome
+
+
 def scope(provider, surface="virtual-office", conversation="conversation-a"):
     return CommandScope.create(provider, f"{provider}-agent", "main", conversation, surface)
 
@@ -76,13 +101,13 @@ def key(value):
     return ConversationKey(value.provider_kind, value.agent_id, value.profile, value.conversation_id)
 
 
-def adapter_for(scopes, *, cleanup=None, openclaw=None):
+def adapter_for(scopes, *, cleanup=None, openclaw=None, compact=None):
     conversations = ProviderConversationService(id_factory=lambda: "new-generation")
     ports = {item.key(): MemoryPort() for item in scopes if item.provider_kind != "openclaw"}
     resetter = ScopedConversationResetAdapter(conversations, KeyResolver(), PortResolver(ports), cleanup=cleanup)
     identities = Identities()
     openclaw = openclaw or OpenClawReset()
-    return ChatProviderCommandAdapter(identities, resetter, openclaw), conversations, ports, identities, openclaw
+    return ChatProviderCommandAdapter(identities, resetter, openclaw, compact), conversations, ports, identities, openclaw
 
 
 @pytest.mark.parametrize("provider", ["codex", "hermes", "claude-code"])
@@ -194,3 +219,38 @@ def test_unknown_provider_and_compact_are_explicitly_unsupported():
     unknown = CommandScope.create("future-provider", "agent", "main", "conversation", "virtual-office")
     assert adapter.execute(ChatCommand.NEW, unknown)["status"] == "unsupported"
     assert adapter.execute(ChatCommand.COMPACT, target)["status"] == "unsupported"
+
+
+def test_codex_compact_keeps_logical_identity_and_releases_runtime_lock():
+    target = scope("codex", "feishu-group")
+    runtime = CompactRuntime()
+    adapter, conversations, ports, identities, openclaw = adapter_for([target], compact=CodexCompactAdapter(runtime).compact)
+    result = adapter.execute(ChatCommand.COMPACT, target)
+    assert result == {"ok": True, "reply": "compacted", "status": "success", "changed": True}
+    assert runtime.calls == [(target, "thread-1")]
+    assert runtime.released == [target]
+
+
+@pytest.mark.parametrize("runtime, expected", [
+    (CompactRuntime(thread_id=""), "no_op"),
+    (CompactRuntime(acquired=False), "busy"),
+    (CompactRuntime(error=TimeoutError()), "failed"),
+    (CompactRuntime(error=RuntimeError("secret")), "failed"),
+])
+def test_codex_compact_boundary_outcomes(runtime, expected):
+    target = scope("codex")
+    adapter, _conversations, _ports, identities, openclaw = adapter_for([target], compact=CodexCompactAdapter(runtime).compact)
+    result = adapter.execute(ChatCommand.COMPACT, target)
+    assert result["status"] == expected
+    if expected in {"no_op", "busy"}:
+        assert runtime.calls == []
+
+
+@pytest.mark.parametrize("provider", ["hermes", "claude-code", "openclaw"])
+def test_non_codex_compact_never_calls_codex_runtime(provider):
+    target = scope(provider)
+    runtime = CompactRuntime()
+    adapter, _conversations, _ports, identities, openclaw = adapter_for([target], compact=CodexCompactAdapter(runtime).compact)
+    result = adapter.execute(ChatCommand.COMPACT, target)
+    assert result["status"] == "unsupported"
+    assert runtime.calls == []

@@ -5,7 +5,7 @@
 
 ## 2. Provider Control and Persistence
 
-- [ ] 2.1 Implement provider-control adapters for VO logical conversation creation and Feishu scoped reset across Codex, Hermes, Claude Code, and OpenClaw, preserving old VO conversations and using existing `ProviderConversationService` generation/state ports; add focused reset, stale-commit, cross-scope, and cleanup-failure tests.
+- [x] 2.1 Implement provider-control adapters for VO logical conversation creation and Feishu scoped reset across Codex, Hermes, Claude Code, and OpenClaw, preserving old VO conversations and using existing `ProviderConversationService` generation/state ports; add focused reset, stale-commit, cross-scope, and cleanup-failure tests.
 - [ ] 2.2 Integrate Codex native compaction behind the command capability port, return no-mutation `unsupported` for Hermes, Claude Code, and OpenClaw, and add provider-matrix tests for success, no context, busy, timeout/failure, and unsupported behavior.
 - [ ] 2.3 Add bounded command operation recording, non-blocking per-scope reservation, feature-flag evaluation, low-cardinality counters, and durable started/terminal/indeterminate semantics using existing VO/Feishu journals and indexes; test duplicate, crash-window, feedback-failure, redaction, and retention behavior.
 
