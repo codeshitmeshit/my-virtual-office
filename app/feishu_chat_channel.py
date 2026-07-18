@@ -152,20 +152,21 @@ def save_source_index(status_dir, record, *, now, lock, owner_id=""):
     event = str(record.get("event") or "").strip()
     if not source_message_id or event not in {"user_message", "turn_completed", "command_started", "command_completed", "ignored", "rejected"}:
         return None
-    state = "processing" if event == "user_message" else "completed"
+    state = "processing" if event in {"user_message", "command_started"} else "completed"
     item = {
         "schema": "vo.feishu-source-message-index/v1",
         "sourceMessageId": source_message_id,
         "state": state,
         "updatedAt": now(),
         **({"ownerId": str(owner_id or "").strip()} if state == "processing" and str(owner_id or "").strip() else {}),
-        **({"executionPhase": "claimed"} if state == "processing" else {}),
+        **({"executionPhase": "dispatching" if event == "command_started" else "claimed"} if state == "processing" else {}),
         "record": {
             key: record.get(key)
             for key in (
                 "id", "event", "sourceMessageId", "conversationId", "feishuChatId",
                 "representativeAgentId", "chatType", "messageType", "reply",
                 "feishuReply", "deliveryStatus", "sendResult", "agentResult", "reason",
+                "command", "commandStatus", "commandResult",
             )
             if record.get(key) not in (None, "", [], {})
         },
@@ -266,6 +267,7 @@ def finalize_orphaned_source_index(status_dir, source_message_id, terminal_recor
                     "id", "event", "sourceMessageId", "conversationId", "feishuChatId",
                     "representativeAgentId", "chatType", "messageType", "reply",
                     "feishuReply", "deliveryStatus", "sendResult", "agentResult", "reason",
+                    "command", "commandStatus", "commandResult",
                 )
                 if terminal_record.get(key) not in (None, "", [], {})
             },

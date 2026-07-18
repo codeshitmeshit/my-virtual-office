@@ -17,7 +17,7 @@
 ## 4. Feishu Transport Integration
 
 - [x] 4.1 Extend `app/feishu_chat_channel.py` with an injected command callback after existing admission and trusted conversation derivation, route only exact attachment-free commands away from Agent dispatch, use non-blocking conversation admission, and emit distinct bounded command audit/feedback outcomes; add direct channel tests for private, mentioned group, unmentioned group, actor attribution, shared scope, and cross-group isolation.
-- [ ] 4.2 Wire Feishu command execution in the server through existing source-message claim/index, provider-control, audit-shard, communication-history projection, recovery, and delivery paths; add restart/redelivery, started-without-terminal, feedback failure, same-group concurrency, private/group compatibility, and representative-Provider matrix tests.
+- [x] 4.2 Wire Feishu command execution in the server through existing source-message claim/index, provider-control, audit-shard, communication-history projection, recovery, and delivery paths; add restart/redelivery, started-without-terminal, feedback failure, same-group concurrency, private/group compatibility, and representative-Provider matrix tests.
 
 ## 5. Rollout, Documentation, and Verification
 

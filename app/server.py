@@ -13387,6 +13387,10 @@ def _record_feishu_channel_event(record):
                 increments["agentFailures"] = 1
             if not send_result.get("ok"):
                 increments["deliveryFailures"] = 1
+        elif event_name == "command_completed":
+            increments["commandsCompleted"] = 1
+            if not ((item.get("sendResult") or {}) if isinstance(item.get("sendResult"), dict) else {}).get("ok"):
+                increments["commandFeedbackFailures"] = 1
         feishu_chat_channel.increment_group_metrics(
             STATUS_DIR,
             increments,
@@ -13394,6 +13398,16 @@ def _record_feishu_channel_event(record):
             lock=_FEISHU_CHANNEL_RECORD_LOCK,
         )
     _sync_feishu_channel_record_to_comm_ledger(item)
+    if str(item.get("event") or "") == "command_completed":
+        send_result = item.get("sendResult") if isinstance(item.get("sendResult"), dict) else {}
+        if not send_result.get("ok"):
+            agent = _find_agent_record(item.get("representativeAgentId")) or {}
+            _CHAT_COMMAND_METRICS.increment(
+                item.get("sourceSurface") or "feishu-dm",
+                str(agent.get("providerKind") or "other"),
+                item.get("command") or "other",
+                "feedback_failed",
+            )
     return item
 
 
@@ -13482,6 +13496,11 @@ def _sync_feishu_channel_record_to_comm_ledger(record):
         if delivery_event:
             _publish_feishu_chat_comm_event(delivery_event, "delivery")
         return reply_event
+    if event_name == "command_completed":
+        delivery_event = _append_feishu_delivery_comm_event(record)
+        if delivery_event:
+            _publish_feishu_chat_comm_event(delivery_event, "delivery")
+        return delivery_event
     return None
 
 
@@ -13609,10 +13628,15 @@ def _finalize_orphaned_feishu_worker_message(adapted, envelope):
     source_message_id = str(envelope.get("messageId") or "").strip()
     indexed = feishu_chat_channel.load_source_index(STATUS_DIR, source_message_id) or {}
     indexed_record = indexed.get("record") if isinstance(indexed.get("record"), dict) else {}
-    reply = "上一轮处理因 VO 服务重启已中断，后续消息将继续按顺序处理。"
+    command_interrupted = indexed_record.get("event") == "command_started"
+    reply = (
+        "上一条命令的执行结果无法确认，系统未自动重试。"
+        if command_interrupted
+        else "上一轮处理因 VO 服务重启已中断，后续消息将继续按顺序处理。"
+    )
     terminal_record = {
         "id": str(uuid.uuid4()),
-        "event": "turn_completed",
+        "event": "command_completed" if command_interrupted else "turn_completed",
         "sourceMessageId": source_message_id,
         "conversationId": indexed_record.get("conversationId") or "",
         "feishuChatId": indexed_record.get("feishuChatId") or message.get("chat_id") or "",
@@ -13631,6 +13655,12 @@ def _finalize_orphaned_feishu_worker_message(adapted, envelope):
             "reply": reply,
         },
     }
+    if command_interrupted:
+        terminal_record.update({
+            "command": indexed_record.get("command") or str(message.get("text") or "").strip(),
+            "commandStatus": "indeterminate",
+            "commandResult": {"ok": False, "status": "indeterminate", "changed": False},
+        })
     finalized = feishu_chat_channel.finalize_orphaned_source_index(
         STATUS_DIR,
         source_message_id,
@@ -13965,7 +13995,7 @@ def _handle_feishu_chat_worker_envelope(body):
     record = result.get("record") if isinstance(result, dict) and isinstance(result.get("record"), dict) else {}
     if result.get("status") == "processing" or record.get("indexState") == "processing":
         return _feishu_processing_ack(envelope)
-    terminal_events = {"turn_completed", "ignored", "rejected"}
+    terminal_events = {"turn_completed", "command_completed", "ignored", "rejected"}
     durable = bool(
         record.get("id")
         and record.get("sourceMessageId") == envelope["messageId"]
@@ -14067,6 +14097,10 @@ def _handle_feishu_chat_message_event(
     group_reply = reply_text
     if group_reply is None and injected_send is not None:
         group_reply = lambda chat_id, source_message_id, text, reply_in_thread: injected_send(chat_id, text)
+    command_flags = CommandFeatureFlags.from_values(
+        os.environ.get("VO_CHAT_SLASH_COMMANDS_ENABLED"),
+        os.environ.get("VO_FEISHU_CHAT_SLASH_COMMANDS_ENABLED"),
+    )
     return feishu_chat_channel.handle_message_event(
         body,
         cfg=_feishu_chat_app_config(),
@@ -14088,8 +14122,26 @@ def _handle_feishu_chat_message_event(
         find_agent=_find_agent_record,
         download_image=download_image if download_image is not None else (None if send_text else _feishu_chat_app_image_download),
         mark_dispatching=_mark_feishu_source_dispatching,
+        command_callback=_dispatch_feishu_chat_command if command_flags.feishu_enabled else None,
         async_acknowledgement=async_acknowledgement,
     )
+
+
+def _dispatch_feishu_chat_command(command, context):
+    context = context if isinstance(context, dict) else {}
+    result = _handle_chat_command_execute(
+        {
+            "command": command,
+            "idempotencyKey": context.get("sourceMessageId"),
+            "sourceMessageId": context.get("sourceMessageId"),
+        },
+        surface=context.get("sourceSurface") or "feishu-dm",
+        trusted_agent=context.get("representativeAgentId"),
+        trusted_conversation_id=context.get("conversationId"),
+    )
+    result = dict(result or {})
+    result.pop("_status", None)
+    return result
 
 
 def _test_feishu_chat_channel(body=None):
@@ -34318,7 +34370,8 @@ def _chat_command_audit_append(row):
         "type": "operation", "operation": "chat_command", "direction": "system",
         "conversationId": row.get("conversationId") or "", "from": _office_agent_ref(row.get("agentId") or ""),
         "to": {"id": "user", "providerKind": "human", "name": "User"},
-        "text": row.get("reply") or "", "metadata": metadata, "visibleInOffice": True,
+        "text": row.get("reply") or "", "metadata": metadata,
+        "visibleInOffice": row.get("sourceSurface") != "feishu-group",
         "ok": bool(row.get("ok", row.get("state") == "started")),
     }, require_durable=True)
 
