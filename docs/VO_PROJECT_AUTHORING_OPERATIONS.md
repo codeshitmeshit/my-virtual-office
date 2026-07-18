@@ -1,87 +1,94 @@
-# VO Agent Project Authoring API and Operations
+# VO Conversation-Confirmed Project Authoring
 
-This document defines the HTTP and operational contract for Agent-authored Virtual Office projects. The runtime skill is `/skills/vo-project-authoring/SKILL.md`; Project Execution, review, acceptance, cancellation, and artifact access remain in `/skills/vo-project-workflow/SKILL.md`.
+This document defines the Agent and operational contract for direct Virtual Office project creation. Project Execution, review, acceptance, cancellation, and artifacts remain separate under `/skills/vo-project-workflow/SKILL.md`.
 
-## Security and rollout boundary
+## Product contract
 
-Authoring and recurrence are local-only, disabled-by-default capabilities:
+The Agent presents a complete natural-language proposal in the conversation. The proposal identifies project type, tasks, responsible and executor actors, optional reviewer decisions, maintenance mode, and template/recurrence settings. The Agent waits for explicit confirmation of that exact version, computes its SHA-256 digest, and calls the direct-create API.
+
+No backend draft is created. If the user changes any semantic field, the Agent presents the complete revised proposal and waits again. If the user does not confirm, no API call occurs.
+
+The backend cannot cryptographically verify provider-neutral chat authorship. `confirmation.confirmed=true` is an Agent assertion audited with the proposal digest. This accepted limitation is bounded by loopback-only registered-Agent access, atomic idempotent creation, project-scoped authority, and the invariant that creation never starts Project Execution.
+
+## Rollout and security
 
 | Environment variable | Default | Purpose |
 | --- | --- | --- |
-| `VO_AGENT_PROJECT_AUTHORING_ENABLED` | `false` | Accept Agent authoring and scoped-maintenance actions |
-| `VO_PROJECT_INSTANCE_RECURRENCE_ENABLED` | `false` | Reconcile recurrence registrations and materialize occurrences |
-| `VO_PROJECT_INSTANCE_RECURRENCE_DISPATCH_PAUSED` | `false` | Pause occurrence dispatch without deleting durable intent |
+| `VO_AGENT_PROJECT_AUTHORING_ENABLED` | `false` | Gate direct creation and Agent maintenance |
+| `VO_PROJECT_INSTANCE_RECURRENCE_ENABLED` | `false` | Gate recurrence intent and occurrence dispatch |
+| `VO_PROJECT_INSTANCE_RECURRENCE_DISPATCH_PAUSED` | `false` | Pause dispatch without deleting durable intent |
 
-Agent routes accept only loopback requests without a browser `Origin`. They require `X-VO-Agent-Action: project-authoring` and a registered `X-VO-Agent-Id`. Agent callers must never acquire `X-VO-Management-Token`; management endpoints are for the trusted local user surface and validate that token before reading mutation bodies.
+Agent routes require loopback, no browser `Origin`, `X-VO-Agent-Action: project-authoring`, and a registered `X-VO-Agent-Id`. Agents must never acquire `X-VO-Management-Token`. Management authentication remains required for protected maintenance confirmation, grant rotation/revocation, template instantiation, recurrence pause/resume, health, and existing project CRUD.
 
-Request bodies, initial task counts, pending queues, maintenance queues, audit history, recurrence history, outbox capacity, worker count, batch size, retry delay, attempts, and occurrence claim duration have bounded `VO_PROJECT_AUTHORING_*` or `VO_PROJECT_RECURRENCE_*` configuration in `app/services/project_authoring_config.py`.
+## Direct-create API
 
-## Actor and draft contract
+`POST /api/agent/project-authoring/projects` accepts:
 
-Every initial task has one `responsibleActor` and one `executorActor`; they may be the same. An actor is either a registered, eligible Agent (`{"type":"agent","id":"..."}`) or the current local user (`{"type":"user","id":"user:local"}`). A human executor remains trackable but cannot start automated Project Execution. Excluded or missing Agents are rejected when drafting, confirming, instantiating, and materializing recurrence occurrences.
+```json
+{
+  "idempotencyKey": "agent:project:stable-key",
+  "confirmation": {
+    "confirmed": true,
+    "summaryDigest": "64 lowercase SHA-256 hex characters"
+  },
+  "project": {
+    "title": "Release preparation",
+    "projectType": "one_time",
+    "agentMaintenanceMode": "strict_confirmation",
+    "columns": [{"id": "backlog", "title": "Backlog"}],
+    "tasks": [{
+      "title": "Prepare release evidence",
+      "columnId": "backlog",
+      "responsibleActor": {"type": "agent", "id": "owner"},
+      "executorActor": {"type": "agent", "id": "builder"},
+      "reviewerRecommendation": {"recommended": false, "triggers": []}
+    }],
+    "template": {"mode": "none"},
+    "recurrence": {"enabled": false}
+  }
+}
+```
 
-The Agent supplies reviewer recommendations, not reviewer assignments. The trusted user may assign `reviewerActor` while editing the approved draft. A complete draft includes columns, all initial tasks and actors, an explicit recommendation per task, `agentMaintenanceMode`, template intent, and recurrence intent. Confirmation materializes the whole aggregate atomically and never starts Project Execution.
+Every task has one responsible actor and one executor actor; they may be the same. `user:local` work is trackable but cannot start automated execution. Reviewer is absent by default. A `reviewerActor` is included only when the confirmed proposal explicitly assigns it; risk recommendations alone do not assign authority.
 
-## Agent API
+The atomic commit contains the project, tasks, actor projections, authoring source/digest, grant hash, immutable template version, recurrence definition, and outbox intent as applicable. Tasks start in `backlog`; `workflowActive` and `projectExecutionFlowActive` are false.
 
-All Agent calls use the two identity headers above.
+Idempotency is scoped to Agent and key. Same key and semantic payload returns the original project. Same key with changed project or proposal digest returns `project_creation_idempotency_conflict`. Workspace or commit failure leaves no partial project.
 
-| Method and path | Authentication | Contract |
-| --- | --- | --- |
-| `POST /api/agent/project-authoring/requests` | identity headers | Submit `{idempotencyKey,draft}`; returns a pending request and exposes `requestSecret` only on first creation |
-| `GET /api/agent/project-authoring/requests/{requestId}` | identity headers + `Authorization: Bearer {requestSecret}` | Read the sanitized status for that exact request and Agent |
-| `GET /api/agent/projects/{projectId}/grant-status` | identity headers + confirmed request/grant secret | Validate the grant bound to that exact project and Agent |
-| `POST /api/agent/projects/{projectId}/maintenance` | identity headers + grant secret | Submit `{idempotencyKey,mutation}` or apply an allowed autonomous routine task update |
-| `POST /api/agent/project-recurrences/{recurrenceId}/occurrences` | identity headers + source-project grant secret | Materialize one idempotent occurrence by `occurrenceId` |
+The first success returns `projectGrantSecret`; only its hash is persisted. Idempotent retries return the project and public grant status without the secret. If the first response is lost, do not create another project—use management-authenticated grant rotation.
 
-The request secret is held only in the Agent's current process memory. It must not be logged, persisted, echoed into chat, or reused across requests. A repeated submission must reuse the original idempotency key. If the secret is lost, the Agent cannot recover it; the trusted user can still inspect and decide the pending request. Once confirmation succeeds, that secret is the scoped project grant until revoked or rotated.
+## Maintenance and recurrence
 
-Status states are `pending`, `materializing`, `confirmed`, `rejected`, and `failed`. Poll at a bounded, low frequency. `failed` retains retryable state and its sanitized error; do not create an equivalent second request to bypass the state or a user rejection.
-
-In `strict_confirmation`, every maintenance mutation becomes a pending maintenance request. In `autonomous`, only `routine_task_update` by the Agent assigned to that task may directly change the allowlisted execution state, description, checklist, evidence, or due date fields. Structural, role, reviewer, recurrence, workspace, archive, delete, and maintenance-mode changes always require user confirmation.
-
-## Trusted user API and confirmation contract
-
-The local “Agent project drafts” view uses these management-authenticated routes:
-
-| Method and path | Body or result |
+| Method and path | Contract |
 | --- | --- |
-| `GET /api/project-authoring/requests?state=...&limit=...` | Bounded sanitized request list |
-| `GET /api/project-authoring/requests/{requestId}` | Original proposal, editable approved draft, state, revision, and errors |
-| `PUT /api/project-authoring/requests/{requestId}` | `{expectedRevision,draft}`; optimistic edit |
-| `POST /api/project-authoring/requests/{requestId}/confirm` | `{expectedRevision,confirmationKey}`; one atomic materialization |
-| `POST /api/project-authoring/requests/{requestId}/reject` | `{expectedRevision,reason}` |
-| `POST /api/project-authoring/projects/{projectId}/maintenance/{maintenanceId}/confirm` | `{expectedRevision}` |
-| `POST /api/project-authoring/projects/{projectId}/maintenance/{maintenanceId}/reject` | `{expectedRevision,reason}` |
-| `POST /api/project-authoring/projects/{projectId}/grant/revoke` | Revoke all further Agent use of the current grant |
-| `POST /api/project-authoring/projects/{projectId}/grant/rotate` | Invalidate the old secret and return a replacement once |
-| `GET /api/project-authoring/health` | Health state, structured counters/durations, queue age, and credential-safe intervention alerts |
+| `GET /api/agent/projects/{projectId}/grant-status` | Validate the Agent/project scoped grant |
+| `POST /api/agent/projects/{projectId}/maintenance` | Submit protected maintenance or an allowed autonomous routine update |
+| `POST /api/agent/project-recurrences/{recurrenceId}/occurrences` | Idempotently materialize one independent occurrence |
+| `POST /api/project-authoring/projects/{projectId}/maintenance/{id}/confirm|reject` | Management decision for protected maintenance |
+| `POST /api/project-authoring/projects/{projectId}/grant/rotate|revoke` | Management grant administration |
+| `POST /api/project-authoring/recurrences/{recurrenceId}/pause|resume` | Management recurrence administration |
+| `GET /api/project-authoring/health` | Credential-safe metrics, outbox age, and intervention alerts |
 
-The user reviews the original proposal and working approved draft, including reviewer rationale, candidate, template/version, recurrence, and validation errors. `expectedRevision` rejects stale browser actions; `confirmationKey` and compare-and-set materialization make repeated confirmation safe. A `confirmed` response with `projectId` means one complete project exists, not that execution has started.
+`strict_confirmation` makes every Agent maintenance mutation pending. `autonomous` directly permits only assigned-task `executionState`, `description`, `checklist`, `evidence`, and `dueDate`. Structural, role, reviewer, recurrence, workspace, archive/delete, and mode changes always require user confirmation.
 
-## Immutable templates and independent recurrence
+Protected maintenance requests use `expectedRevision` for optimistic concurrency and a one-time `confirmationKey` for the management decision. An autonomous assigned-task change uses the `routine_task_update` operation; it cannot widen the allowed field set or change project structure.
 
-`reusable` and `recurring` projects create or reference an immutable template version. A snapshot includes columns, complete task blueprints, actors, reviewer policy, maintenance mode, and execution settings. Updating a template appends a version; existing projects and recurrences keep their pinned `{templateId,version}`. Legacy templates are read as implicit version 1.
+Reusable and recurring projects pin immutable `templateId,version` pairs. Each created project records its `projectTemplateInstance` projection. A due recurrence uses an expiring occurrence claim and compare-and-set commit keyed by `occurrenceId` to create one independent, unstarted project. Duplicate or restarted callbacks return the already materialized project. Legacy `projectWorkflow` and `projectTask` cron behavior is unchanged.
 
-The trusted user may instantiate a pinned version with `POST /api/project-authoring/templates/{templateId}/instantiate` and `{version,idempotencyKey,overrides}`. Actors are revalidated at instantiation and the project is committed once.
+## Legacy draft compatibility
 
-A confirmed recurring draft writes a durable registration outbox entry. The bounded reconciler converges that entry to a Gateway `projectTemplateInstance` binding. Each callback claims an `occurrenceId` with an expiring owner token, loads the pinned template version, revalidates actors, prepares a workspace, and compare-and-set commits an independent project with source/template/occurrence traceability. Duplicate or restarted callbacks return the already materialized project and never reopen the source project.
-
-Management pause/resume uses `POST /api/project-authoring/recurrences/{recurrenceId}/pause` or `/resume`. Global dispatch pause retains registrations and occurrences for later recovery.
+The previous request/status/edit/confirm/reject routes and draft review UI are removed. Previously persisted `projectAuthoringRequests` records remain inert compatibility metadata: they are readable by the store, not exposed as active work, not counted in health, not automatically materialized, and not deleted by this change.
 
 ## Failure and recovery runbook
 
-1. **Feature disabled (`503`)**: keep both flags off during deployment. Enable authoring locally first; enable recurrence only after authoring health is clean. Disabling takes effect on the next action and does not delete stored requests.
-2. **Capacity (`429`/`503`)**: inspect pending request age, per-Agent/global pending counts, per-project maintenance count, and outbox depth. Resolve or compact terminal work before raising a bounded limit.
-3. **Draft validation or actor failure (`400`/`409`)**: refresh `/api/agents`, edit the same request revision, and retry confirmation. Do not create a parallel request.
-4. **Workspace preparation failure**: the service removes a newly prepared managed workspace and leaves the request retryable as `failed`. Correct the workspace condition, edit if necessary, and confirm the same request again.
-5. **Stale revision or duplicate action (`409`)**: reread request detail. If already `confirmed`, navigate to its `projectId`; otherwise repeat against the latest revision with the same logical confirmation key.
-6. **Lost, revoked, or rotated secret (`403`)**: stop Agent polling/mutation. The user can decide pending work, revoke the compromised grant, or rotate once and transfer the new value through a trusted ephemeral channel. Old, cross-Agent, and cross-project secrets remain invalid.
-7. **Outbox/Gateway failure**: pause global dispatch when needed. The reconciler retains durable intent, applies bounded exponential backoff, and raises intervention after max attempts. Fix Gateway/configuration, then resume; do not delete the binding intent.
-8. **Occurrence actor invalid**: keep the occurrence failed and recurrence visible with an intervention alert. Restore/replace the actor through a user-confirmed template/recurrence change; never silently remap identity.
-9. **Stuck occurrence claim**: wait for the configured claim lease to expire, then retry the same `occurrenceId`. Compare-and-set and source traceability prevent duplicate projects.
-10. **Emergency rollback**: turn off authoring, turn on recurrence dispatch pause, allow in-flight writes to finish, deploy the previous code, and preserve root metadata. New readers are backward compatible and legacy projects/cron target kinds are not rewritten.
+1. **Feature disabled (`503`)**: enable direct authoring locally first; enable recurrence only after direct-create health is clean.
+2. **Validation (`400`/`409`)**: refresh `/api/agents`. If the correction changes semantics, present the revised natural-language proposal and obtain confirmation again with a new key.
+3. **Idempotency conflict (`409`)**: do not overwrite the original result. Use a new key only after a newly confirmed semantic proposal.
+4. **Workspace/commit failure**: managed uncommitted workspaces are cleaned; retry the unchanged confirmation with the same key.
+5. **Lost first response**: locate the real project; do not recreate it. Rotate the grant through the trusted management surface.
+6. **Revoked/cross-scope grant (`403`)**: stop Agent mutation; never reuse another project or Agent's secret.
+7. **Outbox/Gateway failure**: pause dispatch, preserve durable intent, repair the dependency, then resume bounded reconciliation.
+8. **Invalid recurrence actor**: retain the intervention alert; use a user-confirmed template/role correction rather than silent substitution.
+9. **Rollback**: disable authoring, pause recurrence, let atomic writes finish, preserve root metadata, deploy the previous compatible code, and verify ordinary project/legacy cron reads.
 
-After any recovery, verify that credentials are absent from persisted root/audit data, the request or occurrence has one terminal result, recurrence bindings are converged, and no materialized task has an active Project Execution attempt unless a separate execution action explicitly started it.
-
-The health state is `disabled`, `healthy`, `paused`, `degraded`, or `intervention_required`. Pending-request age of one hour or recurrence-outbox age of fifteen minutes degrades health; a durable recurrence intervention takes priority. Failure logs are structured, credential-free, and rate-limited by operation/status/code, while suppressed log counts remain visible in metrics.
+Health is `disabled`, `healthy`, `paused`, `degraded`, or `intervention_required`. Recurrence outbox age of fifteen minutes degrades health; legacy pending draft age does not. Process-local counters reset on restart, while durable outbox and intervention state reconstruct operational health.

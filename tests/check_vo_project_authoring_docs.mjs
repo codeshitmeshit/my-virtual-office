@@ -4,14 +4,13 @@ import { readFile } from "node:fs/promises";
 const doc = await readFile(new URL("../docs/VO_PROJECT_AUTHORING_OPERATIONS.md", import.meta.url), "utf8");
 
 for (const contract of [
-  "POST /api/agent/project-authoring/requests",
-  "GET /api/agent/project-authoring/requests/{requestId}",
+  "POST /api/agent/project-authoring/projects",
   "responsibleActor",
   "executorActor",
   "reviewerActor",
   "expectedRevision",
   "confirmationKey",
-  "requestSecret",
+  "projectGrantSecret",
   "strict_confirmation",
   "routine_task_update",
   "templateId,version",
@@ -28,5 +27,7 @@ for (const contract of [
 assert.match(doc, /never starts Project Execution/);
 assert.match(doc, /must never acquire `X-VO-Management-Token`/);
 assert.match(doc, /Duplicate or restarted callbacks return the already materialized project/);
+assert.match(doc, /cannot cryptographically verify provider-neutral chat authorship/);
+assert.match(doc, /remain inert compatibility metadata/);
 
 console.log("VO project authoring operations documentation passed");

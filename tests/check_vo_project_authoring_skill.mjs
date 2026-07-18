@@ -20,8 +20,9 @@ for (const required of [
   "high_risk",
   "cross_team",
   "critical_delivery",
-  "/api/agent/project-authoring/requests",
-  "requestSecret",
+  "/api/agent/project-authoring/projects",
+  "summaryDigest",
+  "projectGrantSecret",
   "/grant-status",
   "/maintenance",
   "strict_confirmation",
@@ -35,5 +36,8 @@ for (const required of [
 assert.match(skill, /只保存在当前运行内存中/);
 assert.match(skill, /不写入文件、日志、项目、聊天消息或命令输出摘要/);
 assert.match(skill, /不自动启动项目、任务、review、验收、取消或会议/);
+assert.match(skill, /展示方案后停止，不调用创建 API/);
+assert.match(skill, /语义变化必须重新确认并使用新 key/);
+assert.ok(!skill.includes("/api/agent/project-authoring/requests"));
 
 console.log("VO project authoring skill contract passed");

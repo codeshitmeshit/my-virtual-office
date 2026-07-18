@@ -61,7 +61,7 @@ echo $VO_GATEWAY_HTTP
 - 普通跨 agent 沟通、提问、短任务委派、状态转交、复用 `conversationId`：使用 本地 `/skills/vo-agent-communication/SKILL.md`。
 - 普通跨 agent 通信统一使用 本地 `/skills/vo-agent-communication/SKILL.md`，目标可以是 OpenClaw、Hermes、Claude Code、Codex 或其他已接入 provider。
 - 需要检查 VO 共享浏览器状态、标签页或控制者，或浏览器访问遇到登录、权限、验证码、MFA、付费墙、网站拒绝自动化、支付/提交等人工介入阻塞：使用 本地 `/skills/vo-browser-control/SKILL.md`。当前 VO 没有 provider-neutral browser action endpoint，不能通过该 skill 执行点击、输入、导航或 DOM snapshot；人工介入场景应请求用户接管，不要升级为 raw CDP 操作。
-- 用户明确调用 `$vo-project-authoring`，需要起草、创建、复用、周期化或按 scoped grant 维护项目：使用 本地 `/skills/vo-project-authoring/SKILL.md`；该 skill 只提交等待用户确认的完整草稿，不启动执行。
+- 用户明确调用 `$vo-project-authoring`，需要创建、复用、周期化或按 scoped grant 维护项目：使用 本地 `/skills/vo-project-authoring/SKILL.md`；该 skill 在对话中展示自然语言方案并等待明确确认，然后直接创建真实但未运行的项目。
 - 需要读取或推进已创建项目/任务的 Project Execution、review、验收、阻塞、取消或项目 artifact：使用 本地 `/skills/vo-project-workflow/SKILL.md`。不要用项目创作 skill 绕过这些执行门禁。
 - 需要读取或维护 Agent workspace、公告、workspace 任务、笔记、受控文本文件、Skills Library 或 OpenClaw agent skill：使用 本地 `/skills/vo-agent-workspace/SKILL.md`。
 - 需要操作已确认的 executable meeting，包括 run/transition、事件跟踪、干预、冲突处理或 action item 草稿：使用 本地 `/skills/vo-meeting-execution/SKILL.md`。
