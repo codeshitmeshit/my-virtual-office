@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Mapping
 
 from services.project_authoring_audit import sanitize_audit_text
-from services.project_authoring_store import OUTBOX_KEY, RECURRENCES_KEY, REQUESTS_KEY
+from services.project_authoring_store import OUTBOX_KEY, RECURRENCES_KEY
 
 
 def _parse_timestamp(value: Any) -> datetime | None:
@@ -86,17 +86,14 @@ class ProjectAuthoringObservability:
         now: datetime | None = None,
     ) -> dict[str, Any]:
         current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
-        requests = root.get(REQUESTS_KEY) if isinstance(root.get(REQUESTS_KEY), Mapping) else {}
         outbox = root.get(OUTBOX_KEY) if isinstance(root.get(OUTBOX_KEY), list) else []
         recurrences = root.get(RECURRENCES_KEY) if isinstance(root.get(RECURRENCES_KEY), Mapping) else {}
 
-        pending = [item for item in requests.values() if isinstance(item, Mapping) and item.get("state") in {"pending", "materializing", "failed"}]
         queued = [item for item in outbox if isinstance(item, Mapping) and item.get("state") in {"pending", "processing", "retry"}]
         intervention_recurrences = [
             item for item in recurrences.values()
             if isinstance(item, Mapping) and item.get("state") == "intervention_required"
         ]
-        pending_age = self._oldest_age_seconds(pending, current, "createdAt")
         outbox_age = self._oldest_age_seconds(queued, current, "createdAt")
         durable_alerts = []
         for recurrence in intervention_recurrences[-20:]:
@@ -110,7 +107,7 @@ class ProjectAuthoringObservability:
 
         if intervention_recurrences:
             health = "intervention_required"
-        elif pending_age >= 3600 or outbox_age >= 900:
+        elif outbox_age >= 900:
             health = "degraded"
         elif not authoring_enabled:
             health = "disabled"
@@ -140,8 +137,6 @@ class ProjectAuthoringObservability:
                 ),
             },
             "queues": {
-                "pendingRequests": len(pending),
-                "oldestPendingRequestAgeSeconds": pending_age,
                 "recurrenceOutbox": len(queued),
                 "oldestRecurrenceOutboxAgeSeconds": outbox_age,
             },

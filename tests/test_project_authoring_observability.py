@@ -25,9 +25,9 @@ def test_records_counters_durations_and_rate_limits_structured_logs():
         clock=lambda: clock[0], emit=emitted.append, log_interval_seconds=60,
     )
 
-    metrics.observe("post /api/project-authoring/requests/{id}/confirm", status="failure", duration_ms=12, code="revision_conflict")
-    metrics.observe("post /api/project-authoring/requests/{id}/confirm", status="failure", duration_ms=8, code="revision_conflict")
-    metrics.observe("post /api/project-authoring/requests/{id}/confirm", status="success", duration_ms=20)
+    metrics.observe("post /api/agent/project-authoring/projects", status="failure", duration_ms=12, code="idempotency_conflict")
+    metrics.observe("post /api/agent/project-authoring/projects", status="failure", duration_ms=8, code="idempotency_conflict")
+    metrics.observe("post /api/agent/project-authoring/projects", status="success", duration_ms=20)
 
     snapshot = metrics.snapshot(
         _root(), authoring_enabled=True, recurrence_enabled=False, recurrence_paused=False,
@@ -36,20 +36,20 @@ def test_records_counters_durations_and_rate_limits_structured_logs():
     assert snapshot["counters"]["operations.failure"] == 2
     assert snapshot["counters"]["logs.emitted"] == 1
     assert snapshot["counters"]["logs.suppressed"] == 1
-    timing = snapshot["durations"]["post /api/project-authoring/requests/{id}/confirm"]
+    timing = snapshot["durations"]["post /api/agent/project-authoring/projects"]
     assert timing == {"count": 3, "totalMs": 40, "maxMs": 20, "averageMs": 13.33}
     assert len(emitted) == 1
     assert json.loads(emitted[0]) == {
         "type": "project_authoring_operation",
-        "operation": "post /api/project-authoring/requests/{id}/confirm",
+        "operation": "post /api/agent/project-authoring/projects",
         "status": "failure",
-        "code": "revision_conflict",
+        "code": "idempotency_conflict",
         "durationMs": 12,
     }
     assert "secret" not in emitted[0].lower()
 
 
-def test_health_reports_queue_age_and_durable_intervention_without_credentials():
+def test_health_ignores_legacy_requests_and_reports_outbox_age_and_intervention_safely():
     now = datetime(2026, 7, 18, 12, 0, tzinfo=timezone.utc)
     root = _root()
     root[REQUESTS_KEY]["request-1"] = {
@@ -82,8 +82,6 @@ def test_health_reports_queue_age_and_durable_intervention_without_credentials()
     assert snapshot["ok"] is False
     assert snapshot["status"] == "intervention_required"
     assert snapshot["queues"] == {
-        "pendingRequests": 1,
-        "oldestPendingRequestAgeSeconds": 7200,
         "recurrenceOutbox": 1,
         "oldestRecurrenceOutboxAgeSeconds": 1200,
     }
@@ -107,4 +105,6 @@ def test_health_distinguishes_disabled_paused_degraded_and_healthy():
 
     old = datetime.now(timezone.utc) - timedelta(hours=2)
     root[REQUESTS_KEY]["old"] = {"state": "pending", "createdAt": old.isoformat()}
+    assert metrics.snapshot(root, authoring_enabled=True, recurrence_enabled=False, recurrence_paused=False)["status"] == "healthy"
+    root[OUTBOX_KEY].append({"state": "pending", "createdAt": old.isoformat()})
     assert metrics.snapshot(root, authoring_enabled=True, recurrence_enabled=False, recurrence_paused=False)["status"] == "degraded"
