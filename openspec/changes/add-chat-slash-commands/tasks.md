@@ -21,5 +21,5 @@
 
 ## 5. Rollout, Documentation, and Verification
 
-- [ ] 5.1 Add configuration and status documentation for `VO_CHAT_SLASH_COMMANDS_ENABLED` and `VO_FEISHU_CHAT_SLASH_COMMANDS_ENABLED`, document the Provider capability matrix, exact command grammar, group shared-context effect, rollout order, observability, indeterminate reconciliation, and configuration-only rollback.
+- [x] 5.1 Add configuration and status documentation for `VO_CHAT_SLASH_COMMANDS_ENABLED` and `VO_FEISHU_CHAT_SLASH_COMMANDS_ENABLED`, document the Provider capability matrix, exact command grammar, group shared-context effect, rollout order, observability, indeterminate reconciliation, and configuration-only rollback.
 - [ ] 5.2 Run OpenSpec validation plus focused Python, JavaScript/static, chat-history, Provider, and Feishu suites; perform flag-off and staged flag-on acceptance for every specification scenario, record commands/results/unverified external-tenant items in change evidence, and fix only regressions within the confirmed scope.

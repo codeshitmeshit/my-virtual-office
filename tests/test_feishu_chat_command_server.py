@@ -215,3 +215,17 @@ def test_representative_provider_matrix_uses_authoritative_agent_scope(monkeypat
     assert scopes[0][1].agent_id == "representative"
     assert scopes[0][1].conversation_id == "feishu-group:trusted"
     assert scopes[0][1].surface == "feishu-group"
+
+
+def test_public_status_exposes_only_bounded_command_flags_and_metrics(monkeypatch, tmp_path):
+    _configure(monkeypatch, tmp_path)
+
+    status = server._chat_command_status_response()
+    config = server._feishu_chat_config_response(include_ok=False)
+
+    assert status["enabled"] is True
+    assert status["feishuEnabled"] is True
+    assert set(status["reservations"]) == {"scopes", "locked"}
+    assert isinstance(status["metrics"], list)
+    assert config["chatCommands"] == status
+    assert "message" not in str(status).lower()

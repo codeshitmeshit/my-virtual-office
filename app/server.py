@@ -1031,11 +1031,25 @@ def _feishu_chat_config_response(include_ok=True):
         "replyMode": "same_chat",
         "longConnection": long_connection,
         "groupMetrics": group_metrics,
+        "chatCommands": _chat_command_status_response(),
         "sse": _feishu_chat_sse_metrics_snapshot(),
     }
     if include_ok:
         result["ok"] = True
     return result
+
+
+def _chat_command_status_response():
+    flags = CommandFeatureFlags.from_values(
+        os.environ.get("VO_CHAT_SLASH_COMMANDS_ENABLED"),
+        os.environ.get("VO_FEISHU_CHAT_SLASH_COMMANDS_ENABLED"),
+    )
+    return {
+        "enabled": flags.enabled,
+        "feishuEnabled": flags.feishu_enabled,
+        "reservations": _CHAT_COMMAND_RESERVATIONS.diagnostics(),
+        "metrics": _CHAT_COMMAND_METRICS.snapshot(),
+    }
 
 
 def _feishu_chat_bindings_response(include_ok=True):

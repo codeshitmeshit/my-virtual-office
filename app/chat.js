@@ -1620,6 +1620,7 @@
         });
         const data = await res.json();
         if (JSON.stringify(this.getHistoryContext()) !== JSON.stringify(commandContext)) return false;
+        if (data.status === 'disabled') return 'ordinary';
         if (!res.ok || !data.ok) {
           this.appendSystem(data.reply || data.error || 'Command failed');
           return false;
@@ -1651,12 +1652,13 @@
         this.input.value = '';
         this.input.style.height = 'auto';
         this.input.style.overflowY = 'hidden';
+        let commandOutcome = false;
         try {
-          await this.executeChatSlashCommand(slashCommand);
+          commandOutcome = await this.executeChatSlashCommand(slashCommand);
         } finally {
           this.sendInFlight = false;
         }
-        return;
+        if (commandOutcome !== 'ordinary') return;
       }
       if ((!connected && !this.isHermesSelected() && !this.isCodexSelected() && !this.isClaudeCodeSelected()) || this.codexBusy) return;
       const submissionFingerprint = JSON.stringify({

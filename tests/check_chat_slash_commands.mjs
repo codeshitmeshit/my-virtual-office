@@ -21,9 +21,13 @@ assert.ok(executeBody.indexOf('if (!res.ok || !data.ok)') < executeBody.indexOf(
   'conversation identity must switch only after a successful response');
 assert.ok(executeBody.includes('JSON.stringify(this.getHistoryContext()) !== JSON.stringify(commandContext)'),
   'a response for a stale selection must not mutate the active conversation');
+assert.ok(executeBody.includes("if (data.status === 'disabled') return 'ordinary';"),
+  'flag-off commands must retain pre-change ordinary-message behavior');
 assert.ok(!executeBody.includes('historyStore.invalidate(commandContext)'),
   'successful /new must preserve the old history cache for reopening');
 assert.ok(executeBody.includes('this.closeProviderEventSource') || chat.includes('resetConversation()'),
   'conversation switching must close stale streams before reopening the provider subscription');
+assert.ok(chat.includes("if (commandOutcome !== 'ordinary') return;"),
+  'disabled command recognition must fall through to the ordinary send path');
 
 console.log('chat slash command regression checks passed');
