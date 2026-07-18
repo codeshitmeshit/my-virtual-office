@@ -59,7 +59,7 @@
 
 ## 10. Conversation-Confirmed Direct Creation Simplification
 
-- [ ] 10.1 Add an Agent-scoped `create_confirmed_project` domain command that validates a confirmation assertion and proposal digest, atomically creates the complete unstarted project/task aggregate with template/recurrence/grant data, returns the grant secret only on first creation, and enforces same-payload idempotency with conflict on key reuse.
+- [x] 10.1 Add an Agent-scoped `create_confirmed_project` domain command that validates a confirmation assertion and proposal digest, atomically creates the complete unstarted project/task aggregate with template/recurrence/grant data, returns the grant secret only on first creation, and enforces same-payload idempotency with conflict on key reuse.
 - [ ] 10.2 Add the loopback/no-Origin `POST /api/agent/project-authoring/projects` HTTP contract and remove active Agent draft submission/status plus management draft list/detail/edit/confirm/reject routing, while preserving management authentication for maintenance, grant administration, recurrence administration, and existing project CRUD.
 - [ ] 10.3 Remove the Agent project-draft review UI wiring/assets and update authoring health so inert legacy request metadata is not treated as active pending work; retain backward-compatible root reads without deleting old request records.
 - [ ] 10.4 Rewrite `vo-project-authoring`, VO routing, metadata, and operations documentation around natural-language proposal confirmation followed by direct creation, including semantic-change reconfirmation, reviewer-default behavior, one-time grant handling, no-auto-execution, and the accepted unsigned-chat-confirmation limitation.
