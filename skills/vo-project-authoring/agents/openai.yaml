@@ -1,6 +1,6 @@
 interface:
   display_name: "Virtual Office 项目创作"
   short_description: "自然语言确认后直接创建未运行的完整 VO 项目"
-  default_prompt: "Use $vo-project-authoring to present a natural-language project proposal, wait for my confirmation, and then create the unstarted VO project."
+  default_prompt: "When the user asks to create, reuse, or schedule a VO project, use $vo-project-authoring to present a natural-language project proposal, wait for confirmation, and then create the unstarted VO project."
 policy:
-  allow_implicit_invocation: false
+  allow_implicit_invocation: true

@@ -107,6 +107,8 @@ assert.ok(operatingGuidelines.includes(': "${VO_BASE_URL:?VO_BASE_URL is require
 assert.ok(operatingGuidelines.includes('VO_BASE_URL="http://127.0.0.1:${VO_PORT:-8090}"'), 'local callers should always derive a loopback base URL');
 assert.ok(!operatingGuidelines.includes('VO_BASE_URL="${VO_BASE_URL:-http://127.0.0.1:'), 'local callers must not inherit an external base URL');
 assert.ok(operatingGuidelines.includes('/skills/vo-project-authoring/SKILL.md'), 'project authoring should route to the authoring skill');
+assert.ok(operatingGuidelines.includes('自然语言要求创建、复用、周期化 VO 项目'), 'natural-language project creation should route to authoring skill');
+assert.ok(operatingGuidelines.includes('不要先用普通 Codex 流程读取本地项目文件、运行 Python、查询 `/api/projects` 或自行判断“已存在”'), 'authoring preflight should not bypass the skill with ordinary Codex checks');
 assert.ok(operatingGuidelines.includes('/skills/vo-project-workflow/SKILL.md'), 'project execution should remain with the workflow skill');
 assert.match(operatingGuidelines, /项目创作\/受控维护与项目执行\/review\/验收已分别路由/);
 

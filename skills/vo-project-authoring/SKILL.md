@@ -1,6 +1,6 @@
 ---
 name: vo-project-authoring
-description: 仅当用户明确调用 `$vo-project-authoring` 并要求在当前本地 Virtual Office 中创建、复用、周期化或受控维护项目时使用；先用自然语言展示完整项目方案并等待用户明确确认，再直接创建真实但未运行的项目。不得隐式触发，不负责项目执行、review、验收、取消或 artifact 读取。
+description: 当用户明确调用 `$vo-project-authoring`，或用自然语言要求在当前本地 Virtual Office 中创建、复用、周期化项目，或对 Agent 创建的项目做 scoped grant 受控维护时使用；先用自然语言展示完整项目方案并等待用户明确确认，再直接创建真实但未运行的项目。不负责项目执行、review、验收、取消或 artifact 读取。
 ---
 
 # Virtual Office 项目创作

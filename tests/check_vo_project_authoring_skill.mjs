@@ -9,8 +9,9 @@ const [skill, metadata] = await Promise.all([
 ]);
 
 assert.match(skill, /^---\nname: vo-project-authoring\n/m);
-assert.match(skill, /仅当用户明确调用 `\$vo-project-authoring`/);
-assert.match(metadata, /allow_implicit_invocation:\s*false/);
+assert.match(skill, /或用自然语言要求在当前本地 Virtual Office 中创建、复用、周期化项目/);
+assert.match(metadata, /allow_implicit_invocation:\s*true/);
+assert.match(metadata, /When the user asks to create, reuse, or schedule a VO project/);
 
 for (const required of [
   "/api/agents",
