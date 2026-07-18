@@ -38,7 +38,32 @@ curl -sS "$vo_authoring_url/api/agents"
 
 ## 2. 展示自然语言方案
 
-在对话中清楚展示：
+在对话中清楚展示，必须使用下面的 Markdown 模板和字段顺序，不要省略字段；未知项写“待确认”，不要自行补全：
+
+```markdown
+我准备创建这个 VO 项目，请确认：
+
+项目名称：...
+项目类型：one_time | reusable | recurring
+项目目标：...
+维护模式：strict_confirmation | autonomous
+创建后状态：确认后会创建真实项目，但不会开始执行。
+Reviewer 默认策略：不指定；如有建议，仅作为建议，确认分配前不会写入 reviewer。
+
+任务清单：
+
+| # | 任务名称 | 所属列 | 任务细节 | 验收标准 | 负责人 | 执行人 | Reviewer |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | ... | Backlog | ... | ... | agent-id | agent-id | 不指定 |
+
+模板/复用配置：无 | 创建模板：... | 复用模板：templateId@version
+周期配置：无 | cron/every + timezone + 触发范围
+需要你确认的点：...
+
+请确认是否按以上方案创建真实项目。
+```
+
+字段要求：
 
 - 项目名称、目标和 `one_time`、`reusable` 或 `recurring` 类型。
 - 全部初始任务及所属 column。
@@ -47,6 +72,7 @@ curl -sS "$vo_authoring_url/api/agents"
 - `strict_confirmation` 或 `autonomous` 维护模式；默认 strict。
 - 可复用模板或周期 schedule、timezone。
 - 明确说明“确认后会创建真实项目，但不会开始执行”。
+- “需要你确认的点”只列真正会影响创建结果的未决事项；如果没有，写“无”。
 
 actor 使用注册 Agent 或本地 `user:local`。本地用户可以负责或执行可跟踪任务，但不能作为自动 Project Execution 的执行 Agent。
 
