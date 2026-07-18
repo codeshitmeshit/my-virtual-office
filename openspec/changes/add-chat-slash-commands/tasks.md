@@ -11,8 +11,8 @@
 
 ## 3. Virtual Office Transport and UI
 
-- [ ] 3.1 Add the thin management-authenticated `POST /api/chat/commands/execute` route and server wiring that resolves provider/profile from the authoritative Agent roster, validates Agent-owned conversation/session identities, delegates to the command service, and returns normalized status and next-identity fields; add API authorization, validation, spoofing, idempotency, and status tests.
-- [ ] 3.2 Integrate exact command submission into `app/chat.js` before optimistic ordinary-message insertion; switch history cache and SSE subscriptions only after successful `/new`, preserve the old conversation and current selection on failure, show normalized feedback, and add JavaScript/browser regression coverage for old-history reopening and stale-response isolation.
+- [x] 3.1 Add the thin management-authenticated `POST /api/chat/commands/execute` route and server wiring that resolves provider/profile from the authoritative Agent roster, validates Agent-owned conversation/session identities, delegates to the command service, and returns normalized status and next-identity fields; add API authorization, validation, spoofing, idempotency, and status tests.
+- [x] 3.2 Integrate exact command submission into `app/chat.js` before optimistic ordinary-message insertion; switch history cache and SSE subscriptions only after successful `/new`, preserve the old conversation and current selection on failure, show normalized feedback, and add JavaScript/browser regression coverage for old-history reopening and stale-response isolation.
 
 ## 4. Feishu Transport Integration
 

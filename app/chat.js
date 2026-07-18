@@ -1575,10 +1575,90 @@
       this.ensureRecoveryWatchdog();
     }
 
+    getChatCommandConversationId() {
+      if (this.isCodexSelected()) return this.getCodexConversationId();
+      if (this.isHermesSelected()) return this.getProviderConversationId('hermes');
+      if (this.isClaudeCodeSelected()) return this.getProviderConversationId('claude-code');
+      return this.sessionKey;
+    }
+
+    applyChatCommandConversation(data) {
+      if (data.nextSessionKey) {
+        this.sessionKey = data.nextSessionKey;
+        const selectedOption = this.agentSelect?.selectedOptions?.[0];
+        if (selectedOption) selectedOption.dataset.sessionKey = data.nextSessionKey;
+        this.saveSelection();
+        return;
+      }
+      if (!data.nextConversationId) return;
+      if (this.isCodexSelected()) {
+        localStorage.setItem(this.codexConversationStorageKey(), data.nextConversationId);
+      } else if (this.isHermesSelected()) {
+        localStorage.setItem(this.providerConversationStorageKey('hermes'), data.nextConversationId);
+      } else if (this.isClaudeCodeSelected()) {
+        localStorage.setItem(this.providerConversationStorageKey('claude-code'), data.nextConversationId);
+      }
+    }
+
+    async executeChatSlashCommand(command) {
+      const providerKind = this.getSelectedProviderKindStrict() || 'openclaw';
+      const commandContext = this.getHistoryContext();
+      const commandConversationId = this.getChatCommandConversationId();
+      const idempotencyKey = `office-command-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      try {
+        const res = await i18n.managementFetch('/api/chat/commands/execute', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            agentId: this.getSelectedAgentId() || this.selectedAgentKey,
+            providerKind,
+            conversationId: commandConversationId,
+            command,
+            idempotencyKey,
+            sourceMessageId: idempotencyKey
+          })
+        });
+        const data = await res.json();
+        if (JSON.stringify(this.getHistoryContext()) !== JSON.stringify(commandContext)) return false;
+        if (!res.ok || !data.ok) {
+          this.appendSystem(data.reply || data.error || 'Command failed');
+          return false;
+        }
+        if (command === '/new') {
+          this.applyChatCommandConversation(data);
+          this.resetConversation();
+          this.activateHistory({ coldEmpty: true });
+          this.prepareHistoryBottomFollow({ newest: true });
+          this.updateProviderEventSource();
+          this.updateFeishuEventSource();
+          await this.loadHistory({ force: true, forceBottom: true });
+        }
+        this.appendSystem(data.reply || (command === '/new' ? 'New conversation created' : 'Context compacted'));
+        return true;
+      } catch (error) {
+        this.appendSystem('Command failed: ' + (error?.message || 'request failed'));
+        return false;
+      }
+    }
+
     async sendMessage() {
       let text = this.input.value.trim();
       const hasAttachments = this.pendingAttachments.length > 0;
-      if (this.sendInFlight || (!text && !hasAttachments) || (!connected && !this.isHermesSelected() && !this.isCodexSelected() && !this.isClaudeCodeSelected()) || this.codexBusy) return;
+      if (this.sendInFlight || (!text && !hasAttachments)) return;
+      const slashCommand = !hasAttachments && (text === '/new' || text === '/compact') ? text : '';
+      if (slashCommand) {
+        this.sendInFlight = true;
+        this.input.value = '';
+        this.input.style.height = 'auto';
+        this.input.style.overflowY = 'hidden';
+        try {
+          await this.executeChatSlashCommand(slashCommand);
+        } finally {
+          this.sendInFlight = false;
+        }
+        return;
+      }
+      if ((!connected && !this.isHermesSelected() && !this.isCodexSelected() && !this.isClaudeCodeSelected()) || this.codexBusy) return;
       const submissionFingerprint = JSON.stringify({
         agent: this.getSelectedAgentId() || this.selectedAgentKey,
         text,
