@@ -33,6 +33,13 @@ for (const required of [
   "autonomous",
   "X-VO-Management-Token",
   "vo-project-workflow",
+  "强制流程门禁",
+  "S0 读取指南",
+  "S1 获取角色",
+  "S2 输出方案",
+  "S3 等待用户确认",
+  "S4 构造请求",
+  "S5 创建项目",
 ]) {
   assert.ok(skill.includes(required), `missing project-authoring contract: ${required}`);
 }
@@ -56,6 +63,10 @@ assert.match(skill, /用户确认前只允许读取本地 skill 和 Agent roster
 assert.match(skill, /不要在确认前调用项目列表、项目详情、项目创建、维护、执行或 review 相关接口/);
 assert.match(skill, /尤其不要用 `GET \/api\/projects` 做预检查/);
 assert.match(skill, /只有在用户确认当前自然语言方案后，才进入本阶段/);
+assert.match(skill, /必须按下面状态机顺序执行，不得跳步、合并步骤/);
+assert.match(skill, /用“我已理解用户意图”替代确认/);
+assert.match(skill, /S3 之前不得调用任何项目状态或项目写接口/);
+assert.match(skill, /S5 之前不得提交 `confirmed=true`/);
 assert.ok(!skill.includes("/api/agent/project-authoring/requests"));
 assert.ok(!skill.includes("PYTHONPATH=app"));
 

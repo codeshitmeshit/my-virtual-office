@@ -11,6 +11,21 @@ description: 仅当用户明确调用 `$vo-project-authoring` 并要求在当前
 
 项目执行、review、验收、取消和 artifact 读取切换到本地 `/skills/vo-project-workflow/SKILL.md`。
 
+## 强制流程门禁
+
+必须按下面状态机顺序执行，不得跳步、合并步骤或用“我已理解用户意图”替代确认：
+
+| 阶段 | 允许动作 | 禁止动作 | 进入下一阶段条件 |
+| --- | --- | --- | --- |
+| S0 读取指南 | 读取 `/skills/index.md` 和 `/skills/vo-project-authoring/SKILL.md` | 调项目列表、创建、维护、执行、review 接口 | 已拿到当前本地权威 skill |
+| S1 获取角色 | 只读 `GET /api/agents` 获取 roster | 内联 Python、导入 `app.server`、`GET /api/projects`、任何写接口 | 已确认负责人、执行人、reviewer 候选存在且可分配 |
+| S2 输出方案 | 只用固定 Markdown 模板展示完整项目方案 | 调创建接口、把草稿写入后台、生成 `confirmed=true` | 已把完整方案发给用户 |
+| S3 等待用户确认 | 等待用户明确确认当前完整方案 | 把沉默、讨论、问题、局部认可当作确认 | 用户明确表达“确认/同意/按以上方案创建”等等价语义 |
+| S4 构造请求 | 计算已确认方案原文 digest，构造 `summaryText`、`summaryDigest`、完整 project payload | 修改方案后不重新确认、遗漏任务/角色/reviewer 决策 | payload 与已确认方案语义一致 |
+| S5 创建项目 | 调 `POST /api/agent/project-authoring/projects` | 自动启动项目、任务、review、验收、取消或会议 | 返回真实 project id 后向用户报告未运行状态 |
+
+如果任一阶段发现信息缺失或用户修改语义，必须回到 S2 重新展示完整方案并等待确认。S3 之前不得调用任何项目状态或项目写接口；S5 之前不得提交 `confirmed=true`。
+
 ## 1. 确认本地 VO 与角色
 
 先读取本地 `/skills/vo-operating-guidelines/SKILL.md`，按其规则确定地址，不猜测或传播外部地址。
