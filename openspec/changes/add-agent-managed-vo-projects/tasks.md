@@ -64,3 +64,9 @@
 - [x] 10.3 Remove the Agent project-draft review UI wiring/assets and update authoring health so inert legacy request metadata is not treated as active pending work; retain backward-compatible root reads without deleting old request records.
 - [x] 10.4 Rewrite `vo-project-authoring`, VO routing, metadata, and operations documentation around natural-language proposal confirmation followed by direct creation, including semantic-change reconfirmation, reviewer-default behavior, one-time grant handling, no-auto-execution, and the accepted unsigned-chat-confirmation limitation.
 - [x] 10.5 Run and record focused direct-create, security, idempotency, atomicity, UI-removal, skill/docs, legacy project/template/cron, Project Execution, recurrence, observability, flag-off, and rollback-compatibility verification; update rollout evidence and confirm no active draft route or UI remains.
+
+## Next Phase Backlog
+
+- [ ] N.1 Turn project templates from immutable/reusable snapshots into first-class editable template objects, while keeping published template versions immutable for existing projects and recurrences. See `docs/VO_PROJECT_TEMPLATE_EDITING_NEXT.md`.
+- [ ] N.2 Add UI support for creating a new template directly, editing template metadata/columns/task blueprints/roles/reviewer policy, publishing a new version, and creating projects from a selected version.
+- [ ] N.3 Add backend APIs for editable template containers, publish-version snapshots, template detail/version reads, validation, and compatibility with existing legacy templates and `projectTemplateVersions`.
