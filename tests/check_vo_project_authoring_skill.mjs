@@ -14,6 +14,7 @@ assert.match(metadata, /allow_implicit_invocation:\s*false/);
 
 for (const required of [
   "/api/agents",
+  "/skills/vo-project-authoring/SKILL.md",
   "responsibleActor",
   "executorActor",
   "reviewerRecommendation",
@@ -41,6 +42,10 @@ assert.match(skill, /语义变化必须重新确认并使用新 key/);
 assert.match(skill, /只用这些只读 HTTP GET 获取 roster/);
 assert.match(skill, /不要运行内联 Python/);
 assert.match(skill, /不要调用 `_office_agent_lookup`/);
+assert.match(skill, /用户确认前只允许读取本地 skill 和 Agent roster/);
+assert.match(skill, /不要在确认前调用项目列表、项目详情、项目创建、维护、执行或 review 相关接口/);
+assert.match(skill, /尤其不要用 `GET \/api\/projects` 做预检查/);
+assert.match(skill, /只有在用户确认当前自然语言方案后，才进入本阶段/);
 assert.ok(!skill.includes("/api/agent/project-authoring/requests"));
 assert.ok(!skill.includes("PYTHONPATH=app"));
 

@@ -15,11 +15,20 @@ description: 仅当用户明确调用 `$vo-project-authoring` 并要求在当前
 
 先读取本地 `/skills/vo-operating-guidelines/SKILL.md`，按其规则确定地址，不猜测或传播外部地址。
 
+用户确认前只允许读取本地 skill 和 Agent roster：
+
+- `GET /skills/index.md`
+- `GET /skills/vo-project-authoring/SKILL.md`
+- `GET /api/agents`
+
+不要在确认前调用项目列表、项目详情、项目创建、维护、执行或 review 相关接口。尤其不要用 `GET /api/projects` 做预检查；除非用户确认方案后需要复用或查重，否则不要读取真实项目状态。
+
 ```bash
 vo_authoring_root="${VO_PROJECT_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
 vo_authoring_port="${VO_PORT:-$(awk -F= '$1=="VO_PORT"{print $2; exit}' "$vo_authoring_root/.env" 2>/dev/null)}"
 vo_authoring_url="${VO_BASE_URL:-http://127.0.0.1:${vo_authoring_port:-8090}}"
 curl -sS "$vo_authoring_url/skills/index.md"
+curl -sS "$vo_authoring_url/skills/vo-project-authoring/SKILL.md"
 curl -sS "$vo_authoring_url/api/agents"
 ```
 
@@ -66,6 +75,8 @@ vo_proposal_digest="$(printf %s "$vo_confirmed_proposal" | shasum -a 256 | awk '
 ```
 
 ## 4. 构造并提交完整项目
+
+只有在用户确认当前自然语言方案后，才进入本阶段。此时可以按确认后的意图调用真实项目接口，例如查重、复用检查或直接创建；如果查重结果会改变项目语义、任务拆分、负责人、执行人、reviewer、模板或周期配置，必须回到第 2 步重新展示完整方案并再次等待确认。
 
 结构化 `project` 必须包含完整 columns/tasks、角色、显式 reviewer recommendation、维护模式以及一致的模板/周期配置：
 
