@@ -14,6 +14,9 @@
         detailError: '',
         detailSequence: 0,
         detailPaging: '',
+        commandBusy: '',
+        commandNotice: '',
+        commandError: '',
     };
 
     function escHtml(value) {
@@ -143,6 +146,28 @@
         return root.document ? root.document.querySelector('.hr-agent-detail') : null;
     }
 
+    function captureScroll() {
+        if (!root.document) return { roster: 0, detail: 0 };
+        const roster = root.document.querySelector('.hr-agent-list');
+        const panel = root.document.querySelector('.hr-agent-detail');
+        return {
+            roster: roster ? roster.scrollTop : 0,
+            detail: panel ? panel.scrollTop : 0,
+        };
+    }
+
+    function restoreScroll(snapshot) {
+        if (!root.document || !snapshot) return;
+        const callback = function () {
+            const roster = root.document.querySelector('.hr-agent-list');
+            const panel = root.document.querySelector('.hr-agent-detail');
+            if (roster) roster.scrollTop = snapshot.roster || 0;
+            if (panel) panel.scrollTop = snapshot.detail || 0;
+        };
+        if (typeof root.requestAnimationFrame === 'function') root.requestAnimationFrame(callback);
+        else callback();
+    }
+
     async function parseResponse(response) {
         const text = await response.text();
         if (!text.trim()) throw new Error('hr_empty_response');
@@ -222,6 +247,14 @@
         const cycles = cycleCounts(overview);
         const activities = array(overview.recentActivity);
         const degraded = state.errors.length > 0;
+        const cycle = object(overview.cycle);
+        const lifecycleAction = hrStatus === 'paused' ? 'resume' : 'pause';
+        const commandButton = function (action, label, danger) {
+            const busy = Boolean(state.commandBusy);
+            return '<button type="button" class="hr-command-button' + (danger ? ' danger' : '') +
+                '" onclick="HumanResources.runCommand(\'' + escHtml(action) + '\')"' +
+                (busy ? ' disabled' : '') + '>' + escHtml(state.commandBusy === action ? tr('hr_command_working', 'Working...') : label) + '</button>';
+        };
         return '<div class="hr-overview">' +
             (degraded ? '<div class="hr-degraded-banner" role="status"><strong>' +
                 escHtml(tr('hr_partial_data', 'Some Human Resources data could not be refreshed.')) +
@@ -232,6 +265,16 @@
                 '<p>' + escHtml(tr('hr_overview_date', 'Local reporting date: {{date}}', { date: overview.localDate || '—' })) + '</p></div>' +
                 '<span class="hr-state-chip hr-tone-' + escHtml(statusTone(hrStatus)) + '">' + escHtml(hrStatus) + '</span>' +
             '</section>' +
+            '<section class="hr-command-panel"><div><h3>' + escHtml(tr('hr_controls', 'HR controls')) + '</h3>' +
+                '<p>' + escHtml(tr('hr_controls_hint', 'Commands run asynchronously; existing records remain available.')) + '</p></div>' +
+                '<div class="hr-command-actions">' +
+                    commandButton(lifecycleAction, lifecycleAction === 'pause' ? tr('hr_pause', 'Pause HR') : tr('hr_resume', 'Resume HR'), lifecycleAction === 'pause') +
+                    commandButton('run', tr('hr_run_cycle', 'Run cycle'), false) +
+                    (cycle.cycleId && cycle.status === 'open' ? commandButton('close', tr('hr_close_cycle', 'Close cycle'), true) : '') +
+                    (cycle.cycleId ? commandButton('retry', tr('hr_retry_cycle', 'Retry failed work'), false) : '') +
+                '</div></section>' +
+            (state.commandNotice ? '<div class="hr-command-message success" role="status">' + escHtml(state.commandNotice) + '</div>' : '') +
+            (state.commandError ? '<div class="hr-command-message error" role="alert">' + escHtml(state.commandError) + '</div>' : '') +
             '<section><h3>' + escHtml(tr('hr_availability', 'Agent availability')) + '</h3><div class="hr-metric-grid">' +
                 renderBadge(tr('hr_agent_total', 'Total Agents'), Number(overview.agentTotal || state.agents.length || 0), 'neutral') +
                 availability.map(function (item) { return renderBadge(item.name, item.count, statusTone(item.name)); }).join('') +
@@ -344,6 +387,7 @@
         const accesses = array(agent.accessHistory);
         return '<div class="hr-detail-view">' +
             (state.detailError ? '<div class="hr-degraded-banner" role="status">' + escHtml(state.detailError) + '</div>' : '') +
+            '<button type="button" class="hr-back-button" onclick="HumanResources.selectAgent(\'\')">' + escHtml(tr('hr_back_overview', '← HR overview')) + '</button>' +
             '<section class="hr-detail-hero"><div><span class="hr-eyebrow">' + escHtml(agent.aiId || '—') + '</span>' +
                 '<h3>' + escHtml(agent.name || agent.aiId || '—') + '</h3><p>' + escHtml(agent.introduction || tr('hr_no_introduction', 'No introduction')) + '</p></div>' +
                 '<div class="hr-detail-statuses"><span class="hr-state-chip hr-tone-' + escHtml(statusTone(agent.status)) + '">' + escHtml(agent.status || 'unknown') + '</span>' +
@@ -393,11 +437,12 @@
         }
     }
 
-    async function loadOverview() {
+    async function loadOverview(scrollSnapshot) {
         const sequence = ++state.requestSequence;
         state.loading = true;
         state.errors = [];
         render();
+        restoreScroll(scrollSnapshot);
         const results = await Promise.allSettled([
             managementJson('/api/human-resources/overview'),
             managementJson('/api/human-resources/export?table=agents&limit=100'),
@@ -412,7 +457,51 @@
         }
         state.loading = false;
         render();
+        restoreScroll(scrollSnapshot);
         return state.errors.length === 0;
+    }
+
+    function commandSpec(action) {
+        const cycleId = object(object(state.overview).cycle).cycleId;
+        if (action === 'pause' || action === 'resume') {
+            return { url: '/api/human-resources/hr/' + action, body: {} };
+        }
+        if (action === 'run') return { url: '/api/human-resources/cycles/run', body: {} };
+        if ((action === 'close' || action === 'retry') && cycleId) {
+            return { url: '/api/human-resources/cycles/' + action, body: { cycleId: cycleId } };
+        }
+        return null;
+    }
+
+    async function runCommand(action) {
+        if (state.commandBusy) return false;
+        const spec = commandSpec(action);
+        if (!spec) return false;
+        const confirmation = tr('hr_confirm_command', 'Confirm Human Resources action: {{action}}?', { action: action });
+        if (typeof root.confirm === 'function' && !root.confirm(confirmation)) return false;
+        const scrollSnapshot = captureScroll();
+        state.commandBusy = action;
+        state.commandNotice = '';
+        state.commandError = '';
+        render();
+        restoreScroll(scrollSnapshot);
+        try {
+            await managementJson(spec.url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(spec.body),
+            });
+            state.commandNotice = tr('hr_command_accepted', 'Command accepted: {{action}}', { action: action });
+            await loadOverview(scrollSnapshot);
+            return true;
+        } catch (error) {
+            state.commandError = String(error && error.message || 'hr_command_failed');
+            return false;
+        } finally {
+            state.commandBusy = '';
+            render();
+            restoreScroll(scrollSnapshot);
+        }
     }
 
     function open() {
@@ -521,6 +610,7 @@
         reload: loadOverview,
         selectAgent,
         loadMore,
+        runCommand,
         render,
         helpers: {
             escHtml,
@@ -532,6 +622,7 @@
             availabilityCounts,
             mergeByKey,
             prettyJson,
+            commandSpec,
         },
     };
     root.HumanResources = api;

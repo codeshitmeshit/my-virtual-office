@@ -247,6 +247,71 @@
     color: #dce6ef;
 }
 
+.hr-command-panel {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+}
+
+.hr-command-panel h3 {
+    margin: 0 0 4px;
+    color: #dce6ef;
+    font-size: 12px;
+}
+
+.hr-command-panel p {
+    margin: 0;
+    color: #8190a2;
+    font-size: 9px;
+}
+
+.hr-command-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 7px;
+}
+
+.hr-command-button,
+.hr-back-button {
+    padding: 7px 10px;
+    border: 1px solid #3d6d63;
+    border-radius: 7px;
+    background: #18302f;
+    color: #83dec5;
+    font-size: 9px;
+    cursor: pointer;
+}
+
+.hr-command-button.danger {
+    border-color: #754950;
+    background: #342126;
+    color: #ffadb2;
+}
+
+.hr-command-button:disabled {
+    cursor: wait;
+    opacity: 0.55;
+}
+
+.hr-command-message {
+    padding: 10px 12px;
+    border: 1px solid currentColor;
+    border-radius: 8px;
+    font-size: 10px;
+}
+
+.hr-command-message.success {
+    background: #173026;
+    color: #7cdda7;
+}
+
+.hr-command-message.error {
+    background: #352126;
+    color: #ffa0a8;
+}
+
 .hr-overview-hero {
     display: flex;
     align-items: center;
@@ -358,6 +423,13 @@
     display: grid;
     gap: 14px;
     padding: 18px;
+}
+
+.hr-back-button {
+    width: fit-content;
+    border-color: #34445a;
+    background: #172131;
+    color: #aebdcd;
 }
 
 .hr-detail-view > section {
@@ -686,6 +758,15 @@
     }
 
     .hr-detail-statuses {
+        justify-content: flex-start;
+    }
+
+    .hr-command-panel {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .hr-command-actions {
         justify-content: flex-start;
     }
 }
