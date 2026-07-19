@@ -9,6 +9,11 @@
         agents: [],
         errors: [],
         requestSequence: 0,
+        detail: null,
+        detailLoading: false,
+        detailError: '',
+        detailSequence: 0,
+        detailPaging: '',
     };
 
     function escHtml(value) {
@@ -51,6 +56,13 @@
         return 'neutral';
     }
 
+    function workloadTone(workload) {
+        const value = String(workload || 'insufficient_information');
+        if (value === 'overloaded' || value === 'high') return 'warning';
+        if (value === 'appropriate') return 'success';
+        return 'neutral';
+    }
+
     function agentPriority(agent) {
         const value = object(agent);
         let score = 0;
@@ -87,6 +99,36 @@
             .map(function (name) { return { name: name, count: Number(counts[name] || 0) }; })
             .filter(function (item) { return item.count > 0; })
             .sort(function (left, right) { return right.count - left.count || left.name.localeCompare(right.name); });
+    }
+
+    function mergeByKey(current, incoming, key) {
+        const result = [];
+        const positions = new Map();
+        array(current).concat(array(incoming)).forEach(function (item) {
+            const value = object(item);
+            const identity = String(value[key] == null ? '' : value[key]);
+            if (!identity || !positions.has(identity)) {
+                positions.set(identity, result.length);
+                result.push(value);
+            } else {
+                result[positions.get(identity)] = value;
+            }
+        });
+        return result;
+    }
+
+    function prettyJson(value) {
+        try {
+            return JSON.stringify(value == null ? {} : value, null, 2);
+        } catch (_error) {
+            return String(value == null ? '' : value);
+        }
+    }
+
+    function formatTime(value) {
+        if (!value) return '—';
+        const date = new Date(value);
+        return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
     }
 
     function modal() {
@@ -206,6 +248,126 @@
         '</div>';
     }
 
+    function renderTextList(values, emptyText) {
+        const items = array(values);
+        return items.length
+            ? '<ul class="hr-detail-list">' + items.map(function (item) {
+                return '<li>' + escHtml(typeof item === 'string' ? item : prettyJson(item)) + '</li>';
+            }).join('') + '</ul>'
+            : '<span class="hr-muted">' + escHtml(emptyText || '—') + '</span>';
+    }
+
+    function renderReport(report) {
+        const item = object(report);
+        const status = String(item.submissionState || 'unknown');
+        return '<article class="hr-record-card">' +
+            '<header><div><strong>' + escHtml(item.localDate || '—') + '</strong>' +
+            '<small>' + escHtml(tr('hr_revision', 'Revision {{version}}', { version: item.revision || 1 })) + '</small></div>' +
+            '<span class="hr-state-chip hr-tone-' + escHtml(statusTone(status)) + '">' + escHtml(status) + '</span></header>' +
+            '<details><summary>' + escHtml(tr('hr_raw_report', 'Raw Agent report')) + '</summary>' +
+            '<pre>' + escHtml(item.rawResponse || tr('hr_no_raw_report', 'No raw response')) + '</pre></details>' +
+            '<details open><summary>' + escHtml(tr('hr_normalized_report', 'HR normalized report')) + '</summary>' +
+            '<pre>' + escHtml(item.normalized ? prettyJson(item.normalized) : tr('hr_not_normalized', 'Not normalized')) + '</pre></details>' +
+            '<footer>' + escHtml(formatTime(item.submittedAt || item.requestedAt)) + '</footer>' +
+        '</article>';
+    }
+
+    function renderEvidence(evidence) {
+        const item = object(evidence);
+        return '<li><strong>' + escHtml(item.evidenceType || 'evidence') + '</strong>' +
+            '<span>' + escHtml(item.summary || item.referenceId || '—') + '</span>' +
+            (item.referenceId ? '<code>' + escHtml(item.referenceId) + '</code>' : '') + '</li>';
+    }
+
+    function renderAssessment(assessment) {
+        const item = object(assessment);
+        const workload = String(item.workload || 'insufficient_information');
+        return '<article class="hr-record-card hr-assessment-card">' +
+            '<header><div><strong>' + escHtml(item.localDate || '—') + '</strong>' +
+            '<small>' + escHtml(tr('hr_assessment_version', 'Assessment v{{version}}', { version: item.version || 1 })) +
+            (item.isCurrent ? ' · ' + escHtml(tr('hr_current', 'Current')) : '') + '</small></div>' +
+            '<span class="hr-state-chip hr-tone-' + escHtml(statusTone(item.status)) + '">' + escHtml(item.status || 'unknown') + '</span></header>' +
+            '<div class="hr-workload-line"><span>' + escHtml(tr('hr_workload', 'Workload')) + '</span>' +
+            '<strong class="hr-tone-' + escHtml(workloadTone(workload)) + '">' + escHtml(workload) + '</strong></div>' +
+            '<p>' + escHtml(item.rationale || tr('hr_no_rationale', 'No rationale recorded')) + '</p>' +
+            '<div class="hr-assessment-grid">' +
+                '<div><h5>' + escHtml(tr('hr_contributions', 'Principal contributions')) + '</h5>' + renderTextList(item.principalContributions) + '</div>' +
+                '<div><h5>' + escHtml(tr('hr_strengths', 'Strengths')) + '</h5>' + renderTextList(item.strengths) + '</div>' +
+                '<div><h5>' + escHtml(tr('hr_blockers', 'Blockers')) + '</h5>' + renderTextList(item.blockers) + '</div>' +
+                '<div><h5>' + escHtml(tr('hr_improvements', 'Improvement opportunities')) + '</h5>' + renderTextList(item.improvements) + '</div>' +
+            '</div>' +
+            '<div class="hr-runtime-diagnosis"><strong>' + escHtml(tr('hr_runtime_diagnosis', 'Runtime diagnosis')) + '</strong><span>' +
+            escHtml(item.runtimeDiagnosis || '—') + '</span></div>' +
+            (array(item.evidence).length ? '<details><summary>' + escHtml(tr('hr_evidence', 'Evidence')) + '</summary><ul class="hr-evidence-list">' +
+                array(item.evidence).map(renderEvidence).join('') + '</ul></details>' : '') +
+            '<footer>' + escHtml(formatTime(item.updatedAt || item.createdAt)) + '</footer>' +
+        '</article>';
+    }
+
+    function renderIdentityHistory(items) {
+        return array(items).map(function (entry) {
+            const item = object(entry);
+            return '<li><strong>' + escHtml(item.name || item.aiId || '—') + '</strong>' +
+                '<span>' + escHtml(item.status || 'unknown') + ' · ' + escHtml(item.source || 'unknown') + '</span>' +
+                '<time>' + escHtml(formatTime(item.observedAt)) + '</time></li>';
+        }).join('');
+    }
+
+    function renderAccessHistory(items) {
+        return array(items).map(function (entry) {
+            const item = object(entry);
+            return '<li><strong>' + escHtml(item.viewerName || item.viewerAiId || '—') + '</strong>' +
+                '<span>' + escHtml(item.scope || 'public') + '</span>' +
+                '<time>' + escHtml(formatTime(item.viewedAt)) + '</time></li>';
+        }).join('');
+    }
+
+    function loadMoreButton(kind, cursor) {
+        const busy = state.detailPaging === kind;
+        return cursor ? '<button type="button" class="hr-load-more" onclick="HumanResources.loadMore(\'' +
+            escHtml(kind) + '\')"' + (busy ? ' disabled' : '') + '>' +
+            escHtml(busy ? tr('hr_loading_more', 'Loading...') : tr('hr_load_more', 'Load more')) + '</button>' : '';
+    }
+
+    function renderAgentDetailPanel() {
+        if (state.detailLoading && !state.detail) {
+            return '<div class="hr-panel-placeholder">' + escHtml(tr('hr_detail_loading', 'Loading Agent Human Resources detail...')) + '</div>';
+        }
+        if (!state.detail) {
+            return '<div class="hr-empty-state"><h3>' + escHtml(tr('hr_detail_unavailable', 'Agent detail is unavailable')) + '</h3>' +
+                '<p>' + escHtml(state.detailError || tr('hr_select_agent', 'Select an Agent to inspect Human Resources records.')) + '</p></div>';
+        }
+        const agent = object(state.detail);
+        const reports = array(agent.reports);
+        const assessments = array(agent.assessments);
+        const identities = array(agent.identityHistory);
+        const accesses = array(agent.accessHistory);
+        return '<div class="hr-detail-view">' +
+            (state.detailError ? '<div class="hr-degraded-banner" role="status">' + escHtml(state.detailError) + '</div>' : '') +
+            '<section class="hr-detail-hero"><div><span class="hr-eyebrow">' + escHtml(agent.aiId || '—') + '</span>' +
+                '<h3>' + escHtml(agent.name || agent.aiId || '—') + '</h3><p>' + escHtml(agent.introduction || tr('hr_no_introduction', 'No introduction')) + '</p></div>' +
+                '<div class="hr-detail-statuses"><span class="hr-state-chip hr-tone-' + escHtml(statusTone(agent.status)) + '">' + escHtml(agent.status || 'unknown') + '</span>' +
+                '<span class="hr-state-chip hr-tone-' + escHtml(statusTone(agent.availability)) + '">' + escHtml(agent.availability || 'unknown') + '</span></div></section>' +
+            '<section class="hr-detail-metadata"><div><span>' + escHtml(tr('hr_agent_kind', 'Agent kind')) + '</span><strong>' + escHtml(agent.agentKind || '—') + '</strong></div>' +
+                '<div><span>' + escHtml(tr('hr_provider', 'Provider')) + '</span><strong>' + escHtml(agent.providerKind || '—') + '</strong></div>' +
+                '<div><span>' + escHtml(tr('hr_introduction_source', 'Introduction source')) + '</span><strong>' + escHtml(object(agent.introductionProvenance).source || '—') + '</strong></div>' +
+                '<div><span>' + escHtml(tr('hr_workflow_state', 'Workflow state')) + '</span><strong>' + escHtml(agent.workflowState || '—') + '</strong></div>' +
+                '<div><span>' + escHtml(tr('hr_skill_readiness', 'Skill readiness')) + '</span><strong>' + escHtml(agent.skillReadiness || '—') + '</strong></div>' +
+                '<div><span>' + escHtml(tr('hr_grant_readiness', 'Grant readiness')) + '</span><strong>' + escHtml(agent.grantReadiness || '—') + '</strong></div></section>' +
+            '<section class="hr-detail-section"><h4>' + escHtml(tr('hr_identity_history', 'Identity and provenance')) + '</h4>' +
+                (identities.length ? '<ul class="hr-history-list">' + renderIdentityHistory(identities) + '</ul>' : '<div class="hr-inline-empty">—</div>') + '</section>' +
+            '<section class="hr-detail-section"><h4>' + escHtml(tr('hr_daily_reports', 'Daily reports')) + '</h4>' +
+                (reports.length ? '<div class="hr-record-list">' + reports.map(renderReport).join('') + '</div>' : '<div class="hr-inline-empty">' + escHtml(tr('hr_no_reports', 'No daily reports')) + '</div>') +
+                loadMoreButton('reports', agent.reportNextCursor) + '</section>' +
+            '<section class="hr-detail-section"><h4>' + escHtml(tr('hr_assessments', 'HR assessments')) + '</h4>' +
+                (assessments.length ? '<div class="hr-record-list">' + assessments.map(renderAssessment).join('') + '</div>' : '<div class="hr-inline-empty">' + escHtml(tr('hr_no_assessments', 'No assessments')) + '</div>') +
+                loadMoreButton('assessments', agent.assessmentNextCursor) + '</section>' +
+            '<section class="hr-detail-section"><h4>' + escHtml(tr('hr_access_history', 'Authorized access history')) + '</h4>' +
+                (accesses.length ? '<ul class="hr-history-list">' + renderAccessHistory(accesses) + '</ul>' : '<div class="hr-inline-empty">' + escHtml(tr('hr_no_access_history', 'No Agent has viewed this record')) + '</div>') +
+                loadMoreButton('access', agent.accessNextCursor) + '</section>' +
+        '</div>';
+    }
+
     function render() {
         const element = content();
         if (!element) return;
@@ -220,7 +382,8 @@
                 '<button type="button" class="hr-icon-button" onclick="HumanResources.reload()" aria-label="' + escHtml(tr('hr_refresh', 'Refresh')) + '">↻</button></div>' +
                 '<div class="hr-agent-rows">' + roster + '</div>' +
             '</aside>' +
-            '<main class="hr-agent-detail" tabindex="-1">' + renderOverviewPanel() + '</main>' +
+            '<main class="hr-agent-detail" tabindex="-1">' +
+                (state.selectedAgentId ? renderAgentDetailPanel() : renderOverviewPanel()) + '</main>' +
         '</div>';
         const status = root.document.getElementById('human-resources-status');
         if (status) {
@@ -268,13 +431,87 @@
         if (!element) return false;
         state.open = false;
         state.requestSequence += 1;
+        state.detailSequence += 1;
         element.classList.add('hidden');
         return true;
     }
 
+    async function loadAgent(aiId, sequence, pageKind) {
+        const params = new URLSearchParams({
+            reportLimit: '10',
+            assessmentLimit: '10',
+            accessLimit: '10',
+        });
+        const current = object(state.detail);
+        if (pageKind === 'reports' && current.reportNextCursor) {
+            params.set('reportCursor', current.reportNextCursor);
+        } else if (pageKind === 'assessments' && current.assessmentNextCursor) {
+            params.set('assessmentCursor', current.assessmentNextCursor);
+        } else if (pageKind === 'access' && current.accessNextCursor) {
+            params.set('accessCursor', current.accessNextCursor);
+        }
+        try {
+            const payload = await managementJson(
+                '/api/human-resources/agents/' + encodeURIComponent(aiId) + '?' + params.toString()
+            );
+            if (sequence !== state.detailSequence || state.selectedAgentId !== aiId) return false;
+            const incoming = object(payload.agent);
+            if (!pageKind || !state.detail) {
+                state.detail = incoming;
+            } else if (pageKind === 'reports') {
+                state.detail.reports = mergeByKey(state.detail.reports, incoming.reports, 'id');
+                state.detail.reportNextCursor = incoming.reportNextCursor || null;
+            } else if (pageKind === 'assessments') {
+                state.detail.assessments = mergeByKey(state.detail.assessments, incoming.assessments, 'id');
+                state.detail.assessmentNextCursor = incoming.assessmentNextCursor || null;
+            } else if (pageKind === 'access') {
+                state.detail.accessHistory = mergeByKey(state.detail.accessHistory, incoming.accessHistory, 'id');
+                state.detail.accessNextCursor = incoming.accessNextCursor || null;
+            }
+            state.detailError = '';
+            return true;
+        } catch (error) {
+            if (sequence !== state.detailSequence || state.selectedAgentId !== aiId) return false;
+            state.detailError = String(error && error.message || 'hr_detail_failed');
+            return false;
+        } finally {
+            if (sequence === state.detailSequence && state.selectedAgentId === aiId) {
+                state.detailLoading = false;
+                state.detailPaging = '';
+                render();
+            }
+        }
+    }
+
     function selectAgent(aiId) {
-        state.selectedAgentId = String(aiId || '');
+        const selected = String(aiId || '');
+        state.selectedAgentId = selected;
+        state.detail = null;
+        state.detailError = '';
+        state.detailPaging = '';
+        const sequence = ++state.detailSequence;
+        if (!selected) {
+            state.detailLoading = false;
+            render();
+            return Promise.resolve(true);
+        }
+        state.detailLoading = true;
         render();
+        return loadAgent(selected, sequence, '');
+    }
+
+    function loadMore(kind) {
+        if (!['reports', 'assessments', 'access'].includes(kind)) return Promise.resolve(false);
+        if (!state.selectedAgentId || !state.detail || state.detailPaging) return Promise.resolve(false);
+        const cursorKey = {
+            reports: 'reportNextCursor',
+            assessments: 'assessmentNextCursor',
+            access: 'accessNextCursor',
+        }[kind];
+        if (!state.detail[cursorKey]) return Promise.resolve(false);
+        state.detailPaging = kind;
+        render();
+        return loadAgent(state.selectedAgentId, state.detailSequence, kind);
     }
 
     const api = {
@@ -283,14 +520,18 @@
         close,
         reload: loadOverview,
         selectAgent,
+        loadMore,
         render,
         helpers: {
             escHtml,
             statusTone,
+            workloadTone,
             agentPriority,
             prioritizeAgents,
             cycleCounts,
             availabilityCounts,
+            mergeByKey,
+            prettyJson,
         },
     };
     root.HumanResources = api;

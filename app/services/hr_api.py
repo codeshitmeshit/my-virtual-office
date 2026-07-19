@@ -176,10 +176,13 @@ class HRManagementAPI:
         report_cursor: str | None = None,
         assessment_limit: int = 20,
         assessment_cursor: str | None = None,
+        access_limit: int = 20,
+        access_cursor: str | None = None,
     ) -> HRServiceResult:
         self._observability.increment("query.requests_total")
         report_limit = self._limit(report_limit)
         assessment_limit = self._limit(assessment_limit)
+        access_limit = self._limit(access_limit)
         agent = self._repository.get_agent(ai_id)
         if agent is None:
             return HRServiceResult(404, {"ok": False, "code": "hr_agent_not_found"})
@@ -193,6 +196,12 @@ class HRManagementAPI:
             ai_id=ai_id,
             limit=assessment_limit,
             cursor=assessment_cursor,
+        )
+        identity_history = self._repository.list_identity_history(ai_id, limit=20)
+        access_history = self._repository.list_access_log(
+            target_ai_id=ai_id,
+            limit=access_limit,
+            cursor=access_cursor,
         )
         latest_assessment = assessments.items[0] if assessments.items else None
         latest_report = reports.items[0] if reports.items else None
@@ -214,6 +223,7 @@ class HRManagementAPI:
                 if introduction
                 else None
             ),
+            "identityHistory": _json_safe(identity_history.items),
             "publicWorkSummary": (
                 normalized.get("completedWork", []) if isinstance(normalized, dict) else []
             ),
@@ -224,6 +234,7 @@ class HRManagementAPI:
             "improvements": list(latest_assessment.improvements) if latest_assessment else [],
             "workflowState": latest_report.submission_state if latest_report else "not_due",
             "hrContactState": introduction.state if introduction else "introduction_pending",
+            "accessHistory": _json_safe(access_history.items),
             "skillReadiness": agent.skill_readiness,
             "grantReadiness": agent.grant_readiness,
             "createdAt": agent.created_at,
@@ -237,6 +248,8 @@ class HRManagementAPI:
         )
         projected["reportNextCursor"] = reports.next_cursor
         projected["assessmentNextCursor"] = assessments.next_cursor
+        projected["identityNextCursor"] = identity_history.next_cursor
+        projected["accessNextCursor"] = access_history.next_cursor
         return HRServiceResult(200, {"ok": True, "agent": projected})
 
     def access_log(

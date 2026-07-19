@@ -147,11 +147,38 @@ def test_agent_detail_is_full_human_projection_with_independent_cursors(setup):
     assert agent["aiId"] == "agent-1"
     assert agent["introduction"] == "Builds APIs"
     assert agent["reports"][0]["rawResponse"] == "private daily report"
+    assert agent["identityHistory"][0]["aiId"] == "agent-1"
+    assert agent["accessHistory"][0]["targetAiId"] == "agent-1"
+    assert "accessNextCursor" in agent
     assert "secret_digest" not in str(agent)
     assert len(repository.list_access_log().items) == access_count
     missing = api.agent_detail("missing")
     assert missing.status == 404
     assert missing.payload["code"] == "hr_agent_not_found"
+
+
+def test_agent_detail_access_history_has_independent_pagination(setup):
+    repository, _reporting, _opened, _lifecycle, api = setup
+    repository.record_successful_access(
+        access_id="access-2",
+        viewer_ai_id="hr",
+        target_ai_id="agent-1",
+        viewed_at="2026-07-19T10:01:00Z",
+        scope="public",
+        request_source="test",
+        occurrence_key="view-2",
+    )
+    first = api.agent_detail("agent-1", access_limit=1).payload["agent"]
+    assert len(first["accessHistory"]) == 1
+    assert first["accessNextCursor"]
+    second = api.agent_detail(
+        "agent-1",
+        access_limit=1,
+        access_cursor=first["accessNextCursor"],
+    ).payload["agent"]
+    assert len(second["accessHistory"]) == 1
+    assert first["accessHistory"][0]["id"] != second["accessHistory"][0]["id"]
+    assert second["accessNextCursor"] is None
 
 
 def test_access_log_is_filtered_and_paginated(setup):

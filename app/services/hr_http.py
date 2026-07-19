@@ -144,6 +144,8 @@ class HRHTTPRoutes:
                     report_cursor=self._value(query, "reportCursor"),
                     assessment_limit=self._integer(query, "assessmentLimit", default=20),
                     assessment_cursor=self._value(query, "assessmentCursor"),
+                    access_limit=self._integer(query, "accessLimit", default=20),
+                    access_cursor=self._value(query, "accessCursor"),
                 )
             else:
                 return HRHTTPResponse(404, {"ok": False, "code": "hr_route_not_found"})
