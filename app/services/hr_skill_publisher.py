@@ -9,7 +9,7 @@ import os
 import re
 import threading
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable, Mapping
 
@@ -173,6 +173,7 @@ class HRGrantManager:
         secret_factory: Callable[[str], str],
         key_id_factory: Callable[[str], str],
         clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+        grant_ttl_days: int = 30,
         supported_provider_kinds: frozenset[str] = frozenset({"openclaw"}),
     ):
         if not isinstance(repository, HRRepository):
@@ -184,15 +185,23 @@ class HRGrantManager:
         self._secret_factory = secret_factory
         self._key_id_factory = key_id_factory
         self._clock = clock
+        if isinstance(grant_ttl_days, bool) or not isinstance(grant_ttl_days, int):
+            raise HRSkillPublisherValidationError("grant_ttl_days must be an integer")
+        if not 1 <= grant_ttl_days <= 365:
+            raise HRSkillPublisherValidationError("grant_ttl_days must be between 1 and 365")
+        self._grant_ttl = timedelta(days=grant_ttl_days)
         self._supported_provider_kinds = frozenset(supported_provider_kinds)
         if not self._supported_provider_kinds:
             raise HRSkillPublisherValidationError("supported_provider_kinds must not be empty")
 
-    def _now(self) -> str:
+    def _now_datetime(self) -> datetime:
         value = self._clock()
         if not isinstance(value, datetime) or value.tzinfo is None or value.utcoffset() is None:
             raise HRSkillPublisherValidationError("grant clock must be timezone-aware")
-        return value.astimezone(timezone.utc).isoformat()
+        return value.astimezone(timezone.utc)
+
+    def _now(self) -> str:
+        return self._now_datetime().isoformat()
 
     def _workspace_paths(
         self,
@@ -338,6 +347,8 @@ class HRGrantManager:
         if (
             current is not None
             and current.status == "active"
+            and current.expires_at is not None
+            and datetime.fromisoformat(current.expires_at) > self._now_datetime()
             and not force_rotate
             and self._delivery_matches(paths, key_id=current.key_id, digest=current.secret_digest)
         ):
@@ -368,11 +379,13 @@ class HRGrantManager:
                 json.dumps(reference, sort_keys=True, indent=2) + "\n",
                 mode=0o600,
             )
+            issued_at = self._now_datetime()
             stored = self._repository.rotate_access_grant(
                 ai_id=ai_id,
                 key_id=key_id,
                 secret_digest=digest,
-                issued_at=self._now(),
+                issued_at=issued_at.isoformat(),
+                expires_at=(issued_at + self._grant_ttl).isoformat(),
                 expected_key_id=current.key_id if current is not None else None,
             )
         except (OSError, HRRepositoryError, HRSkillPublisherValidationError) as exc:

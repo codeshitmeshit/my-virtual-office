@@ -290,6 +290,7 @@ class AccessGrantRecord:
     secret_digest: str
     status: str
     issued_at: str
+    expires_at: str | None
     rotated_at: str | None
     revoked_at: str | None
     revocation_reason: str
@@ -596,7 +597,14 @@ def _apply_schema_v1(connection: sqlite3.Connection) -> None:
         connection.execute(statement)
 
 
-DEFAULT_MIGRATIONS = (HRMigration(1, "initial_hr_schema", _apply_schema_v1),)
+def _add_access_grant_expiry(connection: sqlite3.Connection) -> None:
+    connection.execute("ALTER TABLE access_grants ADD COLUMN expires_at TEXT")
+
+
+DEFAULT_MIGRATIONS = (
+    HRMigration(1, "initial_hr_schema", _apply_schema_v1),
+    HRMigration(2, "add_access_grant_expiry", _add_access_grant_expiry),
+)
 
 
 def _validated_migrations(migrations: Sequence[HRMigration]) -> tuple[HRMigration, ...]:
@@ -2661,6 +2669,7 @@ class HRRepository:
         key_id: str,
         secret_digest: str,
         issued_at: str,
+        expires_at: str | None = None,
         expected_key_id: str | None = None,
     ) -> AccessGrantRecord:
         """Insert or rotate a grant using a SHA-256 hex digest; raw grants are never accepted."""
@@ -2669,6 +2678,11 @@ class HRRepository:
         if not isinstance(secret_digest, str) or SHA256_HEX_PATTERN.fullmatch(secret_digest) is None:
             raise HRRepositoryValidationError("secret_digest must be a lowercase SHA-256 hex digest")
         issued_at = _timestamp_text(issued_at, "issued_at")
+        expires_at = (
+            _timestamp_text(expires_at, "expires_at") if expires_at is not None else None
+        )
+        if expires_at is not None and expires_at <= issued_at:
+            raise HRRepositoryValidationError("access grant expiry must be after issue time")
         if expected_key_id is not None:
             expected_key_id = _opaque_id(expected_key_id, "expected_key_id")
         with self._write_transaction() as connection:
@@ -2682,9 +2696,10 @@ class HRRepository:
                 try:
                     connection.execute(
                         """INSERT INTO access_grants(
-                               ai_id, key_id, secret_digest, status, issued_at, updated_at
-                           ) VALUES (?, ?, ?, 'active', ?, ?)""",
-                        (ai_id, key_id, secret_digest, issued_at, issued_at),
+                               ai_id, key_id, secret_digest, status, issued_at,
+                               expires_at, updated_at
+                           ) VALUES (?, ?, ?, 'active', ?, ?, ?)""",
+                        (ai_id, key_id, secret_digest, issued_at, expires_at, issued_at),
                     )
                 except sqlite3.IntegrityError as exc:
                     raise HRRepositoryConflictError("access grant identity is invalid") from exc
@@ -2695,16 +2710,25 @@ class HRRepository:
                     current.key_id == key_id
                     and current.secret_digest == secret_digest
                     and current.status == "active"
+                    and current.expires_at == expires_at
                 ):
                     return current
                 try:
                     connection.execute(
                         """UPDATE access_grants SET
                                key_id = ?, secret_digest = ?, status = 'active',
-                               issued_at = ?, rotated_at = ?, revoked_at = NULL,
+                               issued_at = ?, expires_at = ?, rotated_at = ?, revoked_at = NULL,
                                revocation_reason = '', updated_at = ?
                            WHERE ai_id = ?""",
-                        (key_id, secret_digest, issued_at, issued_at, issued_at, ai_id),
+                        (
+                            key_id,
+                            secret_digest,
+                            issued_at,
+                            expires_at,
+                            issued_at,
+                            issued_at,
+                            ai_id,
+                        ),
                     )
                 except sqlite3.IntegrityError as exc:
                     raise HRRepositoryConflictError("access grant key is already in use") from exc
@@ -3092,7 +3116,7 @@ class HRRepository:
         columns = "*"
         if table == "access_grants":
             columns = (
-                "ai_id, key_id, status, issued_at, rotated_at, revoked_at, "
+                "ai_id, key_id, status, issued_at, expires_at, rotated_at, revoked_at, "
                 "revocation_reason, updated_at"
             )
         elif table == "assessment_jobs":

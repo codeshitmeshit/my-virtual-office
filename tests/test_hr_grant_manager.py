@@ -6,7 +6,7 @@ import stat
 import sys
 import threading
 from dataclasses import asdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -102,6 +102,7 @@ def test_issue_stores_only_digest_and_delivers_secret_via_secure_reference(setup
 
     stored = repository.get_access_grant("agent-1")
     assert stored.secret_digest == hashlib.sha256(raw_secret.encode()).hexdigest()
+    assert stored.expires_at == (NOW + timedelta(days=30)).isoformat()
     secret_path, reference_path = delivery_paths(workspace)
     assert secret_path.read_text() == raw_secret
     assert json.loads(reference_path.read_text()) == {

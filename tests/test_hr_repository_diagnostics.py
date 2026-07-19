@@ -56,7 +56,7 @@ def test_ready_health_reports_schema_integrity_and_is_read_only(repository):
     health = repository.management_health()
     assert health.status == "ready"
     assert health.code == "ok"
-    assert health.schema_version == health.target_schema_version == 1
+    assert health.schema_version == health.target_schema_version == 2
     assert health.database_bytes == len(before_bytes)
     assert health.page_count > 0
     assert health.page_size > 0

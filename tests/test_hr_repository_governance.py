@@ -79,6 +79,29 @@ def test_grant_storage_accepts_only_digest_and_never_raw_secret(repository):
     assert digest(raw_secret) in dump
 
 
+def test_grant_expiry_is_normalized_validated_and_exported_without_digest(repository):
+    stored = repository.rotate_access_grant(
+        ai_id="agent-1",
+        key_id="key-expiring",
+        secret_digest=digest("expiring-secret"),
+        issued_at="2026-07-19T01:00:00Z",
+        expires_at="2026-08-18T01:00:00Z",
+    )
+    assert stored.expires_at == "2026-08-18T01:00:00+00:00"
+    exported = repository.management_export("access_grants").rows[0]
+    assert exported["expires_at"] == stored.expires_at
+    assert "secret_digest" not in exported
+
+    with pytest.raises(HRRepositoryValidationError, match="expiry"):
+        repository.rotate_access_grant(
+            ai_id="agent-2",
+            key_id="key-invalid-expiry",
+            secret_digest=digest("invalid-expiry"),
+            issued_at="2026-07-19T01:00:00Z",
+            expires_at="2026-07-19T01:00:00Z",
+        )
+
+
 def test_grant_rotation_revocation_and_reactivation_are_conflict_safe(repository):
     first = repository.rotate_access_grant(
         ai_id="agent-1",
