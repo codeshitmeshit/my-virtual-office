@@ -69,7 +69,7 @@
 
 ## 10. Durable Scheduler And Observability
 
-- [ ] 10.1 Implement validated HR configuration for master/scheduler switches, VO timezone, daily time, submission window, worker count, timeout, and retry limits, with defaults, invalid-value handling, and boundary tests.
+- [x] 10.1 Implement validated HR configuration for master/scheduler switches, VO timezone, daily time, submission window, worker count, timeout, and retry limits, with defaults, invalid-value handling, and boundary tests.
 - [ ] 10.2 Implement `app/services/hr_scheduler.py` due-time calculation, DST/local-date handling, today's-only startup catch-up, open-cycle recovery, no historical backfill, and deterministic fake-clock tests.
 - [ ] 10.3 Implement durable report and assessment claim processing with bounded worker pools, claim expiry/fencing, retry limits, queue backpressure, graceful feature-disable behavior, and tests for dual loops, restarts, late workers, and one-Agent stalls.
 - [ ] 10.4 Add thin startup reconciliation-loop wiring plus manual run/close/retry commands that use the same durable scheduler paths; verify HTTP threads do not wait for whole-cycle provider work.
