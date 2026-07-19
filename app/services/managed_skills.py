@@ -53,7 +53,7 @@ class ManagedSkillSeedResult:
     conflicts: tuple[str, ...]
 
 
-def _atomic_write(path: Path, content: str) -> None:
+def atomic_write_managed_text(path: Path, content: str, *, mode: int | None = None) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     descriptor, temporary = tempfile.mkstemp(
         prefix=f".{path.name}.tmp-",
@@ -64,13 +64,15 @@ def _atomic_write(path: Path, content: str) -> None:
             stream.write(content)
             stream.flush()
             os.fsync(stream.fileno())
+        if mode is not None:
+            os.chmod(temporary, mode, follow_symlinks=False)
         os.replace(temporary, path)
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)
 
 
-def _path_is_safe(workspace: Path, target: Path) -> bool:
+def managed_skill_path_is_safe(workspace: Path, target: Path) -> bool:
     workspace = Path(os.path.realpath(workspace))
     lexical = Path(os.path.abspath(target))
     try:
@@ -155,7 +157,7 @@ def sync_managed_skill_to_workspace(
     legacy_directories = tuple(workspace / "skills" / name for name in definition.legacy_names)
     paths = (workspace / "skills", skill_directory, skill_path, marker_path)
     paths += tuple(path for directory in legacy_directories for path in (directory, directory / "SKILL.md"))
-    if not all(_path_is_safe(workspace, path) for path in paths):
+    if not all(managed_skill_path_is_safe(workspace, path) for path in paths):
         return {"ready": False, "status": "path_rejected", "updated": False}
 
     content = definition.content()
@@ -168,11 +170,11 @@ def sync_managed_skill_to_workspace(
         if existing and not managed and existing != content:
             return {"ready": False, "status": "conflict", "updated": False}
         if existing != content:
-            _atomic_write(skill_path, content)
+            atomic_write_managed_text(skill_path, content)
             updated = True
         desired_marker = {"managedBy": MANAGED_BY, "sha256": digest, "skill": definition.name}
         if marker != desired_marker:
-            _atomic_write(
+            atomic_write_managed_text(
                 marker_path,
                 json.dumps(desired_marker, sort_keys=True, indent=2) + "\n",
             )
@@ -217,7 +219,7 @@ def seed_managed_skill_library(
             if skill_directory.is_symlink() or skill_path.is_symlink():
                 raise ValueError(f"managed skill library path is unsafe: {definition.name}")
             if _read_text(skill_path) != content:
-                _atomic_write(skill_path, content)
+                atomic_write_managed_text(skill_path, content)
             paths[definition.name] = str(skill_path)
             for legacy_name in definition.legacy_names:
                 legacy_directory = library / legacy_name
