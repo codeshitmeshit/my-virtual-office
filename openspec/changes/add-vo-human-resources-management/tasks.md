@@ -80,7 +80,7 @@
 - [x] 11.1 Implement `app/services/hr_governance.py` caller roles and server-side full/public/self projections with field allowlists, stable denial codes, and exhaustive matrix tests for human, HR, self, cross-Agent, inactive Agent, and unknown caller.
 - [x] 11.2 Implement management application queries/commands in `app/services/hr_api.py` for overview, Agent detail, access log, health/export, HR pause/resume, and cycle run/close/retry with pagination, body limits, and no transport imports.
 - [x] 11.3 Implement Agent grant authentication requiring loopback, no browser Origin, Human Resources action header, known AI ID, constant-time bearer digest match, active grant, and identity binding; cover spoofing, missing, expired, revoked, mismatched, and unsupported-provider cases.
-- [ ] 11.4 Implement Agent directory, cross-Agent public detail, and self access-log application queries; commit exactly one access record before successful cross-Agent disclosure, exempt HR/human routes, and fail closed when audit persistence fails.
+- [x] 11.4 Implement Agent directory, cross-Agent public detail, and self access-log application queries; commit exactly one access record before successful cross-Agent disclosure, exempt HR/human routes, and fail closed when audit persistence fails.
 - [ ] 11.5 Add thin `OfficeHandler` route delegation for all Human Resources management and Agent endpoints, reuse `managementFetch` challenge semantics, set minimal CORS/allowed headers, normalize errors, and add HTTP contract/security tests.
 
 ## 12. Human Resources User Experience
