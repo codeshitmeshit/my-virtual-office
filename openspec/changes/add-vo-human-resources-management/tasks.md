@@ -38,7 +38,7 @@
 
 ## 6. HR Agent Directory And Introduction Workflow
 
-- [ ] 6.1 Implement `app/services/hr_directory.py` roster reconciliation across system, project, external, and synthetic Agents, with HR self-exclusion from report/assessment eligibility and tests for duplicate sources, changed names, unavailable providers, inactive states, and reactivation.
+- [x] 6.1 Implement `app/services/hr_directory.py` roster reconciliation across system, project, external, and synthetic Agents, with HR self-exclusion from report/assessment eligibility and tests for duplicate sources, changed names, unavailable providers, inactive states, and reactivation.
 - [ ] 6.2 Implement introduction request claiming and HR-to-Agent conversation orchestration with deterministic conversation keys, raw response preservation, neutral no-response, per-Agent failure isolation, and injected fake-conversation tests.
 - [ ] 6.3 Implement HR structured introduction summarization, schema validation, provenance/version persistence, stale-role clarification, and conflict-safe replacement with tests for valid, malformed, unsupported, missing, and changed self-descriptions.
 - [ ] 6.4 Implement safe directory projections containing only name, introduction, AI ID, availability, and readiness; add pagination/filtering and tests that reports, evidence, assessments, grants, and sensitive metadata never enter the directory view.
