@@ -11,11 +11,15 @@ from services.hr_governance import HRCaller, HRDisclosurePolicy
 from services.hr_observability import HRObservability
 from services.hr_reporting import HRReportingProjection
 from services.hr_repository import HRRepository, HRRepositoryError
-from services.hr_scheduler import HRManualCommands
+from services.hr_scheduler import HRCommandReceipt
 
 
 class HRAPIValidationError(ValueError):
     code = "hr_api_validation_failed"
+
+
+class HRAPIDisabledError(RuntimeError):
+    code = "hr_disabled"
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,6 +34,14 @@ class HRLifecyclePort(Protocol):
     def pause(self) -> object: ...
 
     def resume(self) -> object: ...
+
+
+class HRManualCommandsPort(Protocol):
+    def run(self) -> HRCommandReceipt: ...
+
+    def close(self, cycle_id: str) -> HRCommandReceipt: ...
+
+    def retry(self, cycle_id: str) -> HRCommandReceipt: ...
 
 
 def _json_safe(value: object) -> object:
@@ -59,7 +71,7 @@ class HRManagementAPI:
         self,
         repository: HRRepository,
         lifecycle: HRLifecyclePort,
-        commands: HRManualCommands,
+        commands: HRManualCommandsPort,
         reporting: HRReportingProjection,
         observability: HRObservability,
         config: HRConfig,
@@ -73,7 +85,10 @@ class HRManagementAPI:
             for method in ("public_state", "pause", "resume")
         ):
             raise HRAPIValidationError("lifecycle port is invalid")
-        if not isinstance(commands, HRManualCommands):
+        if not all(
+            callable(getattr(commands, method, None))
+            for method in ("run", "close", "retry")
+        ):
             raise HRAPIValidationError("manual commands are invalid")
         if not isinstance(reporting, HRReportingProjection):
             raise HRAPIValidationError("reporting projection is invalid")
@@ -277,6 +292,8 @@ class HRManagementAPI:
         *,
         body_bytes: int,
     ) -> HRServiceResult:
+        if not self._config.enabled:
+            raise HRAPIDisabledError("Human Resources mutations are disabled")
         payload = self._body(body, body_bytes)
         if payload:
             raise HRAPIValidationError("lifecycle command body must be empty")
@@ -292,6 +309,8 @@ class HRManagementAPI:
         *,
         body_bytes: int,
     ) -> HRServiceResult:
+        if not self._config.enabled:
+            raise HRAPIDisabledError("Human Resources mutations are disabled")
         payload = self._body(body, body_bytes)
         if action == "run":
             if payload:
@@ -317,6 +336,8 @@ class HRManagementAPI:
 
     @staticmethod
     def safe_error(exc: Exception) -> HRServiceResult:
+        if isinstance(exc, HRAPIDisabledError):
+            return HRServiceResult(503, {"ok": False, "code": exc.code})
         if isinstance(exc, HRAPIValidationError):
             status = 413 if "too large" in str(exc) else 400
             return HRServiceResult(status, {"ok": False, "code": exc.code, "error": str(exc)})

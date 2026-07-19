@@ -12,7 +12,7 @@ APP_DIR = ROOT / "app"
 if str(APP_DIR) not in sys.path:
     sys.path.insert(0, str(APP_DIR))
 
-from services.hr_api import HRAPIValidationError, HRManagementAPI
+from services.hr_api import HRAPIDisabledError, HRAPIValidationError, HRManagementAPI
 from services.hr_config import HRConfig
 from services.hr_observability import HRObservability
 from services.hr_reporting import HRReportingProjection, HRReportingService
@@ -249,6 +249,28 @@ def test_rejected_command_queue_returns_service_unavailable(tmp_path, setup):
     result = api.cycle_command("run", {}, body_bytes=2)
     assert result.status == 503
     assert result.payload["ok"] is False
+
+
+def test_disabled_feature_keeps_reads_available_and_blocks_all_mutation(setup):
+    repository, _reporting, _opened, lifecycle, _api = setup
+    api = HRManagementAPI(
+        repository,
+        lifecycle,
+        manual_commands(),
+        HRReportingProjection(repository),
+        HRObservability(clock=lambda: NOW),
+        HRConfig.from_env({"VO_HR_ENABLED": "0"}),
+        clock=lambda: NOW,
+    )
+    assert api.overview().status == 200
+    for callback in (
+        lambda: api.lifecycle_command("pause", {}, body_bytes=2),
+        lambda: api.cycle_command("run", {}, body_bytes=2),
+    ):
+        result = api.safe_error(pytest.raises(HRAPIDisabledError, callback).value)
+        assert result.status == 503
+        assert result.payload["code"] == "hr_disabled"
+    assert lifecycle.paused is False
 
 
 def test_management_api_has_no_transport_import_or_handler_dependency():

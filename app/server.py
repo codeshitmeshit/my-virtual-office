@@ -66,6 +66,9 @@ from services import archive_manager_lifecycle as archive_manager_lifecycle_serv
 from services import hr_bootstrap as hr_bootstrap_service
 from services import hr_config as hr_config_service
 from services import hr_lifecycle as hr_lifecycle_service
+from services import hr_agent_auth as hr_agent_auth_service
+from services import hr_http as hr_http_service
+from services import hr_runtime as hr_runtime_service
 from services import hr_scheduler as hr_scheduler_service
 from services import system_agent_lifecycle as system_agent_lifecycle_service
 from services import system_agent_profiles as system_agent_profiles_service
@@ -21572,11 +21575,28 @@ def _hr_profile_check_on_startup(delay_seconds=4):
 
 
 _hr_scheduler_runtime = hr_scheduler_service.HRLoopRuntime()
+_hr_command_router = hr_runtime_service.HRCommandRouter()
+_hr_application_runtime = None
+_hr_application_runtime_lock = threading.Lock()
+
+
+def _get_hr_application_runtime():
+    global _hr_application_runtime
+    with _hr_application_runtime_lock:
+        if _hr_application_runtime is None:
+            _hr_application_runtime = hr_runtime_service.build_hr_application_runtime(
+                status_dir=STATUS_DIR,
+                lifecycle=_hr_shared_adapter(),
+                config=hr_config_service.HRConfig.from_env(),
+                commands=_hr_command_router,
+            )
+        return _hr_application_runtime
 
 
 def _install_hr_scheduler_loop(loop):
     """Thin dependency-wiring hook; scheduling behavior stays in services.hr_scheduler."""
     _hr_scheduler_runtime.install(loop)
+    _hr_command_router.install_loop(loop)
 
 
 def _hr_scheduler_start_on_startup():
@@ -27669,6 +27689,76 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             self._vo_request_id = request_id
         return request_id
 
+    def _hr_routes(self):
+        try:
+            return _get_hr_application_runtime().routes
+        except Exception:
+            self._send_json(
+                {"ok": False, "code": "hr_runtime_unavailable"},
+                status=503,
+            )
+            return None
+
+    def _hr_agent_auth_request(self):
+        try:
+            remote_host = str(self.client_address[0])
+        except (AttributeError, IndexError, TypeError):
+            remote_host = ""
+        return hr_agent_auth_service.HRAgentAuthRequest(
+            remote_host=remote_host,
+            origin=self.headers.get("Origin"),
+            action=self.headers.get("X-VO-Agent-Action"),
+            ai_id=self.headers.get("X-VO-Agent-Id"),
+            authorization=self.headers.get("Authorization"),
+        )
+
+    def _handle_hr_get(self, request_path, query_params):
+        if hr_http_service.HRHTTPRoutes.is_management(request_path):
+            if self._reject_untrusted_management_request():
+                return
+            routes = self._hr_routes()
+            if routes is None:
+                return
+            response = routes.management_get(request_path, query_params)
+        else:
+            routes = self._hr_routes()
+            if routes is None:
+                return
+            response = routes.agent_get(
+                request_path,
+                query_params,
+                self._hr_agent_auth_request(),
+                occurrence_key=self._request_id(),
+            )
+        self._send_json(response.payload, status=response.status)
+
+    def _handle_hr_post(self, request_path):
+        if not hr_http_service.HRHTTPRoutes.is_management(request_path):
+            self._send_json({"ok": False, "code": "hr_route_not_found"}, status=404)
+            return
+        if self._reject_untrusted_management_request():
+            return
+        body, error = self._read_limited_json_body(limit=self._MANAGEMENT_BODY_LIMIT)
+        if error:
+            self._send_json(
+                {"ok": False, "code": "hr_api_validation_failed"},
+                status=int(error.get("_status") or 400),
+            )
+            return
+        routes = self._hr_routes()
+        if routes is None:
+            return
+        try:
+            body_bytes = int(self.headers.get("Content-Length", 0) or 0)
+        except (TypeError, ValueError):
+            body_bytes = 0
+        response = routes.management_post(
+            request_path,
+            body,
+            body_bytes=body_bytes,
+        )
+        self._send_json(response.payload, status=response.status)
+
     def _send_json(self, payload, status=200, *, allow_origin=None):
         raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
@@ -27856,6 +27946,9 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
         parsed_url = urllib.parse.urlparse(self.path)
         request_path = parsed_url.path
         query_params = urllib.parse.parse_qs(parsed_url.query)
+        if hr_http_service.HRHTTPRoutes.handles(request_path):
+            self._handle_hr_get(request_path, query_params)
+            return
         if (
             request_path.startswith("/api/agent/project-authoring/requests")
             or request_path.startswith("/api/project-authoring/requests")
@@ -30426,6 +30519,23 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             self.end_headers()
 
     def do_OPTIONS(self):
+        request_path = urllib.parse.urlparse(self.path).path
+        if hr_http_service.HRHTTPRoutes.handles(request_path):
+            if not hr_http_service.HRHTTPRoutes.is_management(request_path):
+                self._send_json(
+                    {"ok": False, "code": "hr_agent_browser_origin_forbidden"},
+                    status=403,
+                )
+                return
+            self.send_response(204)
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+            self.send_header(
+                "Access-Control-Allow-Headers",
+                "Content-Type, X-VO-Management-Token",
+            )
+            self.send_header("Access-Control-Max-Age", "600")
+            self.end_headers()
+            return
         self.send_response(200)
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
@@ -30435,6 +30545,9 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
     def do_POST(self):
         parsed_url = urllib.parse.urlparse(self.path)
         request_path = parsed_url.path
+        if hr_http_service.HRHTTPRoutes.handles(request_path):
+            self._handle_hr_post(request_path)
+            return
         if request_path == "/api/agent/project-authoring/projects":
             self._handle_agent_project_direct_create()
             return
