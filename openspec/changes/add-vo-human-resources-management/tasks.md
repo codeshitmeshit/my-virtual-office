@@ -16,7 +16,7 @@
 ## 3. Archive Manager Migration To Shared Lifecycle
 
 - [x] 3.1 Introduce an Archive Room lifecycle adapter that preserves `archive-room/manager.json`, the existing Profile template/version, workspace rules, public fields, labels, and legacy function delegates; verify state and Profile compatibility before switching creation.
-- [ ] 3.2 Route archive-manager discovery, auto-creation, communication-skill synchronization, partial repair, and startup reconciliation through the shared lifecycle while preserving provider call parameters and existing error behavior; run the focused characterization suite.
+- [x] 3.2 Route archive-manager discovery, auto-creation, communication-skill synchronization, partial repair, and startup reconciliation through the shared lifecycle while preserving provider call parameters and existing error behavior; run the focused characterization suite.
 - [ ] 3.3 Route archive-manager pause/resume, presence projection, system-role metadata, deletion protection, assignment protection, and public state through shared role policy and lifecycle delegates without moving Archive Room maintenance logic.
 - [ ] 3.4 Remove obsolete duplicate archive lifecycle/Profile implementations after all callers migrate, add static ownership checks preventing lifecycle logic from returning to `app/server.py`, and run Archive Room Phase 1–8 plus communication-skill regression tests.
 
