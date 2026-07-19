@@ -61,6 +61,8 @@ for (const required of [
 
 assert.match(skill, /维护已有项目统一使用下文的“用户确认方案”路径/);
 assert.match(skill, /可复用是项目属性，不是模板属性/);
+assert.match(skill, /默认不要创建可复用模板/);
+assert.match(skill, /只有用户明确说“创建模板 \/ 保存成模板 \/ 复用模板 \/ template\.mode=create \/ 引用某个 templateId”等等价语义/);
 assert.match(skill, /不要使用管理面 `\/api\/projects\/PROJECT_ID\/scheduled-cron`/);
 assert.match(skill, /VO 已保存并启用项目级定时配置/);
 assert.match(skill, /不要把 Gateway token、Gateway registration、`pending_gateway_registration` 或 `reconciliationRequired` 当作用户需要处理的事项/);
@@ -74,6 +76,7 @@ assert.match(skill, /未知项写“待确认”/);
 assert.match(skill, /Reviewer 默认策略：不指定/);
 assert.match(skill, /请确认是否按以上方案创建真实项目/);
 assert.match(skill, /“需要你确认的点”只列真正会影响创建结果的未决事项/);
+assert.match(skill, /模板\/复用配置默认写“无”/);
 assert.match(skill, /创建请求必须同时携带该精确文本和 digest/);
 assert.match(skill, /后端会拒绝缺少 `summaryText`、未使用固定确认模板或 digest 不匹配的请求/);
 assert.match(skill, /只用这些只读 HTTP GET 获取 roster/);
