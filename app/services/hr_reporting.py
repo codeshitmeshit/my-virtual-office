@@ -548,7 +548,7 @@ class HRDailyReportNormalizer:
             raise HRReportingValidationError("HR normalized report is invalid JSON") from exc
         if not isinstance(value, dict) or set(value) != cls.ROOT_KEYS:
             raise HRReportingValidationError("HR normalized report has unsupported fields")
-        if value["schemaVersion"] != 1:
+        if isinstance(value["schemaVersion"], bool) or value["schemaVersion"] != 1:
             raise HRReportingValidationError("unsupported normalized report schema")
         if value["localDate"] != report.local_date or value["agentAiId"] != report.ai_id:
             raise HRReportingValidationError("normalized report identity does not match")

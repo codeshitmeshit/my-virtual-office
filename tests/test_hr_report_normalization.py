@@ -130,6 +130,7 @@ def test_hr_normalization_persists_strict_structure_and_identity(repository):
     "mutate",
     (
         lambda value: value.update({"unsupported": "field"}),
+        lambda value: value.update({"schemaVersion": True}),
         lambda value: value.update({"agentAiId": "agent-2"}),
         lambda value: value.update({"completedWork": [""]}),
         lambda value: value.update(
