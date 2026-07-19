@@ -72,6 +72,12 @@ Failure, timeout, malformed response, or unavailability for one Agent SHALL NOT 
 - **THEN** that Agent's request state SHALL record the failure and retry disposition
 - **AND** the cycle SHALL continue for all other eligible Agents
 
+#### Scenario: HR sends a daily-report request
+- **WHEN** HR requests a scheduled or manually corrected daily report from an Agent
+- **THEN** the request SHALL use the shared provider-neutral VO communication application service
+- **AND** VO SHALL record the visible HR-to-Agent request and reply under the deterministic conversation identity
+- **AND** timeout, busy, empty reply, communication-skill readiness, and Provider error codes SHALL remain distinguishable to the HR workflow
+
 ### Requirement: Traceable reporting states
 The system SHALL expose enough state to distinguish not due, waiting, submitted, late submitted, not submitted, normalization failed, skipped, and complete outcomes at both cycle and Agent levels.
 

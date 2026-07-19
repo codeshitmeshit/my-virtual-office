@@ -84,6 +84,12 @@ HR SHALL ask a newly discovered or materially stale Agent to describe its identi
 - **THEN** the request SHALL include a versioned JSON context and a preferred exact JSON response containing identity, responsibilities, strengths, and collaboration scenarios
 - **AND** a Provider that cannot reliably return JSON MAY answer in natural language without losing its raw response
 
+#### Scenario: HR sends an introduction request
+- **WHEN** HR asks an Agent for missing introduction information
+- **THEN** the request SHALL use the same provider-neutral VO communication application service as the public Agent communication route
+- **AND** VO SHALL preserve the visible HR sender, target, conversation history, Provider routing, and stable terminal failure code
+- **AND** the server SHALL NOT depend on a loopback HTTP request to communicate internally
+
 ### Requirement: Global Agent-directory skill
 The system SHALL expose one repository-owned Agent-directory skill through the current VO instance's built-in `/skills` catalog. The skill SHALL direct every Provider to the controlled information-query capability for each visible Agent's name, concise introduction, AI ID, availability, and permitted work information, and SHALL NOT be copied or installed into individual Agent workspaces.
 

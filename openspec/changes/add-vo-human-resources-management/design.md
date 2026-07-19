@@ -175,6 +175,15 @@ The HTTP server thread never waits for all Agents. Manual management actions enq
 
 ### 6. Use visible HR-to-Agent communication and HR-owned reasoning
 
+The public Agent communication route and HR workflows SHALL share one
+transport-neutral `VOAgentCommunicationService`. The service owns validation,
+visible request/reply events, sender readiness policy, provider routing, and
+stable terminal error classification through injected ports. `app/server.py`
+only builds those ports and delegates; HR calls the same service directly
+rather than calling a private HTTP-handler implementation or making a loopback
+HTTP request. This keeps manual VO communication and automated HR communication
+behaviorally identical without adding a self-network dependency.
+
 `HRConversationPort` has two distinct operations:
 
 1. `ask_agent_as_hr(target, message, conversation_key, timeout)` uses the existing office-mediated Agent communication path with HR as the sender, preserving visible sender/target context and a deterministic idempotency key.

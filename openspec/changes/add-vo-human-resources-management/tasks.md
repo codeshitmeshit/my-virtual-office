@@ -99,6 +99,7 @@
 - [x] 12.10 Add a management-only `日报` correction action with an available-Agent select-all/individual dialog, bounded single-flight execution, explicit same-date report replacement and revision, immediate selected-Agent reassessment with prior-version retention, failure-safe preservation of existing data, and focused repository/service/API/HTTP/UI tests.
 - [x] 12.11 Add versioned JSON request contexts and exact preferred JSON response templates to introduction and scheduled/manual daily-report questions, retain a natural-language Provider fallback with raw-response preservation, align HR Profile normalization/assessment examples with strict runtime parsers, and cover prompt identity/date/schema escaping and compatibility paths with focused tests.
 - [x] 12.12 Persist accepted/processing/complete/failed state for every asynchronous HR management command, make Agent-team synchronization asynchronous, expose active commands in the overview, poll and restore running state in the UI, and cover refresh persistence, single-flight, terminal replacement, API, localization, and UI helpers with focused tests.
+- [x] 12.13 Extract one transport-neutral VO Agent communication application service, delegate the public HTTP route and HR introduction/daily workflows to the same service, preserve visible history and stable Provider failure codes, avoid loopback HTTP, and cover the service boundary with focused unit and routing regressions.
 
 ## 13. Integrated Regression And Development-Machine Acceptance
 
