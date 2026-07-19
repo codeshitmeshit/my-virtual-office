@@ -95,7 +95,7 @@
 ## 13. Integrated Regression And Development-Machine Acceptance
 
 - [x] 13.1 Run and record focused Python/Node integration suites for shared lifecycle, HR repository/directory/skill/reporting/assessment/scheduler/governance/API/UI, resolving every failure without weakening specified assertions.
-- [ ] 13.2 Run and record Archive Room Phase 1–8, archive-manager Phase 4, Agent communication skill/routing, project assignment/actor, meeting lifecycle/service-boundary, provider, management-token, i18n, and static modularity regressions.
+- [x] 13.2 Run and record Archive Room Phase 1–8, archive-manager Phase 4, Agent communication skill/routing, project assignment/actor, meeting lifecycle/service-boundary, provider, management-token, i18n, and static modularity regressions.
 - [ ] 13.3 Run live local browser acceptance with fake provider data and record screenshots/assertions for the Human Resources happy path, permissions, partial failures, and degraded-read path.
 - [ ] 13.4 Identify and document the approved development-machine target, deployment/start commands, OpenClaw and VO versions, configuration values, backup location, feature-switch sequence, and rollback commands before any real-environment mutation.
 - [ ] 13.5 Deploy to the development machine with `VO_HR_ENABLED=0` and scheduler disabled; run existing VO, archive-manager, Archive Room, project, meeting, and provider smoke tests and record a clean pre-enable baseline.
