@@ -22,6 +22,9 @@ MIN_BUSY_TIMEOUT_MS = 100
 MAX_BUSY_TIMEOUT_MS = 30_000
 MAX_PAGE_SIZE = 100
 MAX_AI_ID_LENGTH = 256
+MIN_EXPORT_BYTES = 1_024
+MAX_EXPORT_BYTES = 1_000_000
+MAX_EXPORT_OFFSET = 1_000_000
 AGENT_STATUSES = frozenset({"active", "offline", "disabled", "deleted", "unreachable"})
 INTRODUCTION_STATES = frozenset(
     {"introduction_pending", "published", "clarification_pending", "failed"}
@@ -53,6 +56,10 @@ class HRRepositoryNotFoundError(HRRepositoryError):
 
 class HRRepositoryConflictError(HRRepositoryError):
     code = "hr_repository_conflict"
+
+
+class HRRepositoryCorruptionError(HRRepositoryError):
+    code = "hr_repository_corrupt"
 
 
 @dataclass(frozen=True, slots=True)
@@ -286,6 +293,57 @@ class AccessLogPage:
 class HRActivityPage:
     items: tuple[HRActivityRecord, ...]
     next_cursor: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class HRRepositoryHealth:
+    status: str
+    code: str
+    path: str
+    schema_version: int | None
+    target_schema_version: int
+    database_bytes: int
+    page_count: int
+    page_size: int
+    integrity: str
+    foreign_key_violations: int
+    error: str
+
+
+@dataclass(frozen=True, slots=True)
+class HRExportPage:
+    table: str
+    rows: tuple[dict[str, Any], ...]
+    next_cursor: str | None
+    byte_size: int
+
+
+_EXPORT_TABLES = {
+    "metadata": ("key",),
+    "agents": ("ai_id",),
+    "agent_identity_history": ("id",),
+    "introductions": ("id",),
+    "daily_cycles": ("local_date", "id"),
+    "report_requests": ("id",),
+    "daily_reports": ("local_date", "ai_id"),
+    "assessments": ("local_date", "ai_id", "version"),
+    "assessment_evidence": ("assessment_id", "sequence"),
+    "access_grants": ("ai_id",),
+    "access_log": ("viewed_at", "id"),
+    "hr_activity": ("created_at", "id"),
+}
+_EXPORT_JSON_FIELDS = frozenset(
+    {
+        "roster_snapshot_json",
+        "normalized_json",
+        "principal_contributions_json",
+        "blockers_json",
+        "strengths_json",
+        "improvements_json",
+        "metadata_json",
+        "context_json",
+    }
+)
 
 
 _SCHEMA_V1 = (
@@ -2181,3 +2239,167 @@ class HRRepository:
             _encode_cursor((items[-1].created_at, items[-1].id)) if len(rows) > limit else None
         )
         return HRActivityPage(items, next_cursor)
+
+    def management_health(self) -> HRRepositoryHealth:
+        """Return a read-only health snapshot for the authenticated management surface."""
+        if not self.path.is_file():
+            return HRRepositoryHealth(
+                status="uninitialized",
+                code="hr_repository_uninitialized",
+                path=str(self.path),
+                schema_version=None,
+                target_schema_version=self.target_schema_version,
+                database_bytes=0,
+                page_count=0,
+                page_size=0,
+                integrity="not_checked",
+                foreign_key_violations=0,
+                error="HR repository is not initialized",
+            )
+        database_bytes = self.path.stat().st_size
+        try:
+            with self._connection(readonly=True) as connection:
+                version = self._current_version(connection)
+                integrity_row = connection.execute("PRAGMA quick_check(1)").fetchone()
+                integrity = str(integrity_row[0] if integrity_row is not None else "unknown")
+                page_count = int(connection.execute("PRAGMA page_count").fetchone()[0])
+                page_size = int(connection.execute("PRAGMA page_size").fetchone()[0])
+                foreign_key_violations = len(
+                    connection.execute(
+                        "SELECT 1 FROM pragma_foreign_key_check LIMIT 101"
+                    ).fetchall()
+                )
+            healthy = integrity == "ok" and foreign_key_violations == 0
+            return HRRepositoryHealth(
+                status="ready" if healthy else "corrupt",
+                code="ok" if healthy else "hr_repository_integrity_failed",
+                path=str(self.path),
+                schema_version=version,
+                target_schema_version=self.target_schema_version,
+                database_bytes=database_bytes,
+                page_count=page_count,
+                page_size=page_size,
+                integrity=integrity,
+                foreign_key_violations=foreign_key_violations,
+                error="" if healthy else "HR repository integrity checks failed",
+            )
+        except HRRepositoryMigrationError as exc:
+            return HRRepositoryHealth(
+                status="migration_failed",
+                code=exc.code,
+                path=str(self.path),
+                schema_version=None,
+                target_schema_version=self.target_schema_version,
+                database_bytes=database_bytes,
+                page_count=0,
+                page_size=0,
+                integrity="not_checked",
+                foreign_key_violations=0,
+                error=str(exc),
+            )
+        except (sqlite3.DatabaseError, OSError, HRRepositoryError) as exc:
+            return HRRepositoryHealth(
+                status="corrupt",
+                code=HRRepositoryCorruptionError.code,
+                path=str(self.path),
+                schema_version=None,
+                target_schema_version=self.target_schema_version,
+                database_bytes=database_bytes,
+                page_count=0,
+                page_size=0,
+                integrity="failed",
+                foreign_key_violations=0,
+                error=f"HR repository health check failed: {exc.__class__.__name__}",
+            )
+
+    def management_export(
+        self,
+        table: str,
+        *,
+        limit: int = 50,
+        cursor: str | None = None,
+        max_bytes: int = 256_000,
+    ) -> HRExportPage:
+        """Read one bounded JSON-safe page without creating a second authority."""
+        table = _required_text(table, "table", maximum=64)
+        if table not in _EXPORT_TABLES:
+            raise HRRepositoryValidationError("table is not exportable")
+        limit = _page_limit(limit)
+        if (
+            isinstance(max_bytes, bool)
+            or not isinstance(max_bytes, int)
+            or not MIN_EXPORT_BYTES <= max_bytes <= MAX_EXPORT_BYTES
+        ):
+            raise HRRepositoryValidationError(
+                f"max_bytes must be between {MIN_EXPORT_BYTES} and {MAX_EXPORT_BYTES}"
+            )
+        decoded = _decode_cursor(cursor, fields=1)
+        offset = 0
+        if decoded is not None:
+            offset = decoded[0]
+            if (
+                isinstance(offset, bool)
+                or not isinstance(offset, int)
+                or not 0 <= offset <= MAX_EXPORT_OFFSET
+            ):
+                raise HRRepositoryValidationError("cursor is invalid")
+        order_by = ", ".join(_EXPORT_TABLES[table])
+        columns = "*"
+        if table == "access_grants":
+            columns = (
+                "ai_id, key_id, status, issued_at, rotated_at, revoked_at, "
+                "revocation_reason, updated_at"
+            )
+        try:
+            with self._connection(readonly=True) as connection:
+                self._current_version(connection)
+                rows = connection.execute(
+                    f"SELECT {columns} FROM {table} ORDER BY {order_by} LIMIT ? OFFSET ?",
+                    (limit + 1, offset),
+                ).fetchall()
+        except (sqlite3.DatabaseError, json.JSONDecodeError) as exc:
+            raise HRRepositoryCorruptionError("HR repository export could not be read") from exc
+        exported: list[dict[str, Any]] = []
+        stopped_for_size = False
+        for row in rows[:limit]:
+            item = dict(row)
+            try:
+                for field in tuple(item):
+                    if field in _EXPORT_JSON_FIELDS:
+                        decoded_value = json.loads(item.pop(field)) if item[field] is not None else None
+                        item[field.removesuffix("_json")] = decoded_value
+            except json.JSONDecodeError as exc:
+                raise HRRepositoryCorruptionError(
+                    f"HR repository {table} contains invalid JSON"
+                ) from exc
+            tentative = (*exported, item)
+            size = len(
+                json.dumps(
+                    {"table": table, "rows": tentative},
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            )
+            if size > max_bytes:
+                if not exported:
+                    raise HRRepositoryValidationError("one export row exceeds max_bytes")
+                stopped_for_size = True
+                break
+            exported.append(item)
+        has_more = stopped_for_size or len(rows) > len(exported)
+        next_cursor = _encode_cursor((offset + len(exported),)) if has_more else None
+        payload_size = len(
+            json.dumps(
+                {"table": table, "rows": exported, "nextCursor": next_cursor},
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        )
+        if payload_size > max_bytes:
+            raise HRRepositoryValidationError("export envelope exceeds max_bytes")
+        return HRExportPage(
+            table=table,
+            rows=tuple(exported),
+            next_cursor=next_cursor,
+            byte_size=payload_size,
+        )
