@@ -62,7 +62,7 @@
 ## 9. Evidence And HR Performance Assessment
 
 - [x] 9.1 Implement `app/services/hr_evidence.py` typed read-only ports and sanitizers for dated project/task transitions, relevant meeting contributions, artifact metadata, execution results, blockers, and waiting states, with per-source caps and privacy/secret exclusion tests.
-- [ ] 9.2 Implement `app/services/hr_assessments.py` structured assessment schema/parser enforcing contribution, workload, rationale, evidence, blockers, strengths, improvements, runtime diagnosis, information sufficiency, HR identity, allowed workload values, and no score/rank fields.
+- [x] 9.2 Implement `app/services/hr_assessments.py` structured assessment schema/parser enforcing contribution, workload, rationale, evidence, blockers, strengths, improvements, runtime diagnosis, information sufficiency, HR identity, allowed workload values, and no score/rank fields.
 - [ ] 9.3 Implement HR-only assessment orchestration after cycle closure, combining report and bounded evidence, using `insufficient_information` when evidence is inadequate, and proving meeting attendance or non-submission alone cannot determine performance.
 - [ ] 9.4 Implement assessment idempotency, one current version per Agent/date, prior-version retention, late-report/evidence revision reasons, evidence linkage, and per-Agent failure isolation with retry and concurrent evaluation tests.
 - [ ] 9.5 Add explicit non-punitive guards preventing assessment output from automatically pausing, deleting, reassigning, ranking, or numerically scoring Agents; verify existing project scores remain behaviorally separate.
