@@ -3,7 +3,7 @@
 - [x] 1.1 Capture the pre-extraction archive-manager characterization baseline, including creation, rediscovery, Profile repair, communication-skill readiness, pause/resume, deletion and assignment protection, creation failure degradation, and restart-visible state; record the exact focused test commands and results as OpenSpec evidence.
 - [x] 1.2 Add missing deterministic archive-manager characterization tests for concurrent reconciliation, provider timeout, create-success/Profile-failure repair, stale discovery, and repeated startup checks without changing production behavior.
 - [x] 1.3 Capture and strengthen meeting/project compatibility tests for archive-manager meeting rejection, ordinary system-role assignment rejection, legacy meeting creation, executable meeting occupancy, terminal restoration, and stable archive-specific error codes.
-- [ ] 1.4 Add reusable fake system-Agent ports, fake clock/ID providers, temporary workspace builders, and provider-call assertions for subsequent lifecycle and HR unit tests without requiring a real OpenClaw installation.
+- [x] 1.4 Add reusable fake system-Agent ports, fake clock/ID providers, temporary workspace builders, and provider-call assertions for subsequent lifecycle and HR unit tests without requiring a real OpenClaw installation.
 
 ## 2. Shared VO System-Agent Role And Profile Foundation
 
