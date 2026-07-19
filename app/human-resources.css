@@ -43,6 +43,14 @@
     cursor: pointer;
 }
 
+.hr-close:focus-visible,
+.hr-command-button:focus-visible,
+.hr-back-button:focus-visible,
+.hr-load-more:focus-visible {
+    outline: 2px solid #72e4c5;
+    outline-offset: 2px;
+}
+
 .hr-content {
     flex: 1 1 auto;
     min-height: 0;

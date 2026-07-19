@@ -53,7 +53,7 @@ assert.equal(requests[0].options.method, 'POST');
 assert.deepEqual(JSON.parse(requests[0].options.body), {});
 assert.equal(hr.state.overview.hr.status, 'paused');
 assert.equal(hr.state.agents.length, 1);
-assert.match(hr.state.commandNotice, /pause/);
+assert.match(hr.state.commandNotice, /pause/i);
 assert.equal(hr.state.commandBusy, '');
 
 globalThis.confirm = () => false;

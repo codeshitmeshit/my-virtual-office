@@ -17,7 +17,30 @@
         commandBusy: '',
         commandNotice: '',
         commandError: '',
+        returnFocus: null,
     };
+
+    const SEMANTIC_STATES = [
+        'active', 'appropriate', 'available', 'awaiting_hr_summary', 'busy',
+        'clarification_pending', 'complete', 'conflict', 'creating', 'degraded',
+        'deleted', 'delivery_unsupported', 'disabled', 'enablement_pending', 'error',
+        'failed', 'grant_not_ready', 'high', 'insufficient_information',
+        'introduction_pending', 'issued', 'late', 'late_submitted', 'loading', 'low',
+        'normalization_failed', 'normalized', 'not_required', 'not_submitted', 'offline',
+        'open', 'overloaded', 'paused', 'pending', 'processing', 'published', 'ready',
+        'requested', 'response_received', 'retry', 'revoked', 'rotated', 'skill_conflict',
+        'skipped', 'submitted', 'succeeded', 'unknown', 'unavailable', 'unreachable',
+        'unsupported_provider', 'updated', 'waiting', 'working'
+    ];
+    const ERROR_CODES = [
+        'hr_agent_not_found', 'hr_api_validation_failed', 'hr_audit_unavailable',
+        'hr_disabled', 'hr_empty_response', 'hr_internal_error', 'hr_invalid_response',
+        'hr_repository_unavailable', 'hr_request_failed', 'hr_runtime_unavailable'
+    ];
+    const ACTION_NAMES = [
+        'assessment', 'close', 'directory', 'lifecycle', 'pause', 'query',
+        'report', 'resume', 'retry', 'run', 'skill'
+    ];
 
     function escHtml(value) {
         return String(value == null ? '' : value)
@@ -57,6 +80,23 @@
         if (/pending|waiting|late|paused|retry|not_submitted|processing/.test(value)) return 'warning';
         if (/ready|active|available|complete|submitted|succeeded|ok/.test(value)) return 'success';
         return 'neutral';
+    }
+
+    function semanticLabel(value) {
+        const normalized = String(value || 'unknown').toLowerCase().replace(/[^a-z0-9]+/g, '_');
+        const fallback = normalized.split('_').map(function (part) {
+            return part ? part.charAt(0).toUpperCase() + part.slice(1) : '';
+        }).join(' ');
+        return tr('hr_state_' + normalized, fallback || tr('hr_state_unknown', 'Unknown'));
+    }
+
+    function errorLabel(value) {
+        const code = String(value || 'hr_request_failed');
+        const normalized = code.toLowerCase().replace(/[^a-z0-9]+/g, '_');
+        if (!ERROR_CODES.includes(normalized)) {
+            return tr('hr_error_request_failed', 'Human Resources request failed');
+        }
+        return tr('hr_error_' + normalized.replace(/^hr_/, ''), 'Human Resources request failed');
     }
 
     function workloadTone(workload) {
@@ -168,6 +208,36 @@
         else callback();
     }
 
+    function focusableElements() {
+        const element = modal();
+        if (!element) return [];
+        return Array.from(element.querySelectorAll(
+            'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), ' +
+            'textarea:not([disabled]), details > summary, [tabindex]:not([tabindex="-1"])'
+        )).filter(function (item) { return !item.closest('.hidden'); });
+    }
+
+    function handleKeydown(event) {
+        if (!state.open || !event) return;
+        if (event.key === 'Escape') {
+            event.preventDefault();
+            close();
+            return;
+        }
+        if (event.key !== 'Tab') return;
+        const items = focusableElements();
+        if (!items.length) return;
+        const first = items[0];
+        const last = items[items.length - 1];
+        if (event.shiftKey && root.document.activeElement === first) {
+            event.preventDefault();
+            last.focus();
+        } else if (!event.shiftKey && root.document.activeElement === last) {
+            event.preventDefault();
+            first.focus();
+        }
+    }
+
     async function parseResponse(response) {
         const text = await response.text();
         if (!text.trim()) throw new Error('hr_empty_response');
@@ -211,13 +281,14 @@
         const issueCount = agentPriority(agent);
         const selected = state.selectedAgentId === id ? ' is-selected' : '';
         return '<button type="button" class="hr-agent-row' + selected + '" data-agent-id="' +
-            escHtml(id) + '" onclick="HumanResources.selectAgent(this.dataset.agentId)">' +
+            escHtml(id) + '" onclick="HumanResources.selectAgent(this.dataset.agentId)"' +
+            (selected ? ' aria-current="true"' : '') + '>' +
             '<span class="hr-agent-avatar" aria-hidden="true">AI</span>' +
             '<span class="hr-agent-row-copy"><strong>' + escHtml(agentName(agent)) + '</strong>' +
             '<small>' + escHtml(id) + '</small></span>' +
             '<span class="hr-state-chip hr-tone-' + escHtml(statusTone(availability)) + '">' +
-            escHtml(availability) + '</span>' +
-            (issueCount ? '<span class="hr-attention-dot" title="Needs attention">!</span>' : '') +
+            escHtml(semanticLabel(availability)) + '</span>' +
+            (issueCount ? '<span class="hr-attention-dot" title="' + escHtml(tr('hr_needs_attention', 'Needs attention')) + '">!</span>' : '') +
             '</button>';
     }
 
@@ -227,7 +298,7 @@
         const status = String(activity.status || 'unknown');
         const timestamp = String(activity.createdAt || activity.created_at || '');
         return '<li><span class="hr-state-chip hr-tone-' + escHtml(statusTone(status)) + '">' +
-            escHtml(status) + '</span><span>' + escHtml(action) + '</span>' +
+            escHtml(semanticLabel(status)) + '</span><span>' + escHtml(actionLabel(action)) + '</span>' +
             (timestamp ? '<time datetime="' + escHtml(timestamp) + '">' + escHtml(timestamp) + '</time>' : '') +
             '</li>';
     }
@@ -237,7 +308,7 @@
         if (!state.overview && !state.loading) {
             return (state.errors.length ? '<div class="hr-degraded-banner" role="status"><strong>' +
                 escHtml(tr('hr_partial_data', 'Some Human Resources data could not be refreshed.')) +
-                '</strong><span>' + escHtml(state.errors.join(', ')) + '</span></div>' : '') +
+                '</strong><span>' + escHtml(state.errors.map(errorLabel).join(', ')) + '</span></div>' : '') +
                 '<div class="hr-empty-state"><h3>' + escHtml(tr('hr_no_overview', 'No Human Resources overview is available')) +
                 '</h3><p>' + escHtml(tr('hr_no_overview_hint', 'Existing records will appear when the HR repository becomes available.')) + '</p></div>';
         }
@@ -258,12 +329,12 @@
         return '<div class="hr-overview">' +
             (degraded ? '<div class="hr-degraded-banner" role="status"><strong>' +
                 escHtml(tr('hr_partial_data', 'Some Human Resources data could not be refreshed.')) +
-                '</strong><span>' + escHtml(state.errors.join(', ')) + '</span></div>' : '') +
+                '</strong><span>' + escHtml(state.errors.map(errorLabel).join(', ')) + '</span></div>' : '') +
             '<section class="hr-overview-hero hr-tone-' + escHtml(statusTone(hrStatus)) + '">' +
                 '<div><span class="hr-eyebrow">' + escHtml(tr('hr_global_agent', 'Global HR Agent')) + '</span>' +
                 '<h3>' + escHtml(String(hr.name || 'HR')) + '</h3>' +
                 '<p>' + escHtml(tr('hr_overview_date', 'Local reporting date: {{date}}', { date: overview.localDate || '—' })) + '</p></div>' +
-                '<span class="hr-state-chip hr-tone-' + escHtml(statusTone(hrStatus)) + '">' + escHtml(hrStatus) + '</span>' +
+                '<span class="hr-state-chip hr-tone-' + escHtml(statusTone(hrStatus)) + '">' + escHtml(semanticLabel(hrStatus)) + '</span>' +
             '</section>' +
             '<section class="hr-command-panel"><div><h3>' + escHtml(tr('hr_controls', 'HR controls')) + '</h3>' +
                 '<p>' + escHtml(tr('hr_controls_hint', 'Commands run asynchronously; existing records remain available.')) + '</p></div>' +
@@ -274,14 +345,14 @@
                     (cycle.cycleId ? commandButton('retry', tr('hr_retry_cycle', 'Retry failed work'), false) : '') +
                 '</div></section>' +
             (state.commandNotice ? '<div class="hr-command-message success" role="status">' + escHtml(state.commandNotice) + '</div>' : '') +
-            (state.commandError ? '<div class="hr-command-message error" role="alert">' + escHtml(state.commandError) + '</div>' : '') +
+            (state.commandError ? '<div class="hr-command-message error" role="alert">' + escHtml(errorLabel(state.commandError)) + '</div>' : '') +
             '<section><h3>' + escHtml(tr('hr_availability', 'Agent availability')) + '</h3><div class="hr-metric-grid">' +
                 renderBadge(tr('hr_agent_total', 'Total Agents'), Number(overview.agentTotal || state.agents.length || 0), 'neutral') +
-                availability.map(function (item) { return renderBadge(item.name, item.count, statusTone(item.name)); }).join('') +
+                availability.map(function (item) { return renderBadge(semanticLabel(item.name), item.count, statusTone(item.name)); }).join('') +
             '</div></section>' +
             '<section><h3>' + escHtml(tr('hr_daily_status', 'Daily reporting status')) + '</h3>' +
                 (cycles.length ? '<div class="hr-metric-grid">' + cycles.map(function (item) {
-                    return renderBadge(item.status, item.count, statusTone(item.status));
+                    return renderBadge(semanticLabel(item.status), item.count, statusTone(item.status));
                 }).join('') + '</div>' : '<div class="hr-inline-empty">' + escHtml(tr('hr_no_active_cycle', 'No active or recent cycle')) + '</div>') +
             '</section>' +
             '<section><h3>' + escHtml(tr('hr_recent_activity', 'Recent activity')) + '</h3>' +
@@ -306,7 +377,7 @@
         return '<article class="hr-record-card">' +
             '<header><div><strong>' + escHtml(item.localDate || '—') + '</strong>' +
             '<small>' + escHtml(tr('hr_revision', 'Revision {{version}}', { version: item.revision || 1 })) + '</small></div>' +
-            '<span class="hr-state-chip hr-tone-' + escHtml(statusTone(status)) + '">' + escHtml(status) + '</span></header>' +
+            '<span class="hr-state-chip hr-tone-' + escHtml(statusTone(status)) + '">' + escHtml(semanticLabel(status)) + '</span></header>' +
             '<details><summary>' + escHtml(tr('hr_raw_report', 'Raw Agent report')) + '</summary>' +
             '<pre>' + escHtml(item.rawResponse || tr('hr_no_raw_report', 'No raw response')) + '</pre></details>' +
             '<details open><summary>' + escHtml(tr('hr_normalized_report', 'HR normalized report')) + '</summary>' +
@@ -329,9 +400,9 @@
             '<header><div><strong>' + escHtml(item.localDate || '—') + '</strong>' +
             '<small>' + escHtml(tr('hr_assessment_version', 'Assessment v{{version}}', { version: item.version || 1 })) +
             (item.isCurrent ? ' · ' + escHtml(tr('hr_current', 'Current')) : '') + '</small></div>' +
-            '<span class="hr-state-chip hr-tone-' + escHtml(statusTone(item.status)) + '">' + escHtml(item.status || 'unknown') + '</span></header>' +
+            '<span class="hr-state-chip hr-tone-' + escHtml(statusTone(item.status)) + '">' + escHtml(semanticLabel(item.status)) + '</span></header>' +
             '<div class="hr-workload-line"><span>' + escHtml(tr('hr_workload', 'Workload')) + '</span>' +
-            '<strong class="hr-tone-' + escHtml(workloadTone(workload)) + '">' + escHtml(workload) + '</strong></div>' +
+            '<strong class="hr-tone-' + escHtml(workloadTone(workload)) + '">' + escHtml(semanticLabel(workload)) + '</strong></div>' +
             '<p>' + escHtml(item.rationale || tr('hr_no_rationale', 'No rationale recorded')) + '</p>' +
             '<div class="hr-assessment-grid">' +
                 '<div><h5>' + escHtml(tr('hr_contributions', 'Principal contributions')) + '</h5>' + renderTextList(item.principalContributions) + '</div>' +
@@ -351,7 +422,7 @@
         return array(items).map(function (entry) {
             const item = object(entry);
             return '<li><strong>' + escHtml(item.name || item.aiId || '—') + '</strong>' +
-                '<span>' + escHtml(item.status || 'unknown') + ' · ' + escHtml(item.source || 'unknown') + '</span>' +
+                '<span>' + escHtml(semanticLabel(item.status)) + ' · ' + escHtml(item.source || semanticLabel('unknown')) + '</span>' +
                 '<time>' + escHtml(formatTime(item.observedAt)) + '</time></li>';
         }).join('');
     }
@@ -378,7 +449,7 @@
         }
         if (!state.detail) {
             return '<div class="hr-empty-state"><h3>' + escHtml(tr('hr_detail_unavailable', 'Agent detail is unavailable')) + '</h3>' +
-                '<p>' + escHtml(state.detailError || tr('hr_select_agent', 'Select an Agent to inspect Human Resources records.')) + '</p></div>';
+                '<p>' + escHtml(state.detailError ? errorLabel(state.detailError) : tr('hr_select_agent', 'Select an Agent to inspect Human Resources records.')) + '</p></div>';
         }
         const agent = object(state.detail);
         const reports = array(agent.reports);
@@ -386,18 +457,18 @@
         const identities = array(agent.identityHistory);
         const accesses = array(agent.accessHistory);
         return '<div class="hr-detail-view">' +
-            (state.detailError ? '<div class="hr-degraded-banner" role="status">' + escHtml(state.detailError) + '</div>' : '') +
+            (state.detailError ? '<div class="hr-degraded-banner" role="status">' + escHtml(errorLabel(state.detailError)) + '</div>' : '') +
             '<button type="button" class="hr-back-button" onclick="HumanResources.selectAgent(\'\')">' + escHtml(tr('hr_back_overview', '← HR overview')) + '</button>' +
             '<section class="hr-detail-hero"><div><span class="hr-eyebrow">' + escHtml(agent.aiId || '—') + '</span>' +
                 '<h3>' + escHtml(agent.name || agent.aiId || '—') + '</h3><p>' + escHtml(agent.introduction || tr('hr_no_introduction', 'No introduction')) + '</p></div>' +
-                '<div class="hr-detail-statuses"><span class="hr-state-chip hr-tone-' + escHtml(statusTone(agent.status)) + '">' + escHtml(agent.status || 'unknown') + '</span>' +
-                '<span class="hr-state-chip hr-tone-' + escHtml(statusTone(agent.availability)) + '">' + escHtml(agent.availability || 'unknown') + '</span></div></section>' +
+                '<div class="hr-detail-statuses"><span class="hr-state-chip hr-tone-' + escHtml(statusTone(agent.status)) + '">' + escHtml(semanticLabel(agent.status)) + '</span>' +
+                '<span class="hr-state-chip hr-tone-' + escHtml(statusTone(agent.availability)) + '">' + escHtml(semanticLabel(agent.availability)) + '</span></div></section>' +
             '<section class="hr-detail-metadata"><div><span>' + escHtml(tr('hr_agent_kind', 'Agent kind')) + '</span><strong>' + escHtml(agent.agentKind || '—') + '</strong></div>' +
                 '<div><span>' + escHtml(tr('hr_provider', 'Provider')) + '</span><strong>' + escHtml(agent.providerKind || '—') + '</strong></div>' +
                 '<div><span>' + escHtml(tr('hr_introduction_source', 'Introduction source')) + '</span><strong>' + escHtml(object(agent.introductionProvenance).source || '—') + '</strong></div>' +
-                '<div><span>' + escHtml(tr('hr_workflow_state', 'Workflow state')) + '</span><strong>' + escHtml(agent.workflowState || '—') + '</strong></div>' +
-                '<div><span>' + escHtml(tr('hr_skill_readiness', 'Skill readiness')) + '</span><strong>' + escHtml(agent.skillReadiness || '—') + '</strong></div>' +
-                '<div><span>' + escHtml(tr('hr_grant_readiness', 'Grant readiness')) + '</span><strong>' + escHtml(agent.grantReadiness || '—') + '</strong></div></section>' +
+                '<div><span>' + escHtml(tr('hr_workflow_state', 'Workflow state')) + '</span><strong>' + escHtml(semanticLabel(agent.workflowState)) + '</strong></div>' +
+                '<div><span>' + escHtml(tr('hr_skill_readiness', 'Skill readiness')) + '</span><strong>' + escHtml(semanticLabel(agent.skillReadiness)) + '</strong></div>' +
+                '<div><span>' + escHtml(tr('hr_grant_readiness', 'Grant readiness')) + '</span><strong>' + escHtml(semanticLabel(agent.grantReadiness)) + '</strong></div></section>' +
             '<section class="hr-detail-section"><h4>' + escHtml(tr('hr_identity_history', 'Identity and provenance')) + '</h4>' +
                 (identities.length ? '<ul class="hr-history-list">' + renderIdentityHistory(identities) + '</ul>' : '<div class="hr-inline-empty">—</div>') + '</section>' +
             '<section class="hr-detail-section"><h4>' + escHtml(tr('hr_daily_reports', 'Daily reports')) + '</h4>' +
@@ -432,9 +503,15 @@
         const status = root.document.getElementById('human-resources-status');
         if (status) {
             const value = String(object(state.overview).hr && object(state.overview.hr).status || (state.loading ? 'loading' : 'unavailable'));
-            status.textContent = value;
+            status.textContent = semanticLabel(value);
             status.className = 'hr-header-status hr-tone-' + statusTone(value);
         }
+        element.setAttribute(
+            'aria-busy',
+            state.loading || state.detailLoading || Boolean(state.commandBusy) ? 'true' : 'false'
+        );
+        const closeButton = root.document.getElementById('human-resources-close');
+        if (closeButton) closeButton.setAttribute('aria-label', tr('hr_close', 'Close Human Resources'));
     }
 
     async function loadOverview(scrollSnapshot) {
@@ -473,11 +550,30 @@
         return null;
     }
 
+    function actionLabel(action) {
+        const fallbacks = {
+            assessment: 'Assessment',
+            pause: 'Pause HR',
+            resume: 'Resume HR',
+            run: 'Run cycle',
+            close: 'Close cycle',
+            directory: 'Directory',
+            lifecycle: 'HR lifecycle',
+            query: 'Query',
+            report: 'Daily report',
+            retry: 'Retry failed work',
+            skill: 'Skill distribution',
+        };
+        return ACTION_NAMES.includes(action)
+            ? tr('hr_action_' + action, fallbacks[action] || action)
+            : tr('hr_action_activity', 'HR activity');
+    }
+
     async function runCommand(action) {
         if (state.commandBusy) return false;
         const spec = commandSpec(action);
         if (!spec) return false;
-        const confirmation = tr('hr_confirm_command', 'Confirm Human Resources action: {{action}}?', { action: action });
+        const confirmation = tr('hr_confirm_command', 'Confirm Human Resources action: {{action}}?', { action: actionLabel(action) });
         if (typeof root.confirm === 'function' && !root.confirm(confirmation)) return false;
         const scrollSnapshot = captureScroll();
         state.commandBusy = action;
@@ -491,7 +587,7 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(spec.body),
             });
-            state.commandNotice = tr('hr_command_accepted', 'Command accepted: {{action}}', { action: action });
+            state.commandNotice = tr('hr_command_accepted', 'Command accepted: {{action}}', { action: actionLabel(action) });
             await loadOverview(scrollSnapshot);
             return true;
         } catch (error) {
@@ -507,11 +603,12 @@
     function open() {
         const element = modal();
         if (!element) return false;
+        state.returnFocus = root.document ? root.document.activeElement : null;
         state.open = true;
         element.classList.remove('hidden');
         loadOverview();
-        const target = detail();
-        if (target && typeof target.focus === 'function') target.focus();
+        const closeButton = root.document.getElementById('human-resources-close');
+        if (closeButton && typeof closeButton.focus === 'function') closeButton.focus();
         return true;
     }
 
@@ -522,6 +619,9 @@
         state.requestSequence += 1;
         state.detailSequence += 1;
         element.classList.add('hidden');
+        const target = state.returnFocus;
+        state.returnFocus = null;
+        if (target && typeof target.focus === 'function') target.focus();
         return true;
     }
 
@@ -568,6 +668,10 @@
                 state.detailLoading = false;
                 state.detailPaging = '';
                 render();
+                if (!pageKind) {
+                    const target = detail();
+                    if (target && typeof target.focus === 'function') target.focus();
+                }
             }
         }
     }
@@ -623,11 +727,21 @@
             mergeByKey,
             prettyJson,
             commandSpec,
+            semanticLabel,
+            semanticStates: SEMANTIC_STATES.slice(),
+            errorLabel,
+            errorCodes: ERROR_CODES.slice(),
+            actionNames: ACTION_NAMES.slice(),
+            handleKeydown,
         },
     };
     root.HumanResources = api;
     root.openHumanResources = open;
     root.closeHumanResources = close;
+
+    if (root.document && typeof root.document.addEventListener === 'function') {
+        root.document.addEventListener('keydown', handleKeydown);
+    }
 
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);
