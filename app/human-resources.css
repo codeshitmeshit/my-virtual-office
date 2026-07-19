@@ -433,6 +433,14 @@
     font-size: 8px;
 }
 
+.hr-activity-detail {
+    grid-column: 2 / -1;
+    color: #ff9ea8;
+    font-size: 9px;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+}
+
 .hr-degraded-banner,
 .hr-empty-state,
 .hr-inline-empty {

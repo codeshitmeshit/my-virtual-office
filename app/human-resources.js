@@ -107,6 +107,42 @@
         return tr('hr_error_' + normalized.replace(/^hr_/, ''), 'Human Resources request failed');
     }
 
+    function readableReason(value) {
+        const raw = String(value == null ? '' : value).trim();
+        if (!raw) return '';
+        const normalized = raw.toLowerCase().replace(/[^a-z0-9]+/g, '_');
+        if (ERROR_CODES.includes(normalized)) return errorLabel(normalized);
+        if (SEMANTIC_STATES.includes(normalized)) return semanticLabel(normalized);
+        return raw;
+    }
+
+    function activityFailureReason(item) {
+        const activity = object(item);
+        const status = String(activity.status || '').toLowerCase();
+        const context = object(activity.context || activity.metadata);
+        const candidates = [
+            activity.error,
+            activity.lastError,
+            activity.code,
+            activity.reason,
+            context.error,
+            context.lastError,
+            context.code,
+            context.reason,
+        ];
+        for (const candidate of candidates) {
+            const label = readableReason(candidate);
+            if (label) return label;
+        }
+        if (statusTone(status) === 'danger') {
+            if (Number(context.failed || 0) > 0) {
+                return tr('hr_activity_failed_count', '{{count}} failed', { count: Number(context.failed) });
+            }
+            return readableReason(activity.message);
+        }
+        return '';
+    }
+
     function workloadTone(workload) {
         const value = String(workload || 'insufficient_information');
         if (value === 'overloaded' || value === 'high') return 'warning';
@@ -322,9 +358,11 @@
         const action = String(activity.action || 'activity');
         const status = String(activity.status || 'unknown');
         const timestamp = String(activity.createdAt || activity.created_at || '');
+        const reason = activityFailureReason(activity);
         return '<li><span class="hr-state-chip hr-tone-' + escHtml(statusTone(status)) + '">' +
             escHtml(semanticLabel(status)) + '</span><span>' + escHtml(actionLabel(action)) + '</span>' +
             (timestamp ? '<time datetime="' + escHtml(timestamp) + '">' + escHtml(timestamp) + '</time>' : '') +
+            (reason ? '<small class="hr-activity-detail">' + escHtml(tr('hr_activity_failure_reason', 'Reason: {{reason}}', { reason })) + '</small>' : '') +
             '</li>';
     }
 
@@ -899,6 +937,8 @@
             semanticStates: SEMANTIC_STATES.slice(),
             errorLabel,
             errorCodes: ERROR_CODES.slice(),
+            readableReason,
+            activityFailureReason,
             actionNames: ACTION_NAMES.slice(),
             handleKeydown,
         },

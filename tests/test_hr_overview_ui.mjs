@@ -62,6 +62,36 @@ assert.deepEqual(
   ],
 );
 
+globalThis.i18n = {
+  t(key, params = {}) {
+    const value = {
+      hr_error_information_completion_unavailable: 'Agent information completion is unavailable.',
+      hr_activity_failed_count: '{{count}} failed',
+    }[key];
+    if (!value) return key;
+    return Object.entries(params).reduce(
+      (text, [name, replacement]) => text.replaceAll('{{' + name + '}}', replacement),
+      value,
+    );
+  },
+};
+assert.equal(
+  helpers.activityFailureReason({ status: 'failed', error: 'hr_information_completion_unavailable' }),
+  'Agent information completion is unavailable.',
+);
+assert.equal(
+  helpers.activityFailureReason({ status: 'failed', context: { error: 'Provider timed out' } }),
+  'Provider timed out',
+);
+assert.equal(
+  helpers.activityFailureReason({ status: 'failed', context: { failed: 2 } }),
+  '2 failed',
+);
+assert.equal(
+  helpers.activityFailureReason({ status: 'complete', error: 'ignored' }),
+  'ignored',
+);
+
 function response(payload, ok = true) {
   return {
     ok,
