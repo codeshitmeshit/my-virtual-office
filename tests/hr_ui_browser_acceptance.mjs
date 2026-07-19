@@ -18,6 +18,7 @@ const fixture = JSON.parse(fs.readFileSync('tests/fixtures/hr-browser-acceptance
 const locale = JSON.parse(fs.readFileSync('app/locales/en.json', 'utf8'));
 const javascript = fs.readFileSync('app/human-resources.js', 'utf8');
 const css = fs.readFileSync('app/human-resources.css', 'utf8');
+const screenshotDir = process.env.HR_ACCEPTANCE_SCREENSHOT_DIR || '';
 const page = await createCdpPage('about:blank');
 const ws = new WebSocket(page.webSocketDebuggerUrl);
 await new Promise((resolve, reject) => {
@@ -70,6 +71,15 @@ async function waitFor(expression, timeoutMs = 10000) {
   throw new Error(`Timed out waiting for ${expression}`);
 }
 
+async function captureScreenshot(name) {
+  if (!screenshotDir) return '';
+  fs.mkdirSync(screenshotDir, { recursive: true });
+  const result = await send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true });
+  const path = `${screenshotDir}/${name}.png`;
+  fs.writeFileSync(path, Buffer.from(result.data, 'base64'));
+  return path;
+}
+
 try {
   await send('Page.enable');
   await send('Runtime.enable');
@@ -101,7 +111,7 @@ try {
     document.head.appendChild(style);
     const fixture = ${JSON.stringify(fixture)};
     const locale = ${JSON.stringify(locale)};
-    window.__hrFixture = { data: fixture, failExport: false, failDetail: false, requests: [] };
+    window.__hrFixture = { data: fixture, denyManagement: false, failExport: false, failDetail: false, requests: [] };
     window.confirm = () => true;
     window.i18n = {
       t(key, params) {
@@ -119,6 +129,9 @@ try {
           if (url.endsWith('/resume')) fixture.overview.hr.status = 'ready';
           return new Response(JSON.stringify({ ok: true, command: { accepted: true } }), { status: 202 });
         }
+        if (window.__hrFixture.denyManagement) {
+          return new Response(JSON.stringify({ ok: false, code: 'management_token_required' }), { status: 403 });
+        }
         if (url.includes('/overview')) return new Response(JSON.stringify(fixture.overview), { status: 200 });
         if (url.includes('/export?table=agents')) {
           if (window.__hrFixture.failExport) return new Response(JSON.stringify({ ok: false, code: 'hr_repository_unavailable' }), { status: 503 });
@@ -126,7 +139,7 @@ try {
         }
         if (url.includes('/agents/agent-1')) {
           if (window.__hrFixture.failDetail) return new Response(JSON.stringify({ ok: false, code: 'hr_repository_unavailable' }), { status: 503 });
-          const parsed = new URL(url, location.href);
+          const parsed = new URL(url, 'http://vo.test');
           if (parsed.searchParams.has('reportCursor')) {
             return new Response(JSON.stringify({ ok: true, agent: fixture.reportPage }), { status: 200 });
           }
@@ -154,13 +167,19 @@ try {
   }))()`);
   assert.deepEqual(overview, { modalOpen: true, roster: 2, dailyStatus: true, activity: true });
 
-  await evaluate("document.querySelector('[data-agent-id=\"agent-1\"]').click()");
-  await waitFor("document.querySelector('.hr-detail-view')?.innerText.includes('RAW FIXTURE REPORT ONE')");
+  const clickState = await evaluate(`(() => {
+    document.querySelector('[data-agent-id="agent-1"]').click();
+    return { selectedAgentId: HumanResources.state.selectedAgentId };
+  })()`);
+  assert.deepEqual(clickState, { selectedAgentId: 'agent-1' });
+  await waitFor("HumanResources.state.detail || HumanResources.state.detailError");
+  assert.equal(await evaluate("HumanResources.state.detailError"), '');
+  assert.equal(await evaluate("document.querySelector('.hr-detail-view')?.textContent.includes('RAW FIXTURE REPORT ONE')"), true);
   const detail = await evaluate(`(() => ({
     reportCards: document.querySelectorAll('.hr-record-card:not(.hr-assessment-card)').length,
     assessmentCards: document.querySelectorAll('.hr-assessment-card').length,
     normalizedVisible: document.body.innerText.includes('Completed fixture research'),
-    evidenceVisible: document.body.innerText.includes('Daily report evidence'),
+    evidenceVisible: document.body.textContent.includes('Daily report evidence'),
     accessRows: document.querySelectorAll('.hr-detail-section .hr-history-list li').length,
   }))()`);
   assert.equal(detail.reportCards, 1);
@@ -170,7 +189,7 @@ try {
   assert.ok(detail.accessRows >= 1);
 
   await evaluate("HumanResources.loadMore('reports')");
-  await waitFor("document.body.innerText.includes('RAW FIXTURE REPORT TWO')");
+  await waitFor("document.body.textContent.includes('RAW FIXTURE REPORT TWO')");
   await evaluate("HumanResources.loadMore('access')");
   await waitFor("document.body.innerText.includes('Review Agent')");
   assert.equal(await evaluate("document.querySelectorAll('.hr-record-card:not(.hr-assessment-card)').length"), 2);
@@ -182,8 +201,19 @@ try {
   assert.equal(await evaluate("document.getElementById('human-resources-status').textContent"), 'Paused');
   await evaluate("HumanResources.runCommand('resume')");
   await waitFor("HumanResources.state.overview.hr.status === 'ready'");
+  const happyScreenshot = await captureScreenshot('hr-happy-path');
 
-  await evaluate("window.__hrFixture.failExport = true; HumanResources.reload()");
+  await evaluate("window.__hrFixture.denyManagement = true; HumanResources.reload()");
+  await waitFor("HumanResources.state.errors.includes('management_token_required')");
+  const permission = await evaluate(`(() => ({
+    rosterRetained: document.querySelectorAll('.hr-agent-row').length,
+    overviewRetained: Boolean(document.querySelector('.hr-overview')),
+    denied: HumanResources.state.errors.every(code => code === 'management_token_required'),
+  }))()`);
+  assert.deepEqual(permission, { rosterRetained: 2, overviewRetained: true, denied: true });
+  const permissionScreenshot = await captureScreenshot('hr-permission-denied');
+
+  await evaluate("window.__hrFixture.denyManagement = false; window.__hrFixture.failExport = true; HumanResources.reload()");
   await waitFor("document.querySelector('.hr-degraded-banner')");
   const degraded = await evaluate(`(() => ({
     rosterRetained: document.querySelectorAll('.hr-agent-row').length,
@@ -193,12 +223,14 @@ try {
   assert.equal(degraded.rosterRetained, 2);
   assert.equal(degraded.overviewRetained, true);
   assert.match(degraded.errorText, /repository is unavailable/i);
+  const partialFailureScreenshot = await captureScreenshot('hr-partial-failure');
 
   await evaluate("window.__hrFixture.failExport = false; HumanResources.selectAgent('agent-1')");
-  await waitFor("document.body.innerText.includes('RAW FIXTURE REPORT ONE')");
+  await waitFor("document.body.textContent.includes('RAW FIXTURE REPORT ONE')");
   await evaluate("window.__hrFixture.failDetail = true; HumanResources.state.detail.accessNextCursor = 'retry-access'; HumanResources.loadMore('access')");
   await waitFor("document.querySelector('.hr-degraded-banner')");
   assert.equal(await evaluate("document.body.innerText.includes('Builder Agent')"), true, 'valid detail remains browsable after paging failure');
+  const degradedReadScreenshot = await captureScreenshot('hr-degraded-read');
 
   const summary = await evaluate(`(() => ({
     requests: window.__hrFixture.requests.length,
@@ -207,8 +239,16 @@ try {
     reportPageCalls: window.__hrFixture.requests.filter(item => item.url.includes('reportCursor=')).length,
     accessPageCalls: window.__hrFixture.requests.filter(item => item.url.includes('accessCursor=')).length,
   }))()`);
-  assert.deepEqual(summary, { requests: 15, pauseCalls: 1, resumeCalls: 1, reportPageCalls: 1, accessPageCalls: 2 });
-  console.log(JSON.stringify({ ok: true, overview, detail, degraded, summary }, null, 2));
+  assert.deepEqual(summary, { requests: 17, pauseCalls: 1, resumeCalls: 1, reportPageCalls: 1, accessPageCalls: 2 });
+  console.log(JSON.stringify({
+    ok: true,
+    overview,
+    detail,
+    permission,
+    degraded,
+    summary,
+    screenshots: [happyScreenshot, permissionScreenshot, partialFailureScreenshot, degradedReadScreenshot].filter(Boolean),
+  }, null, 2));
 } finally {
   closeCdpPage(page);
   ws.close();
