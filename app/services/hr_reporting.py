@@ -205,6 +205,55 @@ class HRReportingService:
             cursor=cursor,
         )
 
+    def close_cycle(
+        self,
+        cycle_id: str,
+        *,
+        closed_at: datetime | None = None,
+    ) -> ReportingCycleResult:
+        effective = self._now() if closed_at is None else closed_at
+        if (
+            not isinstance(effective, datetime)
+            or effective.tzinfo is None
+            or effective.utcoffset() is None
+        ):
+            raise HRReportingValidationError("closed_at must be timezone-aware")
+        cycle, reports = self._repository.close_daily_cycle(
+            cycle_id,
+            closed_at=effective.astimezone(timezone.utc).isoformat(),
+        )
+        request_items = []
+        cursor = None
+        while True:
+            page = self._repository.list_report_requests(cycle.id, limit=100, cursor=cursor)
+            request_items.extend(page.items)
+            if page.next_cursor is None:
+                break
+            cursor = page.next_cursor
+        return ReportingCycleResult(cycle, tuple(request_items), reports)
+
+    def submit_response(
+        self,
+        *,
+        ai_id: str,
+        local_date: str,
+        raw_response: str,
+        submitted_at: datetime | None = None,
+    ) -> DailyReportRecord:
+        effective = self._now() if submitted_at is None else submitted_at
+        if (
+            not isinstance(effective, datetime)
+            or effective.tzinfo is None
+            or effective.utcoffset() is None
+        ):
+            raise HRReportingValidationError("submitted_at must be timezone-aware")
+        return self._repository.submit_daily_report_response(
+            ai_id=ai_id,
+            local_date=local_date,
+            raw_response=raw_response,
+            submitted_at=effective.astimezone(timezone.utc).isoformat(),
+        )
+
 
 class HRDailyReportCollector:
     """Performs visible, idempotent HR-to-Agent report conversations."""
