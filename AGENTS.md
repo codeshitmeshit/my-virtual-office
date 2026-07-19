@@ -1,5 +1,9 @@
 # Project Agent Instructions
 
+## Highest-Priority Constraint
+
+- This constraint takes precedence over all other implementation preferences in this file: for every new requirement, default to placing the implementation in one or more new, focused files. Do not append new logic to existing large files unless the change is both minimal and unquestionably part of that file's existing responsibility.
+
 ## Workflow Constraints
 
 - Do not invoke or use the `hammer` skill or any `hammer-*` skill in this repository.
