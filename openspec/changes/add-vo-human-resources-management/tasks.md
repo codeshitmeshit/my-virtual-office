@@ -9,7 +9,7 @@
 
 - [x] 2.1 Implement `app/services/system_agent_roles.py` with immutable role definitions, stable identity matching, assignable/deletable/meeting policies, role lookup, and focused validation/policy tests for archive manager, HR, unknown roles, and conflicting definitions.
 - [x] 2.2 Implement `app/services/system_agent_profiles.py` with generic versioned template parsing, required-file validation, token rendering, safe workspace resolution, symlink/path rejection, atomic writes, update detection, and exhaustive filesystem unit tests.
-- [ ] 2.3 Implement the state and port contracts in `app/services/system_agent_lifecycle.py`, including normalized lifecycle states, bounded activity, injected provider/state/presence/clock/ID collaborators, and static tests proving the module does not import `server.py` or HTTP transport.
+- [x] 2.3 Implement the state and port contracts in `app/services/system_agent_lifecycle.py`, including normalized lifecycle states, bounded activity, injected provider/state/presence/clock/ID collaborators, and static tests proving the module does not import `server.py` or HTTP transport.
 - [ ] 2.4 Implement idempotent lifecycle reconciliation for existing, missing, partial, duplicate, stale, failed, and restarted provider Agent states, with deterministic tests for retries, concurrent calls, provider exceptions, timeouts, and partial Profile/skill success.
 - [ ] 2.5 Implement lifecycle pause, resume, public-state projection, metadata projection, and degraded-read semantics with tests for state transitions, automatic-work skip policy, resume reconciliation, last-error handling, and bounded activity.
 
