@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from .system_agent_lifecycle import (
+    CallbackPresencePort,
     LifecycleStatus,
     ProviderAgent,
     SystemAgentLifecycleService,
@@ -398,14 +399,6 @@ class ArchiveManagerProviderPort:
             "ready": False,
             "status": "invalid managed-skill response",
         }
-
-
-class CallbackPresencePort:
-    def __init__(self, callback: Callable[[str, str, str], None]):
-        self._callback = callback
-
-    def set_presence(self, agent_id: str, state: str, reason: str = "") -> None:
-        self._callback(agent_id, state, reason)
 
 
 class ArchiveManagerLifecycleAdapter:

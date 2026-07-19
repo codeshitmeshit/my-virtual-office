@@ -63,6 +63,8 @@ from services import meeting_action_items as meeting_action_items_service
 from services import meeting_notifications as meeting_notifications_service
 from services import meeting_callbacks as meeting_callbacks_service
 from services import archive_manager_lifecycle as archive_manager_lifecycle_service
+from services import hr_bootstrap as hr_bootstrap_service
+from services import hr_lifecycle as hr_lifecycle_service
 from services import system_agent_lifecycle as system_agent_lifecycle_service
 from services import system_agent_profiles as system_agent_profiles_service
 from services import system_agent_roles as system_agent_roles_service
@@ -21560,7 +21562,7 @@ def _archive_manager_shared_adapter():
         sync_managed_skills=_sync_openclaw_communication_skill,
         default_model=_default_openclaw_agent_model,
     )
-    presence = archive_manager_lifecycle_service.CallbackPresencePort(
+    presence = system_agent_lifecycle_service.CallbackPresencePort(
         lambda agent_id, state, reason: gateway_presence.set_manual_override(
             agent_id, state, reason,
         )
@@ -21581,6 +21583,68 @@ def _archive_manager_shared_adapter():
         lifecycle,
         repository,
     )
+
+
+def _hr_shared_list_agents(force_refresh=False):
+    global _discovered_at
+    if force_refresh:
+        _discovered_at = 0
+    refresh_agent_maps()
+    return list(get_roster())
+
+
+def _hr_shared_adapter():
+    profile_port = hr_lifecycle_service.HRProfilePort(
+        os.path.join(os.path.dirname(__file__), "hr-profile.md"),
+        WORKSPACE_BASE,
+    )
+    repository = hr_lifecycle_service.HRStateRepository(
+        STATUS_DIR,
+        clock=lambda: datetime.now(timezone.utc),
+    )
+    provider = hr_lifecycle_service.HRProviderPort(
+        list_agents=_hr_shared_list_agents,
+        create_agent=lambda params, timeout: _gateway_rpc_call(
+            "agents.create", dict(params), timeout=timeout,
+        ),
+        profile_port=profile_port,
+        sync_managed_skills=_sync_openclaw_communication_skill,
+        default_model=_default_openclaw_agent_model,
+    )
+    presence = system_agent_lifecycle_service.CallbackPresencePort(
+        lambda agent_id, state, reason: gateway_presence.set_manual_override(
+            agent_id, state, reason,
+        )
+    )
+    lifecycle = system_agent_lifecycle_service.SystemAgentLifecycleService(
+        system_agent_lifecycle_service.SystemAgentPorts(
+            provider=provider,
+            profiles=profile_port,
+            state=repository,
+            presence=presence,
+            clock=lambda: datetime.now(timezone.utc),
+            new_id=_proj_uuid,
+        ),
+        activity_limit=hr_lifecycle_service.HR_ACTIVITY_LIMIT,
+    )
+    return hr_lifecycle_service.HRLifecycleAdapter(lifecycle, repository)
+
+
+def _hr_profile_check_on_startup(delay_seconds=4):
+    bootstrap = hr_bootstrap_service.HRBootstrap(_hr_shared_adapter)
+    if not hr_bootstrap_service.is_hr_enabled():
+        return bootstrap.reconcile_startup()
+    if delay_seconds:
+        time.sleep(max(0, delay_seconds))
+    result = bootstrap.reconcile_startup()
+    if result.error:
+        print(f"[HR] startup reconciliation failed: {result.error}")
+    elif result.state:
+        print(
+            f"[HR] profile ready: {result.state.get('agentId') or 'hr'} "
+            f"version={result.state.get('profileVersion') or 'unknown'}"
+        )
+    return result
 
 
 
@@ -36018,6 +36082,14 @@ if __name__ == "__main__":
     archive_manager_thread.start()
     archive_inspection_thread = threading.Thread(target=_archive_manager_startup_inspection, daemon=True, name="archive-manager-startup-inspection")
     archive_inspection_thread.start()
+
+    if hr_bootstrap_service.is_hr_enabled():
+        hr_thread = threading.Thread(
+            target=_hr_profile_check_on_startup,
+            daemon=True,
+            name="hr-profile-check",
+        )
+        hr_thread.start()
 
     feishu_status = _start_feishu_long_connection()
     print(f"📣 Feishu long connection: {feishu_status.get('status')}")

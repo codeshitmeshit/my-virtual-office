@@ -350,6 +350,16 @@ class SystemAgentPresencePort(Protocol):
     def set_presence(self, agent_id: str, state: str, reason: str = "") -> None: ...
 
 
+class CallbackPresencePort:
+    """Adapt an injected callback to the shared presence-port contract."""
+
+    def __init__(self, callback: Callable[[str, str, str], None]):
+        self._callback = callback
+
+    def set_presence(self, agent_id: str, state: str, reason: str = "") -> None:
+        self._callback(agent_id, state, reason)
+
+
 @dataclass(frozen=True, slots=True)
 class SystemAgentPorts:
     provider: SystemAgentProviderPort
