@@ -12,7 +12,9 @@ if APP_DIR not in sys.path:
     sys.path.insert(0, APP_DIR)
 
 from services import project_commands
+from services.system_agent_policy import assignment_error
 from services.project_repository import ProjectRepository
+from services.system_agent_roles import resolve_system_agent_role
 
 
 class MemoryStore:
@@ -43,7 +45,11 @@ def dependencies():
         "new_id": lambda: next(ids),
         "now": lambda: "now",
         "log_activity": log,
-        "is_archive_manager": lambda value: value == "archive-manager",
+        "system_agent_assignment_error": lambda value, scope: (
+            error.as_payload()
+            if (error := assignment_error(resolve_system_agent_role(value), scope=scope))
+            else None
+        ),
     }
 
 
@@ -80,6 +86,10 @@ def test_command_validation_and_missing_resources_are_compatible():
     _, repo, common = dependencies()
     assert create_project(repo, common, title="").result.status == 400
     assert create_project(repo, common, defaultExecutorAgentId="archive-manager").result.payload["code"] == "archive_manager_not_assignable"
+    hr_project = create_project(repo, common, defaultReviewerAgentId="hr")
+    assert hr_project.result.status == 400
+    assert hr_project.result.payload["code"] == "system_agent_not_assignable"
+    assert hr_project.result.payload["systemRole"] == "hr"
     assert project_commands.create_task("missing", {"title": "Task"}, repository=repo, **common).result.status == 404
     assert project_commands.add_task_comment("missing", "task", {"text": "x"}, repository=repo, log_activity=common["log_activity"], new_id=common["new_id"], now=common["now"]).result.status == 404
 
@@ -103,7 +113,7 @@ def test_update_and_reorder_enforce_execution_column_gates():
     repo.update(project["id"], lambda value: next(item for item in value["tasks"] if item["id"] == task["id"]).update({"executionState": "executing"}))
     update = project_commands.update_task(
         project["id"], task["id"], {"columnId": project["columns"][-1]["id"]},
-        repository=repo, is_archive_manager=common["is_archive_manager"], execution_enabled=lambda value: value.get("projectExecutionEnabled") is True,
+        repository=repo, system_agent_assignment_error=common["system_agent_assignment_error"], execution_enabled=lambda value: value.get("projectExecutionEnabled") is True,
         column_locked=lambda value: value.get("executionState") == "executing", checklist_complete=lambda value: False,
         can_complete_after_checklist=lambda value: False, mark_done=lambda *args: {"ok": False}, log_activity=common["log_activity"],
         now=common["now"], is_on_time=lambda value: False,
@@ -127,7 +137,7 @@ def test_project_update_cannot_forge_managed_workspace_metadata():
     project = create_project(repo, common).result.payload["project"]
     outcome = project_commands.update_project(
         project["id"], {"workspaceManagedBy": "system", "workspaceCreatedAt": "forged", "workspacePath": "/tmp/victim"},
-        repository=repo, is_archive_manager=common["is_archive_manager"], execution_enabled=lambda value: False,
+        repository=repo, system_agent_assignment_error=common["system_agent_assignment_error"], execution_enabled=lambda value: False,
         validate_workspace=lambda value: {"ok": True, "path": value, "kind": "directory"}, log_activity=common["log_activity"], now=common["now"],
     )
     assert outcome.result.status == 200
@@ -141,3 +151,73 @@ def test_invalid_project_ids_keep_not_found_contract():
     for project_id in (" ", "../escape", "bad\x01id", "x" * 257):
         outcome = project_commands.create_task(project_id, {"title": "Task"}, repository=repo, **common)
         assert outcome.result.status == 404
+
+
+def test_hr_assignment_is_rejected_before_any_project_or_task_mutation():
+    store, repo, common = dependencies()
+    before = copy.deepcopy(store.data)
+    rejected_project = create_project(repo, common, defaultExecutorAgentId="HR")
+    assert rejected_project.result.payload["code"] == "system_agent_not_assignable"
+    assert store.data == before
+
+    project = create_project(repo, common).result.payload["project"]
+    rejected_task = project_commands.create_task(
+        project["id"],
+        {"title": "HR task", "assignee": "hr"},
+        repository=repo,
+        **common,
+    )
+    assert rejected_task.result.payload["code"] == "system_agent_not_assignable"
+    assert repo.get(project["id"])["tasks"] == []
+
+
+def test_hr_assignment_is_rejected_by_update_and_reorder_call_sites():
+    _, repo, common = dependencies()
+    project = create_project(repo, common).result.payload["project"]
+    task = project_commands.create_task(
+        project["id"], {"title": "Task"}, repository=repo, **common,
+    ).result.payload["task"]
+
+    project_update = project_commands.update_project(
+        project["id"],
+        {"defaultReviewerAgentId": "hr"},
+        repository=repo,
+        system_agent_assignment_error=common["system_agent_assignment_error"],
+        execution_enabled=lambda _value: False,
+        validate_workspace=lambda value: {"ok": True, "path": value},
+        log_activity=common["log_activity"],
+        now=common["now"],
+    )
+    task_update = project_commands.update_task(
+        project["id"],
+        task["id"],
+        {"executorAgentId": "HR"},
+        repository=repo,
+        system_agent_assignment_error=common["system_agent_assignment_error"],
+        execution_enabled=lambda _value: False,
+        column_locked=lambda _value: False,
+        checklist_complete=lambda _value: False,
+        can_complete_after_checklist=lambda _value: False,
+        mark_done=lambda *args: {"ok": False},
+        log_activity=common["log_activity"],
+        now=common["now"],
+        is_on_time=lambda _value: False,
+        score_values={"task_completed": 1, "on_time": 0, "checklist": 0},
+    )
+    reorder = project_commands.reorder_tasks(
+        project["id"],
+        {"updates": [{"id": task["id"], "reviewerAgentId": "hr", "order": 9}]},
+        repository=repo,
+        system_agent_assignment_error=common["system_agent_assignment_error"],
+        execution_enabled=lambda _value: False,
+        column_locked=lambda _value: False,
+        now=common["now"],
+    )
+
+    assert project_update.result.payload["code"] == "system_agent_not_assignable"
+    assert task_update.result.payload["code"] == "system_agent_not_assignable"
+    assert reorder.result.payload["code"] == "system_agent_not_assignable"
+    stored = repo.get(project["id"])
+    assert stored.get("defaultReviewerAgentId") is None
+    assert stored["tasks"][0].get("executorAgentId") is None
+    assert stored["tasks"][0]["order"] == task["order"]

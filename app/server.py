@@ -67,6 +67,7 @@ from services import hr_bootstrap as hr_bootstrap_service
 from services import hr_lifecycle as hr_lifecycle_service
 from services import system_agent_lifecycle as system_agent_lifecycle_service
 from services import system_agent_profiles as system_agent_profiles_service
+from services import system_agent_policy as system_agent_policy_service
 from services import system_agent_roles as system_agent_roles_service
 from services.provider_events import ProviderEventJournal, canonical_event_name, sanitize_payload
 from services.provider_approvals import ProviderApprovalService, TrustedApprovalContext
@@ -17483,7 +17484,7 @@ def _score_valid_agent_key(agent_key):
     key = str(agent_key or "").strip()
     if not key or key in ("null", "None", "unassigned"):
         return ""
-    if _is_archive_manager_agent(key):
+    if _is_unassignable_system_agent(key):
         return ""
     return key
 
@@ -18847,7 +18848,7 @@ def _handle_project_create(body):
     """POST /api/projects — create a new project."""
     outcome = project_command_service.create_project(
         body, repository=_PROJECT_REPOSITORY, prepare_workspace=_project_prepare_workspace,
-        is_archive_manager=_is_archive_manager_agent, archive_maintenance_default=_archive_project_default_maintenance_enabled,
+        system_agent_assignment_error=_system_agent_assignment_error, archive_maintenance_default=_archive_project_default_maintenance_enabled,
         log_activity=_log_activity, new_id=_proj_uuid, now=_proj_now,
     )
     return {**outcome.result.payload, **({"_status": outcome.result.status} if outcome.result.status != 200 else {})}
@@ -18887,7 +18888,7 @@ def _project_template_prepare_workspace(configuration, project_id, idempotency_k
 
 def _handle_task_create(project_id, body):
     outcome = project_command_service.create_task(
-        project_id, body, repository=_PROJECT_REPOSITORY, is_archive_manager=_is_archive_manager_agent,
+        project_id, body, repository=_PROJECT_REPOSITORY, system_agent_assignment_error=_system_agent_assignment_error,
         log_activity=_log_activity, new_id=_proj_uuid, now=_proj_now,
     )
     if outcome.result.status == 200 and outcome.post_commit:
@@ -18969,13 +18970,18 @@ def _handle_project_from_template(body):
                 "updatedAt": now,
                 "completedAt": None,
             })
+    for field in ("defaultExecutorAgentId", "defaultReviewerAgentId"):
+        if rejected := _system_agent_assignment_error(body.get(field), "template"):
+            return rejected
+    for task in new_tasks:
+        for field in ("assignee", "executorAgentId", "reviewerAgentId"):
+            if rejected := _system_agent_assignment_error(task.get(field), "task"):
+                return rejected
+
     created_by = (body.get("createdBy") or "user").strip()
     workspace = _project_prepare_workspace(title, body, now)
     if not workspace.get("ok"):
         return workspace
-    for field in ("defaultExecutorAgentId", "defaultReviewerAgentId"):
-        if _is_archive_manager_agent(body.get(field)):
-            return {"error": "档案管理员不能作为普通项目默认执行或审查 AI", "code": "archive_manager_not_assignable", "_status": 400}
     project = {
         "id": _proj_uuid(),
         "title": title,
@@ -19070,7 +19076,7 @@ def _handle_save_as_template(body):
 
 def _handle_project_update(project_id, body):
     outcome = project_command_service.update_project(
-        project_id, body, repository=_PROJECT_REPOSITORY, is_archive_manager=_is_archive_manager_agent,
+        project_id, body, repository=_PROJECT_REPOSITORY, system_agent_assignment_error=_system_agent_assignment_error,
         execution_enabled=_project_execution_enabled, validate_workspace=_project_execution_validate_workspace,
         log_activity=_log_activity, now=_proj_now,
     )
@@ -19089,7 +19095,7 @@ def _handle_task_update(project_id, task_id, body):
         except Exception:
             return False
     outcome = project_command_service.update_task(
-        project_id, task_id, body, repository=_PROJECT_REPOSITORY, is_archive_manager=_is_archive_manager_agent,
+        project_id, task_id, body, repository=_PROJECT_REPOSITORY, system_agent_assignment_error=_system_agent_assignment_error,
         execution_enabled=_project_execution_enabled, column_locked=_project_execution_column_locked,
         checklist_complete=_project_execution_acceptance_checklist_complete,
         can_complete_after_checklist=_project_execution_can_complete_after_checklist_update,
@@ -19131,7 +19137,7 @@ def _handle_columns_update(project_id, body):
 
 def _handle_tasks_reorder(project_id, body):
     outcome = project_command_service.reorder_tasks(
-        project_id, body, repository=_PROJECT_REPOSITORY, is_archive_manager=_is_archive_manager_agent,
+        project_id, body, repository=_PROJECT_REPOSITORY, system_agent_assignment_error=_system_agent_assignment_error,
         execution_enabled=_project_execution_enabled, column_locked=_project_execution_column_locked, now=_proj_now,
     )
     if outcome.result.status == 200:
@@ -20616,7 +20622,7 @@ def _project_execution_apply_meeting_output_to_task(project, task, meeting, resu
         raw_priority = (raw or {}).get("priority") if isinstance(raw, dict) else ""
         priority = str(raw_priority).strip() if raw_priority is not None else ""
         priority = priority or "medium"
-        if _is_archive_manager_agent(owner):
+        if _is_unassignable_system_agent(owner):
             continue
         task["meetingActionItems"].append({
             "id": meeting_action_id,
@@ -21686,6 +21692,37 @@ def _is_archive_manager_agent(agent_id_or_key):
     return _archive_manager_shared_adapter().is_archive_manager(agent_id_or_key)
 
 
+def _resolve_vo_system_agent_role(agent_id_or_key):
+    role = system_agent_roles_service.resolve_system_agent_role(agent_id_or_key)
+    if role is not None:
+        return role
+    if _archive_manager_shared_adapter().is_archive_manager(agent_id_or_key):
+        return system_agent_roles_service.ARCHIVE_MANAGER_ROLE
+    if _hr_shared_adapter().is_hr(agent_id_or_key):
+        return system_agent_roles_service.HR_ROLE
+    return None
+
+
+def _is_unassignable_system_agent(agent_id_or_key):
+    role = _resolve_vo_system_agent_role(agent_id_or_key)
+    return role is not None and not role.assignable
+
+
+def _system_agent_assignment_error(agent_id_or_key, scope="task"):
+    error = system_agent_policy_service.assignment_error(
+        _resolve_vo_system_agent_role(agent_id_or_key),
+        scope=scope,
+    )
+    return error.as_payload() if error else None
+
+
+def _system_agent_deletion_error(agent_id_or_key):
+    error = system_agent_policy_service.deletion_error(
+        _resolve_vo_system_agent_role(agent_id_or_key),
+    )
+    return error.as_payload() if error else None
+
+
 _PROJECT_AUTHORING_ROOT_STORE = project_authoring_store_service.ProjectAuthoringRootStore(
     _PROJECT_REPOSITORY,
     config=project_authoring_config_service.DEFAULT_CONFIG,
@@ -21696,7 +21733,7 @@ _PROJECT_AUTHORING_OBSERVABILITY = project_authoring_observability_service.Proje
 _PROJECT_AUTHORING_SERVICE = project_authoring_service.ProjectAuthoringService(
     _PROJECT_AUTHORING_ROOT_STORE,
     lookup_agent=_office_agent_lookup,
-    is_excluded_agent=_is_archive_manager_agent,
+    is_excluded_agent=_is_unassignable_system_agent,
 )
 
 
@@ -26272,8 +26309,8 @@ def _handle_agent_delete(body):
     # Safety: never delete the main agent
     if agent_id == "main":
         return {"error": "Cannot delete the main agent", "_status": 403}
-    if _is_archive_manager_agent(agent_id):
-        return {"error": "档案管理员是系统角色，不能删除；可以在档案室暂停。", "code": "archive_manager_cannot_delete", "_status": 403}
+    if rejected := _system_agent_deletion_error(agent_id):
+        return rejected
 
     try:
         agent = _office_agent_lookup(agent_id)

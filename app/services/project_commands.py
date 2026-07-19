@@ -15,12 +15,27 @@ class CommandOutcome:
     post_commit: Mapping[str, Any] | None = None
 
 
+def _assignment_rejection(
+    candidates: tuple[Any, ...],
+    policy: Callable[[Any, str], Mapping[str, Any] | None],
+    scope: str,
+) -> CommandOutcome | None:
+    for candidate in candidates:
+        rejected = policy(candidate, scope)
+        if not isinstance(rejected, Mapping):
+            continue
+        status = int(rejected.get("_status") or 400)
+        payload = {key: value for key, value in rejected.items() if key != "_status"}
+        return CommandOutcome(ServiceResult(status, payload))
+    return None
+
+
 def create_project(
     body: Mapping[str, Any],
     *,
     repository: ProjectRepository,
     prepare_workspace: Callable[[str, Mapping[str, Any], str], dict[str, Any]],
-    is_archive_manager: Callable[[Any], bool],
+    system_agent_assignment_error: Callable[[Any, str], Mapping[str, Any] | None],
     archive_maintenance_default: Callable[[Mapping[str, Any]], bool],
     log_activity: Callable[..., None],
     new_id: Callable[[], str],
@@ -29,8 +44,12 @@ def create_project(
     title = str(body.get("title") or "").strip()
     if not title:
         return CommandOutcome(ServiceResult(400, {"error": "Project title is required"}))
-    if any(is_archive_manager(body.get(field)) for field in ("defaultExecutorAgentId", "defaultReviewerAgentId")):
-        return CommandOutcome(ServiceResult(400, {"error": "档案管理员不能作为普通项目默认执行或审查 AI", "code": "archive_manager_not_assignable"}))
+    if rejected := _assignment_rejection(
+        tuple(body.get(field) for field in ("defaultExecutorAgentId", "defaultReviewerAgentId")),
+        system_agent_assignment_error,
+        "project_defaults",
+    ):
+        return rejected
     created_by = str(body.get("createdBy") or body.get("author") or "user").strip()
     timestamp = now()
     workspace = prepare_workspace(title, body, timestamp)
@@ -67,12 +86,16 @@ def create_project(
     return CommandOutcome(ServiceResult(200, {"ok": True, "project": project}))
 
 
-def create_task(project_id: str, body: Mapping[str, Any], *, repository: ProjectRepository, is_archive_manager: Callable[[Any], bool], log_activity: Callable[..., None], new_id: Callable[[], str], now: Callable[[], str]) -> CommandOutcome:
+def create_task(project_id: str, body: Mapping[str, Any], *, repository: ProjectRepository, system_agent_assignment_error: Callable[[Any, str], Mapping[str, Any] | None], log_activity: Callable[..., None], new_id: Callable[[], str], now: Callable[[], str]) -> CommandOutcome:
     title = str(body.get("title") or "").strip()
     if not title:
         return CommandOutcome(ServiceResult(400, {"error": "Task title is required"}))
-    if any(is_archive_manager(body.get(field)) for field in ("assignee", "executorAgentId", "reviewerAgentId")):
-        return CommandOutcome(ServiceResult(400, {"error": "档案管理员不能被分配普通项目任务", "code": "archive_manager_not_assignable"}))
+    if rejected := _assignment_rejection(
+        tuple(body.get(field) for field in ("assignee", "executorAgentId", "reviewerAgentId")),
+        system_agent_assignment_error,
+        "task",
+    ):
+        return rejected
     created = {}
     def mutate(project):
         column_id = body.get("columnId") or ((project.get("columns") or [{}])[0].get("id"))
@@ -181,11 +204,15 @@ def delete_project(project_id: str, *, delete_workspace: bool, repository: Proje
 
 def update_project(
     project_id: str, body: Mapping[str, Any], *, repository: ProjectRepository,
-    is_archive_manager: Callable[[Any], bool], execution_enabled: Callable[[dict[str, Any]], bool],
+    system_agent_assignment_error: Callable[[Any, str], Mapping[str, Any] | None], execution_enabled: Callable[[dict[str, Any]], bool],
     validate_workspace: Callable[[Any], dict[str, Any]], log_activity: Callable[..., None], now: Callable[[], str],
 ) -> CommandOutcome:
-    if any(is_archive_manager(body.get(field)) for field in ("defaultExecutorAgentId", "defaultReviewerAgentId")):
-        return CommandOutcome(ServiceResult(400, {"error": "档案管理员不能作为普通项目默认执行或审查 AI", "code": "archive_manager_not_assignable"}))
+    if rejected := _assignment_rejection(
+        tuple(body.get(field) for field in ("defaultExecutorAgentId", "defaultReviewerAgentId")),
+        system_agent_assignment_error,
+        "project_defaults",
+    ):
+        return rejected
     mutable_body = dict(body)
     try:
         current_project = repository.get(project_id)
@@ -225,13 +252,17 @@ def update_project(
 
 def update_task(
     project_id: str, task_id: str, body: Mapping[str, Any], *, repository: ProjectRepository,
-    is_archive_manager: Callable[[Any], bool], execution_enabled: Callable[[dict[str, Any]], bool],
+    system_agent_assignment_error: Callable[[Any, str], Mapping[str, Any] | None], execution_enabled: Callable[[dict[str, Any]], bool],
     column_locked: Callable[[dict[str, Any]], bool], checklist_complete: Callable[[dict[str, Any]], bool],
     can_complete_after_checklist: Callable[[dict[str, Any]], bool], mark_done: Callable[..., dict[str, Any]],
     log_activity: Callable[..., None], now: Callable[[], str], is_on_time: Callable[[Any], bool], score_values: Mapping[str, int],
 ) -> CommandOutcome:
-    if any(is_archive_manager(body.get(field)) for field in ("assignee", "executorAgentId", "reviewerAgentId")):
-        return CommandOutcome(ServiceResult(400, {"error": "档案管理员不能被分配普通项目任务", "code": "archive_manager_not_assignable"}))
+    if rejected := _assignment_rejection(
+        tuple(body.get(field) for field in ("assignee", "executorAgentId", "reviewerAgentId")),
+        system_agent_assignment_error,
+        "task",
+    ):
+        return rejected
     mutable_body = dict(body); post = {}
     def mutate(project):
         task = next((item for item in project.get("tasks", []) if item.get("id") == task_id), None)
@@ -283,10 +314,14 @@ def update_task(
     return CommandOutcome(ServiceResult(200, {"ok": True, "task": post["task"]}), post)
 
 
-def reorder_tasks(project_id: str, body: Mapping[str, Any], *, repository: ProjectRepository, is_archive_manager: Callable[[Any], bool], execution_enabled: Callable[[dict[str, Any]], bool], column_locked: Callable[[dict[str, Any]], bool], now: Callable[[], str]) -> CommandOutcome:
+def reorder_tasks(project_id: str, body: Mapping[str, Any], *, repository: ProjectRepository, system_agent_assignment_error: Callable[[Any, str], Mapping[str, Any] | None], execution_enabled: Callable[[dict[str, Any]], bool], column_locked: Callable[[dict[str, Any]], bool], now: Callable[[], str]) -> CommandOutcome:
     updates = body.get("updates", body.get("tasks", []))
-    if any(is_archive_manager(item.get(field)) for item in updates for field in ("assignee", "executorAgentId", "reviewerAgentId")):
-        return CommandOutcome(ServiceResult(400, {"error": "档案管理员不能被分配普通项目任务", "code": "archive_manager_not_assignable"}))
+    if rejected := _assignment_rejection(
+        tuple(item.get(field) for item in updates for field in ("assignee", "executorAgentId", "reviewerAgentId")),
+        system_agent_assignment_error,
+        "task",
+    ):
+        return rejected
     post = {"completedTasks": []}
     def mutate(project):
         task_map = {task["id"]: task for task in project.get("tasks", [])}; done_columns = {column["id"] for column in project.get("columns", []) if column.get("title", "").lower() in ("done", "completed", "verified", "published", "fixed", "closed")}; timestamp = now()

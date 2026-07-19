@@ -314,6 +314,24 @@ class HRLifecycleAdapter:
         state = self.reconcile() if ensure else self.repository.load()
         return hr_public_state(state)
 
+    def is_hr(self, candidate: Any) -> bool:
+        state = self.repository.load()
+        if isinstance(candidate, Mapping):
+            values = tuple(
+                value
+                for key in ("id", "agentId", "agent_id", "statusKey", "name")
+                if (value := str(candidate.get(key) or "").strip())
+            )
+            if str(candidate.get("systemRole") or candidate.get("system_role") or "").strip() == HR_ROLE.role_key:
+                return True
+        else:
+            value = str(candidate or "").strip()
+            values = (value,) if value else ()
+        return any(
+            HR_ROLE.matches_identity(value, state.agent_id, state.name)
+            for value in values
+        )
+
     def update(self, action: str) -> SystemAgentLifecycleState:
         normalized = str(action or "").strip().lower()
         if normalized == "pause":

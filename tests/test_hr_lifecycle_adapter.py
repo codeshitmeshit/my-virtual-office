@@ -232,6 +232,25 @@ def test_pause_resume_and_public_state_use_shared_lifecycle(tmp_path):
         adapter.update("delete")
 
 
+def test_adapter_recognizes_stable_display_explicit_and_persisted_hr_identities(tmp_path):
+    adapter, _calls, _roster, _presence = build_adapter(
+        tmp_path,
+        roster=[{
+            "id": "provider-hr-7",
+            "name": "HR",
+            "providerKind": "openclaw",
+            "workspace": str(tmp_path / "openclaw" / "workspace-provider-hr-7"),
+        }],
+    )
+    state = adapter.reconcile()
+    assert state.agent_id == "provider-hr-7"
+    assert adapter.is_hr("hr") is True
+    assert adapter.is_hr("HR") is True
+    assert adapter.is_hr({"systemRole": "hr", "id": "renamed"}) is True
+    assert adapter.is_hr("provider-hr-7") is True
+    assert adapter.is_hr("ordinary-agent") is False
+
+
 @pytest.mark.parametrize(
     ("failure", "expected_action", "expected_label"),
     [
