@@ -231,7 +231,7 @@ class HRObservability:
         violations = field("foreign_key_violations", 0)
         if isinstance(violations, bool) or not isinstance(violations, int) or violations < 0:
             violations = 0
-        healthy = repository_status == "ok" and integrity == "ok" and violations == 0
+        healthy = repository_status in {"ok", "ready"} and integrity == "ok" and violations == 0
         return HRHealthSnapshot(
             status="ok" if healthy else "degraded",
             feature_enabled=feature_enabled,
