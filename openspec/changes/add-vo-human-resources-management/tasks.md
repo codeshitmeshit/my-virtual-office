@@ -30,7 +30,7 @@
 
 ## 5. Transactional Human Resources Repository
 
-- [ ] 5.1 Implement `app/services/hr_repository.py` initialization, connection policy, schema metadata, transactional migration runner, foreign keys, busy timeout, safe database path, and failure-atomic schema tests using temporary SQLite databases.
+- [x] 5.1 Implement `app/services/hr_repository.py` initialization, connection policy, schema metadata, transactional migration runner, foreign keys, busy timeout, safe database path, and failure-atomic schema tests using temporary SQLite databases.
 - [ ] 5.2 Add transactional Agent, identity-history, and introduction persistence with stable AI-ID uniqueness, optimistic/conflict behavior, status indexes, pagination, and tests for rename, duplicate discovery, inactive history, reactivation, and concurrent updates.
 - [ ] 5.3 Add daily-cycle, report-request, daily-report, assessment-version, and assessment-evidence persistence with date/Agent unique constraints, claim fencing, current-version invariants, JSON validation, pagination, and concurrency/restart tests.
 - [ ] 5.4 Add access-grant, access-log, and HR-activity persistence with hashed secrets only, rotation/revocation, successful-view uniqueness semantics, bounded queries, retention-safe history, and tests that stored/exported values never contain raw grants.
