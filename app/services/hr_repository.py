@@ -1729,6 +1729,35 @@ class HRRepository:
             ).fetchone()
             return _request_from_row(row)
 
+    def mark_report_request_exhausted(
+        self,
+        request_id: str,
+        *,
+        exhausted_at: str,
+    ) -> ReportRequestRecord:
+        request_id = _opaque_id(request_id, "request_id")
+        exhausted_at = _timestamp_text(exhausted_at, "exhausted_at")
+        with self._write_transaction() as connection:
+            updated = connection.execute(
+                """UPDATE report_requests SET
+                       status = 'failed', last_error = 'retry_limit_exhausted',
+                       claim_token = '', claimed_by = '', claim_expires_at = NULL,
+                       updated_at = ?
+                   WHERE id = ? AND (
+                       status IN ('pending', 'retry', 'failed')
+                       OR (status = 'claimed' AND claim_expires_at <= ?)
+                   )""",
+                (exhausted_at, request_id, exhausted_at),
+            ).rowcount
+            if updated != 1:
+                raise HRRepositoryConflictError(
+                    "report request cannot be marked retry exhausted"
+                )
+            row = connection.execute(
+                "SELECT * FROM report_requests WHERE id = ?", (request_id,)
+            ).fetchone()
+            return _request_from_row(row)
+
     def record_report_response(
         self,
         *,
@@ -2229,7 +2258,8 @@ class HRRepository:
                 connection.execute(
                     """UPDATE assessment_jobs SET
                            status = 'pending', evidence_version = ?, last_error = '',
-                           claim_token = '', claimed_by = '', claim_expires_at = NULL,
+                           attempt_count = 0, claim_token = '', claimed_by = '',
+                           claim_expires_at = NULL,
                            updated_at = ?
                        WHERE id = ?""",
                     (evidence_version, timestamp, job_id),
@@ -2365,6 +2395,27 @@ class HRRepository:
                 (ai_id, local_date),
             ).fetchone()
             return _assessment_job_from_row(row) if row is not None else None
+
+    def mark_assessment_job_exhausted(self, job_id: str) -> AssessmentJobRecord:
+        job_id = _opaque_id(job_id, "job_id")
+        timestamp = self._timestamp()
+        with self._write_transaction() as connection:
+            updated = connection.execute(
+                """UPDATE assessment_jobs SET
+                       status = 'failed', last_error = 'retry_limit_exhausted',
+                       claim_token = '', claimed_by = '', claim_expires_at = NULL,
+                       updated_at = ?
+                   WHERE id = ? AND status IN ('failed', 'retry')""",
+                (timestamp, job_id),
+            ).rowcount
+            if updated != 1:
+                raise HRRepositoryConflictError(
+                    "assessment job cannot be marked retry exhausted"
+                )
+            row = connection.execute(
+                "SELECT * FROM assessment_jobs WHERE id = ?", (job_id,)
+            ).fetchone()
+            return _assessment_job_from_row(row)
 
     def save_assessment(
         self,

@@ -1,0 +1,346 @@
+"""Bounded durable report/assessment workers, retries, and dual-loop fencing."""
+
+import json
+import sys
+import threading
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+APP_DIR = ROOT / "app"
+if str(APP_DIR) not in sys.path:
+    sys.path.insert(0, str(APP_DIR))
+
+from services.hr_assessments import HRAssessmentOrchestrator
+from services.hr_config import HRConfig
+from services.hr_evidence import HREvidenceCollector, HREvidencePorts
+from services.hr_reporting import HRDailyReportCollector, HRReportingService
+from services.hr_repository import HRRepository
+from services.hr_scheduler import HRWorkflowProcessor
+
+
+NOW = datetime(2026, 7, 19, 10, tzinfo=timezone.utc)
+LOCAL_DATE = "2026-07-19"
+MESSAGE = "请提交今日日报。"
+
+
+class EmptyEvidence:
+    def read_project_transitions(self, *_args):
+        return ()
+
+    def read_task_transitions(self, *_args):
+        return ()
+
+    def read_meeting_contributions(self, *_args):
+        return ()
+
+    def read_artifact_metadata(self, *_args):
+        return ()
+
+    def read_execution_results(self, *_args):
+        return ()
+
+    def read_blockers_and_waiting(self, *_args):
+        return ()
+
+
+class Conversation:
+    def __init__(self, outcome=None):
+        self.outcome = outcome
+        self.calls = []
+
+    def ask_agent_as_hr(self, request):
+        self.calls.append(request)
+        if isinstance(self.outcome, Exception):
+            raise self.outcome
+        return self.outcome if self.outcome is not None else f"{request.target_ai_id} done"
+
+
+class AssessmentHR:
+    def __init__(self, fail=False):
+        self.fail = fail
+        self.calls = []
+
+    def ask_hr(self, _prompt, conversation_key, _timeout):
+        self.calls.append(conversation_key)
+        if self.fail:
+            raise RuntimeError("provider secret")
+        ai_id = conversation_key.rsplit(":", 1)[-1]
+        return json.dumps(
+            {
+                "schemaVersion": 1,
+                "agentAiId": ai_id,
+                "localDate": LOCAL_DATE,
+                "principalContributions": [],
+                "workload": "insufficient_information",
+                "rationale": "证据不足，不能推断工作量。",
+                "evidenceReferences": [],
+                "blockers": [],
+                "strengths": [],
+                "improvements": ["补充可追踪信息"],
+                "runtimeDiagnosis": "信息不足",
+                "informationSufficiency": {
+                    "status": "insufficient",
+                    "explanation": "只有单一或缺失来源",
+                },
+                "hrAiId": "hr",
+                "assessedAt": NOW.isoformat(),
+            },
+            ensure_ascii=False,
+        )
+
+
+def make_config(*, enabled=True, workers=2, retries=1):
+    return HRConfig.from_env(
+        {
+            "VO_HR_ENABLED": "1" if enabled else "0",
+            "VO_HR_SCHEDULER_ENABLED": "1",
+            "VO_HR_MAX_WORKERS": str(workers),
+            "VO_HR_RETRY_LIMIT": str(retries),
+        }
+    )
+
+
+def setup(tmp_path, *, agent_count=4, conversation=None, assessment_hr=None, config=None):
+    cfg = config or make_config()
+    repository = HRRepository(tmp_path / "status", clock=lambda: NOW)
+    repository.initialize()
+    agent_ids = tuple(f"agent-{index}" for index in range(1, agent_count + 1))
+    for ai_id in ("hr", *agent_ids):
+        repository.upsert_agent(
+            ai_id=ai_id,
+            name=ai_id,
+            agent_kind="system" if ai_id == "hr" else "project",
+            status="active",
+            availability="available",
+            source="test",
+        )
+    reporting = HRReportingService(
+        repository,
+        clock=lambda: NOW,
+        claim_token_factory=lambda request_id: f"claim:{request_id}",
+        claim_lease_seconds=120,
+    )
+    opened = reporting.open_cycle(
+        local_date=LOCAL_DATE,
+        timezone_name="UTC",
+        scheduled_at=NOW,
+        window_opens_at=NOW,
+        window_closes_at=NOW + timedelta(hours=2),
+        eligible_ai_ids=agent_ids,
+    )
+    conversation = conversation or Conversation()
+    reports = HRDailyReportCollector(
+        repository,
+        reporting,
+        conversation,
+        clock=lambda: NOW,
+        timeout_seconds=1,
+    )
+    empty = EmptyEvidence()
+    evidence = HREvidenceCollector(
+        HREvidencePorts(empty, empty, empty, empty, empty, empty)
+    )
+    assessment_hr = assessment_hr or AssessmentHR()
+    assessments = HRAssessmentOrchestrator(
+        repository,
+        evidence,
+        assessment_hr,
+        clock=lambda: NOW,
+        claim_token_factory=lambda job_id: f"claim:{job_id}",
+        timeout_seconds=1,
+        claim_lease_seconds=30,
+        retry_limit=cfg.retry_limit,
+    )
+    processor = HRWorkflowProcessor(
+        cfg,
+        repository,
+        reports,
+        assessments,
+        clock=lambda: NOW,
+        queue_capacity=cfg.max_workers,
+    )
+    return repository, reporting, opened, conversation, assessment_hr, processor
+
+
+def test_report_queue_is_bounded_and_drains_across_ticks(tmp_path):
+    repository, _reporting, opened, conversation, _hr, processor = setup(tmp_path)
+    first = processor.process_reports(opened.cycle.id, message=MESSAGE)
+    assert first.accepted == 2
+    assert first.deferred == 2
+    assert len(conversation.calls) == 2
+    second = processor.process_reports(opened.cycle.id, message=MESSAGE)
+    assert second.accepted == 2
+    assert second.deferred == 0
+    assert len(conversation.calls) == 4
+    assert all(
+        repository.get_daily_report(ai_id, LOCAL_DATE).raw_response is not None
+        for ai_id in opened.cycle.roster_snapshot
+    )
+
+
+def test_one_stalled_agent_does_not_prevent_other_worker_from_finishing(tmp_path):
+    entered = threading.Event()
+    release = threading.Event()
+    neighbor_finished = threading.Event()
+
+    class OneStallConversation(Conversation):
+        def ask_agent_as_hr(self, request):
+            self.calls.append(request)
+            if request.target_ai_id == "agent-1":
+                entered.set()
+                assert release.wait(timeout=5)
+            else:
+                neighbor_finished.set()
+            return f"{request.target_ai_id} done"
+
+    conversation = OneStallConversation()
+    _repository, _reporting, opened, _conversation, _hr, processor = setup(
+        tmp_path, agent_count=2, conversation=conversation
+    )
+    results = []
+    thread = threading.Thread(
+        target=lambda: results.append(
+            processor.process_reports(opened.cycle.id, message=MESSAGE)
+        )
+    )
+    thread.start()
+    assert entered.wait(timeout=5)
+    assert neighbor_finished.wait(timeout=5)
+    release.set()
+    thread.join(timeout=5)
+    assert len(results[0].results) == 2
+
+
+def test_dual_report_loops_make_one_effective_provider_call(tmp_path):
+    entered = threading.Event()
+    release = threading.Event()
+
+    class BlockingConversation(Conversation):
+        def ask_agent_as_hr(self, request):
+            self.calls.append(request)
+            entered.set()
+            assert release.wait(timeout=5)
+            return "done"
+
+    conversation = BlockingConversation()
+    repository, reporting, opened, _conversation, assessment_hr, first = setup(
+        tmp_path, agent_count=1, conversation=conversation
+    )
+    reports = HRDailyReportCollector(
+        repository, reporting, conversation, clock=lambda: NOW, timeout_seconds=1
+    )
+    second = HRWorkflowProcessor(
+        make_config(),
+        repository,
+        reports,
+        first._assessments,
+        clock=lambda: NOW,
+        queue_capacity=2,
+    )
+    first_results = []
+    thread = threading.Thread(
+        target=lambda: first_results.append(
+            first.process_reports(opened.cycle.id, message=MESSAGE)
+        )
+    )
+    thread.start()
+    assert entered.wait(timeout=5)
+    competing = second.process_reports(opened.cycle.id, message=MESSAGE)
+    release.set()
+    thread.join(timeout=5)
+    assert len(conversation.calls) == 1
+    assert competing.status == "idle"
+    assert competing.accepted == 0
+    assert assessment_hr.calls == []
+
+
+def test_expired_claim_is_recovered_after_restart(tmp_path):
+    repository, reporting, opened, conversation, _hr, processor = setup(
+        tmp_path, agent_count=1
+    )
+    request = opened.requests[0]
+    repository.claim_report_request(
+        request_id=request.id,
+        claimed_by="dead-worker",
+        claim_token="dead-claim",
+        now=(NOW - timedelta(minutes=2)).isoformat(),
+        claim_expires_at=(NOW - timedelta(minutes=1)).isoformat(),
+    )
+    result = processor.process_reports(opened.cycle.id, message=MESSAGE)
+    assert result.results[0].status == "submitted"
+    assert len(conversation.calls) == 1
+    assert repository.get_report_request(request.id).attempt_count == 2
+
+
+def test_report_retry_limit_becomes_visible_and_stops_provider_calls(tmp_path):
+    timeout = Conversation(TimeoutError("provider secret"))
+    repository, _reporting, opened, conversation, _hr, processor = setup(
+        tmp_path,
+        agent_count=1,
+        conversation=timeout,
+        config=make_config(retries=1),
+    )
+    assert processor.process_reports(opened.cycle.id, message=MESSAGE).results[0].status == (
+        "timeout"
+    )
+    assert processor.process_reports(opened.cycle.id, message=MESSAGE).results[0].status == (
+        "timeout"
+    )
+    exhausted = processor.process_reports(opened.cycle.id, message=MESSAGE)
+    assert exhausted.exhausted == 1
+    assert len(conversation.calls) == 2
+    stored = repository.get_report_request(opened.requests[0].id)
+    assert stored.status == "failed"
+    assert stored.last_error == "retry_limit_exhausted"
+
+
+def test_feature_disable_stops_new_claims_without_hiding_data(tmp_path):
+    active = [False]
+    repository, _reporting, opened, conversation, _hr, base = setup(
+        tmp_path, agent_count=1
+    )
+    processor = HRWorkflowProcessor(
+        make_config(),
+        repository,
+        base._reports,
+        base._assessments,
+        clock=lambda: NOW,
+        active=lambda: active[0],
+        queue_capacity=2,
+    )
+    disabled = processor.process_reports(opened.cycle.id, message=MESSAGE)
+    assert disabled.status == "disabled"
+    assert conversation.calls == []
+    assert repository.get_report_request(opened.requests[0].id).status == "pending"
+    active[0] = True
+    assert processor.process_reports(opened.cycle.id, message=MESSAGE).accepted == 1
+
+
+def test_assessment_queue_backpressure_and_failure_retry_limit(tmp_path):
+    failing_hr = AssessmentHR(fail=True)
+    repository, reporting, opened, _conversation, _hr, processor = setup(
+        tmp_path,
+        agent_count=3,
+        assessment_hr=failing_hr,
+        config=make_config(retries=1),
+    )
+    reporting.close_cycle(opened.cycle.id, closed_at=NOW)
+    first = processor.process_assessments(opened.cycle.id)
+    assert first.accepted == 2
+    assert first.deferred == 1
+    second = processor.process_assessments(opened.cycle.id)
+    assert second.accepted == 2
+    assert any(item.status == "failed" for item in second.results)
+    third = processor.process_assessments(opened.cycle.id)
+    assert third.exhausted >= 1
+    assert any(
+        repository.get_assessment_job(ai_id, LOCAL_DATE).last_error
+        == "retry_limit_exhausted"
+        for ai_id in opened.cycle.roster_snapshot
+    )
+    assert all(
+        repository.get_assessment_job(ai_id, LOCAL_DATE) is not None
+        for ai_id in opened.cycle.roster_snapshot
+    )

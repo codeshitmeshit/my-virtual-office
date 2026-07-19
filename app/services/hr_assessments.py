@@ -301,6 +301,7 @@ class HRAssessmentOrchestrator:
         clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
         claim_token_factory: Callable[[str], str] = lambda _job_id: secrets.token_urlsafe(24),
         claim_lease_seconds: int = 90,
+        retry_limit: int = 3,
     ):
         if not isinstance(repository, HRRepository):
             raise HRAssessmentValidationError("repository must be an HRRepository")
@@ -325,6 +326,12 @@ class HRAssessmentOrchestrator:
             raise HRAssessmentValidationError(
                 "claim lease must exceed timeout and be at most 600 seconds"
             )
+        if (
+            isinstance(retry_limit, bool)
+            or not isinstance(retry_limit, int)
+            or not 0 <= retry_limit <= 10
+        ):
+            raise HRAssessmentValidationError("retry_limit must be between 0 and 10")
         self._repository = repository
         self._evidence = evidence
         self._hr = hr
@@ -335,6 +342,7 @@ class HRAssessmentOrchestrator:
         self._clock = clock
         self._claim_token_factory = claim_token_factory
         self._claim_lease_seconds = claim_lease_seconds
+        self._max_attempts = retry_limit + 1
 
     def _now(self) -> datetime:
         value = self._clock()
@@ -489,6 +497,14 @@ class HRAssessmentOrchestrator:
                     results.append(
                         AssessmentProcessingResult(
                             ai_id, local_date, "already_complete", current, ""
+                        )
+                    )
+                    continue
+                if job.status in {"failed", "retry"} and job.attempt_count >= self._max_attempts:
+                    self._repository.mark_assessment_job_exhausted(job.id)
+                    results.append(
+                        AssessmentProcessingResult(
+                            ai_id, local_date, "retry_exhausted", current, ""
                         )
                     )
                     continue

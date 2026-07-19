@@ -2,12 +2,19 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from typing import Callable, Iterable
 
 from services.hr_config import HRConfig
-from services.hr_reporting import HRReportingService, ReportingCycleResult
+from services.hr_assessments import AssessmentProcessingResult, HRAssessmentOrchestrator
+from services.hr_reporting import (
+    HRDailyReportCollector,
+    HRReportingService,
+    ReportCollectionResult,
+    ReportingCycleResult,
+)
 from services.hr_repository import DailyCycleRecord, HRRepository
 
 
@@ -31,6 +38,15 @@ class SchedulerReconciliation:
     window: DailyScheduleWindow | None
     cycle: DailyCycleRecord | None
     opened: ReportingCycleResult | None
+
+
+@dataclass(frozen=True, slots=True)
+class WorkflowProcessingSummary:
+    status: str
+    accepted: int
+    deferred: int
+    exhausted: int
+    results: tuple[ReportCollectionResult | AssessmentProcessingResult, ...]
 
 
 class HRDueTimeCalculator:
@@ -151,3 +167,168 @@ class HRScheduler:
         )
         action = "opened_late" if now >= window.window_closes_at else "opened"
         return SchedulerReconciliation(action, window, opened.cycle, opened)
+
+
+class HRWorkflowProcessor:
+    """Runs durable claimed work in a bounded pool with per-tick backpressure."""
+
+    def __init__(
+        self,
+        config: HRConfig,
+        repository: HRRepository,
+        reports: HRDailyReportCollector,
+        assessments: HRAssessmentOrchestrator,
+        *,
+        clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+        active: Callable[[], bool] | None = None,
+        queue_capacity: int | None = None,
+    ):
+        if not isinstance(config, HRConfig):
+            raise HRSchedulerValidationError("HR config is invalid")
+        if not isinstance(repository, HRRepository):
+            raise HRSchedulerValidationError("repository must be an HRRepository")
+        if not isinstance(reports, HRDailyReportCollector):
+            raise HRSchedulerValidationError("report collector is invalid")
+        if not isinstance(assessments, HRAssessmentOrchestrator):
+            raise HRSchedulerValidationError("assessment orchestrator is invalid")
+        capacity = config.max_workers * 4 if queue_capacity is None else queue_capacity
+        if (
+            isinstance(capacity, bool)
+            or not isinstance(capacity, int)
+            or not config.max_workers <= capacity <= 1_000
+        ):
+            raise HRSchedulerValidationError(
+                "queue_capacity must cover workers and be at most 1000"
+            )
+        self._config = config
+        self._repository = repository
+        self._reports = reports
+        self._assessments = assessments
+        self._clock = clock
+        self._active = active or (lambda: config.scheduler_active)
+        self._queue_capacity = capacity
+
+    def _now(self) -> datetime:
+        value = self._clock()
+        if not isinstance(value, datetime) or value.tzinfo is None or value.utcoffset() is None:
+            raise HRSchedulerValidationError("workflow clock must be timezone-aware")
+        return value.astimezone(timezone.utc)
+
+    def _all_requests(self, cycle_id: str):
+        items = []
+        cursor = None
+        while True:
+            page = self._repository.list_report_requests(
+                cycle_id,
+                limit=100,
+                cursor=cursor,
+            )
+            items.extend(page.items)
+            if page.next_cursor is None:
+                return tuple(items)
+            cursor = page.next_cursor
+
+    def process_reports(
+        self,
+        cycle_id: str,
+        *,
+        message: str,
+    ) -> WorkflowProcessingSummary:
+        if not self._active():
+            return WorkflowProcessingSummary("disabled", 0, 0, 0, ())
+        now = self._now()
+        max_attempts = self._config.retry_limit + 1
+        candidates = []
+        exhausted = 0
+        for request in self._all_requests(cycle_id):
+            retryable = request.status in {"pending", "retry", "failed"}
+            expired = (
+                request.status == "claimed"
+                and request.claim_expires_at is not None
+                and request.claim_expires_at <= now.isoformat()
+            )
+            if not (retryable or expired):
+                continue
+            if request.attempt_count >= max_attempts:
+                self._repository.mark_report_request_exhausted(
+                    request.id,
+                    exhausted_at=now.isoformat(),
+                )
+                exhausted += 1
+                continue
+            candidates.append(request)
+        accepted = candidates[: self._queue_capacity]
+        deferred = len(candidates) - len(accepted)
+        if not accepted:
+            return WorkflowProcessingSummary("idle", 0, deferred, exhausted, ())
+        results = []
+        with ThreadPoolExecutor(
+            max_workers=min(self._config.max_workers, len(accepted)),
+            thread_name_prefix="hr-report",
+        ) as executor:
+            futures = {
+                executor.submit(
+                    self._reports.process_requests,
+                    (request.id,),
+                    message=message,
+                    worker_id=f"hr-report-worker-{index}",
+                ): request.id
+                for index, request in enumerate(accepted)
+            }
+            for future in as_completed(futures):
+                results.extend(future.result())
+        results.sort(key=lambda item: item.request_id)
+        return WorkflowProcessingSummary(
+            "processed",
+            len(accepted),
+            deferred,
+            exhausted,
+            tuple(results),
+        )
+
+    def process_assessments(
+        self,
+        cycle_id: str,
+    ) -> WorkflowProcessingSummary:
+        if not self._active():
+            return WorkflowProcessingSummary("disabled", 0, 0, 0, ())
+        cycle = self._repository.get_daily_cycle(cycle_id)
+        if cycle is None:
+            raise HRSchedulerValidationError("daily cycle does not exist")
+        if cycle.status != "closed":
+            raise HRSchedulerValidationError("assessment cycle is not closed")
+        ranked = []
+        for ai_id in cycle.roster_snapshot:
+            job = self._repository.get_assessment_job(ai_id, cycle.local_date)
+            priority = 1 if job is not None and job.status == "complete" else 0
+            ranked.append((priority, job.updated_at if job is not None else "", ai_id))
+        candidates = [item[2] for item in sorted(ranked)]
+        accepted = candidates[: self._queue_capacity]
+        deferred = len(candidates) - len(accepted)
+        if not accepted:
+            return WorkflowProcessingSummary("idle", 0, deferred, 0, ())
+        results = []
+        with ThreadPoolExecutor(
+            max_workers=min(self._config.max_workers, len(accepted)),
+            thread_name_prefix="hr-assessment",
+        ) as executor:
+            futures = {
+                executor.submit(
+                    self._assessments.assess,
+                    (ai_id,),
+                    local_date=cycle.local_date,
+                    actor_ai_id="hr",
+                ): ai_id
+                for ai_id in accepted
+            }
+            for future in as_completed(futures):
+                results.extend(future.result())
+        results.sort(key=lambda item: item.ai_id)
+        exhausted = sum(item.status == "retry_exhausted" for item in results)
+        return WorkflowProcessingSummary(
+            "processed",
+            len(accepted),
+            deferred,
+            exhausted,
+            tuple(results),
+        )
