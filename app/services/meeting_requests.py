@@ -96,7 +96,7 @@ class RequestHooks:
     now: Callable[[], str]
     new_id: Callable[[], str]
     clean_participants: Callable[[Any], list[str]]
-    is_excluded: Callable[[str], bool]
+    participant_error: Callable[[str], Mapping[str, Any] | None]
     auto_confirm_label: Callable[[str], str]
     lifecycle_hooks: meeting_lifecycle.CreateHooks
 
@@ -132,10 +132,19 @@ def create_command(
     participants = hooks.clean_participants(body.get("suggestedParticipants") or body.get("participants") or [])
     if requester not in participants: participants.insert(0, requester)
     moderator = str(body.get("suggestedModerator") or body.get("moderator") or (participants[0] if participants else requester)).strip()
-    blocked = [participant for participant in participants if hooks.is_excluded(participant)]
-    if moderator and hooks.is_excluded(moderator) and moderator not in blocked: blocked.append(moderator)
-    if blocked:
-        return error("Archive manager cannot participate in executable meetings", 400, "archive_manager_not_meeting_participant") | {"participants": blocked}
+    rejected = [
+        (participant, policy_error)
+        for participant in participants
+        if isinstance((policy_error := hooks.participant_error(participant)), Mapping)
+    ]
+    if moderator and moderator not in participants:
+        policy_error = hooks.participant_error(moderator)
+        if isinstance(policy_error, Mapping):
+            rejected.append((moderator, policy_error))
+    if rejected:
+        result = dict(rejected[0][1])
+        result["participants"] = [item[0] for item in rejected]
+        return result
     project_id = str(project.get("id") or ""); task_id = str(task.get("id") or "")
     existing = next((item for item in data.get("requests", {}).values() if unresolved_for_task(item, project_id, task_id)), None)
     if existing:
@@ -185,8 +194,15 @@ def confirm_command(
     participants = hooks.clean_participants(body.get("participants") or proposal.get("suggestedParticipants") or [])
     moderator = str(body.get("moderator") or proposal.get("suggestedModerator") or "").strip()
     if moderator and moderator not in participants: participants.insert(0, moderator)
-    blocked = [participant for participant in participants if hooks.is_excluded(participant)]
-    if blocked: return error("Archive manager cannot participate in executable meetings", 400, "archive_manager_not_meeting_participant") | {"participants": blocked}
+    rejected = [
+        (participant, policy_error)
+        for participant in participants
+        if isinstance((policy_error := hooks.participant_error(participant)), Mapping)
+    ]
+    if rejected:
+        result = dict(rejected[0][1])
+        result["participants"] = [item[0] for item in rejected]
+        return result
     now = hooks.now(); source = request.get("source") if isinstance(request.get("source"), Mapping) else {}
     final = {
         "topic": str(body.get("topic") or proposal.get("topic") or "").strip(),

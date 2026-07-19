@@ -12890,7 +12890,7 @@ def _meeting_request_service_hooks():
         now=_exec_meeting_now,
         new_id=lambda: str(uuid.uuid4()),
         clean_participants=_exec_meeting_clean_participants,
-        is_excluded=_is_archive_manager_agent,
+        participant_error=_system_agent_meeting_error,
         auto_confirm_label=_meeting_request_auto_confirm_label,
         lifecycle_hooks=meeting_lifecycle_service.CreateHooks(
             rebuild_occupancy=_rebuild_exec_meeting_occupancy,
@@ -16326,7 +16326,7 @@ def _handle_executable_meeting_create(body):
     moderator = str(body.get("moderator") or body.get("moderatorId") or participants[0]).strip()
     try:
         meeting_lifecycle_service.validate_participant_eligibility(
-            participants, moderator, is_excluded=_is_archive_manager_agent,
+            participants, moderator, participant_error=_system_agent_meeting_error,
         )
     except meeting_lifecycle_service.MeetingLifecycleError as error:
         if error.code == "archive_manager_not_meeting_participant":
@@ -16432,7 +16432,7 @@ def _handle_executable_meeting_conflict_action(meeting_id, body):
         has_open_conflicts=_meeting_has_open_conflicts,
         mark_preparing=_meeting_mark_preparing_started,
         rebuild_occupancy=_rebuild_exec_meeting_occupancy,
-        is_excluded=_is_archive_manager_agent,
+        participant_error=_system_agent_meeting_error,
         now=_exec_meeting_now,
         new_id=lambda: str(uuid.uuid4()),
     )
@@ -17290,6 +17290,22 @@ def _handle_meeting_create(body):
 
     if not organizer:
         organizer = clean_agents[0]
+
+    try:
+        meeting_lifecycle_service.validate_participant_eligibility(
+            clean_agents,
+            organizer,
+            participant_error=_system_agent_meeting_error,
+        )
+    except meeting_lifecycle_service.MeetingLifecycleError as error:
+        if error.code == "archive_manager_not_meeting_participant":
+            return _exec_meeting_archive_manager_error(error.details.get("participants") or [])
+        return {
+            "error": str(error),
+            "code": error.code,
+            "blockedParticipants": error.details.get("participants") or [],
+            "_status": error.status,
+        }
 
     if meet_type not in ("1on1", "group"):
         meet_type = "1on1" if len(clean_agents) == 2 else "group"
@@ -21718,6 +21734,13 @@ def _system_agent_assignment_error(agent_id_or_key, scope="task"):
 
 def _system_agent_deletion_error(agent_id_or_key):
     error = system_agent_policy_service.deletion_error(
+        _resolve_vo_system_agent_role(agent_id_or_key),
+    )
+    return error.as_payload() if error else None
+
+
+def _system_agent_meeting_error(agent_id_or_key):
+    error = system_agent_policy_service.meeting_error(
         _resolve_vo_system_agent_role(agent_id_or_key),
     )
     return error.as_payload() if error else None

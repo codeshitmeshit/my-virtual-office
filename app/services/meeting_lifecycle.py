@@ -129,7 +129,7 @@ class ConflictHooks:
     has_open_conflicts: Callable[[Mapping[str, Any]], bool]
     mark_preparing: Callable[..., Any]
     rebuild_occupancy: Callable[[MutableMapping[str, Any]], Any]
-    is_excluded: Callable[[str], bool]
+    participant_error: Callable[[str], Mapping[str, Any] | None]
     now: Callable[[], str]
     new_id: Callable[[], str]
 
@@ -340,8 +340,9 @@ def conflict_action_command(
         conflict["resolution"] = {"action": "reserve", "decidedAt": now, "decidedBy": actor["id"]}
     elif action == "replace":
         replacement = str(body.get("replacement") or body.get("replacementAgentId") or "").strip()
-        if hooks.is_excluded(replacement):
-            return {"error": "Archive manager cannot participate in executable meetings", "code": "archive_manager_not_meeting_participant", "_status": 400}
+        rejected = hooks.participant_error(replacement)
+        if isinstance(rejected, Mapping):
+            return dict(rejected)
         replacement_context = hooks.busy_context(data, replacement, exclude_meeting_id=meeting_id)
         if replacement_context.get("busy"):
             return {"error": "Replacement agent is busy", "conflict": replacement_context, "_status": 409}
@@ -755,16 +756,28 @@ def phase(meeting: Mapping[str, Any]) -> str:
 
 
 def validate_participant_eligibility(
-    participants: list[str], moderator: str, *, is_excluded: Callable[[str], bool],
+    participants: list[str], moderator: str, *,
+    participant_error: Callable[[str], Mapping[str, Any] | None],
 ) -> None:
-    blocked = [participant for participant in participants if is_excluded(participant)]
-    if moderator and is_excluded(moderator) and moderator not in blocked:
-        blocked.append(moderator)
-    if blocked:
+    rejected: list[tuple[str, Mapping[str, Any]]] = []
+    for participant in participants:
+        error = participant_error(participant)
+        if isinstance(error, Mapping):
+            rejected.append((participant, error))
+    if moderator and moderator not in participants:
+        error = participant_error(moderator)
+        if isinstance(error, Mapping):
+            rejected.append((moderator, error))
+    if rejected:
+        first = rejected[0][1]
         raise MeetingLifecycleError(
-            "Archive manager cannot participate in executable meetings",
-            code="archive_manager_not_meeting_participant", status=400,
-            details={"participants": blocked},
+            str(first.get("error") or "System Agent cannot participate in this meeting"),
+            code=str(first.get("code") or "system_agent_not_meeting_eligible"),
+            status=int(first.get("_status") or 400),
+            details={
+                "participants": [item[0] for item in rejected],
+                "systemRole": first.get("systemRole"),
+            },
         )
     if moderator not in participants:
         raise MeetingLifecycleError("Moderator must be one of the participants", code="meeting_moderator_invalid", status=400)

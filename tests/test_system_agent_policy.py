@@ -9,7 +9,7 @@ APP_DIR = ROOT / "app"
 if str(APP_DIR) not in sys.path:
     sys.path.insert(0, str(APP_DIR))
 
-from services.system_agent_policy import assignment_error, deletion_error
+from services.system_agent_policy import assignment_error, deletion_error, meeting_error
 from services.system_agent_roles import ARCHIVE_MANAGER_ROLE, HR_ROLE
 
 
@@ -39,8 +39,16 @@ def test_hr_policy_uses_stable_system_role_codes_and_pause_direction():
     assert deletion.role_key == "hr"
     assert deletion.status == 403
     assert "暂停控制" in deletion.message
+    assert meeting_error(HR_ROLE) is None
 
 
 def test_unknown_or_permitted_roles_have_no_protection_error():
     assert assignment_error(None) is None
     assert deletion_error(None) is None
+
+
+def test_archive_manager_meeting_policy_preserves_legacy_error_code():
+    rejected = meeting_error(ARCHIVE_MANAGER_ROLE)
+    assert rejected.code == "archive_manager_not_meeting_participant"
+    assert rejected.operation == "meeting_participation"
+    assert rejected.status == 400

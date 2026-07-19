@@ -279,10 +279,6 @@ def test_archive_manager_cannot_be_deleted_or_assigned_to_project_tasks():
             restore_phase4_store(old)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Known pre-policy defect: the legacy meeting-create path does not enforce archive-manager participant exclusion; task 4.5 must make this pass.",
-)
 def test_legacy_meeting_create_preserves_archive_manager_exclusion():
     with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as oc_home:
         old = with_phase4_store(status_dir, oc_home)

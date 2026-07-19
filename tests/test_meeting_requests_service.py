@@ -15,7 +15,12 @@ def hooks():
     return RequestHooks(
         now=lambda: "now", new_id=lambda: "generated-id",
         clean_participants=lambda values: list(dict.fromkeys(str(value).strip() for value in values if str(value).strip())),
-        is_excluded=lambda value: value == "archive-manager",
+        participant_error=lambda value: ({
+            "error": "Archive manager cannot participate in executable meetings",
+            "code": "archive_manager_not_meeting_participant",
+            "systemRole": "archive_manager",
+            "_status": 400,
+        } if value == "archive-manager" else None),
         auto_confirm_label=lambda reason: f"label:{reason}",
         lifecycle_hooks=meeting_lifecycle.CreateHooks(
             rebuild_occupancy=lambda data: meeting_lifecycle.rebuild_occupancy(data),
@@ -78,6 +83,39 @@ def test_confirm_atomically_creates_meeting_conversion_event_and_occupancy():
         lifecycle_defaults={"meetingId": "other"}, hooks=hooks(),
     )
     assert repeated["idempotent"] is True and len(data["meetings"]) == 1
+
+
+def test_hr_is_eligible_in_request_and_confirmed_meeting_occupancy():
+    data = empty_data()
+    created = create_command(
+        data,
+        {"id": "p1", "title": "Project"},
+        {"id": "t1", "title": "Task"},
+        request_body(
+            requestingAgentId="a1",
+            suggestedParticipants=["a1", "hr"],
+            suggestedModerator="hr",
+        ),
+        [],
+        hooks(),
+    )
+    assert created["ok"] is True
+    confirmed = confirm_command(
+        data,
+        created["request"]["id"],
+        {"participants": ["a1", "hr"], "moderator": "hr", "confirmedBy": "user"},
+        project_title="Project",
+        lifecycle_defaults={
+            "meetingId": "meeting-with-hr",
+            "preparingTimeoutSec": 300,
+            "decisionWindowSec": 60,
+            "contextBudget": {},
+            "allowConflicts": False,
+        },
+        hooks=hooks(),
+    )
+    assert confirmed["ok"] is True
+    assert data["occupancy"] == {"a1": "meeting-with-hr", "hr": "meeting-with-hr"}
 
 
 def test_context_public_projection_reject_and_resolution_are_compatible():

@@ -17,6 +17,17 @@ def meeting(mid="m1", stage="draft", version=1, participants=None):
     return {"id": mid, "stage": stage, "version": version, "participants": participants or ["a1", "a2"]}
 
 
+def participant_error(value):
+    if value != "archive-manager":
+        return None
+    return {
+        "error": "Archive manager cannot participate in executable meetings",
+        "code": "archive_manager_not_meeting_participant",
+        "systemRole": "archive_manager",
+        "_status": 400,
+    }
+
+
 def test_transition_matrix_and_version_gate():
     validate_transition(meeting(), "preparing", expected_version=1)
     try: validate_transition(meeting(), "completed"); assert False
@@ -182,7 +193,9 @@ def test_targeted_question_uses_sequence_token_to_discard_completion_after_inter
 
 def test_participant_eligibility_and_replacement_are_domain_invariants():
     try:
-        validate_participant_eligibility(["a1", "archive-manager"], "a1", is_excluded=lambda item: item == "archive-manager")
+        validate_participant_eligibility(
+            ["a1", "archive-manager"], "a1", participant_error=participant_error,
+        )
         assert False
     except MeetingLifecycleError as error:
         assert error.code == "archive_manager_not_meeting_participant"
@@ -228,7 +241,7 @@ def test_conflict_replacement_rejects_archive_manager_and_updates_participant_at
         original_work_snapshot=lambda *args: {"pauseState": {}},
         has_open_conflicts=lambda current: any(item.get("status") == "open" for item in current.get("conflicts", [])),
         mark_preparing=lambda *args: None, rebuild_occupancy=lambda store: None,
-        is_excluded=lambda item: item == "archive-manager", now=lambda: "now", new_id=lambda: "c1",
+        participant_error=participant_error, now=lambda: "now", new_id=lambda: "c1",
     )
     rejected = conflict_action_command(data, "m1", {"action": "replace", "agentId": "a1", "replacement": "archive-manager"}, hooks)
     assert rejected["code"] == "archive_manager_not_meeting_participant"

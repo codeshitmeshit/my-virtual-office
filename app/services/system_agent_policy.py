@@ -74,3 +74,23 @@ def deletion_error(role: SystemAgentRole | None) -> SystemAgentPolicyError | Non
         role.role_key,
         "agent_deletion",
     )
+
+
+def meeting_error(role: SystemAgentRole | None) -> SystemAgentPolicyError | None:
+    if role is None or role.meeting_eligible:
+        return None
+    if role.role_key == ARCHIVE_MANAGER_ROLE.role_key:
+        return SystemAgentPolicyError(
+            "archive_manager_not_meeting_participant",
+            "档案管理员是系统档案角色，不能作为普通会议参与者；请在档案室进行归档维护。",
+            400,
+            role.role_key,
+            "meeting_participation",
+        )
+    return SystemAgentPolicyError(
+        "system_agent_not_meeting_eligible",
+        f"{role.display_name} 当前系统角色不允许参加会议",
+        400,
+        role.role_key,
+        "meeting_participation",
+    )
