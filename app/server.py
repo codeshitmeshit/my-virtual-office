@@ -2635,6 +2635,12 @@ from providers.codex import CodexProvider
 from providers.claude_code import ClaudeCodeProvider
 from license import get_license_status, activate_license, deactivate_license, check_feature, get_agent_limit
 from project_store import MarkdownProjectStore
+from services.managed_skills import (
+    MANAGED_SKILL_MARKER,
+    ManagedSkillDefinition,
+    seed_managed_skill_library,
+    sync_managed_skill_to_workspace,
+)
 
 PROJECT_STORE = MarkdownProjectStore(STATUS_DIR, watch_external_changes=True)
 
@@ -2647,8 +2653,7 @@ CANONICAL_AGENT_COMM_SKILL_PATH = os.path.join(
     AGENT_PLATFORM_COMM_SKILL_NAME,
     "SKILL.md",
 )
-AGENT_COMM_SKILL_MARKER = ".vo-managed.json"
-_AGENT_COMM_SKILL_SYNC_LOCK = threading.RLock()
+AGENT_COMM_SKILL_MARKER = MANAGED_SKILL_MARKER
 
 
 def _safe_agent_workspace_key(agent_key):
@@ -3300,18 +3305,6 @@ def _agent_platform_comm_skill_content():
     return content
 
 
-def _atomic_write_managed_skill_text(path, content):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    fd, tmp_path = tempfile.mkstemp(prefix=f".{os.path.basename(path)}.tmp-", dir=os.path.dirname(path))
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(content)
-        os.replace(tmp_path, path)
-    finally:
-        if os.path.exists(tmp_path):
-            os.unlink(tmp_path)
-
-
 def _is_known_legacy_agent_comm_content(content):
     text = str(content or "")
     return all(fragment in text for fragment in (
@@ -3322,103 +3315,23 @@ def _is_known_legacy_agent_comm_content(content):
     ))
 
 
-def _managed_skill_path_is_safe(workspace_real, path):
-    """Return False if a managed skill path escapes or crosses a symlink."""
-    workspace_real = os.path.realpath(workspace_real)
-    lexical_path = os.path.abspath(path)
-    if lexical_path != workspace_real and not lexical_path.startswith(workspace_real + os.sep):
-        return False
-    relative = os.path.relpath(lexical_path, workspace_real)
-    current = workspace_real
-    for part in relative.split(os.sep):
-        if part in ("", "."):
-            continue
-        current = os.path.join(current, part)
-        if os.path.islink(current):
-            return False
-        if os.path.lexists(current):
-            resolved = os.path.realpath(current)
-            if resolved != workspace_real and not resolved.startswith(workspace_real + os.sep):
-                return False
-    resolved_target = os.path.realpath(lexical_path)
-    return resolved_target == workspace_real or resolved_target.startswith(workspace_real + os.sep)
+def _communication_skill_definition():
+    return ManagedSkillDefinition(
+        name=AGENT_PLATFORM_COMM_SKILL_NAME,
+        content_loader=_agent_platform_comm_skill_content,
+        legacy_names=(LEGACY_AGENT_PLATFORM_COMM_SKILL_NAME,),
+        legacy_content_validator=_is_known_legacy_agent_comm_content,
+    )
 
 
 def _sync_openclaw_communication_skill(agent):
-    """Install or refresh the VO-managed communication skill for one agent."""
-    if not isinstance(agent, dict) or agent.get("providerKind", "openclaw") != "openclaw":
-        return {"ready": False, "status": "not_applicable", "updated": False}
-
-    workspace = str(agent.get("workspace") or "").strip()
-    base_real = os.path.realpath(WORKSPACE_BASE)
-    workspace_real = os.path.realpath(os.path.abspath(workspace)) if workspace else ""
-    if not workspace_real or not workspace_real.startswith(base_real + os.sep):
-        return {"ready": False, "status": "path_rejected", "updated": False}
-    if not os.path.isdir(workspace_real):
-        return {"ready": False, "status": "workspace_missing", "updated": False}
-
-    content = _agent_platform_comm_skill_content()
-    content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
-    skill_dir = os.path.join(workspace_real, "skills", AGENT_PLATFORM_COMM_SKILL_NAME)
-    skill_path = os.path.join(skill_dir, "SKILL.md")
-    marker_path = os.path.join(skill_dir, AGENT_COMM_SKILL_MARKER)
-    legacy_dir = os.path.join(workspace_real, "skills", LEGACY_AGENT_PLATFORM_COMM_SKILL_NAME)
-    legacy_path = os.path.join(legacy_dir, "SKILL.md")
-    managed_paths = (
-        os.path.join(workspace_real, "skills"),
-        skill_dir,
-        skill_path,
-        marker_path,
-        legacy_dir,
-        legacy_path,
+    """Compatibility delegate for the generic managed-skill installer."""
+    return sync_managed_skill_to_workspace(
+        _communication_skill_definition(),
+        agent,
+        workspace_base=WORKSPACE_BASE,
+        marker_name=AGENT_COMM_SKILL_MARKER,
     )
-    if not all(_managed_skill_path_is_safe(workspace_real, path) for path in managed_paths):
-        return {"ready": False, "status": "path_rejected", "updated": False}
-    updated = False
-
-    with _AGENT_COMM_SKILL_SYNC_LOCK:
-        marker = {}
-        if os.path.isfile(marker_path):
-            try:
-                with open(marker_path, "r", encoding="utf-8") as f:
-                    marker = json.load(f)
-            except (OSError, json.JSONDecodeError, TypeError):
-                marker = {}
-        existing = ""
-        if os.path.isfile(skill_path):
-            with open(skill_path, "r", encoding="utf-8", errors="replace") as f:
-                existing = f.read()
-
-        managed = marker.get("managedBy") == "virtual-office" and marker.get("skill") == AGENT_PLATFORM_COMM_SKILL_NAME
-        if existing and not managed and existing != content:
-            return {"ready": False, "status": "conflict", "updated": False}
-
-        if existing != content:
-            _atomic_write_managed_skill_text(skill_path, content)
-            updated = True
-        desired_marker = {
-            "managedBy": "virtual-office",
-            "skill": AGENT_PLATFORM_COMM_SKILL_NAME,
-            "sha256": content_hash,
-        }
-        if marker != desired_marker:
-            _atomic_write_managed_skill_text(marker_path, json.dumps(desired_marker, sort_keys=True, indent=2) + "\n")
-            updated = True
-
-        if os.path.isfile(legacy_path):
-            with open(legacy_path, "r", encoding="utf-8", errors="replace") as f:
-                legacy_content = f.read()
-            if not _is_known_legacy_agent_comm_content(legacy_content):
-                return {"ready": False, "status": "legacy_conflict", "updated": updated, "sha256": content_hash}
-            shutil.rmtree(legacy_dir)
-            updated = True
-
-    return {
-        "ready": True,
-        "status": "updated" if updated else "ready",
-        "updated": updated,
-        "sha256": content_hash,
-    }
 
 
 def _vo_presence_skill_content():
@@ -3590,37 +3503,24 @@ def _builtin_office_skill_contents():
 
 
 def _ensure_builtin_communication_skill():
-    """Seed built-in Virtual Office agent tool skills into the library."""
+    """Compatibility delegate for generic managed-skill library seeding."""
     try:
         lib_dir = _get_skills_library_dir()
-        first_path = ""
+        definitions = []
         for skill_name, content in _builtin_office_skill_contents().items():
-            skill_dir = os.path.join(lib_dir, skill_name)
-            skill_file = os.path.join(skill_dir, "SKILL.md")
-            os.makedirs(skill_dir, exist_ok=True)
-            old = ""
-            if os.path.isfile(skill_file):
-                with open(skill_file, "r") as f:
-                    old = f.read()
-            if old != content:
-                with open(skill_file, "w") as f:
-                    f.write(content)
             if skill_name == AGENT_PLATFORM_COMM_SKILL_NAME:
-                first_path = skill_file
-        legacy_dir = os.path.join(lib_dir, LEGACY_AGENT_PLATFORM_COMM_SKILL_NAME)
-        if os.path.isdir(legacy_dir):
-            entries = sorted(os.listdir(legacy_dir)) if not os.path.islink(legacy_dir) else []
-            legacy_file = os.path.join(legacy_dir, "SKILL.md")
-            legacy_content = ""
-            if entries == ["SKILL.md"] and os.path.isfile(legacy_file) and not os.path.islink(legacy_file):
-                with open(legacy_file, "r", encoding="utf-8", errors="replace") as f:
-                    legacy_content = f.read()
-            if entries == ["SKILL.md"] and _is_known_legacy_agent_comm_content(legacy_content):
-                os.unlink(legacy_file)
-                os.rmdir(legacy_dir)
+                definitions.append(_communication_skill_definition())
             else:
-                print("[SKILLS] Preserved conflicting legacy communication skill data")
-        return first_path
+                definitions.append(
+                    ManagedSkillDefinition(
+                        name=skill_name,
+                        content_loader=lambda content=content: content,
+                    )
+                )
+        result = seed_managed_skill_library(lib_dir, definitions)
+        if result.conflicts:
+            print("[SKILLS] Preserved conflicting legacy communication skill data")
+        return result.paths.get(AGENT_PLATFORM_COMM_SKILL_NAME, "")
     except Exception as e:
         print(f"[SKILLS] Failed to seed built-in office skills: {e}")
         return ""
