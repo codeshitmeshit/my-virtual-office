@@ -57,7 +57,7 @@
 - [x] 8.2 Implement visible HR-to-Agent daily requests through an injected conversation port, preserving sender/target context, deterministic idempotency keys, raw responses, timeout/failure classification, and per-Agent isolation.
 - [x] 8.3 Implement HR-owned report normalization and strict structured parsing for completed work, projects/tasks, artifacts, blockers, help requests, and submission metadata; retain raw reports on normalization failure and reject unsupported or oversized output.
 - [x] 8.4 Implement submission-window closure, neutral `not_submitted`, late submission into the same dated record, duplicate response handling, normalization retry, and tests proving non-response never creates a synthetic report or low-work conclusion.
-- [ ] 8.5 Implement cycle and per-Agent public/management status projections for waiting, submitted, late, not submitted, normalization failed, skipped, and complete states with accurate aggregate counts and pagination tests.
+- [x] 8.5 Implement cycle and per-Agent public/management status projections for waiting, submitted, late, not submitted, normalization failed, skipped, and complete states with accurate aggregate counts and pagination tests.
 
 ## 9. Evidence And HR Performance Assessment
 
