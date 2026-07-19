@@ -608,12 +608,13 @@ def _env_bool(key, fallback):
     return str(val).strip().lower() in ("1", "true", "yes", "on", "enabled")
 
 def _resolve_config_path():
-    """Return path to vo-config.json — prefers /data/ (persistent volume) over /app/ (container layer)."""
+    """Return the local persistent vo-config.json path."""
     if os.environ.get("VO_CONFIG"):
         return os.environ["VO_CONFIG"]
-    data_cfg = os.path.join(os.environ.get("VO_STATUS_DIR", "/data"), "vo-config.json")
+    default_status_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data"))
+    data_cfg = os.path.join(os.environ.get("VO_STATUS_DIR", default_status_dir), "vo-config.json")
     app_cfg = os.path.join(os.path.dirname(__file__), "vo-config.json")
-    # Prefer data volume config (survives container recreation)
+    # Prefer the persistent local status directory.
     if os.path.isfile(data_cfg):
         return data_cfg
     # Migrate: if app config exists and has been customized, copy to data volume
@@ -655,7 +656,6 @@ def _load_vo_config():
         # Search common locations
         candidates = [
             os.path.expanduser("~/.openclaw"),
-            "/openclaw",  # Docker mount convention
             "/root/.openclaw",  # common root install
         ]
         for c in candidates:
@@ -24736,9 +24736,7 @@ def _wf_call_agent(agent_id, message, timeout=600, project_id=None, task_id=None
         return result
 
     # Some OpenClaw installs do not expose a healthy /v1/chat/completions
-    # endpoint but the Control UI WebSocket chat path works. Use it before CLI
-    # so Dockerized Virtual Office can still deliver cross-platform messages
-    # without needing the host openclaw binary inside the container.
+    # endpoint but the Control UI WebSocket chat path works. Use it before CLI.
     ws_result = _wf_call_agent_ws(agent_id, message, timeout, session_key=session_key)
     if ws_result is not None:
         return ws_result
@@ -24770,9 +24768,8 @@ def _wf_call_agent_ws(agent_id, message, timeout, session_key=None):
     """Call an OpenClaw agent through the gateway WebSocket chat path.
 
     This mirrors the live Virtual Office chat client. It is intentionally a
-    fallback for product deployments where the HTTP OpenAI-compatible endpoint
-    is unavailable/unhealthy and the openclaw CLI is not present in the Docker
-    container.
+    fallback when the HTTP OpenAI-compatible endpoint is unavailable or
+    unhealthy and the OpenClaw CLI is not present locally.
     """
     token = _get_gateway_token()
     if not token:
@@ -25029,7 +25026,7 @@ MANDATORY RULES — VIOLATIONS WILL FAIL REVIEW:
 
 A reviewer will independently verify your work by reading the actual files and browsing the app. If no real file changes are found, ALL items will be marked DID_NOT_PASS.
 
-WARNING: Do NOT run 'docker restart' on this app's container — it will kill the workflow pipeline managing this task. If you need to reload server changes, the app live-mounts /app so file edits take effect on the next HTTP request for static files. For server.py changes that need a process reload, note what needs restarting in your report and the reviewer will handle it."""
+WARNING: Do not restart the Virtual Office process while this workflow is active. Static file edits take effect on the next HTTP request; for server.py changes that require a process reload, note what needs restarting in your report and let the reviewer handle it."""
 
 def _wf_task_needs_visual_review(task):
     """Heuristic: determine whether a task should require browser-based review."""
@@ -26660,11 +26657,7 @@ def get_claude_code_agent_messages(profile, max_messages=500):
 GATEWAY_URL = VO_CONFIG["openclaw"]["gatewayUrl"]
 GATEWAY_URL_FALLBACK = GATEWAY_URL.replace("127.0.0.1", "localhost") if "127.0.0.1" in GATEWAY_URL else GATEWAY_URL
 
-# Extract gateway port for local Host header override.
-# When connecting via Docker bridge (host.docker.internal), websockets sets
-# Host: host.docker.internal:PORT which the gateway treats as non-local,
-# triggering origin allowlist checks. By overriding Host to 127.0.0.1:PORT,
-# the gateway correctly recognizes the connection as local and skips the check.
+# Extract the gateway port for the local Host header override.
 def _compute_local_host_header(gw_url):
     from urllib.parse import urlparse
     parsed = urlparse(gw_url)
@@ -26715,13 +26708,7 @@ def _auto_configure_gateway_origin():
     """Auto-configure the OpenClaw gateway to accept connections from this VO instance.
 
     Adds the VO's origin to gateway.controlUi.allowedOrigins in openclaw.json
-    and signals the gateway to reload. This makes Docker bridge networking
-    work without any manual gateway configuration — truly plug and play.
-
-    Safe for all setups:
-    - --network host: gateway treats connection as local, skips origin check (no-op)
-    - Docker bridge: origin gets added to allowlist on first boot
-    - Already configured: detects existing entry, skips
+    and signals the gateway to reload. Existing entries are left unchanged.
     """
     origin = f"http://127.0.0.1:{PORT}"
     try:
@@ -29959,18 +29946,14 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
 
     @staticmethod
     def _write_openclaw_config(cfg):
-        """Write openclaw.json — handles read-only Docker mounts gracefully."""
+        """Write openclaw.json and report local filesystem permission errors."""
         try:
             with open(CONFIG_PATH, "w") as f:
                 json.dump(cfg, f, indent=2)
             return True, None
         except OSError as e:
             if e.errno in (30, 13):  # EROFS, EACCES
-                return False, (
-                    "OpenClaw directory is mounted read-only. "
-                    "In docker-compose.yml, ensure the volume does NOT end with ':ro'. "
-                    "Example: '~/.openclaw:/openclaw' (not '~/.openclaw:/openclaw:ro')"
-                )
+                return False, "OpenClaw configuration is read-only; grant the local user write permission."
             return False, str(e)
 
     def _handle_set_model(self, req):
@@ -30124,7 +30107,7 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
 
         Tries multiple approaches in order:
         1. systemctl --user (Linux service — works when running on host)
-        2. Signal via /proc scan (works with --pid host in Docker)
+        2. Signal via a local /proc process scan
         3. Signal file (gateway watches for restart trigger)
 
         Config changes are persisted to disk regardless — gateway picks them up
@@ -32263,7 +32246,7 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             self.end_headers()
 
     def _configure_gateway_origin(self, origin):
-        """Configure gateway to allow the given origin, and set insecure auth flags for Docker."""
+        """Configure the gateway to allow the given local origin."""
         if not origin:
             return {"ok": False, "error": "No origin provided"}
         try:
@@ -32285,10 +32268,6 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             if added:
                 origins.append(origin)
             control_ui["allowedOrigins"] = origins
-
-            # Ensure insecure auth flags for Docker
-            control_ui["allowInsecureAuth"] = True
-            control_ui["dangerouslyDisableDeviceAuth"] = True
 
             with open(CONFIG_PATH, "w") as f:
                 json.dump(cfg, f, indent=2)
@@ -33162,7 +33141,7 @@ def start_http_server():
     except (FileNotFoundError, json.JSONDecodeError):
         pass
 
-    # Auto-configure gateway to accept our origin (plug and play for Docker bridge)
+    # Auto-configure the gateway to accept the local VO origin.
     _auto_configure_gateway_origin()
 
     # Read gateway token (vo-config override, then openclaw.json)
@@ -33194,7 +33173,7 @@ def start_http_server():
 
 
 def _wf_auto_resume_on_startup():
-    """Check for workflows that were interrupted by a container restart and resume them.
+    """Check for workflows that were interrupted by a process restart and resume them.
 
     Looks for tasks stuck in 'In Progress' or 'Review' columns that have an active
     or done workflow session, indicating the pipeline was mid-execution when killed.
@@ -35677,7 +35656,7 @@ def _agent_chat_apply_session_meta(messages, meta):
     return messages
 
 def _default_hermes_api_url():
-    return "http://host.docker.internal:8642" if _running_in_docker() else "http://127.0.0.1:8642"
+    return "http://127.0.0.1:8642"
 
 def _default_hermes_desktop_url():
     return ""
@@ -36073,9 +36052,6 @@ def _handle_hermes_desktop_discover(body=None):
         result["message"] = result.get("error") or "Hermes Desktop Backend was not found."
     return result
 
-
-def _running_in_docker():
-    return os.path.exists("/.dockerenv") or bool(os.environ.get("VO_STATUS_DIR") == "/data")
 
 def _format_time_local(ts):
     """Convert ISO timestamp or epoch ms to HH:MM AM/PM in the configured local zone."""

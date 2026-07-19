@@ -78,7 +78,7 @@ Hermes 集成通过 `vo-config.json` 或环境变量进行配置：
 
 `preferApi` 因与参考实现兼容而被接受，并映射为与 `apiEnabled` 相同的运行时行为。
 
-Desktop 自动发现可以使用已暴露的 readiness 日志、已有 URL 或可见的 loopback 监听端口。Docker 部署可通过 `host.docker.internal` 连接宿主机 Desktop，并通过 TCP host/port 与 Host header 配置显式覆盖路由。
+Desktop 自动发现可以使用 readiness 日志、已有 URL 或可见的本机 loopback 监听端口，并可通过 TCP host/port 与 Host header 显式覆盖本地路由。
 
 为发现 Desktop 端口，集成可能读取配置的 readiness 日志尾部（有大小上限）。它只提取监听端口，不会返回或暴露日志原文。
 

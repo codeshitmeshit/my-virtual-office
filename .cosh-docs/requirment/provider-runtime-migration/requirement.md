@@ -210,7 +210,7 @@ Out of scope:
 - Whole-file replacement of `app/server.py`, `app/chat.js`, `app/game.js`, `app/projects.js`, `app/models.html`, `app/setup.html`, or provider facades.
 - Replacing local project execution, meeting request/blocker, archive room, scheduled/cron, i18n, or VO UI semantics with reference implementations.
 - Removing local tests, docs, i18n, project/meeting state machines, or bridge/runtime abstractions.
-- Blindly accepting reference README/LICENSE/website/docker changes unless they directly support the provider-runtime migration and pass review.
+- Blindly accepting unrelated README, license, or website changes unless they directly support the provider-runtime migration and pass review.
 - Treating formatting-only or product-direction differences as mandatory merges.
 
 ### Phase 16 Non-Regression Requirements

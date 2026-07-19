@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title data-i18n="website_title">Your Virtual Office — A Visual Workspace for AI Agents</title>
-    <meta name="description" content="Turn your AI agents into a living, breathing office. Pixel-art workspace with live presence, chat, browser control, and more. Self-hosted with Docker.">
+    <meta name="description" content="Turn your local AI agents into a living, breathing office with live presence, chat, browser control, and more.">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Press+Start+2P&display=swap" rel="stylesheet">
@@ -47,13 +47,13 @@
     <div class="hero-inner">
         <div class="hero-badge" data-i18n="hero_bad">Built for OpenClaw</div>
         <h1 data-i18n-html="hero_title">Your AI agents deserve<br>an <span class="gradient-text">office</span>.</h1>
-        <p class="hero-sub" data-i18n="hero_sub">A live pixel-art workspace where your AI agents walk, work, and talk. Watch them in real time. Chat with them. Customize everything. Self-hosted with Docker.</p>
+        <p class="hero-sub" data-i18n="hero_sub">A live pixel-art workspace where your AI agents walk, work, and talk. Watch them in real time, chat with them, and run everything locally.</p>
         <div class="hero-buttons">
             <a href="#pricing" class="btn btn-primary btn-lg" data-i18n="hero_cta_primary">Get Early Access — $9.99</a>
             <a href="#demo" class="btn btn-ghost btn-lg" data-i18n="hero_cta_secondary">See It In Action ↓</a>
         </div>
         <div class="hero-proof">
-            <div class="proof-item" data-i18n="hero_proof_1">🐳 One Docker command</div>
+            <div class="proof-item" data-i18n="hero_proof_1">⚡ One local command</div>
             <div class="proof-item" data-i18n="hero_proof_2">🔒 Self-hosted, your data</div>
             <div class="proof-item" data-i18n="hero_proof_3">⚡ Works with any OpenClaw setup</div>
         </div>
@@ -287,13 +287,11 @@
                 <div class="setup-step">
                     <div class="step-num">1</div>
                     <div class="step-content">
-                        <h3 data-i18n="setup_step1_title">Run the Docker command</h3>
+                        <h3 data-i18n="setup_step1_title">Run the local start script</h3>
                         <div class="code-block">
-                            <code>docker run -d --name virtual-office \
-  --network host \
-  -v ~/.openclaw:/openclaw \
-  -v vo-data:/data \
-  ghcr.io/eliautobot/my-virtual-office:latest</code>
+                            <code>git clone &lt;repository-url&gt;
+cd my-virtual-office
+./start.sh</code>
                         </div>
                     </div>
                 </div>
@@ -325,12 +323,8 @@
                     <div class="terminal-title" data-i18n="terminal_title">Terminal</div>
                 </div>
                 <div class="terminal-body">
-                    <div class="term-line"><span class="term-prompt">$</span> docker run -d --name virtual-office \</div>
-                    <div class="term-line dim">    --network host \</div>
-                    <div class="term-line dim">    -v ~/.openclaw:/openclaw \</div>
-                    <div class="term-line dim">    -v vo-data:/data \</div>
-                    <div class="term-line dim">    ghcr.io/yourvirtualoffice/app:latest</div>
-                    <div class="term-line"><span class="term-out">→</span> <span data-i18n="term_started">Container started</span></div>
+                    <div class="term-line"><span class="term-prompt">$</span> ./start.sh</div>
+                    <div class="term-line"><span class="term-out">→</span> <span data-i18n="term_started">Local service started</span></div>
                     <div class="term-line">&nbsp;</div>
                     <div class="term-line"><span class="term-prompt">$</span> open http://localhost:8090</div>
                     <div class="term-line"><span class="term-out">🏢</span> <span data-i18n="term_ready">Your Virtual Office is ready!</span></div>
@@ -351,7 +345,7 @@
         <div class="faq-grid">
             <div class="faq-item">
                 <h3 data-i18n="faq_q1">What do I need to run this?</h3>
-                <p data-i18n="faq_a1">Docker and an OpenClaw installation. That's it. Works on Linux, Mac, and Windows (WSL).</p>
+                <p data-i18n="faq_a1">Python 3.10+ and any local agent providers you want to connect. Works on Linux and macOS.</p>
             </div>
             <div class="faq-item">
                 <h3 data-i18n="faq_q2">Is this a SaaS?</h3>
@@ -359,7 +353,7 @@
             </div>
             <div class="faq-item">
                 <h3 data-i18n="faq_q3">How do updates work?</h3>
-                <p data-i18n-html="faq_a3"><code>docker pull</code> and restart. Your config and customizations are stored in a mounted volume — updates don't touch them.</p>
+                <p data-i18n-html="faq_a3">Run <code>git pull</code> and restart <code>./start.sh</code>. Your local configuration and data remain in <code>.env</code> and <code>data/</code>.</p>
             </div>
             <div class="faq-item">
                 <h3 data-i18n="faq_q4">Can I try before buying?</h3>

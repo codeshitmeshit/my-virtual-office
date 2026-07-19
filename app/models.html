@@ -347,7 +347,7 @@ function renderHermesNativeForm(p) {
         <div class="row"><label>${i18n.t('native_api_url')}</label><input id="native-hermes-api-url" value="${escAttr(p.apiUrl || '')}" placeholder="http://127.0.0.1:8642"></div>
         <div class="row"><label>${i18n.t('native_api_key')}</label><input id="native-hermes-api-key" type="password" autocomplete="off" placeholder="${escAttr(i18n.t('leave_blank_keep_key'))}"></div>
         <div class="row"><label>${i18n.t('hermes_desktop_url')}</label><input id="native-hermes-desktop-url" value="${escAttr(p.desktopUrl || '')}" placeholder="http://127.0.0.1:8643"></div>
-        <div class="row"><label>${i18n.t('hermes_desktop_tcp_host')}</label><input id="native-hermes-desktop-host" value="${escAttr(p.desktopTcpHost || '')}" placeholder="host.docker.internal"></div>
+        <div class="row"><label>${i18n.t('hermes_desktop_tcp_host')}</label><input id="native-hermes-desktop-host" value="${escAttr(p.desktopTcpHost || '')}" placeholder="127.0.0.1"></div>
         <div class="row"><label>${i18n.t('hermes_desktop_tcp_port')}</label><input id="native-hermes-desktop-port" value="${escAttr(p.desktopTcpPort || '')}" placeholder="8643"></div>
         <div class="row"><label>${i18n.t('hermes_desktop_host_header')}</label><input id="native-hermes-desktop-header" value="${escAttr(p.desktopHostHeader || '')}" placeholder="127.0.0.1:8643"></div>
         <label class="checkbox-line"><input id="native-hermes-platform-enabled" type="checkbox" ${nativeChecked(p.platformEnabled, false)}> ${i18n.t('hermes_gateway_platform')}</label>

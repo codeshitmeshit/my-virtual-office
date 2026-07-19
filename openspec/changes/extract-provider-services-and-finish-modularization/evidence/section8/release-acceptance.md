@@ -4,8 +4,8 @@
 
 - Candidate was started and restarted only with `./start.sh`; HTTP `8090` and WebSocket `8091` passed the script's built-in health checks.
 - The configured management token was the startup-script default `4285`. An unauthenticated destructive Project request returned `403 management_token_required`; authenticated lifecycle requests succeeded.
-- `./start.sh --browser` was attempted and stopped at its prerequisite check because Docker is not installed on this machine. No direct Python server or alternative browser launcher was used. CDP/UI/performance checks therefore remain explicit manual-only coverage.
-- Browser viewer, OpenClaw Gateway, Hermes, and Feishu reported unavailable because the local machine lacks Docker, a Gateway token/config, Hermes configuration, and Feishu application credentials respectively. Their unavailable/degradation paths passed without affecting healthy Providers.
+- No local Chrome debugging endpoint was available. CDP/UI/performance checks therefore remain explicit manual-only coverage.
+- Browser viewer, OpenClaw Gateway, Hermes, and Feishu reported unavailable because the local machine lacks a Chrome debugging endpoint, a Gateway token/config, Hermes configuration, and Feishu application credentials respectively. Their unavailable/degradation paths passed without affecting healthy Providers.
 
 ## Live acceptance
 
@@ -45,7 +45,7 @@
 
 ## Manual-only gaps
 
-- CDP visual interaction and browser performance: Docker/CDP unavailable.
+- CDP visual interaction and browser performance: local Chrome debugging unavailable.
 - Hermes API/Desktop/Gateway happy path and native approval continuation: no local Hermes/Gateway configuration.
 - OpenClaw live queued delivery: no readable Gateway config/token.
 - Feishu card delivery/callback: no application credentials/webhook.

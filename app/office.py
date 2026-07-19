@@ -39,7 +39,7 @@ def _local_status_dir():
     return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data"))
 
 def _get_status_dir():
-    """Return one canonical status directory for local and container runs."""
+    """Return the canonical local status directory."""
     env_status_dir = os.environ.get("VO_STATUS_DIR")
     if env_status_dir:
         return os.path.abspath(os.path.expanduser(env_status_dir))

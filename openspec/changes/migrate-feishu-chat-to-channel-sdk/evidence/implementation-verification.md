@@ -9,7 +9,7 @@ Recorded: 2026-07-16 (Asia/Shanghai)
 - SDK-backed inbound lifecycle, normalized identity/thread/resource envelopes, durable replay, bounded concurrency/queues/spool, reconnect and parent-liveness behavior.
 - SDK-backed send, reply, reactions, recall, and streamed resource downloads with safe attachment paths and classified failures.
 - Python adapter and owned-child supervisor with `environment > saved config > channel-sdk-node` selection plus `legacy-python` rollback.
-- Settings UI/status projection, supported startup dependency installation, Docker packaging, observability counters, redaction, operator runbook, and offline rollout rehearsal.
+- Settings UI/status projection, supported startup dependency installation, legacy packaging, observability counters, redaction, operator runbook, and offline rollout rehearsal.
 - Existing notification/card-action and provider/history behavior remains isolated and covered by regression tests.
 
 ## Reproducible verification

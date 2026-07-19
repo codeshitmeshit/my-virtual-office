@@ -899,7 +899,7 @@ Likely intentional boundaries:
 - Reference-side wholesale rewrites of `server.py`, `chat.js`, `game.js`, `models.html`, and `setup.html`.
 - Reference product semantics that conflict with local meeting/project/archive/scheduled behavior.
 - Reference UI copy/style that is not localized or not VO-style.
-- Peripheral README/LICENSE/website/docker changes unrelated to provider runtime.
+- Peripheral README, license, and website changes unrelated to provider runtime.
 - Reference deletions or simplifications of local docs/tests/state-machine coverage.
 
 ### Technical Risks

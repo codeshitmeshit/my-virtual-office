@@ -1,13 +1,9 @@
 #!/usr/bin/env bash
 # =============================================================================
 # Virtual Office — 一键启动脚本
-# 用法: ./start.sh              本地启动（默认）
-#       ./start.sh --browser    启动代理浏览器 Docker 服务
-#       ./start.sh --stop       停止 Docker 服务
-#       ./start.sh --restart    重启代理浏览器 Docker 服务
-#       ./start.sh --update     重建代理浏览器镜像后重启
-#       ./start.sh --logs       查看代理浏览器 Docker 日志
-#       ./start.sh --status     查看本地应用与代理浏览器状态
+# 用法: ./start.sh              本地启动
+#       ./start.sh --browser    启动可选 Agent Browser 镜像
+#       ./start.sh --help       显示帮助
 # =============================================================================
 
 set -euo pipefail
@@ -23,81 +19,28 @@ NC='\033[0m' # No Color
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_FILE="$SCRIPT_DIR/.env"
 ENV_EXAMPLE="$SCRIPT_DIR/.env.example"
-COMPOSE_FILE="$SCRIPT_DIR/docker-compose.yml"
-ENABLE_BROWSER=0
-START_BROWSER_SERVICE=0
-BROWSER_CDP_URL=""
-POSITIONAL_ARGS=()
+BROWSER_COMPOSE_FILE="$SCRIPT_DIR/docker-compose.browser.yml"
 
 # ── 帮助信息 ──────────────────────────────────────────────────────────────
 usage() {
     cat <<EOF
-${CYAN}My Virtual Office — 一键部署${NC}
+${CYAN}My Virtual Office — 本地启动${NC}
 
 用法: $(basename "$0") [选项]
 
 选项:
-  (无)          本地启动（默认，直接运行 Python）
-  --browser     启动代理浏览器 Docker 服务，并写入浏览器面板配置
-  --stop        停止 Docker 服务
-  --restart     重启代理浏览器 Docker 服务
-  --update      重建代理浏览器镜像并重启
-  --logs        查看代理浏览器 Docker 日志
-  --status      查看本地应用与代理浏览器状态
-  --browser-cdp URL
-               浏览器 CDP 地址（默认: http://127.0.0.1:9224）
-  --clean       停止 Docker 服务并删除数据卷（⚠️ 会丢失所有数据）
-  --help        显示此帮助信息
+  (无)               直接运行本地 Python 服务（不使用 Docker）
+  --browser          构建并启动可选 Agent Browser 镜像
+  --browser-stop     停止 Agent Browser
+  --browser-restart  重启 Agent Browser
+  --browser-logs     查看 Agent Browser 日志
+  --browser-status   查看 Agent Browser 状态
+  --help             显示此帮助信息
 
 ${CYAN}本地启动后访问: http://localhost:8090/setup${NC}
+${CYAN}Agent Browser: CDP http://127.0.0.1:9224，Viewer https://localhost:6901${NC}
 EOF
     exit 0
-}
-
-# ── 参数解析 ──────────────────────────────────────────────────────────────
-parse_args() {
-    POSITIONAL_ARGS=()
-    while [ $# -gt 0 ]; do
-        case "$1" in
-            --browser)
-                ENABLE_BROWSER=1
-                START_BROWSER_SERVICE=1
-                ;;
-            --browser-cdp)
-                if [ $# -lt 2 ]; then
-                    echo -e "${RED}--browser-cdp 需要 URL 参数${NC}"
-                    exit 1
-                fi
-                BROWSER_CDP_URL="$2"
-                shift
-                ;;
-            *)
-                POSITIONAL_ARGS+=("$1")
-                ;;
-        esac
-        shift
-    done
-}
-
-set_env_var() {
-    local key="$1"
-    local value="$2"
-    local tmp_file="${ENV_FILE}.tmp"
-    if grep -q "^${key}=" "$ENV_FILE"; then
-        awk -v k="$key" -v v="$value" 'BEGIN { FS=OFS="=" } $1 == k { $0 = k "=" v } { print }' "$ENV_FILE" > "$tmp_file"
-        mv "$tmp_file" "$ENV_FILE"
-    else
-        echo "${key}=${value}" >> "$ENV_FILE"
-    fi
-}
-
-apply_start_options() {
-    if [ "$ENABLE_BROWSER" -eq 1 ]; then
-        set_env_var "VO_BROWSER_PANEL" "true"
-        set_env_var "VO_CDP_URL" "${BROWSER_CDP_URL:-http://127.0.0.1:9224}"
-        set_env_var "VO_VIEWER_URL" "https://localhost:6901"
-        echo -e "  ${GREEN}✓${NC} 已启用浏览器面板启动配置"
-    fi
 }
 
 is_truthy() {
@@ -105,13 +48,6 @@ is_truthy() {
         1|true|TRUE|yes|YES|on|ON|enabled|ENABLED) return 0 ;;
         *) return 1 ;;
     esac
-}
-
-host_cdp_url_for_check() {
-    local cdp_url="${1:-}"
-    cdp_url="${cdp_url/host.docker.internal/127.0.0.1}"
-    cdp_url="${cdp_url/localhost/127.0.0.1}"
-    echo "${cdp_url%/}"
 }
 
 warn_if_browser_unavailable() {
@@ -122,54 +58,25 @@ warn_if_browser_unavailable() {
     fi
     if [ -z "$cdp_url" ]; then
         echo -e "  ${YELLOW}⚠ 已启用代理浏览器面板，但未配置 VO_CDP_URL${NC}"
-        echo -e "  ${YELLOW}  建议运行: ./start.sh --browser${NC}"
+        echo -e "  ${YELLOW}  可运行 ./start.sh --browser，或在 .env 中配置其他 Chrome DevTools 地址${NC}"
         return 0
     fi
 
     local check_url
-    check_url="$(host_cdp_url_for_check "$cdp_url")"
+    check_url="${cdp_url/localhost/127.0.0.1}"
+    check_url="${check_url%/}"
     if curl -sf "${check_url}/json/version" >/dev/null 2>&1; then
         echo -e "  ${GREEN}✓${NC} 代理浏览器 CDP 可用: ${check_url}"
         return 0
     fi
 
     echo -e "  ${YELLOW}⚠ 代理浏览器面板已启用，但 CDP 不可达: ${cdp_url}${NC}"
-    echo -e "  ${YELLOW}  如果还没有启动代理浏览器，请运行: ./start.sh --browser${NC}"
-    echo -e "  ${YELLOW}  Docker 镜像默认 CDP 端口: http://127.0.0.1:9224${NC}"
-}
-
-# ── 前置检查 ──────────────────────────────────────────────────────────────
-check_prerequisites() {
-    echo -e "${CYAN}[1/5] 检查运行环境...${NC}"
-
-    # 检查 Docker
-    if ! command -v docker &>/dev/null; then
-        echo -e "${RED}✗ Docker 未安装${NC}"
-        echo "请先安装 Docker: https://docs.docker.com/get-docker/"
-        exit 1
-    fi
-    echo -e "  ${GREEN}✓${NC} Docker $(docker --version | awk '{print $3}' | tr -d ',')"
-
-    # 检查 Docker Compose
-    if ! docker compose version &>/dev/null 2>&1; then
-        echo -e "${RED}✗ Docker Compose 不可用${NC}"
-        echo "请确保 Docker Desktop 已安装，或单独安装 docker-compose-plugin"
-        exit 1
-    fi
-    echo -e "  ${GREEN}✓${NC} Docker Compose 可用"
-
-    # 检查 docker-compose.yml
-    if [ ! -f "$COMPOSE_FILE" ]; then
-        echo -e "${RED}✗ 找不到 docker-compose.yml${NC}"
-        echo "请确保在 Virtual Office 项目目录中运行此脚本"
-        exit 1
-    fi
-    echo -e "  ${GREEN}✓${NC} docker-compose.yml 存在"
+    echo -e "  ${YELLOW}  可运行 ./start.sh --browser，或确认已配置的 Chrome 调试端口可达${NC}"
 }
 
 # ── 环境配置 ──────────────────────────────────────────────────────────────
 setup_env() {
-    echo -e "${CYAN}[2/5] 配置环境...${NC}"
+    echo -e "${CYAN}[配置] 检查环境文件...${NC}"
 
     if [ ! -f "$ENV_FILE" ]; then
         if [ -f "$ENV_EXAMPLE" ]; then
@@ -181,8 +88,8 @@ setup_env() {
             cat > "$ENV_FILE" <<EOF
 # Virtual Office 环境配置
 VO_OPENCLAW_PATH=~/.openclaw
-# VO_GATEWAY_URL=ws://host.docker.internal:18790
-# VO_GATEWAY_HTTP=http://host.docker.internal:18790
+# VO_GATEWAY_URL=ws://127.0.0.1:18790
+# VO_GATEWAY_HTTP=http://127.0.0.1:18790
 VO_PORT=8090
 VO_WS_PORT=8091
 VO_OFFICE_NAME=Virtual Office
@@ -234,8 +141,6 @@ EOF
         echo -e "  ${GREEN}✓${NC} 已补充 Agent 项目创作开关到 .env"
     fi
 
-    apply_start_options
-
     # 检查 OpenClaw 路径是否存在
     VO_PATH=$(grep '^VO_OPENCLAW_PATH=' "$ENV_FILE" | cut -d'=' -f2- | sed "s#^~#$HOME#")
     VO_PATH="${VO_PATH/#\~/$HOME}"
@@ -247,131 +152,74 @@ EOF
     fi
 }
 
-# ── 启动代理浏览器 Docker 服务 ────────────────────────────────────────────
-start_browser_service() {
-    echo -e "${CYAN}[3/5] 构建代理浏览器镜像...${NC}"
-    cd "$SCRIPT_DIR"
-    docker compose build agent-browser
-
-    echo -e "${CYAN}[4/5] 启动代理浏览器...${NC}"
-    # Force recreation so old containers cannot keep stale images or legacy bind mounts.
-    docker compose up -d --force-recreate agent-browser
-
-    echo -e "${CYAN}[5/5] 等待代理浏览器 CDP 就绪...${NC}"
-    local max_wait=30
-    local waited=0
-    while [ $waited -lt $max_wait ]; do
-        if curl -sf "http://127.0.0.1:9224/json/version" &>/dev/null; then
-            echo -e "  ${GREEN}✓${NC} 代理浏览器 CDP 已就绪: http://127.0.0.1:9224"
-            break
-        fi
-        sleep 1
-        waited=$((waited + 1))
-    done
-
-    if [ $waited -ge $max_wait ]; then
-        echo -e "  ${YELLOW}⚠ 代理浏览器 CDP 尚未就绪，容器可能仍在启动中${NC}"
-        echo -e "  ${YELLOW}  可稍后检查: curl http://127.0.0.1:9224/json/version${NC}"
+# ── 可选 Agent Browser 镜像 ──────────────────────────────────────────────
+check_browser_prerequisites() {
+    if ! command -v docker &>/dev/null; then
+        echo -e "${RED}✗ Docker 未安装${NC}"
+        echo "Docker 只用于可选 Agent Browser；主应用仍由 ./start.sh 在宿主机运行。"
+        exit 1
     fi
-
-    set -a
-    source "$ENV_FILE" 2>/dev/null || true
-    set +a
-    warn_if_browser_unavailable
+    if ! docker compose version >/dev/null 2>&1; then
+        echo -e "${RED}✗ Docker Compose 插件不可用${NC}"
+        exit 1
+    fi
+    if [ ! -f "$BROWSER_COMPOSE_FILE" ]; then
+        echo -e "${RED}✗ 找不到浏览器配置: $BROWSER_COMPOSE_FILE${NC}"
+        exit 1
+    fi
 }
 
-# ── 显示访问信息 ──────────────────────────────────────────────────────────
-show_access_info() {
-    local vo_port
-    vo_port=$(grep '^VO_PORT=' "$ENV_FILE" | cut -d'=' -f2-)
-    local vo_ws_port
-    vo_ws_port=$(grep '^VO_WS_PORT=' "$ENV_FILE" | cut -d'=' -f2-)
-
-    echo ""
-    echo -e "${GREEN}╔══════════════════════════════════════════════════╗${NC}"
-    echo -e "${GREEN}║          My Virtual Office 已启动! 🎉           ║${NC}"
-    echo -e "${GREEN}╠══════════════════════════════════════════════════╣${NC}"
-    echo -e "${GREEN}║${NC}"
-    echo -e "${GREEN}║  🌐 办公室:    http://localhost:${vo_port}           ${NC}"
-    echo -e "${GREEN}║  🧙 设置向导:  http://localhost:${vo_port}/setup     ${NC}"
-    echo -e "${GREEN}║  ⚙️  模型设置:   http://localhost:${vo_port}/models.html${NC}"
-    echo -e "${GREEN}║  ⏰ 定时任务:  http://localhost:${vo_port}/cron.html   ${NC}"
-    echo -e "${GREEN}║${NC}"
-    echo -e "${GREEN}║  📋 常用命令:                               ${NC}"
-    echo -e "${GREEN}║    $(basename "$0") --status    查看服务状态          ${NC}"
-    echo -e "${GREEN}║    $(basename "$0") --logs      查看服务日志          ${NC}"
-    echo -e "${GREEN}║    $(basename "$0") --stop      停止服务              ${NC}"
-    echo -e "${GREEN}║    $(basename "$0") --restart   重启服务              ${NC}"
-    echo -e "${GREEN}║    $(basename "$0") --update    更新到最新版          ${NC}"
-    echo -e "${GREEN}║${NC}"
-    echo -e "${GREEN}╚══════════════════════════════════════════════════╝${NC}"
-    echo ""
-    echo -e "${CYAN}💡 提示: 首次访问请打开设置向导完成配置${NC}"
-    echo ""
+browser_compose() {
+    docker compose --project-directory "$SCRIPT_DIR" -f "$BROWSER_COMPOSE_FILE" "$@"
 }
 
 show_browser_access_info() {
-    echo ""
-    echo -e "${GREEN}╔══════════════════════════════════════════════════╗${NC}"
-    echo -e "${GREEN}║          代理浏览器 Docker 已启动              ║${NC}"
-    echo -e "${GREEN}╠══════════════════════════════════════════════════╣${NC}"
-    echo -e "${GREEN}║  CDP:     http://127.0.0.1:9224                 ${NC}"
-    echo -e "${GREEN}║  Viewer:  https://localhost:6901                ${NC}"
-    echo -e "${GREEN}║                                                  ${NC}"
-    echo -e "${GREEN}║  主应用请另开终端运行: ./start.sh               ${NC}"
-    echo -e "${GREEN}╚══════════════════════════════════════════════════╝${NC}"
-    echo ""
+    echo -e "${GREEN}✓ Agent Browser 已启动${NC}"
+    echo "  CDP:    http://127.0.0.1:9224"
+    echo "  Viewer: https://localhost:6901"
 }
 
-# ── 停止服务 ──────────────────────────────────────────────────────────────
-stop_service() {
-    echo -e "${YELLOW}停止 Docker 服务...${NC}"
-    cd "$SCRIPT_DIR"
-    docker compose stop agent-browser virtual-office 2>/dev/null || docker compose down
-    echo -e "${GREEN}✓ Docker 服务已停止${NC}"
+start_browser_service() {
+    check_browser_prerequisites
+    setup_env
+    echo -e "${CYAN}构建并启动可选 Agent Browser...${NC}"
+    browser_compose build agent-browser
+    browser_compose up -d --force-recreate agent-browser
+
+    for _ in $(seq 1 60); do
+        if curl -sf http://127.0.0.1:9224/json/version >/dev/null 2>&1; then
+            show_browser_access_info
+            return 0
+        fi
+        sleep 1
+    done
+
+    echo -e "${YELLOW}⚠ Agent Browser 已启动，但 CDP 尚未就绪${NC}"
+    echo "  使用 ./start.sh --browser-logs 查看日志"
 }
 
-# ── 更新服务 ──────────────────────────────────────────────────────────────
-update_service() {
-    echo -e "${YELLOW}重建并重启代理浏览器...${NC}"
-    cd "$SCRIPT_DIR"
-    docker compose build agent-browser
-    docker compose up -d --force-recreate agent-browser
-    echo -e "${GREEN}✓ 代理浏览器已重建并重启${NC}"
+stop_browser_service() {
+    check_browser_prerequisites
+    browser_compose down
 }
 
-# ── 查看日志 ──────────────────────────────────────────────────────────────
-show_logs() {
-    cd "$SCRIPT_DIR"
-    docker compose logs -f agent-browser
+restart_browser_service() {
+    check_browser_prerequisites
+    browser_compose restart agent-browser
+    show_browser_access_info
 }
 
-# ── 查看状态 ──────────────────────────────────────────────────────────────
-show_status() {
-    cd "$SCRIPT_DIR"
-
-    echo -e "${CYAN}服务状态:${NC}"
-    docker compose ps agent-browser virtual-office 2>/dev/null || echo -e "${RED}Docker 服务未运行${NC}"
-
-    echo ""
-    local vo_port
-    vo_port=$(grep '^VO_PORT=' "$ENV_FILE" 2>/dev/null | cut -d'=' -f2- || echo "8090")
-
-    if curl -sf "http://localhost:${vo_port}/health" &>/dev/null; then
-        echo -e "  ${GREEN}● 健康检查通过${NC}"
-    else
-        echo -e "  ${RED}● 服务未响应${NC}"
-    fi
-
-    # 显示容器资源使用
-    if docker ps --filter name=agent-browser --format '{{.Status}}' | grep -q Up; then
-        echo ""
-        echo -e "${CYAN}代理浏览器资源使用:${NC}"
-        docker stats agent-browser --no-stream --format "  CPU: {{.CPUPerc}} | 内存: {{.MemUsage}}" 2>/dev/null || true
-    fi
+show_browser_logs() {
+    check_browser_prerequisites
+    browser_compose logs -f agent-browser
 }
 
-# ── 本地启动（无需 Docker）────────────────────────────────────────────────
+show_browser_status() {
+    check_browser_prerequisites
+    browser_compose ps agent-browser
+}
+
+# ── 本地启动 ──────────────────────────────────────────────────────────────
 start_local() {
     echo -e "${CYAN}"
     echo "╔══════════════════════════════════════════╗"
@@ -668,42 +516,18 @@ PY
     exit "$exit_code"
 }
 
-# ── 清理数据 ──────────────────────────────────────────────────────────────
-clean_data() {
-    echo -e "${RED}⚠️  警告: 此操作将停止服务并删除所有数据卷（包括办公室布局、配置等）${NC}"
-    echo -n "确认继续? [y/N] "
-    read -r confirm
-    if [[ "$confirm" =~ ^[Yy]$ ]]; then
-        cd "$SCRIPT_DIR"
-        docker compose down -v
-        echo -e "${GREEN}✓ 服务已停止，数据已清理${NC}"
-    else
-        echo "已取消"
-    fi
-}
-
 # ── 主逻辑 ────────────────────────────────────────────────────────────────
 main() {
-    parse_args "$@"
-    local cmd="${POSITIONAL_ARGS[0]:-}"
-    case "$cmd" in
-        --help|-h)   usage ;;
-        --browser)   START_BROWSER_SERVICE=1; ENABLE_BROWSER=1; check_prerequisites && setup_env && start_browser_service && show_browser_access_info ;;
-        --stop)      stop_service ;;
-        --restart)   stop_service && check_prerequisites && setup_env && start_browser_service && show_browser_access_info ;;
-        --update)    update_service ;;
-        --logs)      show_logs ;;
-        --status)    show_status ;;
-        --clean)     clean_data ;;
-        "")
-            if [ "$START_BROWSER_SERVICE" -eq 1 ]; then
-                check_prerequisites && setup_env && start_browser_service && show_browser_access_info
-            else
-                start_local
-            fi
-            ;;
+    case "${1:-}" in
+        --help|-h) usage ;;
+        --browser) start_browser_service ;;
+        --browser-stop) stop_browser_service ;;
+        --browser-restart) restart_browser_service ;;
+        --browser-logs) show_browser_logs ;;
+        --browser-status) show_browser_status ;;
+        "") start_local ;;
         *)
-            echo -e "${RED}未知选项: $cmd${NC}"
+            echo -e "${RED}未知选项: $1${NC}"
             usage
             ;;
     esac

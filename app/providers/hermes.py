@@ -56,13 +56,7 @@ class HermesProvider:
         return bool(self.enabled and self.binary and os.path.exists(self.binary) and self.home_path and os.path.isdir(self.home_path))
 
     def _subprocess_env(self) -> dict[str, str]:
-        """Environment for Hermes CLI calls.
-
-        Containers commonly run as root, where `~` would resolve to /root and
-        Hermes would accidentally inspect/create /root/.hermes. When the user
-        configured a Hermes home path, derive HOME from it so Hermes resolves
-        its own profile paths consistently with the configured installation.
-        """
+        """Build a Hermes CLI environment from the explicitly configured home."""
         env = os.environ.copy()
         if self.home_path:
             env["VO_HERMES_HOME"] = self.home_path
@@ -741,8 +735,6 @@ class HermesDesktopBackendClient:
         parsed = self._parsed_base_url()
         if parsed and self.host_header and not self.tcp_host and self.host_header != parsed.netloc:
             self.tcp_host = parsed.hostname or ""
-        if parsed and self._is_loopback_host(parsed.hostname) and self._running_in_docker() and not self.tcp_host:
-            self.tcp_host = os.environ.get("VO_HERMES_DESKTOP_DOCKER_HOST", "host.docker.internal")
         if parsed and self.tcp_host and not self.tcp_port:
             self.tcp_port = parsed.port
         if parsed and self._uses_tcp_override() and not self.host_header:
@@ -750,16 +742,6 @@ class HermesDesktopBackendClient:
 
     def _url(self, path: str) -> str:
         return self._logical_url(path)
-
-    @staticmethod
-    def _running_in_docker() -> bool:
-        if os.path.exists("/.dockerenv"):
-            return True
-        try:
-            with open("/proc/1/cgroup", "r", encoding="utf-8", errors="ignore") as f:
-                return any(token in f.read() for token in ("docker", "containerd", "kubepods"))
-        except Exception:
-            return False
 
     @staticmethod
     def _is_loopback_host(hostname: str | None) -> bool:
@@ -1478,8 +1460,6 @@ def _desktop_route_host_candidates(configured_host: str | None = None) -> list[t
     add(configured_host, "configured-route-host")
     for item in re.split(r"[\s,]+", os.environ.get("VO_HERMES_DESKTOP_DISCOVERY_HOSTS", "").strip()):
         add(item, "env-route-host")
-    add(os.environ.get("VO_HERMES_DESKTOP_DOCKER_HOST"), "env-docker-host")
-    add("host.docker.internal", "docker-host")
     add("127.0.0.1", "direct-loopback")
     return hosts
 

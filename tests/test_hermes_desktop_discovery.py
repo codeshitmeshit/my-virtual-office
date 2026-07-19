@@ -21,7 +21,6 @@ def check(name, condition, detail=""):
 def main():
     old_test = hermes.HermesDesktopBackendClient.test
     old_listener_ports = hermes._loopback_listener_ports
-    old_running_in_docker = hermes.HermesDesktopBackendClient._running_in_docker
 
     try:
         with tempfile.TemporaryDirectory() as root:
@@ -63,7 +62,6 @@ def main():
 
             hermes.HermesDesktopBackendClient.test = fake_test
             hermes._loopback_listener_ports = lambda: []
-            hermes.HermesDesktopBackendClient._running_in_docker = staticmethod(lambda: False)
 
             result = hermes.discover_desktop_backend(
                 hermes_home=root,
@@ -78,17 +76,9 @@ def main():
             check("Logical Desktop URL stays loopback", result.get("desktopUrl") == "http://127.0.0.1:57485", str(result))
             check("Current-port fallback was attempted", any(c["tcpHost"] == "127.0.0.2" and c["tcpPort"] == 57485 for c in calls), str(calls))
 
-            hermes.HermesDesktopBackendClient._running_in_docker = staticmethod(lambda: True)
-            os.environ["VO_HERMES_DESKTOP_DOCKER_HOST"] = "docker-host.test"
-            client = hermes.HermesDesktopBackendClient(base_url="http://127.0.0.1:57485")
-            check("Docker loopback URLs get a physical route host", client.tcp_host == "docker-host.test", client.tcp_host or "")
-            check("Docker route keeps the Desktop URL port", client.tcp_port == 57485, str(client.tcp_port))
-            check("Docker route keeps loopback Host identity", client.host_header == "127.0.0.1:57485", client.host_header or "")
     finally:
         hermes.HermesDesktopBackendClient.test = old_test
         hermes._loopback_listener_ports = old_listener_ports
-        hermes.HermesDesktopBackendClient._running_in_docker = old_running_in_docker
-        os.environ.pop("VO_HERMES_DESKTOP_DOCKER_HOST", None)
 
     print("\n  Hermes Desktop discovery: all checks passed")
 

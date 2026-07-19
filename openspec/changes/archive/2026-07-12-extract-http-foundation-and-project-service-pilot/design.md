@@ -90,7 +90,7 @@ This change will not migrate all POST routes. Broad conversion is deferred becau
 
 ### 5. Centralize output only for migrated and management paths initially
 
-Add `OfficeHandler` helpers that serialize JSON once, set `Content-Type` and `Content-Length`, attach a request identifier, and apply a small set of response-hardening headers. The helpers will not globally inject CORS or change existing CORS values in this change; CORS and bind-address hardening require a separate compatibility review for browser, Docker, and external callback use cases.
+Add `OfficeHandler` helpers that serialize JSON once, set `Content-Type` and `Content-Length`, attach a request identifier, and apply a small set of response-hardening headers. The helpers will not globally inject CORS or change existing CORS values in this change; CORS and bind-address hardening require a separate compatibility review for browser and external callback use cases.
 
 The initial common headers will be non-breaking response protections such as `X-Content-Type-Options: nosniff` and a request identifier header. CSP and frame policy are deferred because they can affect the embedded browser/viewer surfaces.
 

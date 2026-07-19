@@ -164,10 +164,6 @@
                 <b data-i18n="where_to_find">📁 Where to find it:</b><br><br>
                 <b data-i18n="linux_mac">Linux/Mac (most common):</b><br>
                 <code style="color:#90caf9;">/home/youruser/.openclaw</code><br><br>
-                <b data-i18n="docker_note">Running Virtual Office in Docker?</b><br>
-                Use the path you mounted with <code>-v</code>. For example:<br>
-                <code style="color:#90caf9;font-size:13px;">docker run -v /home/youruser/.openclaw:/openclaw ...</code><br>
-                → enter <code style="color:#90caf9;">/openclaw</code><br><br>
                 <b data-i18n="not_sure">Not sure?</b> Run this in your terminal:<br>
                 <code style="color:#90caf9;font-size:13px;">ls ~/.openclaw/openclaw.json</code><br>
                 If it prints a path, use the folder part (e.g. <code style="color:#90caf9;">/home/youruser/.openclaw</code>).
@@ -199,10 +195,7 @@
                     The folder should contain <code>openclaw.json</code> and an <code>agents/</code> directory.<br><br>
                     <b data-i18n="no_agents_2">2. Do you have agents configured?</b>
                     Open your <code>openclaw.json</code> and look for <code>"agents"</code> → <code>"list"</code>. Each agent needs a workspace directory.<br><br>
-                    <b data-i18n="no_agents_3">3. Running in Docker?</b>
-                    Make sure you mounted your OpenClaw directory into the container:<br>
-                    <code style="color:#90caf9;font-size:13px;">docker run -v /path/to/.openclaw:/openclaw ...</code><br><br>
-                    <b data-i18n="no_agents_4">4. Permissions?</b>
+                    <b data-i18n="no_agents_3">3. Permissions?</b>
                     The Virtual Office server needs read access to the agents/ folder.<br><br>
                     <b data-i18n="no_agents_5">Still stuck?</b> You can skip this step and set the path later from ☰ Menu. The office will work — agents just won't appear until connected.
                 </div>
@@ -239,7 +232,7 @@
                     <label class="checkbox-label"><input type="checkbox" id="s-hermes-platform-enable"> <span data-i18n="enable_hermes_messaging_gateway_platform">Enable Hermes Messaging Gateway Platform</span></label>
                     <input type="password" id="s-hermes-platform-token" data-i18n-placeholder="hermes_shared_platform_token" placeholder="Shared platform token" autocomplete="off">
                     <input type="text" id="s-hermes-platform-agent" placeholder="hermes-gateway">
-                    <div style="font-size:12px;color:#666;margin:6px 0 12px;line-height:1.5;" data-i18n="hermes_docker_hint_setup">Running in Docker? Mount the Hermes home/CLI into the container and enter the mounted paths.</div>
+                    <div style="font-size:12px;color:#666;margin:6px 0 12px;line-height:1.5;" data-i18n="hermes_local_hint_setup">Enter the local Hermes home and CLI paths.</div>
                     <button onclick="testHermesConnection()" style="margin:0 0 12px;padding:8px 16px;font-size:9px;" data-i18n="test_hermes_btn">🔍 TEST HERMES</button>
                     <div id="hermes-test-status"></div>
                 </div>
@@ -372,14 +365,8 @@
                 <b data-i18n="what_is_browser">What is this?</b> The Agent Browser gives your AI agents a real web browser you can watch live. You need two things:<br><br>
                 <b>1. CDP (Chrome DevTools Protocol)</b> — how agents control the browser<br>
                 <b>2. VNC Viewer</b> — how you watch the browser live in the office<br><br>
-                <b>Easiest setup — project Agent Browser Docker service:</b><br>
-                <code style="color:#90caf9;font-size:13px;">./start.sh --browser</code><br><br>
-                This gives you both:<br>
-                • CDP URL: <code style="color:#90caf9;">http://127.0.0.1:9224</code><br>
-                • Viewer URL: <code style="color:#90caf9;">https://127.0.0.1:6901</code><br><br>
-                <b>Or use your own Chrome + VNC:</b><br>
-                <code style="color:#90caf9;font-size:13px;">google-chrome --remote-debugging-port=9222 --user-data-dir=/tmp/vo-browser</code><br>
-                Then point Viewer URL to your VNC/noVNC server.<br><br>
+                <b>Bundled browser image:</b> run <code style="color:#90caf9;font-size:13px;">./start.sh --browser</code> from the repository root. It provides CDP on port 9224 and the viewer on port 6901.<br>
+                Alternatively, start Chrome with <code style="color:#90caf9;font-size:13px;">--remote-debugging-port</code> and enter its CDP URL above.<br><br>
                 <b>Not sure?</b> Skip this step — everything else works without it. You can set it up later from ☰ Menu.
             </div>
 

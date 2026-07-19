@@ -19,4 +19,4 @@ Against a clean candidate started through `start.sh`:
 - `tests/meeting_phase8_acceptance.py`: passed health, management authorization denial, Meeting creation/intervention/agenda/terminalization, recovery and occupancy cleanup, request confirmation and atomic conversion, Project resume, action-item existing-task projection, and missing-webhook notification degradation.
 - Trusted callback authenticity, replay and concurrent delivery are covered by the deterministic callback regression from Phase 7; no external Feishu credential was configured during runtime acceptance, so no real callback or irreversible delivery was emitted.
 
-The startup report confirmed HTTP and WebSocket listeners. Gateway and browser-CDP health were unavailable because no local gateway token or Docker/CDP service was configured; these optional integrations did not affect Meeting-domain acceptance.
+The startup report confirmed HTTP and WebSocket listeners. Gateway and browser-CDP health were unavailable because no local gateway token or Chrome debugging endpoint was configured; these optional integrations did not affect Meeting-domain acceptance.

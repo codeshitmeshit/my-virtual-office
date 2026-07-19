@@ -1,0 +1,21 @@
+services:
+  agent-browser:
+    build:
+      context: ./kasm-browser-config
+    image: my-virtual-office/agent-browser:1.17.0
+    container_name: agent-browser
+    shm_size: 2g
+    ports:
+      - "6901:6901"
+      - "127.0.0.1:9224:9223"
+    environment:
+      - VNC_PW=${BROWSER_VNC_PASSWORD:-changeme}
+      - VNC_RESOLUTION=1600x900
+      - KASMVNC_SSL_ONLY=
+      - KASMVNC_AUTO_RECOVER=true
+    volumes:
+      - browser-data:/home/kasm-user/.config/chromium
+    restart: unless-stopped
+
+volumes:
+  browser-data:

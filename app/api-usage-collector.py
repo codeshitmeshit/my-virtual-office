@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""API Usage Collector — runs on the HOST (not in container).
+"""API Usage Collector for the local Virtual Office process.
 Calls `openclaw status --usage --json` and writes results to /data/api-usage.json.
 Run via cron, systemd timer, or loop."""
 

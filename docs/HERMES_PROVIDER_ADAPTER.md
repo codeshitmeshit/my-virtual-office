@@ -78,7 +78,7 @@ Hermes integration is configured through `vo-config.json` or environment variabl
 
 `preferApi` is accepted for compatibility with the reference implementation and maps to the same runtime behavior as `apiEnabled`.
 
-Desktop auto-discovery may use an exposed readiness log, a previously configured URL, or visible loopback listeners. Docker deployments can route loopback Desktop services through `host.docker.internal` while preserving the logical Host header; the TCP host/port and Host header settings provide explicit overrides.
+Desktop auto-discovery may use a readiness log, a previously configured URL, or visible local loopback listeners. The TCP host/port and Host header settings remain available as explicit local routing overrides.
 
 For Desktop port discovery, the integration may read a bounded tail of the configured readiness log. It extracts listener ports only and does not return or expose the raw log contents.
 

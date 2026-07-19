@@ -29,7 +29,7 @@ description: 任意 CLI 或 agent 需要联系 Virtual Office 中 providerKind=c
 
 需要联系 Codex 时，主动探测 Virtual Office，不要仅凭历史信息认定它可用。
 
-优先使用当前运行环境或 `start.sh` 启动配置中的端口。`start.sh` 会加载 `.env` 并导出 `VO_PORT`，服务端按这个端口启动；不要只探测 `8090`。如果当前 agent 位于容器或其他机器，使用其能够访问的 Virtual Office 地址，不要假设 `127.0.0.1` 指向宿主机。
+优先使用当前运行环境或 `start.sh` 启动配置中的端口。`start.sh` 会加载 `.env` 并导出 `VO_PORT`，服务端按这个端口启动；不要只探测 `8090`。如果当前 agent 位于另一台机器，使用其能够访问的 Virtual Office 地址，不要假设远程调用方的 `127.0.0.1` 指向 Virtual Office 所在主机。
 
 ```bash
 vo_project_root="${VO_PROJECT_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"

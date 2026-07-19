@@ -107,7 +107,7 @@
 - JS 回归：`node --check app/projects.js`、`node tests/check_project_execution_start_payload.mjs`、`node tests/check_project_execution_executor_required_prompt.mjs`、`node tests/check_project_meeting_blocker_view_reference.mjs` 通过。
 - Python 回归：`PYTHONPYCACHEPREFIX=/private/tmp/cosh-pycache .venv/bin/python -m pytest -q tests/test_project_execution.py tests/test_project_scheduled_cron_phase2_3.py tests/test_project_scheduled_cron_phase4.py` 通过，96 passed。
 - 浏览器验收：通过应用内浏览器打开真实项目页，执行 workflow Start 浏览器级 double-click；页面切到 Stop 后回到 Start，服务日志中该 double-click 窗口只出现 1 条 `POST /api/projects/{id}/workflow/start`。
-- CDP E2E：已补充 `tests/chrome_project_action_dedup_check.mjs`，但当前环境 `http://127.0.0.1:9224` 不可达，`./start.sh` 报告 Docker/agent browser 未启动，因此该脚本本机未能执行请求计数型验收。
+- CDP E2E：已补充 `tests/chrome_project_action_dedup_check.mjs`，但当前环境 `http://127.0.0.1:9224` 不可达，未启动本机 Chrome 调试端口，因此该脚本本机未能执行请求计数型验收。
 
 ## 会议侧补充记录
 

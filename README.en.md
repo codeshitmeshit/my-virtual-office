@@ -4,7 +4,7 @@
 
 This repository is a second-development fork of the open-source project [eliautobot/my-virtual-office](https://github.com/eliautobot/my-virtual-office). It keeps the original pixel-art office idea and extends it into a local-first AI agent control surface for OpenClaw, Hermes, Codex, and other local agent runtimes or CLI harnesses.
 
-Thanks to the original project author and community for the foundation. This fork is not an official upstream release. Upstream Docker images, product licensing, deployment instructions, and feature descriptions may not apply to this repository.
+Thanks to the original project author and community for the foundation. This fork is not an official upstream release. Upstream product licensing, deployment instructions, and feature descriptions may not apply to this repository.
 
 ![My Virtual Office](screenshot.png)
 
@@ -123,7 +123,7 @@ Project cron binding connects the global OpenClaw Gateway cron scheduler to Virt
 
 ## Quick Start
 
-This fork is designed for host-local startup.
+> **Deployment boundary: the Virtual Office application does not support Docker or Docker Compose deployment. It must run directly on the host. The optional Agent Browser image is the repository's only supported use of Docker.**
 
 ```bash
 git clone https://github.com/eliautobot/my-virtual-office.git
@@ -146,11 +146,22 @@ Useful routes:
 - Cron: `http://localhost:8090/cron.html`
 - Health: `http://localhost:8090/health`
 
-## Docker Status
+### Optional Agent Browser Image
 
-Direct Docker or Docker Compose startup is not the supported path for this fork. The current implementation depends heavily on host-local CLIs, workspaces, browser endpoints, OpenClaw/Hermes/Codex configuration, and filesystem permissions.
+To provide a shared CDP endpoint and live browser view, start the browser-only image:
 
-Docker files may remain from upstream or for reference, but they are not the supported deployment path for this fork.
+```bash
+./start.sh --browser
+```
+
+[docker-compose.browser.yml](docker-compose.browser.yml) contains only the `agent-browser` service; it does not containerize the Virtual Office application and does not mean that VO supports Docker deployment. The defaults are:
+
+- CDP: `http://127.0.0.1:9224`
+- Viewer: `https://localhost:6901`
+- Stop: `./start.sh --browser-stop`
+- Logs: `./start.sh --browser-logs`
+
+You can skip this image and point `VO_CDP_URL` and `VO_VIEWER_URL` at another browser service instead.
 
 ## Configuration
 

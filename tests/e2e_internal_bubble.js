@@ -102,7 +102,7 @@ async function createCdpPage(url) {
         const res = await fetch(`${cdpURL}/json/new?${encodeURIComponent(url)}`, { method: 'PUT' });
         return await res.json();
     } catch (error) {
-        throw new Error(`CDP is unavailable at ${cdpURL}. Start the agent browser with ./start.sh --browser or set VO_CDP_URL to a reachable Chrome DevTools endpoint. ${error.message || error}`);
+        throw new Error(`CDP is unavailable at ${cdpURL}. Run ./start.sh --browser, start local Chrome with remote debugging enabled, or set VO_CDP_URL to another reachable Chrome DevTools endpoint. ${error.message || error}`);
     }
 }
 

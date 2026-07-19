@@ -65,14 +65,14 @@ Claude Code 聊天使用 `claude -p --output-format stream-json --include-partia
 Codex 配置是与产品无关的：
 
 - `VO_CODEX_BIN`：Codex CLI 可执行文件，默认为 `PATH` 上的 `codex`
-- `VO_CODEX_HOME`：此部署的 Codex 认证/配置主目录，Docker 中默认为 `VO_STATUS_DIR/codex-home`
+- `VO_CODEX_HOME`：本机 Codex 认证/配置主目录，默认 `~/.codex`
 - `VO_CODEX_WORKSPACE_ROOT`：办公室创建的 Codex 代理工作区
 - `VO_CODEX_MAIN_WORKSPACE`：`codex-main` 和原生自定义代理使用的工作区
 - `VO_CODEX_INCLUDE_MAIN`：包含 Codex 的默认主代理，默认启用
 - `VO_CODEX_INCLUDE_NATIVE_AGENTS`：读取 `$CODEX_HOME/agents/*.toml`，默认启用
 - `VO_CODEX_REGISTER_NATIVE_AGENTS`：创建 VO Codex 代理时写入 `$CODEX_HOME/agents/<profile>.toml`，默认启用
 - `VO_CODEX_PREFER_APP_SERVER`：默认启用原生应用服务器集成
-- `VO_CODEX_SANDBOX`：Codex 沙箱模式，Docker 示例默认为 `danger-full-access`，因为 bubblewrap 沙箱通常需要额外的容器权限
+- `VO_CODEX_SANDBOX`：Codex 沙箱模式；本地默认值为 `workspace-write`
 - `VO_CODEX_APPROVAL_POLICY`：Codex 审批策略，默认 `never`，以便无人值守的办公室运行不会因审批提示而挂起
 
 Claude Code 配置是与产品无关的：
@@ -87,7 +87,7 @@ Claude Code 配置是与产品无关的：
 - `VO_CLAUDE_CODE_INCLUDE_NATIVE_AGENTS`：读取 `$CLAUDE_CONFIG_DIR/agents/*.md`，默认启用
 - `VO_CLAUDE_CODE_REGISTER_NATIVE_AGENTS`：创建标准 VO Claude Code 代理时写入 `$CLAUDE_CONFIG_DIR/agents/<profile>.md`，默认启用
 
-切勿将主机用户名、个人认证路径或开发者的本地容器布局硬编码到 Codex 或 Claude Code 产品支持中。
+切勿将主机用户名、个人认证路径或开发者的本地目录布局硬编码到 Codex 或 Claude Code 产品支持中。
 
 Codex 是一种可选择加入的协作工具，而非创建的代理类型。在启动时使用 `VO_CODEX_ENABLED=1` 启用它；它会显示为一个可见的办公室代理，并通过相同的通信层接收消息。`VO_CODEX_REPLY_TEXT=<text>` 可用于确定性本地回归测试，直到配置了实时 Codex 桥接。
 

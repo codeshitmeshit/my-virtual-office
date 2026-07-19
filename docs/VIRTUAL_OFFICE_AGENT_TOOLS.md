@@ -66,14 +66,14 @@ Claude Code chat uses `claude -p --output-format stream-json --include-partial-m
 Codex configuration is product-neutral:
 
 - `VO_CODEX_BIN`: Codex CLI executable, default `codex` on `PATH`
-- `VO_CODEX_HOME`: Codex auth/config home for this deployment, default `VO_STATUS_DIR/codex-home` in Docker
+- `VO_CODEX_HOME`: local Codex auth/config home, default `~/.codex`
 - `VO_CODEX_WORKSPACE_ROOT`: Office-created Codex agent workspaces
 - `VO_CODEX_MAIN_WORKSPACE`: Workspace used by `codex-main` and native custom agents
 - `VO_CODEX_INCLUDE_MAIN`: include Codex's default Main agent, enabled by default
 - `VO_CODEX_INCLUDE_NATIVE_AGENTS`: read `$CODEX_HOME/agents/*.toml`, enabled by default
 - `VO_CODEX_REGISTER_NATIVE_AGENTS`: write `$CODEX_HOME/agents/<profile>.toml` when creating VO Codex agents, enabled by default
 - `VO_CODEX_PREFER_APP_SERVER`: native app-server integration on by default
-- `VO_CODEX_SANDBOX`: Codex sandbox mode, Docker example defaults to `danger-full-access` because bubblewrap sandboxing usually needs extra container privileges
+- `VO_CODEX_SANDBOX`: Codex sandbox mode; the local default is `workspace-write`
 - `VO_CODEX_APPROVAL_POLICY`: Codex approval policy, default `never` so unattended Office runs do not hang on approval prompts
 
 Claude Code configuration is product-neutral:
