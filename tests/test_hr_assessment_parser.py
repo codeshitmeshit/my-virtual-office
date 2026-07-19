@@ -167,9 +167,8 @@ def test_oversized_invalid_json_and_duplicate_list_items_are_rejected():
         parse(payload(strengths=["same", "same"]))
 
 
-def test_assessment_module_has_no_repository_server_or_mutating_domain_dependency():
+def test_assessment_module_has_no_server_or_mutating_domain_dependency():
     source = (APP_DIR / "services" / "hr_assessments.py").read_text(encoding="utf-8")
-    assert "hr_repository" not in source
     assert "import server" not in source
     assert "OfficeHandler" not in source
     assert "pause_agent" not in source

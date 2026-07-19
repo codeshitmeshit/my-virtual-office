@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
+from typing import Iterable, Protocol
+
+from services.hr_evidence import EvidenceBundle, HREvidenceCollector, SanitizedEvidence
+from services.hr_repository import AssessmentRecord, HRRepository
 
 
 class HRAssessmentValidationError(ValueError):
@@ -34,6 +39,24 @@ class ParsedHRAssessment:
     information_sufficiency_status: str
     hr_ai_id: str
     assessed_at: str
+
+
+class HRAssessmentConversationPort(Protocol):
+    def ask_hr(
+        self,
+        prompt: str,
+        conversation_key: str,
+        timeout_seconds: float,
+    ) -> str | None: ...
+
+
+@dataclass(frozen=True, slots=True)
+class AssessmentProcessingResult:
+    ai_id: str
+    local_date: str
+    status: str
+    assessment: AssessmentRecord | None
+    error_code: str
 
 
 class HRAssessmentParser:
@@ -223,3 +246,221 @@ class HRAssessmentParser:
             hr_ai_id=hr_ai_id,
             assessed_at=self._timestamp(value["assessedAt"]),
         )
+
+
+class HRAssessmentOrchestrator:
+    """Allows HR alone to assess closed-cycle reports with bounded evidence."""
+
+    def __init__(
+        self,
+        repository: HRRepository,
+        evidence: HREvidenceCollector,
+        hr: HRAssessmentConversationPort,
+        *,
+        parser: HRAssessmentParser | None = None,
+        hr_ai_id: str = "hr",
+        timeout_seconds: float = 45.0,
+    ):
+        if not isinstance(repository, HRRepository):
+            raise HRAssessmentValidationError("repository must be an HRRepository")
+        if not isinstance(evidence, HREvidenceCollector):
+            raise HRAssessmentValidationError("evidence collector is invalid")
+        if not callable(getattr(hr, "ask_hr", None)):
+            raise HRAssessmentValidationError("HR assessment port is invalid")
+        if (
+            isinstance(timeout_seconds, bool)
+            or not isinstance(timeout_seconds, (int, float))
+            or not 0.1 <= float(timeout_seconds) <= 300
+        ):
+            raise HRAssessmentValidationError("timeout_seconds must be between 0.1 and 300")
+        self._repository = repository
+        self._evidence = evidence
+        self._hr = hr
+        self._parser = parser or HRAssessmentParser(hr_ai_id=hr_ai_id)
+        self._hr_ai_id = hr_ai_id
+        self._timeout_seconds = float(timeout_seconds)
+
+    @staticmethod
+    def _source_group(item: SanitizedEvidence) -> str:
+        if item.evidence_type in {"project_transition", "task_transition"}:
+            return "work_tracking"
+        if item.evidence_type in {"blocker", "waiting_state"}:
+            return "runtime"
+        return item.evidence_type
+
+    @classmethod
+    def _evidence_is_adequate(cls, report_has_raw: bool, bundle: EvidenceBundle) -> bool:
+        groups = {cls._source_group(item) for item in bundle.items}
+        if report_has_raw:
+            groups.add("agent_report")
+        return len(groups) >= 2
+
+    @staticmethod
+    def _evidence_payload(bundle: EvidenceBundle) -> list[dict[str, object]]:
+        return [
+            {
+                "evidenceType": item.evidence_type,
+                "referenceId": item.reference_id,
+                "summary": item.summary,
+                "evidenceDate": item.evidence_date,
+                "metadata": item.metadata,
+            }
+            for item in bundle.items
+        ]
+
+    @classmethod
+    def _evidence_version(cls, report_revision: int, bundle: EvidenceBundle) -> str:
+        payload = {
+            "reportRevision": report_revision,
+            "items": cls._evidence_payload(bundle),
+            "failures": [
+                {"source": item.source, "errorCode": item.error_code}
+                for item in bundle.failures
+            ],
+        }
+        encoded = json.dumps(
+            payload,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+        return f"sha256:{hashlib.sha256(encoded).hexdigest()}"
+
+    @classmethod
+    def _prompt(cls, report, bundle: EvidenceBundle, *, adequate: bool) -> str:
+        policy = (
+            "Evidence is sufficient for a cautious workload conclusion."
+            if adequate
+            else "Evidence is insufficient. workload MUST be insufficient_information; "
+            "informationSufficiency.status MUST be insufficient; principalContributions and "
+            "strengths MUST be empty. Do not infer low work from non-submission or attendance."
+        )
+        schema = (
+            "Return JSON only with exactly: schemaVersion, agentAiId, localDate, "
+            "principalContributions, workload, rationale, evidenceReferences, blockers, "
+            "strengths, improvements, runtimeDiagnosis, informationSufficiency, hrAiId, "
+            "assessedAt. schemaVersion=1. Evidence reference items contain evidenceType, "
+            "referenceId, rationale. informationSufficiency contains status and explanation. "
+            "Never output scores, ranks, leaderboards, elimination, pause, delete, or reassign actions."
+        )
+        report_payload = {
+            "submissionState": report.submission_state,
+            "rawResponse": report.raw_response,
+            "normalized": report.normalized,
+            "requestedAt": report.requested_at,
+            "windowClosedAt": report.window_closed_at,
+            "submittedAt": report.submitted_at,
+        }
+        return (
+            f"{schema}\n{policy}\nAgent AI ID: {report.ai_id}\nDate: {report.local_date}\n"
+            f"Agent report: {json.dumps(report_payload, ensure_ascii=False)}\n"
+            f"Allowed evidence: {json.dumps(cls._evidence_payload(bundle), ensure_ascii=False)}"
+        )
+
+    @staticmethod
+    def _referenced_evidence(
+        parsed: ParsedHRAssessment,
+        bundle: EvidenceBundle,
+    ) -> list[dict[str, object]]:
+        available = {
+            (item.evidence_type, item.reference_id): item for item in bundle.items
+        }
+        result = []
+        for reference in parsed.evidence_references:
+            item = available.get((reference.evidence_type, reference.reference_id))
+            if item is None:
+                raise HRAssessmentValidationError(
+                    "assessment references unavailable evidence"
+                )
+            result.append(
+                {
+                    "evidence_type": item.evidence_type,
+                    "reference_id": item.reference_id,
+                    "summary": item.summary,
+                    "evidence_date": item.evidence_date,
+                    "metadata": {**item.metadata, "assessmentRationale": reference.rationale},
+                }
+            )
+        return result
+
+    def assess(
+        self,
+        ai_ids: Iterable[str],
+        *,
+        local_date: str,
+        actor_ai_id: str,
+    ) -> tuple[AssessmentProcessingResult, ...]:
+        if actor_ai_id != self._hr_ai_id:
+            raise HRAssessmentValidationError("only HR may create assessments")
+        results = []
+        for ai_id in tuple(ai_ids):
+            if ai_id == self._hr_ai_id:
+                results.append(
+                    AssessmentProcessingResult(ai_id, local_date, "skipped_hr", None, "")
+                )
+                continue
+            try:
+                report = self._repository.get_daily_report(ai_id, local_date)
+                if report is None or report.cycle_id is None:
+                    raise HRAssessmentValidationError("dated report does not exist")
+                cycle = self._repository.get_daily_cycle(report.cycle_id)
+                if cycle is None or cycle.status != "closed":
+                    raise HRAssessmentValidationError("assessment cycle is not closed")
+                bundle = self._evidence.collect(ai_id, local_date=local_date)
+                adequate = self._evidence_is_adequate(report.raw_response is not None, bundle)
+                output = self._hr.ask_hr(
+                    self._prompt(report, bundle, adequate=adequate),
+                    f"hr:assessment:{local_date}:{ai_id}",
+                    self._timeout_seconds,
+                )
+                parsed = self._parser.parse(
+                    output,
+                    expected_ai_id=ai_id,
+                    expected_local_date=local_date,
+                )
+                if not adequate and (
+                    parsed.workload != "insufficient_information"
+                    or parsed.principal_contributions
+                    or parsed.strengths
+                ):
+                    raise HRAssessmentValidationError(
+                        "insufficient evidence cannot support a performance conclusion"
+                    )
+                evidence_rows = self._referenced_evidence(parsed, bundle)
+                evidence_version = self._evidence_version(report.revision, bundle)
+                assessment = self._repository.save_assessment(
+                    assessment_id=(
+                        f"hr-assessment:{local_date}:{ai_id}:"
+                        f"{evidence_version.removeprefix('sha256:')[:16]}"
+                    ),
+                    ai_id=ai_id,
+                    local_date=local_date,
+                    status="complete",
+                    workload=parsed.workload,
+                    principal_contributions=list(parsed.principal_contributions),
+                    rationale=parsed.rationale,
+                    blockers=list(parsed.blockers),
+                    strengths=list(parsed.strengths),
+                    improvements=list(parsed.improvements),
+                    runtime_diagnosis=parsed.runtime_diagnosis,
+                    information_sufficiency=parsed.information_sufficiency,
+                    evidence_version=evidence_version,
+                    hr_id=parsed.hr_ai_id,
+                    evidence=evidence_rows,
+                )
+                results.append(
+                    AssessmentProcessingResult(
+                        ai_id, local_date, "complete", assessment, ""
+                    )
+                )
+            except Exception as exc:
+                results.append(
+                    AssessmentProcessingResult(
+                        ai_id,
+                        local_date,
+                        "failed",
+                        None,
+                        str(getattr(exc, "code", "assessment_failed")),
+                    )
+                )
+        return tuple(results)
