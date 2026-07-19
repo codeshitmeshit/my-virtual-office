@@ -208,6 +208,8 @@ try {
   await waitFor("document.querySelector('.hr-command-panel')");
   await evaluate("HumanResources.runCommand('sync')");
   await waitFor("document.querySelectorAll('.hr-agent-row').length === 3");
+  await evaluate("HumanResources.runCommand('complete_information')");
+  await waitFor("HumanResources.state.commandBusy === ''");
   assert.equal(await evaluate("document.querySelectorAll('.hr-overview-hero .hr-state-chip').length"), 1);
   await evaluate("HumanResources.runCommand('pause')");
   await waitFor("HumanResources.state.overview.hr.status === 'paused'");
@@ -250,10 +252,11 @@ try {
     pauseCalls: window.__hrFixture.requests.filter(item => item.url.endsWith('/pause')).length,
     resumeCalls: window.__hrFixture.requests.filter(item => item.url.endsWith('/resume')).length,
     syncCalls: window.__hrFixture.requests.filter(item => item.url.endsWith('/directory/sync')).length,
+    completeInformationCalls: window.__hrFixture.requests.filter(item => item.url.endsWith('/directory/complete-information')).length,
     reportPageCalls: window.__hrFixture.requests.filter(item => item.url.includes('reportCursor=')).length,
     accessPageCalls: window.__hrFixture.requests.filter(item => item.url.includes('accessCursor=')).length,
   }))()`);
-  assert.deepEqual(summary, { requests: 20, pauseCalls: 1, resumeCalls: 1, syncCalls: 1, reportPageCalls: 1, accessPageCalls: 2 });
+  assert.deepEqual(summary, { requests: 23, pauseCalls: 1, resumeCalls: 1, syncCalls: 1, completeInformationCalls: 1, reportPageCalls: 1, accessPageCalls: 2 });
   console.log(JSON.stringify({
     ok: true,
     overview,

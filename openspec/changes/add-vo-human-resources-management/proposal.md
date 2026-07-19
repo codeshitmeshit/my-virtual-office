@@ -6,7 +6,7 @@ Virtual Office can discover and run many system, project, and externally connect
 
 - Add one globally unique VO system Agent named `HR`, created before it manages ordinary Agent records, with visible lifecycle state, pause/resume controls, degraded behavior, explicit role boundaries, and eligibility to join ordinary meetings.
 - Extract the reusable lifecycle behavior currently embedded in Archive Room's archive manager into a focused VO system-Agent lifecycle boundary, then use it for both the archive manager and HR while preserving all archive-manager behavior.
-- Add an HR-owned directory for every discoverable system, project, and externally connected Agent, keyed by stable AI ID and retaining inactive Agent history.
+- Add an HR-owned directory for every discoverable system, project, and externally connected Agent, keyed by stable AI ID and retaining inactive Agent history, plus a manual information-completion action that asks only currently available Agents whose introduction is missing.
 - Add a VO built-in Agent-directory skill, exposed from the current office's `/skills` catalog, that lets every Provider query each Agent's name, concise HR-coordinated introduction, AI ID, and availability without copying the skill into Agent workspaces.
 - Add a first-level Human Resources module, modeled on Archive Room's navigation and degraded-read behavior, with HR status, Agent roster, daily reports, assessments, and relevant access history.
 - Add a global daily collection cycle in which HR asks each eligible Agent what it did, preserves the raw response, produces a normalized report, marks non-response without negative inference, and accepts late submission.

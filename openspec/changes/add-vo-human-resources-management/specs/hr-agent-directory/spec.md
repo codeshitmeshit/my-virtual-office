@@ -72,6 +72,13 @@ HR SHALL ask a newly discovered or materially stale Agent to describe its identi
 - **WHEN** HR detects a material conflict between the published introduction and newer Agent-provided information
 - **THEN** HR SHALL request clarification and preserve the previous introduction until a supported replacement is recorded
 
+#### Scenario: Human requests completion of missing information
+- **WHEN** the authenticated human invokes `补充信息`
+- **THEN** HR SHALL asynchronously ask every currently available non-HR Agent whose introduction text is missing for its identity and responsibilities
+- **AND** an Agent that already has introduction text, is unavailable, or is HR itself SHALL NOT receive a redundant request
+- **AND** a previously received raw response awaiting HR summarization SHALL be summarized without asking that Agent again
+- **AND** one Agent's failure or non-response SHALL NOT block other eligible introductions
+
 ### Requirement: Global Agent-directory skill
 The system SHALL expose one repository-owned Agent-directory skill through the current VO instance's built-in `/skills` catalog. The skill SHALL direct every Provider to the controlled information-query capability for each visible Agent's name, concise introduction, AI ID, availability, and permitted work information, and SHALL NOT be copied or installed into individual Agent workspaces.
 

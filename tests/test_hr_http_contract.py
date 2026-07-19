@@ -25,6 +25,7 @@ os.environ["VO_STATUS_DIR"] = tempfile.mkdtemp(prefix="vo-hr-http-")
 
 import server
 from services.hr_config import HRConfig
+from services.hr_information_completion import HRInformationCompletionReceipt
 from services.hr_runtime import HRCommandRouter, build_hr_application_runtime
 
 
@@ -194,12 +195,54 @@ def test_management_routes_cover_detail_log_health_export_and_commands(runtime):
     assert status == 400
     assert payload["code"] == "hr_api_validation_failed"
 
+    class Completion:
+        def complete(self):
+            return HRInformationCompletionReceipt(
+                "information-http-1",
+                "complete_information",
+                True,
+            )
+
+    _runtime.routes._management._information_completion = Completion()
+    status, payload = call(
+        handler(
+            "/api/human-resources/directory/complete-information",
+            {},
+            management=True,
+        ),
+        "POST",
+    )
+    assert status == 409
+    assert payload["code"] == "hr_information_completion_hr_unavailable"
+    lifecycle.paused = False
+    status, payload = call(
+        handler(
+            "/api/human-resources/directory/complete-information",
+            {},
+            management=True,
+        ),
+        "POST",
+    )
+    assert status == 202
+    assert payload["command"]["command"] == "complete_information"
+
     status, payload = call(
         handler("/api/human-resources/directory/sync", {}, management=True), "POST"
     )
     assert status == 200
     assert payload["sync"]["discovered"] == 1
     assert payload["sync"]["created"] == ["agent-3"]
+
+    status, payload = call(
+        handler(
+            "/api/human-resources/directory/complete-information",
+            {"unexpected": True},
+            management=True,
+        ),
+        "POST",
+    )
+    assert status == 400
+    assert payload["code"] == "hr_api_validation_failed"
 
 
 def test_agent_directory_and_public_detail_require_bound_grant(runtime):

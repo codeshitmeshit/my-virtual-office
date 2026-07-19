@@ -48,6 +48,10 @@ class HRDirectorySyncPort(Protocol):
     def sync(self) -> object: ...
 
 
+class HRInformationCompletionPort(Protocol):
+    def complete(self) -> object: ...
+
+
 def _json_safe(value: object) -> object:
     if is_dataclass(value) and not isinstance(value, type):
         return {
@@ -81,6 +85,7 @@ class HRManagementAPI:
         config: HRConfig,
         *,
         directory_sync: HRDirectorySyncPort | None = None,
+        information_completion: HRInformationCompletionPort | None = None,
         clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
     ):
         if not isinstance(repository, HRRepository):
@@ -103,6 +108,10 @@ class HRManagementAPI:
             raise HRAPIValidationError("HR config is invalid")
         if directory_sync is not None and not callable(getattr(directory_sync, "sync", None)):
             raise HRAPIValidationError("directory sync port is invalid")
+        if information_completion is not None and not callable(
+            getattr(information_completion, "complete", None)
+        ):
+            raise HRAPIValidationError("information completion port is invalid")
         self._repository = repository
         self._lifecycle = lifecycle
         self._commands = commands
@@ -110,6 +119,7 @@ class HRManagementAPI:
         self._observability = observability
         self._config = config
         self._directory_sync = directory_sync
+        self._information_completion = information_completion
         self._clock = clock
 
     def _now(self) -> datetime:
@@ -401,6 +411,49 @@ class HRManagementAPI:
         self._observability.increment("directory.sync_requests_total")
         result = self._directory_sync.sync()
         return HRServiceResult(200, {"ok": True, "sync": _json_safe(result)})
+
+    def information_completion_command(
+        self,
+        body: object,
+        *,
+        body_bytes: int,
+    ) -> HRServiceResult:
+        if not self._config.enabled:
+            raise HRAPIDisabledError("Human Resources mutations are disabled")
+        payload = self._body(body, body_bytes)
+        if payload:
+            raise HRAPIValidationError("information completion command body must be empty")
+        if self._information_completion is None:
+            return HRServiceResult(
+                503,
+                {"ok": False, "code": "hr_information_completion_unavailable"},
+            )
+        lifecycle = self._lifecycle.public_state(ensure=False)
+        lifecycle_status = str(lifecycle.get("status") or "").strip().lower()
+        if bool(lifecycle.get("paused")) or lifecycle_status not in {
+            "idle",
+            "ready",
+            "available",
+            "working",
+        }:
+            return HRServiceResult(
+                409,
+                {"ok": False, "code": "hr_information_completion_hr_unavailable"},
+            )
+        receipt = self._information_completion.complete()
+        accepted = bool(getattr(receipt, "accepted", False))
+        return HRServiceResult(
+            202 if accepted else 409,
+            {
+                "ok": accepted,
+                **(
+                    {}
+                    if accepted
+                    else {"code": "hr_information_completion_running"}
+                ),
+                "command": _json_safe(receipt),
+            },
+        )
 
     @staticmethod
     def safe_error(exc: Exception) -> HRServiceResult:

@@ -15,7 +15,7 @@ from services.system_agent_profiles import load_and_render_profile
 from services.system_agent_roles import HR_ROLE
 
 
-PROFILE_VERSION = "2026-07-19.1"
+PROFILE_VERSION = "2026-07-20.1"
 TOKENS = {
     "HR_NAME": HR_ROLE.display_name,
     "HR_EMOJI": HR_ROLE.emoji,
@@ -76,11 +76,14 @@ def test_hr_profile_contains_versioned_machine_readable_output_contracts():
     agents = rendered_profile().files["AGENTS.md"]
     examples = structured_examples(agents)
     assert [item["schemaVersion"] for item in examples] == [
-        "vo.hr.introduction.v1",
+        1,
         "vo.hr.daily-report.v1",
         "vo.hr.assessment.v1",
     ]
-    assert examples[0]["agentId"] == "<stable AI ID>"
+    assert examples[0]["supportingEvidence"] == [
+        "<exact excerpt from the Agent response>"
+    ]
+    assert examples[0]["materialConflict"] is False
     assert examples[1]["normalizerId"] == "hr"
     assessment = examples[2]
     assert assessment["hrId"] == "hr"

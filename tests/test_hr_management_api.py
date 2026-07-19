@@ -299,6 +299,43 @@ def test_rejected_command_queue_returns_service_unavailable(tmp_path, setup):
     assert result.payload["ok"] is False
 
 
+def test_information_completion_command_is_async_and_rejects_duplicate_or_body(setup):
+    repository, _reporting, _opened, lifecycle, _api = setup
+
+    class Completion:
+        def __init__(self):
+            self.accepted = True
+
+        def complete(self):
+            return HRCommandReceipt("information-1", "complete_information", self.accepted)
+
+    completion = Completion()
+    api = HRManagementAPI(
+        repository,
+        lifecycle,
+        manual_commands(),
+        HRReportingProjection(repository),
+        HRObservability(clock=lambda: NOW),
+        HRConfig.from_env({"VO_HR_ENABLED": "1"}),
+        information_completion=completion,
+        clock=lambda: NOW,
+    )
+    accepted = api.information_completion_command({}, body_bytes=2)
+    assert accepted.status == 202
+    assert accepted.payload["command"]["command"] == "complete_information"
+    completion.accepted = False
+    duplicate = api.information_completion_command({}, body_bytes=2)
+    assert duplicate.status == 409
+    assert duplicate.payload["code"] == "hr_information_completion_running"
+    lifecycle.paused = True
+    unavailable = api.information_completion_command({}, body_bytes=2)
+    assert unavailable.status == 409
+    assert unavailable.payload["code"] == "hr_information_completion_hr_unavailable"
+    lifecycle.paused = False
+    with pytest.raises(HRAPIValidationError, match="body must be empty"):
+        api.information_completion_command({"unexpected": True}, body_bytes=20)
+
+
 def test_disabled_feature_keeps_reads_available_and_blocks_all_mutation(setup):
     repository, _reporting, _opened, lifecycle, _api = setup
     api = HRManagementAPI(
@@ -316,6 +353,7 @@ def test_disabled_feature_keeps_reads_available_and_blocks_all_mutation(setup):
         lambda: api.lifecycle_command("pause", {}, body_bytes=2),
         lambda: api.cycle_command("run", {}, body_bytes=2),
         lambda: api.directory_sync_command({}, body_bytes=2),
+        lambda: api.information_completion_command({}, body_bytes=2),
     ):
         result = api.safe_error(pytest.raises(HRAPIDisabledError, callback).value)
         assert result.status == 503

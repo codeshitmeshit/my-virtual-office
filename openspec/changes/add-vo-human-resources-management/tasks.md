@@ -95,6 +95,7 @@
 - [x] 12.6 Add a deterministic browser acceptance fixture and script covering first-level navigation, HR lifecycle, roster/detail, daily statuses, assessment separation, access history, pagination, pause/resume, and partial/degraded failures.
 - [x] 12.7 Remove the duplicate modal-header lifecycle badge and add a management-only active Agent-team synchronization control backed by forced roster discovery, directory/grant reconciliation, UI refresh, and focused service/API/UI/browser tests.
 - [x] 12.8 Show the next daily-report collection time in the HR overview using a server-calculated VO-timezone schedule projection with scheduled, due-for-catch-up, and scheduler-disabled states; cover API, localization, pure UI, and browser rendering.
+- [x] 12.9 Add a separate management-only `补充信息` action that asynchronously asks only available non-HR Agents with missing introduction text, directly summarizes already received responses, isolates per-Agent failures, prevents duplicate concurrent runs, records bounded activity, aligns the versioned HR Profile introduction contract with the strict evidence-validating parser, and covers service/API/HTTP/UI/browser contracts.
 
 ## 13. Integrated Regression And Development-Machine Acceptance
 

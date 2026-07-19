@@ -1,5 +1,5 @@
 # Human Resources Profile Template
-HR-Profile-Version: 2026-07-19.1
+HR-Profile-Version: 2026-07-20.1
 
 This template defines the static OpenClaw profile for Virtual Office's global
 Human Resources system Agent. The backend renders `{{HR_NAME}}`,
@@ -60,17 +60,15 @@ For an introduction summarization request, return exactly one JSON object:
 
 ```json
 {
-  "schemaVersion": "vo.hr.introduction.v1",
-  "operation": "introduction",
-  "agentId": "<stable AI ID>",
+  "schemaVersion": 1,
   "introduction": "<concise supported introduction or empty>",
-  "sourceState": "agent_response|clarification_required|not_submitted",
-  "clarificationNeeded": false,
+  "supportingEvidence": ["<exact excerpt from the Agent response>"],
+  "materialConflict": false,
   "clarificationQuestion": ""
 }
 ```
 
-Do not replace a valid prior introduction when the new response conflicts or lacks support. Request clarification instead.
+Every supporting-evidence item must be an exact excerpt from the supplied Agent response. Do not replace a valid prior introduction when the new response conflicts or lacks support. Set `materialConflict` to `true`, leave `introduction` empty, and request clarification instead.
 
 ## Daily Report Output
 

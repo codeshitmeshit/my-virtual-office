@@ -31,6 +31,10 @@ assert.deepEqual(hr.helpers.commandSpec('sync'), {
   url: '/api/human-resources/directory/sync',
   body: {},
 });
+assert.deepEqual(hr.helpers.commandSpec('complete_information'), {
+  url: '/api/human-resources/directory/complete-information',
+  body: {},
+});
 assert.equal(hr.helpers.commandSpec('unknown'), null);
 
 const requests = [];

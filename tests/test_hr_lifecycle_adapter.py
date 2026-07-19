@@ -162,7 +162,7 @@ def test_repository_recovers_invalid_json_and_rejects_symlink_target(tmp_path):
 def test_profile_port_renders_syncs_idempotently_and_repairs_stale_files(tmp_path):
     profile = HRProfilePort(APP_DIR / "hr-profile.md", tmp_path / "openclaw")
     rendered = profile.render()
-    assert rendered.version == "2026-07-19.1"
+    assert rendered.version == "2026-07-20.1"
     assert tuple(rendered.files) == HR_ROLE.required_files
     workspace = profile.workspace_for("hr")
     agent = ProviderAgent("hr", "HR", "openclaw", str(workspace))
@@ -212,7 +212,7 @@ def test_public_state_canonicalizes_legacy_mixed_case_hr_name(tmp_path):
 def test_repeated_and_restarted_reconcile_rediscovers_one_hr_and_repairs_profile(tmp_path):
     adapter, calls, roster, _presence = build_adapter(tmp_path)
     first = adapter.reconcile()
-    assert first.profile_version == "2026-07-19.1"
+    assert first.profile_version == "2026-07-20.1"
     (tmp_path / "openclaw" / "workspace-hr" / "SOUL.md").write_text("stale", encoding="utf-8")
     second = adapter.reconcile()
     assert second.status is LifecycleStatus.IDLE

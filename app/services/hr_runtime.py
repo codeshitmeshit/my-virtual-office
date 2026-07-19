@@ -13,6 +13,11 @@ from services.hr_agent_auth import HRAgentAuthenticator
 from services.hr_api import HRLifecyclePort, HRManagementAPI, HRManualCommandsPort
 from services.hr_config import HRConfig
 from services.hr_directory import HRDirectoryQuery
+from services.hr_information_completion import (
+    CallableHRInformationConversation,
+    HRInformationCompletionCommands,
+    HRInformationCompletionService,
+)
 from services.hr_http import HRHTTPRoutes
 from services.hr_observability import HRObservability
 from services.hr_reporting import HRReportingProjection
@@ -73,6 +78,7 @@ def build_hr_application_runtime(
     commands: HRManualCommandsPort,
     roster_provider: Callable[[bool], Sequence[Mapping[str, object]]] | None = None,
     workspace_base: str | Path | None = None,
+    information_conversation: CallableHRInformationConversation | None = None,
 ) -> HRApplicationRuntime:
     """Build one repository authority shared by management and authenticated Agent APIs."""
     repository = HRRepository(status_dir)
@@ -87,6 +93,16 @@ def build_hr_application_runtime(
             roster_provider=roster_provider,
             workspace_base=workspace_base,
         )
+    information_completion = None
+    if information_conversation is not None:
+        information_completion = HRInformationCompletionCommands(
+            HRInformationCompletionService(
+                repository,
+                information_conversation,
+                max_workers=config.max_workers,
+                timeout_seconds=config.agent_timeout_seconds,
+            )
+        )
     management = HRManagementAPI(
         repository,
         lifecycle,
@@ -95,6 +111,7 @@ def build_hr_application_runtime(
         observability,
         config,
         directory_sync=directory_sync,
+        information_completion=information_completion,
     )
     routes = HRHTTPRoutes(
         management,

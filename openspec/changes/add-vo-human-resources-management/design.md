@@ -134,6 +134,7 @@ Alternatives considered:
 Add these modules, none of which imports `server.py` or HTTP transport:
 
 - `hr_directory.py`: roster reconciliation, status transitions, self-exclusion, introduction workflow, and public directory projection.
+- `hr_information_completion.py`: available/missing-Agent selection, bounded introduction collection and HR summarization, single-flight asynchronous command handling, and activity recording.
 - `hr_agent_grants.py`: identity-bound Agent API grant lifecycle and secure credential delivery, independent of Skill files.
 - `hr_directory_enablement.py`: directory persistence and isolated Agent API grant-readiness reconciliation.
 - `hr_reporting.py`: daily cycles, per-Agent request claims, raw response preservation, normalization, late submissions, and status projection.
@@ -254,6 +255,7 @@ Human management APIs reuse `X-VO-Management-Token` and `window.i18n.managementF
 - `GET /api/human-resources/access-log`
 - `POST /api/human-resources/hr/{pause|resume}`
 - `POST /api/human-resources/directory/sync`
+- `POST /api/human-resources/directory/complete-information`
 - `POST /api/human-resources/cycles/{run|close|retry}`
 - `GET /api/human-resources/health`
 
@@ -288,7 +290,7 @@ Add:
 - a Human Resources toolbar entry and modal shell in `app/index.html`
 - localized strings in `app/locales/en.json` and `app/locales/zh.json`
 
-The UI follows Archive Room's independent modal/list/detail pattern but does not import or duplicate Archive Room state. It uses `managementFetch` for every full-data request. The overview shows one authoritative HR state indicator, daily-cycle counts, and a server-calculated `reportSchedule` containing the next configured collection instant, VO-local wall time/timezone, scheduler enablement, and scheduled/due/disabled state; detail separates Agent claims, HR normalization, evidence-backed HR judgment, and access history. An active-sync control invokes a focused `hr_team_sync.py` service that force-refreshes the shared roster, reconciles directory state, and refreshes Agent API grant readiness before the UI reloads. Because the directory Skill is a VO built-in, the detail does not show a per-Agent Skill readiness field. Failed or partial states remain scoped to the affected Agent/workflow. The Agent-facing API is not called by the human UI.
+The UI follows Archive Room's independent modal/list/detail pattern but does not import or duplicate Archive Room state. It uses `managementFetch` for every full-data request. The overview shows one authoritative HR state indicator, daily-cycle counts, and a server-calculated `reportSchedule` containing the next configured collection instant, VO-local wall time/timezone, scheduler enablement, and scheduled/due/disabled state; detail separates Agent claims, HR normalization, evidence-backed HR judgment, and access history. An active-sync control invokes a focused `hr_team_sync.py` service that force-refreshes the shared roster, reconciles directory state, and refreshes Agent API grant readiness before the UI reloads. A separate `补充信息` control invokes `hr_information_completion.py`, which selects only available non-HR Agents lacking introduction text, reuses already received raw responses, performs bounded HR-to-Agent requests and HR summarization in the background, and prevents concurrent duplicate runs. Because the directory Skill is a VO built-in, the detail does not show a per-Agent Skill readiness field. Failed or partial states remain scoped to the affected Agent/workflow. The Agent-facing API is not called by the human UI.
 
 Frontend logic is split into pure formatting/projection helpers where practical so Node-based tests can validate disclosure rendering, workflow states, and localization without a browser. A live browser acceptance script verifies navigation, pause/resume, roster/detail, report/assessment states, and degraded errors.
 

@@ -34,7 +34,7 @@ The human-facing Agent detail SHALL show name, introduction, AI ID, availability
 ### Requirement: HR lifecycle controls and activity
 The module SHALL expose HR status, auto-created state, profile or provider error, pause/resume controls, and recent lifecycle and workflow activity to the authenticated human.
 
-The overview SHALL show one authoritative HR lifecycle status indicator rather than duplicating the same status in the modal header and overview card. It SHALL also provide an authenticated manual Agent-team synchronization action that force-refreshes roster discovery and reconciles newly discovered, changed, reactivated, and missing Agents into the HR directory before refreshing the view.
+The overview SHALL show one authoritative HR lifecycle status indicator rather than duplicating the same status in the modal header and overview card. It SHALL also provide an authenticated manual Agent-team synchronization action that force-refreshes roster discovery and reconciles newly discovered, changed, reactivated, and missing Agents into the HR directory before refreshing the view, plus a separate `补充信息` action for asynchronously filling missing introductions among currently available Agents.
 
 #### Scenario: Human pauses HR
 - **WHEN** the user confirms pause
@@ -44,6 +44,12 @@ The overview SHALL show one authoritative HR lifecycle status indicator rather t
 - **WHEN** the user confirms active synchronization
 - **THEN** HR SHALL force-refresh the VO roster, reconcile Agent records and Agent API grant readiness, and refresh the displayed Agent team
 - **AND** one malformed or unsupported Agent SHALL NOT prevent valid newly discovered Agents from appearing
+
+#### Scenario: Human completes missing Agent information
+- **WHEN** the user confirms `补充信息`
+- **THEN** the command SHALL be accepted without waiting for all Agent conversations
+- **AND** the UI SHALL preserve existing readable data while HR asks and summarizes only missing introductions in the background
+- **AND** a second completion command SHALL NOT start while one is already running
 
 ### Requirement: Degraded and partial-failure experience
 The Human Resources module SHALL remain readable when HR, OpenClaw, scheduling, one Agent, normalization, or assessment fails and SHALL identify the affected scope and retry or recovery state without masking valid records.

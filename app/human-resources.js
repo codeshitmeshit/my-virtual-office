@@ -34,12 +34,14 @@
     ];
     const ERROR_CODES = [
         'hr_agent_not_found', 'hr_api_validation_failed', 'hr_audit_unavailable',
-        'hr_directory_sync_unavailable', 'hr_disabled', 'hr_empty_response', 'hr_internal_error', 'hr_invalid_response',
+        'hr_directory_sync_unavailable', 'hr_disabled', 'hr_empty_response',
+        'hr_information_completion_hr_unavailable', 'hr_information_completion_running',
+        'hr_information_completion_unavailable', 'hr_internal_error', 'hr_invalid_response',
         'hr_repository_unavailable', 'hr_request_failed', 'hr_runtime_unavailable'
     ];
     const ACTION_NAMES = [
         'assessment', 'close', 'directory', 'lifecycle', 'pause', 'query',
-        'report', 'resume', 'retry', 'run', 'skill', 'sync'
+        'report', 'resume', 'retry', 'run', 'skill', 'sync', 'complete_information'
     ];
 
     function escHtml(value) {
@@ -353,9 +355,10 @@
                 '<span class="hr-state-chip hr-tone-' + escHtml(statusTone(hrStatus)) + '">' + escHtml(semanticLabel(hrStatus)) + '</span>' +
             '</section>' +
             '<section class="hr-command-panel"><div><h3>' + escHtml(tr('hr_controls', 'HR controls')) + '</h3>' +
-                '<p>' + escHtml(tr('hr_controls_hint', 'Cycle commands run asynchronously; active sync refreshes the roster when complete.')) + '</p></div>' +
+                '<p>' + escHtml(tr('hr_controls_hint', 'Commands run asynchronously; active sync discovers Agents, while complete information asks available Agents for missing introductions.')) + '</p></div>' +
                 '<div class="hr-command-actions">' +
                     commandButton('sync', tr('hr_sync_team', 'Sync Agent team'), false) +
+                    commandButton('complete_information', tr('hr_complete_information', 'Complete information'), false) +
                     commandButton(lifecycleAction, lifecycleAction === 'pause' ? tr('hr_pause', 'Pause HR') : tr('hr_resume', 'Resume HR'), lifecycleAction === 'pause') +
                     commandButton('run', tr('hr_run_cycle', 'Run cycle'), false) +
                     (cycle.cycleId && cycle.status === 'open' ? commandButton('close', tr('hr_close_cycle', 'Close cycle'), true) : '') +
@@ -554,6 +557,7 @@
             return { url: '/api/human-resources/hr/' + action, body: {} };
         }
         if (action === 'sync') return { url: '/api/human-resources/directory/sync', body: {} };
+        if (action === 'complete_information') return { url: '/api/human-resources/directory/complete-information', body: {} };
         if (action === 'run') return { url: '/api/human-resources/cycles/run', body: {} };
         if ((action === 'close' || action === 'retry') && cycleId) {
             return { url: '/api/human-resources/cycles/' + action, body: { cycleId: cycleId } };
@@ -575,6 +579,7 @@
             retry: 'Retry failed work',
             skill: 'Skill distribution',
             sync: 'Sync Agent team',
+            complete_information: 'Complete information',
         };
         return ACTION_NAMES.includes(action)
             ? tr('hr_action_' + action, fallbacks[action] || action)
