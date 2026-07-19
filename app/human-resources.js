@@ -34,12 +34,12 @@
     ];
     const ERROR_CODES = [
         'hr_agent_not_found', 'hr_api_validation_failed', 'hr_audit_unavailable',
-        'hr_disabled', 'hr_empty_response', 'hr_internal_error', 'hr_invalid_response',
+        'hr_directory_sync_unavailable', 'hr_disabled', 'hr_empty_response', 'hr_internal_error', 'hr_invalid_response',
         'hr_repository_unavailable', 'hr_request_failed', 'hr_runtime_unavailable'
     ];
     const ACTION_NAMES = [
         'assessment', 'close', 'directory', 'lifecycle', 'pause', 'query',
-        'report', 'resume', 'retry', 'run', 'skill'
+        'report', 'resume', 'retry', 'run', 'skill', 'sync'
     ];
 
     function escHtml(value) {
@@ -337,8 +337,9 @@
                 '<span class="hr-state-chip hr-tone-' + escHtml(statusTone(hrStatus)) + '">' + escHtml(semanticLabel(hrStatus)) + '</span>' +
             '</section>' +
             '<section class="hr-command-panel"><div><h3>' + escHtml(tr('hr_controls', 'HR controls')) + '</h3>' +
-                '<p>' + escHtml(tr('hr_controls_hint', 'Commands run asynchronously; existing records remain available.')) + '</p></div>' +
+                '<p>' + escHtml(tr('hr_controls_hint', 'Cycle commands run asynchronously; active sync refreshes the roster when complete.')) + '</p></div>' +
                 '<div class="hr-command-actions">' +
+                    commandButton('sync', tr('hr_sync_team', 'Sync Agent team'), false) +
                     commandButton(lifecycleAction, lifecycleAction === 'pause' ? tr('hr_pause', 'Pause HR') : tr('hr_resume', 'Resume HR'), lifecycleAction === 'pause') +
                     commandButton('run', tr('hr_run_cycle', 'Run cycle'), false) +
                     (cycle.cycleId && cycle.status === 'open' ? commandButton('close', tr('hr_close_cycle', 'Close cycle'), true) : '') +
@@ -500,12 +501,6 @@
             '<main class="hr-agent-detail" tabindex="-1">' +
                 (state.selectedAgentId ? renderAgentDetailPanel() : renderOverviewPanel()) + '</main>' +
         '</div>';
-        const status = root.document.getElementById('human-resources-status');
-        if (status) {
-            const value = String(object(state.overview).hr && object(state.overview.hr).status || (state.loading ? 'loading' : 'unavailable'));
-            status.textContent = semanticLabel(value);
-            status.className = 'hr-header-status hr-tone-' + statusTone(value);
-        }
         element.setAttribute(
             'aria-busy',
             state.loading || state.detailLoading || Boolean(state.commandBusy) ? 'true' : 'false'
@@ -543,6 +538,7 @@
         if (action === 'pause' || action === 'resume') {
             return { url: '/api/human-resources/hr/' + action, body: {} };
         }
+        if (action === 'sync') return { url: '/api/human-resources/directory/sync', body: {} };
         if (action === 'run') return { url: '/api/human-resources/cycles/run', body: {} };
         if ((action === 'close' || action === 'retry') && cycleId) {
             return { url: '/api/human-resources/cycles/' + action, body: { cycleId: cycleId } };
@@ -563,6 +559,7 @@
             report: 'Daily report',
             retry: 'Retry failed work',
             skill: 'Skill distribution',
+            sync: 'Sync Agent team',
         };
         return ACTION_NAMES.includes(action)
             ? tr('hr_action_' + action, fallbacks[action] || action)

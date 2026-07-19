@@ -29,9 +29,16 @@ The human-facing Agent detail SHALL show name, introduction, AI ID, availability
 ### Requirement: HR lifecycle controls and activity
 The module SHALL expose HR status, auto-created state, profile or provider error, pause/resume controls, and recent lifecycle and workflow activity to the authenticated human.
 
+The overview SHALL show one authoritative HR lifecycle status indicator rather than duplicating the same status in the modal header and overview card. It SHALL also provide an authenticated manual Agent-team synchronization action that force-refreshes roster discovery and reconciles newly discovered, changed, reactivated, and missing Agents into the HR directory before refreshing the view.
+
 #### Scenario: Human pauses HR
 - **WHEN** the user confirms pause
 - **THEN** the module SHALL show that new introductions, daily collection, and assessment are paused while existing data remains browsable
+
+#### Scenario: Human actively synchronizes the Agent team
+- **WHEN** the user confirms active synchronization
+- **THEN** HR SHALL force-refresh the VO roster, reconcile Agent records and enablement readiness, and refresh the displayed Agent team
+- **AND** one malformed or unsupported Agent SHALL NOT prevent valid newly discovered Agents from appearing
 
 ### Requirement: Degraded and partial-failure experience
 The Human Resources module SHALL remain readable when HR, OpenClaw, scheduling, one Agent, normalization, or assessment fails and SHALL identify the affected scope and retry or recovery state without masking valid records.

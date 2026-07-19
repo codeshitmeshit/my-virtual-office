@@ -98,7 +98,6 @@ try {
           <div class="modal-content hr-modal-content">
             <div class="modal-header hr-header">
               <h2 id="human-resources-title">Human Resources</h2>
-              <span id="human-resources-status" class="hr-header-status"></span>
               <button id="human-resources-close" class="close-btn hr-close" onclick="closeHumanResources()">×</button>
             </div>
             <div id="human-resources-content" class="hr-content"></div>
@@ -127,6 +126,10 @@ try {
         if (options.method === 'POST') {
           if (url.endsWith('/pause')) fixture.overview.hr.status = 'paused';
           if (url.endsWith('/resume')) fixture.overview.hr.status = 'ready';
+          if (url.endsWith('/directory/sync') && !fixture.agents.some(agent => agent.ai_id === 'agent-3')) {
+            fixture.agents.push({ ai_id: 'agent-3', name: 'New Agent', status: 'active', availability: 'available' });
+            fixture.overview.agentTotal = fixture.agents.length;
+          }
           return new Response(JSON.stringify({ ok: true, command: { accepted: true } }), { status: 202 });
         }
         if (window.__hrFixture.denyManagement) {
@@ -196,9 +199,12 @@ try {
 
   await evaluate("HumanResources.selectAgent('')");
   await waitFor("document.querySelector('.hr-command-panel')");
+  await evaluate("HumanResources.runCommand('sync')");
+  await waitFor("document.querySelectorAll('.hr-agent-row').length === 3");
+  assert.equal(await evaluate("document.querySelectorAll('.hr-overview-hero .hr-state-chip').length"), 1);
   await evaluate("HumanResources.runCommand('pause')");
   await waitFor("HumanResources.state.overview.hr.status === 'paused'");
-  assert.equal(await evaluate("document.getElementById('human-resources-status').textContent"), 'Paused');
+  assert.equal(await evaluate("document.querySelector('.hr-overview-hero .hr-state-chip').textContent"), 'Paused');
   await evaluate("HumanResources.runCommand('resume')");
   await waitFor("HumanResources.state.overview.hr.status === 'ready'");
   const happyScreenshot = await captureScreenshot('hr-happy-path');
@@ -210,7 +216,7 @@ try {
     overviewRetained: Boolean(document.querySelector('.hr-overview')),
     denied: HumanResources.state.errors.every(code => code === 'management_token_required'),
   }))()`);
-  assert.deepEqual(permission, { rosterRetained: 2, overviewRetained: true, denied: true });
+  assert.deepEqual(permission, { rosterRetained: 3, overviewRetained: true, denied: true });
   const permissionScreenshot = await captureScreenshot('hr-permission-denied');
 
   await evaluate("window.__hrFixture.denyManagement = false; window.__hrFixture.failExport = true; HumanResources.reload()");
@@ -220,7 +226,7 @@ try {
     overviewRetained: Boolean(document.querySelector('.hr-overview')),
     errorText: document.querySelector('.hr-degraded-banner').innerText,
   }))()`);
-  assert.equal(degraded.rosterRetained, 2);
+  assert.equal(degraded.rosterRetained, 3);
   assert.equal(degraded.overviewRetained, true);
   assert.match(degraded.errorText, /repository is unavailable/i);
   const partialFailureScreenshot = await captureScreenshot('hr-partial-failure');
@@ -236,10 +242,11 @@ try {
     requests: window.__hrFixture.requests.length,
     pauseCalls: window.__hrFixture.requests.filter(item => item.url.endsWith('/pause')).length,
     resumeCalls: window.__hrFixture.requests.filter(item => item.url.endsWith('/resume')).length,
+    syncCalls: window.__hrFixture.requests.filter(item => item.url.endsWith('/directory/sync')).length,
     reportPageCalls: window.__hrFixture.requests.filter(item => item.url.includes('reportCursor=')).length,
     accessPageCalls: window.__hrFixture.requests.filter(item => item.url.includes('accessCursor=')).length,
   }))()`);
-  assert.deepEqual(summary, { requests: 17, pauseCalls: 1, resumeCalls: 1, reportPageCalls: 1, accessPageCalls: 2 });
+  assert.deepEqual(summary, { requests: 20, pauseCalls: 1, resumeCalls: 1, syncCalls: 1, reportPageCalls: 1, accessPageCalls: 2 });
   console.log(JSON.stringify({
     ok: true,
     overview,

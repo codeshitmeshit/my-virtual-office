@@ -17,6 +17,8 @@ def test_hr_first_level_entry_modal_and_assets_are_registered():
     assert 'human-resources.css?' in html
     assert 'human-resources.js?' in html
     assert html.index('id="btn-human-resources"') < html.index('id="humanResourcesModal"')
+    assert 'id="human-resources-status"' not in html
+    assert "hr-overview-hero" in (APP / "human-resources.js").read_text(encoding="utf-8")
 
 
 def test_hr_shell_has_independent_responsive_list_and_detail_boundaries():

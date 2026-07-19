@@ -6,6 +6,7 @@ import threading
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable, Mapping, Sequence
 
 from services.hr_agent_api import HRAgentAPI
 from services.hr_agent_auth import HRAgentAuthenticator
@@ -17,6 +18,7 @@ from services.hr_observability import HRObservability
 from services.hr_reporting import HRReportingProjection
 from services.hr_repository import HRRepository
 from services.hr_scheduler import HRCommandReceipt, HRManualCommands, HRReconciliationLoop
+from services.hr_team_sync import build_hr_team_sync
 
 
 class HRCommandRouter:
@@ -69,11 +71,24 @@ def build_hr_application_runtime(
     lifecycle: HRLifecyclePort,
     config: HRConfig,
     commands: HRManualCommandsPort,
+    roster_provider: Callable[[bool], Sequence[Mapping[str, object]]] | None = None,
+    workspace_base: str | Path | None = None,
+    repository_root: str | Path | None = None,
 ) -> HRApplicationRuntime:
     """Build one repository authority shared by management and authenticated Agent APIs."""
     repository = HRRepository(status_dir)
     repository.initialize()
     observability = HRObservability()
+    directory_sync = None
+    if roster_provider is not None:
+        if workspace_base is None or repository_root is None:
+            raise ValueError("workspace_base and repository_root are required for roster sync")
+        directory_sync = build_hr_team_sync(
+            repository,
+            roster_provider=roster_provider,
+            workspace_base=workspace_base,
+            repository_root=repository_root,
+        )
     management = HRManagementAPI(
         repository,
         lifecycle,
@@ -81,6 +96,7 @@ def build_hr_application_runtime(
         HRReportingProjection(repository),
         observability,
         config,
+        directory_sync=directory_sync,
     )
     routes = HRHTTPRoutes(
         management,

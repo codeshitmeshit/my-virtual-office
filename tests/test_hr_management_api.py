@@ -293,6 +293,7 @@ def test_disabled_feature_keeps_reads_available_and_blocks_all_mutation(setup):
     for callback in (
         lambda: api.lifecycle_command("pause", {}, body_bytes=2),
         lambda: api.cycle_command("run", {}, body_bytes=2),
+        lambda: api.directory_sync_command({}, body_bytes=2),
     ):
         result = api.safe_error(pytest.raises(HRAPIDisabledError, callback).value)
         assert result.status == 503

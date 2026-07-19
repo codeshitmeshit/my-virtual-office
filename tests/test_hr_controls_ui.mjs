@@ -27,6 +27,10 @@ assert.deepEqual(hr.helpers.commandSpec('close'), {
   url: '/api/human-resources/cycles/close',
   body: { cycleId: 'cycle-1' },
 });
+assert.deepEqual(hr.helpers.commandSpec('sync'), {
+  url: '/api/human-resources/directory/sync',
+  body: {},
+});
 assert.equal(hr.helpers.commandSpec('unknown'), null);
 
 const requests = [];

@@ -165,7 +165,9 @@ class HRHTTPRoutes:
         try:
             lifecycle_prefix = f"{MANAGEMENT_PREFIX}/hr/"
             cycle_prefix = f"{MANAGEMENT_PREFIX}/cycles/"
-            if path.startswith(lifecycle_prefix):
+            if path == f"{MANAGEMENT_PREFIX}/directory/sync":
+                result = self._management.directory_sync_command(body, body_bytes=body_bytes)
+            elif path.startswith(lifecycle_prefix):
                 action = self._segment(path.removeprefix(lifecycle_prefix))
                 result = self._management.lifecycle_command(action, body, body_bytes=body_bytes)
             elif path.startswith(cycle_prefix):

@@ -57,6 +57,8 @@ class Connection:
 @pytest.fixture
 def runtime(tmp_path, monkeypatch):
     lifecycle = Lifecycle()
+    workspace = tmp_path / "workspaces" / "agent-3"
+    workspace.mkdir(parents=True)
     result = build_hr_application_runtime(
         status_dir=tmp_path / "status",
         lifecycle=lifecycle,
@@ -68,6 +70,14 @@ def runtime(tmp_path, monkeypatch):
             }
         ),
         commands=HRCommandRouter(),
+        roster_provider=lambda force: [
+            {
+                "id": "agent-3", "name": "Agent Three", "providerKind": "openclaw",
+                "workspace": str(workspace),
+            }
+        ],
+        workspace_base=tmp_path / "workspaces",
+        repository_root=ROOT,
     )
     for ai_id, secret in (("agent-1", SECRET_1), ("agent-2", SECRET_2)):
         result.repository.upsert_agent(
@@ -178,6 +188,19 @@ def test_management_routes_cover_detail_log_health_export_and_commands(runtime):
     )
     assert status == 503
     assert payload["command"]["accepted"] is False
+
+    status, payload = call(
+        handler("/api/human-resources/directory/sync", {"unexpected": True}, management=True), "POST"
+    )
+    assert status == 400
+    assert payload["code"] == "hr_api_validation_failed"
+
+    status, payload = call(
+        handler("/api/human-resources/directory/sync", {}, management=True), "POST"
+    )
+    assert status == 200
+    assert payload["sync"]["discovered"] == 1
+    assert payload["sync"]["created"] == ["agent-3"]
 
 
 def test_agent_directory_and_public_detail_require_bound_grant(runtime):

@@ -21589,6 +21589,9 @@ def _get_hr_application_runtime():
                 lifecycle=_hr_shared_adapter(),
                 config=hr_config_service.HRConfig.from_env(),
                 commands=_hr_command_router,
+                roster_provider=_hr_shared_list_agents,
+                workspace_base=WORKSPACE_BASE,
+                repository_root=os.path.dirname(os.path.dirname(__file__)),
             )
         return _hr_application_runtime
 

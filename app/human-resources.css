@@ -25,18 +25,8 @@
     font-size: 16px;
 }
 
-.hr-header-status {
-    margin-left: auto;
-    margin-right: 10px;
-    padding: 4px 9px;
-    border: 1px solid #33475a;
-    border-radius: 999px;
-    background: #131c29;
-    color: #a9b8c8;
-    font-size: 11px;
-}
-
 .hr-close {
+    margin-left: auto;
     border: 0;
     background: transparent;
     color: #c4ced8;
@@ -732,13 +722,6 @@
 
     .hr-header {
         padding: 11px 12px;
-    }
-
-    .hr-header-status {
-        max-width: 36vw;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
     }
 
     .hr-shell {

@@ -44,6 +44,10 @@ class HRManualCommandsPort(Protocol):
     def retry(self, cycle_id: str) -> HRCommandReceipt: ...
 
 
+class HRDirectorySyncPort(Protocol):
+    def sync(self) -> object: ...
+
+
 def _json_safe(value: object) -> object:
     if is_dataclass(value) and not isinstance(value, type):
         return {
@@ -76,6 +80,7 @@ class HRManagementAPI:
         observability: HRObservability,
         config: HRConfig,
         *,
+        directory_sync: HRDirectorySyncPort | None = None,
         clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
     ):
         if not isinstance(repository, HRRepository):
@@ -96,12 +101,15 @@ class HRManagementAPI:
             raise HRAPIValidationError("observability is invalid")
         if not isinstance(config, HRConfig):
             raise HRAPIValidationError("HR config is invalid")
+        if directory_sync is not None and not callable(getattr(directory_sync, "sync", None)):
+            raise HRAPIValidationError("directory sync port is invalid")
         self._repository = repository
         self._lifecycle = lifecycle
         self._commands = commands
         self._reporting = reporting
         self._observability = observability
         self._config = config
+        self._directory_sync = directory_sync
         self._clock = clock
 
     def _now(self) -> datetime:
@@ -346,6 +354,18 @@ class HRManagementAPI:
             202 if receipt.accepted else 503,
             {"ok": receipt.accepted, "command": _json_safe(receipt)},
         )
+
+    def directory_sync_command(self, body: object, *, body_bytes: int) -> HRServiceResult:
+        if not self._config.enabled:
+            raise HRAPIDisabledError("Human Resources mutations are disabled")
+        payload = self._body(body, body_bytes)
+        if payload:
+            raise HRAPIValidationError("directory sync command body must be empty")
+        if self._directory_sync is None:
+            return HRServiceResult(503, {"ok": False, "code": "hr_directory_sync_unavailable"})
+        self._observability.increment("directory.sync_requests_total")
+        result = self._directory_sync.sync()
+        return HRServiceResult(200, {"ok": True, "sync": _json_safe(result)})
 
     @staticmethod
     def safe_error(exc: Exception) -> HRServiceResult:
