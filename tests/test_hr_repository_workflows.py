@@ -362,6 +362,75 @@ def test_assessment_versions_current_invariant_and_evidence(repository):
     assert [item.is_current for item in history] == [True, False]
 
 
+def test_assessment_job_claim_fences_changed_evidence_and_repairs_committed_work(repository):
+    job = repository.ensure_assessment_job(
+        job_id="assessment-job-1",
+        ai_id="agent-1",
+        local_date="2026-07-19",
+        evidence_version="evidence-v1",
+        occurrence_key="assessment:2026-07-19:agent-1",
+    )
+    claimed = repository.claim_assessment_job(
+        job_id=job.id,
+        claimed_by="hr",
+        claim_token="claim-v1",
+        now="2026-07-19T09:00:00Z",
+        claim_expires_at="2026-07-19T19:00:00Z",
+    )
+    assert claimed is not None
+    exported = repository.management_export("assessment_jobs").rows[0]
+    assert "claim_token" not in exported
+    assert "claim-v1" not in str(exported)
+    with pytest.raises(HRRepositoryConflictError, match="earlier evidence"):
+        repository.ensure_assessment_job(
+            job_id=job.id,
+            ai_id="agent-1",
+            local_date="2026-07-19",
+            evidence_version="evidence-v2",
+            occurrence_key=job.occurrence_key,
+        )
+    assessment(repository)
+    repaired = repository.reconcile_assessment_job_complete(
+        job_id=job.id,
+        evidence_version="evidence-v1",
+    )
+    assert repaired.status == "complete"
+    assert repaired.claim_token == ""
+
+
+def test_failed_assessment_job_can_be_claimed_for_retry(repository):
+    job = repository.ensure_assessment_job(
+        job_id="assessment-job-retry",
+        ai_id="agent-1",
+        local_date="2026-07-19",
+        evidence_version="evidence-v1",
+        occurrence_key="assessment-retry:2026-07-19:agent-1",
+    )
+    first = repository.claim_assessment_job(
+        job_id=job.id,
+        claimed_by="hr",
+        claim_token="claim-first",
+        now="2026-07-19T09:00:00Z",
+        claim_expires_at="2026-07-19T09:01:00Z",
+    )
+    repository.finish_assessment_job(
+        job_id=job.id,
+        claim_token=first.claim_token,
+        status="failed",
+        finished_at="2026-07-19T09:00:30Z",
+        last_error="assessment_failed:RuntimeError",
+    )
+    retried = repository.claim_assessment_job(
+        job_id=job.id,
+        claimed_by="hr",
+        claim_token="claim-retry",
+        now="2026-07-19T09:00:31Z",
+        claim_expires_at="2026-07-19T09:01:31Z",
+    )
+    assert retried is not None
+    assert retried.attempt_count == 2
+
+
 def test_assessment_json_failure_is_atomic(repository):
     first = assessment(repository)
     with pytest.raises(HRRepositoryValidationError, match="contain strings"):

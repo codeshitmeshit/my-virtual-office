@@ -2,6 +2,7 @@
 
 import json
 import sys
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -283,3 +284,135 @@ def test_one_agent_hr_failure_does_not_block_another(setup):
     assert [item.status for item in results] == ["failed", "complete"]
     assert "secret" not in results[0].error_code
     assert repository.get_current_assessment("agent-2", LOCAL_DATE) is not None
+
+
+def test_same_evidence_retry_is_idempotent_and_skips_second_hr_call(setup):
+    repository, reporting, opened = setup
+    reporting.close_cycle(opened.cycle.id, closed_at=NOW)
+    hr = FakeHR({"agent-1": assessment("agent-1", evidence=(reference(),))})
+    service = HRAssessmentOrchestrator(repository, collector(task_evidence()), hr)
+    first = service.assess(("agent-1",), local_date=LOCAL_DATE, actor_ai_id="hr")
+    second = service.assess(("agent-1",), local_date=LOCAL_DATE, actor_ai_id="hr")
+    assert first[0].status == "complete"
+    assert second[0].status == "already_complete"
+    assert second[0].assessment == first[0].assessment
+    assert len(hr.calls) == 1
+    assert len(repository.list_assessments(ai_id="agent-1").items) == 1
+    assert repository.get_assessment_job("agent-1", LOCAL_DATE).status == "complete"
+
+
+def test_failed_job_is_visible_and_retryable_without_provider_error_leak(setup):
+    repository, reporting, opened = setup
+    reporting.close_cycle(opened.cycle.id, closed_at=NOW)
+    failed = HRAssessmentOrchestrator(
+        repository,
+        collector(task_evidence()),
+        FakeHR({"agent-1": RuntimeError("provider secret envelope")}),
+    ).assess(("agent-1",), local_date=LOCAL_DATE, actor_ai_id="hr")
+    assert failed[0].status == "failed"
+    job = repository.get_assessment_job("agent-1", LOCAL_DATE)
+    assert job.status == "failed"
+    assert job.last_error == "assessment_failed:RuntimeError"
+    assert "secret" not in job.last_error
+    retried = HRAssessmentOrchestrator(
+        repository,
+        collector(task_evidence()),
+        FakeHR({"agent-1": assessment("agent-1", evidence=(reference(),))}),
+    ).assess(("agent-1",), local_date=LOCAL_DATE, actor_ai_id="hr")
+    assert retried[0].status == "complete"
+    assert repository.get_assessment_job("agent-1", LOCAL_DATE).attempt_count == 2
+
+
+def test_late_report_creates_new_current_version_with_revision_reason(setup):
+    repository, reporting, opened = setup
+    reporting.close_cycle(opened.cycle.id, closed_at=NOW)
+    first = HRAssessmentOrchestrator(
+        repository,
+        collector(),
+        FakeHR({"agent-2": assessment("agent-2", sufficient=False)}),
+    ).assess(("agent-2",), local_date=LOCAL_DATE, actor_ai_id="hr")
+    assert first[0].assessment.version == 1
+    reporting.submit_response(
+        ai_id="agent-2",
+        local_date=LOCAL_DATE,
+        raw_response="迟交：完成 task-1",
+        submitted_at=datetime(2026, 7, 19, 11, tzinfo=timezone.utc),
+    )
+    second = HRAssessmentOrchestrator(
+        repository,
+        collector(task_evidence("agent-2")),
+        FakeHR({"agent-2": assessment("agent-2", evidence=(reference(),))}),
+    ).assess(("agent-2",), local_date=LOCAL_DATE, actor_ai_id="hr")
+    assert second[0].status == "complete"
+    assert second[0].assessment.version == 2
+    assert second[0].assessment.revision_reason == "late_report"
+    history = repository.list_assessments(ai_id="agent-2").items
+    assert [item.version for item in history] == [2, 1]
+    assert [item.is_current for item in history] == [True, False]
+
+
+def test_changed_evidence_creates_revision_and_retains_evidence_links(setup):
+    repository, reporting, opened = setup
+    reporting.close_cycle(opened.cycle.id, closed_at=NOW)
+    first_service = HRAssessmentOrchestrator(
+        repository,
+        collector(task_evidence()),
+        FakeHR({"agent-1": assessment("agent-1", evidence=(reference(),))}),
+    )
+    first_service.assess(("agent-1",), local_date=LOCAL_DATE, actor_ai_id="hr")
+    changed = task_evidence()
+    changed[("artifacts", "agent-1")] = [
+        EvidenceCandidate(
+            "artifact",
+            "artifact-2",
+            "新增验收报告",
+            LOCAL_DATE,
+            {"artifactId": "artifact-2", "artifactType": "document"},
+        )
+    ]
+    second = HRAssessmentOrchestrator(
+        repository,
+        collector(changed),
+        FakeHR({"agent-1": assessment("agent-1", evidence=(reference(),))}),
+    ).assess(("agent-1",), local_date=LOCAL_DATE, actor_ai_id="hr")
+    assert second[0].assessment.version == 2
+    assert second[0].assessment.revision_reason == "evidence_changed"
+    assert second[0].assessment.evidence[0].reference_id == "task-1:event-2"
+    assert second[0].assessment.evidence_version != (
+        repository.list_assessments(ai_id="agent-1").items[1].evidence_version
+    )
+
+
+def test_concurrent_evaluation_has_one_claim_one_hr_call_and_one_version(setup):
+    repository, reporting, opened = setup
+    reporting.close_cycle(opened.cycle.id, closed_at=NOW)
+    entered = threading.Event()
+    release = threading.Event()
+
+    class BlockingHR(FakeHR):
+        def ask_hr(self, *args):
+            self.calls.append(args)
+            entered.set()
+            assert release.wait(timeout=5)
+            return assessment("agent-1", evidence=(reference(),))
+
+    hr = BlockingHR({})
+    first_service = HRAssessmentOrchestrator(repository, collector(task_evidence()), hr)
+    second_service = HRAssessmentOrchestrator(repository, collector(task_evidence()), hr)
+    first_results = []
+    thread = threading.Thread(
+        target=lambda: first_results.extend(
+            first_service.assess(("agent-1",), local_date=LOCAL_DATE, actor_ai_id="hr")
+        )
+    )
+    thread.start()
+    assert entered.wait(timeout=5)
+    second = second_service.assess(
+        ("agent-1",), local_date=LOCAL_DATE, actor_ai_id="hr"
+    )
+    release.set()
+    thread.join(timeout=5)
+    assert first_results[0].status == "complete"
+    assert second[0].status == "claimed_elsewhere"
+    assert len(hr.calls) == 1
+    assert len(repository.list_assessments(ai_id="agent-1").items) == 1

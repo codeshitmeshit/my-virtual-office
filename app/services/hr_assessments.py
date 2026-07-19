@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import secrets
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
-from typing import Iterable, Protocol
+from datetime import date, datetime, timedelta, timezone
+from typing import Callable, Iterable, Protocol
 
 from services.hr_evidence import EvidenceBundle, HREvidenceCollector, SanitizedEvidence
 from services.hr_repository import AssessmentRecord, HRRepository
@@ -260,6 +261,9 @@ class HRAssessmentOrchestrator:
         parser: HRAssessmentParser | None = None,
         hr_ai_id: str = "hr",
         timeout_seconds: float = 45.0,
+        clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+        claim_token_factory: Callable[[str], str] = lambda _job_id: secrets.token_urlsafe(24),
+        claim_lease_seconds: int = 90,
     ):
         if not isinstance(repository, HRRepository):
             raise HRAssessmentValidationError("repository must be an HRRepository")
@@ -273,12 +277,32 @@ class HRAssessmentOrchestrator:
             or not 0.1 <= float(timeout_seconds) <= 300
         ):
             raise HRAssessmentValidationError("timeout_seconds must be between 0.1 and 300")
+        if not callable(claim_token_factory):
+            raise HRAssessmentValidationError("claim_token_factory is invalid")
+        if (
+            isinstance(claim_lease_seconds, bool)
+            or not isinstance(claim_lease_seconds, int)
+            or not 1 <= claim_lease_seconds <= 600
+            or claim_lease_seconds <= float(timeout_seconds)
+        ):
+            raise HRAssessmentValidationError(
+                "claim lease must exceed timeout and be at most 600 seconds"
+            )
         self._repository = repository
         self._evidence = evidence
         self._hr = hr
         self._parser = parser or HRAssessmentParser(hr_ai_id=hr_ai_id)
         self._hr_ai_id = hr_ai_id
         self._timeout_seconds = float(timeout_seconds)
+        self._clock = clock
+        self._claim_token_factory = claim_token_factory
+        self._claim_lease_seconds = claim_lease_seconds
+
+    def _now(self) -> datetime:
+        value = self._clock()
+        if not isinstance(value, datetime) or value.tzinfo is None or value.utcoffset() is None:
+            raise HRAssessmentValidationError("assessment clock must be timezone-aware")
+        return value.astimezone(timezone.utc)
 
     @staticmethod
     def _source_group(item: SanitizedEvidence) -> str:
@@ -399,6 +423,8 @@ class HRAssessmentOrchestrator:
                     AssessmentProcessingResult(ai_id, local_date, "skipped_hr", None, "")
                 )
                 continue
+            token = ""
+            job = None
             try:
                 report = self._repository.get_daily_report(ai_id, local_date)
                 if report is None or report.cycle_id is None:
@@ -408,6 +434,44 @@ class HRAssessmentOrchestrator:
                     raise HRAssessmentValidationError("assessment cycle is not closed")
                 bundle = self._evidence.collect(ai_id, local_date=local_date)
                 adequate = self._evidence_is_adequate(report.raw_response is not None, bundle)
+                evidence_version = self._evidence_version(report.revision, bundle)
+                job = self._repository.ensure_assessment_job(
+                    job_id=f"hr-assessment-job:{local_date}:{ai_id}",
+                    ai_id=ai_id,
+                    local_date=local_date,
+                    evidence_version=evidence_version,
+                    occurrence_key=f"hr-assessment:{local_date}:{ai_id}",
+                )
+                current = self._repository.get_current_assessment(ai_id, local_date)
+                if current is not None and current.evidence_version == evidence_version:
+                    self._repository.reconcile_assessment_job_complete(
+                        job_id=job.id,
+                        evidence_version=evidence_version,
+                    )
+                    results.append(
+                        AssessmentProcessingResult(
+                            ai_id, local_date, "already_complete", current, ""
+                        )
+                    )
+                    continue
+                now = self._now()
+                token = self._claim_token_factory(job.id)
+                claim = self._repository.claim_assessment_job(
+                    job_id=job.id,
+                    claimed_by=self._hr_ai_id,
+                    claim_token=token,
+                    now=now.isoformat(),
+                    claim_expires_at=(
+                        now + timedelta(seconds=self._claim_lease_seconds)
+                    ).isoformat(),
+                )
+                if claim is None:
+                    results.append(
+                        AssessmentProcessingResult(
+                            ai_id, local_date, "claimed_elsewhere", None, ""
+                        )
+                    )
+                    continue
                 output = self._hr.ask_hr(
                     self._prompt(report, bundle, adequate=adequate),
                     f"hr:assessment:{local_date}:{ai_id}",
@@ -427,7 +491,19 @@ class HRAssessmentOrchestrator:
                         "insufficient evidence cannot support a performance conclusion"
                     )
                 evidence_rows = self._referenced_evidence(parsed, bundle)
-                evidence_version = self._evidence_version(report.revision, bundle)
+                revision_reason = ""
+                if current is not None:
+                    normalized_submission = (
+                        report.normalized.get("submission", {}).get("state")
+                        if isinstance(report.normalized, dict)
+                        else None
+                    )
+                    revision_reason = (
+                        "late_report"
+                        if report.submission_state == "late_submitted"
+                        or normalized_submission == "late_submitted"
+                        else "evidence_changed"
+                    )
                 assessment = self._repository.save_assessment(
                     assessment_id=(
                         f"hr-assessment:{local_date}:{ai_id}:"
@@ -447,6 +523,14 @@ class HRAssessmentOrchestrator:
                     evidence_version=evidence_version,
                     hr_id=parsed.hr_ai_id,
                     evidence=evidence_rows,
+                    revision_reason=revision_reason,
+                    expected_version=current.version if current is not None else 0,
+                )
+                self._repository.finish_assessment_job(
+                    job_id=job.id,
+                    claim_token=token,
+                    status="complete",
+                    finished_at=self._now().isoformat(),
                 )
                 results.append(
                     AssessmentProcessingResult(
@@ -454,13 +538,25 @@ class HRAssessmentOrchestrator:
                     )
                 )
             except Exception as exc:
+                error_code = str(getattr(exc, "code", "assessment_failed"))
+                if token and job is not None:
+                    try:
+                        self._repository.finish_assessment_job(
+                            job_id=job.id,
+                            claim_token=token,
+                            status="failed",
+                            finished_at=self._now().isoformat(),
+                            last_error=f"{error_code}:{exc.__class__.__name__}",
+                        )
+                    except Exception:
+                        pass
                 results.append(
                     AssessmentProcessingResult(
                         ai_id,
                         local_date,
                         "failed",
                         None,
-                        str(getattr(exc, "code", "assessment_failed")),
+                        error_code,
                     )
                 )
         return tuple(results)

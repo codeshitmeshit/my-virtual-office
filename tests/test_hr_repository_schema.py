@@ -37,6 +37,7 @@ EXPECTED_TABLES = {
     "report_requests",
     "daily_reports",
     "assessments",
+    "assessment_jobs",
     "assessment_evidence",
     "access_grants",
     "access_log",

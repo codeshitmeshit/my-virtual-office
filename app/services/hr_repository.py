@@ -249,6 +249,23 @@ class AssessmentRecord:
 
 
 @dataclass(frozen=True, slots=True)
+class AssessmentJobRecord:
+    id: str
+    ai_id: str
+    local_date: str
+    status: str
+    evidence_version: str
+    occurrence_key: str
+    attempt_count: int
+    last_error: str
+    claim_token: str
+    claimed_by: str
+    claim_expires_at: str | None
+    created_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True, slots=True)
 class DailyReportPage:
     items: tuple[DailyReportRecord, ...]
     next_cursor: str | None
@@ -350,6 +367,7 @@ _EXPORT_TABLES = {
     "report_requests": ("id",),
     "daily_reports": ("local_date", "ai_id"),
     "assessments": ("local_date", "ai_id", "version"),
+    "assessment_jobs": ("local_date", "ai_id"),
     "assessment_evidence": ("assessment_id", "sequence"),
     "access_grants": ("ai_id",),
     "access_log": ("viewed_at", "id"),
@@ -504,6 +522,23 @@ _SCHEMA_V1 = (
     ) WITHOUT ROWID""",
     "CREATE UNIQUE INDEX assessments_current_idx ON assessments(ai_id, local_date) WHERE is_current = 1",
     "CREATE INDEX assessments_date_status_idx ON assessments(local_date DESC, status, ai_id)",
+    """CREATE TABLE assessment_jobs (
+        id TEXT PRIMARY KEY CHECK(length(trim(id)) > 0),
+        ai_id TEXT NOT NULL REFERENCES agents(ai_id) ON UPDATE CASCADE ON DELETE RESTRICT,
+        local_date TEXT NOT NULL,
+        status TEXT NOT NULL,
+        evidence_version TEXT NOT NULL,
+        occurrence_key TEXT NOT NULL UNIQUE,
+        attempt_count INTEGER NOT NULL DEFAULT 0 CHECK(attempt_count >= 0),
+        last_error TEXT NOT NULL DEFAULT '',
+        claim_token TEXT NOT NULL DEFAULT '',
+        claimed_by TEXT NOT NULL DEFAULT '',
+        claim_expires_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(ai_id, local_date)
+    ) WITHOUT ROWID""",
+    "CREATE INDEX assessment_jobs_state_idx ON assessment_jobs(status, local_date, ai_id)",
     """CREATE TABLE assessment_evidence (
         assessment_id TEXT NOT NULL REFERENCES assessments(id) ON UPDATE CASCADE ON DELETE CASCADE,
         sequence INTEGER NOT NULL CHECK(sequence >= 0),
@@ -726,6 +761,10 @@ def _assessment_from_row(
         values[field] = tuple(json.loads(values.pop(f"{field}_json")))
     values["evidence"] = tuple(evidence)
     return AssessmentRecord(**values)
+
+
+def _assessment_job_from_row(row: sqlite3.Row) -> AssessmentJobRecord:
+    return AssessmentJobRecord(**dict(row))
 
 
 def _grant_from_row(row: sqlite3.Row) -> AccessGrantRecord:
@@ -2153,6 +2192,180 @@ class HRRepository:
         )
         return DailyReportPage(items, next_cursor)
 
+    def ensure_assessment_job(
+        self,
+        *,
+        job_id: str,
+        ai_id: str,
+        local_date: str,
+        evidence_version: str,
+        occurrence_key: str,
+    ) -> AssessmentJobRecord:
+        job_id = _opaque_id(job_id, "job_id")
+        ai_id = _stable_ai_id(ai_id)
+        local_date = _local_date(local_date)
+        evidence_version = _opaque_id(evidence_version, "evidence_version")
+        occurrence_key = _opaque_id(occurrence_key, "occurrence_key")
+        timestamp = self._timestamp()
+        with self._write_transaction() as connection:
+            row = connection.execute(
+                "SELECT * FROM assessment_jobs WHERE ai_id = ? AND local_date = ?",
+                (ai_id, local_date),
+            ).fetchone()
+            if row is not None:
+                current = _assessment_job_from_row(row)
+                if current.id != job_id or current.occurrence_key != occurrence_key:
+                    raise HRRepositoryConflictError("assessment job identity already exists")
+                if current.evidence_version == evidence_version:
+                    return current
+                if (
+                    current.status == "claimed"
+                    and current.claim_expires_at is not None
+                    and current.claim_expires_at > timestamp
+                ):
+                    raise HRRepositoryConflictError(
+                        "assessment job is claimed for an earlier evidence version"
+                    )
+                connection.execute(
+                    """UPDATE assessment_jobs SET
+                           status = 'pending', evidence_version = ?, last_error = '',
+                           claim_token = '', claimed_by = '', claim_expires_at = NULL,
+                           updated_at = ?
+                       WHERE id = ?""",
+                    (evidence_version, timestamp, job_id),
+                )
+            else:
+                try:
+                    connection.execute(
+                        """INSERT INTO assessment_jobs(
+                               id, ai_id, local_date, status, evidence_version,
+                               occurrence_key, created_at, updated_at
+                           ) VALUES (?, ?, ?, 'pending', ?, ?, ?, ?)""",
+                        (
+                            job_id,
+                            ai_id,
+                            local_date,
+                            evidence_version,
+                            occurrence_key,
+                            timestamp,
+                            timestamp,
+                        ),
+                    )
+                except sqlite3.IntegrityError as exc:
+                    raise HRRepositoryConflictError(
+                        "assessment job dependency or identity is invalid"
+                    ) from exc
+            row = connection.execute(
+                "SELECT * FROM assessment_jobs WHERE id = ?", (job_id,)
+            ).fetchone()
+            return _assessment_job_from_row(row)
+
+    def reconcile_assessment_job_complete(
+        self,
+        *,
+        job_id: str,
+        evidence_version: str,
+    ) -> AssessmentJobRecord:
+        """Repair job state after an assessment commit won a crash/restart race."""
+        job_id = _opaque_id(job_id, "job_id")
+        evidence_version = _opaque_id(evidence_version, "evidence_version")
+        timestamp = self._timestamp()
+        with self._write_transaction() as connection:
+            updated = connection.execute(
+                """UPDATE assessment_jobs SET
+                       status = 'complete', last_error = '', claim_token = '',
+                       claimed_by = '', claim_expires_at = NULL, updated_at = ?
+                   WHERE id = ? AND evidence_version = ?""",
+                (timestamp, job_id, evidence_version),
+            ).rowcount
+            if updated != 1:
+                raise HRRepositoryConflictError("assessment job evidence version changed")
+            row = connection.execute(
+                "SELECT * FROM assessment_jobs WHERE id = ?", (job_id,)
+            ).fetchone()
+            return _assessment_job_from_row(row)
+
+    def claim_assessment_job(
+        self,
+        *,
+        job_id: str,
+        claimed_by: str,
+        claim_token: str,
+        now: str,
+        claim_expires_at: str,
+    ) -> AssessmentJobRecord | None:
+        job_id = _opaque_id(job_id, "job_id")
+        claimed_by = _opaque_id(claimed_by, "claimed_by")
+        claim_token = _opaque_id(claim_token, "claim_token")
+        now = _timestamp_text(now, "now")
+        claim_expires_at = _timestamp_text(claim_expires_at, "claim_expires_at")
+        if claim_expires_at <= now:
+            raise HRRepositoryValidationError("claim expiry must be after now")
+        with self._write_transaction() as connection:
+            updated = connection.execute(
+                """UPDATE assessment_jobs SET
+                       status = 'claimed', claimed_by = ?, claim_token = ?,
+                       claim_expires_at = ?, attempt_count = attempt_count + 1,
+                       updated_at = ?
+                   WHERE id = ? AND status IN ('pending', 'retry', 'failed', 'claimed')
+                     AND (claim_token = '' OR claim_expires_at <= ?)""",
+                (
+                    claimed_by,
+                    claim_token,
+                    claim_expires_at,
+                    now,
+                    job_id,
+                    now,
+                ),
+            ).rowcount
+            if updated != 1:
+                return None
+            row = connection.execute(
+                "SELECT * FROM assessment_jobs WHERE id = ?", (job_id,)
+            ).fetchone()
+            return _assessment_job_from_row(row)
+
+    def finish_assessment_job(
+        self,
+        *,
+        job_id: str,
+        claim_token: str,
+        status: str,
+        finished_at: str,
+        last_error: str = "",
+    ) -> AssessmentJobRecord:
+        job_id = _opaque_id(job_id, "job_id")
+        claim_token = _opaque_id(claim_token, "claim_token")
+        if status not in {"complete", "retry", "failed"}:
+            raise HRRepositoryValidationError("unsupported assessment job status")
+        finished_at = _timestamp_text(finished_at, "finished_at")
+        last_error = _optional_text(last_error, "last_error", maximum=2_000)
+        with self._write_transaction() as connection:
+            updated = connection.execute(
+                """UPDATE assessment_jobs SET
+                       status = ?, last_error = ?, claim_token = '', claimed_by = '',
+                       claim_expires_at = NULL, updated_at = ?
+                   WHERE id = ? AND status = 'claimed' AND claim_token = ?
+                     AND claim_expires_at > ?""",
+                (status, last_error, finished_at, job_id, claim_token, finished_at),
+            ).rowcount
+            if updated != 1:
+                raise HRRepositoryConflictError("assessment job claim is stale or invalid")
+            row = connection.execute(
+                "SELECT * FROM assessment_jobs WHERE id = ?", (job_id,)
+            ).fetchone()
+            return _assessment_job_from_row(row)
+
+    def get_assessment_job(self, ai_id: str, local_date: str) -> AssessmentJobRecord | None:
+        ai_id = _stable_ai_id(ai_id)
+        local_date = _local_date(local_date)
+        with self._connection(readonly=True) as connection:
+            row = connection.execute(
+                "SELECT * FROM assessment_jobs WHERE ai_id = ? AND local_date = ?",
+                (ai_id, local_date),
+            ).fetchone()
+            return _assessment_job_from_row(row) if row is not None else None
+
     def save_assessment(
         self,
         *,
@@ -2830,6 +3043,11 @@ class HRRepository:
             columns = (
                 "ai_id, key_id, status, issued_at, rotated_at, revoked_at, "
                 "revocation_reason, updated_at"
+            )
+        elif table == "assessment_jobs":
+            columns = (
+                "id, ai_id, local_date, status, evidence_version, occurrence_key, "
+                "attempt_count, last_error, claimed_by, claim_expires_at, created_at, updated_at"
             )
         try:
             with self._connection(readonly=True) as connection:
