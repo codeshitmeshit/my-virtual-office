@@ -4,6 +4,10 @@
 import os
 import sys
 import tempfile
+import time
+from concurrent.futures import ThreadPoolExecutor
+
+import pytest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 APP_DIR = os.path.join(ROOT, "app")
@@ -270,6 +274,142 @@ def test_archive_manager_chat_boundary():
             assert "只处理档案室" in unrelated["reply"]
             related = server._archive_manager_chat_guard("archive-manager", "这个项目的档案上下文是什么？")
             assert related is None
+        finally:
+            restore_phase4_store(old)
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="Known pre-extraction defect: archive-manager reconciliation has no shared creation lock; task 2.4 must make this pass.",
+)
+def test_archive_manager_concurrent_reconciliation_creates_one_effective_agent():
+    with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as oc_home:
+        old = with_phase4_store(status_dir, oc_home)
+        try:
+            calls, _ = install_fake_gateway(oc_home)
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                states = list(executor.map(lambda _: server._archive_manager_create_if_missing(), range(2)))
+
+            assert all(state["status"] == "idle" for state in states)
+            assert len([call for call in calls if call[0] == "agents.create"]) == 1
+        finally:
+            restore_phase4_store(old)
+
+
+def test_archive_manager_provider_timeout_is_persisted_as_degraded_error():
+    with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as oc_home:
+        old = with_phase4_store(status_dir, oc_home)
+        try:
+            def timeout_rpc(method, params=None, timeout=20):
+                raise TimeoutError(f"{method} timed out after {timeout}s")
+
+            server._gateway_rpc_call = timeout_rpc
+            state = server._archive_manager_create_if_missing()
+
+            assert state["status"] == "error"
+            assert state["label"] == "档案管理员创建失败"
+            assert state["lastAction"] == "auto_create"
+            assert "agents.list timed out after 10s" in state["lastError"]
+            assert server._archive_manager_load_state()["lastError"] == state["lastError"]
+        finally:
+            restore_phase4_store(old)
+
+
+def test_archive_manager_partial_profile_failure_repairs_existing_agent_without_recreate():
+    with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as oc_home:
+        old = with_phase4_store(status_dir, oc_home)
+        original_writer = server._archive_manager_write_profile_files
+        try:
+            calls, _ = install_fake_gateway(oc_home)
+            server._archive_manager_write_profile_files = lambda _agent_id: {
+                "ok": False,
+                "error": "simulated profile write failure",
+            }
+            failed = server._archive_manager_create_if_missing()
+            assert failed["status"] == "error"
+            assert failed["agentId"] == "archive-manager"
+            assert failed["lastError"] == "simulated profile write failure"
+
+            workspace = os.path.join(oc_home, "workspace-archive-manager")
+            server._archive_manager_write_profile_files = original_writer
+            server._discovered_roster = [{
+                "id": "archive-manager",
+                "statusKey": "archive-manager",
+                "name": "档案管理员",
+                "providerKind": "openclaw",
+                "workspace": workspace,
+            }]
+            server._discovered_at = time.time()
+            repaired = server._archive_manager_create_if_missing()
+
+            assert repaired["status"] == "idle"
+            assert repaired["agentId"] == "archive-manager"
+            assert repaired["lastError"] == ""
+            assert os.path.isfile(os.path.join(workspace, "AGENTS.md"))
+            assert len([call for call in calls if call[0] == "agents.create"]) == 1
+        finally:
+            server._archive_manager_write_profile_files = original_writer
+            restore_phase4_store(old)
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="Known pre-extraction defect: a fresh negative roster cache can miss an externally created archive manager; shared reconciliation must refresh before create.",
+)
+def test_archive_manager_stale_negative_discovery_does_not_create_duplicate():
+    with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as oc_home:
+        old = with_phase4_store(status_dir, oc_home)
+        try:
+            calls, _ = install_fake_gateway(oc_home)
+            created = server._gateway_rpc_call("agents.create", {
+                "name": "archive-manager",
+                "workspace": os.path.join(oc_home, "workspace-archive-manager"),
+            })
+            assert created["ok"] is True
+            server._discovered_roster = []
+            server._discovered_at = time.time()
+
+            state = server._archive_manager_create_if_missing()
+
+            assert state["status"] == "idle"
+            assert len([call for call in calls if call[0] == "agents.create"]) == 1
+        finally:
+            restore_phase4_store(old)
+
+
+def test_archive_manager_repeated_startup_checks_reuse_agent(monkeypatch):
+    with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as oc_home:
+        old = with_phase4_store(status_dir, oc_home)
+        try:
+            calls, _ = install_fake_gateway(oc_home)
+            monkeypatch.setattr(server.time, "sleep", lambda _seconds: None)
+
+            server._archive_manager_profile_check_on_startup()
+            server._archive_manager_profile_check_on_startup()
+
+            assert server._archive_manager_public_state(ensure=False)["status"] == "idle"
+            assert len([call for call in calls if call[0] == "agents.create"]) == 1
+        finally:
+            restore_phase4_store(old)
+
+
+def test_archive_manager_persisted_pause_state_is_restart_visible():
+    with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as oc_home:
+        old = with_phase4_store(status_dir, oc_home)
+        try:
+            install_fake_gateway(oc_home)
+            server._archive_manager_create_if_missing()
+            paused = server._handle_archive_manager_update({"action": "pause"})["archiveManager"]
+            assert paused["paused"] is True
+
+            server._discovered_roster = []
+            server._discovered_at = time.time()
+            reloaded = server._archive_manager_public_state(ensure=False)
+
+            assert reloaded["agentId"] == "archive-manager"
+            assert reloaded["status"] == "paused"
+            assert reloaded["paused"] is True
+            assert reloaded["lastAction"] == "pause"
         finally:
             restore_phase4_store(old)
 
