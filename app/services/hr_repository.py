@@ -1690,6 +1690,93 @@ class HRRepository:
             ).fetchone()
             return _request_from_row(row)
 
+    def record_report_response(
+        self,
+        *,
+        request_id: str,
+        claim_token: str,
+        finished_at: str,
+        raw_response: str | None,
+    ) -> tuple[ReportRequestRecord, DailyReportRecord]:
+        """Atomically finish a claimed request and preserve its Agent-authored response."""
+        request_id = _opaque_id(request_id, "request_id")
+        claim_token = _opaque_id(claim_token, "claim_token")
+        finished_at = _timestamp_text(finished_at, "finished_at")
+        raw_response = _raw_text(raw_response, "raw_response")
+        if raw_response is not None and not raw_response.strip():
+            raw_response = None
+        timestamp = self._timestamp()
+        with self._write_transaction() as connection:
+            request_row = connection.execute(
+                "SELECT * FROM report_requests WHERE id = ?", (request_id,)
+            ).fetchone()
+            if request_row is None:
+                raise HRRepositoryNotFoundError("report request does not exist")
+            request = _request_from_row(request_row)
+            if (
+                request.status != "claimed"
+                or request.claim_token != claim_token
+                or request.claim_expires_at is None
+                or request.claim_expires_at <= finished_at
+            ):
+                raise HRRepositoryConflictError("report request claim is stale or invalid")
+            report_row = connection.execute(
+                "SELECT * FROM daily_reports WHERE cycle_id = ? AND ai_id = ?",
+                (request.cycle_id, request.ai_id),
+            ).fetchone()
+            if report_row is None:
+                raise HRRepositoryNotFoundError("daily report placeholder does not exist")
+            report = _report_from_row(report_row)
+            if report.raw_response is not None and raw_response not in (
+                None,
+                report.raw_response,
+            ):
+                raise HRRepositoryConflictError("daily report raw response is immutable")
+            effective_raw = report.raw_response or raw_response
+            submission_state = "submitted" if effective_raw is not None else report.submission_state
+            submitted_at = finished_at if effective_raw is not None else report.submitted_at
+            requested_at = report.requested_at or request.requested_at
+            if (
+                submission_state,
+                effective_raw,
+                requested_at,
+                submitted_at,
+            ) != (
+                report.submission_state,
+                report.raw_response,
+                report.requested_at,
+                report.submitted_at,
+            ):
+                connection.execute(
+                    """UPDATE daily_reports SET
+                           submission_state = ?, raw_response = ?, requested_at = ?,
+                           submitted_at = ?, revision = revision + 1, updated_at = ?
+                       WHERE id = ?""",
+                    (
+                        submission_state,
+                        effective_raw,
+                        requested_at,
+                        submitted_at,
+                        timestamp,
+                        report.id,
+                    ),
+                )
+            request_status = "submitted" if effective_raw is not None else "no_response"
+            connection.execute(
+                """UPDATE report_requests SET
+                       status = ?, responded_at = ?, last_error = '', claim_token = '',
+                       claimed_by = '', claim_expires_at = NULL, updated_at = ?
+                   WHERE id = ?""",
+                (request_status, finished_at, timestamp, request_id),
+            )
+            request_row = connection.execute(
+                "SELECT * FROM report_requests WHERE id = ?", (request_id,)
+            ).fetchone()
+            report_row = connection.execute(
+                "SELECT * FROM daily_reports WHERE id = ?", (report.id,)
+            ).fetchone()
+            return _request_from_row(request_row), _report_from_row(report_row)
+
     def get_report_request(self, request_id: str) -> ReportRequestRecord | None:
         request_id = _opaque_id(request_id, "request_id")
         with self._connection(readonly=True) as connection:

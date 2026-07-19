@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Callable, Iterable
+from typing import Callable, Iterable, Protocol
 
 from services.hr_repository import (
     DailyCycleRecord,
@@ -25,6 +25,30 @@ class ReportingCycleResult:
     cycle: DailyCycleRecord
     requests: tuple[ReportRequestRecord, ...]
     reports: tuple[DailyReportRecord, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class DailyReportConversationRequest:
+    sender_ai_id: str
+    target_ai_id: str
+    message: str
+    conversation_key: str
+    idempotency_key: str
+    timeout_seconds: float
+
+
+class HRDailyReportConversationPort(Protocol):
+    def ask_agent_as_hr(self, request: DailyReportConversationRequest) -> str | None: ...
+
+
+@dataclass(frozen=True, slots=True)
+class ReportCollectionResult:
+    request_id: str
+    ai_id: str
+    status: str
+    conversation_key: str
+    attempt_count: int
+    error_code: str
 
 
 class HRReportingService:
@@ -170,3 +194,145 @@ class HRReportingService:
             limit=limit,
             cursor=cursor,
         )
+
+
+class HRDailyReportCollector:
+    """Performs visible, idempotent HR-to-Agent report conversations."""
+
+    def __init__(
+        self,
+        repository: HRRepository,
+        reporting: HRReportingService,
+        conversation: HRDailyReportConversationPort,
+        *,
+        clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+        timeout_seconds: float = 30.0,
+        hr_ai_id: str = "hr",
+    ):
+        if not isinstance(repository, HRRepository):
+            raise HRReportingValidationError("repository must be an HRRepository")
+        if not isinstance(reporting, HRReportingService):
+            raise HRReportingValidationError("reporting service is invalid")
+        if not callable(getattr(conversation, "ask_agent_as_hr", None)):
+            raise HRReportingValidationError("conversation port is invalid")
+        if (
+            isinstance(timeout_seconds, bool)
+            or not isinstance(timeout_seconds, (int, float))
+            or not 0.1 <= float(timeout_seconds) <= 300
+        ):
+            raise HRReportingValidationError("timeout_seconds must be between 0.1 and 300")
+        self._repository = repository
+        self._reporting = reporting
+        self._conversation = conversation
+        self._clock = clock
+        self._timeout_seconds = float(timeout_seconds)
+        self._hr_ai_id = hr_ai_id
+
+    def _now(self) -> datetime:
+        value = self._clock()
+        if not isinstance(value, datetime) or value.tzinfo is None or value.utcoffset() is None:
+            raise HRReportingValidationError("collector clock must be timezone-aware")
+        return value.astimezone(timezone.utc)
+
+    def process_requests(
+        self,
+        request_ids: Iterable[str],
+        *,
+        message: str,
+        worker_id: str,
+    ) -> tuple[ReportCollectionResult, ...]:
+        if not isinstance(message, str) or not message.strip():
+            raise HRReportingValidationError("daily report message must not be empty")
+        message = message.strip()
+        results = []
+        for request_id in tuple(request_ids):
+            token = ""
+            request = None
+            try:
+                request = self._repository.get_report_request(request_id)
+                if request is None:
+                    raise HRReportingValidationError("report request does not exist")
+                if request.status in {"submitted", "no_response", "skipped"}:
+                    results.append(
+                        ReportCollectionResult(
+                            request.id,
+                            request.ai_id,
+                            "already_complete",
+                            request.conversation_key,
+                            request.attempt_count,
+                            "",
+                        )
+                    )
+                    continue
+                claim = self._reporting.claim_request(request.id, worker_id=worker_id)
+                if claim is None:
+                    results.append(
+                        ReportCollectionResult(
+                            request.id,
+                            request.ai_id,
+                            "claimed_elsewhere",
+                            request.conversation_key,
+                            request.attempt_count,
+                            "",
+                        )
+                    )
+                    continue
+                token = claim.claim_token
+                response = self._conversation.ask_agent_as_hr(
+                    DailyReportConversationRequest(
+                        sender_ai_id=self._hr_ai_id,
+                        target_ai_id=claim.ai_id,
+                        message=message,
+                        conversation_key=claim.conversation_key,
+                        idempotency_key=claim.occurrence_key,
+                        timeout_seconds=self._timeout_seconds,
+                    )
+                )
+                if response is not None and not isinstance(response, str):
+                    raise TypeError("conversation response must be text or None")
+                finished, _ = self._repository.record_report_response(
+                    request_id=claim.id,
+                    claim_token=token,
+                    finished_at=self._now().isoformat(),
+                    raw_response=response,
+                )
+                results.append(
+                    ReportCollectionResult(
+                        finished.id,
+                        finished.ai_id,
+                        "submitted" if finished.status == "submitted" else "no_response",
+                        finished.conversation_key,
+                        finished.attempt_count,
+                        "",
+                    )
+                )
+            except Exception as exc:
+                error_code = (
+                    "conversation_timeout"
+                    if isinstance(exc, TimeoutError)
+                    else getattr(exc, "code", "conversation_failed")
+                )
+                attempts = request.attempt_count if request is not None else 0
+                if token and request is not None:
+                    try:
+                        failed = self._repository.finish_report_request(
+                            request_id=request.id,
+                            claim_token=token,
+                            status="retry",
+                            finished_at=self._now().isoformat(),
+                            last_error=f"{error_code}:{exc.__class__.__name__}",
+                        )
+                        attempts = failed.attempt_count
+                    except Exception:
+                        pass
+                results.append(
+                    ReportCollectionResult(
+                        str(request_id),
+                        request.ai_id if request is not None else "",
+                        "timeout" if error_code == "conversation_timeout" else "failed",
+                        request.conversation_key if request is not None else "",
+                        attempts,
+                        str(error_code),
+                    )
+                )
+        return tuple(results)
