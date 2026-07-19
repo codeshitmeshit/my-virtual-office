@@ -405,6 +405,39 @@ class ReportNormalizationResult:
     error_code: str
 
 
+@dataclass(frozen=True, slots=True)
+class AgentReportPublicStatus:
+    ai_id: str
+    local_date: str
+    status: str
+    requested_at: str | None
+    window_closed_at: str | None
+    submitted_at: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class AgentReportManagementStatus:
+    public: AgentReportPublicStatus
+    request_status: str
+    attempt_count: int
+    last_error: str
+    raw_response: str | None
+    normalized: dict[str, object] | None
+    normalizer_id: str
+    normalized_at: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class CycleStatusProjection:
+    cycle_id: str
+    local_date: str
+    status: str
+    total: int
+    counts: dict[str, int]
+    items: tuple[AgentReportPublicStatus | AgentReportManagementStatus, ...]
+    next_cursor: str | None
+
+
 class HRDailyReportNormalizer:
     """Asks HR for bounded structured normalization of Agent-authored claims."""
 
@@ -638,3 +671,135 @@ class HRDailyReportNormalizer:
                     ReportNormalizationResult(ai_id, local_date, "failed", str(error_code))
                 )
         return tuple(results)
+
+
+class HRReportingProjection:
+    """Builds non-leaking public and full management reporting status views."""
+
+    STATUSES = (
+        "waiting",
+        "submitted",
+        "late",
+        "not_submitted",
+        "normalization_failed",
+        "skipped",
+        "complete",
+        "failed",
+    )
+
+    def __init__(self, repository: HRRepository):
+        if not isinstance(repository, HRRepository):
+            raise HRReportingValidationError("repository must be an HRRepository")
+        self._repository = repository
+
+    @staticmethod
+    def _status(request: ReportRequestRecord, report: DailyReportRecord) -> str:
+        if report.normalized is not None or report.submission_state in {"normalized", "complete"}:
+            return "complete"
+        if report.submission_state == "normalization_failed":
+            return "normalization_failed"
+        if report.submission_state == "skipped" or request.status == "skipped":
+            return "skipped"
+        if report.raw_response is not None:
+            if (
+                report.submission_state == "late_submitted"
+                or report.window_closed_at is not None
+                and report.submitted_at is not None
+                and report.submitted_at > report.window_closed_at
+            ):
+                return "late"
+            return "submitted"
+        if report.submission_state == "not_submitted":
+            return "not_submitted"
+        if request.status in {"failed", "retry"} or report.submission_state == "failed":
+            return "failed"
+        return "waiting"
+
+    def _item(
+        self,
+        request: ReportRequestRecord,
+        report: DailyReportRecord,
+        *,
+        management: bool,
+    ) -> AgentReportPublicStatus | AgentReportManagementStatus:
+        public = AgentReportPublicStatus(
+            ai_id=request.ai_id,
+            local_date=report.local_date,
+            status=self._status(request, report),
+            requested_at=report.requested_at or request.requested_at,
+            window_closed_at=report.window_closed_at,
+            submitted_at=report.submitted_at,
+        )
+        if not management:
+            return public
+        return AgentReportManagementStatus(
+            public=public,
+            request_status=request.status,
+            attempt_count=request.attempt_count,
+            last_error=request.last_error,
+            raw_response=report.raw_response,
+            normalized=report.normalized,
+            normalizer_id=report.normalizer_id,
+            normalized_at=report.normalized_at,
+        )
+
+    def project_cycle(
+        self,
+        cycle_id: str,
+        *,
+        management: bool = False,
+        limit: int = 50,
+        cursor: str | None = None,
+    ) -> CycleStatusProjection:
+        cycle = self._repository.get_daily_cycle(cycle_id)
+        if cycle is None:
+            raise HRReportingValidationError("daily cycle does not exist")
+        selected = self._repository.list_report_requests(
+            cycle.id,
+            limit=limit,
+            cursor=cursor,
+        )
+        selected_ids = {item.id for item in selected.items}
+        selected_projections = {}
+        counts = {status: 0 for status in self.STATUSES}
+        total = 0
+        scan_cursor = None
+        while True:
+            page = self._repository.list_report_requests(
+                cycle.id,
+                limit=100,
+                cursor=scan_cursor,
+            )
+            for request in page.items:
+                report = self._repository.get_daily_report(request.ai_id, cycle.local_date)
+                if report is None:
+                    raise HRReportingValidationError("daily report placeholder is missing")
+                status = self._status(request, report)
+                counts[status] += 1
+                total += 1
+                if request.id in selected_ids:
+                    selected_projections[request.id] = self._item(
+                        request,
+                        report,
+                        management=management,
+                    )
+            if page.next_cursor is None:
+                break
+            scan_cursor = page.next_cursor
+        items = tuple(selected_projections[item.id] for item in selected.items)
+        terminal = counts["not_submitted"] + counts["skipped"] + counts["complete"]
+        if total == terminal and cycle.status == "closed":
+            cycle_status = "complete"
+        elif cycle.status == "closed":
+            cycle_status = "processing"
+        else:
+            cycle_status = cycle.status
+        return CycleStatusProjection(
+            cycle_id=cycle.id,
+            local_date=cycle.local_date,
+            status=cycle_status,
+            total=total,
+            counts=counts,
+            items=items,
+            next_cursor=selected.next_cursor,
+        )
