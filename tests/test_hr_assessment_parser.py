@@ -12,7 +12,11 @@ APP_DIR = ROOT / "app"
 if str(APP_DIR) not in sys.path:
     sys.path.insert(0, str(APP_DIR))
 
-from services.hr_assessments import HRAssessmentParser, HRAssessmentValidationError
+from services.hr_assessments import (
+    HRAssessmentParser,
+    HRAssessmentPolicy,
+    HRAssessmentValidationError,
+)
 
 
 def payload(**overrides):
@@ -173,3 +177,29 @@ def test_assessment_module_has_no_server_or_mutating_domain_dependency():
     assert "OfficeHandler" not in source
     assert "pause_agent" not in source
     assert "delete_agent" not in source
+
+
+@pytest.mark.parametrize(
+    "field, text",
+    (
+        ("rationale", "This Agent should be deleted."),
+        ("improvements", ["Pause the Agent until further review."]),
+        ("strengths", ["Performance score: 95"]),
+        ("blockers", ["建议将该 Agent 淘汰"]),
+        ("runtimeDiagnosis", "Agent 排名较低"),
+    ),
+)
+def test_non_punitive_policy_rejects_actions_scores_and_ranks(field, text):
+    parsed = parse(payload(**{field: text}))
+    with pytest.raises(HRAssessmentValidationError, match="punitive"):
+        HRAssessmentPolicy.validate(parsed)
+
+
+def test_non_punitive_policy_allows_actionable_growth_feedback():
+    parsed = parse(
+        payload(
+            improvements=["为并发测试补充真实环境覆盖"],
+            principalContributions=["删除了产物目录中的过期临时文件"],
+        )
+    )
+    assert HRAssessmentPolicy.validate(parsed) is parsed

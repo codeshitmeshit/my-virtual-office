@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import secrets
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
@@ -249,6 +250,41 @@ class HRAssessmentParser:
         )
 
 
+class HRAssessmentPolicy:
+    """Rejects punitive automation, rankings, and numeric scoring in HR judgment."""
+
+    FORBIDDEN = re.compile(
+        r"(?:\b(?:scor(?:e|es|ed|ing)|rank(?:s|ed|ing)?|rating|leaderboard|"
+        r"eliminat(?:e|ed|ion))\b|"
+        r"\b(?:paus(?:e|ed)|delet(?:e|ed|ion)|terminat(?:e|ed|ion)|"
+        r"remov(?:e|ed|al)|reassign(?:ed|ment)?)\b.{0,40}\bagent\b|"
+        r"\bagent\b.{0,40}\b(?:paus(?:e|ed)|delet(?:e|ed|ion)|"
+        r"terminat(?:e|ed|ion)|remov(?:e|ed|al)|reassign(?:ed|ment)?)\b|"
+        r"评分|分数|排名|排行榜|淘汰|暂停.{0,20}Agent|删除.{0,20}Agent|重新分配)",
+        re.IGNORECASE,
+    )
+
+    @classmethod
+    def validate(cls, assessment: ParsedHRAssessment) -> ParsedHRAssessment:
+        if not isinstance(assessment, ParsedHRAssessment):
+            raise HRAssessmentValidationError("assessment policy input is invalid")
+        texts = (
+            *assessment.principal_contributions,
+            assessment.rationale,
+            *(item.rationale for item in assessment.evidence_references),
+            *assessment.blockers,
+            *assessment.strengths,
+            *assessment.improvements,
+            assessment.runtime_diagnosis,
+            assessment.information_sufficiency,
+        )
+        if any(cls.FORBIDDEN.search(text) for text in texts):
+            raise HRAssessmentValidationError(
+                "assessment contains a punitive, ranking, or scoring directive"
+            )
+        return assessment
+
+
 class HRAssessmentOrchestrator:
     """Allows HR alone to assess closed-cycle reports with bounded evidence."""
 
@@ -259,6 +295,7 @@ class HRAssessmentOrchestrator:
         hr: HRAssessmentConversationPort,
         *,
         parser: HRAssessmentParser | None = None,
+        policy: HRAssessmentPolicy | None = None,
         hr_ai_id: str = "hr",
         timeout_seconds: float = 45.0,
         clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
@@ -292,6 +329,7 @@ class HRAssessmentOrchestrator:
         self._evidence = evidence
         self._hr = hr
         self._parser = parser or HRAssessmentParser(hr_ai_id=hr_ai_id)
+        self._policy = policy or HRAssessmentPolicy()
         self._hr_ai_id = hr_ai_id
         self._timeout_seconds = float(timeout_seconds)
         self._clock = clock
@@ -482,6 +520,7 @@ class HRAssessmentOrchestrator:
                     expected_ai_id=ai_id,
                     expected_local_date=local_date,
                 )
+                parsed = self._policy.validate(parsed)
                 if not adequate and (
                     parsed.workload != "insufficient_information"
                     or parsed.principal_contributions

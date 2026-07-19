@@ -416,3 +416,41 @@ def test_concurrent_evaluation_has_one_claim_one_hr_call_and_one_version(setup):
     assert second[0].status == "claimed_elsewhere"
     assert len(hr.calls) == 1
     assert len(repository.list_assessments(ai_id="agent-1").items) == 1
+
+
+def test_low_assessment_does_not_change_agent_or_existing_project_score(setup):
+    repository, reporting, opened = setup
+    reporting.close_cycle(opened.cycle.id, closed_at=NOW)
+    score_path = repository.status_dir / "project-scores.json"
+    original_score = b'{"agents":{"agent-1":{"score":88,"completed":4}}}'
+    score_path.write_bytes(original_score)
+    before_agent = repository.get_agent("agent-1")
+    output = json.loads(assessment("agent-1", evidence=(reference(),)))
+    output["workload"] = "low"
+    output["rationale"] = "现有日报与任务记录显示当日工作量较低，建议检查任务供给。"
+    result = HRAssessmentOrchestrator(
+        repository,
+        collector(task_evidence()),
+        FakeHR({"agent-1": json.dumps(output, ensure_ascii=False)}),
+    ).assess(("agent-1",), local_date=LOCAL_DATE, actor_ai_id="hr")
+    assert result[0].status == "complete"
+    assert result[0].assessment.workload == "low"
+    assert repository.get_agent("agent-1") == before_agent
+    assert score_path.read_bytes() == original_score
+
+
+def test_punitive_hr_output_is_failed_without_side_effects(setup):
+    repository, reporting, opened = setup
+    reporting.close_cycle(opened.cycle.id, closed_at=NOW)
+    before_agent = repository.get_agent("agent-1")
+    output = json.loads(assessment("agent-1", evidence=(reference(),)))
+    output["improvements"] = ["Pause the Agent and reassign its project."]
+    result = HRAssessmentOrchestrator(
+        repository,
+        collector(task_evidence()),
+        FakeHR({"agent-1": json.dumps(output)}),
+    ).assess(("agent-1",), local_date=LOCAL_DATE, actor_ai_id="hr")
+    assert result[0].status == "failed"
+    assert repository.get_current_assessment("agent-1", LOCAL_DATE) is None
+    assert repository.get_assessment_job("agent-1", LOCAL_DATE).status == "failed"
+    assert repository.get_agent("agent-1") == before_agent
