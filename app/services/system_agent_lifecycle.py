@@ -1,0 +1,353 @@
+"""Provider-neutral contracts and state model for VO system-Agent lifecycles."""
+
+from __future__ import annotations
+
+import copy
+from dataclasses import dataclass, field, replace
+from datetime import datetime, timezone
+from enum import Enum
+from pathlib import Path
+from types import MappingProxyType
+from typing import Any, Callable, Mapping, Protocol, Sequence
+
+from .system_agent_profiles import ProfileSyncResult
+from .system_agent_roles import SystemAgentRole
+
+
+DEFAULT_ACTIVITY_LIMIT = 12
+MAX_ACTIVITY_LIMIT = 100
+
+
+class LifecycleStatus(str, Enum):
+    MISSING = "missing"
+    CREATING = "creating"
+    CONFIGURING = "configuring"
+    IDLE = "idle"
+    PAUSED = "paused"
+    ERROR = "error"
+
+
+class ActivityStatus(str, Enum):
+    OK = "ok"
+    ERROR = "error"
+    RUNNING = "running"
+    SKIPPED = "skipped"
+
+
+_STATUS_ALIASES = {
+    "absent": LifecycleStatus.MISSING,
+    "unavailable": LifecycleStatus.MISSING,
+    "provisioning": LifecycleStatus.CREATING,
+    "syncing": LifecycleStatus.CONFIGURING,
+    "ready": LifecycleStatus.IDLE,
+    "available": LifecycleStatus.IDLE,
+    "failed": LifecycleStatus.ERROR,
+    "degraded": LifecycleStatus.ERROR,
+}
+
+
+def normalize_lifecycle_status(value: Any, *, paused: bool = False) -> LifecycleStatus:
+    if paused:
+        return LifecycleStatus.PAUSED
+    normalized = str(value or "").strip().lower()
+    try:
+        return LifecycleStatus(normalized)
+    except ValueError:
+        return _STATUS_ALIASES.get(normalized, LifecycleStatus.MISSING)
+
+
+def _timestamp(value: datetime | str | None) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, datetime):
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("system-Agent timestamps must be timezone-aware")
+        return value.isoformat()
+    if isinstance(value, str):
+        return value.strip()
+    raise ValueError("system-Agent timestamps must be datetime, string, or None")
+
+
+def _freeze(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return MappingProxyType({key: _freeze(item) for key, item in value.items()})
+    if isinstance(value, (list, tuple)):
+        return tuple(_freeze(item) for item in value)
+    if isinstance(value, (set, frozenset)):
+        return frozenset(_freeze(item) for item in value)
+    return copy.deepcopy(value)
+
+
+def _mapping(value: Mapping[str, Any] | None) -> Mapping[str, Any]:
+    return _freeze(value or {})
+
+
+def _thaw(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {key: _thaw(item) for key, item in value.items()}
+    if isinstance(value, (tuple, frozenset)):
+        return [_thaw(item) for item in value]
+    return value
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderAgent:
+    id: str
+    name: str
+    provider_kind: str
+    workspace: str = ""
+    raw: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not self.id.strip():
+            raise ValueError("provider Agent id must not be empty")
+        if not self.provider_kind.strip():
+            raise ValueError("provider kind must not be empty")
+        object.__setattr__(self, "raw", _mapping(self.raw))
+
+    @classmethod
+    def from_mapping(
+        cls,
+        payload: Mapping[str, Any],
+        *,
+        default_provider_kind: str,
+    ) -> "ProviderAgent":
+        return cls(
+            id=str(payload.get("id") or payload.get("agentId") or "").strip(),
+            name=str(payload.get("name") or payload.get("id") or "").strip(),
+            provider_kind=str(payload.get("providerKind") or default_provider_kind).strip(),
+            workspace=str(payload.get("workspace") or "").strip(),
+            raw=payload,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class LifecycleActivity:
+    id: str
+    action: str
+    status: ActivityStatus
+    at: str
+    message: str = ""
+    error: str = ""
+    context: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not self.id.strip() or not self.action.strip():
+            raise ValueError("lifecycle activity id and action are required")
+        object.__setattr__(self, "context", _mapping(self.context))
+
+    @classmethod
+    def from_mapping(cls, value: Mapping[str, Any]) -> "LifecycleActivity":
+        status_value = str(value.get("status") or "ok").strip().lower()
+        try:
+            status = ActivityStatus(status_value)
+        except ValueError:
+            status = ActivityStatus.ERROR
+        known = {"id", "action", "status", "at", "message", "error", "context"}
+        context = dict(value.get("context") or {}) if isinstance(value.get("context"), Mapping) else {}
+        context.update({key: item for key, item in value.items() if key not in known})
+        return cls(
+            id=str(value.get("id") or "").strip(),
+            action=str(value.get("action") or "").strip(),
+            status=status,
+            at=_timestamp(value.get("at")),
+            message=str(value.get("message") or ""),
+            error=str(value.get("error") or ""),
+            context=context,
+        )
+
+    def to_mapping(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "action": self.action,
+            "status": self.status.value,
+            "at": self.at,
+            "message": self.message,
+            "error": self.error,
+            "context": _thaw(self.context),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class SystemAgentLifecycleState:
+    role_key: str
+    agent_id: str
+    name: str
+    emoji: str
+    provider_kind: str
+    status: LifecycleStatus = LifecycleStatus.MISSING
+    paused: bool = False
+    auto_created: bool = False
+    created_at: str = ""
+    updated_at: str = ""
+    reconciled_at: str = ""
+    workspace: str = ""
+    profile_files: tuple[str, ...] = ()
+    profile_version: str = ""
+    profile_updated_at: str = ""
+    communication_skill: Mapping[str, Any] = field(default_factory=dict)
+    last_action: str = ""
+    last_error: str = ""
+    recent_activity: tuple[LifecycleActivity, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not self.role_key.strip() or not self.agent_id.strip():
+            raise ValueError("lifecycle role_key and agent_id are required")
+        object.__setattr__(self, "communication_skill", _mapping(self.communication_skill))
+        if self.paused and self.status is not LifecycleStatus.PAUSED:
+            object.__setattr__(self, "status", LifecycleStatus.PAUSED)
+
+    @classmethod
+    def initial(cls, role: SystemAgentRole, now: datetime | str) -> "SystemAgentLifecycleState":
+        return cls(
+            role_key=role.role_key,
+            agent_id=role.stable_id,
+            name=role.display_name,
+            emoji=role.emoji,
+            provider_kind=role.provider_kind,
+            updated_at=_timestamp(now),
+        )
+
+    @classmethod
+    def from_mapping(
+        cls,
+        role: SystemAgentRole,
+        payload: Mapping[str, Any] | None,
+        *,
+        now: datetime | str,
+        activity_limit: int = DEFAULT_ACTIVITY_LIMIT,
+    ) -> "SystemAgentLifecycleState":
+        data = dict(payload or {})
+        paused = bool(data.get("paused"))
+        raw_activity = data.get("recentActivity", data.get("recent_activity", ()))
+        activities: list[LifecycleActivity] = []
+        if isinstance(raw_activity, Sequence) and not isinstance(raw_activity, (str, bytes)):
+            for item in raw_activity:
+                if not isinstance(item, Mapping):
+                    continue
+                try:
+                    activities.append(LifecycleActivity.from_mapping(item))
+                except ValueError:
+                    continue
+        limit = validate_activity_limit(activity_limit)
+        return cls(
+            role_key=role.role_key,
+            agent_id=str(data.get("agentId") or data.get("agent_id") or role.stable_id).strip(),
+            name=str(data.get("name") or role.display_name).strip(),
+            emoji=str(data.get("emoji") or role.emoji).strip(),
+            provider_kind=str(data.get("providerKind") or data.get("provider_kind") or role.provider_kind).strip(),
+            status=normalize_lifecycle_status(data.get("status"), paused=paused),
+            paused=paused,
+            auto_created=bool(data.get("autoCreated", data.get("auto_created", False))),
+            created_at=_timestamp(data.get("createdAt", data.get("created_at"))),
+            updated_at=_timestamp(data.get("updatedAt", data.get("updated_at"))) or _timestamp(now),
+            reconciled_at=_timestamp(data.get("reconciledAt", data.get("reconciled_at"))),
+            workspace=str(data.get("workspace") or ""),
+            profile_files=tuple(str(item) for item in data.get("profileFiles", data.get("profile_files", ())) if str(item)),
+            profile_version=str(data.get("profileVersion") or data.get("profile_version") or ""),
+            profile_updated_at=_timestamp(data.get("profileUpdatedAt", data.get("profile_updated_at"))),
+            communication_skill=data.get("communicationSkill", data.get("communication_skill", {}))
+            if isinstance(data.get("communicationSkill", data.get("communication_skill", {})), Mapping)
+            else {},
+            last_action=str(data.get("lastAction") or data.get("last_action") or ""),
+            last_error=str(data.get("lastError") or data.get("last_error") or ""),
+            recent_activity=tuple(activities[-limit:]),
+        )
+
+    def to_mapping(self) -> dict[str, Any]:
+        return {
+            "roleKey": self.role_key,
+            "agentId": self.agent_id,
+            "name": self.name,
+            "emoji": self.emoji,
+            "providerKind": self.provider_kind,
+            "status": self.status.value,
+            "paused": self.paused,
+            "autoCreated": self.auto_created,
+            "createdAt": self.created_at or None,
+            "updatedAt": self.updated_at or None,
+            "reconciledAt": self.reconciled_at or None,
+            "workspace": self.workspace,
+            "profileFiles": list(self.profile_files),
+            "profileVersion": self.profile_version,
+            "profileUpdatedAt": self.profile_updated_at or None,
+            "communicationSkill": _thaw(self.communication_skill),
+            "lastAction": self.last_action,
+            "lastError": self.last_error,
+            "recentActivity": [item.to_mapping() for item in self.recent_activity],
+        }
+
+
+def validate_activity_limit(limit: int) -> int:
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= MAX_ACTIVITY_LIMIT:
+        raise ValueError(f"activity limit must be between 1 and {MAX_ACTIVITY_LIMIT}")
+    return limit
+
+
+def record_lifecycle_activity(
+    state: SystemAgentLifecycleState,
+    *,
+    action: str,
+    status: ActivityStatus | str,
+    message: str = "",
+    error: str = "",
+    context: Mapping[str, Any] | None = None,
+    clock: Callable[[], datetime],
+    new_id: Callable[[], str],
+    activity_limit: int = DEFAULT_ACTIVITY_LIMIT,
+) -> tuple[SystemAgentLifecycleState, LifecycleActivity]:
+    normalized_status = status if isinstance(status, ActivityStatus) else ActivityStatus(str(status))
+    at = _timestamp(clock())
+    activity = LifecycleActivity(
+        id=str(new_id()).strip(),
+        action=action.strip(),
+        status=normalized_status,
+        at=at,
+        message=message,
+        error=error,
+        context=context or {},
+    )
+    limit = validate_activity_limit(activity_limit)
+    updated = replace(
+        state,
+        updated_at=at,
+        last_action=activity.action,
+        last_error=error,
+        recent_activity=(*state.recent_activity, activity)[-limit:],
+    )
+    return updated, activity
+
+
+class SystemAgentProviderPort(Protocol):
+    def discover(self, role: SystemAgentRole) -> Sequence[ProviderAgent]: ...
+    def create(self, role: SystemAgentRole) -> ProviderAgent: ...
+    def resolve_workspace(self, agent: ProviderAgent) -> Path: ...
+    def sync_managed_skills(self, agent: ProviderAgent) -> Mapping[str, Any]: ...
+
+
+class SystemAgentProfilePort(Protocol):
+    def synchronize(
+        self,
+        role: SystemAgentRole,
+        agent: ProviderAgent,
+        workspace: Path,
+    ) -> ProfileSyncResult: ...
+
+
+class SystemAgentStatePort(Protocol):
+    def load(self, role: SystemAgentRole) -> SystemAgentLifecycleState | Mapping[str, Any] | None: ...
+    def save(self, role: SystemAgentRole, state: SystemAgentLifecycleState) -> SystemAgentLifecycleState: ...
+
+
+class SystemAgentPresencePort(Protocol):
+    def set_presence(self, agent_id: str, state: str, reason: str = "") -> None: ...
+
+
+@dataclass(frozen=True, slots=True)
+class SystemAgentPorts:
+    provider: SystemAgentProviderPort
+    profiles: SystemAgentProfilePort
+    state: SystemAgentStatePort
+    presence: SystemAgentPresencePort
+    clock: Callable[[], datetime]
+    new_id: Callable[[], str]
