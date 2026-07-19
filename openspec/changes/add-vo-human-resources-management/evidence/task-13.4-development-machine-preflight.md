@@ -4,6 +4,16 @@ Date: 2026-07-20
 
 Status: **blocked pending an approved real-OpenClaw development-machine target**. No development-machine mutation or deployment was performed.
 
+## Startup configuration readiness
+
+The repository startup path is ready for controlled deployment:
+
+- `.env.example` declares every supported non-secret HR setting.
+- `start.sh` repairs missing HR settings in an existing `.env` without replacing operator-supplied values.
+- Repeated repair is idempotent and both `VO_HR_ENABLED` and `VO_HR_SCHEDULER_ENABLED` default to `false`.
+- A blank `VO_HR_TIMEZONE` inherits `VO_TIMEZONE`, then `TZ`, then `UTC`; the remaining bounded values match `HRConfig` defaults.
+- Focused startup/configuration and HR regression tests cover this behavior.
+
 ## Candidate inspected
 
 The only target discoverable from the current repository and runtime configuration was the local VO instance on `http://127.0.0.1:8090`:

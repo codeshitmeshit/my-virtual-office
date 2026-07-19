@@ -20,6 +20,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_FILE="$SCRIPT_DIR/.env"
 ENV_EXAMPLE="$SCRIPT_DIR/.env.example"
 BROWSER_COMPOSE_FILE="$SCRIPT_DIR/docker-compose.browser.yml"
+source "$SCRIPT_DIR/scripts/hr-env-defaults.sh"
 
 # ── 帮助信息 ──────────────────────────────────────────────────────────────
 usage() {
@@ -140,6 +141,7 @@ EOF
         } >> "$ENV_FILE"
         echo -e "  ${GREEN}✓${NC} 已补充 Agent 项目创作开关到 .env"
     fi
+    ensure_hr_env_defaults "$ENV_FILE"
 
     # 检查 OpenClaw 路径是否存在
     VO_PATH=$(grep '^VO_OPENCLAW_PATH=' "$ENV_FILE" | cut -d'=' -f2- | sed "s#^~#$HOME#")
@@ -356,6 +358,14 @@ PY
     export VO_PC_METRICS_URL="${VO_PC_METRICS_URL:-http://127.0.0.1:8099}"
     export VO_API_USAGE="${VO_API_USAGE:-false}"
     export VO_AGENT_PROJECT_AUTHORING_ENABLED="${VO_AGENT_PROJECT_AUTHORING_ENABLED:-true}"
+    export VO_HR_ENABLED="${VO_HR_ENABLED:-false}"
+    export VO_HR_SCHEDULER_ENABLED="${VO_HR_SCHEDULER_ENABLED:-false}"
+    export VO_HR_TIMEZONE="${VO_HR_TIMEZONE:-${VO_TIMEZONE:-${TZ:-UTC}}}"
+    export VO_HR_DAILY_TIME="${VO_HR_DAILY_TIME:-18:00}"
+    export VO_HR_SUBMISSION_WINDOW_MINUTES="${VO_HR_SUBMISSION_WINDOW_MINUTES:-120}"
+    export VO_HR_MAX_WORKERS="${VO_HR_MAX_WORKERS:-2}"
+    export VO_HR_AGENT_TIMEOUT_SECONDS="${VO_HR_AGENT_TIMEOUT_SECONDS:-30}"
+    export VO_HR_RETRY_LIMIT="${VO_HR_RETRY_LIMIT:-3}"
     export NO_PROXY="127.0.0.1,localhost,${NO_PROXY:-}"
     export no_proxy="127.0.0.1,localhost,${no_proxy:-}"
 
