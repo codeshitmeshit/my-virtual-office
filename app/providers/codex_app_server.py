@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from provider_app_server import AppServerResponseError, JsonlAppServerRuntime
+from providers.codex_launch_policy import build_codex_app_server_command
 
 
 APPROVAL_METHODS = {
@@ -687,10 +688,14 @@ class CodexAppServerClient:
             approval_policy or os.environ.get("VO_CODEX_APPROVAL_POLICY")
         )
         self.home_path = os.path.abspath(os.path.expanduser(home_path or os.environ.get("VO_CODEX_HOME") or os.environ.get("CODEX_HOME") or "~/.codex"))
-        runtime_command = [self.binary, "app-server"]
-        if self.route_approvals_through_vo:
-            runtime_command.extend(self._permission_hook_disable_args())
-        runtime_command.append("--stdio")
+        app_server_args = self._permission_hook_disable_args() if self.route_approvals_through_vo else []
+        runtime_command = build_codex_app_server_command(
+            self.binary,
+            sandbox=self.sandbox,
+            approval_policy=self.configured_approval_policy,
+            route_approvals_through_vo=self.route_approvals_through_vo,
+            app_server_args=app_server_args,
+        )
         runtime_env = os.environ.copy()
         runtime_env["CODEX_HOME"] = self.home_path
         try:

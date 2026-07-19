@@ -1830,6 +1830,12 @@ def test_app_server_uses_configured_sandbox_and_approval_policy():
             assert full_access_client._thread_params()["sandbox"] == "danger-full-access"
             assert full_access_client._thread_params()["approvalPolicy"] == "never"
             assert full_access_client._sandbox_policy() == {"type": "dangerFullAccess"}
+            assert full_access_client._runtime.command == [
+                full_access_client.binary,
+                "--dangerously-bypass-approvals-and-sandbox",
+                "app-server",
+                "--stdio",
+            ]
 
             assert read_only_client._thread_params()["sandbox"] == "read-only"
             assert read_only_client._thread_params()["approvalPolicy"] == "untrusted"
