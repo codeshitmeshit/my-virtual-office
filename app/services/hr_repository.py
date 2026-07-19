@@ -8,8 +8,8 @@ import json
 import os
 import sqlite3
 from contextlib import contextmanager
-from dataclasses import dataclass
-from datetime import datetime, timezone
+from dataclasses import dataclass, replace
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterator, Sequence
 from urllib.parse import quote
@@ -135,6 +135,105 @@ class IntroductionPage:
     next_cursor: str | None
 
 
+@dataclass(frozen=True, slots=True)
+class DailyCycleRecord:
+    id: str
+    local_date: str
+    timezone: str
+    scheduled_at: str
+    window_opens_at: str
+    window_closes_at: str
+    status: str
+    roster_snapshot: tuple[str, ...]
+    occurrence_key: str
+    created_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True, slots=True)
+class ReportRequestRecord:
+    id: str
+    cycle_id: str
+    ai_id: str
+    status: str
+    occurrence_key: str
+    conversation_key: str
+    requested_at: str | None
+    responded_at: str | None
+    attempt_count: int
+    last_error: str
+    claim_token: str
+    claimed_by: str
+    claim_expires_at: str | None
+    created_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True, slots=True)
+class DailyReportRecord:
+    id: str
+    cycle_id: str | None
+    ai_id: str
+    local_date: str
+    submission_state: str
+    raw_response: str | None
+    normalized: dict[str, Any] | None
+    normalizer_id: str
+    requested_at: str | None
+    window_closed_at: str | None
+    submitted_at: str | None
+    normalized_at: str | None
+    revision: int
+    created_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True, slots=True)
+class AssessmentEvidenceRecord:
+    sequence: int
+    evidence_type: str
+    reference_id: str
+    summary: str
+    evidence_date: str | None
+    metadata: dict[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
+class AssessmentRecord:
+    id: str
+    ai_id: str
+    local_date: str
+    version: int
+    is_current: bool
+    status: str
+    workload: str
+    principal_contributions: tuple[str, ...]
+    rationale: str
+    blockers: tuple[str, ...]
+    strengths: tuple[str, ...]
+    improvements: tuple[str, ...]
+    runtime_diagnosis: str
+    information_sufficiency: str
+    evidence_version: str
+    hr_id: str
+    revision_reason: str
+    created_at: str
+    updated_at: str
+    evidence: tuple[AssessmentEvidenceRecord, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class DailyReportPage:
+    items: tuple[DailyReportRecord, ...]
+    next_cursor: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class AssessmentPage:
+    items: tuple[AssessmentRecord, ...]
+    next_cursor: str | None
+
+
 _SCHEMA_V1 = (
     """CREATE TABLE metadata (
         key TEXT PRIMARY KEY,
@@ -207,6 +306,9 @@ _SCHEMA_V1 = (
         responded_at TEXT,
         attempt_count INTEGER NOT NULL DEFAULT 0 CHECK(attempt_count >= 0),
         last_error TEXT NOT NULL DEFAULT '',
+        claim_token TEXT NOT NULL DEFAULT '',
+        claimed_by TEXT NOT NULL DEFAULT '',
+        claim_expires_at TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         UNIQUE(cycle_id, ai_id)
@@ -342,6 +444,26 @@ def _stable_ai_id(value: object, field: str = "ai_id") -> str:
     return result
 
 
+def _opaque_id(value: object, field: str) -> str:
+    if not isinstance(value, str):
+        raise HRRepositoryValidationError(f"{field} is invalid")
+    result = _required_text(value, field, maximum=256)
+    if result != value or any(character.isspace() for character in result):
+        raise HRRepositoryValidationError(f"{field} is invalid")
+    return result
+
+
+def _timestamp_text(value: object, field: str) -> str:
+    result = _required_text(value, field, maximum=64)
+    try:
+        parsed = datetime.fromisoformat(result)
+    except ValueError as exc:
+        raise HRRepositoryValidationError(f"{field} must be an ISO timestamp") from exc
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise HRRepositoryValidationError(f"{field} must include a timezone")
+    return parsed.astimezone(timezone.utc).isoformat()
+
+
 def _optional_text(value: object, field: str, *, maximum: int = 20_000) -> str:
     result = str(value or "").strip()
     if len(result) > maximum or any(
@@ -360,6 +482,32 @@ def _raw_text(value: object | None, field: str, *, maximum: int = 40_000) -> str
     ):
         raise HRRepositoryValidationError(f"{field} is invalid")
     return result
+
+
+def _local_date(value: object) -> str:
+    result = _required_text(value, "local_date", maximum=10)
+    try:
+        if date.fromisoformat(result).isoformat() != result:
+            raise ValueError
+    except ValueError as exc:
+        raise HRRepositoryValidationError("local_date must use YYYY-MM-DD") from exc
+    return result
+
+
+def _json_value(value: object, field: str, expected: type, *, maximum: int = 40_000) -> str:
+    try:
+        decoded = json.loads(value) if isinstance(value, str) else value
+    except json.JSONDecodeError as exc:
+        raise HRRepositoryValidationError(f"{field} must be valid JSON") from exc
+    if not isinstance(decoded, expected):
+        raise HRRepositoryValidationError(f"{field} has the wrong JSON shape")
+    try:
+        encoded = json.dumps(decoded, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+    except (TypeError, ValueError) as exc:
+        raise HRRepositoryValidationError(f"{field} must be JSON serializable") from exc
+    if len(encoded) > maximum:
+        raise HRRepositoryValidationError(f"{field} is too large")
+    return encoded
 
 
 def _page_limit(value: int) -> int:
@@ -400,6 +548,35 @@ def _introduction_from_row(row: sqlite3.Row) -> IntroductionRecord:
     values = dict(row)
     values["is_current"] = bool(values["is_current"])
     return IntroductionRecord(**values)
+
+
+def _cycle_from_row(row: sqlite3.Row) -> DailyCycleRecord:
+    values = dict(row)
+    values["roster_snapshot"] = tuple(json.loads(values.pop("roster_snapshot_json")))
+    return DailyCycleRecord(**values)
+
+
+def _request_from_row(row: sqlite3.Row) -> ReportRequestRecord:
+    return ReportRequestRecord(**dict(row))
+
+
+def _report_from_row(row: sqlite3.Row) -> DailyReportRecord:
+    values = dict(row)
+    normalized_json = values.pop("normalized_json")
+    values["normalized"] = json.loads(normalized_json) if normalized_json is not None else None
+    return DailyReportRecord(**values)
+
+
+def _assessment_from_row(
+    row: sqlite3.Row,
+    evidence: Sequence[AssessmentEvidenceRecord] = (),
+) -> AssessmentRecord:
+    values = dict(row)
+    values["is_current"] = bool(values["is_current"])
+    for field in ("principal_contributions", "blockers", "strengths", "improvements"):
+        values[field] = tuple(json.loads(values.pop(f"{field}_json")))
+    values["evidence"] = tuple(evidence)
+    return AssessmentRecord(**values)
 
 
 class HRRepository:
@@ -930,3 +1107,676 @@ class HRRepository:
         if len(rows) > limit:
             next_cursor = _encode_cursor((items[-1].version,))
         return IntroductionPage(items=items, next_cursor=next_cursor)
+
+    def ensure_daily_cycle(
+        self,
+        *,
+        cycle_id: str,
+        local_date: str,
+        timezone_name: str,
+        scheduled_at: str,
+        window_opens_at: str,
+        window_closes_at: str,
+        status: str,
+        roster_snapshot: Sequence[str],
+        occurrence_key: str,
+    ) -> DailyCycleRecord:
+        cycle_id = _opaque_id(cycle_id, "cycle_id")
+        local_date = _local_date(local_date)
+        timezone_name = _required_text(timezone_name, "timezone", maximum=128)
+        scheduled_at = _timestamp_text(scheduled_at, "scheduled_at")
+        window_opens_at = _timestamp_text(window_opens_at, "window_opens_at")
+        window_closes_at = _timestamp_text(window_closes_at, "window_closes_at")
+        if not window_opens_at <= scheduled_at <= window_closes_at:
+            raise HRRepositoryValidationError("daily cycle window is invalid")
+        status = _required_text(status, "status", maximum=32)
+        occurrence_key = _opaque_id(occurrence_key, "occurrence_key")
+        if isinstance(roster_snapshot, (str, bytes)):
+            raise HRRepositoryValidationError("roster_snapshot must be a sequence of AI IDs")
+        roster = tuple(_stable_ai_id(item) for item in roster_snapshot)
+        if len(roster) > 1_000:
+            raise HRRepositoryValidationError("roster_snapshot is too large")
+        if len(set(roster)) != len(roster):
+            raise HRRepositoryValidationError("roster_snapshot contains duplicate AI IDs")
+        roster_json = _json_value(list(roster), "roster_snapshot", list)
+        timestamp = self._timestamp()
+        with self._write_transaction() as connection:
+            row = connection.execute(
+                "SELECT * FROM daily_cycles WHERE local_date = ? OR occurrence_key = ?",
+                (local_date, occurrence_key),
+            ).fetchone()
+            if row is not None:
+                existing = _cycle_from_row(row)
+                expected = (
+                    cycle_id,
+                    local_date,
+                    timezone_name,
+                    scheduled_at,
+                    window_opens_at,
+                    window_closes_at,
+                    status,
+                    roster,
+                    occurrence_key,
+                )
+                actual = (
+                    existing.id,
+                    existing.local_date,
+                    existing.timezone,
+                    existing.scheduled_at,
+                    existing.window_opens_at,
+                    existing.window_closes_at,
+                    existing.status,
+                    existing.roster_snapshot,
+                    existing.occurrence_key,
+                )
+                if actual != expected:
+                    raise HRRepositoryConflictError("daily cycle date or occurrence already exists")
+                return existing
+            try:
+                connection.execute(
+                    """INSERT INTO daily_cycles(
+                           id, local_date, timezone, scheduled_at, window_opens_at,
+                           window_closes_at, status, roster_snapshot_json, occurrence_key,
+                           created_at, updated_at
+                       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        cycle_id,
+                        local_date,
+                        timezone_name,
+                        scheduled_at,
+                        window_opens_at,
+                        window_closes_at,
+                        status,
+                        roster_json,
+                        occurrence_key,
+                        timestamp,
+                        timestamp,
+                    ),
+                )
+            except sqlite3.IntegrityError as exc:
+                raise HRRepositoryConflictError("daily cycle identity already exists") from exc
+            row = connection.execute("SELECT * FROM daily_cycles WHERE id = ?", (cycle_id,)).fetchone()
+            return _cycle_from_row(row)
+
+    def get_daily_cycle(self, cycle_id: str) -> DailyCycleRecord | None:
+        cycle_id = _opaque_id(cycle_id, "cycle_id")
+        with self._connection(readonly=True) as connection:
+            row = connection.execute("SELECT * FROM daily_cycles WHERE id = ?", (cycle_id,)).fetchone()
+            return _cycle_from_row(row) if row is not None else None
+
+    def ensure_report_request(
+        self,
+        *,
+        request_id: str,
+        cycle_id: str,
+        ai_id: str,
+        occurrence_key: str,
+        conversation_key: str,
+    ) -> ReportRequestRecord:
+        request_id = _opaque_id(request_id, "request_id")
+        cycle_id = _opaque_id(cycle_id, "cycle_id")
+        ai_id = _stable_ai_id(ai_id)
+        occurrence_key = _opaque_id(occurrence_key, "occurrence_key")
+        conversation_key = _opaque_id(conversation_key, "conversation_key")
+        timestamp = self._timestamp()
+        with self._write_transaction() as connection:
+            row = connection.execute(
+                """SELECT * FROM report_requests
+                   WHERE (cycle_id = ? AND ai_id = ?) OR occurrence_key = ?""",
+                (cycle_id, ai_id, occurrence_key),
+            ).fetchone()
+            if row is not None:
+                existing = _request_from_row(row)
+                if (
+                    existing.id,
+                    existing.cycle_id,
+                    existing.ai_id,
+                    existing.occurrence_key,
+                    existing.conversation_key,
+                ) != (request_id, cycle_id, ai_id, occurrence_key, conversation_key):
+                    raise HRRepositoryConflictError("report request identity already exists")
+                return existing
+            try:
+                connection.execute(
+                    """INSERT INTO report_requests(
+                           id, cycle_id, ai_id, status, occurrence_key, conversation_key,
+                           created_at, updated_at
+                       ) VALUES (?, ?, ?, 'pending', ?, ?, ?, ?)""",
+                    (
+                        request_id,
+                        cycle_id,
+                        ai_id,
+                        occurrence_key,
+                        conversation_key,
+                        timestamp,
+                        timestamp,
+                    ),
+                )
+            except sqlite3.IntegrityError as exc:
+                raise HRRepositoryConflictError("report request dependency is invalid") from exc
+            row = connection.execute(
+                "SELECT * FROM report_requests WHERE id = ?", (request_id,)
+            ).fetchone()
+            return _request_from_row(row)
+
+    def claim_report_request(
+        self,
+        *,
+        request_id: str,
+        claimed_by: str,
+        claim_token: str,
+        claim_expires_at: str,
+        now: str,
+    ) -> ReportRequestRecord | None:
+        request_id = _opaque_id(request_id, "request_id")
+        claimed_by = _opaque_id(claimed_by, "claimed_by")
+        claim_token = _opaque_id(claim_token, "claim_token")
+        claim_expires_at = _timestamp_text(claim_expires_at, "claim_expires_at")
+        now = _timestamp_text(now, "now")
+        if claim_expires_at <= now:
+            raise HRRepositoryValidationError("claim expiry must be after now")
+        with self._write_transaction() as connection:
+            updated = connection.execute(
+                """UPDATE report_requests SET
+                       status = 'claimed', claimed_by = ?, claim_token = ?,
+                       claim_expires_at = ?, attempt_count = attempt_count + 1,
+                       requested_at = COALESCE(requested_at, ?), updated_at = ?
+                   WHERE id = ? AND status IN ('pending', 'retry', 'claimed')
+                     AND (claim_token = '' OR claim_expires_at <= ?)""",
+                (
+                    claimed_by,
+                    claim_token,
+                    claim_expires_at,
+                    now,
+                    now,
+                    request_id,
+                    now,
+                ),
+            ).rowcount
+            if updated != 1:
+                return None
+            row = connection.execute(
+                "SELECT * FROM report_requests WHERE id = ?", (request_id,)
+            ).fetchone()
+            return _request_from_row(row)
+
+    def finish_report_request(
+        self,
+        *,
+        request_id: str,
+        claim_token: str,
+        status: str,
+        finished_at: str,
+        last_error: str = "",
+    ) -> ReportRequestRecord:
+        request_id = _opaque_id(request_id, "request_id")
+        claim_token = _opaque_id(claim_token, "claim_token")
+        status = _required_text(status, "status", maximum=32)
+        if status not in {"submitted", "no_response", "failed", "skipped", "retry"}:
+            raise HRRepositoryValidationError("unsupported report request terminal status")
+        finished_at = _timestamp_text(finished_at, "finished_at")
+        last_error = _optional_text(last_error, "last_error", maximum=2_000)
+        with self._write_transaction() as connection:
+            updated = connection.execute(
+                """UPDATE report_requests SET
+                       status = ?, responded_at = ?, last_error = ?, claim_token = '',
+                       claimed_by = '', claim_expires_at = NULL, updated_at = ?
+                   WHERE id = ? AND status = 'claimed' AND claim_token = ?
+                     AND claim_expires_at > ?""",
+                (status, finished_at, last_error, finished_at, request_id, claim_token, finished_at),
+            ).rowcount
+            if updated != 1:
+                raise HRRepositoryConflictError("report request claim is stale or invalid")
+            row = connection.execute(
+                "SELECT * FROM report_requests WHERE id = ?", (request_id,)
+            ).fetchone()
+            return _request_from_row(row)
+
+    def get_report_request(self, request_id: str) -> ReportRequestRecord | None:
+        request_id = _opaque_id(request_id, "request_id")
+        with self._connection(readonly=True) as connection:
+            row = connection.execute(
+                "SELECT * FROM report_requests WHERE id = ?", (request_id,)
+            ).fetchone()
+            return _request_from_row(row) if row is not None else None
+
+    def save_daily_report(
+        self,
+        *,
+        report_id: str,
+        cycle_id: str | None,
+        ai_id: str,
+        local_date: str,
+        submission_state: str,
+        raw_response: str | None,
+        normalized: object | None,
+        normalizer_id: str = "",
+        requested_at: str | None = None,
+        window_closed_at: str | None = None,
+        submitted_at: str | None = None,
+        normalized_at: str | None = None,
+        expected_revision: int | None = None,
+    ) -> DailyReportRecord:
+        report_id = _opaque_id(report_id, "report_id")
+        cycle_id = _opaque_id(cycle_id, "cycle_id") if cycle_id is not None else None
+        ai_id = _stable_ai_id(ai_id)
+        local_date = _local_date(local_date)
+        submission_state = _required_text(submission_state, "submission_state", maximum=32)
+        if submission_state not in {
+            "not_due",
+            "waiting",
+            "submitted",
+            "normalized",
+            "late_submitted",
+            "not_submitted",
+            "normalization_failed",
+            "skipped",
+            "complete",
+            "failed",
+        }:
+            raise HRRepositoryValidationError("unsupported daily report state")
+        raw_response = _raw_text(raw_response, "raw_response")
+        normalized_json = (
+            _json_value(normalized, "normalized", dict) if normalized is not None else None
+        )
+        normalizer_id = _optional_text(normalizer_id, "normalizer_id", maximum=256)
+        timestamps = [requested_at, window_closed_at, submitted_at, normalized_at]
+        requested_at, window_closed_at, submitted_at, normalized_at = (
+            _timestamp_text(value, field)
+            if value is not None
+            else None
+            for value, field in zip(
+                timestamps,
+                ("requested_at", "window_closed_at", "submitted_at", "normalized_at"),
+            )
+        )
+        if expected_revision is not None and (
+            isinstance(expected_revision, bool)
+            or not isinstance(expected_revision, int)
+            or expected_revision < 0
+        ):
+            raise HRRepositoryValidationError("expected_revision must be a non-negative integer")
+        timestamp = self._timestamp()
+        with self._write_transaction() as connection:
+            row = connection.execute(
+                "SELECT * FROM daily_reports WHERE ai_id = ? AND local_date = ?",
+                (ai_id, local_date),
+            ).fetchone()
+            current = _report_from_row(row) if row is not None else None
+            current_revision = current.revision if current is not None else 0
+            if expected_revision is not None and expected_revision != current_revision:
+                raise HRRepositoryConflictError(
+                    f"daily report revision is {current_revision}, expected {expected_revision}"
+                )
+            if current is not None:
+                if current.raw_response is not None and raw_response not in (
+                    None,
+                    current.raw_response,
+                ):
+                    raise HRRepositoryConflictError("daily report raw response is immutable")
+                raw_response = (
+                    current.raw_response if current.raw_response is not None else raw_response
+                )
+                normalized_value = (
+                    json.loads(normalized_json)
+                    if normalized_json is not None
+                    else current.normalized
+                )
+                normalized_json = (
+                    _json_value(normalized_value, "normalized", dict)
+                    if normalized_value is not None
+                    else None
+                )
+                normalizer_id = normalizer_id or current.normalizer_id
+                requested_at = requested_at or current.requested_at
+                window_closed_at = window_closed_at or current.window_closed_at
+                submitted_at = submitted_at or current.submitted_at
+                normalized_at = normalized_at or current.normalized_at
+            payload = (
+                cycle_id,
+                submission_state,
+                raw_response,
+                json.loads(normalized_json) if normalized_json is not None else None,
+                normalizer_id,
+                requested_at,
+                window_closed_at,
+                submitted_at,
+                normalized_at,
+            )
+            if current is not None and payload == (
+                current.cycle_id,
+                current.submission_state,
+                current.raw_response,
+                current.normalized,
+                current.normalizer_id,
+                current.requested_at,
+                current.window_closed_at,
+                current.submitted_at,
+                current.normalized_at,
+            ):
+                return current
+            try:
+                if current is None:
+                    connection.execute(
+                        """INSERT INTO daily_reports(
+                               id, cycle_id, ai_id, local_date, submission_state,
+                               raw_response, normalized_json, normalizer_id, requested_at,
+                               window_closed_at, submitted_at, normalized_at, revision,
+                               created_at, updated_at
+                           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)""",
+                        (
+                            report_id,
+                            cycle_id,
+                            ai_id,
+                            local_date,
+                            submission_state,
+                            raw_response,
+                            normalized_json,
+                            normalizer_id,
+                            requested_at,
+                            window_closed_at,
+                            submitted_at,
+                            normalized_at,
+                            timestamp,
+                            timestamp,
+                        ),
+                    )
+                else:
+                    if report_id != current.id:
+                        raise HRRepositoryConflictError("daily report ID cannot change")
+                    connection.execute(
+                        """UPDATE daily_reports SET
+                               cycle_id = ?, submission_state = ?, raw_response = ?,
+                               normalized_json = ?, normalizer_id = ?, requested_at = ?,
+                               window_closed_at = ?, submitted_at = ?, normalized_at = ?,
+                               revision = revision + 1, updated_at = ?
+                           WHERE id = ?""",
+                        (*payload[:3], normalized_json, *payload[4:], timestamp, report_id),
+                    )
+            except sqlite3.IntegrityError as exc:
+                raise HRRepositoryConflictError("daily report dependency or identity is invalid") from exc
+            row = connection.execute("SELECT * FROM daily_reports WHERE id = ?", (report_id,)).fetchone()
+            return _report_from_row(row)
+
+    def get_daily_report(self, ai_id: str, local_date: str) -> DailyReportRecord | None:
+        ai_id = _stable_ai_id(ai_id)
+        local_date = _local_date(local_date)
+        with self._connection(readonly=True) as connection:
+            row = connection.execute(
+                "SELECT * FROM daily_reports WHERE ai_id = ? AND local_date = ?",
+                (ai_id, local_date),
+            ).fetchone()
+            return _report_from_row(row) if row is not None else None
+
+    def list_daily_reports(
+        self,
+        *,
+        ai_id: str | None = None,
+        limit: int = 50,
+        cursor: str | None = None,
+    ) -> DailyReportPage:
+        ai_id = _stable_ai_id(ai_id) if ai_id is not None else None
+        limit = _page_limit(limit)
+        after = _decode_cursor(cursor, fields=2)
+        clauses = []
+        parameters: list[object] = []
+        if ai_id is not None:
+            clauses.append("ai_id = ?")
+            parameters.append(ai_id)
+        if after is not None:
+            local_date, cursor_ai_id = after
+            if not isinstance(local_date, str) or not isinstance(cursor_ai_id, str):
+                raise HRRepositoryValidationError("cursor is invalid")
+            clauses.append("(local_date < ? OR (local_date = ? AND ai_id > ?))")
+            parameters.extend((local_date, local_date, cursor_ai_id))
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        parameters.append(limit + 1)
+        with self._connection(readonly=True) as connection:
+            rows = connection.execute(
+                f"SELECT * FROM daily_reports{where} ORDER BY local_date DESC, ai_id ASC LIMIT ?",
+                parameters,
+            ).fetchall()
+        items = tuple(_report_from_row(row) for row in rows[:limit])
+        next_cursor = (
+            _encode_cursor((items[-1].local_date, items[-1].ai_id))
+            if len(rows) > limit
+            else None
+        )
+        return DailyReportPage(items, next_cursor)
+
+    def save_assessment(
+        self,
+        *,
+        assessment_id: str,
+        ai_id: str,
+        local_date: str,
+        status: str,
+        workload: str,
+        principal_contributions: object,
+        rationale: str,
+        blockers: object,
+        strengths: object,
+        improvements: object,
+        runtime_diagnosis: str,
+        information_sufficiency: str,
+        evidence_version: str,
+        hr_id: str,
+        evidence: Sequence[dict[str, object]],
+        revision_reason: str = "",
+        expected_version: int | None = None,
+    ) -> AssessmentRecord:
+        assessment_id = _opaque_id(assessment_id, "assessment_id")
+        ai_id = _stable_ai_id(ai_id)
+        local_date = _local_date(local_date)
+        status = _required_text(status, "status", maximum=32)
+        workload = _required_text(workload, "workload", maximum=32)
+        if workload not in {"low", "appropriate", "high", "overloaded", "insufficient_information"}:
+            raise HRRepositoryValidationError("unsupported assessment workload")
+        list_values = {}
+        for field, value in (
+            ("principal_contributions", principal_contributions),
+            ("blockers", blockers),
+            ("strengths", strengths),
+            ("improvements", improvements),
+        ):
+            encoded = _json_value(value, field, list, maximum=10_000)
+            if not all(isinstance(item, str) for item in json.loads(encoded)):
+                raise HRRepositoryValidationError(f"{field} must contain strings")
+            list_values[field] = encoded
+        rationale = _required_text(rationale, "rationale", maximum=8_000)
+        runtime_diagnosis = _required_text(runtime_diagnosis, "runtime_diagnosis", maximum=4_000)
+        information_sufficiency = _required_text(
+            information_sufficiency, "information_sufficiency", maximum=4_000
+        )
+        evidence_version = _opaque_id(evidence_version, "evidence_version")
+        hr_id = _stable_ai_id(hr_id, "hr_id")
+        revision_reason = _optional_text(revision_reason, "revision_reason", maximum=2_000)
+        if expected_version is not None and (
+            isinstance(expected_version, bool)
+            or not isinstance(expected_version, int)
+            or expected_version < 0
+        ):
+            raise HRRepositoryValidationError("expected_version must be a non-negative integer")
+        if isinstance(evidence, (str, bytes)) or len(evidence) > 100:
+            raise HRRepositoryValidationError("assessment evidence count is invalid")
+        evidence_rows = []
+        for sequence, item in enumerate(evidence):
+            if not isinstance(item, dict):
+                raise HRRepositoryValidationError("assessment evidence must be objects")
+            evidence_date = item.get("evidence_date")
+            evidence_rows.append(
+                AssessmentEvidenceRecord(
+                    sequence=sequence,
+                    evidence_type=_required_text(item.get("evidence_type"), "evidence_type", maximum=64),
+                    reference_id=_opaque_id(item.get("reference_id"), "reference_id"),
+                    summary=_required_text(item.get("summary"), "summary", maximum=2_000),
+                    evidence_date=_local_date(evidence_date) if evidence_date is not None else None,
+                    metadata=json.loads(
+                        _json_value(item.get("metadata", {}), "evidence.metadata", dict, maximum=4_000)
+                    ),
+                )
+            )
+        timestamp = self._timestamp()
+        with self._write_transaction() as connection:
+            row = connection.execute(
+                """SELECT * FROM assessments
+                   WHERE ai_id = ? AND local_date = ? AND is_current = 1""",
+                (ai_id, local_date),
+            ).fetchone()
+            current = _assessment_from_row(row) if row is not None else None
+            current_version = current.version if current is not None else 0
+            if current is not None and current.evidence_version == evidence_version:
+                return self._load_assessment_evidence(connection, current)
+            if expected_version is not None and expected_version != current_version:
+                raise HRRepositoryConflictError(
+                    f"assessment version is {current_version}, expected {expected_version}"
+                )
+            if current is not None:
+                connection.execute(
+                    "UPDATE assessments SET is_current = 0, updated_at = ? WHERE id = ?",
+                    (timestamp, current.id),
+                )
+            version = current_version + 1
+            try:
+                connection.execute(
+                    """INSERT INTO assessments(
+                           id, ai_id, local_date, version, is_current, status, workload,
+                           principal_contributions_json, rationale, blockers_json,
+                           strengths_json, improvements_json, runtime_diagnosis,
+                           information_sufficiency, evidence_version, hr_id,
+                           revision_reason, created_at, updated_at
+                       ) VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        assessment_id,
+                        ai_id,
+                        local_date,
+                        version,
+                        status,
+                        workload,
+                        list_values["principal_contributions"],
+                        rationale,
+                        list_values["blockers"],
+                        list_values["strengths"],
+                        list_values["improvements"],
+                        runtime_diagnosis,
+                        information_sufficiency,
+                        evidence_version,
+                        hr_id,
+                        revision_reason,
+                        timestamp,
+                        timestamp,
+                    ),
+                )
+                for item in evidence_rows:
+                    connection.execute(
+                        """INSERT INTO assessment_evidence(
+                               assessment_id, sequence, evidence_type, reference_id,
+                               summary, evidence_date, metadata_json
+                           ) VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                        (
+                            assessment_id,
+                            item.sequence,
+                            item.evidence_type,
+                            item.reference_id,
+                            item.summary,
+                            item.evidence_date,
+                            json.dumps(
+                                item.metadata,
+                                ensure_ascii=False,
+                                separators=(",", ":"),
+                                sort_keys=True,
+                            ),
+                        ),
+                    )
+            except sqlite3.IntegrityError as exc:
+                raise HRRepositoryConflictError("assessment identity or dependency is invalid") from exc
+            row = connection.execute(
+                "SELECT * FROM assessments WHERE id = ?", (assessment_id,)
+            ).fetchone()
+            return self._load_assessment_evidence(connection, _assessment_from_row(row))
+
+    @staticmethod
+    def _load_assessment_evidence(
+        connection: sqlite3.Connection,
+        assessment: AssessmentRecord,
+    ) -> AssessmentRecord:
+        rows = connection.execute(
+            """SELECT sequence, evidence_type, reference_id, summary, evidence_date, metadata_json
+               FROM assessment_evidence WHERE assessment_id = ? ORDER BY sequence""",
+            (assessment.id,),
+        ).fetchall()
+        evidence = tuple(
+            AssessmentEvidenceRecord(
+                sequence=int(row["sequence"]),
+                evidence_type=str(row["evidence_type"]),
+                reference_id=str(row["reference_id"]),
+                summary=str(row["summary"]),
+                evidence_date=row["evidence_date"],
+                metadata=json.loads(row["metadata_json"]),
+            )
+            for row in rows
+        )
+        return replace(assessment, evidence=evidence)
+
+    def get_current_assessment(self, ai_id: str, local_date: str) -> AssessmentRecord | None:
+        ai_id = _stable_ai_id(ai_id)
+        local_date = _local_date(local_date)
+        with self._connection(readonly=True) as connection:
+            row = connection.execute(
+                """SELECT * FROM assessments
+                   WHERE ai_id = ? AND local_date = ? AND is_current = 1""",
+                (ai_id, local_date),
+            ).fetchone()
+            if row is None:
+                return None
+            return self._load_assessment_evidence(connection, _assessment_from_row(row))
+
+    def list_assessments(
+        self,
+        *,
+        ai_id: str | None = None,
+        limit: int = 50,
+        cursor: str | None = None,
+    ) -> AssessmentPage:
+        ai_id = _stable_ai_id(ai_id) if ai_id is not None else None
+        limit = _page_limit(limit)
+        after = _decode_cursor(cursor, fields=3)
+        clauses = []
+        parameters: list[object] = []
+        if ai_id is not None:
+            clauses.append("ai_id = ?")
+            parameters.append(ai_id)
+        if after is not None:
+            cursor_date, cursor_ai_id, version = after
+            if (
+                not isinstance(cursor_date, str)
+                or not isinstance(cursor_ai_id, str)
+                or isinstance(version, bool)
+                or not isinstance(version, int)
+            ):
+                raise HRRepositoryValidationError("cursor is invalid")
+            clauses.append(
+                "(local_date < ? OR (local_date = ? AND ai_id > ?) "
+                "OR (local_date = ? AND ai_id = ? AND version < ?))"
+            )
+            parameters.extend(
+                (cursor_date, cursor_date, cursor_ai_id, cursor_date, cursor_ai_id, version)
+            )
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        parameters.append(limit + 1)
+        with self._connection(readonly=True) as connection:
+            rows = connection.execute(
+                f"SELECT * FROM assessments{where} "
+                "ORDER BY local_date DESC, ai_id ASC, version DESC LIMIT ?",
+                parameters,
+            ).fetchall()
+            items = tuple(
+                self._load_assessment_evidence(connection, _assessment_from_row(row))
+                for row in rows[:limit]
+            )
+        next_cursor = (
+            _encode_cursor((items[-1].local_date, items[-1].ai_id, items[-1].version))
+            if len(rows) > limit
+            else None
+        )
+        return AssessmentPage(items, next_cursor)
