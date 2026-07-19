@@ -45,7 +45,7 @@
 
 - 会议资格必须从“所有系统角色禁止”变成按角色策略判断，但档案管理员旧错误语义需要保留。
 - 项目分配应升级为通用 `assignable=False` 策略，同时覆盖现有 archive-manager 专用调用点。
-- Skill 发布要保留已有 communication skill 的 symlink、marker 和冲突保护，不能覆盖用户自定义内容。
+- HR Agent 目录必须注册为当前 VO `/skills` 内置 Skill，不得复制进 Agent workspace；已有 communication skill 的分发兼容性保持不变。
 - 本地已有用户修改的 project-authoring Skill 和测试不属于该需求，任务实现不得误改。
 
 ### 可回滚性
@@ -90,9 +90,9 @@
 
 不会。HR 使用普通 participant 生命周期、占用和恢复。唯一变化是资格策略明确允许 HR；档案管理员继续禁止。会议记录只有在与当日工作相关时才可能成为后续只读证据，参会本身不触发评价。
 
-### Q8：Provider 不支持安全 Skill/grant 安装怎么办？
+### Q8：Provider 不支持安全 grant 交付怎么办？
 
-该 Agent 仍进入名册并参与 HR 主动询问，但跨 Agent HTTP 查询保持禁用并显示 readiness，不能降级为仅凭 Agent ID 信任。后续 adapter 可独立增加安全交付能力。
+所有 Provider 都能从当前 VO 读取同一份内置 Agent-directory Skill，不需要安装。若某个 Provider 暂不支持安全 grant 交付，该 Agent 仍进入名册并参与 HR 主动询问，但跨 Agent HTTP 查询保持禁用并显示授权 readiness，不能降级为仅凭 Agent ID 信任。后续 adapter 可独立增加安全交付能力。
 
 ## 测试与上线建议
 
@@ -103,7 +103,7 @@
 3. 档案管理员逐片迁移及 Phase 1–8 回归。
 4. SQLite repository schema、事务、并发、唯一键、迁移失败和分页测试。
 5. Agent 发现、改名、停用、恢复、HR self-exclusion 和介绍冲突测试。
-6. Skill marker/hash/symlink/conflict、grant 发放/轮换/撤销测试。
+6. 内置 Skill catalog/Agent 指南曝光、禁止 workspace 分发、grant 发放/轮换/撤销测试。
 7. 调度时区、到期、启动补偿、双 loop、claim 过期、Agent 超时和队列上限测试。
 8. 原始日报、归一化、未提交、补交、重复提交和失败隔离测试。
 9. 评价 authority、证据、信息不足、版本修订、无评分/无排名测试。

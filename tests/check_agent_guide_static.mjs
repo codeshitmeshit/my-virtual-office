@@ -17,6 +17,7 @@ const expectedSkills = [
   'vo-codex-communication',
   'vo-browser-control',
   'vo-agent-workspace',
+  'vo-agent-directory',
   'vo-project-authoring',
   'vo-project-workflow',
   'vo-meeting-execution',
@@ -95,6 +96,7 @@ const requiredLocaleKeys = [
   'agent_guide_cat_communication',
   'agent_guide_cat_browser',
   'agent_guide_cat_workspace',
+  'agent_guide_cat_human_resources',
   'agent_guide_cat_workflow',
   'agent_guide_cat_meeting',
 ];

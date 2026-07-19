@@ -44,13 +44,14 @@
 - [x] 6.3 Implement HR structured introduction summarization, schema validation, provenance/version persistence, stale-role clarification, and conflict-safe replacement with tests for valid, malformed, unsupported, missing, and changed self-descriptions.
 - [x] 6.4 Implement safe directory projections containing only name, introduction, AI ID, availability, and readiness; add pagination/filtering and tests that reports, evidence, assessments, grants, and sensitive metadata never enter the directory view.
 
-## 7. Managed Agent-Directory Skill And Agent Grants
+## 7. Built-in Agent-Directory Skill And Agent Grants
 
-- [x] 7.1 Create the canonical `skills/vo-agent-directory/SKILL.md` covering safe roster lookup, controlled Agent lookup, self access-log lookup, grant use, and prohibited direct storage/management access; add static content and endpoint-contract tests.
+- [x] 7.1 Create the canonical `skills/vo-agent-directory/SKILL.md`, register it in the VO built-in catalog and Agent Guide, cover safe roster lookup, controlled Agent lookup, self access-log lookup, grant use, and prohibited direct storage/management access, and add static content and endpoint-contract tests.
 - [x] 7.2 Extract the existing builtin skill seeding into a generic managed-skill registry that preserves current communication-skill behavior, ownership markers, hashes, atomic replacement, legacy conflict handling, symlink protection, and all existing tests.
-- [x] 7.3 Implement `app/services/hr_skill_publisher.py` for canonical directory-skill publication and supported workspace installation with readiness states, path validation, conflict preservation, deterministic refresh, and fake-workspace tests.
-- [x] 7.4 Implement per-Agent Human Resources grant issuance, digest storage, secure workspace grant-reference delivery, rotation, revocation on ineligibility/deletion, and unsupported-provider readiness without embedding secrets in `SKILL.md` or API responses.
-- [x] 7.5 Wire directory reconciliation to skill/grant readiness refresh and verify one Agent's installation conflict or unsupported provider does not block directory updates, HR-initiated reports, or other Agent installations.
+- [x] 7.3 Expose the canonical directory Skill only through the current VO `/skills` catalog and Agent Guide, route matching intents from the VO operating guidelines, and add static tests proving HR runtime code never installs it into Agent workspaces.
+- [x] 7.4 Implement per-Agent Human Resources grant issuance, digest storage, secure workspace credential-reference delivery outside `skills/`, rotation, revocation on ineligibility/deletion, and unsupported-provider authorization readiness without embedding secrets in `SKILL.md` or API responses.
+- [x] 7.5 Wire directory reconciliation to grant readiness independently of built-in Skill exposure and verify one Agent's unsupported grant provider does not block directory updates, HR-initiated reports, or other Agent grants.
+- [x] 7.6 Remove the obsolete HR Skill publisher and per-Agent Skill readiness UI/API projection, migrate grant references out of the Skill directory, safely remove only VO-owned legacy workspace copies, preserve unowned same-name Skills and the database compatibility column as `ready`, and cover catalog exposure, no-distribution, grant isolation, and legacy readiness repair with focused tests.
 
 ## 8. Daily Reporting Domain
 
@@ -92,7 +93,7 @@
 - [x] 12.4 Implement HR pause/resume and cycle run/close/retry controls with confirmation, busy/error feedback, scroll/state preservation, and tests proving existing data remains browsable while HR is paused or failed.
 - [x] 12.5 Add complete English/Chinese localization, accessible labels, focus/keyboard/close behavior, semantic state labels, and localization-integrity/static JavaScript checks for every Human Resources workflow and error state.
 - [x] 12.6 Add a deterministic browser acceptance fixture and script covering first-level navigation, HR lifecycle, roster/detail, daily statuses, assessment separation, access history, pagination, pause/resume, and partial/degraded failures.
-- [x] 12.7 Remove the duplicate modal-header lifecycle badge and add a management-only active Agent-team synchronization control backed by forced roster discovery, directory/skill/grant reconciliation, UI refresh, and focused service/API/UI/browser tests.
+- [x] 12.7 Remove the duplicate modal-header lifecycle badge and add a management-only active Agent-team synchronization control backed by forced roster discovery, directory/grant reconciliation, UI refresh, and focused service/API/UI/browser tests.
 - [x] 12.8 Show the next daily-report collection time in the HR overview using a server-calculated VO-timezone schedule projection with scheduled, due-for-catch-up, and scheduler-disabled states; cover API, localization, pure UI, and browser rendering.
 
 ## 13. Integrated Regression And Development-Machine Acceptance
@@ -103,7 +104,7 @@
 - [ ] 13.4 Identify and document the approved development-machine target, deployment/start commands, OpenClaw and VO versions, configuration values, backup location, feature-switch sequence, and rollback commands before any real-environment mutation.
 - [ ] 13.5 Deploy to the development machine with `VO_HR_ENABLED=0` and scheduler disabled; run existing VO, archive-manager, Archive Room, project, meeting, and provider smoke tests and record a clean pre-enable baseline.
 - [ ] 13.6 Enable HR lifecycle only and verify real OpenClaw auto-create, uniqueness, rediscovery, restart repair, Profile/communication skill, pause/resume, office visibility, HR meeting participation, archive-manager meeting rejection, assignment/deletion protection, and role isolation.
-- [ ] 13.7 Enable directory, introduction, managed skill, and grants; verify real Agent discovery, HR self-exclusion, Agent self-description, skill refresh, secure grant delivery, public lookup, denial paths, access audit, and unsupported-provider readiness.
+- [ ] 13.7 Enable directory, introduction, built-in Skill, and grants; verify real Agent discovery, HR self-exclusion, Agent self-description, `/skills` catalog exposure without Agent workspace copies, secure grant delivery, public lookup, denial paths, access audit, and unsupported-provider grant readiness.
 - [ ] 13.8 Enable a controlled short daily cycle and verify real HR-to-Agent requests, raw and normalized reports, non-response, late submission, evidence collection, assessment, insufficient-information behavior, failure isolation, duplicate trigger prevention, and restart recovery.
 - [ ] 13.9 Execute rollback rehearsal by disabling scheduler then HR, allowing claims to settle/expire, preserving HR data and Agent identity, and proving Archive Room and existing VO workflows remain operational; record restoration steps and results.
 - [ ] 13.10 Run final OpenSpec validation, assemble specification-to-test traceability and all local/development-machine evidence, document remaining unsupported provider delivery or other uncovered items, and prepare the separate test-result confirmation package without archiving the change.

@@ -44,7 +44,6 @@ def record():
             {"viewerAiId": "agent-1", "targetAiId": "agent-2", "scope": "public"},
             {"viewerAiId": "agent-2", "targetAiId": "agent-1", "scope": "public"},
         ],
-        "skillReadiness": "ready",
         "grantReadiness": "ready",
         "createdAt": "2026-07-19T00:00:00+00:00",
         "updatedAt": "2026-07-19T10:00:00+00:00",

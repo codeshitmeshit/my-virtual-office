@@ -10,14 +10,12 @@ from pathlib import Path
 from typing import Callable, Mapping, Protocol, Sequence
 
 from services.hr_directory import HRDirectoryService, RosterObservation, RosterSourceSnapshot
-from services.hr_repository import HRRepository
-from services.hr_skill_publisher import (
+from services.hr_agent_grants import HRGrantManager
+from services.hr_directory_enablement import (
     HRDirectoryEnablementCoordinator,
     HRDirectoryEnablementResult,
-    HRGrantManager,
-    HRSkillPublisher,
-    repository_directory_skill_path,
 )
+from services.hr_repository import HRRepository
 from services.system_agent_roles import HR_ROLE
 
 
@@ -42,7 +40,6 @@ class HRTeamSyncResult:
     inactivated: tuple[str, ...]
     unchanged: tuple[str, ...]
     failed: tuple[str, ...]
-    skill_ready: int
     grant_ready: int
 
 
@@ -139,7 +136,6 @@ class HRTeamSyncService:
                 inactivated=result.directory.inactivated,
                 unchanged=result.directory.unchanged,
                 failed=tuple(dict.fromkeys(failed)),
-                skill_ready=sum(1 for item in result.enablements if item.skill.ready),
                 grant_ready=sum(1 for item in result.enablements if item.grant.ready),
             )
 
@@ -149,15 +145,10 @@ def build_hr_team_sync(
     *,
     roster_provider: Callable[[bool], Sequence[Mapping[str, object]]],
     workspace_base: str | Path,
-    repository_root: str | Path,
 ) -> HRTeamSyncService:
     coordinator = HRDirectoryEnablementCoordinator(
         repository,
         HRDirectoryService(repository),
-        HRSkillPublisher(
-            workspace_base=workspace_base,
-            canonical_skill_path=repository_directory_skill_path(repository_root),
-        ),
         HRGrantManager(
             repository,
             workspace_base=workspace_base,

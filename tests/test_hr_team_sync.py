@@ -12,8 +12,9 @@ if str(APP_DIR) not in sys.path:
     sys.path.insert(0, str(APP_DIR))
 
 from services.hr_directory import HRDirectoryService
+from services.hr_agent_grants import HRGrantManager
+from services.hr_directory_enablement import HRDirectoryEnablementCoordinator
 from services.hr_repository import HRRepository
-from services.hr_skill_publisher import HRDirectoryEnablementCoordinator, HRGrantManager, HRSkillPublisher
 from services.hr_team_sync import HRTeamSyncService, HRTeamSyncValidationError
 
 
@@ -23,13 +24,9 @@ def test_manual_sync_force_refreshes_roster_and_persists_new_agents(tmp_path):
     workspace_base = tmp_path / "workspaces"
     workspace = workspace_base / "new-agent"
     workspace.mkdir(parents=True)
-    canonical = tmp_path / "canonical" / "SKILL.md"
-    canonical.parent.mkdir()
-    canonical.write_text("---\nname: vo-agent-directory\ndescription: safe\n---\n")
     coordinator = HRDirectoryEnablementCoordinator(
         repository,
         HRDirectoryService(repository),
-        HRSkillPublisher(workspace_base=workspace_base, canonical_skill_path=canonical),
         HRGrantManager(
             repository,
             workspace_base=workspace_base,
@@ -59,13 +56,14 @@ def test_manual_sync_force_refreshes_roster_and_persists_new_agents(tmp_path):
     assert refresh_flags == [True]
     assert result.discovered == 2
     assert result.created == ("codex-local", "new-agent")
-    assert result.skill_ready == 1
     assert result.grant_ready == 1
     assert repository.get_agent("new-agent").availability == "busy"
-    assert repository.get_agent("new-agent").skill_readiness == "updated"
-    assert repository.get_agent("codex-local").skill_readiness == "unsupported_provider"
+    assert repository.get_agent("new-agent").skill_readiness == "ready"
+    assert repository.get_agent("codex-local").skill_readiness == "ready"
+    assert repository.get_agent("codex-local").grant_readiness == "unsupported_provider"
     assert repository.get_agent("codex-local").name == "Codex Updated"
     assert repository.get_access_grant("new-agent").status == "active"
+    assert not (workspace / "skills" / "vo-agent-directory").exists()
 
 
 def test_hr_identity_name_is_always_canonical_uppercase():
@@ -86,14 +84,10 @@ def test_manual_sync_marks_agents_missing_from_authoritative_roster_unreachable(
     )
     workspace_base = tmp_path / "workspaces"
     workspace_base.mkdir()
-    canonical = tmp_path / "canonical" / "SKILL.md"
-    canonical.parent.mkdir()
-    canonical.write_text("---\nname: vo-agent-directory\ndescription: safe\n---\n")
     service = HRTeamSyncService(
         HRDirectoryEnablementCoordinator(
             repository,
             HRDirectoryService(repository),
-            HRSkillPublisher(workspace_base=workspace_base, canonical_skill_path=canonical),
             HRGrantManager(
                 repository,
                 workspace_base=workspace_base,

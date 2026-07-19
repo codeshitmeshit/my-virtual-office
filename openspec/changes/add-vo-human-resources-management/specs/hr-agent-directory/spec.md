@@ -73,16 +73,21 @@ HR SHALL ask a newly discovered or materially stale Agent to describe its identi
 - **THEN** HR SHALL request clarification and preserve the previous introduction until a supported replacement is recorded
 
 ### Requirement: Global Agent-directory skill
-The system SHALL distribute a VO Agent-directory skill that returns each visible Agent's name, concise introduction, AI ID, and availability and directs callers to the controlled information-query capability for permitted work information.
+The system SHALL expose one repository-owned Agent-directory skill through the current VO instance's built-in `/skills` catalog. The skill SHALL direct every Provider to the controlled information-query capability for each visible Agent's name, concise introduction, AI ID, availability, and permitted work information, and SHALL NOT be copied or installed into individual Agent workspaces.
 
 #### Scenario: Agent needs a collaborator
 - **WHEN** an Agent invokes the directory skill
 - **THEN** it SHALL receive the current safe roster needed to distinguish available Agent roles
 - **AND** it SHALL NOT receive full reports, private evidence, or sensitive improvement feedback
 
+#### Scenario: Any Provider discovers the built-in skill
+- **WHEN** an OpenClaw, Hermes, Codex, Claude Code, or other connected Agent reads the current VO skill catalog
+- **THEN** `/skills/vo-agent-directory/SKILL.md` SHALL be advertised as the same authoritative built-in skill
+- **AND** no Provider-specific workspace installation SHALL be required to discover or read it
+
 #### Scenario: Directory changes
 - **WHEN** HR adds, reactivates, deactivates, or updates an Agent record
-- **THEN** the distributed skill data SHALL be refreshed without exposing stale availability as current
+- **THEN** subsequent governed directory API queries SHALL return the current safe data without rewriting or redistributing the built-in `SKILL.md`
 
 ### Requirement: Directory provenance and repair
 Every HR-authored directory mutation SHALL retain its source, actor, time, and result so that incomplete or conflicting Agent information can be diagnosed and repaired.

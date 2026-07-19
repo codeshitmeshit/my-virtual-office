@@ -111,7 +111,6 @@
         let score = 0;
         if (statusTone(value.status) === 'danger') score += 100;
         if (statusTone(value.availability) === 'danger') score += 60;
-        if (!['ready', 'updated'].includes(String(value.skill_readiness || value.skillReadiness || ''))) score += 30;
         if (!['ready', 'issued', 'rotated', 'not_required'].includes(String(value.grant_readiness || value.grantReadiness || ''))) score += 20;
         return score;
     }
@@ -485,8 +484,7 @@
                 '<div><span>' + escHtml(tr('hr_provider', 'Provider')) + '</span><strong>' + escHtml(agent.providerKind || '—') + '</strong></div>' +
                 '<div><span>' + escHtml(tr('hr_introduction_source', 'Introduction source')) + '</span><strong>' + escHtml(object(agent.introductionProvenance).source || '—') + '</strong></div>' +
                 '<div><span>' + escHtml(tr('hr_workflow_state', 'Workflow state')) + '</span><strong>' + escHtml(semanticLabel(agent.workflowState)) + '</strong></div>' +
-                '<div><span>' + escHtml(tr('hr_skill_readiness', 'Skill readiness')) + '</span><strong>' + escHtml(semanticLabel(agent.skillReadiness)) + '</strong></div>' +
-                '<div><span>' + escHtml(tr('hr_grant_readiness', 'Grant readiness')) + '</span><strong>' + escHtml(semanticLabel(agent.grantReadiness)) + '</strong></div></section>' +
+                '<div><span>' + escHtml(tr('hr_grant_readiness', 'HR API authorization')) + '</span><strong>' + escHtml(semanticLabel(agent.grantReadiness)) + '</strong></div></section>' +
             '<section class="hr-detail-section"><h4>' + escHtml(tr('hr_identity_history', 'Identity and provenance')) + '</h4>' +
                 (identities.length ? '<ul class="hr-history-list">' + renderIdentityHistory(identities) + '</ul>' : '<div class="hr-inline-empty">—</div>') + '</section>' +
             '<section class="hr-detail-section"><h4>' + escHtml(tr('hr_daily_reports', 'Daily reports')) + '</h4>' +

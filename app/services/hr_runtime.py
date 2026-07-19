@@ -73,7 +73,6 @@ def build_hr_application_runtime(
     commands: HRManualCommandsPort,
     roster_provider: Callable[[bool], Sequence[Mapping[str, object]]] | None = None,
     workspace_base: str | Path | None = None,
-    repository_root: str | Path | None = None,
 ) -> HRApplicationRuntime:
     """Build one repository authority shared by management and authenticated Agent APIs."""
     repository = HRRepository(status_dir)
@@ -81,13 +80,12 @@ def build_hr_application_runtime(
     observability = HRObservability()
     directory_sync = None
     if roster_provider is not None:
-        if workspace_base is None or repository_root is None:
-            raise ValueError("workspace_base and repository_root are required for roster sync")
+        if workspace_base is None:
+            raise ValueError("workspace_base is required for roster sync")
         directory_sync = build_hr_team_sync(
             repository,
             roster_provider=roster_provider,
             workspace_base=workspace_base,
-            repository_root=repository_root,
         )
     management = HRManagementAPI(
         repository,

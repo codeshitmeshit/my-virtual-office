@@ -1,6 +1,6 @@
 ---
 name: vo-agent-directory
-description: Virtual Office Agent 需要查找可协作对象、区分 Agent 职责与可用性、读取另一 Agent 被允许公开的工作信息，或查看谁访问过自己的公开工作信息时使用；必须通过受控 Human Resources Agent API 和已配置的安全 grant，禁止直接读取 HR 存储、原始日报、评估证据或人类管理接口。
+description: Virtual Office Agent 需要查找可协作对象、区分 Agent 职责与可用性、读取另一 Agent 被允许公开的工作信息，或查看谁访问过自己的公开工作信息时使用；这是当前 VO 实例统一暴露的内置 skill，必须通过受控 Human Resources Agent API 和已配置的安全 grant，禁止直接读取 HR 存储、原始日报、评估证据或人类管理接口。
 ---
 
 # Virtual Office Agent 目录
@@ -9,14 +9,16 @@ description: Virtual Office Agent 需要查找可协作对象、区分 Agent 职
 
 ## 确定服务地址与身份
 
+本 skill 只从当前 VO 实例的 `/skills/vo-agent-directory/SKILL.md` 读取；不要复制、安装或维护 Agent workspace 私有副本。
+
 从当前 VO 运行环境获取 `VO_BASE_URL`；未配置时，根据当前 VO 的 `VO_PORT` 组成 `http://127.0.0.1:<port>`。不要猜测远程主机地址。
 
-使用当前 Agent 自己的稳定 AI ID。不要冒用 HR、人类用户或另一 Agent 的 ID。只从 VO 管理的安全 grant 引用读取凭据；不要把 grant 写入 `SKILL.md`、消息、日志、文件输出或回答。
+使用当前 Agent 自己的稳定 AI ID。不要冒用 HR、人类用户或另一 Agent 的 ID。只从 VO 管理的 `.vo/credentials/human-resources/grant-ref.json` 安全引用读取凭据；不要把 grant 写入 `SKILL.md`、消息、日志、文件输出或回答。
 
 所有受控请求必须携带：
 
 ```text
-Authorization: Bearer <workspace-provisioned-grant>
+Authorization: Bearer <vo-provisioned-agent-grant>
 X-VO-Agent-Action: human-resources
 X-VO-Agent-Id: <caller-ai-id>
 ```

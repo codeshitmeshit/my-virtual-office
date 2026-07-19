@@ -28,7 +28,6 @@
       "name": "Research Agent",
       "status": "active",
       "availability": "available",
-      "skill_readiness": "ready",
       "grant_readiness": "ready"
     },
     {
@@ -36,7 +35,6 @@
       "name": "Builder Agent",
       "status": "active",
       "availability": "busy",
-      "skill_readiness": "pending",
       "grant_readiness": "pending"
     }
   ],
@@ -90,7 +88,6 @@
     ],
     "accessNextCursor": "access-next",
     "workflowState": "normalized",
-    "skillReadiness": "ready",
     "grantReadiness": "ready"
   },
   "reportPage": {

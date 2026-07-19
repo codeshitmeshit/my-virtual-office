@@ -17,6 +17,7 @@
         'vo-codex-communication': 'communication',
         'vo-browser-control': 'browser',
         'vo-agent-workspace': 'workspace',
+        'vo-agent-directory': 'human-resources',
         'vo-project-authoring': 'workflow',
         'vo-project-workflow': 'workflow',
         'vo-meeting-execution': 'meeting'
@@ -32,6 +33,7 @@
         { id: 'communication', labelKey: 'agent_guide_cat_communication' },
         { id: 'browser', labelKey: 'agent_guide_cat_browser' },
         { id: 'workspace', labelKey: 'agent_guide_cat_workspace' },
+        { id: 'human-resources', labelKey: 'agent_guide_cat_human_resources' },
         { id: 'workflow', labelKey: 'agent_guide_cat_workflow' },
         { id: 'meeting', labelKey: 'agent_guide_cat_meeting' }
     ];

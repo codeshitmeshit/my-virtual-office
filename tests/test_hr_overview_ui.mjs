@@ -14,9 +14,9 @@ assert.equal(helpers.statusTone('ready'), 'success');
 assert.equal(helpers.statusTone('something-new'), 'neutral');
 
 const prioritized = helpers.prioritizeAgents([
-  { ai_id: 'ready', status: 'active', availability: 'available', skill_readiness: 'ready', grant_readiness: 'ready' },
-  { ai_id: 'failed', status: 'disabled', availability: 'unavailable', skill_readiness: 'failed', grant_readiness: 'revoked' },
-  { ai_id: 'pending', status: 'active', availability: 'available', skill_readiness: 'pending', grant_readiness: 'pending' },
+  { ai_id: 'ready', status: 'active', availability: 'available', grant_readiness: 'ready' },
+  { ai_id: 'failed', status: 'disabled', availability: 'unavailable', grant_readiness: 'revoked' },
+  { ai_id: 'pending', status: 'active', availability: 'available', grant_readiness: 'pending' },
 ]);
 assert.deepEqual(prioritized.map((agent) => agent.ai_id), ['failed', 'pending', 'ready']);
 

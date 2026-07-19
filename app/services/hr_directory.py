@@ -728,12 +728,6 @@ class HRDirectoryQuery:
         }.get(state, "pending")
         if introduction_readiness != "ready":
             return introduction_readiness
-        if agent.skill_readiness == "unsupported_provider":
-            return "unsupported_provider"
-        if agent.skill_readiness == "conflict":
-            return "skill_conflict"
-        if agent.skill_readiness not in {"ready", "updated"}:
-            return "enablement_pending"
         if agent.grant_readiness in {"ready", "issued", "rotated", "not_required"}:
             return "ready"
         if agent.grant_readiness == "unsupported_provider":

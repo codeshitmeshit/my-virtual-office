@@ -41,7 +41,8 @@ def test_skill_documents_only_the_three_agent_hr_endpoints():
 
 def test_skill_requires_identity_bound_grant_headers_without_embedding_a_grant():
     text = skill_text()
-    assert "Authorization: Bearer <workspace-provisioned-grant>" in text
+    assert "Authorization: Bearer <vo-provisioned-agent-grant>" in text
+    assert ".vo/credentials/human-resources/grant-ref.json" in text
     assert "X-VO-Agent-Action: human-resources" in text
     assert "X-VO-Agent-Id: <caller-ai-id>" in text
     assert "不要发送浏览器 `Origin`" in text

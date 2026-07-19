@@ -77,7 +77,6 @@ def runtime(tmp_path, monkeypatch):
             }
         ],
         workspace_base=tmp_path / "workspaces",
-        repository_root=ROOT,
     )
     for ai_id, secret in (("agent-1", SECRET_1), ("agent-2", SECRET_2)):
         result.repository.upsert_agent(

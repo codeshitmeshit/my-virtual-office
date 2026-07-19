@@ -7,7 +7,7 @@ Virtual Office can discover and run many system, project, and externally connect
 - Add one globally unique VO system Agent named `HR`, created before it manages ordinary Agent records, with visible lifecycle state, pause/resume controls, degraded behavior, explicit role boundaries, and eligibility to join ordinary meetings.
 - Extract the reusable lifecycle behavior currently embedded in Archive Room's archive manager into a focused VO system-Agent lifecycle boundary, then use it for both the archive manager and HR while preserving all archive-manager behavior.
 - Add an HR-owned directory for every discoverable system, project, and externally connected Agent, keyed by stable AI ID and retaining inactive Agent history.
-- Add a global Agent-directory skill containing each Agent's name, concise HR-coordinated introduction, AI ID, and availability so Agents can choose appropriate collaborators.
+- Add a VO built-in Agent-directory skill, exposed from the current office's `/skills` catalog, that lets every Provider query each Agent's name, concise HR-coordinated introduction, AI ID, and availability without copying the skill into Agent workspaces.
 - Add a first-level Human Resources module, modeled on Archive Room's navigation and degraded-read behavior, with HR status, Agent roster, daily reports, assessments, and relevant access history.
 - Add a global daily collection cycle in which HR asks each eligible Agent what it did, preserves the raw response, produces a normalized report, marks non-response without negative inference, and accepts late submission.
 - Add an HR-only daily assessment that combines reports with traceable task, meeting, artifact, and execution evidence to produce structured feedback and a non-numeric workload level without ranking Agents.
@@ -39,7 +39,7 @@ Virtual Office can discover and run many system, project, and externally connect
 - Meeting domain: participant eligibility must distinguish the meeting-ineligible archive manager from meeting-eligible HR.
 - Project and execution surfaces: HR and the archive manager remain unavailable for ordinary task assignment; task, meeting, artifact, and execution records are read as assessment evidence without transferring ownership to HR.
 - UI and localization: a first-level Human Resources module, Agent detail views, status and workflow states, disclosure-safe Agent views, and access-history presentation.
-- Runtime skill distribution: a generated or synchronized Agent-directory skill with safe public roster data.
+- Runtime skill exposure: one repository-owned Agent-directory skill in the VO built-in catalog, backed by current safe public roster APIs rather than per-Agent workspace copies.
 - Persistence and APIs: durable Agent profiles, reports, assessments, schedules, lifecycle activity, and access logs plus controlled query and management surfaces.
 - Compatibility: Archive Room lifecycle, profile, assignment, meeting exclusion, maintenance, and degraded-read behavior must remain unchanged after extraction.
 - Verification: deterministic fake-provider unit tests and regression suites locally, followed by mandatory real-OpenClaw development-machine acceptance evidence before the change can pass the test-result gate.

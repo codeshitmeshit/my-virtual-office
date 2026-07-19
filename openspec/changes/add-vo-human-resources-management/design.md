@@ -4,7 +4,7 @@ Virtual Office currently discovers OpenClaw, Hermes, Codex, Claude Code, and syn
 
 The repository has already established a better pattern under `app/services/`: domain modules do not import `server.py` or HTTP classes, state transitions are exercised through injected ports, authoritative repositories own persistence, and `OfficeHandler` remains transport wiring. `AGENTS.md` requires every substantial new capability to follow this modular direction.
 
-Human Resources is cross-cutting. It introduces a second global OpenClaw system Agent, a durable Agent directory, managed skill distribution, scheduled Agent conversations, HR-authored normalization and assessment, evidence reads from project/meeting/artifact/execution domains, sensitive human views, restricted Agent views, access auditing, and a first-level UI. The local development environment does not provide the real OpenClaw integration required for final acceptance, so provider boundaries must be deterministic under unit tests and separately verified on a development machine.
+Human Resources is cross-cutting. It introduces a second global OpenClaw system Agent, a durable Agent directory, one provider-neutral VO built-in skill, scheduled Agent conversations, HR-authored normalization and assessment, evidence reads from project/meeting/artifact/execution domains, sensitive human views, restricted Agent views, access auditing, and a first-level UI. The local development environment does not provide the real OpenClaw integration required for final acceptance, so provider boundaries must be deterministic under unit tests and separately verified on a development machine.
 
 Current constraints and reusable foundations include:
 
@@ -24,7 +24,7 @@ Current constraints and reusable foundations include:
 - Create exactly one global HR Agent before any HR-owned workflow executes.
 - Extract a reusable, role-configured VO system-Agent lifecycle without moving Archive Room business logic into a shared module.
 - Preserve all existing archive-manager identity, state, profile, maintenance, protection, and degraded-read behavior.
-- Maintain a durable HR-owned directory keyed by stable AI ID and distribute a safe directory skill.
+- Maintain a durable HR-owned directory keyed by stable AI ID and expose one safe directory skill through the VO built-in catalog.
 - Run one idempotent daily collection cycle with bounded Agent calls, neutral non-submission, late submission, and restart recovery.
 - Generate HR-only, evidence-backed, non-ranking assessments with explicit information sufficiency.
 - Enforce human, HR, self, and cross-Agent disclosure policies on the server, with authenticated Agent identity and durable access audit.
@@ -95,7 +95,7 @@ HR is configured as:
 - provider creation uses the display name `HR`, while lifecycle and directory projections normalize legacy `Hr`/`hr` display values back to `HR` without changing the stable ID;
 - non-assignable and non-deletable;
 - meeting-eligible;
-- backed by a new `app/hr-profile.md` and repository-owned directory skill;
+- backed by a new `app/hr-profile.md` and repository-owned VO built-in directory skill;
 - excluded from its own ordinary report/assessment population.
 
 ### 3. Use a transactional SQLite repository for the new HR domain
@@ -134,7 +134,8 @@ Alternatives considered:
 Add these modules, none of which imports `server.py` or HTTP transport:
 
 - `hr_directory.py`: roster reconciliation, status transitions, self-exclusion, introduction workflow, and public directory projection.
-- `hr_skill_publisher.py`: canonical skill content, managed installation, readiness, conflict and path protection.
+- `hr_agent_grants.py`: identity-bound Agent API grant lifecycle and secure credential delivery, independent of Skill files.
+- `hr_directory_enablement.py`: directory persistence and isolated Agent API grant-readiness reconciliation.
 - `hr_reporting.py`: daily cycles, per-Agent request claims, raw response preservation, normalization, late submissions, and status projection.
 - `hr_assessments.py`: evidence validation, HR invocation, structured result parsing, workload classification, versioning, and failure isolation.
 - `hr_governance.py`: actor authorization, field-level projections, access-grant validation, access logging, and self-audit views.
@@ -230,7 +231,7 @@ If HR reasoning fails, the raw Agent response remains stored and retryable. If a
 
 Evidence is capped per source and per Agent/date. Raw chat history, credentials, raw provider envelopes, unrelated project content, and unrestricted workspace reads are excluded. Each assessment records exactly which sanitized evidence references were used.
 
-### 8. Publish one canonical Agent-directory skill
+### 8. Expose one canonical VO built-in Agent-directory skill
 
 Add `skills/vo-agent-directory/SKILL.md` as the repository-owned canonical skill. The skill explains how to:
 
@@ -240,9 +241,9 @@ Add `skills/vo-agent-directory/SKILL.md` as the repository-owned canonical skill
 - authenticate using the provisioned Agent grant;
 - avoid direct storage or human-management endpoints.
 
-The existing builtin skill library seeding is extended through a generic managed-skill registry rather than another one-off function. `hr_skill_publisher.py` installs the canonical skill and a grant reference into supported Agent workspaces with symlink/path checks, ownership markers, content hashes, conflict reporting, and atomic replacement. It never embeds the bearer secret in `SKILL.md` or returns it from directory APIs.
+`skills/catalog.md` advertises the skill and `app/agent-guide.js` renders it under a dedicated Human Resources category. Agents read the same file from the current VO instance at `/skills/vo-agent-directory/SKILL.md`, following the routing entry in `vo-operating-guidelines`. The skill is never copied, installed, versioned, or repaired inside an individual Agent workspace, so discovery is Provider-neutral and there is no per-Agent Skill readiness state.
 
-Provider adapters report installation readiness. An Agent without a supported secure grant/skill delivery path remains visible in the directory and can still submit through office-mediated HR conversation, but is not allowed to perform authenticated cross-Agent HTTP reads until delivery is available. This is safer than silently treating a caller-supplied ID as authenticated.
+The built-in Skill and the security credential have separate lifecycles. `hr_agent_grants.py` may deliver an identity-bound grant through a supported secure workspace credential path, but its reference lives under `.vo/credentials/human-resources/` and never under `skills/`. During upgrade it removes only legacy directory-skill copies carrying the exact Virtual Office ownership marker and preserves unowned same-name content. An Agent without a supported secure grant delivery path can still discover and read the built-in Skill, remains visible in the directory, and can submit through office-mediated HR conversation, but cannot perform authenticated cross-Agent HTTP reads until grant delivery is available. This is safer than silently treating a caller-supplied ID as authenticated while avoiding a false Provider restriction on Skill availability.
 
 ### 9. Authenticate and project every Human Resources API server-side
 
@@ -287,7 +288,7 @@ Add:
 - a Human Resources toolbar entry and modal shell in `app/index.html`
 - localized strings in `app/locales/en.json` and `app/locales/zh.json`
 
-The UI follows Archive Room's independent modal/list/detail pattern but does not import or duplicate Archive Room state. It uses `managementFetch` for every full-data request. The overview shows one authoritative HR state indicator, daily-cycle counts, and a server-calculated `reportSchedule` containing the next configured collection instant, VO-local wall time/timezone, scheduler enablement, and scheduled/due/disabled state; detail separates Agent claims, HR normalization, evidence-backed HR judgment, and access history. An active-sync control invokes a focused `hr_team_sync.py` service that force-refreshes the shared roster, reconciles directory state, and reuses the existing skill/grant enablement coordinator before the UI reloads. Failed or partial states remain scoped to the affected Agent/workflow. The Agent-facing API is not called by the human UI.
+The UI follows Archive Room's independent modal/list/detail pattern but does not import or duplicate Archive Room state. It uses `managementFetch` for every full-data request. The overview shows one authoritative HR state indicator, daily-cycle counts, and a server-calculated `reportSchedule` containing the next configured collection instant, VO-local wall time/timezone, scheduler enablement, and scheduled/due/disabled state; detail separates Agent claims, HR normalization, evidence-backed HR judgment, and access history. An active-sync control invokes a focused `hr_team_sync.py` service that force-refreshes the shared roster, reconciles directory state, and refreshes Agent API grant readiness before the UI reloads. Because the directory Skill is a VO built-in, the detail does not show a per-Agent Skill readiness field. Failed or partial states remain scoped to the affected Agent/workflow. The Agent-facing API is not called by the human UI.
 
 Frontend logic is split into pure formatting/projection helpers where practical so Node-based tests can validate disclosure rendering, workflow states, and localization without a browser. A live browser acceptance script verifies navigation, pause/resume, roster/detail, report/assessment states, and degraded errors.
 
@@ -302,7 +303,7 @@ Frontend logic is split into pure formatting/projection helpers where practical 
 - assessment pending/succeeded/insufficient-information/failed;
 - worker queue depth, claim expiry, retry, and timeout counts;
 - public query allowed/denied, audit commit failures, and grant failures;
-- skill publish ready/conflict/unsupported counts.
+- Agent API grant ready/unsupported/delivery-failure counts.
 
 Operational logs contain IDs, state, code, and duration but no raw reports, full assessments, bearer tokens, credentials, or raw provider responses. Repeated failures are rate-limited. Repository and API limits bound request size, raw report length, normalized fields, evidence count, assessment length, activity history, and page sizes.
 
@@ -316,11 +317,11 @@ Operational logs contain IDs, state, code, and duration but no raw reports, full
 - **[HR hallucinates a report or assessment]** → Preserve raw claims, validate structured output, require evidence references/rationale, use `insufficient_information`, and never synthesize a missing self-report.
 - **[Sensitive assessment data leaks to ordinary Agents]** → Separate management and Agent routes, server-side projections, scoped grants, negative authorization tests, and no client-side-only hiding.
 - **[Access log identity is spoofed]** → Bind a hashed bearer grant to known AI ID in addition to loopback/action headers; fail disclosure when authentication or audit persistence fails.
-- **[Grant distribution is unsupported for a provider]** → Report readiness and disable cross-Agent HTTP reads for that Agent while retaining HR conversation/report participation.
+- **[Grant delivery is unsupported for a provider]** → Keep the built-in Skill visible, report only Agent API authorization readiness, and disable cross-Agent HTTP reads for that Agent while retaining HR conversation/report participation.
 - **[SQLite introduces a new repository pattern]** → Use only Python stdlib, one owning module, transactional migrations, backup/export diagnostics, busy timeout, repository tests, and no cross-domain direct access.
 - **[Assessment evidence becomes expensive or invasive]** → Use bounded typed read ports, summaries instead of raw histories, strict date/Agent filters, and source-specific limits.
 - **[Daily times shift with timezone or daylight saving]** → Store configured timezone/date occurrence separately from UTC timestamps and test DST/restart boundaries.
-- **[Skill content or workspace path is overwritten unsafely]** → Reuse managed markers, content hashes, symlink rejection, atomic writes, and conflict states; never overwrite user-owned conflicting content.
+- **[Built-in Skill drifts or is accidentally redistributed]** → Keep one repository-owned `/skills` source, advertise it through the catalog, add static no-workspace-publication checks, and keep grant files under a separate credential path.
 - **[Feature rollback leaves data or background work]** → Master and scheduler switches stop new work; workers use durable claims and bounded timeouts; rollback retains the database and archive-manager state for later recovery.
 - **[Development-machine behavior differs from fakes]** → Treat real OpenClaw creation/profile/restart/communication/meeting checks as a mandatory test-result gate rather than an optional smoke test.
 
@@ -331,14 +332,14 @@ Operational logs contain IDs, state, code, and duration but no raw reports, full
 3. Move archive-manager lifecycle slices behind existing compatibility delegates; run focused and full Archive Room regressions after each slice.
 4. Add HR role/profile/state and verify HR creation remains disabled behind `VO_HR_ENABLED` until storage and UI are ready.
 5. Add the transactional HR repository and schema migration tests, followed by directory and introduction services.
-6. Add the canonical directory skill, managed publisher, per-Agent grants, and readiness projection.
+6. Add the canonical directory skill to the VO built-in catalog, then add separate per-Agent grants and authorization-readiness projection without workspace Skill copies.
 7. Add reporting, evidence, assessment, scheduler, and observability services with deterministic clocks and fake conversations.
 8. Add management and Agent APIs with authorization, disclosure, audit, body-size, and pagination tests.
 9. Update project/deletion/meeting policy wiring and run project, meeting, Archive Room, communication, and provider regressions.
 10. Add the Human Resources UI, localization, Node checks, and live browser acceptance coverage.
 11. Deploy to the development machine with code present but `VO_HR_ENABLED=0`; run archive-manager and existing VO smoke tests.
 12. Enable HR lifecycle only, verify real OpenClaw auto-create, rediscovery, profile repair, restart, pause/resume, meeting eligibility, assignment/deletion protection, and archive-manager isolation.
-13. Enable directory and skill distribution; verify real Agent discovery, introduction, grant delivery, and controlled public queries.
+13. Enable the directory; verify built-in Skill exposure for every Provider, real Agent discovery, introduction, grant delivery, and controlled public queries.
 14. Enable scheduler for a short controlled acceptance window; verify collection, non-response, normalization, assessment, restart idempotency, logs, and failure isolation.
 15. Restore the intended daily schedule only after evidence is captured and no regression is observed.
 
@@ -356,7 +357,7 @@ Rollback:
 Verification is split into four required layers:
 
 1. **Pure unit tests:** role policy, lifecycle transitions, profile parsing/path safety, repository transactions/migrations, directory reconciliation, scheduler due logic and DST, claim fencing, report normalization validation, assessment validation, projection and audit policy.
-2. **Service/HTTP integration tests with fakes:** fake roster/provider/conversation/evidence ports, management token, Agent grants, idempotent retries, partial failures, pagination, body limits, CORS/origin rejection, and concurrent requests.
+2. **Service/HTTP integration tests with fakes:** fake roster/provider/conversation/evidence ports, management token, built-in Skill catalog exposure, absence of Agent workspace copies, Agent grants, idempotent retries, partial failures, pagination, body limits, CORS/origin rejection, and concurrent requests.
 3. **Compatibility and UI regression:** Archive Room Phase 1–8, archive manager Phase 4, meetings, project assignment/deletion, communication skills, provider boundaries, static service boundaries, localization, JS syntax, and live Human Resources UI paths.
 4. **Development-machine real OpenClaw acceptance:** HR/archive-manager creation and isolation, profile and skill writes, restart repair, pause/resume, HR meeting participation, archive-manager meeting rejection, Agent conversations, daily report and assessment, access grant/query/audit, provider failure degradation, and restart idempotency.
 
@@ -366,4 +367,4 @@ Every implementation task must add or update its focused tests. Local test succe
 
 - The exact development-machine target and deployment command will be resolved before the first real-OpenClaw acceptance task; the acceptance matrix is already fixed by the specs.
 - The production daily time may override the proposed `18:00` default through configuration without changing the one-cycle-per-local-date contract.
-- Provider-specific secure skill/grant delivery beyond existing OpenClaw workspace support will be enabled only when its adapter can prove an isolated delivery boundary; unsupported providers remain visible but cannot make cross-Agent HTTP reads.
+- Provider-specific secure grant delivery beyond existing OpenClaw workspace support will be enabled only when its adapter can prove an isolated delivery boundary; the built-in Skill remains Provider-neutral, while providers without a grant path remain visible but cannot make cross-Agent HTTP reads.
