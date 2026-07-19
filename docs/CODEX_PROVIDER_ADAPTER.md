@@ -70,8 +70,10 @@ Relevant routes:
 
 ## Security boundary
 
-- Turns use `workspace-write`, the configured workspace as the writable root, and network access disabled unless the user explicitly approves broader Codex behavior outside Virtual Office.
-- Approval/user-input requests are never auto-approved by the adapter.
+- `VO_CODEX_SANDBOX` accepts `read-only`, `workspace-write`, and `danger-full-access`. The first two disable network access by default, and `workspace-write` limits writable roots to the configured workspace.
+- `VO_CODEX_APPROVAL_POLICY` accepts `untrusted`, `on-request`, and `never`. `never` does not auto-approve requests; it tells Codex not to ask, so operations blocked by the sandbox fail directly.
+- Use `danger-full-access` together with `never` only on a trusted development machine because Codex can access files outside the workspace and the network.
+- When `VO_CODEX_ROUTE_APPROVALS_THROUGH_VO=true`, the adapter forces `untrusted` so approval requests can be handled in Virtual Office.
 - The default app-server transport is local stdio. Do not expose an unauthenticated listener on a non-loopback interface.
 
 ## External bridge contract

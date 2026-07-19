@@ -15,6 +15,18 @@ from providers.codex import CodexProvider
 import providers.codex as codex_provider_module
 
 
+def test_from_env_loads_codex_permission_settings(monkeypatch):
+    monkeypatch.setenv("VO_CODEX_SANDBOX", "danger-full-access")
+    monkeypatch.setenv("VO_CODEX_APPROVAL_POLICY", "never")
+    monkeypatch.setenv("VO_CODEX_ROUTE_APPROVALS_THROUGH_VO", "true")
+
+    provider = CodexProvider.from_env()
+
+    assert provider.sandbox == "danger-full-access"
+    assert provider.approval_policy == "never"
+    assert provider.route_approvals_through_vo is True
+
+
 def test_disabled_provider_is_invisible():
     provider = CodexProvider(enabled=False)
     assert provider.discover_agents() == []

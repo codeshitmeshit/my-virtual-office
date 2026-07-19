@@ -246,6 +246,7 @@ http://localhost:8090/setup
 | `VO_CODEX_MODEL` | 空 | Codex 模型覆盖 |
 | `VO_CODEX_SANDBOX` | `workspace-write` | Codex sandbox 模式；Docker 示例常用 `danger-full-access` |
 | `VO_CODEX_APPROVAL_POLICY` | `never` | Codex approval policy |
+| `VO_CODEX_ROUTE_APPROVALS_THROUGH_VO` | `false` | 是否强制使用 `untrusted` 并把 Codex 审批路由到 VO |
 | `VO_CODEX_INCLUDE_MAIN` | `true` | 是否显示 `codex-main` |
 | `VO_CODEX_INCLUDE_NATIVE_AGENTS` | `true` | 是否发现 `$CODEX_HOME/agents/*.toml` |
 | `VO_CODEX_REGISTER_NATIVE_AGENTS` | `true` | 创建 VO Codex agent 时是否写入 native agent 配置 |
@@ -292,6 +293,26 @@ http://localhost:8090/setup
 更多示例见 [.env.example](.env.example)。
 
 聊天命令的精确语法、Provider 能力、灰度与回滚说明见 [聊天斜杠命令运维指南](docs/CHAT_SLASH_COMMANDS.md)。
+
+### Codex 权限配置
+
+Virtual Office 会把下面两个配置同时传给 `codex app-server` 的 thread 和 turn；修改 `.env` 后需要重启 Virtual Office 才会作用于新启动的 Codex bridge。
+
+- `VO_CODEX_SANDBOX=read-only`：只读文件系统，网络默认关闭。
+- `VO_CODEX_SANDBOX=workspace-write`：允许写入当前 Codex workspace，网络默认关闭，是推荐的常规配置。
+- `VO_CODEX_SANDBOX=danger-full-access`：不启用 Codex 文件系统和网络沙箱，适用于受信任的开发机环境；Codex 可访问 workspace 之外的文件并执行联网操作。
+- `VO_CODEX_APPROVAL_POLICY=untrusted`：对不受信任的命令请求审批。
+- `VO_CODEX_APPROVAL_POLICY=on-request`：Codex 判断需要越过当前限制时请求审批。
+- `VO_CODEX_APPROVAL_POLICY=never`：Codex 不发起权限审批；若 sandbox 仍有限制，越界操作会直接失败。
+
+需要在受信任开发机上完全放开时，可以组合使用：
+
+```env
+VO_CODEX_SANDBOX=danger-full-access
+VO_CODEX_APPROVAL_POLICY=never
+```
+
+如果同时启用 `VO_CODEX_ROUTE_APPROVALS_THROUGH_VO=true`，审批策略会强制设为 `untrusted`，以保证审批卡片能够路由到 Virtual Office；这时 `never` 不生效。未知配置值会安全回退为 `workspace-write` 和 `on-request`。
 
 ## 本地数据
 

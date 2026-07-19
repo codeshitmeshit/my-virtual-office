@@ -1812,6 +1812,56 @@ def test_vo_approval_routing_is_opt_in_and_disables_user_hooks_only_when_enabled
             vo_client.close()
 
 
+def test_app_server_uses_configured_sandbox_and_approval_policy():
+    with tempfile.TemporaryDirectory() as tmp:
+        full_access_client = CodexAppServerClient(
+            tmp,
+            binary=make_fake_codex(tmp),
+            sandbox="danger-full-access",
+            approval_policy="never",
+        )
+        read_only_client = CodexAppServerClient(
+            tmp,
+            binary=make_fake_codex(tmp),
+            sandbox="read-only",
+            approval_policy="untrusted",
+        )
+        try:
+            assert full_access_client._thread_params()["sandbox"] == "danger-full-access"
+            assert full_access_client._thread_params()["approvalPolicy"] == "never"
+            assert full_access_client._sandbox_policy() == {"type": "dangerFullAccess"}
+
+            assert read_only_client._thread_params()["sandbox"] == "read-only"
+            assert read_only_client._thread_params()["approvalPolicy"] == "untrusted"
+            assert read_only_client._sandbox_policy() == {
+                "type": "readOnly",
+                "networkAccess": False,
+            }
+        finally:
+            full_access_client.close()
+            read_only_client.close()
+
+
+def test_app_server_invalid_permission_config_falls_back_to_safe_defaults():
+    with tempfile.TemporaryDirectory() as tmp:
+        client = CodexAppServerClient(
+            tmp,
+            binary=make_fake_codex(tmp),
+            sandbox="invalid",
+            approval_policy="invalid",
+        )
+        try:
+            assert client._thread_params()["sandbox"] == "workspace-write"
+            assert client._thread_params()["approvalPolicy"] == "on-request"
+            assert client._sandbox_policy() == {
+                "type": "workspaceWrite",
+                "writableRoots": [tmp],
+                "networkAccess": False,
+            }
+        finally:
+            client.close()
+
+
 def test_pending_approval_can_select_concurrent_request_by_request_or_item_id():
     with tempfile.TemporaryDirectory() as tmp:
         client = CodexAppServerClient(tmp, binary=make_fake_codex(tmp))

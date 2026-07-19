@@ -676,12 +676,16 @@ class _LateStartCleanup:
 class CodexAppServerClient:
     """Small synchronous facade over app-server's bidirectional JSONL RPC."""
 
-    def __init__(self, workspace: str, model: str = "", binary: str | None = None, max_concurrent_turns: int = 1, route_approvals_through_vo: bool = False, home_path: str | None = None):
+    def __init__(self, workspace: str, model: str = "", binary: str | None = None, max_concurrent_turns: int = 1, route_approvals_through_vo: bool = False, home_path: str | None = None, sandbox: str | None = None, approval_policy: str | None = None):
         self.workspace = os.path.abspath(workspace)
         self.model = model or ""
         self.binary = binary or os.environ.get("VO_CODEX_BIN") or shutil.which("codex") or "codex"
         self.profile = str(os.environ.get("VO_CODEX_PROFILE") or "").strip()
         self.route_approvals_through_vo = bool(route_approvals_through_vo)
+        self.sandbox = self._normalize_sandbox(sandbox or os.environ.get("VO_CODEX_SANDBOX"))
+        self.configured_approval_policy = self._normalize_approval_policy(
+            approval_policy or os.environ.get("VO_CODEX_APPROVAL_POLICY")
+        )
         self.home_path = os.path.abspath(os.path.expanduser(home_path or os.environ.get("VO_CODEX_HOME") or os.environ.get("CODEX_HOME") or "~/.codex"))
         runtime_command = [self.binary, "app-server"]
         if self.route_approvals_through_vo:
@@ -745,6 +749,16 @@ class CodexAppServerClient:
         if not state_entries:
             return []
         return ["-c", "hooks.state={ " + ", ".join(state_entries) + " }"]
+
+    @staticmethod
+    def _normalize_sandbox(value: str | None) -> str:
+        normalized = str(value or "workspace-write").strip().lower()
+        return normalized if normalized in {"read-only", "workspace-write", "danger-full-access"} else "workspace-write"
+
+    @staticmethod
+    def _normalize_approval_policy(value: str | None) -> str:
+        normalized = str(value or "on-request").strip().lower()
+        return normalized if normalized in {"untrusted", "on-request", "never"} else "on-request"
 
     def close(self) -> None:
         self._initialized = False
@@ -1760,7 +1774,18 @@ class CodexAppServerClient:
         return {"decision": "cancel"}
 
     def _approval_policy(self) -> str:
-        return "untrusted" if self.route_approvals_through_vo else "on-request"
+        return "untrusted" if self.route_approvals_through_vo else self.configured_approval_policy
+
+    def _sandbox_policy(self) -> dict[str, Any]:
+        if self.sandbox == "danger-full-access":
+            return {"type": "dangerFullAccess"}
+        if self.sandbox == "read-only":
+            return {"type": "readOnly", "networkAccess": False}
+        return {
+            "type": "workspaceWrite",
+            "writableRoots": [self.workspace],
+            "networkAccess": False,
+        }
 
     def _thread_params(self) -> dict[str, Any]:
         params: dict[str, Any] = {
@@ -1770,7 +1795,7 @@ class CodexAppServerClient:
             # its persisted reviewer so approvals are routed back to this
             # app-server client, where VO can expose them on the source surface.
             "approvalsReviewer": "user",
-            "sandbox": "workspace-write",
+            "sandbox": self.sandbox,
             "ephemeral": False,
         }
         if self.model:
@@ -1928,11 +1953,7 @@ class CodexAppServerClient:
                     "cwd": self.workspace,
                     "approvalPolicy": self._approval_policy(),
                     "approvalsReviewer": "user",
-                    "sandboxPolicy": {
-                        "type": "workspaceWrite",
-                        "writableRoots": [self.workspace],
-                        "networkAccess": False,
-                    },
+                    "sandboxPolicy": self._sandbox_policy(),
                 }
                 turn_result = self._request_with_restart("turn/start", turn_params, timeout=TURN_START_RESPONSE_TIMEOUT_SEC, retry=False, on_late_response=handle_late_response)
             except TimeoutError:
@@ -2311,21 +2332,31 @@ class CodexHttpBridgeClient:
         return self._post("/compact", {"threadId": thread_id, "workspace": self.workspace, "timeoutSec": timeout_sec}, timeout_sec + 10)
 
 
-_CLIENTS: dict[tuple[str, str, str, str, int, bool], CodexAppServerClient | CodexHttpBridgeClient] = {}
+_CLIENTS: dict[tuple[str, str, str, str, int, bool, str, str], CodexAppServerClient | CodexHttpBridgeClient] = {}
 _CLIENTS_LOCK = threading.Lock()
 
 
-def get_codex_bridge(workspace: str, model: str = "", bridge_url: str = "", *, max_concurrent_turns: int = 1, route_approvals_through_vo: bool = False, home_path: str = "") -> CodexAppServerClient | CodexHttpBridgeClient:
+def get_codex_bridge(workspace: str, model: str = "", bridge_url: str = "", *, max_concurrent_turns: int = 1, route_approvals_through_vo: bool = False, home_path: str = "", sandbox: str = "workspace-write", approval_policy: str = "on-request") -> CodexAppServerClient | CodexHttpBridgeClient:
     try:
         capacity = max(1, min(int(max_concurrent_turns or 1), 4))
     except (TypeError, ValueError):
         capacity = 1
     route_in_vo = bool(route_approvals_through_vo)
+    resolved_sandbox = CodexAppServerClient._normalize_sandbox(sandbox)
+    resolved_approval_policy = CodexAppServerClient._normalize_approval_policy(approval_policy)
     resolved_home = os.path.abspath(os.path.expanduser(home_path or os.environ.get("VO_CODEX_HOME") or os.environ.get("CODEX_HOME") or "~/.codex"))
-    key = (os.path.abspath(workspace), resolved_home, model or "", bridge_url or "", capacity, route_in_vo)
+    key = (os.path.abspath(workspace), resolved_home, model or "", bridge_url or "", capacity, route_in_vo, resolved_sandbox, resolved_approval_policy)
     with _CLIENTS_LOCK:
         client = _CLIENTS.get(key)
         if client is None:
-            client = CodexHttpBridgeClient(bridge_url, workspace, model) if bridge_url else CodexAppServerClient(workspace, model, max_concurrent_turns=capacity, route_approvals_through_vo=route_in_vo, home_path=resolved_home)
+            client = CodexHttpBridgeClient(bridge_url, workspace, model) if bridge_url else CodexAppServerClient(
+                workspace,
+                model,
+                max_concurrent_turns=capacity,
+                route_approvals_through_vo=route_in_vo,
+                home_path=resolved_home,
+                sandbox=resolved_sandbox,
+                approval_policy=resolved_approval_policy,
+            )
             _CLIENTS[key] = client
         return client

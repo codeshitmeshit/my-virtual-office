@@ -112,6 +112,8 @@ class CodexProvider:
             max_concurrent_turns=self.max_concurrent_turns,
             route_approvals_through_vo=self.route_approvals_through_vo,
             home_path=self.home_path or "",
+            sandbox=self.sandbox,
+            approval_policy=self.approval_policy,
         )
 
     @classmethod
@@ -128,6 +130,9 @@ class CodexProvider:
             model=os.environ.get("VO_CODEX_MODEL") or os.environ.get("OPENAI_MODEL"),
             reply_text=os.environ.get("VO_CODEX_REPLY_TEXT"),
             bridge_url=os.environ.get("VO_CODEX_BRIDGE_URL"),
+            sandbox=os.environ.get("VO_CODEX_SANDBOX") or "workspace-write",
+            approval_policy=os.environ.get("VO_CODEX_APPROVAL_POLICY") or "never",
+            route_approvals_through_vo=_env_bool("VO_CODEX_ROUTE_APPROVALS_THROUGH_VO", False),
             max_concurrent_turns=_bounded_turn_capacity(os.environ.get("VO_CODEX_MAX_CONCURRENT_TURNS")),
         )
 
