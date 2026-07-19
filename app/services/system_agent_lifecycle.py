@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import threading
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from enum import Enum
@@ -319,7 +320,12 @@ def record_lifecycle_activity(
 
 
 class SystemAgentProviderPort(Protocol):
-    def discover(self, role: SystemAgentRole) -> Sequence[ProviderAgent]: ...
+    def discover(
+        self,
+        role: SystemAgentRole,
+        *,
+        force_refresh: bool = False,
+    ) -> Sequence[ProviderAgent]: ...
     def create(self, role: SystemAgentRole) -> ProviderAgent: ...
     def resolve_workspace(self, agent: ProviderAgent) -> Path: ...
     def sync_managed_skills(self, agent: ProviderAgent) -> Mapping[str, Any]: ...
@@ -351,3 +357,275 @@ class SystemAgentPorts:
     presence: SystemAgentPresencePort
     clock: Callable[[], datetime]
     new_id: Callable[[], str]
+
+
+class SystemAgentLifecycleService:
+    """Idempotent provider reconciliation shared by all VO system-Agent roles."""
+
+    _locks_guard = threading.Lock()
+    _role_locks: dict[str, threading.RLock] = {}
+
+    def __init__(
+        self,
+        ports: SystemAgentPorts,
+        *,
+        provider_retry_limit: int = 1,
+        activity_limit: int = DEFAULT_ACTIVITY_LIMIT,
+    ):
+        if isinstance(provider_retry_limit, bool) or not isinstance(provider_retry_limit, int):
+            raise ValueError("provider_retry_limit must be an integer")
+        if not 0 <= provider_retry_limit <= 5:
+            raise ValueError("provider_retry_limit must be between 0 and 5")
+        self._ports = ports
+        self._provider_retry_limit = provider_retry_limit
+        self._activity_limit = validate_activity_limit(activity_limit)
+
+    @classmethod
+    def _lock_for(cls, role_key: str) -> threading.RLock:
+        with cls._locks_guard:
+            return cls._role_locks.setdefault(role_key, threading.RLock())
+
+    def _load_state(self, role: SystemAgentRole) -> SystemAgentLifecycleState:
+        loaded = self._ports.state.load(role)
+        if isinstance(loaded, SystemAgentLifecycleState):
+            if loaded.role_key != role.role_key:
+                raise ValueError("state repository returned a different system-Agent role")
+            return loaded
+        if loaded is not None and not isinstance(loaded, Mapping):
+            raise ValueError("state repository returned an unsupported lifecycle value")
+        return SystemAgentLifecycleState.from_mapping(
+            role,
+            loaded,
+            now=self._ports.clock(),
+            activity_limit=self._activity_limit,
+        )
+
+    @staticmethod
+    def _provider_agent(role: SystemAgentRole, value: Any) -> ProviderAgent:
+        if isinstance(value, ProviderAgent):
+            return value
+        if isinstance(value, Mapping):
+            return ProviderAgent.from_mapping(value, default_provider_kind=role.provider_kind)
+        raise ValueError("provider returned an unsupported Agent value")
+
+    def _discover_once(self, role: SystemAgentRole) -> tuple[ProviderAgent, ...]:
+        result = self._ports.provider.discover(role, force_refresh=True)
+        if result is None:
+            return ()
+        if isinstance(result, (ProviderAgent, Mapping)):
+            values: Sequence[Any] = (result,)
+        elif isinstance(result, Sequence) and not isinstance(result, (str, bytes)):
+            values = result
+        else:
+            raise ValueError("provider discovery must return a sequence of Agents")
+        unique: dict[str, ProviderAgent] = {}
+        for value in values:
+            agent = self._provider_agent(role, value)
+            unique.setdefault(agent.id, agent)
+        return tuple(unique.values())
+
+    def _discover_with_retries(self, role: SystemAgentRole) -> tuple[ProviderAgent, ...]:
+        last_error: BaseException | None = None
+        for _attempt in range(self._provider_retry_limit + 1):
+            try:
+                return self._discover_once(role)
+            except Exception as exc:
+                last_error = exc
+        assert last_error is not None
+        raise last_error
+
+    @staticmethod
+    def _select_agent(
+        role: SystemAgentRole,
+        state: SystemAgentLifecycleState,
+        agents: Sequence[ProviderAgent],
+    ) -> tuple[ProviderAgent | None, tuple[str, ...]]:
+        if not agents:
+            return None, ()
+        preferred_ids = tuple(
+            value for value in (state.agent_id, role.stable_id) if value
+        )
+        selected = next(
+            (agent for preferred in preferred_ids for agent in agents if agent.id == preferred),
+            agents[0] if len(agents) == 1 else None,
+        )
+        duplicates = tuple(agent.id for agent in agents if selected is None or agent.id != selected.id)
+        return selected, duplicates
+
+    def _create_with_recovery(
+        self,
+        role: SystemAgentRole,
+        state: SystemAgentLifecycleState,
+    ) -> tuple[ProviderAgent, bool, tuple[str, ...]]:
+        last_error: BaseException | None = None
+        for attempt in range(self._provider_retry_limit + 1):
+            try:
+                created = self._provider_agent(role, self._ports.provider.create(role))
+                try:
+                    refreshed = self._discover_with_retries(role)
+                except Exception:
+                    # A successful create response is authoritative enough to continue
+                    # configuration. Retrying create after a refresh outage can duplicate
+                    # a provider Agent.
+                    return created, True, ()
+                selected, duplicates = self._select_agent(role, state, refreshed or (created,))
+                if selected is None:
+                    raise RuntimeError(
+                        "provider creation produced conflicting system-Agent instances: "
+                        + ", ".join(duplicates)
+                    )
+                return selected, True, duplicates
+            except Exception as exc:
+                last_error = exc
+                try:
+                    refreshed = self._discover_with_retries(role)
+                except Exception:
+                    refreshed = ()
+                selected, duplicates = self._select_agent(role, state, refreshed)
+                if selected is not None:
+                    return selected, True, duplicates
+                if duplicates:
+                    raise RuntimeError(
+                        "provider contains ambiguous system-Agent instances: "
+                        + ", ".join(duplicates)
+                    ) from exc
+                if attempt >= self._provider_retry_limit:
+                    break
+        assert last_error is not None
+        raise last_error
+
+    def _record(
+        self,
+        state: SystemAgentLifecycleState,
+        *,
+        action: str,
+        status: ActivityStatus,
+        message: str,
+        error: str = "",
+        context: Mapping[str, Any] | None = None,
+    ) -> SystemAgentLifecycleState:
+        updated, _activity = record_lifecycle_activity(
+            state,
+            action=action,
+            status=status,
+            message=message,
+            error=error,
+            context=context,
+            clock=self._ports.clock,
+            new_id=self._ports.new_id,
+            activity_limit=self._activity_limit,
+        )
+        return updated
+
+    def _save_error(
+        self,
+        role: SystemAgentRole,
+        state: SystemAgentLifecycleState,
+        *,
+        action: str,
+        error: BaseException | str,
+        agent: ProviderAgent | None = None,
+    ) -> SystemAgentLifecycleState:
+        if isinstance(error, BaseException):
+            message = str(error).strip() or error.__class__.__name__
+        else:
+            message = str(error).strip() or "unknown lifecycle error"
+        if agent is not None:
+            state = replace(
+                state,
+                agent_id=agent.id,
+                provider_kind=agent.provider_kind,
+                workspace=agent.workspace or state.workspace,
+            )
+        state = replace(state, status=LifecycleStatus.ERROR, last_error=message)
+        state = self._record(
+            state,
+            action=action,
+            status=ActivityStatus.ERROR,
+            message=f"System Agent {action} failed",
+            error=message,
+        )
+        return self._ports.state.save(role, state)
+
+    def reconcile(self, role: SystemAgentRole) -> SystemAgentLifecycleState:
+        with self._lock_for(role.role_key):
+            state = self._load_state(role)
+            try:
+                discovered = self._discover_with_retries(role)
+            except Exception as exc:
+                return self._save_error(role, state, action="discover", error=exc)
+
+            agent, duplicates = self._select_agent(role, state, discovered)
+            created_now = False
+            if agent is None and duplicates:
+                return self._save_error(
+                    role,
+                    state,
+                    action="discover",
+                    error="ambiguous provider Agents: " + ", ".join(duplicates),
+                )
+            if agent is None:
+                try:
+                    agent, created_now, duplicates = self._create_with_recovery(role, state)
+                except Exception as exc:
+                    return self._save_error(role, state, action="create", error=exc)
+            if duplicates:
+                return self._save_error(
+                    role,
+                    state,
+                    action="duplicate_detected",
+                    error="duplicate provider Agents: " + ", ".join(duplicates),
+                    agent=agent,
+                )
+
+            now = _timestamp(self._ports.clock())
+            state = replace(
+                state,
+                agent_id=agent.id,
+                name=role.display_name,
+                emoji=role.emoji,
+                provider_kind=agent.provider_kind,
+                status=LifecycleStatus.CONFIGURING,
+                auto_created=state.auto_created or created_now,
+                created_at=state.created_at or (now if created_now else ""),
+                reconciled_at=now,
+                last_error="",
+            )
+            try:
+                workspace = self._ports.provider.resolve_workspace(agent)
+                profile = self._ports.profiles.synchronize(role, agent, workspace)
+            except Exception as exc:
+                return self._save_error(role, state, action="profile_sync", error=exc, agent=agent)
+            try:
+                skill = self._ports.provider.sync_managed_skills(agent)
+                if not isinstance(skill, Mapping) or skill.get("ready") is not True:
+                    detail = skill.get("status") if isinstance(skill, Mapping) else "invalid skill result"
+                    raise RuntimeError(str(detail or "managed communication skill is not ready"))
+            except Exception as exc:
+                return self._save_error(role, state, action="skill_sync", error=exc, agent=agent)
+
+            finished_at = _timestamp(self._ports.clock())
+            state = replace(
+                state,
+                workspace=str(profile.workspace or workspace),
+                profile_files=tuple(dict.fromkeys((
+                    *role.required_files,
+                    *profile.written_files,
+                    *profile.unchanged_files,
+                ))),
+                profile_version=profile.version,
+                profile_updated_at=finished_at if profile.updated else state.profile_updated_at,
+                communication_skill=skill,
+                status=LifecycleStatus.PAUSED if state.paused else LifecycleStatus.IDLE,
+                reconciled_at=finished_at,
+                last_error="",
+            )
+            action = "auto_create" if created_now else ("profile_update" if profile.updated else "reconcile")
+            state = self._record(
+                state,
+                action=action,
+                status=ActivityStatus.OK,
+                message="System Agent lifecycle is ready",
+                context={"profileVersion": profile.version, "profileUpdated": profile.updated},
+            )
+            return self._ports.state.save(role, state)
