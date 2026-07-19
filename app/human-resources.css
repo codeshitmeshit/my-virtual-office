@@ -1,0 +1,123 @@
+.hr-modal-content {
+    width: min(96vw, 1380px);
+    height: min(calc(100dvh - 72px), 900px);
+    min-height: 580px;
+    display: flex;
+    flex-direction: column;
+    padding: 0;
+    overflow: hidden;
+    background: #151824;
+    color: #edf1f7;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.hr-header {
+    flex: 0 0 auto;
+    min-height: 58px;
+    padding: 13px 18px;
+    background: #0e1320;
+    border-bottom: 2px solid #54d2b0;
+}
+
+.hr-header h2 {
+    margin: 0;
+    color: #72e4c5;
+    font-size: 16px;
+}
+
+.hr-header-status {
+    margin-left: auto;
+    margin-right: 10px;
+    padding: 4px 9px;
+    border: 1px solid #33475a;
+    border-radius: 999px;
+    background: #131c29;
+    color: #a9b8c8;
+    font-size: 11px;
+}
+
+.hr-close {
+    border: 0;
+    background: transparent;
+    color: #c4ced8;
+    cursor: pointer;
+}
+
+.hr-content {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.hr-shell {
+    height: 100%;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: minmax(280px, 32%) minmax(0, 1fr);
+}
+
+.hr-agent-list,
+.hr-agent-detail {
+    min-width: 0;
+    min-height: 0;
+    overflow: auto;
+}
+
+.hr-agent-list {
+    border-right: 1px solid #293445;
+    background: #101622;
+}
+
+.hr-agent-detail {
+    background: #171d2a;
+}
+
+.hr-panel-placeholder {
+    margin: 18px;
+    padding: 18px;
+    border: 1px dashed #3a485d;
+    border-radius: 9px;
+    background: #151d2a;
+    color: #9eacbb;
+    font-size: 12px;
+    line-height: 1.6;
+}
+
+@media (max-width: 760px) {
+    .hr-modal-content {
+        width: 100vw;
+        height: 100dvh;
+        min-height: 0;
+        max-height: none;
+        border-radius: 0;
+    }
+
+    .hr-header {
+        padding: 11px 12px;
+    }
+
+    .hr-header-status {
+        max-width: 36vw;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .hr-shell {
+        grid-template-columns: 1fr;
+        grid-template-rows: minmax(180px, 38%) minmax(0, 1fr);
+    }
+
+    .hr-agent-list {
+        border-right: 0;
+        border-bottom: 1px solid #293445;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .hr-modal-content,
+    .hr-modal-content * {
+        scroll-behavior: auto !important;
+        transition: none !important;
+    }
+}

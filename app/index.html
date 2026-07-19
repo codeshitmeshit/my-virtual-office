@@ -12,6 +12,7 @@
     <link rel="stylesheet" href="style.css?v=1784143900-chat-bottom-follow-feishu-media-display">
     <link rel="stylesheet" href="projects.css?v=1784174400-project-board-scroll">
     <link rel="stylesheet" href="archive-room.css?v=1783041181-phase13">
+    <link rel="stylesheet" href="human-resources.css?v=1784500000-hr-shell">
     <link rel="stylesheet" href="fonts.css?v=1783041181.05.07">
     <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
     <!-- i18n: inline locale data for immediate init -->
@@ -361,6 +362,7 @@
                 <a href="/cron.html" style="text-decoration:none"><button title="Cron Job Manager" data-i18n="cron" data-i18n-title="cron_manager_title">⏰ Cron</button></a>
                 <button title="Project Manager" onclick="openProjectsManager()" data-i18n="projects" data-i18n-title="projects_title">📋 Projects</button>
                 <button title="Archive Room" onclick="openArchiveRoom()" data-i18n="archive_room" data-i18n-title="archive_room">🗄️ Archive Room</button>
+                <button id="btn-human-resources" title="Human Resources" onclick="openHumanResources()" data-i18n="human_resources" data-i18n-title="human_resources">🧑‍💼 Human Resources</button>
                 <button title="Reset canvas zoom" onclick="resetCamera()" data-i18n="reset_zoom" data-i18n-title="reset_zoom">🔍 Reset</button>
                 <button id="sms-toggle" title="SMS/Phone Panel" data-i18n="sms" data-i18n-title="sms_phone_panel">📞 SMS</button>
                 <button id="browser-toggle" title="Agent Browser" class="browser-toggle-btn" data-i18n="browser" data-i18n-title="agent_browser_title">🌐 Browser</button>
@@ -861,6 +863,28 @@
         </div>
     </div>
 
+    <!-- Human Resources Modal -->
+    <div id="humanResourcesModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="human-resources-title" onclick="if(event.target===this)closeHumanResources()">
+        <div class="modal-content hr-modal-content">
+            <div class="modal-header hr-header">
+                <span class="modal-emoji" aria-hidden="true">🧑‍💼</span>
+                <h2 id="human-resources-title" data-i18n="human_resources_title">Human Resources</h2>
+                <span id="human-resources-status" class="hr-header-status" data-i18n="hr_status_pending">Status pending</span>
+                <button id="human-resources-close" class="close-btn hr-close" type="button" onclick="closeHumanResources()" aria-label="Close Human Resources" data-i18n-aria-label="hr_close">&times;</button>
+            </div>
+            <div id="human-resources-content" class="hr-content" aria-live="polite">
+                <div class="hr-shell">
+                    <aside class="hr-agent-list" aria-label="Agent roster" data-i18n-aria-label="hr_agent_roster">
+                        <div class="hr-panel-placeholder" data-i18n="hr_roster_loading">Loading Agent roster...</div>
+                    </aside>
+                    <main class="hr-agent-detail" tabindex="-1">
+                        <div class="hr-panel-placeholder" data-i18n="hr_overview_loading">Loading Human Resources overview...</div>
+                    </main>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- SMS Panel -->
     <div id="sms-panel" class="sms-panel">
         <div class="sms-resize-handle top-left"></div>
@@ -1112,6 +1136,7 @@
     <script src="browser-panel.js?v=1783078720-viewer-reload"></script>
     <script src="projects.js?v=1784318769-project-authoring-review"></script>
     <script src="archive-room.js?v=1783041181-phase13"></script>
+    <script src="human-resources.js?v=1784500000-hr-shell"></script>
     <script>
     // Bio sections for agent modal
     let _bioCache = {};
