@@ -129,6 +129,55 @@ def test_gateway_exception_maps_to_502_without_binding_write():
     assert bindings == {}
 
 
+def test_agent_local_fallback_persists_binding_when_gateway_create_unavailable():
+    ports, bindings, _jobs = _schedule_fixture()
+    broken = project_schedule.SchedulePorts(
+        **{**ports.__dict__, "gateway": lambda *args: {"ok": False, "error": "gateway down"}}
+    )
+
+    result = project_schedule.create("p", {
+        "schedule": {"kind": "cron", "expr": "0 10 * * *", "timezone": "Asia/Shanghai"},
+        "targetType": "projectWorkflow",
+        "allowLocalBindingFallback": True,
+    }, ports=broken)
+
+    assert result.get("_status", 200) == 200
+    assert result["ok"] is True
+    assert result["gatewayAvailable"] is False
+    assert result["status"] == "enabled"
+    assert result["reconciliationRequired"] is True
+    assert result["id"] in bindings
+    assert bindings[result["id"]]["lastStatus"] == "enabled"
+    assert bindings[result["id"]]["lastError"] is None
+    assert bindings[result["id"]]["debugLastError"] == "gateway down"
+
+
+def test_list_falls_back_to_local_bindings_when_gateway_unavailable():
+    ports, _bindings, _jobs = _schedule_fixture()
+    project_schedule.create("p", {
+        "name": "Daily",
+        "schedule": {"kind": "cron", "expr": "0 10 * * *", "timezone": "Asia/Shanghai"},
+        "targetType": "projectWorkflow",
+    }, ports=ports)
+    broken = project_schedule.SchedulePorts(
+        **{**ports.__dict__, "gateway": lambda *args: {"ok": False, "error": "gateway down"}}
+    )
+
+    project_list = project_schedule.list_jobs("p", ports=broken)
+    all_list = project_schedule.list_all(ports=broken)
+
+    assert project_list.get("_status", 200) == 200
+    assert project_list["ok"] is True
+    assert project_list["gatewayAvailable"] is False
+    assert project_list["jobs"][0]["id"] == "c"
+    assert "warning" in project_list
+    assert all_list.get("_status", 200) == 200
+    assert all_list["ok"] is True
+    assert all_list["gatewayAvailable"] is False
+    assert all_list["jobs"][0]["id"] == "c"
+    assert all_list["projects"][0]["id"] == "p"
+
+
 def test_same_cron_updates_are_serialized_and_binding_matches_gateway():
     ports, bindings, jobs = _schedule_fixture()
     project_schedule.create("p", {

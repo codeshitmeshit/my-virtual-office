@@ -401,7 +401,15 @@ def start_task(
         return _status({"error": "Project Execution is not enabled for this project"}, 409)
 
     workspace_path = snapshot_project.get("workspacePath")
-    workspace = ports.validate_workspace(workspace_path)
+    allow_workspace_optional = (
+        str(body.get("source") or "") == "agent_project_execution"
+        and not str(workspace_path or "").strip()
+    )
+    workspace = (
+        {"ok": True, "path": "", "kind": "none", "virtual": True}
+        if allow_workspace_optional
+        else ports.validate_workspace(workspace_path)
+    )
     if not workspace.get("ok"):
         repository.update(project_id, lambda project: project.update({"workspaceStatus": copy.deepcopy(workspace)}))
         result = _status(workspace, 409)
@@ -427,7 +435,11 @@ def start_task(
         _notify_start_failure(repository, project_id, task_id, result, ports.notify_intervention)
         return result
 
-    git_state = ports.git_snapshot(workspace["path"])
+    git_state = (
+        {"ok": True, "dirty": False, "files": [], "fingerprint": "", "truncated": False, "virtual": True}
+        if workspace.get("virtual")
+        else ports.git_snapshot(workspace["path"])
+    )
     if git_state.get("error"):
         result = _status(
             {

@@ -237,6 +237,71 @@ def test_intents_cover_only_eligible_kinds_and_expose_opaque_actions(tmp_path):
         raise AssertionError("non-security interactions must not become approval cards")
 
 
+def test_route_persists_full_command_separately_from_display_summary(tmp_path):
+    sender = FakeNotificationSender([])
+    service = coordinator(tmp_path, sender)
+    long_json = "{\"payload\":\"" + ("x" * 9000) + "\"}"
+    command = (
+        "/bin/zsh -lc \"curl -sS --max-time 10 -X POST "
+        "http://127.0.0.1:8090/api/agent/project-authoring/projects "
+        "-H 'Content-Type: application/json' -d '"
+        + long_json
+        + "'\""
+    )
+
+    record, created = service.register(approval(command=command), feishu_context())
+
+    assert created is True
+    assert record["command"] == command
+    assert record["summary"] != command
+    assert len(record["summary"]) <= 1200
+    assert record["intent"]["summary"] == record["summary"]
+    assert command not in json.dumps(record["intent"], ensure_ascii=False)
+
+
+def test_vo_project_authoring_command_displays_structured_application_summary(tmp_path):
+    sender = FakeNotificationSender([])
+    service = coordinator(tmp_path, sender)
+    proposal = """我准备修改这个 VO 项目，请确认：
+
+项目 ID：project-e59f9507-285c-4ccf-bf37-648fd16c5067
+项目名称：日报
+修改目标：设置为每天 10:00 运行
+修改内容：
+
+| # | 类型 | 对象 | 当前值 | 目标值 | 影响 |
+| --- | --- | --- | --- | --- | --- |
+| 1 | scheduled_cron | 项目级定时运行 | 当前值以项目现状为准 | 每天 10:00 Asia/Shanghai | VO 会保存并启用项目级定时配置；到点后复用项目执行入口启动项目，不会在保存时立即启动执行 |
+| 2 | update_project | 项目属性 | 当前值以项目现状为准 | projectType=reusable, longTermProject=true | 项目会保持为可复用/长期项目，便于每日重复执行 |
+
+不会修改的内容：任务、角色、reviewer、执行状态
+风险/注意事项：保存定时配置不会立即运行项目；到点触发后仍遵守原项目执行、reviewer、workspace、dirty worktree 和用户验收门禁。
+需要你确认的点：是否修改 project-e59f9507-285c-4ccf-bf37-648fd16c5067 这个“日报”项目。
+
+请确认是否按以上方案修改真实项目。"""
+    command = (
+        "/bin/zsh -lc \"proposal='"
+        + proposal
+        + "'; digest=\\\"$(printf %s \\\"$proposal\\\" | shasum -a 256 | awk '{print $1}')\\\"; "
+        + "curl -sS -X POST http://127.0.0.1:8090/api/agent/projects/project-e59f9507-285c-4ccf-bf37-648fd16c5067/scheduled-cron\""
+    )
+
+    record, created = service.register(approval(command=command), feishu_context())
+
+    assert created is True
+    assert record["command"] == command
+    assert record["summary"].startswith("VO 项目操作申请")
+    assert "项目：日报（project-e59f9507-285c-4ccf-bf37-648fd16c5067）" in record["summary"]
+    assert "目标：设置为每天 10:00 运行" in record["summary"]
+    assert "scheduled_cron / 项目级定时运行：每天 10:00 Asia/Shanghai" in record["summary"]
+    assert "update_project / 项目属性：projectType=reusable, longTermProject=true" in record["summary"]
+    assert "proposal=" not in record["summary"]
+    assert "digest=" not in record["summary"]
+    assert "curl" not in record["summary"]
+    assert record["intent"]["summary"] == record["summary"]
+    assert command not in json.dumps(record["intent"], ensure_ascii=False)
+
+
 def test_notification_application_uses_origin_union_id_and_fixed_recipient_is_ignored(tmp_path):
     sender = FakeNotificationSender([{"ok": True, "status": "sent", "channel": "app", "messageId": "om_primary"}])
     service = coordinator(tmp_path, sender)

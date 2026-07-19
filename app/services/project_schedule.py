@@ -115,22 +115,31 @@ def list_jobs(project_id: str, *, ports: SchedulePorts) -> dict[str, Any]:
     if error:
         return error
     cron_result = _gateway(ports, "cron.list", {"includeDisabled": True}, 20)
-    if not cron_result.get("ok"):
-        return _gateway_error("Failed to list cron jobs")
-    jobs = {str(item.get("id")): _sanitize_gateway_job(item, ports) for item in ports.extract_jobs(cron_result) if isinstance(item, dict) and item.get("id")}
+    gateway_available = bool(cron_result.get("ok"))
+    jobs = (
+        {str(item.get("id")): _sanitize_gateway_job(item, ports) for item in ports.extract_jobs(cron_result) if isinstance(item, dict) and item.get("id")}
+        if gateway_available
+        else {}
+    )
     items = [
         ports.enrich_item(cron_id, binding, jobs.get(str(cron_id), {}), project)
         for cron_id, binding in ports.bindings().items()
         if binding.get("projectId") == project_id
     ]
-    return {"ok": True, "projectId": project_id, "jobs": items, "cronOwner": "gateway", "bindingOwner": "virtual-office"}
+    result = {"ok": True, "projectId": project_id, "jobs": items, "cronOwner": "gateway", "bindingOwner": "virtual-office", "gatewayAvailable": gateway_available}
+    if not gateway_available:
+        result["warning"] = "Gateway cron list is unavailable; returning Virtual Office local bindings only."
+    return result
 
 
 def list_all(*, ports: SchedulePorts) -> dict[str, Any]:
     cron_result = _gateway(ports, "cron.list", {"includeDisabled": True}, 20)
-    if not cron_result.get("ok"):
-        return _gateway_error("Failed to list cron jobs")
-    jobs = {str(item.get("id")): _sanitize_gateway_job(item, ports) for item in ports.extract_jobs(cron_result) if isinstance(item, dict) and item.get("id")}
+    gateway_available = bool(cron_result.get("ok"))
+    jobs = (
+        {str(item.get("id")): _sanitize_gateway_job(item, ports) for item in ports.extract_jobs(cron_result) if isinstance(item, dict) and item.get("id")}
+        if gateway_available
+        else {}
+    )
     projects = ports.list_projects()
     projects_by_id = {project.get("id"): project for project in projects}
     items = [
@@ -145,6 +154,8 @@ def list_all(*, ports: SchedulePorts) -> dict[str, Any]:
             "scheduledCronPaused": bool(project.get("scheduledCronPaused")),
         } for project in projects],
         "cronOwner": "gateway", "bindingOwner": "virtual-office",
+        "gatewayAvailable": gateway_available,
+        **({"warning": "Gateway cron list is unavailable; returning Virtual Office local bindings only."} if not gateway_available else {}),
     }
 
 
@@ -185,6 +196,35 @@ def create(project_id: str, body: Mapping[str, Any] | None, *, ports: SchedulePo
     job, binding = ports.build_job(project, body, None)
     cron_result = _gateway(ports, "cron.add", job, 30)
     if not cron_result.get("ok"):
+        if body.get("allowLocalBindingFallback") is True:
+            cron_id = f"local-{reservation}"
+            try:
+                with ports.operation_lock(cron_id):
+                    binding.update({
+                        "cronJobId": cron_id,
+                        "createdAt": ports.now(),
+                        "gatewayStatus": "pending_gateway_registration",
+                        "lastStatus": "enabled",
+                        "lastError": None,
+                        "debugLastError": ports.sanitize_result(cron_result).get("error") or "Gateway cron add is unavailable",
+                        "reconciliationRequired": True,
+                    })
+                    ports.merge_binding(cron_id, binding)
+            except Exception:
+                return {"error": "Failed to persist local cron binding", "code": "cron_binding_persist_failed", "_status": 500}
+            finally:
+                ports.release_binding_slot(reservation)
+            return {
+                "ok": True,
+                "projectId": project_id,
+                "id": cron_id,
+                "job": {**job, "id": cron_id},
+                "binding": binding,
+                "gatewayAvailable": False,
+                "status": "enabled",
+                "warning": "Saved the Virtual Office local scheduled-cron configuration.",
+                "reconciliationRequired": True,
+            }
         ports.release_binding_slot(reservation)
         return _gateway_error("Failed to create cron job")
     cron_id = ports.extract_job_id(cron_result)

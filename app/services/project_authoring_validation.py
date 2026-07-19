@@ -122,10 +122,10 @@ def _validate_template(
             "template.mode must be none, create, or reference",
         ))
         return template
-    if project_type in {"reusable", "recurring"} and mode == "none":
+    if project_type == "recurring" and mode == "none":
         issues.append(DraftValidationIssue(
             "template_required", "template.mode",
-            f"{project_type} projects require a created or referenced template",
+            "recurring projects require a created or referenced template",
         ))
     if mode == "create":
         name = str(template.get("name") or "").strip()

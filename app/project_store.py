@@ -35,7 +35,7 @@ COMPLEX_JSON_FIELDS = {
     "meetingBlocker_json", "meetingBlockerHistory_json",
     "meetingActionItems_json", "meetingDecisionHistory_json", "meetingDiscussionPoints_json", "meetingRecords_json",
     "scheduledCronHistory_json", "archiveMaintenance_json", "feishuNotifications_json",
-    "authoringSource_json", "templateRef_json", "recurrenceRef_json",
+    "authoringSource_json", "templateRef_json", "recurrence_json", "recurrenceRef_json",
     "responsibleActor_json", "executorActor_json", "reviewerActor_json",
     "reviewerRecommendation_json",
     "maintenanceHistory_json",
@@ -537,6 +537,7 @@ class MarkdownProjectStore:
             "authoringRequestId": project.get("authoringRequestId"),
             "authoringSource_json": project.get("authoringSource", {}),
             "templateRef_json": project.get("templateRef", {}),
+            "recurrence_json": project.get("recurrence", {}),
             "recurrenceRef_json": project.get("recurrenceRef", {}),
         }
         body_lines = [
@@ -710,6 +711,7 @@ class MarkdownProjectStore:
             "authoringRequestId": meta.get("authoringRequestId"),
             "authoringSource": meta.get("authoringSource_json", {}),
             "templateRef": meta.get("templateRef_json", {}),
+            "recurrence": meta.get("recurrence_json", {}),
             "recurrenceRef": meta.get("recurrenceRef_json", {}),
             "activity": self._parse_activity(self._extract_section(body, "Activity")),
             "tasks": [],

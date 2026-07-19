@@ -5,6 +5,7 @@ import os
 import sys
 import tempfile
 import threading
+import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 APP_DIR = os.path.join(ROOT, "app")
@@ -28,6 +29,101 @@ AGENT = {
     "name": "Codex",
     "profile": "local",
 }
+
+
+def test_vo_provider_guidance_prefix_is_idempotent():
+    message = server._with_vo_provider_guidance("请创建一个 VO 项目")
+    assert "http://127.0.0.1:<port>/skills/index.md" in message
+    assert "use known VO_PORT/.env; default 8090" in message
+    assert "follow that entry to the specific VO skill" in message
+    assert "no explicit escalated/sandbox_permissions parameter" in message
+    assert "provider-runtime localhost connection failure before user approval is not the final VO result" in message
+    assert "current approval/command channel" in message
+    assert "After the user approves that exact ordinary command" in message
+    assert "execute the local VO HTTP curl" in message
+    assert "reads and writes" in message
+    assert "issue the exact ordinary local VO curl command" in message
+    assert "do not merely ask the user in prose" in message
+    assert "report the access failure" in message
+    assert "directly operate VO data stores" in message
+    assert message.endswith("请创建一个 VO 项目")
+
+    repeated = server._with_vo_provider_guidance(message)
+    assert repeated == message
+    assert repeated.count("[Virtual Office routing guidance]") == 1
+
+
+def test_codex_approval_identifies_host_side_vo_skill_read_only_curl():
+    approval = {
+        "command": "/bin/zsh -lc 'curl -fsS --max-time 5 http://127.0.0.1:8090/skills/index.md'",
+    }
+    assert server._codex_approval_is_host_side_vo_skill_read(approval) is True
+    assert server._codex_approval_host_side_vo_access_block_reason(approval) == ""
+
+    reference = {
+        "command": "/bin/zsh -lc 'curl -fsS http://localhost:8090/skills/vo-operating-guidelines/references/meeting-requests.md'",
+    }
+    assert server._codex_approval_is_host_side_vo_skill_read(reference) is True
+
+    port_expression = {
+        "command": "/bin/zsh -lc 'curl --max-time 5 -fsS http://localhost:${VO_PORT:-8090}/skills/index.md'",
+    }
+    assert server._codex_approval_is_host_side_vo_skill_read(port_expression) is True
+
+
+def test_codex_approval_accepts_approved_local_vo_api_curl():
+    approval = {
+        "command": "/bin/zsh -lc 'curl -fsS --max-time 5 http://127.0.0.1:8090/api/projects'",
+    }
+    assert server._codex_approval_is_host_side_vo_skill_read(approval) is False
+    assert server._codex_approval_is_host_side_vo_curl(approval) is True
+    assert server._codex_approval_host_side_vo_access_block_reason(approval) == ""
+
+
+def test_codex_approval_allows_host_side_vo_agents_roster_read_only_curl():
+    approval = {
+        "command": "/bin/zsh -lc 'curl -fsS --max-time 5 http://127.0.0.1:8090/api/agents'",
+    }
+    assert server._codex_approval_is_host_side_vo_skill_read(approval) is False
+    assert server._codex_approval_is_host_side_vo_read(approval) is True
+    assert server._codex_approval_host_side_vo_access_block_reason(approval) == ""
+
+
+def test_codex_approval_identifies_multiline_host_side_vo_project_authoring_curl():
+    approval = {
+        "command": (
+            "/bin/zsh -lc \"curl -fsS --max-time 3 -X POST "
+            "'http://127.0.0.1:8090/api/agent/project-authoring/projects' \\\n"
+            "  -H 'Content-Type: application/json' \\\n"
+            "  -H 'X-VO-Agent-Action: project-authoring' \\\n"
+            "  -H 'X-VO-Agent-Id: codex-local' \\\n"
+            "  --data-binary '{\"confirmation\":{\"confirmed\":true,"
+            "\"summaryText\":\"x\",\"summaryDigest\":\""
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}}'\""
+        ),
+    }
+
+    parsed = server._codex_approval_parse_curl(approval)
+
+    assert parsed is not None
+    assert parsed["method"] == "POST"
+    assert parsed["parsed"].path == "/api/agent/project-authoring/projects"
+    assert server._codex_approval_is_host_side_vo_curl(approval) is True
+    assert server._codex_approval_host_side_vo_access_block_reason(approval) == ""
+
+
+def test_codex_approval_identifies_wrapped_host_side_vo_skill_shell():
+    approval = {
+        "command": (
+            "/bin/zsh -lc 'VO_PROJECT_ROOT=\"${VO_PROJECT_ROOT:-$(pwd)}\"; "
+            "VO_LOCAL_URL=\"http://127.0.0.1:${VO_PORT:-8090}\"; "
+            "curl --max-time 5 -sS \"$VO_LOCAL_URL/skills/index.md\"'"
+        ),
+    }
+
+    assert server._codex_approval_is_host_side_vo_shell(approval) is True
+    assert server._codex_approval_vo_shell_path(approval["command"]) == "/skills/index.md"
+    assert server._codex_approval_vo_shell_method(approval["command"]) == "GET"
 
 
 class BlockingProvider:
@@ -311,6 +407,71 @@ def test_human_codex_chat_persists_user_and_reply_to_comm_history():
             server.STATUS_DIR = old_status_dir
             server.get_roster = old_roster
             server._codex_provider_from_config = old_provider
+
+
+def test_host_side_vo_continuation_reply_delivery_is_triggered_from_append_reply():
+    old_status_dir = server.STATUS_DIR
+    old_roster = server.get_roster
+    old_provider = server._codex_provider_from_config
+    old_send = server._feishu_chat_app_text_send
+    old_record = server._record_feishu_channel_event
+    with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as workspace:
+        sends = []
+        records = []
+
+        class ReplyProvider:
+            def __init__(self, workspace):
+                self.workspace = workspace
+
+            def send_message(self, message, conversation_id="", timeout_sec=None, thread_id="", event_callback=None, allow_interaction=False):
+                return {
+                    "ok": True,
+                    "status": "completed",
+                    "reply": "continuation proposal",
+                    "threadId": thread_id or "thr-continuation",
+                    "turnId": "turn-continuation",
+                    "modifiedFiles": [],
+                }
+
+        server.STATUS_DIR = status_dir
+        server.get_roster = lambda: [AGENT]
+        server._codex_provider_from_config = lambda: ReplyProvider(workspace)
+        server._feishu_chat_app_text_send = lambda chat_id, text: (
+            sends.append((chat_id, text))
+            or {"ok": True, "status": "sent", "messageId": "om-sent-continuation"}
+        )
+        server._record_feishu_channel_event = lambda record: records.append(record) or {**record, "id": "channel-1"}
+        try:
+            result = server._handle_codex_chat({
+                "agentId": "codex-local",
+                "message": "[Host-side VO operation succeeded]",
+                "conversationId": "feishu-dm:continuation",
+                "fromType": "chat",
+                "fromDisplayName": "Feishu User",
+                "sourceApp": "feishu",
+                "sourceSurface": "feishu-dm",
+                "sourceLabel": "Virtual Office",
+                "sourceMessageId": "vo-host-side-read-test",
+                "originalSourceMessageId": "om-original-user",
+                "feishuChatId": "oc-continuation",
+                "chatType": "p2p",
+                "representativeAgentId": "codex-local",
+                "threadId": "thr-continuation",
+                "_hostSideVoSkillContinuation": True,
+                "_hostSideVoReadContinuation": True,
+            })
+            assert result["ok"] is True
+            assert sends == [("oc-continuation", "continuation proposal")]
+            assert records
+            assert records[0]["sourceMessageId"] == "vo-host-side-read-test"
+            assert records[0]["continuationForSourceMessageId"] == "om-original-user"
+            assert records[0]["sendResult"]["messageId"] == "om-sent-continuation"
+        finally:
+            server.STATUS_DIR = old_status_dir
+            server.get_roster = old_roster
+            server._codex_provider_from_config = old_provider
+            server._feishu_chat_app_text_send = old_send
+            server._record_feishu_channel_event = old_record
 
 
 def test_feishu_group_codex_request_and_reply_are_never_visible_in_office():
@@ -639,6 +800,457 @@ def test_codex_approval_pending_and_respond_handlers_delegate_to_provider():
     finally:
         server.get_roster = old_roster
         server._codex_provider_from_config = old_provider
+
+
+def test_codex_approval_blocks_direct_project_store_write():
+    old_roster = server.get_roster
+    old_provider = server._codex_provider_from_config
+
+    class ApprovalProvider:
+        def __init__(self):
+            self.calls = []
+            self.messages = []
+
+        def respond_approval(self, profile, approval_id, choice="cancel", session_id=None):
+            self.calls.append((profile, approval_id, choice, session_id))
+            return {"ok": True, "status": "submitted", "approvalId": approval_id, "sessionId": session_id}
+
+        def send_message(self, message, conversation_id="", timeout_sec=None, thread_id="", event_callback=None, allow_interaction=False, attachments=None):
+            self.messages.append((message, conversation_id, thread_id, allow_interaction))
+            return {"ok": True, "status": "completed", "reply": "continued", "threadId": thread_id, "turnId": "turn-continued"}
+
+    provider = ApprovalProvider()
+    server.get_roster = lambda: [AGENT]
+    server._codex_provider_from_config = lambda: provider
+    try:
+        responded = server._handle_codex_approval_respond({
+            "agentId": "codex-local",
+            "approvalId": "approval-project-write",
+            "choice": "approve",
+            "sessionId": "thr-project",
+            "approval": {
+                "command": "PYTHONPATH=app python - <<'PY'\nfrom project_store import MarkdownProjectStore\nstore = MarkdownProjectStore('data')\nstore._write_project({'title':'Oops'})\nPY",
+            },
+        })
+
+        assert responded["ok"] is True
+        assert responded["status"] == "cancelled_by_policy"
+        assert responded["code"] == "project_authoring_skill_required"
+        assert responded["approvalChoice"] == "cancel"
+        assert responded["approval"]["status"] == "cancelled"
+        assert provider.calls[-1] == ("local", "approval-project-write", "cancel", "thr-project")
+    finally:
+        server.get_roster = old_roster
+        server._codex_provider_from_config = old_provider
+
+
+def test_codex_approval_executes_approved_local_vo_api_curl():
+    old_roster = server.get_roster
+    old_provider = server._codex_provider_from_config
+    old_run = server.subprocess.run
+
+    class ApprovalProvider:
+        def __init__(self):
+            self.calls = []
+            self.messages = []
+
+        def respond_approval(self, profile, approval_id, choice="cancel", session_id=None):
+            self.calls.append((profile, approval_id, choice, session_id))
+            return {"ok": True, "status": "submitted", "approvalId": approval_id, "sessionId": session_id}
+
+        def send_message(self, message, conversation_id="", timeout_sec=None, thread_id="", event_callback=None, allow_interaction=False, attachments=None):
+            self.messages.append((message, conversation_id, thread_id, allow_interaction))
+            return {"ok": True, "status": "completed", "reply": "continued", "threadId": thread_id, "turnId": "turn-continued"}
+
+    provider = ApprovalProvider()
+    captured_runs = []
+
+    class Completed:
+        returncode = 0
+        stdout = '{"ok":true,"projects":[]}'
+        stderr = ""
+
+    def fake_run(parts, cwd=None, env=None, text=None, capture_output=None, timeout=None, check=None):
+        captured_runs.append((parts, cwd, env, text, capture_output, timeout, check))
+        return Completed()
+
+    server.get_roster = lambda: [AGENT]
+    server._codex_provider_from_config = lambda: provider
+    server.subprocess.run = fake_run
+    try:
+        responded = server._handle_codex_approval_respond({
+            "agentId": "codex-local",
+            "approvalId": "approval-vo-api",
+            "choice": "approve",
+            "sessionId": "thr-vo-api",
+            "approval": {
+                "command": "/bin/zsh -lc 'curl -fsS --max-time 5 http://127.0.0.1:8090/api/projects'",
+            },
+        })
+
+        assert responded["ok"] is True
+        assert responded["status"] == "host_side_vo_curl_queued"
+        assert responded["approvalSafety"] == "host_side_vo_curl"
+        assert responded["policyScope"] == "vo_approved_local_curl"
+        assert responded["hostSideRead"]["ok"] is True
+        assert responded["hostSideRead"]["path"] == "/api/projects"
+        assert responded["approvalChoice"] == "approve"
+        assert provider.calls[-1] == ("local", "approval-vo-api", "cancel", "thr-vo-api")
+        assert captured_runs
+        assert captured_runs[-1][0][-1] == "http://127.0.0.1:8090/api/projects"
+    finally:
+        server.get_roster = old_roster
+        server._codex_provider_from_config = old_provider
+        server.subprocess.run = old_run
+
+
+def test_codex_approval_allows_host_side_vo_skill_read_only():
+    old_roster = server.get_roster
+    old_provider = server._codex_provider_from_config
+    old_handle_chat = server._handle_codex_chat
+
+    class ApprovalProvider:
+        def __init__(self):
+            self.calls = []
+
+        def respond_approval(self, profile, approval_id, choice="cancel", session_id=None):
+            self.calls.append((profile, approval_id, choice, session_id))
+            return {"ok": True, "status": "submitted", "approvalId": approval_id, "sessionId": session_id}
+
+    provider = ApprovalProvider()
+    continuation_bodies = []
+    server.get_roster = lambda: [AGENT]
+    server._codex_provider_from_config = lambda: provider
+    server._handle_codex_chat = lambda body: continuation_bodies.append(body) or {
+        "ok": True,
+        "status": "completed",
+        "reply": "continued",
+        "threadId": body.get("threadId") or "",
+        "turnId": "turn-continued",
+    }
+    try:
+        responded = server._handle_codex_approval_respond({
+            "agentId": "codex-local",
+            "conversationId": "conv-vo-skill",
+            "approvalId": "approval-vo-skill",
+            "choice": "approve",
+            "sessionId": "thr-vo-skill",
+            "sourceApp": "feishu",
+            "sourceSurface": "feishu-dm",
+            "sourceMessageId": "om_source_message",
+            "feishuChatId": "oc_chat",
+            "actorIds": {"openId": "ou_user", "unionId": "on_user"},
+            "actorName": "Feishu User",
+            "approval": {
+                "command": "/bin/zsh -lc 'curl -fsS --max-time 5 http://127.0.0.1:8090/skills/index.md'",
+            },
+        })
+
+        assert responded["ok"] is True
+        assert responded["status"] == "host_side_vo_curl_queued"
+        assert responded["approvalSafety"] == "host_side_vo_curl"
+        assert responded["policyScope"] == "vo_approved_local_curl"
+        assert responded["hostSideRead"]["ok"] is True
+        assert responded["approvalChoice"] == "approve"
+        assert provider.calls[-1] == ("local", "approval-vo-skill", "cancel", "thr-vo-skill")
+        deadline = time.time() + 2
+        while not continuation_bodies and time.time() < deadline:
+            time.sleep(0.01)
+        assert continuation_bodies
+        body = continuation_bodies[-1]
+        continuation = body["message"]
+        assert "[Host-side VO operation succeeded]" in continuation
+        assert "Do not retry the localhost curl command" in continuation
+        assert "issue the exact ordinary local GET curl command" in continuation
+        assert "no explicit escalated/sandbox_permissions parameter" in continuation
+        assert "do not ask the user in prose" in continuation
+        assert "vo-operating-guidelines" in continuation
+        assert body["conversationId"] == "conv-vo-skill"
+        assert body["threadId"] == "thr-vo-skill"
+        assert body["fromType"] == "chat"
+        assert body["sourceApp"] == "feishu"
+        assert body["sourceSurface"] == "feishu-dm"
+        assert body["feishuChatId"] == "oc_chat"
+        assert body["chatType"] == "p2p"
+        assert body["sourceActor"] == {"openId": "ou_user", "unionId": "on_user", "name": "Feishu User"}
+        assert body["sourceMessageId"].startswith("vo-host-side-read-")
+    finally:
+        server.get_roster = old_roster
+        server._codex_provider_from_config = old_provider
+        server._handle_codex_chat = old_handle_chat
+
+
+def test_codex_approval_allows_host_side_vo_agents_roster_read_only():
+    old_roster = server.get_roster
+    old_provider = server._codex_provider_from_config
+    old_handle_chat = server._handle_codex_chat
+
+    class ApprovalProvider:
+        def __init__(self):
+            self.calls = []
+
+        def respond_approval(self, profile, approval_id, choice="cancel", session_id=None):
+            self.calls.append((profile, approval_id, choice, session_id))
+            return {"ok": True, "status": "submitted", "approvalId": approval_id, "sessionId": session_id}
+
+    provider = ApprovalProvider()
+    continuation_bodies = []
+    server.get_roster = lambda: [AGENT]
+    server._codex_provider_from_config = lambda: provider
+    server._handle_codex_chat = lambda body: continuation_bodies.append(body) or {
+        "ok": True,
+        "status": "completed",
+        "reply": "continued",
+        "threadId": body.get("threadId") or "",
+        "turnId": "turn-continued",
+    }
+    try:
+        responded = server._handle_codex_approval_respond({
+            "agentId": "codex-local",
+            "conversationId": "conv-vo-agents",
+            "approvalId": "approval-vo-agents",
+            "choice": "approve",
+            "sessionId": "thr-vo-agents",
+            "sourceApp": "feishu",
+            "sourceSurface": "feishu-dm",
+            "sourceMessageId": "om_source_message",
+            "feishuChatId": "oc_chat",
+            "actorIds": {"openId": "ou_user", "unionId": "on_user"},
+            "actorName": "Feishu User",
+            "approval": {
+                "command": "/bin/zsh -lc 'curl -fsS --max-time 5 http://127.0.0.1:8090/api/agents'",
+            },
+        })
+
+        assert responded["ok"] is True
+        assert responded["status"] == "host_side_vo_curl_queued"
+        assert responded["hostSideRead"]["ok"] is True
+        assert responded["hostSideRead"]["path"] == "/api/agents"
+        assert provider.calls[-1] == ("local", "approval-vo-agents", "cancel", "thr-vo-agents")
+        deadline = time.time() + 2
+        while not continuation_bodies and time.time() < deadline:
+            time.sleep(0.01)
+        assert continuation_bodies
+        body = continuation_bodies[-1]
+        assert body["conversationId"] == "conv-vo-agents"
+        assert body["threadId"] == "thr-vo-agents"
+        assert body["sourceActor"] == {"openId": "ou_user", "unionId": "on_user", "name": "Feishu User"}
+        assert body["sourceMessageId"].startswith("vo-host-side-read-")
+        assert "```json" in body["message"]
+        assert '"codex-local"' in body["message"]
+    finally:
+        server.get_roster = old_roster
+        server._codex_provider_from_config = old_provider
+        server._handle_codex_chat = old_handle_chat
+
+
+def test_codex_approval_executes_approved_local_vo_project_authoring_curl_host_side():
+    old_roster = server.get_roster
+    old_provider = server._codex_provider_from_config
+    old_handle_chat = server._handle_codex_chat
+    old_run = server.subprocess.run
+
+    class ApprovalProvider:
+        def __init__(self):
+            self.calls = []
+
+        def respond_approval(self, profile, approval_id, choice="cancel", session_id=None):
+            self.calls.append((profile, approval_id, choice, session_id))
+            return {"ok": True, "status": "submitted", "approvalId": approval_id, "sessionId": session_id}
+
+    class Completed:
+        returncode = 0
+        stdout = '{"ok":true,"project":{"id":"proj_1"}}'
+        stderr = ""
+
+    provider = ApprovalProvider()
+    continuation_bodies = []
+    run_calls = []
+    server.get_roster = lambda: [AGENT]
+    server._codex_provider_from_config = lambda: provider
+    server._handle_codex_chat = lambda body: continuation_bodies.append(body) or {
+        "ok": True,
+        "status": "completed",
+        "reply": "continued",
+        "threadId": body.get("threadId") or "",
+        "turnId": "turn-continued",
+    }
+    server.subprocess.run = lambda parts, **kwargs: run_calls.append((parts, kwargs)) or Completed()
+    try:
+        responded = server._handle_codex_approval_respond({
+            "agentId": "codex-local",
+            "conversationId": "conv-vo-create",
+            "approvalId": "approval-vo-create",
+            "choice": "approve",
+            "sessionId": "thr-vo-create",
+            "sourceApp": "feishu",
+            "sourceSurface": "feishu-dm",
+            "sourceMessageId": "om_source_message",
+            "feishuChatId": "oc_chat",
+            "actorIds": {"openId": "ou_user"},
+            "actorName": "Feishu User",
+            "approval": {
+                "command": (
+                    "/bin/zsh -lc 'curl -fsS --max-time 10 -X POST "
+                    "http://127.0.0.1:8090/api/agent/project-authoring/projects "
+                    "-H \"Content-Type: application/json\" "
+                    "-H \"X-VO-Agent-Action: project-authoring\" "
+                    "-d \"{\\\"confirmation\\\":{\\\"confirmed\\\":true,\\\"summaryText\\\":\\\"x\\\",\\\"summaryDigest\\\":\\\""
+                    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\\"}}\"'"
+                ),
+            },
+        })
+
+        assert responded["ok"] is True
+        assert responded["status"] == "host_side_vo_curl_queued"
+        assert responded["approvalSafety"] == "host_side_vo_curl"
+        assert responded["hostSideRead"]["ok"] is True
+        assert provider.calls[-1] == ("local", "approval-vo-create", "cancel", "thr-vo-create")
+        assert run_calls
+        assert run_calls[-1][0][0] == "curl"
+        assert "http://127.0.0.1:8090/api/agent/project-authoring/projects" in run_calls[-1][0]
+        deadline = time.time() + 2
+        while not continuation_bodies and time.time() < deadline:
+            time.sleep(0.01)
+        assert continuation_bodies
+        assert "[Host-side VO operation succeeded]" in continuation_bodies[-1]["message"]
+        assert '"project"' in continuation_bodies[-1]["message"]
+    finally:
+        server.get_roster = old_roster
+        server._codex_provider_from_config = old_provider
+        server._handle_codex_chat = old_handle_chat
+        server.subprocess.run = old_run
+
+
+def test_codex_approval_executes_wrapped_local_vo_project_authoring_shell_host_side():
+    old_roster = server.get_roster
+    old_provider = server._codex_provider_from_config
+    old_handle_chat = server._handle_codex_chat
+    old_run = server.subprocess.run
+
+    class ApprovalProvider:
+        def __init__(self):
+            self.calls = []
+
+        def respond_approval(self, profile, approval_id, choice="cancel", session_id=None):
+            self.calls.append((profile, approval_id, choice, session_id))
+            return {"ok": True, "status": "submitted", "approvalId": approval_id, "sessionId": session_id}
+
+    class Completed:
+        returncode = 0
+        stdout = '{"ok":true,"project":{"id":"proj_wrapped"}}'
+        stderr = ""
+
+    provider = ApprovalProvider()
+    continuation_bodies = []
+    run_calls = []
+    server.get_roster = lambda: [AGENT]
+    server._codex_provider_from_config = lambda: provider
+    server._handle_codex_chat = lambda body: continuation_bodies.append(body) or {
+        "ok": True,
+        "status": "completed",
+        "reply": "continued",
+        "threadId": body.get("threadId") or "",
+        "turnId": "turn-continued",
+    }
+    server.subprocess.run = lambda parts, **kwargs: run_calls.append((parts, kwargs)) or Completed()
+    try:
+        command = (
+            "/bin/zsh -lc \"node -e 'process.stdout.write(JSON.stringify({"
+            "confirmation:{confirmed:true,summaryText:\\\"x\\\",summaryDigest:\\\""
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\\"}}))' "
+            "| curl -sS --max-time 5 -X POST 'http://127.0.0.1:8090/api/agent/project-authoring/projects' "
+            "-H 'Content-Type: application/json' "
+            "-H 'X-VO-Agent-Action: project-authoring' "
+            "-H 'X-VO-Agent-Id: codex-local' "
+            "-d @-\""
+        )
+        responded = server._handle_codex_approval_respond({
+            "agentId": "codex-local",
+            "conversationId": "conv-vo-create-wrapped",
+            "approvalId": "approval-vo-create-wrapped",
+            "choice": "approve",
+            "sessionId": "thr-vo-create-wrapped",
+            "sourceApp": "feishu",
+            "sourceSurface": "feishu-dm",
+            "sourceMessageId": "om_source_message",
+            "feishuChatId": "oc_chat",
+            "actorIds": {"openId": "ou_user"},
+            "actorName": "Feishu User",
+            "approval": {"command": command},
+        })
+
+        assert responded["ok"] is True
+        assert responded["status"] == "host_side_vo_curl_queued"
+        assert responded["approvalSafety"] == "host_side_vo_shell"
+        assert responded["hostSideRead"]["ok"] is True
+        assert provider.calls[-1] == ("local", "approval-vo-create-wrapped", "cancel", "thr-vo-create-wrapped")
+        assert run_calls
+        assert run_calls[-1][0][0].endswith("zsh")
+        assert "/api/agent/project-authoring/projects" in run_calls[-1][0][2]
+        deadline = time.time() + 2
+        while not continuation_bodies and time.time() < deadline:
+            time.sleep(0.01)
+        assert continuation_bodies
+        assert "proj_wrapped" in continuation_bodies[-1]["message"]
+    finally:
+        server.get_roster = old_roster
+        server._codex_provider_from_config = old_provider
+        server._handle_codex_chat = old_handle_chat
+        server.subprocess.run = old_run
+
+
+def test_codex_approval_respond_hydrates_pending_command_before_host_side_proxy():
+    old_roster = server.get_roster
+    old_provider = server._codex_provider_from_config
+    old_handle_chat = server._handle_codex_chat
+
+    class ApprovalProvider:
+        def __init__(self):
+            self.calls = []
+
+        def pending_approval(self, profile, session_id=None):
+            return {
+                "ok": True,
+                "pending": {
+                    "id": "approval-hydrate",
+                    "command": "/bin/zsh -lc 'curl -sS --max-time 3 http://127.0.0.1:8090/skills/index.md'",
+                    "threadId": session_id or "thr-hydrate",
+                },
+            }
+
+        def respond_approval(self, profile, approval_id, choice="cancel", session_id=None):
+            self.calls.append((profile, approval_id, choice, session_id))
+            return {"ok": True, "status": "submitted", "approvalId": approval_id, "sessionId": session_id}
+
+    provider = ApprovalProvider()
+    continuation_bodies = []
+    server.get_roster = lambda: [AGENT]
+    server._codex_provider_from_config = lambda: provider
+    server._handle_codex_chat = lambda body: continuation_bodies.append(body) or {
+        "ok": True,
+        "status": "completed",
+        "reply": "continued",
+        "threadId": body.get("threadId") or "",
+        "turnId": "turn-continued",
+    }
+    try:
+        responded = server._handle_codex_approval_respond({
+            "agentId": "codex-local",
+            "conversationId": "conv-hydrate",
+            "approvalId": "approval-hydrate",
+            "choice": "approve",
+            "sessionId": "thr-hydrate",
+        })
+
+        assert responded["ok"] is True
+        assert responded["status"] == "host_side_vo_curl_queued"
+        assert responded["approvalSafety"] == "host_side_vo_curl"
+        assert provider.calls[-1] == ("local", "approval-hydrate", "cancel", "thr-hydrate")
+    finally:
+        server.get_roster = old_roster
+        server._codex_provider_from_config = old_provider
+        server._handle_codex_chat = old_handle_chat
 
 
 def test_codex_approval_respond_persists_history_once_and_emits_presence():

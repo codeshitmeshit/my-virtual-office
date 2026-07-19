@@ -193,6 +193,7 @@ VO_VIEWER_URL=https://localhost:6901
 VO_PC_METRICS_ENABLED=true
 VO_PC_METRICS_URL=http://127.0.0.1:8099
 VO_API_USAGE=false
+VO_AGENT_PROJECT_AUTHORING_ENABLED=true
 EOF
             echo -e "  ${GREEN}✓${NC} 已创建默认 .env"
         fi
@@ -223,6 +224,14 @@ EOF
     fi
     if ! grep -q '^VO_API_USAGE=' "$ENV_FILE"; then
         echo "VO_API_USAGE=false" >> "$ENV_FILE"
+    fi
+    if ! grep -q '^VO_AGENT_PROJECT_AUTHORING_ENABLED=' "$ENV_FILE"; then
+        {
+            echo ""
+            echo "# Agent-managed VO project authoring"
+            echo "VO_AGENT_PROJECT_AUTHORING_ENABLED=true"
+        } >> "$ENV_FILE"
+        echo -e "  ${GREEN}✓${NC} 已补充 Agent 项目创作开关到 .env"
     fi
 
     apply_start_options
@@ -498,6 +507,7 @@ PY
     export VO_PC_METRICS_ENABLED="${VO_PC_METRICS_ENABLED:-true}"
     export VO_PC_METRICS_URL="${VO_PC_METRICS_URL:-http://127.0.0.1:8099}"
     export VO_API_USAGE="${VO_API_USAGE:-false}"
+    export VO_AGENT_PROJECT_AUTHORING_ENABLED="${VO_AGENT_PROJECT_AUTHORING_ENABLED:-true}"
     export NO_PROXY="127.0.0.1,localhost,${NO_PROXY:-}"
     export no_proxy="127.0.0.1,localhost,${no_proxy:-}"
 

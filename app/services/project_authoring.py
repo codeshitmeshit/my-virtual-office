@@ -83,6 +83,10 @@ def _canonical_digest(value: Any) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def _text_digest(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
 @dataclass
 class ProjectAuthoringCommandError(RuntimeError):
     code: str
@@ -1090,6 +1094,150 @@ class ProjectAuthoringService:
             "request": management_request_view(outcome["request"]),
         }
 
+    @staticmethod
+    def _validate_confirmed_maintenance_confirmation(confirmation: Any) -> str:
+        if not isinstance(confirmation, Mapping) or confirmation.get("confirmed") is not True:
+            raise ProjectAuthoringCommandError(
+                "maintenance_confirmation_required",
+                "Confirmed maintenance requires confirmation.confirmed=true",
+                400,
+            )
+        summary_text = str(confirmation.get("summaryText") or "")
+        if not summary_text.strip():
+            raise ProjectAuthoringCommandError(
+                "maintenance_summary_text_required",
+                "Confirmed maintenance requires confirmation.summaryText",
+                400,
+            )
+        summary_digest = str(confirmation.get("summaryDigest") or "").strip().lower()
+        if len(summary_digest) != 64 or any(ch not in "0123456789abcdef" for ch in summary_digest):
+            raise ProjectAuthoringCommandError(
+                "maintenance_summary_digest_invalid",
+                "Confirmed maintenance requires a SHA-256 summaryDigest",
+                400,
+            )
+        if _text_digest(summary_text) != summary_digest:
+            raise ProjectAuthoringCommandError(
+                "maintenance_summary_digest_mismatch",
+                "Confirmed maintenance summaryDigest does not match summaryText",
+                400,
+            )
+        required_markers = (
+            "我准备修改这个 VO 项目，请确认：",
+            "项目 ID：",
+            "修改内容：",
+            "请确认是否按以上方案修改真实项目。",
+        )
+        missing = [marker for marker in required_markers if marker not in summary_text]
+        if missing:
+            raise ProjectAuthoringCommandError(
+                "maintenance_summary_template_required",
+                "Confirmed maintenance summaryText must use the required maintenance confirmation template",
+                400,
+            )
+        return summary_digest
+
+    def apply_confirmed_maintenance(
+        self,
+        project_id: str,
+        mutation: Any,
+        *,
+        requesting_agent_id: str,
+        idempotency_key: Any,
+        confirmation: Any,
+    ) -> dict[str, Any]:
+        agent_id = str(requesting_agent_id or "").strip()
+        self._validate_requesting_agent(agent_id)
+        key = validate_idempotency_key(idempotency_key)
+        summary_digest = self._validate_confirmed_maintenance_confirmation(confirmation)
+        normalized = self._normalize_maintenance_mutation(mutation)
+        payload_digest = _canonical_digest({
+            "confirmationSummaryDigest": summary_digest,
+            "mutation": normalized,
+            "projectId": str(project_id or ""),
+        })
+        scoped_key = f"confirmed-maintenance:{agent_id}:{project_id}:{key}"
+        now = self._timestamp()
+
+        def apply(root: dict[str, Any]) -> dict[str, Any]:
+            existing = root[IDEMPOTENCY_KEY].get(scoped_key)
+            if isinstance(existing, Mapping):
+                if existing.get("payloadDigest") != payload_digest:
+                    raise ProjectAuthoringCommandError(
+                        "maintenance_idempotency_conflict",
+                        "Maintenance idempotency key was already used for different confirmed content",
+                        409,
+                    )
+                project = next(
+                    (item for item in root.get("projects", []) if item.get("id") == existing.get("projectId")),
+                    None,
+                )
+                return {
+                    "ok": True,
+                    "created": False,
+                    "project": copy.deepcopy(project) if isinstance(project, dict) else None,
+                    "mutation": copy.deepcopy(existing.get("mutation") or normalized),
+                    "confirmationSummaryDigest": existing.get("confirmationSummaryDigest"),
+                }
+            project = next((item for item in root.get("projects", []) if item.get("id") == project_id), None)
+            if project is None:
+                raise ProjectAuthoringCommandError("project_not_found", "Project not found", 404)
+            grant = root[GRANTS_KEY].get(project_id)
+            persisted_grant = isinstance(grant, dict)
+            if not isinstance(grant, dict):
+                grant = {
+                    "id": f"grant-{project_id}",
+                    "projectId": project_id,
+                    "requestingAgentId": agent_id,
+                    "state": "active",
+                    "maintenanceMode": project.get("agentMaintenanceMode") or "strict_confirmation",
+                    "allowedOperations": ["status", "maintenance_request"],
+                    "createdAt": now,
+                    "updatedAt": now,
+                    "audit": [],
+                    "maintenanceRequests": {},
+                    "maintenanceIdempotency": {},
+                    "autonomousIdempotency": {},
+                }
+            self._apply_maintenance_mutation(root, project, grant, normalized, now)
+            project["updatedAt"] = now
+            if persisted_grant:
+                grant["updatedAt"] = now
+                self._append_grant_audit(
+                    grant,
+                    "confirmed_maintenance_applied",
+                    agent_id,
+                    now,
+                )
+            project.setdefault("maintenanceHistory", []).append({
+                "id": f"confirmed-maintenance-{self.new_id()}",
+                "type": "confirmed_agent_maintenance",
+                "requestingAgentId": agent_id,
+                "operation": normalized.get("operation"),
+                "confirmationSummaryDigest": summary_digest,
+                "createdAt": now,
+            })
+            project["maintenanceHistory"] = project["maintenanceHistory"][-self.store.config.audit_history_limit:]
+            result = {
+                "ok": True,
+                "created": True,
+                "project": copy.deepcopy(project),
+                "mutation": copy.deepcopy(normalized),
+                "confirmationSummaryDigest": summary_digest,
+            }
+            root[IDEMPOTENCY_KEY][scoped_key] = {
+                "projectId": project_id,
+                "requestingAgentId": agent_id,
+                "idempotencyKey": key,
+                "payloadDigest": payload_digest,
+                "mutation": copy.deepcopy(normalized),
+                "confirmationSummaryDigest": summary_digest,
+                "createdAt": now,
+            }
+            return result
+
+        return self.store.update(apply)
+
     def confirm_maintenance_request(
         self,
         project_id: str,
@@ -2045,8 +2193,14 @@ class ProjectAuthoringService:
     ) -> None:
         operation = mutation["operation"]
         if operation == "update_project":
-            allowed = {"title", "description", "priority", "dueDate", "tags", "longTermProject"}
+            allowed = {"title", "description", "priority", "dueDate", "tags", "longTermProject", "projectType"}
             self._apply_allowed_changes(project, mutation["changes"], allowed)
+            if "projectType" in mutation["changes"]:
+                project_type = str(project.get("projectType") or "")
+                if project_type not in {"one_time", "reusable", "recurring"}:
+                    raise ProjectAuthoringCommandError(
+                        "invalid_project_type", "projectType must be one_time, reusable, or recurring", 400,
+                    )
             return
         if operation in {"update_task", "reassign_roles"}:
             task = self._maintenance_task(project, mutation["taskId"])
@@ -2115,13 +2269,32 @@ class ProjectAuthoringService:
             )
             return
         if operation == "update_recurrence":
-            recurrence_id = str((project.get("recurrenceRef") or {}).get("id") or "")
-            recurrence = root[RECURRENCES_KEY].get(recurrence_id)
-            if not isinstance(recurrence, dict):
-                raise ProjectAuthoringCommandError("recurrence_not_found", "Project recurrence not found", 404)
             allowed = {"schedule", "paused"}
+            recurrence = copy.deepcopy(project.get("recurrence") if isinstance(project.get("recurrence"), Mapping) else {})
+            recurrence.setdefault("enabled", True)
             self._apply_allowed_changes(recurrence, mutation["changes"], allowed)
+            if "schedule" in recurrence:
+                schedule = recurrence.get("schedule")
+                if not isinstance(schedule, Mapping):
+                    raise ProjectAuthoringCommandError("invalid_recurrence_schedule", "Project recurrence schedule is invalid", 400)
+                kind = str(schedule.get("kind") or "").strip()
+                if kind == "cron":
+                    expr = str(schedule.get("expr") or "").strip()
+                    if len(expr.split()) < 5 or len(expr.split()) > 7:
+                        raise ProjectAuthoringCommandError("invalid_recurrence_schedule", "Cron schedule requires a 5-7 field expr", 400)
+                elif kind == "every":
+                    try:
+                        every_ms = int(schedule.get("everyMs") or 0)
+                    except (TypeError, ValueError):
+                        every_ms = 0
+                    if every_ms < 60000:
+                        raise ProjectAuthoringCommandError("invalid_recurrence_schedule", "Recurring schedule everyMs must be at least 60000", 400)
+                else:
+                    raise ProjectAuthoringCommandError("invalid_recurrence_schedule", "Project recurrence schedule kind must be cron or every", 400)
+            recurrence["enabled"] = True
             recurrence["updatedAt"] = now
+            project["recurrence"] = recurrence
+            project["projectType"] = "recurring"
             return
         raise ProjectAuthoringCommandError(
             "unsupported_maintenance_operation", "Maintenance operation is not supported", 400,

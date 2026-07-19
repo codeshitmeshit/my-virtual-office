@@ -1222,6 +1222,7 @@
   "proj_scheduled_cron_delete": "Delete",
   "proj_scheduled_cron_error": "Error",
   "proj_scheduled_cron_error_detail": "Reason",
+  "proj_scheduled_cron_status_enabled": "Enabled",
   "proj_scheduled_cron_default_name": "Scheduled task",
   "proj_scheduled_cron_no_extra_info": "No additional information",
   "proj_scheduled_cron_target_task": "Task",

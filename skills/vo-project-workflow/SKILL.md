@@ -16,13 +16,18 @@ description: Virtual Office 中任意 CLI 或 agent 需要读取项目/任务、
 优先使用当前运行环境或 `start.sh` 启动配置中的端口：
 
 ```bash
-if [ -z "${VO_BASE_URL:-}" ] && [ -z "${VO_PORT:-}" ] && [ -f /home/wo/code/my-virtual-office/.env ]; then
-  VO_PORT="$(awk -F= '$1=="VO_PORT"{print $2; exit}' /home/wo/code/my-virtual-office/.env)"
+vo_project_root="${VO_PROJECT_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
+if [ -z "${VO_BASE_URL:-}" ] && [ -z "${VO_PORT:-}" ] && [ -f "$vo_project_root/.env" ]; then
+  VO_PORT="$(awk -F= '$1=="VO_PORT"{print $2; exit}' "$vo_project_root/.env")"
 fi
 VO_BASE_URL="${VO_BASE_URL:-http://127.0.0.1:${VO_PORT:-8090}}"
 ```
 
 执行写操作前查询 `/api/agents`，确认 `agentId`、`providerKind` 和当前调用方身份。不要冒用其他 agent。
+
+Agent 自己启动 Project Execution 时优先使用 `/api/agent/projects/.../project-execution/start`，并带上 `X-VO-Agent-Action: project-execution` 与 `X-VO-Agent-Id`。该入口不需要 `X-VO-Management-Token`，但后端会校验调用方必须是项目 authoring agent、默认执行人，或项目/任务里的负责人/执行人。
+
+`/api/projects/...` 下的 project mutation POST/PUT/DELETE 属于用户/管理控制面，通常需要 VO management token 或 UI 代发；Agent 不要索取 token，也不要在没有可信管理面授权时直接调用这些管理面写接口。
 
 ## 工作流
 
@@ -45,25 +50,31 @@ curl -sS -X POST "$VO_BASE_URL/api/projects/PROJECT_ID/project-execution/workspa
   -d '{"workspacePath":"/path/to/workspace"}'
 ```
 
-失败时停止并报告真实错误。不要绕过 workspace 校验，也不要把 artifacts 当作通用文件浏览器。
+这是管理面 workspace 校验接口，适合 UI 或有管理面授权的用户控制面调用。普通 Agent 如果没有管理面授权，不要为了校验 workspace 去索取 `X-VO-Management-Token`；可以在启动接口返回的 `confirmationRequired` / `workspace` 错误中处理真实阻塞。不要绕过 workspace 校验，也不要把 artifacts 当作通用文件浏览器。
 
 ### 3. 启动执行
 
-项目级执行：
+Agent 项目级执行：
 
 ```bash
-curl -sS -X POST "$VO_BASE_URL/api/projects/PROJECT_ID/project-execution/start" \
+curl -sS -X POST "$VO_BASE_URL/api/agent/projects/PROJECT_ID/project-execution/start" \
   -H 'Content-Type: application/json' \
+  -H 'X-VO-Agent-Action: project-execution' \
+  -H 'X-VO-Agent-Id: CURRENT_AGENT_ID' \
   -d '{"mode":"continuous","skipReviewConfirmed":false}'
 ```
 
-单任务执行：
+Agent 单任务执行：
 
 ```bash
-curl -sS -X POST "$VO_BASE_URL/api/projects/PROJECT_ID/tasks/TASK_ID/project-execution/start" \
+curl -sS -X POST "$VO_BASE_URL/api/agent/projects/PROJECT_ID/tasks/TASK_ID/project-execution/start" \
   -H 'Content-Type: application/json' \
+  -H 'X-VO-Agent-Action: project-execution' \
+  -H 'X-VO-Agent-Id: CURRENT_AGENT_ID' \
   -d '{"skipReviewConfirmed":false}'
 ```
+
+用户/管理控制面也保留兼容入口 `POST /api/projects/PROJECT_ID/project-execution/start` 和 `POST /api/projects/PROJECT_ID/tasks/TASK_ID/project-execution/start`，但它们属于 management-gated 项目写操作；Agent 默认不要使用这些入口。
 
 如果响应包含 `confirmationRequired`：
 
@@ -91,6 +102,8 @@ curl -sS -X POST "$VO_BASE_URL/api/projects/PROJECT_ID/tasks/TASK_ID/project-exe
 
 `accept` 只能在 `executionState=awaiting_user_acceptance` 且 reviewer `pass` 或 `skipped` 后执行。`reject_and_rework` 和 `mark_blocked` 必须带 `feedback`，不要替用户编造验收意见。
 
+review、验收和返工属于 reviewer/用户控制面，当前公开接口在 `/api/projects/...` 下，通常需要管理面授权或 UI 代发。Agent 可以读取状态、报告下一步和请求用户处理；不要为了这些动作索取、读取或传递 management token。
+
 ### 5. 取消和会议阻塞
 
 取消 active attempt：
@@ -111,6 +124,8 @@ curl -sS -X POST "$VO_BASE_URL/api/projects/PROJECT_ID/tasks/TASK_ID/project-exe
 
 支持 `continue_execution`、`mark_blocked`、`reopen_meeting`。这些都是用户决策面；没有明确用户意图时只报告状态。
 
+取消和会议阻塞处理也属于用户决策面。当前公开接口在 `/api/projects/...` 下，普通 Agent 不要在没有管理面授权或明确用户控制面代发时调用。
+
 ### 6. Artifact 查看
 
 ```bash
@@ -124,6 +139,8 @@ inline read 当前只适合 Markdown/text artifact，路径必须位于项目 wo
 
 - 不删除、归档、重排项目数据，除非用户明确要求。
 - 不绕过 dirty workspace、skip reviewer、user acceptance、active task 门禁。
+- Agent 启动执行使用 `/api/agent/projects/.../project-execution/start`；用户/管理控制面动作才使用 `/api/projects/...` 写接口。
+- 不索取、读取、缓存或传递 `X-VO-Management-Token`。
 - 不直接调用 provider 私有 CLI 来替代 Project Execution。
 - 需要跨 agent 普通沟通时使用 本地 `/skills/vo-agent-communication/SKILL.md` 或 本地 `/skills/vo-codex-communication/SKILL.md`。
 - 需要申请会议时回到 本地 `/skills/vo-operating-guidelines/SKILL.md` 和 `meeting-requests.md`。

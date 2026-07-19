@@ -56,6 +56,40 @@ Reviewer 默认策略：不指定；如有建议，仅作为建议，确认分�
 
 请确认是否按以上方案创建真实项目。"""
 SUMMARY_DIGEST = hashlib.sha256(SUMMARY_TEXT.encode("utf-8")).hexdigest()
+MAINTENANCE_SUMMARY_TEXT = """我准备修改这个 VO 项目，请确认：
+
+项目 ID：project-creation-1
+项目名称：Strict
+修改目标：更新项目标题
+修改内容：
+
+| # | 类型 | 对象 | 当前值 | 目标值 | 影响 |
+| --- | --- | --- | --- | --- | --- |
+| 1 | update_project | 项目标题 | Strict | Confirmed without grant | 项目标题会更新 |
+
+不会修改的内容：任务、角色、reviewer、执行状态、周期配置
+风险/注意事项：无
+需要你确认的点：无
+
+请确认是否按以上方案修改真实项目。"""
+MAINTENANCE_SUMMARY_DIGEST = hashlib.sha256(MAINTENANCE_SUMMARY_TEXT.encode("utf-8")).hexdigest()
+RECURRENCE_MAINTENANCE_SUMMARY_TEXT = """我准备修改这个 VO 项目，请确认：
+
+项目 ID：project-creation-1
+项目名称：Strict
+修改目标：设置为可复用并每天 10:00 运行
+修改内容：
+
+| # | 类型 | 对象 | 当前值 | 目标值 | 影响 |
+| --- | --- | --- | --- | --- | --- |
+| 1 | update_recurrence | 项目周期配置 | 无 | 每天 10:00 Asia/Shanghai | 项目会记录自身周期属性 |
+
+不会修改的内容：任务、角色、reviewer、执行状态
+风险/注意事项：无
+需要你确认的点：无
+
+请确认是否按以上方案修改真实项目。"""
+RECURRENCE_MAINTENANCE_SUMMARY_DIGEST = hashlib.sha256(RECURRENCE_MAINTENANCE_SUMMARY_TEXT.encode("utf-8")).hexdigest()
 
 
 class _Connection:
@@ -261,6 +295,122 @@ def test_direct_reusable_project_keeps_management_template_instantiation(authori
     assert len(markdown.load_all()["projects"]) == 2
 
 
+def test_direct_reusable_project_can_be_project_attribute_without_template(authoring):
+    markdown, _ = authoring
+    project = _project("Reusable without template")
+    project.update({
+        "projectType": "reusable",
+        "template": {"mode": "none"},
+    })
+
+    status, created = _create(project, "author:reusable-no-template")
+
+    assert status == 200
+    assert created["project"]["projectType"] == "reusable"
+    assert created["project"].get("templateRef") == {}
+    assert len(markdown.load_all()["projects"]) == 1
+
+
+def test_confirmed_update_recurrence_applies_to_existing_project_attribute(authoring):
+    markdown, _ = authoring
+    status, created = _create(_project("Strict"), "author:recurrence-maintenance-source")
+    assert status == 200
+    project_id = created["project"]["id"]
+
+    update_status, updated = _call(_handler(
+        f"/api/agent/projects/{project_id}/maintenance",
+        {
+            "idempotencyKey": "author:update-recurrence-existing",
+            "confirmation": {
+                "confirmed": True,
+                "summaryDigest": RECURRENCE_MAINTENANCE_SUMMARY_DIGEST,
+                "summaryText": RECURRENCE_MAINTENANCE_SUMMARY_TEXT,
+            },
+            "mutation": {
+                "operation": "update_recurrence",
+                "changes": {
+                    "schedule": {"kind": "cron", "expr": "0 10 * * *", "timezone": "Asia/Shanghai"},
+                },
+            },
+        },
+        headers={"X-VO-Agent-Action": "project-authoring", "X-VO-Agent-Id": "author"},
+    ), "POST")
+
+    assert update_status == 200
+    assert updated["project"]["projectType"] == "recurring"
+    assert updated["project"]["recurrence"]["enabled"] is True
+    assert updated["project"]["recurrence"]["schedule"]["expr"] == "0 10 * * *"
+    stored = next(item for item in markdown.load_all()["projects"] if item["id"] == project_id)
+    assert stored["recurrence"]["schedule"]["timezone"] == "Asia/Shanghai"
+
+
+def test_confirmed_agent_scheduled_cron_bypasses_management_token_and_is_idempotent(authoring, monkeypatch):
+    status, created = _create(_project("Strict"), "author:cron-source")
+    assert status == 200
+    project_id = created["project"]["id"]
+    calls = []
+
+    monkeypatch.setattr(server, "_project_schedule_bindings", lambda: {
+        "cron-agent-1": {
+            "projectId": project_id,
+            "agentScheduleIdempotencyKey": "author:daily-cron",
+            "agentSchedulePayloadDigest": calls[0]["agentSchedulePayloadDigest"] if calls else "",
+            "createdByAgentId": "author",
+            "schedule": {"kind": "cron", "expr": "0 10 * * *", "timezone": "Asia/Shanghai"},
+        }
+    } if calls else {})
+
+    def fake_create(pid, cron_body):
+        calls.append(dict(cron_body))
+        return {
+            "ok": True,
+            "projectId": pid,
+            "id": "cron-agent-1",
+            "binding": {
+                "projectId": pid,
+                "agentScheduleIdempotencyKey": cron_body.get("agentScheduleIdempotencyKey"),
+                "agentSchedulePayloadDigest": cron_body.get("agentSchedulePayloadDigest"),
+                "createdByAgentId": cron_body.get("createdByAgentId"),
+                "schedule": cron_body.get("schedule"),
+            },
+        }
+
+    monkeypatch.setattr(server, "_handle_agent_project_scheduled_cron_create", fake_create)
+    payload = {
+        "idempotencyKey": "author:daily-cron",
+        "confirmation": {
+            "confirmed": True,
+            "summaryDigest": RECURRENCE_MAINTENANCE_SUMMARY_DIGEST,
+            "summaryText": RECURRENCE_MAINTENANCE_SUMMARY_TEXT,
+        },
+        "projectType": "reusable",
+        "longTermProject": True,
+        "cron": {
+            "name": "日报每日执行",
+            "schedule": {"kind": "cron", "expr": "0 10 * * *", "timezone": "Asia/Shanghai"},
+            "targetType": "projectWorkflow",
+            "enabled": True,
+        },
+    }
+
+    first_status, first = _call(_handler(
+        f"/api/agent/projects/{project_id}/scheduled-cron",
+        payload,
+        headers={"X-VO-Agent-Action": "project-authoring", "X-VO-Agent-Id": "author"},
+    ), "POST")
+    repeat_status, repeated = _call(_handler(
+        f"/api/agent/projects/{project_id}/scheduled-cron",
+        payload,
+        headers={"X-VO-Agent-Action": "project-authoring", "X-VO-Agent-Id": "author"},
+    ), "POST")
+
+    assert first_status == repeat_status == 200
+    assert first["created"] is True
+    assert repeated["created"] is False
+    assert len(calls) == 1
+    assert calls[0]["createdByAgentId"] == "author"
+
+
 def test_direct_recurring_project_uses_source_grant_and_deduplicates_occurrence(authoring):
     markdown, _ = authoring
     project = _project("Recurring HTTP")
@@ -296,21 +446,25 @@ def test_direct_recurring_project_uses_source_grant_and_deduplicates_occurrence(
 
 
 def test_direct_project_grant_rotation_revocation_and_scope_remain_protected(authoring):
-    markdown, _ = authoring
+    markdown, service = authoring
     _, created = _create(_project("Granted"), "author:grant-http")
     secret = created["projectGrantSecret"]
     project_id = created["project"]["id"]
 
-    def grant_status(value, *, target=project_id, agent="author"):
-        return _call(_handler(
-            f"/api/agent/projects/{target}/grant-status",
-            headers=_grant_headers(value, agent=agent),
-        ), "GET")
+    def authenticate(value, *, target=project_id, agent="author"):
+        return service.authenticate_project_grant(
+            target,
+            requesting_agent_id=agent,
+            grant_secret=value,
+            required_operation="status",
+        )
 
-    assert grant_status(secret)[0] == 200
+    assert authenticate(secret)["projectId"] == project_id
     before = markdown.load_all()
-    assert grant_status(secret, target="different-project")[0] == 403
-    assert grant_status(secret, agent="other-agent")[0] == 403
+    with pytest.raises(Exception):
+        authenticate(secret, target="different-project")
+    with pytest.raises(Exception):
+        authenticate(secret, agent="other-agent")
     assert markdown.load_all()["projects"] == before["projects"]
 
     rotate_path = f"/api/project-authoring/projects/{project_id}/grant/rotate"
@@ -320,7 +474,9 @@ def test_direct_project_grant_rotation_revocation_and_scope_remain_protected(aut
     ), "POST")
     assert rotate_status == 200
     new_secret = rotated["grantSecret"]
-    assert grant_status(secret)[0] == 403 and grant_status(new_secret)[0] == 200
+    with pytest.raises(Exception):
+        authenticate(secret)
+    assert authenticate(new_secret)["projectId"] == project_id
 
     revoke_status, revoked = _call(_handler(
         f"/api/project-authoring/projects/{project_id}/grant/revoke",
@@ -328,7 +484,8 @@ def test_direct_project_grant_rotation_revocation_and_scope_remain_protected(aut
         headers={"X-VO-Management-Token": server._MANAGEMENT_TOKEN},
     ), "POST")
     assert revoke_status == 200 and revoked["grant"]["state"] == "revoked"
-    assert grant_status(new_secret)[0] == 403
+    with pytest.raises(Exception):
+        authenticate(new_secret)
 
 
 def test_direct_project_maintenance_keeps_strict_and_autonomous_boundaries(authoring):
@@ -379,3 +536,73 @@ def test_direct_project_maintenance_keeps_strict_and_autonomous_boundaries(autho
     assert update_status == 200 and updated["created"] is True
     stored = next(item for item in markdown.load_all()["projects"] if item["id"] == project["id"])
     assert stored["tasks"][0]["description"] == "Direct autonomous HTTP update"
+
+
+def test_confirmed_agent_maintenance_without_grant_applies_after_summary_confirmation(authoring):
+    markdown, _ = authoring
+    _, created = _create(_project("Strict"), "author:confirmed-maintenance-http")
+    project = created["project"]
+    headers = {"X-VO-Agent-Action": "project-authoring", "X-VO-Agent-Id": "other-agent"}
+
+    missing_status, missing = _call(_handler(
+        f"/api/agent/projects/{project['id']}/maintenance",
+        {
+            "idempotencyKey": "maintenance:no-confirmation",
+            "mutation": {"operation": "update_project", "changes": {"title": "Should not apply"}},
+        },
+        headers=headers,
+    ), "POST")
+    assert missing_status == 400
+    assert missing["code"] == "maintenance_confirmation_required"
+    assert markdown.load_all()["projects"][0]["title"] == "Strict"
+
+    status, updated = _call(_handler(
+        f"/api/agent/projects/{project['id']}/maintenance",
+        {
+            "idempotencyKey": "maintenance:confirmed-1",
+            "confirmation": {
+                "confirmed": True,
+                "summaryDigest": MAINTENANCE_SUMMARY_DIGEST,
+                "summaryText": MAINTENANCE_SUMMARY_TEXT,
+            },
+            "mutation": {"operation": "update_project", "changes": {"title": "Confirmed without grant"}},
+        },
+        headers=headers,
+    ), "POST")
+
+    assert status == 200
+    assert updated["created"] is True
+    assert updated["project"]["title"] == "Confirmed without grant"
+    assert markdown.load_all()["projects"][0]["title"] == "Confirmed without grant"
+
+    repeat_status, repeated = _call(_handler(
+        f"/api/agent/projects/{project['id']}/maintenance",
+        {
+            "idempotencyKey": "maintenance:confirmed-1",
+            "confirmation": {
+                "confirmed": True,
+                "summaryDigest": MAINTENANCE_SUMMARY_DIGEST,
+                "summaryText": MAINTENANCE_SUMMARY_TEXT,
+            },
+            "mutation": {"operation": "update_project", "changes": {"title": "Confirmed without grant"}},
+        },
+        headers=headers,
+    ), "POST")
+    assert repeat_status == 200
+    assert repeated["created"] is False
+
+    conflict_status, conflict = _call(_handler(
+        f"/api/agent/projects/{project['id']}/maintenance",
+        {
+            "idempotencyKey": "maintenance:confirmed-1",
+            "confirmation": {
+                "confirmed": True,
+                "summaryDigest": MAINTENANCE_SUMMARY_DIGEST,
+                "summaryText": MAINTENANCE_SUMMARY_TEXT,
+            },
+            "mutation": {"operation": "update_project", "changes": {"title": "Different title"}},
+        },
+        headers=headers,
+    ), "POST")
+    assert conflict_status == 409
+    assert conflict["code"] == "maintenance_idempotency_conflict"

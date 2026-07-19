@@ -1057,15 +1057,24 @@
     function scheduledCronStatusClass(status, hasError) {
         if (hasError) return 'error';
         const value = String(status || 'pending').toLowerCase();
-        if (['started', 'running', 'success', 'ok'].includes(value)) return 'ok';
+        if (['started', 'running', 'success', 'ok', 'enabled', 'pending_gateway_registration'].includes(value)) return 'ok';
         if (['failed', 'error', 'stop_error', 'missing_project', 'missing_target'].includes(value)) return 'error';
         if (['skipped', 'paused', 'pending', 'disengaged_completed', 'skipped_confirmation_required'].includes(value)) return 'muted';
         return 'muted';
     }
 
+    function scheduledCronStatusLabel(status) {
+        const value = String(status || 'pending').toLowerCase();
+        if (value === 'pending_gateway_registration') return _t('proj_scheduled_cron_status_enabled');
+        if (value === 'enabled') return _t('proj_scheduled_cron_status_enabled');
+        return status || _t('proj_scheduled_cron_history_unknown');
+    }
+
     function scheduledCronErrorSummary(error) {
         const text = String(error || '').replace(/\s+/g, ' ').trim();
         if (!text) return '';
+        if (/gateway token is not configured/i.test(text)) return '';
+        if (/gateway cron add is unavailable/i.test(text)) return '';
         return text.length > 180 ? `${text.slice(0, 177)}...` : text;
     }
 
@@ -1161,6 +1170,7 @@
                 const repeatGate = scheduledCronRepeatGate(j, p);
                 const cronState = j.state || {};
                 const lastStatus = cronState.lastStatus || 'pending';
+                const statusLabel = scheduledCronStatusLabel(lastStatus);
                 const lastError = scheduledCronErrorSummary(cronState.lastError);
                 const statusClass = scheduledCronStatusClass(lastStatus, !!lastError);
                 return `
@@ -1174,7 +1184,7 @@
                     <div class="proj-scheduled-cron-meta">
                         <div class="proj-scheduled-cron-status-row">
                             <span>${j.enabled === false ? 'disabled' : 'enabled'}</span>
-                            <span class="proj-scheduled-cron-status is-${statusClass}">${escHtml(lastStatus)}</span>
+                            <span class="proj-scheduled-cron-status is-${statusClass}">${escHtml(statusLabel)}</span>
                         </div>
                         ${lastError ? `<div class="proj-scheduled-cron-error-detail" title="${escHtml(cronState.lastError)}">
                             <span>${_t('proj_scheduled_cron_error_detail')}</span>

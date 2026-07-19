@@ -18,7 +18,7 @@ The backend cannot cryptographically verify provider-neutral chat authorship. `c
 | `VO_PROJECT_INSTANCE_RECURRENCE_ENABLED` | `false` | Gate recurrence intent and occurrence dispatch |
 | `VO_PROJECT_INSTANCE_RECURRENCE_DISPATCH_PAUSED` | `false` | Pause dispatch without deleting durable intent |
 
-Agent routes require loopback, no browser `Origin`, `X-VO-Agent-Action: project-authoring`, and a registered `X-VO-Agent-Id`. Agents must never acquire `X-VO-Management-Token`. Management authentication remains required for protected maintenance confirmation, grant rotation/revocation, template instantiation, recurrence pause/resume, health, and existing project CRUD.
+Agent routes require loopback, no browser `Origin`, `X-VO-Agent-Action: project-authoring`, and a registered `X-VO-Agent-Id`. Agents must never acquire `X-VO-Management-Token`. Management authentication remains required for protected maintenance confirmation, grant rotation/revocation, template instantiation, recurrence pause/resume, health, and existing project CRUD. User-confirmed Agent maintenance and Agent-created project scheduled cron use dedicated `/api/agent/...` routes instead of the management-token surface.
 
 ## Direct-create API
 
@@ -54,29 +54,29 @@ Every task has one responsible actor and one executor actor; they may be the sam
 
 The server rejects direct creation unless `confirmation.summaryText` contains the fixed VO project confirmation template and `confirmation.summaryDigest` equals the SHA-256 digest of that exact UTF-8 text. This does not cryptographically prove chat authorship, but it prevents bare `confirmed=true` requests and makes the Agent submit the same full proposal it claims the user confirmed.
 
-The atomic commit contains the project, tasks, actor projections, authoring source/digest, grant hash, immutable template version, recurrence definition, and outbox intent as applicable. Tasks start in `backlog`; `workflowActive` and `projectExecutionFlowActive` are false.
+The atomic commit contains the project, tasks, actor projections, authoring source/digest, optional immutable template version, recurrence definition, and outbox intent as applicable. Reusable is a project attribute and does not require a template. Legacy grant metadata may be stored for backward-compatible recurrence dispatch and administration, but project maintenance is authorized by explicit user-confirmed maintenance proposals. Tasks start in `backlog`; `workflowActive` and `projectExecutionFlowActive` are false.
 
 Idempotency is scoped to Agent and key. Same key and semantic payload returns the original project. Same key with changed project or proposal digest returns `project_creation_idempotency_conflict`. Workspace or commit failure leaves no partial project.
 
-The first success returns `projectGrantSecret`; only its hash is persisted. Idempotent retries return the project and public grant status without the secret. If the first response is lost, do not create another project—use management-authenticated grant rotation.
+If a response includes `projectGrantSecret`, callers must treat it as legacy compatibility data: do not log, cache, display, or use it for normal project maintenance. Idempotent retries return the project without a new secret.
 
 ## Maintenance and recurrence
 
 | Method and path | Contract |
 | --- | --- |
-| `GET /api/agent/projects/{projectId}/grant-status` | Validate the Agent/project scoped grant |
-| `POST /api/agent/projects/{projectId}/maintenance` | Submit protected maintenance or an allowed autonomous routine update |
+| `POST /api/agent/projects/{projectId}/maintenance` | Apply a protected maintenance mutation after a fixed-template user confirmation, or use a legacy autonomous routine update with an existing grant |
+| `POST /api/agent/projects/{projectId}/scheduled-cron` | Create a project scheduled cron after a fixed-template user confirmation; no management token is required |
 | `POST /api/agent/project-recurrences/{recurrenceId}/occurrences` | Idempotently materialize one independent occurrence |
 | `POST /api/project-authoring/projects/{projectId}/maintenance/{id}/confirm|reject` | Management decision for protected maintenance |
 | `POST /api/project-authoring/projects/{projectId}/grant/rotate|revoke` | Management grant administration |
 | `POST /api/project-authoring/recurrences/{recurrenceId}/pause|resume` | Management recurrence administration |
 | `GET /api/project-authoring/health` | Credential-safe metrics, outbox age, and intervention alerts |
 
-`strict_confirmation` makes every Agent maintenance mutation pending. `autonomous` directly permits only assigned-task `executionState`, `description`, `checklist`, `evidence`, and `dueDate`. Structural, role, reviewer, recurrence, workspace, archive/delete, and mode changes always require user confirmation.
+Maintenance requests without a grant must include `confirmation.confirmed=true`, the fixed maintenance confirmation `summaryText`, and a matching SHA-256 `summaryDigest`; the mutation is applied immediately after that confirmation contract is validated. Legacy `autonomous` grant calls directly permit only assigned-task `executionState`, `description`, `checklist`, `evidence`, and `dueDate`. Structural, role, reviewer, recurrence, workspace, archive/delete, mode changes, and project scheduled cron creation always require user confirmation.
 
 Protected maintenance requests use `expectedRevision` for optimistic concurrency and a one-time `confirmationKey` for the management decision. An autonomous assigned-task change uses the `routine_task_update` operation; it cannot widen the allowed field set or change project structure.
 
-Reusable and recurring projects pin immutable `templateId,version` pairs. Each created project records its `projectTemplateInstance` projection. A due recurrence uses an expiring occurrence claim and compare-and-set commit keyed by `occurrenceId` to create one independent, unstarted project. Duplicate or restarted callbacks return the already materialized project. Legacy `projectWorkflow` and `projectTask` cron behavior is unchanged.
+Recurring project-template occurrences pin immutable `templateId,version` pairs and record a `projectTemplateInstance` projection. Reusable projects may have no template at all. A due recurrence uses an expiring occurrence claim and compare-and-set commit keyed by `occurrenceId` to create one independent, unstarted project. Duplicate or restarted callbacks return the already materialized project. Agent project scheduled-cron creation is idempotent by Agent and key; it saves and enables a VO project-level scheduled configuration without asking for a management token. Scheduled project runs reuse the existing Project Execution start path (`projectWorkflow` or `projectTask`) when triggered; Gateway registration is an implementation detail and should not be exposed as a user prerequisite.
 
 ## Legacy draft compatibility
 
@@ -90,7 +90,7 @@ The previous request/status/edit/confirm/reject routes and draft review UI are r
 4. **Workspace/commit failure**: managed uncommitted workspaces are cleaned; retry the unchanged confirmation with the same key.
 5. **Lost first response**: locate the real project; do not recreate it. Rotate the grant through the trusted management surface.
 6. **Revoked/cross-scope grant (`403`)**: stop Agent mutation; never reuse another project or Agent's secret.
-7. **Outbox/Gateway failure**: pause dispatch, preserve durable intent, repair the dependency, then resume bounded reconciliation.
+7. **Outbox/scheduler failure**: pause dispatch, preserve durable intent, repair the scheduler dependency, then resume bounded reconciliation. Do not ask users to handle Gateway registration for ordinary VO project scheduled runs.
 8. **Invalid recurrence actor**: retain the intervention alert; use a user-confirmed template/role correction rather than silent substitution.
 9. **Rollback**: disable authoring, pause recurrence, let atomic writes finish, preserve root metadata, deploy the previous compatible code, and verify ordinary project/legacy cron reads.
 

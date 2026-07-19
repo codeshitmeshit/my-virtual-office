@@ -22,6 +22,27 @@ os.environ.setdefault("VO_STATUS_DIR", tempfile.mkdtemp(prefix="vo-service-bound
 
 import server
 from services import project_execution
+from services import execution_lifecycle
+
+
+class _InMemoryProjectRepository:
+    def __init__(self, project):
+        self.project = project
+
+    def get(self, project_id):
+        if self.project.get("id") != project_id:
+            raise server.ProjectNotFoundError(project_id)
+        return json.loads(json.dumps(self.project))
+
+    def update(self, project_id, mutator):
+        if self.project.get("id") != project_id:
+            raise server.ProjectNotFoundError(project_id)
+        working = json.loads(json.dumps(self.project))
+        result = mutator(working)
+        if isinstance(result, dict) and result.get("ok") is False:
+            return result
+        self.project = working
+        return result if isinstance(result, dict) else working
 
 
 def _project(workspace="/stored/workspace"):
@@ -47,6 +68,7 @@ def _handler_for_post(payload, content_length=None):
     handler.rfile = io.BytesIO(payload)
     handler.wfile = io.BytesIO()
     handler.connection = _Connection()
+    handler.client_address = ("127.0.0.1", 12345)
     handler.responses = []
     handler.response_headers = []
     handler.send_response = lambda status, *args, **kwargs: handler.responses.append(status)
@@ -206,6 +228,149 @@ def test_execution_start_http_preserves_git_snapshot_failure_status_and_code(mon
 
     assert handler.responses == [409]
     assert json.loads(handler.wfile.getvalue())["code"] == "workspace_git_snapshot_failed"
+
+
+def test_agent_project_execution_start_does_not_require_management_token(monkeypatch):
+    handler = _handler_for_post(b'{"mode":"continuous"}')
+    handler.path = "/api/agent/projects/project-1/project-execution/start"
+    handler.headers["X-VO-Agent-Action"] = "project-execution"
+    handler.headers["X-VO-Agent-Id"] = "author"
+    called = []
+    saved = []
+    data = {"projects": [{"id": "project-1", "authoringAgentId": "author", "tasks": []}]}
+    monkeypatch.setattr(
+        server,
+        "_load_projects",
+        lambda: data,
+    )
+    monkeypatch.setattr(server, "_save_projects", lambda value: saved.append(value))
+    monkeypatch.setattr(server, "_proj_now", lambda: "now")
+    monkeypatch.setattr(server, "_office_agent_lookup", lambda agent_id: {"id": agent_id} if agent_id == "author" else None)
+    monkeypatch.setattr(
+        server,
+        "_handle_project_execution_project_start",
+        lambda project_id, body: called.append((project_id, body)) or {"ok": True, "started": True},
+    )
+
+    handler.do_POST()
+
+    assert handler.responses == [200]
+    assert json.loads(handler.wfile.getvalue()) == {"ok": True, "started": True}
+    assert saved == [data]
+    assert data["projects"][0]["projectExecutionEnabled"] is True
+    assert called == [(
+        "project-1",
+        {"mode": "continuous", "by": "author", "source": "agent_project_execution"},
+    )]
+
+
+def test_agent_project_execution_start_rejects_unrelated_agent(monkeypatch):
+    handler = _handler_for_post(b"{}")
+    handler.path = "/api/agent/projects/project-1/project-execution/start"
+    handler.headers["X-VO-Agent-Action"] = "project-execution"
+    handler.headers["X-VO-Agent-Id"] = "intruder"
+    called = []
+    monkeypatch.setattr(
+        server,
+        "_load_projects",
+        lambda: {"projects": [{"id": "project-1", "authoringAgentId": "author", "tasks": []}]},
+    )
+    monkeypatch.setattr(server, "_office_agent_lookup", lambda agent_id: {"id": agent_id})
+    monkeypatch.setattr(server, "_handle_project_execution_project_start", lambda *args: called.append(args) or {"ok": True})
+
+    handler.do_POST()
+
+    assert handler.responses == [403]
+    assert json.loads(handler.wfile.getvalue())["code"] == "agent_project_execution_not_authorized"
+    assert called == []
+
+
+def test_agent_task_execution_start_allows_executor_agent(monkeypatch):
+    handler = _handler_for_post(b'{"mode":"single"}')
+    handler.path = "/api/agent/projects/project-1/tasks/task-1/project-execution/start"
+    handler.headers["X-VO-Agent-Action"] = "project-execution"
+    handler.headers["X-VO-Agent-Id"] = "executor"
+    called = []
+    saved = []
+    data = {"projects": [{
+        "id": "project-1",
+        "authoringAgentId": "author",
+        "tasks": [{"id": "task-1", "executorActor": {"type": "agent", "id": "executor"}}],
+    }]}
+    monkeypatch.setattr(
+        server,
+        "_load_projects",
+        lambda: data,
+    )
+    monkeypatch.setattr(server, "_save_projects", lambda value: saved.append(value))
+    monkeypatch.setattr(server, "_proj_now", lambda: "now")
+    monkeypatch.setattr(server, "_office_agent_lookup", lambda agent_id: {"id": agent_id} if agent_id == "executor" else None)
+    monkeypatch.setattr(
+        server,
+        "_handle_project_execution_start",
+        lambda project_id, task_id, body: called.append((project_id, task_id, body)) or {"ok": True, "started": True},
+    )
+
+    handler.do_POST()
+
+    assert handler.responses == [200]
+    assert json.loads(handler.wfile.getvalue()) == {"ok": True, "started": True}
+    assert saved == [data]
+    assert data["projects"][0]["projectExecutionEnabled"] is True
+    assert called == [(
+        "project-1",
+        "task-1",
+        {"mode": "single", "by": "executor", "source": "agent_project_execution"},
+    )]
+
+
+def test_agent_project_execution_source_allows_workspace_optional_task_start():
+    project = {
+        "id": "project-1",
+        "projectExecutionEnabled": True,
+        "workspacePath": None,
+        "tasks": [{"id": "task-1", "title": "Research", "checklist": [{"text": "done"}]}],
+    }
+    repo = _InMemoryProjectRepository(project)
+    validation_calls = []
+    git_calls = []
+    launches = []
+
+    ports = execution_lifecycle.StartPorts(
+        validate_workspace=lambda path: validation_calls.append(path) or {"ok": False, "code": "workspace_required"},
+        git_snapshot=lambda path: git_calls.append(path) or {"error": "should not be called"},
+        resolve_roles=lambda project, task, allow_skip: {"ok": True, "executor": {"id": "codex-local"}, "skipReview": True},
+        active_task=lambda project: None,
+        start_mode=lambda project, body: "continuous",
+        requires_acceptance=lambda task: False,
+        reopen_completed_task=lambda *args, **kwargs: False,
+        clear_restart_bindings=lambda *args, **kwargs: None,
+        seed_checklist=lambda *args, **kwargs: True,
+        has_pending_meeting_actions=lambda task: False,
+        transition=lambda *args, **kwargs: None,
+        now=lambda: "now",
+        new_id=lambda: "attempt-1",
+        launcher=lambda callback: launches.append(callback),
+        runner=lambda *args, **kwargs: None,
+        notify_intervention=lambda *args, **kwargs: None,
+    )
+
+    result = execution_lifecycle.start_task(
+        "project-1",
+        "task-1",
+        {"source": "agent_project_execution", "projectStart": True, "mode": "continuous"},
+        repository=repo,
+        cancel_registry=execution_lifecycle.CancelRegistry(),
+        ports=ports,
+    )
+
+    assert result["ok"] is True
+    assert validation_calls == []
+    assert git_calls == []
+    assert launches
+    task = repo.project["tasks"][0]
+    assert task["attempts"][0]["workspacePath"] == ""
+    assert task["attempts"][0]["workspaceKind"] == "none"
 
 
 def _service_dependencies(project=None, validation=None):

@@ -27,13 +27,22 @@ for (const required of [
   "/api/agent/project-authoring/projects",
   "summaryDigest",
   "summaryText",
-  "projectGrantSecret",
-  "/grant-status",
   "/maintenance",
+  "/api/agent/projects/PROJECT_ID/scheduled-cron",
   "strict_confirmation",
   "autonomous",
   "X-VO-Management-Token",
   "vo-project-workflow",
+  "维护接口调用样例",
+  "\"operation\": \"update_project\"",
+  "\"operation\": \"create_task\"",
+  "\"operation\": \"update_task\"",
+  "\"operation\": \"reassign_roles\"",
+  "\"operation\": \"delete_task\"",
+  "\"operation\": \"archive_project\"",
+  "\"operation\": \"workspace_change\"",
+  "\"operation\": \"maintenance_mode_change\"",
+  "\"operation\": \"update_recurrence\"",
   "强制流程门禁",
   "S0 读取指南",
   "S1 获取角色",
@@ -41,12 +50,22 @@ for (const required of [
   "S3 等待用户确认",
   "S4 构造请求",
   "S5 创建项目",
+  "修改前相似功能检查",
+  "/api/projects/PROJECT_ID",
+  "GET /api/projects/PROJECT_ID/scheduled-cron",
+  "发现已经有类似配置/任务",
+  "仍然新增一个独立项",
 ]) {
   assert.ok(skill.includes(required), `missing project-authoring contract: ${required}`);
 }
 
-assert.match(skill, /只保存在当前运行内存中/);
-assert.match(skill, /不写入文件、日志、项目、聊天消息或命令输出摘要/);
+assert.match(skill, /维护已有项目统一使用下文的“用户确认方案”路径/);
+assert.match(skill, /可复用是项目属性，不是模板属性/);
+assert.match(skill, /不要使用管理面 `\/api\/projects\/PROJECT_ID\/scheduled-cron`/);
+assert.match(skill, /VO 已保存并启用项目级定时配置/);
+assert.match(skill, /不要把 Gateway token、Gateway registration、`pending_gateway_registration` 或 `reconciliationRequired` 当作用户需要处理的事项/);
+assert.match(skill, /到点后应复用原 Project Execution 启动入口/);
+assert.match(skill, /不索取、读取、缓存或传递 project grant secret/);
 assert.match(skill, /不自动启动项目、任务、review、验收、取消或会议/);
 assert.match(skill, /展示方案后停止，不调用创建 API/);
 assert.match(skill, /语义变化必须重新确认并使用新 key/);
@@ -61,12 +80,16 @@ assert.match(skill, /只用这些只读 HTTP GET 获取 roster/);
 assert.match(skill, /不要运行内联 Python/);
 assert.match(skill, /不要调用 `_office_agent_lookup`/);
 assert.match(skill, /用户确认前只允许读取本地 skill 和 Agent roster/);
-assert.match(skill, /不要在确认前调用项目列表、项目详情、项目创建、维护、执行或 review 相关接口/);
-assert.match(skill, /尤其不要用 `GET \/api\/projects` 做预检查/);
+assert.match(skill, /创建新项目时，不要在确认前调用项目列表、项目详情、项目创建、维护、执行或 review 相关接口/);
+assert.match(skill, /维护已有项目时，如果用户已经给出项目 ID，或必须判断“往哪个已有项目修改”，确认前可以读取目标项目现状和该项目必要配置/);
+assert.match(skill, /不要用全量项目列表扩大范围/);
+assert.match(skill, /在展示维护方案前，必须先读取目标项目现状/);
+assert.match(skill, /如果已存在类似功能，不要直接新增或重复配置/);
 assert.match(skill, /只有在用户确认当前自然语言方案后，才进入本阶段/);
 assert.match(skill, /必须按下面状态机顺序执行，不得跳步、合并步骤/);
 assert.match(skill, /用“我已理解用户意图”替代确认/);
-assert.match(skill, /S3 之前不得调用任何项目状态或项目写接口/);
+assert.match(skill, /创建新项目时，S3 之前不得调用项目列表、项目详情或项目写接口/);
+assert.match(skill, /维护已有项目时，S3 之前只可读取目标项目和必要配置，不得调用任何写接口/);
 assert.match(skill, /S5 之前不得提交 `confirmed=true`/);
 assert.ok(!skill.includes("/api/agent/project-authoring/requests"));
 assert.ok(!skill.includes("PYTHONPATH=app"));

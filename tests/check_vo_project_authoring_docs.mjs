@@ -5,12 +5,13 @@ const doc = await readFile(new URL("../docs/VO_PROJECT_AUTHORING_OPERATIONS.md",
 
 for (const contract of [
   "POST /api/agent/project-authoring/projects",
+  "POST /api/agent/projects/{projectId}/scheduled-cron",
   "responsibleActor",
   "executorActor",
   "reviewerActor",
   "expectedRevision",
   "confirmationKey",
-  "projectGrantSecret",
+  "fixed maintenance confirmation",
   "strict_confirmation",
   "routine_task_update",
   "templateId,version",
@@ -26,6 +27,8 @@ for (const contract of [
 
 assert.match(doc, /never starts Project Execution/);
 assert.match(doc, /must never acquire `X-VO-Management-Token`/);
+assert.match(doc, /Reusable is a project attribute and does not require a template/);
+assert.match(doc, /Gateway registration is an implementation detail and should not be exposed as a user prerequisite/);
 assert.match(doc, /Duplicate or restarted callbacks return the already materialized project/);
 assert.match(doc, /cannot cryptographically verify provider-neutral chat authorship/);
 assert.match(doc, /remain inert compatibility metadata/);

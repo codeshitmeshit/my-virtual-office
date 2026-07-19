@@ -7,6 +7,8 @@ import concurrent.futures
 import hashlib
 import json
 import os
+import re
+import shlex
 import tempfile
 import threading
 import time
@@ -32,6 +34,89 @@ KIND_LABELS = {
     "file_change": "文件变更",
     "permissions": "权限申请",
 }
+MAX_STORED_COMMAND = 128_000
+
+
+def _shell_payload(command: str) -> str:
+    command = str(command or "").strip()
+    if not command:
+        return ""
+    try:
+        parts = shlex.split(command)
+    except ValueError:
+        return command
+    if len(parts) >= 3 and os.path.basename(parts[0]) in {"bash", "sh", "zsh"} and parts[1] in {"-lc", "-c"}:
+        return str(parts[2] or "").strip()
+    return command
+
+
+def _extract_shell_assignment(payload: str, name: str) -> str:
+    payload = str(payload or "")
+    pattern = re.compile(rf"(?:^|[;\s]){re.escape(name)}=(?P<quote>['\"])(?P<value>.*?)(?P=quote)", re.DOTALL)
+    match = pattern.search(payload)
+    if not match:
+        return ""
+    return str(match.group("value") or "").strip()
+
+
+def _extract_vo_project_authoring_summary(command: str) -> str:
+    payload = _shell_payload(command)
+    if "/api/agent/projects/" not in payload and "/api/agent/project-authoring/projects" not in payload:
+        return ""
+    proposal = _extract_shell_assignment(payload, "proposal")
+    if not proposal:
+        return ""
+    return _format_vo_project_proposal_summary(proposal)
+
+
+def _format_vo_project_proposal_summary(proposal: str) -> str:
+    text = str(proposal or "").strip()
+    if not text:
+        return ""
+
+    def first_marker(*markers: str) -> str:
+        for marker in markers:
+            match = re.search(rf"{re.escape(marker)}\s*([^\n\r]+)", text)
+            if match:
+                return match.group(1).strip()
+        return ""
+
+    project_id = first_marker("项目 ID：", "项目ID：")
+    project_name = first_marker("项目名称：")
+    target = first_marker("修改目标：", "项目目标：")
+    unchanged = first_marker("不会修改的内容：")
+    risks = first_marker("风险/注意事项：")
+    confirm = first_marker("需要你确认的点：")
+
+    table_rows: list[str] = []
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line.startswith("|") or "---" in line or "类型" in line:
+            continue
+        cells = [cell.strip() for cell in line.strip("|").split("|")]
+        if len(cells) < 6:
+            continue
+        index, change_type, target_object, _current, desired, impact = cells[:6]
+        if not index or not change_type:
+            continue
+        table_rows.append(f"{index}. {change_type} / {target_object}：{desired}（{impact}）")
+
+    lines = ["VO 项目操作申请"]
+    if project_name or project_id:
+        project_label = project_name or "未命名项目"
+        lines.append(f"项目：{project_label}" + (f"（{project_id}）" if project_id else ""))
+    if target:
+        lines.append(f"目标：{target}")
+    if table_rows:
+        lines.append("修改内容：")
+        lines.extend(table_rows[:6])
+    if unchanged:
+        lines.append(f"不会修改：{unchanged}")
+    if risks and risks != "无":
+        lines.append(f"风险/注意：{risks}")
+    if confirm and confirm != "无":
+        lines.append(f"需确认：{confirm}")
+    return "\n".join(lines).strip()
 
 
 @dataclass(frozen=True)
@@ -85,7 +170,12 @@ class CodexFeishuApprovalRouteStore:
 
     @staticmethod
     def _bounded(value: Mapping[str, Any] | None) -> dict[str, Any]:
+        raw_command = ""
+        if isinstance(value, Mapping):
+            raw_command = str(value.get("command") or "").strip()
         cleaned = sanitize_payload(dict(value or {}))
+        if isinstance(cleaned, dict) and raw_command:
+            cleaned["command"] = raw_command[:MAX_STORED_COMMAND]
         return cleaned if isinstance(cleaned, dict) else {}
 
     @staticmethod
@@ -531,8 +621,21 @@ class CodexFeishuApprovalCoordinator:
             or approval.get("title")
             or "Codex 请求执行受保护操作"
         ).strip()
-        cleaned = sanitize_payload({"summary": redact_sensitive(raw[:1800])}).get("summary")
+        display = _extract_vo_project_authoring_summary(raw) or raw
+        cleaned = sanitize_payload({"summary": redact_sensitive(display[:1800])}).get("summary")
         return str(cleaned or "Codex 请求执行受保护操作")[:1200]
+
+    @staticmethod
+    def _command(approval: Mapping[str, Any]) -> str:
+        raw = str(
+            approval.get("command")
+            or approval.get("description")
+            or approval.get("title")
+            or ""
+        ).strip()
+        if len(raw) > MAX_STORED_COMMAND:
+            return raw[:MAX_STORED_COMMAND]
+        return raw
 
     @staticmethod
     def _kind(approval: Mapping[str, Any]) -> str:
@@ -613,6 +716,7 @@ class CodexFeishuApprovalCoordinator:
             "turnId": str(approval.get("turnId") or approval.get("runId") or "")[:240],
             "kind": kind,
             "summary": self._summary(approval),
+            "command": self._command(approval),
             **origin,
         }
         record["intent"] = self.intent_for(record)

@@ -1363,6 +1363,45 @@ def test_feishu_group_rows_never_publish_or_replay_but_private_delivery_still_in
     assert [item["event"] for item in replay] == ["message", "delivery"]
 
 
+def test_host_side_vo_continuation_reply_is_delivered_once_without_global_fallback(tmp_path, monkeypatch):
+    import server
+
+    sends = []
+    records = []
+    monkeypatch.setattr(server, "STATUS_DIR", str(tmp_path))
+    monkeypatch.setattr(server, "_feishu_channel_idempotency_hit", lambda _source_id: None)
+    monkeypatch.setattr(server, "_feishu_chat_app_text_send", lambda chat_id, text: (
+        sends.append({"chatId": chat_id, "text": text})
+        or {"ok": True, "status": "sent", "messageId": "om-continuation-sent"}
+    ))
+    monkeypatch.setattr(server, "_record_feishu_channel_event", lambda record: (
+        records.append(record)
+        or {**record, "id": "channel-record-1"}
+    ))
+
+    result = server._deliver_feishu_host_side_vo_continuation_reply(
+        agent_id="codex-local",
+        conversation_id="feishu-dm:user:chat",
+        continuation_source_id="vo-host-side-read-abc",
+        source_context={
+            "sourceApp": "feishu",
+            "sourceSurface": "feishu-dm",
+            "sourceMessageId": "om-original",
+            "feishuChatId": "oc-chat",
+            "chatType": "p2p",
+        },
+        prompt_text="[Host-side VO operation succeeded]",
+        result={"ok": True, "status": "completed", "reply": "请确认是否创建项目。", "threadId": "thr", "turnId": "turn"},
+    )
+
+    assert result["ok"] is True
+    assert sends == [{"chatId": "oc-chat", "text": "请确认是否创建项目。"}]
+    assert records and records[0]["event"] == "turn_completed"
+    assert records[0]["sourceMessageId"] == "vo-host-side-read-abc"
+    assert records[0]["continuationForSourceMessageId"] == "om-original"
+    assert records[0]["sendResult"]["messageId"] == "om-continuation-sent"
+
+
 def test_feishu_sse_stream_writes_replayed_event_without_queue_publish():
     import server
 

@@ -381,6 +381,7 @@ let _cronWsPath = '/ws';
   }
   // Rebuild agent selects then connect
   populateAgentSelects();
+  loadJobs();
   connectGateway();
 })();
 
@@ -518,9 +519,16 @@ function populateAgentSelects() {
 // --- Load Jobs ---
 async function loadJobs() {
   try {
-    const res = await rpc('cron.list', {includeDisabled: true});
     const projectRes = await fetch('/api/projects/scheduled-cron').then(r => r.json()).catch(e => ({ok:false, error:e.message, jobs:[], projects:[]}));
     const projectIds = new Set((projectRes.jobs || []).map(j => String(j.id)));
+    let res = {ok: false, jobs: []};
+    if (connected && ws) {
+      try {
+        res = await rpc('cron.list', {includeDisabled: true});
+      } catch (e) {
+        console.warn('Gateway cron.list unavailable; showing project cron bindings only:', e);
+      }
+    }
     allJobs = (res.payload?.jobs || res.jobs || []).filter(j => !projectIds.has(String(j.id))).map(j => ({...j, kind: 'agent'}));
     projectCronJobs = (projectRes.jobs || []).map(j => ({...j, kind: 'project'}));
     projectCronProjects = projectRes.projects || [];
@@ -562,6 +570,8 @@ function renderJobs() {
   container.innerHTML = jobs.map(j => {
     const state = j.state || {};
     const lastStatus = state.lastStatus || 'pending';
+    const displayStatus = projectCronDisplayStatus(lastStatus);
+    const displayError = projectCronDisplayError(state.lastError);
     const schedText = formatSchedule(j.schedule);
     const nextRun = state.nextRunAtMs ? localizedDateTime(state.nextRunAtMs) : '—';
     const lastRun = state.lastRunAtMs ? timeAgo(state.lastRunAtMs) : i18n.t('never');
@@ -578,7 +588,7 @@ function renderJobs() {
         ${isProject ? `<span class="job-agent">${esc(j.agentId || '')}</span>` : ''}
         <span class="job-schedule">${esc(schedText)}</span>
         <div class="job-status">
-          <span class="badge ${lastStatus}">${lastStatus}</span>
+          <span class="badge ${displayStatus.className}">${esc(displayStatus.label)}</span>
           ${j.enabled === false ? `<span class="badge disabled">${i18n.t('disabled')}</span>` : ''}
         </div>
       </div>
@@ -588,7 +598,7 @@ function renderJobs() {
         <span>${i18n.t('duration')}: ${duration}</span>
         <span>${i18n.t('kind')} ${isProject ? 'project' : (payload.kind || '?')}</span>
         ${j.delivery?.mode === 'announce' ? `<span style="color:var(--blue)">${i18n.t('announce_delivery')} ${esc(j.delivery.channel||'')}${j.delivery.to ? ' → '+esc(j.delivery.to) : ''}</span>` : `<span>${i18n.t('silent_label')}</span>`}
-        ${state.lastError ? `<span style="color:var(--red)" title="${esc(state.lastError)}">⚠ ${esc(state.lastError.slice(0,50))}</span>` : ''}
+        ${displayError ? `<span style="color:var(--red)" title="${esc(state.lastError)}">⚠ ${esc(displayError.slice(0,50))}</span>` : ''}
       </div>
       ${isProject ? `<div class="job-project-context">
         <span>Project: <a href="/#projects">${esc(j.projectName || j.projectId)}</a></span>
@@ -604,6 +614,22 @@ function renderJobs() {
       </div>
     </div>`;
   }).join('');
+}
+
+function projectCronDisplayStatus(status) {
+  const value = String(status || 'pending').toLowerCase();
+  if (value === 'pending_gateway_registration' || value === 'enabled') {
+    return { label: i18n.t('enabled'), className: 'enabled' };
+  }
+  return { label: status || 'pending', className: value || 'pending' };
+}
+
+function projectCronDisplayError(error) {
+  const text = String(error || '').replace(/\s+/g, ' ').trim();
+  if (!text) return '';
+  if (/gateway token is not configured/i.test(text)) return '';
+  if (/gateway cron add is unavailable/i.test(text)) return '';
+  return text;
 }
 
 function formatSchedule(s) {
