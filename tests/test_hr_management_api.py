@@ -1,7 +1,7 @@
 """Transport-free management queries, pagination, body limits, and commands."""
 
 import sys
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -133,8 +133,27 @@ def test_overview_has_lifecycle_counts_cycle_status_and_activity_without_raw_rep
     assert result.payload["agentTotal"] == 3
     assert result.payload["availabilityCounts"] == {"available": 2, "busy": 1}
     assert result.payload["localDate"] == "2026-07-19"
+    assert result.payload["reportSchedule"] == {
+        "enabled": True,
+        "state": "scheduled",
+        "nextAt": "2026-07-20T18:00:00+00:00",
+        "nextLocalAt": "2026-07-20T18:00:00+00:00",
+        "timezone": "UTC",
+        "dailyTime": "18:00",
+    }
     assert result.payload["cycle"]["counts"]["submitted"] == 1
     assert "private daily report" not in str(result.payload["cycle"])
+
+
+def test_report_schedule_exposes_due_time_before_catch_up_without_skipping_today(setup):
+    _repository, _reporting, _opened, _lifecycle, api = setup
+    schedule = api._report_schedule(
+        local_date=date(2026, 7, 19),
+        cycle_exists=False,
+        now=datetime(2026, 7, 19, 20, tzinfo=timezone.utc),
+    )
+    assert schedule["state"] == "due"
+    assert schedule["nextAt"] == "2026-07-19T18:00:00+00:00"
 
 
 def test_agent_detail_is_full_human_projection_with_independent_cursors(setup):
@@ -290,6 +309,7 @@ def test_disabled_feature_keeps_reads_available_and_blocks_all_mutation(setup):
         clock=lambda: NOW,
     )
     assert api.overview().status == 200
+    assert api.overview().payload["reportSchedule"]["state"] == "disabled"
     for callback in (
         lambda: api.lifecycle_command("pause", {}, body_bytes=2),
         lambda: api.cycle_command("run", {}, body_bytes=2),

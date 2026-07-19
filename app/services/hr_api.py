@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, fields, is_dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Callable, Mapping, Protocol
 
 from services.hr_config import HRConfig
@@ -11,7 +11,7 @@ from services.hr_governance import HRCaller, HRDisclosurePolicy
 from services.hr_observability import HRObservability
 from services.hr_reporting import HRReportingProjection
 from services.hr_repository import HRRepository, HRRepositoryError
-from services.hr_scheduler import HRCommandReceipt
+from services.hr_scheduler import HRCommandReceipt, HRDueTimeCalculator
 
 
 class HRAPIValidationError(ValueError):
@@ -138,8 +138,37 @@ class HRManagementAPI:
             raise HRAPIValidationError("request body must be an object")
         return body
 
-    def _local_date(self) -> str:
-        return self._now().astimezone(self._config.timezone).date().isoformat()
+    def _report_schedule(
+        self,
+        *,
+        local_date: date,
+        cycle_exists: bool,
+        now: datetime,
+    ) -> dict[str, object]:
+        calculator = HRDueTimeCalculator(self._config)
+        today = calculator.window_for_date(local_date)
+        enabled = self._config.scheduler_active
+        if cycle_exists:
+            window = calculator.window_for_date(local_date + timedelta(days=1))
+            state = "scheduled" if enabled else "disabled"
+        elif now < today.scheduled_at:
+            window = today
+            state = "scheduled" if enabled else "disabled"
+        elif enabled:
+            window = today
+            state = "due"
+        else:
+            window = calculator.window_for_date(local_date + timedelta(days=1))
+            state = "disabled"
+        local_scheduled = window.scheduled_at.astimezone(self._config.timezone)
+        return {
+            "enabled": enabled,
+            "state": state,
+            "nextAt": window.scheduled_at.isoformat(),
+            "nextLocalAt": local_scheduled.isoformat(),
+            "timezone": self._config.timezone_name,
+            "dailyTime": self._config.daily_time.strftime("%H:%M"),
+        }
 
     def overview(self) -> HRServiceResult:
         self._observability.increment("query.requests_total")
@@ -155,7 +184,9 @@ class HRManagementAPI:
         for agent in agents:
             key = agent.availability if agent.status == "active" else "unavailable"
             counts[key] = counts.get(key, 0) + 1
-        local_date = self._local_date()
+        now = self._now()
+        local_day = now.astimezone(self._config.timezone).date()
+        local_date = local_day.isoformat()
         cycle = self._repository.get_daily_cycle(f"hr-cycle:{local_date}")
         cycle_payload = (
             _json_safe(self._reporting.project_cycle(cycle.id, management=False, limit=100))
@@ -171,6 +202,11 @@ class HRManagementAPI:
                 "agentTotal": len(agents),
                 "availabilityCounts": counts,
                 "localDate": local_date,
+                "reportSchedule": self._report_schedule(
+                    local_date=local_day,
+                    cycle_exists=cycle is not None,
+                    now=now,
+                ),
                 "cycle": cycle_payload,
                 "recentActivity": _json_safe(activity.items),
             },

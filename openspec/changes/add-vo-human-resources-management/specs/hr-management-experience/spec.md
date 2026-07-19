@@ -8,7 +8,7 @@ The main VO application SHALL provide a first-level Human Resources entry modele
 - **THEN** the application SHALL open the Human Resources module with HR status and cross-Agent overview before requiring selection of one Agent
 
 ### Requirement: Human Resources overview
-The overview SHALL present HR lifecycle state, Agent totals by availability, today's submitted, missing, pending-assessment, assessed, and failed counts, recent HR activity, and a roster prioritized so unresolved or abnormal states remain discoverable.
+The overview SHALL present HR lifecycle state, Agent totals by availability, today's submitted, missing, pending-assessment, assessed, and failed counts, recent HR activity, the next configured daily-report collection time in the VO timezone, and a roster prioritized so unresolved or abnormal states remain discoverable.
 
 #### Scenario: Daily collection is in progress
 - **WHEN** the overview loads during an open collection window
@@ -17,6 +17,11 @@ The overview SHALL present HR lifecycle state, Agent totals by availability, tod
 #### Scenario: No Agent records exist
 - **WHEN** HR has not yet established a directory
 - **THEN** the module SHALL explain whether initialization is pending, paused, or failed and SHALL NOT display invented roster data
+
+#### Scenario: Human inspects the next daily-report collection
+- **WHEN** the Human Resources overview loads
+- **THEN** it SHALL show the next collection wall-clock time and configured VO timezone
+- **AND** it SHALL distinguish scheduled collection, an occurrence already due for catch-up, and a configured time whose automatic scheduler is disabled
 
 ### Requirement: Agent Human Resources detail
 The human-facing Agent detail SHALL show name, introduction, AI ID, availability, introduction provenance, report history, assessment history, workload history, blockers, improvement feedback, current workflow state, HR contact state, and access history authorized for the human.

@@ -167,8 +167,15 @@ try {
     roster: document.querySelectorAll('.hr-agent-row').length,
     dailyStatus: document.querySelector('.hr-overview').innerText.includes('Daily reporting status'),
     activity: document.querySelector('.hr-overview').innerText.includes('Daily report'),
+    nextReport: document.querySelector('.hr-next-report-time').innerText,
   }))()`);
-  assert.deepEqual(overview, { modalOpen: true, roster: 2, dailyStatus: true, activity: true });
+  assert.deepEqual(overview, {
+    modalOpen: true,
+    roster: 2,
+    dailyStatus: true,
+    activity: true,
+    nextReport: 'Next daily report collection: 2026-07-20 18:00 Asia/Shanghai',
+  });
 
   const clickState = await evaluate(`(() => {
     document.querySelector('[data-agent-id="agent-1"]').click();

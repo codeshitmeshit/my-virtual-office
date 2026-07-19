@@ -174,6 +174,21 @@
         return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
     }
 
+    function reportScheduleLabel(value) {
+        const schedule = object(value);
+        const raw = String(schedule.nextLocalAt || '');
+        const wallTime = raw.length >= 16 ? raw.slice(0, 16).replace('T', ' ') : '—';
+        const display = [wallTime, schedule.timezone].filter(Boolean).join(' ');
+        if (!raw) return tr('hr_next_report_unknown', 'Next daily report collection is unavailable');
+        if (schedule.state === 'due') {
+            return tr('hr_next_report_due', 'Daily report collection is due and awaiting the scheduler ({{time}})', { time: display });
+        }
+        if (!schedule.enabled) {
+            return tr('hr_next_report_disabled', 'Next configured report collection after enabling: {{time}}', { time: display });
+        }
+        return tr('hr_next_report_at', 'Next daily report collection: {{time}}', { time: display });
+    }
+
     function modal() {
         return root.document ? root.document.getElementById('humanResourcesModal') : null;
     }
@@ -314,6 +329,7 @@
         }
         const hr = object(overview.hr);
         const hrStatus = String(hr.status || (state.loading ? 'loading' : 'unknown'));
+        const reportSchedule = object(overview.reportSchedule);
         const availability = availabilityCounts(overview);
         const cycles = cycleCounts(overview);
         const activities = array(overview.recentActivity);
@@ -333,7 +349,8 @@
             '<section class="hr-overview-hero hr-tone-' + escHtml(statusTone(hrStatus)) + '">' +
                 '<div><span class="hr-eyebrow">' + escHtml(tr('hr_global_agent', 'Global HR Agent')) + '</span>' +
                 '<h3>' + escHtml(String(hr.name || 'HR')) + '</h3>' +
-                '<p>' + escHtml(tr('hr_overview_date', 'Local reporting date: {{date}}', { date: overview.localDate || '—' })) + '</p></div>' +
+                '<p>' + escHtml(tr('hr_overview_date', 'Local reporting date: {{date}}', { date: overview.localDate || '—' })) + '</p>' +
+                '<p class="hr-next-report-time">' + escHtml(reportScheduleLabel(reportSchedule)) + '</p></div>' +
                 '<span class="hr-state-chip hr-tone-' + escHtml(statusTone(hrStatus)) + '">' + escHtml(semanticLabel(hrStatus)) + '</span>' +
             '</section>' +
             '<section class="hr-command-panel"><div><h3>' + escHtml(tr('hr_controls', 'HR controls')) + '</h3>' +
@@ -723,6 +740,7 @@
             availabilityCounts,
             mergeByKey,
             prettyJson,
+            reportScheduleLabel,
             commandSpec,
             semanticLabel,
             semanticStates: SEMANTIC_STATES.slice(),

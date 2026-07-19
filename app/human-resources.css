@@ -330,6 +330,11 @@
     font-size: 10px;
 }
 
+.hr-overview-hero .hr-next-report-time {
+    margin-top: 4px;
+    color: #b6c6d8;
+}
+
 .hr-metric-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(105px, 1fr));

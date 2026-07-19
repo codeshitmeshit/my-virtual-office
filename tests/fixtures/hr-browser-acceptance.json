@@ -5,6 +5,14 @@
     "agentTotal": 2,
     "availabilityCounts": { "available": 1, "busy": 1 },
     "localDate": "2026-07-19",
+    "reportSchedule": {
+      "enabled": true,
+      "state": "scheduled",
+      "nextAt": "2026-07-20T10:00:00+00:00",
+      "nextLocalAt": "2026-07-20T18:00:00+08:00",
+      "timezone": "Asia/Shanghai",
+      "dailyTime": "18:00"
+    },
     "cycle": {
       "cycleId": "hr-cycle:2026-07-19",
       "status": "open",

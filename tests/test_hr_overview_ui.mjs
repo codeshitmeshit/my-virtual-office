@@ -28,6 +28,24 @@ assert.deepEqual(
     { status: 'complete', count: 3 },
   ],
 );
+assert.equal(
+  helpers.reportScheduleLabel({
+    enabled: true,
+    state: 'scheduled',
+    nextLocalAt: '2026-07-20T18:00:00+08:00',
+    timezone: 'Asia/Shanghai',
+  }),
+  'Next daily report collection: 2026-07-20 18:00 Asia/Shanghai',
+);
+assert.match(
+  helpers.reportScheduleLabel({
+    enabled: false,
+    state: 'disabled',
+    nextLocalAt: '2026-07-20T18:00:00+08:00',
+    timezone: 'Asia/Shanghai',
+  }),
+  /after enabling/,
+);
 assert.deepEqual(
   helpers.availabilityCounts({ availabilityCounts: { available: 4, busy: 2, unavailable: 1 } }),
   [
@@ -53,6 +71,12 @@ globalThis.i18n = {
         agentTotal: 2,
         availabilityCounts: { available: 2 },
         recentActivity: [],
+        reportSchedule: {
+          enabled: true,
+          state: 'scheduled',
+          nextLocalAt: '2026-07-20T18:00:00+08:00',
+          timezone: 'Asia/Shanghai',
+        },
       });
     }
     return response({ ok: true, export: { rows: [{ ai_id: 'agent-1' }, { ai_id: 'agent-2' }] } });
