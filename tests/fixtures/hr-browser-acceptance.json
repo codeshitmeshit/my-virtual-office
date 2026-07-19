@@ -1,0 +1,108 @@
+{
+  "overview": {
+    "ok": true,
+    "hr": { "name": "HR", "status": "ready" },
+    "agentTotal": 2,
+    "availabilityCounts": { "available": 1, "busy": 1 },
+    "localDate": "2026-07-19",
+    "cycle": {
+      "cycleId": "hr-cycle:2026-07-19",
+      "status": "open",
+      "counts": { "waiting": 0, "submitted": 1, "complete": 1, "failed": 0 }
+    },
+    "recentActivity": [
+      { "id": "activity-1", "action": "report", "status": "complete", "createdAt": "2026-07-19T10:00:00Z" }
+    ]
+  },
+  "agents": [
+    {
+      "ai_id": "agent-1",
+      "name": "Research Agent",
+      "status": "active",
+      "availability": "available",
+      "skill_readiness": "ready",
+      "grant_readiness": "ready"
+    },
+    {
+      "ai_id": "agent-2",
+      "name": "Builder Agent",
+      "status": "active",
+      "availability": "busy",
+      "skill_readiness": "pending",
+      "grant_readiness": "pending"
+    }
+  ],
+  "agent": {
+    "aiId": "agent-1",
+    "name": "Research Agent",
+    "introduction": "Investigates product and reliability questions.",
+    "availability": "available",
+    "status": "active",
+    "agentKind": "project",
+    "providerKind": "openclaw",
+    "introductionProvenance": { "source": "hr-summary", "actorId": "hr", "version": 2 },
+    "identityHistory": [
+      { "id": 1, "aiId": "agent-1", "name": "Research Agent", "status": "active", "source": "fixture", "observedAt": "2026-07-19T09:00:00Z" }
+    ],
+    "reports": [
+      {
+        "id": "report-1",
+        "localDate": "2026-07-19",
+        "submissionState": "normalized",
+        "rawResponse": "RAW FIXTURE REPORT ONE",
+        "normalized": { "completedWork": ["Completed fixture research"], "blockers": [] },
+        "revision": 1,
+        "submittedAt": "2026-07-19T09:30:00Z"
+      }
+    ],
+    "reportNextCursor": "reports-next",
+    "assessments": [
+      {
+        "id": "assessment-1",
+        "localDate": "2026-07-19",
+        "version": 1,
+        "isCurrent": true,
+        "status": "succeeded",
+        "workload": "appropriate",
+        "principalContributions": ["Completed fixture research"],
+        "rationale": "Fixture evidence supports an appropriate workload.",
+        "blockers": [],
+        "strengths": ["Clear evidence"],
+        "improvements": ["Add earlier risk signals"],
+        "runtimeDiagnosis": "healthy",
+        "evidence": [
+          { "evidenceType": "report", "referenceId": "report-1", "summary": "Daily report evidence" }
+        ],
+        "updatedAt": "2026-07-19T10:00:00Z"
+      }
+    ],
+    "assessmentNextCursor": null,
+    "accessHistory": [
+      { "id": "access-1", "viewerAiId": "agent-2", "viewerName": "Builder Agent", "targetAiId": "agent-1", "scope": "public_work_summary", "viewedAt": "2026-07-19T10:00:00Z" }
+    ],
+    "accessNextCursor": "access-next",
+    "workflowState": "normalized",
+    "skillReadiness": "ready",
+    "grantReadiness": "ready"
+  },
+  "reportPage": {
+    "reports": [
+      {
+        "id": "report-2",
+        "localDate": "2026-07-18",
+        "submissionState": "late_submitted",
+        "rawResponse": "RAW FIXTURE REPORT TWO",
+        "normalized": { "completedWork": ["Late fixture follow-up"] },
+        "revision": 1,
+        "submittedAt": "2026-07-19T01:00:00Z"
+      }
+    ],
+    "reportNextCursor": null
+  },
+  "accessPage": {
+    "accessHistory": [
+      { "id": "access-2", "viewerAiId": "agent-3", "viewerName": "Review Agent", "targetAiId": "agent-1", "scope": "public_work_summary", "viewedAt": "2026-07-18T10:00:00Z" }
+    ],
+    "accessNextCursor": null
+  }
+}
