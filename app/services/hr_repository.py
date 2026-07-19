@@ -255,6 +255,12 @@ class DailyReportPage:
 
 
 @dataclass(frozen=True, slots=True)
+class ReportRequestPage:
+    items: tuple[ReportRequestRecord, ...]
+    next_cursor: str | None
+
+
+@dataclass(frozen=True, slots=True)
 class AssessmentPage:
     items: tuple[AssessmentRecord, ...]
     next_cursor: str | None
@@ -1691,6 +1697,44 @@ class HRRepository:
                 "SELECT * FROM report_requests WHERE id = ?", (request_id,)
             ).fetchone()
             return _request_from_row(row) if row is not None else None
+
+    def list_report_requests(
+        self,
+        cycle_id: str,
+        *,
+        status: str | None = None,
+        limit: int = 50,
+        cursor: str | None = None,
+    ) -> ReportRequestPage:
+        cycle_id = _opaque_id(cycle_id, "cycle_id")
+        limit = _page_limit(limit)
+        if status is not None:
+            status = _required_text(status, "status", maximum=32)
+        after = _decode_cursor(cursor, fields=1)
+        clauses = ["cycle_id = ?"]
+        parameters: list[object] = [cycle_id]
+        if status is not None:
+            clauses.append("status = ?")
+            parameters.append(status)
+        if after is not None:
+            ai_id = after[0]
+            if not isinstance(ai_id, str):
+                raise HRRepositoryValidationError("cursor is invalid")
+            clauses.append("ai_id > ?")
+            parameters.append(ai_id)
+        parameters.append(limit + 1)
+        with self._connection(readonly=True) as connection:
+            rows = connection.execute(
+                "SELECT * FROM report_requests WHERE "
+                + " AND ".join(clauses)
+                + " ORDER BY ai_id ASC LIMIT ?",
+                parameters,
+            ).fetchall()
+        items = tuple(_request_from_row(row) for row in rows[:limit])
+        next_cursor = (
+            _encode_cursor((items[-1].ai_id,)) if len(rows) > limit else None
+        )
+        return ReportRequestPage(items, next_cursor)
 
     def save_daily_report(
         self,
