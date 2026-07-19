@@ -10,7 +10,7 @@ The repository startup path is ready for controlled deployment:
 
 - `.env.example` declares every supported non-secret HR setting.
 - `start.sh` repairs missing HR settings in an existing `.env` without replacing operator-supplied values.
-- Repeated repair is idempotent and both `VO_HR_ENABLED` and `VO_HR_SCHEDULER_ENABLED` default to `false`.
+- Repeated repair is idempotent. `VO_HR_ENABLED` defaults to `true`, while `VO_HR_SCHEDULER_ENABLED` remains `false`; an explicit `VO_HR_ENABLED=false` is preserved as the rollback/opt-out control.
 - A blank `VO_HR_TIMEZONE` inherits `VO_TIMEZONE`, then `TZ`, then `UTC`; the remaining bounded values match `HRConfig` defaults.
 - Focused startup/configuration and HR regression tests cover this behavior.
 

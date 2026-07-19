@@ -150,8 +150,8 @@ The scheduler uses a small daemon reconciliation loop similar to existing recurr
 
 Configuration is explicit and bounded:
 
-- `VO_HR_ENABLED`: master feature switch.
-- `VO_HR_SCHEDULER_ENABLED`: automatic collection/assessment switch.
+- `VO_HR_ENABLED`: master feature switch, enabled by default so the global HR Agent is reconciled on normal startup; explicit `false` remains the rollback/opt-out control.
+- `VO_HR_SCHEDULER_ENABLED`: automatic collection/assessment switch, disabled by default so enabling the HR lifecycle does not immediately contact Agents.
 - `VO_HR_DAILY_TIME`: VO-local `HH:MM`, default `18:00`.
 - `VO_HR_SUBMISSION_WINDOW_MINUTES`: default `120`, bounded.
 - `VO_HR_MAX_WORKERS`: default `2`, bounded to prevent provider overload.

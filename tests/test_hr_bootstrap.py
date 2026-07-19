@@ -35,8 +35,13 @@ def test_hr_feature_gate_accepts_explicit_truthy_values(value):
     assert is_hr_enabled({"VO_HR_ENABLED": value}) is True
 
 
-@pytest.mark.parametrize("environment", ({}, {"VO_HR_ENABLED": ""}, {"VO_HR_ENABLED": "0"}, {"VO_HR_ENABLED": "false"}))
-def test_hr_feature_gate_defaults_off(environment):
+@pytest.mark.parametrize("environment", ({}, {"VO_HR_ENABLED": ""}))
+def test_hr_feature_gate_defaults_on(environment):
+    assert is_hr_enabled(environment) is True
+
+
+@pytest.mark.parametrize("environment", ({"VO_HR_ENABLED": "0"}, {"VO_HR_ENABLED": "false"}, {"VO_HR_ENABLED": "off"}))
+def test_hr_feature_gate_honors_explicit_disable(environment):
     assert is_hr_enabled(environment) is False
 
 

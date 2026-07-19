@@ -17,7 +17,7 @@ def is_hr_enabled(environ: Environment | None = None) -> bool:
     env = environ if environ is not None else os.environ
     raw = env.get(HR_FEATURE_ENV)
     if raw is None or str(raw).strip() == "":
-        return False
+        return True
     return str(raw).strip().lower() in {"1", "true", "yes", "on", "enabled"}
 
 

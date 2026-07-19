@@ -32,7 +32,7 @@ ensure_hr_env_defaults() {
     if [ "$needs_defaults" = "true" ] && ! grep -q '^# Human Resources' "$env_file"; then
         printf '\n%s\n' '# Human Resources (safe rollout defaults)' >> "$env_file"
     fi
-    _hr_ensure_env_default "$env_file" "VO_HR_ENABLED" "false"
+    _hr_ensure_env_default "$env_file" "VO_HR_ENABLED" "true"
     _hr_ensure_env_default "$env_file" "VO_HR_SCHEDULER_ENABLED" "false"
     _hr_ensure_env_default "$env_file" "VO_HR_TIMEZONE" ""
     _hr_ensure_env_default "$env_file" "VO_HR_DAILY_TIME" "18:00"

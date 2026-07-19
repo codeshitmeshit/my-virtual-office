@@ -133,7 +133,7 @@ class HRConfig:
             raise HRConfigError("VO_HR_DAILY_TIME must use 24-hour HH:MM")
         hour, minute = (int(part) for part in daily_text.split(":"))
         return cls(
-            enabled=_boolean(env, "VO_HR_ENABLED", False),
+            enabled=_boolean(env, "VO_HR_ENABLED", True),
             scheduler_enabled=_boolean(env, "VO_HR_SCHEDULER_ENABLED", False),
             timezone_name=timezone_name,
             daily_time=time(hour, minute),

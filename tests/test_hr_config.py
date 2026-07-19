@@ -16,9 +16,9 @@ if str(APP_DIR) not in sys.path:
 from services.hr_config import HRConfig, HRConfigError
 
 
-def test_safe_defaults_keep_hr_and_scheduler_disabled():
+def test_defaults_enable_hr_lifecycle_but_keep_scheduler_disabled():
     config = HRConfig.from_env({})
-    assert config.enabled is False
+    assert config.enabled is True
     assert config.scheduler_enabled is False
     assert config.scheduler_active is False
     assert config.timezone_name == "UTC"
@@ -130,6 +130,7 @@ def test_numeric_values_outside_bounds_are_rejected(name, value):
 
 
 def test_blank_values_use_defaults_but_do_not_hide_invalid_nonblank_values():
+    assert HRConfig.from_env({"VO_HR_ENABLED": " "}).enabled is True
     assert HRConfig.from_env({"VO_HR_DAILY_TIME": "  "}).daily_time == time(18, 0)
     assert HRConfig.from_env({"VO_HR_MAX_WORKERS": " "}).max_workers == 2
 
