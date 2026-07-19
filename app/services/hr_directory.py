@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable, Sequence
+from datetime import datetime, timedelta, timezone
+from typing import Callable, Iterable, Protocol, Sequence
 
 from services.hr_repository import AgentRecord, HRRepository, HRRepositoryError
 
@@ -87,6 +88,25 @@ class DirectoryReconciliationResult:
     source_failures: tuple[DirectorySourceFailure, ...]
     failures: tuple[DirectoryFailure, ...]
     authoritative_absence: bool
+
+
+class HRConversationPort(Protocol):
+    def ask_agent_as_hr(
+        self,
+        target_ai_id: str,
+        message: str,
+        conversation_key: str,
+        timeout_seconds: float,
+    ) -> str | None: ...
+
+
+@dataclass(frozen=True, slots=True)
+class IntroductionProcessingResult:
+    ai_id: str
+    status: str
+    conversation_key: str
+    attempt_count: int
+    error_code: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -295,3 +315,166 @@ class HRDirectoryService:
             failures=tuple(failures),
             authoritative_absence=authoritative_absence,
         )
+
+
+class HRIntroductionWorkflow:
+    """Claims and performs HR-to-Agent introduction requests with failure isolation."""
+
+    def __init__(
+        self,
+        repository: HRRepository,
+        conversation: HRConversationPort,
+        *,
+        hr_ai_id: str = "hr",
+        clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+        claim_token_factory: Callable[[str], str],
+        timeout_seconds: float = 30.0,
+        claim_lease_seconds: int = 60,
+    ):
+        if not isinstance(repository, HRRepository):
+            raise HRDirectoryValidationError("repository must be an HRRepository")
+        if not callable(getattr(conversation, "ask_agent_as_hr", None)):
+            raise HRDirectoryValidationError("conversation port is invalid")
+        if not callable(claim_token_factory):
+            raise HRDirectoryValidationError("claim_token_factory is required")
+        if isinstance(timeout_seconds, bool) or not isinstance(timeout_seconds, (int, float)):
+            raise HRDirectoryValidationError("timeout_seconds must be numeric")
+        if not 0.1 <= float(timeout_seconds) <= 300:
+            raise HRDirectoryValidationError("timeout_seconds must be between 0.1 and 300")
+        if (
+            isinstance(claim_lease_seconds, bool)
+            or not isinstance(claim_lease_seconds, int)
+            or not 1 <= claim_lease_seconds <= 600
+        ):
+            raise HRDirectoryValidationError("claim_lease_seconds must be between 1 and 600")
+        if claim_lease_seconds <= float(timeout_seconds):
+            raise HRDirectoryValidationError("claim lease must be longer than conversation timeout")
+        self._repository = repository
+        self._conversation = conversation
+        self._hr_ai_id = hr_ai_id
+        self._clock = clock
+        self._claim_token_factory = claim_token_factory
+        self._timeout_seconds = float(timeout_seconds)
+        self._claim_lease_seconds = claim_lease_seconds
+
+    def _now(self) -> datetime:
+        value = self._clock()
+        if not isinstance(value, datetime) or value.tzinfo is None or value.utcoffset() is None:
+            raise HRDirectoryValidationError("introduction clock must be timezone-aware")
+        return value.astimezone(timezone.utc)
+
+    @staticmethod
+    def _keys(ai_id: str) -> tuple[str, str]:
+        return (
+            f"hr:introduction-request:{ai_id}:initial",
+            f"hr:introduction-conversation:{ai_id}:initial",
+        )
+
+    def process(
+        self,
+        ai_ids: Iterable[str],
+        *,
+        message: str,
+    ) -> tuple[IntroductionProcessingResult, ...]:
+        if not isinstance(message, str) or not message.strip():
+            raise HRDirectoryValidationError("introduction message must not be empty")
+        message = message.strip()
+        results = []
+        for ai_id in tuple(ai_ids):
+            occurrence_key, conversation_key = self._keys(ai_id)
+            if ai_id == self._hr_ai_id:
+                results.append(
+                    IntroductionProcessingResult(ai_id, "skipped_hr", conversation_key, 0, "")
+                )
+                continue
+            token = ""
+            try:
+                request = self._repository.ensure_introduction_request(
+                    ai_id=ai_id,
+                    occurrence_key=occurrence_key,
+                    conversation_key=conversation_key,
+                    actor_id=self._hr_ai_id,
+                )
+                if request.state in {"response_received", "published", "clarification_pending"}:
+                    results.append(
+                        IntroductionProcessingResult(
+                            ai_id,
+                            "already_complete",
+                            conversation_key,
+                            request.attempt_count,
+                            "",
+                        )
+                    )
+                    continue
+                now = self._now()
+                token = self._claim_token_factory(ai_id)
+                claim = self._repository.claim_introduction_request(
+                    ai_id=ai_id,
+                    claimed_by=self._hr_ai_id,
+                    claim_token=token,
+                    now=now.isoformat(),
+                    claim_expires_at=(
+                        now + timedelta(seconds=self._claim_lease_seconds)
+                    ).isoformat(),
+                )
+                if claim is None:
+                    results.append(
+                        IntroductionProcessingResult(
+                            ai_id,
+                            "claimed_elsewhere",
+                            conversation_key,
+                            request.attempt_count,
+                            "",
+                        )
+                    )
+                    continue
+                response = self._conversation.ask_agent_as_hr(
+                    ai_id,
+                    message,
+                    conversation_key,
+                    self._timeout_seconds,
+                )
+                if response is not None and not isinstance(response, str):
+                    raise TypeError("conversation response must be text or None")
+                raw_response = response if response is not None and response.strip() else None
+                finished = self._repository.finish_introduction_request(
+                    ai_id=ai_id,
+                    claim_token=token,
+                    finished_at=self._now().isoformat(),
+                    raw_response=raw_response,
+                )
+                results.append(
+                    IntroductionProcessingResult(
+                        ai_id,
+                        "response_received" if raw_response is not None else "no_response",
+                        conversation_key,
+                        finished.attempt_count,
+                        "",
+                    )
+                )
+            except Exception as exc:
+                error_code = getattr(exc, "code", "hr_introduction_conversation_failed")
+                if token:
+                    try:
+                        failed = self._repository.finish_introduction_request(
+                            ai_id=ai_id,
+                            claim_token=token,
+                            finished_at=self._now().isoformat(),
+                            raw_response=None,
+                            error=f"conversation_failed:{exc.__class__.__name__}",
+                        )
+                        attempts = failed.attempt_count
+                    except Exception:
+                        attempts = 0
+                else:
+                    attempts = 0
+                results.append(
+                    IntroductionProcessingResult(
+                        ai_id,
+                        "failed",
+                        conversation_key,
+                        attempts,
+                        str(error_code),
+                    )
+                )
+        return tuple(results)

@@ -27,7 +27,13 @@ MAX_EXPORT_BYTES = 1_000_000
 MAX_EXPORT_OFFSET = 1_000_000
 AGENT_STATUSES = frozenset({"active", "offline", "disabled", "deleted", "unreachable"})
 INTRODUCTION_STATES = frozenset(
-    {"introduction_pending", "published", "clarification_pending", "failed"}
+    {
+        "introduction_pending",
+        "response_received",
+        "published",
+        "clarification_pending",
+        "failed",
+    }
 )
 SHA256_HEX_PATTERN = re.compile(r"[0-9a-f]{64}\Z")
 
@@ -122,6 +128,15 @@ class IntroductionRecord:
     actor_id: str
     clarification_question: str
     is_current: bool
+    request_occurrence_key: str
+    conversation_key: str
+    requested_at: str | None
+    responded_at: str | None
+    attempt_count: int
+    last_error: str
+    claim_token: str
+    claimed_by: str
+    claim_expires_at: str | None
     created_at: str
     updated_at: str
 
@@ -388,11 +403,21 @@ _SCHEMA_V1 = (
         actor_id TEXT NOT NULL,
         clarification_question TEXT NOT NULL DEFAULT '',
         is_current INTEGER NOT NULL DEFAULT 1 CHECK(is_current IN (0, 1)),
+        request_occurrence_key TEXT NOT NULL DEFAULT '',
+        conversation_key TEXT NOT NULL DEFAULT '',
+        requested_at TEXT,
+        responded_at TEXT,
+        attempt_count INTEGER NOT NULL DEFAULT 0 CHECK(attempt_count >= 0),
+        last_error TEXT NOT NULL DEFAULT '',
+        claim_token TEXT NOT NULL DEFAULT '',
+        claimed_by TEXT NOT NULL DEFAULT '',
+        claim_expires_at TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         UNIQUE(ai_id, version)
     )""",
     "CREATE UNIQUE INDEX introductions_current_idx ON introductions(ai_id) WHERE is_current = 1",
+    "CREATE UNIQUE INDEX introductions_request_occurrence_idx ON introductions(request_occurrence_key) WHERE request_occurrence_key <> ''",
     """CREATE TABLE daily_cycles (
         id TEXT PRIMARY KEY CHECK(length(trim(id)) > 0),
         local_date TEXT NOT NULL UNIQUE,
@@ -1235,6 +1260,159 @@ class HRRepository:
         if len(rows) > limit:
             next_cursor = _encode_cursor((items[-1].version,))
         return IntroductionPage(items=items, next_cursor=next_cursor)
+
+    def ensure_introduction_request(
+        self,
+        *,
+        ai_id: str,
+        occurrence_key: str,
+        conversation_key: str,
+        actor_id: str,
+    ) -> IntroductionRecord:
+        ai_id = _stable_ai_id(ai_id)
+        occurrence_key = _opaque_id(occurrence_key, "occurrence_key")
+        conversation_key = _opaque_id(conversation_key, "conversation_key")
+        actor_id = _stable_ai_id(actor_id, "actor_id")
+        timestamp = self._timestamp()
+        with self._write_transaction() as connection:
+            if connection.execute("SELECT 1 FROM agents WHERE ai_id = ?", (ai_id,)).fetchone() is None:
+                raise HRRepositoryNotFoundError(f"Agent {ai_id} does not exist")
+            row = connection.execute(
+                "SELECT * FROM introductions WHERE ai_id = ? AND is_current = 1",
+                (ai_id,),
+            ).fetchone()
+            if row is not None:
+                current = _introduction_from_row(row)
+                if current.state in {"response_received", "published", "clarification_pending"}:
+                    return current
+                if current.request_occurrence_key not in ("", occurrence_key):
+                    raise HRRepositoryConflictError("another introduction request is current")
+                if current.request_occurrence_key == "":
+                    connection.execute(
+                        """UPDATE introductions SET
+                               request_occurrence_key = ?, conversation_key = ?,
+                               actor_id = ?, updated_at = ? WHERE id = ?""",
+                        (occurrence_key, conversation_key, actor_id, timestamp, current.id),
+                    )
+                    row = connection.execute(
+                        "SELECT * FROM introductions WHERE id = ?", (current.id,)
+                    ).fetchone()
+                    return _introduction_from_row(row)
+                if current.conversation_key != conversation_key:
+                    raise HRRepositoryConflictError("introduction conversation key changed")
+                return current
+            try:
+                cursor = connection.execute(
+                    """INSERT INTO introductions(
+                           ai_id, version, state, raw_response, introduction, source,
+                           actor_id, clarification_question, is_current,
+                           request_occurrence_key, conversation_key, created_at, updated_at
+                       ) VALUES (?, 1, 'introduction_pending', NULL, '',
+                                 'hr-introduction-request', ?, '', 1, ?, ?, ?, ?)""",
+                    (
+                        ai_id,
+                        actor_id,
+                        occurrence_key,
+                        conversation_key,
+                        timestamp,
+                        timestamp,
+                    ),
+                )
+            except sqlite3.IntegrityError as exc:
+                raise HRRepositoryConflictError("introduction request identity already exists") from exc
+            row = connection.execute(
+                "SELECT * FROM introductions WHERE id = ?", (cursor.lastrowid,)
+            ).fetchone()
+            return _introduction_from_row(row)
+
+    def claim_introduction_request(
+        self,
+        *,
+        ai_id: str,
+        claimed_by: str,
+        claim_token: str,
+        now: str,
+        claim_expires_at: str,
+    ) -> IntroductionRecord | None:
+        ai_id = _stable_ai_id(ai_id)
+        claimed_by = _opaque_id(claimed_by, "claimed_by")
+        claim_token = _opaque_id(claim_token, "claim_token")
+        now = _timestamp_text(now, "now")
+        claim_expires_at = _timestamp_text(claim_expires_at, "claim_expires_at")
+        if claim_expires_at <= now:
+            raise HRRepositoryValidationError("claim expiry must be after now")
+        with self._write_transaction() as connection:
+            updated = connection.execute(
+                """UPDATE introductions SET
+                       state = 'introduction_pending', claim_token = ?, claimed_by = ?,
+                       claim_expires_at = ?, requested_at = COALESCE(requested_at, ?),
+                       attempt_count = attempt_count + 1, last_error = '', updated_at = ?
+                   WHERE ai_id = ? AND is_current = 1
+                     AND state IN ('introduction_pending', 'failed')
+                     AND request_occurrence_key <> ''
+                     AND (claim_token = '' OR claim_expires_at <= ?)""",
+                (
+                    claim_token,
+                    claimed_by,
+                    claim_expires_at,
+                    now,
+                    now,
+                    ai_id,
+                    now,
+                ),
+            ).rowcount
+            if updated != 1:
+                return None
+            row = connection.execute(
+                "SELECT * FROM introductions WHERE ai_id = ? AND is_current = 1",
+                (ai_id,),
+            ).fetchone()
+            return _introduction_from_row(row)
+
+    def finish_introduction_request(
+        self,
+        *,
+        ai_id: str,
+        claim_token: str,
+        finished_at: str,
+        raw_response: str | None,
+        error: str = "",
+    ) -> IntroductionRecord:
+        ai_id = _stable_ai_id(ai_id)
+        claim_token = _opaque_id(claim_token, "claim_token")
+        finished_at = _timestamp_text(finished_at, "finished_at")
+        raw_response = _raw_text(raw_response, "raw_response")
+        error = _optional_text(error, "error", maximum=2_000)
+        if raw_response is not None and error:
+            raise HRRepositoryValidationError("introduction result cannot contain response and error")
+        state = "response_received" if raw_response is not None else ("failed" if error else "introduction_pending")
+        with self._write_transaction() as connection:
+            updated = connection.execute(
+                """UPDATE introductions SET
+                       state = ?, raw_response = ?, responded_at = ?, last_error = ?,
+                       claim_token = '', claimed_by = '', claim_expires_at = NULL,
+                       updated_at = ?
+                   WHERE ai_id = ? AND is_current = 1
+                     AND state = 'introduction_pending' AND claim_token = ?
+                     AND claim_expires_at > ?""",
+                (
+                    state,
+                    raw_response,
+                    finished_at if raw_response is not None else None,
+                    error,
+                    finished_at,
+                    ai_id,
+                    claim_token,
+                    finished_at,
+                ),
+            ).rowcount
+            if updated != 1:
+                raise HRRepositoryConflictError("introduction request claim is stale or invalid")
+            row = connection.execute(
+                "SELECT * FROM introductions WHERE ai_id = ? AND is_current = 1",
+                (ai_id,),
+            ).fetchone()
+            return _introduction_from_row(row)
 
     def ensure_daily_cycle(
         self,
