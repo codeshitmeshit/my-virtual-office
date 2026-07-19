@@ -11,27 +11,27 @@
       },
       {
         "file": "app/providers/hermes.py",
-        "line": 1168
+        "line": 1150
       },
       {
         "file": "app/server.py",
-        "line": 4506
+        "line": 4480
       },
       {
         "file": "app/server.py",
-        "line": 4892
+        "line": 4866
       },
       {
         "file": "app/server.py",
-        "line": 5317
+        "line": 5323
       },
       {
         "file": "app/server.py",
-        "line": 6098
+        "line": 6105
       },
       {
         "file": "app/server.py",
-        "line": 7185
+        "line": 7439
       },
       {
         "file": "app/services/provider_events.py",
@@ -41,7 +41,7 @@
     "approval.required": [
       {
         "file": "app/server.py",
-        "line": 6094
+        "line": 6101
       },
       {
         "file": "app/services/provider_events.py",
@@ -51,11 +51,11 @@
     "approval.resolved": [
       {
         "file": "app/server.py",
-        "line": 5880
+        "line": 5887
       },
       {
         "file": "app/server.py",
-        "line": 7642
+        "line": 8702
       },
       {
         "file": "app/services/provider_events.py",
@@ -69,27 +69,27 @@
       },
       {
         "file": "app/server.py",
-        "line": 5781
+        "line": 5788
       },
       {
         "file": "app/server.py",
-        "line": 5900
+        "line": 5907
       },
       {
         "file": "app/server.py",
-        "line": 7515
+        "line": 8484
       },
       {
         "file": "app/server.py",
-        "line": 7564
+        "line": 8533
       },
       {
         "file": "app/server.py",
-        "line": 7571
+        "line": 8540
       },
       {
         "file": "app/server.py",
-        "line": 7654
+        "line": 8714
       },
       {
         "file": "app/services/provider_events.py",
@@ -99,7 +99,7 @@
     "clarify.request": [
       {
         "file": "app/providers/hermes.py",
-        "line": 1168
+        "line": 1150
       },
       {
         "file": "app/services/provider_events.py",
@@ -119,7 +119,7 @@
     "message.complete": [
       {
         "file": "app/providers/hermes.py",
-        "line": 1174
+        "line": 1156
       },
       {
         "file": "app/services/provider_events.py",
@@ -129,19 +129,19 @@
     "message.completed": [
       {
         "file": "app/providers/hermes.py",
-        "line": 1174
+        "line": 1156
       },
       {
         "file": "app/server.py",
-        "line": 4485
+        "line": 4459
       },
       {
         "file": "app/server.py",
-        "line": 5288
+        "line": 5294
       },
       {
         "file": "app/server.py",
-        "line": 6061
+        "line": 6068
       },
       {
         "file": "app/services/provider_events.py",
@@ -155,43 +155,43 @@
       },
       {
         "file": "app/providers/hermes.py",
-        "line": 1112
+        "line": 1094
       },
       {
         "file": "app/providers/hermes.py",
-        "line": 1114
+        "line": 1096
       },
       {
         "file": "app/providers/hermes.py",
-        "line": 1119
+        "line": 1101
       },
       {
         "file": "app/server.py",
-        "line": 4483
+        "line": 4457
       },
       {
         "file": "app/server.py",
-        "line": 5285
+        "line": 5291
       },
       {
         "file": "app/server.py",
-        "line": 6061
+        "line": 6068
       },
       {
         "file": "app/server.py",
-        "line": 6062
+        "line": 6069
       },
       {
         "file": "app/server.py",
-        "line": 7187
+        "line": 7441
       },
       {
         "file": "app/server.py",
-        "line": 8780
+        "line": 9841
       },
       {
         "file": "app/server.py",
-        "line": 33469
+        "line": 35919
       },
       {
         "file": "app/services/codex_fast_path.py",
@@ -205,15 +205,15 @@
     "message.delta.text": [
       {
         "file": "app/server.py",
-        "line": 4483
+        "line": 4457
       },
       {
         "file": "app/server.py",
-        "line": 5285
+        "line": 5291
       },
       {
         "file": "app/server.py",
-        "line": 6061
+        "line": 6068
       },
       {
         "file": "app/services/codex_fast_path.py",
@@ -227,7 +227,7 @@
     "message.error": [
       {
         "file": "app/providers/hermes.py",
-        "line": 1171
+        "line": 1153
       },
       {
         "file": "app/services/provider_events.py",
@@ -237,11 +237,11 @@
     "provider.activity": [
       {
         "file": "app/server.py",
-        "line": 7190
+        "line": 7444
       },
       {
         "file": "app/server.py",
-        "line": 7203
+        "line": 7457
       },
       {
         "file": "app/services/codex_fast_path.py",
@@ -287,39 +287,39 @@
       },
       {
         "file": "app/providers/hermes.py",
-        "line": 1126
+        "line": 1108
       },
       {
         "file": "app/providers/hermes.py",
-        "line": 1130
+        "line": 1112
       },
       {
         "file": "app/server.py",
-        "line": 4490
+        "line": 4464
       },
       {
         "file": "app/server.py",
-        "line": 5292
+        "line": 5298
       },
       {
         "file": "app/server.py",
-        "line": 6063
+        "line": 6070
       },
       {
         "file": "app/server.py",
-        "line": 6064
+        "line": 6071
       },
       {
         "file": "app/server.py",
-        "line": 7190
+        "line": 7444
       },
       {
         "file": "app/server.py",
-        "line": 8785
+        "line": 9846
       },
       {
         "file": "app/server.py",
-        "line": 33472
+        "line": 35922
       },
       {
         "file": "app/services/codex_fast_path.py",
@@ -333,7 +333,7 @@
     "reasoning.delta": [
       {
         "file": "app/providers/hermes.py",
-        "line": 1126
+        "line": 1108
       },
       {
         "file": "app/services/codex_fast_path.py",
@@ -363,19 +363,19 @@
       },
       {
         "file": "app/server.py",
-        "line": 4518
+        "line": 4492
       },
       {
         "file": "app/server.py",
-        "line": 5326
+        "line": 5332
       },
       {
         "file": "app/server.py",
-        "line": 5345
+        "line": 5351
       },
       {
         "file": "app/server.py",
-        "line": 7264
+        "line": 7518
       },
       {
         "file": "app/services/codex_fast_path.py",
@@ -421,43 +421,43 @@
       },
       {
         "file": "app/server.py",
-        "line": 4518
+        "line": 4492
       },
       {
         "file": "app/server.py",
-        "line": 5326
+        "line": 5332
       },
       {
         "file": "app/server.py",
-        "line": 5345
+        "line": 5351
       },
       {
         "file": "app/server.py",
-        "line": 5897
+        "line": 5904
       },
       {
         "file": "app/server.py",
-        "line": 6103
+        "line": 6110
       },
       {
         "file": "app/server.py",
-        "line": 6195
+        "line": 6202
       },
       {
         "file": "app/server.py",
-        "line": 7200
+        "line": 7454
       },
       {
         "file": "app/server.py",
-        "line": 7264
+        "line": 7518
       },
       {
         "file": "app/server.py",
-        "line": 7305
+        "line": 7559
       },
       {
         "file": "app/server.py",
-        "line": 7390
+        "line": 7644
       },
       {
         "file": "app/services/codex_fast_path.py",
@@ -531,23 +531,19 @@
       },
       {
         "file": "app/providers/hermes.py",
-        "line": 1174
+        "line": 1156
       },
       {
         "file": "app/server.py",
-        "line": 4485
+        "line": 4459
       },
       {
         "file": "app/server.py",
-        "line": 4486
+        "line": 4460
       },
       {
         "file": "app/server.py",
-        "line": 4513
-      },
-      {
-        "file": "app/server.py",
-        "line": 5326
+        "line": 4487
       },
       {
         "file": "app/server.py",
@@ -555,35 +551,43 @@
       },
       {
         "file": "app/server.py",
-        "line": 5341
+        "line": 5338
       },
       {
         "file": "app/server.py",
-        "line": 6101
+        "line": 5347
       },
       {
         "file": "app/server.py",
-        "line": 7198
+        "line": 6108
       },
       {
         "file": "app/server.py",
-        "line": 7264
+        "line": 7452
       },
       {
         "file": "app/server.py",
-        "line": 7303
+        "line": 7518
       },
       {
         "file": "app/server.py",
-        "line": 8831
+        "line": 7557
       },
       {
         "file": "app/server.py",
-        "line": 8833
+        "line": 8385
       },
       {
         "file": "app/server.py",
-        "line": 33509
+        "line": 9892
+      },
+      {
+        "file": "app/server.py",
+        "line": 9894
+      },
+      {
+        "file": "app/server.py",
+        "line": 35959
       },
       {
         "file": "app/services/codex_fast_path.py",
@@ -637,59 +641,67 @@
       },
       {
         "file": "app/providers/hermes.py",
-        "line": 1171
+        "line": 1153
       },
       {
         "file": "app/server.py",
-        "line": 4518
+        "line": 4492
       },
       {
         "file": "app/server.py",
-        "line": 5326
+        "line": 5332
       },
       {
         "file": "app/server.py",
-        "line": 5337
+        "line": 5343
       },
       {
         "file": "app/server.py",
-        "line": 5345
+        "line": 5351
       },
       {
         "file": "app/server.py",
-        "line": 6106
+        "line": 6113
       },
       {
         "file": "app/server.py",
-        "line": 6195
+        "line": 6202
       },
       {
         "file": "app/server.py",
-        "line": 7202
+        "line": 7456
       },
       {
         "file": "app/server.py",
-        "line": 7264
+        "line": 7518
       },
       {
         "file": "app/server.py",
-        "line": 7308
+        "line": 7562
       },
       {
         "file": "app/server.py",
-        "line": 7390
+        "line": 7644
       },
       {
         "file": "app/server.py",
-        "line": 8836
+        "line": 8385
       },
       {
         "file": "app/server.py",
-        "line": 8838
+        "line": 8423
       },
       {
         "file": "app/server.py",
-        "line": 33509
+        "line": 9897
+      },
+      {
+        "file": "app/server.py",
+        "line": 9899
+      },
+      {
+        "file": "app/server.py",
+        "line": 35959
       },
       {
         "file": "app/services/codex_fast_path.py",
@@ -743,15 +755,15 @@
     "run.native.started": [
       {
         "file": "app/server.py",
-        "line": 4470
+        "line": 4444
       },
       {
         "file": "app/server.py",
-        "line": 6059
+        "line": 6066
       },
       {
         "file": "app/server.py",
-        "line": 6060
+        "line": 6067
       },
       {
         "file": "app/services/provider_events.py",
@@ -785,31 +797,31 @@
       },
       {
         "file": "app/server.py",
-        "line": 5254
+        "line": 5260
       },
       {
         "file": "app/server.py",
-        "line": 5256
+        "line": 5262
       },
       {
         "file": "app/server.py",
-        "line": 6031
+        "line": 6038
       },
       {
         "file": "app/server.py",
-        "line": 6059
+        "line": 6066
       },
       {
         "file": "app/server.py",
-        "line": 7248
+        "line": 7502
       },
       {
         "file": "app/server.py",
-        "line": 8747
+        "line": 9808
       },
       {
         "file": "app/server.py",
-        "line": 33448
+        "line": 35898
       },
       {
         "file": "app/services/provider_events.py",
@@ -823,7 +835,7 @@
     "run.stop_requested": [
       {
         "file": "app/server.py",
-        "line": 5392
+        "line": 5398
       },
       {
         "file": "app/services/provider_events.py",
@@ -833,7 +845,7 @@
     "secret.request": [
       {
         "file": "app/providers/hermes.py",
-        "line": 1168
+        "line": 1150
       },
       {
         "file": "app/services/provider_events.py",
@@ -843,7 +855,7 @@
     "session.active_list": [
       {
         "file": "app/providers/hermes.py",
-        "line": 1247
+        "line": 1229
       },
       {
         "file": "app/services/provider_events.py",
@@ -853,7 +865,7 @@
     "session.create": [
       {
         "file": "app/providers/hermes.py",
-        "line": 1076
+        "line": 1058
       },
       {
         "file": "app/services/provider_events.py",
@@ -871,7 +883,7 @@
       },
       {
         "file": "app/server.py",
-        "line": 23227
+        "line": 24788
       },
       {
         "file": "app/services/provider_events.py",
@@ -881,7 +893,7 @@
     "session.metrics": [
       {
         "file": "app/server.py",
-        "line": 8774
+        "line": 9835
       },
       {
         "file": "app/services/provider_events.py",
@@ -891,7 +903,7 @@
     "session.resume": [
       {
         "file": "app/providers/hermes.py",
-        "line": 1070
+        "line": 1052
       },
       {
         "file": "app/services/provider_events.py",
@@ -915,7 +927,7 @@
     "sudo.request": [
       {
         "file": "app/providers/hermes.py",
-        "line": 1168
+        "line": 1150
       },
       {
         "file": "app/services/provider_events.py",
@@ -925,23 +937,23 @@
     "tool.call": [
       {
         "file": "app/server.py",
-        "line": 4067
+        "line": 4017
       },
       {
         "file": "app/server.py",
-        "line": 4091
+        "line": 4041
       },
       {
         "file": "app/server.py",
-        "line": 4494
+        "line": 4468
       },
       {
         "file": "app/server.py",
-        "line": 5296
+        "line": 5302
       },
       {
         "file": "app/server.py",
-        "line": 6065
+        "line": 6072
       },
       {
         "file": "app/services/provider_events.py",
@@ -951,7 +963,7 @@
     "tool.call.start": [
       {
         "file": "app/providers/hermes.py",
-        "line": 1137
+        "line": 1119
       },
       {
         "file": "app/services/provider_events.py",
@@ -961,7 +973,7 @@
     "tool.complete": [
       {
         "file": "app/providers/hermes.py",
-        "line": 1151
+        "line": 1133
       },
       {
         "file": "app/services/provider_events.py",
@@ -975,39 +987,39 @@
       },
       {
         "file": "app/providers/hermes.py",
-        "line": 1151
+        "line": 1133
       },
       {
         "file": "app/providers/hermes.py",
-        "line": 1159
+        "line": 1141
       },
       {
         "file": "app/server.py",
-        "line": 4498
+        "line": 4472
       },
       {
         "file": "app/server.py",
-        "line": 5305
+        "line": 5311
       },
       {
         "file": "app/server.py",
-        "line": 6069
+        "line": 6076
       },
       {
         "file": "app/server.py",
-        "line": 6072
+        "line": 6079
       },
       {
         "file": "app/server.py",
-        "line": 7193
+        "line": 7447
       },
       {
         "file": "app/server.py",
-        "line": 8799
+        "line": 9860
       },
       {
         "file": "app/server.py",
-        "line": 33475
+        "line": 35925
       },
       {
         "file": "app/services/provider_events.py",
@@ -1017,7 +1029,7 @@
     "tool.end": [
       {
         "file": "app/providers/hermes.py",
-        "line": 1151
+        "line": 1133
       },
       {
         "file": "app/services/provider_events.py",
@@ -1027,7 +1039,7 @@
     "tool.ended": [
       {
         "file": "app/providers/hermes.py",
-        "line": 1151
+        "line": 1133
       },
       {
         "file": "app/services/provider_events.py",
@@ -1037,7 +1049,7 @@
     "tool.error": [
       {
         "file": "app/providers/hermes.py",
-        "line": 1151
+        "line": 1133
       },
       {
         "file": "app/services/provider_events.py",
@@ -1051,23 +1063,19 @@
       },
       {
         "file": "app/providers/hermes.py",
-        "line": 1151
+        "line": 1133
       },
       {
         "file": "app/providers/hermes.py",
-        "line": 1159
+        "line": 1141
       },
       {
         "file": "app/server.py",
-        "line": 4498
+        "line": 4472
       },
       {
         "file": "app/server.py",
-        "line": 4499
-      },
-      {
-        "file": "app/server.py",
-        "line": 5305
+        "line": 4473
       },
       {
         "file": "app/server.py",
@@ -1075,23 +1083,27 @@
       },
       {
         "file": "app/server.py",
-        "line": 6073
+        "line": 5317
       },
       {
         "file": "app/server.py",
-        "line": 6076
+        "line": 6080
       },
       {
         "file": "app/server.py",
-        "line": 7195
+        "line": 6083
       },
       {
         "file": "app/server.py",
-        "line": 8799
+        "line": 7449
       },
       {
         "file": "app/server.py",
-        "line": 33475
+        "line": 9860
+      },
+      {
+        "file": "app/server.py",
+        "line": 35925
       },
       {
         "file": "app/services/provider_events.py",
@@ -1101,7 +1113,7 @@
     "tool.generating": [
       {
         "file": "app/providers/hermes.py",
-        "line": 1137
+        "line": 1119
       },
       {
         "file": "app/services/provider_events.py",
@@ -1111,7 +1123,7 @@
     "tool.progress": [
       {
         "file": "app/providers/hermes.py",
-        "line": 1137
+        "line": 1119
       },
       {
         "file": "app/services/provider_events.py",
@@ -1121,27 +1133,27 @@
     "tool.result": [
       {
         "file": "app/providers/hermes.py",
-        "line": 1151
+        "line": 1133
       },
       {
         "file": "app/server.py",
-        "line": 4067
+        "line": 4017
       },
       {
         "file": "app/server.py",
-        "line": 4095
+        "line": 4045
       },
       {
         "file": "app/server.py",
-        "line": 4498
+        "line": 4472
       },
       {
         "file": "app/server.py",
-        "line": 5305
+        "line": 5311
       },
       {
         "file": "app/server.py",
-        "line": 6069
+        "line": 6076
       },
       {
         "file": "app/services/provider_events.py",
@@ -1151,7 +1163,7 @@
     "tool.start": [
       {
         "file": "app/providers/hermes.py",
-        "line": 1137
+        "line": 1119
       },
       {
         "file": "app/services/provider_events.py",
@@ -1165,43 +1177,43 @@
       },
       {
         "file": "app/providers/hermes.py",
-        "line": 1137
+        "line": 1119
       },
       {
         "file": "app/providers/hermes.py",
-        "line": 1143
+        "line": 1125
       },
       {
         "file": "app/server.py",
-        "line": 4494
+        "line": 4468
       },
       {
         "file": "app/server.py",
-        "line": 5296
+        "line": 5302
       },
       {
         "file": "app/server.py",
-        "line": 6065
+        "line": 6072
       },
       {
         "file": "app/server.py",
-        "line": 6068
+        "line": 6075
       },
       {
         "file": "app/server.py",
-        "line": 7196
+        "line": 7450
       },
       {
         "file": "app/server.py",
-        "line": 8795
+        "line": 9856
       },
       {
         "file": "app/server.py",
-        "line": 8797
+        "line": 9858
       },
       {
         "file": "app/server.py",
-        "line": 33475
+        "line": 35925
       },
       {
         "file": "app/services/provider_events.py",
@@ -1211,7 +1223,7 @@
     "tool.update": [
       {
         "file": "app/providers/hermes.py",
-        "line": 1137
+        "line": 1119
       },
       {
         "file": "app/services/provider_events.py",
@@ -1221,7 +1233,7 @@
     "tool.updated": [
       {
         "file": "app/providers/hermes.py",
-        "line": 1137
+        "line": 1119
       },
       {
         "file": "app/services/provider_events.py",
@@ -1235,7 +1247,7 @@
       },
       {
         "file": "app/server.py",
-        "line": 8763
+        "line": 9824
       },
       {
         "file": "app/services/provider_events.py",
