@@ -22,7 +22,7 @@
 
 ## 4. HR System Agent Bootstrap
 
-- [ ] 4.1 Add `app/hr-profile.md` and the HR role definition with stable ID `hr`, display name `HR`, non-assignable/non-deletable policy, meeting eligibility, HR-only responsibilities, structured output rules, and Profile rendering tests.
+- [x] 4.1 Add `app/hr-profile.md` and the HR role definition with stable ID `hr`, display name `HR`, non-assignable/non-deletable policy, meeting eligibility, HR-only responsibilities, structured output rules, and Profile rendering tests.
 - [ ] 4.2 Add the HR lifecycle adapter and `human-resources/hr.json` state repository, using the shared lifecycle for auto-create, rediscovery, Profile/skill repair, pause/resume, activity, error degradation, and public state; cover all paths with fake-provider tests.
 - [ ] 4.3 Add `VO_HR_ENABLED` bootstrap wiring and startup reconciliation as thin `app/server.py` construction/delegation, proving disabled startup has no provider or storage side effect and enabled repeated/restarted startup creates at most one HR.
 - [ ] 4.4 Generalize project assignment and Agent deletion checks to system-role policy, preserving archive-manager compatibility while rejecting HR with stable HR/system-role codes; update all legacy and extracted project call sites and tests.
