@@ -47,7 +47,7 @@
 
 - [x] 7.1 Create the canonical `skills/vo-agent-directory/SKILL.md` covering safe roster lookup, controlled Agent lookup, self access-log lookup, grant use, and prohibited direct storage/management access; add static content and endpoint-contract tests.
 - [x] 7.2 Extract the existing builtin skill seeding into a generic managed-skill registry that preserves current communication-skill behavior, ownership markers, hashes, atomic replacement, legacy conflict handling, symlink protection, and all existing tests.
-- [ ] 7.3 Implement `app/services/hr_skill_publisher.py` for canonical directory-skill publication and supported workspace installation with readiness states, path validation, conflict preservation, deterministic refresh, and fake-workspace tests.
+- [x] 7.3 Implement `app/services/hr_skill_publisher.py` for canonical directory-skill publication and supported workspace installation with readiness states, path validation, conflict preservation, deterministic refresh, and fake-workspace tests.
 - [ ] 7.4 Implement per-Agent Human Resources grant issuance, digest storage, secure workspace grant-reference delivery, rotation, revocation on ineligibility/deletion, and unsupported-provider readiness without embedding secrets in `SKILL.md` or API responses.
 - [ ] 7.5 Wire directory reconciliation to skill/grant readiness refresh and verify one Agent's installation conflict or unsupported provider does not block directory updates, HR-initiated reports, or other Agent installations.
 
