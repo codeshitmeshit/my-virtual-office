@@ -17,7 +17,13 @@ from services.hr_config import HRConfig
 from services.hr_evidence import HREvidenceCollector, HREvidencePorts
 from services.hr_reporting import HRDailyReportCollector, HRReportingService
 from services.hr_repository import HRRepository
-from services.hr_scheduler import HRWorkflowProcessor
+from services.hr_scheduler import (
+    HRLoopRuntime,
+    HRManualCommands,
+    HRReconciliationLoop,
+    HRScheduler,
+    HRWorkflowProcessor,
+)
 
 
 NOW = datetime(2026, 7, 19, 10, tzinfo=timezone.utc)
@@ -344,3 +350,118 @@ def test_assessment_queue_backpressure_and_failure_retry_limit(tmp_path):
         repository.get_assessment_job(ai_id, LOCAL_DATE) is not None
         for ai_id in opened.cycle.roster_snapshot
     )
+
+
+def make_loop(repository, reporting, processor, opened, *, config=None):
+    cfg = config or make_config()
+    scheduler = HRScheduler(cfg, repository, reporting, clock=lambda: NOW)
+    return HRReconciliationLoop(
+        scheduler,
+        reporting,
+        processor,
+        eligible_ai_ids=lambda: opened.cycle.roster_snapshot,
+        hr_available=lambda: True,
+        report_message=MESSAGE,
+        clock=lambda: NOW,
+        interval_seconds=1,
+    )
+
+
+def test_loop_tick_reuses_scheduler_and_processor_paths(tmp_path):
+    repository, reporting, opened, conversation, _hr, processor = setup(
+        tmp_path, agent_count=2
+    )
+    loop = make_loop(repository, reporting, processor, opened)
+    result = loop.tick()
+    assert result.schedule.action == "recover_open"
+    assert result.reports.accepted == 2
+    assert result.assessments is None
+    assert len(conversation.calls) == 2
+    closed = loop.close_and_assess(opened.cycle.id)
+    assert closed.assessments.accepted == 2
+    assert repository.get_daily_cycle(opened.cycle.id).status == "closed"
+    retried = loop.retry(opened.cycle.id)
+    assert retried.assessments is not None
+
+
+def test_manual_commands_enqueue_without_running_provider_on_caller_thread(tmp_path):
+    repository, reporting, opened, conversation, _hr, processor = setup(
+        tmp_path, agent_count=1
+    )
+    loop = make_loop(repository, reporting, processor, opened)
+    callbacks = []
+    commands = HRManualCommands(
+        loop,
+        submit=lambda callback: callbacks.append(callback) is None,
+        new_id=lambda: "command-1",
+    )
+    receipt = commands.run()
+    assert receipt.command_id == "command-1"
+    assert receipt.command == "run"
+    assert receipt.accepted is True
+    assert conversation.calls == []
+    assert repository.get_report_request(opened.requests[0].id).status == "pending"
+    callbacks[0]()
+    assert len(conversation.calls) == 1
+
+
+def test_default_manual_submit_returns_while_background_callback_is_blocked(tmp_path):
+    repository, reporting, opened, _conversation, _hr, processor = setup(
+        tmp_path, agent_count=1
+    )
+    loop = make_loop(repository, reporting, processor, opened)
+    entered = threading.Event()
+    release = threading.Event()
+
+    def blocking_tick(*, manual=False):
+        assert manual is True
+        entered.set()
+        assert release.wait(timeout=5)
+
+    loop.tick = blocking_tick
+    receipt = HRManualCommands(loop, new_id=lambda: "async-command").run()
+    assert receipt.accepted is True
+    assert entered.wait(timeout=5)
+    release.set()
+
+
+def test_manual_background_failure_is_reported_as_safe_code(tmp_path):
+    repository, reporting, opened, _conversation, _hr, processor = setup(
+        tmp_path, agent_count=1
+    )
+    loop = make_loop(repository, reporting, processor, opened)
+    callbacks = []
+    errors = []
+    commands = HRManualCommands(
+        loop,
+        submit=lambda callback: callbacks.append(callback) is None,
+        new_id=lambda: "bad-close",
+        on_error=lambda command_id, code: errors.append((command_id, code)),
+    )
+    assert commands.close("missing-cycle").accepted is True
+    callbacks[0]()
+    assert errors == [("bad-close", "hr_repository_not_found")]
+
+
+def test_startup_runtime_is_explicit_idempotent_and_stoppable(tmp_path):
+    repository, reporting, opened, _conversation, _hr, processor = setup(
+        tmp_path, agent_count=1
+    )
+    disabled = make_config(enabled=False)
+    loop = make_loop(repository, reporting, processor, opened, config=disabled)
+    runtime = HRLoopRuntime()
+    assert runtime.start() is False
+    runtime.install(loop)
+    assert runtime.start() is True
+    assert runtime.start() is False
+    runtime.stop()
+
+
+def test_server_startup_wiring_is_thin_and_does_not_run_whole_cycle_inline():
+    source = (APP_DIR / "server.py").read_text(encoding="utf-8")
+    assert "target=_hr_scheduler_start_on_startup" in source
+    startup = source[source.index("def _hr_scheduler_start_on_startup"):]
+    startup = startup[: startup.index("\n\ndef ", 10)]
+    assert "process_reports" not in startup
+    assert "process_assessments" not in startup
+    assert "ask_agent_as_hr" not in startup

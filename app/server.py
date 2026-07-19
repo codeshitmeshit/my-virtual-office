@@ -64,7 +64,9 @@ from services import meeting_notifications as meeting_notifications_service
 from services import meeting_callbacks as meeting_callbacks_service
 from services import archive_manager_lifecycle as archive_manager_lifecycle_service
 from services import hr_bootstrap as hr_bootstrap_service
+from services import hr_config as hr_config_service
 from services import hr_lifecycle as hr_lifecycle_service
+from services import hr_scheduler as hr_scheduler_service
 from services import system_agent_lifecycle as system_agent_lifecycle_service
 from services import system_agent_profiles as system_agent_profiles_service
 from services import system_agent_policy as system_agent_policy_service
@@ -21569,6 +21571,18 @@ def _hr_profile_check_on_startup(delay_seconds=4):
     return result
 
 
+_hr_scheduler_runtime = hr_scheduler_service.HRLoopRuntime()
+
+
+def _install_hr_scheduler_loop(loop):
+    """Thin dependency-wiring hook; scheduling behavior stays in services.hr_scheduler."""
+    _hr_scheduler_runtime.install(loop)
+
+
+def _hr_scheduler_start_on_startup():
+    return _hr_scheduler_runtime.start()
+
+
 
 
 def _archive_manager_create_if_missing():
@@ -36026,6 +36040,18 @@ if __name__ == "__main__":
             name="hr-profile-check",
         )
         hr_thread.start()
+    try:
+        hr_scheduler_config = hr_config_service.HRConfig.from_env()
+    except hr_config_service.HRConfigError as exc:
+        hr_scheduler_config = None
+        print(f"[HR] scheduler configuration rejected: {exc}")
+    if hr_scheduler_config is not None and hr_scheduler_config.scheduler_active:
+        hr_scheduler_thread = threading.Thread(
+            target=_hr_scheduler_start_on_startup,
+            daemon=True,
+            name="hr-scheduler-startup",
+        )
+        hr_scheduler_thread.start()
 
     feishu_status = _start_feishu_long_connection()
     print(f"📣 Feishu long connection: {feishu_status.get('status')}")

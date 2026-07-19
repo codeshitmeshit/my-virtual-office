@@ -5,6 +5,8 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
+import threading
+import uuid
 from typing import Callable, Iterable
 
 from services.hr_config import HRConfig
@@ -47,6 +49,20 @@ class WorkflowProcessingSummary:
     deferred: int
     exhausted: int
     results: tuple[ReportCollectionResult | AssessmentProcessingResult, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ReconciliationTickResult:
+    schedule: SchedulerReconciliation | None
+    reports: WorkflowProcessingSummary | None
+    assessments: WorkflowProcessingSummary | None
+
+
+@dataclass(frozen=True, slots=True)
+class HRCommandReceipt:
+    command_id: str
+    command: str
+    accepted: bool
 
 
 class HRDueTimeCalculator:
@@ -126,6 +142,10 @@ class HRScheduler:
         self._reporting = reporting
         self._clock = clock
         self._calculator = HRDueTimeCalculator(config)
+
+    @property
+    def mutations_enabled(self) -> bool:
+        return self._config.enabled
 
     def _now(self) -> datetime:
         value = self._clock()
@@ -227,6 +247,9 @@ class HRWorkflowProcessor:
             if page.next_cursor is None:
                 return tuple(items)
             cursor = page.next_cursor
+
+    def get_cycle(self, cycle_id: str) -> DailyCycleRecord | None:
+        return self._repository.get_daily_cycle(cycle_id)
 
     def process_reports(
         self,
@@ -332,3 +355,207 @@ class HRWorkflowProcessor:
             exhausted,
             tuple(results),
         )
+
+
+class HRReconciliationLoop:
+    """Background-only coordinator shared by startup and manual commands."""
+
+    def __init__(
+        self,
+        scheduler: HRScheduler,
+        reporting: HRReportingService,
+        processor: HRWorkflowProcessor,
+        *,
+        eligible_ai_ids: Callable[[], Iterable[str]],
+        hr_available: Callable[[], bool],
+        report_message: str,
+        clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+        interval_seconds: float = 30.0,
+        on_error: Callable[[str], None] = lambda _code: None,
+    ):
+        if not isinstance(scheduler, HRScheduler):
+            raise HRSchedulerValidationError("scheduler is invalid")
+        if not isinstance(reporting, HRReportingService):
+            raise HRSchedulerValidationError("reporting service is invalid")
+        if not isinstance(processor, HRWorkflowProcessor):
+            raise HRSchedulerValidationError("workflow processor is invalid")
+        if not callable(eligible_ai_ids) or not callable(hr_available):
+            raise HRSchedulerValidationError("reconciliation providers are invalid")
+        if not isinstance(report_message, str) or not report_message.strip():
+            raise HRSchedulerValidationError("report_message must not be empty")
+        if (
+            isinstance(interval_seconds, bool)
+            or not isinstance(interval_seconds, (int, float))
+            or not 1 <= float(interval_seconds) <= 3_600
+        ):
+            raise HRSchedulerValidationError("interval_seconds must be between 1 and 3600")
+        self._scheduler = scheduler
+        self._reporting = reporting
+        self._processor = processor
+        self._eligible_ai_ids = eligible_ai_ids
+        self._hr_available = hr_available
+        self._report_message = report_message.strip()
+        self._clock = clock
+        self._interval_seconds = float(interval_seconds)
+        self._on_error = on_error
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._start_lock = threading.Lock()
+
+    def _now(self) -> datetime:
+        value = self._clock()
+        if not isinstance(value, datetime) or value.tzinfo is None or value.utcoffset() is None:
+            raise HRSchedulerValidationError("loop clock must be timezone-aware")
+        return value.astimezone(timezone.utc)
+
+    def tick(self, *, manual: bool = False) -> ReconciliationTickResult:
+        schedule = self._scheduler.reconcile(
+            self._eligible_ai_ids(),
+            hr_available=self._hr_available(),
+            manual=manual,
+        )
+        cycle = schedule.cycle
+        if cycle is None or schedule.window is None:
+            return ReconciliationTickResult(schedule, None, None)
+        if cycle.status == "closed":
+            assessments = self._processor.process_assessments(cycle.id)
+            return ReconciliationTickResult(schedule, None, assessments)
+        if self._now() >= schedule.window.window_closes_at:
+            self._reporting.close_cycle(cycle.id, closed_at=self._now())
+            assessments = self._processor.process_assessments(cycle.id)
+            return ReconciliationTickResult(schedule, None, assessments)
+        reports = self._processor.process_reports(cycle.id, message=self._report_message)
+        return ReconciliationTickResult(schedule, reports, None)
+
+    def close_and_assess(self, cycle_id: str) -> ReconciliationTickResult:
+        if not self._scheduler.mutations_enabled:
+            raise HRSchedulerValidationError("Human Resources is disabled")
+        self._reporting.close_cycle(cycle_id, closed_at=self._now())
+        assessments = self._processor.process_assessments(cycle_id)
+        return ReconciliationTickResult(None, None, assessments)
+
+    def retry(self, cycle_id: str) -> ReconciliationTickResult:
+        if not self._scheduler.mutations_enabled:
+            raise HRSchedulerValidationError("Human Resources is disabled")
+        cycle = self._processor.get_cycle(cycle_id)
+        if cycle is None:
+            raise HRSchedulerValidationError("daily cycle does not exist")
+        if cycle.status == "closed":
+            assessments = self._processor.process_assessments(cycle_id)
+            return ReconciliationTickResult(None, None, assessments)
+        reports = self._processor.process_reports(cycle_id, message=self._report_message)
+        return ReconciliationTickResult(None, reports, None)
+
+    def _run(self) -> None:
+        while not self._stop.is_set():
+            try:
+                self.tick()
+            except Exception as exc:
+                try:
+                    self._on_error(
+                        str(getattr(exc, "code", "hr_reconciliation_failed"))
+                    )
+                except Exception:
+                    pass
+            self._stop.wait(self._interval_seconds)
+
+    def start(self) -> bool:
+        with self._start_lock:
+            if self._thread is not None and self._thread.is_alive():
+                return False
+            self._stop.clear()
+            self._thread = threading.Thread(
+                target=self._run,
+                daemon=True,
+                name="hr-reconciliation",
+            )
+            self._thread.start()
+            return True
+
+    def stop(self, timeout_seconds: float = 5.0) -> None:
+        self._stop.set()
+        thread = self._thread
+        if thread is not None:
+            thread.join(timeout=max(0.0, float(timeout_seconds)))
+
+
+class HRManualCommands:
+    """Queues manual actions so HTTP callers never wait for provider workflows."""
+
+    def __init__(
+        self,
+        loop: HRReconciliationLoop,
+        *,
+        submit: Callable[[Callable[[], object]], bool] | None = None,
+        new_id: Callable[[], str] = lambda: uuid.uuid4().hex,
+        on_error: Callable[[str, str], None] = lambda _command_id, _code: None,
+    ):
+        if not isinstance(loop, HRReconciliationLoop):
+            raise HRSchedulerValidationError("reconciliation loop is invalid")
+        self._loop = loop
+        self._submit = submit or self._thread_submit
+        self._new_id = new_id
+        self._on_error = on_error
+
+    @staticmethod
+    def _thread_submit(callback: Callable[[], object]) -> bool:
+        threading.Thread(
+            target=callback,
+            daemon=True,
+            name="hr-manual-command",
+        ).start()
+        return True
+
+    def _enqueue(self, command: str, callback: Callable[[], object]) -> HRCommandReceipt:
+        command_id = self._new_id()
+        if not isinstance(command_id, str) or not command_id.strip():
+            raise HRSchedulerValidationError("manual command ID is invalid")
+
+        def guarded() -> None:
+            try:
+                callback()
+            except Exception as exc:
+                self._on_error(
+                    command_id,
+                    str(getattr(exc, "code", "hr_manual_command_failed")),
+                )
+
+        accepted = bool(self._submit(guarded))
+        return HRCommandReceipt(command_id, command, accepted)
+
+    def run(self) -> HRCommandReceipt:
+        return self._enqueue("run", lambda: self._loop.tick(manual=True))
+
+    def close(self, cycle_id: str) -> HRCommandReceipt:
+        return self._enqueue(
+            "close",
+            lambda: self._loop.close_and_assess(cycle_id),
+        )
+
+    def retry(self, cycle_id: str) -> HRCommandReceipt:
+        return self._enqueue("retry", lambda: self._loop.retry(cycle_id))
+
+
+class HRLoopRuntime:
+    """Explicit startup wiring holder; construction remains outside the legacy entry point."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._loop: HRReconciliationLoop | None = None
+
+    def install(self, loop: HRReconciliationLoop) -> None:
+        if not isinstance(loop, HRReconciliationLoop):
+            raise HRSchedulerValidationError("reconciliation loop is invalid")
+        with self._lock:
+            self._loop = loop
+
+    def start(self) -> bool:
+        with self._lock:
+            loop = self._loop
+        return loop.start() if loop is not None else False
+
+    def stop(self) -> None:
+        with self._lock:
+            loop = self._loop
+        if loop is not None:
+            loop.stop()
