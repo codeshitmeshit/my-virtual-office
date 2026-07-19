@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
 import json
 from dataclasses import dataclass
@@ -127,6 +129,21 @@ class IntroductionSummaryResult:
     version: int
     conversation_key: str
     error_code: str
+
+
+@dataclass(frozen=True, slots=True)
+class SafeDirectoryEntry:
+    name: str
+    introduction: str
+    ai_id: str
+    availability: str
+    readiness: str
+
+
+@dataclass(frozen=True, slots=True)
+class SafeDirectoryPage:
+    items: tuple[SafeDirectoryEntry, ...]
+    next_cursor: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -675,3 +692,130 @@ class HRIntroductionSummarizer:
                 key,
                 "hr_introduction_summary_invalid",
             )
+
+
+class HRDirectoryQuery:
+    """Builds the allowlisted Agent-facing directory projection."""
+
+    READINESS = frozenset(
+        {"pending", "awaiting_hr_summary", "clarification_pending", "ready", "failed"}
+    )
+
+    def __init__(self, repository: HRRepository):
+        if not isinstance(repository, HRRepository):
+            raise HRDirectoryValidationError("repository must be an HRRepository")
+        self._repository = repository
+
+    @staticmethod
+    def _readiness(state: str | None) -> str:
+        return {
+            None: "pending",
+            "introduction_pending": "pending",
+            "response_received": "awaiting_hr_summary",
+            "clarification_pending": "clarification_pending",
+            "published": "ready",
+            "failed": "failed",
+        }.get(state, "pending")
+
+    @staticmethod
+    def _availability(agent: AgentRecord) -> str:
+        return agent.availability if agent.status == "active" else "unavailable"
+
+    @staticmethod
+    def _encode_offset(offset: int) -> str:
+        payload = json.dumps([offset], separators=(",", ":")).encode("utf-8")
+        return base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=")
+
+    @staticmethod
+    def _decode_offset(cursor: str | None) -> int:
+        if cursor is None:
+            return 0
+        if not isinstance(cursor, str) or not cursor or len(cursor) > 256:
+            raise HRDirectoryValidationError("directory cursor is invalid")
+        try:
+            padding = "=" * (-len(cursor) % 4)
+            payload = base64.b64decode(cursor + padding, altchars=b"-_", validate=True)
+            decoded = json.loads(payload.decode("utf-8"))
+        except (binascii.Error, UnicodeError, ValueError, json.JSONDecodeError) as exc:
+            raise HRDirectoryValidationError("directory cursor is invalid") from exc
+        if (
+            not isinstance(decoded, list)
+            or len(decoded) != 1
+            or isinstance(decoded[0], bool)
+            or not isinstance(decoded[0], int)
+            or not 0 <= decoded[0] <= 1_000_000
+        ):
+            raise HRDirectoryValidationError("directory cursor is invalid")
+        return decoded[0]
+
+    def _entries(self) -> tuple[SafeDirectoryEntry, ...]:
+        entries = []
+        for agent in HRDirectoryService._all_agents(self._repository):
+            introduction = self._repository.get_current_introduction(agent.ai_id)
+            entries.append(
+                SafeDirectoryEntry(
+                    name=agent.name,
+                    introduction=introduction.introduction if introduction is not None else "",
+                    ai_id=agent.ai_id,
+                    availability=self._availability(agent),
+                    readiness=self._readiness(
+                        introduction.state if introduction is not None else None
+                    ),
+                )
+            )
+        return tuple(sorted(entries, key=lambda item: item.ai_id))
+
+    def get(self, ai_id: str) -> SafeDirectoryEntry | None:
+        if not isinstance(ai_id, str) or not ai_id.strip():
+            raise HRDirectoryValidationError("ai_id must not be empty")
+        agent = self._repository.get_agent(ai_id)
+        if agent is None:
+            return None
+        introduction = self._repository.get_current_introduction(ai_id)
+        return SafeDirectoryEntry(
+            name=agent.name,
+            introduction=introduction.introduction if introduction is not None else "",
+            ai_id=agent.ai_id,
+            availability=self._availability(agent),
+            readiness=self._readiness(introduction.state if introduction is not None else None),
+        )
+
+    def list(
+        self,
+        *,
+        availability: str | None = None,
+        readiness: str | None = None,
+        query: str | None = None,
+        limit: int = 50,
+        cursor: str | None = None,
+    ) -> SafeDirectoryPage:
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 100:
+            raise HRDirectoryValidationError("limit must be between 1 and 100")
+        if availability is not None and (
+            not isinstance(availability, str) or not availability.strip()
+        ):
+            raise HRDirectoryValidationError("availability filter is invalid")
+        if readiness is not None and readiness not in self.READINESS:
+            raise HRDirectoryValidationError("readiness filter is invalid")
+        if query is not None and (
+            not isinstance(query, str) or not query.strip() or len(query.strip()) > 200
+        ):
+            raise HRDirectoryValidationError("directory query is invalid")
+        offset = self._decode_offset(cursor)
+        needle = query.strip().casefold() if query is not None else None
+        filtered = []
+        for item in self._entries():
+            if availability is not None and item.availability != availability:
+                continue
+            if readiness is not None and item.readiness != readiness:
+                continue
+            if needle is not None and not any(
+                needle in value.casefold()
+                for value in (item.ai_id, item.name, item.introduction)
+            ):
+                continue
+            filtered.append(item)
+        items = tuple(filtered[offset : offset + limit])
+        next_offset = offset + len(items)
+        next_cursor = self._encode_offset(next_offset) if next_offset < len(filtered) else None
+        return SafeDirectoryPage(items=items, next_cursor=next_cursor)
