@@ -18,6 +18,7 @@ from services.hr_skill_publisher import (
     HRSkillPublisher,
     repository_directory_skill_path,
 )
+from services.system_agent_roles import HR_ROLE
 
 
 class HRTeamSyncValidationError(ValueError):
@@ -70,12 +71,18 @@ class HRTeamSyncService:
         ai_id = cls._identity(agent)
         if not ai_id:
             return None
-        name = str(agent.get("name") or ai_id).strip() or ai_id
+        is_hr = (
+            HR_ROLE.matches_identity(ai_id)
+            or HR_ROLE.matches_identity(agent.get("name"))
+            or str(agent.get("systemRole") or agent.get("system_role") or "").strip()
+            == HR_ROLE.role_key
+        )
+        name = HR_ROLE.display_name if is_hr else (str(agent.get("name") or ai_id).strip() or ai_id)
         provider_kind = str(agent.get("providerKind") or "openclaw").strip() or "openclaw"
         explicit_kind = str(agent.get("agentKind") or "").strip().lower()
         if explicit_kind in {"system", "project", "external", "synthetic"}:
             agent_kind = explicit_kind
-        elif ai_id in {"hr", "archive-manager"}:
+        elif is_hr or ai_id == "archive-manager":
             agent_kind = "system"
         elif str(agent.get("providerType") or "").strip() == "gateway-platform":
             agent_kind = "synthetic"

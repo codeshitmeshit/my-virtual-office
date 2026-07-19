@@ -68,6 +68,15 @@ def test_manual_sync_force_refreshes_roster_and_persists_new_agents(tmp_path):
     assert repository.get_access_grant("new-agent").status == "active"
 
 
+def test_hr_identity_name_is_always_canonical_uppercase():
+    observation = HRTeamSyncService._observation(
+        {"id": "provider-hr-legacy", "name": "Hr", "providerKind": "openclaw"}
+    )
+    assert observation is not None
+    assert observation.name == "HR"
+    assert observation.agent_kind == "system"
+
+
 def test_manual_sync_marks_agents_missing_from_authoritative_roster_unreachable(tmp_path):
     repository = HRRepository(tmp_path / "status")
     repository.initialize()

@@ -230,7 +230,7 @@ class HRProviderPort:
             raise ValueError("HRProviderPort only accepts hr")
         workspace = self._profile_port.workspace_for(role.stable_id)
         params: dict[str, Any] = {
-            "name": role.stable_id,
+            "name": role.display_name,
             "workspace": str(workspace),
             "emoji": role.emoji,
         }
@@ -272,7 +272,7 @@ def hr_public_state(state: SystemAgentLifecycleState) -> dict[str, Any]:
     mapping = state.to_mapping()
     return {
         "agentId": state.agent_id,
-        "name": state.name,
+        "name": HR_ROLE.display_name,
         "emoji": state.emoji,
         "providerKind": state.provider_kind,
         "status": state.status.value,

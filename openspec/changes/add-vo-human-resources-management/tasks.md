@@ -27,6 +27,7 @@
 - [x] 4.3 Add `VO_HR_ENABLED` bootstrap wiring and startup reconciliation as thin `app/server.py` construction/delegation, proving disabled startup has no provider or storage side effect and enabled repeated/restarted startup creates at most one HR.
 - [x] 4.4 Generalize project assignment and Agent deletion checks to system-role policy, preserving archive-manager compatibility while rejecting HR with stable HR/system-role codes; update all legacy and extracted project call sites and tests.
 - [x] 4.5 Generalize legacy and executable meeting participant validation to role policy so HR is eligible and archive manager remains ineligible; verify HR occupancy/restoration and prove HR attendance emits no automatic performance event.
+- [x] 4.6 Canonicalize the HR system Agent's visible name as uppercase `HR` at provider creation, lifecycle projection, and directory reconciliation while preserving stable ID `hr`; add regression coverage for legacy `Hr` state and roster values.
 
 ## 5. Transactional Human Resources Repository
 

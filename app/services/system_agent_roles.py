@@ -237,6 +237,7 @@ HR_ROLE = SystemAgentRole(
     deletable=False,
     meeting_eligible=True,
     automatic_work_categories=("directory_coordination", "daily_reporting", "performance_assessment"),
+    aliases=("Hr",),
 )
 
 DEFAULT_SYSTEM_AGENT_ROLES = SystemAgentRoleRegistry((ARCHIVE_MANAGER_ROLE, HR_ROLE))

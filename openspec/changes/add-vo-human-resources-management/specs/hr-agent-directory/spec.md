@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: Globally unique HR role
-The system SHALL establish `HR` as one globally unique VO system Agent before HR-owned Agent discovery, introduction, reporting, or assessment work is attempted.
+The system SHALL establish `HR` as one globally unique VO system Agent before HR-owned Agent discovery, introduction, reporting, or assessment work is attempted. Its stable provider ID SHALL remain `hr`, while its human-visible name SHALL be canonically rendered as uppercase `HR` across creation, lifecycle, directory, and management projections.
 
 #### Scenario: Human Resources is opened without HR
 - **WHEN** no valid HR provider Agent exists
@@ -12,6 +12,11 @@ The system SHALL establish `HR` as one globally unique VO system Agent before HR
 - **WHEN** HR is paused, missing, or in error
 - **THEN** existing Human Resources data SHALL remain readable
 - **AND** new HR-authored introductions and assessments SHALL NOT be fabricated
+
+#### Scenario: Provider or legacy state reports mixed-case HR name
+- **WHEN** the stable HR identity is discovered or loaded with a display name such as `Hr` or `hr`
+- **THEN** Human Resources projections and directory synchronization SHALL normalize the visible name to `HR`
+- **AND** future HR creation requests SHALL use `HR` as the provider display name without changing stable ID `hr`
 
 ### Requirement: Authoritative Agent identity records
 HR SHALL maintain one durable record per discoverable Agent keyed by stable AI ID, with the three core business fields of Agent name, Agent introduction, and AI ID plus status and provenance metadata needed for lifecycle decisions.

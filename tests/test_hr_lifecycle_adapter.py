@@ -73,7 +73,7 @@ def build_adapter(
         if result.get("ok"):
             roster.append({
                 "id": result.get("agentId") or "hr",
-                "name": "HR",
+                "name": params["name"],
                 "providerKind": "openclaw",
                 "workspace": params["workspace"],
             })
@@ -187,7 +187,7 @@ def test_provider_uses_stable_openclaw_identity_and_managed_skill_payload(tmp_pa
     assert create == (
         "create",
         {
-            "name": "hr",
+            "name": "HR",
             "workspace": str(tmp_path / "openclaw" / "workspace-hr"),
             "emoji": "🧑‍💼",
             "model": "test-model",
@@ -197,6 +197,16 @@ def test_provider_uses_stable_openclaw_identity_and_managed_skill_payload(tmp_pa
     skill = next(call for call in calls if call[0] == "skill")
     assert skill[1]["statusKey"] == "hr"
     assert roster[0]["id"] == "hr"
+
+
+def test_public_state_canonicalizes_legacy_mixed_case_hr_name(tmp_path):
+    repo = repository(tmp_path)
+    repo.hr_dir.mkdir(parents=True)
+    repo.path.write_text(
+        json.dumps({"roleKey": "hr", "agentId": "hr", "name": "Hr", "status": "idle"}),
+        encoding="utf-8",
+    )
+    assert repo.public_state()["name"] == "HR"
 
 
 def test_repeated_and_restarted_reconcile_rediscovers_one_hr_and_repairs_profile(tmp_path):
@@ -249,6 +259,22 @@ def test_adapter_recognizes_stable_display_explicit_and_persisted_hr_identities(
     assert adapter.is_hr({"systemRole": "hr", "id": "renamed"}) is True
     assert adapter.is_hr("provider-hr-7") is True
     assert adapter.is_hr("ordinary-agent") is False
+
+
+def test_legacy_mixed_case_provider_name_is_reused_without_duplicate_creation(tmp_path):
+    adapter, calls, _roster, _presence = build_adapter(
+        tmp_path,
+        roster=[{
+            "id": "provider-hr-legacy",
+            "name": "Hr",
+            "providerKind": "openclaw",
+            "workspace": str(tmp_path / "openclaw" / "workspace-provider-hr-legacy"),
+        }],
+    )
+    state = adapter.reconcile()
+    assert state.agent_id == "provider-hr-legacy"
+    assert state.name == "HR"
+    assert not [call for call in calls if call[0] == "create"]
 
 
 @pytest.mark.parametrize(

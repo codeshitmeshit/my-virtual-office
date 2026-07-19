@@ -92,6 +92,7 @@ The archive role remains:
 HR is configured as:
 
 - stable ID `hr`, display name `HR`;
+- provider creation uses the display name `HR`, while lifecycle and directory projections normalize legacy `Hr`/`hr` display values back to `HR` without changing the stable ID;
 - non-assignable and non-deletable;
 - meeting-eligible;
 - backed by a new `app/hr-profile.md` and repository-owned directory skill;

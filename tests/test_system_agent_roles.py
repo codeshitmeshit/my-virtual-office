@@ -69,6 +69,7 @@ def test_default_roles_are_immutable_and_preserve_distinct_policies():
         ({"systemRole": "archive_manager", "id": "renamed"}, ARCHIVE_MANAGER_ROLE),
         ("hr", HR_ROLE),
         ("HR", HR_ROLE),
+        ("Hr", HR_ROLE),
         ({"agentId": "hr"}, HR_ROLE),
         ("ordinary-agent", None),
         ({"systemRole": "unknown", "id": "ordinary-agent"}, None),
