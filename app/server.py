@@ -61,6 +61,8 @@ from services import meeting_requests as meeting_requests_service
 from services import meeting_action_items as meeting_action_items_service
 from services import meeting_notifications as meeting_notifications_service
 from services import meeting_callbacks as meeting_callbacks_service
+from services import archive_manager_lifecycle as archive_manager_lifecycle_service
+from services import system_agent_lifecycle as system_agent_lifecycle_service
 from services.provider_events import ProviderEventJournal, canonical_event_name, sanitize_payload
 from services.provider_approvals import ProviderApprovalService, TrustedApprovalContext
 from services.provider_conversations import CallableConversationStatePort, CallableQueuedConversationPort, ConversationKey, ProviderConversationService
@@ -21666,6 +21668,97 @@ def _archive_manager_write_profile_files(agent_id):
     return {"ok": True, "profileFiles": written, "workspace": workspace, "profileVersion": target_version, "updated": True}
 
 
+_archive_manager_write_profile_files_legacy = _archive_manager_write_profile_files
+
+
+def _archive_manager_write_profile_files(agent_id):
+    """Compatibility delegate to the shared safe Profile synchronizer."""
+    try:
+        profile_port = archive_manager_lifecycle_service.ArchiveManagerProfilePort(
+            ARCHIVE_MANAGER_PROFILE_TEMPLATE,
+            WORKSPACE_BASE,
+        )
+        workspace = profile_port.workspace_for(
+            agent_id or ARCHIVE_MANAGER_AGENT_ID,
+            _archive_manager_workspace(agent_id),
+        )
+        agent = system_agent_lifecycle_service.ProviderAgent(
+            id=agent_id or ARCHIVE_MANAGER_AGENT_ID,
+            name=ARCHIVE_MANAGER_NAME,
+            provider_kind="openclaw",
+            workspace=str(workspace),
+        )
+        result = profile_port.synchronize(
+            archive_manager_lifecycle_service.ARCHIVE_MANAGER_ROLE,
+            agent,
+            workspace,
+        )
+        return {
+            "ok": True,
+            "profileFiles": list(archive_manager_lifecycle_service.ARCHIVE_MANAGER_ROLE.required_files),
+            "workspace": result.workspace,
+            "profileVersion": result.version,
+            "updated": result.updated,
+        }
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+def _archive_manager_shared_list_agents(force_refresh=False):
+    global _discovered_at
+    if force_refresh:
+        _discovered_at = 0
+    refresh_agent_maps()
+    roster = list(get_roster())
+    manager = _archive_manager_roster_agent()
+    if manager and not any(
+        str(agent.get("id") or agent.get("statusKey") or "")
+        == str(manager.get("id") or manager.get("statusKey") or "")
+        for agent in roster
+    ):
+        roster.append(manager)
+    return roster
+
+
+def _archive_manager_shared_adapter():
+    profile_port = archive_manager_lifecycle_service.ArchiveManagerProfilePort(
+        ARCHIVE_MANAGER_PROFILE_TEMPLATE,
+        WORKSPACE_BASE,
+        compatibility_sync=lambda agent_id: _archive_manager_write_profile_files(agent_id),
+    )
+    repository = archive_manager_lifecycle_service.ArchiveManagerStateRepository(
+        STATUS_DIR,
+        clock=lambda: datetime.now(timezone.utc),
+    )
+    provider = archive_manager_lifecycle_service.ArchiveManagerProviderPort(
+        list_agents=_archive_manager_shared_list_agents,
+        create_agent=lambda params, timeout: _gateway_rpc_call(
+            "agents.create", dict(params), timeout=timeout,
+        ),
+        profile_port=profile_port,
+        sync_managed_skills=_sync_openclaw_communication_skill,
+        default_model=_default_openclaw_agent_model,
+    )
+    presence = archive_manager_lifecycle_service.CallbackPresencePort(
+        lambda agent_id, state, reason: gateway_presence.set_manual_override(
+            agent_id, state, reason,
+        )
+    )
+    ports = system_agent_lifecycle_service.SystemAgentPorts(
+        provider=provider,
+        profiles=profile_port,
+        state=repository,
+        presence=presence,
+        clock=lambda: datetime.now(timezone.utc),
+        new_id=_proj_uuid,
+    )
+    lifecycle = system_agent_lifecycle_service.SystemAgentLifecycleService(ports)
+    return archive_manager_lifecycle_service.ArchiveManagerLifecycleAdapter(
+        lifecycle,
+        repository,
+    )
+
+
 def _archive_manager_create_if_missing():
     state = _archive_manager_load_state()
     existing = _archive_manager_roster_agent()
@@ -21779,6 +21872,14 @@ def _archive_manager_create_if_missing():
         state["lastError"] = str(exc)
         _archive_manager_append_activity(state, "auto_create", "error", "自动创建档案管理员失败", error=str(exc))
         return _archive_manager_save_state(state)
+
+
+_archive_manager_create_if_missing_legacy = _archive_manager_create_if_missing
+
+
+def _archive_manager_create_if_missing():
+    """Compatibility delegate to the shared role-configured lifecycle."""
+    return _archive_manager_shared_adapter().legacy_state(ensure=True)
 
 
 def _archive_manager_profile_check_on_startup():

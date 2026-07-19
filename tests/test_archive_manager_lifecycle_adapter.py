@@ -16,6 +16,7 @@ from services.archive_manager_lifecycle import (
     ARCHIVE_MANAGER_ACTIVITY_LIMIT,
     ArchiveManagerLifecycleAdapter,
     ArchiveManagerProfilePort,
+    ArchiveManagerProviderPort,
     ArchiveManagerStateRepository,
     archive_manager_label,
 )
@@ -195,6 +196,51 @@ def test_profile_port_sync_is_idempotent_and_repairs_stale_file(tmp_path):
     repaired = port.synchronize(ARCHIVE_MANAGER_ROLE, agent, workspace)
     assert repaired.written_files == ("AGENTS.md",)
     assert "vo-archive-manager" in (workspace / "AGENTS.md").read_text(encoding="utf-8")
+
+
+def test_provider_port_preserves_openclaw_create_parameters_and_forced_discovery(tmp_path):
+    profile = ArchiveManagerProfilePort(
+        APP_DIR / "archive-manager-profile.md",
+        tmp_path / "openclaw",
+    )
+    calls = []
+    roster = [
+        {"id": "main", "name": "Main", "providerKind": "openclaw"},
+        {"id": "archive-manager", "name": "archive-manager", "providerKind": "openclaw"},
+    ]
+
+    def list_agents(force_refresh):
+        calls.append(("list", force_refresh))
+        return roster
+
+    def create_agent(params, timeout):
+        calls.append(("create", dict(params), timeout))
+        return {"ok": True, "agentId": "archive-manager"}
+
+    skill_payloads = []
+    provider = ArchiveManagerProviderPort(
+        list_agents=list_agents,
+        create_agent=create_agent,
+        profile_port=profile,
+        sync_managed_skills=lambda payload: skill_payloads.append(payload) or {"ready": True},
+        default_model=lambda: "test-model",
+    )
+    discovered = provider.discover(ARCHIVE_MANAGER_ROLE, force_refresh=True)
+    assert [agent.id for agent in discovered] == ["archive-manager"]
+    created = provider.create(ARCHIVE_MANAGER_ROLE)
+    assert calls[-1] == (
+        "create",
+        {
+            "name": "archive-manager",
+            "workspace": str(tmp_path / "openclaw" / "workspace-archive-manager"),
+            "emoji": "🗄️",
+            "model": "test-model",
+        },
+        30,
+    )
+    assert provider.resolve_workspace(created) == tmp_path / "openclaw" / "workspace-archive-manager"
+    assert provider.sync_managed_skills(created) == {"ready": True}
+    assert skill_payloads[0]["statusKey"] == "archive-manager"
 
 
 class StubLifecycle:

@@ -48,10 +48,21 @@ def archive_manager_label(state: SystemAgentLifecycleState) -> str:
     return "已自动创建" if state.auto_created else "已接入"
 
 
+def archive_manager_legacy_action(state: SystemAgentLifecycleState, action: str) -> str:
+    if action in {"create", "discover"}:
+        return "auto_create"
+    if action == "profile_sync":
+        return "auto_create" if state.auto_created and not state.profile_version else "profile_repair"
+    if action == "skill_sync" and state.auto_created and not state.communication_skill:
+        return "auto_create"
+    return action
+
+
 def _legacy_activity(state: SystemAgentLifecycleState) -> list[dict[str, Any]]:
     result = []
     for activity in state.recent_activity[-ARCHIVE_MANAGER_ACTIVITY_LIMIT:]:
         item = activity.to_mapping()
+        item["action"] = archive_manager_legacy_action(state, item["action"])
         context = item.pop("context", {})
         if isinstance(context, Mapping):
             item.update(context)
@@ -93,7 +104,7 @@ class ArchiveManagerStateRepository:
             activity_limit=ARCHIVE_MANAGER_ACTIVITY_LIMIT,
         )
 
-    def _payload(self, state: SystemAgentLifecycleState) -> dict[str, Any]:
+    def legacy_mapping(self, state: SystemAgentLifecycleState) -> dict[str, Any]:
         return {
             "agentId": state.agent_id,
             "name": state.name,
@@ -106,7 +117,7 @@ class ArchiveManagerStateRepository:
             "autoCreated": state.auto_created,
             "createdAt": state.created_at or None,
             "updatedAt": state.updated_at or None,
-            "lastAction": state.last_action,
+            "lastAction": archive_manager_legacy_action(state, state.last_action),
             "lastError": state.last_error,
             "recentActivity": _legacy_activity(state),
             **({"workspace": state.workspace} if state.workspace else {}),
@@ -135,7 +146,7 @@ class ArchiveManagerStateRepository:
             )
             with os.fdopen(descriptor, "w", encoding="utf-8") as output:
                 descriptor = -1
-                json.dump(self._payload(state), output, ensure_ascii=False, indent=2)
+                json.dump(self.legacy_mapping(state), output, ensure_ascii=False, indent=2)
                 output.write("\n")
                 output.flush()
                 os.fsync(output.fileno())
@@ -162,9 +173,16 @@ class ArchiveManagerProfilePort:
         self,
         template_path: str | os.PathLike[str],
         openclaw_home: str | os.PathLike[str],
+        *,
+        compatibility_sync: Callable[[str], Mapping[str, Any]] | None = None,
     ):
         self.template_path = Path(template_path).absolute()
-        self.openclaw_home = Path(openclaw_home).absolute()
+        self.openclaw_home = Path(openclaw_home).resolve(strict=False)
+        self._compatibility_sync = compatibility_sync
+
+    @property
+    def uses_compatibility_sync(self) -> bool:
+        return self._compatibility_sync is not None
 
     def render(self) -> RenderedSystemAgentProfile:
         if self.template_path.is_symlink():
@@ -199,6 +217,20 @@ class ArchiveManagerProfilePort:
     ) -> ProfileSyncResult:
         if role.role_key != ARCHIVE_MANAGER_ROLE.role_key:
             raise ValueError("ArchiveManagerProfilePort only accepts archive_manager")
+        if self._compatibility_sync is not None:
+            result = self._compatibility_sync(agent.id)
+            if not isinstance(result, Mapping) or not result.get("ok"):
+                detail = result.get("error") if isinstance(result, Mapping) else "invalid Profile result"
+                raise RuntimeError(str(detail or "Archive manager Profile synchronization failed"))
+            files = tuple(str(item) for item in result.get("profileFiles", ()) if str(item))
+            updated = bool(result.get("updated"))
+            return ProfileSyncResult(
+                workspace=str(result.get("workspace") or workspace),
+                version=str(result.get("profileVersion") or ""),
+                updated=updated,
+                written_files=files if updated else (),
+                unchanged_files=() if updated else files,
+            )
         safe_workspace = self.workspace_for(agent.id, workspace)
         return sync_profile_files(
             self.openclaw_home,
@@ -206,6 +238,97 @@ class ArchiveManagerProfilePort:
             self.render(),
             version_marker=role.version_marker,
         )
+
+
+class ArchiveManagerProviderPort:
+    """OpenClaw-shaped provider adapter with all runtime callbacks injected."""
+
+    def __init__(
+        self,
+        *,
+        list_agents: Callable[[bool], list[Mapping[str, Any]]],
+        create_agent: Callable[[Mapping[str, Any], int], Mapping[str, Any]],
+        profile_port: ArchiveManagerProfilePort,
+        sync_managed_skills: Callable[[Mapping[str, Any]], Mapping[str, Any]],
+        default_model: Callable[[], str] = lambda: "",
+    ):
+        self._list_agents = list_agents
+        self._create_agent = create_agent
+        self._profile_port = profile_port
+        self._sync_managed_skills = sync_managed_skills
+        self._default_model = default_model
+
+    @staticmethod
+    def _matches(role: SystemAgentRole, candidate: Mapping[str, Any]) -> bool:
+        return any(
+            role.matches_identity(candidate.get(key))
+            for key in ("id", "statusKey", "name")
+        )
+
+    def discover(
+        self,
+        role: SystemAgentRole,
+        *,
+        force_refresh: bool = False,
+    ) -> tuple[ProviderAgent, ...]:
+        return tuple(
+            ProviderAgent.from_mapping(agent, default_provider_kind=role.provider_kind)
+            for agent in self._list_agents(force_refresh)
+            if isinstance(agent, Mapping) and self._matches(role, agent)
+        )
+
+    def create(self, role: SystemAgentRole) -> ProviderAgent:
+        workspace = self._profile_port.workspace_for(role.stable_id)
+        params: dict[str, Any] = {
+            "name": role.stable_id,
+            "workspace": str(workspace),
+            "emoji": role.emoji,
+        }
+        if model := str(self._default_model() or "").strip():
+            params["model"] = model
+        result = self._create_agent(params, 30)
+        if not isinstance(result, Mapping) or not result.get("ok"):
+            detail = result.get("error") if isinstance(result, Mapping) else "invalid provider response"
+            raise RuntimeError(str(detail or "OpenClaw agent creation failed"))
+        agent_id = str(result.get("agentId") or role.stable_id).strip()
+        return ProviderAgent(
+            id=agent_id,
+            name=role.display_name,
+            provider_kind=role.provider_kind,
+            workspace=str(workspace),
+            raw={**dict(result), "statusKey": agent_id, "workspace": str(workspace)},
+        )
+
+    def resolve_workspace(self, agent: ProviderAgent) -> Path:
+        if self._profile_port.uses_compatibility_sync and agent.workspace:
+            # The compatibility callback validates and resolves the workspace.
+            # This also preserves existing dependency-injection tests that replace
+            # the callback with a fully synthetic filesystem result.
+            return Path(agent.workspace)
+        configured = Path(agent.workspace).resolve(strict=False) if agent.workspace else None
+        return self._profile_port.workspace_for(agent.id, configured)
+
+    def sync_managed_skills(self, agent: ProviderAgent) -> Mapping[str, Any]:
+        payload = {
+            **dict(agent.raw),
+            "id": agent.id,
+            "statusKey": agent.id,
+            "providerKind": agent.provider_kind,
+            "workspace": agent.workspace,
+        }
+        result = self._sync_managed_skills(payload)
+        return result if isinstance(result, Mapping) else {
+            "ready": False,
+            "status": "invalid managed-skill response",
+        }
+
+
+class CallbackPresencePort:
+    def __init__(self, callback: Callable[[str, str, str], None]):
+        self._callback = callback
+
+    def set_presence(self, agent_id: str, state: str, reason: str = "") -> None:
+        self._callback(agent_id, state, reason)
 
 
 class ArchiveManagerLifecycleAdapter:
@@ -248,10 +371,14 @@ class ArchiveManagerLifecycleAdapter:
             "profileVersion": state.profile_version,
             "profileUpdatedAt": state.profile_updated_at or None,
             "communicationSkill": dict(state.communication_skill) if state.communication_skill else None,
-            "lastAction": state.last_action,
+            "lastAction": archive_manager_legacy_action(state, state.last_action),
             "lastError": state.last_error,
             "recentActivity": _legacy_activity(state),
         }
+
+    def legacy_state(self, *, ensure: bool = True) -> dict[str, Any]:
+        state = self.create_if_missing() if ensure else self.repository.load()
+        return self.repository.legacy_mapping(state)
 
     def is_archive_manager(self, candidate: Any) -> bool:
         state = self.repository.load()

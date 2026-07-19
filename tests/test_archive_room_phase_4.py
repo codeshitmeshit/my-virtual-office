@@ -302,10 +302,6 @@ def test_archive_manager_chat_boundary():
             restore_phase4_store(old)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Known pre-extraction defect: archive-manager reconciliation has no shared creation lock; task 2.4 must make this pass.",
-)
 def test_archive_manager_concurrent_reconciliation_creates_one_effective_agent():
     with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as oc_home:
         old = with_phase4_store(status_dir, oc_home)
@@ -376,10 +372,6 @@ def test_archive_manager_partial_profile_failure_repairs_existing_agent_without_
             restore_phase4_store(old)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Known pre-extraction defect: a fresh negative roster cache can miss an externally created archive manager; shared reconciliation must refresh before create.",
-)
 def test_archive_manager_stale_negative_discovery_does_not_create_duplicate():
     with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as oc_home:
         old = with_phase4_store(status_dir, oc_home)
