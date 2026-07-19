@@ -16,6 +16,7 @@ from services.hr_directory_enablement import (
     HRDirectoryEnablementResult,
 )
 from services.hr_repository import HRRepository
+from services.hr_command_status import HRCommandStatusTracker
 from services.system_agent_roles import HR_ROLE
 
 
@@ -41,6 +42,13 @@ class HRTeamSyncResult:
     unchanged: tuple[str, ...]
     failed: tuple[str, ...]
     grant_ready: int
+
+
+@dataclass(frozen=True, slots=True)
+class HRTeamSyncReceipt:
+    command_id: str
+    command: str
+    accepted: bool
 
 
 class HRTeamSyncService:
@@ -140,12 +148,100 @@ class HRTeamSyncService:
             )
 
 
+class HRTeamSyncCommands:
+    """Queue one roster synchronization and expose its durable execution state."""
+
+    def __init__(
+        self,
+        service: HRTeamSyncService,
+        tracker: HRCommandStatusTracker,
+        *,
+        submit: Callable[[Callable[[], None]], bool] | None = None,
+        new_id: Callable[[], str] = lambda: uuid.uuid4().hex,
+    ):
+        if not isinstance(service, HRTeamSyncService):
+            raise HRTeamSyncValidationError("team sync service is invalid")
+        if not isinstance(tracker, HRCommandStatusTracker):
+            raise HRTeamSyncValidationError("command status tracker is invalid")
+        self._service = service
+        self._tracker = tracker
+        self._submit = submit or self._thread_submit
+        self._new_id = new_id
+        self._lock = threading.Lock()
+        self._running = False
+
+    @staticmethod
+    def _thread_submit(callback: Callable[[], None]) -> bool:
+        threading.Thread(target=callback, daemon=True, name="hr-team-sync").start()
+        return True
+
+    def sync(self) -> HRTeamSyncReceipt:
+        command_id = self._new_id()
+        with self._lock:
+            if self._running:
+                return HRTeamSyncReceipt(command_id, "sync", False)
+            self._running = True
+        try:
+            self._tracker.accepted(command_id, "sync")
+        except Exception:
+            with self._lock:
+                self._running = False
+            raise
+
+        def execute() -> None:
+            try:
+                self._tracker.running(command_id)
+                result = self._service.sync()
+                context = {
+                    "discovered": result.discovered,
+                    "created": len(result.created),
+                    "updated": len(result.updated),
+                    "reactivated": len(result.reactivated),
+                    "inactivated": len(result.inactivated),
+                    "failed": len(result.failed),
+                    "grantReady": result.grant_ready,
+                }
+                if result.failed:
+                    self._tracker.failed(
+                        command_id, "hr_team_sync_partial_failure", context=context
+                    )
+                else:
+                    self._tracker.complete(
+                        command_id,
+                        message=f"discovered={result.discovered}, failed=0",
+                        context=context,
+                    )
+            except Exception as exc:
+                try:
+                    self._tracker.failed(
+                        command_id,
+                        str(getattr(exc, "code", "hr_team_sync_failed")),
+                    )
+                except Exception:
+                    pass
+            finally:
+                with self._lock:
+                    self._running = False
+
+        try:
+            accepted = bool(self._submit(execute))
+        except Exception:
+            accepted = False
+        if not accepted:
+            try:
+                self._tracker.failed(command_id, "hr_command_not_accepted")
+            finally:
+                with self._lock:
+                    self._running = False
+        return HRTeamSyncReceipt(command_id, "sync", accepted)
+
+
 def build_hr_team_sync(
     repository: HRRepository,
     *,
     roster_provider: Callable[[bool], Sequence[Mapping[str, object]]],
     workspace_base: str | Path,
-) -> HRTeamSyncService:
+) -> HRTeamSyncCommands:
     coordinator = HRDirectoryEnablementCoordinator(
         repository,
         HRDirectoryService(repository),
@@ -156,4 +252,5 @@ def build_hr_team_sync(
             key_id_factory=lambda _ai_id: uuid.uuid4().hex,
         ),
     )
-    return HRTeamSyncService(coordinator, roster_provider)
+    service = HRTeamSyncService(coordinator, roster_provider)
+    return HRTeamSyncCommands(service, HRCommandStatusTracker(repository))

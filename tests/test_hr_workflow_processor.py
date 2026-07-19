@@ -14,6 +14,7 @@ if str(APP_DIR) not in sys.path:
 
 from services.hr_assessments import HRAssessmentOrchestrator
 from services.hr_config import HRConfig
+from services.hr_command_status import HRCommandStatusTracker
 from services.hr_evidence import HREvidenceCollector, HREvidencePorts
 from services.hr_reporting import HRDailyReportCollector, HRReportingService
 from services.hr_repository import HRRepository
@@ -392,6 +393,7 @@ def test_manual_commands_enqueue_without_running_provider_on_caller_thread(tmp_p
     callbacks = []
     commands = HRManualCommands(
         loop,
+        tracker=HRCommandStatusTracker(repository),
         submit=lambda callback: callbacks.append(callback) is None,
         new_id=lambda: "command-1",
     )
@@ -401,7 +403,9 @@ def test_manual_commands_enqueue_without_running_provider_on_caller_thread(tmp_p
     assert receipt.accepted is True
     assert conversation.calls == []
     assert repository.get_report_request(opened.requests[0].id).status == "pending"
+    assert repository.list_active_hr_commands()[0].status == "accepted"
     callbacks[0]()
+    assert repository.list_active_hr_commands() == ()
     assert len(conversation.calls) == 1
 
 

@@ -12,6 +12,7 @@ from services.hr_agent_api import HRAgentAPI
 from services.hr_agent_auth import HRAgentAuthenticator
 from services.hr_api import HRLifecyclePort, HRManagementAPI, HRManualCommandsPort
 from services.hr_config import HRConfig
+from services.hr_command_status import HRCommandStatusTracker
 from services.hr_directory import HRDirectoryQuery
 from services.hr_information_completion import (
     CallableHRInformationConversation,
@@ -40,6 +41,13 @@ class HRCommandRouter:
     def __init__(self):
         self._lock = threading.Lock()
         self._commands: HRManualCommandsPort | None = None
+        self._tracker: HRCommandStatusTracker | None = None
+
+    def install_tracker(self, tracker: HRCommandStatusTracker) -> None:
+        if not isinstance(tracker, HRCommandStatusTracker):
+            raise TypeError("HR command status tracker is invalid")
+        with self._lock:
+            self._tracker = tracker
 
     def install(self, commands: HRManualCommandsPort) -> None:
         if not all(
@@ -51,7 +59,9 @@ class HRCommandRouter:
             self._commands = commands
 
     def install_loop(self, loop: HRReconciliationLoop) -> None:
-        self.install(HRManualCommands(loop))
+        with self._lock:
+            tracker = self._tracker
+        self.install(HRManualCommands(loop, tracker=tracker))
 
     def _call(self, action: str, cycle_id: str | None = None) -> HRCommandReceipt:
         with self._lock:
@@ -92,6 +102,11 @@ def build_hr_application_runtime(
     """Build one repository authority shared by management and authenticated Agent APIs."""
     repository = HRRepository(status_dir)
     repository.initialize()
+    command_tracker = HRCommandStatusTracker(repository)
+    command_tracker.interrupt_active()
+    install_tracker = getattr(commands, "install_tracker", None)
+    if callable(install_tracker):
+        install_tracker(command_tracker)
     observability = HRObservability()
     directory_sync = None
     if roster_provider is not None:
@@ -110,7 +125,8 @@ def build_hr_application_runtime(
                 information_conversation,
                 max_workers=config.max_workers,
                 timeout_seconds=config.agent_timeout_seconds,
-            )
+            ),
+            tracker=command_tracker,
         )
     manual_daily_sync = None
     if daily_conversation is not None:
@@ -147,7 +163,8 @@ def build_hr_application_runtime(
                 submission_window_minutes=config.submission_window_minutes,
                 max_workers=config.max_workers,
                 timeout_seconds=config.agent_timeout_seconds,
-            )
+            ),
+            tracker=command_tracker,
         )
     management = HRManagementAPI(
         repository,

@@ -18,6 +18,7 @@ from services.hr_reporting import (
     ReportingCycleResult,
 )
 from services.hr_repository import DailyCycleRecord, HRRepository
+from services.hr_command_status import HRCommandStatusTracker
 
 
 class HRSchedulerValidationError(ValueError):
@@ -489,6 +490,7 @@ class HRManualCommands:
         submit: Callable[[Callable[[], object]], bool] | None = None,
         new_id: Callable[[], str] = lambda: uuid.uuid4().hex,
         on_error: Callable[[str, str], None] = lambda _command_id, _code: None,
+        tracker: HRCommandStatusTracker | None = None,
     ):
         if not isinstance(loop, HRReconciliationLoop):
             raise HRSchedulerValidationError("reconciliation loop is invalid")
@@ -496,6 +498,7 @@ class HRManualCommands:
         self._submit = submit or self._thread_submit
         self._new_id = new_id
         self._on_error = on_error
+        self._tracker = tracker
 
     @staticmethod
     def _thread_submit(callback: Callable[[], object]) -> bool:
@@ -510,17 +513,35 @@ class HRManualCommands:
         command_id = self._new_id()
         if not isinstance(command_id, str) or not command_id.strip():
             raise HRSchedulerValidationError("manual command ID is invalid")
+        tracker = getattr(self, "_tracker", None)
+        if tracker is not None:
+            tracker.accepted(command_id, command)
 
         def guarded() -> None:
             try:
+                if tracker is not None:
+                    tracker.running(command_id)
                 callback()
+                if tracker is not None:
+                    tracker.complete(command_id)
             except Exception as exc:
+                code = str(getattr(exc, "code", "hr_manual_command_failed"))
+                if tracker is not None:
+                    try:
+                        tracker.failed(command_id, code)
+                    except Exception:
+                        pass
                 self._on_error(
                     command_id,
-                    str(getattr(exc, "code", "hr_manual_command_failed")),
+                    code,
                 )
 
-        accepted = bool(self._submit(guarded))
+        try:
+            accepted = bool(self._submit(guarded))
+        except Exception:
+            accepted = False
+        if not accepted and tracker is not None:
+            tracker.failed(command_id, "hr_command_not_accepted")
         return HRCommandReceipt(command_id, command, accepted)
 
     def run(self) -> HRCommandReceipt:

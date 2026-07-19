@@ -17,6 +17,7 @@ from services.hr_directory import (
     INELIGIBLE_AVAILABILITY,
 )
 from services.hr_repository import AgentRecord, HRRepository
+from services.hr_command_status import HRCommandStatusTracker
 
 
 INTRODUCTION_REQUEST_MESSAGE = (
@@ -251,12 +252,14 @@ class HRInformationCompletionCommands:
         self,
         service: HRInformationCompletionService,
         *,
+        tracker: HRCommandStatusTracker | None = None,
         submit: Callable[[Callable[[], None]], bool] | None = None,
         new_id: Callable[[], str] = lambda: uuid.uuid4().hex,
     ):
         if not isinstance(service, HRInformationCompletionService):
             raise HRInformationCompletionValidationError("completion service is invalid")
         self._service = service
+        self._tracker = tracker
         self._submit = submit or self._thread_submit
         self._new_id = new_id
         self._lock = threading.Lock()
@@ -277,14 +280,53 @@ class HRInformationCompletionCommands:
             if self._running:
                 return HRInformationCompletionReceipt(command_id, "complete_information", False)
             self._running = True
+        if self._tracker is not None:
+            try:
+                self._tracker.accepted(command_id, "complete_information")
+            except Exception:
+                with self._lock:
+                    self._running = False
+                raise
 
         def run() -> None:
             try:
+                if self._tracker is not None:
+                    self._tracker.running(command_id)
                 result = self._service.complete_missing()
-                self._service.record_activity(command_id, result)
+                if self._tracker is not None:
+                    context = {
+                        "available": result.available,
+                        "missing": result.missing,
+                        "published": result.published,
+                        "noResponse": result.no_response,
+                        "failed": result.failed,
+                    }
+                    if result.failed:
+                        self._tracker.failed(
+                            command_id,
+                            "hr_information_completion_partial_failure",
+                            context=context,
+                        )
+                    else:
+                        self._tracker.complete(
+                            command_id,
+                            message=(
+                                f"available={result.available}, missing={result.missing}, "
+                                f"published={result.published}, no_response={result.no_response}"
+                            ),
+                            context=context,
+                        )
+                else:
+                    self._service.record_activity(command_id, result)
             except Exception as exc:
                 try:
-                    self._service.record_failure(command_id, exc)
+                    if self._tracker is not None:
+                        self._tracker.failed(
+                            command_id,
+                            str(getattr(exc, "code", "hr_information_completion_failed")),
+                        )
+                    else:
+                        self._service.record_failure(command_id, exc)
                 except Exception:
                     pass
             finally:
@@ -296,6 +338,10 @@ class HRInformationCompletionCommands:
         except Exception:
             accepted = False
         if not accepted:
-            with self._lock:
-                self._running = False
+            try:
+                if self._tracker is not None:
+                    self._tracker.failed(command_id, "hr_command_not_accepted")
+            finally:
+                with self._lock:
+                    self._running = False
         return HRInformationCompletionReceipt(command_id, "complete_information", accepted)

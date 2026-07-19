@@ -16,6 +16,7 @@ from services.hr_information_completion import (
     HRInformationCompletionService,
 )
 from services.hr_repository import HRRepository
+from services.hr_command_status import HRCommandStatusTracker
 
 
 def summary(raw, introduction):
@@ -155,6 +156,7 @@ def test_command_is_async_single_flight_and_records_bounded_activity(tmp_path):
     queued = []
     commands = HRInformationCompletionCommands(
         service,
+        tracker=HRCommandStatusTracker(repo),
         submit=lambda callback: queued.append(callback) or True,
         new_id=iter(("command-1", "command-2", "command-3")).__next__,
     )
@@ -164,10 +166,14 @@ def test_command_is_async_single_flight_and_records_bounded_activity(tmp_path):
     assert first.accepted is True
     assert duplicate.accepted is False
     assert len(queued) == 1
+    assert repo.list_active_hr_commands()[0].status == "accepted"
 
     queued.pop()()
+    assert repo.list_active_hr_commands() == ()
     assert commands.complete().accepted is True
-    activity = repo.list_hr_activity().items[0]
+    activity = next(
+        item for item in repo.list_hr_activity().items if item.id == "command-1"
+    )
     assert activity.action == "complete_information"
     assert activity.status == "complete"
     assert activity.context["published"] == 2

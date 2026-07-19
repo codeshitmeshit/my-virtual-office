@@ -125,7 +125,11 @@ def setup(tmp_path):
 
 
 def test_overview_has_lifecycle_counts_cycle_status_and_activity_without_raw_reports(setup):
-    _repository, _reporting, _opened, lifecycle, api = setup
+    repository, _reporting, _opened, lifecycle, api = setup
+    from services.hr_command_status import HRCommandStatusTracker
+    tracker = HRCommandStatusTracker(repository)
+    tracker.accepted("sync-overview", "sync")
+    tracker.running("sync-overview")
     result = api.overview()
     assert result.status == 200
     assert result.payload["hr"]["status"] == "ready"
@@ -142,6 +146,8 @@ def test_overview_has_lifecycle_counts_cycle_status_and_activity_without_raw_rep
         "dailyTime": "18:00",
     }
     assert result.payload["cycle"]["counts"]["submitted"] == 1
+    assert result.payload["activeCommands"][0]["id"] == "sync-overview"
+    assert result.payload["activeCommands"][0]["status"] == "processing"
     assert "private daily report" not in str(result.payload["cycle"])
 
 

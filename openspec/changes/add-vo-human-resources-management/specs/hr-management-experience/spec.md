@@ -62,6 +62,22 @@ The Human Resources module SHALL remain readable when HR, OpenClaw, scheduling, 
 - **WHEN** introduction, report collection, or assessment fails for one Agent
 - **THEN** the module SHALL show that Agent's failed state without presenting other Agents as failed
 
+### Requirement: Observable background command execution
+Every asynchronous Human Resources management command SHALL expose a durable command identity and distinguish accepted, processing, complete, and failed states through the management overview. The UI SHALL continue refreshing while a command is active and SHALL present its current action and state instead of treating queue acceptance as completion.
+
+#### Scenario: Accepted command starts background work
+- **WHEN** the human submits Agent-team synchronization, information completion, manual daily synchronization, or a daily-cycle command
+- **THEN** the command endpoint SHALL return without waiting for provider work and include a stable command ID
+- **AND** the overview SHALL expose that command as accepted or processing until it reaches a terminal state
+
+#### Scenario: Human refreshes while work is running
+- **WHEN** the Human Resources module is reopened or refreshed during an active command
+- **THEN** the UI SHALL recover the active state from the server, show which action is in progress, and continue polling until completion or failure
+
+#### Scenario: Background work terminates
+- **WHEN** an active command completes, partially fails, or fails
+- **THEN** its active marker SHALL be removed and the same durable activity SHALL show the terminal result without leaving a stale processing state
+
 ### Requirement: Disclosure-safe Agent experience
 Agent-facing Human Resources queries SHALL use the governed public and self views rather than rendering the human management surface or relying on client-side hiding of restricted data.
 

@@ -15,7 +15,12 @@ from services.hr_directory import HRDirectoryService
 from services.hr_agent_grants import HRGrantManager
 from services.hr_directory_enablement import HRDirectoryEnablementCoordinator
 from services.hr_repository import HRRepository
-from services.hr_team_sync import HRTeamSyncService, HRTeamSyncValidationError
+from services.hr_command_status import HRCommandStatusTracker
+from services.hr_team_sync import (
+    HRTeamSyncCommands,
+    HRTeamSyncService,
+    HRTeamSyncValidationError,
+)
 
 
 def test_manual_sync_force_refreshes_roster_and_persists_new_agents(tmp_path):
@@ -120,3 +125,34 @@ def test_malformed_nonempty_snapshot_fails_without_inactivating_existing_directo
     with pytest.raises(HRTeamSyncValidationError, match="no valid Agent identity"):
         service.sync()
     assert repository.get_agent("existing").status == "active"
+
+
+def test_team_sync_command_exposes_processing_then_terminal_state(tmp_path):
+    repository = HRRepository(tmp_path / "status")
+    repository.initialize()
+
+    class Coordinator:
+        def reconcile(self, _snapshots, _payloads):
+            from types import SimpleNamespace
+            directory = SimpleNamespace(
+                created=(), updated=(), reactivated=(), inactivated=(),
+                unchanged=(), failures=(),
+            )
+            return SimpleNamespace(directory=directory, enablements=())
+
+    callbacks = []
+    commands = HRTeamSyncCommands(
+        HRTeamSyncService(Coordinator(), lambda _force: []),
+        HRCommandStatusTracker(repository),
+        submit=lambda callback: callbacks.append(callback) or True,
+        new_id=iter(("sync-1", "sync-2")).__next__,
+    )
+
+    assert commands.sync().accepted is True
+    assert commands.sync().accepted is False
+    assert repository.list_active_hr_commands()[0].status == "accepted"
+    callbacks.pop()()
+    assert repository.list_active_hr_commands() == ()
+    activity = repository.list_hr_activity().items[0]
+    assert activity.action == "sync"
+    assert activity.status == "complete"

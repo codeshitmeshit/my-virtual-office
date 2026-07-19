@@ -12,6 +12,13 @@ assert.equal(helpers.statusTone('normalization_failed'), 'danger');
 assert.equal(helpers.statusTone('not_submitted'), 'warning');
 assert.equal(helpers.statusTone('ready'), 'success');
 assert.equal(helpers.statusTone('something-new'), 'neutral');
+assert.deepEqual(
+  helpers.activeCommands({ activeCommands: [
+    { action: 'sync', status: 'processing' },
+    { action: 'run', status: 'complete' },
+  ] }),
+  [{ action: 'sync', status: 'processing' }],
+);
 
 const prioritized = helpers.prioritizeAgents([
   { ai_id: 'ready', status: 'active', availability: 'available', grant_readiness: 'ready' },

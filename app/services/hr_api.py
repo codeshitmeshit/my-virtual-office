@@ -226,6 +226,9 @@ class HRManagementAPI:
                     now=now,
                 ),
                 "cycle": cycle_payload,
+                "activeCommands": _json_safe(
+                    self._repository.list_active_hr_commands(limit=20)
+                ),
                 "recentActivity": _json_safe(activity.items),
             },
         )
@@ -417,8 +420,16 @@ class HRManagementAPI:
         if self._directory_sync is None:
             return HRServiceResult(503, {"ok": False, "code": "hr_directory_sync_unavailable"})
         self._observability.increment("directory.sync_requests_total")
-        result = self._directory_sync.sync()
-        return HRServiceResult(200, {"ok": True, "sync": _json_safe(result)})
+        receipt = self._directory_sync.sync()
+        accepted = bool(getattr(receipt, "accepted", False))
+        return HRServiceResult(
+            202 if accepted else 409,
+            {
+                "ok": accepted,
+                **({} if accepted else {"code": "hr_directory_sync_running"}),
+                "command": _json_safe(receipt),
+            },
+        )
 
     def information_completion_command(
         self,

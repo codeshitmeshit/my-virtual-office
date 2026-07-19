@@ -19,6 +19,7 @@ from services.hr_reporting import (
     daily_report_request_message,
 )
 from services.hr_repository import AgentRecord, HRRepository
+from services.hr_command_status import HRCommandStatusTracker
 
 
 DAILY_REPORT_REQUEST_MESSAGE = (
@@ -284,8 +285,9 @@ class HRManualDailySyncService:
 class HRManualDailySyncCommands:
     """Single-flight asynchronous command boundary for HTTP callers."""
 
-    def __init__(self, service: HRManualDailySyncService, *, submit: Callable[[Callable[[], None]], bool] | None = None, new_id: Callable[[], str] = lambda: uuid.uuid4().hex):
+    def __init__(self, service: HRManualDailySyncService, *, tracker: HRCommandStatusTracker | None = None, submit: Callable[[Callable[[], None]], bool] | None = None, new_id: Callable[[], str] = lambda: uuid.uuid4().hex):
         self._service = service
+        self._tracker = tracker
         self._submit = submit or self._thread_submit
         self._new_id = new_id
         self._lock = threading.Lock()
@@ -303,14 +305,60 @@ class HRManualDailySyncCommands:
             if self._running:
                 return HRManualDailySyncReceipt(command_id, "manual_daily_sync", False)
             self._running = True
+        if self._tracker is not None:
+            try:
+                self._tracker.accepted(
+                    command_id,
+                    "manual_daily_sync",
+                    context={"requested": len(selected)},
+                )
+            except Exception:
+                with self._lock:
+                    self._running = False
+                raise
 
         def execute() -> None:
             try:
+                if self._tracker is not None:
+                    self._tracker.running(
+                        command_id, context={"requested": len(selected)}
+                    )
                 result = self._service.synchronize(selected, command_id=command_id)
-                self._service.record_activity(command_id, result)
+                if self._tracker is not None:
+                    context = {
+                        "localDate": result.local_date,
+                        "requested": result.requested,
+                        "updated": result.updated,
+                        "assessed": result.assessed,
+                        "noResponse": result.no_response,
+                        "failed": result.failed,
+                    }
+                    if result.failed:
+                        self._tracker.failed(
+                            command_id,
+                            "hr_manual_daily_sync_partial_failure",
+                            context=context,
+                        )
+                    else:
+                        self._tracker.complete(
+                            command_id,
+                            message=(
+                                f"requested={result.requested}, updated={result.updated}, "
+                                f"assessed={result.assessed}"
+                            ),
+                            context=context,
+                        )
+                else:
+                    self._service.record_activity(command_id, result)
             except Exception as exc:
                 try:
-                    self._service.record_failure(command_id, exc)
+                    if self._tracker is not None:
+                        self._tracker.failed(
+                            command_id,
+                            str(getattr(exc, "code", "hr_manual_daily_sync_failed")),
+                        )
+                    else:
+                        self._service.record_failure(command_id, exc)
                 except Exception:
                     pass
             finally:
@@ -322,6 +370,10 @@ class HRManualDailySyncCommands:
         except Exception:
             accepted = False
         if not accepted:
-            with self._lock:
-                self._running = False
+            try:
+                if self._tracker is not None:
+                    self._tracker.failed(command_id, "hr_command_not_accepted")
+            finally:
+                with self._lock:
+                    self._running = False
         return HRManualDailySyncReceipt(command_id, "manual_daily_sync", accepted)

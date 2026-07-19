@@ -129,6 +129,7 @@ try {
           if (url.endsWith('/directory/sync') && !fixture.agents.some(agent => agent.ai_id === 'agent-3')) {
             fixture.agents.push({ ai_id: 'agent-3', name: 'New Agent', status: 'active', availability: 'available' });
             fixture.overview.agentTotal = fixture.agents.length;
+            fixture.overview.activeCommands = [{ id: 'sync-browser-1', action: 'sync', status: 'processing' }];
           }
           return new Response(JSON.stringify({ ok: true, command: { accepted: true } }), { status: 202 });
         }
@@ -208,6 +209,11 @@ try {
   await waitFor("document.querySelector('.hr-command-panel')");
   await evaluate("HumanResources.runCommand('sync')");
   await waitFor("document.querySelectorAll('.hr-agent-row').length === 3");
+  await waitFor("document.querySelector('.hr-command-message.running')?.textContent.includes('Sync Agent team')");
+  assert.equal(await evaluate("document.querySelector('[onclick*=\"sync\"]')?.disabled"), true);
+  assert.equal(await evaluate("document.querySelector('.hr-overview-hero .hr-state-chip')?.textContent"), 'Working');
+  await evaluate("window.__hrFixture.data.overview.activeCommands = []; HumanResources.reload()");
+  await waitFor("!document.querySelector('.hr-command-message.running')");
   await evaluate("HumanResources.runCommand('complete_information')");
   await waitFor("HumanResources.state.commandBusy === ''");
   await evaluate("HumanResources.openDailySync(); HumanResources.toggleDailySyncAgent('agent-1', true)");
@@ -261,7 +267,7 @@ try {
     reportPageCalls: window.__hrFixture.requests.filter(item => item.url.includes('reportCursor=')).length,
     accessPageCalls: window.__hrFixture.requests.filter(item => item.url.includes('accessCursor=')).length,
   }))()`);
-  assert.deepEqual(summary, { requests: 26, pauseCalls: 1, resumeCalls: 1, syncCalls: 1, completeInformationCalls: 1, dailySyncCalls: 1, reportPageCalls: 1, accessPageCalls: 2 });
+  assert.deepEqual(summary, { requests: 28, pauseCalls: 1, resumeCalls: 1, syncCalls: 1, completeInformationCalls: 1, dailySyncCalls: 1, reportPageCalls: 1, accessPageCalls: 2 });
   console.log(JSON.stringify({
     ok: true,
     overview,

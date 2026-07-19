@@ -53,6 +53,7 @@ def test_hr_http_and_runtime_modules_do_not_depend_on_legacy_server():
         "services/hr_http.py",
         "services/hr_runtime.py",
         "services/hr_manual_daily_sync.py",
+        "services/hr_command_status.py",
     ):
         source = (APP_DIR / relative).read_text(encoding="utf-8")
         assert "import server" not in source

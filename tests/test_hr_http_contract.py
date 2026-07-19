@@ -247,9 +247,9 @@ def test_management_routes_cover_detail_log_health_export_and_commands(runtime):
     status, payload = call(
         handler("/api/human-resources/directory/sync", {}, management=True), "POST"
     )
-    assert status == 200
-    assert payload["sync"]["discovered"] == 1
-    assert payload["sync"]["created"] == ["agent-3"]
+    assert status == 202
+    assert payload["command"]["command"] == "sync"
+    assert payload["command"]["accepted"] is True
 
     status, payload = call(
         handler(

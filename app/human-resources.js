@@ -17,6 +17,7 @@
         commandBusy: '',
         commandNotice: '',
         commandError: '',
+        commandPollTimer: null,
         dailySyncOpen: false,
         dailySyncSelected: [],
         dailySyncReturnFocus: null,
@@ -24,7 +25,7 @@
     };
 
     const SEMANTIC_STATES = [
-        'active', 'appropriate', 'available', 'awaiting_hr_summary', 'busy',
+        'accepted', 'active', 'appropriate', 'available', 'awaiting_hr_summary', 'busy',
         'clarification_pending', 'complete', 'conflict', 'creating', 'degraded',
         'deleted', 'delivery_unsupported', 'disabled', 'enablement_pending', 'error',
         'failed', 'grant_not_ready', 'high', 'insufficient_information',
@@ -37,7 +38,7 @@
     ];
     const ERROR_CODES = [
         'hr_agent_not_found', 'hr_api_validation_failed', 'hr_audit_unavailable',
-        'hr_directory_sync_unavailable', 'hr_disabled', 'hr_empty_response',
+        'hr_directory_sync_running', 'hr_directory_sync_unavailable', 'hr_disabled', 'hr_empty_response',
         'hr_information_completion_hr_unavailable', 'hr_information_completion_running',
         'hr_information_completion_unavailable', 'hr_internal_error', 'hr_invalid_response',
         'hr_manual_daily_sync_hr_unavailable', 'hr_manual_daily_sync_running',
@@ -327,6 +328,19 @@
             '</li>';
     }
 
+    function activeCommands(overview) {
+        return array(object(overview).activeCommands).filter(function (item) {
+            const status = String(object(item).status || '').toLowerCase();
+            return status === 'accepted' || status === 'processing';
+        });
+    }
+
+    function activeCommandFor(action) {
+        return activeCommands(state.overview).find(function (item) {
+            return String(object(item).action || '') === action;
+        }) || null;
+    }
+
     function renderOverviewPanel() {
         const overview = object(state.overview);
         if (!state.overview && !state.loading) {
@@ -342,14 +356,21 @@
         const availability = availabilityCounts(overview);
         const cycles = cycleCounts(overview);
         const activities = array(overview.recentActivity);
+        const runningCommands = activeCommands(overview);
+        const visibleHrStatus = runningCommands.length ? 'working' : hrStatus;
         const degraded = state.errors.length > 0;
         const cycle = object(overview.cycle);
         const lifecycleAction = hrStatus === 'paused' ? 'resume' : 'pause';
         const commandButton = function (action, label, danger) {
-            const busy = Boolean(state.commandBusy);
+            const active = activeCommandFor(action);
+            const busy = Boolean(state.commandBusy) || runningCommands.length > 0;
             return '<button type="button" class="hr-command-button' + (danger ? ' danger' : '') +
                 '" onclick="HumanResources.runCommand(\'' + escHtml(action) + '\')"' +
-                (busy ? ' disabled' : '') + '>' + escHtml(state.commandBusy === action ? tr('hr_command_working', 'Working...') : label) + '</button>';
+                (busy ? ' disabled' : '') + '>' + escHtml(
+                    state.commandBusy === action || active
+                        ? tr('hr_command_working', 'Working...')
+                        : label
+                ) + '</button>';
         };
         const availableAgents = orderedAvailableAgents();
         const dailySyncDialog = state.dailySyncOpen ? renderDailySyncDialog(availableAgents) : '';
@@ -357,12 +378,12 @@
             (degraded ? '<div class="hr-degraded-banner" role="status"><strong>' +
                 escHtml(tr('hr_partial_data', 'Some Human Resources data could not be refreshed.')) +
                 '</strong><span>' + escHtml(state.errors.map(errorLabel).join(', ')) + '</span></div>' : '') +
-            '<section class="hr-overview-hero hr-tone-' + escHtml(statusTone(hrStatus)) + '">' +
+            '<section class="hr-overview-hero hr-tone-' + escHtml(statusTone(visibleHrStatus)) + '">' +
                 '<div><span class="hr-eyebrow">' + escHtml(tr('hr_global_agent', 'Global HR Agent')) + '</span>' +
                 '<h3>' + escHtml(String(hr.name || 'HR')) + '</h3>' +
                 '<p>' + escHtml(tr('hr_overview_date', 'Local reporting date: {{date}}', { date: overview.localDate || '—' })) + '</p>' +
                 '<p class="hr-next-report-time">' + escHtml(reportScheduleLabel(reportSchedule)) + '</p></div>' +
-                '<span class="hr-state-chip hr-tone-' + escHtml(statusTone(hrStatus)) + '">' + escHtml(semanticLabel(hrStatus)) + '</span>' +
+                '<span class="hr-state-chip hr-tone-' + escHtml(statusTone(visibleHrStatus)) + '">' + escHtml(semanticLabel(visibleHrStatus)) + '</span>' +
             '</section>' +
             '<section class="hr-command-panel"><div><h3>' + escHtml(tr('hr_controls', 'HR controls')) + '</h3>' +
                 '<p>' + escHtml(tr('hr_controls_hint', 'Commands run asynchronously; active sync discovers Agents, while complete information asks available Agents for missing introductions.')) + '</p></div>' +
@@ -370,12 +391,23 @@
                     commandButton('sync', tr('hr_sync_team', 'Sync Agent team'), false) +
                     commandButton('complete_information', tr('hr_complete_information', 'Complete information'), false) +
                     '<button type="button" class="hr-command-button" onclick="HumanResources.openDailySync()"' +
-                    (state.commandBusy ? ' disabled' : '') + '>' + escHtml(tr('hr_daily_sync', 'Daily report')) + '</button>' +
+                    (state.commandBusy || runningCommands.length ? ' disabled' : '') + '>' + escHtml(
+                        activeCommandFor('manual_daily_sync')
+                            ? tr('hr_command_working', 'Working...')
+                            : tr('hr_daily_sync', 'Daily report')
+                    ) + '</button>' +
                     commandButton(lifecycleAction, lifecycleAction === 'pause' ? tr('hr_pause', 'Pause HR') : tr('hr_resume', 'Resume HR'), lifecycleAction === 'pause') +
                     commandButton('run', tr('hr_run_cycle', 'Run cycle'), false) +
                     (cycle.cycleId && cycle.status === 'open' ? commandButton('close', tr('hr_close_cycle', 'Close cycle'), true) : '') +
                     (cycle.cycleId ? commandButton('retry', tr('hr_retry_cycle', 'Retry failed work'), false) : '') +
                 '</div></section>' +
+            (runningCommands.length ? '<div class="hr-command-message running" role="status" aria-live="polite">' +
+                '<strong>' + escHtml(tr('hr_command_running_title', 'Task in progress')) + '</strong><span>' +
+                escHtml(runningCommands.map(function (item) {
+                    const command = object(item);
+                    return actionLabel(String(command.action || 'activity')) + ' · ' +
+                        semanticLabel(String(command.status || 'processing'));
+                }).join(', ')) + '</span></div>' : '') +
             (state.commandNotice ? '<div class="hr-command-message success" role="status">' + escHtml(state.commandNotice) + '</div>' : '') +
             (state.commandError ? '<div class="hr-command-message error" role="alert">' + escHtml(errorLabel(state.commandError)) + '</div>' : '') +
             '<section><h3>' + escHtml(tr('hr_availability', 'Agent availability')) + '</h3><div class="hr-metric-grid">' +
@@ -451,7 +483,7 @@
     }
 
     async function submitDailySync() {
-        if (!state.dailySyncSelected.length || state.commandBusy) return false;
+        if (!state.dailySyncSelected.length || state.commandBusy || activeCommands(state.overview).length) return false;
         const selected = state.dailySyncSelected.slice();
         state.dailySyncOpen = false;
         state.commandBusy = 'manual_daily_sync';
@@ -614,10 +646,26 @@
         '</div>';
         element.setAttribute(
             'aria-busy',
-            state.loading || state.detailLoading || Boolean(state.commandBusy) ? 'true' : 'false'
+            state.loading || state.detailLoading || Boolean(state.commandBusy) || activeCommands(state.overview).length ? 'true' : 'false'
         );
         const closeButton = root.document.getElementById('human-resources-close');
         if (closeButton) closeButton.setAttribute('aria-label', tr('hr_close', 'Close Human Resources'));
+    }
+
+    function clearCommandPoll() {
+        if (state.commandPollTimer !== null && typeof root.clearTimeout === 'function') {
+            root.clearTimeout(state.commandPollTimer);
+        }
+        state.commandPollTimer = null;
+    }
+
+    function scheduleCommandPoll() {
+        clearCommandPoll();
+        if (!state.open || !activeCommands(state.overview).length || typeof root.setTimeout !== 'function') return;
+        state.commandPollTimer = root.setTimeout(function () {
+            state.commandPollTimer = null;
+            loadOverview(captureScroll());
+        }, 1500);
     }
 
     async function loadOverview(scrollSnapshot) {
@@ -641,6 +689,7 @@
         state.loading = false;
         render();
         restoreScroll(scrollSnapshot);
+        scheduleCommandPoll();
         return state.errors.length === 0;
     }
 
@@ -681,7 +730,7 @@
     }
 
     async function runCommand(action) {
-        if (state.commandBusy) return false;
+        if (state.commandBusy || activeCommands(state.overview).length) return false;
         const spec = commandSpec(action);
         if (!spec) return false;
         const confirmation = tr('hr_confirm_command', 'Confirm Human Resources action: {{action}}?', { action: actionLabel(action) });
@@ -729,6 +778,7 @@
         state.open = false;
         state.requestSequence += 1;
         state.detailSequence += 1;
+        clearCommandPoll();
         element.classList.add('hidden');
         const target = state.returnFocus;
         state.returnFocus = null;
@@ -843,6 +893,7 @@
             mergeByKey,
             prettyJson,
             reportScheduleLabel,
+            activeCommands,
             commandSpec,
             semanticLabel,
             semanticStates: SEMANTIC_STATES.slice(),

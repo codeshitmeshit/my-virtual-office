@@ -3027,6 +3027,61 @@ class HRRepository:
             ).fetchone()
             return _activity_from_row(row)
 
+    def transition_hr_command_activity(
+        self,
+        activity_id: str,
+        *,
+        status: str,
+        message: str = "",
+        error: str = "",
+        context: object | None = None,
+        expected_statuses: Sequence[str] | None = None,
+    ) -> HRActivityRecord:
+        """Atomically transition one mutable command activity record."""
+        activity_id = _opaque_id(activity_id, "activity_id")
+        status = _required_text(status, "status", maximum=32)
+        message = _optional_text(message, "message", maximum=2_000)
+        error = _optional_text(error, "error", maximum=2_000)
+        context_json = _json_value(context or {}, "context", dict, maximum=8_000)
+        expected = tuple(
+            _required_text(value, "expected_status", maximum=32)
+            for value in (expected_statuses or ())
+        )
+        with self._write_transaction() as connection:
+            row = connection.execute(
+                "SELECT * FROM hr_activity WHERE id = ?", (activity_id,)
+            ).fetchone()
+            if row is None:
+                raise HRRepositoryNotFoundError("HR activity does not exist")
+            current = _activity_from_row(row)
+            if not str(current.occurrence_key or "").startswith("hr-command:"):
+                raise HRRepositoryConflictError("HR activity is not a command")
+            if expected and current.status not in expected:
+                raise HRRepositoryConflictError("HR activity status changed")
+            connection.execute(
+                """UPDATE hr_activity
+                   SET status = ?, message = ?, error = ?, context_json = ?
+                   WHERE id = ?""",
+                (status, message, error, context_json, activity_id),
+            )
+            updated = connection.execute(
+                "SELECT * FROM hr_activity WHERE id = ?", (activity_id,)
+            ).fetchone()
+            return _activity_from_row(updated)
+
+    def list_active_hr_commands(self, *, limit: int = 20) -> tuple[HRActivityRecord, ...]:
+        """Return accepted/running management commands independently of activity pagination."""
+        limit = _page_limit(limit)
+        with self._connection(readonly=True) as connection:
+            rows = connection.execute(
+                """SELECT * FROM hr_activity
+                   WHERE status IN ('accepted', 'processing')
+                     AND occurrence_key LIKE 'hr-command:%'
+                   ORDER BY created_at DESC, id ASC LIMIT ?""",
+                (limit,),
+            ).fetchall()
+        return tuple(_activity_from_row(row) for row in rows)
+
     def list_hr_activity(
         self,
         *,

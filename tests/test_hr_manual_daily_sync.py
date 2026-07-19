@@ -22,6 +22,7 @@ from services.hr_manual_daily_sync import (
 )
 from services.hr_reporting import HRDailyReportNormalizer, HRReportingService
 from services.hr_repository import HRRepository
+from services.hr_command_status import HRCommandStatusTracker
 
 
 NOW = datetime(2026, 7, 20, 10, tzinfo=timezone.utc)
@@ -151,13 +152,16 @@ def test_agent_discovered_after_cycle_open_gets_manual_report_placeholder(tmp_pa
 
 
 def test_command_is_single_flight_and_releases_after_background_run(tmp_path):
-    _repository, _fake, service = build(tmp_path)
+    repository, _fake, service = build(tmp_path)
     callbacks = []
     commands = HRManualDailySyncCommands(
-        service, submit=lambda callback: callbacks.append(callback) or True,
+        service, tracker=HRCommandStatusTracker(repository),
+        submit=lambda callback: callbacks.append(callback) or True,
         new_id=iter(("command-1", "command-2", "command-3")).__next__,
     )
     assert commands.run(("agent-1",)).accepted is True
     assert commands.run(("agent-1",)).accepted is False
+    assert repository.list_active_hr_commands()[0].status == "accepted"
     callbacks.pop()()
+    assert repository.list_active_hr_commands() == ()
     assert commands.run(("agent-1",)).accepted is True

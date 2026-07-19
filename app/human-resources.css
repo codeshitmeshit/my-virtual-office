@@ -316,6 +316,35 @@
     color: #7cdda7;
 }
 
+.hr-command-message.running {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: #2f2a18;
+    color: #f2ca6b;
+}
+
+.hr-command-message.running::before {
+    content: "";
+    width: 8px;
+    height: 8px;
+    flex: 0 0 auto;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    animation: hr-command-spin 0.8s linear infinite;
+}
+
+@keyframes hr-command-spin {
+    to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .hr-command-message.running::before {
+        animation: none;
+    }
+}
+
 .hr-command-message.error {
     background: #352126;
     color: #ffa0a8;
