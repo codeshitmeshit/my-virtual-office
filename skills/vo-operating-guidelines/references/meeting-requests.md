@@ -43,7 +43,22 @@ curl -sS "$VO_BASE_URL/agents-list"
 
 将 `key` 用作 `suggestedParticipants`。不要猜测或补全不存在的参会者 ID。
 
-## 2. 提交会议申请
+## 2. 自动批准风险检查
+
+提交会议申请前，必须检查目标项目的会议自动批准策略。若当前服务端可能将 meeting request 自动 confirm 或 auto-run，则必须先告知用户，并等待用户确认是否仍要提交。
+
+AI 不得在用户未确认的情况下触发可能自动开始的会议。如果不确定服务端是否会自动批准，则不要提交会议申请，只输出拟申请内容和风险说明。
+
+建议先读取目标项目和已有会议请求：
+
+```bash
+curl -sS "$VO_BASE_URL/api/projects/PROJECT_ID"
+curl -sS "$VO_BASE_URL/api/projects/PROJECT_ID/tasks/TASK_ID/meeting-requests"
+```
+
+如果项目或任务配置中存在自动批准、自动运行、会议阻塞自动恢复、或类似策略字段，先向用户展示会议草案、触发原因、参会者、预期产出、可能自动开始的风险，再等待明确确认。
+
+## 3. 提交会议申请
 
 Phase 4 当前只支持项目任务来源的 AI 会议申请：
 
@@ -88,7 +103,7 @@ curl -sS -X POST "$VO_BASE_URL/api/projects/PROJECT_ID/tasks/TASK_ID/meeting-req
 
 申请成功后停止等待用户处理，不要假设会议已经开始。
 
-## 3. 查询会议申请
+## 4. 查询会议申请
 
 查询全部申请：
 
@@ -108,7 +123,7 @@ curl -sS "$VO_BASE_URL/api/meetings/requests?status=pending"
 curl -sS "$VO_BASE_URL/api/projects/PROJECT_ID/tasks/TASK_ID/meeting-requests"
 ```
 
-## 4. 用户控制面
+## 5. 用户控制面
 
 AI 只能申请和查询会议请求，不要自行调用确认或拒绝接口。
 
@@ -138,13 +153,14 @@ POST /api/meetings/requests/{requestId}/reject
 
 拒绝原因会写回来源任务评论，AI 后续可以在任务上下文里看到。不要绕过用户决定继续推进会议。
 
-## 5. 质量检查
+## 6. 质量检查
 
 提交或查询会议前确认：
 
 - 已确认当前可访问 Virtual Office。
 - 当前场景确实需要正式 AI 会议，而不是普通 agent 沟通。
 - 项目任务来源已确认，且有有效 `projectId` 和 `taskId`。
+- 已检查目标项目会议自动批准风险；不确定是否自动批准时，已先输出拟申请内容和风险说明并等待用户确认。
 - `suggestedParticipants` 优先来自 `/agents-list` 的 `key`。
 - 申请包含 `goal`、`expectedOutcome`、`reason` 和 `idempotencyKey`。
 - 没有自行 confirm/reject 会议，也没有替用户选择最终会议上下文。

@@ -97,6 +97,21 @@ echo $VO_GATEWAY_HTTP
 
 确定需要申请或查询 AI 会议时，停止在本文件展开细节，读取 [references/meeting-requests.md](references/meeting-requests.md)。AI 只能申请和查询会议请求；不要自行调用确认或拒绝接口，不要替用户选择最终会议上下文。
 
+## 用户确认优先级
+
+普通单轮 agent 通信可以直接执行；但只要操作会改变 VO 项目结构、任务状态、会议状态或自动化策略，默认必须先让用户确认草案。
+
+以下 VO 写操作必须先输出草案并等待用户明确确认：
+
+- 创建、修改或删除项目。
+- 创建、修改或删除模板。
+- 批量创建任务，或创建任务链路 / 工作流 / 可复用流程。
+- 提交可能影响项目状态的会议申请。
+- 启动 Project Execution、workflow 或 meeting run。
+- 设置自动批准、自动执行、定时任务、长期项目或可复用项目策略。
+
+确认草案应说明目标对象、将要修改的结构/状态、涉及的 Agent 分工、是否会启动执行或会议、是否涉及自动化策略，以及不会修改的内容。只有用户明确说“确认/同意/按这个创建/按这个修改/可以启动”等等价语义后，才可调用对应写接口。
+
 ## 降级规则
 
 - VO 不可用：说明当前未检测到 Virtual Office，停止 VO 专属动作，并询问是否改用普通协作方式。
@@ -112,6 +127,7 @@ echo $VO_GATEWAY_HTTP
 - 已通过 HTTP 探测确认当前可访问 VO，或已明确降级。
 - 已完整读取当前实例的 `/skills/index.md`。
 - 已根据任务意图路由到正确 VO skill，没有用本 skill 替代专用通信、浏览器、项目、workspace 或会议执行规则。
+- 会改变 VO 项目结构、任务状态、会议状态或自动化策略的写操作，已先展示草案并获得明确用户确认。
 - 普通通信已先识别目标 `providerKind`，并统一使用 本地 `/skills/vo-agent-communication/SKILL.md`。
 - 普通协作已优先考虑专用通信 skill，会议只用于正式多方决策、独立评审或需要用户确认上下文的场景。
 - 明确的项目创作/受控维护与项目执行/review/验收已分别路由到 本地 `/skills/vo-project-authoring/SKILL.md` 和 本地 `/skills/vo-project-workflow/SKILL.md`。

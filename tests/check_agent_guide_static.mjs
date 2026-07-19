@@ -9,6 +9,7 @@ const en = JSON.parse(fs.readFileSync('app/locales/en.json', 'utf8'));
 const catalog = fs.readFileSync('skills/catalog.md', 'utf8');
 const operatingGuidelines = fs.readFileSync('skills/vo-operating-guidelines/SKILL.md', 'utf8');
 const projectWorkflow = fs.readFileSync('skills/vo-project-workflow/SKILL.md', 'utf8');
+const meetingRequestsReference = fs.readFileSync('skills/vo-operating-guidelines/references/meeting-requests.md', 'utf8');
 
 const expectedSkills = [
   'vo-operating-guidelines',
@@ -54,7 +55,6 @@ for (const skill of expectedSkills) {
   const skillBody = fs.readFileSync(`skills/${skill}/SKILL.md`, 'utf8');
   assert.ok(!skillBody.includes('/home/wo/code/my-virtual-office'), `${skill} should not hardcode a non-current VO project path`);
 }
-const meetingRequestsReference = fs.readFileSync('skills/vo-operating-guidelines/references/meeting-requests.md', 'utf8');
 assert.ok(!meetingRequestsReference.includes('/home/wo/code/my-virtual-office'), 'meeting request reference should not hardcode a non-current VO project path');
 
 assert.ok(!js.includes('/Users/'), 'Agent Guide should not hardcode local absolute paths');
@@ -124,5 +124,15 @@ assert.ok(projectWorkflow.includes('/api/agent/projects/PROJECT_ID/project-execu
 assert.ok(projectWorkflow.includes('/api/agent/projects/PROJECT_ID/tasks/TASK_ID/project-execution/start'), 'agent task execution should use the agent task start endpoint');
 assert.ok(projectWorkflow.includes('X-VO-Agent-Action: project-execution'), 'agent execution examples should include the required action header');
 assert.ok(projectWorkflow.includes('不索取、读取、缓存或传递 `X-VO-Management-Token`'), 'project workflow skill should not ask agents for management tokens');
+assert.ok(operatingGuidelines.includes('## 用户确认优先级'), 'main VO entry should define confirmation priority for risky writes');
+assert.ok(operatingGuidelines.includes('会改变 VO 项目结构、任务状态、会议状态或自动化策略'), 'main VO entry should require confirmation for state-changing operations');
+assert.ok(operatingGuidelines.includes('提交可能影响项目状态的会议申请'), 'main VO entry should gate stateful meeting requests');
+assert.ok(operatingGuidelines.includes('设置自动批准、自动执行、定时任务、长期项目或可复用项目策略'), 'main VO entry should gate automation policy changes');
+assert.ok(projectWorkflow.includes('## 创建项目确认门禁'), 'project workflow should include project creation confirmation gate');
+assert.ok(projectWorkflow.includes('确认草案至少包含：项目名称、目标、任务列表、每个任务的 assignee/executor/reviewer、会议触发点、是否创建模板、是否立即启动执行'), 'project workflow should define required draft fields');
+assert.ok(projectWorkflow.includes('不把“规划/拆分/设计项目链路”的讨论当作创建授权'), 'project workflow should not treat planning language as creation authorization');
+assert.ok(meetingRequestsReference.includes('## 2. 自动批准风险检查'), 'meeting request reference should include auto-approval risk gate');
+assert.ok(meetingRequestsReference.includes('AI 不得在用户未确认的情况下触发可能自动开始的会议'), 'meeting request reference should block unconfirmed auto-start meetings');
+assert.ok(meetingRequestsReference.includes('如果不确定服务端是否会自动批准，则不要提交会议申请'), 'meeting request reference should stop when auto-approval behavior is uncertain');
 
 console.log('agent guide static checks passed');

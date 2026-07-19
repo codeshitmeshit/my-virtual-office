@@ -29,6 +29,20 @@ Agent 自己启动 Project Execution 时优先使用 `/api/agent/projects/.../pr
 
 `/api/projects/...` 下的 project mutation POST/PUT/DELETE 属于用户/管理控制面，通常需要 VO management token 或 UI 代发；Agent 不要索取 token，也不要在没有可信管理面授权时直接调用这些管理面写接口。
 
+## 创建项目确认门禁
+
+当用户要求创建项目、模板、任务链路、工作流或可复用流程时，如果包含以下任一情况，必须先输出草案并等待用户明确确认，不得直接创建：
+
+- 涉及多个 Agent 分工或跨 Agent 协作。
+- 涉及 AI 会议、review、验收、返工、自动推进等流程门禁。
+- 涉及可复用模板、长期项目、定时项目或项目执行策略。
+- 任务数量超过 3 个，或需要为任务指定 executor/reviewer。
+- 用户表达的是“我们可以拆分/形成链路/设计流程/起一个项目”这类规划语气。
+
+确认草案至少包含：项目名称、目标、任务列表、每个任务的 assignee/executor/reviewer、会议触发点、是否创建模板、是否立即启动执行。只有用户明确说“确认创建/可以创建/按这个建”等等价语义后，才能调用项目写接口。
+
+如果意图是新建或维护项目结构，优先切换到 本地 `/skills/vo-project-authoring/SKILL.md` 的确认流程；本节是防止 workflow 场景误把规划语气当作执行授权的兜底门禁。
+
 ## 工作流
 
 ### 1. 读取项目和任务
@@ -138,6 +152,7 @@ inline read 当前只适合 Markdown/text artifact，路径必须位于项目 wo
 ## 安全规则
 
 - 不删除、归档、重排项目数据，除非用户明确要求。
+- 不把“规划/拆分/设计项目链路”的讨论当作创建授权；命中创建项目确认门禁时必须先给草案并等待确认。
 - 不绕过 dirty workspace、skip reviewer、user acceptance、active task 门禁。
 - Agent 启动执行使用 `/api/agent/projects/.../project-execution/start`；用户/管理控制面动作才使用 `/api/projects/...` 写接口。
 - 不索取、读取、缓存或传递 `X-VO-Management-Token`。
