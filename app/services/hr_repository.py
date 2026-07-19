@@ -6,6 +6,7 @@ import base64
 import binascii
 import json
 import os
+import re
 import sqlite3
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
@@ -25,6 +26,7 @@ AGENT_STATUSES = frozenset({"active", "offline", "disabled", "deleted", "unreach
 INTRODUCTION_STATES = frozenset(
     {"introduction_pending", "published", "clarification_pending", "failed"}
 )
+SHA256_HEX_PATTERN = re.compile(r"[0-9a-f]{64}\Z")
 
 
 class HRRepositoryError(RuntimeError):
@@ -234,6 +236,58 @@ class AssessmentPage:
     next_cursor: str | None
 
 
+@dataclass(frozen=True, slots=True)
+class AccessGrantRecord:
+    ai_id: str
+    key_id: str
+    secret_digest: str
+    status: str
+    issued_at: str
+    rotated_at: str | None
+    revoked_at: str | None
+    revocation_reason: str
+    updated_at: str
+
+
+@dataclass(frozen=True, slots=True)
+class AccessLogRecord:
+    id: str
+    viewer_ai_id: str
+    viewer_name: str
+    target_ai_id: str
+    target_name: str
+    viewed_at: str
+    scope: str
+    request_source: str
+    result: str
+    occurrence_key: str
+
+
+@dataclass(frozen=True, slots=True)
+class HRActivityRecord:
+    id: str
+    ai_id: str | None
+    action: str
+    status: str
+    message: str
+    error: str
+    context: dict[str, Any]
+    occurrence_key: str | None
+    created_at: str
+
+
+@dataclass(frozen=True, slots=True)
+class AccessLogPage:
+    items: tuple[AccessLogRecord, ...]
+    next_cursor: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class HRActivityPage:
+    items: tuple[HRActivityRecord, ...]
+    next_cursor: str | None
+
+
 _SCHEMA_V1 = (
     """CREATE TABLE metadata (
         key TEXT PRIMARY KEY,
@@ -381,7 +435,9 @@ _SCHEMA_V1 = (
     """CREATE TABLE access_log (
         id TEXT PRIMARY KEY CHECK(length(trim(id)) > 0),
         viewer_ai_id TEXT NOT NULL REFERENCES agents(ai_id) ON UPDATE CASCADE ON DELETE RESTRICT,
+        viewer_name TEXT NOT NULL,
         target_ai_id TEXT NOT NULL REFERENCES agents(ai_id) ON UPDATE CASCADE ON DELETE RESTRICT,
+        target_name TEXT NOT NULL,
         viewed_at TEXT NOT NULL,
         scope TEXT NOT NULL,
         request_source TEXT NOT NULL,
@@ -577,6 +633,20 @@ def _assessment_from_row(
         values[field] = tuple(json.loads(values.pop(f"{field}_json")))
     values["evidence"] = tuple(evidence)
     return AssessmentRecord(**values)
+
+
+def _grant_from_row(row: sqlite3.Row) -> AccessGrantRecord:
+    return AccessGrantRecord(**dict(row))
+
+
+def _access_log_from_row(row: sqlite3.Row) -> AccessLogRecord:
+    return AccessLogRecord(**dict(row))
+
+
+def _activity_from_row(row: sqlite3.Row) -> HRActivityRecord:
+    values = dict(row)
+    values["context"] = json.loads(values.pop("context_json"))
+    return HRActivityRecord(**values)
 
 
 class HRRepository:
@@ -1780,3 +1850,334 @@ class HRRepository:
             else None
         )
         return AssessmentPage(items, next_cursor)
+
+    def rotate_access_grant(
+        self,
+        *,
+        ai_id: str,
+        key_id: str,
+        secret_digest: str,
+        issued_at: str,
+        expected_key_id: str | None = None,
+    ) -> AccessGrantRecord:
+        """Insert or rotate a grant using a SHA-256 hex digest; raw grants are never accepted."""
+        ai_id = _stable_ai_id(ai_id)
+        key_id = _opaque_id(key_id, "key_id")
+        if not isinstance(secret_digest, str) or SHA256_HEX_PATTERN.fullmatch(secret_digest) is None:
+            raise HRRepositoryValidationError("secret_digest must be a lowercase SHA-256 hex digest")
+        issued_at = _timestamp_text(issued_at, "issued_at")
+        if expected_key_id is not None:
+            expected_key_id = _opaque_id(expected_key_id, "expected_key_id")
+        with self._write_transaction() as connection:
+            row = connection.execute(
+                "SELECT * FROM access_grants WHERE ai_id = ?", (ai_id,)
+            ).fetchone()
+            current = _grant_from_row(row) if row is not None else None
+            if current is None:
+                if expected_key_id is not None:
+                    raise HRRepositoryConflictError("access grant does not exist")
+                try:
+                    connection.execute(
+                        """INSERT INTO access_grants(
+                               ai_id, key_id, secret_digest, status, issued_at, updated_at
+                           ) VALUES (?, ?, ?, 'active', ?, ?)""",
+                        (ai_id, key_id, secret_digest, issued_at, issued_at),
+                    )
+                except sqlite3.IntegrityError as exc:
+                    raise HRRepositoryConflictError("access grant identity is invalid") from exc
+            else:
+                if expected_key_id is not None and current.key_id != expected_key_id:
+                    raise HRRepositoryConflictError("access grant key changed concurrently")
+                if (
+                    current.key_id == key_id
+                    and current.secret_digest == secret_digest
+                    and current.status == "active"
+                ):
+                    return current
+                try:
+                    connection.execute(
+                        """UPDATE access_grants SET
+                               key_id = ?, secret_digest = ?, status = 'active',
+                               issued_at = ?, rotated_at = ?, revoked_at = NULL,
+                               revocation_reason = '', updated_at = ?
+                           WHERE ai_id = ?""",
+                        (key_id, secret_digest, issued_at, issued_at, issued_at, ai_id),
+                    )
+                except sqlite3.IntegrityError as exc:
+                    raise HRRepositoryConflictError("access grant key is already in use") from exc
+            row = connection.execute(
+                "SELECT * FROM access_grants WHERE ai_id = ?", (ai_id,)
+            ).fetchone()
+            return _grant_from_row(row)
+
+    def revoke_access_grant(
+        self,
+        *,
+        ai_id: str,
+        key_id: str,
+        revoked_at: str,
+        reason: str,
+    ) -> AccessGrantRecord:
+        ai_id = _stable_ai_id(ai_id)
+        key_id = _opaque_id(key_id, "key_id")
+        revoked_at = _timestamp_text(revoked_at, "revoked_at")
+        reason = _required_text(reason, "reason", maximum=1_000)
+        with self._write_transaction() as connection:
+            row = connection.execute(
+                "SELECT * FROM access_grants WHERE ai_id = ?", (ai_id,)
+            ).fetchone()
+            if row is None:
+                raise HRRepositoryNotFoundError("access grant does not exist")
+            current = _grant_from_row(row)
+            if current.key_id != key_id:
+                raise HRRepositoryConflictError("access grant key changed concurrently")
+            if current.status == "revoked":
+                if current.revocation_reason == reason:
+                    return current
+                raise HRRepositoryConflictError("access grant is already revoked")
+            connection.execute(
+                """UPDATE access_grants SET
+                       status = 'revoked', revoked_at = ?, revocation_reason = ?, updated_at = ?
+                   WHERE ai_id = ?""",
+                (revoked_at, reason, revoked_at, ai_id),
+            )
+            row = connection.execute(
+                "SELECT * FROM access_grants WHERE ai_id = ?", (ai_id,)
+            ).fetchone()
+            return _grant_from_row(row)
+
+    def get_access_grant(self, ai_id: str) -> AccessGrantRecord | None:
+        ai_id = _stable_ai_id(ai_id)
+        with self._connection(readonly=True) as connection:
+            row = connection.execute(
+                "SELECT * FROM access_grants WHERE ai_id = ?", (ai_id,)
+            ).fetchone()
+            return _grant_from_row(row) if row is not None else None
+
+    def record_successful_access(
+        self,
+        *,
+        access_id: str,
+        viewer_ai_id: str,
+        target_ai_id: str,
+        viewed_at: str,
+        scope: str,
+        request_source: str,
+        occurrence_key: str,
+    ) -> AccessLogRecord:
+        access_id = _opaque_id(access_id, "access_id")
+        viewer_ai_id = _stable_ai_id(viewer_ai_id, "viewer_ai_id")
+        target_ai_id = _stable_ai_id(target_ai_id, "target_ai_id")
+        if viewer_ai_id == target_ai_id:
+            raise HRRepositoryValidationError("cross-Agent access requires different Agents")
+        viewed_at = _timestamp_text(viewed_at, "viewed_at")
+        scope = _required_text(scope, "scope", maximum=256)
+        request_source = _required_text(request_source, "request_source", maximum=256)
+        occurrence_key = _opaque_id(occurrence_key, "occurrence_key")
+        with self._write_transaction() as connection:
+            row = connection.execute(
+                "SELECT * FROM access_log WHERE occurrence_key = ?", (occurrence_key,)
+            ).fetchone()
+            if row is not None:
+                existing = _access_log_from_row(row)
+                if (
+                    existing.id,
+                    existing.viewer_ai_id,
+                    existing.target_ai_id,
+                    existing.viewed_at,
+                    existing.scope,
+                    existing.request_source,
+                ) != (
+                    access_id,
+                    viewer_ai_id,
+                    target_ai_id,
+                    viewed_at,
+                    scope,
+                    request_source,
+                ):
+                    raise HRRepositoryConflictError("access occurrence already records another view")
+                return existing
+            names = connection.execute(
+                "SELECT ai_id, name FROM agents WHERE ai_id IN (?, ?)",
+                (viewer_ai_id, target_ai_id),
+            ).fetchall()
+            name_by_id = {str(item["ai_id"]): str(item["name"]) for item in names}
+            if set(name_by_id) != {viewer_ai_id, target_ai_id}:
+                raise HRRepositoryNotFoundError("access viewer or target Agent does not exist")
+            try:
+                connection.execute(
+                    """INSERT INTO access_log(
+                           id, viewer_ai_id, viewer_name, target_ai_id, target_name,
+                           viewed_at, scope, request_source, result, occurrence_key
+                       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'success', ?)""",
+                    (
+                        access_id,
+                        viewer_ai_id,
+                        name_by_id[viewer_ai_id],
+                        target_ai_id,
+                        name_by_id[target_ai_id],
+                        viewed_at,
+                        scope,
+                        request_source,
+                        occurrence_key,
+                    ),
+                )
+            except sqlite3.IntegrityError as exc:
+                raise HRRepositoryConflictError("access identity already exists") from exc
+            row = connection.execute(
+                "SELECT * FROM access_log WHERE id = ?", (access_id,)
+            ).fetchone()
+            return _access_log_from_row(row)
+
+    def list_access_log(
+        self,
+        *,
+        target_ai_id: str | None = None,
+        viewer_ai_id: str | None = None,
+        limit: int = 50,
+        cursor: str | None = None,
+    ) -> AccessLogPage:
+        target_ai_id = (
+            _stable_ai_id(target_ai_id, "target_ai_id") if target_ai_id is not None else None
+        )
+        viewer_ai_id = (
+            _stable_ai_id(viewer_ai_id, "viewer_ai_id") if viewer_ai_id is not None else None
+        )
+        limit = _page_limit(limit)
+        after = _decode_cursor(cursor, fields=2)
+        clauses = []
+        parameters: list[object] = []
+        if target_ai_id is not None:
+            clauses.append("target_ai_id = ?")
+            parameters.append(target_ai_id)
+        if viewer_ai_id is not None:
+            clauses.append("viewer_ai_id = ?")
+            parameters.append(viewer_ai_id)
+        if after is not None:
+            viewed_at, access_id = after
+            if not isinstance(viewed_at, str) or not isinstance(access_id, str):
+                raise HRRepositoryValidationError("cursor is invalid")
+            clauses.append("(viewed_at < ? OR (viewed_at = ? AND id > ?))")
+            parameters.extend((viewed_at, viewed_at, access_id))
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        parameters.append(limit + 1)
+        with self._connection(readonly=True) as connection:
+            rows = connection.execute(
+                f"SELECT * FROM access_log{where} ORDER BY viewed_at DESC, id ASC LIMIT ?",
+                parameters,
+            ).fetchall()
+        items = tuple(_access_log_from_row(row) for row in rows[:limit])
+        next_cursor = (
+            _encode_cursor((items[-1].viewed_at, items[-1].id)) if len(rows) > limit else None
+        )
+        return AccessLogPage(items, next_cursor)
+
+    def append_hr_activity(
+        self,
+        *,
+        activity_id: str,
+        ai_id: str | None,
+        action: str,
+        status: str,
+        message: str = "",
+        error: str = "",
+        context: object | None = None,
+        occurrence_key: str | None = None,
+    ) -> HRActivityRecord:
+        activity_id = _opaque_id(activity_id, "activity_id")
+        ai_id = _stable_ai_id(ai_id) if ai_id is not None else None
+        action = _required_text(action, "action", maximum=128)
+        status = _required_text(status, "status", maximum=32)
+        message = _optional_text(message, "message", maximum=2_000)
+        error = _optional_text(error, "error", maximum=2_000)
+        context_json = _json_value(context or {}, "context", dict, maximum=8_000)
+        occurrence_key = (
+            _opaque_id(occurrence_key, "occurrence_key") if occurrence_key is not None else None
+        )
+        timestamp = self._timestamp()
+        with self._write_transaction() as connection:
+            if occurrence_key is not None:
+                row = connection.execute(
+                    "SELECT * FROM hr_activity WHERE occurrence_key = ?", (occurrence_key,)
+                ).fetchone()
+                if row is not None:
+                    existing = _activity_from_row(row)
+                    expected = (
+                        activity_id,
+                        ai_id,
+                        action,
+                        status,
+                        message,
+                        error,
+                        json.loads(context_json),
+                    )
+                    actual = (
+                        existing.id,
+                        existing.ai_id,
+                        existing.action,
+                        existing.status,
+                        existing.message,
+                        existing.error,
+                        existing.context,
+                    )
+                    if actual != expected:
+                        raise HRRepositoryConflictError("activity occurrence already exists")
+                    return existing
+            try:
+                connection.execute(
+                    """INSERT INTO hr_activity(
+                           id, ai_id, action, status, message, error, context_json,
+                           occurrence_key, created_at
+                       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        activity_id,
+                        ai_id,
+                        action,
+                        status,
+                        message,
+                        error,
+                        context_json,
+                        occurrence_key,
+                        timestamp,
+                    ),
+                )
+            except sqlite3.IntegrityError as exc:
+                raise HRRepositoryConflictError("activity identity or Agent is invalid") from exc
+            row = connection.execute(
+                "SELECT * FROM hr_activity WHERE id = ?", (activity_id,)
+            ).fetchone()
+            return _activity_from_row(row)
+
+    def list_hr_activity(
+        self,
+        *,
+        ai_id: str | None = None,
+        limit: int = 50,
+        cursor: str | None = None,
+    ) -> HRActivityPage:
+        ai_id = _stable_ai_id(ai_id) if ai_id is not None else None
+        limit = _page_limit(limit)
+        after = _decode_cursor(cursor, fields=2)
+        clauses = []
+        parameters: list[object] = []
+        if ai_id is not None:
+            clauses.append("ai_id = ?")
+            parameters.append(ai_id)
+        if after is not None:
+            created_at, activity_id = after
+            if not isinstance(created_at, str) or not isinstance(activity_id, str):
+                raise HRRepositoryValidationError("cursor is invalid")
+            clauses.append("(created_at < ? OR (created_at = ? AND id > ?))")
+            parameters.extend((created_at, created_at, activity_id))
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        parameters.append(limit + 1)
+        with self._connection(readonly=True) as connection:
+            rows = connection.execute(
+                f"SELECT * FROM hr_activity{where} ORDER BY created_at DESC, id ASC LIMIT ?",
+                parameters,
+            ).fetchall()
+        items = tuple(_activity_from_row(row) for row in rows[:limit])
+        next_cursor = (
+            _encode_cursor((items[-1].created_at, items[-1].id)) if len(rows) > limit else None
+        )
+        return HRActivityPage(items, next_cursor)
