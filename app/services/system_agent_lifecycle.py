@@ -359,6 +359,14 @@ class SystemAgentPorts:
     new_id: Callable[[], str]
 
 
+@dataclass(frozen=True, slots=True)
+class AutomaticWorkDecision:
+    allowed: bool
+    code: str
+    reason: str
+    category: str
+
+
 class SystemAgentLifecycleService:
     """Idempotent provider reconciliation shared by all VO system-Agent roles."""
 
@@ -390,7 +398,7 @@ class SystemAgentLifecycleService:
         if isinstance(loaded, SystemAgentLifecycleState):
             if loaded.role_key != role.role_key:
                 raise ValueError("state repository returned a different system-Agent role")
-            return loaded
+            loaded = loaded.to_mapping()
         if loaded is not None and not isinstance(loaded, Mapping):
             raise ValueError("state repository returned an unsupported lifecycle value")
         return SystemAgentLifecycleState.from_mapping(
@@ -629,3 +637,190 @@ class SystemAgentLifecycleService:
                 context={"profileVersion": profile.version, "profileUpdated": profile.updated},
             )
             return self._ports.state.save(role, state)
+
+    def pause(self, role: SystemAgentRole) -> SystemAgentLifecycleState:
+        with self._lock_for(role.role_key):
+            state = self.reconcile(role)
+            prior_error = state.last_error
+            state = replace(state, paused=True, status=LifecycleStatus.PAUSED)
+            state = self._record(
+                state,
+                action="pause",
+                status=ActivityStatus.OK,
+                message="System Agent automatic work is paused",
+            )
+            if prior_error:
+                state = replace(state, last_error=prior_error)
+            try:
+                self._ports.presence.set_presence(
+                    state.agent_id,
+                    "break",
+                    "System Agent paused by human control",
+                )
+            except Exception as exc:
+                return self._save_error(
+                    role,
+                    state,
+                    action="presence",
+                    error=exc,
+                )
+            return self._ports.state.save(role, state)
+
+    def resume(self, role: SystemAgentRole) -> SystemAgentLifecycleState:
+        with self._lock_for(role.role_key):
+            state = self._load_state(role)
+            state = replace(
+                state,
+                paused=False,
+                status=LifecycleStatus.MISSING,
+                last_error="",
+            )
+            state = self._record(
+                state,
+                action="resume",
+                status=ActivityStatus.RUNNING,
+                message="System Agent resume reconciliation started",
+            )
+            self._ports.state.save(role, state)
+            state = self.reconcile(role)
+            if state.status is not LifecycleStatus.IDLE:
+                return state
+            try:
+                self._ports.presence.set_presence(state.agent_id, "idle", "")
+            except Exception as exc:
+                return self._save_error(
+                    role,
+                    state,
+                    action="presence",
+                    error=exc,
+                )
+            state = self._record(
+                state,
+                action="resume",
+                status=ActivityStatus.OK,
+                message="System Agent resumed",
+            )
+            return self._ports.state.save(role, state)
+
+    @staticmethod
+    def automatic_work_decision(
+        role: SystemAgentRole,
+        state: SystemAgentLifecycleState,
+        category: str,
+    ) -> AutomaticWorkDecision:
+        normalized = str(category or "").strip()
+        if normalized not in role.automatic_work_categories:
+            return AutomaticWorkDecision(
+                False,
+                "unsupported_work_category",
+                "The work category is not owned by this system-Agent role",
+                normalized,
+            )
+        if state.paused or state.status is LifecycleStatus.PAUSED:
+            return AutomaticWorkDecision(
+                False,
+                "system_agent_paused",
+                "The system Agent is paused by human control",
+                normalized,
+            )
+        if state.status is not LifecycleStatus.IDLE:
+            return AutomaticWorkDecision(
+                False,
+                "system_agent_unavailable",
+                f"The system Agent lifecycle is {state.status.value}",
+                normalized,
+            )
+        return AutomaticWorkDecision(True, "allowed", "Automatic work is allowed", normalized)
+
+    def check_automatic_work(
+        self,
+        role: SystemAgentRole,
+        category: str,
+        *,
+        record_skip: bool = True,
+    ) -> AutomaticWorkDecision:
+        with self._lock_for(role.role_key):
+            state = self._load_state(role)
+            decision = self.automatic_work_decision(role, state, category)
+            if decision.allowed or not record_skip:
+                return decision
+            prior_error = state.last_error
+            state = self._record(
+                state,
+                action="automatic_work_skipped",
+                status=ActivityStatus.SKIPPED,
+                message=decision.reason,
+                context={"category": decision.category, "code": decision.code},
+            )
+            if prior_error:
+                state = replace(state, last_error=prior_error)
+            self._ports.state.save(role, state)
+            return decision
+
+    @staticmethod
+    def _candidate_identities(candidate: Any) -> tuple[str, ...]:
+        if isinstance(candidate, Mapping):
+            return tuple(
+                value
+                for key in ("id", "agentId", "agent_id", "statusKey", "name")
+                if (value := str(candidate.get(key) or "").strip())
+            )
+        value = str(candidate or "").strip()
+        return (value,) if value else ()
+
+    def metadata(self, role: SystemAgentRole, candidate: Any) -> dict[str, Any]:
+        state = self._load_state(role)
+        explicit_role = ""
+        if isinstance(candidate, Mapping):
+            explicit_role = str(
+                candidate.get("systemRole") or candidate.get("system_role") or ""
+            ).strip()
+        identities = self._candidate_identities(candidate)
+        if explicit_role != role.role_key and not any(
+            role.matches_identity(value, state.agent_id, state.name)
+            for value in identities
+        ):
+            return {}
+        return {
+            "systemRole": role.role_key,
+            "systemAgent": True,
+            "assignable": role.assignable,
+            "deletable": role.deletable,
+            "meetingEligible": role.meeting_eligible,
+            "lifecycleStatus": state.status.value,
+            "paused": state.paused,
+        }
+
+    @staticmethod
+    def _public_projection(
+        role: SystemAgentRole,
+        state: SystemAgentLifecycleState,
+    ) -> dict[str, Any]:
+        return {
+            "role": role.role_key,
+            "agentId": state.agent_id,
+            "name": state.name,
+            "emoji": state.emoji,
+            "providerKind": state.provider_kind,
+            "status": state.status.value,
+            "paused": state.paused,
+            "autoCreated": state.auto_created,
+            "createdAt": state.created_at or None,
+            "updatedAt": state.updated_at or None,
+            "reconciledAt": state.reconciled_at or None,
+            "profileVersion": state.profile_version,
+            "profileUpdatedAt": state.profile_updated_at or None,
+            "communicationSkill": _thaw(state.communication_skill),
+            "lastAction": state.last_action,
+            "lastError": state.last_error,
+            "recentActivity": [item.to_mapping() for item in state.recent_activity],
+        }
+
+    def public_state(
+        self,
+        role: SystemAgentRole,
+        *,
+        ensure: bool = False,
+    ) -> dict[str, Any]:
+        state = self.reconcile(role) if ensure else self._load_state(role)
+        return self._public_projection(role, state)
