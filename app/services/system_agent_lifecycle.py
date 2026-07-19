@@ -24,6 +24,7 @@ class LifecycleStatus(str, Enum):
     CREATING = "creating"
     CONFIGURING = "configuring"
     IDLE = "idle"
+    WORKING = "working"
     PAUSED = "paused"
     ERROR = "error"
 

@@ -128,7 +128,7 @@ def test_repository_bounds_activity_and_writes_atomically(tmp_path):
     state = repo.load()
     ids = SequenceIdProvider("activity")
     clock = FakeClock(datetime(2026, 7, 19, 10, tzinfo=timezone.utc))
-    for index in range(20):
+    for index in range(ARCHIVE_MANAGER_ACTIVITY_LIMIT + 8):
         state, _item = record_lifecycle_activity(
             state,
             action="test",
@@ -141,8 +141,35 @@ def test_repository_bounds_activity_and_writes_atomically(tmp_path):
     repo.save(ARCHIVE_MANAGER_ROLE, state)
     payload = json.loads(repo.path.read_text(encoding="utf-8"))
     assert len(payload["recentActivity"]) == ARCHIVE_MANAGER_ACTIVITY_LIMIT
-    assert payload["recentActivity"][-1]["index"] == 19
+    assert payload["recentActivity"][-1]["index"] == ARCHIVE_MANAGER_ACTIVITY_LIMIT + 7
+    adapter = ArchiveManagerLifecycleAdapter(StubLifecycle(repo.load()), repo)
+    assert len(adapter.public_state(ensure=False)["recentActivity"]) == 12
     assert not list(repo.archive_room_dir.glob(".manager.*.tmp"))
+
+
+def test_legacy_domain_state_preserves_working_label_and_activity_shape(tmp_path):
+    repo = repository(tmp_path)
+    saved = repo.save_legacy({
+        "status": "working",
+        "label": "检查中",
+        "lastAction": "audit_archive_count",
+        "recentActivity": [{
+            "id": "audit-1",
+            "action": "audit_archive_count",
+            "status": "running",
+            "projectId": "project-1",
+            "at": "now",
+        }],
+    })
+    assert saved["status"] == "working"
+    assert saved["label"] == "检查中"
+    assert repo.load().status is LifecycleStatus.WORKING
+
+    adapter = ArchiveManagerLifecycleAdapter(StubLifecycle(repo.load()), repo)
+    public = adapter.public_state(ensure=False)
+    assert public["status"] == "working"
+    assert public["label"] == "检查中"
+    assert public["recentActivity"][0]["projectId"] == "project-1"
 
 
 def test_repository_recovers_from_invalid_json_and_rejects_symlink_target(tmp_path):

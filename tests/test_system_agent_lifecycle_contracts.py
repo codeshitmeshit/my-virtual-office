@@ -29,6 +29,7 @@ from services.system_agent_roles import HR_ROLE
 
 def test_status_normalization_is_closed_and_pause_wins():
     assert normalize_lifecycle_status("ready") is LifecycleStatus.IDLE
+    assert normalize_lifecycle_status("working") is LifecycleStatus.WORKING
     assert normalize_lifecycle_status("degraded") is LifecycleStatus.ERROR
     assert normalize_lifecycle_status("unknown-provider-state") is LifecycleStatus.MISSING
     assert normalize_lifecycle_status("error", paused=True) is LifecycleStatus.PAUSED

@@ -36,6 +36,7 @@ import sqlite3
 import subprocess
 import time
 import difflib
+from pathlib import Path
 from collections import OrderedDict, deque
 from dataclasses import dataclass
 import feishu_chat_channel
@@ -63,6 +64,7 @@ from services import meeting_notifications as meeting_notifications_service
 from services import meeting_callbacks as meeting_callbacks_service
 from services import archive_manager_lifecycle as archive_manager_lifecycle_service
 from services import system_agent_lifecycle as system_agent_lifecycle_service
+from services import system_agent_profiles as system_agent_profiles_service
 from services import system_agent_roles as system_agent_roles_service
 from services.provider_events import ProviderEventJournal, canonical_event_name, sanitize_payload
 from services.provider_approvals import ProviderApprovalService, TrustedApprovalContext
@@ -20991,12 +20993,10 @@ def _handle_project_artifact_delete(project_id, query_string=""):
 
 ARCHIVE_ROOM_DIR = os.path.join(STATUS_DIR, "archive-room")
 ARCHIVE_ROOM_PROJECTS_DIR = os.path.join(ARCHIVE_ROOM_DIR, "projects")
-ARCHIVE_MANAGER_FILE = os.path.join(ARCHIVE_ROOM_DIR, "manager.json")
 ARCHIVE_MANAGER_AGENT_ID = "archive-manager"
 ARCHIVE_MANAGER_NAME = "档案管理员"
 ARCHIVE_MANAGER_EMOJI = "🗄️"
 ARCHIVE_MANAGER_PROFILE_TEMPLATE = os.path.join(os.path.dirname(__file__), "archive-manager-profile.md")
-ARCHIVE_MANAGER_PROFILE_VERSION_RE = re.compile(r"archive-manager-profile-version:\s*([^\s>]+)", re.IGNORECASE)
 ARCHIVE_CONFIRMED = "confirmed_fact"
 ARCHIVE_INFERENCE = "ai_inference"
 ARCHIVE_PENDING = "pending_confirmation_suggestion"
@@ -21038,60 +21038,21 @@ ARCHIVE_SCHEDULE_MODES = {
 ARCHIVE_DEFAULT_SCHEDULE_MODE = ARCHIVE_SCHEDULE_DAILY
 
 
-def _archive_manager_file():
-    return os.path.join(ARCHIVE_ROOM_DIR, "manager.json")
-
-
-def _archive_manager_default_state():
-    now = _proj_now()
-    return {
-        "agentId": ARCHIVE_MANAGER_AGENT_ID,
-        "name": ARCHIVE_MANAGER_NAME,
-        "emoji": ARCHIVE_MANAGER_EMOJI,
-        "providerKind": "openclaw",
-        "status": "missing",
-        "label": "未接入",
-        "phase": "phase-4",
-        "paused": False,
-        "autoCreated": False,
-        "createdAt": None,
-        "updatedAt": now,
-        "lastAction": "",
-        "lastError": "",
-        "recentActivity": [],
-    }
+def _archive_manager_state_repository():
+    return archive_manager_lifecycle_service.ArchiveManagerStateRepository(
+        STATUS_DIR,
+        clock=lambda: datetime.now(timezone.utc),
+    )
 
 
 def _archive_manager_load_state():
-    try:
-        with open(_archive_manager_file(), "r", encoding="utf-8") as f:
-            data = json.load(f)
-        if not isinstance(data, dict):
-            data = {}
-    except (FileNotFoundError, json.JSONDecodeError, OSError):
-        data = {}
-    state = _archive_manager_default_state()
-    state.update({k: v for k, v in data.items() if k in state or k in {"workspace", "profileFiles", "profileVersion", "profileUpdatedAt"}})
-    if not isinstance(state.get("recentActivity"), list):
-        state["recentActivity"] = []
-    return state
+    return _archive_manager_state_repository().load_legacy()
 
 
 def _archive_manager_save_state(state):
-    os.makedirs(ARCHIVE_ROOM_DIR, exist_ok=True)
-    payload = dict(state or {})
-    payload["recentActivity"] = (payload.get("recentActivity") or [])[-ARCHIVE_MANAGER_ACTIVITY_LIMIT:]
-    payload["updatedAt"] = payload.get("updatedAt") or _proj_now()
-    tmp = _archive_manager_file() + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, indent=2)
-        f.write("\n")
-    os.replace(tmp, _archive_manager_file())
-    try:
-        os.chmod(_archive_manager_file(), 0o666)
-    except OSError:
-        pass
-    return payload
+    return _archive_manager_state_repository().save_legacy(
+        state if isinstance(state, dict) else {},
+    )
 
 
 def _archive_manager_append_activity(state, action, status="ok", message="", project_id=None, error=""):
@@ -21519,62 +21480,24 @@ def _archive_add_pending_confirmation(record, event_key, title, text, source, re
 
 
 def _archive_manager_profile_files():
-    try:
-        with open(ARCHIVE_MANAGER_PROFILE_TEMPLATE, "r", encoding="utf-8") as f:
-            template = f.read()
-    except OSError as exc:
-        raise RuntimeError(f"Archive manager profile template cannot be read: {exc}") from exc
-
-    version = _archive_manager_profile_template_version(template)
-    files = {}
-    current_name = None
-    current_lines = []
-    marker_re = re.compile(r"^--- file:\s*([A-Za-z0-9_.-]+)\s*---\s*$")
-    for line in template.splitlines():
-        marker = marker_re.match(line)
-        if marker:
-            if current_name:
-                files[current_name] = "\n".join(current_lines).strip() + "\n"
-            current_name = marker.group(1)
-            current_lines = []
-            continue
-        if current_name:
-            current_lines.append(line)
-    if current_name:
-        files[current_name] = "\n".join(current_lines).strip() + "\n"
-
-    replacements = {
-        "{{ARCHIVE_MANAGER_NAME}}": ARCHIVE_MANAGER_NAME,
-        "{{ARCHIVE_MANAGER_EMOJI}}": ARCHIVE_MANAGER_EMOJI,
-        "{{ARCHIVE_MANAGER_AGENT_ID}}": ARCHIVE_MANAGER_AGENT_ID,
-        "{{ARCHIVE_MANAGER_PROFILE_VERSION}}": version,
-    }
-    rendered = {}
-    for filename, content in files.items():
-        for token, value in replacements.items():
-            content = content.replace(token, value)
-        rendered[filename] = content
-
-    required = {"IDENTITY.md", "SOUL.md", "AGENTS.md", "agent.md", "MEMORY.md", "HEARTBEAT.md"}
-    missing = sorted(required - set(rendered))
-    if missing:
-        raise RuntimeError(f"Archive manager profile template missing files: {', '.join(missing)}")
-    return rendered
+    return dict(_archive_manager_profile_port().render().files)
 
 
 def _archive_manager_profile_template_version(template=None):
-    if template is None:
-        try:
-            with open(ARCHIVE_MANAGER_PROFILE_TEMPLATE, "r", encoding="utf-8") as f:
-                template = f.read(4096)
-        except OSError as exc:
-            raise RuntimeError(f"Archive manager profile template cannot be read: {exc}") from exc
-    for line in str(template or "").splitlines()[:20]:
-        if line.lower().startswith("archive-manager-profile-version:"):
-            version = line.split(":", 1)[1].strip()
-            if version:
-                return version
-    raise RuntimeError("Archive manager profile template missing Archive-Manager-Profile-Version header")
+    if template is not None:
+        return system_agent_profiles_service.extract_template_version(
+            str(template),
+            system_agent_roles_service.ARCHIVE_MANAGER_ROLE.version_marker,
+        )
+    return _archive_manager_profile_port().render().version
+
+
+def _archive_manager_profile_port(compatibility_sync=None):
+    return archive_manager_lifecycle_service.ArchiveManagerProfilePort(
+        ARCHIVE_MANAGER_PROFILE_TEMPLATE,
+        WORKSPACE_BASE,
+        compatibility_sync=compatibility_sync,
+    )
 
 
 def _archive_manager_roster_agent():
@@ -21588,121 +21511,23 @@ def _archive_manager_roster_agent():
 
 
 def _archive_manager_workspace(agent_id):
-    safe_id = _sanitize_agent_id(agent_id or ARCHIVE_MANAGER_AGENT_ID)
     roster_agent = _archive_manager_roster_agent()
     workspace = ""
     if roster_agent and str(roster_agent.get("id") or "") == (agent_id or ARCHIVE_MANAGER_AGENT_ID):
         workspace = str(roster_agent.get("workspace") or "")
-    if not workspace:
-        workspace = os.path.join(WORKSPACE_BASE, f"workspace-{safe_id}")
-    base = os.path.realpath(WORKSPACE_BASE)
-    real_workspace = os.path.realpath(workspace)
-    if not (real_workspace == base or real_workspace.startswith(base + os.sep)):
-        raise ValueError("Archive manager workspace is outside OpenClaw home")
-    return real_workspace
-
-
-def _archive_manager_write_direct_profile_file(agent_id, filename, content):
-    workspace = _archive_manager_workspace(agent_id)
-    os.makedirs(workspace, exist_ok=True)
-    path = os.path.realpath(os.path.join(workspace, filename))
-    if not path.startswith(workspace + os.sep):
-        raise ValueError("Archive manager profile path is outside workspace")
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        f.write(content)
-        if content and not content.endswith("\n"):
-            f.write("\n")
-    os.replace(tmp, path)
-    try:
-        os.chmod(path, 0o666)
-    except OSError:
-        pass
-    return workspace
-
-
-def _archive_manager_read_profile_file_version(workspace, filename):
-    path = os.path.realpath(os.path.join(workspace, filename))
-    real_workspace = os.path.realpath(workspace)
-    if not path.startswith(real_workspace + os.sep):
-        return ""
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            head = f.read(512)
-    except OSError:
-        return ""
-    match = ARCHIVE_MANAGER_PROFILE_VERSION_RE.search(head)
-    return match.group(1).strip() if match else ""
-
-
-def _archive_manager_profile_needs_update(agent_id, profile_files, target_version):
-    try:
-        workspace = _archive_manager_workspace(agent_id)
-    except Exception:
-        return True
-    for filename in profile_files:
-        if _archive_manager_read_profile_file_version(workspace, filename) != target_version:
-            return True
-    return False
-
-
-def _archive_manager_write_profile_files(agent_id):
-    try:
-        profile_files = _archive_manager_profile_files()
-        target_version = _archive_manager_profile_template_version()
-    except Exception as exc:
-        return {"ok": False, "error": str(exc)}
-    if not _archive_manager_profile_needs_update(agent_id, profile_files, target_version):
-        try:
-            workspace = _archive_manager_workspace(agent_id)
-        except Exception:
-            workspace = ""
-        return {"ok": True, "profileFiles": list(profile_files.keys()), "workspace": workspace, "profileVersion": target_version, "updated": False}
-    written = []
-    workspace = ""
-    for filename, content in profile_files.items():
-        try:
-            workspace = _archive_manager_write_direct_profile_file(agent_id, filename, content)
-            written.append(filename)
-        except Exception as exc:
-            return {"ok": False, "error": f"failed to write {filename}: {exc}"}
-    return {"ok": True, "profileFiles": written, "workspace": workspace, "profileVersion": target_version, "updated": True}
-
-
-_archive_manager_write_profile_files_legacy = _archive_manager_write_profile_files
+    configured = Path(workspace).resolve(strict=False) if workspace else None
+    return str(_archive_manager_profile_port().workspace_for(
+        agent_id or ARCHIVE_MANAGER_AGENT_ID,
+        configured,
+    ))
 
 
 def _archive_manager_write_profile_files(agent_id):
     """Compatibility delegate to the shared safe Profile synchronizer."""
-    try:
-        profile_port = archive_manager_lifecycle_service.ArchiveManagerProfilePort(
-            ARCHIVE_MANAGER_PROFILE_TEMPLATE,
-            WORKSPACE_BASE,
-        )
-        workspace = profile_port.workspace_for(
-            agent_id or ARCHIVE_MANAGER_AGENT_ID,
-            _archive_manager_workspace(agent_id),
-        )
-        agent = system_agent_lifecycle_service.ProviderAgent(
-            id=agent_id or ARCHIVE_MANAGER_AGENT_ID,
-            name=ARCHIVE_MANAGER_NAME,
-            provider_kind="openclaw",
-            workspace=str(workspace),
-        )
-        result = profile_port.synchronize(
-            archive_manager_lifecycle_service.ARCHIVE_MANAGER_ROLE,
-            agent,
-            workspace,
-        )
-        return {
-            "ok": True,
-            "profileFiles": list(archive_manager_lifecycle_service.ARCHIVE_MANAGER_ROLE.required_files),
-            "workspace": result.workspace,
-            "profileVersion": result.version,
-            "updated": result.updated,
-        }
-    except Exception as exc:
-        return {"ok": False, "error": str(exc)}
+    return _archive_manager_profile_port().synchronize_legacy(
+        agent_id or ARCHIVE_MANAGER_AGENT_ID,
+        _archive_manager_workspace(agent_id),
+    )
 
 
 def _archive_manager_shared_list_agents(force_refresh=False):
@@ -21722,15 +21547,10 @@ def _archive_manager_shared_list_agents(force_refresh=False):
 
 
 def _archive_manager_shared_adapter():
-    profile_port = archive_manager_lifecycle_service.ArchiveManagerProfilePort(
-        ARCHIVE_MANAGER_PROFILE_TEMPLATE,
-        WORKSPACE_BASE,
+    profile_port = _archive_manager_profile_port(
         compatibility_sync=lambda agent_id: _archive_manager_write_profile_files(agent_id),
     )
-    repository = archive_manager_lifecycle_service.ArchiveManagerStateRepository(
-        STATUS_DIR,
-        clock=lambda: datetime.now(timezone.utc),
-    )
+    repository = _archive_manager_state_repository()
     provider = archive_manager_lifecycle_service.ArchiveManagerProviderPort(
         list_agents=_archive_manager_shared_list_agents,
         create_agent=lambda params, timeout: _gateway_rpc_call(
@@ -21753,129 +21573,16 @@ def _archive_manager_shared_adapter():
         clock=lambda: datetime.now(timezone.utc),
         new_id=_proj_uuid,
     )
-    lifecycle = system_agent_lifecycle_service.SystemAgentLifecycleService(ports)
+    lifecycle = system_agent_lifecycle_service.SystemAgentLifecycleService(
+        ports,
+        activity_limit=ARCHIVE_MANAGER_ACTIVITY_LIMIT,
+    )
     return archive_manager_lifecycle_service.ArchiveManagerLifecycleAdapter(
         lifecycle,
         repository,
     )
 
 
-def _archive_manager_create_if_missing():
-    state = _archive_manager_load_state()
-    existing = _archive_manager_roster_agent()
-    if existing:
-        profile_result = _archive_manager_write_profile_files(existing.get("id") or ARCHIVE_MANAGER_AGENT_ID)
-        if not profile_result.get("ok"):
-            state["agentId"] = existing.get("id") or ARCHIVE_MANAGER_AGENT_ID
-            state["name"] = ARCHIVE_MANAGER_NAME
-            state["providerKind"] = existing.get("providerKind", "openclaw")
-            state["workspace"] = existing.get("workspace", "")
-            state["status"] = "error"
-            state["label"] = "档案管理员配置失败"
-            state["lastError"] = profile_result.get("error", "")
-            _archive_manager_append_activity(state, "profile_repair", "error", "档案管理员 profile 写入失败", error=state["lastError"])
-            return _archive_manager_save_state(state)
-        state["agentId"] = existing.get("id") or ARCHIVE_MANAGER_AGENT_ID
-        state["name"] = ARCHIVE_MANAGER_NAME
-        state["providerKind"] = existing.get("providerKind", "openclaw")
-        state["workspace"] = profile_result.get("workspace") or existing.get("workspace", "")
-        communication_skill = _sync_openclaw_communication_skill({
-            **existing,
-            "providerKind": "openclaw",
-            "workspace": state["workspace"],
-        })
-        state["communicationSkill"] = communication_skill
-        if not communication_skill.get("ready"):
-            state["status"] = "error"
-            state["label"] = "档案管理员通信技能未就绪"
-            state["lastError"] = communication_skill.get("status", "communication skill sync failed")
-            _archive_manager_append_activity(state, "skill_sync", "error", "档案管理员通信技能同步失败", error=state["lastError"])
-            return _archive_manager_save_state(state)
-        state["profileFiles"] = profile_result.get("profileFiles", [])
-        state["profileVersion"] = profile_result.get("profileVersion", "")
-        if profile_result.get("updated"):
-            state["profileUpdatedAt"] = _proj_now()
-            _archive_manager_append_activity(state, "profile_update", "ok", f"档案管理员 profile 已更新到版本 {state.get('profileVersion', '')}")
-        state["status"] = "paused" if state.get("paused") else "idle"
-        state["label"] = "已暂停" if state.get("paused") else ("已自动创建" if state.get("autoCreated") else "已接入")
-        state["lastError"] = ""
-        _archive_manager_save_state(state)
-        return state
-
-    now = _proj_now()
-    workspace_dir = os.path.join(WORKSPACE_BASE, f"workspace-{ARCHIVE_MANAGER_AGENT_ID}")
-    try:
-        create_params = {
-            "name": ARCHIVE_MANAGER_AGENT_ID,
-            "workspace": workspace_dir,
-            "emoji": ARCHIVE_MANAGER_EMOJI,
-        }
-        selected_model = _default_openclaw_agent_model()
-        if selected_model:
-            create_params["model"] = selected_model
-        result = _gateway_rpc_call("agents.create", create_params, timeout=30)
-        if not result.get("ok"):
-            state["status"] = "error"
-            state["label"] = "档案管理员创建失败"
-            state["lastError"] = result.get("error", "OpenClaw agent creation failed")
-            _archive_manager_append_activity(state, "auto_create", "error", "自动创建档案管理员失败", error=state["lastError"])
-            return _archive_manager_save_state(state)
-
-        agent_id = result.get("agentId") or ARCHIVE_MANAGER_AGENT_ID
-        profile_result = _archive_manager_write_profile_files(agent_id)
-        if not profile_result.get("ok"):
-            state["status"] = "error"
-            state["label"] = "档案管理员创建失败"
-            state["agentId"] = agent_id
-            state["lastError"] = profile_result.get("error", "")
-            _archive_manager_append_activity(state, "auto_create", "error", "档案管理员已创建但 profile 写入失败", error=state["lastError"])
-            return _archive_manager_save_state(state)
-
-        communication_skill = _sync_openclaw_communication_skill({
-            "id": agent_id,
-            "statusKey": agent_id,
-            "providerKind": "openclaw",
-            "workspace": profile_result.get("workspace") or workspace_dir,
-        })
-        if not communication_skill.get("ready"):
-            state["status"] = "error"
-            state["label"] = "档案管理员创建后通信技能未就绪"
-            state["agentId"] = agent_id
-            state["communicationSkill"] = communication_skill
-            state["lastError"] = communication_skill.get("status", "communication skill sync failed")
-            _archive_manager_append_activity(state, "auto_create", "error", "档案管理员已创建但通信技能未就绪", error=state["lastError"])
-            return _archive_manager_save_state(state)
-
-        global _discovered_at
-        _discovered_at = 0
-        refresh_agent_maps()
-        state.update({
-            "agentId": agent_id,
-            "name": ARCHIVE_MANAGER_NAME,
-            "providerKind": "openclaw",
-            "status": "idle",
-            "label": "已自动创建",
-            "paused": False,
-            "autoCreated": True,
-            "createdAt": now,
-            "workspace": profile_result.get("workspace") or workspace_dir,
-            "profileFiles": profile_result.get("profileFiles", []),
-            "profileVersion": profile_result.get("profileVersion", ""),
-            "profileUpdatedAt": now if profile_result.get("updated") else None,
-            "communicationSkill": communication_skill,
-            "lastError": "",
-        })
-        _archive_manager_append_activity(state, "auto_create", "ok", "已自动创建档案管理员")
-        return _archive_manager_save_state(state)
-    except Exception as exc:
-        state["status"] = "error"
-        state["label"] = "档案管理员创建失败"
-        state["lastError"] = str(exc)
-        _archive_manager_append_activity(state, "auto_create", "error", "自动创建档案管理员失败", error=str(exc))
-        return _archive_manager_save_state(state)
-
-
-_archive_manager_create_if_missing_legacy = _archive_manager_create_if_missing
 
 
 def _archive_manager_create_if_missing():

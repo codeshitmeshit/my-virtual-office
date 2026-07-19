@@ -27,7 +27,8 @@ from .system_agent_roles import ARCHIVE_MANAGER_ROLE, SystemAgentRole
 
 
 ARCHIVE_MANAGER_PHASE = "phase-4"
-ARCHIVE_MANAGER_ACTIVITY_LIMIT = 12
+ARCHIVE_MANAGER_ACTIVITY_LIMIT = 60
+ARCHIVE_MANAGER_PUBLIC_ACTIVITY_LIMIT = 12
 
 
 def archive_manager_label(state: SystemAgentLifecycleState) -> str:
@@ -83,9 +84,27 @@ class ArchiveManagerStateRepository:
         self.path = self.archive_room_dir / "manager.json"
         self._clock = clock
 
-    def load(self, role: SystemAgentRole = ARCHIVE_MANAGER_ROLE) -> SystemAgentLifecycleState:
-        if role.role_key != ARCHIVE_MANAGER_ROLE.role_key:
-            raise ValueError("ArchiveManagerStateRepository only accepts archive_manager")
+    def _default_legacy(self) -> dict[str, Any]:
+        now = self._clock()
+        updated_at = now.isoformat() if hasattr(now, "isoformat") else str(now or "")
+        return {
+            "agentId": ARCHIVE_MANAGER_ROLE.stable_id,
+            "name": ARCHIVE_MANAGER_ROLE.display_name,
+            "emoji": ARCHIVE_MANAGER_ROLE.emoji,
+            "providerKind": ARCHIVE_MANAGER_ROLE.provider_kind,
+            "status": "missing",
+            "label": "未接入",
+            "phase": ARCHIVE_MANAGER_PHASE,
+            "paused": False,
+            "autoCreated": False,
+            "createdAt": None,
+            "updatedAt": updated_at,
+            "lastAction": "",
+            "lastError": "",
+            "recentActivity": [],
+        }
+
+    def load_legacy(self) -> dict[str, Any]:
         data: Mapping[str, Any] = {}
         try:
             if self.path.is_symlink():
@@ -97,9 +116,23 @@ class ArchiveManagerStateRepository:
             pass
         except (OSError, UnicodeError, json.JSONDecodeError):
             data = {}
+        state = self._default_legacy()
+        allowed = set(state) | {
+            "workspace", "profileFiles", "profileVersion", "profileUpdatedAt",
+            "reconciledAt", "communicationSkill",
+        }
+        state.update({key: value for key, value in data.items() if key in allowed})
+        if not isinstance(state.get("recentActivity"), list):
+            state["recentActivity"] = []
+        state["recentActivity"] = state["recentActivity"][-ARCHIVE_MANAGER_ACTIVITY_LIMIT:]
+        return state
+
+    def load(self, role: SystemAgentRole = ARCHIVE_MANAGER_ROLE) -> SystemAgentLifecycleState:
+        if role.role_key != ARCHIVE_MANAGER_ROLE.role_key:
+            raise ValueError("ArchiveManagerStateRepository only accepts archive_manager")
         return SystemAgentLifecycleState.from_mapping(
             role,
-            data,
+            self.load_legacy(),
             now=self._clock(),
             activity_limit=ARCHIVE_MANAGER_ACTIVITY_LIMIT,
         )
@@ -128,13 +161,7 @@ class ArchiveManagerStateRepository:
             **({"communicationSkill": state.to_mapping()["communicationSkill"]} if state.communication_skill else {}),
         }
 
-    def save(
-        self,
-        role: SystemAgentRole,
-        state: SystemAgentLifecycleState,
-    ) -> SystemAgentLifecycleState:
-        if role.role_key != ARCHIVE_MANAGER_ROLE.role_key or state.role_key != role.role_key:
-            raise ValueError("archive manager state role mismatch")
+    def _write_payload(self, payload: Mapping[str, Any]) -> None:
         if self.archive_room_dir.is_symlink() or self.path.is_symlink():
             raise UnsafeProfilePathError("archive manager state path must not be a symbolic link")
         self.archive_room_dir.mkdir(parents=True, exist_ok=True)
@@ -146,7 +173,7 @@ class ArchiveManagerStateRepository:
             )
             with os.fdopen(descriptor, "w", encoding="utf-8") as output:
                 descriptor = -1
-                json.dump(self.legacy_mapping(state), output, ensure_ascii=False, indent=2)
+                json.dump(dict(payload), output, ensure_ascii=False, indent=2)
                 output.write("\n")
                 output.flush()
                 os.fsync(output.fileno())
@@ -163,7 +190,32 @@ class ArchiveManagerStateRepository:
                     os.unlink(temporary)
                 except FileNotFoundError:
                     pass
+
+    def save(
+        self,
+        role: SystemAgentRole,
+        state: SystemAgentLifecycleState,
+    ) -> SystemAgentLifecycleState:
+        if role.role_key != ARCHIVE_MANAGER_ROLE.role_key or state.role_key != role.role_key:
+            raise ValueError("archive manager state role mismatch")
+        self._write_payload(self.legacy_mapping(state))
         return state
+
+    def save_legacy(self, state: Mapping[str, Any]) -> dict[str, Any]:
+        payload = self._default_legacy()
+        allowed = set(payload) | {
+            "workspace", "profileFiles", "profileVersion", "profileUpdatedAt",
+            "reconciledAt", "communicationSkill",
+        }
+        payload.update({key: value for key, value in state.items() if key in allowed})
+        activity = payload.get("recentActivity")
+        payload["recentActivity"] = (
+            activity[-ARCHIVE_MANAGER_ACTIVITY_LIMIT:] if isinstance(activity, list) else []
+        )
+        if not payload.get("updatedAt"):
+            payload["updatedAt"] = self._default_legacy()["updatedAt"]
+        self._write_payload(payload)
+        return payload
 
 
 class ArchiveManagerProfilePort:
@@ -238,6 +290,31 @@ class ArchiveManagerProfilePort:
             self.render(),
             version_marker=role.version_marker,
         )
+
+    def synchronize_legacy(
+        self,
+        agent_id: str,
+        configured_workspace: str | os.PathLike[str] | None = None,
+    ) -> dict[str, Any]:
+        try:
+            effective_id = agent_id or ARCHIVE_MANAGER_ROLE.stable_id
+            workspace = self.workspace_for(effective_id, configured_workspace)
+            agent = ProviderAgent(
+                id=effective_id,
+                name=ARCHIVE_MANAGER_ROLE.display_name,
+                provider_kind=ARCHIVE_MANAGER_ROLE.provider_kind,
+                workspace=str(workspace),
+            )
+            result = self.synchronize(ARCHIVE_MANAGER_ROLE, agent, workspace)
+            return {
+                "ok": True,
+                "profileFiles": list(ARCHIVE_MANAGER_ROLE.required_files),
+                "workspace": result.workspace,
+                "profileVersion": result.version,
+                "updated": result.updated,
+            }
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
 
 
 class ArchiveManagerProviderPort:
@@ -355,7 +432,28 @@ class ArchiveManagerLifecycleAdapter:
         return self.lifecycle.resume(ARCHIVE_MANAGER_ROLE)
 
     def public_state(self, *, ensure: bool = True) -> dict[str, Any]:
-        state = self.create_if_missing() if ensure else self.repository.load()
+        if not ensure:
+            state = self.repository.load_legacy()
+            return {
+                "agentId": state.get("agentId") or ARCHIVE_MANAGER_ROLE.stable_id,
+                "name": state.get("name") or ARCHIVE_MANAGER_ROLE.display_name,
+                "emoji": state.get("emoji") or ARCHIVE_MANAGER_ROLE.emoji,
+                "providerKind": state.get("providerKind") or ARCHIVE_MANAGER_ROLE.provider_kind,
+                "status": state.get("status") or "missing",
+                "label": state.get("label") or "未接入",
+                "phase": ARCHIVE_MANAGER_PHASE,
+                "paused": bool(state.get("paused")),
+                "autoCreated": bool(state.get("autoCreated")),
+                "createdAt": state.get("createdAt"),
+                "updatedAt": state.get("updatedAt"),
+                "profileVersion": state.get("profileVersion") or "",
+                "profileUpdatedAt": state.get("profileUpdatedAt"),
+                "communicationSkill": state.get("communicationSkill"),
+                "lastAction": state.get("lastAction") or "",
+                "lastError": state.get("lastError") or "",
+                "recentActivity": (state.get("recentActivity") or [])[-ARCHIVE_MANAGER_PUBLIC_ACTIVITY_LIMIT:],
+            }
+        state = self.create_if_missing()
         return {
             "agentId": state.agent_id,
             "name": state.name,
@@ -370,18 +468,22 @@ class ArchiveManagerLifecycleAdapter:
             "updatedAt": state.updated_at or None,
             "profileVersion": state.profile_version,
             "profileUpdatedAt": state.profile_updated_at or None,
-            "communicationSkill": dict(state.communication_skill) if state.communication_skill else None,
+            "communicationSkill": (
+                state.to_mapping()["communicationSkill"]
+                if state.communication_skill else None
+            ),
             "lastAction": archive_manager_legacy_action(state, state.last_action),
             "lastError": state.last_error,
-            "recentActivity": _legacy_activity(state),
+            "recentActivity": _legacy_activity(state)[-ARCHIVE_MANAGER_PUBLIC_ACTIVITY_LIMIT:],
         }
 
     def legacy_state(self, *, ensure: bool = True) -> dict[str, Any]:
-        state = self.create_if_missing() if ensure else self.repository.load()
-        return self.repository.legacy_mapping(state)
+        if not ensure:
+            return self.repository.load_legacy()
+        return self.repository.legacy_mapping(self.create_if_missing())
 
     def is_archive_manager(self, candidate: Any) -> bool:
-        state = self.repository.load()
+        state = self.repository.load_legacy()
         values: tuple[str, ...]
         if isinstance(candidate, Mapping):
             values = tuple(
@@ -393,14 +495,18 @@ class ArchiveManagerLifecycleAdapter:
             value = str(candidate or "").strip()
             values = (value,) if value else ()
         return any(
-            ARCHIVE_MANAGER_ROLE.matches_identity(value, state.agent_id, state.name)
+            ARCHIVE_MANAGER_ROLE.matches_identity(
+                value,
+                state.get("agentId"),
+                state.get("name"),
+            )
             for value in values
         )
 
     def agent_meta(self, candidate: Any) -> dict[str, Any]:
         if not self.is_archive_manager(candidate):
             return {}
-        state = self.repository.load()
+        state = self.repository.load_legacy()
         return {
             "systemRole": ARCHIVE_MANAGER_ROLE.role_key,
             "systemAgent": True,
@@ -408,9 +514,9 @@ class ArchiveManagerLifecycleAdapter:
             "deletable": ARCHIVE_MANAGER_ROLE.deletable,
             "meetingEligible": ARCHIVE_MANAGER_ROLE.meeting_eligible,
             "archiveManager": True,
-            "archiveManagerStatus": state.status.value,
-            "archiveManagerPaused": state.paused,
-            "archiveManagerLabel": archive_manager_label(state),
+            "archiveManagerStatus": state.get("status") or "missing",
+            "archiveManagerPaused": bool(state.get("paused")),
+            "archiveManagerLabel": state.get("label") or "未接入",
         }
 
     def update(self, action: str) -> SystemAgentLifecycleState:
