@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Callable, Iterable, Protocol
@@ -39,6 +40,15 @@ class DailyReportConversationRequest:
 
 class HRDailyReportConversationPort(Protocol):
     def ask_agent_as_hr(self, request: DailyReportConversationRequest) -> str | None: ...
+
+
+class HRReportNormalizationPort(Protocol):
+    def ask_hr(
+        self,
+        prompt: str,
+        conversation_key: str,
+        timeout_seconds: float,
+    ) -> str | None: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -334,5 +344,248 @@ class HRDailyReportCollector:
                         attempts,
                         str(error_code),
                     )
+                )
+        return tuple(results)
+
+
+@dataclass(frozen=True, slots=True)
+class ReportNormalizationResult:
+    ai_id: str
+    local_date: str
+    status: str
+    error_code: str
+
+
+class HRDailyReportNormalizer:
+    """Asks HR for bounded structured normalization of Agent-authored claims."""
+
+    MAX_OUTPUT_CHARS = 40_000
+    MAX_LIST_ITEMS = 50
+    MAX_TEXT_CHARS = 1_000
+    ROOT_KEYS = frozenset(
+        {
+            "schemaVersion",
+            "localDate",
+            "agentAiId",
+            "completedWork",
+            "relatedProjectsOrTasks",
+            "artifacts",
+            "blockers",
+            "requestedHelp",
+            "submission",
+        }
+    )
+
+    def __init__(
+        self,
+        repository: HRRepository,
+        hr: HRReportNormalizationPort,
+        *,
+        clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+        timeout_seconds: float = 30.0,
+        hr_ai_id: str = "hr",
+    ):
+        if not isinstance(repository, HRRepository):
+            raise HRReportingValidationError("repository must be an HRRepository")
+        if not callable(getattr(hr, "ask_hr", None)):
+            raise HRReportingValidationError("HR normalization port is invalid")
+        if (
+            isinstance(timeout_seconds, bool)
+            or not isinstance(timeout_seconds, (int, float))
+            or not 0.1 <= float(timeout_seconds) <= 300
+        ):
+            raise HRReportingValidationError("timeout_seconds must be between 0.1 and 300")
+        self._repository = repository
+        self._hr = hr
+        self._clock = clock
+        self._timeout_seconds = float(timeout_seconds)
+        self._hr_ai_id = hr_ai_id
+
+    def _now(self) -> datetime:
+        value = self._clock()
+        if not isinstance(value, datetime) or value.tzinfo is None or value.utcoffset() is None:
+            raise HRReportingValidationError("normalization clock must be timezone-aware")
+        return value.astimezone(timezone.utc)
+
+    @classmethod
+    def _string_list(cls, value: object, field: str) -> list[str]:
+        if not isinstance(value, list) or len(value) > cls.MAX_LIST_ITEMS:
+            raise HRReportingValidationError(f"{field} must be a bounded list")
+        if any(
+            not isinstance(item, str)
+            or not item.strip()
+            or len(item) > cls.MAX_TEXT_CHARS
+            for item in value
+        ):
+            raise HRReportingValidationError(f"{field} contains invalid text")
+        return [item.strip() for item in value]
+
+    @classmethod
+    def _object_list(
+        cls,
+        value: object,
+        field: str,
+        keys: frozenset[str],
+    ) -> list[dict[str, str]]:
+        if not isinstance(value, list) or len(value) > cls.MAX_LIST_ITEMS:
+            raise HRReportingValidationError(f"{field} must be a bounded list")
+        normalized = []
+        for item in value:
+            if not isinstance(item, dict) or set(item) != keys:
+                raise HRReportingValidationError(f"{field} contains an invalid object")
+            if any(
+                not isinstance(item[key], str)
+                or not item[key].strip()
+                or len(item[key]) > cls.MAX_TEXT_CHARS
+                for key in keys
+            ):
+                raise HRReportingValidationError(f"{field} contains invalid text")
+            normalized.append({key: item[key].strip() for key in sorted(keys)})
+        return normalized
+
+    @staticmethod
+    def _claim_submission_state(report: DailyReportRecord) -> str:
+        if report.submitted_at is None:
+            return report.submission_state
+        if (
+            report.window_closed_at is not None
+            and report.submitted_at > report.window_closed_at
+        ):
+            return "late_submitted"
+        return "submitted"
+
+    @classmethod
+    def _parse(cls, output: str, report: DailyReportRecord) -> dict[str, object]:
+        if not isinstance(output, str) or not output.strip():
+            raise HRReportingValidationError("HR returned no normalized report")
+        if len(output) > cls.MAX_OUTPUT_CHARS:
+            raise HRReportingValidationError("HR normalized report is too large")
+        try:
+            value = json.loads(output)
+        except json.JSONDecodeError as exc:
+            raise HRReportingValidationError("HR normalized report is invalid JSON") from exc
+        if not isinstance(value, dict) or set(value) != cls.ROOT_KEYS:
+            raise HRReportingValidationError("HR normalized report has unsupported fields")
+        if value["schemaVersion"] != 1:
+            raise HRReportingValidationError("unsupported normalized report schema")
+        if value["localDate"] != report.local_date or value["agentAiId"] != report.ai_id:
+            raise HRReportingValidationError("normalized report identity does not match")
+        submission = value["submission"]
+        if not isinstance(submission, dict) or set(submission) != {
+            "state",
+            "requestedAt",
+            "submittedAt",
+        }:
+            raise HRReportingValidationError("submission metadata is invalid")
+        expected_submission = {
+            "state": cls._claim_submission_state(report),
+            "requestedAt": report.requested_at,
+            "submittedAt": report.submitted_at,
+        }
+        if submission != expected_submission:
+            raise HRReportingValidationError("submission metadata does not match")
+        return {
+            "schemaVersion": 1,
+            "localDate": report.local_date,
+            "agentAiId": report.ai_id,
+            "completedWork": cls._string_list(value["completedWork"], "completedWork"),
+            "relatedProjectsOrTasks": cls._object_list(
+                value["relatedProjectsOrTasks"],
+                "relatedProjectsOrTasks",
+                frozenset({"type", "id", "title"}),
+            ),
+            "artifacts": cls._object_list(
+                value["artifacts"],
+                "artifacts",
+                frozenset({"id", "name", "type"}),
+            ),
+            "blockers": cls._string_list(value["blockers"], "blockers"),
+            "requestedHelp": cls._string_list(value["requestedHelp"], "requestedHelp"),
+            "submission": expected_submission,
+        }
+
+    @staticmethod
+    def _prompt(report: DailyReportRecord) -> str:
+        submission = {
+            "state": HRDailyReportNormalizer._claim_submission_state(report),
+            "requestedAt": report.requested_at,
+            "submittedAt": report.submitted_at,
+        }
+        return (
+            "Normalize the Agent's daily report. Return JSON only with exactly these keys: "
+            "schemaVersion, localDate, agentAiId, completedWork, "
+            "relatedProjectsOrTasks, artifacts, blockers, requestedHelp, submission. "
+            "schemaVersion must be 1. relatedProjectsOrTasks items require type, id, title; "
+            "artifacts items require id, name, type. submission requires state, requestedAt, "
+            "submittedAt and must copy the supplied metadata exactly. Do not invent work.\n"
+            f"localDate: {report.local_date}\nAgent AI ID: {report.ai_id}\n"
+            f"submission: {json.dumps(submission, ensure_ascii=False)}\n"
+            f"Agent raw response:\n{report.raw_response}"
+        )
+
+    def normalize(
+        self,
+        ai_ids: Iterable[str],
+        *,
+        local_date: str,
+    ) -> tuple[ReportNormalizationResult, ...]:
+        results = []
+        for ai_id in tuple(ai_ids):
+            report = None
+            try:
+                report = self._repository.get_daily_report(ai_id, local_date)
+                if report is None or report.raw_response is None:
+                    results.append(
+                        ReportNormalizationResult(ai_id, local_date, "no_raw_report", "")
+                    )
+                    continue
+                if report.normalized is not None:
+                    results.append(
+                        ReportNormalizationResult(ai_id, local_date, "already_normalized", "")
+                    )
+                    continue
+                output = self._hr.ask_hr(
+                    self._prompt(report),
+                    f"hr:daily-report-normalize:{local_date}:{ai_id}",
+                    self._timeout_seconds,
+                )
+                normalized = self._parse(output, report)
+                self._repository.save_daily_report(
+                    report_id=report.id,
+                    cycle_id=report.cycle_id,
+                    ai_id=report.ai_id,
+                    local_date=report.local_date,
+                    submission_state="normalized",
+                    raw_response=report.raw_response,
+                    normalized=normalized,
+                    normalizer_id=self._hr_ai_id,
+                    requested_at=report.requested_at,
+                    window_closed_at=report.window_closed_at,
+                    submitted_at=report.submitted_at,
+                    normalized_at=self._now().isoformat(),
+                    expected_revision=report.revision,
+                )
+                results.append(ReportNormalizationResult(ai_id, local_date, "normalized", ""))
+            except Exception as exc:
+                error_code = getattr(exc, "code", "normalization_failed")
+                if report is not None and report.raw_response is not None:
+                    try:
+                        self._repository.save_daily_report(
+                            report_id=report.id,
+                            cycle_id=report.cycle_id,
+                            ai_id=report.ai_id,
+                            local_date=report.local_date,
+                            submission_state="normalization_failed",
+                            raw_response=report.raw_response,
+                            normalized=None,
+                            requested_at=report.requested_at,
+                            window_closed_at=report.window_closed_at,
+                            submitted_at=report.submitted_at,
+                            expected_revision=report.revision,
+                        )
+                    except Exception:
+                        pass
+                results.append(
+                    ReportNormalizationResult(ai_id, local_date, "failed", str(error_code))
                 )
         return tuple(results)
