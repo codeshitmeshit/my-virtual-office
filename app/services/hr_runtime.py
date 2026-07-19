@@ -18,9 +18,17 @@ from services.hr_information_completion import (
     HRInformationCompletionCommands,
     HRInformationCompletionService,
 )
+from services.hr_assessments import HRAssessmentOrchestrator
+from services.hr_evidence import HREvidenceCollector, HREvidencePorts
+from services.hr_manual_daily_sync import (
+    CallableHRManualDailyConversation,
+    EmptyHREvidencePort,
+    HRManualDailySyncCommands,
+    HRManualDailySyncService,
+)
 from services.hr_http import HRHTTPRoutes
 from services.hr_observability import HRObservability
-from services.hr_reporting import HRReportingProjection
+from services.hr_reporting import HRDailyReportNormalizer, HRReportingProjection, HRReportingService
 from services.hr_repository import HRRepository
 from services.hr_scheduler import HRCommandReceipt, HRManualCommands, HRReconciliationLoop
 from services.hr_team_sync import build_hr_team_sync
@@ -79,6 +87,7 @@ def build_hr_application_runtime(
     roster_provider: Callable[[bool], Sequence[Mapping[str, object]]] | None = None,
     workspace_base: str | Path | None = None,
     information_conversation: CallableHRInformationConversation | None = None,
+    daily_conversation: CallableHRManualDailyConversation | None = None,
 ) -> HRApplicationRuntime:
     """Build one repository authority shared by management and authenticated Agent APIs."""
     repository = HRRepository(status_dir)
@@ -103,6 +112,43 @@ def build_hr_application_runtime(
                 timeout_seconds=config.agent_timeout_seconds,
             )
         )
+    manual_daily_sync = None
+    if daily_conversation is not None:
+        reporting = HRReportingService(
+            repository,
+            claim_token_factory=lambda request_id: f"hr-manual-{uuid.uuid4().hex}-{request_id}",
+            claim_lease_seconds=min(600, max(31, int(config.agent_timeout_seconds) + 30)),
+        )
+        evidence_port = EmptyHREvidencePort()
+        evidence = HREvidenceCollector(
+            HREvidencePorts(
+                evidence_port, evidence_port, evidence_port,
+                evidence_port, evidence_port, evidence_port,
+            )
+        )
+        normalizer = HRDailyReportNormalizer(
+            repository, daily_conversation, timeout_seconds=config.agent_timeout_seconds,
+        )
+        assessments = HRAssessmentOrchestrator(
+            repository,
+            evidence,
+            daily_conversation,
+            timeout_seconds=config.agent_timeout_seconds,
+            claim_lease_seconds=min(600, max(31, int(config.agent_timeout_seconds) + 30)),
+        )
+        manual_daily_sync = HRManualDailySyncCommands(
+            HRManualDailySyncService(
+                repository,
+                reporting,
+                normalizer,
+                assessments,
+                daily_conversation,
+                timezone_name=config.timezone_name,
+                submission_window_minutes=config.submission_window_minutes,
+                max_workers=config.max_workers,
+                timeout_seconds=config.agent_timeout_seconds,
+            )
+        )
     management = HRManagementAPI(
         repository,
         lifecycle,
@@ -112,6 +158,7 @@ def build_hr_application_runtime(
         config,
         directory_sync=directory_sync,
         information_completion=information_completion,
+        manual_daily_sync=manual_daily_sync,
     )
     routes = HRHTTPRoutes(
         management,

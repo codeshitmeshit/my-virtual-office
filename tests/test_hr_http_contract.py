@@ -226,6 +226,24 @@ def test_management_routes_cover_detail_log_health_export_and_commands(runtime):
     assert status == 202
     assert payload["command"]["command"] == "complete_information"
 
+    class DailySync:
+        def run(self, ai_ids):
+            assert ai_ids == ("agent-1",)
+            from services.hr_manual_daily_sync import HRManualDailySyncReceipt
+            return HRManualDailySyncReceipt("daily-http-1", "manual_daily_sync", True)
+
+    _runtime.routes._management._manual_daily_sync = DailySync()
+    status, payload = call(
+        handler(
+            "/api/human-resources/daily-sync",
+            {"agentIds": ["agent-1"]},
+            management=True,
+        ),
+        "POST",
+    )
+    assert status == 202
+    assert payload["command"]["command"] == "manual_daily_sync"
+
     status, payload = call(
         handler("/api/human-resources/directory/sync", {}, management=True), "POST"
     )

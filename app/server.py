@@ -69,6 +69,7 @@ from services import hr_lifecycle as hr_lifecycle_service
 from services import hr_agent_auth as hr_agent_auth_service
 from services import hr_http as hr_http_service
 from services import hr_information_completion as hr_information_completion_service
+from services import hr_manual_daily_sync as hr_manual_daily_sync_service
 from services import hr_runtime as hr_runtime_service
 from services import hr_scheduler as hr_scheduler_service
 from services import system_agent_lifecycle as system_agent_lifecycle_service
@@ -21586,7 +21587,7 @@ def _hr_provider_agent_id():
     return str(state.get("agentId") or system_agent_roles_service.HR_ROLE.stable_id)
 
 
-def _hr_ask_agent_for_information(target_ai_id, message, conversation_key, timeout_seconds):
+def _hr_ask_agent(target_ai_id, message, conversation_key, timeout_seconds, source_label):
     result = _handle_agent_platform_comm_send({
         "fromAgentId": _hr_provider_agent_id(),
         "toAgentId": target_ai_id,
@@ -21595,12 +21596,24 @@ def _hr_ask_agent_for_information(target_ai_id, message, conversation_key, timeo
         "timeoutSec": int(max(1, timeout_seconds)),
         "sourceApp": "virtual-office",
         "sourceSurface": "human-resources",
-        "sourceLabel": "HR information completion",
+        "sourceLabel": source_label,
     })
     if not result.get("ok"):
         raise RuntimeError(str(result.get("code") or result.get("error") or "HR Agent call failed"))
     reply = result.get("reply")
     return str(reply) if reply is not None else None
+
+
+def _hr_ask_agent_for_information(target_ai_id, message, conversation_key, timeout_seconds):
+    return _hr_ask_agent(
+        target_ai_id, message, conversation_key, timeout_seconds, "HR information completion"
+    )
+
+
+def _hr_ask_agent_for_daily_report(target_ai_id, message, conversation_key, timeout_seconds):
+    return _hr_ask_agent(
+        target_ai_id, message, conversation_key, timeout_seconds, "HR daily report"
+    )
 
 
 def _hr_summarize_agent_information(prompt, conversation_key, timeout_seconds):
@@ -21629,6 +21642,12 @@ def _get_hr_application_runtime():
                 information_conversation=(
                     hr_information_completion_service.CallableHRInformationConversation(
                         _hr_ask_agent_for_information,
+                        _hr_summarize_agent_information,
+                    )
+                ),
+                daily_conversation=(
+                    hr_manual_daily_sync_service.CallableHRManualDailyConversation(
+                        _hr_ask_agent_for_daily_report,
                         _hr_summarize_agent_information,
                     )
                 ),

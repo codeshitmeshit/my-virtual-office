@@ -32,3 +32,6 @@ def test_hr_shell_has_independent_responsive_list_and_detail_boundaries():
     assert "archiveRoom" not in javascript
     assert "ArchiveRoom" not in javascript
     assert "humanResourcesModal" in javascript
+    assert "hr-selection-dialog" in javascript
+    assert "/api/human-resources/daily-sync" in javascript
+    assert ".hr-selection-dialog" in css

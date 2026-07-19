@@ -35,9 +35,18 @@ globalThis.document = {
 const hr = require('../app/human-resources.js');
 assert.equal(listeners.keydown, hr.helpers.handleKeydown);
 
+let prevented = false;
+hr.state.open = true;
+hr.openDailySync();
+prevented = false;
+hr.helpers.handleKeydown({ key: 'Escape', preventDefault: () => { prevented = true; } });
+assert.equal(prevented, true);
+assert.equal(hr.state.dailySyncOpen, false, 'Escape closes the nested daily sync dialog first');
+assert.equal(hr.state.open, true, 'closing the nested dialog keeps Human Resources open');
+
 hr.state.open = true;
 globalThis.document.activeElement = last;
-let prevented = false;
+prevented = false;
 hr.helpers.handleKeydown({ key: 'Tab', shiftKey: false, preventDefault: () => { prevented = true; } });
 assert.equal(prevented, true);
 assert.equal(globalThis.document.activeElement, first, 'forward Tab wraps to first focusable control');

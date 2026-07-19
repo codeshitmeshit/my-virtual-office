@@ -459,6 +459,8 @@ class HRAssessmentOrchestrator:
         *,
         local_date: str,
         actor_ai_id: str,
+        allow_open_cycle: bool = False,
+        revision_reason: str = "",
     ) -> tuple[AssessmentProcessingResult, ...]:
         if actor_ai_id != self._hr_ai_id:
             raise HRAssessmentValidationError("only HR may create assessments")
@@ -476,7 +478,7 @@ class HRAssessmentOrchestrator:
                 if report is None or report.cycle_id is None:
                     raise HRAssessmentValidationError("dated report does not exist")
                 cycle = self._repository.get_daily_cycle(report.cycle_id)
-                if cycle is None or cycle.status != "closed":
+                if cycle is None or (cycle.status != "closed" and not allow_open_cycle):
                     raise HRAssessmentValidationError("assessment cycle is not closed")
                 bundle = self._evidence.collect(ai_id, local_date=local_date)
                 adequate = self._evidence_is_adequate(report.raw_response is not None, bundle)
@@ -546,18 +548,16 @@ class HRAssessmentOrchestrator:
                         "insufficient evidence cannot support a performance conclusion"
                     )
                 evidence_rows = self._referenced_evidence(parsed, bundle)
-                revision_reason = ""
+                effective_revision_reason = revision_reason
                 if current is not None:
                     normalized_submission = (
                         report.normalized.get("submission", {}).get("state")
                         if isinstance(report.normalized, dict)
                         else None
                     )
-                    revision_reason = (
-                        "late_report"
-                        if report.submission_state == "late_submitted"
-                        or normalized_submission == "late_submitted"
-                        else "evidence_changed"
+                    effective_revision_reason = effective_revision_reason or (
+                        "late_report" if report.submission_state == "late_submitted"
+                        or normalized_submission == "late_submitted" else "evidence_changed"
                     )
                 assessment = self._repository.save_assessment(
                     assessment_id=(
@@ -578,7 +578,7 @@ class HRAssessmentOrchestrator:
                     evidence_version=evidence_version,
                     hr_id=parsed.hr_ai_id,
                     evidence=evidence_rows,
-                    revision_reason=revision_reason,
+                    revision_reason=effective_revision_reason,
                     expected_version=current.version if current is not None else 0,
                 )
                 self._repository.finish_assessment_job(

@@ -49,7 +49,11 @@ def test_command_router_is_unavailable_until_commands_are_installed():
 
 
 def test_hr_http_and_runtime_modules_do_not_depend_on_legacy_server():
-    for relative in ("services/hr_http.py", "services/hr_runtime.py"):
+    for relative in (
+        "services/hr_http.py",
+        "services/hr_runtime.py",
+        "services/hr_manual_daily_sync.py",
+    ):
         source = (APP_DIR / relative).read_text(encoding="utf-8")
         assert "import server" not in source
         assert "OfficeHandler" not in source

@@ -65,3 +65,16 @@ The system SHALL expose enough state to distinguish not due, waiting, submitted,
 #### Scenario: Human inspects today's cycle
 - **WHEN** the Human Resources module loads the active or most recent cycle
 - **THEN** it SHALL show accurate counts and per-Agent states without presenting unfinished data as completed
+
+### Requirement: Explicit selected-Agent daily correction
+Human management SHALL be able to select one or more currently available non-HR Agents, including selecting all available Agents, and request a new report for the current VO-local date without closing the global cycle.
+
+#### Scenario: Selected Agent returns a corrected report
+- **WHEN** a human confirms a manual daily synchronization and a selected Agent returns a non-empty report
+- **THEN** the same authoritative Agent/date record SHALL replace its raw response, clear stale normalization, increment its revision, and be normalized again
+- **AND** no second authoritative dated report SHALL be created
+
+#### Scenario: Selected Agent does not respond
+- **WHEN** a selected Agent times out, fails, or returns no report
+- **THEN** its previous report and assessment SHALL remain unchanged
+- **AND** successful selected Agents SHALL continue independently

@@ -256,6 +256,7 @@ Human management APIs reuse `X-VO-Management-Token` and `window.i18n.managementF
 - `POST /api/human-resources/hr/{pause|resume}`
 - `POST /api/human-resources/directory/sync`
 - `POST /api/human-resources/directory/complete-information`
+- `POST /api/human-resources/daily-sync`
 - `POST /api/human-resources/cycles/{run|close|retry}`
 - `GET /api/human-resources/health`
 
@@ -291,6 +292,8 @@ Add:
 - localized strings in `app/locales/en.json` and `app/locales/zh.json`
 
 The UI follows Archive Room's independent modal/list/detail pattern but does not import or duplicate Archive Room state. It uses `managementFetch` for every full-data request. The overview shows one authoritative HR state indicator, daily-cycle counts, and a server-calculated `reportSchedule` containing the next configured collection instant, VO-local wall time/timezone, scheduler enablement, and scheduled/due/disabled state; detail separates Agent claims, HR normalization, evidence-backed HR judgment, and access history. An active-sync control invokes a focused `hr_team_sync.py` service that force-refreshes the shared roster, reconciles directory state, and refreshes Agent API grant readiness before the UI reloads. A separate `补充信息` control invokes `hr_information_completion.py`, which selects only available non-HR Agents lacking introduction text, reuses already received raw responses, performs bounded HR-to-Agent requests and HR summarization in the background, and prevents concurrent duplicate runs. Because the directory Skill is a VO built-in, the detail does not show a per-Agent Skill readiness field. Failed or partial states remain scoped to the affected Agent/workflow. The Agent-facing API is not called by the human UI.
+
+A separate `日报` control opens an accessible selector containing only available, non-HR Agents, with select-all and individual checkboxes. `hr_manual_daily_sync.py` runs the selected correction asynchronously and single-flight: it explicitly re-asks each selected Agent, replaces the same authoritative Agent/date report only after a non-empty response, clears stale normalization, increments the report revision, normalizes again, and immediately invokes HR reassessment with revision reason `manual_daily_sync`. It may reassess a selected Agent while the global cycle is still open without closing or advancing other Agents. No-response and provider failure preserve the prior report and assessment; normalization or assessment failure is isolated and visible through bounded HR activity.
 
 Frontend logic is split into pure formatting/projection helpers where practical so Node-based tests can validate disclosure rendering, workflow states, and localization without a browser. A live browser acceptance script verifies navigation, pause/resume, roster/detail, report/assessment states, and degraded errors.
 

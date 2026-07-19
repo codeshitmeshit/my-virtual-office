@@ -170,6 +170,8 @@ class HRHTTPRoutes:
                     body,
                     body_bytes=body_bytes,
                 )
+            elif path == f"{MANAGEMENT_PREFIX}/daily-sync":
+                result = self._management.manual_daily_sync_command(body, body_bytes=body_bytes)
             elif path == f"{MANAGEMENT_PREFIX}/directory/sync":
                 result = self._management.directory_sync_command(body, body_bytes=body_bytes)
             elif path.startswith(lifecycle_prefix):

@@ -271,6 +271,17 @@
     gap: 7px;
 }
 
+.hr-selection-backdrop { position: fixed; inset: 0; z-index: 10020; display: grid; place-items: center; padding: 24px; background: rgba(3, 8, 18, .78); }
+.hr-selection-dialog { width: min(620px, 92vw); max-height: min(720px, 86vh); overflow: auto; padding: 22px; border: 1px solid var(--hr-border, #33465d); border-radius: 16px; background: #111b2a; box-shadow: 0 24px 80px rgba(0,0,0,.55); }
+.hr-selection-dialog > header, .hr-selection-dialog > footer { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.hr-selection-dialog > header p { margin: 6px 0 0; color: #9fb0c4; }
+.hr-selection-dialog > footer { justify-content: flex-end; margin-top: 18px; }
+.hr-selection-all { display: block; margin: 20px 0 10px; padding-bottom: 10px; border-bottom: 1px solid #2b3b50; }
+.hr-selection-list { display: grid; gap: 8px; max-height: 360px; overflow: auto; }
+.hr-selection-list label { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid #26384d; border-radius: 10px; }
+.hr-selection-list span { display: grid; gap: 2px; }
+.hr-selection-list small { color: #8fa2b8; }
+
 .hr-command-button,
 .hr-back-button {
     padding: 7px 10px;

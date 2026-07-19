@@ -58,6 +58,11 @@ The system SHALL maintain one current assessment per Agent and date while preser
 - **WHEN** an Agent submits late after an assessment exists
 - **THEN** HR MAY issue a revised assessment with the earlier version and revision reason retained
 
+#### Scenario: Human manually corrects today's report
+- **WHEN** manual daily synchronization successfully replaces an Agent's current-date report
+- **THEN** HR SHALL immediately generate the corresponding assessment from the refreshed report without waiting for global cycle closure
+- **AND** the new assessment SHALL become current with revision reason `manual_daily_sync` while all prior assessment versions remain readable
+
 ### Requirement: Assessment failure isolation
 An assessment failure for one Agent SHALL be visible and retryable without preventing other Agents' dated assessments or corrupting the last valid assessment.
 

@@ -1979,6 +1979,58 @@ class HRRepository:
             ).fetchone()
             return _report_from_row(row)
 
+    def replace_daily_report_response(
+        self,
+        *,
+        ai_id: str,
+        local_date: str,
+        raw_response: str,
+        submitted_at: str,
+    ) -> DailyReportRecord:
+        """Explicitly replace today's report for a management-triggered correction."""
+        ai_id = _stable_ai_id(ai_id)
+        local_date = _local_date(local_date)
+        raw_response = _raw_text(raw_response, "raw_response")
+        if raw_response is None or not raw_response.strip():
+            raise HRRepositoryValidationError("raw_response must not be empty")
+        submitted_at = _timestamp_text(submitted_at, "submitted_at")
+        timestamp = self._timestamp()
+        with self._write_transaction() as connection:
+            row = connection.execute(
+                "SELECT * FROM daily_reports WHERE ai_id = ? AND local_date = ?",
+                (ai_id, local_date),
+            ).fetchone()
+            if row is None:
+                raise HRRepositoryNotFoundError("daily report does not exist")
+            current = _report_from_row(row)
+            state = (
+                "late_submitted"
+                if current.window_closed_at is not None
+                and submitted_at > current.window_closed_at
+                else "submitted"
+            )
+            connection.execute(
+                """UPDATE daily_reports SET
+                       submission_state = ?, raw_response = ?, normalized_json = NULL,
+                       normalizer_id = '', submitted_at = ?, normalized_at = NULL,
+                       revision = revision + 1, updated_at = ?
+                   WHERE id = ?""",
+                (state, raw_response, submitted_at, timestamp, current.id),
+            )
+            if current.cycle_id is not None:
+                connection.execute(
+                    """UPDATE report_requests SET
+                           status = 'submitted', responded_at = ?, last_error = '',
+                           claim_token = '', claimed_by = '', claim_expires_at = NULL,
+                           updated_at = ?
+                       WHERE cycle_id = ? AND ai_id = ?""",
+                    (submitted_at, timestamp, current.cycle_id, ai_id),
+                )
+            row = connection.execute(
+                "SELECT * FROM daily_reports WHERE id = ?", (current.id,)
+            ).fetchone()
+            return _report_from_row(row)
+
     def get_report_request(self, request_id: str) -> ReportRequestRecord | None:
         request_id = _opaque_id(request_id, "request_id")
         with self._connection(readonly=True) as connection:

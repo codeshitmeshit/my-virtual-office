@@ -17,6 +17,9 @@
         commandBusy: '',
         commandNotice: '',
         commandError: '',
+        dailySyncOpen: false,
+        dailySyncSelected: [],
+        dailySyncReturnFocus: null,
         returnFocus: null,
     };
 
@@ -37,11 +40,13 @@
         'hr_directory_sync_unavailable', 'hr_disabled', 'hr_empty_response',
         'hr_information_completion_hr_unavailable', 'hr_information_completion_running',
         'hr_information_completion_unavailable', 'hr_internal_error', 'hr_invalid_response',
+        'hr_manual_daily_sync_hr_unavailable', 'hr_manual_daily_sync_running',
+        'hr_manual_daily_sync_unavailable', 'hr_manual_daily_sync_validation_failed',
         'hr_repository_unavailable', 'hr_request_failed', 'hr_runtime_unavailable'
     ];
     const ACTION_NAMES = [
         'assessment', 'close', 'directory', 'lifecycle', 'pause', 'query',
-        'report', 'resume', 'retry', 'run', 'skill', 'sync', 'complete_information'
+        'report', 'resume', 'retry', 'run', 'skill', 'sync', 'complete_information', 'manual_daily_sync'
     ];
 
     function escHtml(value) {
@@ -225,7 +230,9 @@
     }
 
     function focusableElements() {
-        const element = modal();
+        const element = state.dailySyncOpen && root.document
+            ? root.document.querySelector('.hr-selection-dialog') || modal()
+            : modal();
         if (!element) return [];
         return Array.from(element.querySelectorAll(
             'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), ' +
@@ -237,7 +244,8 @@
         if (!state.open || !event) return;
         if (event.key === 'Escape') {
             event.preventDefault();
-            close();
+            if (state.dailySyncOpen) closeDailySync();
+            else close();
             return;
         }
         if (event.key !== 'Tab') return;
@@ -343,6 +351,8 @@
                 '" onclick="HumanResources.runCommand(\'' + escHtml(action) + '\')"' +
                 (busy ? ' disabled' : '') + '>' + escHtml(state.commandBusy === action ? tr('hr_command_working', 'Working...') : label) + '</button>';
         };
+        const availableAgents = orderedAvailableAgents();
+        const dailySyncDialog = state.dailySyncOpen ? renderDailySyncDialog(availableAgents) : '';
         return '<div class="hr-overview">' +
             (degraded ? '<div class="hr-degraded-banner" role="status"><strong>' +
                 escHtml(tr('hr_partial_data', 'Some Human Resources data could not be refreshed.')) +
@@ -359,6 +369,8 @@
                 '<div class="hr-command-actions">' +
                     commandButton('sync', tr('hr_sync_team', 'Sync Agent team'), false) +
                     commandButton('complete_information', tr('hr_complete_information', 'Complete information'), false) +
+                    '<button type="button" class="hr-command-button" onclick="HumanResources.openDailySync()"' +
+                    (state.commandBusy ? ' disabled' : '') + '>' + escHtml(tr('hr_daily_sync', 'Daily report')) + '</button>' +
                     commandButton(lifecycleAction, lifecycleAction === 'pause' ? tr('hr_pause', 'Pause HR') : tr('hr_resume', 'Resume HR'), lifecycleAction === 'pause') +
                     commandButton('run', tr('hr_run_cycle', 'Run cycle'), false) +
                     (cycle.cycleId && cycle.status === 'open' ? commandButton('close', tr('hr_close_cycle', 'Close cycle'), true) : '') +
@@ -374,12 +386,93 @@
                 (cycles.length ? '<div class="hr-metric-grid">' + cycles.map(function (item) {
                     return renderBadge(semanticLabel(item.status), item.count, statusTone(item.status));
                 }).join('') + '</div>' : '<div class="hr-inline-empty">' + escHtml(tr('hr_no_active_cycle', 'No active or recent cycle')) + '</div>') +
-            '</section>' +
+            '</section>' + dailySyncDialog +
             '<section><h3>' + escHtml(tr('hr_recent_activity', 'Recent activity')) + '</h3>' +
                 (activities.length ? '<ul class="hr-activity-list">' + activities.map(renderActivity).join('') + '</ul>' :
                     '<div class="hr-inline-empty">' + escHtml(tr('hr_no_recent_activity', 'No recent activity')) + '</div>') +
             '</section>' +
         '</div>';
+    }
+
+    function orderedAvailableAgents() {
+        return prioritizeAgents(state.agents).filter(function (agent) {
+            const id = agentId(agent);
+            const status = String(agent.status || 'active').toLowerCase();
+            const availability = String(agent.availability || '').toLowerCase();
+            return id && id !== 'hr' && status === 'active' && !['offline', 'unavailable', 'unreachable', 'disabled', 'deleted'].includes(availability);
+        });
+    }
+
+    function renderDailySyncDialog(agents) {
+        const selected = new Set(state.dailySyncSelected);
+        const allSelected = agents.length > 0 && agents.every(function (agent) { return selected.has(agentId(agent)); });
+        return '<div class="hr-selection-backdrop" role="presentation"><section class="hr-selection-dialog" role="dialog" aria-modal="true" aria-labelledby="hr-daily-sync-title">' +
+            '<header><div><h3 id="hr-daily-sync-title">' + escHtml(tr('hr_daily_sync_title', 'Resubmit daily reports')) + '</h3>' +
+            '<p>' + escHtml(tr('hr_daily_sync_hint', 'Choose available Agents. Successful reports replace today’s report and immediately refresh the assessment.')) + '</p></div>' +
+            '<button type="button" class="hr-icon-button" onclick="HumanResources.closeDailySync()" aria-label="' + escHtml(tr('hr_cancel', 'Cancel')) + '">×</button></header>' +
+            '<label class="hr-selection-all"><input type="checkbox" onchange="HumanResources.toggleDailySyncAll(this.checked)"' + (allSelected ? ' checked' : '') + '> ' + escHtml(tr('hr_select_all', 'Select all')) + '</label>' +
+            '<div class="hr-selection-list">' + agents.map(function (agent) {
+                const id = agentId(agent);
+                return '<label><input type="checkbox" value="' + escHtml(id) + '" onchange="HumanResources.toggleDailySyncAgent(this.value, this.checked)"' + (selected.has(id) ? ' checked' : '') + '><span><strong>' + escHtml(agentName(agent)) + '</strong><small>' + escHtml(id) + '</small></span></label>';
+            }).join('') + '</div>' +
+            '<footer><button type="button" class="hr-command-button" onclick="HumanResources.closeDailySync()">' + escHtml(tr('hr_cancel', 'Cancel')) + '</button>' +
+            '<button type="button" class="hr-command-button" onclick="HumanResources.submitDailySync()"' + (!selected.size ? ' disabled' : '') + '>' + escHtml(tr('hr_submit_daily_sync', 'Sync selected')) + '</button></footer>' +
+            '</section></div>';
+    }
+
+    function openDailySync() {
+        state.dailySyncReturnFocus = root.document ? root.document.activeElement : null;
+        state.dailySyncOpen = true;
+        state.dailySyncSelected = [];
+        render();
+        const first = root.document && root.document.querySelector('.hr-selection-dialog input');
+        if (first && typeof first.focus === 'function') first.focus();
+    }
+
+    function closeDailySync() {
+        state.dailySyncOpen = false;
+        state.dailySyncSelected = [];
+        render();
+        const target = state.dailySyncReturnFocus;
+        state.dailySyncReturnFocus = null;
+        if (target && typeof target.focus === 'function') target.focus();
+    }
+
+    function toggleDailySyncAll(checked) {
+        state.dailySyncSelected = checked ? orderedAvailableAgents().map(agentId) : [];
+        render();
+    }
+
+    function toggleDailySyncAgent(aiId, checked) {
+        const selected = new Set(state.dailySyncSelected);
+        if (checked) selected.add(String(aiId)); else selected.delete(String(aiId));
+        state.dailySyncSelected = Array.from(selected);
+        render();
+    }
+
+    async function submitDailySync() {
+        if (!state.dailySyncSelected.length || state.commandBusy) return false;
+        const selected = state.dailySyncSelected.slice();
+        state.dailySyncOpen = false;
+        state.commandBusy = 'manual_daily_sync';
+        state.commandError = '';
+        render();
+        try {
+            await managementJson('/api/human-resources/daily-sync', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ agentIds: selected }),
+            });
+            state.commandNotice = tr('hr_command_accepted', 'Command accepted: {{action}}', { action: actionLabel('manual_daily_sync') });
+            await loadOverview();
+            return true;
+        } catch (error) {
+            state.commandError = String(error && error.message || 'hr_request_failed');
+            return false;
+        } finally {
+            state.commandBusy = '';
+            state.dailySyncSelected = [];
+            render();
+        }
     }
 
     function renderTextList(values, emptyText) {
@@ -580,6 +673,7 @@
             skill: 'Skill distribution',
             sync: 'Sync Agent team',
             complete_information: 'Complete information',
+            manual_daily_sync: 'Daily report',
         };
         return ACTION_NAMES.includes(action)
             ? tr('hr_action_' + action, fallbacks[action] || action)
@@ -732,6 +826,11 @@
         selectAgent,
         loadMore,
         runCommand,
+        openDailySync,
+        closeDailySync,
+        toggleDailySyncAll,
+        toggleDailySyncAgent,
+        submitDailySync,
         render,
         helpers: {
             escHtml,

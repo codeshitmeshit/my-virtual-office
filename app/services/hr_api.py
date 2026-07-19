@@ -52,6 +52,10 @@ class HRInformationCompletionPort(Protocol):
     def complete(self) -> object: ...
 
 
+class HRManualDailySyncPort(Protocol):
+    def run(self, ai_ids: tuple[str, ...]) -> object: ...
+
+
 def _json_safe(value: object) -> object:
     if is_dataclass(value) and not isinstance(value, type):
         return {
@@ -86,6 +90,7 @@ class HRManagementAPI:
         *,
         directory_sync: HRDirectorySyncPort | None = None,
         information_completion: HRInformationCompletionPort | None = None,
+        manual_daily_sync: HRManualDailySyncPort | None = None,
         clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
     ):
         if not isinstance(repository, HRRepository):
@@ -112,6 +117,8 @@ class HRManagementAPI:
             getattr(information_completion, "complete", None)
         ):
             raise HRAPIValidationError("information completion port is invalid")
+        if manual_daily_sync is not None and not callable(getattr(manual_daily_sync, "run", None)):
+            raise HRAPIValidationError("manual daily sync port is invalid")
         self._repository = repository
         self._lifecycle = lifecycle
         self._commands = commands
@@ -120,6 +127,7 @@ class HRManagementAPI:
         self._config = config
         self._directory_sync = directory_sync
         self._information_completion = information_completion
+        self._manual_daily_sync = manual_daily_sync
         self._clock = clock
 
     def _now(self) -> datetime:
@@ -453,6 +461,36 @@ class HRManagementAPI:
                 ),
                 "command": _json_safe(receipt),
             },
+        )
+
+    def manual_daily_sync_command(self, body: object, *, body_bytes: int) -> HRServiceResult:
+        if not self._config.enabled:
+            raise HRAPIDisabledError("Human Resources mutations are disabled")
+        payload = self._body(body, body_bytes)
+        if set(payload) != {"agentIds"}:
+            raise HRAPIValidationError("manual daily sync requires only agentIds")
+        agent_ids = payload.get("agentIds")
+        if not isinstance(agent_ids, list):
+            raise HRAPIValidationError("agentIds must be a list")
+        lifecycle = self._lifecycle.public_state(ensure=False)
+        lifecycle_status = str(lifecycle.get("status") or "").strip().lower()
+        if bool(lifecycle.get("paused")) or lifecycle_status not in {"idle", "ready", "available", "working"}:
+            return HRServiceResult(409, {"ok": False, "code": "hr_manual_daily_sync_hr_unavailable"})
+        if self._manual_daily_sync is None:
+            return HRServiceResult(503, {"ok": False, "code": "hr_manual_daily_sync_unavailable"})
+        try:
+            receipt = self._manual_daily_sync.run(tuple(agent_ids))
+        except Exception as exc:
+            if getattr(exc, "code", "") == "hr_manual_daily_sync_validation_failed":
+                return HRServiceResult(
+                    400,
+                    {"ok": False, "code": "hr_manual_daily_sync_validation_failed"},
+                )
+            raise
+        accepted = bool(getattr(receipt, "accepted", False))
+        return HRServiceResult(
+            202 if accepted else 409,
+            {"ok": accepted, **({} if accepted else {"code": "hr_manual_daily_sync_running"}), "command": _json_safe(receipt)},
         )
 
     @staticmethod

@@ -336,6 +336,47 @@ def test_information_completion_command_is_async_and_rejects_duplicate_or_body(s
         api.information_completion_command({"unexpected": True}, body_bytes=20)
 
 
+def test_manual_daily_sync_validates_selection_and_hr_availability(setup):
+    repository, _reporting, _opened, lifecycle, api = setup
+
+    class DailySync:
+        def __init__(self):
+            self.calls = []
+
+        def run(self, ai_ids):
+            self.calls.append(ai_ids)
+            from services.hr_manual_daily_sync import HRManualDailySyncReceipt
+            return HRManualDailySyncReceipt("daily-1", "manual_daily_sync", True)
+
+    daily = DailySync()
+    api._manual_daily_sync = daily
+    result = api.manual_daily_sync_command({"agentIds": ["agent-1", "agent-2"]}, body_bytes=40)
+    assert result.status == 202
+    assert daily.calls == [("agent-1", "agent-2")]
+    assert result.payload["command"]["command"] == "manual_daily_sync"
+
+    with pytest.raises(HRAPIValidationError):
+        api.manual_daily_sync_command({}, body_bytes=2)
+    with pytest.raises(HRAPIValidationError):
+        api.manual_daily_sync_command({"agentIds": "agent-1"}, body_bytes=25)
+
+    class InvalidDailySync:
+        def run(self, _ai_ids):
+            error = ValueError("stale selection")
+            error.code = "hr_manual_daily_sync_validation_failed"
+            raise error
+
+    api._manual_daily_sync = InvalidDailySync()
+    invalid = api.manual_daily_sync_command({"agentIds": ["missing"]}, body_bytes=25)
+    assert invalid.status == 400
+    assert invalid.payload["code"] == "hr_manual_daily_sync_validation_failed"
+
+    lifecycle.paused = True
+    unavailable = api.manual_daily_sync_command({"agentIds": ["agent-1"]}, body_bytes=25)
+    assert unavailable.status == 409
+    assert unavailable.payload["code"] == "hr_manual_daily_sync_hr_unavailable"
+
+
 def test_disabled_feature_keeps_reads_available_and_blocks_all_mutation(setup):
     repository, _reporting, _opened, lifecycle, _api = setup
     api = HRManagementAPI(

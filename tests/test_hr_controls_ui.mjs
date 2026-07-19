@@ -64,6 +64,17 @@ assert.equal(hr.state.agents.length, 1);
 assert.match(hr.state.commandNotice, /pause/i);
 assert.equal(hr.state.commandBusy, '');
 
+hr.openDailySync();
+assert.equal(hr.state.dailySyncOpen, true);
+hr.toggleDailySyncAll(true);
+assert.deepEqual(hr.state.dailySyncSelected, ['agent-1']);
+const dailyRequestStart = requests.length;
+assert.equal(await hr.submitDailySync(), true);
+assert.equal(requests[dailyRequestStart].url, '/api/human-resources/daily-sync');
+assert.deepEqual(JSON.parse(requests[dailyRequestStart].options.body), { agentIds: ['agent-1'] });
+assert.equal(hr.state.dailySyncOpen, false);
+assert.deepEqual(hr.state.dailySyncSelected, []);
+
 globalThis.confirm = () => false;
 const requestCount = requests.length;
 assert.equal(await hr.runCommand('resume'), false);
