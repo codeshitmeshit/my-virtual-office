@@ -309,7 +309,10 @@ def test_adapter_identity_and_metadata_preserve_archive_specific_fields(tmp_path
     assert adapter.is_archive_manager("ordinary-agent") is False
     assert adapter.agent_meta("provider-archive-8") == {
         "systemRole": "archive_manager",
+        "systemAgent": True,
         "assignable": False,
+        "deletable": False,
+        "meetingEligible": False,
         "archiveManager": True,
         "archiveManagerStatus": "idle",
         "archiveManagerPaused": False,

@@ -63,6 +63,7 @@ from services import meeting_notifications as meeting_notifications_service
 from services import meeting_callbacks as meeting_callbacks_service
 from services import archive_manager_lifecycle as archive_manager_lifecycle_service
 from services import system_agent_lifecycle as system_agent_lifecycle_service
+from services import system_agent_roles as system_agent_roles_service
 from services.provider_events import ProviderEventJournal, canonical_event_name, sanitize_payload
 from services.provider_approvals import ProviderApprovalService, TrustedApprovalContext
 from services.provider_conversations import CallableConversationStatePort, CallableQueuedConversationPort, ConversationKey, ProviderConversationService
@@ -21900,56 +21901,18 @@ def _archive_manager_profile_check_on_startup():
 
 
 def _archive_manager_public_state(ensure=True):
-    state = _archive_manager_create_if_missing() if ensure else _archive_manager_load_state()
-    if state.get("paused"):
-        state["status"] = "paused"
-        state["label"] = "已暂停"
-    return {
-        "agentId": state.get("agentId") or ARCHIVE_MANAGER_AGENT_ID,
-        "name": state.get("name") or ARCHIVE_MANAGER_NAME,
-        "emoji": state.get("emoji") or ARCHIVE_MANAGER_EMOJI,
-        "providerKind": state.get("providerKind", "openclaw"),
-        "status": state.get("status", "missing"),
-        "label": state.get("label", "未接入"),
-        "phase": "phase-4",
-        "paused": bool(state.get("paused")),
-        "autoCreated": bool(state.get("autoCreated")),
-        "createdAt": state.get("createdAt"),
-        "updatedAt": state.get("updatedAt"),
-        "profileVersion": state.get("profileVersion", ""),
-        "profileUpdatedAt": state.get("profileUpdatedAt"),
-        "communicationSkill": state.get("communicationSkill"),
-        "lastAction": state.get("lastAction", ""),
-        "lastError": state.get("lastError", ""),
-        "recentActivity": (state.get("recentActivity") or [])[-12:],
-    }
+    return _archive_manager_shared_adapter().public_state(ensure=ensure)
 
 
 def _agent_archive_manager_meta(agent_id_or_key):
-    state = _archive_manager_load_state()
-    if not _is_archive_manager_agent(agent_id_or_key):
-        return {}
-    if state.get("status") == "missing" and str(agent_id_or_key or "") in {ARCHIVE_MANAGER_AGENT_ID, ARCHIVE_MANAGER_NAME}:
-        state["status"] = "idle"
-        state["label"] = "已接入"
-        state["agentId"] = ARCHIVE_MANAGER_AGENT_ID
-        state["name"] = ARCHIVE_MANAGER_NAME
-    return {
-        "systemRole": "archive_manager",
-        "assignable": False,
-        "archiveManager": True,
-        "archiveManagerStatus": state.get("status", "missing"),
-        "archiveManagerPaused": bool(state.get("paused")),
-        "archiveManagerLabel": state.get("label", "未接入"),
-    }
+    return _archive_manager_shared_adapter().agent_meta(agent_id_or_key)
 
 
 def _is_archive_manager_agent(agent_id_or_key):
-    needle = str(agent_id_or_key or "")
-    if needle in {ARCHIVE_MANAGER_AGENT_ID, ARCHIVE_MANAGER_NAME}:
+    role = system_agent_roles_service.resolve_system_agent_role(agent_id_or_key)
+    if role is system_agent_roles_service.ARCHIVE_MANAGER_ROLE:
         return True
-    state = _archive_manager_load_state()
-    return bool(needle and needle in {str(state.get("agentId") or ""), str(state.get("name") or "")})
+    return _archive_manager_shared_adapter().is_archive_manager(agent_id_or_key)
 
 
 _PROJECT_AUTHORING_ROOT_STORE = project_authoring_store_service.ProjectAuthoringRootStore(
@@ -21998,36 +21961,26 @@ def _archive_manager_chat_guard(to_agent_id, message):
 
 def _handle_archive_manager_update(body):
     action = str((body or {}).get("action") or "").strip().lower()
+    if action not in {"pause", "resume"}:
+        return {"error": "Unsupported archive manager action", "_status": 400}
     try:
-        state = _archive_manager_create_if_missing()
+        adapter = _archive_manager_shared_adapter()
+        adapter.update(action)
+        public = adapter.public_state(ensure=False)
+        activity = (public.get("recentActivity") or [])[-1:]
+        return {
+            "ok": True,
+            "archiveManager": public,
+            "activity": activity[0] if activity else None,
+        }
     except Exception as exc:
-        state = _archive_manager_load_state()
-        state["status"] = "error"
-        state["label"] = "档案管理员不可用"
-        state["lastError"] = str(exc)
-        _archive_manager_append_activity(state, f"auto_{event_type}", "error", "自动整理失败", project_id=project_id, error=str(exc))
-        try:
-            _archive_manager_save_state(state)
-        except Exception:
-            pass
-        return {"ok": False, "status": "error", "error": str(exc), "eventType": event_type}
-    if action == "pause":
-        state["paused"] = True
-        state["status"] = "paused"
-        state["label"] = "已暂停"
-        _archive_manager_append_activity(state, "pause", "ok", "档案管理员已暂停")
-        gateway_presence.set_manual_override(state.get("agentId") or ARCHIVE_MANAGER_AGENT_ID, "break", "Archive manager paused")
-        saved = _archive_manager_save_state(state)
-        return {"ok": True, "archiveManager": _archive_manager_public_state(ensure=False), "activity": (saved.get("recentActivity") or [])[-1]}
-    if action == "resume":
-        state["paused"] = False
-        state["status"] = "idle"
-        state["label"] = "已接入"
-        _archive_manager_append_activity(state, "resume", "ok", "档案管理员已恢复")
-        gateway_presence.set_manual_override(state.get("agentId") or ARCHIVE_MANAGER_AGENT_ID, "idle", "")
-        saved = _archive_manager_save_state(state)
-        return {"ok": True, "archiveManager": _archive_manager_public_state(ensure=False), "activity": (saved.get("recentActivity") or [])[-1]}
-    return {"error": "Unsupported archive manager action", "_status": 400}
+        return {
+            "ok": False,
+            "status": "error",
+            "error": str(exc),
+            "archiveManager": _archive_manager_public_state(ensure=False),
+            "_status": 409,
+        }
 
 
 def _handle_archive_manager_manual_maintain(project_id):

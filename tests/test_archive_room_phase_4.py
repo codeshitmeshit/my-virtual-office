@@ -212,8 +212,13 @@ def test_archive_manager_creation_failure_degrades_readonly():
 def test_archive_manager_pause_resume_and_manual_maintain_current_project():
     with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as oc_home:
         old = with_phase4_store(status_dir, oc_home)
+        original_presence = server.gateway_presence.set_manual_override
+        presence_calls = []
         try:
             install_fake_gateway(oc_home)
+            server.gateway_presence.set_manual_override = (
+                lambda agent_id, state, reason: presence_calls.append((agent_id, state, reason))
+            )
             project = server._handle_project_create({"title": "Maintain Me"})["project"]
             pause = server._handle_archive_manager_update({"action": "pause"})
             assert pause["ok"] is True
@@ -230,7 +235,12 @@ def test_archive_manager_pause_resume_and_manual_maintain_current_project():
             assert resume["ok"] is True
             assert resume["archiveManager"]["paused"] is False
             assert resume["archiveManager"]["status"] == "idle"
+            assert presence_calls == [
+                ("archive-manager", "break", "System Agent paused by human control"),
+                ("archive-manager", "idle", ""),
+            ]
         finally:
+            server.gateway_presence.set_manual_override = original_presence
             restore_phase4_store(old)
 
 
@@ -261,7 +271,10 @@ def test_archive_manager_cannot_be_deleted_or_assigned_to_project_tasks():
 
             meta = server._agent_archive_manager_meta("archive-manager")
             assert meta["systemRole"] == "archive_manager"
+            assert meta["systemAgent"] is True
             assert meta["assignable"] is False
+            assert meta["deletable"] is False
+            assert meta["meetingEligible"] is False
         finally:
             restore_phase4_store(old)
 

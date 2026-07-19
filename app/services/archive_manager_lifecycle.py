@@ -403,7 +403,10 @@ class ArchiveManagerLifecycleAdapter:
         state = self.repository.load()
         return {
             "systemRole": ARCHIVE_MANAGER_ROLE.role_key,
+            "systemAgent": True,
             "assignable": ARCHIVE_MANAGER_ROLE.assignable,
+            "deletable": ARCHIVE_MANAGER_ROLE.deletable,
+            "meetingEligible": ARCHIVE_MANAGER_ROLE.meeting_eligible,
             "archiveManager": True,
             "archiveManagerStatus": state.status.value,
             "archiveManagerPaused": state.paused,
