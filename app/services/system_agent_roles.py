@@ -34,6 +34,8 @@ def _validate_safe_relative_file(value: str, *, field: str) -> None:
         or path.is_absolute()
         or len(path.parts) != 1
         or path.name in {".", ".."}
+        or "/" in value
+        or "\\" in value
         or "\x00" in value
     ):
         raise SystemAgentRoleError(f"{field} must be one safe relative filename")
@@ -198,7 +200,14 @@ class SystemAgentRoleRegistry:
         return True if role is None else role.meeting_eligible
 
 
-_STANDARD_PROFILE_FILES = ("IDENTITY.md", "SOUL.md", "AGENTS.md", "agent.md")
+_STANDARD_PROFILE_FILES = (
+    "IDENTITY.md",
+    "SOUL.md",
+    "AGENTS.md",
+    "agent.md",
+    "MEMORY.md",
+    "HEARTBEAT.md",
+)
 
 ARCHIVE_MANAGER_ROLE = SystemAgentRole(
     role_key="archive_manager",

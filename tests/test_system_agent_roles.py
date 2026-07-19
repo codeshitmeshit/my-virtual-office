@@ -51,6 +51,7 @@ def test_default_roles_are_immutable_and_preserve_distinct_policies():
     assert ARCHIVE_MANAGER_ROLE.assignable is False
     assert ARCHIVE_MANAGER_ROLE.deletable is False
     assert ARCHIVE_MANAGER_ROLE.meeting_eligible is False
+    assert {"MEMORY.md", "HEARTBEAT.md"}.issubset(ARCHIVE_MANAGER_ROLE.required_files)
 
     assert HR_ROLE.stable_id == "hr"
     assert HR_ROLE.assignable is False
@@ -131,6 +132,7 @@ def test_future_role_registration_requires_no_domain_subclass():
         {"required_files": ()},
         {"required_files": ("AGENTS.md", "AGENTS.md")},
         {"required_files": ("nested/AGENTS.md",)},
+        {"required_files": ("nested\\AGENTS.md",)},
         {"automatic_work_categories": ("not-valid",)},
         {"automatic_work_categories": ("same", "same")},
         {"aliases": ("future-agent",)},
