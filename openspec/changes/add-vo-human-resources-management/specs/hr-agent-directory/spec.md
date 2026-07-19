@@ -79,6 +79,11 @@ HR SHALL ask a newly discovered or materially stale Agent to describe its identi
 - **AND** a previously received raw response awaiting HR summarization SHALL be summarized without asking that Agent again
 - **AND** one Agent's failure or non-response SHALL NOT block other eligible introductions
 
+#### Scenario: Agent supports structured introduction output
+- **WHEN** HR requests an Agent introduction
+- **THEN** the request SHALL include a versioned JSON context and a preferred exact JSON response containing identity, responsibilities, strengths, and collaboration scenarios
+- **AND** a Provider that cannot reliably return JSON MAY answer in natural language without losing its raw response
+
 ### Requirement: Global Agent-directory skill
 The system SHALL expose one repository-owned Agent-directory skill through the current VO instance's built-in `/skills` catalog. The skill SHALL direct every Provider to the controlled information-query capability for each visible Agent's name, concise introduction, AI ID, availability, and permitted work information, and SHALL NOT be copied or installed into individual Agent workspaces.
 

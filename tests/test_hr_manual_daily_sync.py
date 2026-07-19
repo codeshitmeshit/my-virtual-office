@@ -30,8 +30,10 @@ NOW = datetime(2026, 7, 20, 10, tzinfo=timezone.utc)
 class FakeConversation:
     def __init__(self):
         self.responses = {"agent-1": "first corrected report", "agent-2": None}
+        self.agent_calls = []
 
-    def ask_agent(self, ai_id, _message, _key, _timeout):
+    def ask_agent(self, ai_id, message, _key, _timeout):
+        self.agent_calls.append((ai_id, message))
         return self.responses[ai_id]
 
     def ask_hr(self, prompt, _key, _timeout):
@@ -90,6 +92,8 @@ def test_manual_sync_replaces_report_and_versions_assessment(tmp_path):
     first = service.synchronize(("agent-1",), command_id="command-1")
     assert first.updated == 1
     assert first.assessed == 1
+    assert '"requestType":"vo.hr.daily_report"' in fake.agent_calls[0][1]
+    assert '"agentAiId":"agent-1"' in fake.agent_calls[0][1]
     report = repository.get_daily_report("agent-1", "2026-07-20")
     assessment = repository.get_current_assessment("agent-1", "2026-07-20")
     assert report.raw_response == "first corrected report"

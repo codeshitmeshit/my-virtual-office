@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -22,6 +23,31 @@ INTRODUCTION_REQUEST_MESSAGE = (
     "请介绍你的身份、主要职责、擅长处理的工作，以及其他 Agent 在什么情况下适合与你协作。"
     "请只描述你真实具备的能力，不要推测或虚构。"
 )
+
+
+def introduction_request_message(ai_id: str) -> str:
+    context = {
+        "schemaVersion": 1,
+        "requestType": "vo.hr.agent_introduction",
+        "agentAiId": ai_id,
+    }
+    response = {
+        "schemaVersion": 1,
+        "agentAiId": ai_id,
+        "identity": "<self-described identity>",
+        "responsibilities": ["<responsibility>"],
+        "strengths": ["<strength>"],
+        "collaborationScenarios": ["<when another Agent should collaborate with you>"],
+    }
+    return (
+        f"{INTRODUCTION_REQUEST_MESSAGE}\n\n"
+        f"请求上下文（JSON）：\n{json.dumps(context, ensure_ascii=False, separators=(',', ':'))}\n\n"
+        "请优先只返回一个 JSON 对象，字段和类型严格参考以下模板；"
+        "没有内容的数组请返回 []，不要添加其他字段或 Markdown 代码块：\n"
+        f"{json.dumps(response, ensure_ascii=False, separators=(',', ':'))}\n"
+        "如果当前运行环境确实无法输出合法 JSON，可以改用清晰的自然语言回答；"
+        "系统仍会保留原始回答并交由 HR 总结。"
+    )
 
 
 class HRInformationCompletionValidationError(ValueError):
@@ -146,7 +172,7 @@ class HRInformationCompletionService:
         if current is None or current.state not in {"response_received", "published"}:
             request = self._workflow.process(
                 (ai_id,),
-                message=INTRODUCTION_REQUEST_MESSAGE,
+                message=introduction_request_message(ai_id),
             )[0]
             if request.status not in {"response_received", "already_complete"}:
                 return HRInformationCompletionItem(ai_id, request.status, request.error_code)

@@ -21,6 +21,42 @@ class HRReportingValidationError(ValueError):
     code = "hr_reporting_validation_failed"
 
 
+def daily_report_request_message(base_message: str, *, ai_id: str, local_date: str) -> str:
+    """Build the provider-neutral preferred JSON contract with a text fallback."""
+    if not isinstance(base_message, str) or not base_message.strip():
+        raise HRReportingValidationError("daily report message must not be empty")
+    context = {
+        "schemaVersion": 1,
+        "requestType": "vo.hr.daily_report",
+        "agentAiId": ai_id,
+        "localDate": local_date,
+    }
+    response = {
+        "schemaVersion": 1,
+        "agentAiId": ai_id,
+        "localDate": local_date,
+        "completedWork": [],
+        "relatedProjectsOrTasks": [
+            {"type": "<project-or-task>", "id": "<stable-id>", "title": "<title>"}
+        ],
+        "artifacts": [
+            {"id": "<artifact-id>", "name": "<artifact-name>", "type": "<artifact-type>"}
+        ],
+        "blockers": [],
+        "requestedHelp": [],
+    }
+    return (
+        f"{base_message.strip()}\n\n"
+        "请求上下文（JSON）：\n"
+        f"{json.dumps(context, ensure_ascii=False, separators=(',', ':'))}\n\n"
+        "请优先只返回一个 JSON 对象，字段和类型严格参考以下模板；"
+        "没有内容的数组请返回 []，不要添加其他字段或 Markdown 代码块：\n"
+        f"{json.dumps(response, ensure_ascii=False, separators=(',', ':'))}\n"
+        "如果当前运行环境确实无法输出合法 JSON，可以改用清晰的自然语言回答；"
+        "系统会保留原始回答并交由 HR 归一化。不要虚构未发生的工作。"
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class ReportingCycleResult:
     cycle: DailyCycleRecord
@@ -337,11 +373,18 @@ class HRDailyReportCollector:
                     )
                     continue
                 token = claim.claim_token
+                cycle = self._repository.get_daily_cycle(claim.cycle_id)
+                if cycle is None:
+                    raise HRReportingValidationError("daily report cycle does not exist")
                 response = self._conversation.ask_agent_as_hr(
                     DailyReportConversationRequest(
                         sender_ai_id=self._hr_ai_id,
                         target_ai_id=claim.ai_id,
-                        message=message,
+                        message=daily_report_request_message(
+                            message,
+                            ai_id=claim.ai_id,
+                            local_date=cycle.local_date,
+                        ),
                         conversation_key=claim.conversation_key,
                         idempotency_key=claim.occurrence_key,
                         timeout_seconds=self._timeout_seconds,

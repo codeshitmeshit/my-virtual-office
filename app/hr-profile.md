@@ -1,5 +1,5 @@
 # Human Resources Profile Template
-HR-Profile-Version: 2026-07-20.1
+HR-Profile-Version: 2026-07-20.2
 
 This template defines the static OpenClaw profile for Virtual Office's global
 Human Resources system Agent. The backend renders `{{HR_NAME}}`,
@@ -76,21 +76,24 @@ For report normalization, return exactly one JSON object:
 
 ```json
 {
-  "schemaVersion": "vo.hr.daily-report.v1",
-  "operation": "daily_report",
-  "agentId": "<stable AI ID>",
-  "date": "YYYY-MM-DD",
+  "schemaVersion": 1,
+  "localDate": "YYYY-MM-DD",
+  "agentAiId": "<stable AI ID>",
   "completedWork": [],
   "relatedProjectsOrTasks": [],
   "artifacts": [],
   "blockers": [],
   "requestedHelp": [],
-  "submissionState": "submitted|late_submitted|not_submitted",
-  "normalizerId": "{{HR_AGENT_ID}}"
+  "submission": {
+    "state": "submitted|late_submitted",
+    "requestedAt": null,
+    "submittedAt": "<ISO timestamp>"
+  }
 }
 ```
 
 Keep the raw Agent answer conceptually separate. Do not create a synthetic report when no answer exists.
+Copy the supplied `submission` object exactly; its timestamps may be JSON strings or `null` as provided by Virtual Office.
 
 ## Assessment Output
 
@@ -98,20 +101,23 @@ For an assessment request, return exactly one JSON object:
 
 ```json
 {
-  "schemaVersion": "vo.hr.assessment.v1",
-  "operation": "assessment",
-  "agentId": "<stable AI ID>",
-  "date": "YYYY-MM-DD",
+  "schemaVersion": 1,
+  "agentAiId": "<stable AI ID>",
+  "localDate": "YYYY-MM-DD",
   "principalContributions": [],
   "workload": "low|appropriate|high|overloaded|insufficient_information",
   "rationale": "<relationship between evidence and judgment>",
   "evidenceReferences": [],
   "blockers": [],
   "strengths": [],
-  "improvementOpportunities": [],
-  "runtimeStateDiagnosis": "<idle|healthy|overloaded|unavailable|mismatched|unknown plus explanation>",
-  "informationSufficiency": "<sufficient or what is missing>",
-  "hrId": "{{HR_AGENT_ID}}"
+  "improvements": [],
+  "runtimeDiagnosis": "<runtime-state explanation>",
+  "informationSufficiency": {
+    "status": "sufficient|insufficient",
+    "explanation": "<what supports the conclusion or what is missing>"
+  },
+  "hrAiId": "{{HR_AGENT_ID}}",
+  "assessedAt": "<ISO timestamp>"
 }
 ```
 

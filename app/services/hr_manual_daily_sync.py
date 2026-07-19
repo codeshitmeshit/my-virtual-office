@@ -16,6 +16,7 @@ from services.hr_reporting import (
     DailyReportConversationRequest,
     HRDailyReportNormalizer,
     HRReportingService,
+    daily_report_request_message,
 )
 from services.hr_repository import AgentRecord, HRRepository
 
@@ -205,7 +206,11 @@ class HRManualDailySyncService:
                 DailyReportConversationRequest(
                     sender_ai_id="hr",
                     target_ai_id=ai_id,
-                    message=DAILY_REPORT_REQUEST_MESSAGE,
+                    message=daily_report_request_message(
+                        DAILY_REPORT_REQUEST_MESSAGE,
+                        ai_id=ai_id,
+                        local_date=local_date,
+                    ),
                     conversation_key=f"hr:manual-daily-report:{local_date}:{ai_id}:{command_id}",
                     idempotency_key=f"hr-manual-daily:{command_id}:{ai_id}",
                     timeout_seconds=self._timeout_seconds,

@@ -16,6 +16,7 @@ from services.hr_reporting import (
     HRDailyReportCollector,
     HRReportingService,
     HRReportingValidationError,
+    daily_report_request_message,
 )
 from services.hr_repository import HRRepository
 
@@ -88,7 +89,13 @@ def test_visible_request_preserves_context_idempotency_and_raw_response(setup):
     assert result[0].status == "submitted"
     sent = conversation.calls[0]
     assert (sent.sender_ai_id, sent.target_ai_id) == ("hr", "agent-1")
-    assert sent.message == MESSAGE
+    assert sent.message.startswith(MESSAGE)
+    assert '"requestType":"vo.hr.daily_report"' in sent.message
+    assert '"agentAiId":"agent-1"' in sent.message
+    assert '"localDate":"2026-07-19"' in sent.message
+    assert '"completedWork":[]' in sent.message
+    assert "无法输出合法 JSON" in sent.message
+    assert "```" not in sent.message
     assert sent.conversation_key == "hr:daily-report:2026-07-19:agent-1"
     assert sent.idempotency_key == "hr-daily-request:2026-07-19:agent-1"
     assert sent.timeout_seconds == 12.5
@@ -167,3 +174,21 @@ def test_collection_module_has_no_server_or_transport_dependency():
     assert "import server" not in source
     assert "OfficeHandler" not in source
     assert "http.server" not in source
+
+
+def test_daily_report_contract_escapes_identity_and_keeps_text_fallback():
+    message = daily_report_request_message(
+        "日报", ai_id='agent-"quoted', local_date="2026-07-19"
+    )
+    assert 'agent-\\"quoted' in message
+    assert "自然语言回答" in message
+
+
+def test_structured_agent_json_is_preserved_as_raw_before_hr_normalization(setup):
+    repository, reporting, opened = setup
+    raw = '{"schemaVersion":1,"agentAiId":"agent-1","localDate":"2026-07-19","completedWork":["done"],"relatedProjectsOrTasks":[],"artifacts":[],"blockers":[],"requestedHelp":[]}'
+    result = collector(
+        repository, reporting, FakeConversation({"agent-1": raw})
+    ).process_requests((opened.requests[0].id,), message=MESSAGE, worker_id="json-worker")
+    assert result[0].status == "submitted"
+    assert repository.get_daily_report("agent-1", "2026-07-19").raw_response == raw

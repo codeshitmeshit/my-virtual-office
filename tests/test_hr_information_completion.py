@@ -102,6 +102,11 @@ def test_completion_only_contacts_available_agents_with_missing_introductions(tm
     assert result.published == 2
     assert result.failed == 0
     assert [call[0] for call in agent_calls] == ["missing"]
+    assert '"requestType":"vo.hr.agent_introduction"' in agent_calls[0][1]
+    assert '"agentAiId":"missing"' in agent_calls[0][1]
+    assert '"responsibilities":["<responsibility>"]' in agent_calls[0][1]
+    assert "自然语言回答" in agent_calls[0][1]
+    assert "```" not in agent_calls[0][1]
     assert len(hr_calls) == 2
     assert repo.get_current_introduction("missing").introduction == "Coordinates infrastructure incidents."
     assert repo.get_current_introduction("waiting-summary").introduction == "Reviews release quality."

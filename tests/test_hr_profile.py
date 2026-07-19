@@ -15,7 +15,7 @@ from services.system_agent_profiles import load_and_render_profile
 from services.system_agent_roles import HR_ROLE
 
 
-PROFILE_VERSION = "2026-07-20.1"
+PROFILE_VERSION = "2026-07-20.2"
 TOKENS = {
     "HR_NAME": HR_ROLE.display_name,
     "HR_EMOJI": HR_ROLE.emoji,
@@ -77,16 +77,28 @@ def test_hr_profile_contains_versioned_machine_readable_output_contracts():
     examples = structured_examples(agents)
     assert [item["schemaVersion"] for item in examples] == [
         1,
-        "vo.hr.daily-report.v1",
-        "vo.hr.assessment.v1",
+        1,
+        1,
     ]
     assert examples[0]["supportingEvidence"] == [
         "<exact excerpt from the Agent response>"
     ]
     assert examples[0]["materialConflict"] is False
-    assert examples[1]["normalizerId"] == "hr"
+    daily = examples[1]
+    assert set(daily) == {
+        "schemaVersion", "localDate", "agentAiId", "completedWork",
+        "relatedProjectsOrTasks", "artifacts", "blockers", "requestedHelp",
+        "submission",
+    }
+    assert daily["submission"]["state"] == "submitted|late_submitted"
     assessment = examples[2]
-    assert assessment["hrId"] == "hr"
+    assert set(assessment) == {
+        "schemaVersion", "agentAiId", "localDate", "principalContributions",
+        "workload", "rationale", "evidenceReferences", "blockers", "strengths",
+        "improvements", "runtimeDiagnosis", "informationSufficiency", "hrAiId",
+        "assessedAt",
+    }
+    assert assessment["hrAiId"] == "hr"
     assert assessment["workload"] == "low|appropriate|high|overloaded|insufficient_information"
     assert {
         "principalContributions",
@@ -94,9 +106,10 @@ def test_hr_profile_contains_versioned_machine_readable_output_contracts():
         "evidenceReferences",
         "blockers",
         "strengths",
-        "improvementOpportunities",
-        "runtimeStateDiagnosis",
+        "improvements",
+        "runtimeDiagnosis",
         "informationSufficiency",
+        "assessedAt",
     }.issubset(assessment)
 
 

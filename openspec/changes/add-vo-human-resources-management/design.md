@@ -180,6 +180,8 @@ The HTTP server thread never waits for all Agents. Manual management actions enq
 1. `ask_agent_as_hr(target, message, conversation_key, timeout)` uses the existing office-mediated Agent communication path with HR as the sender, preserving visible sender/target context and a deterministic idempotency key.
 2. `ask_hr(prompt, conversation_key, timeout)` invokes the HR Agent for normalization, introduction summarization, or assessment and validates a versioned structured JSON response.
 
+Every introduction and daily-report question includes a JSON request-context envelope with `schemaVersion`, request type, and stable Agent identity (plus the VO-local date for reports), followed by an exact preferred JSON response template. Agents are asked to return only that object without Markdown when supported. Natural-language responses remain an explicit compatibility fallback for Providers that cannot reliably produce JSON; they are preserved as raw claims and passed through the same strict HR normalization. HR normalization and assessment outputs remain mandatory, exact-key JSON contracts, and the versioned HR Profile examples must match the runtime parsers.
+
 Introduction flow:
 
 ```mermaid

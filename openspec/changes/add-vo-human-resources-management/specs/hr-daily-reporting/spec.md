@@ -24,6 +24,19 @@ For each submitted report, HR SHALL preserve the Agent's original response and p
 - **WHEN** HR cannot normalize a valid raw response
 - **THEN** the raw response SHALL remain available and the report SHALL be marked `normalization_failed` for retry
 
+### Requirement: Versioned structured report request contract
+Every HR daily-report question SHALL identify its request as `vo.hr.daily_report` using a JSON context containing schema version, stable Agent AI ID, and VO-local date, and SHALL provide an exact preferred JSON response shape for completed work, related projects or tasks, artifacts, blockers, and requested help.
+
+#### Scenario: Agent supports structured output
+- **WHEN** a targeted Agent can produce valid JSON
+- **THEN** it SHOULD return only the requested JSON object without Markdown or additional fields
+- **AND** HR SHALL still preserve that JSON text as the Agent-authored raw response before normalization
+
+#### Scenario: Provider cannot reliably produce JSON
+- **WHEN** a targeted Agent cannot return valid JSON in its current runtime
+- **THEN** it MAY return a clear natural-language report
+- **AND** the system SHALL preserve and normalize that response through the same strict HR output contract instead of rejecting the submission
+
 ### Requirement: Neutral non-submission and late submission
 The reporting workflow MUST treat missing responses as an unknown submission state rather than evidence of low work, MUST NOT invent a replacement report, and SHALL allow a later response to complete the same dated record.
 
