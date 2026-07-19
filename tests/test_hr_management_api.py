@@ -138,7 +138,8 @@ def test_overview_has_lifecycle_counts_cycle_status_and_activity_without_raw_rep
 
 
 def test_agent_detail_is_full_human_projection_with_independent_cursors(setup):
-    _repository, _reporting, _opened, _lifecycle, api = setup
+    repository, _reporting, _opened, _lifecycle, api = setup
+    access_count = len(repository.list_access_log().items)
     result = api.agent_detail("agent-1", report_limit=1, assessment_limit=1)
     assert result.status == 200
     agent = result.payload["agent"]
@@ -147,6 +148,7 @@ def test_agent_detail_is_full_human_projection_with_independent_cursors(setup):
     assert agent["introduction"] == "Builds APIs"
     assert agent["reports"][0]["rawResponse"] == "private daily report"
     assert "secret_digest" not in str(agent)
+    assert len(repository.list_access_log().items) == access_count
     missing = api.agent_detail("missing")
     assert missing.status == 404
     assert missing.payload["code"] == "hr_agent_not_found"
