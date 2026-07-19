@@ -242,12 +242,14 @@ def test_archive_manager_cannot_be_deleted_or_assigned_to_project_tasks():
             server._handle_archive_room_overview()
             blocked_delete = server._handle_agent_delete({"id": "archive-manager"})
             assert blocked_delete["_status"] == 403
+            assert blocked_delete["code"] == "archive_manager_cannot_delete"
 
             project_block = server._handle_project_create({
                 "title": "Blocked Defaults",
                 "defaultExecutorAgentId": "archive-manager",
             })
             assert project_block["_status"] == 400
+            assert project_block["code"] == "archive_manager_not_assignable"
 
             project = server._handle_project_create({"title": "Task Project"})["project"]
             task_block = server._handle_task_create(project["id"], {
@@ -255,10 +257,32 @@ def test_archive_manager_cannot_be_deleted_or_assigned_to_project_tasks():
                 "assignee": "archive-manager",
             })
             assert task_block["_status"] == 400
+            assert task_block["code"] == "archive_manager_not_assignable"
 
             meta = server._agent_archive_manager_meta("archive-manager")
             assert meta["systemRole"] == "archive_manager"
             assert meta["assignable"] is False
+        finally:
+            restore_phase4_store(old)
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="Known pre-policy defect: the legacy meeting-create path does not enforce archive-manager participant exclusion; task 4.5 must make this pass.",
+)
+def test_legacy_meeting_create_preserves_archive_manager_exclusion():
+    with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as oc_home:
+        old = with_phase4_store(status_dir, oc_home)
+        try:
+            blocked = server._handle_meeting_create({
+                "topic": "Archive manager must remain excluded",
+                "participants": ["archive-manager", "main"],
+                "organizer": "main",
+            })
+
+            assert blocked["_status"] == 400
+            assert blocked["code"] == "archive_manager_not_meeting_participant"
+            assert blocked["blockedParticipants"] == ["archive-manager"]
         finally:
             restore_phase4_store(old)
 
