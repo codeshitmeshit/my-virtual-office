@@ -312,6 +312,14 @@ VO_CODEX_SANDBOX=danger-full-access
 VO_CODEX_APPROVAL_POLICY=never
 ```
 
+这个组合会让本地 bridge 使用 Codex 原生完整权限启动方式：
+
+```bash
+codex --dangerously-bypass-approvals-and-sandbox app-server --stdio
+```
+
+原生 flag 位于 `app-server` 子命令之前，同时 thread/turn 仍会收到 `danger-full-access` 和 `never`，确保新线程与恢复线程使用一致的权限策略。
+
 如果同时启用 `VO_CODEX_ROUTE_APPROVALS_THROUGH_VO=true`，审批策略会强制设为 `untrusted`，以保证审批卡片能够路由到 Virtual Office；这时 `never` 不生效。未知配置值会安全回退为 `workspace-write` 和 `on-request`。
 
 ## 本地数据

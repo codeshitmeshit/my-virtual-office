@@ -73,6 +73,7 @@ Relevant routes:
 - `VO_CODEX_SANDBOX` accepts `read-only`, `workspace-write`, and `danger-full-access`. The first two disable network access by default, and `workspace-write` limits writable roots to the configured workspace.
 - `VO_CODEX_APPROVAL_POLICY` accepts `untrusted`, `on-request`, and `never`. `never` does not auto-approve requests; it tells Codex not to ask, so operations blocked by the sandbox fail directly.
 - Use `danger-full-access` together with `never` only on a trusted development machine because Codex can access files outside the workspace and the network.
+- Only when `danger-full-access` and `never` are set without VO approval routing, the local bridge launches as `codex --dangerously-bypass-approvals-and-sandbox app-server --stdio` and continues to send the equivalent policy explicitly on thread and turn requests.
 - When `VO_CODEX_ROUTE_APPROVALS_THROUGH_VO=true`, the adapter forces `untrusted` so approval requests can be handled in Virtual Office.
 - The default app-server transport is local stdio. Do not expose an unauthenticated listener on a non-loopback interface.
 
