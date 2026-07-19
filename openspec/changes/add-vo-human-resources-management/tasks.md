@@ -85,7 +85,7 @@
 
 ## 12. Human Resources User Experience
 
-- [ ] 12.1 Add `app/human-resources.css`, the first-level Human Resources toolbar entry, independent modal shell, script/style registration, and responsive list/detail layout without coupling to Archive Room JavaScript state.
+- [x] 12.1 Add `app/human-resources.css`, the first-level Human Resources toolbar entry, independent modal shell, script/style registration, and responsive list/detail layout without coupling to Archive Room JavaScript state.
 - [ ] 12.2 Implement `app/human-resources.js` management-token overview loading and rendering for HR state, Agent availability totals, daily status counts, recent activity, unresolved/failed prioritization, loading, empty, and degraded states with pure-helper Node tests.
 - [ ] 12.3 Implement Agent detail rendering for identity/provenance, raw versus normalized reports, assessment versions, workload history, evidence, blockers, improvements, workflow state, and authorized access history with pagination and stale-request protection.
 - [ ] 12.4 Implement HR pause/resume and cycle run/close/retry controls with confirmation, busy/error feedback, scroll/state preservation, and tests proving existing data remains browsable while HR is paused or failed.
