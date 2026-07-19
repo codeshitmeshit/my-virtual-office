@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Callable, Iterable, Protocol, Sequence
@@ -100,12 +102,30 @@ class HRConversationPort(Protocol):
     ) -> str | None: ...
 
 
+class HRSummarizationPort(Protocol):
+    def ask_hr(
+        self,
+        prompt: str,
+        conversation_key: str,
+        timeout_seconds: float,
+    ) -> str | None: ...
+
+
 @dataclass(frozen=True, slots=True)
 class IntroductionProcessingResult:
     ai_id: str
     status: str
     conversation_key: str
     attempt_count: int
+    error_code: str
+
+
+@dataclass(frozen=True, slots=True)
+class IntroductionSummaryResult:
+    ai_id: str
+    status: str
+    version: int
+    conversation_key: str
     error_code: str
 
 
@@ -478,3 +498,180 @@ class HRIntroductionWorkflow:
                     )
                 )
         return tuple(results)
+
+
+class HRIntroductionSummarizer:
+    """Validates HR structured summaries before versioned publication."""
+
+    def __init__(
+        self,
+        repository: HRRepository,
+        hr: HRSummarizationPort,
+        *,
+        hr_ai_id: str = "hr",
+        timeout_seconds: float = 30.0,
+    ):
+        if not isinstance(repository, HRRepository):
+            raise HRDirectoryValidationError("repository must be an HRRepository")
+        if not callable(getattr(hr, "ask_hr", None)):
+            raise HRDirectoryValidationError("HR summarization port is invalid")
+        if (
+            isinstance(timeout_seconds, bool)
+            or not isinstance(timeout_seconds, (int, float))
+            or not 0.1 <= float(timeout_seconds) <= 300
+        ):
+            raise HRDirectoryValidationError("timeout_seconds must be between 0.1 and 300")
+        self._repository = repository
+        self._hr = hr
+        self._hr_ai_id = hr_ai_id
+        self._timeout_seconds = float(timeout_seconds)
+
+    @staticmethod
+    def _conversation_key(ai_id: str, version: int, raw_response: str) -> str:
+        fingerprint = hashlib.sha256(raw_response.encode("utf-8")).hexdigest()[:16]
+        return f"hr:introduction-summary:{ai_id}:v{version}:{fingerprint}"
+
+    @staticmethod
+    def _prompt(ai_id: str, raw_response: str, previous_introduction: str) -> str:
+        previous = previous_introduction or "(none)"
+        return (
+            "Return only JSON with keys schemaVersion, introduction, supportingEvidence, "
+            "materialConflict, clarificationQuestion. schemaVersion must be 1. "
+            "supportingEvidence must contain exact excerpts from the Agent response. "
+            "Do not invent responsibilities. If the response materially conflicts with the "
+            "previous introduction, set materialConflict=true, keep introduction empty, and "
+            "provide one neutral clarificationQuestion.\n"
+            f"Agent AI ID: {ai_id}\n"
+            f"Previous introduction: {previous}\n"
+            f"Agent response:\n{raw_response}"
+        )
+
+    @staticmethod
+    def _validate_output(payload: str, raw_response: str, *, has_previous: bool) -> dict[str, object]:
+        if not isinstance(payload, str) or not payload.strip():
+            raise HRDirectoryValidationError("HR returned no structured introduction")
+        if len(payload) > 20_000:
+            raise HRDirectoryValidationError("HR structured introduction is too large")
+        try:
+            value = json.loads(payload)
+        except json.JSONDecodeError as exc:
+            raise HRDirectoryValidationError("HR structured introduction is malformed JSON") from exc
+        expected_keys = {
+            "schemaVersion",
+            "introduction",
+            "supportingEvidence",
+            "materialConflict",
+            "clarificationQuestion",
+        }
+        if not isinstance(value, dict) or set(value) != expected_keys:
+            raise HRDirectoryValidationError("HR structured introduction has an invalid schema")
+        if value["schemaVersion"] != 1 or isinstance(value["schemaVersion"], bool):
+            raise HRDirectoryValidationError("HR introduction schema version is unsupported")
+        introduction = value["introduction"]
+        evidence = value["supportingEvidence"]
+        conflict = value["materialConflict"]
+        question = value["clarificationQuestion"]
+        if not isinstance(introduction, str) or len(introduction.strip()) > 1_000:
+            raise HRDirectoryValidationError("HR introduction text is invalid")
+        if (
+            not isinstance(evidence, list)
+            or not 1 <= len(evidence) <= 10
+            or any(
+                not isinstance(item, str)
+                or not item.strip()
+                or len(item) > 500
+                or item not in raw_response
+                for item in evidence
+            )
+        ):
+            raise HRDirectoryValidationError("HR introduction lacks supported evidence")
+        if not isinstance(conflict, bool) or not isinstance(question, str):
+            raise HRDirectoryValidationError("HR conflict fields are invalid")
+        if conflict:
+            if not has_previous or introduction.strip() or not question.strip() or len(question) > 1_000:
+                raise HRDirectoryValidationError("HR clarification result is invalid")
+        elif not introduction.strip() or question.strip():
+            raise HRDirectoryValidationError("HR publication result is invalid")
+        return value
+
+    def summarize(
+        self,
+        ai_id: str,
+        *,
+        expected_version: int,
+        raw_response: str | None = None,
+    ) -> IntroductionSummaryResult:
+        current = self._repository.get_current_introduction(ai_id)
+        if current is None:
+            return IntroductionSummaryResult(ai_id, "missing_response", 0, "", "hr_introduction_missing")
+        if current.version != expected_version:
+            return IntroductionSummaryResult(
+                ai_id,
+                "failed",
+                current.version,
+                "",
+                "hr_introduction_version_conflict",
+            )
+        if current.state == "published" and raw_response is None:
+            return IntroductionSummaryResult(ai_id, "already_published", current.version, "", "")
+        if current.state == "clarification_pending" and raw_response is None:
+            return IntroductionSummaryResult(
+                ai_id,
+                "awaiting_clarification",
+                current.version,
+                "",
+                "",
+            )
+        candidate = raw_response if raw_response is not None else current.raw_response
+        if not isinstance(candidate, str) or not candidate.strip():
+            return IntroductionSummaryResult(
+                ai_id,
+                "missing_response",
+                current.version,
+                "",
+                "hr_introduction_missing",
+            )
+        if current.state == "published" and candidate == current.raw_response:
+            return IntroductionSummaryResult(ai_id, "already_published", current.version, "", "")
+        key = self._conversation_key(ai_id, current.version, candidate)
+        try:
+            payload = self._hr.ask_hr(
+                self._prompt(ai_id, candidate, current.introduction),
+                key,
+                self._timeout_seconds,
+            )
+            value = self._validate_output(
+                payload,
+                candidate,
+                has_previous=bool(current.introduction),
+            )
+            conflict = bool(value["materialConflict"])
+            saved = self._repository.save_introduction(
+                ai_id=ai_id,
+                state="clarification_pending" if conflict else "published",
+                raw_response=candidate,
+                introduction=current.introduction if conflict else str(value["introduction"]).strip(),
+                source="hr-structured-summary",
+                actor_id=self._hr_ai_id,
+                clarification_question=(
+                    str(value["clarificationQuestion"]).strip() if conflict else ""
+                ),
+                expected_version=current.version,
+            )
+            return IntroductionSummaryResult(
+                ai_id,
+                "clarification_pending" if conflict else "published",
+                saved.version,
+                key,
+                "",
+            )
+        except HRRepositoryError as exc:
+            return IntroductionSummaryResult(ai_id, "failed", current.version, key, exc.code)
+        except Exception:
+            return IntroductionSummaryResult(
+                ai_id,
+                "failed",
+                current.version,
+                key,
+                "hr_introduction_summary_invalid",
+            )
