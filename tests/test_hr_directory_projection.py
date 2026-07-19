@@ -51,6 +51,13 @@ def repository(tmp_path):
         actor_id="hr",
         expected_version=0,
     )
+    current = result.get_agent("agent-1")
+    result.update_agent_enablement(
+        ai_id="agent-1",
+        skill_readiness="ready",
+        grant_readiness="ready",
+        expected_revision=current.revision,
+    )
     result.save_introduction(
         ai_id="agent-2",
         state="response_received",

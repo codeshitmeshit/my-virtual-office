@@ -698,7 +698,17 @@ class HRDirectoryQuery:
     """Builds the allowlisted Agent-facing directory projection."""
 
     READINESS = frozenset(
-        {"pending", "awaiting_hr_summary", "clarification_pending", "ready", "failed"}
+        {
+            "pending",
+            "awaiting_hr_summary",
+            "clarification_pending",
+            "enablement_pending",
+            "skill_conflict",
+            "unsupported_provider",
+            "grant_not_ready",
+            "ready",
+            "failed",
+        }
     )
 
     def __init__(self, repository: HRRepository):
@@ -707,8 +717,8 @@ class HRDirectoryQuery:
         self._repository = repository
 
     @staticmethod
-    def _readiness(state: str | None) -> str:
-        return {
+    def _readiness(state: str | None, agent: AgentRecord) -> str:
+        introduction_readiness = {
             None: "pending",
             "introduction_pending": "pending",
             "response_received": "awaiting_hr_summary",
@@ -716,6 +726,19 @@ class HRDirectoryQuery:
             "published": "ready",
             "failed": "failed",
         }.get(state, "pending")
+        if introduction_readiness != "ready":
+            return introduction_readiness
+        if agent.skill_readiness == "unsupported_provider":
+            return "unsupported_provider"
+        if agent.skill_readiness == "conflict":
+            return "skill_conflict"
+        if agent.skill_readiness not in {"ready", "updated"}:
+            return "enablement_pending"
+        if agent.grant_readiness in {"ready", "issued", "rotated", "not_required"}:
+            return "ready"
+        if agent.grant_readiness == "unsupported_provider":
+            return "unsupported_provider"
+        return "grant_not_ready"
 
     @staticmethod
     def _availability(agent: AgentRecord) -> str:
@@ -759,7 +782,8 @@ class HRDirectoryQuery:
                     ai_id=agent.ai_id,
                     availability=self._availability(agent),
                     readiness=self._readiness(
-                        introduction.state if introduction is not None else None
+                        introduction.state if introduction is not None else None,
+                        agent,
                     ),
                 )
             )
@@ -777,7 +801,10 @@ class HRDirectoryQuery:
             introduction=introduction.introduction if introduction is not None else "",
             ai_id=agent.ai_id,
             availability=self._availability(agent),
-            readiness=self._readiness(introduction.state if introduction is not None else None),
+            readiness=self._readiness(
+                introduction.state if introduction is not None else None,
+                agent,
+            ),
         )
 
     def list(

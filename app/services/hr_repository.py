@@ -97,6 +97,8 @@ class AgentRecord:
     provider_kind: str
     status: str
     availability: str
+    skill_readiness: str
+    grant_readiness: str
     discovery_source: str
     discovered_at: str
     last_seen_at: str
@@ -374,6 +376,8 @@ _SCHEMA_V1 = (
         provider_kind TEXT NOT NULL DEFAULT '',
         status TEXT NOT NULL DEFAULT 'active',
         availability TEXT NOT NULL DEFAULT 'unknown',
+        skill_readiness TEXT NOT NULL DEFAULT 'pending',
+        grant_readiness TEXT NOT NULL DEFAULT 'pending',
         discovery_source TEXT NOT NULL DEFAULT '',
         discovered_at TEXT NOT NULL,
         last_seen_at TEXT NOT NULL,
@@ -1056,6 +1060,48 @@ class HRRepository:
         with self._connection(readonly=True) as connection:
             row = connection.execute("SELECT * FROM agents WHERE ai_id = ?", (ai_id,)).fetchone()
             return _agent_from_row(row) if row is not None else None
+
+    def update_agent_enablement(
+        self,
+        *,
+        ai_id: str,
+        skill_readiness: str,
+        grant_readiness: str,
+        expected_revision: int,
+    ) -> AgentRecord:
+        ai_id = _stable_ai_id(ai_id)
+        skill_readiness = _required_text(skill_readiness, "skill_readiness", maximum=64)
+        grant_readiness = _required_text(grant_readiness, "grant_readiness", maximum=64)
+        if (
+            isinstance(expected_revision, bool)
+            or not isinstance(expected_revision, int)
+            or expected_revision < 1
+        ):
+            raise HRRepositoryValidationError("expected_revision must be a positive integer")
+        timestamp = self._timestamp()
+        with self._write_transaction() as connection:
+            row = connection.execute("SELECT * FROM agents WHERE ai_id = ?", (ai_id,)).fetchone()
+            if row is None:
+                raise HRRepositoryNotFoundError(f"Agent {ai_id} does not exist")
+            current = _agent_from_row(row)
+            if current.revision != expected_revision:
+                raise HRRepositoryConflictError(
+                    f"Agent {ai_id} revision is {current.revision}, expected {expected_revision}"
+                )
+            if (
+                current.skill_readiness == skill_readiness
+                and current.grant_readiness == grant_readiness
+            ):
+                return current
+            connection.execute(
+                """UPDATE agents SET
+                       skill_readiness = ?, grant_readiness = ?,
+                       revision = revision + 1, updated_at = ?
+                   WHERE ai_id = ?""",
+                (skill_readiness, grant_readiness, timestamp, ai_id),
+            )
+            row = connection.execute("SELECT * FROM agents WHERE ai_id = ?", (ai_id,)).fetchone()
+            return _agent_from_row(row)
 
     def list_agents(
         self,

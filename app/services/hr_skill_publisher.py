@@ -14,6 +14,11 @@ from pathlib import Path
 from typing import Callable, Mapping
 
 from services.hr_repository import HRRepository, HRRepositoryError
+from services.hr_directory import (
+    DirectoryReconciliationResult,
+    HRDirectoryService,
+    RosterSourceSnapshot,
+)
 from services.managed_skills import (
     MANAGED_SKILL_MARKER,
     ManagedSkillDefinition,
@@ -48,6 +53,21 @@ class HRGrantReadiness:
     state: str
     key_id: str
     error_code: str
+
+
+@dataclass(frozen=True, slots=True)
+class HREnablementReadiness:
+    ai_id: str
+    skill: HRSkillReadiness
+    grant: HRGrantReadiness
+    persisted: bool
+    error_code: str
+
+
+@dataclass(frozen=True, slots=True)
+class HRDirectoryEnablementResult:
+    directory: DirectoryReconciliationResult
+    enablements: tuple[HREnablementReadiness, ...]
 
 
 class HRSkillPublisher:
@@ -165,6 +185,8 @@ class HRGrantManager:
         self._key_id_factory = key_id_factory
         self._clock = clock
         self._supported_provider_kinds = frozenset(supported_provider_kinds)
+        if not self._supported_provider_kinds:
+            raise HRSkillPublisherValidationError("supported_provider_kinds must not be empty")
 
     def _now(self) -> str:
         value = self._clock()
@@ -363,3 +385,87 @@ class HRGrantManager:
                 getattr(exc, "code", "hr_grant_delivery_failed"),
             )
         return HRGrantReadiness(ai_id, True, "rotated" if current else "issued", stored.key_id, "")
+
+
+class HRDirectoryEnablementCoordinator:
+    """Commits directory state first, then isolates per-Agent skill and grant refresh."""
+
+    def __init__(
+        self,
+        repository: HRRepository,
+        directory: HRDirectoryService,
+        publisher: HRSkillPublisher,
+        grants: HRGrantManager,
+        *,
+        hr_ai_id: str = "hr",
+    ):
+        self._repository = repository
+        self._directory = directory
+        self._publisher = publisher
+        self._grants = grants
+        self._hr_ai_id = hr_ai_id
+
+    def reconcile(
+        self,
+        snapshots: tuple[RosterSourceSnapshot, ...],
+        provider_agents: Mapping[str, Mapping[str, object]],
+    ) -> HRDirectoryEnablementResult:
+        directory_result = self._directory.reconcile(snapshots)
+        enablements = []
+        for state in directory_result.agents:
+            ai_id = state.agent.ai_id
+            raw_payload = provider_agents.get(ai_id)
+            payload = dict(raw_payload) if isinstance(raw_payload, Mapping) else {}
+            payload.setdefault("id", ai_id)
+            try:
+                skill = self._publisher.publish(payload)
+            except Exception:
+                skill = HRSkillReadiness(
+                    ai_id,
+                    False,
+                    "failed",
+                    False,
+                    "",
+                    "hr_skill_publish_failed",
+                )
+            if ai_id == self._hr_ai_id:
+                grant = HRGrantReadiness(ai_id, True, "not_required", "", "")
+            else:
+                try:
+                    grant = self._grants.reconcile(
+                        payload,
+                        eligible=state.report_eligible and skill.ready,
+                    )
+                except Exception:
+                    grant = HRGrantReadiness(
+                        ai_id,
+                        False,
+                        "failed",
+                        "",
+                        "hr_grant_refresh_failed",
+                    )
+            persisted = False
+            error_code = ""
+            try:
+                current = self._repository.get_agent(ai_id)
+                if current is None:
+                    raise HRSkillPublisherValidationError("directory Agent disappeared")
+                self._repository.update_agent_enablement(
+                    ai_id=ai_id,
+                    skill_readiness=skill.state,
+                    grant_readiness=grant.state,
+                    expected_revision=current.revision,
+                )
+                persisted = True
+            except (HRRepositoryError, HRSkillPublisherValidationError) as exc:
+                error_code = getattr(exc, "code", "hr_enablement_persist_failed")
+            enablements.append(
+                HREnablementReadiness(
+                    ai_id=ai_id,
+                    skill=skill,
+                    grant=grant,
+                    persisted=persisted,
+                    error_code=str(error_code),
+                )
+            )
+        return HRDirectoryEnablementResult(directory_result, tuple(enablements))
