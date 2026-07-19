@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
+import json
 import os
 import sqlite3
 from contextlib import contextmanager
@@ -16,6 +19,12 @@ SCHEMA_NAME = "vo-human-resources"
 DATABASE_FILENAME = "hr.sqlite3"
 MIN_BUSY_TIMEOUT_MS = 100
 MAX_BUSY_TIMEOUT_MS = 30_000
+MAX_PAGE_SIZE = 100
+MAX_AI_ID_LENGTH = 256
+AGENT_STATUSES = frozenset({"active", "offline", "disabled", "deleted", "unreachable"})
+INTRODUCTION_STATES = frozenset(
+    {"introduction_pending", "published", "clarification_pending", "failed"}
+)
 
 
 class HRRepositoryError(RuntimeError):
@@ -30,6 +39,18 @@ class HRRepositoryPathError(HRRepositoryError):
 
 class HRRepositoryMigrationError(HRRepositoryError):
     code = "hr_repository_migration_failed"
+
+
+class HRRepositoryValidationError(HRRepositoryError):
+    code = "hr_repository_validation_failed"
+
+
+class HRRepositoryNotFoundError(HRRepositoryError):
+    code = "hr_repository_not_found"
+
+
+class HRRepositoryConflictError(HRRepositoryError):
+    code = "hr_repository_conflict"
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,6 +72,67 @@ class HRRepositoryInfo:
     schema_name: str
     schema_version: int
     initialized_at: str
+
+
+@dataclass(frozen=True, slots=True)
+class AgentRecord:
+    ai_id: str
+    name: str
+    agent_kind: str
+    provider_kind: str
+    status: str
+    availability: str
+    discovery_source: str
+    discovered_at: str
+    last_seen_at: str
+    inactive_at: str | None
+    revision: int
+    created_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True, slots=True)
+class AgentIdentityRecord:
+    id: int
+    ai_id: str
+    name: str
+    status: str
+    source: str
+    observed_at: str
+
+
+@dataclass(frozen=True, slots=True)
+class IntroductionRecord:
+    id: int
+    ai_id: str
+    version: int
+    state: str
+    raw_response: str | None
+    introduction: str
+    source: str
+    actor_id: str
+    clarification_question: str
+    is_current: bool
+    created_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True, slots=True)
+class AgentPage:
+    items: tuple[AgentRecord, ...]
+    next_cursor: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class IdentityHistoryPage:
+    items: tuple[AgentIdentityRecord, ...]
+    next_cursor: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class IntroductionPage:
+    items: tuple[IntroductionRecord, ...]
+    next_cursor: str | None
 
 
 _SCHEMA_V1 = (
@@ -81,8 +163,7 @@ _SCHEMA_V1 = (
         name TEXT NOT NULL,
         status TEXT NOT NULL,
         source TEXT NOT NULL,
-        observed_at TEXT NOT NULL,
-        UNIQUE(ai_id, name, status, source, observed_at)
+        observed_at TEXT NOT NULL
     )""",
     "CREATE INDEX identity_history_agent_idx ON agent_identity_history(ai_id, observed_at DESC, id DESC)",
     """CREATE TABLE introductions (
@@ -241,6 +322,84 @@ def _validated_migrations(migrations: Sequence[HRMigration]) -> tuple[HRMigratio
     if actual != expected:
         raise ValueError("HR migrations must be unique and contiguous from version 1")
     return ordered
+
+
+def _required_text(value: object, field: str, *, maximum: int = 512) -> str:
+    result = str(value or "").strip()
+    if not result:
+        raise HRRepositoryValidationError(f"{field} must not be empty")
+    if len(result) > maximum or any(ord(character) < 32 for character in result):
+        raise HRRepositoryValidationError(f"{field} is invalid")
+    return result
+
+
+def _stable_ai_id(value: object, field: str = "ai_id") -> str:
+    if not isinstance(value, str):
+        raise HRRepositoryValidationError(f"{field} is invalid")
+    result = _required_text(value, field, maximum=MAX_AI_ID_LENGTH)
+    if result != value or any(character.isspace() for character in result):
+        raise HRRepositoryValidationError(f"{field} is invalid")
+    return result
+
+
+def _optional_text(value: object, field: str, *, maximum: int = 20_000) -> str:
+    result = str(value or "").strip()
+    if len(result) > maximum or any(
+        ord(character) < 32 and character not in "\n\r\t" for character in result
+    ):
+        raise HRRepositoryValidationError(f"{field} is invalid")
+    return result
+
+
+def _raw_text(value: object | None, field: str, *, maximum: int = 40_000) -> str | None:
+    if value is None:
+        return None
+    result = str(value)
+    if len(result) > maximum or any(
+        ord(character) < 32 and character not in "\n\r\t" for character in result
+    ):
+        raise HRRepositoryValidationError(f"{field} is invalid")
+    return result
+
+
+def _page_limit(value: int) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= MAX_PAGE_SIZE:
+        raise HRRepositoryValidationError(f"limit must be between 1 and {MAX_PAGE_SIZE}")
+    return value
+
+
+def _encode_cursor(parts: Sequence[object]) -> str:
+    payload = json.dumps(list(parts), ensure_ascii=True, separators=(",", ":")).encode("utf-8")
+    return base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=")
+
+
+def _decode_cursor(cursor: str | None, *, fields: int) -> tuple[object, ...] | None:
+    if cursor is None:
+        return None
+    try:
+        value = _required_text(cursor, "cursor", maximum=2_048)
+        padding = "=" * (-len(value) % 4)
+        payload = base64.b64decode(value + padding, altchars=b"-_", validate=True)
+        decoded = json.loads(payload.decode("utf-8"))
+    except (ValueError, UnicodeError, json.JSONDecodeError, binascii.Error) as exc:
+        raise HRRepositoryValidationError("cursor is invalid") from exc
+    if not isinstance(decoded, list) or len(decoded) != fields:
+        raise HRRepositoryValidationError("cursor is invalid")
+    return tuple(decoded)
+
+
+def _agent_from_row(row: sqlite3.Row) -> AgentRecord:
+    return AgentRecord(**dict(row))
+
+
+def _identity_from_row(row: sqlite3.Row) -> AgentIdentityRecord:
+    return AgentIdentityRecord(**dict(row))
+
+
+def _introduction_from_row(row: sqlite3.Row) -> IntroductionRecord:
+    values = dict(row)
+    values["is_current"] = bool(values["is_current"])
+    return IntroductionRecord(**values)
 
 
 class HRRepository:
@@ -442,3 +601,332 @@ class HRRepository:
                 "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
             ).fetchall()
             return tuple(str(row[0]) for row in rows)
+
+    def upsert_agent(
+        self,
+        *,
+        ai_id: str,
+        name: str,
+        agent_kind: str,
+        provider_kind: str = "",
+        status: str = "active",
+        availability: str = "unknown",
+        source: str,
+        expected_revision: int | None = None,
+    ) -> AgentRecord:
+        """Merge one discovery observation into the stable AI-ID authority."""
+        ai_id = _stable_ai_id(ai_id)
+        name = _required_text(name, "name")
+        agent_kind = _required_text(agent_kind, "agent_kind", maximum=64)
+        provider_kind = _optional_text(provider_kind, "provider_kind", maximum=64)
+        status = _required_text(status, "status", maximum=32)
+        availability = _required_text(availability, "availability", maximum=64)
+        source = _required_text(source, "source", maximum=256)
+        if status not in AGENT_STATUSES:
+            raise HRRepositoryValidationError(f"unsupported Agent status: {status}")
+        if expected_revision is not None and (
+            isinstance(expected_revision, bool)
+            or not isinstance(expected_revision, int)
+            or expected_revision < 0
+        ):
+            raise HRRepositoryValidationError("expected_revision must be a non-negative integer")
+        observed_at = self._timestamp()
+        with self._write_transaction() as connection:
+            row = connection.execute("SELECT * FROM agents WHERE ai_id = ?", (ai_id,)).fetchone()
+            if row is None:
+                if expected_revision not in (None, 0):
+                    raise HRRepositoryConflictError(
+                        f"Agent {ai_id} does not match expected revision {expected_revision}"
+                    )
+                inactive_at = None if status == "active" else observed_at
+                connection.execute(
+                    """INSERT INTO agents(
+                           ai_id, name, agent_kind, provider_kind, status, availability,
+                           discovery_source, discovered_at, last_seen_at, inactive_at,
+                           revision, created_at, updated_at
+                       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)""",
+                    (
+                        ai_id,
+                        name,
+                        agent_kind,
+                        provider_kind,
+                        status,
+                        availability,
+                        source,
+                        observed_at,
+                        observed_at,
+                        inactive_at,
+                        observed_at,
+                        observed_at,
+                    ),
+                )
+                connection.execute(
+                    """INSERT INTO agent_identity_history(
+                           ai_id, name, status, source, observed_at
+                       ) VALUES (?, ?, ?, ?, ?)""",
+                    (ai_id, name, status, source, observed_at),
+                )
+            else:
+                current = _agent_from_row(row)
+                if expected_revision is not None and current.revision != expected_revision:
+                    raise HRRepositoryConflictError(
+                        f"Agent {ai_id} revision is {current.revision}, expected {expected_revision}"
+                    )
+                material = (
+                    current.name,
+                    current.agent_kind,
+                    current.provider_kind,
+                    current.status,
+                    current.availability,
+                    current.discovery_source,
+                ) != (name, agent_kind, provider_kind, status, availability, source)
+                if material:
+                    revision = current.revision + 1
+                    inactive_at = (
+                        None
+                        if status == "active"
+                        else current.inactive_at or observed_at
+                    )
+                    connection.execute(
+                        """UPDATE agents SET
+                               name = ?, agent_kind = ?, provider_kind = ?, status = ?,
+                               availability = ?, discovery_source = ?, last_seen_at = ?,
+                               inactive_at = ?, revision = ?, updated_at = ?
+                           WHERE ai_id = ?""",
+                        (
+                            name,
+                            agent_kind,
+                            provider_kind,
+                            status,
+                            availability,
+                            source,
+                            observed_at,
+                            inactive_at,
+                            revision,
+                            observed_at,
+                            ai_id,
+                        ),
+                    )
+                    connection.execute(
+                        """INSERT INTO agent_identity_history(
+                               ai_id, name, status, source, observed_at
+                           ) VALUES (?, ?, ?, ?, ?)""",
+                        (ai_id, name, status, source, observed_at),
+                    )
+                else:
+                    connection.execute(
+                        "UPDATE agents SET last_seen_at = ?, updated_at = ? WHERE ai_id = ?",
+                        (observed_at, observed_at, ai_id),
+                    )
+            result = connection.execute("SELECT * FROM agents WHERE ai_id = ?", (ai_id,)).fetchone()
+            return _agent_from_row(result)
+
+    def get_agent(self, ai_id: str) -> AgentRecord | None:
+        ai_id = _stable_ai_id(ai_id)
+        with self._connection(readonly=True) as connection:
+            row = connection.execute("SELECT * FROM agents WHERE ai_id = ?", (ai_id,)).fetchone()
+            return _agent_from_row(row) if row is not None else None
+
+    def list_agents(
+        self,
+        *,
+        status: str | None = None,
+        limit: int = 50,
+        cursor: str | None = None,
+    ) -> AgentPage:
+        limit = _page_limit(limit)
+        if status is not None:
+            status = _required_text(status, "status", maximum=32)
+            if status not in AGENT_STATUSES:
+                raise HRRepositoryValidationError(f"unsupported Agent status: {status}")
+        after = _decode_cursor(cursor, fields=2)
+        parameters: list[object] = []
+        clauses: list[str] = []
+        if status is not None:
+            clauses.append("status = ?")
+            parameters.append(status)
+        if after is not None:
+            updated_at, ai_id = after
+            if not isinstance(updated_at, str) or not isinstance(ai_id, str):
+                raise HRRepositoryValidationError("cursor is invalid")
+            clauses.append("(updated_at < ? OR (updated_at = ? AND ai_id > ?))")
+            parameters.extend((updated_at, updated_at, ai_id))
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        parameters.append(limit + 1)
+        with self._connection(readonly=True) as connection:
+            rows = connection.execute(
+                f"SELECT * FROM agents{where} ORDER BY updated_at DESC, ai_id ASC LIMIT ?",
+                parameters,
+            ).fetchall()
+        items = tuple(_agent_from_row(row) for row in rows[:limit])
+        next_cursor = None
+        if len(rows) > limit:
+            last = items[-1]
+            next_cursor = _encode_cursor((last.updated_at, last.ai_id))
+        return AgentPage(items=items, next_cursor=next_cursor)
+
+    def list_identity_history(
+        self,
+        ai_id: str,
+        *,
+        limit: int = 50,
+        cursor: str | None = None,
+    ) -> IdentityHistoryPage:
+        ai_id = _stable_ai_id(ai_id)
+        limit = _page_limit(limit)
+        after = _decode_cursor(cursor, fields=2)
+        parameters: list[object] = [ai_id]
+        condition = ""
+        if after is not None:
+            observed_at, row_id = after
+            if not isinstance(observed_at, str) or isinstance(row_id, bool) or not isinstance(row_id, int):
+                raise HRRepositoryValidationError("cursor is invalid")
+            condition = " AND (observed_at < ? OR (observed_at = ? AND id < ?))"
+            parameters.extend((observed_at, observed_at, row_id))
+        parameters.append(limit + 1)
+        with self._connection(readonly=True) as connection:
+            rows = connection.execute(
+                """SELECT id, ai_id, name, status, source, observed_at
+                   FROM agent_identity_history WHERE ai_id = ?"""
+                + condition
+                + " ORDER BY observed_at DESC, id DESC LIMIT ?",
+                parameters,
+            ).fetchall()
+        items = tuple(_identity_from_row(row) for row in rows[:limit])
+        next_cursor = None
+        if len(rows) > limit:
+            last = items[-1]
+            next_cursor = _encode_cursor((last.observed_at, last.id))
+        return IdentityHistoryPage(items=items, next_cursor=next_cursor)
+
+    def save_introduction(
+        self,
+        *,
+        ai_id: str,
+        state: str,
+        raw_response: str | None,
+        introduction: str,
+        source: str,
+        actor_id: str,
+        clarification_question: str = "",
+        expected_version: int | None = None,
+    ) -> IntroductionRecord:
+        ai_id = _stable_ai_id(ai_id)
+        state = _required_text(state, "state", maximum=64)
+        raw_response = _raw_text(raw_response, "raw_response")
+        introduction = _optional_text(introduction, "introduction", maximum=4_000)
+        source = _required_text(source, "source", maximum=256)
+        actor_id = _stable_ai_id(actor_id, "actor_id")
+        clarification_question = _optional_text(
+            clarification_question, "clarification_question", maximum=2_000
+        )
+        if state not in INTRODUCTION_STATES:
+            raise HRRepositoryValidationError(f"unsupported introduction state: {state}")
+        if state == "published" and not introduction:
+            raise HRRepositoryValidationError("published introduction must not be empty")
+        if expected_version is not None and (
+            isinstance(expected_version, bool)
+            or not isinstance(expected_version, int)
+            or expected_version < 0
+        ):
+            raise HRRepositoryValidationError("expected_version must be a non-negative integer")
+        timestamp = self._timestamp()
+        with self._write_transaction() as connection:
+            if connection.execute("SELECT 1 FROM agents WHERE ai_id = ?", (ai_id,)).fetchone() is None:
+                raise HRRepositoryNotFoundError(f"Agent {ai_id} does not exist")
+            row = connection.execute(
+                "SELECT * FROM introductions WHERE ai_id = ? AND is_current = 1",
+                (ai_id,),
+            ).fetchone()
+            current = _introduction_from_row(row) if row is not None else None
+            current_version = current.version if current is not None else 0
+            if expected_version is not None and expected_version != current_version:
+                raise HRRepositoryConflictError(
+                    f"Agent {ai_id} introduction version is {current_version}, expected {expected_version}"
+                )
+            content = (
+                state,
+                raw_response,
+                introduction,
+                source,
+                actor_id,
+                clarification_question,
+            )
+            if current is not None and content == (
+                current.state,
+                current.raw_response,
+                current.introduction,
+                current.source,
+                current.actor_id,
+                current.clarification_question,
+            ):
+                return current
+            if current is not None:
+                connection.execute(
+                    "UPDATE introductions SET is_current = 0, updated_at = ? WHERE id = ?",
+                    (timestamp, current.id),
+                )
+            version = current_version + 1
+            cursor = connection.execute(
+                """INSERT INTO introductions(
+                       ai_id, version, state, raw_response, introduction, source, actor_id,
+                       clarification_question, is_current, created_at, updated_at
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)""",
+                (
+                    ai_id,
+                    version,
+                    state,
+                    raw_response,
+                    introduction,
+                    source,
+                    actor_id,
+                    clarification_question,
+                    timestamp,
+                    timestamp,
+                ),
+            )
+            result = connection.execute(
+                "SELECT * FROM introductions WHERE id = ?", (cursor.lastrowid,)
+            ).fetchone()
+            return _introduction_from_row(result)
+
+    def get_current_introduction(self, ai_id: str) -> IntroductionRecord | None:
+        ai_id = _stable_ai_id(ai_id)
+        with self._connection(readonly=True) as connection:
+            row = connection.execute(
+                "SELECT * FROM introductions WHERE ai_id = ? AND is_current = 1",
+                (ai_id,),
+            ).fetchone()
+            return _introduction_from_row(row) if row is not None else None
+
+    def list_introductions(
+        self,
+        ai_id: str,
+        *,
+        limit: int = 50,
+        cursor: str | None = None,
+    ) -> IntroductionPage:
+        ai_id = _stable_ai_id(ai_id)
+        limit = _page_limit(limit)
+        after = _decode_cursor(cursor, fields=1)
+        parameters: list[object] = [ai_id]
+        condition = ""
+        if after is not None:
+            version = after[0]
+            if isinstance(version, bool) or not isinstance(version, int):
+                raise HRRepositoryValidationError("cursor is invalid")
+            condition = " AND version < ?"
+            parameters.append(version)
+        parameters.append(limit + 1)
+        with self._connection(readonly=True) as connection:
+            rows = connection.execute(
+                "SELECT * FROM introductions WHERE ai_id = ?"
+                + condition
+                + " ORDER BY version DESC LIMIT ?",
+                parameters,
+            ).fetchall()
+        items = tuple(_introduction_from_row(row) for row in rows[:limit])
+        next_cursor = None
+        if len(rows) > limit:
+            next_cursor = _encode_cursor((items[-1].version,))
+        return IntroductionPage(items=items, next_cursor=next_cursor)
