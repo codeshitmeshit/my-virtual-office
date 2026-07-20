@@ -342,13 +342,13 @@ def test_hr_options_use_minimal_headers_and_never_enable_agent_cors(runtime):
 def test_hr_http_errors_are_normalized_without_credentials(runtime):
     status, payload = call(
         handler(
-            "/api/human-resources/export?table=access_grants&limit=not-a-number",
+            "/api/human-resources/export?table=access_grants&limit=10",
             management=True,
         ),
         "GET",
     )
-    assert status == 400
-    assert payload == {"ok": False, "code": "hr_http_validation_failed"}
+    assert status == 409
+    assert payload == {"ok": False, "code": "hr_repository_validation_failed"}
     encoded = json.dumps(payload)
     assert server._MANAGEMENT_TOKEN not in encoded
 

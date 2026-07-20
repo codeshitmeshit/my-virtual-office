@@ -34,7 +34,7 @@
 - [x] 5.1 Implement `app/services/hr_repository.py` initialization, connection policy, schema metadata, transactional migration runner, foreign keys, busy timeout, safe database path, and failure-atomic schema tests using temporary SQLite databases.
 - [x] 5.2 Add transactional Agent, identity-history, and introduction persistence with stable AI-ID uniqueness, optimistic/conflict behavior, status indexes, pagination, and tests for rename, duplicate discovery, inactive history, reactivation, and concurrent updates.
 - [x] 5.3 Add daily-cycle, report-request, daily-report, assessment-version, and assessment-evidence persistence with date/Agent unique constraints, claim fencing, current-version invariants, JSON validation, pagination, and concurrency/restart tests.
-- [x] 5.4 Add access-log and HR-activity persistence with successful-view uniqueness semantics, bounded queries, and retention-safe history; retain legacy access-grant tables as inert compatibility storage and prove management exports never expose stored digests.
+- [x] 5.4 Add access-log and HR-activity persistence with successful-view uniqueness semantics, bounded queries, and retention-safe history; exclude obsolete access-grant storage from the final schema and management exports.
 - [x] 5.5 Add management-only repository health and JSON diagnostic/export queries, corruption/migration failure reporting, size/page limits, and tests proving export is read-only and SQLite remains the sole authority.
 
 ## 6. HR Agent Directory And Introduction Workflow
@@ -51,7 +51,7 @@
 - [x] 7.3 Expose the canonical Agent HR Skill only through the current VO `/skills` catalog and Agent Guide, route matching intents from the VO operating guidelines, and add static tests proving HR runtime code never installs it into Agent workspaces.
 - [x] 7.4 Use the trusted VO-internal interaction model for Agent HR queries: require loopback, no browser Origin, the HR action header, and a registered active self-declared AI ID without bearer credentials or Provider restrictions.
 - [x] 7.5 Wire directory reconciliation independently of Provider credential readiness and verify OpenClaw, Hermes, Codex, Claude Code, and future registered Providers remain equally query-capable.
-- [x] 7.6 Remove obsolete HR grant issuance/delivery runtime modules and per-Agent Skill/API authorization readiness projections while retaining database compatibility fields and legacy rows as inert data.
+- [x] 7.6 Remove obsolete HR grant issuance/delivery runtime modules and per-Agent Skill/API authorization readiness projections.
 
 ## 8. Daily Reporting Domain
 
@@ -100,7 +100,8 @@
 - [x] 12.11 Add versioned JSON request contexts and exact preferred JSON response templates to introduction and scheduled/manual daily-report questions, retain a natural-language Provider fallback with raw-response preservation, align HR Profile normalization/assessment examples with strict runtime parsers, and cover prompt identity/date/schema escaping and compatibility paths with focused tests.
 - [x] 12.12 Persist accepted/processing/complete/failed state for every asynchronous HR management command, make Agent-team synchronization asynchronous, expose active commands in the overview, poll and restore running state in the UI, and cover refresh persistence, single-flight, terminal replacement, API, localization, and UI helpers with focused tests.
 - [x] 12.13 Extract one transport-neutral VO Agent communication application service, delegate the public HTTP route and HR introduction/daily workflows to the same service, preserve visible history and stable Provider failure codes, avoid loopback HTTP, and cover the service boundary with focused unit and routing regressions.
-- [x] 12.14 Rename the built-in HR capability from `vo-agent-directory` to `vo-agent-hr`, adopt the trusted VO-internal caller-ID model, remove Provider grant delivery and HR authorization-readiness UI/API state, preserve legacy database compatibility, and cover every Provider, Skill, HTTP, audit, UI, and static boundary with focused tests.
+- [x] 12.14 Rename the built-in HR capability from `vo-agent-directory` to `vo-agent-hr`, adopt the trusted VO-internal caller-ID model, remove Provider grant delivery and HR authorization-readiness UI/API state, and cover every Provider, Skill, HTTP, audit, UI, and static boundary with focused tests.
+- [x] 12.15 Permanently remove the obsolete `access_grants` table, Agent Skill/grant readiness columns, grant repository methods, and grant export surface; add a transactional schema-v3 cleanup migration and focused tests proving existing development databases lose the legacy rows while retaining Agent and HR records.
 
 ## 13. Integrated Regression And Development-Machine Acceptance
 

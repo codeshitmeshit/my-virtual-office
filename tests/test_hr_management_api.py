@@ -216,8 +216,8 @@ def test_access_log_is_filtered_and_paginated(setup):
     assert result.payload["items"][0]["targetName"] == "Agent-1"
 
 
-def test_health_and_export_are_bounded_and_do_not_return_grant_digests(setup):
-    repository, _reporting, _opened, _lifecycle, api = setup
+def test_health_and_export_are_bounded_without_authorization_fields(setup):
+    _repository, _reporting, _opened, _lifecycle, api = setup
     health = api.health()
     assert health.status == 200
     assert health.payload["health"]["status"] == "ok"
@@ -225,15 +225,8 @@ def test_health_and_export_are_bounded_and_do_not_return_grant_digests(setup):
     exported = api.export("agents", limit=2)
     assert exported.status == 200
     assert len(exported.payload["export"]["rows"]) == 2
-    repository.rotate_access_grant(
-        ai_id="agent-1",
-        key_id="key-1",
-        secret_digest="a" * 64,
-        issued_at=NOW.isoformat(),
-    )
-    grants = api.export("access_grants")
-    assert "secret_digest" not in str(grants.payload)
-    assert "a" * 64 not in str(grants.payload)
+    assert "skill_readiness" not in str(exported.payload)
+    assert "grant_readiness" not in str(exported.payload)
 
 
 def test_pause_resume_commands_use_lifecycle_port_and_reject_body_fields(setup):

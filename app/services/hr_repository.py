@@ -6,7 +6,6 @@ import base64
 import binascii
 import json
 import os
-import re
 import sqlite3
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
@@ -35,9 +34,6 @@ INTRODUCTION_STATES = frozenset(
         "failed",
     }
 )
-SHA256_HEX_PATTERN = re.compile(r"[0-9a-f]{64}\Z")
-
-
 class HRRepositoryError(RuntimeError):
     """Base class for safe, diagnosable HR repository failures."""
 
@@ -97,8 +93,6 @@ class AgentRecord:
     provider_kind: str
     status: str
     availability: str
-    skill_readiness: str
-    grant_readiness: str
     discovery_source: str
     discovered_at: str
     last_seen_at: str
@@ -284,20 +278,6 @@ class AssessmentPage:
 
 
 @dataclass(frozen=True, slots=True)
-class AccessGrantRecord:
-    ai_id: str
-    key_id: str
-    secret_digest: str
-    status: str
-    issued_at: str
-    expires_at: str | None
-    rotated_at: str | None
-    revoked_at: str | None
-    revocation_reason: str
-    updated_at: str
-
-
-@dataclass(frozen=True, slots=True)
 class AccessLogRecord:
     id: str
     viewer_ai_id: str
@@ -370,7 +350,6 @@ _EXPORT_TABLES = {
     "assessments": ("local_date", "ai_id", "version"),
     "assessment_jobs": ("local_date", "ai_id"),
     "assessment_evidence": ("assessment_id", "sequence"),
-    "access_grants": ("ai_id",),
     "access_log": ("viewed_at", "id"),
     "hr_activity": ("created_at", "id"),
 }
@@ -401,8 +380,6 @@ _SCHEMA_V1 = (
         provider_kind TEXT NOT NULL DEFAULT '',
         status TEXT NOT NULL DEFAULT 'active',
         availability TEXT NOT NULL DEFAULT 'unknown',
-        skill_readiness TEXT NOT NULL DEFAULT 'pending',
-        grant_readiness TEXT NOT NULL DEFAULT 'pending',
         discovery_source TEXT NOT NULL DEFAULT '',
         discovered_at TEXT NOT NULL,
         last_seen_at TEXT NOT NULL,
@@ -550,17 +527,6 @@ _SCHEMA_V1 = (
         metadata_json TEXT NOT NULL DEFAULT '{}',
         PRIMARY KEY(assessment_id, sequence)
     ) WITHOUT ROWID""",
-    """CREATE TABLE access_grants (
-        ai_id TEXT PRIMARY KEY REFERENCES agents(ai_id) ON UPDATE CASCADE ON DELETE RESTRICT,
-        key_id TEXT NOT NULL UNIQUE,
-        secret_digest TEXT NOT NULL CHECK(length(secret_digest) >= 32),
-        status TEXT NOT NULL,
-        issued_at TEXT NOT NULL,
-        rotated_at TEXT,
-        revoked_at TEXT,
-        revocation_reason TEXT NOT NULL DEFAULT '',
-        updated_at TEXT NOT NULL
-    ) WITHOUT ROWID""",
     """CREATE TABLE access_log (
         id TEXT PRIMARY KEY CHECK(length(trim(id)) > 0),
         viewer_ai_id TEXT NOT NULL REFERENCES agents(ai_id) ON UPDATE CASCADE ON DELETE RESTRICT,
@@ -597,13 +563,29 @@ def _apply_schema_v1(connection: sqlite3.Connection) -> None:
         connection.execute(statement)
 
 
-def _add_access_grant_expiry(connection: sqlite3.Connection) -> None:
-    connection.execute("ALTER TABLE access_grants ADD COLUMN expires_at TEXT")
+def _reserve_legacy_schema_v2(_connection: sqlite3.Connection) -> None:
+    """Keep migration numbering compatible with repositories created before schema v3."""
+
+
+def _remove_legacy_hr_authorization_storage(connection: sqlite3.Connection) -> None:
+    """Permanently remove obsolete per-Agent Skill/grant authorization storage."""
+    connection.execute("DROP TABLE IF EXISTS access_grants")
+    agent_columns = {
+        str(row[1]) for row in connection.execute("PRAGMA table_info(agents)").fetchall()
+    }
+    for column in ("grant_readiness", "skill_readiness"):
+        if column in agent_columns:
+            connection.execute(f"ALTER TABLE agents DROP COLUMN {column}")
 
 
 DEFAULT_MIGRATIONS = (
     HRMigration(1, "initial_hr_schema", _apply_schema_v1),
-    HRMigration(2, "add_access_grant_expiry", _add_access_grant_expiry),
+    HRMigration(2, "reserved_legacy_schema_v2", _reserve_legacy_schema_v2),
+    HRMigration(
+        3,
+        "remove_legacy_hr_authorization_storage",
+        _remove_legacy_hr_authorization_storage,
+    ),
 )
 
 
@@ -773,10 +755,6 @@ def _assessment_from_row(
 
 def _assessment_job_from_row(row: sqlite3.Row) -> AssessmentJobRecord:
     return AssessmentJobRecord(**dict(row))
-
-
-def _grant_from_row(row: sqlite3.Row) -> AccessGrantRecord:
-    return AccessGrantRecord(**dict(row))
 
 
 def _access_log_from_row(row: sqlite3.Row) -> AccessLogRecord:
@@ -1113,48 +1091,6 @@ class HRRepository:
         with self._connection(readonly=True) as connection:
             row = connection.execute("SELECT * FROM agents WHERE ai_id = ?", (ai_id,)).fetchone()
             return _agent_from_row(row) if row is not None else None
-
-    def update_agent_enablement(
-        self,
-        *,
-        ai_id: str,
-        skill_readiness: str,
-        grant_readiness: str,
-        expected_revision: int,
-    ) -> AgentRecord:
-        ai_id = _stable_ai_id(ai_id)
-        skill_readiness = _required_text(skill_readiness, "skill_readiness", maximum=64)
-        grant_readiness = _required_text(grant_readiness, "grant_readiness", maximum=64)
-        if (
-            isinstance(expected_revision, bool)
-            or not isinstance(expected_revision, int)
-            or expected_revision < 1
-        ):
-            raise HRRepositoryValidationError("expected_revision must be a positive integer")
-        timestamp = self._timestamp()
-        with self._write_transaction() as connection:
-            row = connection.execute("SELECT * FROM agents WHERE ai_id = ?", (ai_id,)).fetchone()
-            if row is None:
-                raise HRRepositoryNotFoundError(f"Agent {ai_id} does not exist")
-            current = _agent_from_row(row)
-            if current.revision != expected_revision:
-                raise HRRepositoryConflictError(
-                    f"Agent {ai_id} revision is {current.revision}, expected {expected_revision}"
-                )
-            if (
-                current.skill_readiness == skill_readiness
-                and current.grant_readiness == grant_readiness
-            ):
-                return current
-            connection.execute(
-                """UPDATE agents SET
-                       skill_readiness = ?, grant_readiness = ?,
-                       revision = revision + 1, updated_at = ?
-                   WHERE ai_id = ?""",
-                (skill_readiness, grant_readiness, timestamp, ai_id),
-            )
-            row = connection.execute("SELECT * FROM agents WHERE ai_id = ?", (ai_id,)).fetchone()
-            return _agent_from_row(row)
 
     def list_agents(
         self,
@@ -2714,125 +2650,6 @@ class HRRepository:
         )
         return AssessmentPage(items, next_cursor)
 
-    def rotate_access_grant(
-        self,
-        *,
-        ai_id: str,
-        key_id: str,
-        secret_digest: str,
-        issued_at: str,
-        expires_at: str | None = None,
-        expected_key_id: str | None = None,
-    ) -> AccessGrantRecord:
-        """Insert or rotate a grant using a SHA-256 hex digest; raw grants are never accepted."""
-        ai_id = _stable_ai_id(ai_id)
-        key_id = _opaque_id(key_id, "key_id")
-        if not isinstance(secret_digest, str) or SHA256_HEX_PATTERN.fullmatch(secret_digest) is None:
-            raise HRRepositoryValidationError("secret_digest must be a lowercase SHA-256 hex digest")
-        issued_at = _timestamp_text(issued_at, "issued_at")
-        expires_at = (
-            _timestamp_text(expires_at, "expires_at") if expires_at is not None else None
-        )
-        if expires_at is not None and expires_at <= issued_at:
-            raise HRRepositoryValidationError("access grant expiry must be after issue time")
-        if expected_key_id is not None:
-            expected_key_id = _opaque_id(expected_key_id, "expected_key_id")
-        with self._write_transaction() as connection:
-            row = connection.execute(
-                "SELECT * FROM access_grants WHERE ai_id = ?", (ai_id,)
-            ).fetchone()
-            current = _grant_from_row(row) if row is not None else None
-            if current is None:
-                if expected_key_id is not None:
-                    raise HRRepositoryConflictError("access grant does not exist")
-                try:
-                    connection.execute(
-                        """INSERT INTO access_grants(
-                               ai_id, key_id, secret_digest, status, issued_at,
-                               expires_at, updated_at
-                           ) VALUES (?, ?, ?, 'active', ?, ?, ?)""",
-                        (ai_id, key_id, secret_digest, issued_at, expires_at, issued_at),
-                    )
-                except sqlite3.IntegrityError as exc:
-                    raise HRRepositoryConflictError("access grant identity is invalid") from exc
-            else:
-                if expected_key_id is not None and current.key_id != expected_key_id:
-                    raise HRRepositoryConflictError("access grant key changed concurrently")
-                if (
-                    current.key_id == key_id
-                    and current.secret_digest == secret_digest
-                    and current.status == "active"
-                    and current.expires_at == expires_at
-                ):
-                    return current
-                try:
-                    connection.execute(
-                        """UPDATE access_grants SET
-                               key_id = ?, secret_digest = ?, status = 'active',
-                               issued_at = ?, expires_at = ?, rotated_at = ?, revoked_at = NULL,
-                               revocation_reason = '', updated_at = ?
-                           WHERE ai_id = ?""",
-                        (
-                            key_id,
-                            secret_digest,
-                            issued_at,
-                            expires_at,
-                            issued_at,
-                            issued_at,
-                            ai_id,
-                        ),
-                    )
-                except sqlite3.IntegrityError as exc:
-                    raise HRRepositoryConflictError("access grant key is already in use") from exc
-            row = connection.execute(
-                "SELECT * FROM access_grants WHERE ai_id = ?", (ai_id,)
-            ).fetchone()
-            return _grant_from_row(row)
-
-    def revoke_access_grant(
-        self,
-        *,
-        ai_id: str,
-        key_id: str,
-        revoked_at: str,
-        reason: str,
-    ) -> AccessGrantRecord:
-        ai_id = _stable_ai_id(ai_id)
-        key_id = _opaque_id(key_id, "key_id")
-        revoked_at = _timestamp_text(revoked_at, "revoked_at")
-        reason = _required_text(reason, "reason", maximum=1_000)
-        with self._write_transaction() as connection:
-            row = connection.execute(
-                "SELECT * FROM access_grants WHERE ai_id = ?", (ai_id,)
-            ).fetchone()
-            if row is None:
-                raise HRRepositoryNotFoundError("access grant does not exist")
-            current = _grant_from_row(row)
-            if current.key_id != key_id:
-                raise HRRepositoryConflictError("access grant key changed concurrently")
-            if current.status == "revoked":
-                if current.revocation_reason == reason:
-                    return current
-                raise HRRepositoryConflictError("access grant is already revoked")
-            connection.execute(
-                """UPDATE access_grants SET
-                       status = 'revoked', revoked_at = ?, revocation_reason = ?, updated_at = ?
-                   WHERE ai_id = ?""",
-                (revoked_at, reason, revoked_at, ai_id),
-            )
-            row = connection.execute(
-                "SELECT * FROM access_grants WHERE ai_id = ?", (ai_id,)
-            ).fetchone()
-            return _grant_from_row(row)
-
-    def get_access_grant(self, ai_id: str) -> AccessGrantRecord | None:
-        ai_id = _stable_ai_id(ai_id)
-        with self._connection(readonly=True) as connection:
-            row = connection.execute(
-                "SELECT * FROM access_grants WHERE ai_id = ?", (ai_id,)
-            ).fetchone()
-            return _grant_from_row(row) if row is not None else None
-
     def record_successful_access(
         self,
         *,
@@ -3221,12 +3038,7 @@ class HRRepository:
                 raise HRRepositoryValidationError("cursor is invalid")
         order_by = ", ".join(_EXPORT_TABLES[table])
         columns = "*"
-        if table == "access_grants":
-            columns = (
-                "ai_id, key_id, status, issued_at, expires_at, rotated_at, revoked_at, "
-                "revocation_reason, updated_at"
-            )
-        elif table == "assessment_jobs":
+        if table == "assessment_jobs":
             columns = (
                 "id, ai_id, local_date, status, evidence_version, occurrence_key, "
                 "attempt_count, last_error, claimed_by, claim_expires_at, created_at, updated_at"

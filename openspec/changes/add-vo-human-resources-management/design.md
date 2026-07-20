@@ -115,7 +115,6 @@ The repository owns schema versioning and transactions. No handler or other serv
 | `daily_reports` | one current dated report plus raw and normalized JSON and submission metadata |
 | `assessments` | versioned HR assessment rows with one current version per Agent/date |
 | `assessment_evidence` | sanitized typed references used by an assessment version |
-| `access_grants` | legacy compatibility rows retained inert after trusted VO identity migration |
 | `access_log` | successful cross-Agent disclosure audit keyed by viewer, target, time, and scope |
 | `hr_activity` | bounded operational and lifecycle-relevant HR workflow events |
 
@@ -253,7 +252,7 @@ Add `skills/vo-agent-hr/SKILL.md` as the repository-owned canonical skill. The b
 
 `skills/catalog.md` advertises the skill and `app/agent-guide.js` renders it under a dedicated Human Resources category. Agents read the same file from the current VO instance at `/skills/vo-agent-hr/SKILL.md`, following the routing entry in `vo-operating-guidelines`. The skill is never copied, installed, versioned, or repaired inside an individual Agent workspace, so discovery and invocation are Provider-neutral.
 
-No credential is embedded in or distributed beside the Skill. An Agent first resolves its stable identity from the current VO Agent list, then sends `X-VO-Agent-Action: human-resources` and `X-VO-Agent-Id` on the originless loopback request. The server verifies only that the declared ID is a registered active Agent. Existing access-grant database rows and previously delivered files are ignored for compatibility; the runtime no longer creates, rotates, reads, or projects them.
+No credential is embedded in or distributed beside the Skill. An Agent first resolves its stable identity from the current VO Agent list, then sends `X-VO-Agent-Action: human-resources` and `X-VO-Agent-Id` on the originless loopback request. The server verifies only that the declared ID is a registered active Agent. The repository schema contains no access-grant table or per-Agent Skill/grant readiness columns; schema migration permanently deletes those obsolete rows and columns from repositories created by earlier development builds.
 
 ### 9. Authenticate and project every Human Resources API server-side
 

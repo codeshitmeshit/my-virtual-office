@@ -1,7 +1,6 @@
 """Read-only management health and bounded JSON export tests."""
 
 import base64
-import hashlib
 import json
 import sqlite3
 import sys
@@ -56,7 +55,7 @@ def test_ready_health_reports_schema_integrity_and_is_read_only(repository):
     health = repository.management_health()
     assert health.status == "ready"
     assert health.code == "ok"
-    assert health.schema_version == health.target_schema_version == 2
+    assert health.schema_version == health.target_schema_version == 3
     assert health.database_bytes == len(before_bytes)
     assert health.page_count > 0
     assert health.page_size > 0
@@ -131,21 +130,9 @@ def test_export_decodes_typed_json_fields(repository):
     assert "normalized_json" not in row
 
 
-def test_grant_export_omits_digest_and_raw_secret(repository):
-    raw_secret = "grant_live_must_never_be_exported"
-    repository.rotate_access_grant(
-        ai_id="agent-0",
-        key_id="key-0",
-        secret_digest=hashlib.sha256(raw_secret.encode()).hexdigest(),
-        issued_at="2026-07-19T01:00:00Z",
-    )
-    page = repository.management_export("access_grants")
-    assert page.rows[0]["key_id"] == "key-0"
-    assert "secret_digest" not in page.rows[0]
-    assert raw_secret not in repr(page)
-
-
-@pytest.mark.parametrize("table", ("unknown", "agents; DROP TABLE agents", "sqlite_master"))
+@pytest.mark.parametrize(
+    "table", ("unknown", "access_grants", "agents; DROP TABLE agents", "sqlite_master")
+)
 def test_export_rejects_non_allowlisted_tables(repository, table):
     with pytest.raises(HRRepositoryValidationError, match="not exportable"):
         repository.management_export(table)

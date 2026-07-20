@@ -44,10 +44,6 @@ def test_manual_sync_force_refreshes_and_accepts_all_registered_provider_kinds(t
     assert repository.get_agent("openclaw-agent").availability == "busy"
     assert repository.get_agent("codex-local").name == "Codex Updated"
     assert repository.get_agent("hermes-default").provider_kind == "hermes"
-    assert all(
-        repository.get_access_grant(ai_id) is None
-        for ai_id in ("openclaw-agent", "codex-local", "hermes-default")
-    )
     assert not hasattr(result, "grant_ready")
 
 

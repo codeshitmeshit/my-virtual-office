@@ -1,6 +1,5 @@
 """Allowlisted Agent directory projection and disclosure-negative tests."""
 
-import hashlib
 import sys
 from dataclasses import asdict, fields
 from datetime import datetime, timezone
@@ -51,13 +50,6 @@ def repository(tmp_path):
         actor_id="hr",
         expected_version=0,
     )
-    current = result.get_agent("agent-1")
-    result.update_agent_enablement(
-        ai_id="agent-1",
-        skill_readiness="ready",
-        grant_readiness="ready",
-        expected_revision=current.revision,
-    )
     result.save_introduction(
         ai_id="agent-2",
         state="response_received",
@@ -106,12 +98,6 @@ def add_sensitive_records(repository):
         ],
         expected_version=0,
     )
-    repository.rotate_access_grant(
-        ai_id="agent-1",
-        key_id="PRIVATE_KEY_ID",
-        secret_digest=hashlib.sha256(b"PRIVATE_RAW_GRANT").hexdigest(),
-        issued_at="2026-07-19T01:00:00Z",
-    )
 
 
 def test_safe_entry_type_has_exactly_five_allowlisted_fields():
@@ -144,8 +130,6 @@ def test_directory_list_contains_only_safe_fields_despite_sensitive_authority(re
         "PRIVATE_IMPROVEMENT",
         "PRIVATE_RUNTIME_DIAGNOSIS",
         "PRIVATE_EVIDENCE",
-        "PRIVATE_KEY_ID",
-        "PRIVATE_RAW_GRANT",
         "evidence-v1",
     ):
         assert secret not in text

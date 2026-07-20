@@ -81,6 +81,7 @@
 ### Q5：Agent 查看为什么不再需要 grant？
 
 产品接受 VO 内部 Agent 自报身份，并将访问日志定位为尽力记录而非安全审计。接口仍要求 loopback、无浏览器 Origin、HR action header，并校验 AI ID 已登记且活跃；所有 Provider 因此可使用同一套接口，无需 workspace 凭证交付。
+最终数据库也不保留 access grant 表或 Skill/grant readiness 字段；schema v3 会直接删除早期开发版本留下的相关数据。
 
 ### Q6：HR 如何评价但不“编造绩效”？
 

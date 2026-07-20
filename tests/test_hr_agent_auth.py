@@ -100,21 +100,3 @@ def test_trusted_identity_requires_a_known_active_directory_agent(authenticator,
     with pytest.raises(HRAgentAuthenticationError) as error:
         authenticator.authenticate(_request(ai_id=ai_id))
     assert error.value.code == code
-
-
-def test_bearer_grant_is_not_required_or_consulted(repository):
-    repository.rotate_access_grant(
-        ai_id="agent-1",
-        key_id="legacy-key",
-        secret_digest="a" * 64,
-        issued_at="2026-07-19T00:00:00+00:00",
-        expires_at="2026-07-20T00:00:00+00:00",
-    )
-    repository.revoke_access_grant(
-        ai_id="agent-1",
-        key_id="legacy-key",
-        revoked_at="2026-07-19T01:00:00+00:00",
-        reason="legacy",
-    )
-    identity = HRAgentAuthenticator(repository).authenticate(_request())
-    assert identity.ai_id == "agent-1"

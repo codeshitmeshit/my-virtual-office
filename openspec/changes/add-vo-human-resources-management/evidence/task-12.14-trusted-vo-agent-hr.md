@@ -6,7 +6,7 @@ Date: 2026-07-20
 
 - Renamed the canonical built-in skill from `vo-agent-directory` to `vo-agent-hr`.
 - Removed runtime grant issuance, delivery, Provider allowlisting, and authorization-readiness projection.
-- Kept legacy database grant schema and rows inert for upgrade compatibility.
+- A subsequent schema-v3 cleanup permanently removes the legacy database grant schema and rows; see task 12.15 evidence.
 - Required originless loopback, `X-VO-Agent-Action: human-resources`, and a registered active `X-VO-Agent-Id` for Agent HR reads.
 - Preserved server-side public/self/full projection rules and atomic best-effort cross-Agent access logging.
 
