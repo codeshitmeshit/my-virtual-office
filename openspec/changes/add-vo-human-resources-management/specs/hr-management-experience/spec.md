@@ -42,7 +42,7 @@ The overview SHALL show one authoritative HR lifecycle status indicator rather t
 
 #### Scenario: Human actively synchronizes the Agent team
 - **WHEN** the user confirms active synchronization
-- **THEN** HR SHALL force-refresh the VO roster, reconcile Agent records and Agent API grant readiness, and refresh the displayed Agent team
+- **THEN** HR SHALL force-refresh the VO roster, reconcile Agent records for every registered Provider, and refresh the displayed Agent team
 - **AND** one malformed or unsupported Agent SHALL NOT prevent valid newly discovered Agents from appearing
 
 #### Scenario: Human completes missing Agent information

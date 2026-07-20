@@ -72,7 +72,7 @@ echo $VO_GATEWAY_HTTP
 - 用户明确调用 `$vo-project-authoring`，或自然语言要求创建、复用、周期化 VO 项目，或维护已有 VO 项目：使用 本地 `/skills/vo-project-authoring/SKILL.md`；该 skill 在对话中展示自然语言方案并等待明确确认，然后直接创建或修改真实项目。不要先用普通 Codex 流程读取本地项目文件、运行 Python、查询 `/api/projects` 或自行判断“已存在”。
 - 需要读取或推进已创建项目/任务的 Project Execution、review、验收、阻塞、取消或项目 artifact：使用 本地 `/skills/vo-project-workflow/SKILL.md`。不要用项目创作 skill 绕过这些执行门禁。
 - 需要读取或维护 Agent workspace、公告、workspace 任务、笔记、受控文本文件、Skills Library 或 OpenClaw agent skill：使用 本地 `/skills/vo-agent-workspace/SKILL.md`。
-- 需要查询当前 Agent 团队、区分 Agent 职责与可用性、读取另一 Agent 被允许公开的工作信息，或查看谁访问过自己的公开工作信息：使用 本地 `/skills/vo-agent-directory/SKILL.md`。
+- 需要查询 HR Agent 名册、区分 Agent 职责与可用性、读取另一 Agent 被允许公开的工作信息，或查看谁访问过自己的公开工作信息：使用 本地 `/skills/vo-agent-hr/SKILL.md`。
 - 需要正式 AI 会议申请、多方同步决策、用户确认会议上下文或产出明确会议结论：先按下文“会议分流”判断；确定需要申请或查询时读取 [references/meeting-requests.md](references/meeting-requests.md)。
 - 需要操作已确认的 executable meeting，包括 run/transition、事件跟踪、干预、冲突处理或 action item 草稿：使用 本地 `/skills/vo-meeting-execution/SKILL.md`。
 
@@ -132,7 +132,7 @@ echo $VO_GATEWAY_HTTP
 - 普通通信已先识别目标 `providerKind`，并统一使用 本地 `/skills/vo-agent-communication/SKILL.md`。
 - 普通协作已优先考虑专用通信 skill，会议只用于正式多方决策、独立评审或需要用户确认上下文的场景。
 - 明确的项目创作/受控维护与项目执行/review/验收已分别路由到 本地 `/skills/vo-project-authoring/SKILL.md` 和 本地 `/skills/vo-project-workflow/SKILL.md`。
-- Agent workspace、HR Agent 目录、已确认会议执行已分别路由到 本地 `/skills/vo-agent-workspace/SKILL.md`、本地 `/skills/vo-agent-directory/SKILL.md`、本地 `/skills/vo-meeting-execution/SKILL.md`。
+- Agent workspace、HR Agent 能力、已确认会议执行已分别路由到 本地 `/skills/vo-agent-workspace/SKILL.md`、本地 `/skills/vo-agent-hr/SKILL.md`、本地 `/skills/vo-meeting-execution/SKILL.md`。
 - 浏览器权限/登录/验证码/敏感操作阻塞已路由到 本地 `/skills/vo-browser-control/SKILL.md`，并已停止自动化或明确请求用户接管。
 - 需要提交或查询会议申请时，已读取 [references/meeting-requests.md](references/meeting-requests.md)。
 - 没有自行 confirm/reject 会议，也没有替用户选择最终会议上下文。

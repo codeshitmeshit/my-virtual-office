@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: Audience-specific Human Resources disclosure
-The system SHALL derive Human Resources responses from one authoritative record while enforcing distinct full, public, and self/audit views according to the trusted caller identity.
+The system SHALL derive Human Resources responses from one authoritative record while enforcing distinct full, public, and self/audit views according to the caller AI ID trusted within the VO interaction boundary.
 
 #### Scenario: Human or HR reads an Agent record
 - **WHEN** the authenticated VO human or HR requests Human Resources information
@@ -15,9 +15,16 @@ The system SHALL derive Human Resources responses from one authoritative record 
 ### Requirement: Controlled cross-Agent query surface
 Ordinary Agents MUST use the designated Human Resources query capability to inspect another Agent's permitted information, and direct access to full records or another Agent's restricted view SHALL be rejected.
 
+The controlled Agent query surface SHALL trust VO-internal Agent interactions: it SHALL require an originless loopback request, the Human Resources action header, and a self-declared AI ID that resolves to a currently active directory Agent. It SHALL NOT require a bearer grant or restrict access by Provider kind. Access records are operational, best-effort records of that declared VO identity rather than cryptographic identity attestations.
+
 #### Scenario: Agent performs a permitted lookup
 - **WHEN** a registered Agent requests another Agent by stable AI ID through the controlled capability
 - **THEN** the system SHALL return the audience-filtered public view and record the access atomically with the successful disclosure
+
+#### Scenario: Any registered Provider performs a permitted lookup
+- **WHEN** an active OpenClaw, Hermes, Codex, Claude Code, or other registered VO Agent declares its own stable AI ID through the controlled query headers
+- **THEN** the same public or self projection SHALL be available without Provider-specific credential delivery
+- **AND** an unknown, inactive, browser-originated, or non-loopback request SHALL still be rejected
 
 #### Scenario: Agent bypasses the controlled capability
 - **WHEN** an Agent attempts to read storage, a human-only endpoint, a raw report, detailed evidence, or sensitive feedback belonging to another Agent

@@ -176,7 +176,7 @@ def test_agent_detail_is_full_human_projection_with_independent_cursors(setup):
     assert agent["accessHistory"][0]["targetAiId"] == "agent-1"
     assert "accessNextCursor" in agent
     assert "skillReadiness" not in agent
-    assert "grantReadiness" in agent
+    assert "grantReadiness" not in agent
     assert "secret_digest" not in str(agent)
     assert len(repository.list_access_log().items) == access_count
     missing = api.agent_detail("missing")

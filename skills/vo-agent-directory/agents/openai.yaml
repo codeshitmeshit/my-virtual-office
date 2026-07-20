@@ -1,4 +1,0 @@
-interface:
-  display_name: "VO Agent Directory"
-  short_description: "Query safe VO Agent directory and public work views"
-  default_prompt: "Use $vo-agent-directory to find an available Virtual Office Agent and inspect only permitted public information."

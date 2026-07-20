@@ -17,7 +17,7 @@ const expectedSkills = [
   'vo-codex-communication',
   'vo-browser-control',
   'vo-agent-workspace',
-  'vo-agent-directory',
+  'vo-agent-hr',
   'vo-project-authoring',
   'vo-project-workflow',
   'vo-meeting-execution',

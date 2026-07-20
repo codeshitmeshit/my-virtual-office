@@ -1,8 +1,6 @@
-"""Security and identity-binding tests for Human Resources Agent authentication."""
+"""Trusted VO identity checks for Human Resources Agent APIs."""
 
-import hashlib
 import sys
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -21,31 +19,15 @@ from services.hr_agent_auth import (
 from services.hr_repository import HRRepository
 
 
-NOW = datetime(2026, 7, 19, 9, tzinfo=timezone.utc)
-SECRETS = {
-    "agent-1": "agent-one-human-resources-grant-00000001",
-    "agent-2": "agent-two-human-resources-grant-00000002",
-    "revoked": "revoked-human-resources-agent-grant-000003",
-    "expired": "expired-human-resources-agent-grant-000004",
-}
-
-
-def _digest(secret):
-    return hashlib.sha256(secret.encode("utf-8")).hexdigest()
-
-
 @pytest.fixture
 def repository(tmp_path):
-    result = HRRepository(tmp_path / "status", clock=lambda: NOW)
+    result = HRRepository(tmp_path / "status")
     result.initialize()
     for ai_id, status, provider in (
         ("agent-1", "active", "openclaw"),
-        ("agent-2", "active", "openclaw"),
         ("inactive", "disabled", "openclaw"),
-        ("no-grant", "active", "openclaw"),
-        ("revoked", "active", "openclaw"),
-        ("expired", "active", "openclaw"),
         ("codex-agent", "active", "codex"),
+        ("hermes-agent", "active", "hermes"),
     ):
         result.upsert_agent(
             ai_id=ai_id,
@@ -56,142 +38,83 @@ def repository(tmp_path):
             availability="available",
             source="test",
         )
-    for ai_id in ("agent-1", "agent-2", "revoked", "expired"):
-        expiry = NOW - timedelta(seconds=1) if ai_id == "expired" else NOW + timedelta(days=30)
-        result.rotate_access_grant(
-            ai_id=ai_id,
-            key_id=f"key-{ai_id}",
-            secret_digest=_digest(SECRETS[ai_id]),
-            issued_at=(NOW - timedelta(days=1)).isoformat(),
-            expires_at=expiry.isoformat(),
-        )
-    result.revoke_access_grant(
-        ai_id="revoked",
-        key_id="key-revoked",
-        revoked_at=NOW.isoformat(),
-        reason="test revocation",
-    )
     return result
 
 
 @pytest.fixture
 def authenticator(repository):
-    return HRAgentAuthenticator(repository, clock=lambda: NOW)
+    return HRAgentAuthenticator(repository)
 
 
-def _request(
-    *,
-    ai_id="agent-1",
-    secret=SECRETS["agent-1"],
-    remote_host="127.0.0.1",
-    origin=None,
-    action="human-resources",
-    authorization=None,
-):
+def _request(*, ai_id="agent-1", remote_host="127.0.0.1", origin=None, action="human-resources"):
     return HRAgentAuthRequest(
         remote_host=remote_host,
         origin=origin,
         action=action,
         ai_id=ai_id,
-        authorization=authorization if authorization is not None else f"Bearer {secret}",
     )
 
 
 @pytest.mark.parametrize("remote_host", ["127.0.0.1", "127.99.1.4", "::1", "[::1]"])
-def test_authentication_accepts_originless_loopback_and_binds_identity(authenticator, remote_host):
-    identity = authenticator.authenticate(_request(remote_host=remote_host))
-    assert identity.ai_id == "agent-1"
-    assert identity.key_id == "key-agent-1"
-    assert identity.provider_kind == "openclaw"
-    assert SECRETS["agent-1"] not in repr(identity)
+def test_trusted_identity_accepts_originless_loopback_for_every_registered_provider(
+    authenticator, remote_host
+):
+    for ai_id in ("agent-1", "codex-agent", "hermes-agent"):
+        identity = authenticator.authenticate(_request(ai_id=ai_id, remote_host=remote_host))
+        assert identity.ai_id == ai_id
+        assert identity.provider_kind
+        assert not hasattr(identity, "key_id")
 
 
 @pytest.mark.parametrize("remote_host", ["10.0.0.7", "192.168.1.2", "localhost", ""])
-def test_authentication_rejects_non_loopback_or_spoofed_hosts(authenticator, remote_host):
+def test_trusted_identity_rejects_non_loopback_hosts(authenticator, remote_host):
     with pytest.raises(HRAgentAuthenticationError) as error:
         authenticator.authenticate(_request(remote_host=remote_host))
     assert error.value.code == "hr_agent_loopback_required"
 
 
 @pytest.mark.parametrize("origin", ["https://office.example", "null", ""])
-def test_authentication_rejects_every_browser_origin_header(authenticator, origin):
+def test_trusted_identity_rejects_every_browser_origin_header(authenticator, origin):
     with pytest.raises(HRAgentAuthenticationError) as error:
         authenticator.authenticate(_request(origin=origin))
     assert error.value.code == "hr_agent_browser_origin_forbidden"
 
 
 @pytest.mark.parametrize("action", [None, "", "project-authoring", "Human Resources"])
-def test_authentication_requires_exact_hr_action(authenticator, action):
+def test_trusted_identity_requires_exact_hr_action(authenticator, action):
     with pytest.raises(HRAgentAuthenticationError) as error:
         authenticator.authenticate(_request(action=action))
     assert error.value.code == "hr_agent_action_required"
 
 
 @pytest.mark.parametrize(
-    ("authorization", "code"),
+    ("ai_id", "code"),
     [
-        (None, "hr_agent_bearer_required"),
-        ("", "hr_agent_bearer_required"),
-        ("Basic abc", "hr_agent_bearer_required"),
-        ("Bearer short", "hr_agent_bearer_required"),
-        ("Bearer contains whitespace", "hr_agent_bearer_required"),
+        (None, "hr_agent_identity_required"),
+        ("", "hr_agent_identity_required"),
+        ("missing", "hr_agent_unknown"),
+        ("inactive", "hr_agent_inactive"),
     ],
 )
-def test_authentication_rejects_missing_or_malformed_bearer(
-    authenticator, authorization, code
-):
-    request = _request()
-    request = HRAgentAuthRequest(
-        remote_host=request.remote_host,
-        origin=request.origin,
-        action=request.action,
-        ai_id=request.ai_id,
-        authorization=authorization,
+def test_trusted_identity_requires_a_known_active_directory_agent(authenticator, ai_id, code):
+    with pytest.raises(HRAgentAuthenticationError) as error:
+        authenticator.authenticate(_request(ai_id=ai_id))
+    assert error.value.code == code
+
+
+def test_bearer_grant_is_not_required_or_consulted(repository):
+    repository.rotate_access_grant(
+        ai_id="agent-1",
+        key_id="legacy-key",
+        secret_digest="a" * 64,
+        issued_at="2026-07-19T00:00:00+00:00",
+        expires_at="2026-07-20T00:00:00+00:00",
     )
-    with pytest.raises(HRAgentAuthenticationError) as error:
-        authenticator.authenticate(request)
-    assert error.value.code == code
-
-
-@pytest.mark.parametrize(
-    ("ai_id", "secret", "code"),
-    [
-        ("missing", SECRETS["agent-1"], "hr_agent_unknown"),
-        ("inactive", SECRETS["agent-1"], "hr_agent_inactive"),
-        ("no-grant", SECRETS["agent-1"], "hr_agent_grant_missing"),
-        ("expired", SECRETS["expired"], "hr_agent_grant_expired"),
-        ("revoked", SECRETS["revoked"], "hr_agent_grant_revoked"),
-        ("codex-agent", SECRETS["agent-1"], "hr_agent_provider_unsupported"),
-    ],
-)
-def test_authentication_rejects_unknown_inactive_expired_revoked_and_unsupported(
-    authenticator, ai_id, secret, code
-):
-    with pytest.raises(HRAgentAuthenticationError) as error:
-        authenticator.authenticate(_request(ai_id=ai_id, secret=secret))
-    assert error.value.code == code
-
-
-def test_header_spoofing_cannot_use_another_agents_grant(authenticator):
-    with pytest.raises(HRAgentAuthenticationError) as error:
-        authenticator.authenticate(_request(ai_id="agent-1", secret=SECRETS["agent-2"]))
-    assert error.value.code == "hr_agent_grant_mismatch"
-
-    identity = authenticator.authenticate(_request(ai_id="agent-2", secret=SECRETS["agent-2"]))
-    assert identity.ai_id == "agent-2"
-
-
-def test_digest_match_uses_constant_time_comparison(repository, monkeypatch):
-    calls = []
-
-    def compare(left, right):
-        calls.append((left, right))
-        return left == right
-
-    monkeypatch.setattr("services.hr_agent_auth.hmac.compare_digest", compare)
-    authenticator = HRAgentAuthenticator(repository, clock=lambda: NOW)
-    authenticator.authenticate(_request())
-    with pytest.raises(HRAgentAuthenticationError):
-        authenticator.authenticate(_request(secret=SECRETS["agent-2"]))
-    assert len(calls) == 2
-    assert all(len(left) == len(right) == 64 for left, right in calls)
+    repository.revoke_access_grant(
+        ai_id="agent-1",
+        key_id="legacy-key",
+        revoked_at="2026-07-19T01:00:00+00:00",
+        reason="legacy",
+    )
+    identity = HRAgentAuthenticator(repository).authenticate(_request())
+    assert identity.ai_id == "agent-1"

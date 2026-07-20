@@ -57,7 +57,6 @@ class HRDisclosurePolicy:
             "workflowState",
             "hrContactState",
             "accessHistory",
-            "grantReadiness",
             "createdAt",
             "updatedAt",
         }

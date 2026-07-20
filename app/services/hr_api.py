@@ -300,7 +300,6 @@ class HRManagementAPI:
             "workflowState": latest_report.submission_state if latest_report else "not_due",
             "hrContactState": introduction.state if introduction else "introduction_pending",
             "accessHistory": _json_safe(access_history.items),
-            "grantReadiness": agent.grant_readiness,
             "createdAt": agent.created_at,
             "updatedAt": agent.updated_at,
         }

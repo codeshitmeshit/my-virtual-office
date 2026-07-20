@@ -27,15 +27,13 @@
       "ai_id": "agent-1",
       "name": "Research Agent",
       "status": "active",
-      "availability": "available",
-      "grant_readiness": "ready"
+      "availability": "available"
     },
     {
       "ai_id": "agent-2",
       "name": "Builder Agent",
       "status": "active",
-      "availability": "busy",
-      "grant_readiness": "pending"
+      "availability": "busy"
     }
   ],
   "agent": {
@@ -88,7 +86,7 @@
     ],
     "accessNextCursor": "access-next",
     "workflowState": "normalized",
-    "grantReadiness": "ready"
+    "createdAt": "2026-07-19T00:00:00+00:00"
   },
   "reportPage": {
     "reports": [

@@ -2,18 +2,16 @@
 
 from __future__ import annotations
 
-import secrets
 import threading
 import uuid
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Callable, Mapping, Protocol, Sequence
 
-from services.hr_directory import HRDirectoryService, RosterObservation, RosterSourceSnapshot
-from services.hr_agent_grants import HRGrantManager
-from services.hr_directory_enablement import (
-    HRDirectoryEnablementCoordinator,
-    HRDirectoryEnablementResult,
+from services.hr_directory import (
+    DirectoryReconciliationResult,
+    HRDirectoryService,
+    RosterObservation,
+    RosterSourceSnapshot,
 )
 from services.hr_repository import HRRepository
 from services.hr_command_status import HRCommandStatusTracker
@@ -28,8 +26,7 @@ class HRDirectoryCoordinatorPort(Protocol):
     def reconcile(
         self,
         snapshots: tuple[RosterSourceSnapshot, ...],
-        provider_agents: Mapping[str, Mapping[str, object]],
-    ) -> HRDirectoryEnablementResult: ...
+    ) -> DirectoryReconciliationResult: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,7 +38,6 @@ class HRTeamSyncResult:
     inactivated: tuple[str, ...]
     unchanged: tuple[str, ...]
     failed: tuple[str, ...]
-    grant_ready: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,7 +115,6 @@ class HRTeamSyncService:
             roster = self._roster_provider(True)
             if isinstance(roster, (str, bytes)) or not isinstance(roster, Sequence):
                 raise HRTeamSyncValidationError("roster provider returned an invalid snapshot")
-            payloads: dict[str, Mapping[str, object]] = {}
             observations: dict[str, RosterObservation] = {}
             for raw in roster:
                 if not isinstance(raw, Mapping):
@@ -127,24 +122,21 @@ class HRTeamSyncService:
                 observation = self._observation(raw)
                 if observation is None:
                     continue
-                payloads[observation.ai_id] = raw
                 observations[observation.ai_id] = observation
             if roster and not observations:
                 raise HRTeamSyncValidationError("roster snapshot contains no valid Agent identity")
             result = self._coordinator.reconcile(
-                (RosterSourceSnapshot("vo-roster", tuple(observations.values())),), payloads
+                (RosterSourceSnapshot("vo-roster", tuple(observations.values())),)
             )
-            failed = tuple(item.ai_id for item in result.directory.failures)
-            failed += tuple(item.ai_id for item in result.enablements if not item.persisted)
+            failed = tuple(item.ai_id for item in result.failures)
             return HRTeamSyncResult(
                 discovered=len(observations),
-                created=result.directory.created,
-                updated=result.directory.updated,
-                reactivated=result.directory.reactivated,
-                inactivated=result.directory.inactivated,
-                unchanged=result.directory.unchanged,
+                created=result.created,
+                updated=result.updated,
+                reactivated=result.reactivated,
+                inactivated=result.inactivated,
+                unchanged=result.unchanged,
                 failed=tuple(dict.fromkeys(failed)),
-                grant_ready=sum(1 for item in result.enablements if item.grant.ready),
             )
 
 
@@ -199,7 +191,6 @@ class HRTeamSyncCommands:
                     "reactivated": len(result.reactivated),
                     "inactivated": len(result.inactivated),
                     "failed": len(result.failed),
-                    "grantReady": result.grant_ready,
                 }
                 if result.failed:
                     self._tracker.failed(
@@ -240,17 +231,6 @@ def build_hr_team_sync(
     repository: HRRepository,
     *,
     roster_provider: Callable[[bool], Sequence[Mapping[str, object]]],
-    workspace_base: str | Path,
 ) -> HRTeamSyncCommands:
-    coordinator = HRDirectoryEnablementCoordinator(
-        repository,
-        HRDirectoryService(repository),
-        HRGrantManager(
-            repository,
-            workspace_base=workspace_base,
-            secret_factory=lambda _ai_id: secrets.token_urlsafe(32),
-            key_id_factory=lambda _ai_id: uuid.uuid4().hex,
-        ),
-    )
-    service = HRTeamSyncService(coordinator, roster_provider)
+    service = HRTeamSyncService(HRDirectoryService(repository), roster_provider)
     return HRTeamSyncCommands(service, HRCommandStatusTracker(repository))

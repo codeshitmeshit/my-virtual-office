@@ -27,7 +27,6 @@ def identity(ai_id):
         ai_id=ai_id,
         name=ai_id.title(),
         provider_kind="openclaw",
-        key_id=f"key-{ai_id}",
     )
 
 

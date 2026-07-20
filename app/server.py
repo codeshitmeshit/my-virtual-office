@@ -21461,7 +21461,6 @@ def _get_hr_application_runtime():
                 config=hr_config_service.HRConfig.from_env(),
                 commands=_hr_command_router,
                 roster_provider=_hr_shared_list_agents,
-                workspace_base=WORKSPACE_BASE,
                 information_conversation=(
                     hr_information_completion_service.CallableHRInformationConversation(
                         _hr_ask_agent_for_information,
@@ -27594,7 +27593,6 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             origin=self.headers.get("Origin"),
             action=self.headers.get("X-VO-Agent-Action"),
             ai_id=self.headers.get("X-VO-Agent-Id"),
-            authorization=self.headers.get("Authorization"),
         )
 
     def _handle_hr_get(self, request_path, query_params):

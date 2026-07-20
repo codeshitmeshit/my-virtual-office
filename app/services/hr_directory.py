@@ -702,10 +702,6 @@ class HRDirectoryQuery:
             "pending",
             "awaiting_hr_summary",
             "clarification_pending",
-            "enablement_pending",
-            "skill_conflict",
-            "unsupported_provider",
-            "grant_not_ready",
             "ready",
             "failed",
         }
@@ -717,8 +713,8 @@ class HRDirectoryQuery:
         self._repository = repository
 
     @staticmethod
-    def _readiness(state: str | None, agent: AgentRecord) -> str:
-        introduction_readiness = {
+    def _readiness(state: str | None) -> str:
+        return {
             None: "pending",
             "introduction_pending": "pending",
             "response_received": "awaiting_hr_summary",
@@ -726,13 +722,6 @@ class HRDirectoryQuery:
             "published": "ready",
             "failed": "failed",
         }.get(state, "pending")
-        if introduction_readiness != "ready":
-            return introduction_readiness
-        if agent.grant_readiness in {"ready", "issued", "rotated", "not_required"}:
-            return "ready"
-        if agent.grant_readiness == "unsupported_provider":
-            return "unsupported_provider"
-        return "grant_not_ready"
 
     @staticmethod
     def _availability(agent: AgentRecord) -> str:
@@ -776,8 +765,7 @@ class HRDirectoryQuery:
                     ai_id=agent.ai_id,
                     availability=self._availability(agent),
                     readiness=self._readiness(
-                        introduction.state if introduction is not None else None,
-                        agent,
+                        introduction.state if introduction is not None else None
                     ),
                 )
             )
@@ -796,8 +784,7 @@ class HRDirectoryQuery:
             ai_id=agent.ai_id,
             availability=self._availability(agent),
             readiness=self._readiness(
-                introduction.state if introduction is not None else None,
-                agent,
+                introduction.state if introduction is not None else None
             ),
         )
 

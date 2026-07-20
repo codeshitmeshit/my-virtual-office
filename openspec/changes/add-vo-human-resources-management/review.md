@@ -29,7 +29,7 @@
 
 ### 安全与隐私
 
-- 只依赖 `X-VO-Agent-Id` 会导致访问日志身份可伪造，因此方案增加与 AI ID 绑定的 bearer grant。
+- 产品确认 VO 体系内部交互默认可信；`X-VO-Agent-Id` 作为操作日志身份即可，不要求密码学级别的调用者证明。
 - 人类完整视图必须使用 management token；普通 Agent 路由不能复用完整 DTO 后在前端隐藏字段。
 - 日志、指标、证据和导出不得包含 bearer、管理 token、原始 provider envelope 或无界 transcript。
 - 本设计不防御拥有整机和所有 workspace 读取权限的恶意本地进程，该威胁边界需要在文档中保留。
@@ -78,9 +78,9 @@
 
 本地没有 OpenClaw，且 Gateway cron 的重复、丢失和重启状态不能成为 HR 数据一致性的唯一依据。VO 以日期唯一键和 durable claim 为权威，OpenClaw 只承担 Agent 对话与 HR 推理，测试和降级更明确。
 
-### Q5：Agent 查看为什么需要 grant？
+### Q5：Agent 查看为什么不再需要 grant？
 
-访问日志的价值依赖 viewer 身份准确。loopback 加自报 Header 只能阻挡远程浏览器，不能阻止一个本地 Agent 冒充另一个 Agent。与 AI ID 绑定的 bearer grant使成功披露和审计身份建立可验证关联。
+产品接受 VO 内部 Agent 自报身份，并将访问日志定位为尽力记录而非安全审计。接口仍要求 loopback、无浏览器 Origin、HR action header，并校验 AI ID 已登记且活跃；所有 Provider 因此可使用同一套接口，无需 workspace 凭证交付。
 
 ### Q6：HR 如何评价但不“编造绩效”？
 
@@ -90,9 +90,9 @@
 
 不会。HR 使用普通 participant 生命周期、占用和恢复。唯一变化是资格策略明确允许 HR；档案管理员继续禁止。会议记录只有在与当日工作相关时才可能成为后续只读证据，参会本身不触发评价。
 
-### Q8：Provider 不支持安全 grant 交付怎么办？
+### Q8：不同 Provider 如何使用 HR Skill？
 
-所有 Provider 都能从当前 VO 读取同一份内置 Agent-directory Skill，不需要安装。若某个 Provider 暂不支持安全 grant 交付，该 Agent 仍进入名册并参与 HR 主动询问，但跨 Agent HTTP 查询保持禁用并显示授权 readiness，不能降级为仅凭 Agent ID 信任。后续 adapter 可独立增加安全交付能力。
+所有 Provider 都从当前 VO 读取同一份内置 `vo-agent-hr`，不需要安装，也不需要 Provider 适配器。Agent 查询当前 VO Agent 列表确认自己的稳定 AI ID，然后携带 HR action header 和 AI ID 调用受控接口；管理界面不再显示授权 readiness。
 
 ## 测试与上线建议
 
@@ -103,11 +103,11 @@
 3. 档案管理员逐片迁移及 Phase 1–8 回归。
 4. SQLite repository schema、事务、并发、唯一键、迁移失败和分页测试。
 5. Agent 发现、改名、停用、恢复、HR self-exclusion 和介绍冲突测试。
-6. 内置 Skill catalog/Agent 指南曝光、禁止 workspace 分发、grant 发放/轮换/撤销测试。
+6. `vo-agent-hr` catalog/Agent 指南曝光、禁止 workspace 分发或凭证依赖测试。
 7. 调度时区、到期、启动补偿、双 loop、claim 过期、Agent 超时和队列上限测试。
 8. 原始日报、归一化、未提交、补交、重复提交和失败隔离测试。
 9. 评价 authority、证据、信息不足、版本修订、无评分/无排名测试。
-10. management token、Agent grant、字段裁剪、越权拒绝、审计成功与审计失败关闭测试。
+10. management token、可信 Agent 身份 header、字段裁剪、来源拒绝、审计成功与审计失败关闭测试。
 11. UI、i18n、错误态、分页、暂停/恢复和降级浏览测试。
 12. 相关 Python/Node 回归、静态模块边界和 live browser 验收。
 13. 开发机先关闭开关部署，再分阶段启用 HR 生命周期、Skill/名册、调度/评价。

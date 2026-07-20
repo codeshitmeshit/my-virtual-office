@@ -43,7 +43,7 @@ Once a valid target is explicitly approved, use this order:
 1. Back up the status directory and record checksums/previous revision.
 2. Deploy with `VO_HR_ENABLED=0` and `VO_HR_SCHEDULER_ENABLED=0`; restart and complete the task 13.5 baseline.
 3. Set only `VO_HR_ENABLED=1`; restart and complete task 13.6 lifecycle verification.
-4. Keep the scheduler disabled while completing task 13.7 directory, introduction, managed-skill, grant, permission, and audit verification.
+4. Keep the scheduler disabled while completing task 13.7 directory, introduction, `vo-agent-hr`, trusted caller-ID, permission, and audit verification.
 5. Configure a controlled short cycle, then set `VO_HR_SCHEDULER_ENABLED=1` for task 13.8.
 6. For rollback, first set `VO_HR_SCHEDULER_ENABLED=0`, allow active claims to settle or expire, then set `VO_HR_ENABLED=0` and restart. Preserve the HR database and HR Agent identity; do not delete either automatically.
 7. If code rollback is required, restore the recorded prior revision and configuration only after both HR switches are disabled. Restore data from backup only for proven corruption, not as a routine feature rollback.

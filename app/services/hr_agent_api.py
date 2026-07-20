@@ -1,4 +1,4 @@
-"""Transport-independent queries for authenticated Human Resources Agents."""
+"""Transport-independent queries for trusted Human Resources Agent identities."""
 
 from __future__ import annotations
 

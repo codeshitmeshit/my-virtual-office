@@ -90,18 +90,23 @@ HR SHALL ask a newly discovered or materially stale Agent to describe its identi
 - **AND** VO SHALL preserve the visible HR sender, target, conversation history, Provider routing, and stable terminal failure code
 - **AND** the server SHALL NOT depend on a loopback HTTP request to communicate internally
 
-### Requirement: Global Agent-directory skill
-The system SHALL expose one repository-owned Agent-directory skill through the current VO instance's built-in `/skills` catalog. The skill SHALL direct every Provider to the controlled information-query capability for each visible Agent's name, concise introduction, AI ID, availability, and permitted work information, and SHALL NOT be copied or installed into individual Agent workspaces.
+### Requirement: Global Agent HR skill
+The system SHALL expose one repository-owned `vo-agent-hr` skill through the current VO instance's built-in `/skills` catalog. The skill SHALL direct every Provider to the controlled HR query capability for the Agent roster, each visible Agent's name, concise introduction, AI ID, availability, permitted work information, and the caller's own access history, and SHALL NOT be copied or installed into individual Agent workspaces.
 
 #### Scenario: Agent needs a collaborator
-- **WHEN** an Agent invokes the directory skill
+- **WHEN** an Agent invokes the Agent HR skill
 - **THEN** it SHALL receive the current safe roster needed to distinguish available Agent roles
 - **AND** it SHALL NOT receive full reports, private evidence, or sensitive improvement feedback
 
 #### Scenario: Any Provider discovers the built-in skill
 - **WHEN** an OpenClaw, Hermes, Codex, Claude Code, or other connected Agent reads the current VO skill catalog
-- **THEN** `/skills/vo-agent-directory/SKILL.md` SHALL be advertised as the same authoritative built-in skill
+- **THEN** `/skills/vo-agent-hr/SKILL.md` SHALL be advertised as the same authoritative built-in skill
 - **AND** no Provider-specific workspace installation SHALL be required to discover or read it
+
+#### Scenario: Agent invokes an HR query
+- **WHEN** a registered active Agent follows `vo-agent-hr`
+- **THEN** it SHALL identify itself with its stable AI ID through the trusted VO-internal request headers
+- **AND** no Provider-specific bearer grant, workspace credential delivery, or authorization-readiness state SHALL be required
 
 #### Scenario: Directory changes
 - **WHEN** HR adds, reactivates, deactivates, or updates an Agent record

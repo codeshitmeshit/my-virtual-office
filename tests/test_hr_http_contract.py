@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 """OfficeHandler contracts for management and authenticated Agent HR routes."""
 
-import hashlib
 import io
 import json
 import os
 import sys
 import tempfile
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -30,8 +29,6 @@ from services.hr_runtime import HRCommandRouter, build_hr_application_runtime
 
 
 NOW = datetime(2026, 7, 19, 10, tzinfo=timezone.utc)
-SECRET_1 = "agent-one-human-resources-http-grant-000001"
-SECRET_2 = "agent-two-human-resources-http-grant-000002"
 
 
 class Lifecycle:
@@ -58,8 +55,6 @@ class Connection:
 @pytest.fixture
 def runtime(tmp_path, monkeypatch):
     lifecycle = Lifecycle()
-    workspace = tmp_path / "workspaces" / "agent-3"
-    workspace.mkdir(parents=True)
     result = build_hr_application_runtime(
         status_dir=tmp_path / "status",
         lifecycle=lifecycle,
@@ -73,18 +68,16 @@ def runtime(tmp_path, monkeypatch):
         commands=HRCommandRouter(),
         roster_provider=lambda force: [
             {
-                "id": "agent-3", "name": "Agent Three", "providerKind": "openclaw",
-                "workspace": str(workspace),
+                "id": "agent-3", "name": "Agent Three", "providerKind": "hermes",
             }
         ],
-        workspace_base=tmp_path / "workspaces",
     )
-    for ai_id, secret in (("agent-1", SECRET_1), ("agent-2", SECRET_2)):
+    for ai_id, provider in (("agent-1", "openclaw"), ("agent-2", "codex")):
         result.repository.upsert_agent(
             ai_id=ai_id,
             name=ai_id.title(),
             agent_kind="project",
-            provider_kind="openclaw",
+            provider_kind=provider,
             status="active",
             availability="available",
             source="test",
@@ -98,14 +91,6 @@ def runtime(tmp_path, monkeypatch):
             actor_id="hr",
             expected_version=0,
         )
-        result.repository.rotate_access_grant(
-            ai_id=ai_id,
-            key_id=f"key-{ai_id}",
-            secret_digest=hashlib.sha256(secret.encode()).hexdigest(),
-            issued_at=(NOW - timedelta(days=1)).isoformat(),
-            expires_at=(NOW + timedelta(days=30)).isoformat(),
-        )
-    result.routes._authenticator._clock = lambda: NOW
     result.routes._agents._clock = lambda: NOW
     monkeypatch.setattr(server, "_hr_application_runtime", result)
     return result, lifecycle
@@ -143,11 +128,10 @@ def call(instance, method):
     return instance.responses[-1], json.loads(raw) if raw else {}
 
 
-def agent_headers(ai_id="agent-1", secret=SECRET_1):
+def agent_headers(ai_id="agent-1"):
     return {
         "X-VO-Agent-Action": "human-resources",
         "X-VO-Agent-Id": ai_id,
-        "Authorization": f"Bearer {secret}",
     }
 
 
@@ -263,7 +247,7 @@ def test_management_routes_cover_detail_log_health_export_and_commands(runtime):
     assert payload["code"] == "hr_api_validation_failed"
 
 
-def test_agent_directory_and_public_detail_require_bound_grant(runtime):
+def test_agent_directory_and_public_detail_trust_registered_vo_identity(runtime):
     repository, _lifecycle = runtime
     status, payload = call(
         handler("/api/agent-human-resources/directory", headers=agent_headers()),
@@ -298,11 +282,7 @@ def test_agent_directory_and_public_detail_require_bound_grant(runtime):
             "hr_agent_browser_origin_forbidden",
         ),
         (agent_headers(), "10.0.0.8", "hr_agent_loopback_required"),
-        (
-            agent_headers(ai_id="agent-1", secret=SECRET_2),
-            "127.0.0.1",
-            "hr_agent_grant_mismatch",
-        ),
+        (agent_headers(ai_id="missing"), "127.0.0.1", "hr_agent_unknown"),
     ],
 )
 def test_agent_http_security_denies_missing_origin_remote_and_spoofed_calls(
@@ -370,7 +350,6 @@ def test_hr_http_errors_are_normalized_without_credentials(runtime):
     assert status == 400
     assert payload == {"ok": False, "code": "hr_http_validation_failed"}
     encoded = json.dumps(payload)
-    assert SECRET_1 not in encoded
     assert server._MANAGEMENT_TOKEN not in encoded
 
     malformed = handler(

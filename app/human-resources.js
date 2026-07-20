@@ -28,13 +28,13 @@
         'accepted', 'active', 'appropriate', 'available', 'awaiting_hr_summary', 'busy',
         'clarification_pending', 'complete', 'conflict', 'creating', 'degraded',
         'deleted', 'delivery_unsupported', 'disabled', 'enablement_pending', 'error',
-        'failed', 'grant_not_ready', 'high', 'insufficient_information',
+        'failed', 'high', 'insufficient_information',
         'introduction_pending', 'issued', 'late', 'late_submitted', 'loading', 'low',
         'normalization_failed', 'normalized', 'not_required', 'not_submitted', 'offline',
         'open', 'overloaded', 'paused', 'pending', 'processing', 'published', 'ready',
         'requested', 'response_received', 'retry', 'revoked', 'rotated', 'skill_conflict',
         'skipped', 'submitted', 'succeeded', 'unknown', 'unavailable', 'unreachable',
-        'unsupported_provider', 'updated', 'waiting', 'working'
+        'updated', 'waiting', 'working'
     ];
     const ERROR_CODES = [
         'hr_agent_not_found', 'hr_api_validation_failed', 'hr_audit_unavailable',
@@ -155,7 +155,6 @@
         let score = 0;
         if (statusTone(value.status) === 'danger') score += 100;
         if (statusTone(value.availability) === 'danger') score += 60;
-        if (!['ready', 'issued', 'rotated', 'not_required'].includes(String(value.grant_readiness || value.grantReadiness || ''))) score += 20;
         return score;
     }
 
@@ -649,8 +648,7 @@
             '<section class="hr-detail-metadata"><div><span>' + escHtml(tr('hr_agent_kind', 'Agent kind')) + '</span><strong>' + escHtml(agent.agentKind || '—') + '</strong></div>' +
                 '<div><span>' + escHtml(tr('hr_provider', 'Provider')) + '</span><strong>' + escHtml(agent.providerKind || '—') + '</strong></div>' +
                 '<div><span>' + escHtml(tr('hr_introduction_source', 'Introduction source')) + '</span><strong>' + escHtml(object(agent.introductionProvenance).source || '—') + '</strong></div>' +
-                '<div><span>' + escHtml(tr('hr_workflow_state', 'Workflow state')) + '</span><strong>' + escHtml(semanticLabel(agent.workflowState)) + '</strong></div>' +
-                '<div><span>' + escHtml(tr('hr_grant_readiness', 'HR API authorization')) + '</span><strong>' + escHtml(semanticLabel(agent.grantReadiness)) + '</strong></div></section>' +
+                '<div><span>' + escHtml(tr('hr_workflow_state', 'Workflow state')) + '</span><strong>' + escHtml(semanticLabel(agent.workflowState)) + '</strong></div></section>' +
             '<section class="hr-detail-section"><h4>' + escHtml(tr('hr_identity_history', 'Identity and provenance')) + '</h4>' +
                 (identities.length ? '<ul class="hr-history-list">' + renderIdentityHistory(identities) + '</ul>' : '<div class="hr-inline-empty">—</div>') + '</section>' +
             '<section class="hr-detail-section"><h4>' + escHtml(tr('hr_daily_reports', 'Daily reports')) + '</h4>' +
@@ -659,7 +657,7 @@
             '<section class="hr-detail-section"><h4>' + escHtml(tr('hr_assessments', 'HR assessments')) + '</h4>' +
                 (assessments.length ? '<div class="hr-record-list">' + assessments.map(renderAssessment).join('') + '</div>' : '<div class="hr-inline-empty">' + escHtml(tr('hr_no_assessments', 'No assessments')) + '</div>') +
                 loadMoreButton('assessments', agent.assessmentNextCursor) + '</section>' +
-            '<section class="hr-detail-section"><h4>' + escHtml(tr('hr_access_history', 'Authorized access history')) + '</h4>' +
+            '<section class="hr-detail-section"><h4>' + escHtml(tr('hr_access_history', 'Agent access history')) + '</h4>' +
                 (accesses.length ? '<ul class="hr-history-list">' + renderAccessHistory(accesses) + '</ul>' : '<div class="hr-inline-empty">' + escHtml(tr('hr_no_access_history', 'No Agent has viewed this record')) + '</div>') +
                 loadMoreButton('access', agent.accessNextCursor) + '</section>' +
         '</div>';

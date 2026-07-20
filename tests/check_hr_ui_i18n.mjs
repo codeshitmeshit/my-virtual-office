@@ -49,6 +49,5 @@ for (const required of [
 }
 
 assert.equal(hr.helpers.semanticLabel('normalization_failed'), 'Normalization Failed');
-assert.equal(hr.helpers.semanticLabel('unsupported_provider'), 'Unsupported Provider');
 
 console.log(`Human Resources i18n/accessibility checks passed (${keys.size} locale keys)`);
