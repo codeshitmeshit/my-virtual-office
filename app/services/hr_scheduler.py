@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta, timezone
 import threading
 import uuid
@@ -13,12 +13,16 @@ from services.hr_config import HRConfig
 from services.hr_assessments import AssessmentProcessingResult, HRAssessmentOrchestrator
 from services.hr_reporting import (
     HRDailyReportCollector,
+    HRDailyReportNormalizer,
     HRReportingService,
     ReportCollectionResult,
+    ReportNormalizationResult,
     ReportingCycleResult,
 )
 from services.hr_repository import DailyCycleRecord, HRRepository
 from services.hr_command_status import HRCommandStatusTracker
+from services.hr_schedule_settings import HRScheduleSettings
+from services.periodic_timer import PeriodicTimer
 
 
 class HRSchedulerValidationError(ValueError):
@@ -49,13 +53,17 @@ class WorkflowProcessingSummary:
     accepted: int
     deferred: int
     exhausted: int
-    results: tuple[ReportCollectionResult | AssessmentProcessingResult, ...]
+    results: tuple[
+        ReportCollectionResult | ReportNormalizationResult | AssessmentProcessingResult,
+        ...,
+    ]
 
 
 @dataclass(frozen=True, slots=True)
 class ReconciliationTickResult:
     schedule: SchedulerReconciliation | None
     reports: WorkflowProcessingSummary | None
+    normalizations: WorkflowProcessingSummary | None
     assessments: WorkflowProcessingSummary | None
 
 
@@ -131,6 +139,7 @@ class HRScheduler:
         reporting: HRReportingService,
         *,
         clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+        schedule_settings: Callable[[], HRScheduleSettings] | None = None,
     ):
         if not isinstance(config, HRConfig):
             raise HRSchedulerValidationError("HR config is invalid")
@@ -142,7 +151,12 @@ class HRScheduler:
         self._repository = repository
         self._reporting = reporting
         self._clock = clock
-        self._calculator = HRDueTimeCalculator(config)
+        self._schedule_settings = schedule_settings or (
+            lambda: HRScheduleSettings(
+                enabled=config.scheduler_enabled,
+                daily_time=config.daily_time,
+            )
+        )
 
     @property
     def mutations_enabled(self) -> bool:
@@ -154,9 +168,19 @@ class HRScheduler:
             raise HRSchedulerValidationError("scheduler clock must be timezone-aware")
         return value.astimezone(timezone.utc)
 
+    def _effective_config(self) -> HRConfig:
+        settings = self._schedule_settings()
+        if not isinstance(settings, HRScheduleSettings):
+            raise HRSchedulerValidationError("schedule settings are invalid")
+        return replace(
+            self._config,
+            scheduler_enabled=settings.enabled,
+            daily_time=settings.daily_time,
+        )
+
     def reconcile(
         self,
-        eligible_ai_ids: Iterable[str],
+        eligible_ai_ids: Iterable[str] | Callable[[], Iterable[str]],
         *,
         hr_available: bool = True,
         manual: bool = False,
@@ -165,10 +189,11 @@ class HRScheduler:
             raise HRSchedulerValidationError("scheduler flags must be boolean")
         if not self._config.enabled:
             return SchedulerReconciliation("disabled", None, None, None)
-        if not manual and not self._config.scheduler_enabled:
+        effective_config = self._effective_config()
+        if not manual and not effective_config.scheduler_enabled:
             return SchedulerReconciliation("scheduler_disabled", None, None, None)
         now = self._now()
-        window = self._calculator.window_at(now)
+        window = HRDueTimeCalculator(effective_config).window_at(now)
         cycle_id = f"hr-cycle:{window.local_date}"
         existing = self._repository.get_daily_cycle(cycle_id)
         if existing is not None:
@@ -178,13 +203,14 @@ class HRScheduler:
             return SchedulerReconciliation("not_due", window, None, None)
         if not hr_available:
             return SchedulerReconciliation("hr_unavailable", window, None, None)
+        eligible = eligible_ai_ids() if callable(eligible_ai_ids) else eligible_ai_ids
         opened = self._reporting.open_cycle(
             local_date=window.local_date,
             timezone_name=window.timezone_name,
             scheduled_at=window.scheduled_at,
             window_opens_at=window.window_opens_at,
             window_closes_at=window.window_closes_at,
-            eligible_ai_ids=eligible_ai_ids,
+            eligible_ai_ids=eligible,
         )
         action = "opened_late" if now >= window.window_closes_at else "opened"
         return SchedulerReconciliation(action, window, opened.cycle, opened)
@@ -198,6 +224,7 @@ class HRWorkflowProcessor:
         config: HRConfig,
         repository: HRRepository,
         reports: HRDailyReportCollector,
+        normalizer: HRDailyReportNormalizer,
         assessments: HRAssessmentOrchestrator,
         *,
         clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
@@ -210,6 +237,8 @@ class HRWorkflowProcessor:
             raise HRSchedulerValidationError("repository must be an HRRepository")
         if not isinstance(reports, HRDailyReportCollector):
             raise HRSchedulerValidationError("report collector is invalid")
+        if not isinstance(normalizer, HRDailyReportNormalizer):
+            raise HRSchedulerValidationError("report normalizer is invalid")
         if not isinstance(assessments, HRAssessmentOrchestrator):
             raise HRSchedulerValidationError("assessment orchestrator is invalid")
         capacity = config.max_workers * 4 if queue_capacity is None else queue_capacity
@@ -224,9 +253,12 @@ class HRWorkflowProcessor:
         self._config = config
         self._repository = repository
         self._reports = reports
+        self._normalizer = normalizer
         self._assessments = assessments
         self._clock = clock
-        self._active = active or (lambda: config.scheduler_active)
+        # The loop runtime enforces the automatic scheduler switch. Manual cycle
+        # commands remain valid whenever the HR feature itself is enabled.
+        self._active = active or (lambda: config.enabled)
         self._queue_capacity = capacity
 
     def _now(self) -> datetime:
@@ -310,6 +342,55 @@ class HRWorkflowProcessor:
             tuple(results),
         )
 
+    def process_normalizations(
+        self,
+        cycle_id: str,
+    ) -> WorkflowProcessingSummary:
+        """Normalize every raw, not-yet-normalized report with bounded concurrency."""
+        if not self._active():
+            return WorkflowProcessingSummary("disabled", 0, 0, 0, ())
+        cycle = self._repository.get_daily_cycle(cycle_id)
+        if cycle is None:
+            raise HRSchedulerValidationError("daily cycle does not exist")
+        ranked = []
+        for ai_id in cycle.roster_snapshot:
+            report = self._repository.get_daily_report(ai_id, cycle.local_date)
+            if (
+                report is not None
+                and report.raw_response is not None
+                and report.normalized is None
+            ):
+                priority = 1 if report.submission_state == "normalization_failed" else 0
+                ranked.append((priority, report.updated_at, ai_id))
+        candidates = [item[2] for item in sorted(ranked)]
+        accepted = candidates[: self._queue_capacity]
+        deferred = len(candidates) - len(accepted)
+        if not accepted:
+            return WorkflowProcessingSummary("idle", 0, deferred, 0, ())
+        results = []
+        with ThreadPoolExecutor(
+            max_workers=min(self._config.max_workers, len(accepted)),
+            thread_name_prefix="hr-normalize",
+        ) as executor:
+            futures = {
+                executor.submit(
+                    self._normalizer.normalize,
+                    (ai_id,),
+                    local_date=cycle.local_date,
+                ): ai_id
+                for ai_id in accepted
+            }
+            for future in as_completed(futures):
+                results.extend(future.result())
+        results.sort(key=lambda item: item.ai_id)
+        return WorkflowProcessingSummary(
+            "processed",
+            len(accepted),
+            deferred,
+            0,
+            tuple(results),
+        )
+
     def process_assessments(
         self,
         cycle_id: str,
@@ -323,6 +404,13 @@ class HRWorkflowProcessor:
             raise HRSchedulerValidationError("assessment cycle is not closed")
         ranked = []
         for ai_id in cycle.roster_snapshot:
+            report = self._repository.get_daily_report(ai_id, cycle.local_date)
+            if (
+                report is not None
+                and report.raw_response is not None
+                and report.normalized is None
+            ):
+                continue
             job = self._repository.get_assessment_job(ai_id, cycle.local_date)
             priority = 1 if job is not None and job.status == "complete" else 0
             ranked.append((priority, job.updated_at if job is not None else "", ai_id))
@@ -399,9 +487,12 @@ class HRReconciliationLoop:
         self._clock = clock
         self._interval_seconds = float(interval_seconds)
         self._on_error = on_error
-        self._stop = threading.Event()
-        self._thread: threading.Thread | None = None
-        self._start_lock = threading.Lock()
+        self._timer = PeriodicTimer(
+            self.tick,
+            interval_seconds=self._interval_seconds,
+            name="hr-reconciliation",
+            on_error=self._handle_timer_error,
+        )
 
     def _now(self) -> datetime:
         value = self._clock()
@@ -411,29 +502,37 @@ class HRReconciliationLoop:
 
     def tick(self, *, manual: bool = False) -> ReconciliationTickResult:
         schedule = self._scheduler.reconcile(
-            self._eligible_ai_ids(),
+            self._eligible_ai_ids,
             hr_available=self._hr_available(),
             manual=manual,
         )
         cycle = schedule.cycle
         if cycle is None or schedule.window is None:
-            return ReconciliationTickResult(schedule, None, None)
+            return ReconciliationTickResult(schedule, None, None, None)
         if cycle.status == "closed":
+            normalizations = self._processor.process_normalizations(cycle.id)
             assessments = self._processor.process_assessments(cycle.id)
-            return ReconciliationTickResult(schedule, None, assessments)
+            return ReconciliationTickResult(
+                schedule, None, normalizations, assessments
+            )
         if self._now() >= schedule.window.window_closes_at:
             self._reporting.close_cycle(cycle.id, closed_at=self._now())
+            normalizations = self._processor.process_normalizations(cycle.id)
             assessments = self._processor.process_assessments(cycle.id)
-            return ReconciliationTickResult(schedule, None, assessments)
+            return ReconciliationTickResult(
+                schedule, None, normalizations, assessments
+            )
         reports = self._processor.process_reports(cycle.id, message=self._report_message)
-        return ReconciliationTickResult(schedule, reports, None)
+        normalizations = self._processor.process_normalizations(cycle.id)
+        return ReconciliationTickResult(schedule, reports, normalizations, None)
 
     def close_and_assess(self, cycle_id: str) -> ReconciliationTickResult:
         if not self._scheduler.mutations_enabled:
             raise HRSchedulerValidationError("Human Resources is disabled")
         self._reporting.close_cycle(cycle_id, closed_at=self._now())
+        normalizations = self._processor.process_normalizations(cycle_id)
         assessments = self._processor.process_assessments(cycle_id)
-        return ReconciliationTickResult(None, None, assessments)
+        return ReconciliationTickResult(None, None, normalizations, assessments)
 
     def retry(self, cycle_id: str) -> ReconciliationTickResult:
         if not self._scheduler.mutations_enabled:
@@ -442,42 +541,21 @@ class HRReconciliationLoop:
         if cycle is None:
             raise HRSchedulerValidationError("daily cycle does not exist")
         if cycle.status == "closed":
+            normalizations = self._processor.process_normalizations(cycle_id)
             assessments = self._processor.process_assessments(cycle_id)
-            return ReconciliationTickResult(None, None, assessments)
+            return ReconciliationTickResult(None, None, normalizations, assessments)
         reports = self._processor.process_reports(cycle_id, message=self._report_message)
-        return ReconciliationTickResult(None, reports, None)
+        normalizations = self._processor.process_normalizations(cycle_id)
+        return ReconciliationTickResult(None, reports, normalizations, None)
 
-    def _run(self) -> None:
-        while not self._stop.is_set():
-            try:
-                self.tick()
-            except Exception as exc:
-                try:
-                    self._on_error(
-                        str(getattr(exc, "code", "hr_reconciliation_failed"))
-                    )
-                except Exception:
-                    pass
-            self._stop.wait(self._interval_seconds)
+    def _handle_timer_error(self, exc: Exception) -> None:
+        self._on_error(str(getattr(exc, "code", "hr_reconciliation_failed")))
 
     def start(self) -> bool:
-        with self._start_lock:
-            if self._thread is not None and self._thread.is_alive():
-                return False
-            self._stop.clear()
-            self._thread = threading.Thread(
-                target=self._run,
-                daemon=True,
-                name="hr-reconciliation",
-            )
-            self._thread.start()
-            return True
+        return self._timer.start()
 
     def stop(self, timeout_seconds: float = 5.0) -> None:
-        self._stop.set()
-        thread = self._thread
-        if thread is not None:
-            thread.join(timeout=max(0.0, float(timeout_seconds)))
+        self._timer.stop(timeout_seconds)
 
 
 class HRManualCommands:

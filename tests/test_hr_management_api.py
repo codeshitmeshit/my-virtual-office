@@ -162,6 +162,28 @@ def test_report_schedule_exposes_due_time_before_catch_up_without_skipping_today
     assert schedule["nextAt"] == "2026-07-19T18:00:00+00:00"
 
 
+def test_schedule_is_updated_from_the_management_page_and_used_immediately(setup):
+    _repository, _reporting, _opened, _lifecycle, api = setup
+    result = api.schedule_command(
+        {"enabled": False, "dailyTime": "07:35"},
+        body_bytes=44,
+    )
+    assert result.status == 200
+    assert result.payload["schedule"] == {
+        "enabled": False,
+        "dailyTime": "07:35",
+        "timezone": "UTC",
+    }
+    schedule = api._report_schedule(
+        local_date=date(2026, 7, 19),
+        cycle_exists=False,
+        now=datetime(2026, 7, 19, 6, tzinfo=timezone.utc),
+    )
+    assert schedule["enabled"] is False
+    assert schedule["dailyTime"] == "07:35"
+    assert schedule["nextLocalAt"] == "2026-07-19T07:35:00+00:00"
+
+
 def test_agent_detail_is_full_human_projection_with_independent_cursors(setup):
     repository, _reporting, _opened, _lifecycle, api = setup
     access_count = len(repository.list_access_log().items)

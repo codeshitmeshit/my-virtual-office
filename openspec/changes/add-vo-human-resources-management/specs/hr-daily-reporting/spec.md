@@ -1,7 +1,12 @@
 ## ADDED Requirements
 
 ### Requirement: Fixed daily collection cycle
-The system SHALL run one global HR daily-report collection cycle at a configured VO-local time, establish a bounded submission window, and target every Agent that is eligible at the cycle's effective roster snapshot.
+The system SHALL run one global HR daily-report collection cycle at a persistently configured VO-local time, establish a bounded submission window, and target every Agent that is eligible at the cycle's effective roster snapshot. The schedule SHALL be managed from the Human Resources page, SHALL default to enabled at `18:00` for a repository with no saved setting, and SHALL take effect without restarting VO.
+
+#### Scenario: Human changes the daily schedule
+- **WHEN** an authenticated human changes the automatic enablement or `HH:MM` collection time on the Human Resources page
+- **THEN** the system SHALL validate and persist the setting in the HR repository
+- **AND** subsequent due-time calculations and next-collection projections SHALL use the saved setting without a process restart
 
 #### Scenario: Daily cycle becomes due
 - **WHEN** the configured daily collection time is reached and HR is available
@@ -23,6 +28,11 @@ For each submitted report, HR SHALL preserve the Agent's original response and p
 #### Scenario: Normalization fails
 - **WHEN** HR cannot normalize a valid raw response
 - **THEN** the raw response SHALL remain available and the report SHALL be marked `normalization_failed` for retry
+
+#### Scenario: Automatic collection receives a raw response
+- **WHEN** the automatic collector stores a non-empty Agent response
+- **THEN** the same automatic workflow SHALL ask HR to normalize it before the Agent becomes eligible for assessment
+- **AND** restart, close, and retry reconciliation SHALL recover raw reports that still lack normalization
 
 ### Requirement: Versioned structured report request contract
 Every HR daily-report question SHALL identify its request as `vo.hr.daily_report` using a JSON context containing schema version, stable Agent AI ID, and VO-local date, and SHALL provide an exact preferred JSON response shape for completed work, related projects or tasks, artifacts, blockers, and requested help.

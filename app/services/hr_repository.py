@@ -960,6 +960,29 @@ class HRRepository:
                 "journalMode": str(connection.execute("PRAGMA journal_mode").fetchone()[0]),
             }
 
+    def get_metadata_value(self, key: str) -> str | None:
+        """Read one repository-owned metadata value for a focused domain service."""
+        key = _required_text(key, "metadata key", maximum=128)
+        with self._connection(readonly=True) as connection:
+            row = connection.execute(
+                "SELECT value FROM metadata WHERE key = ?",
+                (key,),
+            ).fetchone()
+            return str(row[0]) if row is not None else None
+
+    def set_metadata_value(self, key: str, value: str) -> None:
+        """Atomically persist one bounded repository metadata value."""
+        key = _required_text(key, "metadata key", maximum=128)
+        value = _required_text(value, "metadata value", maximum=16_000)
+        with self._write_transaction() as connection:
+            connection.execute(
+                """INSERT INTO metadata(key, value, updated_at) VALUES (?, ?, ?)
+                   ON CONFLICT(key) DO UPDATE SET
+                       value = excluded.value,
+                       updated_at = excluded.updated_at""",
+                (key, value, self._timestamp()),
+            )
+
     def table_names(self) -> tuple[str, ...]:
         with self._connection(readonly=True) as connection:
             rows = connection.execute(

@@ -271,6 +271,55 @@
     gap: 7px;
 }
 
+.hr-schedule-panel {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+}
+
+.hr-schedule-panel h3 {
+    margin: 0 0 4px;
+    color: #dce6ef;
+    font-size: 12px;
+}
+
+.hr-schedule-panel p {
+    margin: 0;
+    color: #8190a2;
+    font-size: 9px;
+}
+
+.hr-schedule-form {
+    display: flex;
+    align-items: end;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 10px;
+}
+
+.hr-schedule-form label {
+    display: grid;
+    gap: 5px;
+    color: #9fb0c4;
+    font-size: 9px;
+}
+
+.hr-schedule-form input[type="time"] {
+    min-height: 31px;
+    padding: 5px 8px;
+    border: 1px solid #34485f;
+    border-radius: 7px;
+    background: #0d1622;
+    color: #dce6ef;
+}
+
+.hr-schedule-form .hr-schedule-enabled {
+    display: flex;
+    align-items: center;
+    min-height: 31px;
+}
+
 .hr-selection-backdrop { position: fixed; inset: 0; z-index: 10020; display: grid; place-items: center; padding: 24px; background: rgba(3, 8, 18, .78); }
 .hr-selection-dialog { width: min(620px, 92vw); max-height: min(720px, 86vh); overflow: auto; padding: 22px; border: 1px solid var(--hr-border, #33465d); border-radius: 16px; background: #111b2a; box-shadow: 0 24px 80px rgba(0,0,0,.55); }
 .hr-selection-dialog > header, .hr-selection-dialog > footer { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
@@ -808,6 +857,15 @@
     .hr-command-panel {
         align-items: flex-start;
         flex-direction: column;
+    }
+
+    .hr-schedule-panel {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .hr-schedule-form {
+        justify-content: flex-start;
     }
 
     .hr-command-actions {

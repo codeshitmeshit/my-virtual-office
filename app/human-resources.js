@@ -17,6 +17,7 @@
         commandBusy: '',
         commandNotice: '',
         commandError: '',
+        scheduleBusy: false,
         commandPollTimer: null,
         dailySyncOpen: false,
         dailySyncSelected: [],
@@ -43,7 +44,8 @@
         'hr_information_completion_unavailable', 'hr_internal_error', 'hr_invalid_response',
         'hr_manual_daily_sync_hr_unavailable', 'hr_manual_daily_sync_running',
         'hr_manual_daily_sync_unavailable', 'hr_manual_daily_sync_validation_failed',
-        'hr_repository_unavailable', 'hr_request_failed', 'hr_runtime_unavailable'
+        'hr_repository_unavailable', 'hr_request_failed', 'hr_runtime_unavailable',
+        'hr_schedule_settings_validation_failed'
     ];
     const ACTION_NAMES = [
         'assessment', 'close', 'directory', 'lifecycle', 'pause', 'query',
@@ -422,6 +424,15 @@
                 '<p class="hr-next-report-time">' + escHtml(reportScheduleLabel(reportSchedule)) + '</p></div>' +
                 '<span class="hr-state-chip hr-tone-' + escHtml(statusTone(visibleHrStatus)) + '">' + escHtml(semanticLabel(visibleHrStatus)) + '</span>' +
             '</section>' +
+            '<section class="hr-schedule-panel"><div><h3>' + escHtml(tr('hr_schedule_title', 'Daily report schedule')) + '</h3>' +
+                '<p>' + escHtml(tr('hr_schedule_hint', 'Configure the automatic collection time here. The default is 18:00.')) + '</p></div>' +
+                '<div class="hr-schedule-form">' +
+                    '<label><span>' + escHtml(tr('hr_schedule_time', 'Collection time')) + '</span>' +
+                    '<input id="hr-schedule-time" type="time" step="60" value="' + escHtml(String(reportSchedule.dailyTime || '18:00')) + '"' + (state.scheduleBusy ? ' disabled' : '') + '></label>' +
+                    '<label class="hr-schedule-enabled"><input id="hr-schedule-enabled" type="checkbox"' + (reportSchedule.enabled ? ' checked' : '') + (state.scheduleBusy ? ' disabled' : '') + '> ' + escHtml(tr('hr_schedule_enabled', 'Enable automatic daily reports')) + '</label>' +
+                    '<button type="button" class="hr-command-button" onclick="HumanResources.saveSchedule()"' + (state.scheduleBusy ? ' disabled' : '') + '>' +
+                    escHtml(state.scheduleBusy ? tr('hr_schedule_saving', 'Saving...') : tr('hr_schedule_save', 'Save schedule')) + '</button>' +
+                '</div></section>' +
             '<section class="hr-command-panel"><div><h3>' + escHtml(tr('hr_controls', 'HR controls')) + '</h3>' +
                 '<p>' + escHtml(tr('hr_controls_hint', 'Commands run asynchronously; active sync discovers Agents, while complete information asks available Agents for missing introductions.')) + '</p></div>' +
                 '<div class="hr-command-actions">' +
@@ -682,7 +693,7 @@
         '</div>';
         element.setAttribute(
             'aria-busy',
-            state.loading || state.detailLoading || Boolean(state.commandBusy) || activeCommands(state.overview).length ? 'true' : 'false'
+            state.loading || state.detailLoading || Boolean(state.commandBusy) || state.scheduleBusy || activeCommands(state.overview).length ? 'true' : 'false'
         );
         const closeButton = root.document.getElementById('human-resources-close');
         if (closeButton) closeButton.setAttribute('aria-label', tr('hr_close', 'Close Human Resources'));
@@ -791,6 +802,44 @@
             return false;
         } finally {
             state.commandBusy = '';
+            render();
+            restoreScroll(scrollSnapshot);
+        }
+    }
+
+    async function saveSchedule() {
+        if (state.scheduleBusy) return false;
+        const timeInput = root.document && root.document.getElementById('hr-schedule-time');
+        const enabledInput = root.document && root.document.getElementById('hr-schedule-enabled');
+        const dailyTime = String(timeInput && timeInput.value || '').trim();
+        if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(dailyTime)) {
+            state.commandError = 'hr_schedule_settings_validation_failed';
+            render();
+            return false;
+        }
+        const scrollSnapshot = captureScroll();
+        state.scheduleBusy = true;
+        state.commandNotice = '';
+        state.commandError = '';
+        render();
+        restoreScroll(scrollSnapshot);
+        try {
+            await managementJson('/api/human-resources/schedule', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    enabled: Boolean(enabledInput && enabledInput.checked),
+                    dailyTime,
+                }),
+            });
+            state.commandNotice = tr('hr_schedule_saved', 'Daily report schedule saved');
+            await loadOverview(scrollSnapshot);
+            return true;
+        } catch (error) {
+            state.commandError = String(error && error.message || 'hr_schedule_settings_validation_failed');
+            return false;
+        } finally {
+            state.scheduleBusy = false;
             render();
             restoreScroll(scrollSnapshot);
         }
@@ -912,6 +961,7 @@
         selectAgent,
         loadMore,
         runCommand,
+        saveSchedule,
         openDailySync,
         closeDailySync,
         toggleDailySyncAll,

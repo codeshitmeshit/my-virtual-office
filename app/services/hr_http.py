@@ -174,6 +174,8 @@ class HRHTTPRoutes:
                 result = self._management.manual_daily_sync_command(body, body_bytes=body_bytes)
             elif path == f"{MANAGEMENT_PREFIX}/directory/sync":
                 result = self._management.directory_sync_command(body, body_bytes=body_bytes)
+            elif path == f"{MANAGEMENT_PREFIX}/schedule":
+                result = self._management.schedule_command(body, body_bytes=body_bytes)
             elif path.startswith(lifecycle_prefix):
                 action = self._segment(path.removeprefix(lifecycle_prefix))
                 result = self._management.lifecycle_command(action, body, body_bytes=body_bytes)

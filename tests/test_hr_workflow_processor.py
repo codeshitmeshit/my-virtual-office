@@ -16,7 +16,11 @@ from services.hr_assessments import HRAssessmentOrchestrator
 from services.hr_config import HRConfig
 from services.hr_command_status import HRCommandStatusTracker
 from services.hr_evidence import HREvidenceCollector, HREvidencePorts
-from services.hr_reporting import HRDailyReportCollector, HRReportingService
+from services.hr_reporting import (
+    HRDailyReportCollector,
+    HRDailyReportNormalizer,
+    HRReportingService,
+)
 from services.hr_repository import HRRepository
 from services.hr_scheduler import (
     HRLoopRuntime,
@@ -69,11 +73,27 @@ class AssessmentHR:
         self.fail = fail
         self.calls = []
 
-    def ask_hr(self, _prompt, conversation_key, _timeout):
+    def ask_hr(self, prompt, conversation_key, _timeout):
         self.calls.append(conversation_key)
         if self.fail:
             raise RuntimeError("provider secret")
         ai_id = conversation_key.rsplit(":", 1)[-1]
+        if ":daily-report-normalize:" in conversation_key:
+            submission = json.loads(prompt.split("submission: ", 1)[1].split("\n", 1)[0])
+            return json.dumps(
+                {
+                    "schemaVersion": 1,
+                    "localDate": LOCAL_DATE,
+                    "agentAiId": ai_id,
+                    "completedWork": [f"{ai_id} done"],
+                    "relatedProjectsOrTasks": [],
+                    "artifacts": [],
+                    "blockers": [],
+                    "requestedHelp": [],
+                    "submission": submission,
+                },
+                ensure_ascii=False,
+            )
         return json.dumps(
             {
                 "schemaVersion": 1,
@@ -150,6 +170,12 @@ def setup(tmp_path, *, agent_count=4, conversation=None, assessment_hr=None, con
         HREvidencePorts(empty, empty, empty, empty, empty, empty)
     )
     assessment_hr = assessment_hr or AssessmentHR()
+    normalizer = HRDailyReportNormalizer(
+        repository,
+        assessment_hr,
+        clock=lambda: NOW,
+        timeout_seconds=1,
+    )
     assessments = HRAssessmentOrchestrator(
         repository,
         evidence,
@@ -164,6 +190,7 @@ def setup(tmp_path, *, agent_count=4, conversation=None, assessment_hr=None, con
         cfg,
         repository,
         reports,
+        normalizer,
         assessments,
         clock=lambda: NOW,
         queue_capacity=cfg.max_workers,
@@ -242,6 +269,7 @@ def test_dual_report_loops_make_one_effective_provider_call(tmp_path):
         make_config(),
         repository,
         reports,
+        first._normalizer,
         first._assessments,
         clock=lambda: NOW,
         queue_capacity=2,
@@ -312,6 +340,7 @@ def test_feature_disable_stops_new_claims_without_hiding_data(tmp_path):
         make_config(),
         repository,
         base._reports,
+        base._normalizer,
         base._assessments,
         clock=lambda: NOW,
         active=lambda: active[0],
@@ -466,6 +495,7 @@ def test_server_startup_wiring_is_thin_and_does_not_run_whole_cycle_inline():
     assert "target=_hr_scheduler_start_on_startup" in source
     startup = source[source.index("def _hr_scheduler_start_on_startup"):]
     startup = startup[: startup.index("\n\ndef ", 10)]
+    assert "_get_hr_application_runtime()" in startup
     assert "process_reports" not in startup
     assert "process_assessments" not in startup
     assert "ask_agent_as_hr" not in startup

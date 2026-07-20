@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, fields, is_dataclass
+from dataclasses import dataclass, fields, is_dataclass, replace
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Callable, Mapping, Protocol
 
@@ -12,6 +12,10 @@ from services.hr_observability import HRObservability
 from services.hr_reporting import HRReportingProjection
 from services.hr_repository import HRRepository, HRRepositoryError
 from services.hr_scheduler import HRCommandReceipt, HRDueTimeCalculator
+from services.hr_schedule_settings import (
+    HRScheduleSettingsService,
+    HRScheduleSettingsValidationError,
+)
 
 
 class HRAPIValidationError(ValueError):
@@ -88,6 +92,7 @@ class HRManagementAPI:
         observability: HRObservability,
         config: HRConfig,
         *,
+        schedule_settings: HRScheduleSettingsService | None = None,
         directory_sync: HRDirectorySyncPort | None = None,
         information_completion: HRInformationCompletionPort | None = None,
         manual_daily_sync: HRManualDailySyncPort | None = None,
@@ -111,6 +116,10 @@ class HRManagementAPI:
             raise HRAPIValidationError("observability is invalid")
         if not isinstance(config, HRConfig):
             raise HRAPIValidationError("HR config is invalid")
+        if schedule_settings is not None and not isinstance(
+            schedule_settings, HRScheduleSettingsService
+        ):
+            raise HRAPIValidationError("HR schedule settings are invalid")
         if directory_sync is not None and not callable(getattr(directory_sync, "sync", None)):
             raise HRAPIValidationError("directory sync port is invalid")
         if information_completion is not None and not callable(
@@ -125,6 +134,7 @@ class HRManagementAPI:
         self._reporting = reporting
         self._observability = observability
         self._config = config
+        self._schedule_settings = schedule_settings or HRScheduleSettingsService(repository)
         self._directory_sync = directory_sync
         self._information_completion = information_completion
         self._manual_daily_sync = manual_daily_sync
@@ -163,9 +173,15 @@ class HRManagementAPI:
         cycle_exists: bool,
         now: datetime,
     ) -> dict[str, object]:
-        calculator = HRDueTimeCalculator(self._config)
+        settings = self._schedule_settings.load()
+        effective_config = replace(
+            self._config,
+            scheduler_enabled=settings.enabled,
+            daily_time=settings.daily_time,
+        )
+        calculator = HRDueTimeCalculator(effective_config)
         today = calculator.window_for_date(local_date)
-        enabled = self._config.scheduler_active
+        enabled = effective_config.scheduler_active
         if cycle_exists:
             window = calculator.window_for_date(local_date + timedelta(days=1))
             state = "scheduled" if enabled else "disabled"
@@ -178,14 +194,14 @@ class HRManagementAPI:
         else:
             window = calculator.window_for_date(local_date + timedelta(days=1))
             state = "disabled"
-        local_scheduled = window.scheduled_at.astimezone(self._config.timezone)
+        local_scheduled = window.scheduled_at.astimezone(effective_config.timezone)
         return {
             "enabled": enabled,
             "state": state,
             "nextAt": window.scheduled_at.isoformat(),
             "nextLocalAt": local_scheduled.isoformat(),
-            "timezone": self._config.timezone_name,
-            "dailyTime": self._config.daily_time.strftime("%H:%M"),
+            "timezone": effective_config.timezone_name,
+            "dailyTime": settings.daily_time_text,
         }
 
     def overview(self) -> HRServiceResult:
@@ -340,7 +356,7 @@ class HRManagementAPI:
         snapshot = self._observability.health(
             self._repository.management_health(),
             feature_enabled=self._config.enabled,
-            scheduler_enabled=self._config.scheduler_enabled,
+            scheduler_enabled=self._schedule_settings.load().enabled,
         )
         return HRServiceResult(200, {"ok": True, "health": _json_safe(snapshot)})
 
@@ -377,6 +393,23 @@ class HRManagementAPI:
             raise HRAPIValidationError("unsupported lifecycle action")
         state = self._lifecycle.pause() if action == "pause" else self._lifecycle.resume()
         return HRServiceResult(200, {"ok": True, "hr": _json_safe(state)})
+
+    def schedule_command(self, body: object, *, body_bytes: int) -> HRServiceResult:
+        if not self._config.enabled:
+            raise HRAPIDisabledError("Human Resources mutations are disabled")
+        payload = self._body(body, body_bytes)
+        settings = self._schedule_settings.update(payload)
+        return HRServiceResult(
+            200,
+            {
+                "ok": True,
+                "schedule": {
+                    "enabled": settings.enabled,
+                    "dailyTime": settings.daily_time_text,
+                    "timezone": self._config.timezone_name,
+                },
+            },
+        )
 
     def cycle_command(
         self,
@@ -510,6 +543,8 @@ class HRManagementAPI:
         if isinstance(exc, HRAPIValidationError):
             status = 413 if "too large" in str(exc) else 400
             return HRServiceResult(status, {"ok": False, "code": exc.code, "error": str(exc)})
+        if isinstance(exc, HRScheduleSettingsValidationError):
+            return HRServiceResult(400, {"ok": False, "code": exc.code})
         if isinstance(exc, HRRepositoryError):
             return HRServiceResult(409, {"ok": False, "code": exc.code})
         return HRServiceResult(500, {"ok": False, "code": "hr_internal_error"})

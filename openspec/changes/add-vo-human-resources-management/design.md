@@ -144,21 +144,20 @@ Add these modules, none of which imports `server.py` or HTTP transport:
 
 `app/server.py` constructs ports and delegates routes. It does not contain HR validation, persistence decisions, state transitions, prompt parsing, or access projection.
 
-### 5. Keep the daily schedule authoritative in VO
+### 5. Keep the daily schedule authoritative in VO and editable in Human Resources
 
-The scheduler uses a small daemon reconciliation loop similar to existing recurrence reconciliation, but cycle identity and claims are stored in the HR repository. It does not depend on OpenClaw cron to decide whether a date has run.
+The scheduler uses the shared VO `PeriodicTimer` interface also used by project recurrence, while cycle identity and claims remain stored in the HR repository. It does not depend on OpenClaw cron to decide whether a date has run. The timer only triggers reconciliation; the repository remains the idempotency and recovery authority.
 
 Configuration is explicit and bounded:
 
 - `VO_HR_ENABLED`: master feature switch, enabled by default so the global HR Agent is reconciled on normal startup; explicit `false` remains the rollback/opt-out control.
-- `VO_HR_SCHEDULER_ENABLED`: automatic collection/assessment switch, disabled by default so enabling the HR lifecycle does not immediately contact Agents.
-- `VO_HR_DAILY_TIME`: VO-local `HH:MM`, default `18:00`.
+- automatic collection enablement and VO-local `HH:MM` are persisted through the Human Resources page, defaulting to enabled at `18:00`; the running loop reloads them on every reconciliation tick.
 - `VO_HR_SUBMISSION_WINDOW_MINUTES`: default `120`, bounded.
 - `VO_HR_MAX_WORKERS`: default `2`, bounded to prevent provider overload.
 - `VO_HR_AGENT_TIMEOUT_SECONDS`: bounded per call.
 - `VO_HR_RETRY_LIMIT`: bounded transient retry count.
 
-At the due time the scheduler transactionally creates one cycle for the VO-local date and snapshots eligible Agent IDs. Workers claim one request row at a time, commit the claim before provider work, renew or expire claims, and persist a terminal request state. Window closure marks outstanding responses `not_submitted` without negative interpretation, then assessment jobs are created for eligible Agents.
+At the due time the scheduler transactionally refreshes the Agent directory, creates one cycle for the VO-local date, and snapshots eligible Agent IDs. Workers claim one request row at a time, commit the claim before provider work, renew or expire claims, and persist a terminal request state. Every accepted raw response is passed through HR normalization during the same reconciliation path. Window closure and restart recovery retry raw reports that still lack normalization; assessment skips those raw reports until normalization succeeds. Window closure marks outstanding responses `not_submitted` without negative interpretation, then assessment jobs are created for eligible Agents.
 
 Startup reconciliation behaves as follows:
 
@@ -265,6 +264,7 @@ Human management APIs reuse `X-VO-Management-Token` and `window.i18n.managementF
 - `POST /api/human-resources/directory/sync`
 - `POST /api/human-resources/directory/complete-information`
 - `POST /api/human-resources/daily-sync`
+- `POST /api/human-resources/schedule`
 - `POST /api/human-resources/cycles/{run|close|retry}`
 - `GET /api/human-resources/health`
 

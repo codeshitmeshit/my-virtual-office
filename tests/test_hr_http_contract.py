@@ -179,6 +179,33 @@ def test_management_routes_cover_detail_log_health_export_and_commands(runtime):
     assert status == 400
     assert payload["code"] == "hr_api_validation_failed"
 
+    status, payload = call(
+        handler(
+            "/api/human-resources/schedule",
+            {"enabled": True, "dailyTime": "16:45"},
+            management=True,
+        ),
+        "POST",
+    )
+    assert status == 200
+    assert payload["schedule"]["dailyTime"] == "16:45"
+    overview_status, overview_payload = call(
+        handler("/api/human-resources/overview", management=True),
+        "GET",
+    )
+    assert overview_status == 200
+    assert overview_payload["reportSchedule"]["dailyTime"] == "16:45"
+    status, payload = call(
+        handler(
+            "/api/human-resources/schedule",
+            {"enabled": True, "dailyTime": "25:00"},
+            management=True,
+        ),
+        "POST",
+    )
+    assert status == 400
+    assert payload["code"] == "hr_schedule_settings_validation_failed"
+
     class Completion:
         def complete(self):
             return HRInformationCompletionReceipt(

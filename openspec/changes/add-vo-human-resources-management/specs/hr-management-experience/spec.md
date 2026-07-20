@@ -23,6 +23,12 @@ The overview SHALL present HR lifecycle state, Agent totals by availability, tod
 - **THEN** it SHALL show the next collection wall-clock time and configured VO timezone
 - **AND** it SHALL distinguish scheduled collection, an occurrence already due for catch-up, and a configured time whose automatic scheduler is disabled
 
+#### Scenario: Human configures daily collection on the page
+- **WHEN** the human edits the daily collection time or automatic enablement in Human Resources
+- **THEN** the module SHALL validate and save the schedule through a management API
+- **AND** the refreshed overview SHALL show the persisted time and next occurrence
+- **AND** a new repository SHALL initially show an enabled `18:00` schedule
+
 ### Requirement: Agent Human Resources detail
 The human-facing Agent detail SHALL show name, introduction, AI ID, availability, introduction provenance, report history, assessment history, workload history, blockers, improvement feedback, current workflow state, HR contact state, and access history authorized for the human.
 

@@ -64,6 +64,23 @@ assert.equal(hr.state.agents.length, 1);
 assert.match(hr.state.commandNotice, /pause/i);
 assert.equal(hr.state.commandBusy, '');
 
+globalThis.document = {
+  getElementById(id) {
+    if (id === 'hr-schedule-time') return { value: '07:35' };
+    if (id === 'hr-schedule-enabled') return { checked: false };
+    return null;
+  },
+  querySelector() { return null; },
+};
+const scheduleRequestStart = requests.length;
+assert.equal(await hr.saveSchedule(), true);
+assert.equal(requests[scheduleRequestStart].url, '/api/human-resources/schedule');
+assert.deepEqual(JSON.parse(requests[scheduleRequestStart].options.body), {
+  enabled: false,
+  dailyTime: '07:35',
+});
+assert.equal(hr.state.scheduleBusy, false);
+
 hr.openDailySync();
 assert.equal(hr.state.dailySyncOpen, true);
 hr.toggleDailySyncAll(true);

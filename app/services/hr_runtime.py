@@ -20,6 +20,7 @@ from services.hr_information_completion import (
     HRInformationCompletionService,
 )
 from services.hr_assessments import HRAssessmentOrchestrator
+from services.hr_automatic_reporting import build_hr_automatic_reporting
 from services.hr_evidence import HREvidenceCollector, HREvidencePorts
 from services.hr_manual_daily_sync import (
     CallableHRManualDailyConversation,
@@ -32,7 +33,11 @@ from services.hr_observability import HRObservability
 from services.hr_reporting import HRDailyReportNormalizer, HRReportingProjection, HRReportingService
 from services.hr_repository import HRRepository
 from services.hr_scheduler import HRCommandReceipt, HRManualCommands, HRReconciliationLoop
-from services.hr_team_sync import build_hr_team_sync
+from services.hr_schedule_settings import HRScheduleSettingsService
+from services.hr_team_sync import (
+    HRTeamSyncCommands,
+    build_hr_team_sync,
+)
 
 
 class HRCommandRouter:
@@ -86,6 +91,7 @@ class HRApplicationRuntime:
     repository: HRRepository
     observability: HRObservability
     routes: HRHTTPRoutes
+    scheduler_loop: HRReconciliationLoop | None = None
 
 
 def build_hr_application_runtime(
@@ -107,8 +113,28 @@ def build_hr_application_runtime(
     if callable(install_tracker):
         install_tracker(command_tracker)
     observability = HRObservability()
+    schedule_settings = HRScheduleSettingsService(repository)
     directory_sync = None
-    if roster_provider is not None:
+    scheduler_loop = None
+    automatic_reporting = None
+    if roster_provider is not None and daily_conversation is not None:
+        automatic_reporting = build_hr_automatic_reporting(
+            repository,
+            config=config,
+            lifecycle=lifecycle,
+            schedule_settings=schedule_settings,
+            roster_provider=roster_provider,
+            conversation=daily_conversation,
+        )
+        directory_sync = HRTeamSyncCommands(
+            automatic_reporting.team_sync,
+            command_tracker,
+        )
+        scheduler_loop = automatic_reporting.loop
+        install_loop = getattr(commands, "install_loop", None)
+        if callable(install_loop):
+            install_loop(scheduler_loop)
+    elif roster_provider is not None:
         directory_sync = build_hr_team_sync(
             repository,
             roster_provider=roster_provider,
@@ -126,28 +152,33 @@ def build_hr_application_runtime(
         )
     manual_daily_sync = None
     if daily_conversation is not None:
-        reporting = HRReportingService(
-            repository,
-            claim_token_factory=lambda request_id: f"hr-manual-{uuid.uuid4().hex}-{request_id}",
-            claim_lease_seconds=min(600, max(31, int(config.agent_timeout_seconds) + 30)),
-        )
-        evidence_port = EmptyHREvidencePort()
-        evidence = HREvidenceCollector(
-            HREvidencePorts(
-                evidence_port, evidence_port, evidence_port,
-                evidence_port, evidence_port, evidence_port,
+        if automatic_reporting is None:
+            reporting = HRReportingService(
+                repository,
+                claim_token_factory=lambda request_id: f"hr-manual-{uuid.uuid4().hex}-{request_id}",
+                claim_lease_seconds=min(600, max(31, int(config.agent_timeout_seconds) + 30)),
             )
-        )
-        normalizer = HRDailyReportNormalizer(
-            repository, daily_conversation, timeout_seconds=config.agent_timeout_seconds,
-        )
-        assessments = HRAssessmentOrchestrator(
-            repository,
-            evidence,
-            daily_conversation,
-            timeout_seconds=config.agent_timeout_seconds,
-            claim_lease_seconds=min(600, max(31, int(config.agent_timeout_seconds) + 30)),
-        )
+            evidence_port = EmptyHREvidencePort()
+            evidence = HREvidenceCollector(
+                HREvidencePorts(
+                    evidence_port, evidence_port, evidence_port,
+                    evidence_port, evidence_port, evidence_port,
+                )
+            )
+            normalizer = HRDailyReportNormalizer(
+                repository, daily_conversation, timeout_seconds=config.agent_timeout_seconds,
+            )
+            assessments = HRAssessmentOrchestrator(
+                repository,
+                evidence,
+                daily_conversation,
+                timeout_seconds=config.agent_timeout_seconds,
+                claim_lease_seconds=min(600, max(31, int(config.agent_timeout_seconds) + 30)),
+            )
+        else:
+            reporting = automatic_reporting.reporting
+            normalizer = automatic_reporting.normalizer
+            assessments = automatic_reporting.assessments
         manual_daily_sync = HRManualDailySyncCommands(
             HRManualDailySyncService(
                 repository,
@@ -169,6 +200,7 @@ def build_hr_application_runtime(
         HRReportingProjection(repository),
         observability,
         config,
+        schedule_settings=schedule_settings,
         directory_sync=directory_sync,
         information_completion=information_completion,
         manual_daily_sync=manual_daily_sync,
@@ -178,4 +210,4 @@ def build_hr_application_runtime(
         HRAgentAuthenticator(repository),
         HRAgentAPI(repository, HRDirectoryQuery(repository)),
     )
-    return HRApplicationRuntime(repository, observability, routes)
+    return HRApplicationRuntime(repository, observability, routes, scheduler_loop)

@@ -55,6 +55,7 @@ from services import project_authoring_security as project_authoring_security_se
 from services import project_authoring_audit as project_authoring_audit_service
 from services import project_templates as project_templates_service
 from services import project_recurrence as project_recurrence_service
+from services import periodic_timer as periodic_timer_service
 from services import project_authoring_observability as project_authoring_observability_service
 from services import meeting_repository as meeting_repository_service
 from services import meeting_lifecycle as meeting_lifecycle_service
@@ -18132,26 +18133,31 @@ def _project_recurrence_reconciler():
     return _PROJECT_RECURRENCE_RECONCILER
 
 
-def _project_recurrence_reconcile_loop():
-    while True:
-        started_at = time.perf_counter()
-        try:
-            _project_recurrence_reconciler().reconcile_once()
-        except Exception as exc:
-            safe_error = project_authoring_audit_service.sanitize_audit_text(exc, limit=360)
-            _PROJECT_AUTHORING_OBSERVABILITY.observe(
-                "recurrence.reconcile_loop",
-                status="failure",
-                duration_ms=int((time.perf_counter() - started_at) * 1000),
-                code=type(exc).__name__,
-                intervention=True,
-            )
-            print(json.dumps({
-                "type": "project_recurrence_reconcile_failed",
-                "error": safe_error,
-                "timestamp": _proj_now(),
-            }, ensure_ascii=False), flush=True)
-        time.sleep(5)
+def _project_recurrence_reconcile_once():
+    started_at = time.perf_counter()
+    try:
+        return _project_recurrence_reconciler().reconcile_once()
+    except Exception as exc:
+        safe_error = project_authoring_audit_service.sanitize_audit_text(exc, limit=360)
+        _PROJECT_AUTHORING_OBSERVABILITY.observe(
+            "recurrence.reconcile_loop",
+            status="failure",
+            duration_ms=int((time.perf_counter() - started_at) * 1000),
+            code=type(exc).__name__,
+            intervention=True,
+        )
+        print(json.dumps({
+            "type": "project_recurrence_reconcile_failed",
+            "error": safe_error,
+            "timestamp": _proj_now(),
+        }, ensure_ascii=False), flush=True)
+
+
+_PROJECT_RECURRENCE_TIMER = periodic_timer_service.PeriodicTimer(
+    _project_recurrence_reconcile_once,
+    interval_seconds=5,
+    name="project-recurrence-reconciler",
+)
 
 
 def _handle_project_scheduled_cron_list(project_id):
@@ -21474,16 +21480,18 @@ def _get_hr_application_runtime():
                     )
                 ),
             )
+            if _hr_application_runtime.scheduler_loop is not None:
+                _install_hr_scheduler_loop(_hr_application_runtime.scheduler_loop)
         return _hr_application_runtime
 
 
 def _install_hr_scheduler_loop(loop):
     """Thin dependency-wiring hook; scheduling behavior stays in services.hr_scheduler."""
     _hr_scheduler_runtime.install(loop)
-    _hr_command_router.install_loop(loop)
 
 
 def _hr_scheduler_start_on_startup():
+    _get_hr_application_runtime()
     return _hr_scheduler_runtime.start()
 
 
@@ -36041,7 +36049,7 @@ if __name__ == "__main__":
     except hr_config_service.HRConfigError as exc:
         hr_scheduler_config = None
         print(f"[HR] scheduler configuration rejected: {exc}")
-    if hr_scheduler_config is not None and hr_scheduler_config.scheduler_active:
+    if hr_scheduler_config is not None and hr_scheduler_config.enabled:
         hr_scheduler_thread = threading.Thread(
             target=_hr_scheduler_start_on_startup,
             daemon=True,
@@ -36060,12 +36068,7 @@ if __name__ == "__main__":
     )
     approval_reconcile_thread.start()
 
-    recurrence_reconcile_thread = threading.Thread(
-        target=_project_recurrence_reconcile_loop,
-        daemon=True,
-        name="project-recurrence-reconciler",
-    )
-    recurrence_reconcile_thread.start()
+    _PROJECT_RECURRENCE_TIMER.start()
 
     # Start HTTP server in main thread
     start_http_server()
