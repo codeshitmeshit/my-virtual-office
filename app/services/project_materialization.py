@@ -102,6 +102,31 @@ CANONICAL_TASK_BASE_FIELDS = frozenset({
     "updatedAt",
 })
 
+# Persisted fields allowed in addition to the canonical Project base. Activity
+# remains a canonical field; its source-specific event type is documented
+# separately so overlays cannot use provenance to omit base fields.
+PERMITTED_PROJECT_OVERLAY_FIELDS = {
+    "manual": frozenset(),
+    "browser_template": frozenset({"authoringSource", "recurrenceRef", "templateRef"}),
+    "agent_direct": frozenset({
+        "agentMaintenanceMode", "authoringAgentId", "authoringSource",
+        "recurrenceRef", "templateRef",
+    }),
+    "versioned_template": frozenset({
+        "agentMaintenanceMode", "authoringSource", "recurrenceRef", "templateRef",
+    }),
+    "recurrence": frozenset({
+        "agentMaintenanceMode", "authoringSource", "recurrenceRef", "templateRef",
+    }),
+}
+PROJECT_CREATION_ACTIVITY_TYPES = {
+    "manual": "project_created",
+    "browser_template": "project_created",
+    "agent_direct": "project_authored",
+    "versioned_template": "project_instantiated_from_template",
+    "recurrence": "project_instantiated_from_template",
+}
+
 MAX_CHECKLIST_ITEMS = 100
 
 

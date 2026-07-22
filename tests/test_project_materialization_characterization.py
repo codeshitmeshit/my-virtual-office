@@ -25,6 +25,8 @@ from services.project_authoring_store import ProjectAuthoringRootStore
 from services.project_materialization import (
     CANONICAL_PROJECT_BASE_FIELDS,
     CANONICAL_TASK_BASE_FIELDS,
+    PERMITTED_PROJECT_OVERLAY_FIELDS,
+    PROJECT_CREATION_ACTIVITY_TYPES,
 )
 from services.project_repository import ProjectRepository
 
@@ -428,3 +430,46 @@ def test_creation_paths_characterize_current_default_divergence(monkeypatch, tmp
         "project": direct_project_defaults,
         "task": direct_task_defaults,
     }
+
+
+def test_creation_paths_share_base_defaults_and_only_documented_overlays(monkeypatch, tmp_path):
+    cases = {
+        "manual": _manual_creation(),
+        "browser_template": _browser_template_creation(monkeypatch, tmp_path),
+        "agent_direct": _agent_direct_creation(tmp_path),
+        "versioned_template": _versioned_template_creation(tmp_path),
+        "recurrence": _recurring_creation(tmp_path),
+    }
+    project_content_fields = {
+        "id", "title", "description", "columns", "tasks", "activity",
+        "createdAt", "updatedAt", "createdBy", "archiveMaintenance",
+    }
+    task_content_fields = {
+        "id", "title", "description", "columnId", "order", "checklist",
+        "responsibleActor", "executorActor", "reviewerActor", "reviewerRecommendation",
+        "assignee", "executorAgentId", "reviewerAgentId", "createdAt", "updatedAt",
+    }
+
+    project_projections = {}
+    task_projections = {}
+    for source, (project, task) in cases.items():
+        assert set(project) - CANONICAL_PROJECT_BASE_FIELDS == PERMITTED_PROJECT_OVERLAY_FIELDS[source]
+        assert set(task) == CANONICAL_TASK_BASE_FIELDS
+        assert project["activity"][0]["type"] == PROJECT_CREATION_ACTIVITY_TYPES[source]
+        project_projections[source] = {
+            field: copy.deepcopy(project[field])
+            for field in CANONICAL_PROJECT_BASE_FIELDS - project_content_fields
+        }
+        task_projections[source] = {
+            field: copy.deepcopy(task[field])
+            for field in CANONICAL_TASK_BASE_FIELDS - task_content_fields
+        }
+
+    assert all(
+        projection == project_projections["manual"]
+        for projection in project_projections.values()
+    )
+    assert all(
+        projection == task_projections["manual"]
+        for projection in task_projections.values()
+    )
