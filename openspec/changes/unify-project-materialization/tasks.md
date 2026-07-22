@@ -35,7 +35,7 @@
 - [x] 6.1 Add and validate the confirmed recurrence execution mode (`create_only` or `create_and_execute`), include it in semantic digests and durable recurrence definitions, default existing definitions to create-only, and add validation/idempotency tests.
 - [x] 6.2 Migrate recurring occurrence Project/Task creation to canonical materialization while preserving deterministic IDs, claims, version/source traceability, workspace cleanup, intervention recording, and duplicate/concurrent callback tests.
 - [x] 6.3 Persist a bounded per-occurrence automatic-execution intent atomically with `create_and_execute` Project creation, and add state/history tests for pending, started, retryable failure, and intervention outcomes.
-- [ ] 6.4 Inject project-level execution start after occurrence commit, reconcile pending/retryable intents without duplicate active attempts, expose sanitized/rate-limited observability, and test post-commit crash recovery, repeated/concurrent callbacks, start failure, and already-active projects.
+- [x] 6.4 Inject project-level execution start after occurrence commit, reconcile pending/retryable intents without duplicate active attempts, expose sanitized/rate-limited observability, and test post-commit crash recovery, repeated/concurrent callbacks, start failure, and already-active projects.
 
 ## 7. Duplicate Removal and Boundary Enforcement
 
