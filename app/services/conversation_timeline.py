@@ -732,6 +732,34 @@ class ConversationTimelineService:
     ) -> TimelinePage:
         return self.page_items(self.merge_items(scope, sources), query, session=session)
 
+    def merge_compatibility_records(
+        self,
+        scope: TimelineScope,
+        source_records: Iterable[Iterable[Mapping[str, Any]]],
+    ) -> tuple[dict[str, Any], ...]:
+        """Select legacy DTOs using canonical scoped identity without reshaping them."""
+
+        selected: dict[str, tuple[TimelineItem, dict[str, Any]]] = {}
+        ordinal = 0
+        for records in source_records or ():
+            for raw in records or ():
+                if not isinstance(raw, Mapping):
+                    continue
+                payload = copy.deepcopy(dict(raw))
+                source = str(payload.get("source") or scope.provider_kind)
+                item = self.item_from_record(scope, payload, source=source, ordinal=ordinal, durable=True)
+                ordinal += 1
+                legacy_id = str(payload.get("id") or "")
+                key = "compat:" + _stable_hash((scope.key(), legacy_id)) if legacy_id else (item.identity_key or item.id)
+                existing = selected.get(key)
+                if existing is None or item.source_priority > existing[0].source_priority:
+                    selected[key] = (item, payload)
+        ordered = sorted(
+            selected.values(),
+            key=lambda pair: (int(pair[1].get("epochMs") or 0), str(pair[1].get("id") or "")),
+        )
+        return tuple(copy.deepcopy(payload) for _, payload in ordered)
+
     @staticmethod
     def _settle_pair(left: TimelineItem, right: TimelineItem) -> TimelineItem:
         def rank(item: TimelineItem) -> tuple[Any, ...]:

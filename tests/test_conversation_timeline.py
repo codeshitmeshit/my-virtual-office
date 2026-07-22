@@ -293,3 +293,17 @@ def test_input_and_output_nested_values_do_not_share_mutable_state():
     assert item.tools[0]["arguments"]["path"] == "a"
     with pytest.raises(ValueError):
         service.normalize_records(scope, (), source="openclaw", candidate_limit="bad")
+
+
+def test_compatibility_merge_deduplicates_legacy_id_even_if_item_kind_changes():
+    service = ConversationTimelineService()
+    scope = TimelineScope.create("codex", "agent", "", "conversation")
+    records = service.merge_compatibility_records(
+        scope,
+        (
+            ({"id": "shared", "providerKind": "codex", "conversationId": "conversation", "text": "message", "source": "codex"},),
+            ({"id": "shared", "providerKind": "codex", "conversationId": "conversation", "approval": {"status": "pending"}, "source": "agent-platform-communications", "sourcePriority": 10},),
+        ),
+    )
+    assert len(records) == 1
+    assert records[0]["approval"] == {"status": "pending"}

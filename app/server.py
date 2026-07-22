@@ -90,6 +90,17 @@ from services.provider_runs import ProviderRunCoordinator
 from services.chat_commands import ChatCommand, ChatCommandService, CommandRequest, CommandScope, parse_chat_command
 from services.chat_command_providers import ChatProviderCommandAdapter, CodexCompactAdapter, ScopedConversationResetAdapter
 from services.chat_command_runtime import CallbackCommandAuditPort, CommandFeatureFlags, CommandMetrics, ScopedCommandReservations
+from services.conversation_timeline import ConversationTimelineService
+from services.chat_history_timeline import (
+    ChatHistoryTimelineService,
+    SOURCE_CACHE_BYTE_LIMIT,
+    SOURCE_CACHE_ENTRY_LIMIT,
+    clean_feishu_image_text,
+    decode_cursor as decode_chat_history_cursor,
+    encode_cursor as encode_chat_history_cursor,
+    extract_content as extract_chat_history_content,
+    history_hash as chat_history_hash,
+)
 from services.codex_fast_path import CodexEventFastPath, CodexFastPathTelemetry, CodexTransientCoalescer, classify_codex_event, load_codex_fast_path_settings
 from services.codex_feishu_approvals import (
     BoundedApprovalDeliveryExecutor,
@@ -137,6 +148,8 @@ _FEISHU_CHAT_SSE_METRICS = {
 }
 _CHAT_COMMAND_RESERVATIONS = ScopedCommandReservations()
 _CHAT_COMMAND_METRICS = CommandMetrics()
+_CONVERSATION_TIMELINE_SERVICE = ConversationTimelineService()
+_CHAT_HISTORY_TIMELINE_SERVICE = ChatHistoryTimelineService(_CONVERSATION_TIMELINE_SERVICE)
 _FEISHU_CHAT_WORKER_TOKEN = uuid.uuid4().hex
 
 
@@ -10816,40 +10829,17 @@ class _ChatHistoryRequest:
 
 
 def _chat_history_hash(value):
-    """Return the shared unsigned FNV-1a hash for normalized UTF-8 text."""
-    result = 0x811C9DC5
-    for byte in str(value or "").encode("utf-8"):
-        result ^= byte
-        result = (result * 0x01000193) & 0xFFFFFFFF
-    return f"{result:08x}"
+    return chat_history_hash(value)
 
 
 def _encode_chat_history_cursor(epoch_ms, message_id):
-    payload = json.dumps({
-        "v": 1,
-        "ts": int(epoch_ms or 0),
-        "id": str(message_id or ""),
-    }, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
-    return base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=")
+    return encode_chat_history_cursor(epoch_ms, message_id)
 
 
 def _decode_chat_history_cursor(cursor):
-    raw = str(cursor or "").strip()
-    if not raw or len(raw) > 1024:
-        raise _ChatHistoryRequestError("Invalid chat history cursor", "invalid_chat_history_cursor")
     try:
-        padding = "=" * (-len(raw) % 4)
-        payload = json.loads(base64.urlsafe_b64decode((raw + padding).encode("ascii")).decode("utf-8"))
-        if not isinstance(payload, dict) or payload.get("v") != 1:
-            raise ValueError("unsupported cursor")
-        epoch_ms = int(payload.get("ts"))
-        message_id = str(payload.get("id") or "")
-        if epoch_ms < 0 or not message_id or len(message_id) > 512:
-            raise ValueError("invalid cursor values")
-        return epoch_ms, message_id
-    except (_ChatHistoryRequestError,):
-        raise
-    except Exception as exc:
+        return decode_chat_history_cursor(cursor)
+    except ValueError as exc:
         raise _ChatHistoryRequestError(
             "Invalid chat history cursor",
             "invalid_chat_history_cursor",
@@ -10951,159 +10941,15 @@ def _load_cached_chat_history_jsonl(path, cache_key, max_records=1000, predicate
 
 
 def _chat_history_extract_content(row):
-    message = row.get("message") if isinstance(row.get("message"), dict) else row
-    content = message.get("content")
-    text = str(row.get("text") or message.get("text") or "")
-    # Keep attachments in their canonical field. Falling back to attachments
-    # here duplicates the same resource when the normalized payload is rendered.
-    media = list(row.get("media") or [])
-    tools = [dict(item) for item in (row.get("tools") or []) if isinstance(item, dict)]
-    if isinstance(content, str):
-        text = content
-    elif isinstance(content, list):
-        text_parts = []
-        indexed_tools = {str(item.get("id") or item.get("toolCallId") or ""): item for item in tools}
-        for block in content:
-            if not isinstance(block, dict):
-                continue
-            block_type = str(block.get("type") or "")
-            if block_type == "text":
-                text_parts.append(str(block.get("text") or ""))
-            elif block_type in ("image", "image_url", "input_image", "file", "media", "attachment", "video", "audio"):
-                url = block.get("url") or block.get("path") or block.get("filePath") or block.get("mediaUrl")
-                if not url and isinstance(block.get("image_url"), dict):
-                    url = block["image_url"].get("url")
-                if not url and isinstance(block.get("source"), dict):
-                    url = block["source"].get("url") or block["source"].get("path")
-                if url:
-                    media.append({
-                        "url": url,
-                        "mimeType": block.get("mimeType") or block.get("media_type") or block.get("contentType") or "",
-                        "name": block.get("name") or block.get("filename") or "",
-                    })
-            elif block_type in ("toolCall", "tool_call"):
-                tool = {
-                    "id": block.get("id") or block.get("toolCallId") or block.get("callId") or "",
-                    "name": block.get("name") or block.get("toolName") or (block.get("function") or {}).get("name") or "tool",
-                    "arguments": block.get("arguments") or block.get("args") or block.get("input") or (block.get("function") or {}).get("arguments") or {},
-                    "status": "done",
-                }
-                tools.append(tool)
-                if tool["id"]:
-                    indexed_tools[str(tool["id"])] = tool
-            elif block_type in ("toolResult", "tool_result"):
-                tool_id = str(block.get("toolCallId") or block.get("id") or "")
-                tool = indexed_tools.get(tool_id)
-                result = block.get("result", block.get("output", block.get("content", block.get("text", block.get("error", "")))))
-                if tool is None:
-                    tool = {"id": tool_id, "name": block.get("name") or "tool result", "arguments": {}}
-                    tools.append(tool)
-                    if tool_id:
-                        indexed_tools[tool_id] = tool
-                tool["result"] = result
-                tool["error"] = block.get("error") or ""
-                tool["status"] = "error" if block.get("error") else "done"
-        text = "".join(text_parts)
-    return text, media, tools
+    return extract_chat_history_content(row)
 
 
 def _clean_feishu_image_history_text(row, metadata, text):
-    """Remove transport-only image details persisted by older Feishu adapters."""
-    if str(metadata.get("sourceApp") or "").lower() != "feishu":
-        return text
-    if str(metadata.get("messageType") or "").lower() != "image":
-        return text
-    attachments = row.get("attachments") if isinstance(row.get("attachments"), list) else []
-    file_keys = {str(item.get("fileKey") or "").strip() for item in attachments if isinstance(item, dict)}
-    names = {str(item.get("name") or "").strip() for item in attachments if isinstance(item, dict)}
-    paths = {str(item.get("path") or "").strip() for item in attachments if isinstance(item, dict)}
-    urls = {str(item.get("url") or "").strip() for item in attachments if isinstance(item, dict)}
-    visible = []
-    for line in str(text or "").splitlines():
-        stripped = line.strip()
-        image_match = re.fullmatch(r"!\[[^\]]*\]\(\s*([^\s)]+)\s*\)", stripped, re.IGNORECASE)
-        if image_match and image_match.group(1) in file_keys:
-            continue
-        if stripped == "图片附件已同步到 VO。":
-            continue
-        if stripped.startswith("文件名：") and stripped.removeprefix("文件名：").strip() in names:
-            continue
-        if stripped.startswith("本地路径：") and stripped.removeprefix("本地路径：").strip() in paths:
-            continue
-        if stripped.startswith("预览 URL：") and stripped.removeprefix("预览 URL：").strip() in urls:
-            continue
-        visible.append(line)
-    return "\n".join(visible).strip()
+    return clean_feishu_image_text(row, metadata, text)
 
 
 def _normalize_chat_history_message(request, row, source="", ordinal=0):
-    row = row if isinstance(row, dict) else {}
-    message = row.get("message") if isinstance(row.get("message"), dict) else row
-    metadata = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
-    from_ref = row.get("from") if isinstance(row.get("from"), dict) else {}
-    to_ref = row.get("to") if isinstance(row.get("to"), dict) else {}
-    from_id = str(row.get("fromAgentId") or from_ref.get("id") or "")
-    to_id = str(row.get("toAgentId") or to_ref.get("id") or "")
-    explicit_role = str(row.get("role") or message.get("role") or "").strip().lower()
-    direction = str(row.get("direction") or "").strip().lower()
-    from_kind = str(from_ref.get("providerKind") or "").strip().lower()
-    if explicit_role:
-        role = explicit_role
-    elif direction == "request" or from_id == "user" or from_kind == "human":
-        role = "user"
-    else:
-        role = "assistant"
-    text, media, tools = _chat_history_extract_content(row)
-    text = _clean_feishu_image_history_text(row, metadata, text)
-    epoch_ms = _parse_iso_epoch_ms(
-        row.get("epochMs") or row.get("ts") or row.get("timestamp") or message.get("timestamp")
-    )
-    if not epoch_ms:
-        try:
-            epoch_ms = int(row.get("epochMs") or row.get("ts") or 0)
-        except (TypeError, ValueError):
-            epoch_ms = 0
-    source = str(source or row.get("source") or request.provider_kind)
-    canonical_identity = _CHAT_HISTORY_KEY_SEPARATOR.join((
-        request.provider_kind,
-        request.conversation_id or request.session_key,
-        role,
-        str(epoch_ms),
-        from_id,
-        to_id,
-        source,
-        _chat_history_hash(text),
-    ))
-    source_id = row.get("commEventId") or row.get("messageId") or row.get("id") or message.get("id")
-    message_id = str(source_id or f"fallback-{_chat_history_hash(canonical_identity)}-{int(ordinal or 0)}")
-    normalized = {
-        "id": message_id,
-        "providerKind": request.provider_kind,
-        "conversationId": request.conversation_id or request.session_key,
-        "role": role,
-        "text": text,
-        "epochMs": epoch_ms,
-        "from": row.get("from") if not isinstance(row.get("from"), dict) else row["from"].get("name") or from_id,
-        "fromAgentId": from_id,
-        "to": row.get("to") if not isinstance(row.get("to"), dict) else row["to"].get("name") or to_id,
-        "toAgentId": to_id,
-        "media": media,
-        "attachments": list(row.get("attachments") or []),
-        "tools": tools,
-        "thinking": str(row.get("thinking") or ""),
-        "reasoningTokens": int(row.get("reasoningTokens") or 0),
-        "approval": row.get("approval") if isinstance(row.get("approval"), dict) else None,
-        "status": str(row.get("status") or "done"),
-        "source": source,
-        "identityFields": canonical_identity,
-        "idempotencyKey": str(row.get("idempotencyKey") or metadata.get("idempotencyKey") or ""),
-    }
-    version_fields = {key: normalized[key] for key in (
-        "role", "text", "from", "fromAgentId", "to", "toAgentId", "media", "attachments",
-        "tools", "thinking", "reasoningTokens", "approval", "status", "source", "idempotencyKey",
-    )}
-    normalized["version"] = _chat_history_hash(json.dumps(version_fields, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
-    return normalized
+    return _CHAT_HISTORY_TIMELINE_SERVICE.normalize_message(request, row, source, ordinal)
 
 
 def _chat_history_sort_tuple(message):
@@ -11111,36 +10957,27 @@ def _chat_history_sort_tuple(message):
 
 
 def _page_chat_history_messages(messages, before, limit_plus_one):
-    ordered = sorted((item for item in messages if isinstance(item, dict)), key=_chat_history_sort_tuple)
-    if before:
-        ordered = [item for item in ordered if _chat_history_sort_tuple(item) < before]
-    selected = ordered[-max(1, int(limit_plus_one or 1)):]
-    return {"messages": selected, "hasMore": len(ordered) > len(selected)}
+    return _CHAT_HISTORY_TIMELINE_SERVICE.page_messages(messages, before, limit_plus_one)
 
 
 def _merge_chat_history_source_pages(source_pages, before, limit):
-    merged = {}
-    source_has_more = False
-    for page in source_pages or []:
-        source_has_more = source_has_more or bool(page.get("hasMore"))
-        for message in page.get("messages") or []:
-            if before and _chat_history_sort_tuple(message) >= before:
-                continue
-            message_id = str(message.get("id") or "")
-            existing = merged.get(message_id)
-            if existing is None or (
-                existing.get("source") != "agent-platform-communications" and
-                message.get("source") == "agent-platform-communications"
-            ):
-                merged[message_id] = message
-    ordered = sorted(merged.values(), key=_chat_history_sort_tuple)
-    page_messages = ordered[-max(1, min(int(limit or 50), 50)):]
-    has_more = source_has_more or len(ordered) > len(page_messages)
-    next_cursor = ""
-    if page_messages and has_more:
-        first = page_messages[0]
-        next_cursor = _encode_chat_history_cursor(first.get("epochMs"), first.get("id"))
-    return page_messages, next_cursor, has_more
+    source_pages = tuple(source_pages or ())
+    first = next(
+        (message for page in source_pages for message in page.get("messages") or () if isinstance(message, dict)),
+        {},
+    )
+    provider_kind = str(first.get("providerKind") or "codex")
+    conversation_ref = str(first.get("conversationId") or "compatibility")
+    request = _ChatHistoryRequest(
+        provider_kind=provider_kind,
+        agent_id="compatibility",
+        conversation_id="" if provider_kind == "gateway" else conversation_ref,
+        session_key=conversation_ref if provider_kind == "gateway" else "",
+        limit=max(1, min(int(limit or 50), 50)),
+        before=before,
+        key="",
+    )
+    return _CHAT_HISTORY_TIMELINE_SERVICE.merge_pages(request, source_pages)
 
 
 def _page_openclaw_session_history(request, limit_plus_one):
@@ -11165,12 +11002,7 @@ def _page_openclaw_session_history(request, limit_plus_one):
 
 
 def _page_provider_history(request, rows, source, limit_plus_one):
-    normalized = [
-        _normalize_chat_history_message(request, row, source=source, ordinal=index)
-        for index, row in enumerate(rows or [])
-        if isinstance(row, dict)
-    ]
-    return _page_chat_history_messages(normalized, request.before, limit_plus_one)
+    return _CHAT_HISTORY_TIMELINE_SERVICE.page_provider(request, rows, source, limit_plus_one)
 
 
 def _chat_history_comm_event_matches(request, event):
@@ -11268,11 +11100,7 @@ def _handle_chat_history_page(query):
     try:
         request = _parse_chat_history_request(query)
         source_pages, session = _load_chat_history_source_pages(request)
-        messages, next_cursor, has_more = _merge_chat_history_source_pages(
-            source_pages,
-            request.before,
-            request.limit,
-        )
+        messages, next_cursor, has_more = _CHAT_HISTORY_TIMELINE_SERVICE.merge_pages(request, source_pages)
         result = {
             "ok": True,
             "conversationKey": request.key,
