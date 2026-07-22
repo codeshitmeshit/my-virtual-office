@@ -19,6 +19,10 @@ from services.project_authoring import ProjectAuthoringService
 from services.project_authoring_config import ProjectAuthoringCapacityError
 from services.project_direct_creation import DirectProjectCreationError
 from services.project_authoring_security import hash_request_secret
+from services.project_materialization import (
+    CANONICAL_PROJECT_BASE_FIELDS,
+    CANONICAL_TASK_BASE_FIELDS,
+)
 from services.project_authoring_store import (
     GRANTS_KEY,
     IDEMPOTENCY_KEY,
@@ -135,6 +139,8 @@ def test_direct_creation_commits_complete_unstarted_project_and_one_time_grant(t
     assert len(root["projects"]) == 1
     assert root[REQUESTS_KEY] == {}
     project = root["projects"][0]
+    assert CANONICAL_PROJECT_BASE_FIELDS <= set(project)
+    assert CANONICAL_TASK_BASE_FIELDS <= set(project["tasks"][0])
     assert project["authoringSource"] == {
         "kind": "conversation_confirmed_agent",
         "creationId": "creation-1",

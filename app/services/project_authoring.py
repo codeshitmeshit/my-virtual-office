@@ -1,4 +1,4 @@
-"""Project-authoring request commands; no project materialization occurs here."""
+"""Project-authoring orchestration delegating persisted shapes to materializers."""
 
 from __future__ import annotations
 
@@ -30,6 +30,12 @@ from services.project_authoring_store import (
 )
 from services.project_authoring_validation import validate_idempotency_key, validate_project_draft
 from services.project_authoring_workspace import prepared_execution_workspace_error
+from services.project_materialization import (
+    apply_authoring_overlay,
+    materialize_columns,
+    materialize_project_base,
+    materialize_task_base,
+)
 from services.project_authoring_security import verify_request_secret
 from services.project_direct_creation import (
     DirectProjectCreationPorts,
@@ -1897,72 +1903,63 @@ class ProjectAuthoringService:
         recurrence_ref: Mapping[str, Any],
         now: str,
     ) -> dict[str, Any]:
-        columns = copy.deepcopy(approved.get("columns") or [])
-        default_column = columns[0].get("id") if columns else None
+        column_sequence = {"value": 0}
+
+        def new_column_id() -> str:
+            column_sequence["value"] += 1
+            return f"{project_id}-column-{column_sequence['value']}"
+
+        columns, column_map = materialize_columns(
+            approved.get("columns"), new_id=new_column_id,
+        )
         tasks = []
         for index, item in enumerate(approved.get("tasks") or []):
-            task = copy.deepcopy(item)
-            raw_order = task.get("order")
-            task.update({
-                "id": str(task.get("id") or f"{project_id}-task-{index + 1}"),
-                "columnId": task.get("columnId") or default_column,
-                "order": index if raw_order is None else int(raw_order),
-                "executionState": "backlog",
-                "activeAttemptId": None,
-                "attempts": [],
-                "createdAt": now,
-                "updatedAt": now,
-                "completedAt": None,
-            })
-            tasks.append(task)
-        project = {
-            "id": project_id,
-            "title": approved.get("title"),
-            "description": approved.get("description") or "",
-            "projectType": approved.get("projectType"),
-            "status": "active",
-            "priority": approved.get("priority", "medium"),
-            "dueDate": approved.get("dueDate"),
-            "tags": copy.deepcopy(approved.get("tags") or []),
-            "branch": approved.get("branch", ""),
-            "longTermProject": approved.get("longTermProject") is True,
-            "columns": columns,
-            "tasks": tasks,
-            "activity": [{
-                "type": "project_authored",
-                "by": request.get("requestingAgentId"),
-                "at": now,
-                "detail": f"Created from confirmed Agent draft {request.get('id')}",
-            }],
-            "createdAt": now,
-            "updatedAt": now,
-            "createdBy": request.get("requestingAgentId"),
-            "agentMaintenanceMode": approved.get("agentMaintenanceMode"),
-            "authoringAgentId": request.get("requestingAgentId"),
-            "authoringRequestId": request.get("id"),
-            "authoringSource": {"kind": "confirmed_agent_draft", "requestId": request.get("id")},
-            "templateRef": copy.deepcopy(dict(template_ref)),
-            "recurrenceRef": copy.deepcopy(dict(recurrence_ref)),
-            "projectExecutionEnabled": approved.get("projectExecutionEnabled") is True,
-            "projectExecutionStartMode": approved.get("projectExecutionStartMode", "continuous"),
-            "executionPolicy": copy.deepcopy(approved.get("executionPolicy") or {"maxActiveTasks": 1}),
-            "projectExecutionFlowActive": False,
-            "workflowActive": False,
-            "workflowPhase": "idle",
-            "activeTaskId": None,
-            "activeAgent": None,
-        }
-        if workspace.get("workspacePath"):
-            project.update({
-                "workspacePath": workspace.get("workspacePath"),
-                "workspaceKind": workspace.get("workspaceKind") or "directory",
-                "workspaceManagedBy": workspace.get("workspaceManagedBy"),
-                "workspaceCreatedAt": workspace.get("workspaceCreatedAt"),
-                "workspaceStatus": copy.deepcopy(workspace.get("workspaceStatus") or {
-                    "ok": True, "path": workspace.get("workspacePath"),
-                }),
-            })
-        return project
+            task_configuration = copy.deepcopy(dict(item))
+            source_column = task_configuration.get("columnId")
+            if source_column in column_map:
+                task_configuration["columnId"] = column_map[source_column]
+            raw_order = task_configuration.get("order")
+            tasks.append(materialize_task_base(
+                task_configuration,
+                columns=columns,
+                task_id=str(
+                    task_configuration.get("id") or f"{project_id}-task-{index + 1}"
+                ),
+                timestamp=now,
+                order=index if raw_order is None else int(raw_order),
+                new_id=lambda: f"{project_id}-task-{index + 1}",
+                now=lambda: now,
+            ))
+        created_by = str(request.get("requestingAgentId") or "").strip()
+        maintenance_enabled = (
+            bool(approved["archiveMaintenanceEnabled"])
+            if "archiveMaintenanceEnabled" in approved
+            else True
+        )
+        project = materialize_project_base(
+            {**approved, "createdBy": created_by},
+            columns=columns,
+            tasks=tasks,
+            workspace=workspace,
+            project_id=project_id,
+            timestamp=now,
+            new_id=lambda: project_id,
+            now=lambda: now,
+            archive_maintenance_enabled=maintenance_enabled,
+            archive_maintenance_explicit="archiveMaintenanceEnabled" in approved,
+            archive_maintenance_updated_by=created_by,
+        )
+        return apply_authoring_overlay(
+            project,
+            actor=created_by,
+            request_id=str(request.get("id") or ""),
+            timestamp=now,
+            maintenance_mode=str(
+                approved.get("agentMaintenanceMode") or "strict_confirmation"
+            ),
+            template_ref=template_ref,
+            recurrence_ref=recurrence_ref,
+        )
 
     def _fail_materialization(
         self,

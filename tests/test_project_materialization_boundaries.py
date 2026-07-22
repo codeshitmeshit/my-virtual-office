@@ -28,16 +28,6 @@ CURRENT_MATERIALIZATION_BUILDERS = frozenset({
     ),
     MaterializationSite(
         "app/services/project_authoring.py",
-        "ProjectAuthoringService._build_project",
-        "project",
-    ),
-    MaterializationSite(
-        "app/services/project_authoring.py",
-        "ProjectAuthoringService._build_project",
-        "task",
-    ),
-    MaterializationSite(
-        "app/services/project_authoring.py",
         "ProjectAuthoringService._build_template_instance_project",
         "project",
     ),

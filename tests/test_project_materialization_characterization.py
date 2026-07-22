@@ -22,6 +22,10 @@ from project_store import MarkdownProjectStore
 from services import project_commands
 from services.project_authoring import ProjectAuthoringService
 from services.project_authoring_store import ProjectAuthoringRootStore
+from services.project_materialization import (
+    CANONICAL_PROJECT_BASE_FIELDS,
+    CANONICAL_TASK_BASE_FIELDS,
+)
 from services.project_repository import ProjectRepository
 
 
@@ -84,13 +88,9 @@ BROWSER_TEMPLATE_PROJECT_KEYS = MANUAL_PROJECT_KEYS + (
     "authoringSource", "recurrenceRef", "templateRef",
 )
 BROWSER_TEMPLATE_TASK_KEYS = MANUAL_TASK_KEYS
-AGENT_PROJECT_KEYS = (
-    "activeAgent", "activeTaskId", "activity", "agentMaintenanceMode", "authoringAgentId",
-    "authoringSource", "branch", "columns", "createdAt", "createdBy", "description", "dueDate",
-    "executionPolicy", "id", "longTermProject", "priority", "projectExecutionEnabled",
-    "projectExecutionFlowActive", "projectExecutionStartMode", "projectType", "recurrenceRef", "status",
-    "tags", "tasks", "templateRef", "title", "updatedAt", "workflowActive", "workflowPhase",
-)
+AGENT_PROJECT_KEYS = tuple(sorted(CANONICAL_PROJECT_BASE_FIELDS | {
+    "agentMaintenanceMode", "authoringAgentId", "authoringSource", "recurrenceRef", "templateRef",
+}))
 TEMPLATE_PROJECT_KEYS = (
     "activeAgent", "activeTaskId", "activity", "agentMaintenanceMode", "authoringSource", "branch",
     "columns", "createdAt", "createdBy", "defaultExecutorAgentId", "defaultReviewerAgentId", "description",
@@ -103,6 +103,7 @@ AUTHORED_TASK_KEYS = (
     "executionState", "executorActor", "executorAgentId", "id", "order", "responsibleActor", "reviewerActor",
     "reviewerAgentId", "reviewerRecommendation", "title", "updatedAt",
 )
+DIRECT_TASK_KEYS = tuple(sorted(CANONICAL_TASK_BASE_FIELDS))
 
 
 def _sorted_keys(value: dict[str, Any]) -> tuple[str, ...]:
@@ -328,7 +329,7 @@ def _recurring_creation(tmp_path) -> tuple[dict[str, Any], dict[str, Any]]:
     (
         ("manual", lambda monkeypatch, tmp_path: _manual_creation(), MANUAL_PROJECT_KEYS, MANUAL_TASK_KEYS),
         ("browser_template", _browser_template_creation, BROWSER_TEMPLATE_PROJECT_KEYS, BROWSER_TEMPLATE_TASK_KEYS),
-        ("agent_direct", lambda monkeypatch, tmp_path: _agent_direct_creation(tmp_path), AGENT_PROJECT_KEYS, AUTHORED_TASK_KEYS),
+        ("agent_direct", lambda monkeypatch, tmp_path: _agent_direct_creation(tmp_path), AGENT_PROJECT_KEYS, DIRECT_TASK_KEYS),
         ("versioned_template", lambda monkeypatch, tmp_path: _versioned_template_creation(tmp_path), TEMPLATE_PROJECT_KEYS, AUTHORED_TASK_KEYS),
         ("recurrence", lambda monkeypatch, tmp_path: _recurring_creation(tmp_path), TEMPLATE_PROJECT_KEYS, AUTHORED_TASK_KEYS),
     ),
@@ -401,6 +402,32 @@ def test_creation_paths_characterize_current_default_divergence(monkeypatch, tmp
         "project": projections["manual"]["project"],
         "task": projections["manual"]["task"],
     }
+    direct_project_defaults = {
+        "archiveMaintenanceEnabled": True,
+        "archiveMaintenance": {"enabled": True, "explicit": False, "updatedAt": NOW, "updatedBy": "author"},
+        "highPriorityAiMeetingAutoApprove": False,
+        "projectExecutionEnabled": False,
+        "projectExecutionFlowActive": False,
+        "projectExecutionFlowStopReason": None,
+        "workflowActive": False,
+        "workflowPhase": "idle",
+        "scheduledCronPaused": False,
+        "executionDirtyConfirmations": [],
+        "template": False,
+        "defaultExecutorAgentId": None,
+        "defaultReviewerAgentId": None,
+        "workspaceManagedBy": None,
+        "workspaceCreatedAt": None,
+    }
+    direct_task_defaults = {
+        **projections["manual"]["task"],
+        "checklist": [{"id": CHECKLIST_ID, "text": "Complete it", "done": False}],
+    }
+    assert projections["agent_direct"] == {
+        "project": direct_project_defaults,
+        "task": direct_task_defaults,
+    }
+
     authored_project_defaults = {
         "archiveMaintenanceEnabled": MISSING,
         "archiveMaintenance": MISSING,
@@ -434,10 +461,6 @@ def test_creation_paths_characterize_current_default_divergence(monkeypatch, tmp
         "meetingDecisionHistory": MISSING,
         "meetingDiscussionPoints": MISSING,
         "meetingRecords": MISSING,
-    }
-    assert projections["agent_direct"] == {
-        "project": authored_project_defaults,
-        "task": authored_task_defaults,
     }
     template_project_defaults = {
         **authored_project_defaults,
