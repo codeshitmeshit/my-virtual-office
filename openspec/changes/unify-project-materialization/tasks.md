@@ -19,7 +19,7 @@
 
 ## 4. Agent Execution Intent and Confirmation Contract
 
-- [ ] 4.1 Extend Agent project validation to default missing execution intent to enabled, validate execution/default Agent and policy fields, require executable Task Agents and workspace preparation when enabled, allow explicit tracking-only projects, and add failure/no-downgrade tests.
+- [x] 4.1 Extend Agent project validation to default missing execution intent to enabled, validate execution/default Agent and policy fields, require executable Task Agents and workspace preparation when enabled, allow explicit tracking-only projects, and add failure/no-downgrade tests.
 - [ ] 4.2 Update `vo-project-authoring` confirmation text, structured payload guidance, digest markers, and static/direct-create contract tests to show execution state, executor, reviewer, start behavior, and to translate confirmed acceptance criteria into Task checklists without promoting meeting context.
 - [ ] 4.3 Replace the authoring-specific `{path, kind, status, managed, created}` workspace mapping with the canonical prepared-workspace projection, preserve cleanup-on-failed-commit behavior, and add system-managed/user-managed/tracking-only workspace tests.
 
