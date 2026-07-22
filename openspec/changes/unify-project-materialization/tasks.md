@@ -40,7 +40,7 @@
 ## 7. Duplicate Removal and Boundary Enforcement
 
 - [x] 7.1 Remove superseded `_build_project`, `_build_template_instance_project`, compact-column/checklist repair logic, and obsolete workspace field adapters after all callers migrate; tighten the static writer boundary test to forbid new independent builders.
-- [ ] 7.2 Run cross-entry-point base-field projection tests and document every permitted manual/authoring/template/recurrence overlay difference, fixing any unapproved parity drift without changing public route contracts.
+- [x] 7.2 Run cross-entry-point base-field projection tests and document every permitted manual/authoring/template/recurrence overlay difference, fixing any unapproved parity drift without changing public route contracts.
 
 ## 8. Verification, Documentation, and Rollout Evidence
 
