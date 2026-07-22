@@ -30,17 +30,13 @@ from services.project_authoring_store import (
 )
 from services.project_authoring_validation import validate_idempotency_key, validate_project_draft
 from services.project_authoring_workspace import prepared_execution_workspace_error
-from services.project_materialization import (
-    apply_authoring_overlay,
-    materialize_columns,
-    materialize_project_base,
-    materialize_task_base,
-)
+from services.project_materialization import materialize_task_base
 from services.project_authoring_security import verify_request_secret
 from services.project_direct_creation import (
     DirectProjectCreationPorts,
     DirectProjectCreationService,
 )
+from services.project_direct_materialization import materialize_direct_project
 from services.project_authoring_audit import build_audit_event, sanitize_audit_text
 from services.project_templates import (
     ProjectTemplateError,
@@ -174,7 +170,7 @@ class ProjectAuthoringService:
             recurrence_enabled=recurrence_enabled,
             materialize_template=self._materialize_template,
             materialize_recurrence=self._materialize_recurrence,
-            build_project=self._build_project,
+            build_project=materialize_direct_project,
             audit=self._audit,
             cleanup_workspace=self._cleanup_prepared_workspace,
             clock=clock,
@@ -629,7 +625,7 @@ class ProjectAuthoringService:
         recurrence_ref = self._materialize_recurrence(
             root, request_id, request, approved, template_ref, now, actor,
         )
-        project = self._build_project(
+        project = materialize_direct_project(
             project_id=project_id,
             request=request,
             approved=approved,
@@ -1789,93 +1785,6 @@ class ProjectAuthoringService:
         result["title"] = title
         return result
 
-    @staticmethod
-    def _build_template_instance_project(
-        *,
-        project_id: str,
-        template_id: str,
-        version: int,
-        configuration: Mapping[str, Any],
-        workspace: Mapping[str, Any],
-        actor: str,
-        now: str,
-    ) -> dict[str, Any]:
-        columns = copy.deepcopy(configuration.get("columns") or [])
-        default_column = columns[0].get("id") if columns else None
-        tasks = []
-        for index, blueprint in enumerate(configuration.get("tasks") or []):
-            task = copy.deepcopy(blueprint)
-            actors = task_actor_references(task)
-            raw_order = task.get("order")
-            task.update({
-                "id": f"{project_id}-task-{index + 1}",
-                "columnId": task.get("columnId") or default_column,
-                "order": index if raw_order is None else int(raw_order),
-                **legacy_task_role_fields(actors),
-                "executionState": "backlog",
-                "activeAttemptId": None,
-                "attempts": [],
-                "createdAt": now,
-                "updatedAt": now,
-                "completedAt": None,
-            })
-            tasks.append(task)
-        execution = configuration.get("executionSettings") if isinstance(
-            configuration.get("executionSettings"), Mapping,
-        ) else {}
-        project = {
-            "id": project_id,
-            "title": configuration.get("title"),
-            "description": configuration.get("description") or "",
-            "projectType": "one_time",
-            "status": "active",
-            "priority": configuration.get("priority") or "medium",
-            "dueDate": configuration.get("dueDate"),
-            "tags": copy.deepcopy(configuration.get("tags") or []),
-            "branch": configuration.get("branch") or "",
-            "longTermProject": configuration.get("longTermProject") is True,
-            "columns": columns,
-            "tasks": tasks,
-            "activity": [{
-                "type": "project_instantiated_from_template",
-                "by": actor,
-                "at": now,
-                "detail": f"Created from template {template_id} version {version}",
-            }],
-            "createdAt": now,
-            "updatedAt": now,
-            "createdBy": actor,
-            "agentMaintenanceMode": configuration.get("agentMaintenanceMode") or "strict_confirmation",
-            "authoringSource": {
-                "kind": "manual_template_instance",
-                "templateId": template_id,
-                "templateVersion": version,
-            },
-            "templateRef": {"id": template_id, "version": version},
-            "recurrenceRef": {},
-            "projectExecutionEnabled": execution.get("projectExecutionEnabled") is True,
-            "projectExecutionStartMode": execution.get("projectExecutionStartMode") or "continuous",
-            "executionPolicy": copy.deepcopy(execution.get("executionPolicy") or {"maxActiveTasks": 1}),
-            "defaultExecutorAgentId": execution.get("defaultExecutorAgentId"),
-            "defaultReviewerAgentId": execution.get("defaultReviewerAgentId"),
-            "projectExecutionFlowActive": False,
-            "workflowActive": False,
-            "workflowPhase": "idle",
-            "activeTaskId": None,
-            "activeAgent": None,
-        }
-        if workspace.get("workspacePath"):
-            project.update({
-                "workspacePath": workspace.get("workspacePath"),
-                "workspaceKind": workspace.get("workspaceKind") or "directory",
-                "workspaceManagedBy": workspace.get("workspaceManagedBy"),
-                "workspaceCreatedAt": workspace.get("workspaceCreatedAt"),
-                "workspaceStatus": copy.deepcopy(workspace.get("workspaceStatus") or {
-                    "ok": True, "path": workspace.get("workspacePath"),
-                }),
-            })
-        return project
-
     def _materialize_recurrence(
         self,
         root: dict[str, Any],
@@ -1926,75 +1835,6 @@ class ProjectAuthoringService:
             "updatedAt": now,
         })
         return {"id": recurrence_id}
-
-    @staticmethod
-    def _build_project(
-        *,
-        project_id: str,
-        request: Mapping[str, Any],
-        approved: Mapping[str, Any],
-        workspace: Mapping[str, Any],
-        template_ref: Mapping[str, Any],
-        recurrence_ref: Mapping[str, Any],
-        now: str,
-    ) -> dict[str, Any]:
-        column_sequence = {"value": 0}
-
-        def new_column_id() -> str:
-            column_sequence["value"] += 1
-            return f"{project_id}-column-{column_sequence['value']}"
-
-        columns, column_map = materialize_columns(
-            approved.get("columns"), new_id=new_column_id,
-        )
-        tasks = []
-        for index, item in enumerate(approved.get("tasks") or []):
-            task_configuration = copy.deepcopy(dict(item))
-            source_column = task_configuration.get("columnId")
-            if source_column in column_map:
-                task_configuration["columnId"] = column_map[source_column]
-            raw_order = task_configuration.get("order")
-            tasks.append(materialize_task_base(
-                task_configuration,
-                columns=columns,
-                task_id=str(
-                    task_configuration.get("id") or f"{project_id}-task-{index + 1}"
-                ),
-                timestamp=now,
-                order=index if raw_order is None else int(raw_order),
-                new_id=lambda: f"{project_id}-task-{index + 1}",
-                now=lambda: now,
-            ))
-        created_by = str(request.get("requestingAgentId") or "").strip()
-        maintenance_enabled = (
-            bool(approved["archiveMaintenanceEnabled"])
-            if "archiveMaintenanceEnabled" in approved
-            else True
-        )
-        project = materialize_project_base(
-            {**approved, "createdBy": created_by},
-            columns=columns,
-            tasks=tasks,
-            workspace=workspace,
-            project_id=project_id,
-            timestamp=now,
-            new_id=lambda: project_id,
-            now=lambda: now,
-            archive_maintenance_enabled=maintenance_enabled,
-            archive_maintenance_explicit="archiveMaintenanceEnabled" in approved,
-            archive_maintenance_updated_by=created_by,
-        )
-        return apply_authoring_overlay(
-            project,
-            actor=created_by,
-            request_id=str(request.get("id") or ""),
-            timestamp=now,
-            maintenance_mode=str(
-                approved.get("agentMaintenanceMode") or "strict_confirmation"
-            ),
-            template_ref=template_ref,
-            recurrence_ref=recurrence_ref,
-        )
 
     def _fail_materialization(
         self,

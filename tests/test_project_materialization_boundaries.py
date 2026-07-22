@@ -20,20 +20,6 @@ class MaterializationSite:
     kind: str
 
 
-CURRENT_MATERIALIZATION_BUILDERS = frozenset({
-    MaterializationSite(
-        "app/services/project_authoring.py",
-        "ProjectAuthoringService._build_template_instance_project",
-        "project",
-    ),
-    MaterializationSite(
-        "app/services/project_authoring.py",
-        "ProjectAuthoringService._build_template_instance_project",
-        "task",
-    ),
-})
-
-# Task 7.1 replaces CURRENT_MATERIALIZATION_BUILDERS with this final boundary.
 FINAL_MATERIALIZATION_BOUNDARY = frozenset({
     MaterializationSite(
         "app/services/project_materialization.py", "materialize_project_base", "project",
@@ -163,16 +149,13 @@ def discover_materialization_candidates() -> set[MaterializationSite]:
     return discovered
 
 
-def test_current_creation_builder_inventory_is_complete_and_explicit():
+def test_creation_writers_are_limited_to_the_final_materializer_boundary():
     candidates = discover_materialization_candidates()
     excluded = set(NON_BUILDER_INVENTORY)
     builders = candidates - excluded
 
-    assert builders == set(CURRENT_MATERIALIZATION_BUILDERS) | (
-        builders & set(FINAL_MATERIALIZATION_BOUNDARY)
-    )
-    assert set(CURRENT_MATERIALIZATION_BUILDERS) <= builders
-    assert set(CURRENT_MATERIALIZATION_BUILDERS).isdisjoint(excluded)
+    assert builders == set(FINAL_MATERIALIZATION_BOUNDARY)
+    assert builders.isdisjoint(excluded)
 
 
 def test_inventory_classifies_non_builders_and_defines_final_boundary():
@@ -187,4 +170,3 @@ def test_inventory_classifies_non_builders_and_defines_final_boundary():
             "app/services/project_materialization.py", "materialize_task_base", "task",
         ),
     }
-    assert set(CURRENT_MATERIALIZATION_BUILDERS).isdisjoint(FINAL_MATERIALIZATION_BOUNDARY)
