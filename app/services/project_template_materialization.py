@@ -16,17 +16,15 @@ from services.project_materialization import (
 )
 
 
-def materialize_versioned_template_instance(
+def materialize_template_project_base(
     *,
     project_id: str,
-    template_id: str,
-    version: int,
     configuration: Mapping[str, Any],
     workspace: Mapping[str, Any],
     actor: str,
     timestamp: str,
 ) -> dict[str, Any]:
-    """Materialize one version-pinned template instance without persistence effects."""
+    """Materialize the canonical base shared by immutable template instances."""
 
     column_sequence = count(1)
     columns, column_map = materialize_columns(
@@ -73,14 +71,35 @@ def materialize_versioned_template_instance(
         archive_maintenance_explicit=False,
         archive_maintenance_updated_by=actor,
     )
-    overlaid = apply_template_overlay(
+    project["agentMaintenanceMode"] = (
+        configuration.get("agentMaintenanceMode") or "strict_confirmation"
+    )
+    return project
+
+
+def materialize_versioned_template_instance(
+    *,
+    project_id: str,
+    template_id: str,
+    version: int,
+    configuration: Mapping[str, Any],
+    workspace: Mapping[str, Any],
+    actor: str,
+    timestamp: str,
+) -> dict[str, Any]:
+    """Materialize one version-pinned template instance without persistence effects."""
+
+    project = materialize_template_project_base(
+        project_id=project_id,
+        configuration=configuration,
+        workspace=workspace,
+        actor=actor,
+        timestamp=timestamp,
+    )
+    return apply_template_overlay(
         project,
         actor=actor,
         timestamp=timestamp,
         template_id=template_id,
         template_version=version,
     )
-    overlaid["agentMaintenanceMode"] = (
-        configuration.get("agentMaintenanceMode") or "strict_confirmation"
-    )
-    return overlaid

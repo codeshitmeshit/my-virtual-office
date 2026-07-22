@@ -95,18 +95,6 @@ AGENT_PROJECT_KEYS = tuple(sorted(CANONICAL_PROJECT_BASE_FIELDS | {
 VERSIONED_TEMPLATE_PROJECT_KEYS = tuple(sorted(CANONICAL_PROJECT_BASE_FIELDS | {
     "agentMaintenanceMode", "authoringSource", "recurrenceRef", "templateRef",
 }))
-LEGACY_TEMPLATE_PROJECT_KEYS = (
-    "activeAgent", "activeTaskId", "activity", "agentMaintenanceMode", "authoringSource", "branch",
-    "columns", "createdAt", "createdBy", "defaultExecutorAgentId", "defaultReviewerAgentId", "description",
-    "dueDate", "executionPolicy", "id", "longTermProject", "priority", "projectExecutionEnabled",
-    "projectExecutionFlowActive", "projectExecutionStartMode", "projectType", "recurrenceRef", "status",
-    "tags", "tasks", "templateRef", "title", "updatedAt", "workflowActive", "workflowPhase",
-)
-AUTHORED_TASK_KEYS = (
-    "activeAttemptId", "assignee", "attempts", "checklist", "columnId", "completedAt", "createdAt", "description",
-    "executionState", "executorActor", "executorAgentId", "id", "order", "responsibleActor", "reviewerActor",
-    "reviewerAgentId", "reviewerRecommendation", "title", "updatedAt",
-)
 DIRECT_TASK_KEYS = tuple(sorted(CANONICAL_TASK_BASE_FIELDS))
 
 
@@ -335,7 +323,7 @@ def _recurring_creation(tmp_path) -> tuple[dict[str, Any], dict[str, Any]]:
         ("browser_template", _browser_template_creation, BROWSER_TEMPLATE_PROJECT_KEYS, BROWSER_TEMPLATE_TASK_KEYS),
         ("agent_direct", lambda monkeypatch, tmp_path: _agent_direct_creation(tmp_path), AGENT_PROJECT_KEYS, DIRECT_TASK_KEYS),
         ("versioned_template", lambda monkeypatch, tmp_path: _versioned_template_creation(tmp_path), VERSIONED_TEMPLATE_PROJECT_KEYS, DIRECT_TASK_KEYS),
-        ("recurrence", lambda monkeypatch, tmp_path: _recurring_creation(tmp_path), LEGACY_TEMPLATE_PROJECT_KEYS, AUTHORED_TASK_KEYS),
+        ("recurrence", lambda monkeypatch, tmp_path: _recurring_creation(tmp_path), VERSIONED_TEMPLATE_PROJECT_KEYS, DIRECT_TASK_KEYS),
     ),
 )
 def test_creation_paths_preserve_complete_current_field_sets(
@@ -432,50 +420,11 @@ def test_creation_paths_characterize_current_default_divergence(monkeypatch, tmp
         "task": direct_task_defaults,
     }
 
-    authored_project_defaults = {
-        "archiveMaintenanceEnabled": MISSING,
-        "archiveMaintenance": MISSING,
-        "highPriorityAiMeetingAutoApprove": MISSING,
-        "projectExecutionEnabled": False,
-        "projectExecutionFlowActive": False,
-        "projectExecutionFlowStopReason": MISSING,
-        "workflowActive": False,
-        "workflowPhase": "idle",
-        "scheduledCronPaused": MISSING,
-        "executionDirtyConfirmations": MISSING,
-        "template": MISSING,
-        "defaultExecutorAgentId": MISSING,
-        "defaultReviewerAgentId": MISSING,
-        "workspaceManagedBy": MISSING,
-        "workspaceCreatedAt": MISSING,
-    }
-    authored_task_defaults = {
-        "assigneeBranch": MISSING,
-        "executionState": "backlog",
-        "activeAttemptId": None,
-        "attempts": [],
-        "evidence": MISSING,
-        "blockedReason": MISSING,
-        "lastError": MISSING,
-        "checklist": [{"id": CHECKLIST_ID, "text": "Complete it", "done": False}],
-        "source": MISSING,
-        "comments": MISSING,
-        "attachments": MISSING,
-        "meetingActionItems": MISSING,
-        "meetingDecisionHistory": MISSING,
-        "meetingDiscussionPoints": MISSING,
-        "meetingRecords": MISSING,
-    }
-    template_project_defaults = {
-        **authored_project_defaults,
-        "defaultExecutorAgentId": None,
-        "defaultReviewerAgentId": None,
-    }
     assert projections["versioned_template"] == {
         "project": projections["manual"]["project"],
         "task": direct_task_defaults,
     }
     assert projections["recurrence"] == {
-        "project": template_project_defaults,
-        "task": authored_task_defaults,
+        "project": direct_project_defaults,
+        "task": direct_task_defaults,
     }

@@ -52,6 +52,9 @@ from services.project_template_materialization import (
     materialize_versioned_template_instance,
 )
 from services.project_recurrence_execution import stored_recurrence_execution_mode
+from services.project_recurrence_materialization import (
+    materialize_recurrence_occurrence_project,
+)
 from services.project_actors import (
     ActorReferenceError,
     legacy_task_role_fields,
@@ -972,29 +975,17 @@ class ProjectAuthoringService:
                 latest_snapshot = copy.deepcopy(latest.get("snapshot") or {})
                 self._validate_template_snapshot_actors(latest_snapshot)
                 committed_at = self._timestamp()
-                project = self._build_template_instance_project(
+                project = materialize_recurrence_occurrence_project(
                     project_id=project_id,
                     template_id=template_id,
-                    version=template_version,
+                    template_version=template_version,
+                    recurrence_id=clean_recurrence_id,
+                    occurrence_id=clean_occurrence_id,
                     configuration=configuration,
                     workspace=workspace,
                     actor=current.get("requestingAgentId") or "project-recurrence",
-                    now=committed_at,
+                    timestamp=committed_at,
                 )
-                project.update({
-                    "projectType": "one_time",
-                    "authoringSource": {
-                        "kind": "recurrence_occurrence",
-                        "recurrenceId": clean_recurrence_id,
-                        "occurrenceId": clean_occurrence_id,
-                        "templateId": template_id,
-                        "templateVersion": template_version,
-                    },
-                    "recurrenceRef": {
-                        "id": clean_recurrence_id,
-                        "occurrenceId": clean_occurrence_id,
-                    },
-                })
                 root.setdefault("projects", []).append(project)
                 record.update({
                     "state": "created",

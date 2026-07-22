@@ -18,6 +18,10 @@ if APP_DIR not in sys.path:
 from project_store import MarkdownProjectStore
 from services.project_authoring import ProjectAuthoringCommandError, ProjectAuthoringService
 from services.project_authoring_store import RECURRENCES_KEY, ProjectAuthoringRootStore
+from services.project_materialization import (
+    CANONICAL_PROJECT_BASE_FIELDS,
+    CANONICAL_TASK_BASE_FIELDS,
+)
 from services.project_repository import ProjectRepository
 
 
@@ -120,6 +124,8 @@ def test_occurrence_creates_one_independent_version_pinned_project(tmp_path):
     }
     assert first["project"]["workflowActive"] is False
     assert first["project"]["projectExecutionFlowActive"] is False
+    assert CANONICAL_PROJECT_BASE_FIELDS <= set(first["project"])
+    assert set(first["project"]["tasks"][0]) == CANONICAL_TASK_BASE_FIELDS
     root = markdown.load_all()
     assert len(root["projects"]) == 2
     occurrence = root[RECURRENCES_KEY]["recurrence-request-1"]["occurrences"][
