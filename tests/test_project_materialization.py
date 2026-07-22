@@ -17,6 +17,11 @@ from services.project_materialization import (
     CANONICAL_PROJECT_BASE_FIELDS,
     CANONICAL_TASK_BASE_FIELDS,
     MAX_CHECKLIST_ITEMS,
+    PreparedWorkspace,
+    apply_authoring_overlay,
+    apply_manual_overlay,
+    apply_recurrence_overlay,
+    apply_template_overlay,
     materialize_columns,
     materialize_checklist,
     materialize_project_base,
@@ -435,3 +440,208 @@ def test_materialize_task_base_falls_back_to_first_column_or_none():
 
     assert first["columnId"] == "first"
     assert empty["columnId"] is None
+
+
+def _overlay_base() -> dict:
+    columns, _ = materialize_columns(None, new_id=_ids("c1", "c2", "c3", "c4"))
+    return materialize_project_base(
+        {"title": "Overlay Base", "createdBy": "actor"},
+        columns=columns,
+        tasks=[],
+        workspace=None,
+        project_id="overlay-project",
+        timestamp=NOW,
+        new_id=lambda: (_ for _ in ()).throw(AssertionError("ID factory called")),
+        now=lambda: (_ for _ in ()).throw(AssertionError("clock called")),
+    )
+
+
+def _assert_overlay_preserves_base(base: dict, overlaid: dict):
+    assert set(CANONICAL_PROJECT_BASE_FIELDS) <= set(overlaid)
+    for field in CANONICAL_PROJECT_BASE_FIELDS - {"activity"}:
+        assert overlaid[field] == base[field], field
+    assert base["activity"] == []
+    assert len(overlaid["activity"]) == 1
+
+
+def test_source_overlays_only_add_owned_metadata_and_activity():
+    base = _overlay_base()
+    original = copy.deepcopy(base)
+
+    manual = apply_manual_overlay(base, actor="user", timestamp=NOW)
+    authored = apply_authoring_overlay(
+        base,
+        actor="author",
+        request_id="request-1",
+        timestamp=NOW,
+        maintenance_mode="strict_confirmation",
+        template_ref={"id": "template-1", "version": 2},
+        recurrence_ref={"id": "recurrence-1"},
+    )
+    template = apply_template_overlay(
+        base,
+        actor="user",
+        timestamp=NOW,
+        template_id="template-1",
+        template_version=2,
+    )
+    recurrence = apply_recurrence_overlay(
+        base,
+        actor="author",
+        timestamp=NOW,
+        template_id="template-1",
+        template_version=2,
+        recurrence_id="recurrence-1",
+        occurrence_id="occurrence-1",
+    )
+
+    assert base == original
+    for overlaid in (manual, authored, template, recurrence):
+        _assert_overlay_preserves_base(base, overlaid)
+
+    assert set(manual) == set(base)
+    assert manual["activity"] == [{
+        "type": "project_created",
+        "by": "user",
+        "at": NOW,
+        "detail": "Created project 'Overlay Base'",
+    }]
+    assert {
+        key: authored[key]
+        for key in (
+            "agentMaintenanceMode",
+            "authoringAgentId",
+            "authoringRequestId",
+            "authoringSource",
+            "templateRef",
+            "recurrenceRef",
+        )
+    } == {
+        "agentMaintenanceMode": "strict_confirmation",
+        "authoringAgentId": "author",
+        "authoringRequestId": "request-1",
+        "authoringSource": {"kind": "confirmed_agent_draft", "requestId": "request-1"},
+        "templateRef": {"id": "template-1", "version": 2},
+        "recurrenceRef": {"id": "recurrence-1"},
+    }
+    assert authored["activity"][0]["type"] == "project_authored"
+    assert template["authoringSource"] == {
+        "kind": "manual_template_instance",
+        "templateId": "template-1",
+        "templateVersion": 2,
+    }
+    assert template["templateRef"] == {"id": "template-1", "version": 2}
+    assert template["recurrenceRef"] == {}
+    assert template["activity"][0]["type"] == "project_instantiated_from_template"
+    assert recurrence["authoringSource"] == {
+        "kind": "recurrence_occurrence",
+        "recurrenceId": "recurrence-1",
+        "occurrenceId": "occurrence-1",
+        "templateId": "template-1",
+        "templateVersion": 2,
+    }
+    assert recurrence["templateRef"] == {"id": "template-1", "version": 2}
+    assert recurrence["recurrenceRef"] == {
+        "id": "recurrence-1",
+        "occurrenceId": "occurrence-1",
+    }
+
+
+def test_source_overlays_deep_copy_base_and_provenance_inputs():
+    base = _overlay_base()
+    base["tags"] = [{"nested": ["base"]}]
+    template_ref = {"id": "template-1", "metadata": ["source"]}
+    overlaid = apply_authoring_overlay(
+        base,
+        actor={"id": "author"},
+        request_id="request-1",
+        timestamp=NOW,
+        maintenance_mode="strict_confirmation",
+        template_ref=template_ref,
+    )
+
+    overlaid["tags"][0]["nested"].append("overlay")
+    overlaid["templateRef"]["metadata"].append("overlay")
+    overlaid["activity"][0]["by"]["id"] = "changed"
+    assert base["tags"] == [{"nested": ["base"]}]
+    assert template_ref == {"id": "template-1", "metadata": ["source"]}
+
+
+def test_prepared_workspace_separates_persisted_projection_from_cleanup_metadata():
+    source = {
+        "projectExecutionEnabled": True,
+        "workspacePath": "/workspace/system",
+        "workspaceKind": "directory",
+        "workspaceStatus": {"ok": True, "checks": ["ready"]},
+        "workspaceManagedBy": "system",
+        "workspaceCreatedAt": NOW,
+    }
+    prepared = PreparedWorkspace.from_mapping(source, created_in_attempt=True)
+    source["workspaceStatus"]["checks"].append("changed")
+
+    assert prepared.project_fields() == {
+        "projectExecutionEnabled": True,
+        "workspacePath": "/workspace/system",
+        "workspaceKind": "directory",
+        "workspaceStatus": {"ok": True, "checks": ["ready"]},
+        "workspaceManagedBy": "system",
+        "workspaceCreatedAt": NOW,
+    }
+    assert prepared.cleanup_path == "/workspace/system"
+
+    projected = materialize_project_base(
+        {"title": "Workspace"},
+        columns=[],
+        tasks=[],
+        workspace=prepared,
+        project_id="workspace-project",
+        timestamp=NOW,
+        new_id=lambda: "unused",
+        now=lambda: "unused",
+    )
+    assert projected["projectExecutionEnabled"] is True
+    assert projected["workspaceManagedBy"] == "system"
+    assert "created_in_attempt" not in projected
+    assert "cleanup_path" not in projected
+
+
+def test_prepared_workspace_cleanup_requires_system_owned_creation_attempt():
+    user = PreparedWorkspace.from_mapping(
+        {
+            "projectExecutionEnabled": True,
+            "workspacePath": "/workspace/user",
+            "workspaceManagedBy": "user",
+        },
+        created_in_attempt=True,
+    )
+    existing_system = PreparedWorkspace.from_mapping(
+        {
+            "projectExecutionEnabled": True,
+            "workspacePath": "/workspace/existing-system",
+            "workspaceManagedBy": "system",
+        },
+    )
+    assert user.cleanup_path is None
+    assert existing_system.cleanup_path is None
+
+    try:
+        PreparedWorkspace.from_mapping({"workspaceManagedBy": "project_authoring"})
+    except ValueError as exc:
+        assert "system, user, or null" in str(exc)
+    else:
+        raise AssertionError("expected invalid workspace owner to fail")
+
+
+def test_project_materialization_uses_execution_default_without_workspace_projection():
+    project = materialize_project_base(
+        {"title": "Resolved execution", "projectExecutionEnabled": True},
+        columns=[],
+        tasks=[],
+        workspace=None,
+        project_id="execution-project",
+        timestamp=NOW,
+        new_id=lambda: "unused",
+        now=lambda: "unused",
+    )
+
+    assert project["projectExecutionEnabled"] is True

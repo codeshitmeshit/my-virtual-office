@@ -11,6 +11,7 @@ import copy
 import hashlib
 import re
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 from typing import Any
 
 
@@ -102,6 +103,62 @@ CANONICAL_TASK_BASE_FIELDS = frozenset({
 })
 
 MAX_CHECKLIST_ITEMS = 100
+
+
+@dataclass(frozen=True)
+class PreparedWorkspace:
+    """Canonical persisted workspace values plus non-persisted cleanup intent."""
+
+    project_execution_enabled: bool
+    workspace_path: Any = None
+    workspace_kind: Any = None
+    workspace_status: Any = None
+    workspace_managed_by: str | None = None
+    workspace_created_at: Any = None
+    created_in_attempt: bool = False
+
+    @classmethod
+    def from_mapping(
+        cls,
+        value: Mapping[str, Any] | None,
+        *,
+        created_in_attempt: bool = False,
+        project_execution_enabled_default: bool = False,
+    ) -> PreparedWorkspace:
+        source = value if isinstance(value, Mapping) else {}
+        managed_by = source.get("workspaceManagedBy")
+        if managed_by not in (None, "system", "user"):
+            raise ValueError("workspaceManagedBy must be system, user, or null")
+        return cls(
+            project_execution_enabled=bool(
+                source.get(
+                    "projectExecutionEnabled",
+                    project_execution_enabled_default,
+                )
+            ),
+            workspace_path=copy.deepcopy(source.get("workspacePath")),
+            workspace_kind=copy.deepcopy(source.get("workspaceKind")),
+            workspace_status=copy.deepcopy(source.get("workspaceStatus") or {}),
+            workspace_managed_by=managed_by,
+            workspace_created_at=copy.deepcopy(source.get("workspaceCreatedAt")),
+            created_in_attempt=bool(created_in_attempt),
+        )
+
+    def project_fields(self) -> dict[str, Any]:
+        return {
+            "projectExecutionEnabled": self.project_execution_enabled,
+            "workspacePath": copy.deepcopy(self.workspace_path),
+            "workspaceKind": copy.deepcopy(self.workspace_kind),
+            "workspaceStatus": copy.deepcopy(self.workspace_status or {}),
+            "workspaceManagedBy": self.workspace_managed_by,
+            "workspaceCreatedAt": copy.deepcopy(self.workspace_created_at),
+        }
+
+    @property
+    def cleanup_path(self) -> Any:
+        if self.created_in_attempt and self.workspace_managed_by == "system":
+            return copy.deepcopy(self.workspace_path)
+        return None
 
 
 def _meaningful_columns(
@@ -313,12 +370,148 @@ def materialize_task_base(
     }
 
 
+def _copy_with_activity(
+    project: Mapping[str, Any],
+    *,
+    activity_type: str,
+    actor: Any,
+    timestamp: str,
+    detail: str,
+) -> dict[str, Any]:
+    overlaid = copy.deepcopy(dict(project))
+    activity = overlaid.get("activity")
+    if not isinstance(activity, list):
+        activity = []
+        overlaid["activity"] = activity
+    activity.append({
+        "type": activity_type,
+        "by": copy.deepcopy(actor),
+        "at": timestamp,
+        "detail": detail,
+    })
+    return overlaid
+
+
+def apply_manual_overlay(
+    project: Mapping[str, Any],
+    *,
+    actor: Any,
+    timestamp: str,
+    detail: str | None = None,
+) -> dict[str, Any]:
+    """Add manual-creation activity without rebuilding canonical fields."""
+
+    title = str(project.get("title") or "")
+    return _copy_with_activity(
+        project,
+        activity_type="project_created",
+        actor=actor,
+        timestamp=timestamp,
+        detail=detail or f"Created project '{title}'",
+    )
+
+
+def apply_authoring_overlay(
+    project: Mapping[str, Any],
+    *,
+    actor: Any,
+    request_id: str,
+    timestamp: str,
+    maintenance_mode: str,
+    template_ref: Mapping[str, Any] | None = None,
+    recurrence_ref: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Add confirmed Agent provenance and its initial audit activity."""
+
+    overlaid = _copy_with_activity(
+        project,
+        activity_type="project_authored",
+        actor=actor,
+        timestamp=timestamp,
+        detail=f"Created from confirmed Agent draft {request_id}",
+    )
+    overlaid.update({
+        "agentMaintenanceMode": maintenance_mode,
+        "authoringAgentId": copy.deepcopy(actor),
+        "authoringRequestId": request_id,
+        "authoringSource": {"kind": "confirmed_agent_draft", "requestId": request_id},
+        "templateRef": copy.deepcopy(dict(template_ref or {})),
+        "recurrenceRef": copy.deepcopy(dict(recurrence_ref or {})),
+    })
+    return overlaid
+
+
+def apply_template_overlay(
+    project: Mapping[str, Any],
+    *,
+    actor: Any,
+    timestamp: str,
+    template_id: str,
+    template_version: int,
+    source_kind: str = "manual_template_instance",
+    activity_type: str = "project_instantiated_from_template",
+    detail: str | None = None,
+) -> dict[str, Any]:
+    """Add immutable template provenance and one source-appropriate activity."""
+
+    overlaid = _copy_with_activity(
+        project,
+        activity_type=activity_type,
+        actor=actor,
+        timestamp=timestamp,
+        detail=detail or f"Created from template {template_id} version {template_version}",
+    )
+    overlaid.update({
+        "authoringSource": {
+            "kind": source_kind,
+            "templateId": template_id,
+            "templateVersion": template_version,
+        },
+        "templateRef": {"id": template_id, "version": template_version},
+        "recurrenceRef": {},
+    })
+    return overlaid
+
+
+def apply_recurrence_overlay(
+    project: Mapping[str, Any],
+    *,
+    actor: Any,
+    timestamp: str,
+    template_id: str,
+    template_version: int,
+    recurrence_id: str,
+    occurrence_id: str,
+) -> dict[str, Any]:
+    """Add deterministic recurrence/template provenance to an occurrence Project."""
+
+    overlaid = _copy_with_activity(
+        project,
+        activity_type="project_instantiated_from_template",
+        actor=actor,
+        timestamp=timestamp,
+        detail=f"Created from template {template_id} version {template_version}",
+    )
+    overlaid.update({
+        "authoringSource": {
+            "kind": "recurrence_occurrence",
+            "recurrenceId": recurrence_id,
+            "occurrenceId": occurrence_id,
+            "templateId": template_id,
+            "templateVersion": template_version,
+        },
+        "templateRef": {"id": template_id, "version": template_version},
+        "recurrenceRef": {"id": recurrence_id, "occurrenceId": occurrence_id},
+    })
+    return overlaid
+
+
 def materialize_project_base(
     configuration: Mapping[str, Any],
     *,
     columns: Sequence[Mapping[str, Any]],
     tasks: Sequence[Mapping[str, Any]] | None,
-    workspace: Mapping[str, Any] | None,
+    workspace: PreparedWorkspace | Mapping[str, Any] | None,
     new_id: Callable[[], str],
     now: Callable[[], str],
     project_id: str | None = None,
@@ -331,9 +524,19 @@ def materialize_project_base(
 
     created_at = str(timestamp or now())
     created_by = str(configuration.get("createdBy") or "user").strip() or "user"
-    prepared_workspace = workspace if isinstance(workspace, Mapping) else {}
+    prepared_workspace = (
+        workspace
+        if isinstance(workspace, PreparedWorkspace)
+        else PreparedWorkspace.from_mapping(
+            workspace,
+            project_execution_enabled_default=bool(
+                configuration.get("projectExecutionEnabled", False)
+            ),
+        )
+    )
+    workspace_fields = prepared_workspace.project_fields()
     execution_enabled = bool(
-        prepared_workspace.get(
+        workspace_fields.get(
             "projectExecutionEnabled",
             configuration.get("projectExecutionEnabled", False),
         )
@@ -365,11 +568,11 @@ def materialize_project_base(
             "updatedBy": maintenance_updated_by,
         },
         "projectExecutionEnabled": execution_enabled,
-        "workspacePath": copy.deepcopy(prepared_workspace.get("workspacePath")),
-        "workspaceKind": copy.deepcopy(prepared_workspace.get("workspaceKind")),
-        "workspaceStatus": copy.deepcopy(prepared_workspace.get("workspaceStatus") or {}),
-        "workspaceManagedBy": copy.deepcopy(prepared_workspace.get("workspaceManagedBy")),
-        "workspaceCreatedAt": copy.deepcopy(prepared_workspace.get("workspaceCreatedAt")),
+        "workspacePath": workspace_fields["workspacePath"],
+        "workspaceKind": workspace_fields["workspaceKind"],
+        "workspaceStatus": workspace_fields["workspaceStatus"],
+        "workspaceManagedBy": workspace_fields["workspaceManagedBy"],
+        "workspaceCreatedAt": workspace_fields["workspaceCreatedAt"],
         "defaultExecutorAgentId": copy.deepcopy(configuration.get("defaultExecutorAgentId")),
         "defaultReviewerAgentId": copy.deepcopy(configuration.get("defaultReviewerAgentId")),
         "projectExecutionStartMode": (
