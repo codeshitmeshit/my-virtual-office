@@ -45,7 +45,7 @@
 ## 8. Verification, Documentation, and Rollout Evidence
 
 - [x] 8.1 Update user and operator documentation for enabled-but-unstarted Agent projects, tracking-only creation, execution prerequisite failures, recurring create-only versus auto-execute confirmation, and rollback behavior.
-- [ ] 8.2 Run and record focused materialization, project command, direct authoring, HTTP/security, template, recurrence, Project Execution, persistence, static-boundary, and legacy compatibility suites, plus strict OpenSpec validation.
+- [x] 8.2 Run and record focused materialization, project command, direct authoring, HTTP/security, template, recurrence, Project Execution, persistence, static-boundary, and legacy compatibility suites, plus strict OpenSpec validation.
   - Evidence (2026-07-23): `.venv/bin/python -m pytest -q tests/test_project_materialization*.py tests/test_project_commands.py tests/test_project_cli_materialization_characterization.py tests/test_project_writer_characterization.py tests/test_project_authoring*.py tests/test_project_template*.py tests/test_project_recurrence*.py tests/test_project_execution*.py tests/test_project_repository.py tests/test_project_store_authoring_metadata.py` — 323 passed in 13.29s.
   - Evidence (2026-07-23): `node tests/check_vo_project_authoring_skill.mjs` and `node tests/check_vo_project_authoring_docs.mjs` — both contract checks passed.
   - Evidence (2026-07-23): `openspec validate unify-project-materialization --strict` — change is valid.
