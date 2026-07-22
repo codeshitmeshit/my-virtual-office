@@ -50,7 +50,6 @@ CURRENT_MATERIALIZATION_BUILDERS = frozenset({
         "ProjectAuthoringService._build_template_instance_project",
         "task",
     ),
-    MaterializationSite("app/services/project_commands.py", "create_project", "project"),
     MaterializationSite("app/services/project_commands.py", "create_task.mutate", "task"),
 })
 

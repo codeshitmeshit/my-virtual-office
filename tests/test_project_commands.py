@@ -73,6 +73,14 @@ def test_create_project_and_task_preserve_contract_without_http():
     project_outcome = create_project(repo, common)
     assert project_outcome.result.status == 200
     project = project_outcome.result.payload["project"]
+    assert project["id"] == "id-4"
+    assert [column["id"] for column in project["columns"]] == [
+        "id-0", "id-1", "id-2", "id-3",
+    ]
+    assert project["activity"][0]["id"] == "id-5"
+    assert project["projectType"] == "one_time"
+    assert project["workflowActive"] is False
+    assert project["workflowPhase"] == "idle"
     task_outcome = project_commands.create_task(
         project["id"], {"title": "Task", "assignee": "executor"}, repository=repo, **common
     )

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Mapping
 
 from .project_execution import ServiceResult
+from .project_materialization import materialize_columns, materialize_project_base
 from .project_repository import ProjectAlreadyExistsError, ProjectConflictError, ProjectNotFoundError, ProjectRepository
 
 
@@ -55,29 +56,25 @@ def create_project(
     workspace = prepare_workspace(title, body, timestamp)
     if not workspace.get("ok"):
         return CommandOutcome(ServiceResult(int(workspace.get("_status") or 400), {k: v for k, v in workspace.items() if k != "_status"}))
-    default_columns = [
-        {"id": new_id(), "title": "Backlog", "color": "#6c757d", "order": 0},
-        {"id": new_id(), "title": "In Progress", "color": "#ffc107", "order": 1},
-        {"id": new_id(), "title": "Review", "color": "#fd7e14", "order": 2},
-        {"id": new_id(), "title": "Done", "color": "#198754", "order": 3},
-    ]
     maintenance_enabled = bool(body["archiveMaintenanceEnabled"]) if "archiveMaintenanceEnabled" in body else archive_maintenance_default({"status": body.get("status", "active")})
-    project = {
-        "id": new_id(), "title": title, "description": body.get("description", ""), "status": body.get("status", "active"),
-        "priority": body.get("priority", "medium"), "createdAt": timestamp, "updatedAt": timestamp,
-        "dueDate": body.get("dueDate"), "createdBy": created_by, "tags": body.get("tags", []), "branch": body.get("branch", ""),
-        "longTermProject": bool(body.get("longTermProject", False)), "highPriorityAiMeetingAutoApprove": bool(body.get("highPriorityAiMeetingAutoApprove", False)),
-        "archiveMaintenanceEnabled": maintenance_enabled,
-        "archiveMaintenance": {"enabled": maintenance_enabled, "explicit": "archiveMaintenanceEnabled" in body, "updatedAt": timestamp, "updatedBy": created_by},
-        "projectExecutionEnabled": workspace["projectExecutionEnabled"], "workspacePath": workspace["workspacePath"],
-        "workspaceKind": workspace["workspaceKind"], "workspaceStatus": workspace["workspaceStatus"],
-        "workspaceManagedBy": workspace.get("workspaceManagedBy"), "workspaceCreatedAt": workspace.get("workspaceCreatedAt"),
-        "defaultExecutorAgentId": body.get("defaultExecutorAgentId"), "defaultReviewerAgentId": body.get("defaultReviewerAgentId"),
-        "projectExecutionStartMode": body.get("projectExecutionStartMode") or "continuous", "projectExecutionFlowActive": False,
-        "projectExecutionFlowStopReason": None, "scheduledCronPaused": bool(body.get("scheduledCronPaused", False)),
-        "executionPolicy": {"maxActiveTasks": 1}, "executionDirtyConfirmations": [],
-        "columns": body.get("columns") or default_columns, "tasks": [], "activity": [], "template": False,
-    }
+    columns, _column_map = materialize_columns(body.get("columns"), new_id=new_id)
+    project = materialize_project_base(
+        {
+            **body,
+            "title": title,
+            "createdBy": created_by,
+            "executionPolicy": {"maxActiveTasks": 1},
+        },
+        columns=columns,
+        tasks=[],
+        workspace=workspace,
+        new_id=new_id,
+        now=now,
+        timestamp=timestamp,
+        archive_maintenance_enabled=maintenance_enabled,
+        archive_maintenance_explicit="archiveMaintenanceEnabled" in body,
+        archive_maintenance_updated_by=created_by,
+    )
     log_activity(project, "project_created", created_by, f"Created project '{title}'")
     try:
         repository.create(project)

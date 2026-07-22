@@ -57,13 +57,15 @@ SUMMARY_DIGEST = hashlib.sha256(SUMMARY_TEXT.encode("utf-8")).hexdigest()
 
 
 MANUAL_PROJECT_KEYS = (
-    "activity", "archiveMaintenance", "archiveMaintenanceEnabled", "branch", "columns",
+    "activeAgent", "activeTaskId", "activity", "archiveMaintenance", "archiveMaintenanceEnabled",
+    "branch", "columns",
     "createdAt", "createdBy", "defaultExecutorAgentId", "defaultReviewerAgentId", "description",
     "dueDate", "executionDirtyConfirmations", "executionPolicy", "highPriorityAiMeetingAutoApprove",
     "id", "longTermProject", "priority", "projectExecutionEnabled", "projectExecutionFlowActive",
     "projectExecutionFlowStopReason", "projectExecutionStartMode", "scheduledCronPaused", "status",
-    "tags", "tasks", "template", "title", "updatedAt", "workspaceCreatedAt", "workspaceKind",
-    "workspaceManagedBy", "workspacePath", "workspaceStatus",
+    "projectType", "tags", "tasks", "template", "title", "updatedAt", "workflowActive",
+    "workflowPhase", "workspaceCreatedAt", "workspaceKind", "workspaceManagedBy", "workspacePath",
+    "workspaceStatus",
 )
 MANUAL_TASK_KEYS = (
     "activeAttemptId", "allowReviewerlessExecution", "assignee", "assigneeBranch", "attachments",
@@ -73,7 +75,11 @@ MANUAL_TASK_KEYS = (
     "priority", "requiresUserAcceptance", "reviewerAgentId", "scheduledRepeatEnabled", "source", "tags",
     "title", "updatedAt",
 )
-BROWSER_TEMPLATE_PROJECT_KEYS = MANUAL_PROJECT_KEYS + ("authoringSource", "templateRef")
+BROWSER_TEMPLATE_PROJECT_KEYS = tuple(
+    field
+    for field in MANUAL_PROJECT_KEYS
+    if field not in {"activeAgent", "activeTaskId", "projectType", "workflowActive", "workflowPhase"}
+) + ("authoringSource", "templateRef")
 BROWSER_TEMPLATE_TASK_KEYS = (
     "activeAttemptId", "allowReviewerlessExecution", "assignee", "assigneeBranch", "attachments",
     "attempts", "blockedReason", "checklist", "columnId", "comments", "completedAt", "createdAt",
@@ -360,8 +366,8 @@ def test_creation_paths_characterize_current_default_divergence(monkeypatch, tmp
             "projectExecutionEnabled": False,
             "projectExecutionFlowActive": False,
             "projectExecutionFlowStopReason": None,
-            "workflowActive": MISSING,
-            "workflowPhase": MISSING,
+            "workflowActive": False,
+            "workflowPhase": "idle",
             "scheduledCronPaused": False,
             "executionDirtyConfirmations": [],
             "template": False,
@@ -392,6 +398,8 @@ def test_creation_paths_characterize_current_default_divergence(monkeypatch, tmp
         "project": {
             **projections["manual"]["project"],
             "archiveMaintenance": {"enabled": True, "explicit": False, "updatedAt": NOW, "updatedBy": "user"},
+            "workflowActive": MISSING,
+            "workflowPhase": MISSING,
         },
         "task": {
             **projections["manual"]["task"],
