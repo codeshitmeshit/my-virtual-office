@@ -2,7 +2,7 @@
 
 - [x] 1.1 Add focused characterization fixtures that capture the complete persisted Project and Task base-field projections for manual creation, browser template creation, Agent direct creation, versioned template instantiation, and recurring occurrence creation.
 - [x] 1.2 Add a static creation-writer inventory test that identifies every Project/Task materialization entry point, including local `office.py --proj create`/`add-task` and confirmed Agent maintenance `create_task`, distinguishes readers/blueprints/persistence sinks, and initially allows the known builders while defining the final single-materializer boundary.
-- [ ] 1.3 Add focused local CLI characterization fixtures for empty and built-in-template `office.py --proj create` plus `add-task`, capturing arguments, printed results, persistence location, column/order behavior, and complete persisted Project/Task base-field projections.
+- [x] 1.3 Add focused local CLI characterization fixtures for empty and built-in-template `office.py --proj create` plus `add-task`, capturing arguments, printed results, persistence location, column/order behavior, and complete persisted Project/Task base-field projections.
 
 ## 2. Canonical Materialization Foundation
 
