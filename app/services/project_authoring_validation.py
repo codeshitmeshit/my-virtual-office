@@ -21,6 +21,7 @@ PROJECT_TYPES = frozenset({"one_time", "reusable", "recurring"})
 MAINTENANCE_MODES = frozenset({"strict_confirmation", "autonomous"})
 TEMPLATE_MODES = frozenset({"none", "create", "reference"})
 REVIEW_TRIGGERS = frozenset({"high_risk", "cross_team", "critical_delivery"})
+PROJECT_EXECUTION_START_MODES = frozenset({"single", "continuous"})
 IDEMPOTENCY_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$")
 
 
@@ -227,6 +228,98 @@ def _validate_reviewer_recommendation(
     return recommendation
 
 
+def _validate_default_agent_id(
+    value: Any,
+    *,
+    path: str,
+    lookup_agent,
+    is_excluded_agent,
+    issues: list[DraftValidationIssue],
+) -> tuple[str | None, bool]:
+    agent_id = str(value or "").strip()
+    if not agent_id:
+        return None, False
+    if lookup_agent(agent_id) is None:
+        issues.append(DraftValidationIssue(
+            "agent_not_found", path, f"{path} Agent was not found", agent_id,
+        ))
+        return agent_id, False
+    if is_excluded_agent(agent_id):
+        issues.append(DraftValidationIssue(
+            "agent_not_assignable", path,
+            f"{path} Agent is not assignable to ordinary project work", agent_id,
+        ))
+        return agent_id, False
+    return agent_id, True
+
+
+def _validate_execution_configuration(
+    draft: Mapping[str, Any],
+    *,
+    normalized: dict[str, Any],
+    lookup_agent,
+    is_excluded_agent,
+    issues: list[DraftValidationIssue],
+) -> bool:
+    raw_enabled = draft.get("projectExecutionEnabled", True)
+    if not isinstance(raw_enabled, bool):
+        issues.append(DraftValidationIssue(
+            "invalid_project_execution_enabled",
+            "projectExecutionEnabled",
+            "projectExecutionEnabled must be true or false",
+        ))
+        enabled = True
+    else:
+        enabled = raw_enabled
+    normalized["projectExecutionEnabled"] = enabled
+
+    start_mode = str(draft.get("projectExecutionStartMode") or "continuous").strip()
+    if start_mode not in PROJECT_EXECUTION_START_MODES:
+        issues.append(DraftValidationIssue(
+            "invalid_project_execution_start_mode",
+            "projectExecutionStartMode",
+            "projectExecutionStartMode must be single or continuous",
+        ))
+    normalized["projectExecutionStartMode"] = start_mode
+
+    raw_policy = draft.get("executionPolicy", {"maxActiveTasks": 1})
+    if not isinstance(raw_policy, Mapping):
+        issues.append(DraftValidationIssue(
+            "invalid_execution_policy", "executionPolicy",
+            "executionPolicy must be an object",
+        ))
+        policy = {"maxActiveTasks": 1}
+    else:
+        policy = copy.deepcopy(dict(raw_policy))
+    max_active = policy.get("maxActiveTasks", 1)
+    if isinstance(max_active, bool) or not isinstance(max_active, int) or max_active < 1:
+        issues.append(DraftValidationIssue(
+            "invalid_max_active_tasks", "executionPolicy.maxActiveTasks",
+            "executionPolicy.maxActiveTasks must be a positive integer",
+        ))
+    else:
+        policy["maxActiveTasks"] = max_active
+    normalized["executionPolicy"] = policy
+
+    default_executor, executor_valid = _validate_default_agent_id(
+        draft.get("defaultExecutorAgentId"),
+        path="defaultExecutorAgentId",
+        lookup_agent=lookup_agent,
+        is_excluded_agent=is_excluded_agent,
+        issues=issues,
+    )
+    default_reviewer, _reviewer_valid = _validate_default_agent_id(
+        draft.get("defaultReviewerAgentId"),
+        path="defaultReviewerAgentId",
+        lookup_agent=lookup_agent,
+        is_excluded_agent=is_excluded_agent,
+        issues=issues,
+    )
+    normalized["defaultExecutorAgentId"] = default_executor
+    normalized["defaultReviewerAgentId"] = default_reviewer
+    return enabled and executor_valid
+
+
 def validate_project_draft(
     draft: Any,
     *,
@@ -264,6 +357,13 @@ def validate_project_draft(
             "agentMaintenanceMode must be strict_confirmation or autonomous",
         ))
     normalized["agentMaintenanceMode"] = maintenance_mode
+    has_valid_default_executor = _validate_execution_configuration(
+        draft,
+        normalized=normalized,
+        lookup_agent=lookup_agent,
+        is_excluded_agent=is_excluded_agent,
+        issues=issues,
+    )
 
     columns = draft.get("columns", [])
     if not isinstance(columns, list):
@@ -340,6 +440,19 @@ def validate_project_draft(
             lookup_agent=lookup_agent, is_excluded_agent=is_excluded_agent,
             issues=issues,
         )
+        if normalized["projectExecutionEnabled"] is True:
+            executor = item.get("executorActor")
+            task_has_agent_executor = (
+                isinstance(executor, Mapping)
+                and executor.get("type") == "agent"
+                and bool(executor.get("id"))
+            )
+            if not task_has_agent_executor and not has_valid_default_executor:
+                issues.append(DraftValidationIssue(
+                    "executable_agent_required",
+                    f"{path}.executorActor",
+                    "Execution-enabled tasks require an assignable Agent executor or project default executor",
+                ))
         normalized_tasks.append(item)
     normalized["tasks"] = normalized_tasks
     normalized["template"] = _validate_template(

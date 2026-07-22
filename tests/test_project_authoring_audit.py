@@ -25,7 +25,7 @@ from services.project_repository import ProjectRepository
 AGENTS = {agent_id: {"id": agent_id} for agent_id in ("author", "owner", "builder")}
 
 
-def _draft(*, autonomous=False):
+def _draft(*, autonomous=False, execution_enabled=False):
     responsible = "author" if autonomous else "owner"
     executor = "author" if autonomous else "builder"
     return {
@@ -33,6 +33,7 @@ def _draft(*, autonomous=False):
         "description": "Safe description",
         "projectType": "one_time",
         "agentMaintenanceMode": "autonomous" if autonomous else "strict_confirmation",
+        "projectExecutionEnabled": execution_enabled,
         "columns": [{"id": "backlog", "title": "Backlog"}],
         "tasks": [{
             "title": "Audited task",
@@ -46,7 +47,7 @@ def _draft(*, autonomous=False):
     }
 
 
-def _service(path, *, autonomous=False):
+def _service(path, *, autonomous=False, execution_enabled=False):
     path.mkdir()
     markdown = MarkdownProjectStore(str(path))
     markdown.save_all({"projects": [], "templates": []})
@@ -66,7 +67,7 @@ def _service(path, *, autonomous=False):
     )
     secret = "plaintext-project-secret"
     service.create_pending(
-        _draft(autonomous=autonomous),
+        _draft(autonomous=autonomous, execution_enabled=execution_enabled),
         requesting_agent_id="author",
         idempotency_key="audit:key-1",
         request_secret_hash=hash_request_secret(secret),
@@ -127,7 +128,7 @@ def test_draft_confirmation_materialization_and_rejection_events_include_safe_id
 
 
 def test_materialization_and_maintenance_failures_are_sanitized_and_retryable(tmp_path):
-    store, service, secret = _service(tmp_path / "failed")
+    store, service, secret = _service(tmp_path / "failed", execution_enabled=True)
     result = service.confirm_and_materialize(
         "audit-1",
         expected_revision=1,
@@ -147,7 +148,10 @@ def test_materialization_and_maintenance_failures_are_sanitized_and_retryable(tm
     assert "workspace-credential" not in encoded
 
     retried = service.confirm_and_materialize(
-        "audit-1", expected_revision=3, confirmation_key="confirm:retry",
+        "audit-1",
+        expected_revision=3,
+        confirmation_key="confirm:retry",
+        prepare_workspace=lambda *_args: {"ok": True, "path": "/tmp/audit-retry"},
     )
     project_id = retried["project"]["id"]
     pending = service.create_maintenance_request(
@@ -229,4 +233,3 @@ def test_maintenance_success_rejection_and_autonomous_events_are_traceable(tmp_p
     assert event["action"] == "autonomous_routine_update"
     assert event["taskId"] == task_id
     assert event["changedFields"] == ["description"]
-

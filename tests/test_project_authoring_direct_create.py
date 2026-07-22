@@ -66,6 +66,7 @@ def _project(title="Direct project"):
         "description": "Created after conversation confirmation",
         "projectType": "one_time",
         "agentMaintenanceMode": "strict_confirmation",
+        "projectExecutionEnabled": False,
         "columns": [{"id": "backlog", "title": "Backlog"}],
         "tasks": [{
             "title": "Implement",
@@ -147,6 +148,62 @@ def test_direct_creation_commits_complete_unstarted_project_and_one_time_grant(t
     assert root[IDEMPOTENCY_KEY]["direct-create:author:author:direct-1"]["projectId"] == project["id"]
 
 
+def test_direct_enabled_creation_requires_prepared_workspace_without_downgrade(tmp_path):
+    markdown, service = _service(tmp_path)
+    enabled = _project()
+    enabled.pop("projectExecutionEnabled")
+
+    with pytest.raises(DirectProjectCreationError) as missing:
+        _create(service, enabled)
+    assert missing.value.code == "workspace_preparation_required"
+    assert markdown.load_all()["projects"] == []
+
+    with pytest.raises(DirectProjectCreationError) as invalid:
+        _create(service, enabled, prepare_workspace=lambda *_: {"ok": True})
+    assert invalid.value.code == "workspace_preparation_failed"
+    assert markdown.load_all()["projects"] == []
+
+    calls = []
+    created = _create(
+        service,
+        enabled,
+        prepare_workspace=lambda normalized, *_: calls.append(normalized) or {
+            "ok": True,
+            "path": "/tmp/enabled-workspace",
+            "kind": "directory",
+            "managed": True,
+            "created": True,
+        },
+    )
+    assert calls[0]["projectExecutionEnabled"] is True
+    assert created["project"]["projectExecutionEnabled"] is True
+    assert created["project"]["workflowActive"] is False
+    assert created["project"]["projectExecutionFlowActive"] is False
+
+    explicit = _project()
+    explicit["projectExecutionEnabled"] = True
+    repeated = _create(
+        service,
+        explicit,
+        prepare_workspace=lambda *_: calls.append("unexpected") or {"ok": False},
+    )
+    assert repeated["created"] is False
+    assert len(calls) == 1
+
+
+def test_direct_tracking_only_creation_skips_workspace_preparation(tmp_path):
+    _, service = _service(tmp_path)
+    calls = []
+
+    created = _create(
+        service,
+        prepare_workspace=lambda *_: calls.append(True) or {"ok": False},
+    )
+
+    assert created["project"]["projectExecutionEnabled"] is False
+    assert calls == []
+
+
 def test_direct_creation_requires_confirmation_and_sha256_summary(tmp_path):
     markdown, service = _service(tmp_path)
 
@@ -191,6 +248,8 @@ def test_direct_creation_rejects_idempotency_key_reuse_for_changed_content(tmp_p
 
 def test_direct_creation_workspace_failure_and_commit_failure_leave_no_partial_state(tmp_path, monkeypatch):
     markdown, service = _service(tmp_path)
+    enabled = _project()
+    enabled["projectExecutionEnabled"] = True
     cleanup = []
     failed_workspace = {
         "ok": False,
@@ -202,6 +261,7 @@ def test_direct_creation_workspace_failure_and_commit_failure_leave_no_partial_s
     with pytest.raises(DirectProjectCreationError) as raised:
         _create(
             service,
+            enabled,
             prepare_workspace=lambda *_args: failed_workspace,
             cleanup_workspace=cleanup.append,
         )
@@ -224,6 +284,7 @@ def test_direct_creation_workspace_failure_and_commit_failure_leave_no_partial_s
     with pytest.raises(OSError, match="root commit failed"):
         _create(
             service,
+            enabled,
             prepare_workspace=lambda *_args: prepared,
             cleanup_workspace=cleanup.append,
         )

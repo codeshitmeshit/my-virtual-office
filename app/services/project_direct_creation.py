@@ -14,6 +14,7 @@ from services.project_authoring_config import feature_disabled_error
 from services.project_authoring_security import generate_request_secret, hash_request_secret
 from services.project_authoring_store import GRANTS_KEY, IDEMPOTENCY_KEY, grant_public_view
 from services.project_authoring_validation import validate_idempotency_key, validate_project_draft
+from services.project_authoring_workspace import prepared_execution_workspace_error
 
 
 def _canonical_digest(value: Any) -> str:
@@ -129,16 +130,28 @@ class DirectProjectCreationService:
         grant_secret_hash = self.ports.hash_secret(grant_secret)
         workspace: dict[str, Any] = {"ok": True, "managed": False, "created": False}
         try:
-            if prepare_workspace is not None:
+            execution_enabled = normalized.get("projectExecutionEnabled") is True
+            if execution_enabled and prepare_workspace is None:
+                raise DirectProjectCreationError(
+                    "workspace_preparation_required",
+                    "Execution-enabled project creation requires workspace preparation",
+                    409,
+                )
+            if execution_enabled and prepare_workspace is not None:
                 prepared = prepare_workspace(normalized, creation_id, key)
                 workspace = dict(prepared) if isinstance(prepared, Mapping) else {
                     "ok": False,
                     "error": "Workspace preparation returned an invalid result",
                 }
-            if not workspace.get("ok"):
+            workspace_error = (
+                prepared_execution_workspace_error(workspace)
+                if execution_enabled
+                else None
+            )
+            if workspace_error:
                 raise DirectProjectCreationError(
                     "workspace_preparation_failed",
-                    sanitize_audit_text(workspace.get("error") or "Workspace preparation failed", limit=1000),
+                    sanitize_audit_text(workspace_error, limit=1000),
                     409,
                 )
             result = self.ports.store.update(lambda root: self._commit(

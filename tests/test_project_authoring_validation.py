@@ -67,6 +67,11 @@ def _codes(error):
 def test_complete_draft_normalizes_roles_and_legacy_execution_fields():
     normalized = _validate(_draft())
 
+    assert normalized["projectExecutionEnabled"] is True
+    assert normalized["projectExecutionStartMode"] == "continuous"
+    assert normalized["executionPolicy"] == {"maxActiveTasks": 1}
+    assert normalized["defaultExecutorAgentId"] is None
+    assert normalized["defaultReviewerAgentId"] is None
     task = normalized["tasks"][0]
     assert task["responsibleActor"] == {"type": "agent", "id": "owner"}
     assert task["executorActor"] == {"type": "agent", "id": "builder"}
@@ -84,9 +89,47 @@ def test_same_actor_and_local_user_roles_are_supported():
     human = _draft()
     human["tasks"][0]["responsibleActor"] = {"type": "user", "id": "user:local"}
     human["tasks"][0]["executorActor"] = {"type": "user", "id": "user:local"}
+    with pytest.raises(DraftValidationError) as enabled_error:
+        _validate(human)
+    assert "executable_agent_required" in _codes(enabled_error)
+
+    human["projectExecutionEnabled"] = False
     task = _validate(human)["tasks"][0]
     assert task["assignee"] == "user:local"
     assert task["executorAgentId"] is None
+
+
+def test_execution_enabled_human_task_can_resolve_project_default_agent():
+    draft = _draft(defaultExecutorAgentId="builder", defaultReviewerAgentId="reviewer")
+    draft["tasks"][0]["executorActor"] = {"type": "user", "id": "user:local"}
+
+    normalized = _validate(draft)
+
+    assert normalized["projectExecutionEnabled"] is True
+    assert normalized["defaultExecutorAgentId"] == "builder"
+    assert normalized["defaultReviewerAgentId"] == "reviewer"
+    assert normalized["tasks"][0]["executorAgentId"] is None
+
+
+def test_execution_configuration_rejects_invalid_values_and_agents():
+    draft = _draft(
+        projectExecutionEnabled="yes",
+        projectExecutionStartMode="automatic",
+        executionPolicy={"maxActiveTasks": 0},
+        defaultExecutorAgentId="missing",
+        defaultReviewerAgentId="excluded",
+    )
+
+    with pytest.raises(DraftValidationError) as error:
+        _validate(draft)
+
+    assert {
+        "invalid_project_execution_enabled",
+        "invalid_project_execution_start_mode",
+        "invalid_max_active_tasks",
+        "agent_not_found",
+        "agent_not_assignable",
+    } <= _codes(error)
 
 
 def test_missing_unknown_and_excluded_actors_report_role_paths():
@@ -151,10 +194,12 @@ def test_reviewer_recommendation_requires_trigger_rationale_and_agent_candidate(
     assert "reviewer_recommendation_required" in _codes(inconsistent)
 
 
-@pytest.mark.parametrize("project_type", ["reusable", "recurring"])
-def test_reusable_and_recurring_projects_require_templates(project_type):
+def test_recurring_projects_require_templates_while_reusable_attribute_does_not():
+    reusable = _validate(_draft(projectType="reusable"))
+    assert reusable["template"] == {"mode": "none"}
+
     with pytest.raises(DraftValidationError) as error:
-        _validate(_draft(projectType=project_type))
+        _validate(_draft(projectType="recurring"))
     assert "template_required" in _codes(error)
 
 

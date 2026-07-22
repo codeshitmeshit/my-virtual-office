@@ -29,6 +29,7 @@ from services.project_authoring_store import (
     management_request_view,
 )
 from services.project_authoring_validation import validate_idempotency_key, validate_project_draft
+from services.project_authoring_workspace import prepared_execution_workspace_error
 from services.project_authoring_security import verify_request_secret
 from services.project_direct_creation import (
     DirectProjectCreationPorts,
@@ -479,18 +480,38 @@ class ProjectAuthoringService:
         approved = copy.deepcopy(started.get("approvedSnapshot") or {})
         workspace: dict[str, Any] = {"ok": True, "managed": False, "created": False}
         try:
-            if prepare_workspace is not None:
+            execution_enabled = approved.get("projectExecutionEnabled") is True
+            if execution_enabled and prepare_workspace is None:
+                failed = self._fail_materialization(
+                    request_id,
+                    materializing_revision,
+                    "workspace_preparation_required",
+                    "Execution-enabled project creation requires workspace preparation",
+                )
+                return {
+                    "ok": False,
+                    "request": failed,
+                    "code": failed.get("code"),
+                    "error": failed.get("error"),
+                    "_status": 409,
+                }
+            if execution_enabled and prepare_workspace is not None:
                 prepared = prepare_workspace(approved, request_id, key)
                 workspace = dict(prepared) if isinstance(prepared, Mapping) else {
                     "ok": False, "error": "Workspace preparation returned an invalid result",
                 }
-            if not workspace.get("ok"):
+            workspace_error = (
+                prepared_execution_workspace_error(workspace)
+                if execution_enabled
+                else None
+            )
+            if workspace_error:
                 self._cleanup_prepared_workspace(workspace, cleanup_workspace)
                 failed = self._fail_materialization(
                     request_id,
                     materializing_revision,
                     "workspace_preparation_failed",
-                    str(workspace.get("error") or "Workspace preparation failed"),
+                    workspace_error,
                 )
                 return {
                     "ok": False,

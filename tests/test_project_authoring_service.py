@@ -42,6 +42,7 @@ def _draft(title="Launch"):
         "description": "Ship it",
         "projectType": "one_time",
         "agentMaintenanceMode": "strict_confirmation",
+        "projectExecutionEnabled": False,
         "columns": [{"id": "backlog", "title": "Backlog"}],
         "tasks": [{
             "title": "Implement",
@@ -284,6 +285,7 @@ def test_user_approved_reviewer_and_prepared_workspace_are_committed(tmp_path):
     _, _, service = _service(tmp_path)
     _create(service)
     edited = _draft()
+    edited["projectExecutionEnabled"] = True
     edited["tasks"][0]["reviewerActor"] = {"type": "agent", "id": "reviewer"}
     service.edit_pending("request-1", edited, expected_revision=1)
     cleanup_calls = []
@@ -307,6 +309,42 @@ def test_user_approved_reviewer_and_prepared_workspace_are_committed(tmp_path):
     assert task["reviewerAgentId"] == "reviewer"
     assert result["project"]["workspaceManagedBy"] == "project_authoring"
     assert cleanup_calls == []
+
+
+def test_enabled_confirmation_requires_workspace_and_never_downgrades(tmp_path):
+    markdown, _, service = _service(tmp_path)
+    enabled = _draft()
+    enabled.pop("projectExecutionEnabled")
+    _create(service, draft=enabled)
+
+    result = service.confirm_and_materialize(
+        "request-1",
+        expected_revision=1,
+        confirmation_key="confirm:enabled-no-workspace",
+    )
+
+    assert result["ok"] is False
+    assert result["code"] == "workspace_preparation_required"
+    root = markdown.load_all()
+    assert root["projects"] == []
+    assert root[REQUESTS_KEY]["request-1"]["approvedSnapshot"]["projectExecutionEnabled"] is True
+
+
+def test_tracking_only_confirmation_skips_workspace_preparation(tmp_path):
+    _, _, service = _service(tmp_path)
+    _create(service)
+    calls = []
+
+    result = service.confirm_and_materialize(
+        "request-1",
+        expected_revision=1,
+        confirmation_key="confirm:tracking-only",
+        prepare_workspace=lambda *_: calls.append(True) or {"ok": False},
+    )
+
+    assert result["ok"] is True
+    assert result["project"]["projectExecutionEnabled"] is False
+    assert calls == []
 
 
 def test_recurring_confirmation_commits_template_recurrence_and_outbox_together(tmp_path):
@@ -346,7 +384,9 @@ def test_recurring_confirmation_commits_template_recurrence_and_outbox_together(
 
 def test_failed_workspace_preparation_cleans_up_and_leaves_retryable_request(tmp_path):
     markdown, _, service = _service(tmp_path)
-    _create(service)
+    enabled = _draft()
+    enabled["projectExecutionEnabled"] = True
+    _create(service, draft=enabled)
     cleanup_calls = []
     prepared = {
         "ok": False,
@@ -375,7 +415,9 @@ def test_failed_workspace_preparation_cleans_up_and_leaves_retryable_request(tmp
 
 def test_failed_root_commit_cleans_managed_workspace_and_records_failure(tmp_path):
     markdown, _, service = _service(tmp_path)
-    _create(service)
+    enabled = _draft()
+    enabled["projectExecutionEnabled"] = True
+    _create(service, draft=enabled)
     original_update = service.store.update
     update_calls = {"count": 0}
     cleanup_calls = []
