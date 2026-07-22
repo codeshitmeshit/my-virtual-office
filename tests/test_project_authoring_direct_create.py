@@ -78,6 +78,7 @@ def _project(title="Direct project"):
         "columns": [{"id": "backlog", "title": "Backlog"}],
         "tasks": [{
             "title": "Implement",
+            "description": "Created after conversation confirmation\n\n验收标准：完成任务",
             "columnId": "backlog",
             "responsibleActor": {"type": "agent", "id": "owner"},
             "executorActor": {"type": "agent", "id": "builder"},
@@ -150,7 +151,9 @@ def test_direct_creation_commits_complete_unstarted_project_and_one_time_grant(t
     }
     assert project["workflowActive"] is False
     assert project["projectExecutionFlowActive"] is False
+    assert [column["title"] for column in project["columns"]] == ["Backlog", "In Progress", "Review", "Done"]
     assert project["tasks"][0]["executionState"] == "backlog"
+    assert project["tasks"][0]["columnId"] == "backlog"
     assert project["tasks"][0]["checklist"][0]["text"] == "完成任务"
     assert project["tasks"][0]["checklist"][0]["id"].startswith("checklist-")
     assert project["tasks"][0]["responsibleActor"] == {"type": "agent", "id": "owner"}

@@ -337,6 +337,10 @@
         return String(agent.name || agentId(agent) || tr('hr_unknown_agent', 'Unknown Agent'));
     }
 
+    function agentAvatar(agent) {
+        return String(agent.emoji || '').trim() || 'AI';
+    }
+
     function renderAgent(agent) {
         const id = agentId(agent);
         const availability = String(agent.availability || agent.status || 'unknown');
@@ -345,7 +349,7 @@
         return '<button type="button" class="hr-agent-row' + selected + '" data-agent-id="' +
             escHtml(id) + '" onclick="HumanResources.selectAgent(this.dataset.agentId)"' +
             (selected ? ' aria-current="true"' : '') + '>' +
-            '<span class="hr-agent-avatar" aria-hidden="true">AI</span>' +
+            '<span class="hr-agent-avatar" aria-hidden="true">' + escHtml(agentAvatar(agent)) + '</span>' +
             '<span class="hr-agent-row-copy"><strong>' + escHtml(agentName(agent)) + '</strong>' +
             '<small>' + escHtml(id) + '</small></span>' +
             '<span class="hr-state-chip hr-tone-' + escHtml(statusTone(availability)) + '">' +

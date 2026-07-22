@@ -79,6 +79,65 @@ def test_workflow_provider_message_activity_does_not_count_as_review_evidence():
     assert server._wf_activity_has_browser_evidence(activity) is False
 
 
+def test_legacy_workflow_applies_executor_checklist_updates():
+    with tempfile.TemporaryDirectory() as status_dir:
+        old = with_store(status_dir)
+        try:
+            project = server._handle_project_create({"title": "Legacy Workflow"})["project"]
+            task = server._handle_task_create(project["id"], {
+                "title": "Write report",
+                "description": "验收标准：输出完整报告",
+                "columnId": project["columns"][0]["id"],
+                "assignee": "executor",
+            })["task"]
+            reply = json.dumps({
+                "checklistUpdates": [{
+                    "id": "deliverable",
+                    "text": "输出完整报告",
+                    "done": True,
+                    "evidence": "report.md exists",
+                }],
+            }, ensure_ascii=False)
+
+            assert server._wf_apply_executor_checklist_updates(project["id"], task["id"], reply) is True
+
+            current = server._handle_project_get(project["id"])["project"]
+            current_task = next(t for t in current["tasks"] if t["id"] == task["id"])
+            assert len(current_task["checklist"]) == 1
+            assert current_task["checklist"][0]["id"] == "deliverable"
+            assert current_task["checklist"][0]["text"] == "输出完整报告"
+            assert current_task["checklist"][0]["done"] is True
+            assert current_task["checklist"][0]["source"] == "project_execution_acceptance"
+            assert current_task["checklist"][0]["completedBy"] == "executor"
+            assert current_task["checklist"][0]["completionEvidence"] == "report.md exists"
+        finally:
+            restore_store(old)
+
+
+def test_legacy_workflow_seeds_empty_checklist_before_review():
+    with tempfile.TemporaryDirectory() as status_dir:
+        old = with_store(status_dir)
+        try:
+            project = server._handle_project_create({"title": "Legacy Workflow"})["project"]
+            task = server._handle_task_create(project["id"], {
+                "title": "Confirm scope",
+                "description": "明确范围\n\n验收标准：输出完整分析约束",
+                "columnId": project["columns"][0]["id"],
+                "assignee": "executor",
+            })["task"]
+
+            checklist = server._wf_ensure_acceptance_checklist(project["id"], task["id"])
+
+            assert checklist
+            assert checklist[0]["text"] == "输出完整分析约束。"
+            current = server._handle_project_get(project["id"])["project"]
+            current_task = next(t for t in current["tasks"] if t["id"] == task["id"])
+            assert current_task.get("reviewCheck", []) == []
+            assert current_task["checklist"][0]["done"] is False
+        finally:
+            restore_store(old)
+
+
 def fake_feishu_sender(calls):
     def _send(intent, **kwargs):
         calls.append({"intent": intent, "kwargs": kwargs})

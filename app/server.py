@@ -2651,6 +2651,7 @@ from services.managed_skills import (
     seed_managed_skill_library,
     sync_managed_skill_to_workspace,
 )
+from services.project_task_checklists import normalize_task_checklist
 
 PROJECT_STORE = MarkdownProjectStore(STATUS_DIR, watch_external_changes=True)
 
@@ -25033,6 +25034,47 @@ def _wf_unfinished_checklist_items(checklist):
         if isinstance(item, dict) and item.get("done") is not True
     ]
 
+def _wf_apply_executor_checklist_updates(project_id, task_id, agent_response):
+    data = _load_projects()
+    project = next((x for x in data["projects"] if x["id"] == project_id), None)
+    if not project:
+        return False
+    task = next((t for t in project.get("tasks", []) if t.get("id") == task_id), None)
+    if not task:
+        return False
+    changed = _project_execution_apply_checklist_updates(task, {"reply": agent_response or ""})
+    if not changed:
+        return False
+    now = _proj_now()
+    task["updatedAt"] = now
+    project["updatedAt"] = now
+    _log_activity(project, "checklist_updated", "workflow", "Applied executor checklistUpdates", task_id)
+    _save_projects(data)
+    return True
+
+def _wf_ensure_acceptance_checklist(project_id, task_id):
+    data = _load_projects()
+    project = next((x for x in data["projects"] if x["id"] == project_id), None)
+    if not project:
+        return []
+    task = next((t for t in project.get("tasks", []) if t.get("id") == task_id), None)
+    if not task:
+        return []
+    checklist = _project_execution_acceptance_checklist(task)
+    if checklist:
+        return checklist
+    task["checklist"] = normalize_task_checklist(task, index=0)
+    now = _proj_now()
+    for item in task["checklist"]:
+        if isinstance(item, dict):
+            item.setdefault("createdAt", now)
+            item.setdefault("createdBy", "workflow")
+    task["updatedAt"] = now
+    project["updatedAt"] = now
+    _log_activity(project, "checklist_seeded", "workflow", "Seeded acceptance checklist before review", task_id)
+    _save_projects(data)
+    return _project_execution_acceptance_checklist(task)
+
 def _wf_run_pipeline(project_id, single_task=False):
     """Main workflow pipeline — runs in a background thread."""
     with _WORKFLOW_LOCK:
@@ -25147,6 +25189,7 @@ def _wf_run_pipeline_inner(project_id, single_task, wf, stop_flag):
         work_activity = _wf_extract_session_activity(assignee, project_id, task_id)
         work_activity_text = _wf_format_activity_summary(work_activity)
         _wf_write_task_file(project_id, task, "in_progress", work_log_entry=f"Agent response:\n{agent_response[:2000]}\n\n**Activity:**\n{work_activity_text}")
+        _wf_apply_executor_checklist_updates(project_id, task_id, agent_response)
 
         # Step 3: Move to Review
         review_col = _wf_get_review_col(project)
@@ -25184,6 +25227,11 @@ def _wf_run_pipeline_inner(project_id, single_task, wf, stop_flag):
                 break
 
             checklist = _project_execution_acceptance_checklist(task)
+            if not checklist:
+                checklist = _wf_ensure_acceptance_checklist(project_id, task_id)
+                data = _load_projects()
+                project = next((x for x in data["projects"] if x["id"] == project_id), None)
+                task = next((t for t in (project or {}).get("tasks", []) if t["id"] == task_id), None) if project else None
             if not checklist:
                 _wf_write_task_file(
                     project_id,
@@ -25385,6 +25433,7 @@ def _wf_run_pipeline_inner(project_id, single_task, wf, stop_flag):
                 rework_activity = _wf_extract_session_activity(assignee, project_id, task_id)
                 rework_activity_text = _wf_format_activity_summary(rework_activity)
                 _wf_write_task_file(project_id, task, "in_progress", work_log_entry=f"Rework response:\n{rework_response[:2000]}\n\n**Rework activity:**\n{rework_activity_text}")
+                _wf_apply_executor_checklist_updates(project_id, task_id, rework_response)
 
                 # Move back to Review
                 _wf_move_task(project_id, task_id, review_col["id"], by="workflow")

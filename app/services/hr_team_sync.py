@@ -105,6 +105,7 @@ class HRTeamSyncService:
             ai_id=ai_id,
             name=name,
             agent_kind=agent_kind,
+            emoji=str(agent.get("emoji") or "").strip(),
             provider_kind=provider_kind,
             status=status,
             availability=availability,

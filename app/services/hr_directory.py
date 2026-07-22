@@ -30,6 +30,7 @@ class RosterObservation:
     name: str
     agent_kind: str
     availability: str
+    emoji: str = ""
     status: str = "active"
     provider_kind: str = ""
     priority: int = 0
@@ -150,6 +151,7 @@ class SafeDirectoryPage:
 class _MergedObservation:
     ai_id: str
     name: str
+    emoji: str
     agent_kind: str
     provider_kind: str
     status: str
@@ -213,10 +215,19 @@ class HRDirectoryService:
             ),
             "",
         )
+        emoji = next(
+            (
+                item.emoji.strip()
+                for item in (*active, *(item for _, item in ordered))
+                if item.emoji.strip()
+            ),
+            "",
+        )
         sources = "+".join(sorted({source for source, _ in observations}))
         return _MergedObservation(
             ai_id=ai_id,
             name=preferred.name.strip(),
+            emoji=emoji,
             agent_kind=agent_kind,
             provider_kind=provider_kind,
             status=status,
@@ -284,6 +295,7 @@ class HRDirectoryService:
                     ai_id=merged.ai_id,
                     name=merged.name,
                     agent_kind=merged.agent_kind,
+                    emoji=merged.emoji,
                     provider_kind=merged.provider_kind,
                     status=merged.status,
                     availability=merged.availability,
@@ -325,6 +337,7 @@ class HRDirectoryService:
                         ai_id=before.ai_id,
                         name=before.name,
                         agent_kind=before.agent_kind,
+                        emoji=before.emoji,
                         provider_kind=before.provider_kind,
                         status="unreachable",
                         availability="unavailable",

@@ -89,6 +89,7 @@ class HRRepositoryInfo:
 class AgentRecord:
     ai_id: str
     name: str
+    emoji: str
     agent_kind: str
     provider_kind: str
     status: str
@@ -376,6 +377,7 @@ _SCHEMA_V1 = (
     """CREATE TABLE agents (
         ai_id TEXT PRIMARY KEY CHECK(length(trim(ai_id)) > 0),
         name TEXT NOT NULL CHECK(length(trim(name)) > 0),
+        emoji TEXT NOT NULL DEFAULT '',
         agent_kind TEXT NOT NULL DEFAULT 'unknown',
         provider_kind TEXT NOT NULL DEFAULT '',
         status TEXT NOT NULL DEFAULT 'active',
@@ -578,6 +580,18 @@ def _remove_legacy_hr_authorization_storage(connection: sqlite3.Connection) -> N
             connection.execute(f"ALTER TABLE agents DROP COLUMN {column}")
 
 
+def _add_agent_emoji(connection: sqlite3.Connection) -> None:
+    agent_columns = {
+        str(row[1]) for row in connection.execute("PRAGMA table_info(agents)").fetchall()
+    }
+    if "emoji" not in agent_columns:
+        connection.execute("ALTER TABLE agents ADD COLUMN emoji TEXT NOT NULL DEFAULT ''")
+
+
+def _reserve_schema_migration(_connection: sqlite3.Connection) -> None:
+    """Preserve repository compatibility with previously stamped HR schemas."""
+
+
 DEFAULT_MIGRATIONS = (
     HRMigration(1, "initial_hr_schema", _apply_schema_v1),
     HRMigration(2, "reserved_legacy_schema_v2", _reserve_legacy_schema_v2),
@@ -586,6 +600,10 @@ DEFAULT_MIGRATIONS = (
         "remove_legacy_hr_authorization_storage",
         _remove_legacy_hr_authorization_storage,
     ),
+    HRMigration(4, "add_agent_emoji", _add_agent_emoji),
+    HRMigration(5, "reserved_assessment_schema", _reserve_schema_migration),
+    HRMigration(6, "reserved_access_activity_schema", _reserve_schema_migration),
+    HRMigration(7, "reserved_hr_queue_schema", _reserve_schema_migration),
 )
 
 
@@ -996,6 +1014,7 @@ class HRRepository:
         ai_id: str,
         name: str,
         agent_kind: str,
+        emoji: str = "",
         provider_kind: str = "",
         status: str = "active",
         availability: str = "unknown",
@@ -1005,6 +1024,7 @@ class HRRepository:
         """Merge one discovery observation into the stable AI-ID authority."""
         ai_id = _stable_ai_id(ai_id)
         name = _required_text(name, "name")
+        emoji = _optional_text(emoji, "emoji", maximum=32)
         agent_kind = _required_text(agent_kind, "agent_kind", maximum=64)
         provider_kind = _optional_text(provider_kind, "provider_kind", maximum=64)
         status = _required_text(status, "status", maximum=32)
@@ -1029,13 +1049,14 @@ class HRRepository:
                 inactive_at = None if status == "active" else observed_at
                 connection.execute(
                     """INSERT INTO agents(
-                           ai_id, name, agent_kind, provider_kind, status, availability,
+                           ai_id, name, emoji, agent_kind, provider_kind, status, availability,
                            discovery_source, discovered_at, last_seen_at, inactive_at,
                            revision, created_at, updated_at
-                       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)""",
+                       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)""",
                     (
                         ai_id,
                         name,
+                        emoji,
                         agent_kind,
                         provider_kind,
                         status,
@@ -1062,12 +1083,13 @@ class HRRepository:
                     )
                 material = (
                     current.name,
+                    current.emoji,
                     current.agent_kind,
                     current.provider_kind,
                     current.status,
                     current.availability,
                     current.discovery_source,
-                ) != (name, agent_kind, provider_kind, status, availability, source)
+                ) != (name, emoji, agent_kind, provider_kind, status, availability, source)
                 if material:
                     revision = current.revision + 1
                     inactive_at = (
@@ -1077,12 +1099,13 @@ class HRRepository:
                     )
                     connection.execute(
                         """UPDATE agents SET
-                               name = ?, agent_kind = ?, provider_kind = ?, status = ?,
+                               name = ?, emoji = ?, agent_kind = ?, provider_kind = ?, status = ?,
                                availability = ?, discovery_source = ?, last_seen_at = ?,
                                inactive_at = ?, revision = ?, updated_at = ?
                            WHERE ai_id = ?""",
                         (
                             name,
+                            emoji,
                             agent_kind,
                             provider_kind,
                             status,

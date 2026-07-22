@@ -290,6 +290,7 @@ class HRManagementAPI:
         record = {
             "aiId": agent.ai_id,
             "name": agent.name,
+            "emoji": agent.emoji,
             "introduction": introduction.introduction if introduction else "",
             "availability": agent.availability if agent.status == "active" else "unavailable",
             "status": agent.status,

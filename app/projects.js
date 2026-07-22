@@ -34,7 +34,10 @@
         _projectSummarySignature: '',
     };
 
-    const _t = (key, params) => typeof i18n !== 'undefined' ? i18n.t(key, params) : key;
+    const _t = (key, params) => {
+        const value = typeof i18n !== 'undefined' ? i18n.t(key, params) : key;
+        return params ? formatTextTemplate(value, params) : value;
+    };
     function currentLang() {
         return ((typeof i18n !== 'undefined' && i18n.getLanguage && i18n.getLanguage()) || document.documentElement.lang || 'en').toLowerCase();
     }
