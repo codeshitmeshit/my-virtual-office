@@ -23,8 +23,6 @@ class MaterializationSite:
 CURRENT_MATERIALIZATION_BUILDERS = frozenset({
     MaterializationSite("app/office.py", "proj_cmd", "project"),
     MaterializationSite("app/office.py", "proj_cmd", "task"),
-    MaterializationSite("app/server.py", "_handle_project_from_template", "project"),
-    MaterializationSite("app/server.py", "_handle_project_from_template", "task"),
     MaterializationSite(
         "app/services/project_authoring.py",
         "ProjectAuthoringService._apply_maintenance_mutation",

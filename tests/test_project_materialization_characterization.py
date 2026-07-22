@@ -76,18 +76,10 @@ MANUAL_TASK_KEYS = (
     "reviewerRecommendation", "scheduledRepeatEnabled", "source", "tags",
     "title", "updatedAt",
 )
-BROWSER_TEMPLATE_PROJECT_KEYS = tuple(
-    field
-    for field in MANUAL_PROJECT_KEYS
-    if field not in {"activeAgent", "activeTaskId", "projectType", "workflowActive", "workflowPhase"}
-) + ("authoringSource", "templateRef")
-BROWSER_TEMPLATE_TASK_KEYS = (
-    "activeAttemptId", "allowReviewerlessExecution", "assignee", "assigneeBranch", "attachments",
-    "attempts", "blockedReason", "checklist", "columnId", "comments", "completedAt", "createdAt",
-    "description", "dueDate", "evidence", "executionState", "executorActor", "executorAgentId", "id",
-    "lastError", "order", "priority", "requiresUserAcceptance", "responsibleActor", "reviewerActor",
-    "reviewerAgentId", "reviewerRecommendation", "scheduledRepeatEnabled", "tags", "title", "updatedAt",
+BROWSER_TEMPLATE_PROJECT_KEYS = MANUAL_PROJECT_KEYS + (
+    "authoringSource", "recurrenceRef", "templateRef",
 )
+BROWSER_TEMPLATE_TASK_KEYS = MANUAL_TASK_KEYS
 AGENT_PROJECT_KEYS = (
     "activeAgent", "activeTaskId", "activity", "agentMaintenanceMode", "authoringAgentId",
     "authoringSource", "branch", "columns", "createdAt", "createdBy", "description", "dueDate",
@@ -209,6 +201,11 @@ def _browser_template_creation(monkeypatch, tmp_path) -> tuple[dict[str, Any], d
     ids = iter(f"browser-{index}" for index in range(20))
     monkeypatch.setattr(server, "_load_projects", lambda: copy.deepcopy(state))
     monkeypatch.setattr(server, "_save_projects", save)
+    monkeypatch.setattr(
+        server,
+        "_PROJECT_REPOSITORY",
+        ProjectRepository(load_projects=lambda: copy.deepcopy(state), save_projects=save),
+    )
     monkeypatch.setattr(server, "_project_browser_templates", lambda _data: [copy.deepcopy(template)])
     monkeypatch.setattr(server, "_system_agent_assignment_error", lambda _value, _scope: None)
     monkeypatch.setattr(server, "_proj_uuid", lambda: next(ids))
@@ -396,20 +393,8 @@ def test_creation_paths_characterize_current_default_divergence(monkeypatch, tmp
         },
     }
     assert projections["browser_template"] == {
-        "project": {
-            **projections["manual"]["project"],
-            "archiveMaintenance": {"enabled": True, "explicit": False, "updatedAt": NOW, "updatedBy": "user"},
-            "workflowActive": MISSING,
-            "workflowPhase": MISSING,
-        },
-        "task": {
-            **projections["manual"]["task"],
-            "source": MISSING,
-            "meetingActionItems": MISSING,
-            "meetingDecisionHistory": MISSING,
-            "meetingDiscussionPoints": MISSING,
-            "meetingRecords": MISSING,
-        },
+        "project": projections["manual"]["project"],
+        "task": projections["manual"]["task"],
     }
     authored_project_defaults = {
         "archiveMaintenanceEnabled": MISSING,

@@ -132,6 +132,11 @@ def test_browser_template_list_and_creation_accept_latest_version_without_breaki
         state.update(copy.deepcopy(data))
 
     monkeypatch.setattr(server, "_save_projects", save)
+    monkeypatch.setattr(
+        server,
+        "_PROJECT_REPOSITORY",
+        ProjectRepository(load_projects=lambda: copy.deepcopy(state), save_projects=save),
+    )
     generated_ids = iter(("column-new", "task-new", "project-new"))
     monkeypatch.setattr(server, "_proj_uuid", lambda: next(generated_ids))
     monkeypatch.setattr(server, "_proj_now", lambda: "2025-02-01T00:00:00+00:00")
@@ -157,3 +162,12 @@ def test_browser_template_list_and_creation_accept_latest_version_without_breaki
     assert task["executorActor"] == {"type": "agent", "id": "builder"}
     assert task["reviewerActor"] == {"type": "agent", "id": "reviewer"}
     assert created["project"]["templateRef"] == {"id": "template-release", "version": 2}
+
+
+def test_browser_template_creation_service_has_no_server_dependency():
+    path = os.path.join(APP_DIR, "services", "browser_project_creation.py")
+    with open(path, encoding="utf-8") as source_file:
+        source = source_file.read()
+    assert "import server" not in source
+    assert "_load_projects" not in source
+    assert "_save_projects" not in source

@@ -44,6 +44,7 @@ import gateway_presence
 from dashboard_realtime import DashboardRealtimeStream
 from services import project_execution as project_execution_service
 from services import project_commands as project_command_service
+from services import browser_project_creation as browser_project_creation_service
 from services import execution_lifecycle as execution_lifecycle_service
 from services import review_acceptance as review_acceptance_service
 from services import artifacts as artifact_service
@@ -18667,127 +18668,21 @@ def _handle_task_comment(project_id, task_id, body):
 
 def _handle_project_from_template(body):
     """POST /api/projects/from-template."""
-    template_id = (body.get("templateId") or "").strip()
-    title = (body.get("title") or "").strip()
-    if not title:
-        return {"error": "Project title is required", "_status": 400}
-    data = _load_projects()
-    tpl = next((t for t in _project_browser_templates(data) if t["id"] == template_id), None)
-    # Also check built-in templates
-    if not tpl:
-        tpl = next((t for t in _BUILTIN_TEMPLATES if t["id"] == template_id), None)
-    if not tpl:
-        return {"error": "Template not found", "_status": 404}
-    now = _proj_now()
-    # Clone columns with new IDs
-    col_map = {}
-    new_cols = []
-    for i, col in enumerate(tpl.get("columns", [])):
-        new_id = _proj_uuid()
-        col_map[i] = new_id
-        new_cols.append({"id": new_id, "title": col.get("title", f"Column {i+1}"), "color": col.get("color", "#6c757d"), "order": i})
-    # Create tasks from taskTemplates
-    new_tasks = []
-    for tt in tpl.get("taskTemplates", []):
-        col_idx = tt.get("columnIndex", 0)
-        col_id = col_map.get(col_idx, new_cols[0]["id"] if new_cols else None)
-        if col_id:
-            new_tasks.append({
-                "id": _proj_uuid(),
-                "title": tt.get("title", "Task"),
-                "description": tt.get("description", ""),
-                "columnId": col_id,
-                "order": tt.get("order", 0),
-                "priority": tt.get("priority", "medium"),
-                "responsibleActor": copy.deepcopy(tt.get("responsibleActor")),
-                "executorActor": copy.deepcopy(tt.get("executorActor")),
-                "reviewerActor": copy.deepcopy(tt.get("reviewerActor")),
-                "reviewerRecommendation": copy.deepcopy(tt.get("reviewerRecommendation") or {}),
-                "assignee": tt.get("assignee"),
-                "assigneeBranch": None,
-                "executorAgentId": tt.get("executorAgentId"),
-                "reviewerAgentId": tt.get("reviewerAgentId"),
-                "requiresUserAcceptance": tt.get("requiresUserAcceptance", False) is True,
-                "allowReviewerlessExecution": tt.get("allowReviewerlessExecution", False) is True,
-                "scheduledRepeatEnabled": tt.get("scheduledRepeatEnabled", False) is True,
-                "executionState": "backlog",
-                "activeAttemptId": None,
-                "attempts": [],
-                "evidence": {},
-                "blockedReason": None,
-                "lastError": None,
-                "dueDate": None,
-                "tags": tt.get("tags", []),
-                "checklist": [],
-                "comments": [],
-                "attachments": [],
-                "createdAt": now,
-                "updatedAt": now,
-                "completedAt": None,
-            })
-    for field in ("defaultExecutorAgentId", "defaultReviewerAgentId"):
-        if rejected := _system_agent_assignment_error(body.get(field), "template"):
-            return rejected
-    for task in new_tasks:
-        for field in ("assignee", "executorAgentId", "reviewerAgentId"):
-            if rejected := _system_agent_assignment_error(task.get(field), "task"):
-                return rejected
-
-    created_by = (body.get("createdBy") or "user").strip()
-    workspace = _project_prepare_workspace(title, body, now)
-    if not workspace.get("ok"):
-        return workspace
-    project = {
-        "id": _proj_uuid(),
-        "title": title,
-        "description": body.get("description", tpl.get("description", "")),
-        "status": "active",
-        "priority": body.get("priority", "medium"),
-        "createdAt": now,
-        "updatedAt": now,
-        "dueDate": body.get("dueDate"),
-        "createdBy": created_by,
-        "tags": body.get("tags", []),
-        "branch": body.get("branch", ""),
-        "longTermProject": bool(body.get("longTermProject", False)),
-        "highPriorityAiMeetingAutoApprove": bool(body.get("highPriorityAiMeetingAutoApprove", False)),
-        "archiveMaintenanceEnabled": bool(body["archiveMaintenanceEnabled"]) if "archiveMaintenanceEnabled" in body else True,
-        "archiveMaintenance": {
-            "enabled": bool(body["archiveMaintenanceEnabled"]) if "archiveMaintenanceEnabled" in body else True,
-            "explicit": "archiveMaintenanceEnabled" in body,
-            "updatedAt": now,
-            "updatedBy": created_by,
-        },
-        "projectExecutionEnabled": workspace["projectExecutionEnabled"],
-        "workspacePath": workspace["workspacePath"],
-        "workspaceKind": workspace["workspaceKind"],
-        "workspaceStatus": workspace["workspaceStatus"],
-        "workspaceManagedBy": workspace.get("workspaceManagedBy"),
-        "workspaceCreatedAt": workspace.get("workspaceCreatedAt"),
-        "defaultExecutorAgentId": body.get("defaultExecutorAgentId"),
-        "defaultReviewerAgentId": body.get("defaultReviewerAgentId"),
-        "projectExecutionStartMode": body.get("projectExecutionStartMode") or "continuous",
-        "projectExecutionFlowActive": False,
-        "projectExecutionFlowStopReason": None,
-        "scheduledCronPaused": bool(body.get("scheduledCronPaused", False)),
-        "executionPolicy": {"maxActiveTasks": 1},
-        "executionDirtyConfirmations": [],
-        "columns": new_cols,
-        "tasks": new_tasks,
-        "activity": [],
-        "template": False,
+    result = browser_project_creation_service.create_from_browser_template(
+        body,
+        repository=_PROJECT_REPOSITORY,
+        load_catalog=_load_projects,
+        browser_templates=_project_browser_templates,
+        builtin_templates=_BUILTIN_TEMPLATES,
+        assignment_error=_system_agent_assignment_error,
+        prepare_workspace=_project_prepare_workspace,
+        new_id=_proj_uuid,
+        now=_proj_now,
+    )
+    return {
+        **result.payload,
+        **({"_status": result.status} if result.status != 200 else {}),
     }
-    if tpl.get("versioned") is True:
-        project["templateRef"] = {"id": template_id, "version": int(tpl.get("version") or 1)}
-        project["authoringSource"] = {
-            "kind": "browser_template_instance",
-            "templateId": template_id,
-            "templateVersion": int(tpl.get("version") or 1),
-        }
-    _log_activity(project, "project_created", created_by, f"Created from template '{tpl.get('title', '')}'")
-    data["projects"].append(project)
-    _save_projects(data)
-    return {"ok": True, "project": project}
 
 
 def _handle_save_as_template(body):
