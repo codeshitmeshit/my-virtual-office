@@ -27,7 +27,7 @@
 
 - [x] 5.1 Migrate conversation-confirmed direct creation to canonical Project/Task/column/checklist materialization plus the authoring overlay, preserving grant, idempotency, template/recurrence/outbox atomicity, activity, and one-time secret behavior.
 - [x] 5.2 Persist explicit execution intent in new immutable template snapshots, safely retain stored disabled behavior for existing schema-version-1 templates, and add compatibility tests for new enabled, explicit tracking-only, and historical templates.
-- [ ] 5.3 Migrate versioned template instantiation to canonical materialization and template overlays while preserving actor revalidation, immutable version pinning, overrides, workspace cleanup, idempotency, and public management behavior.
+- [x] 5.3 Migrate versioned template instantiation to canonical materialization and template overlays while preserving actor revalidation, immutable version pinning, overrides, workspace cleanup, idempotency, and public management behavior.
 - [ ] 5.4 Migrate confirmed Agent maintenance `create_task` to the canonical Task materializer while preserving grant and confirmation authorization, actor validation, caller-supplied ID conflict handling, root-transaction atomicity, audit behavior, and maintenance tests.
 
 ## 6. Recurring Instance and Automatic Execution
