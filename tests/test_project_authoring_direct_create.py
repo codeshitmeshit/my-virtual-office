@@ -89,7 +89,7 @@ def _project(title="Direct project"):
     }
 
 
-def _service(tmp_path, *, recurrence_enabled=False):
+def _service(tmp_path, *, recurrence_enabled=False, authoring_enabled=lambda: True):
     markdown = MarkdownProjectStore(str(tmp_path))
     markdown.save_all({"projects": [], "templates": []})
     repository = ProjectRepository(
@@ -101,7 +101,7 @@ def _service(tmp_path, *, recurrence_enabled=False):
         ProjectAuthoringRootStore(repository),
         lookup_agent=AGENTS.get,
         is_excluded_agent=lambda _agent_id: False,
-        submission_enabled=lambda: True,
+        submission_enabled=authoring_enabled,
         recurrence_enabled=lambda: recurrence_enabled,
         clock=lambda: datetime(2026, 7, 18, 12, 0, tzinfo=timezone.utc),
         new_id=lambda: "creation-1",
@@ -159,6 +159,23 @@ def test_direct_creation_commits_complete_unstarted_project_and_one_time_grant(t
     assert grant["secretHash"] == hash_request_secret("one-time-project-secret")
     assert "one-time-project-secret" not in str(root)
     assert root[IDEMPOTENCY_KEY]["direct-create:author:author:direct-1"]["projectId"] == project["id"]
+
+
+def test_rollout_flag_off_then_on_gates_direct_creation_without_partial_state(tmp_path):
+    enabled = {"value": False}
+    markdown, service = _service(
+        tmp_path, authoring_enabled=lambda: enabled["value"],
+    )
+
+    with pytest.raises(ProjectAuthoringCapacityError) as disabled:
+        _create(service)
+    assert disabled.value.code == "project_authoring_disabled"
+    assert markdown.load_all()["projects"] == []
+
+    enabled["value"] = True
+    created = _create(service)
+    assert created["created"] is True
+    assert len(markdown.load_all()["projects"]) == 1
 
 
 def test_direct_enabled_creation_requires_prepared_workspace_without_downgrade(tmp_path):
