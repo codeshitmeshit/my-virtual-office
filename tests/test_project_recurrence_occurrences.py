@@ -73,8 +73,21 @@ def _service(tmp_path, *, execution=False):
         idempotency_key="recurrence:draft-1",
         request_secret_hash="sha256:test",
     )
+    confirm_options = {}
+    if execution:
+        confirm_options["prepare_workspace"] = lambda *_args: {
+            "ok": True,
+            "projectExecutionEnabled": True,
+            "workspacePath": "/tmp/recurrence-source-workspace",
+            "workspaceKind": "directory",
+            "workspaceStatus": {"ok": True},
+            "workspaceManagedBy": "system",
+            "workspaceCreatedAt": "2025-04-01T00:00:00+00:00",
+            "createdInAttempt": True,
+        }
     source = service.confirm_and_materialize(
         "request-1", expected_revision=1, confirmation_key="confirm:recurrence-source",
+        **confirm_options,
     )["project"]
     return markdown, service, current, source
 
@@ -159,9 +172,10 @@ def test_workspace_failure_cleans_up_and_records_retryable_occurrence(tmp_path):
         "ok": False,
         "code": "workspace_failed",
         "error": "Authorization=Bearer workspace-secret",
-        "path": "/tmp/partial-recurring-workspace",
-        "managed": True,
-        "created": True,
+        "projectExecutionEnabled": True,
+        "workspacePath": "/tmp/partial-recurring-workspace",
+        "workspaceManagedBy": "system",
+        "createdInAttempt": True,
     }
     cleanup = []
 
@@ -194,10 +208,13 @@ def test_lost_claim_cannot_commit_and_cleans_prepared_workspace(tmp_path):
         service.store.update(steal)
         return {
             "ok": True,
-            "path": "/tmp/prepared-recurring-workspace",
-            "kind": "directory",
-            "managed": True,
-            "created": True,
+            "projectExecutionEnabled": True,
+            "workspacePath": "/tmp/prepared-recurring-workspace",
+            "workspaceKind": "directory",
+            "workspaceStatus": {"ok": True},
+            "workspaceManagedBy": "system",
+            "workspaceCreatedAt": "2025-04-01T00:00:00+00:00",
+            "createdInAttempt": True,
         }
 
     with pytest.raises(ProjectAuthoringCommandError) as lost:
@@ -209,7 +226,7 @@ def test_lost_claim_cannot_commit_and_cleans_prepared_workspace(tmp_path):
         )
 
     assert lost.value.code == "occurrence_claim_lost"
-    assert cleanup[0]["path"] == "/tmp/prepared-recurring-workspace"
+    assert cleanup[0]["workspacePath"] == "/tmp/prepared-recurring-workspace"
     assert len(markdown.load_all()["projects"]) == 1
 
 
@@ -239,10 +256,13 @@ def test_retryable_workspace_failure_can_safely_create_same_occurrence_once(tmp_
             return {"ok": False, "error": "Temporary workspace failure"}
         return {
             "ok": True,
-            "path": "/tmp/recovered-recurring-workspace",
-            "kind": "directory",
-            "managed": True,
-            "created": True,
+            "projectExecutionEnabled": True,
+            "workspacePath": "/tmp/recovered-recurring-workspace",
+            "workspaceKind": "directory",
+            "workspaceStatus": {"ok": True},
+            "workspaceManagedBy": "system",
+            "workspaceCreatedAt": "2025-04-01T00:00:00+00:00",
+            "createdInAttempt": True,
         }
 
     with pytest.raises(ProjectAuthoringCommandError):
@@ -297,10 +317,13 @@ def test_concurrent_callbacks_share_one_live_claim_and_create_one_project(tmp_pa
         assert release.wait(timeout=5)
         return {
             "ok": True,
-            "path": "/tmp/concurrent-recurring-workspace",
-            "kind": "directory",
-            "managed": True,
-            "created": True,
+            "projectExecutionEnabled": True,
+            "workspacePath": "/tmp/concurrent-recurring-workspace",
+            "workspaceKind": "directory",
+            "workspaceStatus": {"ok": True},
+            "workspaceManagedBy": "system",
+            "workspaceCreatedAt": "2025-04-01T00:00:00+00:00",
+            "createdInAttempt": True,
         }
 
     def dispatch():

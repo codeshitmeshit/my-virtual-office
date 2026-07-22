@@ -375,6 +375,7 @@ def test_recurring_confirmation_commits_template_recurrence_and_outbox_together(
         "template": {"mode": "create", "name": "Weekly launch"},
         "recurrence": {
             "enabled": True,
+            "executionMode": "create_and_execute",
             "schedule": {"kind": "cron", "expr": "0 9 * * 1", "timezone": "UTC"},
         },
     })
@@ -391,6 +392,7 @@ def test_recurring_confirmation_commits_template_recurrence_and_outbox_together(
     recurrence = root[RECURRENCES_KEY]["recurrence-request-1"]
     assert recurrence["targetType"] == "projectTemplateInstance"
     assert recurrence["requestingAgentId"] == "author"
+    assert recurrence["executionMode"] == "create_and_execute"
     assert root[OUTBOX_KEY] == [{
         "id": "outbox-recurrence-request-1",
         "kind": "register_project_template_instance",

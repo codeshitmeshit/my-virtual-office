@@ -9,6 +9,10 @@ from datetime import datetime
 from typing import Any, Mapping
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from services.project_recurrence_execution import (
+    CREATE_ONLY,
+    RECURRENCE_EXECUTION_MODES,
+)
 from services.project_actors import (
     ActorReferenceError,
     legacy_task_role_fields,
@@ -175,6 +179,15 @@ def _validate_recurrence(
         if error:
             issues.append(DraftValidationIssue("invalid_recurrence_schedule", "recurrence.schedule", error))
         recurrence["paused"] = recurrence.get("paused") is True
+        execution_mode = recurrence.get("executionMode", CREATE_ONLY)
+        if execution_mode not in RECURRENCE_EXECUTION_MODES:
+            issues.append(DraftValidationIssue(
+                "invalid_recurrence_execution_mode",
+                "recurrence.executionMode",
+                "recurrence.executionMode must be create_only or create_and_execute",
+            ))
+        else:
+            recurrence["executionMode"] = execution_mode
     recurrence["enabled"] = enabled
     return recurrence
 

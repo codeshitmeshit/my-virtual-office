@@ -51,6 +51,7 @@ from services.project_templates import (
 from services.project_template_materialization import (
     materialize_versioned_template_instance,
 )
+from services.project_recurrence_execution import stored_recurrence_execution_mode
 from services.project_actors import (
     ActorReferenceError,
     legacy_task_role_fields,
@@ -1874,6 +1875,7 @@ class ProjectAuthoringService:
             "templateVersion": template_ref.get("version"),
             "schedule": copy.deepcopy(recurrence.get("schedule")),
             "paused": recurrence.get("paused") is True,
+            "executionMode": stored_recurrence_execution_mode(recurrence),
             "state": "pending_registration",
             "requestingAgentId": request.get("requestingAgentId"),
             "sourceRequestId": request_id,

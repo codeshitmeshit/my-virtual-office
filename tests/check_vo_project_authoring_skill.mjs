@@ -24,6 +24,7 @@ for (const required of [
   "Project Execution：已启用（默认） | 仅跟踪（用户明确要求不执行）",
   "默认执行 Agent：",
   "启动模式：continuous",
+  "周期执行模式：不适用 | 仅创建实例（create_only） | 创建并自动执行（create_and_execute）",
   "结构化 `checklist`",
   "任务清单",
   "| # | 任务名称 | 所属列 | 任务细节 | 验收标准 | 负责人 | 执行人 | Reviewer |",
@@ -83,6 +84,7 @@ assert.match(skill, /Reviewer 默认策略：不指定/);
 assert.match(skill, /Agent 创建默认写 `projectExecutionEnabled=true`/);
 assert.match(skill, /只有用户明确要求“仅跟踪\/不执行”时才写 false/);
 assert.match(skill, /创建动作本身绝不自动启动/);
+assert.match(skill, /周期项目必须单独展示并确认 `create_only` 或 `create_and_execute`/);
 assert.match(skill, /每个任务表格中的“验收标准”必须逐项转换为该任务的结构化 `checklist`/);
 assert.match(skill, /会议行动项、风险、讨论点和上下文分别写入对应 meeting 字段，不得自动提升为 checklist/);
 assert.match(skill, /请确认是否按以上方案创建真实项目/);
