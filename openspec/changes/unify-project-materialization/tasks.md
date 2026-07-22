@@ -1,6 +1,6 @@
 ## 1. Baseline and Contract Inventory
 
-- [ ] 1.1 Add focused characterization fixtures that capture the complete persisted Project and Task base-field projections for manual creation, browser template creation, Agent direct creation, versioned template instantiation, and recurring occurrence creation.
+- [x] 1.1 Add focused characterization fixtures that capture the complete persisted Project and Task base-field projections for manual creation, browser template creation, Agent direct creation, versioned template instantiation, and recurring occurrence creation.
 - [ ] 1.2 Add a static creation-writer inventory test that identifies every Project/Task materialization entry point and initially allows the known builders while defining the final single-materializer boundary.
 
 ## 2. Canonical Materialization Foundation
