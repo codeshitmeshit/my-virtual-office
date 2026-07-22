@@ -164,6 +164,37 @@ def test_direct_creation_commits_complete_unstarted_project_and_one_time_grant(t
     assert root[IDEMPOTENCY_KEY]["direct-create:author:author:direct-1"]["projectId"] == project["id"]
 
 
+def test_direct_creation_derives_checklist_from_acceptance_description(tmp_path):
+    markdown, service = _service(tmp_path)
+    project = _project("Derived checklist")
+    project["tasks"][0].pop("checklist")
+
+    created = _create(service, project, idempotency_key="author:derived-checklist")
+
+    assert created["created"] is True
+    task = markdown.load_all()["projects"][0]["tasks"][0]
+    assert task["checklist"][0]["text"] == "完成任务。"
+    assert "会议讨论" not in task["checklist"][0]["text"]
+
+
+def test_tracking_only_direct_creation_does_not_require_executor(tmp_path):
+    markdown, service = _service(tmp_path)
+    project = _project("Tracking without executor")
+    project["projectExecutionEnabled"] = False
+    project["tasks"][0].pop("executorActor")
+
+    created = _create(
+        service, project, idempotency_key="author:tracking-no-executor",
+    )
+
+    assert created["created"] is True
+    persisted = markdown.load_all()["projects"][0]
+    assert persisted["projectExecutionEnabled"] is False
+    assert persisted["workspacePath"] is None
+    assert persisted["tasks"][0]["executorActor"] is None
+    assert persisted["tasks"][0]["executionState"] == "backlog"
+
+
 def test_rollout_flag_off_then_on_gates_direct_creation_without_partial_state(tmp_path):
     enabled = {"value": False}
     markdown, service = _service(

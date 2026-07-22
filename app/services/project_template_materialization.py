@@ -9,6 +9,7 @@ from typing import Any
 
 from services.project_actors import legacy_task_role_fields, task_actor_references
 from services.project_board_defaults import normalize_compact_project_columns
+from services.project_task_checklists import normalize_task_checklist
 from services.project_materialization import (
     apply_template_overlay,
     materialize_columns,
@@ -35,6 +36,9 @@ def materialize_template_project_base(
     tasks = []
     for index, blueprint in enumerate(configuration.get("tasks") or []):
         task_configuration = copy.deepcopy(dict(blueprint))
+        task_configuration["checklist"] = normalize_task_checklist(
+            task_configuration, index=index,
+        )
         source_column = task_configuration.get("columnId")
         if isinstance(source_column, (str, int)) and source_column in column_map:
             task_configuration["columnId"] = column_map[source_column]

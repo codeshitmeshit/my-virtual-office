@@ -432,13 +432,14 @@ def validate_project_draft(
             issues.append(DraftValidationIssue("unknown_column", f"{path}.columnId", "Task columnId was not found"))
 
         actors: dict[str, Any] = {}
+        executor_required = normalized["projectExecutionEnabled"] is True
         for role, required, agent_only in (
             ("responsible", True, False),
-            ("executor", True, False),
+            ("executor", executor_required, False),
             ("reviewer", False, True),
         ):
             field = f"{role}Actor"
-            if role != "reviewer" and field not in task:
+            if required and role != "reviewer" and field not in task:
                 issues.append(DraftValidationIssue("actor_required", f"{path}.{field}", f"{field} is required"))
                 actors[role] = None
                 continue
