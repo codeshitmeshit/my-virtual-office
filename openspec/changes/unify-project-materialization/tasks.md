@@ -44,6 +44,6 @@
 
 ## 8. Verification, Documentation, and Rollout Evidence
 
-- [ ] 8.1 Update user and operator documentation for enabled-but-unstarted Agent projects, tracking-only creation, execution prerequisite failures, recurring create-only versus auto-execute confirmation, and rollback behavior.
+- [x] 8.1 Update user and operator documentation for enabled-but-unstarted Agent projects, tracking-only creation, execution prerequisite failures, recurring create-only versus auto-execute confirmation, and rollback behavior.
 - [ ] 8.2 Run and record focused materialization, project command, direct authoring, HTTP/security, template, recurrence, Project Execution, persistence, static-boundary, and legacy compatibility suites, plus strict OpenSpec validation.
 - [ ] 8.3 Record a flag-off rollout rehearsal followed by Agent direct creation, create-only recurrence, confirmed auto-execute recurrence, failure/intervention observation, feature disablement, and code/data rollback checks with unresolved limitations explicitly listed.
