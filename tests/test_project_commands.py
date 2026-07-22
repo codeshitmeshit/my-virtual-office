@@ -86,8 +86,49 @@ def test_create_project_and_task_preserve_contract_without_http():
     )
     assert task_outcome.result.status == 200
     task = task_outcome.result.payload["task"]
+    assert task["id"] == "id-6"
     assert task["executionState"] == "backlog"
+    assert task["responsibleActor"] is None
+    assert task["executorActor"] is None
+    assert task["reviewerActor"] is None
+    assert task["reviewerRecommendation"] == {}
+    assert task_outcome.post_commit["columnTitle"] == "Backlog"
     assert repo.get(project["id"])["tasks"][0]["id"] == task["id"]
+
+
+def test_create_task_uses_canonical_column_checklist_and_atomic_validation():
+    _, repo, common = dependencies()
+    project = create_project(repo, common).result.payload["project"]
+    source_checklist = ["  Verify   output ", {"id": "docs", "text": "Document output"}]
+
+    outcome = project_commands.create_task(
+        project["id"],
+        {"title": "Canonical task", "columnId": "missing", "checklist": source_checklist},
+        repository=repo,
+        **common,
+    )
+
+    assert outcome.result.status == 200
+    task = outcome.result.payload["task"]
+    assert task["columnId"] == project["columns"][0]["id"]
+    assert task["order"] == 0
+    assert task["checklist"][0]["text"] == "Verify output"
+    assert task["checklist"][0]["id"].startswith("checklist-")
+    assert task["checklist"][1] == {"id": "docs", "text": "Document output", "done": False}
+    assert source_checklist == [
+        "  Verify   output ", {"id": "docs", "text": "Document output"},
+    ]
+
+    before = repo.get(project["id"])
+    rejected = project_commands.create_task(
+        project["id"],
+        {"title": "Rejected", "checklist": "not-a-list"},
+        repository=repo,
+        **common,
+    )
+    assert rejected.result.status == 400
+    assert "checklist must be a list" in rejected.result.payload["error"]
+    assert repo.get(project["id"]) == before
 
 
 def test_command_validation_and_missing_resources_are_compatible():

@@ -105,6 +105,10 @@ CANONICAL_TASK_BASE_FIELDS = frozenset({
 MAX_CHECKLIST_ITEMS = 100
 
 
+class ProjectMaterializationError(ValueError):
+    """Resolved creation input cannot be projected onto the canonical contract."""
+
+
 @dataclass(frozen=True)
 class PreparedWorkspace:
     """Canonical persisted workspace values plus non-persisted cleanup intent."""
@@ -128,7 +132,9 @@ class PreparedWorkspace:
         source = value if isinstance(value, Mapping) else {}
         managed_by = source.get("workspaceManagedBy")
         if managed_by not in (None, "system", "user"):
-            raise ValueError("workspaceManagedBy must be system, user, or null")
+            raise ProjectMaterializationError(
+                "workspaceManagedBy must be system, user, or null"
+            )
         return cls(
             project_execution_enabled=bool(
                 source.get(
@@ -233,9 +239,13 @@ def materialize_checklist(
     if checklist is None:
         return []
     if not isinstance(checklist, Sequence) or isinstance(checklist, (str, bytes)):
-        raise ValueError("checklist must be a list of text values or mappings")
+        raise ProjectMaterializationError(
+            "checklist must be a list of text values or mappings"
+        )
     if len(checklist) > max_items:
-        raise ValueError(f"checklist cannot contain more than {max_items} items")
+        raise ProjectMaterializationError(
+            f"checklist cannot contain more than {max_items} items"
+        )
 
     normalized: list[dict[str, Any]] = []
     used_ids: set[str] = set()
@@ -301,14 +311,28 @@ def materialize_task_base(
     task_id: str | None = None,
     timestamp: str | None = None,
     order: Any = None,
+    existing_tasks: Sequence[Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Project resolved Task configuration onto canonical persisted base fields."""
 
     created_at = str(timestamp or now())
+    column_id = _canonical_task_column_id(configuration.get("columnId"), columns)
     configured_order = configuration.get("order")
-    resolved_order = (
-        order if order is not None else (0 if configured_order is None else configured_order)
-    )
+    if order is not None:
+        resolved_order = order
+    elif configured_order is not None:
+        resolved_order = configured_order
+    elif existing_tasks is not None:
+        resolved_order = max(
+            (
+                task.get("order", 0)
+                for task in existing_tasks
+                if isinstance(task, Mapping) and task.get("columnId") == column_id
+            ),
+            default=-1,
+        ) + 1
+    else:
+        resolved_order = 0
     source = configuration.get("source")
     evidence = configuration.get("evidence")
 
@@ -316,7 +340,7 @@ def materialize_task_base(
         "id": str(task_id or configuration.get("id") or new_id()),
         "title": str(configuration.get("title") or "").strip(),
         "description": copy.deepcopy(configuration.get("description") or ""),
-        "columnId": _canonical_task_column_id(configuration.get("columnId"), columns),
+        "columnId": column_id,
         "order": copy.deepcopy(resolved_order),
         "priority": configuration.get("priority") or "medium",
         "responsibleActor": copy.deepcopy(configuration.get("responsibleActor")),

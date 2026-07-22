@@ -70,9 +70,10 @@ MANUAL_PROJECT_KEYS = (
 MANUAL_TASK_KEYS = (
     "activeAttemptId", "allowReviewerlessExecution", "assignee", "assigneeBranch", "attachments",
     "attempts", "blockedReason", "checklist", "columnId", "comments", "completedAt", "createdAt",
-    "description", "dueDate", "evidence", "executionState", "executorAgentId", "id", "lastError",
+    "description", "dueDate", "evidence", "executionState", "executorActor", "executorAgentId", "id", "lastError",
     "meetingActionItems", "meetingDecisionHistory", "meetingDiscussionPoints", "meetingRecords", "order",
-    "priority", "requiresUserAcceptance", "reviewerAgentId", "scheduledRepeatEnabled", "source", "tags",
+    "priority", "requiresUserAcceptance", "responsibleActor", "reviewerActor", "reviewerAgentId",
+    "reviewerRecommendation", "scheduledRepeatEnabled", "source", "tags",
     "title", "updatedAt",
 )
 BROWSER_TEMPLATE_PROJECT_KEYS = tuple(

@@ -442,6 +442,23 @@ def test_materialize_task_base_falls_back_to_first_column_or_none():
     assert empty["columnId"] is None
 
 
+def test_materialize_task_base_computes_next_order_after_column_fallback():
+    task = materialize_task_base(
+        {"title": "Fallback order", "columnId": "missing"},
+        columns=[{"id": "backlog", "title": "Backlog"}, {"id": "done", "title": "Done"}],
+        existing_tasks=[
+            {"columnId": "backlog", "order": 1},
+            {"columnId": "done", "order": 8},
+            {"columnId": "backlog", "order": 4},
+        ],
+        new_id=_ids("ordered-task"),
+        now=lambda: NOW,
+    )
+
+    assert task["columnId"] == "backlog"
+    assert task["order"] == 5
+
+
 def _overlay_base() -> dict:
     columns, _ = materialize_columns(None, new_id=_ids("c1", "c2", "c3", "c4"))
     return materialize_project_base(

@@ -6,7 +6,12 @@ from dataclasses import dataclass
 from typing import Any, Callable, Mapping
 
 from .project_execution import ServiceResult
-from .project_materialization import materialize_columns, materialize_project_base
+from .project_materialization import (
+    ProjectMaterializationError,
+    materialize_columns,
+    materialize_project_base,
+    materialize_task_base,
+)
 from .project_repository import ProjectAlreadyExistsError, ProjectConflictError, ProjectNotFoundError, ProjectRepository
 
 
@@ -95,32 +100,47 @@ def create_task(project_id: str, body: Mapping[str, Any], *, repository: Project
         return rejected
     created = {}
     def mutate(project):
-        column_id = body.get("columnId") or ((project.get("columns") or [{}])[0].get("id"))
-        order = max((item.get("order", 0) for item in project.get("tasks", []) if item.get("columnId") == column_id), default=-1) + 1
         timestamp = now()
-        task = {
-            "id": new_id(), "title": title, "description": body.get("description", ""), "columnId": column_id, "order": order,
-            "priority": body.get("priority", "medium"), "assignee": body.get("assignee"), "assigneeBranch": body.get("assigneeBranch"),
-            "executorAgentId": body.get("executorAgentId"), "reviewerAgentId": body.get("reviewerAgentId"),
-            "requiresUserAcceptance": body.get("requiresUserAcceptance", False) is True, "allowReviewerlessExecution": body.get("allowReviewerlessExecution", False) is True,
-            "scheduledRepeatEnabled": body.get("scheduledRepeatEnabled", False) is True, "executionState": "backlog", "activeAttemptId": None,
-            "attempts": [], "evidence": {}, "blockedReason": None, "lastError": None, "dueDate": body.get("dueDate"), "tags": body.get("tags", []),
-            "checklist": body.get("checklist", []), "meetingActionItems": body.get("meetingActionItems", []) if isinstance(body.get("meetingActionItems"), list) else [],
-            "meetingDecisionHistory": body.get("meetingDecisionHistory", []) if isinstance(body.get("meetingDecisionHistory"), list) else [],
-            "meetingDiscussionPoints": body.get("meetingDiscussionPoints", []) if isinstance(body.get("meetingDiscussionPoints"), list) else [],
-            "meetingRecords": body.get("meetingRecords", []) if isinstance(body.get("meetingRecords"), list) else [],
-            "source": body.get("source") if isinstance(body.get("source"), dict) else {}, "comments": [], "attachments": [],
-            "createdAt": timestamp, "updatedAt": timestamp, "completedAt": None,
-        }
+        task = materialize_task_base(
+            {
+                "title": title,
+                "description": body.get("description", ""),
+                "columnId": body.get("columnId"),
+                "priority": body.get("priority", "medium"),
+                "assignee": body.get("assignee"),
+                "assigneeBranch": body.get("assigneeBranch"),
+                "executorAgentId": body.get("executorAgentId"),
+                "reviewerAgentId": body.get("reviewerAgentId"),
+                "requiresUserAcceptance": body.get("requiresUserAcceptance", False),
+                "allowReviewerlessExecution": body.get("allowReviewerlessExecution", False),
+                "scheduledRepeatEnabled": body.get("scheduledRepeatEnabled", False),
+                "dueDate": body.get("dueDate"),
+                "tags": body.get("tags", []),
+                "checklist": body.get("checklist", []),
+                "meetingActionItems": body.get("meetingActionItems", []),
+                "meetingDecisionHistory": body.get("meetingDecisionHistory", []),
+                "meetingDiscussionPoints": body.get("meetingDiscussionPoints", []),
+                "meetingRecords": body.get("meetingRecords", []),
+                "source": body.get("source"),
+            },
+            columns=project.get("columns") or [],
+            existing_tasks=project.get("tasks") or [],
+            task_id=new_id(),
+            timestamp=timestamp,
+            new_id=new_id,
+            now=now,
+        )
         project.setdefault("tasks", []).append(task)
         project["updatedAt"] = timestamp
         by = body.get("by", "user")
         log_activity(project, "task_created", by, f"Created task '{title}'", task["id"])
-        created.update({"task": task, "columnTitle": next((column["title"] for column in project.get("columns", []) if column["id"] == column_id), "backlog"), "by": by})
+        created.update({"task": task, "columnTitle": next((column["title"] for column in project.get("columns", []) if column["id"] == task["columnId"]), "backlog"), "by": by})
     try:
         repository.update(project_id, mutate)
     except ProjectNotFoundError:
         return CommandOutcome(ServiceResult(404, {"error": "Project not found"}))
+    except ProjectMaterializationError as exc:
+        return CommandOutcome(ServiceResult(400, {"error": str(exc)}))
     return CommandOutcome(ServiceResult(200, {"ok": True, "task": created["task"]}), created)
 
 
