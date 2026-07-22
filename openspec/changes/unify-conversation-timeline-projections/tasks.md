@@ -1,7 +1,7 @@
 ## 1. Freeze Compatibility and Defect Baselines
 
 - [x] 1.1 Create a four-Provider characterization manifest and evidence snapshot for standard chat history, Project Execution workflow chat, Provider SSE, and refresh recovery, recording canonical fields, route/status/error contracts, cursor behavior, event names/order, scope isolation, and current performance bounds without recording message or reasoning content.
-- [ ] 1.2 Define and automate the allowed-difference policy: all existing product behavior must remain unchanged except the confirmed Claude Code workflow-history selection, Hermes completed-reasoning state, OpenClaw structured-block consistency, and Codex duplicate reasoning ownership corrections; make unexplained DTO, status, order, event, history, interaction, or visual-behavior differences fail the comparison.
+- [x] 1.2 Define and automate the allowed-difference policy: all existing product behavior must remain unchanged except the confirmed Claude Code workflow-history selection, Hermes completed-reasoning state, OpenClaw structured-block consistency, and Codex duplicate reasoning ownership corrections; make unexplained DTO, status, order, event, history, interaction, or visual-behavior differences fail the comparison.
 
 ## 2. Build the Canonical Timeline Core
 
