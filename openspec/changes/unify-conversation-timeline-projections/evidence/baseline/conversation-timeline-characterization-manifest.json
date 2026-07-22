@@ -1,0 +1,253 @@
+{
+  "schema": 1,
+  "contentPolicy": "content-free",
+  "capturedBehavior": "pre-unification",
+  "routeContracts": {
+    "standardChatHistory": {
+      "method": "GET",
+      "path": "/api/chat/history",
+      "successStatus": 200,
+      "invalidRequestStatus": 400,
+      "maxPageSize": 50,
+      "cursor": "base64url-json-v1-ts-id"
+    },
+    "projectWorkflowChat": {
+      "method": "GET",
+      "path": "/api/projects/{projectId}/workflow/chat",
+      "successStatus": 200,
+      "missingProjectBehavior": "empty-compatible-response",
+      "pollingTransport": true
+    },
+    "providerEvents": {
+      "method": "GET",
+      "path": "/api/provider/events",
+      "successStatus": 200,
+      "invalidScopeStatus": 400,
+      "transport": "text/event-stream",
+      "cursorInputs": [
+        "after",
+        "Last-Event-ID"
+      ]
+    }
+  },
+  "canonicalHistoryFields": [
+    "id",
+    "version",
+    "providerKind",
+    "conversationId",
+    "role",
+    "text",
+    "epochMs",
+    "from",
+    "fromAgentId",
+    "to",
+    "toAgentId",
+    "media",
+    "attachments",
+    "tools",
+    "thinking",
+    "reasoningTokens",
+    "approval",
+    "status",
+    "source",
+    "identityFields",
+    "idempotencyKey"
+  ],
+  "workflowResponseFields": [
+    "ok",
+    "messages",
+    "agent",
+    "taskId",
+    "phase",
+    "sessionActive"
+  ],
+  "workflowMessageFieldUnion": [
+    "role",
+    "text",
+    "thinking",
+    "reasoningStatus",
+    "timestamp",
+    "ts",
+    "epochMs",
+    "fromAgentId",
+    "source",
+    "tools"
+  ],
+  "providerEventOrder": [
+    "provider.snapshot",
+    "history.recovered-if-eligible",
+    "retained-events-after-cursor",
+    "provider.heartbeat-while-idle",
+    "single-terminal-event"
+  ],
+  "providerEventNames": [
+    "provider.snapshot",
+    "provider.heartbeat",
+    "history.recovered",
+    "run.started",
+    "message.delta",
+    "reasoning.available",
+    "session.metrics",
+    "tool.started",
+    "tool.completed",
+    "tool.failed",
+    "provider.activity",
+    "approval.request",
+    "approval.resolved",
+    "run.completed",
+    "run.failed",
+    "run.cancelled"
+  ],
+  "scopeIsolation": {
+    "standardChat": [
+      "providerKind",
+      "agentId",
+      "conversationIdOrSessionKey"
+    ],
+    "projectExecution": [
+      "projectId",
+      "taskId",
+      "attemptOrReviewId",
+      "providerKind",
+      "agentId"
+    ],
+    "providerEvents": [
+      "providerKind",
+      "agentId",
+      "conversationId"
+    ]
+  },
+  "capacityBounds": {
+    "chatHistoryMaxPageSize": 50,
+    "chatHistorySourceCandidateLimit": 1000,
+    "historySourceCacheEntries": 32,
+    "historySourceCacheBytes": 67108864,
+    "mountedHistoricalRoots": 160,
+    "providerEventRetention": 4000,
+    "workflowMessageLimit": 50
+  },
+  "refreshRecovery": {
+    "durableHistory": "reloaded-from-scoped-provider-and-office-history",
+    "eligibleProgress": "recovered-only-while-nonterminal-and-fresh",
+    "transientAfterFailure": "not-guaranteed",
+    "terminalEvent": "at-most-one-per-run"
+  },
+  "providers": {
+    "codex": {
+      "standardHistorySources": [
+        "conversation-scoped-codex-history",
+        "visible-office-communications"
+      ],
+      "projectHistorySources": [
+        "attempt-scoped-office-communications",
+        "attempt-scoped-codex-activity"
+      ],
+      "liveTransport": "provider-sse-plus-codex-activity-recovery",
+      "reasoningProjection": "server-project-accumulator-plus-client-accumulator"
+    },
+    "claude-code": {
+      "standardHistorySources": [
+        "conversation-scoped-claude-code-history",
+        "visible-office-communications"
+      ],
+      "projectHistorySources": [
+        "openclaw-session-fallback"
+      ],
+      "liveTransport": "provider-sse",
+      "knownBaselineDefect": "project-reader-does-not-select-claude-code-history"
+    },
+    "hermes": {
+      "standardHistorySources": [
+        "conversation-scoped-hermes-history",
+        "visible-office-communications"
+      ],
+      "projectHistorySources": [
+        "conversation-scoped-hermes-history"
+      ],
+      "liveTransport": "provider-sse",
+      "knownBaselineDefect": "workflow-reasoning-status-may-default-to-live"
+    },
+    "openclaw": {
+      "standardHistorySources": [
+        "exact-session-jsonl",
+        "visible-office-communications"
+      ],
+      "projectHistorySources": [
+        "task-session-jsonl-tail"
+      ],
+      "liveTransport": "gateway-events",
+      "knownBaselineDefect": "standard-and-project-structured-block-parsers-differ"
+    }
+  },
+  "commands": [
+    {
+      "id": "standard-chat-history-contract",
+      "command": [
+        ".venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/test_chat_history_api.py"
+      ]
+    },
+    {
+      "id": "project-workflow-chat-contract",
+      "command": [
+        ".venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/test_project_execution.py",
+        "-k",
+        "workflow_chat"
+      ]
+    },
+    {
+      "id": "provider-sse-and-isolation-contract",
+      "command": [
+        ".venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/test_provider_events.py",
+        "tests/test_provider_sse_transport.py",
+        "tests/test_provider_characterization.py"
+      ]
+    },
+    {
+      "id": "chat-history-client-contract",
+      "command": [
+        "node",
+        "tests/check_chat_history_store.mjs"
+      ]
+    },
+    {
+      "id": "chat-history-navigation-contract",
+      "command": [
+        "node",
+        "tests/check_chat_history_navigation.mjs"
+      ]
+    },
+    {
+      "id": "provider-live-client-contract",
+      "command": [
+        "node",
+        "tests/check_provider_chat_sse.mjs"
+      ]
+    },
+    {
+      "id": "project-chat-polling-contract",
+      "command": [
+        "node",
+        "tests/check_project_execution_chat_polling.mjs"
+      ]
+    },
+    {
+      "id": "codex-reasoning-baseline",
+      "command": [
+        "node",
+        "tests/test_codex_reasoning.js"
+      ]
+    }
+  ]
+}

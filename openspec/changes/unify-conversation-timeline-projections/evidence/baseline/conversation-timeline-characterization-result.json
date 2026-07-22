@@ -1,0 +1,74 @@
+{
+  "commandCount": 8,
+  "contentPolicy": "content-free",
+  "gitHead": "4a59e09de06bdc3949445e1a6617c0faee4c7294",
+  "manifest": "openspec/changes/unify-conversation-timeline-projections/evidence/baseline/conversation-timeline-characterization-manifest.json",
+  "passed": true,
+  "results": [
+    {
+      "durationMs": 2507.737,
+      "exitCode": 0,
+      "id": "standard-chat-history-contract",
+      "outputBytes": 99,
+      "outputLines": 2,
+      "outputSha256": "71a602fe86aa4b4c266bee676e88618afdb3665bd9629189a7d83ba9954d7300"
+    },
+    {
+      "durationMs": 1041.995,
+      "exitCode": 0,
+      "id": "project-workflow-chat-contract",
+      "outputBytes": 114,
+      "outputLines": 2,
+      "outputSha256": "2f4bd3953f580a75f63d33d6b214f1e9adbb97c20bc16205f1e55fd7d5d60eb0"
+    },
+    {
+      "durationMs": 1891.638,
+      "exitCode": 0,
+      "id": "provider-sse-and-isolation-contract",
+      "outputBytes": 99,
+      "outputLines": 2,
+      "outputSha256": "2d1d46559b80cce40bb5127d1df0e25d103f21b47118ba713b4a03dd3b4d4d09"
+    },
+    {
+      "durationMs": 42.782,
+      "exitCode": 0,
+      "id": "chat-history-client-contract",
+      "outputBytes": 33,
+      "outputLines": 1,
+      "outputSha256": "f6c7fe42a81da8ad130ddb6b49feb344da02d8e5614c048be3e71f98640d9696"
+    },
+    {
+      "durationMs": 33.818,
+      "exitCode": 0,
+      "id": "chat-history-navigation-contract",
+      "outputBytes": 38,
+      "outputLines": 1,
+      "outputSha256": "527de8936190aede93fc2da88c7ace0abff57c11ed893cb9df9ca593947da77e"
+    },
+    {
+      "durationMs": 35.169,
+      "exitCode": 0,
+      "id": "provider-live-client-contract",
+      "outputBytes": 32,
+      "outputLines": 1,
+      "outputSha256": "6fb55eb6b0639a33ad749d806b754d44694e69c3268e00da5253ed24faed83e7"
+    },
+    {
+      "durationMs": 30.547,
+      "exitCode": 0,
+      "id": "project-chat-polling-contract",
+      "outputBytes": 59,
+      "outputLines": 1,
+      "outputSha256": "d83979fa318b7c6d9471a77d07ceabc54a6d395eb3b7484bacb5c025b15fe44d"
+    },
+    {
+      "durationMs": 30.688,
+      "exitCode": 0,
+      "id": "codex-reasoning-baseline",
+      "outputBytes": 3,
+      "outputLines": 1,
+      "outputSha256": "dc51b8c96c2d745df3bd5590d990230a482fd247123599548e0632fdbf97fc22"
+    }
+  ],
+  "schema": 1
+}

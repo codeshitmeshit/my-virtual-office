@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-07-22
+goal: Make Codex, Claude Code, Hermes, and OpenClaw content, thinking, tools,
+  status, ordering, and history recovery consistent across both surfaces while
+  reducing duplicate logic and permitting verified in-scope bug fixes.
