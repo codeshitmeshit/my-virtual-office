@@ -6,6 +6,7 @@ import copy
 from collections.abc import Mapping
 from typing import Any
 
+from services.project_board_defaults import normalize_compact_project_columns
 from services.project_materialization import (
     apply_authoring_overlay,
     materialize_columns,
@@ -33,7 +34,8 @@ def materialize_direct_project(
         return f"{project_id}-column-{column_sequence['value']}"
 
     columns, column_map = materialize_columns(
-        approved.get("columns"), new_id=new_column_id,
+        normalize_compact_project_columns(approved.get("columns")),
+        new_id=new_column_id,
     )
     tasks = []
     for index, item in enumerate(approved.get("tasks") or []):

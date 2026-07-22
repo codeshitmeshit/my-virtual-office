@@ -8,6 +8,7 @@ from itertools import count
 from typing import Any
 
 from services.project_actors import legacy_task_role_fields, task_actor_references
+from services.project_board_defaults import normalize_compact_project_columns
 from services.project_materialization import (
     apply_template_overlay,
     materialize_columns,
@@ -28,7 +29,7 @@ def materialize_template_project_base(
 
     column_sequence = count(1)
     columns, column_map = materialize_columns(
-        configuration.get("columns"),
+        normalize_compact_project_columns(configuration.get("columns")),
         new_id=lambda: f"{project_id}-column-{next(column_sequence)}",
     )
     tasks = []
