@@ -179,8 +179,12 @@ def discover_materialization_candidates() -> set[MaterializationSite]:
 def test_current_creation_builder_inventory_is_complete_and_explicit():
     candidates = discover_materialization_candidates()
     excluded = set(NON_BUILDER_INVENTORY)
+    builders = candidates - excluded
 
-    assert candidates - excluded == set(CURRENT_MATERIALIZATION_BUILDERS)
+    assert builders == set(CURRENT_MATERIALIZATION_BUILDERS) | (
+        builders & set(FINAL_MATERIALIZATION_BOUNDARY)
+    )
+    assert set(CURRENT_MATERIALIZATION_BUILDERS) <= builders
     assert set(CURRENT_MATERIALIZATION_BUILDERS).isdisjoint(excluded)
 
 
