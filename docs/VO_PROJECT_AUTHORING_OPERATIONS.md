@@ -14,7 +14,7 @@ The backend cannot cryptographically verify provider-neutral chat authorship. `c
 
 Future Agent-created projects default to `projectExecutionEnabled=true`. Enabled means the project is capable of using Project Execution; it does not mean execution has started. Immediately after ordinary creation, `projectExecutionFlowActive=false` and `workflowActive=false`. The user must explicitly request project-level execution later.
 
-The confirmation proposal always displays execution enabled/disabled, executor, reviewer or absence, start mode, and whether creation starts execution. An explicit tracking-only request sets `projectExecutionEnabled=false`; it does not prepare an executable workspace and may use human-only task executors. Omission is not tracking-only.
+The confirmation proposal always displays execution enabled/disabled, executor, reviewer or absence, start mode, and whether creation starts execution. Each task proposal must separately state task input, task output, execution notes, risk/discussion, and acceptance criteria. Task input/output/notes/risk are persisted in structured `description` text; only deliverable acceptance criteria become `checklist` items. An explicit tracking-only request sets `projectExecutionEnabled=false`; it does not prepare an executable workspace and may use human-only task executors. Omission is not tracking-only.
 
 Enabled creation fails closed before commit when an executor is missing/unassignable or the workspace cannot be prepared. It never silently creates a legacy or tracking-only project. A failed attempt leaves no partial Project, and a system-managed workspace created only for that failed attempt is eligible for cleanup.
 
@@ -49,6 +49,7 @@ Agent routes require loopback, no browser `Origin`, `X-VO-Agent-Action: project-
     "columns": [{"id": "backlog", "title": "Backlog"}],
     "tasks": [{
       "title": "Prepare release evidence",
+      "description": "Input: confirmed release scope and current project context\n\nOutput: release evidence package and verification notes\n\nExecution notes: collect release notes, validation steps, rollback notes, and traceable evidence.\n\nRisk/discussion: none",
       "columnId": "backlog",
       "responsibleActor": {"type": "agent", "id": "owner"},
       "executorActor": {"type": "agent", "id": "builder"},

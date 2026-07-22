@@ -27,7 +27,7 @@ for (const required of [
   "周期执行模式：不适用 | 仅创建实例（create_only） | 创建并自动执行（create_and_execute）",
   "结构化 `checklist`",
   "任务清单",
-  "| # | 任务名称 | 所属列 | 任务细节 | 验收标准 | 负责人 | 执行人 | Reviewer |",
+  "| # | 任务名称 | 所属列 | 任务输入 | 任务输出 | 执行说明 | 风险/讨论 | 验收标准 | 负责人 | 执行人 | Reviewer |",
   "high_risk",
   "cross_team",
   "critical_delivery",
@@ -80,13 +80,15 @@ assert.match(skill, /展示方案后停止，不调用创建 API/);
 assert.match(skill, /语义变化必须重新确认并使用新 key/);
 assert.match(skill, /必须使用下面的 Markdown 模板和字段顺序/);
 assert.match(skill, /未知项写“待确认”/);
+assert.match(skill, /每个任务必须明确输入、输出、执行说明和验收标准/);
+assert.match(skill, /任务输入、输出、执行说明、风险和讨论只进入任务 `description` 的结构化段落/);
 assert.match(skill, /Reviewer 默认策略：不指定/);
 assert.match(skill, /Agent 创建默认写 `projectExecutionEnabled=true`/);
 assert.match(skill, /只有用户明确要求“仅跟踪\/不执行”时才写 false/);
 assert.match(skill, /创建动作本身绝不自动启动/);
 assert.match(skill, /周期项目必须单独展示并确认 `create_only` 或 `create_and_execute`/);
 assert.match(skill, /每个任务表格中的“验收标准”必须逐项转换为该任务的结构化 `checklist`/);
-assert.match(skill, /会议行动项、风险、讨论点和上下文分别写入对应 meeting 字段，不得自动提升为 checklist/);
+assert.match(skill, /输入、输出模板、执行步骤、会议行动项、风险、讨论点和上下文分别写入 `description` 或对应 meeting 字段，不得自动提升为 checklist/);
 assert.match(skill, /请确认是否按以上方案创建真实项目/);
 assert.match(skill, /“需要你确认的点”只列真正会影响创建结果的未决事项/);
 assert.match(skill, /模板\/复用配置默认写“无”/);
