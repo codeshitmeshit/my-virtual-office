@@ -1,11 +1,12 @@
 ## Context
 
-Project creation currently has four object-building authorities:
+Project creation currently has five object-building authorities:
 
 - `project_commands.create_project` and `create_task` build the manual Project and Task contracts.
 - `ProjectAuthoringService._build_project` builds conversation-confirmed Agent projects.
 - `ProjectAuthoringService._build_template_instance_project` builds versioned template and recurrence instances.
 - `server._handle_project_from_template` independently clones browser templates and builds another Project/Task shape.
+- `office.proj_cmd --proj create` is a separate local CLI writer that directly appends a smaller Project/Task shape through `_save_proj`.
 
 The paths share storage but not materialization. Manual creation supplies archive, execution, workspace, scheduling, dirty-confirmation, template, meeting, evidence, source, comment, and attachment defaults that the authoring builders may omit. Agent validation also leaves Project Execution fields optional, while workspace preparation interprets an omitted `projectExecutionEnabled` as false. Template schema version 1 synthesizes false when execution intent is absent, and authoring workspace preparation converts the canonical persisted field names into a second `{path, kind, status, managed, created}` vocabulary.
 
@@ -111,9 +112,10 @@ Migration order follows dependency risk:
 1. Add pure materializers and exhaustive unit contract fixtures.
 2. Delegate manual `create_project` and `create_task` object construction while retaining command validation, repository calls, activity logging, and task-file post-commit behavior.
 3. Delegate browser `_handle_project_from_template`, replace its direct full-store append with the existing repository create boundary, and retain its route/status/payload contract.
-4. Normalize Agent execution/checklist/column intent, then delegate direct authoring `_build_project`; once callers use the materializer, remove the duplicate private builder.
-5. Delegate versioned template and recurrence instance creation; remove `_build_template_instance_project` after both callers migrate.
-6. Remove standalone compact-column/checklist repair helpers once their behavior is covered by canonical materialization.
+4. Delegate the local `office.py --proj create` path, retaining CLI arguments, built-in template selection, printed output, and its current storage adapter while replacing its independent Project/Task dictionaries.
+5. Normalize Agent execution/checklist/column intent, then delegate direct authoring `_build_project`; once callers use the materializer, remove the duplicate private builder.
+6. Delegate versioned template and recurrence instance creation; remove `_build_template_instance_project` after both callers migrate.
+7. Remove standalone compact-column/checklist repair helpers once their behavior is covered by canonical materialization.
 
 During migration, thin compatibility delegates may remain only while a referenced caller still exists. There will be no import from the new module back into `server.py` or another legacy entry point.
 
@@ -148,7 +150,7 @@ Materialization itself is O(columns + tasks + checklist items), which matches ex
 
 ## Risks / Trade-offs
 
-- **[Compatibility] Canonical defaults expose accidental differences that some tests or clients may rely on.** → Characterize every current entry point first, compare allowed overlays explicitly, and retain public response/storage readability.
+- **[Compatibility] Canonical defaults expose accidental differences that HTTP clients or local CLI automation may rely on.** → Characterize every current entry point first, compare allowed overlays explicitly, and retain public response, CLI output/arguments, and storage readability.
 - **[Safety] Historical template false may have been synthesized rather than user-selected.** → Treat stored false as disabled; do not guess or auto-enable historical automation. New snapshots persist explicit intent.
 - **[Consistency] Automatic occurrence start can crash after Project commit.** → Persist the execution intent in the same occurrence commit and reconcile it on repeated callbacks.
 - **[Concurrency] Two recurrence callbacks may race to start the same Project.** → Reuse the existing occurrence claim plus Project Execution project-scoped start gates; never launch while holding the root-store lock.
@@ -159,7 +161,7 @@ Materialization itself is O(columns + tasks + checklist items), which matches ex
 ## Migration Plan
 
 1. Land pure materializer tests and implementation with no callers.
-2. Migrate manual commands and browser template creation; run project command, template compatibility, persistence, and Project Execution regressions.
+2. Migrate manual commands, browser template creation, and the local `office.py --proj create` writer; run project command, CLI, template compatibility, persistence, and Project Execution regressions.
 3. Update Agent validation, confirmation template/docs, and direct creation; deploy with `VO_AGENT_PROJECT_AUTHORING_ENABLED` off, then verify enabled and tracking-only creation in an isolated workspace.
 4. Migrate versioned template and recurrence creation with `VO_PROJECT_INSTANCE_RECURRENCE_ENABLED` off.
 5. Enable create-only recurrence first. Verify occurrence idempotency, workspace cleanup, and bounded history.

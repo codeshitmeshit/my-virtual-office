@@ -1,7 +1,8 @@
 ## 1. Baseline and Contract Inventory
 
 - [x] 1.1 Add focused characterization fixtures that capture the complete persisted Project and Task base-field projections for manual creation, browser template creation, Agent direct creation, versioned template instantiation, and recurring occurrence creation.
-- [ ] 1.2 Add a static creation-writer inventory test that identifies every Project/Task materialization entry point and initially allows the known builders while defining the final single-materializer boundary.
+- [ ] 1.2 Add a static creation-writer inventory test that identifies every Project/Task materialization entry point, including the local `office.py --proj create` writer, and initially allows the known builders while defining the final single-materializer boundary.
+- [ ] 1.3 Add focused local CLI characterization fixtures for empty and built-in-template `office.py --proj create`, capturing arguments, printed results, persistence location, and complete persisted Project/Task base-field projections.
 
 ## 2. Canonical Materialization Foundation
 
@@ -14,6 +15,7 @@
 - [ ] 3.1 Migrate `project_commands.create_project` to the canonical Project/column materializers while preserving validation, archive default policy, workspace preparation, activity, repository response, IDs, and compatibility tests.
 - [ ] 3.2 Migrate `project_commands.create_task` to the canonical Task/checklist materializer while preserving assignment validation, column ordering, repository atomic update, task-file post-commit metadata, and compatibility tests.
 - [ ] 3.3 Migrate `_handle_project_from_template` to canonical materialization and the existing repository create boundary, preserving template column remapping, actor validation, version/source overlay, workspace behavior, HTTP payload/status, and browser-template compatibility tests.
+- [ ] 3.4 Migrate local `office.py --proj create` Project/Task construction to canonical materialization while preserving CLI arguments, built-in template selection, printed output, storage adapter behavior, and CLI compatibility tests.
 
 ## 4. Agent Execution Intent and Confirmation Contract
 
