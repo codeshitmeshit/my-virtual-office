@@ -132,6 +132,29 @@ def test_execution_configuration_rejects_invalid_values_and_agents():
     } <= _codes(error)
 
 
+def test_acceptance_checklist_is_normalized_without_promoting_meeting_context():
+    draft = _draft()
+    draft["tasks"][0].update({
+        "checklist": ["  Verify   output ", {"id": "docs", "text": "Document output"}],
+        "meetingActionItems": [{"title": "Discuss rollout"}],
+        "meetingDiscussionPoints": [{"text": "Risk context"}],
+    })
+
+    task = _validate(draft)["tasks"][0]
+
+    assert task["checklist"][0]["text"] == "Verify output"
+    assert task["checklist"][0]["id"].startswith("checklist-")
+    assert task["checklist"][1] == {"id": "docs", "text": "Document output", "done": False}
+    assert len(task["checklist"]) == 2
+    assert task["meetingActionItems"] == [{"title": "Discuss rollout"}]
+    assert task["meetingDiscussionPoints"] == [{"text": "Risk context"}]
+
+    draft["tasks"][0]["checklist"] = "not-a-list"
+    with pytest.raises(DraftValidationError) as error:
+        _validate(draft)
+    assert "invalid_checklist" in _codes(error)
+
+
 def test_missing_unknown_and_excluded_actors_report_role_paths():
     draft = _draft()
     draft["tasks"][0].pop("responsibleActor")

@@ -41,8 +41,11 @@ SUMMARY_TEXT = """我准备创建这个 VO 项目，请确认：
 项目类型：one_time
 项目目标：HTTP contract project
 维护模式：strict_confirmation
-创建后状态：确认后会创建真实项目，但不会开始执行。
+Project Execution：已启用（projectExecutionEnabled=true）
+默认执行 Agent：未指定（使用任务级执行人 builder）
 Reviewer 默认策略：不指定；如有建议，仅作为建议，确认分配前不会写入 reviewer。
+创建后状态：确认后会创建真实项目并保持未启动；只有用户显式要求执行才会开始。
+启动模式：continuous（启动后连续推进整个项目）
 
 任务清单：
 
@@ -109,6 +112,7 @@ def _project(title):
             "responsibleActor": {"type": "agent", "id": "owner"},
             "executorActor": {"type": "agent", "id": "builder"},
             "reviewerRecommendation": {"recommended": False, "triggers": []},
+            "checklist": [{"text": "完成任务", "done": False}],
         }],
         "template": {"mode": "none"},
         "recurrence": {"enabled": False},

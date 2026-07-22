@@ -43,8 +43,11 @@ SUMMARY_TEXT = """我准备创建这个 VO 项目，请确认：
 项目类型：one_time
 项目目标：Created after conversation confirmation
 维护模式：strict_confirmation
-创建后状态：确认后会创建真实项目，但不会开始执行。
+Project Execution：仅跟踪（projectExecutionEnabled=false）
+默认执行 Agent：未指定（使用任务级执行人 builder）
 Reviewer 默认策略：不指定；如有建议，仅作为建议，确认分配前不会写入 reviewer。
+创建后状态：确认后会创建真实项目并保持未启动；只有用户显式要求执行才会开始。
+启动模式：continuous（启动后连续推进整个项目）
 
 任务清单：
 
@@ -74,6 +77,7 @@ def _project(title="Direct project"):
             "responsibleActor": {"type": "agent", "id": "owner"},
             "executorActor": {"type": "agent", "id": "builder"},
             "reviewerRecommendation": {"recommended": False, "triggers": []},
+            "checklist": [{"text": "完成任务", "done": False}],
         }],
         "template": {"mode": "none"},
         "recurrence": {"enabled": False},
@@ -140,6 +144,8 @@ def test_direct_creation_commits_complete_unstarted_project_and_one_time_grant(t
     assert project["workflowActive"] is False
     assert project["projectExecutionFlowActive"] is False
     assert project["tasks"][0]["executionState"] == "backlog"
+    assert project["tasks"][0]["checklist"][0]["text"] == "完成任务"
+    assert project["tasks"][0]["checklist"][0]["id"].startswith("checklist-")
     assert project["tasks"][0]["responsibleActor"] == {"type": "agent", "id": "owner"}
     assert project["tasks"][0]["executorActor"] == {"type": "agent", "id": "builder"}
     grant = root[GRANTS_KEY][project["id"]]
@@ -232,6 +238,15 @@ def test_direct_creation_requires_confirmation_and_sha256_summary(tmp_path):
         with pytest.raises(DirectProjectCreationError) as raised:
             _create(service, confirmation=confirmation)
         assert raised.value.code == code
+
+    missing_execution_marker = SUMMARY_TEXT.replace("Project Execution：", "执行配置：")
+    with pytest.raises(DirectProjectCreationError) as marker_error:
+        _create(service, confirmation={
+            "confirmed": True,
+            "summaryDigest": hashlib.sha256(missing_execution_marker.encode("utf-8")).hexdigest(),
+            "summaryText": missing_execution_marker,
+        })
+    assert marker_error.value.code == "invalid_confirmation_summary_format"
     assert markdown.load_all()["projects"] == []
 
 

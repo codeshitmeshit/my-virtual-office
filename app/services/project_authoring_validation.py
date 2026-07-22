@@ -15,6 +15,10 @@ from services.project_actors import (
     validate_actor_reference,
 )
 from services.project_authoring_config import DEFAULT_CONFIG, ProjectAuthoringConfig
+from services.project_materialization import (
+    ProjectMaterializationError,
+    materialize_checklist,
+)
 
 
 PROJECT_TYPES = frozenset({"one_time", "reusable", "recurring"})
@@ -403,6 +407,13 @@ def validate_project_draft(
         item = copy.deepcopy(task)
         item["title"] = _text(task.get("title"), path=f"{path}.title", issues=issues, required=True, maximum=300)
         item["description"] = _text(task.get("description"), path=f"{path}.description", issues=issues, required=False, maximum=20000)
+        try:
+            item["checklist"] = materialize_checklist(task.get("checklist"))
+        except ProjectMaterializationError as exc:
+            issues.append(DraftValidationIssue(
+                "invalid_checklist", f"{path}.checklist", str(exc),
+            ))
+            item["checklist"] = []
         if column_ids and task.get("columnId") not in column_ids:
             issues.append(DraftValidationIssue("unknown_column", f"{path}.columnId", "Task columnId was not found"))
 
