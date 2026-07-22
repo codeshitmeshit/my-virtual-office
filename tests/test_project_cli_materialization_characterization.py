@@ -12,42 +12,17 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 OFFICE = ROOT / "app" / "office.py"
+if str(OFFICE.parent) not in sys.path:
+    sys.path.insert(0, str(OFFICE.parent))
 
-CLI_PROJECT_KEYS = {
-    "activity",
-    "branch",
-    "columns",
-    "createdAt",
-    "createdBy",
-    "description",
-    "dueDate",
-    "id",
-    "priority",
-    "status",
-    "tags",
-    "tasks",
-    "template",
-    "title",
-    "updatedAt",
-}
-CLI_TASK_KEYS = {
-    "assignee",
-    "assigneeBranch",
-    "attachments",
-    "checklist",
-    "columnId",
-    "comments",
-    "completedAt",
-    "createdAt",
-    "description",
-    "dueDate",
-    "id",
-    "order",
-    "priority",
-    "tags",
-    "title",
-    "updatedAt",
-}
+from services.project_materialization import (
+    CANONICAL_PROJECT_BASE_FIELDS,
+    CANONICAL_TASK_BASE_FIELDS,
+)
+
+
+CLI_PROJECT_KEYS = set(CANONICAL_PROJECT_BASE_FIELDS)
+CLI_TASK_KEYS = set(CANONICAL_TASK_BASE_FIELDS)
 
 
 def _run_cli(status_dir: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -95,7 +70,7 @@ def test_cli_create_empty_project_arguments_output_and_persistence(tmp_path: Pat
     assert result.stdout.splitlines() == [
         "✅ Project created: CLI Empty",
         "   ID: " + _read_projects(status_dir)[0]["id"],
-        "   Columns: Backlog, To Do, In Progress, Review, Done",
+        "   Columns: Backlog, In Progress, Review, Done",
     ]
 
     project = _read_projects(status_dir)[0]
@@ -131,13 +106,24 @@ def test_cli_create_empty_project_arguments_output_and_persistence(tmp_path: Pat
     assert project["createdAt"] == project["updatedAt"]
     assert [(column["title"], column["color"]) for column in project["columns"]] == [
         ("Backlog", "#6c757d"),
-        ("To Do", "#0d6efd"),
         ("In Progress", "#ffc107"),
         ("Review", "#fd7e14"),
         ("Done", "#198754"),
     ]
-    assert [column["order"] for column in project["columns"]] == list(range(5))
+    assert [column["order"] for column in project["columns"]] == list(range(4))
     assert all(set(column) == {"id", "title", "color", "order"} for column in project["columns"])
+    assert project["archiveMaintenanceEnabled"] is True
+    assert project["archiveMaintenance"] == {
+        "enabled": True,
+        "explicit": False,
+        "updatedAt": project["createdAt"],
+        "updatedBy": "operator",
+    }
+    assert project["projectType"] == "one_time"
+    assert project["projectExecutionEnabled"] is False
+    assert project["projectExecutionFlowActive"] is False
+    assert project["workflowActive"] is False
+    assert project["workflowPhase"] == "idle"
 
 
 def test_cli_create_builtin_template_materializes_template_columns_and_tasks(tmp_path: Path):
@@ -240,20 +226,27 @@ def test_cli_add_task_preserves_column_order_arguments_and_output(tmp_path: Path
     project = _read_projects(status_dir)[0]
     first_task, second_task = project["tasks"]
     assert first.stdout.splitlines() == [
-        "✅ Task added to [To Do]: First task",
+        "✅ Task added to [Backlog]: First task",
         "   ID: " + first_task["id"],
         "   Assigned: builder",
     ]
     assert second.stdout.splitlines() == [
-        "✅ Task added to [To Do]: Second task",
+        "✅ Task added to [Backlog]: Second task",
         "   ID: " + second_task["id"],
     ]
     assert all(set(task) == CLI_TASK_KEYS for task in project["tasks"])
-    assert first_task == {
+    assert {
+        key: first_task[key]
+        for key in (
+            "id", "title", "description", "columnId", "order", "priority", "assignee",
+            "assigneeBranch", "dueDate", "tags", "checklist", "comments", "attachments",
+            "createdAt", "updatedAt", "completedAt",
+        )
+    } == {
         "id": first_task["id"],
         "title": "First task",
         "description": "First description",
-        "columnId": project["columns"][1]["id"],
+        "columnId": project["columns"][0]["id"],
         "order": 0,
         "priority": "high",
         "assignee": "builder",
@@ -267,6 +260,18 @@ def test_cli_add_task_preserves_column_order_arguments_and_output(tmp_path: Path
         "updatedAt": first_task["createdAt"],
         "completedAt": None,
     }
+    assert first_task["responsibleActor"] is None
+    assert first_task["executorActor"] is None
+    assert first_task["reviewerActor"] is None
+    assert first_task["reviewerRecommendation"] == {}
+    assert first_task["executionState"] == "backlog"
+    assert first_task["attempts"] == []
+    assert first_task["evidence"] == {}
+    assert first_task["source"] == {}
+    assert first_task["meetingActionItems"] == []
+    assert first_task["meetingDecisionHistory"] == []
+    assert first_task["meetingDiscussionPoints"] == []
+    assert first_task["meetingRecords"] == []
     assert second_task["columnId"] == first_task["columnId"]
     assert second_task["order"] == 1
     assert second_task["priority"] == "medium"
@@ -281,3 +286,20 @@ def test_cli_add_task_preserves_column_order_arguments_and_output(tmp_path: Path
     assert second_task["completedAt"] is None
     assert second_task["createdAt"] == second_task["updatedAt"]
     assert project["updatedAt"] == second_task["updatedAt"]
+
+
+def test_cli_add_task_preserves_legacy_count_based_ordering(tmp_path: Path):
+    status_dir = tmp_path / "status"
+    assert _run_cli(status_dir, "create", "CLI Sparse Order").returncode == 0
+    project = _read_projects(status_dir)[0]
+    assert _run_cli(status_dir, "add-task", project["id"], "First").returncode == 0
+
+    projects_path = status_dir / "projects.json"
+    stored = json.loads(projects_path.read_text(encoding="utf-8"))
+    stored["projects"][0]["tasks"][0]["order"] = 7
+    projects_path.write_text(json.dumps(stored), encoding="utf-8")
+
+    assert _run_cli(status_dir, "add-task", project["id"], "Second").returncode == 0
+    first, second = _read_projects(status_dir)[0]["tasks"]
+    assert first["order"] == 7
+    assert second["order"] == 1

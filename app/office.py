@@ -35,6 +35,12 @@ Agent keys are now dynamic — any agent ID is accepted.
 import json, sys, time, uuid, os
 from datetime import datetime, timezone, timedelta
 
+from services.project_materialization import (
+    materialize_columns,
+    materialize_project_base,
+    materialize_task_base,
+)
+
 def _local_status_dir():
     return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data"))
 
@@ -153,15 +159,6 @@ def _uid():
 
 def _now():
     return datetime.now(timezone.utc).isoformat()
-
-def _default_columns():
-    return [
-        {"id": _uid(), "title": "Backlog", "color": "#6c757d", "order": 0},
-        {"id": _uid(), "title": "To Do", "color": "#0d6efd", "order": 1},
-        {"id": _uid(), "title": "In Progress", "color": "#ffc107", "order": 2},
-        {"id": _uid(), "title": "Review", "color": "#fd7e14", "order": 3},
-        {"id": _uid(), "title": "Done", "color": "#198754", "order": 4},
-    ]
 
 _BUILTIN_TEMPLATES = {
     "tpl-software": {
@@ -322,32 +319,52 @@ def proj_cmd(args):
         # Build columns from template or default
         if template_id and template_id in _BUILTIN_TEMPLATES:
             tpl = _BUILTIN_TEMPLATES[template_id]
-            cols = [{"id": _uid(), "title": c["title"], "color": c["color"], "order": i} for i, c in enumerate(tpl["columns"])]
+            cols, col_map = materialize_columns(
+                tpl["columns"], new_id=_uid, preserve_ids=False,
+            )
             tasks = []
             for tt in tpl.get("tasks", []):
-                col_id = cols[tt.get("colIdx", 0)]["id"] if tt.get("colIdx", 0) < len(cols) else cols[0]["id"]
-                tasks.append({
-                    "id": _uid(), "title": tt["title"], "description": "", "columnId": col_id,
-                    "order": 0, "priority": tt.get("priority", "medium"),
-                    "assignee": None, "assigneeBranch": None, "dueDate": None,
-                    "tags": [], "checklist": [], "comments": [], "attachments": [],
-                    "createdAt": now, "updatedAt": now, "completedAt": None,
-                })
+                tasks.append(materialize_task_base(
+                    {
+                        "title": tt["title"],
+                        "description": "",
+                        "columnId": col_map.get(tt.get("colIdx", 0)),
+                        "order": 0,
+                        "priority": tt.get("priority", "medium"),
+                    },
+                    columns=cols,
+                    task_id=_uid(),
+                    timestamp=now,
+                    new_id=_uid,
+                    now=_now,
+                ))
         else:
-            cols = _default_columns()
+            cols, _col_map = materialize_columns(None, new_id=_uid)
             tasks = []
 
-        project = {
-            "id": _uid(), "title": title,
-            "description": opts.get("desc", ""),
-            "status": "active", "priority": opts.get("priority", "medium"),
-            "createdAt": now, "updatedAt": now,
-            "dueDate": opts.get("due"),
-            "createdBy": opts.get("by", "agent"),
-            "tags": [t.strip() for t in opts.get("tags", "").split(",") if t.strip()] if opts.get("tags") else [],
-            "branch": opts.get("branch", ""),
-            "columns": cols, "tasks": tasks, "activity": [], "template": False,
-        }
+        project = materialize_project_base(
+            {
+                "title": title,
+                "description": opts.get("desc", ""),
+                "status": "active",
+                "priority": opts.get("priority", "medium"),
+                "dueDate": opts.get("due"),
+                "createdBy": opts.get("by", "agent"),
+                "tags": [
+                    tag.strip()
+                    for tag in opts.get("tags", "").split(",")
+                    if tag.strip()
+                ] if opts.get("tags") else [],
+                "branch": opts.get("branch", ""),
+            },
+            columns=cols,
+            tasks=tasks,
+            workspace=None,
+            new_id=_uid,
+            now=_now,
+            timestamp=now,
+            archive_maintenance_enabled=True,
+        )
         d = _load_proj()
         d["projects"].append(project)
         _save_proj(d)
@@ -443,15 +460,34 @@ def proj_cmd(args):
         due = opts.get("due")
         if due and "T" not in due:
             due = due + "T00:00:00Z"
-        task = {
-            "id": _uid(), "title": title, "description": opts.get("desc", ""),
-            "columnId": col["id"], "order": len([t for t in p["tasks"] if t.get("columnId") == col["id"]]),
-            "priority": opts.get("priority", "medium"),
-            "assignee": opts.get("assign"), "assigneeBranch": None,
-            "dueDate": due, "tags": [t.strip() for t in opts.get("tags", "").split(",") if t.strip()] if opts.get("tags") else [],
-            "checklist": [], "comments": [], "attachments": [],
-            "createdAt": now, "updatedAt": now, "completedAt": None,
-        }
+        task = materialize_task_base(
+            {
+                "title": title,
+                "description": opts.get("desc", ""),
+                "columnId": col["id"],
+                "priority": opts.get("priority", "medium"),
+                "assignee": opts.get("assign"),
+                "assigneeBranch": None,
+                "dueDate": due,
+                "tags": [
+                    tag.strip()
+                    for tag in opts.get("tags", "").split(",")
+                    if tag.strip()
+                ] if opts.get("tags") else [],
+                "checklist": [],
+            },
+            columns=p.get("columns") or [],
+            existing_tasks=p.get("tasks") or [],
+            task_id=_uid(),
+            timestamp=now,
+            order=len([
+                existing
+                for existing in p.get("tasks") or []
+                if existing.get("columnId") == col["id"]
+            ]),
+            new_id=_uid,
+            now=_now,
+        )
         p["tasks"].append(task)
         p["updatedAt"] = now
         _save_proj(d)
