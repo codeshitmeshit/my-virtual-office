@@ -11,7 +11,7 @@
 
 ## 3. Migrate Standard Chat History Without Product Drift
 
-- [ ] 3.1 Move existing provider-neutral history normalization, source merge, paging, cursor, and bounded cache responsibilities behind `ConversationTimelineService`, leaving `/api/chat/history` as a thin compatibility delegate; preserve exact supported request fields, status/error semantics, cursor format, response fields, page limits, sender attribution, attachments, tools, approvals, Feishu-visible history, and session metrics.
+- [x] 3.1 Move existing provider-neutral history normalization, source merge, paging, cursor, and bounded cache responsibilities behind `ConversationTimelineService`, leaving `/api/chat/history` as a thin compatibility delegate; preserve exact supported request fields, status/error semantics, cursor format, response fields, page limits, sender attribution, attachments, tools, approvals, Feishu-visible history, and session metrics.
 - [ ] 3.2 Run the frozen standard-chat old/new comparison for Codex, Claude Code, Hermes, and Gateway/OpenClaw and update compatibility tests so cached switching, older-page loading, bounded DOM history, Markdown/media/tool/approval rendering, optimistic reconciliation, bottom-follow behavior, and refresh recovery show no product-visible change.
 
 ## 4. Migrate Project Execution Scope and Provider Reads
