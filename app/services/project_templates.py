@@ -8,7 +8,8 @@ import json
 from typing import Any, Mapping, Sequence
 
 
-TEMPLATE_SCHEMA_VERSION = 1
+TEMPLATE_SCHEMA_VERSION = 2
+LEGACY_TEMPLATE_SCHEMA_VERSION = 1
 _TASK_RUNTIME_FIELDS = frozenset({
     "activeAttemptId", "attempts", "blockedReason", "completedAt", "createdAt",
     "executionState", "lastError", "maintenanceHistory", "updatedAt",
@@ -57,7 +58,10 @@ def build_template_snapshot(draft: Mapping[str, Any]) -> dict[str, Any]:
         for field in _EXECUTION_FIELDS
         if field in draft
     }
-    execution.setdefault("projectExecutionEnabled", False)
+    # New immutable snapshots always carry the resolved execution intent. Agent
+    # validation normally supplies it; direct callers receive the same enabled
+    # default rather than creating another ambiguous historical snapshot.
+    execution.setdefault("projectExecutionEnabled", True)
     execution.setdefault("projectExecutionStartMode", "continuous")
     execution.setdefault("executionPolicy", {"maxActiveTasks": 1})
     tasks = [
@@ -142,7 +146,7 @@ def adapt_legacy_template(template: Mapping[str, Any]) -> dict[str, Any]:
         item.setdefault("reviewerRecommendation", {"recommended": False, "triggers": []})
         tasks.append(item)
     snapshot = {
-        "schemaVersion": TEMPLATE_SCHEMA_VERSION,
+        "schemaVersion": LEGACY_TEMPLATE_SCHEMA_VERSION,
         "legacy": True,
         "title": template.get("title") or "Template",
         "description": template.get("description") or "",
@@ -187,7 +191,23 @@ def resolve_template_version(
             None,
         )
         if match is not None:
-            return copy.deepcopy(dict(match))
+            resolved = copy.deepcopy(dict(match))
+            snapshot = resolved.get("snapshot")
+            if isinstance(snapshot, dict):
+                try:
+                    schema_version = int(snapshot.get("schemaVersion") or 1)
+                except (TypeError, ValueError):
+                    schema_version = 1
+                if schema_version <= LEGACY_TEMPLATE_SCHEMA_VERSION:
+                    execution = snapshot.get("executionSettings")
+                    if not isinstance(execution, dict):
+                        execution = {}
+                        snapshot["executionSettings"] = execution
+                    # Version-1 snapshots predate explicit execution intent.
+                    # Preserve their historical disabled behavior, including
+                    # records where the old writer omitted the synthesized field.
+                    execution.setdefault("projectExecutionEnabled", False)
+            return resolved
     if int(version) == 1:
         legacy = next(
             (

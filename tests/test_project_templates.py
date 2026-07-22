@@ -67,7 +67,7 @@ def test_snapshot_contains_complete_blueprints_roles_reviewer_and_execution_poli
     snapshot = build_template_snapshot(_draft())
     task = snapshot["tasks"][0]
 
-    assert snapshot["schemaVersion"] == 1
+    assert snapshot["schemaVersion"] == 2
     assert snapshot["columns"][0]["id"] == "todo"
     assert task["responsibleActor"] == {"type": "agent", "id": "owner"}
     assert task["executorActor"] == {"type": "agent", "id": "builder"}
@@ -119,6 +119,40 @@ def test_append_only_versions_do_not_mutate_prior_snapshots():
     assert second["snapshotDigest"] != first["snapshotDigest"]
 
 
+def test_new_snapshots_persist_enabled_and_explicit_tracking_only_intent():
+    enabled = _draft()
+    enabled.pop("projectExecutionEnabled")
+    tracking = _draft()
+    tracking["projectExecutionEnabled"] = False
+
+    assert build_template_snapshot(enabled)["executionSettings"]["projectExecutionEnabled"] is True
+    assert build_template_snapshot(tracking)["executionSettings"]["projectExecutionEnabled"] is False
+
+
+def test_historical_schema_v1_snapshots_remain_disabled_when_resolved():
+    for execution_settings in ({"projectExecutionEnabled": False}, {}):
+        historical = {
+            "id": "historical",
+            "templateId": "historical",
+            "version": 1,
+            "snapshotDigest": "historical-digest",
+            "snapshot": {
+                "schemaVersion": 1,
+                "title": "Historical",
+                "columns": [],
+                "tasks": [],
+                "executionSettings": execution_settings,
+            },
+        }
+
+        resolved = resolve_template_version(
+            {"historical": [historical]}, [], "historical", 1,
+        )
+
+        assert resolved["snapshot"]["executionSettings"]["projectExecutionEnabled"] is False
+        assert historical["snapshot"]["executionSettings"] == execution_settings
+
+
 def test_legacy_browser_template_is_readable_as_implicit_v1_without_mutation():
     legacy = {
         "id": "legacy-template",
@@ -139,6 +173,7 @@ def test_legacy_browser_template_is_readable_as_implicit_v1_without_mutation():
     assert legacy == original
     assert version == resolved
     assert version["version"] == 1 and version["legacy"] is True
+    assert version["snapshot"]["schemaVersion"] == 1
     assert version["snapshot"]["columns"][0]["id"] == "column-1"
     task = version["snapshot"]["tasks"][0]
     assert task["columnId"] == "column-1"
@@ -164,4 +199,3 @@ def test_explicit_version_takes_precedence_over_same_id_legacy_template():
 
     assert resolved["name"] == "Explicit"
     assert resolved.get("legacy") is not True
-
