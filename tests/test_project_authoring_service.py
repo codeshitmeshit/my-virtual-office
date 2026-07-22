@@ -17,6 +17,10 @@ if APP_DIR not in sys.path:
 from project_store import MarkdownProjectStore
 from services.project_authoring import ProjectAuthoringCommandError, ProjectAuthoringService
 from services.project_authoring_security import hash_request_secret
+from services.project_materialization import (
+    CANONICAL_PROJECT_BASE_FIELDS,
+    CANONICAL_TASK_BASE_FIELDS,
+)
 from services.project_authoring_store import (
     IDEMPOTENCY_KEY,
     OUTBOX_KEY,
@@ -524,7 +528,9 @@ def test_manual_template_instantiation_is_version_pinned_atomic_and_idempotent(t
         "templateId": "template-request-1",
         "templateVersion": 1,
     }
+    assert CANONICAL_PROJECT_BASE_FIELDS <= set(created["project"])
     task = created["project"]["tasks"][0]
+    assert set(task) == CANONICAL_TASK_BASE_FIELDS
     assert task["responsibleActor"] == {"type": "agent", "id": "owner"}
     assert task["executorActor"] == {"type": "agent", "id": "builder"}
     assert task["executionState"] == "backlog"

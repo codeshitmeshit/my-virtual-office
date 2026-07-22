@@ -48,6 +48,9 @@ from services.project_templates import (
     append_template_version,
     resolve_template_version,
 )
+from services.project_template_materialization import (
+    materialize_versioned_template_instance,
+)
 from services.project_actors import (
     ActorReferenceError,
     legacy_task_role_fields,
@@ -767,14 +770,14 @@ class ProjectAuthoringService:
                         "project_id_conflict", "Generated project id already exists", 409,
                     )
                 now = self._timestamp()
-                project = self._build_template_instance_project(
+                project = materialize_versioned_template_instance(
                     project_id=project_id,
                     template_id=clean_template_id,
                     version=version_number,
                     configuration=configuration,
                     workspace=workspace,
                     actor=actor,
-                    now=now,
+                    timestamp=now,
                 )
                 current.setdefault("projects", []).append(project)
                 current[IDEMPOTENCY_KEY][scoped_key] = {

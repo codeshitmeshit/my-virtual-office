@@ -91,7 +91,10 @@ BROWSER_TEMPLATE_TASK_KEYS = MANUAL_TASK_KEYS
 AGENT_PROJECT_KEYS = tuple(sorted(CANONICAL_PROJECT_BASE_FIELDS | {
     "agentMaintenanceMode", "authoringAgentId", "authoringSource", "recurrenceRef", "templateRef",
 }))
-TEMPLATE_PROJECT_KEYS = (
+VERSIONED_TEMPLATE_PROJECT_KEYS = tuple(sorted(CANONICAL_PROJECT_BASE_FIELDS | {
+    "agentMaintenanceMode", "authoringSource", "recurrenceRef", "templateRef",
+}))
+LEGACY_TEMPLATE_PROJECT_KEYS = (
     "activeAgent", "activeTaskId", "activity", "agentMaintenanceMode", "authoringSource", "branch",
     "columns", "createdAt", "createdBy", "defaultExecutorAgentId", "defaultReviewerAgentId", "description",
     "dueDate", "executionPolicy", "id", "longTermProject", "priority", "projectExecutionEnabled",
@@ -330,8 +333,8 @@ def _recurring_creation(tmp_path) -> tuple[dict[str, Any], dict[str, Any]]:
         ("manual", lambda monkeypatch, tmp_path: _manual_creation(), MANUAL_PROJECT_KEYS, MANUAL_TASK_KEYS),
         ("browser_template", _browser_template_creation, BROWSER_TEMPLATE_PROJECT_KEYS, BROWSER_TEMPLATE_TASK_KEYS),
         ("agent_direct", lambda monkeypatch, tmp_path: _agent_direct_creation(tmp_path), AGENT_PROJECT_KEYS, DIRECT_TASK_KEYS),
-        ("versioned_template", lambda monkeypatch, tmp_path: _versioned_template_creation(tmp_path), TEMPLATE_PROJECT_KEYS, AUTHORED_TASK_KEYS),
-        ("recurrence", lambda monkeypatch, tmp_path: _recurring_creation(tmp_path), TEMPLATE_PROJECT_KEYS, AUTHORED_TASK_KEYS),
+        ("versioned_template", lambda monkeypatch, tmp_path: _versioned_template_creation(tmp_path), VERSIONED_TEMPLATE_PROJECT_KEYS, DIRECT_TASK_KEYS),
+        ("recurrence", lambda monkeypatch, tmp_path: _recurring_creation(tmp_path), LEGACY_TEMPLATE_PROJECT_KEYS, AUTHORED_TASK_KEYS),
     ),
 )
 def test_creation_paths_preserve_complete_current_field_sets(
@@ -468,8 +471,8 @@ def test_creation_paths_characterize_current_default_divergence(monkeypatch, tmp
         "defaultReviewerAgentId": None,
     }
     assert projections["versioned_template"] == {
-        "project": template_project_defaults,
-        "task": authored_task_defaults,
+        "project": projections["manual"]["project"],
+        "task": direct_task_defaults,
     }
     assert projections["recurrence"] == {
         "project": template_project_defaults,
