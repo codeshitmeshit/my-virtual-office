@@ -12,7 +12,7 @@
 
 ## 3. Manual and Browser Creation Migration
 
-- [ ] 3.1 Migrate `project_commands.create_project` to the canonical Project/column materializers while preserving validation, archive default policy, workspace preparation, activity, repository response, IDs, and compatibility tests.
+- [x] 3.1 Migrate `project_commands.create_project` to the canonical Project/column materializers while preserving validation, archive default policy, workspace preparation, activity, repository response, IDs, and compatibility tests.
 - [ ] 3.2 Migrate `project_commands.create_task` to the canonical Task/checklist materializer while preserving assignment validation, column ordering, repository atomic update, task-file post-commit metadata, and compatibility tests.
 - [ ] 3.3 Migrate `_handle_project_from_template` to canonical materialization and the existing repository create boundary, preserving template column remapping, actor validation, version/source overlay, workspace behavior, HTTP payload/status, and browser-template compatibility tests.
 - [ ] 3.4 Migrate local `office.py --proj create` and `add-task` Project/Task construction to canonical materialization while preserving CLI arguments, built-in template selection, column/order behavior, printed output, storage adapter behavior, and CLI compatibility tests.
