@@ -108,3 +108,35 @@ def test_health_distinguishes_disabled_paused_degraded_and_healthy():
     assert metrics.snapshot(root, authoring_enabled=True, recurrence_enabled=False, recurrence_paused=False)["status"] == "healthy"
     root[OUTBOX_KEY].append({"state": "pending", "createdAt": old.isoformat()})
     assert metrics.snapshot(root, authoring_enabled=True, recurrence_enabled=False, recurrence_paused=False)["status"] == "degraded"
+
+
+def test_recurrence_execution_observability_is_sanitized_and_rate_limited():
+    emitted = []
+    metrics = ProjectAuthoringObservability(
+        clock=lambda: 100.0, emit=emitted.append, log_interval_seconds=60,
+    )
+    for _ in range(2):
+        metrics.observe(
+            "recurrence.execution.start",
+            status="failed_retryable",
+            duration_ms=0,
+            code="provider_unavailable token=super-secret",
+        )
+
+    snapshot = metrics.snapshot(
+        _root(), authoring_enabled=True, recurrence_enabled=True, recurrence_paused=False,
+    )
+    assert snapshot["counters"]["operation.recurrence.execution.start.failed_retryable"] == 2
+    assert snapshot["counters"]["logs.emitted"] == 1
+    assert snapshot["counters"]["logs.suppressed"] == 1
+    assert len(emitted) == 1
+    assert "super-secret" not in emitted[0]
+    assert "[REDACTED]" in emitted[0]
+
+    metrics.observe(
+        "recurrence.execution.start", status="requested", duration_ms=0,
+    )
+    metrics.observe(
+        "recurrence.execution.start", status="started", duration_ms=0,
+    )
+    assert len(emitted) == 1

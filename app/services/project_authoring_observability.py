@@ -73,7 +73,11 @@ class ProjectAuthoringObservability:
                     "code": safe_code or "intervention_required",
                     "at": datetime.fromtimestamp(self.clock(), timezone.utc).isoformat(),
                 })
-        if safe_status != "success" or intervention:
+        quiet_statuses = {
+            "success", "requested", "started", "already_active", "already_completed",
+            "in_progress", "pending", "not_requested",
+        }
+        if safe_status not in quiet_statuses or intervention:
             self._emit_rate_limited(safe_operation, safe_status, safe_code, elapsed)
 
     def snapshot(

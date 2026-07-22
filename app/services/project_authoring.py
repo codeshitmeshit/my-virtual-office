@@ -59,6 +59,7 @@ from services.project_recurrence_execution import (
 from services.project_recurrence_materialization import (
     materialize_recurrence_occurrence_project,
 )
+from services.project_recurrence_execution_dispatch import RecurrenceExecutionDispatcher
 from services.project_actors import (
     ActorReferenceError,
     legacy_task_role_fields,
@@ -147,6 +148,8 @@ class ProjectAuthoringService:
         new_id: Callable[[], str] = _new_id,
         new_secret: Callable[[], str] | None = None,
         hash_secret: Callable[[str], str] | None = None,
+        start_project: Callable[[str, Mapping[str, Any]], Mapping[str, Any]] | None = None,
+        observe_operation: Callable[..., None] | None = None,
     ) -> None:
         self.store = store
         self.lookup_agent = lookup_agent
@@ -156,6 +159,13 @@ class ProjectAuthoringService:
         self.recurrence_paused = recurrence_paused
         self.clock = clock
         self.new_id = new_id
+        self.recurrence_execution = RecurrenceExecutionDispatcher(
+            store=store,
+            start_project=start_project,
+            clock=clock,
+            new_id=new_id,
+            observe=observe_operation,
+        )
         direct_ports = DirectProjectCreationPorts(
             store=store,
             lookup_agent=lookup_agent,
@@ -905,7 +915,10 @@ class ProjectAuthoringService:
 
         self.store.update(claim)
         if outcome.get("status") == "created":
-            return {"ok": True, "created": False, "status": "created", "project": outcome["project"]}
+            result = {"ok": True, "created": False, "status": "created", "project": outcome["project"]}
+            return self._with_reconciled_occurrence_execution(
+                result, clean_recurrence_id, clean_occurrence_id,
+            )
         if outcome.get("status") == "claimed":
             return {
                 "ok": True,
@@ -1027,7 +1040,9 @@ class ProjectAuthoringService:
             result = self.store.update(commit)
             if not result.get("created"):
                 self._cleanup_prepared_workspace(workspace, cleanup_workspace)
-            return result
+            return self._with_reconciled_occurrence_execution(
+                result, clean_recurrence_id, clean_occurrence_id,
+            )
         except Exception as exc:
             self._cleanup_prepared_workspace(workspace, cleanup_workspace)
             self._record_occurrence_failure(
@@ -1037,6 +1052,17 @@ class ProjectAuthoringService:
                 exc,
             )
             raise
+
+    def _with_reconciled_occurrence_execution(
+        self,
+        result: dict[str, Any],
+        recurrence_id: str,
+        occurrence_id: str,
+    ) -> dict[str, Any]:
+        execution = self.recurrence_execution.reconcile(recurrence_id, occurrence_id)
+        if execution.get("state") not in {None, "not_requested"}:
+            result = {**result, "automaticExecution": execution}
+        return result
 
     def authenticate_recurrence_dispatch(
         self,

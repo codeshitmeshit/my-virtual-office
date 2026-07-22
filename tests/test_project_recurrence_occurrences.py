@@ -52,7 +52,10 @@ def _draft(*, execution=False, execution_mode="create_only"):
     }
 
 
-def _service(tmp_path, *, execution=False, execution_mode="create_only"):
+def _service(
+    tmp_path, *, execution=False, execution_mode="create_only", start_project=None,
+    observe_operation=None,
+):
     markdown = MarkdownProjectStore(str(tmp_path))
     markdown.save_all({"projects": [], "templates": []})
     repository = ProjectRepository(
@@ -71,6 +74,8 @@ def _service(tmp_path, *, execution=False, execution_mode="create_only"):
         recurrence_paused=lambda: False,
         clock=lambda: current[0],
         new_id=lambda: next(identifiers),
+        start_project=start_project,
+        observe_operation=observe_operation,
     )
     service.create_pending(
         _draft(execution=execution, execution_mode=execution_mode),
@@ -109,6 +114,8 @@ def test_occurrence_creates_one_independent_version_pinned_project(tmp_path):
 
     assert first["created"] is True
     assert repeated["created"] is False
+    assert "automaticExecution" not in first
+    assert "automaticExecution" not in repeated
     assert first["project"]["id"] == repeated["project"]["id"]
     assert first["project"]["id"] != source["id"]
     assert first["project"]["templateRef"] == {"id": "template-request-1", "version": 1}
@@ -175,6 +182,156 @@ def test_create_and_execute_intent_is_committed_atomically_with_occurrence_proje
         "history": [{"state": "pending", "at": "2025-04-01T00:00:00+00:00", "code": None}],
     }
     assert any(project["id"] == record["projectId"] for project in root["projects"])
+
+
+def test_post_commit_retry_reconciles_once_after_start_port_recovers(tmp_path):
+    markdown, service, _, _ = _service(
+        tmp_path, execution=True, execution_mode="create_and_execute",
+    )
+    prepared = {
+        "ok": True,
+        "projectExecutionEnabled": True,
+        "workspacePath": "/tmp/recovery-occurrence",
+        "workspaceKind": "directory",
+        "workspaceStatus": {"ok": True},
+        "workspaceManagedBy": "system",
+        "workspaceCreatedAt": "2025-04-01T00:00:00+00:00",
+        "createdInAttempt": True,
+    }
+    committed = service.materialize_recurrence_occurrence(
+        "recurrence-request-1", "recover-after-commit",
+        prepare_workspace=lambda *_args: prepared,
+    )
+    calls = []
+
+    def start(project_id, body):
+        assert any(item["id"] == project_id for item in markdown.load_all()["projects"])
+        calls.append((project_id, body))
+        return {"ok": True, "status": "started"}
+
+    service.recurrence_execution.start_project = start
+    recovered = service.materialize_recurrence_occurrence(
+        "recurrence-request-1", "recover-after-commit",
+    )
+    repeated = service.materialize_recurrence_occurrence(
+        "recurrence-request-1", "recover-after-commit",
+    )
+
+    assert committed["automaticExecution"]["state"] == "pending"
+    assert recovered["automaticExecution"]["state"] == "started"
+    assert repeated["automaticExecution"]["state"] == "started"
+    assert len(calls) == 1
+
+
+def test_retryable_start_failure_retries_same_project_without_duplication(tmp_path):
+    responses = iter((
+        {"ok": False, "_status": 503, "code": "provider_unavailable token=launch-secret"},
+        {"ok": True, "status": "started"},
+    ))
+    calls = []
+
+    def start(project_id, body):
+        calls.append((project_id, body))
+        return next(responses)
+
+    markdown, service, _, _ = _service(
+        tmp_path, execution=True, execution_mode="create_and_execute", start_project=start,
+    )
+    prepared = {
+        "ok": True, "projectExecutionEnabled": True,
+        "workspacePath": "/tmp/retry-start", "workspaceKind": "directory",
+        "workspaceStatus": {"ok": True}, "workspaceManagedBy": "system",
+        "workspaceCreatedAt": "2025-04-01T00:00:00+00:00", "createdInAttempt": True,
+    }
+    failed = service.materialize_recurrence_occurrence(
+        "recurrence-request-1", "retry-start", prepare_workspace=lambda *_args: prepared,
+    )
+    recovered = service.materialize_recurrence_occurrence(
+        "recurrence-request-1", "retry-start",
+    )
+
+    assert failed["automaticExecution"] == {
+        "state": "failed_retryable", "code": "provider_unavailable token=[REDACTED]",
+    }
+    assert recovered["automaticExecution"]["state"] == "started"
+    assert len(calls) == 2
+    assert calls[0][0] == calls[1][0]
+    assert len(markdown.load_all()["projects"]) == 2
+    assert "launch-secret" not in str(markdown.load_all())
+
+
+def test_already_active_occurrence_is_marked_started_without_launch(tmp_path):
+    markdown, service, _, _ = _service(
+        tmp_path, execution=True, execution_mode="create_and_execute",
+    )
+    prepared = {
+        "ok": True, "projectExecutionEnabled": True,
+        "workspacePath": "/tmp/already-active", "workspaceKind": "directory",
+        "workspaceStatus": {"ok": True}, "workspaceManagedBy": "system",
+        "workspaceCreatedAt": "2025-04-01T00:00:00+00:00", "createdInAttempt": True,
+    }
+    committed = service.materialize_recurrence_occurrence(
+        "recurrence-request-1", "already-active", prepare_workspace=lambda *_args: prepared,
+    )
+
+    def activate(root):
+        project = next(item for item in root["projects"] if item["id"] == committed["project"]["id"])
+        project["projectExecutionFlowActive"] = True
+
+    service.store.update(activate)
+    calls = []
+    service.recurrence_execution.start_project = lambda *args: calls.append(args) or {"ok": True}
+    result = service.materialize_recurrence_occurrence(
+        "recurrence-request-1", "already-active",
+    )
+
+    assert result["automaticExecution"] == {"state": "started", "code": "already_active"}
+    assert calls == []
+
+
+def test_concurrent_execution_reconciliation_claims_one_launch(tmp_path):
+    markdown, service, _, _ = _service(
+        tmp_path, execution=True, execution_mode="create_and_execute",
+    )
+    prepared = {
+        "ok": True, "projectExecutionEnabled": True,
+        "workspacePath": "/tmp/concurrent-start", "workspaceKind": "directory",
+        "workspaceStatus": {"ok": True}, "workspaceManagedBy": "system",
+        "workspaceCreatedAt": "2025-04-01T00:00:00+00:00", "createdInAttempt": True,
+    }
+    service.materialize_recurrence_occurrence(
+        "recurrence-request-1", "concurrent-start", prepare_workspace=lambda *_args: prepared,
+    )
+    entered = threading.Event()
+    release = threading.Event()
+    calls = []
+
+    def start(project_id, body):
+        calls.append((project_id, body))
+        entered.set()
+        assert release.wait(timeout=5)
+        return {"ok": True, "status": "started"}
+
+    service.recurrence_execution.start_project = start
+    results = []
+
+    def dispatch():
+        results.append(service.materialize_recurrence_occurrence(
+            "recurrence-request-1", "concurrent-start",
+        ))
+
+    first = threading.Thread(target=dispatch)
+    second = threading.Thread(target=dispatch)
+    first.start()
+    assert entered.wait(timeout=5)
+    second.start()
+    second.join(timeout=5)
+    release.set()
+    first.join(timeout=5)
+
+    assert len(calls) == 1
+    assert sorted(item["automaticExecution"]["state"] for item in results) == ["in_progress", "started"]
+    assert len(markdown.load_all()["projects"]) == 2
 
 
 def test_live_claim_is_not_stolen_and_expired_claim_recovers_after_restart(tmp_path):

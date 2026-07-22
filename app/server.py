@@ -21481,6 +21481,10 @@ _PROJECT_AUTHORING_SERVICE = project_authoring_service.ProjectAuthoringService(
     _PROJECT_AUTHORING_ROOT_STORE,
     lookup_agent=_office_agent_lookup,
     is_excluded_agent=_is_unassignable_system_agent,
+    start_project=lambda project_id, body: _handle_project_execution_project_start(
+        project_id, dict(body),
+    ),
+    observe_operation=_PROJECT_AUTHORING_OBSERVABILITY.observe,
 )
 
 
