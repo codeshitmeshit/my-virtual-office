@@ -8,7 +8,15 @@ The Agent presents a complete natural-language proposal in the conversation. The
 
 No backend draft is created. If the user changes any semantic field, the Agent presents the complete revised proposal and waits again. If the user does not confirm, no API call occurs.
 
-The backend cannot cryptographically verify provider-neutral chat authorship. `confirmation.confirmed=true` is an Agent assertion audited with the proposal digest. This accepted limitation is bounded by loopback-only registered-Agent access, atomic idempotent creation, project-scoped authority, and the invariant that creation never starts Project Execution.
+The backend cannot cryptographically verify provider-neutral chat authorship. `confirmation.confirmed=true` is an Agent assertion audited with the proposal digest. This accepted limitation is bounded by loopback-only registered-Agent access, atomic idempotent creation, and project-scoped authority. Ordinary creation never starts Project Execution; a recurring occurrence starts automatically only when the separately displayed `create_and_execute` mode was confirmed.
+
+## Project Execution creation semantics
+
+Future Agent-created projects default to `projectExecutionEnabled=true`. Enabled means the project is capable of using Project Execution; it does not mean execution has started. Immediately after ordinary creation, `projectExecutionFlowActive=false` and `workflowActive=false`. The user must explicitly request project-level execution later.
+
+The confirmation proposal always displays execution enabled/disabled, executor, reviewer or absence, start mode, and whether creation starts execution. An explicit tracking-only request sets `projectExecutionEnabled=false`; it does not prepare an executable workspace and may use human-only task executors. Omission is not tracking-only.
+
+Enabled creation fails closed before commit when an executor is missing/unassignable or the workspace cannot be prepared. It never silently creates a legacy or tracking-only project. A failed attempt leaves no partial Project, and a system-managed workspace created only for that failed attempt is eligible for cleanup.
 
 ## Rollout and security
 
@@ -36,13 +44,16 @@ Agent routes require loopback, no browser `Origin`, `X-VO-Agent-Action: project-
     "title": "Release preparation",
     "projectType": "one_time",
     "agentMaintenanceMode": "strict_confirmation",
+    "projectExecutionEnabled": true,
+    "projectExecutionStartMode": "continuous",
     "columns": [{"id": "backlog", "title": "Backlog"}],
     "tasks": [{
       "title": "Prepare release evidence",
       "columnId": "backlog",
       "responsibleActor": {"type": "agent", "id": "owner"},
       "executorActor": {"type": "agent", "id": "builder"},
-      "reviewerRecommendation": {"recommended": false, "triggers": []}
+      "reviewerRecommendation": {"recommended": false, "triggers": []},
+      "checklist": [{"text": "Release evidence is complete", "done": false}]
     }],
     "template": {"mode": "none"},
     "recurrence": {"enabled": false}
@@ -76,7 +87,14 @@ Maintenance requests without a grant must include `confirmation.confirmed=true`,
 
 Protected maintenance requests use `expectedRevision` for optimistic concurrency and a one-time `confirmationKey` for the management decision. An autonomous assigned-task change uses the `routine_task_update` operation; it cannot widen the allowed field set or change project structure.
 
-Recurring project-template occurrences pin immutable `templateId,version` pairs and record a `projectTemplateInstance` projection. Reusable projects may have no template at all. A due recurrence uses an expiring occurrence claim and compare-and-set commit keyed by `occurrenceId` to create one independent, unstarted project. Duplicate or restarted callbacks return the already materialized project. Agent project scheduled-cron creation is idempotent by Agent and key; it saves and enables a VO project-level scheduled configuration without asking for a management token. Scheduled project runs reuse the existing Project Execution start path (`projectWorkflow` or `projectTask`) when triggered; Gateway registration is an implementation detail and should not be exposed as a user prerequisite.
+Recurring project-template occurrences pin immutable `templateId,version` pairs and record a `projectTemplateInstance` projection. Reusable projects may have no template at all. Every recurrence stores one confirmed execution mode:
+
+- `create_only` (default and historical compatibility): create one execution-capable but unstarted Project. The user starts it explicitly later.
+- `create_and_execute`: atomically create the Project and a durable per-occurrence automatic-execution intent, then call the existing project-level start entry point after commit.
+
+A due recurrence uses an expiring occurrence claim and compare-and-set commit keyed by `occurrenceId`. Duplicate or restarted callbacks return the same Project. Automatic start uses a separate expiring launch claim, so repeated or concurrent callbacks do not establish duplicate active attempts. Intent states are `pending`, `started`, `failed_retryable`, or `intervention_required`; bounded history and sanitized status counters make crash recovery observable without storing provider output or credentials. A retryable start failure never rolls back or duplicates the committed Project. An already active/completed Project is reconciled as started without another launch.
+
+Agent project scheduled-cron creation is idempotent by Agent and key; it saves and enables a VO project-level scheduled configuration without asking for a management token. Scheduled project runs reuse the existing Project Execution start path (`projectWorkflow` or `projectTask`) when triggered; Gateway registration is an implementation detail and should not be exposed as a user prerequisite.
 
 ## Legacy draft compatibility
 
@@ -84,14 +102,15 @@ The previous request/status/edit/confirm/reject routes and draft review UI are r
 
 ## Failure and recovery runbook
 
-1. **Feature disabled (`503`)**: enable direct authoring locally first; enable recurrence only after direct-create health is clean.
-2. **Validation (`400`/`409`)**: refresh `/api/agents`. If the correction changes semantics, present the revised natural-language proposal and obtain confirmation again with a new key.
+1. **Feature disabled (`503`)**: enable direct authoring locally first; enable recurrence only after direct-create health is clean. Disabling recurrence stops new occurrence creation and automatic-start reconciliation; it does not cancel a Project that already started.
+2. **Validation (`400`/`409`)**: refresh `/api/agents`. Missing/unassignable executors, invalid execution policy, and workspace preparation failures must be corrected; never retry by changing the request to tracking-only unless the user explicitly confirms that semantic change. Present a revised proposal and use a new key when semantics change.
 3. **Idempotency conflict (`409`)**: do not overwrite the original result. Use a new key only after a newly confirmed semantic proposal.
 4. **Workspace/commit failure**: managed uncommitted workspaces are cleaned; retry the unchanged confirmation with the same key.
 5. **Lost first response**: locate the real project; do not recreate it. Rotate the grant through the trusted management surface.
 6. **Revoked/cross-scope grant (`403`)**: stop Agent mutation; never reuse another project or Agent's secret.
 7. **Outbox/scheduler failure**: pause dispatch, preserve durable intent, repair the scheduler dependency, then resume bounded reconciliation. Do not ask users to handle Gateway registration for ordinary VO project scheduled runs.
-8. **Invalid recurrence actor**: retain the intervention alert; use a user-confirmed template/role correction rather than silent substitution.
-9. **Rollback**: disable authoring, pause recurrence, let atomic writes finish, preserve root metadata, deploy the previous compatible code, and verify ordinary project/legacy cron reads.
+8. **Automatic-start failure**: leave the occurrence Project in place. Retry `failed_retryable` with the same occurrence; correct `intervention_required` through a confirmed executor/workspace/template change. Never create a replacement occurrence to force execution.
+9. **Invalid recurrence actor**: retain the intervention alert; use a user-confirmed template/role correction rather than silent substitution.
+10. **Rollback**: set `VO_AGENT_PROJECT_AUTHORING_ENABLED=false`, set `VO_PROJECT_INSTANCE_RECURRENCE_DISPATCH_PAUSED=true`, let in-flight atomic writes finish, and preserve root metadata. Then deploy the previous compatible code and verify ordinary Project/template/legacy cron reads. New canonical Project fields are backward-readable; additive recurrence `executionMode`/`executionIntent` fields may remain inert under old code. Stop an already running Project through existing Project Execution controls rather than deleting it.
 
 Health is `disabled`, `healthy`, `paused`, `degraded`, or `intervention_required`. Recurrence outbox age of fifteen minutes degrades health; legacy pending draft age does not. Process-local counters reset on restart, while durable outbox and intervention state reconstruct operational health.

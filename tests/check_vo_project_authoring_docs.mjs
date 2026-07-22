@@ -19,6 +19,12 @@ for (const contract of [
   "occurrenceId",
   "VO_AGENT_PROJECT_AUTHORING_ENABLED",
   "VO_PROJECT_INSTANCE_RECURRENCE_ENABLED",
+  "projectExecutionEnabled=true",
+  "tracking-only",
+  "create_only",
+  "create_and_execute",
+  "failed_retryable",
+  "intervention_required",
   "Failure and recovery runbook",
   "GET /api/project-authoring/health",
 ]) {
@@ -29,7 +35,9 @@ assert.match(doc, /never starts Project Execution/);
 assert.match(doc, /must never acquire `X-VO-Management-Token`/);
 assert.match(doc, /Reusable is a project attribute and does not require a template/);
 assert.match(doc, /Gateway registration is an implementation detail and should not be exposed as a user prerequisite/);
-assert.match(doc, /Duplicate or restarted callbacks return the already materialized project/);
+assert.match(doc, /Duplicate or restarted callbacks return the same Project/);
+assert.match(doc, /never silently creates a legacy or tracking-only project/);
+assert.match(doc, /additive recurrence `executionMode`\/`executionIntent` fields may remain inert/);
 assert.match(doc, /cannot cryptographically verify provider-neutral chat authorship/);
 assert.match(doc, /remain inert compatibility metadata/);
 
