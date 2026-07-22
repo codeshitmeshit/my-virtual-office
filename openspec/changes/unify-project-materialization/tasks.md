@@ -7,7 +7,7 @@
 ## 2. Canonical Materialization Foundation
 
 - [x] 2.1 Create `app/services/project_materialization.py` with pure canonical column and Project base materializers, injected ID/time/default inputs, deep-copy guarantees, four-column fallback, and focused unit tests.
-- [ ] 2.2 Add the canonical Task and checklist materializers with complete runtime/meeting/source collection defaults, stable checklist normalization, Backlog fallback, and focused unit tests for explicit and omitted values.
+- [x] 2.2 Add the canonical Task and checklist materializers with complete runtime/meeting/source collection defaults, stable checklist normalization, Backlog fallback, and focused unit tests for explicit and omitted values.
 - [ ] 2.3 Add pure manual, authoring, template, and recurrence overlay helpers plus canonical workspace projection/cleanup metadata handling, with tests proving overlays cannot omit or mutate canonical base fields.
 
 ## 3. Manual and Browser Creation Migration
