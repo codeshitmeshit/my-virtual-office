@@ -23,11 +23,6 @@ class MaterializationSite:
 CURRENT_MATERIALIZATION_BUILDERS = frozenset({
     MaterializationSite(
         "app/services/project_authoring.py",
-        "ProjectAuthoringService._apply_maintenance_mutation",
-        "task",
-    ),
-    MaterializationSite(
-        "app/services/project_authoring.py",
         "ProjectAuthoringService._build_template_instance_project",
         "project",
     ),
@@ -100,6 +95,14 @@ def _contains_maintenance_task_builder(function: ast.FunctionDef | ast.AsyncFunc
     if function.name != "_apply_maintenance_mutation":
         return False
     nodes = tuple(_owned_nodes(function))
+    delegates_to_canonical_materializer = any(
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "materialize_task_base"
+        for node in nodes
+    )
+    if delegates_to_canonical_materializer:
+        return False
     has_create_task_branch = any(
         isinstance(node, ast.Compare)
         and any(

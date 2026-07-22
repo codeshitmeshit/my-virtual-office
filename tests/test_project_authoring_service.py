@@ -3,6 +3,7 @@
 
 import copy
 from datetime import datetime, timezone
+import hashlib
 import os
 import sys
 
@@ -38,6 +39,16 @@ AGENTS = {
     "builder": {"id": "builder"},
     "reviewer": {"id": "reviewer"},
 }
+MAINTENANCE_CREATE_TASK_SUMMARY = """我准备修改这个 VO 项目，请确认：
+
+项目 ID：project-request-1
+修改目标：创建一个已确认的新任务
+修改内容：新增任务 Follow up，并将验收标准写入 checklist。
+
+请确认是否按以上方案修改真实项目。"""
+MAINTENANCE_CREATE_TASK_DIGEST = hashlib.sha256(
+    MAINTENANCE_CREATE_TASK_SUMMARY.encode("utf-8")
+).hexdigest()
 
 
 def _draft(title="Launch"):
@@ -563,6 +574,62 @@ def test_manual_template_instantiation_revalidates_actors_without_partial_projec
 
     assert invalid.value.code == "agent_not_found"
     assert markdown.load_all()["projects"] == before
+
+
+def test_confirmed_maintenance_create_task_is_canonical_atomic_and_idempotent(tmp_path):
+    markdown, _, service = _service(tmp_path)
+    _create(service)
+    project = service.confirm_and_materialize(
+        "request-1", expected_revision=1, confirmation_key="confirm:maintenance-source",
+    )["project"]
+    confirmation = {
+        "confirmed": True,
+        "summaryDigest": MAINTENANCE_CREATE_TASK_DIGEST,
+        "summaryText": MAINTENANCE_CREATE_TASK_SUMMARY,
+    }
+    mutation = {
+        "operation": "create_task",
+        "task": {
+            "id": "caller-task",
+            "title": "Follow up",
+            "columnId": "missing-column",
+            "responsibleActor": {"type": "agent", "id": "owner"},
+            "executorActor": {"type": "agent", "id": "builder"},
+            "checklist": ["Acceptance is met"],
+        },
+    }
+
+    created = service.apply_confirmed_maintenance(
+        project["id"], mutation,
+        requesting_agent_id="author",
+        idempotency_key="maintenance:create-task",
+        confirmation=confirmation,
+    )
+    repeated = service.apply_confirmed_maintenance(
+        project["id"], mutation,
+        requesting_agent_id="author",
+        idempotency_key="maintenance:create-task",
+        confirmation=confirmation,
+    )
+
+    assert created["created"] is True and repeated["created"] is False
+    task = next(item for item in created["project"]["tasks"] if item["id"] == "caller-task")
+    assert set(task) == CANONICAL_TASK_BASE_FIELDS
+    assert task["columnId"] == project["columns"][0]["id"]
+    assert task["order"] == 1
+    assert task["checklist"][0]["text"] == "Acceptance is met"
+    assert created["project"]["maintenanceHistory"][-1]["operation"] == "create_task"
+
+    before = copy.deepcopy(markdown.load_all())
+    with pytest.raises(ProjectAuthoringCommandError) as conflict:
+        service.apply_confirmed_maintenance(
+            project["id"], mutation,
+            requesting_agent_id="author",
+            idempotency_key="maintenance:create-task-conflict",
+            confirmation=confirmation,
+        )
+    assert conflict.value.code == "maintenance_task_id_conflict"
+    assert markdown.load_all() == before
 
 
 @pytest.mark.parametrize(

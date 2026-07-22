@@ -2247,26 +2247,32 @@ class ProjectAuthoringService:
             task["updatedAt"] = now
             return
         if operation == "create_task":
-            task = copy.deepcopy(dict(mutation["task"]))
-            if not str(task.get("title") or "").strip():
+            task_configuration = copy.deepcopy(dict(mutation["task"]))
+            if not str(task_configuration.get("title") or "").strip():
                 raise ProjectAuthoringCommandError(
                     "maintenance_task_title_required", "Created task requires a title", 400,
                 )
-            actors = self._validate_maintenance_task_actors(task)
-            task.update({
-                "id": str(task.get("id") or f"task-{self.new_id()}"),
+            actors = self._validate_maintenance_task_actors(task_configuration)
+            task_configuration.update({
                 "responsibleActor": actors["responsible"],
                 "executorActor": actors["executor"],
                 "reviewerActor": actors["reviewer"],
                 **legacy_task_role_fields(actors),
-                "executionState": "backlog",
-                "createdAt": now,
-                "updatedAt": now,
             })
-            if any(item.get("id") == task["id"] for item in project.get("tasks", [])):
+            task_id = str(task_configuration.get("id") or f"task-{self.new_id()}")
+            if any(item.get("id") == task_id for item in project.get("tasks", [])):
                 raise ProjectAuthoringCommandError(
                     "maintenance_task_id_conflict", "Created task id already exists", 409,
                 )
+            task = materialize_task_base(
+                task_configuration,
+                columns=project.get("columns") or [],
+                task_id=task_id,
+                timestamp=now,
+                existing_tasks=project.get("tasks") or [],
+                new_id=lambda: task_id,
+                now=lambda: now,
+            )
             project.setdefault("tasks", []).append(task)
             return
         if operation == "delete_task":
