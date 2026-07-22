@@ -10,6 +10,7 @@ from typing import Any, Mapping
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from services.project_recurrence_execution import (
+    CREATE_AND_EXECUTE,
     CREATE_ONLY,
     RECURRENCE_EXECUTION_MODES,
 )
@@ -485,6 +486,15 @@ def validate_project_draft(
     normalized["recurrence"] = _validate_recurrence(
         draft.get("recurrence"), project_type=project_type, issues=issues,
     )
+    if (
+        normalized["recurrence"].get("executionMode") == CREATE_AND_EXECUTE
+        and normalized["projectExecutionEnabled"] is not True
+    ):
+        issues.append(DraftValidationIssue(
+            "recurrence_execution_requires_project_execution",
+            "recurrence.executionMode",
+            "create_and_execute requires projectExecutionEnabled=true",
+        ))
     normalized["validatedAt"] = datetime.now().astimezone().isoformat()
     if issues:
         raise DraftValidationError(tuple(issues))

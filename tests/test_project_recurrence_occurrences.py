@@ -28,7 +28,7 @@ from services.project_repository import ProjectRepository
 AGENTS = {agent_id: {"id": agent_id} for agent_id in ("author", "owner", "builder")}
 
 
-def _draft(*, execution=False):
+def _draft(*, execution=False, execution_mode="create_only"):
     return {
         "title": "Weekly release",
         "description": "Create an independent weekly project",
@@ -46,12 +46,13 @@ def _draft(*, execution=False):
         "template": {"mode": "create", "name": "Weekly release template"},
         "recurrence": {
             "enabled": True,
+            "executionMode": execution_mode,
             "schedule": {"kind": "cron", "expr": "0 9 * * 1", "timezone": "UTC"},
         },
     }
 
 
-def _service(tmp_path, *, execution=False):
+def _service(tmp_path, *, execution=False, execution_mode="create_only"):
     markdown = MarkdownProjectStore(str(tmp_path))
     markdown.save_all({"projects": [], "templates": []})
     repository = ProjectRepository(
@@ -72,7 +73,7 @@ def _service(tmp_path, *, execution=False):
         new_id=lambda: next(identifiers),
     )
     service.create_pending(
-        _draft(execution=execution),
+        _draft(execution=execution, execution_mode=execution_mode),
         requesting_agent_id="author",
         idempotency_key="recurrence:draft-1",
         request_secret_hash="sha256:test",
@@ -132,10 +133,48 @@ def test_occurrence_creates_one_independent_version_pinned_project(tmp_path):
         "gateway-occurrence-2025-04-07"
     ]
     assert occurrence["state"] == "created"
+    assert occurrence["executionMode"] == "create_only"
+    assert "executionIntent" not in occurrence
     assert "claimToken" not in occurrence
     history = root[RECURRENCES_KEY]["recurrence-request-1"]["occurrenceHistory"]
     assert [item["status"] for item in history[-2:]] == ["claimed", "created"]
     assert len(history) <= service.store.config.recurrence_history_limit
+
+
+def test_create_and_execute_intent_is_committed_atomically_with_occurrence_project(tmp_path):
+    markdown, service, _, _ = _service(
+        tmp_path, execution=True, execution_mode="create_and_execute",
+    )
+    result = service.materialize_recurrence_occurrence(
+        "recurrence-request-1",
+        "automatic-occurrence",
+        prepare_workspace=lambda *_args: {
+            "ok": True,
+            "projectExecutionEnabled": True,
+            "workspacePath": "/tmp/automatic-occurrence",
+            "workspaceKind": "directory",
+            "workspaceStatus": {"ok": True},
+            "workspaceManagedBy": "system",
+            "workspaceCreatedAt": "2025-04-01T00:00:00+00:00",
+            "createdInAttempt": True,
+        },
+    )
+
+    root = markdown.load_all()
+    record = root[RECURRENCES_KEY]["recurrence-request-1"]["occurrences"]["automatic-occurrence"]
+    assert result["created"] is True
+    assert record["executionMode"] == "create_and_execute"
+    assert record["executionIntent"] == {
+        "state": "pending",
+        "projectId": result["project"]["id"],
+        "occurrenceId": "automatic-occurrence",
+        "attempts": 0,
+        "requestedAt": "2025-04-01T00:00:00+00:00",
+        "updatedAt": "2025-04-01T00:00:00+00:00",
+        "code": None,
+        "history": [{"state": "pending", "at": "2025-04-01T00:00:00+00:00", "code": None}],
+    }
+    assert any(project["id"] == record["projectId"] for project in root["projects"])
 
 
 def test_live_claim_is_not_stolen_and_expired_claim_recovers_after_restart(tmp_path):

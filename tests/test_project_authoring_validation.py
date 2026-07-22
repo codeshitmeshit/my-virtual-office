@@ -244,6 +244,12 @@ def test_recurring_project_validates_schedule_and_timezone():
         _validate(draft)
     assert "invalid_recurrence_execution_mode" in _codes(execution_error)
 
+    draft["recurrence"]["executionMode"] = "create_and_execute"
+    draft["projectExecutionEnabled"] = False
+    with pytest.raises(DraftValidationError) as disabled_error:
+        _validate(draft)
+    assert "recurrence_execution_requires_project_execution" in _codes(disabled_error)
+
     draft["recurrence"]["executionMode"] = "create_only"
     draft["recurrence"]["schedule"]["timezone"] = "Mars/Olympus"
     with pytest.raises(DraftValidationError) as error:

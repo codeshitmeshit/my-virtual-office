@@ -372,6 +372,7 @@ def test_recurring_confirmation_commits_template_recurrence_and_outbox_together(
     recurring = _draft()
     recurring.update({
         "projectType": "recurring",
+        "projectExecutionEnabled": True,
         "template": {"mode": "create", "name": "Weekly launch"},
         "recurrence": {
             "enabled": True,
@@ -383,6 +384,16 @@ def test_recurring_confirmation_commits_template_recurrence_and_outbox_together(
 
     result = service.confirm_and_materialize(
         "request-1", expected_revision=1, confirmation_key="confirm:recurring-1",
+        prepare_workspace=lambda *_args: {
+            "ok": True,
+            "projectExecutionEnabled": True,
+            "workspacePath": "/tmp/recurring-source",
+            "workspaceKind": "directory",
+            "workspaceStatus": {"ok": True},
+            "workspaceManagedBy": "system",
+            "workspaceCreatedAt": "2025-01-03T00:00:00+00:00",
+            "createdInAttempt": True,
+        },
     )
     root = markdown.load_all()
 

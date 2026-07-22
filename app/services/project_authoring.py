@@ -51,7 +51,11 @@ from services.project_templates import (
 from services.project_template_materialization import (
     materialize_versioned_template_instance,
 )
-from services.project_recurrence_execution import stored_recurrence_execution_mode
+from services.project_recurrence_execution import (
+    CREATE_AND_EXECUTE,
+    new_occurrence_execution_intent,
+    stored_recurrence_execution_mode,
+)
 from services.project_recurrence_materialization import (
     materialize_recurrence_occurrence_project,
 )
@@ -879,6 +883,7 @@ class ProjectAuthoringService:
             claim_token = f"occurrence-claim-{self.new_id()}"
             occurrences[clean_occurrence_id] = {
                 "occurrenceId": clean_occurrence_id,
+                "executionMode": stored_recurrence_execution_mode(recurrence),
                 "state": "claimed",
                 "claimToken": claim_token,
                 "claimOwner": "project-recurrence-dispatch",
@@ -993,6 +998,14 @@ class ProjectAuthoringService:
                     "createdAt": committed_at,
                     "updatedAt": committed_at,
                 })
+                execution_mode = stored_recurrence_execution_mode(current)
+                record["executionMode"] = execution_mode
+                if execution_mode == CREATE_AND_EXECUTE:
+                    record["executionIntent"] = new_occurrence_execution_intent(
+                        project_id=project_id,
+                        occurrence_id=clean_occurrence_id,
+                        timestamp=committed_at,
+                    )
                 for field in ("claimToken", "claimOwner", "claimExpiresAt"):
                     record.pop(field, None)
                 current.update({
