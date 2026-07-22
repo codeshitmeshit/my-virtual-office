@@ -1,8 +1,8 @@
 ## 1. Baseline and Contract Inventory
 
 - [x] 1.1 Add focused characterization fixtures that capture the complete persisted Project and Task base-field projections for manual creation, browser template creation, Agent direct creation, versioned template instantiation, and recurring occurrence creation.
-- [ ] 1.2 Add a static creation-writer inventory test that identifies every Project/Task materialization entry point, including the local `office.py --proj create` writer, and initially allows the known builders while defining the final single-materializer boundary.
-- [ ] 1.3 Add focused local CLI characterization fixtures for empty and built-in-template `office.py --proj create`, capturing arguments, printed results, persistence location, and complete persisted Project/Task base-field projections.
+- [ ] 1.2 Add a static creation-writer inventory test that identifies every Project/Task materialization entry point, including local `office.py --proj create`/`add-task` and confirmed Agent maintenance `create_task`, distinguishes readers/blueprints/persistence sinks, and initially allows the known builders while defining the final single-materializer boundary.
+- [ ] 1.3 Add focused local CLI characterization fixtures for empty and built-in-template `office.py --proj create` plus `add-task`, capturing arguments, printed results, persistence location, column/order behavior, and complete persisted Project/Task base-field projections.
 
 ## 2. Canonical Materialization Foundation
 
@@ -15,7 +15,7 @@
 - [ ] 3.1 Migrate `project_commands.create_project` to the canonical Project/column materializers while preserving validation, archive default policy, workspace preparation, activity, repository response, IDs, and compatibility tests.
 - [ ] 3.2 Migrate `project_commands.create_task` to the canonical Task/checklist materializer while preserving assignment validation, column ordering, repository atomic update, task-file post-commit metadata, and compatibility tests.
 - [ ] 3.3 Migrate `_handle_project_from_template` to canonical materialization and the existing repository create boundary, preserving template column remapping, actor validation, version/source overlay, workspace behavior, HTTP payload/status, and browser-template compatibility tests.
-- [ ] 3.4 Migrate local `office.py --proj create` Project/Task construction to canonical materialization while preserving CLI arguments, built-in template selection, printed output, storage adapter behavior, and CLI compatibility tests.
+- [ ] 3.4 Migrate local `office.py --proj create` and `add-task` Project/Task construction to canonical materialization while preserving CLI arguments, built-in template selection, column/order behavior, printed output, storage adapter behavior, and CLI compatibility tests.
 
 ## 4. Agent Execution Intent and Confirmation Contract
 
@@ -28,6 +28,7 @@
 - [ ] 5.1 Migrate conversation-confirmed direct creation to canonical Project/Task/column/checklist materialization plus the authoring overlay, preserving grant, idempotency, template/recurrence/outbox atomicity, activity, and one-time secret behavior.
 - [ ] 5.2 Persist explicit execution intent in new immutable template snapshots, safely retain stored disabled behavior for existing schema-version-1 templates, and add compatibility tests for new enabled, explicit tracking-only, and historical templates.
 - [ ] 5.3 Migrate versioned template instantiation to canonical materialization and template overlays while preserving actor revalidation, immutable version pinning, overrides, workspace cleanup, idempotency, and public management behavior.
+- [ ] 5.4 Migrate confirmed Agent maintenance `create_task` to the canonical Task materializer while preserving grant and confirmation authorization, actor validation, caller-supplied ID conflict handling, root-transaction atomicity, audit behavior, and maintenance tests.
 
 ## 6. Recurring Instance and Automatic Execution
 
