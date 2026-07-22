@@ -7,7 +7,7 @@
 
 - [x] 2.1 Add `app/services/conversation_timeline.py` with bounded scope/query/item/page contracts, lifecycle normalization, one reasoning visibility policy, and delta/replace/boundary/deduplication state; add focused unit tests for every Provider alias, placeholder, terminal state, empty reasoning, replay, and malformed input.
 - [x] 2.2 Implement stable scoped identity, versioning, Provider-sequence-first ordering, conservative live/durable matching, deterministic merge, cursor paging, and copied public results in the timeline service; test missing IDs, fallback collisions, duplicate text, equal/missing timestamps, overlapping sources, repeated reads, and cross-conversation/attempt rejection.
-- [ ] 2.3 Add injected, read-only timeline source ports and focused source-reader helpers for Provider history, office communication history, live event/activity snapshots, OpenClaw structured blocks, session metrics, and active state; verify bounded reads, no Provider launch/history writes, source failure isolation, and no dependency on `app/server.py`.
+- [x] 2.3 Add injected, read-only timeline source ports and focused source-reader helpers for Provider history, office communication history, live event/activity snapshots, OpenClaw structured blocks, session metrics, and active state; verify bounded reads, no Provider launch/history writes, source failure isolation, and no dependency on `app/server.py`.
 
 ## 3. Migrate Standard Chat History Without Product Drift
 
