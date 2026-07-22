@@ -175,14 +175,20 @@ def test_direct_enabled_creation_requires_prepared_workspace_without_downgrade(t
         enabled,
         prepare_workspace=lambda normalized, *_: calls.append(normalized) or {
             "ok": True,
-            "path": "/tmp/enabled-workspace",
-            "kind": "directory",
-            "managed": True,
-            "created": True,
+            "projectExecutionEnabled": True,
+            "workspacePath": "/tmp/enabled-workspace",
+            "workspaceKind": "directory",
+            "workspaceStatus": {"ok": True},
+            "workspaceManagedBy": "system",
+            "workspaceCreatedAt": "2026-07-18T12:00:00+00:00",
+            "createdInAttempt": True,
         },
     )
     assert calls[0]["projectExecutionEnabled"] is True
     assert created["project"]["projectExecutionEnabled"] is True
+    assert created["project"]["workspaceManagedBy"] == "system"
+    assert created["project"]["workspaceCreatedAt"] == "2026-07-18T12:00:00+00:00"
+    assert "createdInAttempt" not in created["project"]
     assert created["project"]["workflowActive"] is False
     assert created["project"]["projectExecutionFlowActive"] is False
 
@@ -208,6 +214,34 @@ def test_direct_tracking_only_creation_skips_workspace_preparation(tmp_path):
 
     assert created["project"]["projectExecutionEnabled"] is False
     assert calls == []
+
+
+def test_direct_enabled_creation_preserves_user_managed_workspace(tmp_path):
+    _, service = _service(tmp_path)
+    enabled = _project()
+    enabled["projectExecutionEnabled"] = True
+    cleanup_calls = []
+
+    created = _create(
+        service,
+        enabled,
+        prepare_workspace=lambda *_: {
+            "ok": True,
+            "projectExecutionEnabled": True,
+            "workspacePath": "/workspace/user",
+            "workspaceKind": "directory",
+            "workspaceStatus": {"ok": True},
+            "workspaceManagedBy": "user",
+            "workspaceCreatedAt": None,
+            "createdInAttempt": False,
+        },
+        cleanup_workspace=cleanup_calls.append,
+    )
+
+    assert created["project"]["workspacePath"] == "/workspace/user"
+    assert created["project"]["workspaceManagedBy"] == "user"
+    assert created["project"]["workspaceCreatedAt"] is None
+    assert cleanup_calls == []
 
 
 def test_direct_creation_requires_confirmation_and_sha256_summary(tmp_path):
@@ -269,9 +303,9 @@ def test_direct_creation_workspace_failure_and_commit_failure_leave_no_partial_s
     failed_workspace = {
         "ok": False,
         "error": "workspace unavailable",
-        "path": "/tmp/direct-partial",
-        "managed": True,
-        "created": True,
+        "workspacePath": "/tmp/direct-partial",
+        "workspaceManagedBy": "system",
+        "createdInAttempt": True,
     }
     with pytest.raises(DirectProjectCreationError) as raised:
         _create(
@@ -286,9 +320,13 @@ def test_direct_creation_workspace_failure_and_commit_failure_leave_no_partial_s
 
     prepared = {
         "ok": True,
-        "path": "/tmp/direct-created",
-        "managed": True,
-        "created": True,
+        "projectExecutionEnabled": True,
+        "workspacePath": "/tmp/direct-created",
+        "workspaceKind": "directory",
+        "workspaceStatus": {"ok": True},
+        "workspaceManagedBy": "system",
+        "workspaceCreatedAt": "2026-07-18T12:00:00+00:00",
+        "createdInAttempt": True,
     }
     original_update = service.store.update
 

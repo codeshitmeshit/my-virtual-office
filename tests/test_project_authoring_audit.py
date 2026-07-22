@@ -151,7 +151,12 @@ def test_materialization_and_maintenance_failures_are_sanitized_and_retryable(tm
         "audit-1",
         expected_revision=3,
         confirmation_key="confirm:retry",
-        prepare_workspace=lambda *_args: {"ok": True, "path": "/tmp/audit-retry"},
+        prepare_workspace=lambda *_args: {
+            "ok": True,
+            "projectExecutionEnabled": True,
+            "workspacePath": "/tmp/audit-retry",
+            "workspaceManagedBy": "user",
+        },
     )
     project_id = retried["project"]["id"]
     pending = service.create_maintenance_request(

@@ -1824,14 +1824,14 @@ class ProjectAuthoringService:
             "activeTaskId": None,
             "activeAgent": None,
         }
-        if workspace.get("path"):
+        if workspace.get("workspacePath"):
             project.update({
-                "workspacePath": workspace.get("path"),
-                "workspaceKind": workspace.get("kind") or "directory",
-                "workspaceManagedBy": "project_authoring" if workspace.get("managed") else None,
-                "workspaceCreatedAt": now if workspace.get("created") else None,
-                "workspaceStatus": copy.deepcopy(workspace.get("status") or {
-                    "ok": True, "path": workspace.get("path"),
+                "workspacePath": workspace.get("workspacePath"),
+                "workspaceKind": workspace.get("workspaceKind") or "directory",
+                "workspaceManagedBy": workspace.get("workspaceManagedBy"),
+                "workspaceCreatedAt": workspace.get("workspaceCreatedAt"),
+                "workspaceStatus": copy.deepcopy(workspace.get("workspaceStatus") or {
+                    "ok": True, "path": workspace.get("workspacePath"),
                 }),
             })
         return project
@@ -1952,13 +1952,15 @@ class ProjectAuthoringService:
             "activeTaskId": None,
             "activeAgent": None,
         }
-        if workspace.get("path"):
+        if workspace.get("workspacePath"):
             project.update({
-                "workspacePath": workspace.get("path"),
-                "workspaceKind": workspace.get("kind") or "directory",
-                "workspaceManagedBy": "project_authoring" if workspace.get("managed") else None,
-                "workspaceCreatedAt": now if workspace.get("created") else None,
-                "workspaceStatus": {"ok": True, "path": workspace.get("path")},
+                "workspacePath": workspace.get("workspacePath"),
+                "workspaceKind": workspace.get("workspaceKind") or "directory",
+                "workspaceManagedBy": workspace.get("workspaceManagedBy"),
+                "workspaceCreatedAt": workspace.get("workspaceCreatedAt"),
+                "workspaceStatus": copy.deepcopy(workspace.get("workspaceStatus") or {
+                    "ok": True, "path": workspace.get("workspacePath"),
+                }),
             })
         return project
 
@@ -1990,7 +1992,10 @@ class ProjectAuthoringService:
     ) -> None:
         if cleanup_workspace is None:
             return
-        if workspace.get("managed") is not True or workspace.get("created") is not True:
+        if (
+            workspace.get("workspaceManagedBy") != "system"
+            or workspace.get("createdInAttempt") is not True
+        ):
             return
         try:
             cleanup_workspace(workspace)

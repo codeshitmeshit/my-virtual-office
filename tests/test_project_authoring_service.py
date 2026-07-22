@@ -296,10 +296,13 @@ def test_user_approved_reviewer_and_prepared_workspace_are_committed(tmp_path):
         confirmation_key="confirm:key-2",
         prepare_workspace=lambda *_: {
             "ok": True,
-            "path": "/tmp/managed-project-request-1",
-            "kind": "directory",
-            "managed": True,
-            "created": True,
+            "projectExecutionEnabled": True,
+            "workspacePath": "/tmp/managed-project-request-1",
+            "workspaceKind": "directory",
+            "workspaceStatus": {"ok": True},
+            "workspaceManagedBy": "system",
+            "workspaceCreatedAt": "2025-01-03T00:00:00+00:00",
+            "createdInAttempt": True,
         },
         cleanup_workspace=cleanup_calls.append,
     )
@@ -307,7 +310,9 @@ def test_user_approved_reviewer_and_prepared_workspace_are_committed(tmp_path):
     task = result["project"]["tasks"][0]
     assert task["reviewerActor"] == {"type": "agent", "id": "reviewer"}
     assert task["reviewerAgentId"] == "reviewer"
-    assert result["project"]["workspaceManagedBy"] == "project_authoring"
+    assert result["project"]["workspaceManagedBy"] == "system"
+    assert result["project"]["workspaceCreatedAt"] == "2025-01-03T00:00:00+00:00"
+    assert "createdInAttempt" not in result["project"]
     assert cleanup_calls == []
 
 
@@ -391,9 +396,9 @@ def test_failed_workspace_preparation_cleans_up_and_leaves_retryable_request(tmp
     prepared = {
         "ok": False,
         "error": "Unable to initialize repository",
-        "path": "/tmp/partial-workspace",
-        "managed": True,
-        "created": True,
+        "workspacePath": "/tmp/partial-workspace",
+        "workspaceManagedBy": "system",
+        "createdInAttempt": True,
     }
 
     result = service.confirm_and_materialize(
@@ -431,9 +436,13 @@ def test_failed_root_commit_cleans_managed_workspace_and_records_failure(tmp_pat
     service.store.update = flaky_update
     workspace = {
         "ok": True,
-        "path": "/tmp/new-managed-workspace",
-        "managed": True,
-        "created": True,
+        "projectExecutionEnabled": True,
+        "workspacePath": "/tmp/new-managed-workspace",
+        "workspaceKind": "directory",
+        "workspaceStatus": {"ok": True},
+        "workspaceManagedBy": "system",
+        "workspaceCreatedAt": "2025-01-03T00:00:00+00:00",
+        "createdInAttempt": True,
     }
     result = service.confirm_and_materialize(
         "request-1",

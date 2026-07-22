@@ -140,3 +140,90 @@ def test_legacy_agent_draft_submission_and_status_routes_are_inactive(monkeypatc
     assert _response(submission)[0] == 404
     assert _response(status)[0] == 404
     assert fake.creations == []
+
+
+def test_authoring_workspace_adapter_preserves_canonical_ownership(monkeypatch):
+    prepared_values = iter((
+        {
+            "ok": True,
+            "projectExecutionEnabled": True,
+            "workspacePath": "/workspace/system",
+            "workspaceKind": "directory",
+            "workspaceStatus": {"ok": True, "path": "/workspace/system"},
+            "workspaceManagedBy": "system",
+            "workspaceCreatedAt": "2026-07-23T00:00:00+00:00",
+            "createdInAttempt": True,
+        },
+        {
+            "ok": True,
+            "projectExecutionEnabled": True,
+            "workspacePath": "/workspace/user",
+            "workspaceKind": "directory",
+            "workspaceStatus": {"ok": True, "path": "/workspace/user"},
+            "workspaceManagedBy": "user",
+            "workspaceCreatedAt": None,
+            "createdInAttempt": False,
+        },
+        {
+            "ok": True,
+            "projectExecutionEnabled": False,
+            "workspacePath": None,
+            "workspaceKind": None,
+            "workspaceStatus": {},
+            "workspaceManagedBy": None,
+            "workspaceCreatedAt": None,
+            "createdInAttempt": False,
+        },
+    ))
+    monkeypatch.setattr(server, "_project_prepare_workspace", lambda *_: next(prepared_values))
+
+    system = server._project_authoring_prepare_workspace(
+        {"title": "System"}, "request-system", "confirm:system",
+    )
+    user = server._project_authoring_prepare_workspace(
+        {"title": "User"}, "request-user", "confirm:user",
+    )
+    tracking = server._project_authoring_prepare_workspace(
+        {"title": "Tracking"}, "request-tracking", "confirm:tracking",
+    )
+
+    assert system["workspaceManagedBy"] == "system"
+    assert system["createdInAttempt"] is True
+    assert user["workspaceManagedBy"] == "user"
+    assert user["createdInAttempt"] is False
+    assert tracking["projectExecutionEnabled"] is False
+    assert tracking["workspacePath"] is None
+    for prepared in (system, user, tracking):
+        assert not {"path", "kind", "status", "managed", "created"} & set(prepared)
+
+
+def test_authoring_workspace_cleanup_uses_canonical_path(monkeypatch):
+    deleted = []
+    monkeypatch.setattr(
+        server,
+        "_delete_managed_project_workspace",
+        lambda path: deleted.append(path),
+    )
+
+    server._project_authoring_cleanup_workspace({"workspacePath": "/workspace/system"})
+
+    assert deleted == ["/workspace/system"]
+
+
+def test_existing_workspace_cannot_forge_system_cleanup_ownership():
+    with tempfile.TemporaryDirectory() as workspace:
+        prepared = server._project_authoring_prepare_workspace(
+            {
+                "title": "Existing workspace",
+                "projectExecutionEnabled": True,
+                "workspacePath": workspace,
+                "workspaceManagedBy": "system",
+                "workspaceCreatedAt": "forged",
+            },
+            "request-existing",
+            "confirm:existing",
+        )
+
+    assert prepared["workspaceManagedBy"] == "user"
+    assert prepared["workspaceCreatedAt"] is None
+    assert prepared["createdInAttempt"] is False

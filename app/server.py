@@ -18570,8 +18570,9 @@ def _project_prepare_workspace(title, body, now):
             "workspacePath": workspace_path if workspace_path else None,
             "workspaceKind": workspace_kind if workspace_path else None,
             "workspaceStatus": workspace_status if workspace_path else {},
-            "workspaceManagedBy": workspace_managed_by if workspace_path else None,
-            "workspaceCreatedAt": workspace_created_at if workspace_path else None,
+            "workspaceManagedBy": "user" if workspace_path else None,
+            "workspaceCreatedAt": None,
+            "createdInAttempt": False,
         }
     auto_created = False
     if not str(workspace_path or "").strip():
@@ -18583,7 +18584,8 @@ def _project_prepare_workspace(title, body, now):
         workspace_created_at = created.get("createdAt")
         auto_created = True
     else:
-        workspace_managed_by = workspace_managed_by or "user"
+        workspace_managed_by = "user"
+        workspace_created_at = None
     workspace_status = _project_execution_validate_workspace(workspace_path)
     if not workspace_status.get("ok"):
         if auto_created:
@@ -18597,6 +18599,7 @@ def _project_prepare_workspace(title, body, now):
         "workspaceStatus": workspace_status,
         "workspaceManagedBy": workspace_managed_by,
         "workspaceCreatedAt": workspace_created_at,
+        "createdInAttempt": auto_created,
     }
 
 
@@ -18614,23 +18617,23 @@ def _project_authoring_prepare_workspace(snapshot, request_id, confirmation_key)
     prepared = _project_prepare_workspace(snapshot.get("title"), dict(snapshot), _proj_now())
     if not prepared.get("ok"):
         return prepared
-    managed = prepared.get("workspaceManagedBy") == "system"
     return {
         "ok": True,
-        "path": prepared.get("workspacePath"),
-        "kind": prepared.get("workspaceKind"),
-        "status": copy.deepcopy(prepared.get("workspaceStatus") or {}),
-        "managed": managed,
-        "created": bool(managed and prepared.get("workspaceCreatedAt")),
-        "createdAt": prepared.get("workspaceCreatedAt"),
+        "projectExecutionEnabled": prepared.get("projectExecutionEnabled") is True,
+        "workspacePath": prepared.get("workspacePath"),
+        "workspaceKind": prepared.get("workspaceKind"),
+        "workspaceStatus": copy.deepcopy(prepared.get("workspaceStatus") or {}),
+        "workspaceManagedBy": prepared.get("workspaceManagedBy"),
+        "workspaceCreatedAt": prepared.get("workspaceCreatedAt"),
+        "createdInAttempt": prepared.get("createdInAttempt") is True,
         "requestId": request_id,
         "confirmationKey": confirmation_key,
     }
 
 
 def _project_authoring_cleanup_workspace(workspace):
-    if workspace.get("path"):
-        _delete_managed_project_workspace(workspace.get("path"))
+    if workspace.get("workspacePath"):
+        _delete_managed_project_workspace(workspace.get("workspacePath"))
 
 
 def _project_template_prepare_workspace(configuration, project_id, idempotency_key):
