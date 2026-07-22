@@ -18,6 +18,8 @@ from services.conversation_timeline import (
     TimelineQuery,
     TimelineScope,
     canonical_provider_kind,
+    decode_timeline_cursor,
+    encode_timeline_cursor,
     normalize_lifecycle,
     visible_reasoning,
 )
@@ -157,3 +159,137 @@ def test_reasoning_state_and_event_identity_are_bounded():
     bounded = ReasoningAccumulator()
     snapshot = bounded.apply("codex", {"turnId": "x" * 300, "itemId": "y" * 300, "text": "bounded"})
     assert snapshot and len(snapshot.key) == 513
+
+
+def test_stable_native_identity_and_version_are_scoped_and_render_sensitive():
+    service = ConversationTimelineService()
+    scope = TimelineScope.create("codex", "agent", "profile", "conversation")
+    record = {"id": "native", "text": "hello", "epochMs": 10}
+    first = service.item_from_record(scope, record, source="codex")
+    repeated = service.item_from_record(scope, record, source="durable-copy")
+    changed = service.item_from_record(scope, {**record, "text": "updated"}, source="codex")
+    other_scope = TimelineScope.create("codex", "agent", "profile", "other")
+    other = service.item_from_record(other_scope, {**record, "conversationId": "other"}, source="codex")
+    assert first.id == repeated.id
+    assert first.identity_key == repeated.identity_key
+    assert first.version != changed.version
+    assert first.id != other.id
+
+
+def test_fallback_identity_keeps_duplicate_text_and_is_deterministic():
+    service = ConversationTimelineService()
+    scope = TimelineScope.create("hermes", "agent", "profile", "conversation")
+    record = {"role": "assistant", "text": "same", "epochMs": 20}
+    first = service.item_from_record(scope, record, source="hermes", ordinal=0)
+    repeated = service.item_from_record(scope, record, source="hermes", ordinal=0)
+    duplicate = service.item_from_record(scope, record, source="hermes", ordinal=1)
+    assert first.id == repeated.id
+    assert first.id != duplicate.id
+    assert len(service.merge_items(scope, ((first, duplicate),))) == 2
+
+
+def test_provider_sequence_precedes_equal_or_missing_timestamps():
+    service = ConversationTimelineService()
+    scope = TimelineScope.create("openclaw", "agent", "", "conversation")
+    records = [
+        {"id": "second", "text": "second", "sequence": 2, "epochMs": 0},
+        {"id": "first", "text": "first", "sequence": 1, "epochMs": 99},
+        {"id": "third", "text": "third", "sequence": 3, "epochMs": 99},
+    ]
+    items = service.normalize_records(scope, records, source="openclaw")
+    ordered = service.merge_items(scope, (items,))
+    assert [item.text for item in ordered] == ["first", "second", "third"]
+    missing_sequence = service.item_from_record(scope, {"id": "unsequenced", "text": "unsequenced", "epochMs": 1}, source="openclaw")
+    mixed = service.merge_items(scope, (items, (missing_sequence,)))
+    assert [item.text for item in mixed] == ["first", "second", "third", "unsequenced"]
+
+
+def test_overlapping_live_and_durable_sources_settle_one_item_conservatively():
+    service = ConversationTimelineService()
+    scope = TimelineScope.create("claude-code", "agent", "profile", "conversation")
+    live = service.item_from_record(
+        scope,
+        {"eventId": "shared", "text": "answer", "status": "running", "sequence": 1},
+        source="provider-events",
+        durable=False,
+    )
+    durable = service.item_from_record(
+        scope,
+        {"messageId": "shared", "text": "answer", "status": "completed", "epochMs": 30},
+        source="claude-code",
+        durable=True,
+    )
+    merged = service.merge_items(scope, ((live,), (durable,)))
+    assert len(merged) == 1
+    assert merged[0].status == "done"
+    assert merged[0].durable is True
+    assert service.merge_items(scope, ((durable,), (durable,)))[0].version == durable.version
+
+
+def test_source_priority_can_preserve_communication_attribution_without_text_matching():
+    service = ConversationTimelineService()
+    scope = TimelineScope.create("codex", "agent", "profile", "conversation")
+    provider = service.item_from_record(scope, {"id": "shared", "text": "provider"}, source="codex")
+    communication = service.item_from_record(
+        scope,
+        {"id": "shared", "text": "communication", "fromAgentId": "agent", "sourcePriority": 10},
+        source="agent-platform-communications",
+    )
+    merged = service.merge_items(scope, ((provider,), (communication,)))
+    assert len(merged) == 1
+    assert merged[0].text == "communication"
+    assert merged[0].from_agent_id == "agent"
+
+
+def test_cursor_paging_is_stable_and_public_results_are_copied():
+    service = ConversationTimelineService()
+    scope = TimelineScope.create("codex", "agent", "profile", "conversation")
+    items = service.normalize_records(
+        scope,
+        ({"id": f"m-{index}", "text": str(index), "epochMs": index} for index in range(1, 6)),
+        source="codex",
+    )
+    latest = service.read(scope, TimelineQuery(limit=2), (items,), session={"tokenUsage": {"total": 1}})
+    assert [item.text for item in latest.items] == ["4", "5"]
+    assert latest.has_more and decode_timeline_cursor(latest.next_cursor) == (latest.items[0].epoch_ms, latest.items[0].id)
+    older = service.read(scope, TimelineQuery(limit=2, before=decode_timeline_cursor(latest.next_cursor)), (items,))
+    assert [item.text for item in older.items] == ["2", "3"]
+
+    public = latest.to_public_dict()
+    public["messages"][0]["text"] = "mutated"
+    public["session"]["tokenUsage"]["total"] = 2
+    assert latest.items[0].text == "4"
+    assert latest.session["tokenUsage"]["total"] == 1
+    assert encode_timeline_cursor(1, "item")
+    with pytest.raises(ValueError):
+        decode_timeline_cursor("bad")
+
+
+def test_cross_conversation_provider_and_agent_records_are_rejected():
+    service = ConversationTimelineService()
+    scope = TimelineScope.create("codex", "agent", "profile", "conversation")
+    for record in (
+        {"providerKind": "hermes", "text": "foreign"},
+        {"conversationId": "other", "text": "foreign"},
+        {"agentId": "other", "text": "foreign"},
+    ):
+        with pytest.raises(ValueError):
+            service.item_from_record(scope, record, source="source")
+    foreign_scope = TimelineScope.create("codex", "agent", "profile", "other")
+    foreign = service.item_from_record(foreign_scope, {"id": "foreign"}, source="codex")
+    with pytest.raises(ValueError):
+        service.merge_items(scope, ((foreign,),))
+
+
+def test_input_and_output_nested_values_do_not_share_mutable_state():
+    service = ConversationTimelineService()
+    scope = TimelineScope.create("openclaw", "agent", "", "conversation")
+    tool = {"id": "tool", "arguments": {"path": "a"}}
+    item = service.item_from_record(scope, {"id": "message", "text": "answer", "tools": [tool]}, source="openclaw")
+    assert item.item_kind == "message"
+    tool["arguments"]["path"] = "changed"
+    public = item.to_public_dict()
+    public["tools"][0]["arguments"]["path"] = "public-change"
+    assert item.tools[0]["arguments"]["path"] == "a"
+    with pytest.raises(ValueError):
+        service.normalize_records(scope, (), source="openclaw", candidate_limit="bad")

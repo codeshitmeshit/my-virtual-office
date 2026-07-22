@@ -6,8 +6,12 @@ intentionally has no dependency on the legacy HTTP/server composition root.
 
 from __future__ import annotations
 
+import base64
+import copy
+import hashlib
+import json
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Iterable, Mapping
 
 
@@ -21,6 +25,7 @@ MAX_REASONING_STATES = 1_000
 MAX_REASONING_EVENT_IDS = 4_000
 ITEM_KINDS = frozenset({"message", "reasoning", "tool", "approval", "run"})
 ITEM_ROLES = frozenset({"user", "assistant", "system", "tool"})
+ITEM_KIND_ORDER = {"message": 0, "reasoning": 1, "tool": 2, "approval": 3, "run": 4}
 
 PROVIDER_ALIASES = {
     "codex": "codex",
@@ -220,6 +225,20 @@ class TimelineItem:
     sequence: int = 0
     source: str = ""
     tools: tuple[Mapping[str, Any], ...] = field(default_factory=tuple)
+    provider_run_id: str = ""
+    from_name: str = ""
+    from_agent_id: str = ""
+    to_name: str = ""
+    to_agent_id: str = ""
+    media: tuple[Mapping[str, Any], ...] = field(default_factory=tuple)
+    attachments: tuple[Mapping[str, Any], ...] = field(default_factory=tuple)
+    reasoning_tokens: int = 0
+    approval: Mapping[str, Any] | None = None
+    idempotency_key: str = ""
+    identity_key: str = ""
+    identity_strength: int = 0
+    durable: bool = True
+    source_priority: int = 0
 
     def __post_init__(self) -> None:
         if not str(self.id or "") or not str(self.version or ""):
@@ -235,6 +254,40 @@ class TimelineItem:
         object.__setattr__(self, "epoch_ms", _safe_nonnegative_int(self.epoch_ms))
         object.__setattr__(self, "sequence", _safe_nonnegative_int(self.sequence))
         object.__setattr__(self, "tools", tuple(self.tools or ()))
+        object.__setattr__(self, "media", tuple(self.media or ()))
+        object.__setattr__(self, "attachments", tuple(self.attachments or ()))
+        object.__setattr__(self, "reasoning_tokens", _safe_nonnegative_int(self.reasoning_tokens))
+        object.__setattr__(self, "identity_strength", max(0, min(3, _safe_nonnegative_int(self.identity_strength))))
+        object.__setattr__(self, "source_priority", _safe_nonnegative_int(self.source_priority))
+
+    def to_public_dict(self) -> dict[str, Any]:
+        return copy.deepcopy(
+            {
+                "id": self.id,
+                "version": self.version,
+                "providerKind": self.provider_kind,
+                "conversationId": self.conversation_id,
+                "providerRunId": self.provider_run_id,
+                "itemKind": self.item_kind,
+                "role": self.role,
+                "text": self.text,
+                "thinking": self.thinking,
+                "status": self.status,
+                "epochMs": self.epoch_ms,
+                "sequence": self.sequence,
+                "source": self.source,
+                "from": self.from_name,
+                "fromAgentId": self.from_agent_id,
+                "to": self.to_name,
+                "toAgentId": self.to_agent_id,
+                "media": list(self.media),
+                "attachments": list(self.attachments),
+                "tools": list(self.tools),
+                "reasoningTokens": self.reasoning_tokens,
+                "approval": self.approval,
+                "idempotencyKey": self.idempotency_key,
+            }
+        )
 
 
 @dataclass(frozen=True)
@@ -249,6 +302,14 @@ class TimelinePage:
         if len(items) > MAX_PAGE_SIZE or any(not isinstance(item, TimelineItem) for item in items):
             raise ValueError("timeline page items are invalid")
         object.__setattr__(self, "items", items)
+
+    def to_public_dict(self) -> dict[str, Any]:
+        return {
+            "messages": [item.to_public_dict() for item in self.items],
+            "nextCursor": self.next_cursor,
+            "hasMore": self.has_more,
+            "session": copy.deepcopy(dict(self.session or {})),
+        }
 
 
 @dataclass(frozen=True)
@@ -365,8 +426,346 @@ def _safe_nonnegative_int(value: Any) -> int:
         return 0
 
 
+def _stable_hash(value: Any, *, length: int = 32) -> str:
+    encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()[:length]
+
+
+def _record_value(record: Mapping[str, Any], *names: str) -> Any:
+    for name in names:
+        value = record.get(name)
+        if value is not None and value != "":
+            return value
+    return ""
+
+
+def _record_role(record: Mapping[str, Any]) -> str:
+    role = str(record.get("role") or "").strip().lower()
+    if role in ITEM_ROLES:
+        return role
+    direction = str(record.get("direction") or "").strip().lower()
+    from_ref = record.get("from") if isinstance(record.get("from"), Mapping) else {}
+    from_id = str(record.get("fromAgentId") or from_ref.get("id") or "")
+    from_kind = str(from_ref.get("providerKind") or "").lower()
+    return "user" if direction == "request" or from_id == "user" or from_kind == "human" else "assistant"
+
+
+def _record_party(record: Mapping[str, Any], name: str) -> tuple[str, str]:
+    ref = record.get(name)
+    if isinstance(ref, Mapping):
+        return str(ref.get("name") or ref.get("id") or ""), str(ref.get("id") or "")
+    identifier = str(record.get(f"{name}AgentId") or "")
+    return str(ref or identifier), identifier
+
+
+def _record_item_kind(record: Mapping[str, Any]) -> str:
+    item_kind = str(record.get("itemKind") or record.get("kind") or "").strip().lower()
+    if item_kind in ITEM_KINDS:
+        return item_kind
+    if record.get("approval"):
+        return "approval"
+    if record.get("toolCallId") or (record.get("tools") and not record.get("text") and not record.get("thinking")):
+        return "tool"
+    if record.get("thinking") and not record.get("text"):
+        return "reasoning"
+    return "message"
+
+
+def _assert_record_scope(scope: TimelineScope, record: Mapping[str, Any]) -> None:
+    raw_provider = record.get("providerKind")
+    if raw_provider and canonical_provider_kind(raw_provider) != scope.provider_kind:
+        raise ValueError("timeline record provider is outside the requested scope")
+    raw_conversation = str(record.get("conversationId") or record.get("sessionKey") or "")
+    if raw_conversation and raw_conversation != scope.conversation_ref:
+        raise ValueError("timeline record conversation is outside the requested scope")
+    raw_agent = str(record.get("agentId") or "")
+    if raw_agent and raw_agent != scope.agent_id:
+        raise ValueError("timeline record agent is outside the requested scope")
+
+
+def _identity_for(
+    scope: TimelineScope,
+    record: Mapping[str, Any],
+    *,
+    item_kind: str,
+    role: str,
+    source: str,
+    ordinal: int,
+    epoch_ms: int,
+    sender_id: str,
+    text: str,
+    thinking: str,
+) -> tuple[str, int]:
+    native_id = _record_value(record, "messageId", "eventId", "toolCallId", "approvalId", "commEventId", "id")
+    scope_key = scope.key()
+    if native_id:
+        return "native:" + _stable_hash((scope_key, item_kind, str(native_id))), 3
+    run_id = _record_value(record, "providerRunId", "runId", "operationId")
+    turn_id = _record_value(record, "turnId", "threadId")
+    item_id = _record_value(record, "itemId")
+    if run_id and (turn_id or item_id):
+        return "run:" + _stable_hash((scope_key, item_kind, str(run_id), str(turn_id), str(item_id))), 2
+    content_signature = _stable_hash((text[:16_384], thinking[:16_384]), length=24)
+    fallback = (scope_key, item_kind, role, sender_id, source, epoch_ms, content_signature, max(0, int(ordinal)))
+    return "fallback:" + _stable_hash(fallback), 1
+
+
+def _render_version(values: Mapping[str, Any]) -> str:
+    return _stable_hash(values)
+
+
+def _timeline_sort_key(item: TimelineItem) -> tuple[Any, ...]:
+    if item.sequence:
+        return (0, item.sequence, item.epoch_ms, ITEM_KIND_ORDER[item.item_kind], item.id)
+    return (1, item.epoch_ms, ITEM_KIND_ORDER[item.item_kind], item.id)
+
+
+def _item_render_values(item: TimelineItem) -> dict[str, Any]:
+    return {
+        "role": item.role,
+        "itemKind": item.item_kind,
+        "text": item.text,
+        "thinking": item.thinking,
+        "status": item.status,
+        "tools": item.tools,
+        "media": item.media,
+        "attachments": item.attachments,
+        "approval": item.approval,
+        "from": item.from_name,
+        "fromAgentId": item.from_agent_id,
+        "to": item.to_name,
+        "toAgentId": item.to_agent_id,
+        "reasoningTokens": item.reasoning_tokens,
+        "source": item.source,
+        "idempotencyKey": item.idempotency_key,
+    }
+
+
+def encode_timeline_cursor(epoch_ms: Any, item_id: Any) -> str:
+    normalized_id = str(item_id or "")
+    if not normalized_id or len(normalized_id) > 512:
+        raise ValueError("invalid timeline cursor id")
+    payload = json.dumps(
+        {"v": 1, "ts": _safe_nonnegative_int(epoch_ms), "id": normalized_id},
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=")
+
+
+def decode_timeline_cursor(cursor: Any) -> tuple[int, str]:
+    raw = str(cursor or "").strip()
+    if not raw or len(raw) > 1_024:
+        raise ValueError("invalid timeline cursor")
+    try:
+        padding = "=" * (-len(raw) % 4)
+        payload = json.loads(base64.urlsafe_b64decode((raw + padding).encode("ascii")).decode("utf-8"))
+        epoch_ms = int(payload.get("ts"))
+        item_id = str(payload.get("id") or "")
+        if not isinstance(payload, dict) or payload.get("v") != 1 or epoch_ms < 0 or not item_id or len(item_id) > 512:
+            raise ValueError
+        return epoch_ms, item_id
+    except Exception as exc:
+        raise ValueError("invalid timeline cursor") from exc
+
+
 class ConversationTimelineService:
     """Pure canonical policies used by source and transport adapters."""
+
+    def item_from_record(
+        self,
+        scope: TimelineScope,
+        record: Mapping[str, Any],
+        *,
+        source: str,
+        ordinal: int = 0,
+        durable: bool = True,
+    ) -> TimelineItem:
+        if not isinstance(record, Mapping):
+            raise ValueError("timeline record must be a mapping")
+        _assert_record_scope(scope, record)
+        role = _record_role(record)
+        item_kind = _record_item_kind(record)
+        epoch_ms = _safe_nonnegative_int(_record_value(record, "epochMs", "ts", "timestamp"))
+        sequence = _safe_nonnegative_int(_record_value(record, "sequence", "providerSequence", "seq"))
+        text = str(record.get("text") or "")
+        reasoning_record = {
+            "thinking": record.get("thinking") or (text if item_kind == "reasoning" else ""),
+            "status": record.get("status"),
+        }
+        thinking = visible_reasoning(scope.provider_kind, reasoning_record)
+        if item_kind == "reasoning":
+            text = ""
+        from_name, from_agent_id = _record_party(record, "from")
+        to_name, to_agent_id = _record_party(record, "to")
+        normalized_source = _bounded(source or record.get("source") or scope.provider_kind, 80)
+        identity_key, identity_strength = _identity_for(
+            scope,
+            record,
+            item_kind=item_kind,
+            role=role,
+            source=normalized_source,
+            ordinal=ordinal,
+            epoch_ms=epoch_ms,
+            sender_id=from_agent_id,
+            text=text,
+            thinking=thinking,
+        )
+        item_id = "tl-" + _stable_hash(identity_key, length=24)
+        status = normalize_lifecycle(record.get("status"), default="done" if durable else "running")
+        tools = tuple(copy.deepcopy(item) for item in (record.get("tools") or ()) if isinstance(item, Mapping))
+        media = tuple(copy.deepcopy(item) for item in (record.get("media") or ()) if isinstance(item, Mapping))
+        attachments = tuple(copy.deepcopy(item) for item in (record.get("attachments") or ()) if isinstance(item, Mapping))
+        approval = copy.deepcopy(record.get("approval")) if isinstance(record.get("approval"), Mapping) else None
+        values = {
+            "role": role,
+            "itemKind": item_kind,
+            "text": text,
+            "thinking": thinking,
+            "status": status,
+            "tools": tools,
+            "media": media,
+            "attachments": attachments,
+            "approval": approval,
+            "from": from_name,
+            "fromAgentId": from_agent_id,
+            "to": to_name,
+            "toAgentId": to_agent_id,
+            "reasoningTokens": _safe_nonnegative_int(record.get("reasoningTokens")),
+            "source": normalized_source,
+            "idempotencyKey": str(record.get("idempotencyKey") or ""),
+        }
+        return TimelineItem(
+            id=item_id,
+            version=_render_version(values),
+            provider_kind=scope.provider_kind,
+            conversation_id=scope.conversation_ref,
+            provider_run_id=str(_record_value(record, "providerRunId", "runId", "operationId")),
+            item_kind=item_kind,
+            role=role,
+            text=text,
+            thinking=thinking,
+            status=status,
+            epoch_ms=epoch_ms,
+            sequence=sequence,
+            source=normalized_source,
+            tools=tools,
+            from_name=from_name,
+            from_agent_id=from_agent_id,
+            to_name=to_name,
+            to_agent_id=to_agent_id,
+            media=media,
+            attachments=attachments,
+            reasoning_tokens=values["reasoningTokens"],
+            approval=approval,
+            idempotency_key=values["idempotencyKey"],
+            identity_key=identity_key,
+            identity_strength=identity_strength,
+            durable=bool(durable),
+            source_priority=_safe_nonnegative_int(record.get("sourcePriority")),
+        )
+
+    def normalize_records(
+        self,
+        scope: TimelineScope,
+        records: Iterable[Mapping[str, Any]],
+        *,
+        source: str,
+        durable: bool = True,
+        candidate_limit: int = MAX_SOURCE_CANDIDATES,
+    ) -> tuple[TimelineItem, ...]:
+        try:
+            limit = max(1, min(int(candidate_limit), MAX_SOURCE_CANDIDATES))
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError("timeline candidate limit must be an integer") from exc
+        items = []
+        for ordinal, record in enumerate(records or ()):
+            if ordinal >= limit:
+                break
+            if not isinstance(record, Mapping):
+                continue
+            items.append(self.item_from_record(scope, record, source=source, ordinal=ordinal, durable=durable))
+        return tuple(items)
+
+    def merge_items(self, scope: TimelineScope, sources: Iterable[Iterable[TimelineItem]]) -> tuple[TimelineItem, ...]:
+        merged: dict[str, TimelineItem] = {}
+        for source in sources or ():
+            for item in source or ():
+                if not isinstance(item, TimelineItem):
+                    continue
+                if item.provider_kind != scope.provider_kind or item.conversation_id != scope.conversation_ref:
+                    raise ValueError("timeline item is outside the requested scope")
+                key = item.identity_key or item.id
+                existing = merged.get(key)
+                merged[key] = item if existing is None else self._settle_pair(existing, item)
+        return tuple(sorted(merged.values(), key=_timeline_sort_key))
+
+    def page_items(
+        self,
+        items: Iterable[TimelineItem],
+        query: TimelineQuery,
+        *,
+        session: Mapping[str, Any] | None = None,
+    ) -> TimelinePage:
+        ordered = tuple(sorted((item for item in items if isinstance(item, TimelineItem)), key=_timeline_sort_key))
+        if query.before:
+            boundary_index = next(
+                (index for index, item in enumerate(ordered) if (item.epoch_ms, item.id) == query.before),
+                None,
+            )
+            if boundary_index is not None:
+                ordered = ordered[:boundary_index]
+            else:
+                ordered = tuple(item for item in ordered if (item.epoch_ms, item.id) < query.before)
+        selected = ordered[-query.limit :]
+        has_more = len(ordered) > len(selected)
+        next_cursor = encode_timeline_cursor(selected[0].epoch_ms, selected[0].id) if selected and has_more else ""
+        return TimelinePage(selected, next_cursor, has_more, copy.deepcopy(dict(session or {})))
+
+    def read(
+        self,
+        scope: TimelineScope,
+        query: TimelineQuery,
+        sources: Iterable[Iterable[TimelineItem]],
+        *,
+        session: Mapping[str, Any] | None = None,
+    ) -> TimelinePage:
+        return self.page_items(self.merge_items(scope, sources), query, session=session)
+
+    @staticmethod
+    def _settle_pair(left: TimelineItem, right: TimelineItem) -> TimelineItem:
+        def rank(item: TimelineItem) -> tuple[Any, ...]:
+            richness = bool(item.text) + bool(item.thinking) + bool(item.tools) + bool(item.approval)
+            return (
+                item.source_priority,
+                int(item.durable),
+                int(item.status in TERMINAL_LIFECYCLES),
+                item.sequence,
+                item.epoch_ms,
+                item.identity_strength,
+                richness,
+                item.version,
+            )
+
+        winner, other = (right, left) if rank(right) > rank(left) else (left, right)
+        enriched = replace(
+            winner,
+            text=winner.text or other.text,
+            thinking=winner.thinking or other.thinking,
+            tools=winner.tools or other.tools,
+            media=winner.media or other.media,
+            attachments=winner.attachments or other.attachments,
+            approval=winner.approval or other.approval,
+            from_name=winner.from_name or other.from_name,
+            from_agent_id=winner.from_agent_id or other.from_agent_id,
+            to_name=winner.to_name or other.to_name,
+            to_agent_id=winner.to_agent_id or other.to_agent_id,
+            provider_run_id=winner.provider_run_id or other.provider_run_id,
+            idempotency_key=winner.idempotency_key or other.idempotency_key,
+            identity_strength=max(winner.identity_strength, other.identity_strength),
+            durable=winner.durable or other.durable,
+        )
+        return replace(enriched, version=_render_version(_item_render_values(enriched)))
 
     def accumulate_reasoning(self, provider_kind: Any, events: Iterable[Any]) -> tuple[ReasoningSnapshot, ...]:
         accumulator = ReasoningAccumulator()
