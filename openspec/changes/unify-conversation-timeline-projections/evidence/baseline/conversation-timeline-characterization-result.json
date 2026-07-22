@@ -1,36 +1,36 @@
 {
-  "commandCount": 8,
+  "commandCount": 9,
   "contentPolicy": "content-free",
-  "gitHead": "4a59e09de06bdc3949445e1a6617c0faee4c7294",
+  "gitHead": "988546a4c4d96e9f884763e09ab4834977355851",
   "manifest": "openspec/changes/unify-conversation-timeline-projections/evidence/baseline/conversation-timeline-characterization-manifest.json",
   "passed": true,
   "results": [
     {
-      "durationMs": 2507.737,
+      "durationMs": 554.7,
       "exitCode": 0,
       "id": "standard-chat-history-contract",
       "outputBytes": 99,
       "outputLines": 2,
-      "outputSha256": "71a602fe86aa4b4c266bee676e88618afdb3665bd9629189a7d83ba9954d7300"
+      "outputSha256": "ca4107189e93a4540eff826fa53f36e97642e7afe98dc27b4a27e4e1dfcb83d8"
     },
     {
-      "durationMs": 1041.995,
+      "durationMs": 1491.015,
       "exitCode": 0,
       "id": "project-workflow-chat-contract",
       "outputBytes": 114,
       "outputLines": 2,
-      "outputSha256": "2f4bd3953f580a75f63d33d6b214f1e9adbb97c20bc16205f1e55fd7d5d60eb0"
+      "outputSha256": "bdcaac2f3af691a4d64868dff69b2bdd0abb0e32014a433d0f1a658506a4d0d0"
     },
     {
-      "durationMs": 1891.638,
+      "durationMs": 2178.616,
       "exitCode": 0,
       "id": "provider-sse-and-isolation-contract",
       "outputBytes": 99,
       "outputLines": 2,
-      "outputSha256": "2d1d46559b80cce40bb5127d1df0e25d103f21b47118ba713b4a03dd3b4d4d09"
+      "outputSha256": "86ff2d6f0733a72f18c3a3664a828694a4539cd53a97839eb3b697026a259ffc"
     },
     {
-      "durationMs": 42.782,
+      "durationMs": 36.984,
       "exitCode": 0,
       "id": "chat-history-client-contract",
       "outputBytes": 33,
@@ -38,7 +38,7 @@
       "outputSha256": "f6c7fe42a81da8ad130ddb6b49feb344da02d8e5614c048be3e71f98640d9696"
     },
     {
-      "durationMs": 33.818,
+      "durationMs": 32.605,
       "exitCode": 0,
       "id": "chat-history-navigation-contract",
       "outputBytes": 38,
@@ -46,7 +46,7 @@
       "outputSha256": "527de8936190aede93fc2da88c7ace0abff57c11ed893cb9df9ca593947da77e"
     },
     {
-      "durationMs": 35.169,
+      "durationMs": 31.742,
       "exitCode": 0,
       "id": "provider-live-client-contract",
       "outputBytes": 32,
@@ -54,7 +54,7 @@
       "outputSha256": "6fb55eb6b0639a33ad749d806b754d44694e69c3268e00da5253ed24faed83e7"
     },
     {
-      "durationMs": 30.547,
+      "durationMs": 26.573,
       "exitCode": 0,
       "id": "project-chat-polling-contract",
       "outputBytes": 59,
@@ -62,12 +62,20 @@
       "outputSha256": "d83979fa318b7c6d9471a77d07ceabc54a6d395eb3b7484bacb5c025b15fe44d"
     },
     {
-      "durationMs": 30.688,
+      "durationMs": 28.389,
       "exitCode": 0,
       "id": "codex-reasoning-baseline",
       "outputBytes": 3,
       "outputLines": 1,
       "outputSha256": "dc51b8c96c2d745df3bd5590d990230a482fd247123599548e0632fdbf97fc22"
+    },
+    {
+      "durationMs": 1505.765,
+      "exitCode": 0,
+      "id": "allowed-difference-policy",
+      "outputBytes": 99,
+      "outputLines": 2,
+      "outputSha256": "c98726dcb0c9f0252e8160d23de79ed048961494c9d2bff5c5f7d6fc6c831163"
     }
   ],
   "schema": 1

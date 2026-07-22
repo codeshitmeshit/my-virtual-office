@@ -248,6 +248,16 @@
         "node",
         "tests/test_codex_reasoning.js"
       ]
+    },
+    {
+      "id": "allowed-difference-policy",
+      "command": [
+        ".venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/test_conversation_timeline_compatibility.py"
+      ]
     }
   ]
 }

@@ -1,0 +1,73 @@
+{
+  "schema": 1,
+  "contentPolicy": "content-free",
+  "defaultAction": "reject",
+  "comparedDimensions": [
+    "dto",
+    "status",
+    "order",
+    "events",
+    "history",
+    "interaction",
+    "visual"
+  ],
+  "allowedCorrections": [
+    {
+      "id": "claude-code-workflow-history-selection",
+      "selectors": {
+        "observation_id": "claude-code-project-history-selection",
+        "provider": "claude-code",
+        "surface": "project-execution",
+        "dimension": "history"
+      },
+      "paths": [
+        "/historySource",
+        "/canonicalDigest",
+        "/itemCount",
+        "/orderDigest"
+      ]
+    },
+    {
+      "id": "hermes-completed-reasoning-state",
+      "selectors": {
+        "observation_id": "hermes-completed-reasoning-state",
+        "provider": "hermes",
+        "surface": "project-execution",
+        "dimension": "status"
+      },
+      "paths": [
+        "/reasoningStatus",
+        "/canonicalDigest"
+      ]
+    },
+    {
+      "id": "openclaw-structured-block-consistency",
+      "selectors": {
+        "observation_id": "openclaw-structured-block-consistency",
+        "provider": "openclaw",
+        "surface": "cross-surface",
+        "dimension": "history"
+      },
+      "paths": [
+        "/canonicalDigest",
+        "/itemCount",
+        "/orderDigest"
+      ]
+    },
+    {
+      "id": "codex-single-reasoning-owner",
+      "selectors": {
+        "observation_id": "codex-single-reasoning-owner",
+        "provider": "codex",
+        "surface": "cross-surface",
+        "dimension": "history"
+      },
+      "paths": [
+        "/canonicalDigest",
+        "/itemCount",
+        "/orderDigest",
+        "/reasoningOwner"
+      ]
+    }
+  ]
+}
