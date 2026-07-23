@@ -103,6 +103,7 @@ from services.chat_history_timeline import (
     history_hash as chat_history_hash,
 )
 from services.conversation_timeline_sources import project_workflow_history
+from services.openclaw_timeline_source import OpenClawWorkflowTimelineSource
 from services.codex_fast_path import CodexEventFastPath, CodexFastPathTelemetry, CodexTransientCoalescer, classify_codex_event, load_codex_fast_path_settings
 from services.codex_feishu_approvals import (
     BoundedApprovalDeliveryExecutor,
@@ -25539,6 +25540,17 @@ def _wf_get_task_session_messages(agent_id, project_id, task_id, max_messages=50
         messages.sort(key=lambda m: int(m.get("epochMs") or m.get("ts") or 0))
         return messages[-max_messages:]
 
+    session_key = _wf_task_session_key(agent_id, project_id, task_id)
+    home_path = VO_CONFIG.get("openclaw", {}).get("homePath", os.path.expanduser("~/.openclaw"))
+    sessions_dir = os.path.join(home_path, "agents", agent_id, "sessions")
+    source = OpenClawWorkflowTimelineSource(
+        _CONVERSATION_TIMELINE_SERVICE,
+        sessions_dir,
+        lambda data, target_agent, target_key: _openclaw_get_session_info(data, target_agent, target_key)[0],
+    )
+    timeline_scope = TimelineScope.create("openclaw", agent_id, agent_id, conversation_id or task_id)
+    return source.read_messages(timeline_scope, session_key, max_messages=max_messages)
+
     """Read messages from the task-specific workflow session JSONL only."""
     session_key = _wf_task_session_key(agent_id, project_id, task_id)
     home_path = VO_CONFIG.get("openclaw", {}).get("homePath", os.path.expanduser("~/.openclaw"))
@@ -25644,8 +25656,18 @@ def _wf_get_task_session_messages(agent_id, project_id, task_id, max_messages=50
 
 
 def _wf_is_task_session_active(agent_id, project_id, task_id):
-    if _is_hermes_agent(agent_id) or _is_codex_agent(agent_id):
+    if _is_hermes_agent(agent_id) or _is_codex_agent(agent_id) or _is_claude_code_agent(agent_id):
         return False
+
+    session_key = _wf_task_session_key(agent_id, project_id, task_id)
+    home_path = VO_CONFIG.get("openclaw", {}).get("homePath", os.path.expanduser("~/.openclaw"))
+    sessions_dir = os.path.join(home_path, "agents", agent_id, "sessions")
+    source = OpenClawWorkflowTimelineSource(
+        _CONVERSATION_TIMELINE_SERVICE,
+        sessions_dir,
+        lambda data, target_agent, target_key: _openclaw_get_session_info(data, target_agent, target_key)[0],
+    )
+    return source.is_active(agent_id, session_key)
 
     """Check if the task-specific workflow session is still actively running."""
     session_key = _wf_task_session_key(agent_id, project_id, task_id)

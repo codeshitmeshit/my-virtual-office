@@ -165,10 +165,12 @@ def project_workflow_history(
         message = copy.deepcopy(dict(raw))
         if "text" in raw or normalized.get("content") is not None:
             message["text"] = item.text
-        if "thinking" in raw:
+        if "thinking" in raw or normalized.get("content") is not None:
             message["thinking"] = item.thinking
         if "tools" in raw or normalized.get("content") is not None:
             message["tools"] = copy.deepcopy(list(item.tools))
+        if "media" in raw or normalized.get("content") is not None:
+            message["media"] = copy.deepcopy(list(item.media))
         if item.thinking or raw.get("reasoningStatus") is not None:
             message["reasoningStatus"] = item.status
         projected.append(message)

@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "contentPolicy": "content-free",
+  "baselineRevision": "35a4e9d",
+  "defects": [
+    {
+      "id": "openclaw-structured-block-consistency",
+      "before": "project-parser-text-and-tool-subset",
+      "after": "shared-structured-content-projection",
+      "coveredKinds": [
+        "text",
+        "media",
+        "reasoning",
+        "tool-call",
+        "tool-result",
+        "tool-error"
+      ],
+      "regression": "tests/test_openclaw_timeline_source.py::test_structured_transcript_uses_shared_blocks_and_keeps_tool_summary"
+    }
+  ],
+  "isolationRegressions": [
+    "tests/test_openclaw_timeline_source.py::test_session_and_path_isolation_rejects_foreign_attempt_or_file",
+    "tests/test_project_execution.py::test_openclaw_workflow_chat_reads_gateway_prefixed_session"
+  ],
+  "boundsRegression": "tests/test_openclaw_timeline_source.py::test_tail_read_is_bounded_and_drops_partial_old_record"
+}
