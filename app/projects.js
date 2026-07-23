@@ -1209,20 +1209,22 @@
     function projectExecutionOrderMap(tasks) {
         const result = new Map();
         const source = (tasks || []).filter(task => task && task.id);
-        const explicit = source.map(task => ({
-            task,
-            order: Number(task.executionOrder),
-        }));
-        const hasCompleteExplicitOrder = explicit.length === source.length
-            && explicit.every(item => Number.isFinite(item.order) && item.order > 0)
-            && new Set(explicit.map(item => item.order)).size === explicit.length;
-        if (hasCompleteExplicitOrder) {
-            explicit.forEach(({ task, order }) => {
+        const used = new Set();
+        source.forEach(task => {
+            const order = Number(task.executionOrder);
+            if (Number.isInteger(order) && order > 0 && !used.has(order)) {
                 result.set(task.id, order);
-            });
-            return result;
-        }
+                used.add(order);
+            }
+        });
+        const nextAvailableOrder = (preferred) => {
+            let order = Number.isInteger(preferred) && preferred > 0 ? preferred : 1;
+            while (used.has(order)) order += 1;
+            used.add(order);
+            return order;
+        };
         source
+            .filter(task => !result.has(task.id))
             .slice()
             .sort((a, b) => {
                 const orderA = Number.isFinite(Number(a.order)) ? Number(a.order) : 999999;
@@ -1231,7 +1233,10 @@
                     || String(a.createdAt || '').localeCompare(String(b.createdAt || ''))
                     || String(a.id || '').localeCompare(String(b.id || ''));
             })
-            .forEach((task, index) => result.set(task.id, index + 1));
+            .forEach((task, index) => {
+                const legacyOrder = Number.isInteger(Number(task.order)) ? Number(task.order) + 1 : index + 1;
+                result.set(task.id, nextAvailableOrder(legacyOrder));
+            });
         return result;
     }
 
@@ -1245,7 +1250,7 @@
         const tasks = allTasks.filter(t => t.columnId === col.id).slice().sort((a, b) => (a.order || 0) - (b.order || 0));
         const colTitle = col._titleKey ? _t(col._titleKey) : col.title;
         const backlogOrderButton = isBacklogColumn(col)
-            ? `<button class="proj-col-order-btn" onclick="ProjMgr.showBacklogOrderDialog('${escHtml(col.id)}')" title="${escHtml(_tf('proj_backlog_order_edit_hint', 'Edit backlog execution order', '编辑 Backlog 执行顺序'))}">↕</button>`
+            ? `<button class="proj-col-order-btn" onclick="ProjMgr.showProjectOrderDialog()" title="${escHtml(_tf('proj_project_order_edit_hint', 'Edit project execution order', '编辑项目执行顺序'))}">↕</button>`
             : '';
         return `
         <div class="proj-col" id="col-${col.id}" data-col-id="${col.id}" style="--col-color:${col.color || '#6c757d'}">
@@ -1274,6 +1279,9 @@
     }
 
     function renderTaskCard(task, executionOrder = null) {
+        if (!Number.isFinite(executionOrder) && state.currentProject && Array.isArray(state.currentProject.tasks)) {
+            executionOrder = projectExecutionOrderMap(state.currentProject.tasks).get(task.id);
+        }
         const pc = priorityColor(task.priority);
         const due = task.dueDate;
         const overdue = due && !task.completedAt && isOverdue(due);
@@ -2628,48 +2636,48 @@
         } catch (e) { toast(_t('proj_failed_duplicate'), 'error'); }
     }
 
-    function showBacklogOrderDialog(colId) {
+    function projectColumnLabel(project, task) {
+        const column = (project.columns || []).find(item => item.id === task.columnId);
+        if (!column) return task.columnId || '';
+        return column._titleKey ? _t(column._titleKey) : (column.title || column.id || '');
+    }
+
+    function showProjectOrderDialog() {
         const p = state.currentProject;
         const overlay = document.getElementById('proj-form-overlay');
         if (!p || !overlay) return;
-        const col = (p.columns || []).find(item => item.id === colId);
         const orderMap = projectExecutionOrderMap(p.tasks || []);
-        const backlogTasks = (p.tasks || [])
-            .filter(task => task.columnId === colId)
+        const tasks = (p.tasks || [])
             .slice()
             .sort((a, b) => (orderMap.get(a.id) || 999999) - (orderMap.get(b.id) || 999999));
-        const otherOrders = (p.tasks || [])
-            .filter(task => task.columnId !== colId)
-            .map(task => orderMap.get(task.id))
-            .filter(order => Number.isFinite(order));
-        const usedText = otherOrders.length
-            ? `<div class="proj-order-used">${escHtml(_tf('proj_backlog_order_reserved', 'Reserved by other columns', '其它状态已占用'))}: ${otherOrders.slice().sort((a, b) => a - b).join(', ')}</div>`
-            : '';
         overlay.classList.remove('hidden');
         overlay.innerHTML = `
         <div class="proj-form-modal" style="position:static;padding:0;background:transparent" onclick="event.stopPropagation()">
             <div class="proj-form-box proj-order-dialog">
-                <div class="proj-form-title">${escHtml(_tf('proj_backlog_order_title', 'Edit Backlog Order', '编辑 Backlog 顺序'))}</div>
-                ${usedText}
-                <div class="proj-order-list" id="proj-backlog-order-list">
-                    ${backlogTasks.map(task => `
+                <div class="proj-form-title">${escHtml(_tf('proj_project_order_title', 'Edit Project Execution Order', '编辑项目执行顺序'))}</div>
+                <div class="proj-order-used">${escHtml(_tf('proj_project_order_scope', 'All project tasks share one unique execution order.', '项目内所有任务共用一套唯一执行顺序。'))}</div>
+                <div class="proj-order-list" id="proj-project-order-list">
+                    ${tasks.map(task => `
                     <div class="proj-order-row" data-task-id="${escHtml(task.id)}">
                         <input class="proj-order-input" type="number" min="1" step="1" value="${escHtml(String(orderMap.get(task.id) || ''))}" aria-label="${escHtml(_tf('proj_task_execution_order_hint', 'Project execution order', '项目执行顺序'))}">
-                        <div class="proj-order-title" title="${escHtml(task.title || '')}">${escHtml(task.title || '')}</div>
-                        <button type="button" class="proj-order-move" onclick="ProjMgr.moveBacklogOrderRow('${escHtml(task.id)}', -1)" title="${escHtml(_tf('proj_move_up', 'Move up', '上移'))}">↑</button>
-                        <button type="button" class="proj-order-move" onclick="ProjMgr.moveBacklogOrderRow('${escHtml(task.id)}', 1)" title="${escHtml(_tf('proj_move_down', 'Move down', '下移'))}">↓</button>
+                        <div class="proj-order-task">
+                            <div class="proj-order-title" title="${escHtml(task.title || '')}">${escHtml(task.title || '')}</div>
+                            <div class="proj-order-column">${escHtml(projectColumnLabel(p, task))}</div>
+                        </div>
+                        <button type="button" class="proj-order-move" onclick="ProjMgr.moveProjectOrderRow('${escHtml(task.id)}', -1)" title="${escHtml(_tf('proj_move_up', 'Move up', '上移'))}">↑</button>
+                        <button type="button" class="proj-order-move" onclick="ProjMgr.moveProjectOrderRow('${escHtml(task.id)}', 1)" title="${escHtml(_tf('proj_move_down', 'Move down', '下移'))}">↓</button>
                     </div>`).join('')}
                 </div>
                 <div class="proj-form-actions">
-                    <button class="proj-btn proj-btn-primary" onclick="ProjMgr.saveBacklogOrderDialog('${escHtml(colId)}')">${_t('proj_save')}</button>
+                    <button class="proj-btn proj-btn-primary" onclick="ProjMgr.saveProjectOrderDialog()">${_t('proj_save')}</button>
                     <button class="proj-btn" onclick="ProjMgr.hideFormModal()">${_t('proj_cancel')}</button>
                 </div>
             </div>
         </div>`;
     }
 
-    function moveBacklogOrderRow(taskId, direction) {
-        const list = document.getElementById('proj-backlog-order-list');
+    function moveProjectOrderRow(taskId, direction) {
+        const list = document.getElementById('proj-project-order-list');
         if (!list) return;
         const row = list.querySelector(`.proj-order-row[data-task-id="${CSS.escape(taskId)}"]`);
         if (!row) return;
@@ -2689,40 +2697,35 @@
         });
     }
 
-    async function saveBacklogOrderDialog(colId) {
+    async function saveProjectOrderDialog() {
         const p = state.currentProject;
-        const list = document.getElementById('proj-backlog-order-list');
+        const list = document.getElementById('proj-project-order-list');
         if (!p || !list) return;
         const rows = Array.from(list.querySelectorAll('.proj-order-row'));
-        const updates = [];
         const seen = new Set();
-        const orderMap = projectExecutionOrderMap(p.tasks || []);
-        const otherOrders = new Map();
-        (p.tasks || []).forEach(task => {
-            if (task.columnId !== colId) {
-                const order = orderMap.get(task.id);
-                if (Number.isFinite(order)) otherOrders.set(order, task);
-            }
-        });
+        const desiredOrders = new Map();
         for (const row of rows) {
             const taskId = row.getAttribute('data-task-id');
             const order = Number(row.querySelector('.proj-order-input')?.value);
             if (!Number.isInteger(order) || order <= 0) {
-                toast(_tf('proj_backlog_order_invalid', 'Use positive whole numbers for order.', '顺序必须是正整数。'), 'error');
+                toast(_tf('proj_project_order_invalid', 'Use positive whole numbers for order.', '顺序必须是正整数。'), 'error');
                 return;
             }
             if (seen.has(order)) {
-                toast(_tf('proj_backlog_order_duplicate', 'Backlog order values must be unique.', 'Backlog 顺序不能重复。'), 'error');
-                return;
-            }
-            if (otherOrders.has(order)) {
-                toast(_tf('proj_backlog_order_conflict', 'That order is already used by another column.', '该顺序已被其它状态任务占用。'), 'error');
+                toast(_tf('proj_project_order_duplicate', 'Project order values must be unique.', '项目执行顺序不能重复。'), 'error');
                 return;
             }
             seen.add(order);
-            updates.push({ taskId, order });
+            desiredOrders.set(taskId, order);
         }
+        const updates = (p.tasks || [])
+            .map(task => ({ taskId: task.id, order: desiredOrders.get(task.id), current: Number(task.executionOrder) }))
+            .filter(item => item.taskId && Number.isFinite(item.order) && item.current !== item.order);
         try {
+            const maxOrder = Math.max(0, ...Array.from(desiredOrders.values()));
+            if (updates.length > 1) {
+                await Promise.all(updates.map((item, index) => api.updateTask(p.id, item.taskId, { executionOrder: maxOrder + index + 1000 })));
+            }
             const results = await Promise.all(updates.map(item => api.updateTask(p.id, item.taskId, { executionOrder: item.order })));
             results.forEach(result => {
                 if (!result || !result.task) return;
@@ -2732,7 +2735,7 @@
             hideFormModal();
             const mc = getMainContent();
             if (mc) { mc.innerHTML = renderBoardView(); bindBoardEvents(); }
-            toast(_tf('proj_backlog_order_saved', 'Backlog order saved.', 'Backlog 顺序已保存。'), 'success');
+            toast(_tf('proj_project_order_saved', 'Project order saved.', '项目执行顺序已保存。'), 'success');
         } catch (e) {
             toast(_t('proj_save_failed'), 'error');
         }
@@ -4920,9 +4923,9 @@
         showQuickAdd,
         hideQuickAdd,
         submitQuickAdd,
-        showBacklogOrderDialog,
-        moveBacklogOrderRow,
-        saveBacklogOrderDialog,
+        showProjectOrderDialog,
+        moveProjectOrderRow,
+        saveProjectOrderDialog,
         hideFormModal,
         submitTextInputDialog: submitTextInputDialogAction,
         toggleProjectExecutionFields,

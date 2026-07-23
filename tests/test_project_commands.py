@@ -171,6 +171,82 @@ def test_update_task_persists_execution_order():
     assert repo.get(project["id"])["tasks"][0]["executionOrder"] == 7
 
 
+def test_update_task_rejects_invalid_or_duplicate_execution_order():
+    _, repo, common = dependencies()
+    project = create_project(repo, common).result.payload["project"]
+    first = project_commands.create_task(project["id"], {"title": "First"}, repository=repo, **common).result.payload["task"]
+    second = project_commands.create_task(project["id"], {"title": "Second"}, repository=repo, **common).result.payload["task"]
+
+    duplicate = project_commands.update_task(
+        project["id"],
+        second["id"],
+        {"executionOrder": first["executionOrder"]},
+        repository=repo,
+        system_agent_assignment_error=common["system_agent_assignment_error"],
+        execution_enabled=lambda _value: False,
+        column_locked=lambda _value: False,
+        checklist_complete=lambda _value: False,
+        can_complete_after_checklist=lambda _value: False,
+        mark_done=lambda *args: {"ok": False},
+        log_activity=common["log_activity"],
+        now=common["now"],
+        is_on_time=lambda _value: False,
+        score_values={"task_completed": 1, "critical": 0, "high": 0, "medium": 0, "on_time": 0, "checklist": 0},
+    )
+    invalid = project_commands.update_task(
+        project["id"],
+        first["id"],
+        {"executionOrder": 0},
+        repository=repo,
+        system_agent_assignment_error=common["system_agent_assignment_error"],
+        execution_enabled=lambda _value: False,
+        column_locked=lambda _value: False,
+        checklist_complete=lambda _value: False,
+        can_complete_after_checklist=lambda _value: False,
+        mark_done=lambda *args: {"ok": False},
+        log_activity=common["log_activity"],
+        now=common["now"],
+        is_on_time=lambda _value: False,
+        score_values={"task_completed": 1, "critical": 0, "high": 0, "medium": 0, "on_time": 0, "checklist": 0},
+    )
+
+    assert duplicate.result.status == 409
+    assert duplicate.result.payload["code"] == "duplicate_execution_order"
+    assert invalid.result.status == 400
+    assert invalid.result.payload["code"] == "invalid_execution_order"
+
+
+def test_update_task_rejects_execution_order_used_by_legacy_task():
+    _, repo, common = dependencies()
+    project = create_project(repo, common).result.payload["project"]
+    first = project_commands.create_task(project["id"], {"title": "First"}, repository=repo, **common).result.payload["task"]
+    second = project_commands.create_task(project["id"], {"title": "Second"}, repository=repo, **common).result.payload["task"]
+    repo.update(
+        project["id"],
+        lambda value: next(item for item in value["tasks"] if item["id"] == first["id"]).update({"executionOrder": None}),
+    )
+
+    duplicate = project_commands.update_task(
+        project["id"],
+        second["id"],
+        {"executionOrder": 1},
+        repository=repo,
+        system_agent_assignment_error=common["system_agent_assignment_error"],
+        execution_enabled=lambda _value: False,
+        column_locked=lambda _value: False,
+        checklist_complete=lambda _value: False,
+        can_complete_after_checklist=lambda _value: False,
+        mark_done=lambda *args: {"ok": False},
+        log_activity=common["log_activity"],
+        now=common["now"],
+        is_on_time=lambda _value: False,
+        score_values={"task_completed": 1, "critical": 0, "high": 0, "medium": 0, "on_time": 0, "checklist": 0},
+    )
+
+    assert duplicate.result.status == 409
+    assert duplicate.result.payload["code"] == "duplicate_execution_order"
+
+
 def test_comment_columns_update_and_delete_use_repository():
     _, repo, common = dependencies()
     project = create_project(repo, common).result.payload["project"]

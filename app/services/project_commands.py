@@ -12,6 +12,7 @@ from .project_materialization import (
     materialize_project_base,
     materialize_task_base,
 )
+from .project_execution_ordering import execution_order_map
 from .project_repository import ProjectAlreadyExistsError, ProjectConflictError, ProjectNotFoundError, ProjectRepository
 
 
@@ -308,6 +309,25 @@ def update_task(
             log_activity(project, "task_moved", by, f"Moved '{task['title']}' from {old_column} to {new_column}", task_id)
         if "priority" in mutable_body and mutable_body["priority"] != task.get("priority"): log_activity(project, "task_priority_changed", by, f"Priority changed: {task.get('priority')} → {mutable_body['priority']}", task_id)
         if "assignee" in mutable_body and mutable_body["assignee"] != task.get("assignee"): log_activity(project, "task_assigned", by, f"Assigned to {mutable_body['assignee']}", task_id)
+        if "executionOrder" in mutable_body:
+            try:
+                execution_order = int(mutable_body.get("executionOrder"))
+            except (TypeError, ValueError):
+                raise ValueError("invalid_execution_order")
+            if execution_order <= 0:
+                raise ValueError("invalid_execution_order")
+            duplicate = None
+            effective_orders = execution_order_map(project)
+            for item in project.get("tasks", []):
+                if item.get("id") == task_id:
+                    continue
+                other_execution_order = effective_orders.get(item.get("id"))
+                if other_execution_order == execution_order:
+                    duplicate = item
+                    break
+            if duplicate:
+                raise ValueError("duplicate_execution_order")
+            mutable_body["executionOrder"] = execution_order
         fields = ["title", "description", "columnId", "order", "executionOrder", "priority", "assignee", "assigneeBranch", "executorAgentId", "reviewerAgentId", "dueDate", "tags", "checklist", "meetingActionItems", "meetingDecisionHistory", "meetingDiscussionPoints", "meetingRecords", "completedAt", "requiresUserAcceptance", "allowReviewerlessExecution", "scheduledRepeatEnabled"]
         changed_fields = []
         for field in fields:
@@ -328,6 +348,10 @@ def update_task(
     except PermissionError as exc:
         if str(exc) == "column_locked": return CommandOutcome(ServiceResult(409, {"error": "Project Execution is controlling this task column; wait for the state machine transition or stop/reset execution before moving it manually.", "code": "project_execution_column_locked"}))
         return CommandOutcome(ServiceResult(409, {"error": "Project Execution tasks require final user acceptance before Done"}))
+    except ValueError as exc:
+        if str(exc) == "duplicate_execution_order":
+            return CommandOutcome(ServiceResult(409, {"error": "Execution order is already used by another task", "code": "duplicate_execution_order"}))
+        return CommandOutcome(ServiceResult(400, {"error": "executionOrder must be a positive integer", "code": "invalid_execution_order"}))
     return CommandOutcome(ServiceResult(200, {"ok": True, "task": post["task"]}), post)
 
 

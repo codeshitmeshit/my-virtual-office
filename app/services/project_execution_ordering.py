@@ -24,12 +24,46 @@ def task_execution_order(task: Mapping[str, Any], index: int = 0) -> int:
     return legacy + 1
 
 
+def execution_order_map(project: Mapping[str, Any]) -> dict[Any, int]:
+    tasks = [task for task in project.get("tasks", []) or [] if isinstance(task, dict) and task.get("id")]
+    result: dict[Any, int] = {}
+    used: set[int] = set()
+    for task in tasks:
+        try:
+            explicit = int(task.get("executionOrder") or 0)
+        except (TypeError, ValueError):
+            explicit = 0
+        if explicit > 0 and explicit not in used:
+            result[task.get("id")] = explicit
+            used.add(explicit)
+
+    def next_available(preferred: int) -> int:
+        order = preferred if preferred > 0 else 1
+        while order in used:
+            order += 1
+        used.add(order)
+        return order
+
+    missing = [(index, task) for index, task in enumerate(tasks) if task.get("id") not in result]
+    missing.sort(
+        key=lambda item: (
+            task_execution_order(item[1], item[0]),
+            item[1].get("createdAt") or "",
+            item[1].get("id") or "",
+        )
+    )
+    for index, task in missing:
+        result[task.get("id")] = next_available(task_execution_order(task, index))
+    return result
+
+
 def ordered_tasks(project: Mapping[str, Any]) -> list[Task]:
     tasks = [task for task in project.get("tasks", []) or [] if isinstance(task, dict)]
+    order_map = execution_order_map(project)
     indexed = list(enumerate(tasks))
     indexed.sort(
         key=lambda item: (
-            task_execution_order(item[1], item[0]),
+            order_map.get(item[1].get("id"), task_execution_order(item[1], item[0])),
             item[1].get("createdAt") or "",
             item[1].get("id") or "",
         )

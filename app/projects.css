@@ -1861,6 +1861,15 @@
     text-overflow: ellipsis;
     white-space: nowrap;
 }
+.proj-order-task {
+    min-width: 0;
+}
+.proj-order-column {
+    color: #8b91ad;
+    font-size: 11px;
+    margin-top: 3px;
+    text-transform: uppercase;
+}
 .proj-order-move {
     width: 34px;
     height: 34px;
