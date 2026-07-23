@@ -91,7 +91,7 @@ from services.provider_runs import ProviderRunCoordinator
 from services.chat_commands import ChatCommand, ChatCommandService, CommandRequest, CommandScope, parse_chat_command
 from services.chat_command_providers import ChatProviderCommandAdapter, CodexCompactAdapter, ScopedConversationResetAdapter
 from services.chat_command_runtime import CallbackCommandAuditPort, CommandFeatureFlags, CommandMetrics, ScopedCommandReservations
-from services.conversation_timeline import ConversationTimelineService, TimelineScope
+from services.conversation_timeline import ConversationTimelineService
 from services.chat_history_timeline import (
     ChatHistoryTimelineService,
     SOURCE_CACHE_BYTE_LIMIT,
@@ -102,10 +102,8 @@ from services.chat_history_timeline import (
     extract_content as extract_chat_history_content,
     history_hash as chat_history_hash,
 )
-from services.conversation_timeline_sources import project_workflow_history
 from services.conversation_timeline_events import ProviderTimelineItemProjector
-from services.codex_workflow_timeline_source import CodexWorkflowTimelineSource
-from services.openclaw_timeline_source import OpenClawWorkflowTimelineSource
+from services.project_workflow_timeline import ProjectWorkflowTimelinePorts, ProjectWorkflowTimelineRouter
 from services.codex_fast_path import CodexEventFastPath, CodexFastPathTelemetry, CodexTransientCoalescer, classify_codex_event, load_codex_fast_path_settings
 from services.codex_feishu_approvals import (
     BoundedApprovalDeliveryExecutor,
@@ -25425,21 +25423,22 @@ def _wf_clear_persisted_state(project_id):
         pass
 
 
+def _wf_agent_descriptor(agent_id):
+    if _is_hermes_agent(agent_id):
+        return {**(_get_hermes_agent(agent_id) or {}), "providerKind": "hermes"}
+    if _is_codex_agent(agent_id):
+        return {**(_get_codex_agent(agent_id) or {}), "providerKind": "codex"}
+    if _is_claude_code_agent(agent_id):
+        return {**(_get_claude_code_agent(agent_id) or {}), "providerKind": "claude-code"}
+    return {"providerKind": "openclaw", "providerAgentId": agent_id}
+
+
 def _handle_workflow_chat(project_id):
     """Return the compatible workflow-chat envelope for one resolved execution scope."""
 
     def workflow_state(target_project_id):
         with _WORKFLOW_LOCK:
             return dict(_WORKFLOW_STATE.get(target_project_id, {}))
-
-    def agent_descriptor(agent_id):
-        if _is_hermes_agent(agent_id):
-            return _get_hermes_agent(agent_id) or {"providerKind": "hermes"}
-        if _is_codex_agent(agent_id):
-            return _get_codex_agent(agent_id) or {"providerKind": "codex"}
-        if _is_claude_code_agent(agent_id):
-            return _get_claude_code_agent(agent_id) or {"providerKind": "claude-code"}
-        return {"providerKind": "openclaw", "providerAgentId": agent_id}
 
     service = project_workflow_chat_service.ProjectWorkflowChatService(
         project_workflow_chat_service.ProjectWorkflowChatPorts(
@@ -25448,7 +25447,7 @@ def _handle_workflow_chat(project_id):
             load_projects=_load_projects,
             project_execution_enabled=_project_execution_enabled,
             task_agent_id=_project_execution_task_agent_id,
-            agent_descriptor=agent_descriptor,
+            agent_descriptor=_wf_agent_descriptor,
             read_messages=lambda agent, project, task, conversation: _wf_get_task_session_messages(
                 agent, project, task, conversation_id=conversation
             ),
@@ -25458,237 +25457,44 @@ def _handle_workflow_chat(project_id):
     return service.read(project_id)
 
 
-def _codex_reasoning_events_to_chat_messages(events, agent_id, max_messages=50):
-    states = {}
-    ordered = []
-    for event in events:
-        if event.get("type") != "reasoning":
-            continue
-        key = f"{event.get('operationId') or event.get('turnId') or event.get('threadId') or 'turn'}:{event.get('itemId') or 'reasoning'}"
-        state = states.get(key)
-        if not state:
-            state = {"text": "", "ids": set(), "lastTs": 0, "status": "running"}
-            states[key] = state
-            ordered.append((key, state))
-        event_id = event.get("id")
-        if event_id and event_id in state["ids"]:
-            continue
-        if event_id:
-            state["ids"].add(event_id)
-        incoming = _provider_visible_thinking("codex", {**event, "thinking": event.get("text") or event.get("output") or ""})
-        if not incoming:
-            continue
-        if event.get("replace") and incoming.strip():
-            state["text"] = incoming
-        else:
-            if event.get("boundary") and state["text"].strip() and not state["text"].endswith("\n\n"):
-                state["text"] += "\n\n"
-            state["text"] += incoming
-        state["lastTs"] = max(int(event.get("ts") or 0), int(state.get("lastTs") or 0))
-        state["status"] = event.get("status") or state.get("status") or "running"
+def _wf_timeline_router():
+    def openclaw_sessions_dir(agent_id):
+        home_path = VO_CONFIG.get("openclaw", {}).get("homePath", os.path.expanduser("~/.openclaw"))
+        return os.path.join(home_path, "agents", agent_id, "sessions")
 
-    messages = []
-    for _, state in ordered:
-        text = state.get("text", "").strip()
-        if not text:
-            continue
-        messages.append({
-            "role": "assistant",
-            "text": "",
-            "thinking": text,
-            "reasoningStatus": state.get("status") or "running",
-            "ts": state.get("lastTs") or 0,
-            "epochMs": state.get("lastTs") or 0,
-            "fromAgentId": agent_id,
-            "source": "codex-activity",
-        })
-    return messages[-max_messages:]
+    return ProjectWorkflowTimelineRouter(
+        _CONVERSATION_TIMELINE_SERVICE,
+        ProjectWorkflowTimelinePorts(
+            agent_descriptor=_wf_agent_descriptor,
+            hermes_history=_load_hermes_history,
+            claude_history=lambda profile, conversation: _sanitize_claude_code_history_messages(
+                _load_claude_code_history(profile, conversation)
+            ),
+            communication_history=lambda conversation, limit: _load_comm_history(
+                limit=limit,
+                conversation_id=conversation,
+            ),
+            project_communication=_comm_event_to_chat_message,
+            codex_activity=lambda agent, conversation: _get_codex_activity(agent, conversation, 0),
+            openclaw_sessions_dir=openclaw_sessions_dir,
+            resolve_openclaw_session=lambda data, agent, key: _openclaw_get_session_info(data, agent, key)[0],
+            task_session_key=_wf_task_session_key,
+        ),
+    )
 
 
 def _wf_get_task_session_messages(agent_id, project_id, task_id, max_messages=50, conversation_id=None):
-    if _is_hermes_agent(agent_id):
-        agent = _get_hermes_agent(agent_id) or {}
-        profile = agent.get("profile") or agent.get("providerAgentId") or "default"
-        timeline_scope = TimelineScope.create("hermes", agent_id, profile, conversation_id or task_id)
-        return project_workflow_history(
-            _CONVERSATION_TIMELINE_SERVICE,
-            timeline_scope,
-            _load_hermes_history(profile, conversation_id),
-            source="hermes",
-            limit=max_messages,
-        )
-    if _is_claude_code_agent(agent_id):
-        agent = _get_claude_code_agent(agent_id) or {}
-        profile = agent.get("profile") or agent.get("providerAgentId") or "main"
-        timeline_scope = TimelineScope.create("claude-code", agent_id, profile, conversation_id or task_id)
-        return project_workflow_history(
-            _CONVERSATION_TIMELINE_SERVICE,
-            timeline_scope,
-            _sanitize_claude_code_history_messages(_load_claude_code_history(profile, conversation_id)),
-            source="claude-code",
-            limit=max_messages,
-        )
-    if _is_codex_agent(agent_id):
-        codex_conversation_id = conversation_id or task_id
-        timeline_scope = TimelineScope.create("codex", agent_id, "", codex_conversation_id)
-        source = CodexWorkflowTimelineSource(
-            _CONVERSATION_TIMELINE_SERVICE,
-            lambda target_conversation, limit: _load_comm_history(
-                limit=limit,
-                conversation_id=target_conversation,
-            ),
-            _comm_event_to_chat_message,
-            lambda target_agent, target_conversation: _get_codex_activity(
-                target_agent,
-                target_conversation,
-                0,
-            ),
-        )
-        return source.read_messages(timeline_scope, max_messages=max_messages)
-
-    session_key = _wf_task_session_key(agent_id, project_id, task_id)
-    home_path = VO_CONFIG.get("openclaw", {}).get("homePath", os.path.expanduser("~/.openclaw"))
-    sessions_dir = os.path.join(home_path, "agents", agent_id, "sessions")
-    source = OpenClawWorkflowTimelineSource(
-        _CONVERSATION_TIMELINE_SERVICE,
-        sessions_dir,
-        lambda data, target_agent, target_key: _openclaw_get_session_info(data, target_agent, target_key)[0],
+    return _wf_timeline_router().read(
+        agent_id,
+        project_id,
+        task_id,
+        max_messages=max_messages,
+        conversation_id=conversation_id,
     )
-    timeline_scope = TimelineScope.create("openclaw", agent_id, agent_id, conversation_id or task_id)
-    return source.read_messages(timeline_scope, session_key, max_messages=max_messages)
-
-    """Read messages from the task-specific workflow session JSONL only."""
-    session_key = _wf_task_session_key(agent_id, project_id, task_id)
-    home_path = VO_CONFIG.get("openclaw", {}).get("homePath", os.path.expanduser("~/.openclaw"))
-    sessions_dir = os.path.join(home_path, "agents", agent_id, "sessions")
-    sessions_json_path = os.path.join(sessions_dir, "sessions.json")
-
-    try:
-        with open(sessions_json_path, "r") as f:
-            sessions_data = json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return []
-
-    session_info, _ = _openclaw_get_session_info(sessions_data, agent_id, session_key)
-    if not session_info:
-        return []
-
-    session_id = session_info.get("sessionId", "")
-    jsonl_path = session_info.get("sessionFile") or (os.path.join(sessions_dir, f"{session_id}.jsonl") if session_id else "")
-    if not os.path.exists(jsonl_path):
-        return []
-
-    messages = []
-    try:
-        # Read tail of file — use a larger buffer to handle long lines (tool results
-        # can be 100KB+). Read last 256KB to ensure we capture multiple complete lines.
-        TAIL_BYTES = 256 * 1024
-        with open(jsonl_path, "rb") as fb:
-            fb.seek(0, 2)
-            fsize = fb.tell()
-            start = max(0, fsize - TAIL_BYTES)
-            fb.seek(start)
-            tail_data = fb.read().decode("utf-8", errors="replace")
-        if start > 0:
-            nl = tail_data.find("\n")
-            if nl >= 0:
-                tail_data = tail_data[nl + 1:]
-        for line in tail_data.split("\n"):
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                entry = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            msg = entry.get("message", entry)
-            role = msg.get("role")
-            if role not in ("user", "assistant"):
-                continue
-            content = msg.get("content", [])
-            text = ""
-            tool_info = []
-            if isinstance(content, str):
-                text = content
-            elif isinstance(content, list):
-                for c in content:
-                    if isinstance(c, dict):
-                        if c.get("type") == "text":
-                            text += c.get("text", "")
-                        elif c.get("type") == "toolCall":
-                            name = c.get("name", "?")
-                            args = c.get("arguments", {})
-                            # Build a human-readable summary instead of bare tool name
-                            summary = name
-                            if isinstance(args, dict):
-                                if name in ("read", "Read") and (args.get("file") or args.get("path") or args.get("file_path")):
-                                    fpath = args.get("file") or args.get("path") or args.get("file_path") or ""
-                                    summary = f"Reading {fpath.split('/')[-1] if '/' in fpath else fpath}"
-                                elif name in ("edit", "Edit"):
-                                    fpath = args.get("file") or args.get("path") or args.get("file_path") or ""
-                                    summary = f"Editing {fpath.split('/')[-1] if '/' in fpath else fpath}"
-                                elif name in ("write", "Write"):
-                                    fpath = args.get("file") or args.get("path") or args.get("file_path") or ""
-                                    summary = f"Writing {fpath.split('/')[-1] if '/' in fpath else fpath}"
-                                elif name == "exec":
-                                    cmd = args.get("command", "")
-                                    summary = f"Running: {cmd[:80]}" if cmd else "exec"
-                                elif name == "web_search":
-                                    query = args.get("query", "")
-                                    summary = f"Searching: {query[:60]}" if query else "web_search"
-                                elif name == "web_fetch":
-                                    url = args.get("url", "")
-                                    summary = f"Fetching: {url[:60]}" if url else "web_fetch"
-                                elif name == "browser":
-                                    action = args.get("action", "")
-                                    summary = f"Browser: {action}" if action else "browser"
-                                elif name == "sessions_send":
-                                    target = args.get("sessionKey") or args.get("label") or ""
-                                    summary = f"Messaging: {target[:40]}" if target else "sessions_send"
-                            tool_info.append({"name": summary, "args_preview": ""})
-                        elif c.get("type") == "toolResult":
-                            pass  # skip tool results for chat display
-            if text or tool_info:
-                m = {"role": role, "timestamp": msg.get("timestamp", entry.get("timestamp", 0))}
-                if text:
-                    m["text"] = text[:2000]
-                if tool_info:
-                    m["tools"] = tool_info[:5]  # cap tool display
-                messages.append(m)
-        messages = messages[-max_messages:]
-    except Exception:
-        pass
-    return messages
 
 
 def _wf_is_task_session_active(agent_id, project_id, task_id):
-    if _is_hermes_agent(agent_id) or _is_codex_agent(agent_id) or _is_claude_code_agent(agent_id):
-        return False
-
-    session_key = _wf_task_session_key(agent_id, project_id, task_id)
-    home_path = VO_CONFIG.get("openclaw", {}).get("homePath", os.path.expanduser("~/.openclaw"))
-    sessions_dir = os.path.join(home_path, "agents", agent_id, "sessions")
-    source = OpenClawWorkflowTimelineSource(
-        _CONVERSATION_TIMELINE_SERVICE,
-        sessions_dir,
-        lambda data, target_agent, target_key: _openclaw_get_session_info(data, target_agent, target_key)[0],
-    )
-    return source.is_active(agent_id, session_key)
-
-    """Check if the task-specific workflow session is still actively running."""
-    session_key = _wf_task_session_key(agent_id, project_id, task_id)
-    home_path = VO_CONFIG.get("openclaw", {}).get("homePath", os.path.expanduser("~/.openclaw"))
-    sessions_dir = os.path.join(home_path, "agents", agent_id, "sessions")
-    sessions_json_path = os.path.join(sessions_dir, "sessions.json")
-
-    try:
-        with open(sessions_json_path, "r") as f:
-            sessions_data = json.load(f)
-        session_info, _ = _openclaw_get_session_info(sessions_data, agent_id, session_key)
-        status = session_info.get("status", "")
-        return status == "running"
-    except Exception:
-        return False
+    return _wf_timeline_router().is_active(agent_id, project_id, task_id)
 
 
 def _handle_workflow_start(project_id, body=None):
