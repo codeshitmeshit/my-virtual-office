@@ -75,6 +75,7 @@ from services import hr_manual_daily_sync as hr_manual_daily_sync_service
 from services import hr_runtime as hr_runtime_service
 from services import hr_scheduler as hr_scheduler_service
 from services import vo_agent_communication as vo_agent_communication_service
+from services.project_execution_ordering import first_incomplete_task
 from services import system_agent_lifecycle as system_agent_lifecycle_service
 from services import system_agent_profiles as system_agent_profiles_service
 from services import system_agent_policy as system_agent_policy_service
@@ -19094,34 +19095,10 @@ def _project_execution_is_startable_task(task):
 
 
 def _project_execution_next_task(project):
-    done_cols = _project_execution_done_column_ids(project)
-    col_order = {c.get("id"): idx for idx, c in enumerate(sorted(project.get("columns", []), key=lambda c: c.get("order", 0)))}
-    candidates = []
-    for idx, task in enumerate(project.get("tasks", [])):
-        if task.get("columnId") in done_cols:
-            continue
-        if not _project_execution_is_startable_task(task):
-            continue
-        executor_id = _project_execution_executor_agent_id(project, task)
-        if not executor_id or not _office_agent_lookup(executor_id):
-            continue
-        try:
-            execution_order = int(task.get("executionOrder") or 0)
-        except (TypeError, ValueError):
-            execution_order = 0
-        try:
-            fallback_order = int(task.get("order"))
-        except (TypeError, ValueError):
-            fallback_order = idx
-        candidates.append((
-            execution_order if execution_order > 0 else fallback_order + 1,
-            col_order.get(task.get("columnId"), 9999),
-            task.get("order", idx),
-            idx,
-            task,
-        ))
-    candidates.sort(key=lambda item: (item[0], item[1], item[2]))
-    return candidates[0][4] if candidates else None
+    task = first_incomplete_task(project)
+    if task is None or not _project_execution_is_startable_task(task):
+        return None
+    return task
 
 
 def _project_execution_all_tasks_repeatable(project):

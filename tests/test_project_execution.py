@@ -1680,6 +1680,57 @@ def test_project_level_start_uses_global_execution_order_before_column_order():
             restore_store(old)
 
 
+def test_direct_task_start_rejects_out_of_order_task():
+    with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as workspace:
+        old = with_store(status_dir)
+        try:
+            project, _first = create_project_execution_project(workspace)
+            second = server._handle_task_create(project["id"], {
+                "title": "Second task",
+                "columnId": project["columns"][0]["id"],
+                "assignee": "executor",
+                "executorAgentId": "executor",
+            })["task"]
+
+            result = server._handle_project_execution_start(project["id"], second["id"], {})
+
+            assert result["_status"] == 409
+            assert result["code"] == "project_execution_order_blocked"
+            assert result["priorTaskTitle"] == "Implement fixture"
+        finally:
+            restore_store(old)
+
+
+def test_project_level_start_does_not_skip_lower_order_unassignable_task():
+    with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as workspace:
+        old = with_store(status_dir)
+        try:
+            project, first = create_project_execution_project(workspace)
+            second = server._handle_task_create(project["id"], {
+                "title": "Executable second task",
+                "columnId": project["columns"][0]["id"],
+                "assignee": "executor",
+                "executorAgentId": "executor",
+            })["task"]
+            data = server._load_projects()
+            stored = next(item for item in data["projects"] if item["id"] == project["id"])
+            for task in stored["tasks"]:
+                if task["id"] == first["id"]:
+                    task["executorAgentId"] = "missing-agent"
+                    task["executionOrder"] = 1
+                elif task["id"] == second["id"]:
+                    task["executionOrder"] = 2
+            server._save_projects(data)
+
+            result = server._handle_project_execution_project_start(project["id"], {"mode": "single"})
+
+            assert result["_status"] == 409
+            assert result["code"] == "executor_required"
+            assert result["selectedTask"]["id"] == first["id"]
+        finally:
+            restore_store(old)
+
+
 def test_project_execution_transition_syncs_state_columns():
     with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as workspace:
         old = with_store(status_dir)

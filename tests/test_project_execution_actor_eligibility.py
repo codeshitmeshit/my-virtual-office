@@ -57,12 +57,12 @@ def test_human_executor_remains_trackable_but_direct_automation_is_rejected(monk
 
     assert roles["ok"] is False
     assert roles["code"] == "executor_required"
-    assert server._project_execution_next_task(project) is None
+    assert server._project_execution_next_task(project)["id"] == "human-task"
     assert project["tasks"] == [human_task]
     assert human_task["executionState"] == "backlog"
 
 
-def test_hybrid_project_skips_human_task_and_selects_executable_agent(monkeypatch):
+def test_hybrid_project_keeps_lower_order_human_task_before_agent_task(monkeypatch):
     registered = {"builder": {"id": "builder"}}
     monkeypatch.setattr(server, "_office_agent_lookup", registered.get)
     human_task = _task(
@@ -81,7 +81,7 @@ def test_hybrid_project_skips_human_task_and_selects_executable_agent(monkeypatc
 
     selected = server._project_execution_next_task(project)
 
-    assert selected["id"] == "agent-task"
+    assert selected["id"] == "human-task"
     assert human_task["executionState"] == "backlog"
 
 

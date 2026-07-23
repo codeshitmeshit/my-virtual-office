@@ -13,6 +13,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Callable, Protocol
 
+from services.project_execution_ordering import prior_incomplete_task
 from services.project_repository import ProjectNotFoundError
 
 
@@ -407,6 +408,22 @@ def start_task(
         return _status({"error": "Project or task not found"}, 404)
     if not snapshot_project.get("projectExecutionEnabled"):
         return _status({"error": "Project Execution is not enabled for this project"}, 409)
+    active = ports.active_task(snapshot_project)
+    if active:
+        return _status({"error": "Another task is already active for this project", "activeTaskId": active.get("id")}, 409)
+    prior_task = prior_incomplete_task(snapshot_project, task_id)
+    if prior_task is not None:
+        return _status(
+            {
+                "ok": False,
+                "error": "A lower-order task must be completed before this task can start",
+                "code": "project_execution_order_blocked",
+                "taskId": task_id,
+                "priorTaskId": prior_task.get("id"),
+                "priorTaskTitle": prior_task.get("title", ""),
+            },
+            409,
+        )
 
     workspace_path = snapshot_project.get("workspacePath")
     allow_workspace_optional = (
@@ -485,11 +502,24 @@ def start_task(
             return _status({"error": "Project or task not found"}, 404)
         if not project.get("projectExecutionEnabled"):
             return _status({"error": "Project Execution is not enabled for this project"}, 409)
-        if project.get("workspacePath") != workspace_path:
-            return _status({"error": "Project workspace changed while execution was being prepared", "code": "workspace_changed"}, 409)
         active = ports.active_task(project)
         if active:
             return _status({"error": "Another task is already active for this project", "activeTaskId": active.get("id")}, 409)
+        prior_task = prior_incomplete_task(project, task_id)
+        if prior_task is not None:
+            return _status(
+                {
+                    "ok": False,
+                    "error": "A lower-order task must be completed before this task can start",
+                    "code": "project_execution_order_blocked",
+                    "taskId": task_id,
+                    "priorTaskId": prior_task.get("id"),
+                    "priorTaskTitle": prior_task.get("title", ""),
+                },
+                409,
+            )
+        if project.get("workspacePath") != workspace_path:
+            return _status({"error": "Project workspace changed while execution was being prepared", "code": "workspace_changed"}, 409)
         reopened = False
         if task.get("completedAt"):
             if task.get("scheduledRepeatEnabled") is not True:
