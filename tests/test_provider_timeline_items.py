@@ -57,6 +57,37 @@ def test_reasoning_replay_boundary_replace_and_terminal_share_one_item():
     assert items[-1]["status"] == "done"
 
 
+def test_reasoning_replay_across_sse_and_activity_poll_uses_native_event_identity():
+    projector = ProviderTimelineItemProjector(ConversationTimelineService())
+    native = {
+        "id": "native-reasoning-event",
+        "type": "reasoning",
+        "operationId": "turn",
+        "itemId": "reason",
+        "text": "once",
+        "status": "running",
+        "sequence": 1,
+    }
+    streamed = projector.project(
+        "reasoning.available",
+        {"eventId": 99, "runId": "run", "activity": native},
+        "codex",
+        "agent",
+        "conversation",
+        99,
+    )
+    polled = projector.project(
+        "reasoning.available",
+        native,
+        "codex",
+        "agent",
+        "conversation",
+        1,
+    )
+    assert streamed["id"] == polled["id"]
+    assert streamed["thinking"] == polled["thinking"] == "once"
+
+
 def test_tool_and_run_lifecycle_keep_stable_scoped_identity():
     projector = ProviderTimelineItemProjector(ConversationTimelineService())
     tool_start = projector.project("tool.started", {"runId": "run", "toolCallId": "tool", "name": "read"}, "hermes", "agent", "conversation", 1)

@@ -272,7 +272,9 @@ const makeMessage = (id, epochMs, overrides = {}) => ({
   const ctx = makeContext('live');
   const optimistic = store.insertOptimistic(ctx, makeMessage('optimistic', 1, { status: 'running' }));
   assert.equal(store.getOrCreate(ctx).messages.has(optimistic.id), true);
-  store.applyLiveEvent(ctx, 'run.completed', makeMessage('optimistic', 1, { status: 'done', version: 'final', text: 'final' }));
+  store.applyLiveEvent(ctx, 'run.completed', {
+    timelineItem: makeMessage('optimistic', 1, { status: 'done', version: 'final', text: 'final' }),
+  });
   assert.equal(store.getOrCreate(ctx).messages.get('optimistic').text, 'final');
   store.removeMessage(ctx, 'optimistic');
   assert.equal(store.getOrCreate(ctx).messages.has('optimistic'), false);
@@ -299,6 +301,9 @@ const makeMessage = (id, epochMs, overrides = {}) => ({
   assert.equal(item.thinking, 'canonical reasoning', 'timelineItem must own live reasoning');
   assert.equal(item.tools[0].status, 'done', 'timelineItem must own tool lifecycle');
   assert.equal(store.getOrCreate(ctx).messages.has('legacy-run'), false, 'legacy payload identity must not be re-derived');
+  const canonicalOrder = store.getOrCreate(ctx).order.slice();
+  store.applyLiveEvent(ctx, 'run.completed', makeMessage('old-server-shape', 20, { status: 'done' }));
+  assert.deepEqual(JSON.parse(JSON.stringify(store.getOrCreate(ctx).order)), JSON.parse(JSON.stringify(canonicalOrder)), 'legacy live DTO fallback must stay removed');
 
   store.applyLiveEvent(ctx, 'tool.completed', {
     timelineItem: makeMessage('same-time-later', 20, { sequence: 3, status: 'done' }),
@@ -332,25 +337,6 @@ const makeMessage = (id, epochMs, overrides = {}) => ({
   assert.equal(entry.messages.has('optimistic-slot-2'), true, 'same text under a different request key must remain distinct');
   assert.deepEqual(JSON.parse(JSON.stringify(reconciliations)), [{
     optimisticId: 'optimistic-slot-1', authoritativeId: 'persisted-1', idempotencyKey: 'request-1',
-  }]);
-}
-
-{
-  const reconciliations = [];
-  const store = new runtime.ChatHistoryStore({ fetchImpl: context.fetch });
-  const ctx = makeContext('provider-final-reconcile');
-  const view = { activation: 0, onHistoryEntryChanged: (_entry, mutation) => reconciliations.push(...(mutation.reconciled || [])) };
-  const { entry } = store.activate(ctx, view);
-  store.applyLiveEvent(ctx, 'run.completed', makeMessage('run-codex-run-1-final', 1000, {
-    role: 'assistant', text: '验收通过', status: 'done',
-  }), { notify: false });
-  store.mergePage(entry, { messages: [makeMessage('communication-reply-1', 1005, {
-    role: 'assistant', text: '验收通过', status: 'done', source: 'agent-platform-communications',
-  })] }, 'latest');
-  assert.equal(entry.messages.has('run-codex-run-1-final'), false, 'authoritative communication history must replace the transient run final');
-  assert.equal(entry.messages.has('communication-reply-1'), true);
-  assert.deepEqual(JSON.parse(JSON.stringify(reconciliations)), [{
-    providerRunId: 'codex-run-1', authoritativeId: 'communication-reply-1',
   }]);
 }
 

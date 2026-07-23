@@ -67,9 +67,9 @@ assert.ok(normalizedRenderBody.includes('cachedHtml'), 'cached HTML must flow th
 assert.ok(normalizedRenderBody.includes('normalizeHermesTools(message.tools || [])'), 'tool cards must be reconstructed for the active ChatWindow');
 assert.ok(normalizedRenderBody.includes('approval: message.approval || null'), 'approval cards must be reconstructed for the active ChatWindow');
 
-assert.ok(chat.includes('mergeLiveHistoryRecord(eventName, payload)'), 'provider and Gateway final events need one normalized Store merge hook');
+assert.ok(chat.includes('applyCanonicalLiveHistoryItem(eventName, payload)'), 'provider final events need one canonical Store merge hook');
 assert.ok(chat.includes("if (eventName === 'message.delta') return"), 'streaming deltas must remain transient in the live layer');
-assert.ok(chat.includes('this.mergeLiveHistoryRecord('), 'live provider handlers must feed terminal records into the shared Store');
+assert.ok(chat.includes('this.applyCanonicalLiveHistoryItem('), 'live provider handlers must feed canonical terminal records into the shared Store');
 assert.ok(chat.includes('this.historyStickToBottom = true'), 'each ChatWindow must own bottom-follow state');
 assert.ok(chat.includes('updateHistoryBottomFollow()'), 'user scrolling must update bottom-follow state');
 assert.ok(chat.includes('prepareHistoryBottomFollow(options = {})'), 'opening or switching a conversation must initialize bottom-follow state');
@@ -77,10 +77,10 @@ assert.ok(chat.includes('scheduleHistoryBottomFollow()'), 'post-layout bottom se
 assert.match(chat, /historyBottomSettleTimers = \[80, 300\]/, 'bottom settling must cover immediate post-render layout changes');
 assert.ok(historyRuntime.includes('navigateToNewest()'), 'initial bottom placement must move the virtual history window to its newest range');
 assert.ok(chat.includes('prepareHistoryBottomFollow({ newest: true })'), 'opening and switching must request the newest virtual range');
-const providerMergeStart = chat.indexOf('mergeLiveHistoryRecord(eventName, payload)');
+const providerMergeStart = chat.indexOf('applyCanonicalLiveHistoryItem(eventName, payload)');
 const providerMergeBody = chat.slice(providerMergeStart, chat.indexOf('\n    handleProviderHistoryRecovered', providerMergeStart));
 assert.ok(providerMergeBody.includes('payload.timelineItem'), 'provider model reconciliation must prefer the canonical server projection');
-assert.ok(providerMergeBody.includes('this.historyStore.applyLiveEvent(context, eventName, payload'), 'canonical timeline payloads must enter the shared Store without re-derivation');
+assert.ok(providerMergeBody.includes('this.historyStore.applyLiveEvent(this.getHistoryContext(), eventName, payload'), 'canonical timeline payloads must enter the shared Store without re-derivation');
 assert.ok(providerMergeBody.includes('const shouldStickToBottom = this.historyStickToBottom'), 'provider events must capture follow intent before live mutation');
 assert.ok(providerMergeBody.includes('this.scheduleHistoryBottomFollow()'), 'provider events must follow the bottom when enabled');
 

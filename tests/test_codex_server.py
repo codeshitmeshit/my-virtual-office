@@ -690,6 +690,9 @@ def test_activity_persists_redacted_and_reports_active_conversation():
             assert "private-token" not in reasoning["text"]
             assert "[REDACTED]" in reasoning["text"]
             assert reasoning["text"].endswith("[TRUNCATED]")
+            assert reasoning["timelineItem"]["itemKind"] == "reasoning"
+            assert reasoning["timelineItem"]["thinking"] == reasoning["text"]
+            assert reasoning["timelineItem"]["status"] == "running"
             server._append_codex_activity("codex-local", "conv-activity", {
                 "id": "evt-2", "sequence": 1, "type": "turn", "status": "running",
             })

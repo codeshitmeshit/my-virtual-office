@@ -1529,7 +1529,7 @@
       );
       this.currentRunId = runId;
       if (providerKind === 'codex') {
-        const thinking = visibleProviderThinking('codex', progress.thinking, progress.status);
+        const thinking = String(progress.thinking || '').trim();
         this.renderCodexRunStatus({
           runId,
           label,
@@ -1538,12 +1538,11 @@
           ts: progress.ts || Date.now()
         });
         if (thinking) {
-          this.renderCodexReasoning({
-            type: 'reasoning',
+          this.renderCodexReasoningItem({
+            id: `recovered-reasoning-${progress.progressId || runId}`,
+            itemKind: 'reasoning',
             status: progress.status || 'running',
-            text: thinking,
-            turnId: progress.turnId || runId,
-            itemId: progress.progressId || 'progress'
+            thinking,
           });
         }
         if (progress.approval) this.appendCodexPendingApproval(progress.approval, progress.approval.pending_count || 1);
@@ -2258,17 +2257,7 @@
         return;
       }
       if (eventName === 'reasoning.available') {
-        if (activity) this.renderCodexActivity(activity);
-        else {
-          const thinking = visibleProviderThinking('codex', data.thinking || data.text, data.status);
-          if (thinking) this.renderCodexReasoning({
-            type: 'reasoning',
-            status: data.status || 'running',
-            text: thinking,
-            turnId: data.turnId || runId,
-            itemId: data.itemId || 'reasoning'
-          });
-        }
+        this.renderCodexReasoningItem(data.timelineItem);
         return;
       }
       if (eventName === 'approval.request') {
@@ -2496,7 +2485,7 @@
       const replayCompletedTurns = options.replayCompletedTurns !== false;
       const preferredRunId = options.runId || this.currentRunId || '';
       if (event.type === 'reasoning') {
-        this.renderCodexReasoning(event);
+        this.renderCodexReasoningItem(event.timelineItem);
       } else if (event.type === 'activity') {
         const payload = {
           itemId: event.itemId || event.id,
@@ -2617,29 +2606,28 @@
       }
     }
 
-    renderCodexReasoning(event) {
-      const visibleText = visibleProviderThinking('codex', event?.text || event?.output || '', event?.status);
-      if (!visibleText) return;
-      event = { ...event, text: visibleText, output: '' };
-      const key = `${event.operationId || event.turnId || event.threadId || 'turn'}:${event.itemId || 'reasoning'}`;
+    renderCodexReasoningItem(item) {
+      if (!item || item.itemKind !== 'reasoning' || !String(item.thinking || '').trim()) return;
+      const key = String(item.id || 'reasoning');
       let state = this.codexReasoningCards.get(key);
       if (!state) {
-        state = { ...CodexReasoning.createState(), wrap: null };
+        state = { text: '', status: 'running', wrap: null };
         this.codexReasoningCards.set(key, state);
       }
-      CodexReasoning.applyEvent(state, event);
+      state.text = String(item.thinking || '');
+      state.status = String(item.status || 'running');
 
       if (!state.text.trim()) return;
       if (!state.wrap) {
         const wrap = document.createElement('div');
         wrap.className = 'chat-msg assistant chat-reasoning-msg';
         wrap.dataset.reasoningKey = key;
-        wrap.appendChild(renderThinkingCard(state.text, { codex: true, status: event.status }));
+        wrap.appendChild(renderThinkingCard(state.text, { codex: true, status: state.status }));
         const indicator = this.messages.querySelector('.typing-indicator');
         this.appendLiveNode(wrap, indicator);
         state.wrap = wrap;
       } else {
-        updateThinkingCard(state.wrap.querySelector('.chat-thinking-card'), state.text, event.status);
+        updateThinkingCard(state.wrap.querySelector('.chat-thinking-card'), state.text, state.status);
       }
       this.scrollBottom();
     }
@@ -2848,7 +2836,7 @@
         }
       } else if (payload?.state === 'final' || payload?.state === 'done') {
         const finalText = text || this.pendingStreamContent || (this.streamingMsg ? this.streamingMsg.content : '');
-        this.mergeLiveHistoryRecord('run.completed', { ...payload, reply: finalText });
+        this.loadHistory({ recoverFinal: true }).catch(() => {});
         this.flushStreamingRender(true);
         this.flushToolEvents(true);
         this.clearActivityFeed();
@@ -3017,7 +3005,6 @@
       const msg = payload?.message && typeof payload.message === 'object' ? payload.message : payload;
       const role = msg?.role || payload?.role || '';
       if (role === 'assistant') {
-        this.mergeLiveHistoryRecord('session.message', msg);
         this.markLiveEvent();
         const providerKind = this.isClaudeCodeSelected() ? 'claude-code' : (this.isHermesSelected() ? 'hermes' : '');
         const startedAt = providerKind === 'claude-code' ? this.claudeCodeSendStartedAt : (providerKind === 'hermes' ? this.hermesSendStartedAt : 0);
@@ -3329,7 +3316,7 @@
         if (active?.runId && !this.currentRunId) this.currentRunId = active.runId;
         return;
       }
-      this.mergeLiveHistoryRecord(eventName, data);
+      this.applyCanonicalLiveHistoryItem(eventName, data);
       if (eventName === 'approval.request') {
         if (context.providerKind === 'hermes' && data.approval) {
           this.appendHermesPendingApproval(data.approval, data.pending_count || 1);
@@ -3378,58 +3365,18 @@
       }
     }
 
-    mergeLiveHistoryRecord(eventName, payload) {
+    applyCanonicalLiveHistoryItem(eventName, payload) {
       if (eventName === 'message.delta') return;
       const shouldStickToBottom = this.historyStickToBottom;
       payload = payload && typeof payload === 'object' ? payload : {};
-      const context = this.getHistoryContext();
       const timelineItem = payload.timelineItem && typeof payload.timelineItem === 'object' ? payload.timelineItem : null;
-      const runId = payload.runId || payload.turnId || this.currentRunId || '';
-      const epochMs = Number(payload.epochMs || payload.ts || Date.now());
+      if (!timelineItem) return;
       const terminalRun = ['run.completed', 'run.failed', 'run.cancelled', 'run.canceled'].includes(eventName);
       const toolEvent = eventName.startsWith('tool.');
       const approvalEvent = eventName.startsWith('approval.');
-      const sessionMessage = eventName === 'session.message';
       const recovered = eventName === 'history.recovered';
-      if (!terminalRun && !toolEvent && !approvalEvent && !sessionMessage && !recovered) return;
-
-      if (timelineItem) {
-        this.historyStore.applyLiveEvent(context, eventName, payload, { notify: false });
-        if (shouldStickToBottom && this.historyStickToBottom) this.scheduleHistoryBottomFollow();
-        return;
-      }
-
-      const toolCard = payload.toolCard || {};
-      const toolId = payload.toolCallId || toolCard.id || payload.itemId || payload.id || '';
-      const approval = payload.approval && typeof payload.approval === 'object' ? payload.approval : null;
-      const approvalId = approval?.approval_id || approval?.approvalId || approval?.id || payload.approvalId || '';
-      const status = terminalRun
-        ? (eventName === 'run.completed' ? 'done' : 'failed')
-        : (eventName === 'tool.started' || eventName === 'approval.request' ? 'running' : 'done');
-      const record = sessionMessage ? { ...payload } : {
-        id: terminalRun
-          ? `run-${runId || epochMs}-final`
-          : toolEvent
-            ? `tool-${runId || 'run'}-${toolId || epochMs}`
-            : approvalEvent
-              ? `approval-${approvalId || runId || epochMs}`
-              : `recovered-${runId || epochMs}`,
-        role: payload.role || 'assistant',
-        text: payload.reply || payload.text || payload.error || '',
-        epochMs,
-        status,
-        thinking: payload.thinking || '',
-        approval,
-        tools: toolEvent ? [{
-          id: toolId,
-          name: toolCard.name || payload.name || payload.tool || 'tool',
-          arguments: toolCard.arguments || payload.arguments || payload.input || {},
-          result: toolCard.result || payload.result || payload.output || '',
-          error: toolCard.error || payload.error || '',
-          status,
-        }] : (payload.tools || [])
-      };
-      this.historyStore.applyLiveEvent(context, eventName, record, { notify: false });
+      if (!terminalRun && !toolEvent && !approvalEvent && !recovered) return;
+      this.historyStore.applyLiveEvent(this.getHistoryContext(), eventName, payload, { notify: false });
       if (shouldStickToBottom && this.historyStickToBottom) this.scheduleHistoryBottomFollow();
     }
 

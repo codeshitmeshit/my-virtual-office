@@ -291,15 +291,11 @@
           let matchedRun = null;
           for (const [candidateId, candidate] of entry.messages) {
             const canonicalRunId = candidate.itemKind === 'run' ? String(candidate.providerRunId || '') : '';
-            const legacyRunId = candidateId.startsWith('run-') && candidateId.endsWith('-final')
-              ? candidateId.slice(4, -6)
-              : '';
-            const providerRunId = canonicalRunId || legacyRunId;
-            if (!providerRunId) continue;
+            if (!canonicalRunId) continue;
             if (candidate.role !== 'assistant' || String(candidate.text || '').trim() !== String(message.text || '').trim()) continue;
             const delta = Math.abs((Number(candidate.epochMs) || 0) - (Number(message.epochMs) || 0));
             if (delta > 10000 || (matchedRun && matchedRun.delta <= delta)) continue;
-            matchedRun = { candidateId, delta, providerRunId };
+            matchedRun = { candidateId, delta, providerRunId: canonicalRunId };
           }
           if (matchedRun) {
             entry.messages.delete(matchedRun.candidateId);
@@ -464,7 +460,8 @@
     applyLiveEvent(context, eventName, data = {}, options = {}) {
       if (eventName === 'message.delta') return this.getOrCreate(context);
       const timelineItem = data?.timelineItem && typeof data.timelineItem === 'object' ? data.timelineItem : null;
-      const message = normalizedMessage(timelineItem || data.message || data, context);
+      if (!timelineItem) return this.getOrCreate(context);
+      const message = normalizedMessage(timelineItem, context);
       return this.mergePage(this.getOrCreate(context), { messages: [message] }, 'live', options);
     }
 

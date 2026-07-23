@@ -36,6 +36,7 @@ def _event_record(event_name: str, payload: Mapping[str, Any], event_id: Any) ->
         "providerRunId": payload.get("runId") or source.get("runId"),
         "epochMs": source.get("epochMs") or source.get("ts") or payload.get("ts"),
         "sequence": source.get("sequence") or payload.get("sequence") or payload.get("eventId") or event_id,
+        "_eventIdentity": source.get("id") or source.get("eventId") or payload.get("eventId") or event_id,
     })
     record.setdefault("role", "assistant")
     if str(record.get("role") or "").lower() != "user":
@@ -112,7 +113,7 @@ class ProviderTimelineItemProjector:
                 self._reasoning.popitem(last=False)
             event = {
                 **record,
-                "id": payload.get("eventId") or event_id or record.get("id"),
+                "id": record.get("_eventIdentity") or payload.get("eventId") or event_id or record.get("id"),
                 "text": record.get("thinking") or record.get("text") or "",
             }
             snapshot = accumulator.apply(scope.provider_kind, event)

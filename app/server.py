@@ -153,6 +153,7 @@ _CHAT_COMMAND_RESERVATIONS = ScopedCommandReservations()
 _CHAT_COMMAND_METRICS = CommandMetrics()
 _CONVERSATION_TIMELINE_SERVICE = ConversationTimelineService()
 _CHAT_HISTORY_TIMELINE_SERVICE = ChatHistoryTimelineService(_CONVERSATION_TIMELINE_SERVICE)
+_PROVIDER_TIMELINE_ITEM_PROJECTOR = ProviderTimelineItemProjector(_CONVERSATION_TIMELINE_SERVICE)
 _FEISHU_CHAT_WORKER_TOKEN = uuid.uuid4().hex
 
 
@@ -7707,9 +7708,21 @@ def _handle_codex_activity(query):
             else event
             for event in events
         ]
+    projected_events = []
+    for event in events:
+        event_name = _codex_activity_bridge_event_name(event)
+        timeline_item = _PROVIDER_TIMELINE_ITEM_PROJECTOR.project(
+            event_name,
+            event,
+            "codex",
+            agent_id,
+            conversation_id,
+            event.get("sequence") or event.get("id"),
+        )
+        projected_events.append({**event, **({"timelineItem": timeline_item} if timeline_item else {})})
     return {
         "ok": True,
-        "events": events,
+        "events": projected_events,
         "active": active if active and active.get("conversationId") == conversation_id else None,
         "activeConversationId": (active or {}).get("conversationId", ""),
     }
@@ -9724,7 +9737,7 @@ def _provider_sse_transport_for(repository, journal):
         recovery_lookup=_provider_recovery_progress_snapshot,
         clock=lambda: time.time(),
         telemetry=_CODEX_FAST_PATH_TELEMETRY,
-        timeline_item_projector=ProviderTimelineItemProjector(_CONVERSATION_TIMELINE_SERVICE).project,
+        timeline_item_projector=_PROVIDER_TIMELINE_ITEM_PROJECTOR.project,
     )
 
 
