@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "contentPolicy": "content-free",
+  "baselineRevision": "e691db1",
+  "defects": [
+    {
+      "id": "claude-code-workflow-history-selection",
+      "before": "openclaw-session-fallthrough",
+      "after": "attempt-scoped-claude-code-history",
+      "regression": "tests/test_project_workflow_provider_history.py::test_claude_workflow_uses_attempt_scoped_claude_history_not_openclaw"
+    },
+    {
+      "id": "hermes-completed-reasoning-state",
+      "before": "implicit-or-live-reasoning-state",
+      "after": "canonical-done-state",
+      "regression": "tests/test_project_workflow_provider_history.py::test_completed_hermes_reasoning_is_terminal_and_attempt_isolated"
+    }
+  ]
+}

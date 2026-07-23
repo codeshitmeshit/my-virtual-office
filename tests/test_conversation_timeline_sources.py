@@ -15,6 +15,7 @@ from services.conversation_timeline_sources import (
     TimelineSourcePorts,
     normalize_source_record,
     parse_openclaw_content,
+    project_workflow_history,
 )
 
 
@@ -154,3 +155,22 @@ def test_source_module_has_no_server_or_mutation_authority():
     assert "from app import server" not in source
     assert "launch(" not in source
     assert "write(" not in source
+
+
+def test_project_workflow_projection_preserves_fields_and_settles_durable_reasoning():
+    timeline = ConversationTimelineService()
+    scope = _scope("hermes")
+    messages = project_workflow_history(
+        timeline,
+        scope,
+        [{
+            "id": "message", "role": "assistant", "text": "answer", "thinking": "checked",
+            "tools": [{"id": "tool", "status": "done"}], "error": "provider-warning", "ts": 10,
+        }],
+        source="hermes",
+    )
+    assert messages[0]["reasoningStatus"] == "done"
+    assert "status" not in messages[0]
+    assert messages[0]["thinking"] == "checked"
+    assert messages[0]["tools"] == [{"id": "tool", "status": "done"}]
+    assert messages[0]["error"] == "provider-warning"

@@ -91,7 +91,7 @@ from services.provider_runs import ProviderRunCoordinator
 from services.chat_commands import ChatCommand, ChatCommandService, CommandRequest, CommandScope, parse_chat_command
 from services.chat_command_providers import ChatProviderCommandAdapter, CodexCompactAdapter, ScopedConversationResetAdapter
 from services.chat_command_runtime import CallbackCommandAuditPort, CommandFeatureFlags, CommandMetrics, ScopedCommandReservations
-from services.conversation_timeline import ConversationTimelineService
+from services.conversation_timeline import ConversationTimelineService, TimelineScope
 from services.chat_history_timeline import (
     ChatHistoryTimelineService,
     SOURCE_CACHE_BYTE_LIMIT,
@@ -102,6 +102,7 @@ from services.chat_history_timeline import (
     extract_content as extract_chat_history_content,
     history_hash as chat_history_hash,
 )
+from services.conversation_timeline_sources import project_workflow_history
 from services.codex_fast_path import CodexEventFastPath, CodexFastPathTelemetry, CodexTransientCoalescer, classify_codex_event, load_codex_fast_path_settings
 from services.codex_feishu_approvals import (
     BoundedApprovalDeliveryExecutor,
@@ -25504,7 +25505,25 @@ def _wf_get_task_session_messages(agent_id, project_id, task_id, max_messages=50
     if _is_hermes_agent(agent_id):
         agent = _get_hermes_agent(agent_id) or {}
         profile = agent.get("profile") or agent.get("providerAgentId") or "default"
-        return _load_hermes_history(profile, conversation_id)[-max_messages:]
+        timeline_scope = TimelineScope.create("hermes", agent_id, profile, conversation_id or task_id)
+        return project_workflow_history(
+            _CONVERSATION_TIMELINE_SERVICE,
+            timeline_scope,
+            _load_hermes_history(profile, conversation_id),
+            source="hermes",
+            limit=max_messages,
+        )
+    if _is_claude_code_agent(agent_id):
+        agent = _get_claude_code_agent(agent_id) or {}
+        profile = agent.get("profile") or agent.get("providerAgentId") or "main"
+        timeline_scope = TimelineScope.create("claude-code", agent_id, profile, conversation_id or task_id)
+        return project_workflow_history(
+            _CONVERSATION_TIMELINE_SERVICE,
+            timeline_scope,
+            _sanitize_claude_code_history_messages(_load_claude_code_history(profile, conversation_id)),
+            source="claude-code",
+            limit=max_messages,
+        )
     if _is_codex_agent(agent_id):
         messages = []
         codex_conversation_id = conversation_id or task_id

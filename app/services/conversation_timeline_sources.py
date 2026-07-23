@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+from collections import deque
 from dataclasses import dataclass, field
 from itertools import islice
 from typing import Any, Iterable, Mapping, Protocol
@@ -140,6 +141,38 @@ def normalize_source_record(provider_kind: str, raw: Mapping[str, Any]) -> dict[
         record["tools"] = list(record.get("tools") or []) + projected["tools"]
     record["providerKind"] = record.get("providerKind") or provider_kind
     return record
+
+
+def project_workflow_history(
+    timeline: ConversationTimelineService,
+    scope: TimelineScope,
+    records: Iterable[Mapping[str, Any]],
+    *,
+    source: str,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """Project durable Provider rows through canonical semantics and a legacy envelope."""
+
+    projected: list[dict[str, Any]] = []
+    normalized_limit = max(1, min(int(limit or 50), 50))
+    bounded = tuple(deque(islice(records or (), 1_000), maxlen=normalized_limit))
+    for ordinal, raw in enumerate(bounded):
+        if not isinstance(raw, Mapping):
+            continue
+        normalized = normalize_source_record(scope.provider_kind, raw)
+        compatible_source = str(raw.get("source") or source)
+        item = timeline.item_from_record(scope, normalized, source=compatible_source, ordinal=ordinal, durable=True)
+        message = copy.deepcopy(dict(raw))
+        if "text" in raw or normalized.get("content") is not None:
+            message["text"] = item.text
+        if "thinking" in raw:
+            message["thinking"] = item.thinking
+        if "tools" in raw or normalized.get("content") is not None:
+            message["tools"] = copy.deepcopy(list(item.tools))
+        if item.thinking or raw.get("reasoningStatus") is not None:
+            message["reasoningStatus"] = item.status
+        projected.append(message)
+    return projected
 
 
 class ConversationTimelineSourceReader:
