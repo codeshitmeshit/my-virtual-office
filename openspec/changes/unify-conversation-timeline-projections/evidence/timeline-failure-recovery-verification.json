@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "contentFree": true,
+  "task": "7.3",
+  "result": "passed",
+  "scenarios": [
+    {"name": "partial-source-failure", "result": "healthy durable source retained; failure classified without content"},
+    {"name": "corrupt-openclaw-history", "result": "malformed JSON and non-message records ignored within bounded tail"},
+    {"name": "stale-progress", "result": "stale and terminal progress filtered while fresh active progress remains recoverable"},
+    {"name": "sse-disconnect", "result": "disconnect does not mutate or remove active run"},
+    {"name": "sse-reconnect-replay", "result": "Last-Event-ID replay remains ordered and idempotent"},
+    {"name": "application-restart", "result": "durable terminal message recovered; unavailable transient activity not fabricated"},
+    {"name": "concurrent-polling-refresh", "result": "32 concurrent reads returned copied deterministic order and lifecycle"},
+    {"name": "cache-eviction", "result": "entry bound enforced and evicted source reloaded as a miss"},
+    {"name": "one-provider-unavailable", "result": "failure contained to selected source and unrelated durable contribution remained available"}
+  ],
+  "invariants": {
+    "durableTerminalRecovery": true,
+    "truthfulTransientLoss": true,
+    "deterministicRepeatedReads": true,
+    "failureContainment": true,
+    "providerLaunches": 0,
+    "historyWrites": 0
+  },
+  "command": ".venv/bin/python -m pytest -q tests/test_conversation_timeline_recovery.py tests/test_conversation_timeline_sources.py tests/test_openclaw_timeline_source.py tests/test_provider_events.py tests/test_provider_sse_transport.py tests/test_codex_runs_sse.py tests/test_codex_workflow_timeline_source.py tests/test_chat_history_api.py",
+  "resultSummary": "65 passed"
+}
