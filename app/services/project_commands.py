@@ -308,7 +308,7 @@ def update_task(
             log_activity(project, "task_moved", by, f"Moved '{task['title']}' from {old_column} to {new_column}", task_id)
         if "priority" in mutable_body and mutable_body["priority"] != task.get("priority"): log_activity(project, "task_priority_changed", by, f"Priority changed: {task.get('priority')} → {mutable_body['priority']}", task_id)
         if "assignee" in mutable_body and mutable_body["assignee"] != task.get("assignee"): log_activity(project, "task_assigned", by, f"Assigned to {mutable_body['assignee']}", task_id)
-        fields = ["title", "description", "columnId", "order", "priority", "assignee", "assigneeBranch", "executorAgentId", "reviewerAgentId", "dueDate", "tags", "checklist", "meetingActionItems", "meetingDecisionHistory", "meetingDiscussionPoints", "meetingRecords", "completedAt", "requiresUserAcceptance", "allowReviewerlessExecution", "scheduledRepeatEnabled"]
+        fields = ["title", "description", "columnId", "order", "executionOrder", "priority", "assignee", "assigneeBranch", "executorAgentId", "reviewerAgentId", "dueDate", "tags", "checklist", "meetingActionItems", "meetingDecisionHistory", "meetingDiscussionPoints", "meetingRecords", "completedAt", "requiresUserAcceptance", "allowReviewerlessExecution", "scheduledRepeatEnabled"]
         changed_fields = []
         for field in fields:
             if field in mutable_body:

@@ -1235,15 +1235,25 @@
         return result;
     }
 
+    function isBacklogColumn(col) {
+        const title = String((col && (col._titleKey ? _t(col._titleKey) : col.title)) || '').trim().toLowerCase();
+        const id = String((col && col.id) || '').trim().toLowerCase();
+        return id === 'backlog' || title === 'backlog' || title === '待办';
+    }
+
     function renderColumn(col, allTasks, executionOrderByTaskId = new Map()) {
         const tasks = allTasks.filter(t => t.columnId === col.id).slice().sort((a, b) => (a.order || 0) - (b.order || 0));
         const colTitle = col._titleKey ? _t(col._titleKey) : col.title;
+        const backlogOrderButton = isBacklogColumn(col)
+            ? `<button class="proj-col-order-btn" onclick="ProjMgr.showBacklogOrderDialog('${escHtml(col.id)}')" title="${escHtml(_tf('proj_backlog_order_edit_hint', 'Edit backlog execution order', '编辑 Backlog 执行顺序'))}">↕</button>`
+            : '';
         return `
         <div class="proj-col" id="col-${col.id}" data-col-id="${col.id}" style="--col-color:${col.color || '#6c757d'}">
             <div class="proj-col-header">
                 <div class="proj-col-dot"></div>
                 <div class="proj-col-title" ondblclick="ProjMgr.renameColumn('${col.id}')">${escHtml(colTitle)}</div>
                 <span class="proj-col-count">${tasks.length}</span>
+                ${backlogOrderButton}
                 <button class="proj-col-add-btn" onclick="ProjMgr.showQuickAdd('${col.id}')" title="${_t('proj_add')}">+</button>
             </div>
             <div class="proj-col-tasks" id="tasks-${col.id}"
@@ -2616,6 +2626,116 @@
             const d = await api.createTask(p.id, copy);
             if (d.task) { p.tasks.push(d.task); const mc = getMainContent(); if (mc) { mc.innerHTML = renderBoardView(); bindBoardEvents(); } toast(_t('proj_task_duplicated'), 'success'); }
         } catch (e) { toast(_t('proj_failed_duplicate'), 'error'); }
+    }
+
+    function showBacklogOrderDialog(colId) {
+        const p = state.currentProject;
+        const overlay = document.getElementById('proj-form-overlay');
+        if (!p || !overlay) return;
+        const col = (p.columns || []).find(item => item.id === colId);
+        const orderMap = projectExecutionOrderMap(p.tasks || []);
+        const backlogTasks = (p.tasks || [])
+            .filter(task => task.columnId === colId)
+            .slice()
+            .sort((a, b) => (orderMap.get(a.id) || 999999) - (orderMap.get(b.id) || 999999));
+        const otherOrders = (p.tasks || [])
+            .filter(task => task.columnId !== colId)
+            .map(task => orderMap.get(task.id))
+            .filter(order => Number.isFinite(order));
+        const usedText = otherOrders.length
+            ? `<div class="proj-order-used">${escHtml(_tf('proj_backlog_order_reserved', 'Reserved by other columns', '其它状态已占用'))}: ${otherOrders.slice().sort((a, b) => a - b).join(', ')}</div>`
+            : '';
+        overlay.classList.remove('hidden');
+        overlay.innerHTML = `
+        <div class="proj-form-modal" style="position:static;padding:0;background:transparent" onclick="event.stopPropagation()">
+            <div class="proj-form-box proj-order-dialog">
+                <div class="proj-form-title">${escHtml(_tf('proj_backlog_order_title', 'Edit Backlog Order', '编辑 Backlog 顺序'))}</div>
+                ${usedText}
+                <div class="proj-order-list" id="proj-backlog-order-list">
+                    ${backlogTasks.map(task => `
+                    <div class="proj-order-row" data-task-id="${escHtml(task.id)}">
+                        <input class="proj-order-input" type="number" min="1" step="1" value="${escHtml(String(orderMap.get(task.id) || ''))}" aria-label="${escHtml(_tf('proj_task_execution_order_hint', 'Project execution order', '项目执行顺序'))}">
+                        <div class="proj-order-title" title="${escHtml(task.title || '')}">${escHtml(task.title || '')}</div>
+                        <button type="button" class="proj-order-move" onclick="ProjMgr.moveBacklogOrderRow('${escHtml(task.id)}', -1)" title="${escHtml(_tf('proj_move_up', 'Move up', '上移'))}">↑</button>
+                        <button type="button" class="proj-order-move" onclick="ProjMgr.moveBacklogOrderRow('${escHtml(task.id)}', 1)" title="${escHtml(_tf('proj_move_down', 'Move down', '下移'))}">↓</button>
+                    </div>`).join('')}
+                </div>
+                <div class="proj-form-actions">
+                    <button class="proj-btn proj-btn-primary" onclick="ProjMgr.saveBacklogOrderDialog('${escHtml(colId)}')">${_t('proj_save')}</button>
+                    <button class="proj-btn" onclick="ProjMgr.hideFormModal()">${_t('proj_cancel')}</button>
+                </div>
+            </div>
+        </div>`;
+    }
+
+    function moveBacklogOrderRow(taskId, direction) {
+        const list = document.getElementById('proj-backlog-order-list');
+        if (!list) return;
+        const row = list.querySelector(`.proj-order-row[data-task-id="${CSS.escape(taskId)}"]`);
+        if (!row) return;
+        if (direction < 0 && row.previousElementSibling) {
+            list.insertBefore(row, row.previousElementSibling);
+        } else if (direction > 0 && row.nextElementSibling) {
+            list.insertBefore(row.nextElementSibling, row);
+        }
+        const rows = Array.from(list.querySelectorAll('.proj-order-row'));
+        const slots = rows
+            .map(item => Number(item.querySelector('.proj-order-input')?.value))
+            .filter(value => Number.isInteger(value) && value > 0)
+            .sort((a, b) => a - b);
+        rows.forEach((item, index) => {
+            const input = item.querySelector('.proj-order-input');
+            if (input && slots[index]) input.value = String(slots[index]);
+        });
+    }
+
+    async function saveBacklogOrderDialog(colId) {
+        const p = state.currentProject;
+        const list = document.getElementById('proj-backlog-order-list');
+        if (!p || !list) return;
+        const rows = Array.from(list.querySelectorAll('.proj-order-row'));
+        const updates = [];
+        const seen = new Set();
+        const orderMap = projectExecutionOrderMap(p.tasks || []);
+        const otherOrders = new Map();
+        (p.tasks || []).forEach(task => {
+            if (task.columnId !== colId) {
+                const order = orderMap.get(task.id);
+                if (Number.isFinite(order)) otherOrders.set(order, task);
+            }
+        });
+        for (const row of rows) {
+            const taskId = row.getAttribute('data-task-id');
+            const order = Number(row.querySelector('.proj-order-input')?.value);
+            if (!Number.isInteger(order) || order <= 0) {
+                toast(_tf('proj_backlog_order_invalid', 'Use positive whole numbers for order.', '顺序必须是正整数。'), 'error');
+                return;
+            }
+            if (seen.has(order)) {
+                toast(_tf('proj_backlog_order_duplicate', 'Backlog order values must be unique.', 'Backlog 顺序不能重复。'), 'error');
+                return;
+            }
+            if (otherOrders.has(order)) {
+                toast(_tf('proj_backlog_order_conflict', 'That order is already used by another column.', '该顺序已被其它状态任务占用。'), 'error');
+                return;
+            }
+            seen.add(order);
+            updates.push({ taskId, order });
+        }
+        try {
+            const results = await Promise.all(updates.map(item => api.updateTask(p.id, item.taskId, { executionOrder: item.order })));
+            results.forEach(result => {
+                if (!result || !result.task) return;
+                const task = p.tasks.find(item => item.id === result.task.id);
+                if (task) Object.assign(task, result.task);
+            });
+            hideFormModal();
+            const mc = getMainContent();
+            if (mc) { mc.innerHTML = renderBoardView(); bindBoardEvents(); }
+            toast(_tf('proj_backlog_order_saved', 'Backlog order saved.', 'Backlog 顺序已保存。'), 'success');
+        } catch (e) {
+            toast(_t('proj_save_failed'), 'error');
+        }
     }
 
     // ── NEW PROJECT DIALOG ────────────────────────────────────────
@@ -4800,6 +4920,9 @@
         showQuickAdd,
         hideQuickAdd,
         submitQuickAdd,
+        showBacklogOrderDialog,
+        moveBacklogOrderRow,
+        saveBacklogOrderDialog,
         hideFormModal,
         submitTextInputDialog: submitTextInputDialogAction,
         toggleProjectExecutionFields,

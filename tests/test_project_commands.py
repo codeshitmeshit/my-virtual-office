@@ -144,6 +144,33 @@ def test_command_validation_and_missing_resources_are_compatible():
     assert project_commands.add_task_comment("missing", "task", {"text": "x"}, repository=repo, log_activity=common["log_activity"], new_id=common["new_id"], now=common["now"]).result.status == 404
 
 
+def test_update_task_persists_execution_order():
+    _, repo, common = dependencies()
+    project = create_project(repo, common).result.payload["project"]
+    task = project_commands.create_task(project["id"], {"title": "Task"}, repository=repo, **common).result.payload["task"]
+
+    update = project_commands.update_task(
+        project["id"],
+        task["id"],
+        {"executionOrder": 7},
+        repository=repo,
+        system_agent_assignment_error=common["system_agent_assignment_error"],
+        execution_enabled=lambda _value: False,
+        column_locked=lambda _value: False,
+        checklist_complete=lambda _value: False,
+        can_complete_after_checklist=lambda _value: False,
+        mark_done=lambda *args: {"ok": False},
+        log_activity=common["log_activity"],
+        now=common["now"],
+        is_on_time=lambda _value: False,
+        score_values={"task_completed": 1, "critical": 0, "high": 0, "medium": 0, "on_time": 0, "checklist": 0},
+    )
+
+    assert update.result.status == 200
+    assert update.result.payload["task"]["executionOrder"] == 7
+    assert repo.get(project["id"])["tasks"][0]["executionOrder"] == 7
+
+
 def test_comment_columns_update_and_delete_use_repository():
     _, repo, common = dependencies()
     project = create_project(repo, common).result.payload["project"]
