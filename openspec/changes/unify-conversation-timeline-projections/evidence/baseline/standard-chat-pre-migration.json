@@ -1,0 +1,78 @@
+{
+  "contentPolicy": "content-free",
+  "observations": [
+    {
+      "dimension": "history",
+      "id": "standard-chat-codex",
+      "provider": "codex",
+      "surface": "standard-chat",
+      "values": {
+        "conversationDigest": "b69db2e7c3f99f288d2853d4766483a0bd6c13efd1ebc4653eca4661d5c82612",
+        "cursorRoundTrip": [4000, "codex-4"],
+        "dtoFields": ["approval", "attachments", "conversationId", "epochMs", "from", "fromAgentId", "id", "idempotencyKey", "identityFields", "media", "providerKind", "reasoningTokens", "role", "source", "status", "text", "thinking", "to", "toAgentId", "tools", "version"],
+        "hasMore": true,
+        "messageCount": 2,
+        "orderDigest": "b76b3af99b53c162e4acb6b9c0303389c8d2809419290249376bd858bec469e1",
+        "pageLimit": 2,
+        "richDigest": "03e4f71175bdedac4f8d2c3c8f3e26fac3f39db0ba8f5a455a22b6b823f0fea9",
+        "winnerDigest": "10161aac18d2d883a18db01029ab64c2276894935bc44b684a6c4a07e56f2d12",
+        "winnerSource": "agent-platform-communications"
+      }
+    },
+    {
+      "dimension": "history",
+      "id": "standard-chat-claude-code",
+      "provider": "claude-code",
+      "surface": "standard-chat",
+      "values": {
+        "conversationDigest": "b69db2e7c3f99f288d2853d4766483a0bd6c13efd1ebc4653eca4661d5c82612",
+        "cursorRoundTrip": [4000, "claude-code-4"],
+        "dtoFields": ["approval", "attachments", "conversationId", "epochMs", "from", "fromAgentId", "id", "idempotencyKey", "identityFields", "media", "providerKind", "reasoningTokens", "role", "source", "status", "text", "thinking", "to", "toAgentId", "tools", "version"],
+        "hasMore": true,
+        "messageCount": 2,
+        "orderDigest": "2bc85d36c5838074ac0e3d6dfff6037892946c79362201fcd036214efde16040",
+        "pageLimit": 2,
+        "richDigest": "9e057444a52a4db306360ac721a7452ecd5328aec56a8289d6a6c643e55a1e29",
+        "winnerDigest": "2872bfdcf9b84569dd150774dc4c1b02f76606f5b8d1e087b3728dc9181c966c",
+        "winnerSource": "agent-platform-communications"
+      }
+    },
+    {
+      "dimension": "history",
+      "id": "standard-chat-hermes",
+      "provider": "hermes",
+      "surface": "standard-chat",
+      "values": {
+        "conversationDigest": "b69db2e7c3f99f288d2853d4766483a0bd6c13efd1ebc4653eca4661d5c82612",
+        "cursorRoundTrip": [4000, "hermes-4"],
+        "dtoFields": ["approval", "attachments", "conversationId", "epochMs", "from", "fromAgentId", "id", "idempotencyKey", "identityFields", "media", "providerKind", "reasoningTokens", "role", "source", "status", "text", "thinking", "to", "toAgentId", "tools", "version"],
+        "hasMore": true,
+        "messageCount": 2,
+        "orderDigest": "7d0cd25fd053ddbb1effbc49cf21ada6a2f9689b9b73e6ebeea83a0e312c4d32",
+        "pageLimit": 2,
+        "richDigest": "bd251b507e9d292d30a8e0824007ee3c0a50affb7e256608017f9f5096b204cc",
+        "winnerDigest": "ead0093b034ecd8697a2d1cb034775d4aed204fe54936849454b1c1f6178d2ac",
+        "winnerSource": "agent-platform-communications"
+      }
+    },
+    {
+      "dimension": "history",
+      "id": "standard-chat-gateway",
+      "provider": "openclaw",
+      "surface": "standard-chat",
+      "values": {
+        "conversationDigest": "95ed91e7bbc7abaa03c4732c5c27f7e2ef464739395e4ed88ea10766ce6995ca",
+        "cursorRoundTrip": [4000, "gateway-4"],
+        "dtoFields": ["approval", "attachments", "conversationId", "epochMs", "from", "fromAgentId", "id", "idempotencyKey", "identityFields", "media", "providerKind", "reasoningTokens", "role", "source", "status", "text", "thinking", "to", "toAgentId", "tools", "version"],
+        "hasMore": true,
+        "messageCount": 2,
+        "orderDigest": "f861a00331db258674d942a3c0b279159b974d36d135f6fdf01a41b9b5dd6c5f",
+        "pageLimit": 2,
+        "richDigest": "1feb2e5fe52e1a3360d378f17a1703c03bbfa279a4c54d6b25d39109d2f347c6",
+        "winnerDigest": "d8be9bd55f2ef59ef2119a7ea27a0ae5a57c99192cd1c64eab9a78f0aecc03f7",
+        "winnerSource": "agent-platform-communications"
+      }
+    }
+  ],
+  "schema": 1
+}

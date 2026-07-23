@@ -1,0 +1,36 @@
+{
+  "schema": 1,
+  "contentPolicy": "content-free",
+  "baselineRevision": "b5c83cf2af998667138d32250f68b9f0725d9f80",
+  "providers": ["codex", "claude-code", "hermes", "openclaw"],
+  "canonicalComparison": {
+    "command": ".venv/bin/python tests/run_standard_chat_timeline_comparison.py",
+    "result": "passed",
+    "differences": 0,
+    "dimensions": ["dto-fields", "render-version", "identity", "order", "paging", "cursor", "source-precedence", "rich-content"]
+  },
+  "clientRegression": {
+    "commands": [
+      "node tests/check_chat_history_store.mjs",
+      "node tests/check_chat_history_navigation.mjs",
+      "node tests/check_provider_chat_sse.mjs"
+    ],
+    "result": "passed",
+    "coveredBehavior": [
+      "cached-conversation-switching",
+      "older-page-loading",
+      "bounded-dom-history",
+      "markdown-media-tool-approval-plumbing",
+      "optimistic-reconciliation",
+      "bottom-follow",
+      "refresh-and-sse-recovery"
+    ]
+  },
+  "browserRegression": {
+    "command": "node tests/chat_history_ui_e2e.mjs",
+    "result": "passed-on-rerun",
+    "firstRun": "timed-out-at-bottom-follow-settlement",
+    "secondRun": "passed",
+    "classification": "existing-timing-flake-no-code-change"
+  }
+}
