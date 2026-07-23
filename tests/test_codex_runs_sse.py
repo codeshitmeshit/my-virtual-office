@@ -47,7 +47,7 @@ class FakeCodexProvider:
 
     def send_message(self, message, conversation_id="", timeout_sec=None, thread_id="", event_callback=None, allow_interaction=False):
         self.calls += 1
-        assert message == "hello"
+        assert message.endswith("hello")
         assert conversation_id == "conv-run"
         assert callable(event_callback)
         event_callback({

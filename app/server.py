@@ -103,6 +103,7 @@ from services.chat_history_timeline import (
     history_hash as chat_history_hash,
 )
 from services.conversation_timeline_sources import project_workflow_history
+from services.codex_workflow_timeline_source import CodexWorkflowTimelineSource
 from services.openclaw_timeline_source import OpenClawWorkflowTimelineSource
 from services.codex_fast_path import CodexEventFastPath, CodexFastPathTelemetry, CodexTransientCoalescer, classify_codex_event, load_codex_fast_path_settings
 from services.codex_feishu_approvals import (
@@ -25526,19 +25527,22 @@ def _wf_get_task_session_messages(agent_id, project_id, task_id, max_messages=50
             limit=max_messages,
         )
     if _is_codex_agent(agent_id):
-        messages = []
         codex_conversation_id = conversation_id or task_id
-        for event in _load_comm_history(limit=max_messages, conversation_id=codex_conversation_id):
-            msg = _comm_event_to_chat_message(event, agent_id)
-            if msg:
-                messages.append(msg)
-        messages.extend(_codex_reasoning_events_to_chat_messages(
-            _get_codex_activity(agent_id, codex_conversation_id, 0),
-            agent_id,
-            max_messages=max_messages,
-        ))
-        messages.sort(key=lambda m: int(m.get("epochMs") or m.get("ts") or 0))
-        return messages[-max_messages:]
+        timeline_scope = TimelineScope.create("codex", agent_id, "", codex_conversation_id)
+        source = CodexWorkflowTimelineSource(
+            _CONVERSATION_TIMELINE_SERVICE,
+            lambda target_conversation, limit: _load_comm_history(
+                limit=limit,
+                conversation_id=target_conversation,
+            ),
+            _comm_event_to_chat_message,
+            lambda target_agent, target_conversation: _get_codex_activity(
+                target_agent,
+                target_conversation,
+                0,
+            ),
+        )
+        return source.read_messages(timeline_scope, max_messages=max_messages)
 
     session_key = _wf_task_session_key(agent_id, project_id, task_id)
     home_path = VO_CONFIG.get("openclaw", {}).get("homePath", os.path.expanduser("~/.openclaw"))

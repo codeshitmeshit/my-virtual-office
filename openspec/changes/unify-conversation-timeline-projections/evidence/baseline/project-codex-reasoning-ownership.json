@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "contentPolicy": "content-free",
+  "baselineRevision": "223724c",
+  "defects": [
+    {
+      "id": "codex-single-reasoning-owner",
+      "before": "project-specific-reasoning-accumulator",
+      "after": "conversation-timeline-reasoning-accumulator",
+      "regression": "tests/test_codex_workflow_timeline_source.py::test_reasoning_delta_boundary_replace_duplicate_placeholder_and_terminal"
+    }
+  ],
+  "compatibilityRegressions": [
+    "tests/test_project_execution.py::test_workflow_chat_reads_project_execution_codex_attempt_reasoning",
+    "tests/test_project_execution.py::test_workflow_chat_recovers_active_attempt_after_workflow_timeout",
+    "tests/test_codex_workflow_timeline_source.py::test_durable_and_transient_records_keep_time_and_tool_order",
+    "tests/test_codex_workflow_timeline_source.py::test_attempt_isolation_rejects_foreign_durable_and_live_records",
+    "tests/test_codex_workflow_timeline_source.py::test_live_event_read_is_bounded_and_non_reasoning_activity_is_not_fabricated"
+  ],
+  "fastPathRegression": {
+    "command": ".venv/bin/python -m pytest -q tests/test_codex_fast_path_config.py tests/test_codex_fast_path_integration.py tests/test_codex_fast_path_rollback.py tests/test_codex_runs_sse.py tests/test_codex_coalescer.py tests/test_codex_coalescer_journal.py tests/test_codex_workflow_timeline_source.py tests/test_project_execution.py",
+    "result": "passed",
+    "tests": 140
+  },
+  "incidentalTestCorrection": {
+    "file": "tests/test_codex_runs_sse.py",
+    "before": "provider-message-equals-user-text",
+    "after": "provider-message-retains-user-text-after-routing-guidance",
+    "productRuntimeChanged": false
+  }
+}
