@@ -29,6 +29,7 @@ class ProviderSSETransport:
         recovery_lookup: Callable[[str, str, str], dict[str, Any] | None] | None = None,
         clock: Callable[[], float] | None = None,
         telemetry=None,
+        timeline_item_projector: Callable[..., dict[str, Any] | None] | None = None,
     ) -> None:
         self.repository = repository
         self.journal = journal
@@ -37,6 +38,26 @@ class ProviderSSETransport:
         self.recovery_lookup = recovery_lookup or (lambda *_args: None)
         self.clock = clock or time.time
         self.telemetry = telemetry
+        self.timeline_item_projector = timeline_item_projector
+
+    def _payload(self, event_name, payload, provider_kind, agent_id, conversation_id, event_id=None):
+        compatible = dict(payload) if isinstance(payload, dict) else {}
+        if self.timeline_item_projector is None:
+            return compatible
+        try:
+            item = self.timeline_item_projector(
+                event_name,
+                compatible,
+                provider_kind,
+                agent_id,
+                conversation_id,
+                event_id,
+            )
+        except Exception:
+            item = None
+        if isinstance(item, dict):
+            compatible.setdefault("timelineItem", item)
+        return compatible
 
     @staticmethod
     def _cursor(handler, after=0) -> int:
@@ -79,6 +100,9 @@ class ProviderSSETransport:
             handler.wfile.write(f"event: run.failed\ndata: {payload}\n\n".encode("utf-8"))
             return
         telemetry_enabled = str(self.provider_kind_of(meta, run_id) or "").strip().lower() == "codex"
+        provider_kind = str(self.provider_kind_of(meta, run_id) or "").strip().lower()
+        agent_id = str(meta.get("agentId") or "")
+        conversation_id = str(meta.get("conversationId") or "")
 
         self._sse_headers(handler, 200)
         cursor = self._cursor(handler, after)
@@ -96,7 +120,7 @@ class ProviderSSETransport:
                         payload.setdefault("runId", run_id)
                         payload.setdefault("agentId", meta.get("agentId") or "")
                         payload.setdefault("profile", meta.get("profile") or "")
-                        self.write_event(handler, event_name, payload)
+                        self.write_event(handler, event_name, self._payload(event_name, payload, provider_kind, agent_id, conversation_id))
                         if self.telemetry is not None and telemetry_enabled:
                             self.telemetry.mark(run_id, "sse_written")
                             self.telemetry.mark(run_id, "terminal_sse_written")
@@ -110,7 +134,14 @@ class ProviderSSETransport:
                 for item in items:
                     cursor = max(cursor, int(item.get("id") or 0))
                     event_name = str(item.get("event") or "message")
-                    self.write_event(handler, event_name, item.get("data") or {}, item.get("id"))
+                    self.write_event(handler, event_name, self._payload(
+                        event_name,
+                        item.get("data") or {},
+                        item.get("providerKind") or provider_kind,
+                        item.get("agentId") or agent_id,
+                        item.get("conversationId") or conversation_id,
+                        item.get("id"),
+                    ), item.get("id"))
                     if self.telemetry is not None and telemetry_enabled:
                         self.telemetry.mark(run_id, "sse_written")
                         if event_name in {"run.completed", "run.failed", "run.cancelled", "run.canceled"}:
@@ -166,51 +197,70 @@ class ProviderSSETransport:
         }
         last_keepalive = self.clock()
         try:
-            self.write_event(handler, "provider.snapshot", snapshot, cursor if cursor > 0 else None)
+            self.write_event(handler, "provider.snapshot", self._payload(
+                "provider.snapshot", snapshot, provider_kind, agent_id, conversation_id, cursor
+            ), cursor if cursor > 0 else None)
             try:
                 pending = self.pending_lookup(provider_kind, agent_id, conversation_id)
             except Exception:
                 pending = None
             if isinstance(pending, dict):
-                self.write_event(handler, "approval.request", {
+                approval_payload = {
                     "providerKind": provider_kind,
                     "agentId": agent_id,
                     "conversationId": conversation_id,
                     "approval": pending,
                     "pending_count": 1,
-                })
+                }
+                self.write_event(handler, "approval.request", self._payload(
+                    "approval.request", approval_payload, provider_kind, agent_id, conversation_id
+                ))
             try:
                 progress = self.recovery_lookup(provider_kind, agent_id, conversation_id)
             except Exception:
                 progress = None
             if isinstance(progress, dict):
-                self.write_event(handler, "history.recovered", {
+                recovery_payload = {
                     "providerKind": provider_kind,
                     "agentId": agent_id,
                     "conversationId": conversation_id,
                     "progress": progress,
                     "eventId": cursor,
-                })
+                }
+                self.write_event(handler, "history.recovered", self._payload(
+                    "history.recovered", recovery_payload, provider_kind, agent_id, conversation_id, cursor
+                ))
 
             while True:
                 items = self.journal.wait_for_conversation_events(provider_kind, agent_id, conversation_id, cursor, timeout=1.0)
                 if items:
                     for item in items:
                         cursor = max(cursor, int(item.get("id") or 0))
-                        self.write_event(handler, item.get("event") or "message", item.get("data") or {}, item.get("id"))
+                        event_name = item.get("event") or "message"
+                        self.write_event(handler, event_name, self._payload(
+                            event_name,
+                            item.get("data") or {},
+                            item.get("providerKind") or provider_kind,
+                            item.get("agentId") or agent_id,
+                            item.get("conversationId") or conversation_id,
+                            item.get("id"),
+                        ), item.get("id"))
                         if self.telemetry is not None and telemetry_enabled and item.get("runId"):
                             self.telemetry.mark(item.get("runId"), "sse_written")
                             if item.get("event") in {"run.completed", "run.failed", "run.cancelled", "run.canceled"}:
                                 self.telemetry.mark(item.get("runId"), "terminal_sse_written")
                     continue
                 if self.clock() - last_keepalive >= 10:
-                    self.write_event(handler, "provider.heartbeat", {
+                    heartbeat_payload = {
                         "providerKind": provider_kind,
                         "agentId": agent_id,
                         "conversationId": conversation_id,
                         "eventId": cursor,
                         "ts": int(self.clock() * 1000),
-                    })
+                    }
+                    self.write_event(handler, "provider.heartbeat", self._payload(
+                        "provider.heartbeat", heartbeat_payload, provider_kind, agent_id, conversation_id, cursor
+                    ))
                     last_keepalive = self.clock()
         except (BrokenPipeError, ConnectionError, OSError):
             handler.close_connection = True

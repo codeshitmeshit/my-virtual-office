@@ -103,6 +103,7 @@ from services.chat_history_timeline import (
     history_hash as chat_history_hash,
 )
 from services.conversation_timeline_sources import project_workflow_history
+from services.conversation_timeline_events import ProviderTimelineItemProjector
 from services.codex_workflow_timeline_source import CodexWorkflowTimelineSource
 from services.openclaw_timeline_source import OpenClawWorkflowTimelineSource
 from services.codex_fast_path import CodexEventFastPath, CodexFastPathTelemetry, CodexTransientCoalescer, classify_codex_event, load_codex_fast_path_settings
@@ -9725,6 +9726,7 @@ def _provider_sse_transport_for(repository, journal):
         recovery_lookup=_provider_recovery_progress_snapshot,
         clock=lambda: time.time(),
         telemetry=_CODEX_FAST_PATH_TELEMETRY,
+        timeline_item_projector=ProviderTimelineItemProjector(_CONVERSATION_TIMELINE_SERVICE).project,
     )
 
 
