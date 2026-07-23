@@ -31,6 +31,7 @@ class ParsedHRAssessment:
     local_date: str
     principal_contributions: tuple[str, ...]
     workload: str
+    workload_score: int
     rationale: str
     evidence_references: tuple[AssessmentEvidenceReference, ...]
     blockers: tuple[str, ...]
@@ -71,6 +72,7 @@ class HRAssessmentParser:
             "localDate",
             "principalContributions",
             "workload",
+            "workloadScore",
             "rationale",
             "evidenceReferences",
             "blockers",
@@ -201,6 +203,13 @@ class HRAssessmentParser:
         workload = value["workload"]
         if not isinstance(workload, str) or workload not in self.WORKLOADS:
             raise HRAssessmentValidationError("assessment workload is unsupported")
+        workload_score = value["workloadScore"]
+        if (
+            isinstance(workload_score, bool)
+            or not isinstance(workload_score, int)
+            or not 1 <= workload_score <= 10
+        ):
+            raise HRAssessmentValidationError("assessment workload score is unsupported")
         sufficiency = value["informationSufficiency"]
         if not isinstance(sufficiency, dict) or set(sufficiency) != {"status", "explanation"}:
             raise HRAssessmentValidationError("informationSufficiency is invalid")
@@ -225,6 +234,7 @@ class HRAssessmentParser:
             local_date=local_date,
             principal_contributions=contributions,
             workload=workload,
+            workload_score=workload_score,
             rationale=self._text(
                 value["rationale"],
                 "rationale",
@@ -407,11 +417,13 @@ class HRAssessmentOrchestrator:
         )
         schema = (
             "Return JSON only with exactly: schemaVersion, agentAiId, localDate, "
-            "principalContributions, workload, rationale, evidenceReferences, blockers, "
+            "principalContributions, workload, workloadScore, rationale, evidenceReferences, blockers, "
             "strengths, improvements, runtimeDiagnosis, informationSufficiency, hrAiId, "
             "assessedAt. schemaVersion=1. Evidence reference items contain evidenceType, "
             "referenceId, rationale. informationSufficiency contains status and explanation. "
-            "Never output scores, ranks, leaderboards, elimination, pause, delete, or reassign actions."
+            "workloadScore MUST be an integer from 1 to 10 where 1 is minimal observable workload "
+            "and 10 is extreme observable workload. Never output ranks, leaderboards, elimination, "
+            "pause, delete, or reassign actions."
         )
         report_payload = {
             "submissionState": report.submission_state,
@@ -568,6 +580,7 @@ class HRAssessmentOrchestrator:
                     local_date=local_date,
                     status="complete",
                     workload=parsed.workload,
+                    workload_score=parsed.workload_score,
                     principal_contributions=list(parsed.principal_contributions),
                     rationale=parsed.rationale,
                     blockers=list(parsed.blockers),

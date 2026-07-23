@@ -26,6 +26,7 @@ def payload(**overrides):
         "localDate": "2026-07-19",
         "principalContributions": ["完成日报调度器并补齐并发测试"],
         "workload": "appropriate",
+        "workloadScore": 6,
         "rationale": "实现和测试均有可追踪证据，工作量与当日目标匹配。",
         "evidenceReferences": [
             {
@@ -62,6 +63,7 @@ def test_parses_complete_evidence_backed_assessment():
     assert result.agent_ai_id == "agent-1"
     assert result.local_date == "2026-07-19"
     assert result.workload == "appropriate"
+    assert result.workload_score == 6
     assert result.principal_contributions == ("完成日报调度器并补齐并发测试",)
     assert result.evidence_references[0].reference_id == "task-1:event-2"
     assert result.blockers == ("开发机缺少真实 OpenClaw",)
@@ -96,7 +98,7 @@ def test_insufficient_information_requires_explanation_without_invented_contribu
 
 
 @pytest.mark.parametrize("forbidden", ("score", "numericScore", "rank", "leaderboard"))
-def test_score_and_rank_fields_are_rejected(forbidden):
+def test_unsupported_score_alias_and_rank_fields_are_rejected(forbidden):
     value = payload()
     value[forbidden] = 100
     with pytest.raises(HRAssessmentValidationError, match="unsupported fields"):
@@ -114,6 +116,9 @@ def test_score_and_rank_fields_are_rejected(forbidden):
         ({"schemaVersion": 2}, "schema"),
         ({"schemaVersion": True}, "schema"),
         ({"workload": ["low"]}, "workload"),
+        ({"workloadScore": 0}, "workload score"),
+        ({"workloadScore": 11}, "workload score"),
+        ({"workloadScore": True}, "workload score"),
     ),
 )
 def test_identity_schema_workload_and_timestamp_are_enforced(overrides, message):

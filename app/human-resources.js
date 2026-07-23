@@ -593,13 +593,18 @@
     function renderAssessment(assessment) {
         const item = object(assessment);
         const workload = String(item.workload || 'insufficient_information');
+        const workloadScore = Number(item.workloadScore || item.workload_score || 0);
+        const scoreText = workloadScore >= 1 && workloadScore <= 10
+            ? ' · ' + tr('hr_score_out_of_ten', 'Score {{score}}/10', { score: workloadScore })
+            : '';
         return '<article class="hr-record-card hr-assessment-card">' +
             '<header><div><strong>' + escHtml(item.localDate || '—') + '</strong>' +
             '<small>' + escHtml(tr('hr_assessment_version', 'Assessment v{{version}}', { version: item.version || 1 })) +
             (item.isCurrent ? ' · ' + escHtml(tr('hr_current', 'Current')) : '') + '</small></div>' +
             '<span class="hr-state-chip hr-tone-' + escHtml(statusTone(item.status)) + '">' + escHtml(semanticLabel(item.status)) + '</span></header>' +
             '<div class="hr-workload-line"><span>' + escHtml(tr('hr_workload', 'Workload')) + '</span>' +
-            '<strong class="hr-tone-' + escHtml(workloadTone(workload)) + '">' + escHtml(semanticLabel(workload)) + '</strong></div>' +
+            '<strong class="hr-tone-' + escHtml(workloadTone(workload)) + '">' +
+            escHtml(semanticLabel(workload) + scoreText) + '</strong></div>' +
             '<p>' + escHtml(item.rationale || tr('hr_no_rationale', 'No rationale recorded')) + '</p>' +
             '<div class="hr-assessment-grid">' +
                 '<div><h5>' + escHtml(tr('hr_contributions', 'Principal contributions')) + '</h5>' + renderTextList(item.principalContributions) + '</div>' +
