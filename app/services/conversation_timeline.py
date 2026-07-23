@@ -740,26 +740,44 @@ class ConversationTimelineService:
     ) -> tuple[dict[str, Any], ...]:
         """Select legacy DTOs using canonical scoped identity without reshaping them."""
 
-        selected: dict[str, tuple[TimelineItem, dict[str, Any]]] = {}
+        selected: dict[str, tuple[int, Mapping[str, Any]]] = {}
         ordinal = 0
         for records in source_records or ():
             for raw in records or ():
                 if not isinstance(raw, Mapping):
                     continue
-                payload = copy.deepcopy(dict(raw))
-                source = str(payload.get("source") or scope.provider_kind)
-                item = self.item_from_record(scope, payload, source=source, ordinal=ordinal, durable=True)
+                _assert_record_scope(scope, raw)
+                legacy_id = str(raw.get("id") or "")
+                if legacy_id:
+                    key = "compat:" + _stable_hash((scope.key(), legacy_id))
+                else:
+                    source = str(raw.get("source") or scope.provider_kind)
+                    role = _record_role(raw)
+                    item_kind = _record_item_kind(raw)
+                    epoch_ms = _safe_nonnegative_int(_record_value(raw, "epochMs", "ts", "timestamp"))
+                    _from_name, from_agent_id = _record_party(raw, "from")
+                    key, _strength = _identity_for(
+                        scope,
+                        raw,
+                        item_kind=item_kind,
+                        role=role,
+                        source=_bounded(source, 80),
+                        ordinal=ordinal,
+                        epoch_ms=epoch_ms,
+                        sender_id=from_agent_id,
+                        text=str(raw.get("text") or ""),
+                        thinking=visible_reasoning(scope.provider_kind, raw),
+                    )
                 ordinal += 1
-                legacy_id = str(payload.get("id") or "")
-                key = "compat:" + _stable_hash((scope.key(), legacy_id)) if legacy_id else (item.identity_key or item.id)
+                priority = _safe_nonnegative_int(raw.get("sourcePriority"))
                 existing = selected.get(key)
-                if existing is None or item.source_priority > existing[0].source_priority:
-                    selected[key] = (item, payload)
+                if existing is None or priority > existing[0]:
+                    selected[key] = (priority, raw)
         ordered = sorted(
             selected.values(),
-            key=lambda pair: (int(pair[1].get("epochMs") or 0), str(pair[1].get("id") or "")),
+            key=lambda pair: (_safe_nonnegative_int(pair[1].get("epochMs")), str(pair[1].get("id") or "")),
         )
-        return tuple(copy.deepcopy(payload) for _, payload in ordered)
+        return tuple(copy.deepcopy(dict(payload)) for _, payload in ordered)
 
     @staticmethod
     def _settle_pair(left: TimelineItem, right: TimelineItem) -> TimelineItem:

@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "contentFree": true,
+  "task": "7.2",
+  "result": "passed",
+  "method": {
+    "beforeRevision": "988546a",
+    "samplesPerFixture": 30,
+    "historySourceRecords": [10, 50, 500, 1000],
+    "liveEvents": [0, 1, 4000],
+    "historyP95Gate": "max(before*2,25ms)",
+    "liveP95Gate": "max(before*4,10ms)"
+  },
+  "before": {
+    "history": [
+      {"sourceRecords": 10, "candidates": 10, "normalized": 10, "dedupeCount": 2, "responseBytes": 3754, "medianNs": 141666, "p95Ns": 187167},
+      {"sourceRecords": 50, "candidates": 50, "normalized": 50, "dedupeCount": 12, "responseBytes": 17918, "medianNs": 714604, "p95Ns": 837459},
+      {"sourceRecords": 500, "candidates": 500, "normalized": 500, "dedupeCount": 50, "responseBytes": 25846, "medianNs": 7501062, "p95Ns": 9585375},
+      {"sourceRecords": 1000, "candidates": 1000, "normalized": 1000, "dedupeCount": 50, "responseBytes": 25846, "medianNs": 14229562, "p95Ns": 17219708}
+    ],
+    "live": [
+      {"liveEvents": 0, "candidates": 0, "normalized": 0, "dedupeCount": 0, "medianNs": 125, "p95Ns": 208},
+      {"liveEvents": 1, "candidates": 1, "normalized": 1, "dedupeCount": 0, "medianNs": 917, "p95Ns": 2500},
+      {"liveEvents": 4000, "candidates": 4000, "normalized": 4000, "dedupeCount": 0, "medianNs": 2290729, "p95Ns": 2348542}
+    ]
+  },
+  "after": {
+    "history": [
+      {"sourceRecords": 10, "candidates": 10, "normalized": 10, "dedupeCount": 2, "responseBytes": 3754, "medianNs": 321583, "p95Ns": 362875},
+      {"sourceRecords": 50, "candidates": 50, "normalized": 50, "dedupeCount": 12, "responseBytes": 17918, "medianNs": 1572208, "p95Ns": 1631750},
+      {"sourceRecords": 500, "candidates": 500, "normalized": 500, "dedupeCount": 50, "responseBytes": 25846, "medianNs": 11512125, "p95Ns": 11852375},
+      {"sourceRecords": 1000, "candidates": 1000, "normalized": 1000, "dedupeCount": 50, "responseBytes": 25846, "medianNs": 22300791, "p95Ns": 23487041}
+    ],
+    "live": [
+      {"liveEvents": 0, "candidates": 0, "normalized": 0, "dedupeCount": 0, "medianNs": 500, "p95Ns": 917},
+      {"liveEvents": 1, "candidates": 1, "normalized": 1, "dedupeCount": 0, "medianNs": 2916, "p95Ns": 5209},
+      {"liveEvents": 4000, "candidates": 4000, "normalized": 4000, "dedupeCount": 0, "medianNs": 6608459, "p95Ns": 7041083}
+    ]
+  },
+  "invariants": {
+    "providerCallsBefore": 0,
+    "providerCallsAfter": 0,
+    "historyWritesBefore": 0,
+    "historyWritesAfter": 0,
+    "cacheHitsAfter": 1,
+    "cacheMissesAfter": 1,
+    "cacheEntriesAfter": 1,
+    "cacheBytesAfter": 101323,
+    "cacheEntryBound": 32,
+    "cacheByteBound": 67108864,
+    "lockHeldWork": "cache-lookup-and-update-only",
+    "unboundedScan": false,
+    "responseBytesChanged": false
+  },
+  "commands": [
+    "tests/conversation_timeline_performance.py --mode before --app-dir <detached-988546a>/app",
+    "tests/conversation_timeline_performance.py --mode after --app-dir app",
+    "tests/compare_conversation_timeline_performance.py <before.json> <after.json>"
+  ]
+}
