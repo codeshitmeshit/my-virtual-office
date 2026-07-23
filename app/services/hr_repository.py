@@ -228,6 +228,7 @@ class AssessmentRecord:
     is_current: bool
     status: str
     workload: str
+    workload_score: int
     principal_contributions: tuple[str, ...]
     rationale: str
     blockers: tuple[str, ...]
@@ -486,6 +487,7 @@ _SCHEMA_V1 = (
         is_current INTEGER NOT NULL DEFAULT 1 CHECK(is_current IN (0, 1)),
         status TEXT NOT NULL,
         workload TEXT NOT NULL CHECK(workload IN ('low','appropriate','high','overloaded','insufficient_information')),
+        workload_score INTEGER NOT NULL DEFAULT 1 CHECK(workload_score BETWEEN 1 AND 10),
         principal_contributions_json TEXT NOT NULL DEFAULT '[]',
         rationale TEXT NOT NULL,
         blockers_json TEXT NOT NULL DEFAULT '[]',
@@ -588,6 +590,16 @@ def _add_agent_emoji(connection: sqlite3.Connection) -> None:
         connection.execute("ALTER TABLE agents ADD COLUMN emoji TEXT NOT NULL DEFAULT ''")
 
 
+def _add_assessment_workload_score(connection: sqlite3.Connection) -> None:
+    assessment_columns = {
+        str(row[1]) for row in connection.execute("PRAGMA table_info(assessments)").fetchall()
+    }
+    if "workload_score" not in assessment_columns:
+        connection.execute(
+            "ALTER TABLE assessments ADD COLUMN workload_score INTEGER NOT NULL DEFAULT 1"
+        )
+
+
 def _reserve_schema_migration(_connection: sqlite3.Connection) -> None:
     """Preserve repository compatibility with previously stamped HR schemas."""
 
@@ -601,7 +613,7 @@ DEFAULT_MIGRATIONS = (
         _remove_legacy_hr_authorization_storage,
     ),
     HRMigration(4, "add_agent_emoji", _add_agent_emoji),
-    HRMigration(5, "reserved_assessment_schema", _reserve_schema_migration),
+    HRMigration(5, "add_assessment_workload_score", _add_assessment_workload_score),
     HRMigration(6, "reserved_access_activity_schema", _reserve_schema_migration),
     HRMigration(7, "reserved_hr_queue_schema", _reserve_schema_migration),
 )
@@ -2467,6 +2479,7 @@ class HRRepository:
         local_date: str,
         status: str,
         workload: str,
+        workload_score: int = 1,
         principal_contributions: object,
         rationale: str,
         blockers: object,
@@ -2487,6 +2500,12 @@ class HRRepository:
         workload = _required_text(workload, "workload", maximum=32)
         if workload not in {"low", "appropriate", "high", "overloaded", "insufficient_information"}:
             raise HRRepositoryValidationError("unsupported assessment workload")
+        if (
+            isinstance(workload_score, bool)
+            or not isinstance(workload_score, int)
+            or not 1 <= workload_score <= 10
+        ):
+            raise HRRepositoryValidationError("assessment workload score must be between 1 and 10")
         list_values = {}
         for field, value in (
             ("principal_contributions", principal_contributions),
@@ -2556,11 +2575,12 @@ class HRRepository:
                 connection.execute(
                     """INSERT INTO assessments(
                            id, ai_id, local_date, version, is_current, status, workload,
+                           workload_score,
                            principal_contributions_json, rationale, blockers_json,
                            strengths_json, improvements_json, runtime_diagnosis,
                            information_sufficiency, evidence_version, hr_id,
                            revision_reason, created_at, updated_at
-                       ) VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                       ) VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         assessment_id,
                         ai_id,
@@ -2568,6 +2588,7 @@ class HRRepository:
                         version,
                         status,
                         workload,
+                        workload_score,
                         list_values["principal_contributions"],
                         rationale,
                         list_values["blockers"],

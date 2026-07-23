@@ -243,6 +243,7 @@
   "hr_unknown_agent": "未知 Agent",
   "hr_workflow_state": "工作流状态",
   "hr_workload": "工作量",
+  "hr_score_out_of_ten": "评分 {{score}}/10",
   "hr_state_active": "活跃",
   "hr_state_accepted": "已接收",
   "hr_state_appropriate": "适中",

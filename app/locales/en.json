@@ -243,6 +243,7 @@
   "hr_unknown_agent": "Unknown Agent",
   "hr_workflow_state": "Workflow state",
   "hr_workload": "Workload",
+  "hr_score_out_of_ten": "Score {{score}}/10",
   "hr_state_active": "Active",
   "hr_state_accepted": "Accepted",
   "hr_state_appropriate": "Appropriate",
