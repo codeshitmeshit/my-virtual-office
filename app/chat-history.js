@@ -290,16 +290,21 @@
         if (message.role === 'assistant' && message.source === 'agent-platform-communications' && String(message.text || '').trim()) {
           let matchedRun = null;
           for (const [candidateId, candidate] of entry.messages) {
-            if (!candidateId.startsWith('run-') || !candidateId.endsWith('-final')) continue;
+            const canonicalRunId = candidate.itemKind === 'run' ? String(candidate.providerRunId || '') : '';
+            const legacyRunId = candidateId.startsWith('run-') && candidateId.endsWith('-final')
+              ? candidateId.slice(4, -6)
+              : '';
+            const providerRunId = canonicalRunId || legacyRunId;
+            if (!providerRunId) continue;
             if (candidate.role !== 'assistant' || String(candidate.text || '').trim() !== String(message.text || '').trim()) continue;
             const delta = Math.abs((Number(candidate.epochMs) || 0) - (Number(message.epochMs) || 0));
             if (delta > 10000 || (matchedRun && matchedRun.delta <= delta)) continue;
-            matchedRun = { candidateId, delta };
+            matchedRun = { candidateId, delta, providerRunId };
           }
           if (matchedRun) {
             entry.messages.delete(matchedRun.candidateId);
             reconciled.push({
-              providerRunId: matchedRun.candidateId.slice(4, -6),
+              providerRunId: matchedRun.providerRunId,
               authoritativeId: message.id,
             });
           }
@@ -312,7 +317,7 @@
         }
       }
       entry.order = Array.from(entry.messages.values())
-        .sort((left, right) => left.epochMs - right.epochMs || left.id.localeCompare(right.id))
+        .sort((left, right) => left.epochMs - right.epochMs || (Number(left.sequence) || 0) - (Number(right.sequence) || 0) || left.id.localeCompare(right.id))
         .map(message => message.id);
       const firstPreviousIndex = previousOrder.length
         ? entry.order.findIndex(id => previousIds.has(id))
@@ -446,7 +451,7 @@
       if (options.notify === false) {
         entry.messages.set(normalized.id, normalized);
         entry.order = Array.from(entry.messages.values())
-          .sort((left, right) => left.epochMs - right.epochMs || left.id.localeCompare(right.id))
+          .sort((left, right) => left.epochMs - right.epochMs || (Number(left.sequence) || 0) - (Number(right.sequence) || 0) || left.id.localeCompare(right.id))
           .map(item => item.id);
         entry.estimatedBytes = Array.from(entry.messages.values()).reduce((sum, item) => sum + estimateMessageBytes(item), 0);
         entry.revision += 1;
@@ -458,7 +463,8 @@
 
     applyLiveEvent(context, eventName, data = {}, options = {}) {
       if (eventName === 'message.delta') return this.getOrCreate(context);
-      const message = normalizedMessage(data.message || data, context);
+      const timelineItem = data?.timelineItem && typeof data.timelineItem === 'object' ? data.timelineItem : null;
+      const message = normalizedMessage(timelineItem || data.message || data, context);
       return this.mergePage(this.getOrCreate(context), { messages: [message] }, 'live', options);
     }
 

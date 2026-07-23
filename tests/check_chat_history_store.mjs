@@ -281,6 +281,35 @@ const makeMessage = (id, epochMs, overrides = {}) => ({
 }
 
 {
+  const store = new runtime.ChatHistoryStore({ fetchImpl: context.fetch });
+  const ctx = makeContext('canonical-live');
+  const payload = {
+    runId: 'legacy-run',
+    text: 'legacy text must not win',
+    status: 'failed',
+    timelineItem: makeMessage('canonical-item', 20, {
+      providerRunId: 'canonical-run', text: 'canonical text', status: 'done', version: 'canonical-v1', sequence: 2,
+      thinking: 'canonical reasoning', tools: [{ id: 'tool', status: 'done' }],
+    }),
+  };
+  store.applyLiveEvent(ctx, 'run.completed', payload);
+  const item = store.getOrCreate(ctx).messages.get('canonical-item');
+  assert.equal(item.text, 'canonical text', 'timelineItem must own live text');
+  assert.equal(item.status, 'done', 'timelineItem must own live lifecycle');
+  assert.equal(item.thinking, 'canonical reasoning', 'timelineItem must own live reasoning');
+  assert.equal(item.tools[0].status, 'done', 'timelineItem must own tool lifecycle');
+  assert.equal(store.getOrCreate(ctx).messages.has('legacy-run'), false, 'legacy payload identity must not be re-derived');
+
+  store.applyLiveEvent(ctx, 'tool.completed', {
+    timelineItem: makeMessage('same-time-later', 20, { sequence: 3, status: 'done' }),
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(store.getOrCreate(ctx).order)), ['canonical-item', 'same-time-later'], 'canonical sequence must break equal-time ties');
+  const beforeDelta = store.getOrCreate(ctx).order.slice();
+  store.applyLiveEvent(ctx, 'message.delta', { timelineItem: makeMessage('delta', 21, { status: 'running' }) });
+  assert.deepEqual(JSON.parse(JSON.stringify(store.getOrCreate(ctx).order)), JSON.parse(JSON.stringify(beforeDelta)), 'streaming deltas must remain in the existing transient presentation layer');
+}
+
+{
   const reconciliations = [];
   const store = new runtime.ChatHistoryStore({ fetchImpl: context.fetch });
   const ctx = makeContext('optimistic-reconcile');
@@ -322,6 +351,27 @@ const makeMessage = (id, epochMs, overrides = {}) => ({
   assert.equal(entry.messages.has('communication-reply-1'), true);
   assert.deepEqual(JSON.parse(JSON.stringify(reconciliations)), [{
     providerRunId: 'codex-run-1', authoritativeId: 'communication-reply-1',
+  }]);
+}
+
+{
+  const reconciliations = [];
+  const store = new runtime.ChatHistoryStore({ fetchImpl: context.fetch });
+  const ctx = makeContext('canonical-provider-final-reconcile');
+  const view = { activation: 0, onHistoryEntryChanged: (_entry, mutation) => reconciliations.push(...(mutation.reconciled || [])) };
+  const { entry } = store.activate(ctx, view);
+  store.applyLiveEvent(ctx, 'run.completed', {
+    timelineItem: makeMessage('tl-canonical-run', 1000, {
+      itemKind: 'run', providerRunId: 'canonical-run-1', role: 'assistant', text: 'canonical final', status: 'done',
+    }),
+  }, { notify: false });
+  store.mergePage(entry, { messages: [makeMessage('communication-canonical-1', 1005, {
+    role: 'assistant', text: 'canonical final', status: 'done', source: 'agent-platform-communications',
+  })] }, 'latest');
+  assert.equal(entry.messages.has('tl-canonical-run'), false, 'durable history must settle the canonical transient run item');
+  assert.equal(entry.messages.has('communication-canonical-1'), true);
+  assert.deepEqual(JSON.parse(JSON.stringify(reconciliations)), [{
+    providerRunId: 'canonical-run-1', authoritativeId: 'communication-canonical-1',
   }]);
 }
 

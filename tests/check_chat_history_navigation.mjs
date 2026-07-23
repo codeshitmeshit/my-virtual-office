@@ -79,6 +79,8 @@ assert.ok(historyRuntime.includes('navigateToNewest()'), 'initial bottom placeme
 assert.ok(chat.includes('prepareHistoryBottomFollow({ newest: true })'), 'opening and switching must request the newest virtual range');
 const providerMergeStart = chat.indexOf('mergeLiveHistoryRecord(eventName, payload)');
 const providerMergeBody = chat.slice(providerMergeStart, chat.indexOf('\n    handleProviderHistoryRecovered', providerMergeStart));
+assert.ok(providerMergeBody.includes('payload.timelineItem'), 'provider model reconciliation must prefer the canonical server projection');
+assert.ok(providerMergeBody.includes('this.historyStore.applyLiveEvent(context, eventName, payload'), 'canonical timeline payloads must enter the shared Store without re-derivation');
 assert.ok(providerMergeBody.includes('const shouldStickToBottom = this.historyStickToBottom'), 'provider events must capture follow intent before live mutation');
 assert.ok(providerMergeBody.includes('this.scheduleHistoryBottomFollow()'), 'provider events must follow the bottom when enabled');
 

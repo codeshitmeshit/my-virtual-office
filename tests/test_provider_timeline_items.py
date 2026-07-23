@@ -114,6 +114,7 @@ def test_sse_adds_timeline_item_without_changing_event_name_or_legacy_fields():
     assert data["ok"] is True and data["reply"] == "done"
     assert data["timelineItem"]["itemKind"] == "run"
     assert data["timelineItem"]["status"] == "done"
+    assert data["timelineItem"]["text"] == "done"
 
 
 def test_projection_failure_does_not_change_legacy_sse_delivery():

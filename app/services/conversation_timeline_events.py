@@ -69,6 +69,10 @@ def _event_record(event_name: str, payload: Mapping[str, Any], event_id: Any) ->
     else:
         record["itemKind"] = "run"
         record["id"] = payload.get("runId") or source.get("runId") or f"{name}:{event_id or 0}"
+        record["text"] = _text(source.get("reply") or source.get("text") or source.get("error"))
+        record["thinking"] = _text(source.get("thinking"))
+        record["tools"] = copy.deepcopy(list(source.get("tools") or ()))
+        record["approval"] = copy.deepcopy(source.get("approval")) if isinstance(source.get("approval"), Mapping) else None
     if name in TERMINAL_EVENT_STATUS:
         record["status"] = TERMINAL_EVENT_STATUS[name]
     elif name == "run.started":

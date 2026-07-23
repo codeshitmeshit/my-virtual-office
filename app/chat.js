@@ -3383,6 +3383,7 @@
       const shouldStickToBottom = this.historyStickToBottom;
       payload = payload && typeof payload === 'object' ? payload : {};
       const context = this.getHistoryContext();
+      const timelineItem = payload.timelineItem && typeof payload.timelineItem === 'object' ? payload.timelineItem : null;
       const runId = payload.runId || payload.turnId || this.currentRunId || '';
       const epochMs = Number(payload.epochMs || payload.ts || Date.now());
       const terminalRun = ['run.completed', 'run.failed', 'run.cancelled', 'run.canceled'].includes(eventName);
@@ -3391,6 +3392,12 @@
       const sessionMessage = eventName === 'session.message';
       const recovered = eventName === 'history.recovered';
       if (!terminalRun && !toolEvent && !approvalEvent && !sessionMessage && !recovered) return;
+
+      if (timelineItem) {
+        this.historyStore.applyLiveEvent(context, eventName, payload, { notify: false });
+        if (shouldStickToBottom && this.historyStickToBottom) this.scheduleHistoryBottomFollow();
+        return;
+      }
 
       const toolCard = payload.toolCard || {};
       const toolId = payload.toolCallId || toolCard.id || payload.itemId || payload.id || '';

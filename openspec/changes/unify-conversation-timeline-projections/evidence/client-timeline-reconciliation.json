@@ -1,0 +1,38 @@
+{
+  "schema": 1,
+  "contentPolicy": "content-free",
+  "canonicalOwnership": [
+    "identity",
+    "version",
+    "status",
+    "reasoning",
+    "tools",
+    "equal-time-sequence"
+  ],
+  "presentationPreserved": [
+    "streaming-delta-live-layer",
+    "typing-indicator",
+    "tool-and-approval-components",
+    "scroll-follow-and-anchor",
+    "virtual-history-window",
+    "provider-specific-live-presentation"
+  ],
+  "compatibilityFallback": "legacy-provider-payload-until-task-6.2",
+  "verification": [
+    {
+      "command": "node tests/check_chat_history_store.mjs && node tests/check_chat_history_navigation.mjs && node tests/check_provider_chat_sse.mjs",
+      "result": "passed"
+    },
+    {
+      "command": ".venv/bin/python -m pytest -q tests/test_provider_timeline_items.py tests/test_provider_sse_transport.py tests/test_provider_characterization.py",
+      "result": "passed",
+      "tests": 24
+    },
+    {
+      "command": "node tests/chat_history_ui_e2e.mjs",
+      "result": "passed-on-rerun",
+      "firstRun": "existing-bottom-follow-timing-flake",
+      "secondRun": "passed"
+    }
+  ]
+}
