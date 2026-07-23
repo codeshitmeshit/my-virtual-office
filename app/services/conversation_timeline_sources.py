@@ -14,6 +14,7 @@ from .conversation_timeline import (
     TimelineQuery,
     TimelineScope,
 )
+from .conversation_timeline_public import sanitize_public_timeline_record
 
 
 MAX_CONTENT_BLOCKS = 100
@@ -162,7 +163,7 @@ def project_workflow_history(
         normalized = normalize_source_record(scope.provider_kind, raw)
         compatible_source = str(raw.get("source") or source)
         item = timeline.item_from_record(scope, normalized, source=compatible_source, ordinal=ordinal, durable=True)
-        message = copy.deepcopy(dict(raw))
+        message = sanitize_public_timeline_record(raw)
         if "text" in raw or normalized.get("content") is not None:
             message["text"] = item.text
         if "thinking" in raw or normalized.get("content") is not None:
@@ -173,7 +174,7 @@ def project_workflow_history(
             message["media"] = copy.deepcopy(list(item.media))
         if item.thinking or raw.get("reasoningStatus") is not None:
             message["reasoningStatus"] = item.status
-        projected.append(message)
+        projected.append(sanitize_public_timeline_record(message))
     return projected
 
 

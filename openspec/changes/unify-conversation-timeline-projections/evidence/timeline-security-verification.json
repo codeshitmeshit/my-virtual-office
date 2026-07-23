@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "contentFree": true,
+  "task": "7.1",
+  "result": "passed",
+  "publicBoundaries": {
+    "canonicalTimelineItem": {
+      "fieldAllowlist": true,
+      "nestedBounds": true,
+      "secretRedaction": true,
+      "absolutePathSuppression": true
+    },
+    "projectWorkflowHistory": {
+      "fieldAllowlist": true,
+      "nestedBounds": true,
+      "secretRedaction": true,
+      "absolutePathSuppression": true
+    },
+    "standardChatHistory": {
+      "existingCompatibilityAllowlist": true,
+      "frozenDtoComparison": "passed",
+      "productVisibleDifference": false
+    },
+    "providerSse": {
+      "payloadSanitization": true,
+      "fieldAndListBounds": true,
+      "depthBound": true,
+      "secretHeaderTokenRedaction": true,
+      "absolutePathSuppression": true
+    }
+  },
+  "sourceIsolation": {
+    "failureMessagesExcluded": true,
+    "failureClassification": "source-and-exception-type-only",
+    "openClawTrustedSessionResolution": true,
+    "openClawDirectoryContainment": true,
+    "openClawMalformedJsonIsolation": true,
+    "openClawTailBounded": true,
+    "sessionMetricsAllowlisted": true,
+    "diagnostics": "counts-and-types-only",
+    "repeatedSourceFailureContentLogging": false
+  },
+  "commands": [
+    {
+      "command": ".venv/bin/python tests/run_standard_chat_timeline_comparison.py",
+      "result": "passed"
+    },
+    {
+      "command": ".venv/bin/python -m pytest -q tests/test_provider_events.py tests/test_provider_approvals.py tests/test_provider_sse_transport.py tests/test_conversation_timeline.py tests/test_conversation_timeline_sources.py tests/test_conversation_timeline_security.py tests/test_openclaw_timeline_source.py tests/test_provider_timeline_items.py tests/test_codex_server.py",
+      "result": "118 passed"
+    }
+  ]
+}

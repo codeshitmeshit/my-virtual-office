@@ -14,6 +14,7 @@ from collections import deque
 from dataclasses import dataclass, field, replace
 from typing import Any, Iterable, Mapping
 
+from .conversation_timeline_public import sanitize_public_timeline_record
 
 MAX_AGENT_ID = 160
 MAX_PROFILE = 160
@@ -261,7 +262,7 @@ class TimelineItem:
         object.__setattr__(self, "source_priority", _safe_nonnegative_int(self.source_priority))
 
     def to_public_dict(self) -> dict[str, Any]:
-        return copy.deepcopy(
+        return sanitize_public_timeline_record(
             {
                 "id": self.id,
                 "version": self.version,
