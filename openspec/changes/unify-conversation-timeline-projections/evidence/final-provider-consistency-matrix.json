@@ -1,0 +1,142 @@
+{
+  "schemaVersion": 1,
+  "contentFree": true,
+  "task": "8.3",
+  "result": "passed",
+  "providers": {
+    "codex": {
+      "standardHistory": "canonical compatibility delegate",
+      "projectHistory": "attempt-scoped durable communication plus bounded live reasoning",
+      "liveProjection": "provider SSE timelineItem plus activity recovery",
+      "reasoning": "single server accumulator",
+      "refresh": "durable messages and terminal state recovered",
+      "scopeIsolation": "provider, Agent, conversation, task and attempt",
+      "status": "passed"
+    },
+    "claude-code": {
+      "standardHistory": "canonical compatibility delegate",
+      "projectHistory": "attempt-scoped Claude history",
+      "liveProjection": "provider SSE timelineItem",
+      "reasoning": "Provider-supplied only",
+      "refresh": "durable Provider history recovered",
+      "scopeIsolation": "provider, profile, Agent, conversation and attempt",
+      "status": "passed"
+    },
+    "hermes": {
+      "standardHistory": "canonical compatibility delegate",
+      "projectHistory": "conversation-scoped Hermes history",
+      "liveProjection": "provider SSE timelineItem",
+      "reasoning": "completed durable reasoning normalized terminal",
+      "refresh": "durable Provider history recovered",
+      "scopeIsolation": "provider, profile, Agent, conversation and attempt",
+      "status": "passed"
+    },
+    "openclaw": {
+      "standardHistory": "exact-session canonical compatibility delegate",
+      "projectHistory": "trusted attempt/session JSONL tail",
+      "liveProjection": "provider SSE timelineItem where supplied",
+      "reasoning": "Provider structured block only",
+      "refresh": "bounded trusted session reread",
+      "scopeIsolation": "provider, Agent, session, project, task and attempt",
+      "status": "passed"
+    }
+  },
+  "intentionalCorrections": [
+    {
+      "id": "claude-code-project-history-selection",
+      "before": "Project Execution could fall through to OpenClaw storage",
+      "after": "attempt-scoped Claude history is selected",
+      "regression": "tests/test_project_workflow_provider_history.py"
+    },
+    {
+      "id": "hermes-completed-reasoning-state",
+      "before": "completed durable reasoning could appear live",
+      "after": "completed durable reasoning is terminal",
+      "regression": "tests/test_project_workflow_provider_history.py"
+    },
+    {
+      "id": "openclaw-structured-block-consistency",
+      "before": "standard and project parsers could disagree",
+      "after": "one structured-content reader owns text, media, tool, error and reasoning projection",
+      "regression": "tests/test_openclaw_timeline_source.py"
+    },
+    {
+      "id": "codex-reasoning-ownership",
+      "before": "server project and client could both accumulate reasoning",
+      "after": "replace, boundary, replay and terminal settlement have one canonical owner",
+      "regression": "tests/test_codex_workflow_timeline_source.py and tests/check_codex_runs_bridge.mjs"
+    }
+  ],
+  "specificationScenarios": [
+    {"scenario": "Same active run is viewed from both surfaces", "evidence": ["tests/test_provider_timeline_items.py", "tests/test_project_workflow_provider_history.py"], "result": "passed"},
+    {"scenario": "Surfaces request different bounded windows", "evidence": ["tests/test_conversation_timeline.py", "tests/test_chat_history_api.py"], "result": "passed"},
+    {"scenario": "Each supported Provider executes a project attempt", "evidence": ["tests/test_project_workflow_provider_history.py", "tests/test_codex_workflow_timeline_source.py", "tests/test_openclaw_timeline_source.py"], "result": "passed"},
+    {"scenario": "Claude Code attempt history is requested", "evidence": ["tests/test_project_workflow_provider_history.py"], "result": "passed"},
+    {"scenario": "Two attempts use the same Agent", "evidence": ["tests/test_project_workflow_chat.py", "tests/test_codex_workflow_timeline_source.py"], "result": "passed"},
+    {"scenario": "Requested identity does not belong to the selected scope", "evidence": ["tests/test_conversation_timeline.py", "tests/test_openclaw_timeline_source.py"], "result": "passed"},
+    {"scenario": "Live progress settles into durable history", "evidence": ["tests/test_conversation_timeline.py", "tests/test_codex_workflow_timeline_source.py"], "result": "passed"},
+    {"scenario": "Completed conversation is refreshed", "evidence": ["tests/test_conversation_timeline_recovery.py", "tests/chat_history_ui_e2e.mjs"], "result": "passed"},
+    {"scenario": "Non-durable transient activity is lost during failure", "evidence": ["tests/test_conversation_timeline_recovery.py", "tests/test_provider_sse_transport.py"], "result": "passed"},
+    {"scenario": "Provider event is replayed", "evidence": ["tests/test_provider_events.py", "tests/test_provider_sse_transport.py", "tests/test_provider_timeline_items.py"], "result": "passed"},
+    {"scenario": "Multiple sources overlap", "evidence": ["tests/test_conversation_timeline.py", "tests/test_chat_history_api.py"], "result": "passed"},
+    {"scenario": "Timestamps are equal or incomplete", "evidence": ["tests/test_conversation_timeline.py"], "result": "passed"},
+    {"scenario": "Provider supplies incremental reasoning", "evidence": ["tests/test_codex_workflow_timeline_source.py", "tests/test_provider_timeline_items.py"], "result": "passed"},
+    {"scenario": "Provider supplies only execution state", "evidence": ["tests/test_codex_workflow_timeline_source.py", "tests/test_conversation_timeline.py"], "result": "passed"},
+    {"scenario": "Completed Hermes history is recovered", "evidence": ["tests/test_project_workflow_provider_history.py"], "result": "passed"},
+    {"scenario": "Placeholder thinking is received", "evidence": ["tests/test_conversation_timeline.py", "tests/test_codex_workflow_timeline_source.py"], "result": "passed"},
+    {"scenario": "Tool progresses during a turn", "evidence": ["tests/test_provider_timeline_items.py", "tests/test_conversation_timeline.py"], "result": "passed"},
+    {"scenario": "OpenClaw transcript contains supported structured blocks", "evidence": ["tests/test_openclaw_timeline_source.py", "tests/test_conversation_timeline_sources.py"], "result": "passed"},
+    {"scenario": "Existing client requests workflow chat", "evidence": ["tests/test_project_execution.py", "tests/test_project_workflow_chat.py"], "result": "passed"},
+    {"scenario": "Surfaces render canonical reasoning differently", "evidence": ["tests/check_chat_history_navigation.mjs", "tests/check_project_execution_chat_polling.mjs", "browser smoke"], "result": "passed"},
+    {"scenario": "Provider history is malformed or unavailable", "evidence": ["tests/test_conversation_timeline_sources.py", "tests/test_openclaw_timeline_source.py", "tests/test_conversation_timeline_recovery.py"], "result": "passed"},
+    {"scenario": "Repeated project polling reads an unchanged timeline", "evidence": ["tests/test_conversation_timeline_recovery.py", "tests/check_project_execution_chat_polling.mjs"], "result": "passed"},
+    {"scenario": "Reproducible timeline defect is found", "evidence": ["four intentional correction regressions"], "result": "passed"},
+    {"scenario": "Suspected defect is ambiguous or unrelated", "evidence": ["full-regression-verification.json documented preexisting harness issues without product changes"], "result": "passed"},
+    {"scenario": "Provider consistency matrix is verified", "evidence": ["this matrix", "timeline-performance-comparison.json", "timeline-security-verification.json", "timeline-failure-recovery-verification.json"], "result": "passed"},
+    {"scenario": "Existing compatibility suites run", "evidence": ["standard-chat-comparison.json", "full-regression-verification.json", "timeline-rollback-rehearsal.json"], "result": "passed"}
+  ],
+  "unchangedBehavior": {
+    "routesAndMethods": true,
+    "requestFieldsAndStatusCodes": true,
+    "standardHistoryDtoAndCursor": true,
+    "workflowChatEnvelopeAndPolling": true,
+    "providerEventNamesAndLegacyFields": true,
+    "presentationAndInteractions": true,
+    "providerLaunchAndPersistenceContracts": true,
+    "standardFourProviderFrozenComparison": "passed",
+    "unexplainedProductVisibleDifferences": 0
+  },
+  "verification": {
+    "security": "passed; public allowlists, bounds, redaction, safe OpenClaw resolution and failure isolation",
+    "performance": "passed; 10/50/500/1000 history and 0/1/4000 live fixtures within gates",
+    "failureRecovery": "passed; partial/corrupt/stale/disconnect/restart/concurrent/eviction/unavailable scenarios",
+    "fullRegression": "1871 formal Python tests passed file-isolated; 32 relevant static scripts passed; final browser smoke passed",
+    "rollback": "four-provider starting-revision snapshot exact; no data repair"
+  },
+  "residualChecksAndLimitations": [
+    {
+      "item": "Project Execution remains polling-based",
+      "classification": "accepted current product behavior",
+      "followUpChange": "add-project-workflow-chat-realtime-stream"
+    },
+    {
+      "item": "Provider-transient activity is not guaranteed after process failure",
+      "classification": "existing Provider durability contract"
+    },
+    {
+      "item": "tests/test_workflow_e2e.py requires an externally configured management token",
+      "classification": "environmental residual; HTTP/project behavior covered by isolated suites and browser smoke"
+    },
+    {
+      "item": "tests/check_codex_app_server_split.mjs has a preexisting stale exact import marker",
+      "classification": "unrelated static harness issue present at 4a59e09"
+    }
+  ],
+  "acceptance": {
+    "canonicalConsistency": true,
+    "codeAccuracy": true,
+    "legacyAuthoritiesRemoved": true,
+    "productBehaviorPreservedExceptConfirmedCorrections": true,
+    "readyToArchive": true
+  }
+}
