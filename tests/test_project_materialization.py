@@ -311,6 +311,7 @@ def test_materialize_task_base_supplies_complete_defaults_and_backlog_fallback()
         "description": "",
         "columnId": "backlog",
         "order": 0,
+        "executionOrder": 1,
         "priority": "medium",
         "responsibleActor": None,
         "executorActor": None,
@@ -352,6 +353,7 @@ def test_materialize_task_base_preserves_resolved_values_and_copies_mutables():
         "description": {"rich": ["description"]},
         "columnId": "review",
         "order": 8,
+        "executionOrder": 4,
         "priority": "critical",
         "responsibleActor": {"kind": "agent", "id": "owner"},
         "executorActor": {"kind": "agent", "id": "builder"},
@@ -389,6 +391,7 @@ def test_materialize_task_base_preserves_resolved_values_and_copies_mutables():
     assert task["id"] == "deterministic-task"
     assert task["columnId"] == "review"
     assert task["order"] == 3
+    assert task["executionOrder"] == 4
     assert task["priority"] == "critical"
     assert task["responsibleActor"] == {"kind": "agent", "id": "owner"}
     assert task["executorActor"] == {"kind": "agent", "id": "builder"}
@@ -447,9 +450,9 @@ def test_materialize_task_base_computes_next_order_after_column_fallback():
         {"title": "Fallback order", "columnId": "missing"},
         columns=[{"id": "backlog", "title": "Backlog"}, {"id": "done", "title": "Done"}],
         existing_tasks=[
-            {"columnId": "backlog", "order": 1},
-            {"columnId": "done", "order": 8},
-            {"columnId": "backlog", "order": 4},
+            {"columnId": "backlog", "order": 1, "executionOrder": 1},
+            {"columnId": "done", "order": 8, "executionOrder": 2},
+            {"columnId": "backlog", "order": 4, "executionOrder": 3},
         ],
         new_id=_ids("ordered-task"),
         now=lambda: NOW,
@@ -457,6 +460,7 @@ def test_materialize_task_base_computes_next_order_after_column_fallback():
 
     assert task["columnId"] == "backlog"
     assert task["order"] == 5
+    assert task["executionOrder"] == 4
 
 
 def _overlay_base() -> dict:

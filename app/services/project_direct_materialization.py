@@ -48,6 +48,7 @@ def materialize_direct_project(
         if isinstance(source_column, (str, int)) and source_column in column_map:
             task_configuration["columnId"] = column_map[source_column]
         raw_order = task_configuration.get("order")
+        task_configuration.setdefault("executionOrder", index + 1)
         tasks.append(materialize_task_base(
             task_configuration,
             columns=columns,

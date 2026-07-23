@@ -81,7 +81,7 @@ MANUAL_PROJECT_KEYS = (
 MANUAL_TASK_KEYS = (
     "activeAttemptId", "allowReviewerlessExecution", "assignee", "assigneeBranch", "attachments",
     "attempts", "blockedReason", "checklist", "columnId", "comments", "completedAt", "createdAt",
-    "description", "dueDate", "evidence", "executionState", "executorActor", "executorAgentId", "id", "lastError",
+    "description", "dueDate", "evidence", "executionOrder", "executionState", "executorActor", "executorAgentId", "id", "lastError",
     "meetingActionItems", "meetingDecisionHistory", "meetingDiscussionPoints", "meetingRecords", "order",
     "priority", "requiresUserAcceptance", "responsibleActor", "reviewerActor", "reviewerAgentId",
     "reviewerRecommendation", "scheduledRepeatEnabled", "source", "tags",

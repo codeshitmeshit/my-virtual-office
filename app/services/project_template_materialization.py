@@ -46,6 +46,7 @@ def materialize_template_project_base(
             legacy_task_role_fields(task_actor_references(task_configuration))
         )
         raw_order = task_configuration.get("order")
+        task_configuration.setdefault("executionOrder", index + 1)
         tasks.append(materialize_task_base(
             task_configuration,
             columns=columns,

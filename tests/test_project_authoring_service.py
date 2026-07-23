@@ -630,6 +630,7 @@ def test_confirmed_maintenance_create_task_is_canonical_atomic_and_idempotent(tm
     assert set(task) == CANONICAL_TASK_BASE_FIELDS
     assert task["columnId"] == project["columns"][0]["id"]
     assert task["order"] == 1
+    assert task["executionOrder"] == 2
     assert task["checklist"][0]["text"] == "Acceptance is met"
     assert created["project"]["maintenanceHistory"][-1]["operation"] == "create_task"
 

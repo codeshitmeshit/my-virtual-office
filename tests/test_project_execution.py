@@ -1645,6 +1645,41 @@ def test_project_level_start_waits_for_review_handoff_before_next_task():
             restore_store(old)
 
 
+def test_project_level_start_uses_global_execution_order_before_column_order():
+    with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as workspace:
+        old = with_store(status_dir)
+        old_call = server._project_execution_call_executor
+        server._project_execution_call_executor = lambda executor, prompt, workspace, attempt_id, project_id=None, task_id=None, timeout=600: {
+            "ok": True, "status": "completed", "reply": "implemented", "modifiedFiles": [],
+            "checklistUpdates": [{"id": "done", "text": "Complete implementation", "done": True}],
+        }
+        try:
+            project, first = create_project_execution_project(workspace)
+            second = server._handle_task_create(project["id"], {
+                "title": "Execute first by sequence",
+                "columnId": project["columns"][0]["id"],
+                "assignee": "executor",
+                "executorAgentId": "executor",
+            })["task"]
+            data = server._load_projects()
+            stored = next(item for item in data["projects"] if item["id"] == project["id"])
+            for task in stored["tasks"]:
+                if task["id"] == first["id"]:
+                    task["executionOrder"] = 2
+                elif task["id"] == second["id"]:
+                    task["executionOrder"] = 1
+            server._save_projects(data)
+
+            started = server._handle_project_execution_project_start(project["id"], {"mode": "single"})
+
+            assert started["ok"] is True
+            assert started["taskId"] == second["id"]
+            assert started["selectedTask"]["id"] == second["id"]
+        finally:
+            server._project_execution_call_executor = old_call
+            restore_store(old)
+
+
 def test_project_execution_transition_syncs_state_columns():
     with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as workspace:
         old = with_store(status_dir)
@@ -3540,7 +3575,7 @@ def test_feishu_acceptance_rework_uses_default_feedback():
             assert result["ok"] is True
             assert result["outcome"]["businessStatus"] == "reworking"
             current = server._handle_project_get(project["id"])["project"]["tasks"][0]
-            assert current["executionState"] == "reworking"
+            assert any(item.get("rework") is True for item in current["attempts"])
             assert current["reworkFeedback"] == server._PROJECT_EXECUTION_FEISHU_REWORK_FEEDBACK
         finally:
             server.send_feishu_notification = old_send
@@ -3583,7 +3618,7 @@ def test_feishu_acceptance_rework_uses_card_feedback_input():
             assert result["ok"] is True
             assert result["outcome"]["businessStatus"] == "reworking"
             current = server._handle_project_get(project["id"])["project"]["tasks"][0]
-            assert current["executionState"] == "reworking"
+            assert any(item.get("rework") is True for item in current["attempts"])
             assert current["reworkFeedback"] == "请补充 README 的验收说明"
         finally:
             server.send_feishu_notification = old_send

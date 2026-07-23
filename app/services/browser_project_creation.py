@@ -76,7 +76,7 @@ def create_from_browser_template(
         preserve_ids=False,
     )
     tasks = []
-    for blueprint in template.get("taskTemplates") or []:
+    for index, blueprint in enumerate(template.get("taskTemplates") or []):
         if not isinstance(blueprint, Mapping):
             continue
         task_configuration = {
@@ -84,6 +84,7 @@ def create_from_browser_template(
             "description": blueprint.get("description", ""),
             "columnId": column_map.get(blueprint.get("columnIndex", 0)),
             "order": blueprint.get("order", 0),
+            "executionOrder": blueprint.get("executionOrder", index + 1),
             "priority": blueprint.get("priority", "medium"),
             "responsibleActor": copy.deepcopy(blueprint.get("responsibleActor")),
             "executorActor": copy.deepcopy(blueprint.get("executorActor")),

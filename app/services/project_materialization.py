@@ -80,6 +80,7 @@ CANONICAL_TASK_BASE_FIELDS = frozenset({
     "dueDate",
     "evidence",
     "executionState",
+    "executionOrder",
     "executorActor",
     "executorAgentId",
     "id",
@@ -327,6 +328,14 @@ def _canonical_task_column_id(
     return copy.deepcopy(valid_ids[0] if valid_ids else None)
 
 
+def _safe_execution_order(value: Any) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return parsed if parsed > 0 else 0
+
+
 def materialize_task_base(
     configuration: Mapping[str, Any],
     *,
@@ -360,6 +369,25 @@ def materialize_task_base(
         resolved_order = 0
     source = configuration.get("source")
     evidence = configuration.get("evidence")
+    configured_execution_order = configuration.get("executionOrder")
+    if configured_execution_order is not None:
+        resolved_execution_order = configured_execution_order
+    elif existing_tasks is not None:
+        resolved_execution_order = max(
+            (
+                _safe_execution_order(task.get("executionOrder"))
+                for task in existing_tasks
+                if isinstance(task, Mapping)
+            ),
+            default=0,
+        ) + 1
+    elif order is not None:
+        try:
+            resolved_execution_order = int(order) + 1
+        except (TypeError, ValueError):
+            resolved_execution_order = 1
+    else:
+        resolved_execution_order = 1
 
     return {
         "id": str(task_id or configuration.get("id") or new_id()),
@@ -367,6 +395,7 @@ def materialize_task_base(
         "description": copy.deepcopy(configuration.get("description") or ""),
         "columnId": column_id,
         "order": copy.deepcopy(resolved_order),
+        "executionOrder": copy.deepcopy(resolved_execution_order),
         "priority": configuration.get("priority") or "medium",
         "responsibleActor": copy.deepcopy(configuration.get("responsibleActor")),
         "executorActor": copy.deepcopy(configuration.get("executorActor")),

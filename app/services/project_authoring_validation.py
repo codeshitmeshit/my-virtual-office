@@ -422,6 +422,10 @@ def validate_project_draft(
         item["title"] = _text(task.get("title"), path=f"{path}.title", issues=issues, required=True, maximum=300)
         item["description"] = _text(task.get("description"), path=f"{path}.description", issues=issues, required=False, maximum=20000)
         try:
+            item["executionOrder"] = int(task.get("executionOrder") or index + 1)
+        except (TypeError, ValueError):
+            item["executionOrder"] = index + 1
+        try:
             item["checklist"] = materialize_checklist(task.get("checklist"))
         except ProjectMaterializationError as exc:
             issues.append(DraftValidationIssue(

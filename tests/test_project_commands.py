@@ -112,6 +112,7 @@ def test_create_task_uses_canonical_column_checklist_and_atomic_validation():
     task = outcome.result.payload["task"]
     assert task["columnId"] == project["columns"][0]["id"]
     assert task["order"] == 0
+    assert task["executionOrder"] == 1
     assert task["checklist"][0]["text"] == "Verify output"
     assert task["checklist"][0]["id"].startswith("checklist-")
     assert task["checklist"][1] == {"id": "docs", "text": "Document output", "done": False}

@@ -966,6 +966,7 @@
         if (!p) return '';
         const cols = (p.columns || []).slice().sort((a, b) => (a.order || 0) - (b.order || 0));
         const tasks = p.tasks || [];
+        const executionOrderByTaskId = projectExecutionOrderMap(tasks);
         const canRestartProjectPipeline = tasks.length > 0 && tasks.every(t => t.scheduledRepeatEnabled === true);
 
         return `
@@ -1026,7 +1027,7 @@
                     <div class="proj-chat-empty">${_t('proj_workflow_chat_empty')}</div>
                 </div>
             </div>
-            ${cols.map(col => renderColumn(col, tasks)).join('')}
+            ${cols.map(col => renderColumn(col, tasks, executionOrderByTaskId)).join('')}
         </div>`;
     }
 
@@ -1205,16 +1206,38 @@
         </div>`;
     }
 
-    function isBacklogColumn(col) {
-        const title = String((col && (col._titleKey ? _t(col._titleKey) : col.title)) || '').trim().toLowerCase();
-        const id = String((col && col.id) || '').trim().toLowerCase();
-        return id === 'backlog' || title === 'backlog' || title === '待办';
+    function projectExecutionOrderMap(tasks) {
+        const result = new Map();
+        const source = (tasks || []).filter(task => task && task.id);
+        const explicit = source.map(task => ({
+            task,
+            order: Number(task.executionOrder),
+        }));
+        const hasCompleteExplicitOrder = explicit.length === source.length
+            && explicit.every(item => Number.isFinite(item.order) && item.order > 0)
+            && new Set(explicit.map(item => item.order)).size === explicit.length;
+        if (hasCompleteExplicitOrder) {
+            explicit.forEach(({ task, order }) => {
+                result.set(task.id, order);
+            });
+            return result;
+        }
+        source
+            .slice()
+            .sort((a, b) => {
+                const orderA = Number.isFinite(Number(a.order)) ? Number(a.order) : 999999;
+                const orderB = Number.isFinite(Number(b.order)) ? Number(b.order) : 999999;
+                return orderA - orderB
+                    || String(a.createdAt || '').localeCompare(String(b.createdAt || ''))
+                    || String(a.id || '').localeCompare(String(b.id || ''));
+            })
+            .forEach((task, index) => result.set(task.id, index + 1));
+        return result;
     }
 
-    function renderColumn(col, allTasks) {
+    function renderColumn(col, allTasks, executionOrderByTaskId = new Map()) {
         const tasks = allTasks.filter(t => t.columnId === col.id).slice().sort((a, b) => (a.order || 0) - (b.order || 0));
         const colTitle = col._titleKey ? _t(col._titleKey) : col.title;
-        const showExecutionOrder = isBacklogColumn(col);
         return `
         <div class="proj-col" id="col-${col.id}" data-col-id="${col.id}" style="--col-color:${col.color || '#6c757d'}">
             <div class="proj-col-header">
@@ -1227,7 +1250,7 @@
                 ondragover="ProjMgr.onDragOver(event, '${col.id}')"
                 ondragleave="ProjMgr.onDragLeave(event, '${col.id}')"
                 ondrop="ProjMgr.onDrop(event, '${col.id}')">
-                ${tasks.map((t, index) => renderTaskCard(t, showExecutionOrder ? index + 1 : null)).join('')}
+                ${tasks.map(t => renderTaskCard(t, executionOrderByTaskId.get(t.id))).join('')}
             </div>
             <div class="proj-quick-add hidden" id="quick-add-${col.id}">
                 <input class="proj-quick-add-input" id="quick-input-${col.id}" type="text" placeholder="${_t('proj_task_title_placeholder')}">

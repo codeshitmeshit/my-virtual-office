@@ -19105,9 +19105,23 @@ def _project_execution_next_task(project):
         executor_id = _project_execution_executor_agent_id(project, task)
         if not executor_id or not _office_agent_lookup(executor_id):
             continue
-        candidates.append((col_order.get(task.get("columnId"), 9999), task.get("order", idx), idx, task))
+        try:
+            execution_order = int(task.get("executionOrder") or 0)
+        except (TypeError, ValueError):
+            execution_order = 0
+        try:
+            fallback_order = int(task.get("order"))
+        except (TypeError, ValueError):
+            fallback_order = idx
+        candidates.append((
+            execution_order if execution_order > 0 else fallback_order + 1,
+            col_order.get(task.get("columnId"), 9999),
+            task.get("order", idx),
+            idx,
+            task,
+        ))
     candidates.sort(key=lambda item: (item[0], item[1], item[2]))
-    return candidates[0][3] if candidates else None
+    return candidates[0][4] if candidates else None
 
 
 def _project_execution_all_tasks_repeatable(project):
