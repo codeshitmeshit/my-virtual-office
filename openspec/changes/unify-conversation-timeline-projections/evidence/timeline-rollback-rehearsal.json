@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 1,
+  "contentFree": true,
+  "task": "8.2",
+  "result": "passed",
+  "startingRevision": "4a59e09",
+  "perProviderCompatibilityStage": [
+    {
+      "provider": "claude-code",
+      "migrationCommit": "726f86d",
+      "rehearsal": "standard history delegate comparison plus attempt-scoped source regression",
+      "dataRepairRequired": false
+    },
+    {
+      "provider": "hermes",
+      "migrationCommit": "726f86d",
+      "rehearsal": "standard history delegate comparison plus terminal reasoning regression",
+      "dataRepairRequired": false
+    },
+    {
+      "provider": "openclaw",
+      "migrationCommit": "bf16dc4",
+      "rehearsal": "standard history delegate comparison plus trusted session JSONL regression",
+      "dataRepairRequired": false
+    },
+    {
+      "provider": "codex",
+      "migrationCommit": "5a7fe2e",
+      "rehearsal": "standard history delegate comparison plus durable/transient activity regression",
+      "dataRepairRequired": false
+    }
+  ],
+  "finalPriorRevisionRehearsal": {
+    "revision": "4a59e09",
+    "method": "detached read-only worktree",
+    "fourProviderSnapshotExactMatch": true,
+    "providers": ["claude-code", "codex", "hermes", "openclaw"],
+    "observationCount": 4,
+    "oldCodeReadsExistingHistoryAndSessionMetadata": true,
+    "dataRepairRequired": false
+  },
+  "persistence": {
+    "storageMigrationAdded": false,
+    "historySchemaChanged": false,
+    "sessionMetadataSchemaChanged": false,
+    "databaseChanged": false,
+    "backfillRequired": false
+  },
+  "readOnlyInvariants": {
+    "providerLaunches": 0,
+    "historyWrites": 0,
+    "conversationMutations": 0,
+    "projectionSwitchMutatesState": false
+  },
+  "commands": [
+    "tests/standard_chat_compatibility_snapshot.py --app-dir <detached-4a59e09>/app",
+    "tests/run_standard_chat_timeline_comparison.py",
+    ".venv/bin/python -m pytest -q tests/test_conversation_timeline_sources.py tests/test_project_workflow_timeline_boundary.py tests/test_provider_conversations.py tests/test_provider_runs.py tests/test_provider_sse_transport.py"
+  ],
+  "resultSummary": "rollback snapshot exact; 50 read-only/transport tests passed; four-provider comparison passed"
+}
