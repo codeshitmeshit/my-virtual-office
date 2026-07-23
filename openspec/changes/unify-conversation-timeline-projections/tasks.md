@@ -28,7 +28,7 @@
 
 ## 6. Remove Parallel Authorities
 
-- [ ] 6.1 After all four Provider parity suites pass, remove `_codex_reasoning_events_to_chat_messages()`, Provider parsing from `_wf_get_task_session_messages()`, the duplicate project OpenClaw transcript parser, and obsolete server compatibility helpers; prove both public routes still delegate to one timeline owner.
+- [x] 6.1 After all four Provider parity suites pass, remove `_codex_reasoning_events_to_chat_messages()`, Provider parsing from `_wf_get_task_session_messages()`, the duplicate project OpenClaw transcript parser, and obsolete server compatibility helpers; prove both public routes still delegate to one timeline owner.
 - [ ] 6.2 Remove obsolete client `mergeLiveHistoryRecord()` canonical mappings and the client-side Codex reasoning accumulator where canonical projection now owns those decisions; retain only presentation state and a temporary compatibility fallback if still required by an explicitly supported old-server window, then remove that fallback before final acceptance.
 - [ ] 6.3 Add static boundary checks confirming timeline and project workflow services do not import `server.py`, Provider-native parsing is not duplicated by consumers, no second runtime authority remains, and legacy entry points contain only validation, wiring, transport adaptation, and compatible field mapping.
 
