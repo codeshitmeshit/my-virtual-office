@@ -36,7 +36,7 @@
 
 - [x] 7.1 Verify malformed/unavailable source isolation plus allowlisting, size/depth bounds, secret/header/token redaction, unrestricted-path suppression, safe OpenClaw session resolution, and content-free/rate-limited diagnostics across all timeline sources and public responses.
 - [x] 7.2 Measure fixed 10/50/500/1,000 source-record and 0/1/4,000 live-event fixtures before and after migration; record candidates, normalized items, dedupe count, cache hit/miss, response bytes, lock-held work, median, and p95, and reject increased Provider calls/writes, unbounded scans, cache growth, or material regression in chat/project read latency.
-- [ ] 7.3 Exercise partial-source failure, corrupt history, stale progress, SSE disconnect/reconnect, application restart, concurrent polling/refresh, cache eviction, and one-Provider-unavailable scenarios; prove durable terminal/message recovery, truthful transient loss, deterministic repeated reads, and failure containment.
+- [x] 7.3 Exercise partial-source failure, corrupt history, stale progress, SSE disconnect/reconnect, application restart, concurrent polling/refresh, cache eviction, and one-Provider-unavailable scenarios; prove durable terminal/message recovery, truthful transient loss, deterministic repeated reads, and failure containment.
 
 ## 8. Full Regression, Rollback, and Acceptance Evidence
 
