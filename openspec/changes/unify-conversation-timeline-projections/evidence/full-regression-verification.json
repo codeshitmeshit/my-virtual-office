@@ -1,0 +1,84 @@
+{
+  "schemaVersion": 1,
+  "contentFree": true,
+  "task": "8.1",
+  "result": "passed-with-documented-preexisting-test-harness-limitations",
+  "python": {
+    "isolatedTestFilesPassed": 182,
+    "testsCollected": 1871,
+    "timelineRelatedFailures": 0,
+    "providerInventoryRegenerated": true,
+    "providerInventoryCheck": "5 artifacts verified",
+    "startupTests": "8 passed",
+    "standardChatComparison": "four providers passed"
+  },
+  "javascript": {
+    "staticAndModelScripts": 33,
+    "passed": 32,
+    "timelineRelatedFailures": 0,
+    "preexistingFailure": {
+      "script": "tests/check_codex_app_server_split.mjs",
+      "reason": "stale exact import-string marker",
+      "presentAtPulledRevision": "4a59e09",
+      "productVisibleDifference": false
+    }
+  },
+  "browser": {
+    "scriptedChatHistoryE2E": "passed after client authority removal",
+    "covered": [
+      "cached switching",
+      "older-page loading",
+      "bounded mounted roots",
+      "bottom initialization",
+      "bottom follow",
+      "scroll preservation",
+      "resume follow",
+      "provider reconciliation"
+    ],
+    "finalInAppBrowserSmoke": {
+      "rootLoaded": true,
+      "projectListOpened": true,
+      "projectExecutionBoardOpened": true,
+      "workflowChatMounted": true,
+      "consoleErrors": 0
+    }
+  },
+  "scope": [
+    "chat history API/store/UI",
+    "Project Execution lifecycle and polling",
+    "Codex, Claude Code, Hermes, and OpenClaw history/run/SSE/event/conversation",
+    "Codex fast path",
+    "approvals and cancellation",
+    "Feishu-visible history",
+    "HTTP contracts",
+    "startup",
+    "static browser checks"
+  ],
+  "harnessNotes": [
+    {
+      "command": ".venv/bin/python -m pytest -q",
+      "classification": "collection-harness",
+      "detail": "repository-root test_review_parser.py executes sys.exit during pytest collection after its own 85 script checks pass"
+    },
+    {
+      "command": ".venv/bin/python -m pytest -q tests",
+      "classification": "live-environment-script",
+      "detail": "tests/test_workflow_e2e.py executes during collection and requires a configured management token"
+    },
+    {
+      "classification": "helper-scripts",
+      "detail": "eight tracked test_*.py helper scripts intentionally contain no pytest cases and return pytest exit 5 when invoked alone"
+    },
+    {
+      "classification": "cross-file-global-pollution",
+      "detail": "one combined-process Claude discovery assertion fails after earlier modules mutate shared environment; the file passes in isolation, so the full suite was run file-isolated"
+    }
+  ],
+  "productVisibleDifferences": [
+    "Claude Code project history now selects Claude history",
+    "completed Hermes reasoning is terminal",
+    "OpenClaw supported structured blocks are consistent",
+    "Codex reasoning has one owner and no duplicate aggregation"
+  ],
+  "unexplainedProductVisibleDifferences": 0
+}
