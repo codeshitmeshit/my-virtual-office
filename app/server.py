@@ -43,6 +43,7 @@ import feishu_chat_channel
 import gateway_presence
 from dashboard_realtime import DashboardRealtimeStream
 from services import project_execution as project_execution_service
+from services import project_workflow_chat as project_workflow_chat_service
 from services import project_commands as project_command_service
 from services import browser_project_creation as browser_project_creation_service
 from services import execution_lifecycle as execution_lifecycle_service
@@ -25420,89 +25421,36 @@ def _wf_clear_persisted_state(project_id):
 
 
 def _handle_workflow_chat(project_id):
-    """GET /api/projects/{id}/workflow/chat — get the active workflow agent's session messages.
+    """Return the compatible workflow-chat envelope for one resolved execution scope."""
 
-    ONLY reads from the task-specific workflow session (wf-<project>-<task>),
-    never from the agent's main session or other sessions.
-    """
-    with _WORKFLOW_LOCK:
-        wf = _WORKFLOW_STATE.get(project_id, {})
+    def workflow_state(target_project_id):
+        with _WORKFLOW_LOCK:
+            return dict(_WORKFLOW_STATE.get(target_project_id, {}))
 
-    # Also check persisted state if in-memory is empty
-    persisted = _wf_load_persisted_state(project_id)
-    current_task_id = wf.get("currentTaskId") or persisted.get("currentTaskId")
-    phase = wf.get("phase") or persisted.get("phase", "idle")
+    def agent_descriptor(agent_id):
+        if _is_hermes_agent(agent_id):
+            return _get_hermes_agent(agent_id) or {"providerKind": "hermes"}
+        if _is_codex_agent(agent_id):
+            return _get_codex_agent(agent_id) or {"providerKind": "codex"}
+        if _is_claude_code_agent(agent_id):
+            return _get_claude_code_agent(agent_id) or {"providerKind": "claude-code"}
+        return {"providerKind": "openclaw", "providerAgentId": agent_id}
 
-    # Find the assigned agent — check current task or find any in-progress/review task
-    data = _load_projects()
-    p = next((x for x in data["projects"] if x["id"] == project_id), None)
-    if not p:
-        return {"ok": True, "messages": [], "agent": None}
-
-    project_execution_active = _project_execution_enabled(p) and p.get("workflowActive") and p.get("activeTaskId")
-    agent_key = p.get("activeAgent") if project_execution_active else None
-    task_id = p.get("activeTaskId") if project_execution_active else current_task_id
-    conversation_id = None
-    task = None
-
-    # First try the tracked current task
-    if task_id:
-        task = next((t for t in p["tasks"] if t["id"] == task_id), None)
-        if task:
-            task_execution_active = (
-                _project_execution_enabled(p)
-                and task.get("activeAttemptId")
-                and str(task.get("executionState") or "") in _PROJECT_EXECUTION_WORKING_STATES
-            )
-            if project_execution_active or task_execution_active:
-                phase = p.get("workflowPhase") or phase
-                conversation_id = task.get("activeAttemptId")
-                agent_key = agent_key or _project_execution_task_agent_id(p, task)
-                if task_execution_active and phase in {"", "idle", "stopped"}:
-                    phase = str(task.get("executionState") or "executing")
-            agent_key = agent_key or task.get("assignee")
-
-    # If no tracked task, find the most recently active task (in progress or review)
-    if not agent_key:
-        ip_cols = [c["id"] for c in p.get("columns", []) if c.get("title", "").lower() in ("in progress", "review", "to do")]
-        execution_tasks = [
-            t for t in p.get("tasks", [])
-            if t.get("activeAttemptId") and str(t.get("executionState") or "") in _PROJECT_EXECUTION_WORKING_STATES
-        ] if _project_execution_enabled(p) else []
-        active_tasks = execution_tasks or [t for t in p.get("tasks", []) if t.get("columnId") in ip_cols]
-        if active_tasks:
-            active_tasks.sort(key=lambda t: t.get("updatedAt", ""), reverse=True)
-            task = active_tasks[0]
-            task_id = task["id"]
-            if execution_tasks:
-                conversation_id = task.get("activeAttemptId")
-                agent_key = _project_execution_task_agent_id(p, task)
-                if phase in {"", "idle", "stopped"}:
-                    phase = str(task.get("executionState") or "executing")
-            else:
-                agent_key = task.get("assignee")
-
-    if not agent_key or not task_id:
-        return {"ok": True, "messages": [], "agent": None, "phase": phase}
-
-    # Read ONLY from the execution-scoped session. Project Execution uses the
-    # active attempt/review id for OpenClaw sessions so repeat triggers do not
-    # continue a prior run's transcript.
-    project_execution_session = _project_execution_enabled(p) and bool(conversation_id)
-    session_task_id = conversation_id if (project_execution_session and not (_is_hermes_agent(agent_key) or _is_codex_agent(agent_key))) else task_id
-    msgs = _wf_get_task_session_messages(agent_key, project_id, session_task_id, conversation_id=conversation_id)
-
-    # Check if the workflow session is still actively running
-    session_active = _wf_is_task_session_active(agent_key, project_id, session_task_id)
-
-    return {
-        "ok": True,
-        "messages": msgs,
-        "agent": agent_key,
-        "taskId": task_id,
-        "phase": phase,
-        "sessionActive": session_active,
-    }
+    service = project_workflow_chat_service.ProjectWorkflowChatService(
+        project_workflow_chat_service.ProjectWorkflowChatPorts(
+            workflow_state=workflow_state,
+            persisted_state=_wf_load_persisted_state,
+            load_projects=_load_projects,
+            project_execution_enabled=_project_execution_enabled,
+            task_agent_id=_project_execution_task_agent_id,
+            agent_descriptor=agent_descriptor,
+            read_messages=lambda agent, project, task, conversation: _wf_get_task_session_messages(
+                agent, project, task, conversation_id=conversation
+            ),
+            session_active=_wf_is_task_session_active,
+        )
+    )
+    return service.read(project_id)
 
 
 def _codex_reasoning_events_to_chat_messages(events, agent_id, max_messages=50):
