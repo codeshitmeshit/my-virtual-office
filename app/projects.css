@@ -405,6 +405,31 @@
     position: relative;
     user-select: none;
 }
+.proj-task-card.has-exec-order {
+    display: grid;
+    grid-template-columns: 28px minmax(0, 1fr);
+    gap: 9px;
+    align-items: start;
+}
+.proj-task-exec-order {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 24px;
+    margin-top: 1px;
+    background: rgba(96, 165, 250, 0.14);
+    border: 1px solid rgba(96, 165, 250, 0.52);
+    color: #bfdbfe;
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1;
+}
+.proj-task-body {
+    min-width: 0;
+}
 .proj-task-card:active { cursor: grabbing; }
 .proj-task-card:hover { border-color: #3a3a5e; box-shadow: 0 3px 12px rgba(0,0,0,0.3); }
 .proj-task-card.dragging {

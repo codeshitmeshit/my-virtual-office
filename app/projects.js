@@ -1205,9 +1205,16 @@
         </div>`;
     }
 
+    function isBacklogColumn(col) {
+        const title = String((col && (col._titleKey ? _t(col._titleKey) : col.title)) || '').trim().toLowerCase();
+        const id = String((col && col.id) || '').trim().toLowerCase();
+        return id === 'backlog' || title === 'backlog' || title === '待办';
+    }
+
     function renderColumn(col, allTasks) {
         const tasks = allTasks.filter(t => t.columnId === col.id).slice().sort((a, b) => (a.order || 0) - (b.order || 0));
         const colTitle = col._titleKey ? _t(col._titleKey) : col.title;
+        const showExecutionOrder = isBacklogColumn(col);
         return `
         <div class="proj-col" id="col-${col.id}" data-col-id="${col.id}" style="--col-color:${col.color || '#6c757d'}">
             <div class="proj-col-header">
@@ -1220,7 +1227,7 @@
                 ondragover="ProjMgr.onDragOver(event, '${col.id}')"
                 ondragleave="ProjMgr.onDragLeave(event, '${col.id}')"
                 ondrop="ProjMgr.onDrop(event, '${col.id}')">
-                ${tasks.map(t => renderTaskCard(t)).join('')}
+                ${tasks.map((t, index) => renderTaskCard(t, showExecutionOrder ? index + 1 : null)).join('')}
             </div>
             <div class="proj-quick-add hidden" id="quick-add-${col.id}">
                 <input class="proj-quick-add-input" id="quick-input-${col.id}" type="text" placeholder="${_t('proj_task_title_placeholder')}">
@@ -1233,7 +1240,7 @@
         </div>`;
     }
 
-    function renderTaskCard(task) {
+    function renderTaskCard(task, executionOrder = null) {
         const pc = priorityColor(task.priority);
         const due = task.dueDate;
         const overdue = due && !task.completedAt && isOverdue(due);
@@ -1246,28 +1253,33 @@
         const projectExecutionState = task.executionState && task.executionState !== 'backlog' ? `<span class="proj-exec-state state-${escHtml(task.executionState)}">${escHtml(projectExecutionStateLabel(task))}</span>` : '';
         const mtgRequests = state.meetingRequestsByTask[task.id] || [];
         const pendingMtgRequests = mtgRequests.filter(r => r.status === 'pending').length;
+        const orderBadge = Number.isFinite(executionOrder) ? `<span class="proj-task-exec-order" title="${escHtml(_tf('proj_task_execution_order_hint', 'Project execution order', '项目执行顺序'))}">${executionOrder}</span>` : '';
+        const orderClass = orderBadge ? ' has-exec-order' : '';
         return `
-        <div class="proj-task-card" id="task-${task.id}" data-task-id="${task.id}"
+        <div class="proj-task-card${orderClass}" id="task-${task.id}" data-task-id="${task.id}"
             style="--pri-color:${pc}"
             draggable="true"
             ondragstart="ProjMgr.onDragStart(event, '${task.id}')"
             ondragend="ProjMgr.onDragEnd(event)"
             ontouchstart="ProjMgr.onTouchStart(event, '${task.id}')">
-            <div class="proj-task-title">${escHtml(task.title)}</div>
-            <div class="proj-task-meta">
-                ${task.priority !== 'medium' ? `<span class="proj-badge badge-${task.priority}" style="font-size:9px">${priorityLabel}</span>` : ''}
-                ${assignee ? `<span class="proj-task-assignee" title="${escHtml(assignee.name)}">${escHtml(assignee.emoji || '👤')}</span>` : ''}
-                ${due ? `<span class="proj-task-due ${overdue ? 'overdue' : ''}" title="${formatDate(due)}">${overdue ? '⚠️' : '📅'} ${formatDate(due)}</span>` : ''}
-                ${(task.tags || []).slice(0, 2).map(t => `<span class="proj-tag" style="font-size:9px">${escHtml(t)}</span>`).join('')}
-                ${comments > 0 ? `<span class="proj-task-comment-icon">💬 ${comments}</span>` : ''}
-                ${pendingMtgRequests > 0 ? `<span class="proj-task-comment-icon proj-task-mtg-request">📊 ${pendingMtgRequests}</span>` : ''}
-                ${projectExecutionState}
+            ${orderBadge}
+            <div class="proj-task-body">
+                <div class="proj-task-title">${escHtml(task.title)}</div>
+                <div class="proj-task-meta">
+                    ${task.priority !== 'medium' ? `<span class="proj-badge badge-${task.priority}" style="font-size:9px">${priorityLabel}</span>` : ''}
+                    ${assignee ? `<span class="proj-task-assignee" title="${escHtml(assignee.name)}">${escHtml(assignee.emoji || '👤')}</span>` : ''}
+                    ${due ? `<span class="proj-task-due ${overdue ? 'overdue' : ''}" title="${formatDate(due)}">${overdue ? '⚠️' : '📅'} ${formatDate(due)}</span>` : ''}
+                    ${(task.tags || []).slice(0, 2).map(t => `<span class="proj-tag" style="font-size:9px">${escHtml(t)}</span>`).join('')}
+                    ${comments > 0 ? `<span class="proj-task-comment-icon">💬 ${comments}</span>` : ''}
+                    ${pendingMtgRequests > 0 ? `<span class="proj-task-comment-icon proj-task-mtg-request">📊 ${pendingMtgRequests}</span>` : ''}
+                    ${projectExecutionState}
+                </div>
+                ${hasCheck ? `
+                <div class="proj-checklist-mini">
+                    <div class="proj-checklist-mini-bar"><div class="proj-checklist-mini-fill" style="width:${Math.round(checkDone/checklist.length*100)}%"></div></div>
+                    <span>${checkDone}/${checklist.length}</span>
+                </div>` : ''}
             </div>
-            ${hasCheck ? `
-            <div class="proj-checklist-mini">
-                <div class="proj-checklist-mini-bar"><div class="proj-checklist-mini-fill" style="width:${Math.round(checkDone/checklist.length*100)}%"></div></div>
-                <span>${checkDone}/${checklist.length}</span>
-            </div>` : ''}
         </div>`;
     }
 
