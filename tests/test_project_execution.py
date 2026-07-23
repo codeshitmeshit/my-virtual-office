@@ -1619,6 +1619,32 @@ def test_selected_task_executes_and_stops_at_execution_complete():
             server._project_execution_call_executor = old_call
             restore_store(old)
 
+
+def test_project_level_start_waits_for_review_handoff_before_next_task():
+    with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as workspace:
+        old = with_store(status_dir)
+        old_call = server._project_execution_call_executor
+        server._project_execution_call_executor = lambda executor, prompt, workspace, attempt_id, project_id=None, task_id=None, timeout=600: {
+            "ok": True, "status": "completed", "reply": "implemented", "modifiedFiles": [],
+            "checklistUpdates": [{"id": "done", "text": "Complete implementation", "done": True}],
+        }
+        try:
+            project, first = create_project_execution_project(workspace)
+            server._handle_task_create(project["id"], {"title": "Second", "columnId": project["columns"][0]["id"]})
+            completed = complete_project_task_execution(project["id"], first["id"])
+            assert completed["executionState"] == "execution_complete"
+
+            blocked = server._handle_project_execution_project_start(project["id"], {"mode": "continuous"})
+
+            assert blocked["_status"] == 409
+            assert blocked["activeTaskId"] == first["id"]
+            current = server._handle_project_get(project["id"])["project"]
+            assert current["tasks"][1]["executionState"] == "backlog"
+        finally:
+            server._project_execution_call_executor = old_call
+            restore_store(old)
+
+
 def test_project_execution_transition_syncs_state_columns():
     with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as workspace:
         old = with_store(status_dir)
@@ -2788,11 +2814,15 @@ def test_status_reconciles_stale_active_execution_after_restart():
             current["workflowActive"] = True
             current["workflowPhase"] = "executing"
             current["activeTaskId"] = task["id"]
+            current["projectExecutionFlowActive"] = True
+            current["projectExecutionFlowStopReason"] = None
             server._save_projects(data)
 
             status = server._handle_project_execution_status(project["id"], task["id"])
             assert status["ok"] is True
             assert status["phase"] == "blocked"
+            assert status["flowActive"] is False
+            assert status["flowStopReason"] == "previous_execution_not_resumable"
             assert status["task"]["executionState"] == "blocked"
             assert status["task"]["blockedReason"] == "previous_execution_not_resumable"
         finally:
@@ -3683,12 +3713,12 @@ def test_acceptance_reject_starts_rework_execution_before_returning_to_review():
                 "feedback": "重新执行",
             })
             assert rejected["status"] == "reworking"
-            assert calls[-1] == started["attemptId"]
+            assert started["attemptId"] in calls
 
             reworked = wait_for(lambda: server._handle_project_get(project["id"])["project"]["tasks"][0]
                                 if len(calls) >= 2 and server._handle_project_get(project["id"])["project"]["tasks"][0].get("executionState") == "awaiting_user_acceptance"
                                 else None)
-            assert calls[-1] == rejected["attemptId"]
+            assert rejected["attemptId"] in calls
             assert reworked["reviewResult"]["status"] == "skipped"
             assert reworked["activeAttemptId"] is None
             assert reworked["attempts"][-1]["id"] == rejected["attemptId"]

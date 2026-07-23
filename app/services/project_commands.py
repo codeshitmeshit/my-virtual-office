@@ -250,7 +250,7 @@ def update_project(
         if validated_workspace is not None and "workspacePath" not in body and project.get("workspacePath") != workspace_basis:
             raise ProjectConflictError("Workspace changed during validation")
         old_status = project.get("status"); by = mutable_body.get("by", "user")
-        fields = ["title", "description", "status", "priority", "dueDate", "tags", "branch", "longTermProject", "highPriorityAiMeetingAutoApprove", "projectExecutionEnabled", "workspacePath", "workspaceKind", "workspaceStatus", "defaultExecutorAgentId", "defaultReviewerAgentId", "projectExecutionStartMode", "projectExecutionFlowActive", "projectExecutionFlowStopReason", "executionPolicy", "scheduledCronPaused", "archiveMaintenanceEnabled", "archiveMaintenance"]
+        fields = ["title", "description", "status", "priority", "dueDate", "tags", "branch", "longTermProject", "highPriorityAiMeetingAutoApprove", "projectExecutionEnabled", "workspacePath", "workspaceKind", "workspaceStatus", "defaultExecutorAgentId", "defaultReviewerAgentId", "projectExecutionStartMode", "executionPolicy", "scheduledCronPaused", "archiveMaintenanceEnabled", "archiveMaintenance"]
         for field in fields:
             if field in mutable_body:
                 old = project.get(field); project[field] = mutable_body[field]

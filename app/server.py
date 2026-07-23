@@ -19007,8 +19007,23 @@ def _project_execution_attempt(task, attempt_id):
 
 
 def _project_execution_active_task(project):
-    active_states = {"validating", "executing", "retrying", "reviewing", "reworking", "awaiting_meeting_resolution"}
+    active_states = {
+        "validating",
+        "executing",
+        "retrying",
+        "reviewing",
+        "reworking",
+        "awaiting_meeting_resolution",
+    }
     return next((t for t in project.get("tasks", []) if t.get("executionState") in active_states), None)
+
+
+def _project_execution_project_start_blocker(project):
+    active = _project_execution_active_task(project)
+    if active:
+        return active
+    blocked_states = {"execution_complete", "awaiting_user_acceptance"}
+    return next((t for t in project.get("tasks", []) if t.get("executionState") in blocked_states), None)
 
 
 def _project_execution_done_column_ids(project):
@@ -23503,7 +23518,7 @@ def _handle_project_execution_start(project_id, task_id, body):
 def _handle_project_execution_project_start(project_id, body=None):
     return execution_lifecycle_service.start_project(
         project_id, body, repository=_PROJECT_REPOSITORY,
-        active_task=_project_execution_active_task,
+        active_task=_project_execution_project_start_blocker,
         all_tasks_repeatable=_project_execution_all_tasks_repeatable,
         reset_tasks=_project_execution_reset_project_tasks_for_restart,
         next_task=_project_execution_next_task,

@@ -289,6 +289,35 @@ def test_already_active_occurrence_is_marked_started_without_launch(tmp_path):
     assert calls == []
 
 
+def test_awaiting_user_acceptance_occurrence_is_marked_started_without_launch(tmp_path):
+    markdown, service, _, _ = _service(
+        tmp_path, execution=True, execution_mode="create_and_execute",
+    )
+    prepared = {
+        "ok": True, "projectExecutionEnabled": True,
+        "workspacePath": "/tmp/awaiting-acceptance", "workspaceKind": "directory",
+        "workspaceStatus": {"ok": True}, "workspaceManagedBy": "system",
+        "workspaceCreatedAt": "2025-04-01T00:00:00+00:00", "createdInAttempt": True,
+    }
+    committed = service.materialize_recurrence_occurrence(
+        "recurrence-request-1", "awaiting-acceptance", prepare_workspace=lambda *_args: prepared,
+    )
+
+    def await_acceptance(root):
+        project = next(item for item in root["projects"] if item["id"] == committed["project"]["id"])
+        project["tasks"][0]["executionState"] = "awaiting_user_acceptance"
+
+    service.store.update(await_acceptance)
+    calls = []
+    service.recurrence_execution.start_project = lambda *args: calls.append(args) or {"ok": False, "_status": 409, "code": "no_eligible_task"}
+    result = service.materialize_recurrence_occurrence(
+        "recurrence-request-1", "awaiting-acceptance",
+    )
+
+    assert result["automaticExecution"] == {"state": "started", "code": "already_active"}
+    assert calls == []
+
+
 def test_concurrent_execution_reconciliation_claims_one_launch(tmp_path):
     markdown, service, _, _ = _service(
         tmp_path, execution=True, execution_mode="create_and_execute",

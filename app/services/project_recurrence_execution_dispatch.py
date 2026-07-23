@@ -27,6 +27,15 @@ _ALREADY_STARTED_CODES = frozenset({
     "already_active", "already_completed", "project_already_active",
     "project_execution_active", "project_execution_completed",
 })
+_ACTIVE_TASK_STATES = frozenset({
+    "executing",
+    "retrying",
+    "reviewing",
+    "reworking",
+    "execution_complete",
+    "awaiting_user_acceptance",
+    "awaiting_meeting_resolution",
+})
 
 
 def _parse_timestamp(value: Any) -> datetime | None:
@@ -47,7 +56,7 @@ def _already_satisfied(project: Mapping[str, Any]) -> str | None:
     for task in project.get("tasks") or []:
         if isinstance(task, Mapping) and (
             task.get("activeAttemptId")
-            or task.get("executionState") in {"executing", "reviewing", "awaiting_acceptance"}
+            or task.get("executionState") in _ACTIVE_TASK_STATES
         ):
             return "already_active"
     return None

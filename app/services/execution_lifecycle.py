@@ -19,6 +19,14 @@ from services.project_repository import ProjectNotFoundError
 Project = dict[str, Any]
 Task = dict[str, Any]
 
+STALE_RECONCILE_STATES = frozenset({
+    "validating",
+    "executing",
+    "retrying",
+    "reviewing",
+    "reworking",
+})
+
 
 class Repository(Protocol):
     def get(self, project_id: str) -> Project: ...
@@ -695,12 +703,12 @@ def status(
     if task_id and task is None:
         return _status({"error": "Project or task not found"}, 404)
     targets = [task] if task else project.get("tasks", [])
-    stale = [item.get("id") for item in targets if item and item.get("executionState") in {"validating", "executing", "reviewing", "reworking"} and not is_live(str(item.get("activeAttemptId") or ""))]
+    stale = [item.get("id") for item in targets if item and item.get("executionState") in STALE_RECONCILE_STATES and not is_live(str(item.get("activeAttemptId") or ""))]
     if stale:
         def reconcile(latest: Project) -> None:
             for item_id in stale:
                 item = _find_task(latest, item_id)
-                if not item or item.get("executionState") not in {"validating", "executing", "reviewing", "reworking"}:
+                if not item or item.get("executionState") not in STALE_RECONCILE_STATES:
                     continue
                 attempt_id = item.get("activeAttemptId")
                 if is_live(str(attempt_id or "")):
@@ -708,7 +716,14 @@ def status(
                 item["activeAttemptId"] = None
                 item["blockedReason"] = "previous_execution_not_resumable"
                 transition_task(latest, item, "blocked", "system", item["blockedReason"], attempt_id)
-            latest.update({"workflowActive": False, "activeTaskId": None, "activeAgent": None, "workflowPhase": "blocked"})
+            latest.update({
+                "workflowActive": False,
+                "activeTaskId": None,
+                "activeAgent": None,
+                "workflowPhase": "blocked",
+                "projectExecutionFlowActive": False,
+                "projectExecutionFlowStopReason": "previous_execution_not_resumable",
+            })
         repository.update(project_id, reconcile)
         project = repository.get(project_id)
         task = _find_task(project, task_id) if task_id else None

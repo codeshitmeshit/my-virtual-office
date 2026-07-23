@@ -195,6 +195,29 @@ def test_project_update_cannot_forge_managed_workspace_metadata():
     assert stored.get("workspaceCreatedAt") is None
 
 
+def test_project_update_cannot_forge_execution_flow_state():
+    _, repo, common = dependencies()
+    project = create_project(repo, common, projectExecutionEnabled=True).result.payload["project"]
+    outcome = project_commands.update_project(
+        project["id"],
+        {
+            "projectExecutionFlowActive": True,
+            "projectExecutionFlowStopReason": None,
+            "title": "Renamed",
+        },
+        repository=repo, system_agent_assignment_error=common["system_agent_assignment_error"],
+        execution_enabled=lambda value: value.get("projectExecutionEnabled") is True,
+        validate_workspace=lambda value: {"ok": True, "path": value, "kind": "directory"},
+        log_activity=common["log_activity"], now=common["now"],
+    )
+
+    assert outcome.result.status == 200
+    stored = repo.get(project["id"])
+    assert stored["title"] == "Renamed"
+    assert stored["projectExecutionFlowActive"] is False
+    assert stored["projectExecutionFlowStopReason"] is None
+
+
 def test_invalid_project_ids_keep_not_found_contract():
     _, repo, common = dependencies()
     for project_id in (" ", "../escape", "bad\x01id", "x" * 257):
