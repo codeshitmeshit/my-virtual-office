@@ -24,7 +24,7 @@
 ## 5. Unify Live Reconciliation Without UI Redesign
 
 - [x] 5.1 Add a bounded canonical `timelineItem` projection to existing Provider SSE payloads for all four Providers without removing or renaming current events or fields; verify Last-Event-ID replay, heartbeat, history recovery, approval, tool, terminal, malformed-event, and cross-conversation behavior remains compatible.
-- [ ] 5.2 Update `ChatHistoryStore` and `ChatWindow` data plumbing to reconcile canonical `timelineItem` values instead of independently deriving history identity, ordering, status, tools, and reasoning; retain current visual components, labels, expansion behavior, streaming feedback, typing indicators, approval actions, scrolling, cache bounds, and Provider-specific presentation.
+- [x] 5.2 Update `ChatHistoryStore` and `ChatWindow` data plumbing to reconcile canonical `timelineItem` values instead of independently deriving history identity, ordering, status, tools, and reasoning; retain current visual components, labels, expansion behavior, streaming feedback, typing indicators, approval actions, scrolling, cache bounds, and Provider-specific presentation.
 
 ## 6. Remove Parallel Authorities
 
