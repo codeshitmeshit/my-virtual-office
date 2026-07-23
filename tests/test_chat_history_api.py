@@ -433,6 +433,27 @@ class ChatHistoryContractTest(unittest.TestCase):
             self.assertEqual(len(results), 8)
             self.assertTrue(all(len(rows) == 2 for rows in results))
 
+    def test_jsonl_snapshot_cache_incrementally_reads_appends(self):
+        load = self.require("_load_cached_chat_history_jsonl")
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "append-history.jsonl")
+            with open(path, "w", encoding="utf-8") as stream:
+                stream.write(json.dumps({"id": "one", "agent": "main"}) + "\n")
+
+            is_main = lambda row: row.get("agent") == "main"
+            self.assertEqual([row["id"] for row in load(path, "append-fixture", 1000, predicate=is_main)], ["one"])
+
+            def fail_reverse_iter(_path):
+                raise AssertionError("append-only cache hit must not rescan the old JSONL body")
+
+            with open(path, "a", encoding="utf-8") as stream:
+                stream.write(json.dumps({"id": "two", "agent": "main"}) + "\n")
+                stream.write(json.dumps({"id": "other", "agent": "other"}) + "\n")
+
+            with mock.patch.object(server, "_iter_chat_history_jsonl_reverse", side_effect=fail_reverse_iter):
+                rows = load(path, "append-fixture", 1000, predicate=is_main)
+            self.assertEqual([row["id"] for row in rows], ["one", "two"])
+
     def test_gateway_page_reads_exact_session_without_truncating(self):
         page_gateway = self.require("_page_openclaw_session_history")
         request = self.request("gateway")

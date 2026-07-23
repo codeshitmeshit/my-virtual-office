@@ -76,6 +76,7 @@ from services import hr_runtime as hr_runtime_service
 from services import hr_scheduler as hr_scheduler_service
 from services import vo_agent_communication as vo_agent_communication_service
 from services.project_execution_ordering import first_incomplete_task
+from services.chat_history_jsonl_cache import JsonlSnapshotCache
 from services import system_agent_lifecycle as system_agent_lifecycle_service
 from services import system_agent_profiles as system_agent_profiles_service
 from services import system_agent_policy as system_agent_policy_service
@@ -10897,7 +10898,10 @@ def _parse_chat_history_request(query):
 
 _CHAT_HISTORY_SOURCE_CACHE_ENTRY_LIMIT = 32
 _CHAT_HISTORY_SOURCE_CACHE_BYTE_LIMIT = 64 * 1024 * 1024
-_CHAT_HISTORY_SOURCE_CACHE = OrderedDict()
+_CHAT_HISTORY_SOURCE_CACHE = JsonlSnapshotCache(
+    entry_limit=_CHAT_HISTORY_SOURCE_CACHE_ENTRY_LIMIT,
+    byte_limit=_CHAT_HISTORY_SOURCE_CACHE_BYTE_LIMIT,
+)
 _CHAT_HISTORY_SOURCE_CACHE_BYTES = 0
 _CHAT_HISTORY_SOURCE_CACHE_LOCK = threading.RLock()
 _CHAT_HISTORY_SOURCE_CACHE_HITS = 0
@@ -10905,11 +10909,7 @@ _CHAT_HISTORY_SOURCE_CACHE_MISSES = 0
 
 
 def _chat_history_file_signature(path):
-    try:
-        stat = os.stat(path)
-        return (stat.st_ino, stat.st_size, stat.st_mtime_ns)
-    except (FileNotFoundError, OSError):
-        return None
+    return JsonlSnapshotCache._file_signature(path)
 
 
 def _iter_chat_history_jsonl_reverse(path, chunk_size=64 * 1024):
@@ -10936,46 +10936,17 @@ def _iter_chat_history_jsonl_reverse(path, chunk_size=64 * 1024):
 
 def _load_cached_chat_history_jsonl(path, cache_key, max_records=1000, predicate=None):
     global _CHAT_HISTORY_SOURCE_CACHE_BYTES, _CHAT_HISTORY_SOURCE_CACHE_HITS, _CHAT_HISTORY_SOURCE_CACHE_MISSES
-    signature = _chat_history_file_signature(path)
-    key = (os.path.abspath(path or ""), str(cache_key or ""), int(max_records or 1000))
-    with _CHAT_HISTORY_SOURCE_CACHE_LOCK:
-        cached = _CHAT_HISTORY_SOURCE_CACHE.get(key)
-        if cached and cached["signature"] == signature:
-            _CHAT_HISTORY_SOURCE_CACHE_HITS += 1
-            _CHAT_HISTORY_SOURCE_CACHE.move_to_end(key)
-            return [dict(row) for row in cached["rows"]]
-        _CHAT_HISTORY_SOURCE_CACHE_MISSES += 1
-
-    newest_first = []
-    if signature:
-        for line in _iter_chat_history_jsonl_reverse(path):
-            try:
-                row = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if not isinstance(row, dict) or (predicate and not predicate(row)):
-                continue
-            newest_first.append(row)
-            if len(newest_first) >= max(1, min(int(max_records or 1000), 1000)):
-                break
-    rows = list(reversed(newest_first))
-    estimated_bytes = len(json.dumps(rows, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
-    with _CHAT_HISTORY_SOURCE_CACHE_LOCK:
-        previous = _CHAT_HISTORY_SOURCE_CACHE.pop(key, None)
-        if previous:
-            _CHAT_HISTORY_SOURCE_CACHE_BYTES -= previous["bytes"]
-        _CHAT_HISTORY_SOURCE_CACHE[key] = {
-            "signature": signature,
-            "rows": rows,
-            "bytes": estimated_bytes,
-        }
-        _CHAT_HISTORY_SOURCE_CACHE_BYTES += estimated_bytes
-        while (
-            len(_CHAT_HISTORY_SOURCE_CACHE) > _CHAT_HISTORY_SOURCE_CACHE_ENTRY_LIMIT or
-            _CHAT_HISTORY_SOURCE_CACHE_BYTES > _CHAT_HISTORY_SOURCE_CACHE_BYTE_LIMIT
-        ):
-            _, evicted = _CHAT_HISTORY_SOURCE_CACHE.popitem(last=False)
-            _CHAT_HISTORY_SOURCE_CACHE_BYTES -= evicted["bytes"]
+    rows = _CHAT_HISTORY_SOURCE_CACHE.load(
+        path,
+        cache_key,
+        max_records,
+        predicate,
+        reverse_iter=_iter_chat_history_jsonl_reverse,
+    )
+    stats = _CHAT_HISTORY_SOURCE_CACHE.stats()
+    _CHAT_HISTORY_SOURCE_CACHE_BYTES = stats["bytes"]
+    _CHAT_HISTORY_SOURCE_CACHE_HITS = stats["hits"]
+    _CHAT_HISTORY_SOURCE_CACHE_MISSES = stats["misses"]
     return [dict(row) for row in rows]
 
 
@@ -11312,12 +11283,14 @@ def _handle_chat_history_page(query):
         }
         duration_ms = int((time.perf_counter() - started_at) * 1000)
         if duration_ms >= 200:
-            with _CHAT_HISTORY_SOURCE_CACHE_LOCK:
-                cache_hits = _CHAT_HISTORY_SOURCE_CACHE_HITS
-                cache_misses = _CHAT_HISTORY_SOURCE_CACHE_MISSES
+            cache_stats = _CHAT_HISTORY_SOURCE_CACHE.stats()
+            cache_hits = cache_stats["hits"]
+            cache_misses = cache_stats["misses"]
+            incremental_hits = cache_stats["incrementalHits"]
             print(
                 f"[CHAT-HISTORY] provider={request.provider_kind} count={len(messages)} "
-                f"durationMs={duration_ms} sourceCacheHits={cache_hits} sourceCacheMisses={cache_misses}"
+                f"durationMs={duration_ms} sourceCacheHits={cache_hits} "
+                f"sourceCacheMisses={cache_misses} sourceCacheIncrementalHits={incremental_hits}"
             )
         return result
     except _ChatHistoryRequestError as exc:
