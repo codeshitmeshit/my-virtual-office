@@ -136,7 +136,29 @@ def test_self_low_risk_mutation_and_undo_use_session_identity(tmp_path):
 
 
 def test_self_and_public_detail_do_not_leak_restricted_hr_fields(tmp_path):
-    repository, _, session, _, routes = _runtime(tmp_path)
+    repository, _, session, management, routes = _runtime(tmp_path)
+    management.profiles.update(
+        "codex-local",
+        {
+            "name": "Codex",
+            "introduction": "Self introduction",
+            "responsibilities": ["Backend"],
+            "specialties": ["Review"],
+            "appearance": {"emoji": "⚡"},
+        },
+        expected_revision=0,
+    )
+    management.profiles.update(
+        "hermes-default",
+        {
+            "name": "Hermes",
+            "introduction": "Public introduction",
+            "responsibilities": ["Research"],
+            "specialties": ["Operations"],
+            "appearance": {"emoji": "🪽"},
+        },
+        expected_revision=0,
+    )
     self_detail = routes.get(
         f"{AGENT_PREFIX}codex-local",
         {},
@@ -152,8 +174,22 @@ def test_self_and_public_detail_do_not_leak_restricted_hr_fields(tmp_path):
 
     assert self_detail.status == 200
     assert self_detail.payload["scope"] == "self"
+    assert self_detail.payload["profile"]["revision"] == 1
+    assert self_detail.payload["profile"]["source"] == "profile-store"
     assert public_detail.status == 200
     assert public_detail.payload["scope"] == "public"
+    assert set(public_detail.payload["profile"]) == {
+        "aiId",
+        "name",
+        "introduction",
+        "responsibilities",
+        "specialties",
+        "appearance",
+    }
+    assert public_detail.payload["profile"]["name"] == "Hermes"
+    assert "revision" not in public_detail.payload["profile"]
+    assert "source" not in public_detail.payload["profile"]
+    assert "updatedAt" not in public_detail.payload["profile"]
     assert "reports" not in public_detail.payload["hr"]
     assert "assessments" not in public_detail.payload["hr"]
     assert "accessHistory" not in public_detail.payload["hr"]

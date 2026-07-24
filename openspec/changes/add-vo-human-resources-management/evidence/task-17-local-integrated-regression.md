@@ -146,3 +146,14 @@ They cover launch-code exchange, loopback/origin policy, scoped session cookies,
 expiry and restart invalidation, browser HTTP projection, confirmation challenge
 semantics and high-risk authorization. Static shell/configuration/browser
 contracts also passed.
+
+### Post-acceptance self-review hardening
+
+The full branch review required the Agent browser route to construct an explicit
+colleague Profile DTO instead of returning the profile-store dictionary
+wholesale. The store currently owns low-risk fields only, but the public route
+now allowlists exactly `aiId`, name, introduction, responsibilities,
+specialties and appearance. Revision, source and update metadata remain
+self-only. The service tests and live Chrome fixture assert the exact public key
+set, preventing a later profile-store field addition from becoming an implicit
+cross-Agent disclosure.

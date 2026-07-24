@@ -183,8 +183,29 @@ class AgentManagementBrowserRoutes:
         return target
 
     @staticmethod
-    def _profile_payload(profile) -> dict[str, object] | None:
-        return profile.to_dict() if profile is not None else None
+    def _profile_payload(
+        profile,
+        *,
+        self_view: bool,
+    ) -> dict[str, object] | None:
+        if profile is None:
+            return None
+        payload = profile.to_dict()
+        if self_view:
+            return payload
+        public_fields = (
+            "aiId",
+            "name",
+            "introduction",
+            "responsibilities",
+            "specialties",
+            "appearance",
+        )
+        return {
+            field: copy.deepcopy(payload[field])
+            for field in public_fields
+            if field in payload
+        }
 
     @classmethod
     def _browser_hr_projection(cls, value: object) -> object:
@@ -257,14 +278,16 @@ class AgentManagementBrowserRoutes:
                     return AgentManagementBrowserResponse(
                         result.status, result.payload
                     )
+                self_view = target == identity.ai_id
                 return AgentManagementBrowserResponse(
                     200,
                     {
                         "ok": True,
-                        "scope": (
-                            "self" if target == identity.ai_id else "public"
+                        "scope": "self" if self_view else "public",
+                        "profile": self._profile_payload(
+                            profile,
+                            self_view=self_view,
                         ),
-                        "profile": self._profile_payload(profile),
                         "hr": self._browser_hr_projection(
                             result.payload["agent"]
                         ),

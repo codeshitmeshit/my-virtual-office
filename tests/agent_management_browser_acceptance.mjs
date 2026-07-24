@@ -290,8 +290,14 @@ try {
         delete profile.workspace;
         delete profile.assignment;
         delete profile.providerAgentId;
+        if (aiId !== 'codex-local') {
+          delete profile.revision;
+          delete profile.source;
+          delete profile.updatedAt;
+        }
         payload = {
           ok: true,
+          scope: aiId === 'codex-local' ? 'self' : 'public',
           profile,
           hr: {
             aiId,
@@ -483,6 +489,9 @@ try {
     audience: AgentManagement.state.audience.kind,
     restrictedDom: document.querySelectorAll('.ac-restricted, [data-restricted-field]').length,
     editableFields: document.querySelectorAll('[data-profile-field]').length,
+    publicProfileKeys: Object.keys(
+      __amFixture.browserResponses.find(item => item.scope === 'public')?.profile || {}
+    ).sort(),
     hiddenText: document.body.textContent.includes(__amFixture.data.hiddenRestrictedSentinel),
     humanRoutes: __amFixture.requests.filter(item => item.url.startsWith('/api/human-resources')).length,
     responseContainsHidden: JSON.stringify(__amFixture.browserResponses).includes(__amFixture.data.hiddenRestrictedSentinel),
@@ -491,6 +500,14 @@ try {
     audience: 'agent',
     restrictedDom: 0,
     editableFields: 0,
+    publicProfileKeys: [
+      'aiId',
+      'appearance',
+      'introduction',
+      'name',
+      'responsibilities',
+      'specialties',
+    ],
     hiddenText: false,
     humanRoutes: 0,
     responseContainsHidden: false,
