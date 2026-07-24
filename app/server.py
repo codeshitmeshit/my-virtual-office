@@ -66,6 +66,7 @@ from services import meeting_action_items as meeting_action_items_service
 from services import meeting_notifications as meeting_notifications_service
 from services import meeting_callbacks as meeting_callbacks_service
 from services import archive_manager_lifecycle as archive_manager_lifecycle_service
+from services.weather_config import resolve_weather_location
 from services import hr_bootstrap as hr_bootstrap_service
 from services import hr_config as hr_config_service
 from services import hr_lifecycle as hr_lifecycle_service
@@ -788,7 +789,7 @@ def _load_vo_config():
             "preparingTimeoutSec": meetings_cfg.get("preparingTimeoutSec", 300),
         },
         "weather": {
-            "location": _env_or("VO_WEATHER_LOCATION", weather_cfg.get("location")),
+            "location": resolve_weather_location(os.environ, weather_cfg),
         },
         "sms": {
             "ownerAgentId": _env_or("VO_SMS_OWNER_AGENT_ID", _env_or("VO_SMS_AGENT_ID", sms_cfg.get("ownerAgentId") or sms_cfg.get("agentId"))),
