@@ -4,7 +4,7 @@ Virtual Office currently discovers OpenClaw, Hermes, Codex, Claude Code, and syn
 
 The repository has already established a better pattern under `app/services/`: domain modules do not import `server.py` or HTTP classes, state transitions are exercised through injected ports, authoritative repositories own persistence, and `OfficeHandler` remains transport wiring. `AGENTS.md` requires every substantial new capability to follow this modular direction.
 
-Human Resources is cross-cutting. It introduces a second global OpenClaw system Agent, a durable Agent directory, one provider-neutral VO built-in skill, scheduled Agent conversations, HR-authored normalization and assessment, evidence reads from project/meeting/artifact/execution domains, sensitive human views, restricted Agent views, access auditing, and a first-level UI. The local development environment does not provide the real OpenClaw integration required for final acceptance, so provider boundaries must be deterministic under unit tests and separately verified on a development machine.
+Human Resources is cross-cutting. It introduces a second global OpenClaw system Agent, a durable Agent directory, one provider-neutral VO built-in skill, scheduled Agent conversations, HR-authored normalization and assessment, evidence reads from project/meeting/artifact/execution domains, sensitive human views, restricted Agent views, access auditing, and a Human Resources tab inside the shared Agent Management UI. The local development environment does not provide the real OpenClaw integration required for final acceptance, so provider boundaries must be deterministic under unit tests and separately verified end to end on a development machine.
 
 Current constraints and reusable foundations include:
 
@@ -13,6 +13,8 @@ Current constraints and reusable foundations include:
 - Archive manager state is already persisted at `archive-room/manager.json`; compatibility requires preserving that path and public behavior during extraction.
 - Existing management-token support (`X-VO-Management-Token` and `window.i18n.managementFetch`) can protect full human views and mutations.
 - Human Resources Agent reads use the trusted VO-internal interaction boundary: loopback, no browser `Origin`, an HR action header, and a self-declared AI ID that must resolve to an active directory Agent. Access logging is operational and best-effort; it does not claim cryptographic Agent identity attestation.
+- The existing browser Agent editor is implemented inside the large `app/game.js`, persists a whole office document, keeps a manual Save button, and exposes legacy mutation routes that are not sufficient for field-level audience authorization, revision checks, or bounded undo.
+- The existing originless Agent HR API intentionally rejects browser requests. Therefore a browser must never obtain Agent authority from a query parameter, local storage, a roster selection, or a client-supplied Agent ID.
 - Meeting services already preserve archive-manager exclusion and occupancy restoration; eligibility needs to become policy-based so HR is allowed without weakening archive-manager protection.
 - Existing recurrence code demonstrates bounded reconcilers and injected clocks/workers, but Human Resources daily-cycle authority must remain inside VO even when OpenClaw cron is unavailable.
 - The worktree contains unrelated user edits in `skills/vo-project-authoring/SKILL.md` and `tests/check_vo_project_authoring_skill.mjs`; implementation must not modify or overwrite them unless a later confirmed task explicitly requires it.
@@ -28,7 +30,9 @@ Current constraints and reusable foundations include:
 - Run one idempotent daily collection cycle with bounded Agent calls, neutral non-submission, late submission, and restart recovery.
 - Generate HR-only, evidence-backed, non-ranking assessments with explicit information sufficiency.
 - Enforce human, HR, self, and cross-Agent disclosure policies on the server, with trusted VO-internal Agent identity declarations and durable access audit.
-- Add an independent Human Resources UI while keeping `app/server.py` limited to construction and route delegation.
+- Merge Agent configuration and Human Resources into one modular Agent Management shell while keeping `app/server.py` limited to construction and route delegation.
+- Provide a provider-neutral, short-lived Agent browser session without distributing the management token or weakening the existing originless Agent API boundary.
+- Replace whole-document/manual-save Agent edits with field-scoped automatic persistence, revision-aware feedback, and bounded undo.
 - Make provider calls, clocks, IDs, storage, evidence, and worker launching injectable for strict unit tests.
 - Require real-OpenClaw development-machine acceptance before test-result confirmation.
 
@@ -37,7 +41,7 @@ Current constraints and reusable foundations include:
 - Replacing Archive Room, project acceptance, task review, or the existing project score feature.
 - Numeric performance scores, leaderboards, automatic punishment, automatic Agent deletion, or automatic task reassignment.
 - Treating all chat history as HR evidence or recording private prompt content in operational logs.
-- Generalizing every existing Agent operation in one migration; the shared lifecycle covers VO system-Agent lifecycle only.
+- Generalizing every existing Agent operation in one migration; only Agent Management configuration, audience authorization, and alternate mutation paths needed to enforce this specification are in scope.
 - Migrating Archive Room archive data into the Human Resources store.
 - Making HR an ordinary project executor or reviewer.
 - Adding a new external scheduler, database server, message broker, or third-party dependency.
@@ -276,7 +280,26 @@ Agent APIs require loopback, reject browser Origin, require `X-VO-Agent-Action: 
 
 A successful cross-Agent response is returned only after its audit transaction commits. If the audit commit fails, disclosure fails closed. HR and human management reads use separate routes and therefore do not create cross-Agent logs. Provider kind does not affect access.
 
-The threat model protects against remote callers, browser-originated requests, unknown IDs, and inactive Agents. By product decision, VO-internal Agent interactions are trusted; access logs record the declared Agent ID and do not attempt to prevent one trusted local Agent from declaring another active ID.
+The shared browser UI adds a separate, short-lived session boundary in
+`app/services/agent_management_sessions.py`:
+
+1. A registered Agent makes an originless loopback `POST /api/agent-management/sessions` with `X-VO-Agent-Action: agent-management` and its stable AI ID.
+2. The server returns a random, single-use, short-expiry launch code. It stores only a digest plus Agent ID, expiry, and unused/used state in a bounded in-memory repository; codes are lost on restart by design.
+3. The browser opens the returned same-origin launch URL and exchanges the code once. The response sets an opaque `HttpOnly`, `SameSite=Strict`, path-scoped Agent Management cookie and redirects to a URL without the code.
+4. Browser Agent routes resolve the audience exclusively from that server session, re-check that the directory Agent is active, enforce idle/absolute expiry, and reject management commands and cross-Agent mutations.
+
+The launch code and cookie are not persistent HR grants and are never placed in
+local storage, logs, Skill files, or Agent workspaces. The existing originless
+Skill/API routes remain unchanged. Management-token requests never inherit an
+Agent session, and Agent-session requests never inherit human authority. Session
+creation, exchange, expiry, replay, CSRF/origin, inactive-Agent, and restart
+behavior receive negative tests.
+
+The threat model protects against remote callers, arbitrary browser identity
+claims, launch-code replay, unknown IDs, inactive Agents, and cross-audience
+confusion. By product decision, the originless VO-internal request that mints a
+session remains trusted and self-declared; the browser cannot change the
+resulting identity.
 
 ### 10. Make system-role policy explicit across projects, meetings, and deletion
 
@@ -290,16 +313,72 @@ Replace archive-specific exclusion checks at shared boundaries with a role-polic
 
 Both legacy meetings and executable meetings must call the same eligibility policy before persistence. Occupancy and restoration logic remains in the meeting domain. HR attendance is not emitted as an HR performance event; completed meeting records may later be read as bounded evidence only when relevant.
 
-### 11. Add an independent UI module with management-token data access
+### 11. Build one modular Agent Management shell with audience-scoped adapters
 
 Add:
 
-- `app/human-resources.js`
-- `app/human-resources.css`
-- a Human Resources toolbar entry and modal shell in `app/index.html`
+- `app/agent-management.js` and `app/agent-management.css`: modal shell, close control, peer tabs, one roster/selection store, tab scroll restoration, audience bootstrap, feedback, and confirmation orchestration.
+- `app/agent-configuration.js` and `app/agent-configuration.css`: configuration projection, compact visual selectors, preview, automatic-save state, and undo interaction.
+- an embeddable Human Resources panel contract in `app/human-resources.js`; its data projection remains independent of the shell and receives the selected stable AI ID through an explicit adapter.
+- one Agent Management toolbar entry and one modal shell in `app/index.html`; the independent Human Resources entry/modal is removed after callers migrate.
 - localized strings in `app/locales/en.json` and `app/locales/zh.json`
 
-The UI follows Archive Room's independent modal/list/detail pattern but does not import or duplicate Archive Room state. It uses `managementFetch` for every full-data request. The overview shows one authoritative HR state indicator, daily-cycle counts, and a server-calculated `reportSchedule` containing the next configured collection instant, VO-local wall time/timezone, scheduler enablement, and scheduled/due/disabled state; detail separates Agent claims, HR normalization, evidence-backed HR judgment, and access history. An active-sync control invokes a focused `hr_team_sync.py` service that force-refreshes the shared roster and reconciles directory state for every Provider before the UI reloads. A separate `补充信息` control invokes `hr_information_completion.py`, which selects only available non-HR Agents lacking introduction text, reuses already received raw responses, performs bounded HR-to-Agent requests and HR summarization in the background, and prevents concurrent duplicate runs. Because `vo-agent-hr` is a VO built-in and invocation needs no per-Agent credential, detail shows neither Skill readiness nor HR API authorization readiness. Failed or partial states remain scoped to the affected Agent/workflow. The Agent-facing API is not called by the human UI.
+`app/game.js` retains only thin compatibility entry points while the old `_acp*`
+implementation is migrated and then removed; new state, authorization, save, or
+rendering logic is not added there. The shell exposes one explicit interface:
+`setRoster`, `selectAgent`, `setAudience`, `mountTab`, and `reportMutation`.
+Configuration and HR panels do not read each other's globals. Stable AI ID is the
+selection key across both tabs; each tab owns its loading/error/scroll state.
+The top-right `×` is the only modal-close control, and the tab switch is placed
+in the header area without a duplicate return button or global Save button.
+
+The human adapter uses `managementFetch` for full-data requests. The Agent
+adapter uses only the scoped Agent Management session routes and receives public
+or self DTOs already projected by the server. An Agent keeps the same two-tab
+navigation, but the Human Resources tab contains only governed public/self
+information and no human HR commands, assessment evidence, or unrelated access
+history. The shell does not fetch a human DTO and then hide fields.
+
+Create `app/services/agent_profile_configuration.py` as the field-level
+application service and `app/services/agent_profile_store.py` as the atomic,
+revisioned owner of editable Agent profile/appearance configuration. Each
+mutation contains one stable AI ID, one allowlisted field, a normalized value,
+and `expectedRevision`. Human and Agent actors pass through the same policy:
+
+- an Agent may change only its own `name`, `introduction`,
+  `responsibilities`, `specialties`, and allowlisted appearance fields;
+- a human may change those fields and confirmed high-risk Provider, branch,
+  workspace, assignment, binding, create, and delete operations;
+- every high-risk command requires a short-lived server-issued confirmation
+  challenge bound to actor, Agent, action, normalized before/after digest, and
+  expiry; a boolean `confirmed` field is insufficient;
+- legacy whole-office, workspace-settings, create/delete, and Provider-binding
+  mutation routes must either require management authorization and delegate to
+  the same service or become read-only/removed, so they cannot bypass policy.
+
+Profile fields are persisted independently; a partial batch cannot create a
+cross-store half-save. The store writes atomically and returns the new revision.
+The HR directory consumes committed name/introduction/responsibility changes
+through an explicit reconciliation port rather than becoming a second writable
+authority. Legacy free-form `role` is read as a compatibility fallback and
+migrated to bounded responsibility/specialty values; it remains descriptive
+metadata for display, filtering, and recommendations, never an assignment
+permission gate.
+
+Committed categorical controls save immediately; text fields use a short
+debounce followed by a field commit. The UI shows saving/saved/failed per field.
+Each successful low-risk response includes an opaque, single-use inverse token
+with a documented 30-second expiry. Undo is a server operation with revision
+comparison; it fails visibly rather than overwriting a newer edit. The browser
+does not construct an unrestricted inverse payload.
+
+Appearance categories render as compact buttons showing the current value.
+Opening one mounts a keyboard-accessible visual grid with focus management;
+selection updates the preview, commits the field, and closes the popover. Color
+controls retain swatches/palettes. This replaces the permanently expanded grids
+without turning colors into opaque text selects.
+
+The HR overview shows one authoritative HR state indicator, daily-cycle counts, and a server-calculated `reportSchedule` containing the next configured collection instant, VO-local wall time/timezone, scheduler enablement, and scheduled/due/disabled state; detail separates Agent claims, HR normalization, evidence-backed HR judgment, and access history. An active-sync control invokes a focused `hr_team_sync.py` service that force-refreshes the shared roster and reconciles directory state for every Provider before the UI reloads. A separate `补充信息` control invokes `hr_information_completion.py`, which selects only available non-HR Agents lacking introduction text, reuses already received raw responses, performs bounded HR-to-Agent requests and HR summarization in the background, and prevents concurrent duplicate runs. Because `vo-agent-hr` is a VO built-in and invocation needs no per-Agent credential, detail shows neither Skill readiness nor HR API authorization readiness. Failed or partial states remain scoped to the affected Agent/workflow.
 
 A separate `日报` control opens an accessible selector containing only available, non-HR Agents, with select-all and individual checkboxes. `hr_manual_daily_sync.py` runs the selected correction asynchronously and single-flight: it explicitly re-asks each selected Agent, replaces the same authoritative Agent/date report only after a non-empty response, clears stale normalization, increments the report revision, normalizes again, and immediately invokes HR reassessment with revision reason `manual_daily_sync`. It may reassess a selected Agent while the global cycle is still open without closing or advancing other Agents. No-response and provider failure preserve the prior report and assessment; normalization or assessment failure is isolated and visible through bounded HR activity.
 
@@ -331,6 +410,10 @@ Operational logs contain IDs, state, code, and duration but no raw reports, full
 - **[HR hallucinates a report or assessment]** → Preserve raw claims, validate structured output, require evidence references/rationale, use `insufficient_information`, and never synthesize a missing self-report.
 - **[Sensitive assessment data leaks to ordinary Agents]** → Separate management and Agent routes, server-side projections, active-directory identity checks, negative disclosure tests, and no client-side-only hiding.
 - **[Access log identity is self-declared]** → Treat VO-internal interaction as trusted by product decision, label the log as best-effort operational evidence, and continue rejecting remote, browser-originated, unknown, and inactive callers.
+- **[Browser Agent identity is forged or replayed]** → Mint a single-use launch code only through the existing originless trusted boundary, exchange it for a short-lived HttpOnly path-scoped session, re-check active identity, and test replay, expiry, origin, CSRF, audience confusion, and restart invalidation.
+- **[Legacy mutation routes bypass the merged UI policy]** → Inventory every Agent/office/workspace/create/delete mutation route; protect and delegate it to the field-level policy or remove its mutation behavior before exposing the merged UI.
+- **[Automatic save overwrites a concurrent edit]** → Require expected revisions, persist one field per commit, return conflicts explicitly, and make undo a single-use revision-checked server operation.
+- **[UI merge increases `game.js` coupling]** → Add focused Agent Management/configuration modules, retain only temporary thin delegates, and enforce import/global/size boundaries with static tests.
 - **[SQLite introduces a new repository pattern]** → Use only Python stdlib, one owning module, transactional migrations, backup/export diagnostics, busy timeout, repository tests, and no cross-domain direct access.
 - **[Assessment evidence becomes expensive or invasive]** → Use bounded typed read ports, summaries instead of raw histories, strict date/Agent filters, and source-specific limits.
 - **[Daily times shift with timezone or daylight saving]** → Store configured timezone/date occurrence separately from UTC timestamps and test DST/restart boundaries.
@@ -349,12 +432,13 @@ Operational logs contain IDs, state, code, and duration but no raw reports, full
 7. Add reporting, evidence, assessment, scheduler, and observability services with deterministic clocks and fake conversations.
 8. Add management and Agent APIs with authorization, disclosure, audit, body-size, and pagination tests.
 9. Update project/deletion/meeting policy wiring and run project, meeting, Archive Room, communication, and provider regressions.
-10. Add the Human Resources UI, localization, Node checks, and live browser acceptance coverage.
-11. Deploy to the development machine with code present but `VO_HR_ENABLED=0`; run archive-manager and existing VO smoke tests.
-12. Enable HR lifecycle only, verify real OpenClaw auto-create, rediscovery, profile repair, restart, pause/resume, meeting eligibility, assignment/deletion protection, and archive-manager isolation.
-13. Enable the directory; verify `vo-agent-hr` exposure for every Provider, real Agent discovery, introduction, trusted identity headers, controlled public queries, and best-effort access audit.
-14. Enable scheduler for a short controlled acceptance window; verify collection, non-response, normalization, assessment, restart idempotency, logs, and failure isolation.
-15. Restore the intended daily schedule only after evidence is captured and no regression is observed.
+10. Add field-level profile storage/service, revisioned low-risk auto-save/undo, server-bound high-risk confirmation, and secure or retire every alternate Agent mutation route.
+11. Add short-lived Agent UI session mint/exchange/expiry and separate human/Agent DTO adapters with negative authorization coverage.
+12. Build the modular Agent Management shell, migrate Agent configuration out of `game.js`, embed Human Resources, remove the independent HR modal/save button/duplicate return controls, and add localization plus browser-component tests.
+13. Deploy to the approved development machine with code present but `VO_HR_ENABLED=0`; capture the pre-enable browser baseline for Agent Management, Archive Room, meetings, projects, and existing Agent operations.
+14. Enable HR lifecycle and directory; verify real OpenClaw creation, rediscovery, profile repair, Skill exposure, human management authentication, Agent launch-code/session entry, self/public disclosure, auto-save/undo, high-risk denial/confirmation, restart, meeting eligibility, and archive-manager isolation from the browser-visible flow.
+15. Enable the scheduler for a short controlled window; drive sync, information completion, daily correction/collection, normalization, assessment, failure isolation, restart recovery, and refreshed UI projection end to end.
+16. Rehearse rollback in the approved order, confirm persisted state and existing VO workflows remain available, capture evidence, and only then restore the intended daily schedule.
 
 Rollback:
 
@@ -371,13 +455,18 @@ Verification is split into four required layers:
 
 1. **Pure unit tests:** role policy, lifecycle transitions, profile parsing/path safety, repository transactions/migrations, directory reconciliation, scheduler due logic and DST, claim fencing, report normalization validation, assessment validation, projection and audit policy.
 2. **Service/HTTP integration tests with fakes:** fake roster/provider/conversation/evidence ports, management token, built-in Skill catalog exposure, absence of Agent workspace copies and credentials, trusted Agent identity headers across Providers, idempotent retries, partial failures, pagination, body limits, CORS/origin rejection, and concurrent requests.
-3. **Compatibility and UI regression:** Archive Room Phase 1–8, archive manager Phase 4, meetings, project assignment/deletion, communication skills, provider boundaries, static service boundaries, localization, JS syntax, and live Human Resources UI paths.
-4. **Development-machine real OpenClaw acceptance:** HR/archive-manager creation and isolation, profile and skill writes, restart repair, pause/resume, HR meeting participation, archive-manager meeting rejection, Agent conversations, daily report and assessment, trusted Agent query/audit, provider failure degradation, and restart idempotency.
+3. **Compatibility and UI regression:** Archive Room Phase 1–8, archive manager Phase 4, meetings, project assignment/deletion, communication skills, Provider boundaries, every legacy Agent mutation route, profile revision/conflict/undo, launch-code/session negatives, two-tab selection/scroll state, compact selector keyboard behavior, localization, JS syntax, and live merged-UI paths.
+4. **Development-machine real OpenClaw E2E acceptance:** browser-visible human and Agent entry; management-token or launch-code/session authorization; merged-tab navigation; real HTTP/service/background/provider boundaries; auto-save/undo and high-risk denial/confirmation; HR/archive-manager creation and isolation; profile and Skill writes; Agent conversations; daily report and assessment; disclosure audit; durable persistence; VO/OpenClaw restart recovery; rollback; refreshed final UI; and regression of Archive Room plus existing VO workflows.
 
-Every implementation task must add or update its focused tests. Local test success cannot waive layer 4. OpenSpec test-result confirmation remains blocked until commands, environment/version, outputs, failures/fixes, and uncovered items are recorded.
+Every implementation task must add or update its focused tests. Unit, static,
+API-only, fake-provider, and smoke success cannot waive layer 4. OpenSpec
+test-result confirmation remains blocked until the approved machine, VO and
+OpenClaw versions, feature-switch sequence, browser actions, correlated command
+or log IDs, persisted outcomes, screenshots/recordings, failures/fixes/retries,
+restart/rollback results, and uncovered items are recorded.
 
 ## Open Questions
 
-- The exact development-machine target and deployment command will be resolved before the first real-OpenClaw acceptance task; the acceptance matrix is already fixed by the specs.
+- The exact approved development-machine target and deployment command will be resolved before the first real-OpenClaw E2E task; without them the test-result gate remains blocked, while the acceptance matrix is fixed by the specs.
 - The production daily time may override the proposed `18:00` default through configuration without changing the one-cycle-per-local-date contract.
 - Access logs intentionally record the Agent ID declared inside the trusted VO interaction boundary; if the product threat model later requires cryptographic identity attestation, that will be a separate protocol change rather than Provider-specific Skill distribution.
