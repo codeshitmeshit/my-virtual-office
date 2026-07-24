@@ -2494,5 +2494,6 @@
   "agent_save_denied": "无权修改",
   "agent_save_failed": "保存失败",
   "agent_save_undone": "已撤销",
+  "agent_management_session_required": "代理管理会话已失效，请从虚拟办公室重新打开。",
   "confirm": "确认"
 }

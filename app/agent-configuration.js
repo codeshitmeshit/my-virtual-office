@@ -437,6 +437,8 @@
                 });
                 option.addEventListener('keydown', function (event) {
                     if (event.key === 'Escape') {
+                        event.preventDefault();
+                        event.stopPropagation();
                         closeSelector();
                         toggle.focus();
                         return;
@@ -521,6 +523,7 @@
             }
         });
         host.querySelector('[data-confirm-submit]').addEventListener('click', async function (event) {
+            const submit = event.currentTarget;
             const valueInput = host.querySelector('[data-high-risk-value]');
             const value = valueInput ? valueInput.value.trim() : '';
             let targetAiId = context.selectedAiId;
@@ -541,7 +544,7 @@
                 error.textContent = tr('agent_change_invalid', 'A new value is required');
                 return;
             }
-            event.currentTarget.disabled = true;
+            submit.disabled = true;
             try {
                 const adapter = context.adapter;
                 if (!adapter || typeof adapter.applyHighRisk !== 'function') {
@@ -560,7 +563,7 @@
                 if (root.AgentManagement) root.AgentManagement.bootstrapAudience();
                 load(context);
             } catch (failure) {
-                event.currentTarget.disabled = false;
+                submit.disabled = false;
                 error.textContent = failure && failure.message || tr('agent_change_failed', 'Change failed');
             }
         });

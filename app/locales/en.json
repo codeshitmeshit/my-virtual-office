@@ -2494,5 +2494,6 @@
   "agent_save_denied": "Denied",
   "agent_save_failed": "Save failed",
   "agent_save_undone": "Undone",
+  "agent_management_session_required": "Agent Management session expired. Reopen it from Virtual Office.",
   "confirm": "Confirm"
 }

@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
+import http from 'node:http';
 import { closeCdpPage, createCdpPage, cdpVersion } from './cdp-test-utils.mjs';
 
 
@@ -28,7 +29,17 @@ const sources = {
   ].join('\n'),
 };
 const screenshotDir = process.env.AGENT_MANAGEMENT_ACCEPTANCE_SCREENSHOT_DIR || '';
-const page = await createCdpPage('about:blank');
+const fixtureServer = http.createServer((_request, response) => {
+  response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+  response.end('<!doctype html><html><head><title>Agent Management Live Fixture</title></head><body></body></html>');
+});
+await new Promise((resolve, reject) => {
+  fixtureServer.once('error', reject);
+  fixtureServer.listen(0, '127.0.0.1', resolve);
+});
+const fixtureAddress = fixtureServer.address();
+const fixtureUrl = `http://127.0.0.1:${fixtureAddress.port}/`;
+const page = await createCdpPage(fixtureUrl);
 const ws = new WebSocket(page.webSocketDebuggerUrl);
 await new Promise((resolve, reject) => {
   ws.addEventListener('open', resolve, { once: true });
@@ -138,6 +149,7 @@ try {
       browserResponses: [],
       conflictNext: false,
       failExport: false,
+      denyNextCommand: false,
       undo: {},
       confirmation: null,
       challengeCounter: 0,
@@ -231,6 +243,11 @@ try {
           return json({ ok: true, confirmation: { challengeToken } }, 201);
         }
         if (url === '/api/agent-management/commands') {
+          if (runtime.denyNextCommand) {
+            runtime.denyNextCommand = false;
+            runtime.confirmation = null;
+            return json({ ok: false, code: 'agent_management_command_denied' }, 403);
+          }
           const expected = Object.assign({}, runtime.confirmation.change, {
             challengeToken: runtime.confirmation.challengeToken,
           });
@@ -386,13 +403,23 @@ try {
   await evaluate(`(() => {
     const input = document.querySelector('[data-high-risk-value]');
     input.value = 'operations';
+    __amFixture.denyNextCommand = true;
     document.querySelector('[data-confirm-submit]').click();
   })()`);
+  await waitFor("__amFixture.requests.filter(item => item.url === '/api/agent-management/commands').length === 1");
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  await waitFor("Boolean(document.querySelector('.ac-confirm-dialog')) && !document.querySelector('[data-confirm-submit]')?.disabled");
+  assert.match(
+    await evaluate("document.querySelector('.ac-confirm-error')?.textContent || ''"),
+    /agent_management_command_denied/,
+  );
+  assert.equal(await evaluate("Boolean(document.querySelector('.ac-confirm-dialog'))"), true);
+  await evaluate("document.querySelector('[data-confirm-submit]').click()");
   await waitFor("!document.querySelector('.ac-confirm-dialog')");
   const highRiskRequests = await evaluate(`__amFixture.requests
     .filter(item => item.url.includes('/api/agent-management/confirmations') || item.url.includes('/api/agent-management/commands'))
     .map(item => ({ url: item.url, body: item.body }))`);
-  assert.equal(highRiskRequests.length, 2);
+  assert.equal(highRiskRequests.length, 4);
   assert.deepEqual(highRiskRequests[0].body, {
     targetAiId: 'hermes-default',
     action: 'branch',
@@ -402,6 +429,10 @@ try {
   });
   assert.deepEqual(highRiskRequests[1].body, Object.assign({}, highRiskRequests[0].body, {
     challengeToken: 'challenge-000000000000000000000001',
+  }));
+  assert.deepEqual(highRiskRequests[2].body, highRiskRequests[0].body);
+  assert.deepEqual(highRiskRequests[3].body, Object.assign({}, highRiskRequests[0].body, {
+    challengeToken: 'challenge-000000000000000000000002',
   }));
 
   await evaluate("AgentManagement.switchTab('humanResources'); HumanResources.selectAgent('')");
@@ -416,10 +447,11 @@ try {
   await evaluate("__amFixture.failExport = true; HumanResources.selectAgent(''); HumanResources.reload()");
   await waitFor("document.querySelector('.hr-degraded-banner')");
   assert.equal(await evaluate("Boolean(HumanResources.state.overview)"), true);
+  assert.equal(await evaluate("AgentManagement.state.open"), true);
+  const humanScreenshot = await captureScreenshot('agent-management-human');
   await evaluate("__amFixture.failExport = false; AgentManagement.setRoster([]); AgentManagement.switchTab('configuration')");
   await waitFor("document.querySelector('.am-empty')");
   assert.equal(await evaluate("document.querySelectorAll('.am-roster-item').length"), 0);
-  const humanScreenshot = await captureScreenshot('agent-management-human');
 
   await waitFor("!AgentManagement.state.bootstrapping");
   await evaluate(`(() => {
@@ -435,6 +467,16 @@ try {
   await waitFor("!AgentManagement.state.bootstrapping");
   await evaluate("AgentManagement.bootstrapAudience()");
   await waitFor("AgentManagement.state.audience.kind === 'agent' && AgentManagement.state.selectedAiId === 'codex-local'");
+  await waitFor("document.querySelector('[data-profile-field=\"name\"]')");
+  await evaluate(`(() => {
+    const input = document.querySelector('[data-profile-field="name"]');
+    input.value = 'Codex Self Updated';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('blur', { bubbles: true }));
+  })()`);
+  await waitFor("__amFixture.data.profiles['codex-local'].name === 'Codex Self Updated'");
+  await evaluate("document.querySelector('[data-undo-field=\"name\"]').click()");
+  await waitFor("__amFixture.data.profiles['codex-local'].name === 'Codex Local'");
   await evaluate("AgentManagement.selectAgent('hermes-default'); AgentManagement.switchTab('configuration')");
   await waitFor("document.querySelector('.agent-configuration')");
   const agentProjection = await evaluate(`(() => ({
@@ -461,6 +503,25 @@ try {
     false,
   );
   const agentScreenshot = await captureScreenshot('agent-management-agent');
+  await evaluate("AgentManagement.switchTab('configuration')");
+  await waitFor("AgentManagement.state.activeTab === 'configuration'");
+  await evaluate(`(() => {
+    __amFixture.mode = 'restarted';
+    AgentManagement.state.tabs.configuration.error = '';
+  })()`);
+  assert.equal(await evaluate("AgentManagement.bootstrapAudience()"), false);
+  await waitFor("document.querySelector('[role=\"alert\"]')?.textContent.includes('session expired')");
+  const restartProjection = await evaluate(`(() => ({
+    error: AgentManagement.state.tabs.configuration.error,
+    alert: document.querySelector('[role="alert"]')?.textContent || '',
+    restrictedDom: document.querySelectorAll('.ac-restricted, [data-restricted-field]').length,
+  }))()`);
+  assert.deepEqual(restartProjection, {
+    error: 'agent_management_session_required',
+    alert: 'Agent Management session expired. Reopen it from Virtual Office.',
+    restrictedDom: 0,
+  });
+  const restartScreenshot = await captureScreenshot('agent-management-session-expired');
 
   console.log(JSON.stringify({
     ok: true,
@@ -468,11 +529,15 @@ try {
     keyboardSelector,
     impact,
     agentProjection,
-    screenshots: [humanScreenshot, agentScreenshot].filter(Boolean),
+    restartProjection,
+    fixtureUrl,
+    screenshots: [humanScreenshot, agentScreenshot, restartScreenshot].filter(Boolean),
   }, null, 2));
 } finally {
   try {
     ws.close();
   } catch {}
   await closeCdpPage(page);
+  fixtureServer.closeAllConnections();
+  await new Promise((resolve) => fixtureServer.close(resolve));
 }

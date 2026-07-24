@@ -129,7 +129,12 @@
             if (!result && state.adapters.human && typeof state.adapters.human.bootstrap === 'function') {
                 result = await state.adapters.human.bootstrap();
             }
-            if (!result) return false;
+            if (!result) {
+                state.tabs[state.activeTab].error = 'agent_management_session_required';
+                mountActiveTab();
+                return false;
+            }
+            state.tabs[state.activeTab].error = '';
             setAudience(result.audience || { kind: 'human', aiId: '' });
             setRoster(result.roster || []);
             state.bootstrappedAudience = state.audience.kind;
@@ -179,6 +184,13 @@
     function mountActiveTab() {
         const container = panel();
         if (!container) return;
+        const tabState = state.tabs[state.activeTab];
+        if (tabState && tabState.error) {
+            container.innerHTML = '<div class="am-empty ac-error" role="alert">' +
+                esc(tr(tabState.error, 'Agent Management session expired. Reopen it from Virtual Office.')) +
+                '</div>';
+            return;
+        }
         const implementation = state.panels[state.activeTab];
         const context = {
             container: container,

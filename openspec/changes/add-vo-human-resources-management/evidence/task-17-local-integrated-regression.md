@@ -105,3 +105,44 @@ The broad Node scan additionally identified two unrelated/non-hermetic entries:
 version assertion observes an uncommitted meeting/index change outside this
 change. Neither was counted as a pass. The stale Codex import marker was updated
 to assert both imported symbols without relying on their order on one line.
+
+## 17.4 Local Live-Browser Acceptance
+
+Result: **PASS — local HTTP fixture, real headless Chrome, 57 focused session/security tests**
+
+The deterministic fixture was served from an ephemeral loopback HTTP port and
+opened in a real isolated Chrome target. The acceptance covered:
+
+- human authentication fallback, full configuration and Human Resources views;
+- both merged tabs, selector keyboard behavior and a single modal close control;
+- human auto-save, bounded undo and optimistic-revision conflict feedback;
+- high-risk impact disclosure, explicit command denial, retry with a fresh
+  one-use challenge, and successful confirmation;
+- asynchronous HR command acceptance, duplicate-command disabling, partial
+  export failure and degraded overview preservation;
+- Agent session audience bootstrap, self-only edit/undo, colleague public
+  projection, and zero restricted response/DOM sentinel leakage;
+- simulated process restart invalidation with a visible session-expired alert
+  and no restricted fields left in the panel.
+
+The browser pass found and fixed two interaction defects before the final run:
+the asynchronous denial branch used an event `currentTarget` after `await`, so
+the button could remain disabled without feedback; and Escape inside the
+appearance selector propagated to the outer dialog and closed it.
+
+Supporting screenshots:
+
+- `task-17.4-screenshots/agent-management-human.png`
+- `task-17.4-screenshots/agent-management-agent.png`
+- `task-17.4-screenshots/agent-management-session-expired.png`
+
+The real service/session checks were rerun separately:
+
+```text
+57 passed in 1.81s
+```
+
+They cover launch-code exchange, loopback/origin policy, scoped session cookies,
+expiry and restart invalidation, browser HTTP projection, confirmation challenge
+semantics and high-risk authorization. Static shell/configuration/browser
+contracts also passed.
