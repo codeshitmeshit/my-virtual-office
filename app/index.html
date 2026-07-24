@@ -354,7 +354,7 @@
                 <button id="btn-edit-office" title="Edit office layout" onclick="toggleEditMode()" data-i18n="edit_office" data-i18n-title="edit_office">✏️ Edit Office</button>
                 <button id="btn-save-edits" title="Save changes" onclick="saveEdits()" style="display:none;opacity:0.4" disabled data-i18n="save" data-i18n-title="save_changes">💾 Save</button>
                 <button id="btn-undo-edit" title="Undo last change" onclick="undoEdit()" style="display:none;opacity:0.4" disabled data-i18n="undo" data-i18n-title="undo">↩️ Undo</button>
-                <button id="btn-agent-settings" title="Create and customize agents" onclick="toggleAgentPanel()" data-i18n="agents" data-i18n-title="agents">👤 Agents</button>
+                <button id="btn-agent-settings" title="Agent Management" onclick="openAgentManagement('configuration')" data-i18n="agent_management" data-i18n-title="agent_management">👤 Agent Management</button>
                 <div class="toolbar-divider"></div>
                 <button id="btn-expand-all" title="Expand all bubbles" onclick="expandAllBubbles()" data-i18n="expand_all" data-i18n-title="expand_all">💬 Expand All</button>
                 <button id="btn-minimize-all" title="Minimize all bubbles" onclick="minimizeAllBubbles()" data-i18n="minimize_all" data-i18n-title="minimize_all">💬 Minimize All</button>
@@ -362,7 +362,6 @@
                 <a href="/cron.html" style="text-decoration:none"><button title="Cron Job Manager" data-i18n="cron" data-i18n-title="cron_manager_title">⏰ Cron</button></a>
                 <button title="Project Manager" onclick="openProjectsManager()" data-i18n="projects" data-i18n-title="projects_title">📋 Projects</button>
                 <button title="Archive Room" onclick="openArchiveRoom()" data-i18n="archive_room" data-i18n-title="archive_room">🗄️ Archive Room</button>
-                <button id="btn-human-resources" title="Human Resources" onclick="openHumanResources()" data-i18n="human_resources" data-i18n-title="human_resources">🧑‍💼 Human Resources</button>
                 <button title="Reset canvas zoom" onclick="resetCamera()" data-i18n="reset_zoom" data-i18n-title="reset_zoom">🔍 Reset</button>
                 <button id="sms-toggle" title="SMS/Phone Panel" data-i18n="sms" data-i18n-title="sms_phone_panel">📞 SMS</button>
                 <button id="browser-toggle" title="Agent Browser" class="browser-toggle-btn" data-i18n="browser" data-i18n-title="agent_browser_title">🌐 Browser</button>
@@ -863,24 +862,25 @@
         </div>
     </div>
 
-    <!-- Human Resources Modal -->
-    <div id="humanResourcesModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="human-resources-title" onclick="if(event.target===this)closeHumanResources()">
-        <div class="modal-content hr-modal-content">
-            <div class="modal-header hr-header">
-                <span class="modal-emoji" aria-hidden="true">🧑‍💼</span>
-                <h2 id="human-resources-title" data-i18n="human_resources_title">Human Resources</h2>
-                <button id="human-resources-close" class="close-btn hr-close" type="button" onclick="closeHumanResources()" aria-label="Close Human Resources" data-i18n-aria-label="hr_close">&times;</button>
-            </div>
-            <div id="human-resources-content" class="hr-content" aria-live="polite">
-                <div class="hr-shell">
-                    <aside class="hr-agent-list" aria-label="Agent roster" data-i18n-aria-label="hr_agent_roster">
-                        <div class="hr-panel-placeholder" data-i18n="hr_roster_loading">Loading Agent roster...</div>
-                    </aside>
-                    <main class="hr-agent-detail" tabindex="-1">
-                        <div class="hr-panel-placeholder" data-i18n="hr_overview_loading">Loading Human Resources overview...</div>
-                    </main>
+    <!-- Merged Agent Management Modal -->
+    <div id="agentManagementModal" class="agent-management-modal hidden" role="dialog" aria-modal="true" aria-labelledby="agent-management-title">
+        <div class="agent-management-dialog">
+            <header class="agent-management-header">
+                <h2 id="agent-management-title" class="agent-management-title">
+                    <span data-i18n="agent_management">Agent Management</span>
+                    <small data-i18n="agent_management_subtitle">Configuration and Human Resources</small>
+                </h2>
+                <div class="agent-management-tabs" role="tablist" aria-label="Agent Management">
+                    <button id="agent-management-tab-configuration" class="agent-management-tab active" type="button" role="tab" aria-selected="true" aria-controls="agent-management-panel" data-agent-management-tab="configuration" onclick="AgentManagement.switchTab('configuration')" data-i18n="agent_configuration">Agent Configuration</button>
+                    <button id="agent-management-tab-human-resources" class="agent-management-tab" type="button" role="tab" aria-selected="false" aria-controls="agent-management-panel" tabindex="-1" data-agent-management-tab="humanResources" onclick="AgentManagement.switchTab('humanResources')" data-i18n="human_resources">Human Resources</button>
                 </div>
+                <button id="agent-management-close" class="agent-management-close" type="button" onclick="closeAgentManagement()" aria-label="Close Agent Management" data-i18n-aria-label="agent_management_close">&times;</button>
+            </header>
+            <div class="agent-management-body">
+                <aside id="agent-management-roster" class="agent-management-roster" aria-label="Agent roster" data-i18n-aria-label="hr_agent_roster"></aside>
+                <main id="agent-management-panel" class="agent-management-panel" role="tabpanel" aria-labelledby="agent-management-tab-configuration" tabindex="-1"></main>
             </div>
+            <div id="agent-management-feedback" class="agent-management-feedback" aria-live="polite"></div>
         </div>
     </div>
 
@@ -1136,6 +1136,7 @@
     <script src="projects.js?v=1784780212-project-authoring-review"></script>
     <script src="archive-room.js?v=1784780212-phase13"></script>
     <script src="human-resources.js?v=1784780212-hr-daily-sync"></script>
+    <script src="agent-management.js?v=1784910000-merged-shell"></script>
     <script>
     // Bio sections for agent modal
     let _bioCache = {};

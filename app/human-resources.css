@@ -54,6 +54,16 @@
     grid-template-columns: minmax(280px, 32%) minmax(0, 1fr);
 }
 
+.hr-shell-embedded {
+    display: block;
+    min-height: 100%;
+}
+
+.hr-shell-embedded .hr-agent-detail {
+    width: 100%;
+    max-height: none;
+}
+
 .hr-agent-list,
 .hr-agent-detail {
     min-width: 0;

@@ -76,6 +76,13 @@ from services import hr_manual_daily_sync as hr_manual_daily_sync_service
 from services import hr_runtime as hr_runtime_service
 from services import hr_scheduler as hr_scheduler_service
 from services import vo_agent_communication as vo_agent_communication_service
+from services import agent_legacy_mutation_policy as agent_legacy_mutation_policy_service
+from services import agent_management_http as agent_management_http_service
+from services import agent_management_executor as agent_management_executor_service
+from services import agent_management_runtime as agent_management_runtime_service
+from services import agent_management_session_mint as agent_management_session_mint_service
+from services import agent_management_session_exchange as agent_management_session_exchange_service
+from services import agent_management_browser as agent_management_browser_service
 from services.project_execution_ordering import first_incomplete_task
 from services.chat_history_jsonl_cache import JsonlSnapshotCache
 from services import system_agent_lifecycle as system_agent_lifecycle_service
@@ -21135,6 +21142,14 @@ _hr_scheduler_runtime = hr_scheduler_service.HRLoopRuntime()
 _hr_command_router = hr_runtime_service.HRCommandRouter()
 _hr_application_runtime = None
 _hr_application_runtime_lock = threading.Lock()
+_agent_management_runtime = None
+_agent_management_runtime_lock = threading.Lock()
+_agent_management_session_mint = None
+_agent_management_session_mint_lock = threading.Lock()
+_agent_management_session_exchange = None
+_agent_management_session_exchange_lock = threading.Lock()
+_agent_management_browser_routes = None
+_agent_management_browser_routes_lock = threading.Lock()
 
 
 def _hr_provider_agent_id():
@@ -21206,6 +21221,63 @@ def _get_hr_application_runtime():
             if _hr_application_runtime.scheduler_loop is not None:
                 _install_hr_scheduler_loop(_hr_application_runtime.scheduler_loop)
         return _hr_application_runtime
+
+
+def _get_agent_management_runtime():
+    global _agent_management_runtime
+    with _agent_management_runtime_lock:
+        if _agent_management_runtime is None:
+            _agent_management_runtime = (
+                agent_management_runtime_service.build_agent_management_runtime(
+                    status_dir=STATUS_DIR,
+                    high_risk_executor=agent_management_executor_service.AgentManagementCommandExecutor(
+                        create_agent=_handle_agent_create,
+                        delete_agent=_handle_agent_delete,
+                        update_agent=_update_office_config_agent,
+                    ).execute,
+                )
+            )
+        return _agent_management_runtime
+
+
+def _get_agent_management_session_mint():
+    global _agent_management_session_mint
+    with _agent_management_session_mint_lock:
+        if _agent_management_session_mint is None:
+            _agent_management_session_mint = (
+                agent_management_session_mint_service.build_agent_management_session_mint(
+                    _get_hr_application_runtime().repository,
+                )
+            )
+        return _agent_management_session_mint
+
+
+def _get_agent_management_session_exchange():
+    global _agent_management_session_exchange
+    with _agent_management_session_exchange_lock:
+        if _agent_management_session_exchange is None:
+            _agent_management_session_exchange = (
+                agent_management_session_exchange_service.build_agent_management_session_exchange(
+                    _get_agent_management_session_mint().sessions,
+                )
+            )
+        return _agent_management_session_exchange
+
+
+def _get_agent_management_browser_routes():
+    global _agent_management_browser_routes
+    with _agent_management_browser_routes_lock:
+        if _agent_management_browser_routes is None:
+            profile_runtime = _get_agent_management_runtime()
+            _agent_management_browser_routes = (
+                agent_management_browser_service.build_agent_management_browser_routes(
+                    repository=_get_hr_application_runtime().repository,
+                    sessions=_get_agent_management_session_mint().sessions,
+                    profiles=profile_runtime.profiles,
+                    mutations=profile_runtime.mutations,
+                )
+            )
+        return _agent_management_browser_routes
 
 
 def _install_hr_scheduler_loop(loop):
@@ -26671,9 +26743,28 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
         request_path = urllib.parse.urlparse(self.path).path
         if request_path in {"", "/"} or request_path.endswith(".html"):
             self.send_header("Cache-Control", "no-cache")
+        elif request_path.startswith(
+            agent_management_browser_service.BROWSER_PREFIX
+        ):
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Referrer-Policy", "no-referrer")
         elif request_path.endswith(".woff2"):
             self.send_header("Cache-Control", "public, max-age=31536000, immutable")
         super().end_headers()
+
+    def log_message(self, format, *args):
+        if (
+            urllib.parse.urlparse(self.path).path
+            == agent_management_session_mint_service.SESSION_EXCHANGE_PATH
+        ):
+            redacted_path = (
+                agent_management_session_mint_service.SESSION_EXCHANGE_PATH
+                + "?code=[REDACTED]"
+            )
+            args = tuple(
+                str(value).replace(self.path, redacted_path) for value in args
+            )
+        super().log_message(format, *args)
 
     def _management_request_allowed(self):
         """Require the per-process management token for destructive APIs."""
@@ -27163,6 +27254,151 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             )
             return None
 
+    def _agent_management_routes(self):
+        try:
+            return _get_agent_management_runtime().routes
+        except Exception:
+            self._send_json(
+                {"ok": False, "code": "agent_management_runtime_unavailable"},
+                status=503,
+            )
+            return None
+
+    def _handle_agent_management_get(self, request_path):
+        if self._reject_untrusted_management_request():
+            return
+        routes = self._agent_management_routes()
+        if routes is None:
+            return
+        response = routes.get(request_path)
+        self._send_json(response.payload, status=response.status)
+
+    def _handle_agent_management_post(self, request_path):
+        if self._reject_untrusted_management_request():
+            return
+        body, error = self._read_limited_json_body(limit=self._MANAGEMENT_BODY_LIMIT)
+        if error:
+            self._send_json_error(error)
+            return
+        routes = self._agent_management_routes()
+        if routes is None:
+            return
+        response = routes.post(request_path, body)
+        self._send_json(response.payload, status=response.status)
+
+    def _handle_agent_management_session_mint(self):
+        try:
+            remote_host = str(self.client_address[0])
+        except (AttributeError, IndexError, TypeError):
+            remote_host = ""
+        request = agent_management_session_mint_service.AgentManagementMintRequest(
+            remote_host=remote_host,
+            origin=self.headers.get("Origin"),
+            action=self.headers.get("X-VO-Agent-Action"),
+            ai_id=self.headers.get("X-VO-Agent-Id"),
+        )
+        try:
+            response = _get_agent_management_session_mint().mint(request)
+        except Exception:
+            self._send_json(
+                {"ok": False, "code": "agent_management_session_unavailable"},
+                status=503,
+            )
+            return
+        self._send_json(response.payload, status=response.status)
+
+    def _handle_agent_management_session_exchange(self, query_params):
+        code = (query_params.get("code") or [None])[0]
+        request = (
+            agent_management_session_exchange_service.AgentManagementExchangeRequest(
+                code=code,
+                host=self.headers.get("Host"),
+                origin=self.headers.get("Origin"),
+                referer=self.headers.get("Referer"),
+                fetch_site=self.headers.get("Sec-Fetch-Site"),
+                secure=isinstance(self.connection, ssl.SSLSocket),
+            )
+        )
+        try:
+            response = _get_agent_management_session_exchange().exchange(request)
+        except Exception:
+            response = (
+                agent_management_session_exchange_service.AgentManagementExchangeResponse(
+                    503,
+                    {
+                        "Cache-Control": "no-store",
+                        "Referrer-Policy": "no-referrer",
+                        "Content-Type": "application/json",
+                    },
+                    {
+                        "ok": False,
+                        "code": "agent_management_session_unavailable",
+                    },
+                )
+            )
+        body = response.body()
+        self.send_response(response.status)
+        for name, value in response.headers.items():
+            self.send_header(name, value)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        if body:
+            self.wfile.write(body)
+
+    def _agent_management_browser_session_token(self):
+        return agent_management_browser_service.AgentManagementBrowserRoutes.session_token(
+            self.headers.get("Cookie")
+        )
+
+    def _handle_agent_management_browser_get(
+        self,
+        request_path,
+        query_params,
+    ):
+        try:
+            routes = _get_agent_management_browser_routes()
+            response = routes.get(
+                request_path,
+                query_params,
+                session_token=self._agent_management_browser_session_token(),
+                occurrence_key=self._request_id(),
+            )
+        except Exception:
+            self._send_json(
+                {"ok": False, "code": "agent_management_browser_unavailable"},
+                status=503,
+            )
+            return
+        self._send_json(
+            response.payload,
+            status=response.status,
+            headers=response.headers,
+        )
+
+    def _handle_agent_management_browser_post(self, request_path):
+        body, error = self._read_limited_json_body(limit=self._MANAGEMENT_BODY_LIMIT)
+        if error:
+            self._send_json_error(error)
+            return
+        try:
+            routes = _get_agent_management_browser_routes()
+            response = routes.post(
+                request_path,
+                body,
+                session_token=self._agent_management_browser_session_token(),
+            )
+        except Exception:
+            self._send_json(
+                {"ok": False, "code": "agent_management_browser_unavailable"},
+                status=503,
+            )
+            return
+        self._send_json(
+            response.payload,
+            status=response.status,
+            headers=response.headers,
+        )
+
     def _hr_agent_auth_request(self):
         try:
             remote_host = str(self.client_address[0])
@@ -27222,7 +27458,14 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
         )
         self._send_json(response.payload, status=response.status)
 
-    def _send_json(self, payload, status=200, *, allow_origin=None):
+    def _send_json(
+        self,
+        payload,
+        status=200,
+        *,
+        allow_origin=None,
+        headers=None,
+    ):
         raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
@@ -27231,6 +27474,8 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
         self.send_header("X-Request-Id", self._request_id())
         if allow_origin is not None:
             self.send_header("Access-Control-Allow-Origin", allow_origin)
+        for name, value in dict(headers or {}).items():
+            self.send_header(str(name), str(value))
         self.end_headers()
         self.wfile.write(raw)
 
@@ -27409,6 +27654,24 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
         parsed_url = urllib.parse.urlparse(self.path)
         request_path = parsed_url.path
         query_params = urllib.parse.parse_qs(parsed_url.query)
+        if (
+            request_path
+            == agent_management_session_mint_service.SESSION_EXCHANGE_PATH
+        ):
+            self._handle_agent_management_session_exchange(query_params)
+            return
+        if agent_management_browser_service.AgentManagementBrowserRoutes.handles(
+            "GET", request_path
+        ):
+            self._handle_agent_management_browser_get(
+                request_path, query_params
+            )
+            return
+        if agent_management_http_service.AgentManagementHTTPRoutes.handles(
+            "GET", request_path
+        ):
+            self._handle_agent_management_get(request_path)
+            return
         if hr_http_service.HRHTTPRoutes.handles(request_path):
             self._handle_hr_get(request_path, query_params)
             return
@@ -29871,23 +30134,30 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             self.end_headers()
 
     def do_DELETE(self):
+        request_path = urllib.parse.urlparse(self.path).path
         if _is_meeting_domain_path(self.path):
             authority = _meeting_domain_authority_status()
             if not authority.get("ok"):
                 self._send_json({"error": "Meeting store is not ready", **authority}, status=authority["_status"])
                 return
+        if (
+            agent_legacy_mutation_policy_service.requires_management(
+                "DELETE", request_path
+            )
+            and self._reject_untrusted_management_request()
+        ):
+            return
         if urllib.parse.urlparse(self.path).path.startswith("/api/projects/") and self._reject_untrusted_management_request():
             return
         if self.path == "/api/agent/delete":
-            length = int(self.headers.get('Content-Length', 0))
-            body = json.loads(self.rfile.read(length)) if length else {}
-            result = _handle_agent_delete(body)
-            self.send_response(result.get("_status", 200))
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.end_headers()
-            result.pop("_status", None)
-            self.wfile.write(json.dumps(result).encode())
+            decision = agent_legacy_mutation_policy_service.retired_route(
+                "DELETE", request_path
+            )
+            self._send_json(
+                decision.response(),
+                status=decision.status,
+                allow_origin="*",
+            )
             return
         elif self.path.startswith("/api/meetings/history/"):
             # DELETE /api/meetings/history/<id>
@@ -30008,8 +30278,31 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
     def do_POST(self):
         parsed_url = urllib.parse.urlparse(self.path)
         request_path = parsed_url.path
+        if (
+            request_path
+            == agent_management_session_mint_service.SESSION_MINT_PATH
+        ):
+            self._handle_agent_management_session_mint()
+            return
+        if agent_management_browser_service.AgentManagementBrowserRoutes.handles(
+            "POST", request_path
+        ):
+            self._handle_agent_management_browser_post(request_path)
+            return
+        if agent_management_http_service.AgentManagementHTTPRoutes.handles(
+            "POST", request_path
+        ):
+            self._handle_agent_management_post(request_path)
+            return
         if hr_http_service.HRHTTPRoutes.handles(request_path):
             self._handle_hr_post(request_path)
+            return
+        if (
+            agent_legacy_mutation_policy_service.requires_management(
+                "POST", request_path
+            )
+            and self._reject_untrusted_management_request()
+        ):
             return
         if request_path == "/api/agent/project-authoring/projects":
             self._handle_agent_project_direct_create()
@@ -30440,38 +30733,44 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             return
         # --- OFFICE CONFIG PERSISTENCE ---
         elif self.path == "/api/office-config":
-            length = int(self.headers.get('Content-Length', 0))
-            body = self.rfile.read(length) if length else b'{}'
-            # Validate JSON
-            try:
-                json.loads(body)
-            except json.JSONDecodeError:
-                self.send_response(400)
-                self.send_header("Content-Type", "application/json")
-                self.end_headers()
-                self.wfile.write(b'{"error":"Invalid JSON"}')
+            proposed, error = self._read_limited_json_body(
+                limit=self._MANAGEMENT_BODY_LIMIT
+            )
+            if error:
+                self._send_json_error(error, allow_origin="*")
                 return
             _oc_path = os.path.join(STATUS_DIR, "office-config.json")
-            with open(_oc_path, "w") as f:
-                f.write(body.decode())
+            try:
+                with open(_oc_path, "r", encoding="utf-8") as config_file:
+                    current = json.load(config_file)
+            except (OSError, ValueError):
+                current = {}
+            decision = agent_legacy_mutation_policy_service.office_config_update(
+                current,
+                proposed,
+            )
+            if not decision.allowed:
+                self._send_json(
+                    decision.response(),
+                    status=decision.status,
+                    allow_origin="*",
+                )
+                return
+            with open(_oc_path, "w", encoding="utf-8") as config_file:
+                json.dump(proposed, config_file, ensure_ascii=False)
             os.chmod(_oc_path, 0o666)
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.end_headers()
-            self.wfile.write(b'{"ok":true}')
+            self._send_json({"ok": True}, allow_origin="*")
             return
         # --- AGENT CREATION API ---
         elif self.path == "/api/agent/create":
-            length = int(self.headers.get('Content-Length', 0))
-            body = json.loads(self.rfile.read(length)) if length else {}
-            result = _handle_agent_create(body)
-            self.send_response(result.get("_status", 200))
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.end_headers()
-            result.pop("_status", None)
-            self.wfile.write(json.dumps(result).encode())
+            decision = agent_legacy_mutation_policy_service.retired_route(
+                "POST", request_path
+            )
+            self._send_json(
+                decision.response(),
+                status=decision.status,
+                allow_origin="*",
+            )
             return
         elif self.path == "/api/archive-room/manager":
             length = int(self.headers.get('Content-Length', 0))
@@ -30564,8 +30863,20 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             return
         elif request_path.startswith("/api/agent-workspace/"):
             agent_key = urllib.parse.unquote(request_path.split("/api/agent-workspace/", 1)[1].strip("/"))
-            length = int(self.headers.get('Content-Length', 0))
-            body = json.loads(self.rfile.read(length)) if length else {}
+            body, error = self._read_limited_json_body(
+                limit=self._MANAGEMENT_BODY_LIMIT
+            )
+            if error:
+                self._send_json_error(error, allow_origin="*")
+                return
+            decision = agent_legacy_mutation_policy_service.workspace_update(body)
+            if not decision.allowed:
+                self._send_json(
+                    decision.response(),
+                    status=decision.status,
+                    allow_origin="*",
+                )
+                return
             result = _handle_agent_workspace_update(agent_key, body)
             self.send_response(result.get("_status", 200))
             self.send_header("Content-Type", "application/json")
@@ -31166,16 +31477,14 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                 self.wfile.write(json.dumps({"error": str(e)}).encode())
             return
         elif self.path == "/set-model":
-            length = int(self.headers.get('Content-Length', 0))
-            body = json.loads(self.rfile.read(length)) if length else {}
-            agent_key = body.get("agent", "")
-            model_id = body.get("model", "")
-            result = self._set_agent_model(agent_key, model_id)
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.end_headers()
-            self.wfile.write(json.dumps(result).encode())
+            decision = agent_legacy_mutation_policy_service.retired_route(
+                "POST", request_path
+            )
+            self._send_json(
+                decision.response(),
+                status=decision.status,
+                allow_origin="*",
+            )
         elif self.path == "/api/native-models/openclaw/agent-model":
             length = int(self.headers.get('Content-Length', 0))
             body = json.loads(self.rfile.read(length)) if length else {}

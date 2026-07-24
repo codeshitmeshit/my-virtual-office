@@ -24,6 +24,7 @@
         dailySyncReturnFocus: null,
         returnFocus: null,
     };
+    let embeddedContext = null;
 
     const SEMANTIC_STATES = [
         'accepted', 'active', 'appropriate', 'available', 'awaiting_hr_summary', 'busy',
@@ -234,10 +235,14 @@
     }
 
     function modal() {
+        if (embeddedContext && root.document) {
+            return root.document.getElementById('agentManagementModal');
+        }
         return root.document ? root.document.getElementById('humanResourcesModal') : null;
     }
 
     function content() {
+        if (embeddedContext) return embeddedContext.container || null;
         return root.document ? root.document.getElementById('human-resources-content') : null;
     }
 
@@ -316,6 +321,13 @@
     }
 
     async function managementJson(url, options) {
+        if (
+            embeddedContext &&
+            embeddedContext.adapter &&
+            typeof embeddedContext.adapter.hrRequest === 'function'
+        ) {
+            return embeddedContext.adapter.hrRequest(url, options || {});
+        }
         const request = root.i18n && typeof root.i18n.managementFetch === 'function'
             ? root.i18n.managementFetch.bind(root.i18n)
             : root.fetch.bind(root);
@@ -690,7 +702,13 @@
         const roster = state.loading && !orderedAgents.length
             ? '<div class="hr-panel-placeholder">' + escHtml(tr('hr_roster_loading', 'Loading Agent roster...')) + '</div>'
             : orderedAgents.map(renderAgent).join('') || '<div class="hr-inline-empty">' + escHtml(tr('hr_empty_roster', 'No Agents are in the HR directory yet.')) + '</div>';
-        element.innerHTML = '<div class="hr-shell">' +
+        if (embeddedContext) {
+            element.innerHTML = '<div class="hr-shell hr-shell-embedded">' +
+                '<main class="hr-agent-detail" tabindex="-1">' +
+                (state.selectedAgentId ? renderAgentDetailPanel() : renderOverviewPanel()) +
+                '</main></div>';
+        } else {
+            element.innerHTML = '<div class="hr-shell">' +
             '<aside class="hr-agent-list" aria-label="' + escHtml(tr('hr_agent_roster', 'Agent roster')) + '">' +
                 '<div class="hr-roster-header"><div><span class="hr-eyebrow">' + escHtml(tr('hr_directory', 'Directory')) + '</span>' +
                 '<strong>' + escHtml(tr('hr_agents_count', '{{count}} Agents', { count: orderedAgents.length })) + '</strong></div>' +
@@ -699,7 +717,8 @@
             '</aside>' +
             '<main class="hr-agent-detail" tabindex="-1">' +
                 (state.selectedAgentId ? renderAgentDetailPanel() : renderOverviewPanel()) + '</main>' +
-        '</div>';
+            '</div>';
+        }
         element.setAttribute(
             'aria-busy',
             state.loading || state.detailLoading || Boolean(state.commandBusy) || state.scheduleBusy || activeCommands(state.overview).length ? 'true' : 'false'
@@ -739,6 +758,9 @@
         else state.errors.push(String(results[0].reason && results[0].reason.message || 'hr_overview_failed'));
         if (results[1].status === 'fulfilled') {
             state.agents = array(object(results[1].value.export).rows);
+            if (embeddedContext && typeof embeddedContext.setRoster === 'function') {
+                embeddedContext.setRoster(state.agents);
+            }
         } else {
             state.errors.push(String(results[1].reason && results[1].reason.message || 'hr_roster_failed'));
         }
@@ -948,6 +970,36 @@
         return loadAgent(selected, sequence, '');
     }
 
+    function mountPanel(context) {
+        embeddedContext = context || null;
+        state.open = true;
+        const selected = String(context && context.selectedAiId || '');
+        const selectionChanged = selected !== state.selectedAgentId;
+        state.selectedAgentId = selected;
+        if (selectionChanged) {
+            state.detail = null;
+            state.detailError = '';
+            state.detailPaging = '';
+        }
+        if (!state.overview) {
+            return loadOverview();
+        }
+        if (selected && (selectionChanged || !state.detail)) {
+            const sequence = ++state.detailSequence;
+            state.detailLoading = true;
+            render();
+            return loadAgent(selected, sequence, '');
+        }
+        render();
+        scheduleCommandPoll();
+        return Promise.resolve(true);
+    }
+
+    function unmountPanel() {
+        embeddedContext = null;
+        clearCommandPoll();
+    }
+
     function loadMore(kind) {
         if (!['reports', 'assessments', 'access'].includes(kind)) return Promise.resolve(false);
         if (!state.selectedAgentId || !state.detail || state.detailPaging) return Promise.resolve(false);
@@ -977,6 +1029,8 @@
         toggleDailySyncAgent,
         submitDailySync,
         render,
+        mount: mountPanel,
+        unmount: unmountPanel,
         helpers: {
             escHtml,
             statusTone,
@@ -1003,6 +1057,7 @@
     root.HumanResources = api;
     root.openHumanResources = open;
     root.closeHumanResources = close;
+    if (root.AgentManagement) root.AgentManagement.mountTab('humanResources', api);
 
     if (root.document && typeof root.document.addEventListener === 'function') {
         root.document.addEventListener('keydown', handleKeydown);

@@ -1,0 +1,127 @@
+{
+  "overview": {
+    "ok": true,
+    "hr": { "name": "HR", "status": "ready" },
+    "agentTotal": 2,
+    "availabilityCounts": { "available": 1, "busy": 1 },
+    "localDate": "2026-07-24",
+    "activeCommands": [],
+    "reportSchedule": {
+      "enabled": false,
+      "state": "disabled",
+      "timezone": "Asia/Shanghai",
+      "dailyTime": "18:00"
+    },
+    "recentActivity": []
+  },
+  "agents": [
+    {
+      "ai_id": "codex-local",
+      "name": "Codex Local",
+      "emoji": "⚡",
+      "role": "Backend / Reviewer",
+      "status": "active",
+      "availability": "available",
+      "providerKind": "codex",
+      "branch": "hq",
+      "workspace": "/work/codex",
+      "assignment": "Backend / Reviewer",
+      "providerAgentId": "codex-main"
+    },
+    {
+      "ai_id": "hermes-default",
+      "name": "Hermes",
+      "emoji": "🪽",
+      "role": "Research / Ops",
+      "status": "active",
+      "availability": "busy",
+      "providerKind": "hermes",
+      "branch": "research",
+      "workspace": "/work/hermes",
+      "assignment": "Research / Ops",
+      "providerAgentId": "default"
+    }
+  ],
+  "profiles": {
+    "codex-local": {
+      "aiId": "codex-local",
+      "name": "Codex Local",
+      "introduction": "Builds and reviews backend systems.",
+      "responsibilities": ["Backend", "Review"],
+      "specialties": ["Python", "Reliability"],
+      "appearance": {
+        "gender": "M",
+        "hairStyle": "short",
+        "eyebrowStyle": "thin",
+        "facialHair": "none",
+        "costume": "none",
+        "headwear": "none",
+        "glasses": "square",
+        "heldItem": "tablet",
+        "deskItem": "checklist",
+        "color": "#ffd700",
+        "skinTone": "#e2a76f",
+        "hairColor": "#28231f",
+        "eyeColor": "#2474c6",
+        "headwearColor": "#888888",
+        "glassesColor": "#333333"
+      },
+      "providerKind": "codex",
+      "branch": "hq",
+      "workspace": "/work/codex",
+      "assignment": "Backend / Reviewer",
+      "providerAgentId": "codex-main",
+      "revision": 0
+    },
+    "hermes-default": {
+      "aiId": "hermes-default",
+      "name": "Hermes",
+      "introduction": "Researches operational questions.",
+      "responsibilities": ["Research"],
+      "specialties": ["Analysis"],
+      "appearance": {
+        "gender": "F",
+        "hairStyle": "long",
+        "eyebrowStyle": "arched",
+        "costume": "none",
+        "headwear": "none",
+        "glasses": "none",
+        "heldItem": "book",
+        "deskItem": "chart",
+        "color": "#49dc8b",
+        "skinTone": "#c9875b",
+        "hairColor": "#50342c",
+        "eyeColor": "#318642"
+      },
+      "providerKind": "hermes",
+      "branch": "research",
+      "workspace": "/work/hermes",
+      "assignment": "Research / Ops",
+      "providerAgentId": "default",
+      "revision": 0
+    }
+  },
+  "details": {
+    "codex-local": {
+      "aiId": "codex-local",
+      "name": "Codex Local",
+      "status": "active",
+      "availability": "available",
+      "publicWorkSummary": ["Reviewed the API boundary"],
+      "reports": [],
+      "assessments": [],
+      "accessHistory": []
+    },
+    "hermes-default": {
+      "aiId": "hermes-default",
+      "name": "Hermes",
+      "status": "active",
+      "availability": "busy",
+      "publicWorkSummary": ["Completed market research"],
+      "reports": [],
+      "assessments": [],
+      "accessHistory": []
+    }
+  },
+  "hiddenRestrictedSentinel": "SECRET_EVIDENCE_MUST_NEVER_REACH_AGENT"
+}
