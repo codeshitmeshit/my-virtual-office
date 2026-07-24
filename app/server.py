@@ -81,6 +81,7 @@ from services import agent_management_http as agent_management_http_service
 from services import agent_management_runtime as agent_management_runtime_service
 from services import agent_management_session_mint as agent_management_session_mint_service
 from services import agent_management_session_exchange as agent_management_session_exchange_service
+from services import agent_management_browser as agent_management_browser_service
 from services.project_execution_ordering import first_incomplete_task
 from services.chat_history_jsonl_cache import JsonlSnapshotCache
 from services import system_agent_lifecycle as system_agent_lifecycle_service
@@ -21146,6 +21147,8 @@ _agent_management_session_mint = None
 _agent_management_session_mint_lock = threading.Lock()
 _agent_management_session_exchange = None
 _agent_management_session_exchange_lock = threading.Lock()
+_agent_management_browser_routes = None
+_agent_management_browser_routes_lock = threading.Lock()
 
 
 def _hr_provider_agent_id():
@@ -21253,6 +21256,22 @@ def _get_agent_management_session_exchange():
                 )
             )
         return _agent_management_session_exchange
+
+
+def _get_agent_management_browser_routes():
+    global _agent_management_browser_routes
+    with _agent_management_browser_routes_lock:
+        if _agent_management_browser_routes is None:
+            profile_runtime = _get_agent_management_runtime()
+            _agent_management_browser_routes = (
+                agent_management_browser_service.build_agent_management_browser_routes(
+                    repository=_get_hr_application_runtime().repository,
+                    sessions=_get_agent_management_session_mint().sessions,
+                    profiles=profile_runtime.profiles,
+                    mutations=profile_runtime.mutations,
+                )
+            )
+        return _agent_management_browser_routes
 
 
 def _install_hr_scheduler_loop(loop):
@@ -26718,6 +26737,11 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
         request_path = urllib.parse.urlparse(self.path).path
         if request_path in {"", "/"} or request_path.endswith(".html"):
             self.send_header("Cache-Control", "no-cache")
+        elif request_path.startswith(
+            agent_management_browser_service.BROWSER_PREFIX
+        ):
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Referrer-Policy", "no-referrer")
         elif request_path.endswith(".woff2"):
             self.send_header("Cache-Control", "public, max-age=31536000, immutable")
         super().end_headers()
@@ -27315,6 +27339,52 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
         if body:
             self.wfile.write(body)
 
+    def _agent_management_browser_session_token(self):
+        return agent_management_browser_service.AgentManagementBrowserRoutes.session_token(
+            self.headers.get("Cookie")
+        )
+
+    def _handle_agent_management_browser_get(
+        self,
+        request_path,
+        query_params,
+    ):
+        try:
+            routes = _get_agent_management_browser_routes()
+            response = routes.get(
+                request_path,
+                query_params,
+                session_token=self._agent_management_browser_session_token(),
+                occurrence_key=self._request_id(),
+            )
+        except Exception:
+            self._send_json(
+                {"ok": False, "code": "agent_management_browser_unavailable"},
+                status=503,
+            )
+            return
+        self._send_json(response.payload, status=response.status)
+
+    def _handle_agent_management_browser_post(self, request_path):
+        body, error = self._read_limited_json_body(limit=self._MANAGEMENT_BODY_LIMIT)
+        if error:
+            self._send_json_error(error)
+            return
+        try:
+            routes = _get_agent_management_browser_routes()
+            response = routes.post(
+                request_path,
+                body,
+                session_token=self._agent_management_browser_session_token(),
+            )
+        except Exception:
+            self._send_json(
+                {"ok": False, "code": "agent_management_browser_unavailable"},
+                status=503,
+            )
+            return
+        self._send_json(response.payload, status=response.status)
+
     def _hr_agent_auth_request(self):
         try:
             remote_host = str(self.client_address[0])
@@ -27566,6 +27636,13 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             == agent_management_session_mint_service.SESSION_EXCHANGE_PATH
         ):
             self._handle_agent_management_session_exchange(query_params)
+            return
+        if agent_management_browser_service.AgentManagementBrowserRoutes.handles(
+            "GET", request_path
+        ):
+            self._handle_agent_management_browser_get(
+                request_path, query_params
+            )
             return
         if agent_management_http_service.AgentManagementHTTPRoutes.handles(
             "GET", request_path
@@ -30183,6 +30260,11 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             == agent_management_session_mint_service.SESSION_MINT_PATH
         ):
             self._handle_agent_management_session_mint()
+            return
+        if agent_management_browser_service.AgentManagementBrowserRoutes.handles(
+            "POST", request_path
+        ):
+            self._handle_agent_management_browser_post(request_path)
             return
         if agent_management_http_service.AgentManagementHTTPRoutes.handles(
             "POST", request_path

@@ -122,6 +122,16 @@ class AgentProfileMutationAPI:
                 copy.deepcopy(profile.appearance.get(key)) if present else None,
                 present,
             )
+        if field not in {
+            "name",
+            "introduction",
+            "responsibilities",
+            "specialties",
+        }:
+            # The configuration policy owns the authorization result for
+            # unsupported or high-risk fields.  Do not dereference an
+            # arbitrary profile attribute before that policy runs.
+            return None, True
         if profile is None:
             return ([] if field in {"responsibilities", "specialties"} else ""), True
         return copy.deepcopy(getattr(profile, field)), True
