@@ -156,6 +156,8 @@
             adapter: state.audience.kind === 'agent'
                 ? state.adapters.agent : state.adapters.human,
             reportMutation: reportMutation,
+            setRoster: setRoster,
+            selectAgent: selectAgent,
         };
         if (implementation && typeof implementation.mount === 'function') {
             implementation.mount(context);
