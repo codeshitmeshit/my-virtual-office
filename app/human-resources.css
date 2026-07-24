@@ -335,6 +335,9 @@
 .hr-selection-dialog > header, .hr-selection-dialog > footer { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .hr-selection-dialog > header p { margin: 6px 0 0; color: #9fb0c4; }
 .hr-selection-dialog > footer { justify-content: flex-end; margin-top: 18px; }
+.hr-record-dialog { width: min(960px, 94vw); }
+.hr-record-dialog-body { margin-top: 14px; }
+.hr-record-dialog .hr-record-card { margin: 0; }
 .hr-selection-all { display: block; margin: 20px 0 10px; padding-bottom: 10px; border-bottom: 1px solid #2b3b50; }
 .hr-selection-list { display: grid; gap: 8px; max-height: 360px; overflow: auto; }
 .hr-selection-list label { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid #26384d; border-radius: 10px; }
@@ -662,6 +665,41 @@
 .hr-record-list {
     display: grid;
     gap: 10px;
+}
+
+.hr-record-date-button {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    width: 100%;
+    min-height: 44px;
+    padding: 10px 12px;
+    border: 1px solid #2a3a4e;
+    border-radius: 7px;
+    background: #141d2a;
+    color: #aebbc8;
+    text-align: left;
+    cursor: pointer;
+    transition: border-color .16s ease, background .16s ease, transform .16s ease;
+}
+
+.hr-record-date-button:hover,
+.hr-record-date-button:focus-visible {
+    border-color: #41d6c3;
+    background: #172635;
+    outline: none;
+    transform: translateY(-1px);
+}
+
+.hr-record-date-button strong {
+    color: #edf3f8;
+    font-size: 10px;
+}
+
+.hr-record-date-button span {
+    color: #76869a;
+    font-size: 8px;
 }
 
 .hr-record-card {

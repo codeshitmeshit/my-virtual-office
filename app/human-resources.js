@@ -14,6 +14,7 @@
         detailError: '',
         detailSequence: 0,
         detailPaging: '',
+        detailCache: new Map(),
         commandBusy: '',
         commandNotice: '',
         commandError: '',
@@ -22,6 +23,8 @@
         dailySyncOpen: false,
         dailySyncSelected: [],
         dailySyncReturnFocus: null,
+        recordDialog: null,
+        recordDialogReturnFocus: null,
         returnFocus: null,
     };
     let embeddedContext = null;
@@ -169,6 +172,50 @@
         });
     }
 
+    function agentId(agent) {
+        const value = object(agent);
+        return String(value.aiId || value.ai_id || value.id || value.statusKey || '');
+    }
+
+    function seedFromEmbeddedContext(context) {
+        const source = context || embeddedContext;
+        if (!source) return false;
+        let changed = false;
+        if (source.overview && !state.overview) {
+            state.overview = source.overview;
+            changed = true;
+        }
+        if (array(source.roster).length && !state.agents.length) {
+            state.agents = source.roster.slice();
+            changed = true;
+        }
+        return changed;
+    }
+
+    function summaryDetail(aiId) {
+        const id = String(aiId || '');
+        const agent = array(state.agents).find(function (item) {
+            return agentId(item) === id;
+        });
+        if (!agent) return null;
+        const value = object(agent);
+        return {
+            aiId: id,
+            name: value.name || value.displayName || id,
+            introduction: value.introduction || '',
+            status: value.status || 'unknown',
+            availability: value.availability || 'unknown',
+            agentKind: value.agentKind || value.kind || 'agent',
+            providerKind: value.providerKind || value.provider || '',
+            introductionProvenance: value.introductionProvenance || {},
+            workflowState: value.workflowState || value.status || 'unknown',
+            reports: [],
+            assessments: [],
+            identityHistory: [],
+            accessHistory: [],
+        };
+    }
+
     function cycleCounts(overview) {
         const cycle = object(object(overview).cycle);
         const counts = object(cycle.counts);
@@ -217,6 +264,15 @@
         if (!value) return '—';
         const date = new Date(value);
         return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
+    }
+
+    function currentLocalDate() {
+        return String(object(state.overview).localDate || '');
+    }
+
+    function isCurrentRecord(record) {
+        const today = currentLocalDate();
+        return !today || String(object(record).localDate || '') === today;
     }
 
     function reportScheduleLabel(value) {
@@ -273,7 +329,9 @@
     }
 
     function focusableElements() {
-        const element = state.dailySyncOpen && root.document
+        const element = state.recordDialog && root.document
+            ? root.document.querySelector('.hr-record-dialog') || modal()
+            : state.dailySyncOpen && root.document
             ? root.document.querySelector('.hr-selection-dialog') || modal()
             : modal();
         if (!element) return [];
@@ -287,7 +345,8 @@
         if (!state.open || !event) return;
         if (event.key === 'Escape') {
             event.preventDefault();
-            if (state.dailySyncOpen) closeDailySync();
+            if (state.recordDialog) closeRecordDetail();
+            else if (state.dailySyncOpen) closeDailySync();
             else close();
             return;
         }
@@ -534,6 +593,25 @@
         if (target && typeof target.focus === 'function') target.focus();
     }
 
+    function openRecordDetail(kind, index) {
+        state.recordDialogReturnFocus = root.document ? root.document.activeElement : null;
+        state.recordDialog = {
+            kind: kind === 'assessments' ? 'assessments' : 'reports',
+            index: Number(index || 0),
+        };
+        render();
+        const first = root.document && root.document.querySelector('.hr-record-dialog button, .hr-record-dialog summary');
+        if (first && typeof first.focus === 'function') first.focus();
+    }
+
+    function closeRecordDetail() {
+        state.recordDialog = null;
+        render();
+        const target = state.recordDialogReturnFocus;
+        state.recordDialogReturnFocus = null;
+        if (target && typeof target.focus === 'function') target.focus();
+    }
+
     function toggleDailySyncAll(checked) {
         state.dailySyncSelected = checked ? orderedAvailableAgents().map(agentId) : [];
         render();
@@ -580,19 +658,69 @@
             : '<span class="hr-muted">' + escHtml(emptyText || '—') + '</span>';
     }
 
-    function renderReport(report) {
+    function renderReport(report, options) {
         const item = object(report);
         const status = String(item.submissionState || 'unknown');
+        const showNormalized = Boolean(object(options).showNormalized);
         return '<article class="hr-record-card">' +
             '<header><div><strong>' + escHtml(item.localDate || '—') + '</strong>' +
             '<small>' + escHtml(tr('hr_revision', 'Revision {{version}}', { version: item.revision || 1 })) + '</small></div>' +
             '<span class="hr-state-chip hr-tone-' + escHtml(statusTone(status)) + '">' + escHtml(semanticLabel(status)) + '</span></header>' +
-            '<details><summary>' + escHtml(tr('hr_raw_report', 'Raw Agent report')) + '</summary>' +
+            '<details open><summary>' + escHtml(tr('hr_raw_report', 'Raw Agent report')) + '</summary>' +
             '<pre>' + escHtml(item.rawResponse || tr('hr_no_raw_report', 'No raw response')) + '</pre></details>' +
-            '<details open><summary>' + escHtml(tr('hr_normalized_report', 'HR normalized report')) + '</summary>' +
-            '<pre>' + escHtml(item.normalized ? prettyJson(item.normalized) : tr('hr_not_normalized', 'Not normalized')) + '</pre></details>' +
+            (showNormalized ? '<details><summary>' + escHtml(tr('hr_normalized_report', 'HR normalized report')) + '</summary>' +
+                '<pre>' + escHtml(item.normalized ? prettyJson(item.normalized) : tr('hr_not_normalized', 'Not normalized')) + '</pre></details>' : '') +
             '<footer>' + escHtml(formatTime(item.submittedAt || item.requestedAt)) + '</footer>' +
         '</article>';
+    }
+
+    function recordCollection(kind) {
+        const detailRecord = object(state.detail);
+        return kind === 'assessments' ? array(detailRecord.assessments) : array(detailRecord.reports);
+    }
+
+    function renderRecordDateButton(kind, item, index) {
+        const record = object(item);
+        const date = record.localDate || '—';
+        const meta = kind === 'assessments'
+            ? tr('hr_assessment_version', 'Assessment v{{version}}', { version: record.version || 1 })
+            : tr('hr_revision', 'Revision {{version}}', { version: record.revision || 1 });
+        return '<button type="button" class="hr-record-date-button" onclick="HumanResources.openRecordDetail(\'' +
+            escHtml(kind) + '\',' + Number(index) + ')"><strong>' + escHtml(date) + '</strong><span>' +
+            escHtml(meta) + '</span></button>';
+    }
+
+    function renderRecordList(kind, records, renderFullRecord) {
+        const current = [];
+        const history = [];
+        array(records).forEach(function (item, index) {
+            const entry = { item: item, index: index };
+            if (isCurrentRecord(item)) current.push(entry);
+            else history.push(entry);
+        });
+        return '<div class="hr-record-list">' +
+            current.map(function (entry) { return renderFullRecord(entry.item); }).join('') +
+            history.map(function (entry) { return renderRecordDateButton(kind, entry.item, entry.index); }).join('') +
+            '</div>';
+    }
+
+    function renderRecordDialog() {
+        if (!state.recordDialog) return '';
+        const dialog = object(state.recordDialog);
+        const kind = dialog.kind === 'assessments' ? 'assessments' : 'reports';
+        const record = recordCollection(kind)[Number(dialog.index || 0)];
+        if (!record) return '';
+        const title = kind === 'assessments'
+            ? tr('hr_assessment_detail_title', 'HR assessment detail')
+            : tr('hr_daily_report_detail_title', 'Daily report detail');
+        return '<div class="hr-selection-backdrop hr-record-backdrop" role="presentation">' +
+            '<section class="hr-selection-dialog hr-record-dialog" role="dialog" aria-modal="true" aria-labelledby="hr-record-dialog-title">' +
+            '<header><div><h3 id="hr-record-dialog-title">' + escHtml(title) + '</h3>' +
+            '<p>' + escHtml(object(record).localDate || '—') + '</p></div>' +
+            '<button type="button" class="hr-icon-button" onclick="HumanResources.closeRecordDetail()" aria-label="' + escHtml(tr('hr_close', 'Close')) + '">×</button></header>' +
+            '<div class="hr-record-dialog-body">' +
+            (kind === 'assessments' ? renderAssessment(record) : renderReport(record, { showNormalized: true })) +
+            '</div></section></div>';
     }
 
     function renderEvidence(evidence) {
@@ -740,10 +868,10 @@
             '<section class="hr-detail-section hr-identity-section"><h4>' + escHtml(tr('hr_identity_history', 'Identity and provenance')) + '</h4>' +
                 (identities.length ? '<ul class="hr-history-list">' + renderIdentityHistory(identities) + '</ul>' : '<div class="hr-inline-empty">—</div>') + '</section>' +
             '<section class="hr-detail-section hr-reports-section"><h4>' + escHtml(tr('hr_daily_reports', 'Daily reports')) + '</h4>' +
-                (reports.length ? '<div class="hr-record-list">' + reports.map(renderReport).join('') + '</div>' : '<div class="hr-inline-empty">' + escHtml(tr('hr_no_reports', 'No daily reports')) + '</div>') +
+                (reports.length ? renderRecordList('reports', reports, renderReport) : '<div class="hr-inline-empty">' + escHtml(tr('hr_no_reports', 'No daily reports')) + '</div>') +
                 loadMoreButton('reports', agent.reportNextCursor) + '</section>' +
             '<section class="hr-detail-section hr-assessments-section"><h4>' + escHtml(tr('hr_assessments', 'HR assessments')) + '</h4>' +
-                (assessments.length ? '<div class="hr-record-list">' + assessments.map(renderAssessment).join('') + '</div>' : '<div class="hr-inline-empty">' + escHtml(tr('hr_no_assessments', 'No assessments')) + '</div>') +
+                (assessments.length ? renderRecordList('assessments', assessments, renderAssessment) : '<div class="hr-inline-empty">' + escHtml(tr('hr_no_assessments', 'No assessments')) + '</div>') +
                 loadMoreButton('assessments', agent.assessmentNextCursor) + '</section>' +
             '<section class="hr-detail-section hr-access-section"><h4>' + escHtml(tr('hr_access_history', 'Agent access history')) + '</h4>' +
                 (accesses.length ? '<ul class="hr-history-list">' + renderAccessHistory(accesses) + '</ul>' : '<div class="hr-inline-empty">' + escHtml(tr('hr_no_access_history', 'No Agent has viewed this record')) + '</div>') +
@@ -763,7 +891,7 @@
                 renderEmbeddedSummary() +
                 '<main class="hr-agent-detail" tabindex="-1">' +
                 (state.selectedAgentId ? renderAgentDetailPanel() : renderOverviewPanel()) +
-                '</main></div>';
+                '</main></div>' + renderRecordDialog();
         } else {
             element.innerHTML = '<div class="hr-shell">' +
             '<aside class="hr-agent-list" aria-label="' + escHtml(tr('hr_agent_roster', 'Agent roster')) + '">' +
@@ -774,7 +902,7 @@
             '</aside>' +
             '<main class="hr-agent-detail" tabindex="-1">' +
                 (state.selectedAgentId ? renderAgentDetailPanel() : renderOverviewPanel()) + '</main>' +
-            '</div>';
+            '</div>' + renderRecordDialog();
         }
         element.setAttribute(
             'aria-busy',
@@ -804,7 +932,8 @@
         const sequence = ++state.requestSequence;
         state.loading = true;
         state.errors = [];
-        render();
+        seedFromEmbeddedContext();
+        if (!state.overview && !state.agents.length) render();
         restoreScroll(scrollSnapshot);
         const results = await Promise.allSettled([
             managementJson('/api/human-resources/overview'),
@@ -951,6 +1080,8 @@
         state.open = false;
         state.requestSequence += 1;
         state.detailSequence += 1;
+        state.dailySyncOpen = false;
+        state.recordDialog = null;
         clearCommandPoll();
         element.classList.add('hidden');
         const target = state.returnFocus;
@@ -981,15 +1112,19 @@
             const incoming = object(payload.agent);
             if (!pageKind || !state.detail) {
                 state.detail = incoming;
+                state.detailCache.set(aiId, incoming);
             } else if (pageKind === 'reports') {
                 state.detail.reports = mergeByKey(state.detail.reports, incoming.reports, 'id');
                 state.detail.reportNextCursor = incoming.reportNextCursor || null;
+                state.detailCache.set(aiId, state.detail);
             } else if (pageKind === 'assessments') {
                 state.detail.assessments = mergeByKey(state.detail.assessments, incoming.assessments, 'id');
                 state.detail.assessmentNextCursor = incoming.assessmentNextCursor || null;
+                state.detailCache.set(aiId, state.detail);
             } else if (pageKind === 'access') {
                 state.detail.accessHistory = mergeByKey(state.detail.accessHistory, incoming.accessHistory, 'id');
                 state.detail.accessNextCursor = incoming.accessNextCursor || null;
+                state.detailCache.set(aiId, state.detail);
             }
             state.detailError = '';
             return true;
@@ -1013,7 +1148,7 @@
     function selectAgent(aiId) {
         const selected = String(aiId || '');
         state.selectedAgentId = selected;
-        state.detail = null;
+        state.detail = selected ? (state.detailCache.get(selected) || summaryDetail(selected)) : null;
         state.detailError = '';
         state.detailPaging = '';
         const sequence = ++state.detailSequence;
@@ -1029,12 +1164,13 @@
 
     function mountPanel(context) {
         embeddedContext = context || null;
+        seedFromEmbeddedContext(context);
         state.open = true;
         const selected = String(context && context.selectedAiId || '');
         const selectionChanged = selected !== state.selectedAgentId;
         state.selectedAgentId = selected;
         if (selectionChanged) {
-            state.detail = null;
+            state.detail = selected ? (state.detailCache.get(selected) || summaryDetail(selected)) : null;
             state.detailError = '';
             state.detailPaging = '';
         }
@@ -1082,6 +1218,8 @@
         saveSchedule,
         openDailySync,
         closeDailySync,
+        openRecordDetail,
+        closeRecordDetail,
         toggleDailySyncAll,
         toggleDailySyncAgent,
         submitDailySync,
@@ -1099,6 +1237,7 @@
             mergeByKey,
             prettyJson,
             reportScheduleLabel,
+            isCurrentRecord,
             activeCommands,
             commandSpec,
             semanticLabel,

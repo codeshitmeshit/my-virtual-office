@@ -189,21 +189,27 @@ try {
   const detail = await evaluate(`(() => ({
     reportCards: document.querySelectorAll('.hr-record-card:not(.hr-assessment-card)').length,
     assessmentCards: document.querySelectorAll('.hr-assessment-card').length,
-    normalizedVisible: document.body.innerText.includes('Completed fixture research'),
+    reportDetailBlocks: document.querySelectorAll('.hr-record-card:not(.hr-assessment-card) details').length,
     evidenceVisible: document.body.textContent.includes('Daily report evidence'),
     accessRows: document.querySelectorAll('.hr-detail-section .hr-history-list li').length,
   }))()`);
   assert.equal(detail.reportCards, 1);
   assert.equal(detail.assessmentCards, 1);
-  assert.equal(detail.normalizedVisible, true);
+  assert.equal(detail.reportDetailBlocks, 1);
   assert.equal(detail.evidenceVisible, true);
   assert.ok(detail.accessRows >= 1);
 
   await evaluate("HumanResources.loadMore('reports')");
-  await waitFor("document.body.textContent.includes('RAW FIXTURE REPORT TWO')");
+  await waitFor("document.querySelectorAll('.hr-record-date-button').length >= 1");
+  assert.equal(await evaluate("document.body.innerText.includes('RAW FIXTURE REPORT TWO')"), false);
+  await evaluate("document.querySelector('.hr-record-date-button').click()");
+  await waitFor("document.querySelector('.hr-record-dialog') && document.body.textContent.includes('RAW FIXTURE REPORT TWO')");
+  assert.equal(await evaluate("document.body.textContent.includes('Late fixture follow-up')"), true);
+  await evaluate("HumanResources.closeRecordDetail()");
+  await waitFor("!document.querySelector('.hr-record-dialog')");
   await evaluate("HumanResources.loadMore('access')");
   await waitFor("document.body.innerText.includes('Review Agent')");
-  assert.equal(await evaluate("document.querySelectorAll('.hr-record-card:not(.hr-assessment-card)').length"), 2);
+  assert.equal(await evaluate("document.querySelectorAll('.hr-record-card:not(.hr-assessment-card)').length"), 1);
 
   await evaluate("HumanResources.selectAgent('')");
   await waitFor("document.querySelector('.hr-command-panel')");

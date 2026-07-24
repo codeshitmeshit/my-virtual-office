@@ -36,3 +36,32 @@ def test_hr_panel_has_embedded_responsive_detail_boundary():
     assert "hr-selection-dialog" in javascript
     assert "/api/human-resources/daily-sync" in javascript
     assert ".hr-selection-dialog" in css
+
+
+def test_embedded_hr_reuses_agent_management_bootstrap_data():
+    management = (APP / "agent-management.js").read_text(encoding="utf-8")
+    javascript = (APP / "human-resources.js").read_text(encoding="utf-8")
+    assert "overview: state.overview" in management
+    assert "state.overview = result.overview || null" in management
+    assert "function seedFromEmbeddedContext(context)" in javascript
+    assert "source.overview && !state.overview" in javascript
+    assert "source.roster).length && !state.agents.length" in javascript
+    assert "function summaryDetail(aiId)" in javascript
+    assert "state.detailCache.get(selected) || summaryDetail(selected)" in javascript
+
+
+def test_hr_daily_records_collapse_history_and_keep_raw_report_primary():
+    css = (APP / "human-resources.css").read_text(encoding="utf-8")
+    javascript = (APP / "human-resources.js").read_text(encoding="utf-8")
+    assert "function isCurrentRecord(record)" in javascript
+    assert "function renderRecordDateButton(kind, item, index)" in javascript
+    assert "function renderRecordDialog()" in javascript
+    assert "openRecordDetail" in javascript
+    assert "closeRecordDetail" in javascript
+    assert "renderReport(record, { showNormalized: true })" in javascript
+    assert "renderRecordList('reports', reports, renderReport)" in javascript
+    assert "renderRecordList('assessments', assessments, renderAssessment)" in javascript
+    assert '<details open><summary>' in javascript
+    assert "const showNormalized = Boolean(object(options).showNormalized)" in javascript
+    assert ".hr-record-date-button" in css
+    assert ".hr-record-dialog" in css

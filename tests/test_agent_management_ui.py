@@ -13,6 +13,10 @@ def test_merged_shell_has_peer_tabs_shared_selection_and_one_close_control():
     assert INDEX.count('id="agent-management-close"') == 1
     assert 'data-agent-management-tab="configuration"' in INDEX
     assert 'data-agent-management-tab="humanResources"' in INDEX
+    assert 'agent-management-adapters.js' in INDEX
+    assert 'agent-configuration.js' in INDEX
+    assert INDEX.index('agent-management-adapters.js') < INDEX.index('agent-management.js')
+    assert INDEX.index('agent-configuration.js') < INDEX.index('agent-management.js')
     assert "selectedAiId" in SHELL
     assert "scrollTop" in SHELL
     assert "setRoster" in SHELL
@@ -43,3 +47,9 @@ def test_human_resources_is_embeddable_and_does_not_read_configuration_globals()
     assert "if (root.HumanResources) mountTab('humanResources', root.HumanResources);" in SHELL
     assert "AgentConfiguration" not in HR
     assert "_acp" not in HR
+
+
+def test_shell_wires_preloaded_adapters_without_waiting_for_dynamic_script():
+    assert "if (root.AgentManagementAdapters)" in SHELL
+    assert "root.AgentManagementAdapters.createHumanAdapter()" in SHELL
+    assert "root.AgentManagementAdapters.createAgentAdapter()" in SHELL

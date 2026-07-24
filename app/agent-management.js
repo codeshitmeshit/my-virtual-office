@@ -13,6 +13,7 @@
         },
         adapters: { human: null, agent: null },
         panels: {},
+        overview: null,
         returnFocus: null,
         mutations: [],
         bootstrapping: false,
@@ -136,6 +137,7 @@
             }
             state.tabs[state.activeTab].error = '';
             setAudience(result.audience || { kind: 'human', aiId: '' });
+            state.overview = result.overview || null;
             setRoster(result.roster || []);
             state.bootstrappedAudience = state.audience.kind;
             return true;
@@ -196,6 +198,7 @@
             container: container,
             audience: Object.assign({}, state.audience),
             roster: state.roster.slice(),
+            overview: state.overview,
             selectedAiId: state.selectedAiId,
             adapter: state.audience.kind === 'agent'
                 ? state.adapters.agent : state.adapters.human,
@@ -344,6 +347,12 @@
     root.closeAgentManagement = close;
     if (root.AgentConfiguration) mountTab('configuration', root.AgentConfiguration);
     if (root.HumanResources) mountTab('humanResources', root.HumanResources);
+    if (root.AgentManagementAdapters) {
+        setAdapters({
+            human: root.AgentManagementAdapters.createHumanAdapter(),
+            agent: root.AgentManagementAdapters.createAgentAdapter(),
+        });
+    }
     root.toggleAgentPanel = function () {
         return state.open ? close() : open('configuration');
     };

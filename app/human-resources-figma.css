@@ -295,6 +295,28 @@
     gap: 7px;
 }
 
+.agent-management-panel[data-active-tab="humanResources"] .hr-record-date-button {
+    min-height: 36px;
+    padding: 8px 9px;
+    border-color: #34375c;
+    border-radius: 6px;
+    background: #171933;
+}
+
+.agent-management-panel[data-active-tab="humanResources"] .hr-record-date-button strong {
+    font-size: 8px;
+}
+
+.agent-management-panel[data-active-tab="humanResources"] .hr-record-date-button span {
+    font-size: 6px;
+}
+
+.agent-management-panel[data-active-tab="humanResources"] .hr-record-dialog {
+    width: min(880px, 88vw);
+    border-radius: 8px;
+    background: #101129;
+}
+
 .agent-management-panel[data-active-tab="humanResources"] .hr-record-card {
     padding: 9px;
     border-color: #34375c;
