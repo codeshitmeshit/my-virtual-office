@@ -45,3 +45,27 @@ Coverage recorded:
 - retained legacy route authorization and bypass denial;
 - Agent launch-code/session mint, exchange, expiry, restart invalidation and browser projection;
 - HR self/public/full projections, governance, audit/observability and HTTP delegation.
+
+## 17.2 Focused Node, Static UI and Browser
+
+Result: **PASS — 11 Node/static scripts, 13 Python UI tests, 1 Chrome acceptance**
+
+The Node/static group covered:
+
+- merged shell state, configuration component and Human/Agent adapters;
+- English/Chinese locale integrity and dynamic HR copy;
+- merged and nested-dialog keyboard/focus behavior;
+- Human Resources controls, detail request ordering, overview degradation and management-token behavior;
+- browser-fixture completeness and shared CDP configuration.
+
+The Python UI group covered merged-modal semantics, unique close control,
+responsive/reduced-motion rules, HR embedding and the absence of `_acp` or new
+Agent Management implementation in `app/game.js`.
+
+The deterministic Chrome acceptance passed with:
+
+- human roster `2`, restricted human configuration present and one close control;
+- selector Arrow-key movement and Escape focus return;
+- explicit Agent/action/before/after high-risk impact with no generic Save button;
+- Agent audience restricted DOM `0`, editable colleague fields `0`, human HR
+  requests `0`, and hidden restricted response/DOM sentinel occurrences `0`.
