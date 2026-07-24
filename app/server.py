@@ -79,6 +79,7 @@ from services import vo_agent_communication as vo_agent_communication_service
 from services import agent_legacy_mutation_policy as agent_legacy_mutation_policy_service
 from services import agent_management_http as agent_management_http_service
 from services import agent_management_runtime as agent_management_runtime_service
+from services import agent_management_session_mint as agent_management_session_mint_service
 from services.project_execution_ordering import first_incomplete_task
 from services.chat_history_jsonl_cache import JsonlSnapshotCache
 from services import system_agent_lifecycle as system_agent_lifecycle_service
@@ -21140,6 +21141,8 @@ _hr_application_runtime = None
 _hr_application_runtime_lock = threading.Lock()
 _agent_management_runtime = None
 _agent_management_runtime_lock = threading.Lock()
+_agent_management_session_mint = None
+_agent_management_session_mint_lock = threading.Lock()
 
 
 def _hr_provider_agent_id():
@@ -21223,6 +21226,18 @@ def _get_agent_management_runtime():
                 )
             )
         return _agent_management_runtime
+
+
+def _get_agent_management_session_mint():
+    global _agent_management_session_mint
+    with _agent_management_session_mint_lock:
+        if _agent_management_session_mint is None:
+            _agent_management_session_mint = (
+                agent_management_session_mint_service.build_agent_management_session_mint(
+                    _get_hr_application_runtime().repository,
+                )
+            )
+        return _agent_management_session_mint
 
 
 def _install_hr_scheduler_loop(loop):
@@ -27212,6 +27227,27 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
         response = routes.post(request_path, body)
         self._send_json(response.payload, status=response.status)
 
+    def _handle_agent_management_session_mint(self):
+        try:
+            remote_host = str(self.client_address[0])
+        except (AttributeError, IndexError, TypeError):
+            remote_host = ""
+        request = agent_management_session_mint_service.AgentManagementMintRequest(
+            remote_host=remote_host,
+            origin=self.headers.get("Origin"),
+            action=self.headers.get("X-VO-Agent-Action"),
+            ai_id=self.headers.get("X-VO-Agent-Id"),
+        )
+        try:
+            response = _get_agent_management_session_mint().mint(request)
+        except Exception:
+            self._send_json(
+                {"ok": False, "code": "agent_management_session_unavailable"},
+                status=503,
+            )
+            return
+        self._send_json(response.payload, status=response.status)
+
     def _hr_agent_auth_request(self):
         try:
             remote_host = str(self.client_address[0])
@@ -30069,6 +30105,12 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
     def do_POST(self):
         parsed_url = urllib.parse.urlparse(self.path)
         request_path = parsed_url.path
+        if (
+            request_path
+            == agent_management_session_mint_service.SESSION_MINT_PATH
+        ):
+            self._handle_agent_management_session_mint()
+            return
         if agent_management_http_service.AgentManagementHTTPRoutes.handles(
             "POST", request_path
         ):
