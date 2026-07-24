@@ -224,8 +224,6 @@
   "hr_next_report_disabled": "Next configured report collection after enabling: {{time}}",
   "hr_next_report_due": "Daily report collection is due and awaiting the scheduler ({{time}})",
   "hr_next_report_unknown": "Next daily report collection is unavailable",
-  "hr_normalized_report": "HR normalized report",
-  "hr_not_normalized": "Not normalized",
   "hr_overview_date": "Local reporting date: {{date}}",
   "hr_partial_data": "Some Human Resources data could not be refreshed.",
   "hr_pause": "Pause HR",

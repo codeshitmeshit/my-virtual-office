@@ -275,6 +275,18 @@
         return !today || String(object(record).localDate || '') === today;
     }
 
+    function reportSubmissionLabelState(value) {
+        const state = String(value || 'unknown').toLowerCase();
+        return state === 'normalized' ? 'submitted' : state;
+    }
+
+    function hrDisplayState(value) {
+        const state = String(value || 'unknown').toLowerCase();
+        if (state === 'normalized') return 'submitted';
+        if (state === 'normalization_failed') return 'failed';
+        return state;
+    }
+
     function reportScheduleLabel(value) {
         const schedule = object(value);
         const raw = String(schedule.nextLocalAt || '');
@@ -435,7 +447,7 @@
     function renderActivity(item) {
         const activity = object(item);
         const action = String(activity.action || 'activity');
-        const status = String(activity.status || 'unknown');
+        const status = hrDisplayState(activity.status);
         const timestamp = String(activity.createdAt || activity.created_at || '');
         const reason = activityFailureReason(activity);
         return '<li><span class="hr-state-chip hr-tone-' + escHtml(statusTone(status)) + '">' +
@@ -542,7 +554,8 @@
             '</div></section>' +
             '<section><h3>' + escHtml(tr('hr_daily_status', 'Daily reporting status')) + '</h3>' +
                 (cycles.length ? '<div class="hr-metric-grid">' + cycles.map(function (item) {
-                    return renderBadge(semanticLabel(item.status), item.count, statusTone(item.status));
+                    const displayState = hrDisplayState(item.status);
+                    return renderBadge(semanticLabel(displayState), item.count, statusTone(displayState));
                 }).join('') + '</div>' : '<div class="hr-inline-empty">' + escHtml(tr('hr_no_active_cycle', 'No active or recent cycle')) + '</div>') +
             '</section>' + dailySyncDialog +
             '<section><h3>' + escHtml(tr('hr_recent_activity', 'Recent activity')) + '</h3>' +
@@ -661,18 +674,15 @@
             : '<span class="hr-muted">' + escHtml(emptyText || '—') + '</span>';
     }
 
-    function renderReport(report, options) {
+    function renderReport(report) {
         const item = object(report);
-        const status = String(item.submissionState || 'unknown');
-        const showNormalized = Boolean(object(options).showNormalized);
+        const status = reportSubmissionLabelState(item.submissionState);
         return '<article class="hr-record-card">' +
             '<header><div><strong>' + escHtml(item.localDate || '—') + '</strong>' +
             '<small>' + escHtml(tr('hr_revision', 'Revision {{version}}', { version: item.revision || 1 })) + '</small></div>' +
             '<span class="hr-state-chip hr-tone-' + escHtml(statusTone(status)) + '">' + escHtml(semanticLabel(status)) + '</span></header>' +
             '<details open><summary>' + escHtml(tr('hr_raw_report', 'Raw Agent report')) + '</summary>' +
             '<pre>' + escHtml(item.rawResponse || tr('hr_no_raw_report', 'No raw response')) + '</pre></details>' +
-            (showNormalized ? '<details><summary>' + escHtml(tr('hr_normalized_report', 'HR normalized report')) + '</summary>' +
-                '<pre>' + escHtml(item.normalized ? prettyJson(item.normalized) : tr('hr_not_normalized', 'Not normalized')) + '</pre></details>' : '') +
             '<footer>' + escHtml(formatTime(item.submittedAt || item.requestedAt)) + '</footer>' +
         '</article>';
     }
@@ -722,7 +732,7 @@
             '<p>' + escHtml(object(record).localDate || '—') + '</p></div>' +
             '<button type="button" class="hr-icon-button" onclick="HumanResources.closeRecordDetail()" aria-label="' + escHtml(tr('hr_close', 'Close')) + '">×</button></header>' +
             '<div class="hr-record-dialog-body">' +
-            (kind === 'assessments' ? renderAssessment(record) : renderReport(record, { showNormalized: true })) +
+            (kind === 'assessments' ? renderAssessment(record) : renderReport(record)) +
             '</div></section></div>';
     }
 
@@ -1241,6 +1251,8 @@
             prettyJson,
             reportScheduleLabel,
             isCurrentRecord,
+            reportSubmissionLabelState,
+            hrDisplayState,
             activeCommands,
             commandSpec,
             semanticLabel,

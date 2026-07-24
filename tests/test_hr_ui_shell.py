@@ -58,10 +58,14 @@ def test_hr_daily_records_collapse_history_and_keep_raw_report_primary():
     assert "function renderRecordDialog()" in javascript
     assert "openRecordDetail" in javascript
     assert "closeRecordDetail" in javascript
-    assert "renderReport(record, { showNormalized: true })" in javascript
+    assert "renderReport(record, { showNormalized: true })" not in javascript
+    assert "showNormalized" not in javascript
+    assert "hr_normalized_report" not in javascript
+    assert "reportSubmissionLabelState" in javascript
+    assert "function hrDisplayState(value)" in javascript
+    assert "const displayState = hrDisplayState(item.status)" in javascript
     assert "renderRecordList('reports', reports, renderReport)" in javascript
     assert "renderRecordList('assessments', assessments, renderAssessment)" in javascript
     assert '<details open><summary>' in javascript
-    assert "const showNormalized = Boolean(object(options).showNormalized)" in javascript
     assert ".hr-record-date-button" in css
     assert ".hr-record-dialog" in css

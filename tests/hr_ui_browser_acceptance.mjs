@@ -204,7 +204,9 @@ try {
   assert.equal(await evaluate("document.body.innerText.includes('RAW FIXTURE REPORT TWO')"), false);
   await evaluate("document.querySelector('.hr-record-date-button').click()");
   await waitFor("document.querySelector('.hr-record-dialog') && document.body.textContent.includes('RAW FIXTURE REPORT TWO')");
-  assert.equal(await evaluate("document.body.textContent.includes('Late fixture follow-up')"), true);
+  assert.equal(await evaluate("document.querySelector('.hr-record-dialog').textContent.includes('Late fixture follow-up')"), false);
+  assert.equal(await evaluate("document.querySelector('.hr-record-dialog').textContent.includes('HR normalized report')"), false);
+  assert.equal(await evaluate("document.querySelectorAll('.hr-record-dialog .hr-record-card:not(.hr-assessment-card) details').length"), 1);
   await evaluate("HumanResources.closeRecordDetail()");
   await waitFor("!document.querySelector('.hr-record-dialog')");
   await evaluate("HumanResources.loadMore('access')");

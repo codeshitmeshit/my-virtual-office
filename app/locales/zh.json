@@ -224,8 +224,6 @@
   "hr_next_report_disabled": "启用自动任务后的下一次获取日报：{{time}}",
   "hr_next_report_due": "日报获取时间已到，等待调度运行（{{time}}）",
   "hr_next_report_unknown": "下一次获取日报时间暂不可用",
-  "hr_normalized_report": "HR 归一化日报",
-  "hr_not_normalized": "尚未归一化",
   "hr_overview_date": "本地日报日期：{{date}}",
   "hr_partial_data": "部分人事管理数据未能刷新。",
   "hr_pause": "暂停 HR",
