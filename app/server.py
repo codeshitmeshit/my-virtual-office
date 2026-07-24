@@ -80,6 +80,7 @@ from services import agent_legacy_mutation_policy as agent_legacy_mutation_polic
 from services import agent_management_http as agent_management_http_service
 from services import agent_management_runtime as agent_management_runtime_service
 from services import agent_management_session_mint as agent_management_session_mint_service
+from services import agent_management_session_exchange as agent_management_session_exchange_service
 from services.project_execution_ordering import first_incomplete_task
 from services.chat_history_jsonl_cache import JsonlSnapshotCache
 from services import system_agent_lifecycle as system_agent_lifecycle_service
@@ -21143,6 +21144,8 @@ _agent_management_runtime = None
 _agent_management_runtime_lock = threading.Lock()
 _agent_management_session_mint = None
 _agent_management_session_mint_lock = threading.Lock()
+_agent_management_session_exchange = None
+_agent_management_session_exchange_lock = threading.Lock()
 
 
 def _hr_provider_agent_id():
@@ -21238,6 +21241,18 @@ def _get_agent_management_session_mint():
                 )
             )
         return _agent_management_session_mint
+
+
+def _get_agent_management_session_exchange():
+    global _agent_management_session_exchange
+    with _agent_management_session_exchange_lock:
+        if _agent_management_session_exchange is None:
+            _agent_management_session_exchange = (
+                agent_management_session_exchange_service.build_agent_management_session_exchange(
+                    _get_agent_management_session_mint().sessions,
+                )
+            )
+        return _agent_management_session_exchange
 
 
 def _install_hr_scheduler_loop(loop):
@@ -26707,6 +26722,20 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             self.send_header("Cache-Control", "public, max-age=31536000, immutable")
         super().end_headers()
 
+    def log_message(self, format, *args):
+        if (
+            urllib.parse.urlparse(self.path).path
+            == agent_management_session_mint_service.SESSION_EXCHANGE_PATH
+        ):
+            redacted_path = (
+                agent_management_session_mint_service.SESSION_EXCHANGE_PATH
+                + "?code=[REDACTED]"
+            )
+            args = tuple(
+                str(value).replace(self.path, redacted_path) for value in args
+            )
+        super().log_message(format, *args)
+
     def _management_request_allowed(self):
         """Require the per-process management token for destructive APIs."""
         supplied = str(self.headers.get("X-VO-Management-Token") or "")
@@ -27248,6 +27277,44 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             return
         self._send_json(response.payload, status=response.status)
 
+    def _handle_agent_management_session_exchange(self, query_params):
+        code = (query_params.get("code") or [None])[0]
+        request = (
+            agent_management_session_exchange_service.AgentManagementExchangeRequest(
+                code=code,
+                host=self.headers.get("Host"),
+                origin=self.headers.get("Origin"),
+                referer=self.headers.get("Referer"),
+                fetch_site=self.headers.get("Sec-Fetch-Site"),
+                secure=isinstance(self.connection, ssl.SSLSocket),
+            )
+        )
+        try:
+            response = _get_agent_management_session_exchange().exchange(request)
+        except Exception:
+            response = (
+                agent_management_session_exchange_service.AgentManagementExchangeResponse(
+                    503,
+                    {
+                        "Cache-Control": "no-store",
+                        "Referrer-Policy": "no-referrer",
+                        "Content-Type": "application/json",
+                    },
+                    {
+                        "ok": False,
+                        "code": "agent_management_session_unavailable",
+                    },
+                )
+            )
+        body = response.body()
+        self.send_response(response.status)
+        for name, value in response.headers.items():
+            self.send_header(name, value)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        if body:
+            self.wfile.write(body)
+
     def _hr_agent_auth_request(self):
         try:
             remote_host = str(self.client_address[0])
@@ -27494,6 +27561,12 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
         parsed_url = urllib.parse.urlparse(self.path)
         request_path = parsed_url.path
         query_params = urllib.parse.parse_qs(parsed_url.query)
+        if (
+            request_path
+            == agent_management_session_mint_service.SESSION_EXCHANGE_PATH
+        ):
+            self._handle_agent_management_session_exchange(query_params)
+            return
         if agent_management_http_service.AgentManagementHTTPRoutes.handles(
             "GET", request_path
         ):
