@@ -12,6 +12,7 @@ from services.agent_management_browser import (
     ACCESS_LOG_PATH,
     AGENT_PREFIX,
     BOOTSTRAP_PATH,
+    LOGOUT_PATH,
     PROFILE_MUTATION_PATH,
     PROFILE_UNDO_PATH,
     AgentManagementBrowserRoutes,
@@ -209,6 +210,26 @@ def test_every_request_rechecks_active_directory_state_and_invalidates(
     assert response.status == 403
     assert response.payload["code"] == "agent_management_agent_inactive"
     assert sessions.invalidate(session.token) is False
+
+
+def test_logout_invalidates_session_and_returns_cookie_deletion(tmp_path):
+    _, sessions, session, _, routes = _runtime(tmp_path)
+    response = routes.post(
+        LOGOUT_PATH,
+        {},
+        session_token=session.token,
+    )
+    assert response.status == 200
+    assert response.payload["loggedOut"] is True
+    assert "Max-Age=0" in response.headers["Set-Cookie"]
+    assert sessions.invalidate(session.token) is False
+    expired = routes.get(
+        BOOTSTRAP_PATH,
+        {},
+        session_token=session.token,
+        occurrence_key="after-logout",
+    )
+    assert expired.status == 401
 
 
 def test_browser_routes_never_claim_human_or_high_risk_paths():

@@ -27363,7 +27363,11 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                 status=503,
             )
             return
-        self._send_json(response.payload, status=response.status)
+        self._send_json(
+            response.payload,
+            status=response.status,
+            headers=response.headers,
+        )
 
     def _handle_agent_management_browser_post(self, request_path):
         body, error = self._read_limited_json_body(limit=self._MANAGEMENT_BODY_LIMIT)
@@ -27383,7 +27387,11 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                 status=503,
             )
             return
-        self._send_json(response.payload, status=response.status)
+        self._send_json(
+            response.payload,
+            status=response.status,
+            headers=response.headers,
+        )
 
     def _hr_agent_auth_request(self):
         try:
@@ -27444,7 +27452,14 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
         )
         self._send_json(response.payload, status=response.status)
 
-    def _send_json(self, payload, status=200, *, allow_origin=None):
+    def _send_json(
+        self,
+        payload,
+        status=200,
+        *,
+        allow_origin=None,
+        headers=None,
+    ):
         raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
@@ -27453,6 +27468,8 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
         self.send_header("X-Request-Id", self._request_id())
         if allow_origin is not None:
             self.send_header("Access-Control-Allow-Origin", allow_origin)
+        for name, value in dict(headers or {}).items():
+            self.send_header(str(name), str(value))
         self.end_headers()
         self.wfile.write(raw)
 

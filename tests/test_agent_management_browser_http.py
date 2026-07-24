@@ -24,6 +24,7 @@ os.environ.setdefault(
 import server
 from services.agent_management_browser import (
     BOOTSTRAP_PATH,
+    LOGOUT_PATH,
     PROFILE_MUTATION_PATH,
     AgentManagementBrowserRoutes,
 )
@@ -199,3 +200,21 @@ def test_browser_api_responses_are_no_store_and_no_referrer(
     headers = dict(handler.response_headers)
     assert headers["Cache-Control"] == "no-store"
     assert headers["Referrer-Policy"] == "no-referrer"
+
+
+def test_logout_clears_cookie_and_invalidates_server_session(
+    monkeypatch,
+    tmp_path,
+):
+    session, routes = _routes(tmp_path)
+    monkeypatch.setattr(
+        server, "_get_agent_management_browser_routes", lambda: routes
+    )
+    handler = _handler(LOGOUT_PATH, b"{}", cookie=session.token)
+    handler.do_POST()
+    headers = dict(handler.response_headers)
+    assert handler.responses == [200]
+    assert "Max-Age=0" in headers["Set-Cookie"]
+    after = _handler(BOOTSTRAP_PATH, cookie=session.token)
+    after.do_GET()
+    assert after.responses == [401]

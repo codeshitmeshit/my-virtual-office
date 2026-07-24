@@ -7,7 +7,10 @@ import urllib.parse
 from dataclasses import dataclass
 from typing import Mapping, Sequence
 
-from services.agent_management_session_exchange import SESSION_COOKIE_NAME
+from services.agent_management_session_exchange import (
+    SESSION_COOKIE_NAME,
+    SESSION_COOKIE_PATH,
+)
 from services.agent_management_sessions import (
     AgentManagementBrowserSessionExpiredError,
     AgentManagementSessionService,
@@ -27,13 +30,17 @@ AGENT_PREFIX = f"{BROWSER_PREFIX}/agents/"
 ACCESS_LOG_PATH = f"{BROWSER_PREFIX}/access-log/self"
 PROFILE_MUTATION_PATH = f"{BROWSER_PREFIX}/profile/mutate"
 PROFILE_UNDO_PATH = f"{BROWSER_PREFIX}/profile/undo"
-POST_PATHS = frozenset({PROFILE_MUTATION_PATH, PROFILE_UNDO_PATH})
+LOGOUT_PATH = f"{BROWSER_PREFIX}/logout"
+POST_PATHS = frozenset(
+    {PROFILE_MUTATION_PATH, PROFILE_UNDO_PATH, LOGOUT_PATH}
+)
 
 
 @dataclass(frozen=True, slots=True)
 class AgentManagementBrowserResponse:
     status: int
     payload: dict[str, object]
+    headers: Mapping[str, str] | None = None
 
 
 class AgentManagementBrowserRoutes:
@@ -265,6 +272,18 @@ class AgentManagementBrowserRoutes:
             return error
         assert identity is not None
         actor = ConfigurationActor.agent(identity.ai_id)
+        if path == LOGOUT_PATH:
+            self._sessions.invalidate(str(session_token or ""))
+            return AgentManagementBrowserResponse(
+                200,
+                {"ok": True, "loggedOut": True},
+                {
+                    "Set-Cookie": (
+                        f"{SESSION_COOKIE_NAME}=; Path={SESSION_COOKIE_PATH}; "
+                        "Max-Age=0; HttpOnly; SameSite=Strict"
+                    )
+                },
+            )
         if path == PROFILE_MUTATION_PATH:
             if (
                 not isinstance(body, Mapping)
