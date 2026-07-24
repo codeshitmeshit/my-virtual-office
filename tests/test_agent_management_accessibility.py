@@ -9,6 +9,7 @@ APP = ROOT / "app"
 INDEX = (APP / "index.html").read_text(encoding="utf-8")
 SHELL = (APP / "agent-management.js").read_text(encoding="utf-8")
 CONFIGURATION = (APP / "agent-configuration.js").read_text(encoding="utf-8")
+GAME = (APP / "game.js").read_text(encoding="utf-8")
 SHELL_CSS = (APP / "agent-management.css").read_text(encoding="utf-8")
 CONFIGURATION_CSS = (APP / "agent-configuration.css").read_text(encoding="utf-8")
 
@@ -95,3 +96,6 @@ def test_old_independent_hr_modal_is_absent_and_new_modules_are_decoupled():
     assert INDEX.index('src="game.js?') < INDEX.index('src="agent-management.js?')
     assert "_acp" not in SHELL
     assert "_acp" not in CONFIGURATION
+    assert "_acp" not in GAME
+    assert "function toggleAgentPanel" not in GAME
+    assert "window.AgentManagement.setRoster(agents)" in GAME
