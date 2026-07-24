@@ -18,6 +18,7 @@
         mutations: [],
         bootstrapping: false,
         bootstrappedAudience: '',
+        mountRevision: 0,
     };
 
     function tr(key, fallback) {
@@ -194,8 +195,12 @@
             return;
         }
         const implementation = state.panels[state.activeTab];
+        const tabName = state.activeTab;
+        const mountId = ++state.mountRevision;
         const context = {
             container: container,
+            tab: tabName,
+            mountId: mountId,
             audience: Object.assign({}, state.audience),
             roster: state.roster.slice(),
             overview: state.overview,
@@ -205,6 +210,10 @@
             reportMutation: reportMutation,
             setRoster: setRoster,
             selectAgent: selectAgent,
+            isActive: function () {
+                return state.open && state.activeTab === tabName &&
+                    state.mountRevision === mountId && panel() === container;
+            },
         };
         if (implementation && typeof implementation.mount === 'function') {
             implementation.mount(context);

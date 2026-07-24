@@ -298,7 +298,10 @@
     }
 
     function content() {
-        if (embeddedContext) return embeddedContext.container || null;
+        if (embeddedContext) {
+            if (typeof embeddedContext.isActive === 'function' && !embeddedContext.isActive()) return null;
+            return embeddedContext.container || null;
+        }
         return root.document ? root.document.getElementById('human-resources-content') : null;
     }
 

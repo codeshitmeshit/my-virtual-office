@@ -23,6 +23,8 @@ assert.deepEqual(
 assert.equal(configuration.helpers.classifySaveError(409, ''), 'conflict');
 assert.equal(configuration.helpers.classifySaveError(403, ''), 'denied');
 assert.equal(configuration.helpers.classifySaveError(500, ''), 'failed');
+assert.equal(configuration.helpers.isContextActive({ isActive: () => true }), true);
+assert.equal(configuration.helpers.isContextActive({ isActive: () => false }), false);
 assert(configuration.helpers.appearanceOptions.hairStyle.includes('curly'));
 assert(configuration.helpers.appearanceOptions.deskItem.includes('checklist'));
 global.i18n = {

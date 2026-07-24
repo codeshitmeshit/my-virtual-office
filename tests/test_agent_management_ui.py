@@ -53,3 +53,15 @@ def test_shell_wires_preloaded_adapters_without_waiting_for_dynamic_script():
     assert "if (root.AgentManagementAdapters)" in SHELL
     assert "root.AgentManagementAdapters.createHumanAdapter()" in SHELL
     assert "root.AgentManagementAdapters.createAgentAdapter()" in SHELL
+
+
+def test_tab_panels_guard_against_stale_async_renders():
+    configuration = (ROOT / "app" / "agent-configuration.js").read_text(encoding="utf-8")
+    assert "mountRevision" in SHELL
+    assert "isActive: function ()" in SHELL
+    assert "state.activeTab === tabName" in SHELL
+    assert "state.mountRevision === mountId" in SHELL
+    assert "function isContextActive(context)" in configuration
+    assert "if (!isContextActive(context)) return false;" in configuration
+    assert "isContextActive(state.context)" in configuration
+    assert "embeddedContext.isActive" in HR

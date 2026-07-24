@@ -59,6 +59,10 @@
         return Boolean(context && context.audience.kind === 'human');
     }
 
+    function isContextActive(context) {
+        return !context || typeof context.isActive !== 'function' || context.isActive();
+    }
+
     function visibleSections(context) {
         const sections = ['identity', 'introduction', 'responsibilities', 'appearance'];
         if (canSeeRestricted(context)) {
@@ -234,6 +238,7 @@
     }
 
     function renderProfile(context, profile) {
+        if (!isContextActive(context)) return false;
         const container = context.container;
         const agent = selectedAgent(context);
         const editable = canEdit(context);
@@ -289,6 +294,7 @@
             root.AgentAppearancePreview.render(preview, appearance, agent);
         }
         bindFieldEvents(context);
+        return true;
     }
 
     function normalizeFieldValue(field, raw) {
@@ -357,7 +363,7 @@
     async function commitField(field, value) {
         const context = state.context;
         const profile = context && state.profiles.get(context.selectedAiId);
-        if (!context || !profile || !canEdit(context)) return false;
+        if (!context || !profile || !canEdit(context) || !isContextActive(context)) return false;
         const sequence = (state.saveSequence.get(field) || 0) + 1;
         state.saveSequence.set(field, sequence);
         setSaveState(field, 'saving');
@@ -396,7 +402,7 @@
     async function undoField(field) {
         const context = state.context;
         const undo = state.undo.get(field);
-        if (!context || !undo) return false;
+        if (!context || !undo || !isContextActive(context)) return false;
         try {
             const payload = await mutationRequest(
                 context,
@@ -528,7 +534,7 @@
 
     function openHighRiskDialog(action) {
         const context = state.context;
-        if (!context || context.audience.kind !== 'human') return false;
+        if (!context || context.audience.kind !== 'human' || !isContextActive(context)) return false;
         const host = context.container.querySelector('#agent-high-risk-dialog');
         if (!host) return false;
         const returnFocus = root.document && root.document.activeElement;
@@ -628,6 +634,7 @@
     async function load(context) {
         const aiId = context.selectedAiId;
         if (!aiId) {
+            if (!isContextActive(context)) return;
             context.container.innerHTML = '<div class="am-empty">' + esc(tr('agent_management_empty', 'No Agent selected')) + '</div>';
             return;
         }
@@ -636,16 +643,19 @@
             renderProfile(context, state.profiles.get(aiId));
             return;
         }
+        if (!isContextActive(context)) return;
         context.container.innerHTML = '<div class="am-empty">' + esc(tr('agent_configuration_loading', 'Loading Agent configuration…')) + '</div>';
         state.loading.add(aiId);
         try {
             const payload = await requestProfile(context, aiId);
             const profile = normalizeProfile(payload, agent);
             state.profiles.set(aiId, profile);
-            if (state.context && state.context.selectedAiId === aiId) renderProfile(state.context, profile);
+            if (state.context && state.context.selectedAiId === aiId && isContextActive(state.context)) {
+                renderProfile(state.context, profile);
+            }
         } catch (error) {
             state.errors.set(aiId, String(error && error.message || 'agent_profile_load_failed'));
-            if (state.context && state.context.selectedAiId === aiId) {
+            if (state.context && state.context.selectedAiId === aiId && isContextActive(state.context)) {
                 state.context.container.innerHTML = '<div class="am-empty ac-error">' +
                     esc(tr('agent_configuration_failed', 'Agent configuration could not be loaded')) + '</div>';
             }
@@ -677,6 +687,7 @@
             normalizeFieldValue: normalizeFieldValue,
             classifySaveError: classifySaveError,
             fieldStatus: fieldStatus,
+            isContextActive: isContextActive,
             appearanceOptionLabel: appearanceOptionLabel,
             appearanceOptions: APPEARANCE_OPTIONS,
             renderAppearance: renderAppearance,
