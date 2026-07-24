@@ -23,4 +23,13 @@ assert.deepEqual(
 assert.equal(configuration.helpers.classifySaveError(409, ''), 'conflict');
 assert.equal(configuration.helpers.classifySaveError(403, ''), 'denied');
 assert.equal(configuration.helpers.classifySaveError(500, ''), 'failed');
+assert(configuration.helpers.appearanceOptions.hairStyle.includes('curly'));
+assert(configuration.helpers.appearanceOptions.deskItem.includes('checklist'));
+const appearance = configuration.helpers.renderAppearance(
+    { appearance: { hairStyle: 'short', hairColor: '#112233' } },
+    true,
+);
+assert(appearance.includes('aria-haspopup="listbox"'));
+assert(appearance.includes('data-appearance-color="hairColor"'));
+assert(!appearance.includes('<select'));
 console.log('agent configuration audience contract ok');

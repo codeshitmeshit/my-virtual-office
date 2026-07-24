@@ -12,6 +12,22 @@
         saveSequence: new Map(),
     };
 
+    const APPEARANCE_OPTIONS = {
+        gender: ['M', 'F'],
+        hairStyle: ['bald', 'buzz', 'short', 'medium', 'long', 'curly', 'wavy', 'spiky', 'bun', 'ponytail', 'mohawk'],
+        eyebrowStyle: ['thin', 'thick', 'angular', 'arched'],
+        facialHair: ['none', 'stubble', 'beard', 'goatee', 'mustache'],
+        costume: ['none', 'lobster', 'chicken'],
+        headwear: ['none', 'hardhat', 'cap', 'crown', 'tiara', 'headband', 'goggles', 'headset', 'beanie'],
+        glasses: ['none', 'round', 'square', 'sunglasses'],
+        heldItem: ['none', 'tablet', 'wrench', 'coffee', 'clipboard', 'pen', 'hammer', 'testTube', 'book'],
+        deskItem: ['none', 'anvil', 'trophy', 'calendar', 'envelope', 'money', 'ruler', 'marker', 'chart', 'plans', 'checklist', 'microscope', 'shield', 'phone', 'files'],
+    };
+    const APPEARANCE_COLORS = [
+        'color', 'skinTone', 'hairColor', 'eyeColor',
+        'headwearColor', 'glassesColor',
+    ];
+
     function esc(value) {
         return String(value == null ? '' : value)
             .replace(/&/g, '&amp;').replace(/</g, '&lt;')
@@ -124,6 +140,75 @@
             esc(tr('agent_change', 'Change')) + '</button></section>';
     }
 
+    function appearanceLabel(field) {
+        const labels = {
+            gender: tr('agent_gender', 'Gender'),
+            hairStyle: tr('agent_hair', 'Hair'),
+            eyebrowStyle: tr('agent_eyebrows', 'Eyebrows'),
+            facialHair: tr('agent_facial_hair', 'Facial hair'),
+            costume: tr('agent_costume', 'Costume'),
+            headwear: tr('agent_headwear', 'Headwear'),
+            glasses: tr('agent_glasses', 'Glasses'),
+            heldItem: tr('agent_held_item', 'Held item'),
+            deskItem: tr('agent_desk_item', 'Desk item'),
+            color: tr('agent_shirt', 'Clothing color'),
+            skinTone: tr('agent_skin', 'Skin tone'),
+            hairColor: tr('agent_hair_color', 'Hair color'),
+            eyeColor: tr('agent_eye_color', 'Eye color'),
+            headwearColor: tr('agent_hat_color', 'Headwear color'),
+            glassesColor: tr('agent_lens_color', 'Glasses color'),
+        };
+        return labels[field] || field;
+    }
+
+    function appearanceSelector(field, value, editable) {
+        const current = value == null ? 'none' : String(value);
+        const options = APPEARANCE_OPTIONS[field] || [];
+        if (!editable) {
+            return '<div class="ac-appearance-readonly"><span>' + esc(appearanceLabel(field)) +
+                '</span><strong>' + esc(current) + '</strong></div>';
+        }
+        return '<div class="ac-selector" data-appearance-selector="' + esc(field) + '">' +
+            '<span class="ac-selector-label">' + esc(appearanceLabel(field)) + '</span>' +
+            '<button type="button" class="ac-selector-current" aria-haspopup="listbox" aria-expanded="false">' +
+                '<span class="ac-option-icon" aria-hidden="true">' + esc(current === 'none' ? '—' : current.slice(0, 2).toUpperCase()) + '</span>' +
+                '<strong>' + esc(current) + '</strong><span aria-hidden="true">▾</span></button>' +
+            '<div class="ac-option-popover hidden" role="listbox" aria-label="' + esc(appearanceLabel(field)) + '">' +
+                options.map(function (option, index) {
+                    return '<button type="button" role="option" tabindex="' + (index === 0 ? '0' : '-1') +
+                        '" aria-selected="' + (option === current ? 'true' : 'false') +
+                        '" data-appearance-option="' + esc(option) + '">' +
+                        '<span class="ac-option-icon" aria-hidden="true">' + esc(option === 'none' ? '—' : option.slice(0, 2).toUpperCase()) +
+                        '</span><span>' + esc(option) + '</span></button>';
+                }).join('') + '</div>' + fieldStatus('appearance.' + field) + '</div>';
+    }
+
+    function appearanceColor(field, value, editable) {
+        const fallback = {
+            color: '#4a90e2', skinTone: '#f2c7a5', hairColor: '#4b3527',
+            eyeColor: '#2f7bc1', headwearColor: '#888888', glassesColor: '#333333',
+        }[field];
+        const current = /^#[0-9a-f]{6}$/i.test(String(value || '')) ? value : fallback;
+        if (!editable) {
+            return '<div class="ac-color-field"><span>' + esc(appearanceLabel(field)) +
+                '</span><i style="--swatch:' + esc(current) + '"></i><strong>' + esc(current) + '</strong></div>';
+        }
+        return '<label class="ac-color-field"><span>' + esc(appearanceLabel(field)) + '</span>' +
+            '<input type="color" data-appearance-color="' + esc(field) + '" value="' + esc(current) + '">' +
+            '<i style="--swatch:' + esc(current) + '"></i>' + fieldStatus('appearance.' + field) + '</label>';
+    }
+
+    function renderAppearance(profile, editable) {
+        const appearance = profile.appearance || {};
+        return '<div class="ac-selector-grid">' +
+            Object.keys(APPEARANCE_OPTIONS).map(function (field) {
+                return appearanceSelector(field, appearance[field], editable);
+            }).join('') + '</div><div class="ac-color-grid">' +
+            APPEARANCE_COLORS.map(function (field) {
+                return appearanceColor(field, appearance[field], editable);
+            }).join('') + '</div>';
+    }
+
     function renderProfile(context, profile) {
         const container = context.container;
         const agent = selectedAgent(context);
@@ -146,7 +231,8 @@
                         tagsField(tr('agent_responsibilities', 'Responsibilities'), 'responsibilities', profile.responsibilities, editable) +
                         tagsField(tr('agent_specialties', 'Specialties'), 'specialties', profile.specialties, editable) + '</section>' +
                     '<section class="ac-card" data-section="appearance"><h4>' + esc(tr('agent_appearance', 'Appearance')) + '</h4>' +
-                        '<div id="agent-appearance-editor" class="ac-appearance-editor" data-editable="' + (editable ? 'true' : 'false') + '"></div></section>' +
+                        '<div id="agent-appearance-editor" class="ac-appearance-editor" data-editable="' + (editable ? 'true' : 'false') + '">' +
+                            renderAppearance(profile, editable) + '</div></section>' +
                 '</div>' +
                 (restricted ? '<section class="ac-restricted"><h4>' + esc(tr('agent_restricted_configuration', 'Authenticated human configuration')) + '</h4>' +
                     restrictedCard(tr('agent_provider', 'Provider'), 'provider', agent.providerKind || agent.provider) +
@@ -317,6 +403,50 @@
                 undoField(button.getAttribute('data-undo-field'));
             });
         });
+        context.container.querySelectorAll('[data-appearance-selector]').forEach(function (selector) {
+            const field = selector.getAttribute('data-appearance-selector');
+            const toggle = selector.querySelector('.ac-selector-current');
+            const popover = selector.querySelector('.ac-option-popover');
+            const options = Array.from(selector.querySelectorAll('[data-appearance-option]'));
+            function closeSelector() {
+                popover.classList.add('hidden');
+                toggle.setAttribute('aria-expanded', 'false');
+            }
+            toggle.addEventListener('click', function () {
+                const opening = popover.classList.contains('hidden');
+                context.container.querySelectorAll('.ac-option-popover').forEach(function (other) {
+                    other.classList.add('hidden');
+                });
+                popover.classList.toggle('hidden', !opening);
+                toggle.setAttribute('aria-expanded', opening ? 'true' : 'false');
+                if (opening && options[0]) options.find(function (option) {
+                    return option.getAttribute('aria-selected') === 'true';
+                })?.focus();
+            });
+            options.forEach(function (option, index) {
+                option.addEventListener('click', function () {
+                    closeSelector();
+                    commitField('appearance.' + field, option.getAttribute('data-appearance-option'));
+                });
+                option.addEventListener('keydown', function (event) {
+                    if (event.key === 'Escape') {
+                        closeSelector();
+                        toggle.focus();
+                        return;
+                    }
+                    const delta = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1 :
+                        (event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 0);
+                    if (!delta) return;
+                    event.preventDefault();
+                    options[(index + delta + options.length) % options.length].focus();
+                });
+            });
+        });
+        context.container.querySelectorAll('[data-appearance-color]').forEach(function (input) {
+            input.addEventListener('change', function () {
+                commitField('appearance.' + input.getAttribute('data-appearance-color'), input.value);
+            });
+        });
     }
 
     async function load(context) {
@@ -369,6 +499,8 @@
             normalizeProfile: normalizeProfile,
             normalizeFieldValue: normalizeFieldValue,
             classifySaveError: classifySaveError,
+            appearanceOptions: APPEARANCE_OPTIONS,
+            renderAppearance: renderAppearance,
         },
     };
 
