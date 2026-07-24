@@ -84,6 +84,10 @@
         }, profile || {});
     }
 
+    function previewProfile(agent) {
+        return Object.assign(normalizeProfile(null, agent || {}), { __preview: true });
+    }
+
     async function requestProfile(context, aiId) {
         if (context.adapter && typeof context.adapter.getConfiguration === 'function') {
             return context.adapter.getConfiguration(aiId);
@@ -140,10 +144,11 @@
         return textField(label, field, text, editable, false);
     }
 
-    function restrictedCard(title, field, value) {
+    function restrictedCard(title, field, value, disabled) {
         return '<section class="ac-restricted-card" data-restricted-field="' + esc(field) + '">' +
             '<span>' + esc(title) + '</span><strong>' + esc(value || '—') + '</strong>' +
-            '<button type="button" data-high-risk-action="' + esc(field) + '">' +
+            '<button type="button" data-high-risk-action="' + esc(field) + '"' +
+            (disabled ? ' disabled' : '') + '>' +
             esc(tr('agent_change', 'Change')) + '</button></section>';
     }
 
@@ -241,7 +246,8 @@
         if (!isContextActive(context)) return false;
         const container = context.container;
         const agent = selectedAgent(context);
-        const editable = canEdit(context);
+        const isPreview = Boolean(profile.__preview);
+        const editable = !isPreview && canEdit(context);
         const restricted = canSeeRestricted(context);
         const appearance = profile.appearance || {};
         const role = agent.role || (profile.responsibilities || []).join(' / ') || '—';
@@ -255,7 +261,7 @@
                             '<div><span class="ac-eyebrow">' + esc(profile.aiId) + '</span>' +
                             '<h3>' + esc(profile.name || profile.aiId) + '</h3>' +
                             '<p>' + esc(profile.aiId + ' · ' + role) + '</p></div>' +
-                            '<span class="ac-active">● ACTIVE</span></section>' +
+                            '<span class="ac-active">● ' + esc(isPreview ? tr('agent_loading_short', 'LOADING') : tr('agent_active_short', 'ACTIVE')) + '</span></section>' +
                         '<section class="ac-card ac-identity-card" data-section="identity"><h4>' +
                             esc(tr('agent_identity_bilingual', 'Identity / IDENTITY')) + '</h4>' +
                             textField(tr('agent_name', 'Name'), 'name', profile.name, editable, false) +
@@ -265,13 +271,13 @@
                             '</span><strong>' + esc(appearanceOptionLabel(appearance.gender || 'none')) + '</strong></div></section>' +
                         (restricted ? '<section class="ac-restricted"><h4>' +
                             esc(tr('agent_assignment_bilingual', 'Assignment / ASSIGNMENT')) + '</h4>' +
-                            restrictedCard(tr('agent_branch', 'Branch'), 'branch', branch) +
-                            restrictedCard(tr('agent_provider', 'Provider'), 'provider', provider) +
-                            restrictedCard(tr('agent_binding', 'Provider Agent'), 'binding', agent.providerAgentId || agent.profile) +
-                            restrictedCard(tr('agent_workspace', 'Workspace'), 'workspace', agent.workspace || agent.workspacePath) +
-                            restrictedCard(tr('agent_assignment', 'Assignment'), 'assignment', agent.assignment || agent.role) +
-                            '<div class="ac-lifecycle-actions"><button type="button" data-high-risk-action="create">' +
-                                esc(tr('new_agent', 'Create Agent')) + '</button><button type="button" class="danger" data-high-risk-action="delete">' +
+                            restrictedCard(tr('agent_branch', 'Branch'), 'branch', branch, isPreview) +
+                            restrictedCard(tr('agent_provider', 'Provider'), 'provider', provider, isPreview) +
+                            restrictedCard(tr('agent_binding', 'Provider Agent'), 'binding', agent.providerAgentId || agent.profile, isPreview) +
+                            restrictedCard(tr('agent_workspace', 'Workspace'), 'workspace', agent.workspace || agent.workspacePath, isPreview) +
+                            restrictedCard(tr('agent_assignment', 'Assignment'), 'assignment', agent.assignment || agent.role, isPreview) +
+                            '<div class="ac-lifecycle-actions"><button type="button" data-high-risk-action="create"' + (isPreview ? ' disabled' : '') + '>' +
+                                esc(tr('new_agent', 'Create Agent')) + '</button><button type="button" class="danger" data-high-risk-action="delete"' + (isPreview ? ' disabled' : '') + '>' +
                                 esc(tr('delete_agent', 'Delete Agent')) + '</button></div></section>' : '') +
                         '<div class="ac-work-copy">' +
                             '<section class="ac-card" data-section="introduction"><h4>' +
@@ -644,7 +650,7 @@
             return;
         }
         if (!isContextActive(context)) return;
-        context.container.innerHTML = '<div class="am-empty">' + esc(tr('agent_configuration_loading', 'Loading Agent configuration…')) + '</div>';
+        renderProfile(context, previewProfile(agent));
         state.loading.add(aiId);
         try {
             const payload = await requestProfile(context, aiId);
@@ -684,6 +690,7 @@
             canSeeRestricted: canSeeRestricted,
             visibleSections: visibleSections,
             normalizeProfile: normalizeProfile,
+            previewProfile: previewProfile,
             normalizeFieldValue: normalizeFieldValue,
             classifySaveError: classifySaveError,
             fieldStatus: fieldStatus,

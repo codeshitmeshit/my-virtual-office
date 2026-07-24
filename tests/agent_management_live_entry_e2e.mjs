@@ -137,7 +137,32 @@ try {
       : `Boolean(document.querySelector('#agent-management-panel .ac-hero')) ||
         Boolean(document.querySelector('#agent-management-panel .ac-error'))`
   );
+  if (managementToken && await evaluate(`Boolean(document.getElementById('management-token-dialog'))`)) {
+    await evaluate(`(() => {
+      const input = document.getElementById('management-token-input');
+      input.value = ${JSON.stringify(managementToken)};
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      document.querySelector(
+        '#management-token-dialog [data-management-token-confirm]'
+      ).click();
+    })()`);
+  }
   if (await evaluate(`Boolean(document.querySelector('#agent-management-panel .ac-hero'))`)) {
+    if (managementToken) {
+      await waitFor(`Boolean(document.querySelector('#agent-management-panel .ac-selector-current')) ||
+        Boolean(document.getElementById('management-token-dialog'))`);
+      if (await evaluate(`Boolean(document.getElementById('management-token-dialog'))`)) {
+        await evaluate(`(() => {
+          const input = document.getElementById('management-token-input');
+          input.value = ${JSON.stringify(managementToken)};
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          document.querySelector(
+            '#management-token-dialog [data-management-token-confirm]'
+          ).click();
+        })()`);
+      }
+    }
+    await waitFor(`Boolean(document.querySelector('#agent-management-panel .ac-selector-current'))`);
     const visualContract = await evaluate(`(() => {
       const panel = document.getElementById('agent-management-panel');
       const config = panel.querySelector('.agent-configuration');

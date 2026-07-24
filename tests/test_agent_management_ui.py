@@ -65,3 +65,16 @@ def test_tab_panels_guard_against_stale_async_renders():
     assert "if (!isContextActive(context)) return false;" in configuration
     assert "isContextActive(state.context)" in configuration
     assert "embeddedContext.isActive" in HR
+
+
+def test_agent_switch_renders_configuration_preview_before_profile_fetch():
+    configuration = (ROOT / "app" / "agent-configuration.js").read_text(encoding="utf-8")
+    assert "function previewProfile(agent)" in configuration
+    assert "renderProfile(context, previewProfile(agent));" in configuration
+    assert "agent_configuration_loading" not in configuration[
+        configuration.index("async function load(context)") :
+        configuration.index("state.loading.add(aiId);")
+    ]
+    assert "const editable = !isPreview && canEdit(context)" in configuration
+    assert "disabled' : '')" in configuration
+    assert "instant-preview" in INDEX
