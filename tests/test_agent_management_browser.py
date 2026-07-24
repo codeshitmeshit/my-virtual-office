@@ -157,6 +157,7 @@ def test_self_and_public_detail_do_not_leak_restricted_hr_fields(tmp_path):
     assert "reports" not in public_detail.payload["hr"]
     assert "assessments" not in public_detail.payload["hr"]
     assert "accessHistory" not in public_detail.payload["hr"]
+    assert "evidence" not in str(self_detail.payload["hr"]).lower()
     logs = repository.list_access_log().items
     assert len(logs) == 1
     assert (logs[0].viewer_ai_id, logs[0].target_ai_id) == (

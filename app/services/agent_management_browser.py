@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import http.cookies
 import urllib.parse
 from dataclasses import dataclass
@@ -185,6 +186,20 @@ class AgentManagementBrowserRoutes:
     def _profile_payload(profile) -> dict[str, object] | None:
         return profile.to_dict() if profile is not None else None
 
+    @classmethod
+    def _browser_hr_projection(cls, value: object) -> object:
+        if isinstance(value, Mapping):
+            projected = {}
+            for key, nested in value.items():
+                normalized = str(key).replace("_", "").replace("-", "").lower()
+                if "evidence" in normalized or "providerenvelope" in normalized:
+                    continue
+                projected[str(key)] = cls._browser_hr_projection(nested)
+            return projected
+        if isinstance(value, (list, tuple)):
+            return [cls._browser_hr_projection(item) for item in value]
+        return copy.deepcopy(value)
+
     def get(
         self,
         path: str,
@@ -250,7 +265,9 @@ class AgentManagementBrowserRoutes:
                             "self" if target == identity.ai_id else "public"
                         ),
                         "profile": self._profile_payload(profile),
-                        "hr": result.payload["agent"],
+                        "hr": self._browser_hr_projection(
+                            result.payload["agent"]
+                        ),
                     },
                 )
             return self._error(404, "agent_management_route_not_found")

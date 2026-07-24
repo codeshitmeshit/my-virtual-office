@@ -15,6 +15,8 @@
         panels: {},
         returnFocus: null,
         mutations: [],
+        bootstrapping: false,
+        bootstrappedAudience: '',
     };
 
     function tr(key, fallback) {
@@ -109,6 +111,36 @@
 
     function setAdapters(adapters) {
         state.adapters = Object.assign({ human: null, agent: null }, adapters || {});
+        if (state.open) bootstrapAudience();
+    }
+
+    async function bootstrapAudience() {
+        if (state.bootstrapping) return false;
+        state.bootstrapping = true;
+        let result = null;
+        try {
+            if (state.adapters.agent && typeof state.adapters.agent.bootstrap === 'function') {
+                try {
+                    result = await state.adapters.agent.bootstrap();
+                } catch (_agentError) {
+                    result = null;
+                }
+            }
+            if (!result && state.adapters.human && typeof state.adapters.human.bootstrap === 'function') {
+                result = await state.adapters.human.bootstrap();
+            }
+            if (!result) return false;
+            setAudience(result.audience || { kind: 'human', aiId: '' });
+            setRoster(result.roster || []);
+            state.bootstrappedAudience = state.audience.kind;
+            return true;
+        } catch (error) {
+            state.tabs[state.activeTab].error = String(error && error.message || 'agent_management_bootstrap_failed');
+            mountActiveTab();
+            return false;
+        } finally {
+            state.bootstrapping = false;
+        }
     }
 
     function mountTab(name, implementation) {
@@ -209,6 +241,7 @@
         if (tab) state.activeTab = tab === 'humanResources' ? tab : 'configuration';
         if (!state.roster.length && Array.isArray(root.agents)) setRoster(root.agents);
         render();
+        bootstrapAudience();
         const close = root.document.getElementById('agent-management-close');
         if (close && typeof close.focus === 'function') close.focus();
         return true;
@@ -243,6 +276,7 @@
         selectAgent: selectAgent,
         setAudience: setAudience,
         setAdapters: setAdapters,
+        bootstrapAudience: bootstrapAudience,
         mountTab: mountTab,
         reportMutation: reportMutation,
         render: render,
@@ -275,6 +309,11 @@
             if (!root.AgentConfiguration && !root.document.querySelector('script[src*="agent-configuration.js"]')) {
                 const script = root.document.createElement('script');
                 script.src = 'agent-configuration.js?v=1784910000-configuration-panel';
+                root.document.body.appendChild(script);
+            }
+            if (!root.AgentManagementAdapters && !root.document.querySelector('script[src*="agent-management-adapters.js"]')) {
+                const script = root.document.createElement('script');
+                script.src = 'agent-management-adapters.js?v=1784910000-audience-adapters';
                 root.document.body.appendChild(script);
             }
             const dialog = modal();
