@@ -16,4 +16,11 @@ assert.deepEqual(
     configuration.helpers.normalizeProfile(null, { aiId: 'a', role: 'Backend' }).responsibilities,
     ['Backend'],
 );
+assert.deepEqual(
+    configuration.helpers.normalizeFieldValue('responsibilities', 'Backend, Reviewer, backend'),
+    ['Backend', 'Reviewer'],
+);
+assert.equal(configuration.helpers.classifySaveError(409, ''), 'conflict');
+assert.equal(configuration.helpers.classifySaveError(403, ''), 'denied');
+assert.equal(configuration.helpers.classifySaveError(500, ''), 'failed');
 console.log('agent configuration audience contract ok');

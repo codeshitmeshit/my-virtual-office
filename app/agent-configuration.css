@@ -15,6 +15,8 @@
 .ac-field-status.saved, .ac-field-status.undone { color: #45db91; }
 .ac-field-status.failed, .ac-field-status.denied { color: #ff6877; }
 .ac-field-status.conflict { color: #f4d60b; }
+.ac-field-feedback { display: flex; justify-content: flex-end; align-items: center; gap: 8px; min-height: 22px; }
+.ac-undo { padding: 3px 7px; color: #57d7ff; border: 1px solid #35718a; border-radius: 6px; background: transparent; cursor: pointer; }
 .ac-appearance-editor { min-height: 90px; }
 .ac-restricted { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; margin-top: 14px; }
 .ac-restricted h4 { grid-column: 1 / -1; }

@@ -8,6 +8,8 @@
         errors: new Map(),
         saveState: new Map(),
         undo: new Map(),
+        debounce: new Map(),
+        saveSequence: new Map(),
     };
 
     function esc(value) {
@@ -88,7 +90,11 @@
             failed: tr('agent_save_failed', 'Save failed'),
             undone: tr('agent_save_undone', 'Undone'),
         }[entry.state] || entry.state;
-        return '<span class="ac-field-status ' + esc(entry.state) + '" role="status">' + esc(label) + '</span>';
+        const undo = state.undo.get(field);
+        return '<span class="ac-field-feedback"><span class="ac-field-status ' + esc(entry.state) +
+            '" data-field-status="' + esc(field) + '" role="status">' + esc(label) + '</span>' +
+            (undo ? '<button type="button" class="ac-undo" data-undo-field="' + esc(field) + '">' +
+                esc(tr('undo', 'Undo')) + '</button>' : '') + '</span>';
     }
 
     function textField(label, field, value, editable, multiline) {
@@ -150,6 +156,167 @@
                     restrictedCard(tr('agent_binding', 'Provider-Agent binding'), 'binding', agent.providerAgentId || agent.profile) +
                 '</section>' : '') +
             '</div>';
+        bindFieldEvents(context);
+    }
+
+    function normalizeFieldValue(field, raw) {
+        if (field === 'responsibilities' || field === 'specialties') {
+            const seen = new Set();
+            return String(raw || '').split(',').map(function (item) { return item.trim(); })
+                .filter(function (item) {
+                    const key = item.toLowerCase();
+                    if (!item || seen.has(key)) return false;
+                    seen.add(key);
+                    return true;
+                }).slice(0, 12);
+        }
+        return String(raw == null ? '' : raw).trim();
+    }
+
+    function classifySaveError(status, code) {
+        if (status === 409 || /conflict/.test(String(code || ''))) return 'conflict';
+        if (status === 401 || status === 403 || /denied|forbidden/.test(String(code || ''))) return 'denied';
+        return 'failed';
+    }
+
+    function setSaveState(field, nextState, code) {
+        state.saveState.set(field, { state: nextState, code: code || '' });
+        const context = state.context;
+        if (!context || !context.container) return;
+        const status = context.container.querySelector('[data-field-status="' + field + '"]');
+        if (status) {
+            status.className = 'ac-field-status ' + nextState;
+            status.textContent = {
+                saving: tr('agent_save_saving', 'Saving…'),
+                saved: tr('agent_save_saved', 'Saved'),
+                conflict: tr('agent_save_conflict', 'Conflict'),
+                denied: tr('agent_save_denied', 'Denied'),
+                failed: tr('agent_save_failed', 'Save failed'),
+                undone: tr('agent_save_undone', 'Undone'),
+            }[nextState] || nextState;
+        }
+        if (context.reportMutation) {
+            context.reportMutation({ field: field, state: nextState, code: code || '' });
+        }
+    }
+
+    async function mutationRequest(context, path, body) {
+        if (context.adapter && typeof context.adapter.mutateConfiguration === 'function') {
+            return context.adapter.mutateConfiguration(path, body);
+        }
+        if (!root.i18n || typeof root.i18n.managementFetch !== 'function') {
+            throw Object.assign(new Error('agent_management_adapter_unavailable'), { status: 503 });
+        }
+        const response = await root.i18n.managementFetch(path, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+        });
+        const payload = await response.json();
+        if (!response.ok || payload.ok === false) {
+            throw Object.assign(new Error(payload.code || 'agent_profile_mutation_failed'), {
+                status: response.status,
+                code: payload.code || '',
+            });
+        }
+        return payload;
+    }
+
+    async function commitField(field, value) {
+        const context = state.context;
+        const profile = context && state.profiles.get(context.selectedAiId);
+        if (!context || !profile || !canEdit(context)) return false;
+        const sequence = (state.saveSequence.get(field) || 0) + 1;
+        state.saveSequence.set(field, sequence);
+        setSaveState(field, 'saving');
+        try {
+            const payload = await mutationRequest(
+                context,
+                context.audience.kind === 'agent'
+                    ? '/api/agent-management/browser/profile/mutate'
+                    : '/api/agent-management/profile/mutate',
+                {
+                    targetAiId: context.selectedAiId,
+                    field: field,
+                    value: normalizeFieldValue(field, value),
+                    expectedRevision: profile.revision,
+                }
+            );
+            if (state.saveSequence.get(field) !== sequence) return false;
+            state.profiles.set(context.selectedAiId, normalizeProfile(payload, selectedAgent(context)));
+            if (payload.undoToken) {
+                state.undo.set(field, {
+                    token: payload.undoToken,
+                    revision: payload.revision,
+                    expiresAt: payload.undoExpiresAt,
+                });
+            }
+            setSaveState(field, 'saved');
+            renderProfile(context, state.profiles.get(context.selectedAiId));
+            return true;
+        } catch (error) {
+            if (state.saveSequence.get(field) !== sequence) return false;
+            setSaveState(field, classifySaveError(error.status, error.code || error.message), error.code || error.message);
+            return false;
+        }
+    }
+
+    async function undoField(field) {
+        const context = state.context;
+        const undo = state.undo.get(field);
+        if (!context || !undo) return false;
+        try {
+            const payload = await mutationRequest(
+                context,
+                context.audience.kind === 'agent'
+                    ? '/api/agent-management/browser/profile/undo'
+                    : '/api/agent-management/profile/undo',
+                { undoToken: undo.token, expectedRevision: undo.revision }
+            );
+            state.undo.delete(field);
+            state.profiles.set(context.selectedAiId, normalizeProfile(payload, selectedAgent(context)));
+            setSaveState(field, 'undone');
+            renderProfile(context, state.profiles.get(context.selectedAiId));
+            return true;
+        } catch (error) {
+            state.undo.delete(field);
+            setSaveState(field, classifySaveError(error.status, error.code || error.message), error.code || error.message);
+            return false;
+        }
+    }
+
+    function scheduleTextSave(field, value) {
+        if (state.debounce.has(field) && typeof root.clearTimeout === 'function') {
+            root.clearTimeout(state.debounce.get(field));
+        }
+        if (typeof root.setTimeout !== 'function') return commitField(field, value);
+        const timer = root.setTimeout(function () {
+            state.debounce.delete(field);
+            commitField(field, value);
+        }, 450);
+        state.debounce.set(field, timer);
+        return timer;
+    }
+
+    function bindFieldEvents(context) {
+        if (!context.container || !canEdit(context)) return;
+        context.container.querySelectorAll('[data-profile-field]').forEach(function (control) {
+            const field = control.getAttribute('data-profile-field');
+            control.addEventListener('input', function () {
+                scheduleTextSave(field, control.value);
+            });
+            control.addEventListener('blur', function () {
+                if (!state.debounce.has(field)) return;
+                if (typeof root.clearTimeout === 'function') root.clearTimeout(state.debounce.get(field));
+                state.debounce.delete(field);
+                commitField(field, control.value);
+            });
+        });
+        context.container.querySelectorAll('[data-undo-field]').forEach(function (button) {
+            button.addEventListener('click', function () {
+                undoField(button.getAttribute('data-undo-field'));
+            });
+        });
     }
 
     async function load(context) {
@@ -193,11 +360,15 @@
             state.profiles.delete(aiId || (state.context && state.context.selectedAiId));
             if (state.context) return load(state.context);
         },
+        commitField: commitField,
+        undoField: undoField,
         helpers: {
             canEdit: canEdit,
             canSeeRestricted: canSeeRestricted,
             visibleSections: visibleSections,
             normalizeProfile: normalizeProfile,
+            normalizeFieldValue: normalizeFieldValue,
+            classifySaveError: classifySaveError,
         },
     };
 
