@@ -25,12 +25,28 @@ assert.equal(configuration.helpers.classifySaveError(403, ''), 'denied');
 assert.equal(configuration.helpers.classifySaveError(500, ''), 'failed');
 assert(configuration.helpers.appearanceOptions.hairStyle.includes('curly'));
 assert(configuration.helpers.appearanceOptions.deskItem.includes('checklist'));
+global.i18n = {
+    t(key) {
+        return {
+            option_female: '女',
+            option_bald: '光头',
+            option_short: '短发',
+            option_medium: '中发',
+            option_none: '无',
+        }[key] || key;
+    },
+};
+assert.equal(configuration.helpers.appearanceOptionLabel('F'), '女');
+assert.equal(configuration.helpers.appearanceOptionLabel('short'), '短发');
 const appearance = configuration.helpers.renderAppearance(
     { appearance: { hairStyle: 'short', hairColor: '#112233' } },
     true,
 );
 assert(appearance.includes('aria-haspopup="listbox"'));
 assert(appearance.includes('data-appearance-color="hairColor"'));
+assert(appearance.includes('<strong>短发</strong>'));
+assert(appearance.includes('<span>无</span>'));
+assert(!appearance.includes('<span>bald</span>'));
 assert(!appearance.includes('<select'));
 assert.equal(configuration.helpers.highRiskField('binding'), 'providerAgentId');
 assert.match(

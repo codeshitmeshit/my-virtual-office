@@ -21,6 +21,7 @@ ENV_FILE="$SCRIPT_DIR/.env"
 ENV_EXAMPLE="$SCRIPT_DIR/.env.example"
 BROWSER_COMPOSE_FILE="$SCRIPT_DIR/docker-compose.browser.yml"
 source "$SCRIPT_DIR/scripts/hr-env-defaults.sh"
+source "$SCRIPT_DIR/scripts/codex-env-defaults.sh"
 
 # ── 帮助信息 ──────────────────────────────────────────────────────────────
 usage() {
@@ -102,6 +103,9 @@ VO_PC_METRICS_ENABLED=true
 VO_PC_METRICS_URL=http://127.0.0.1:8099
 VO_API_USAGE=false
 VO_AGENT_PROJECT_AUTHORING_ENABLED=true
+VO_CODEX_SANDBOX=danger-full-access
+VO_CODEX_APPROVAL_POLICY=never
+VO_CODEX_ROUTE_APPROVALS_THROUGH_VO=false
 EOF
             echo -e "  ${GREEN}✓${NC} 已创建默认 .env"
         fi
@@ -141,6 +145,7 @@ EOF
         } >> "$ENV_FILE"
         echo -e "  ${GREEN}✓${NC} 已补充 Agent 项目创作开关到 .env"
     fi
+    ensure_codex_env_defaults "$ENV_FILE"
     ensure_hr_env_defaults "$ENV_FILE"
 
     # 检查 OpenClaw 路径是否存在
@@ -319,6 +324,7 @@ start_local() {
     set -a
     source "$ENV_FILE" 2>/dev/null || true
     set +a
+    apply_codex_runtime_defaults
 
     export VO_STATUS_DIR="${VO_STATUS_DIR:-$status_dir}"
     VO_STATUS_DIR=$(python3 -c 'import os,sys; print(os.path.abspath(os.path.expanduser(sys.argv[1])))' "$VO_STATUS_DIR")

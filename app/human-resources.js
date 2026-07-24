@@ -650,6 +650,62 @@
         }).join('');
     }
 
+    function renderEmbeddedSummary() {
+        const overview = object(state.overview);
+        const detailRecord = object(state.detail);
+        const reportSchedule = object(overview.reportSchedule);
+        const hr = object(overview.hr);
+        const runningCommands = activeCommands(overview);
+        const total = Number(overview.agentTotal || state.agents.length || 0);
+        const available = orderedAvailableAgents().length;
+        const reports = array(detailRecord.reports);
+        const recordGroups = [
+            array(detailRecord.identityHistory),
+            reports,
+            array(detailRecord.assessments),
+            array(detailRecord.accessHistory),
+        ];
+        const coverage = recordGroups.filter(function (items) { return items.length > 0; }).length;
+        const hrStatus = runningCommands.length
+            ? 'working'
+            : String(hr.status || (state.loading ? 'loading' : 'unknown'));
+        const busy = Boolean(state.commandBusy) || runningCommands.length > 0;
+        const lifecycleAction = String(hr.status || '') === 'paused' ? 'resume' : 'pause';
+        const stat = function (value, label, meta, tone) {
+            return '<article class="hr-summary-card hr-tone-' + escHtml(tone || 'neutral') + '">' +
+                '<strong>' + escHtml(value) + '</strong><span>' + escHtml(label) + '</span>' +
+                '<small>' + escHtml(meta) + '</small></article>';
+        };
+        const command = function (action, label) {
+            const working = state.commandBusy === action || Boolean(activeCommandFor(action));
+            return '<button type="button" class="hr-ops-action" onclick="HumanResources.runCommand(\'' +
+                escHtml(action) + '\')"' + (busy ? ' disabled' : '') + '>' +
+                escHtml(working ? tr('hr_command_working', 'Working...') : label) + '</button>';
+        };
+        return '<section class="hr-embedded-summary" aria-label="' +
+            escHtml(tr('hr_ops_summary', 'Human Resources summary')) + '">' +
+            '<div class="hr-summary-stats">' +
+                stat(total, tr('hr_roster_stat', 'Roster'), tr('hr_agent_total', 'Total Agents'), 'neutral') +
+                stat(available, tr('hr_available_stat', 'Available'), tr('hr_status_synced', 'Status synced'), 'success') +
+                stat(reports.length, tr('hr_report_stat', 'Reports'), overview.localDate || '—', 'neutral') +
+                stat(coverage + '/4', tr('hr_record_coverage', 'Record coverage'), tr('hr_coverage_meta', 'Identity · Report · Assessment · Access'), 'warning') +
+            '</div>' +
+            '<article class="hr-ops-console">' +
+                '<div class="hr-ops-heading"><strong>' + escHtml(tr('hr_ops_title', 'Daily operations / HR OPS')) + '</strong>' +
+                '<span class="hr-state-chip hr-tone-' + escHtml(statusTone(hrStatus)) + '">' + escHtml(semanticLabel(hrStatus)) + '</span>' +
+                '<small>' + escHtml(reportSchedule.dailyTime || '18:00') + '</small></div>' +
+                '<div class="hr-ops-actions">' +
+                    command('sync', tr('hr_sync_team', 'Sync Agent team')) +
+                    command('complete_information', tr('hr_complete_information', 'Complete information')) +
+                    '<button type="button" class="hr-ops-action" onclick="HumanResources.openDailySync()"' +
+                    (busy ? ' disabled' : '') + '>' + escHtml(tr('hr_daily_sync', 'Daily report')) + '</button>' +
+                    command('run', tr('hr_run_cycle', 'Run cycle')) +
+                    command(lifecycleAction, lifecycleAction === 'pause' ? tr('hr_pause', 'Pause HR') : tr('hr_resume', 'Resume HR')) +
+                '</div>' +
+            '</article>' +
+        '</section>';
+    }
+
     function loadMoreButton(kind, cursor) {
         const busy = state.detailPaging === kind;
         return cursor ? '<button type="button" class="hr-load-more" onclick="HumanResources.loadMore(\'' +
@@ -681,15 +737,15 @@
                 '<div><span>' + escHtml(tr('hr_provider', 'Provider')) + '</span><strong>' + escHtml(agent.providerKind || '—') + '</strong></div>' +
                 '<div><span>' + escHtml(tr('hr_introduction_source', 'Introduction source')) + '</span><strong>' + escHtml(object(agent.introductionProvenance).source || '—') + '</strong></div>' +
                 '<div><span>' + escHtml(tr('hr_workflow_state', 'Workflow state')) + '</span><strong>' + escHtml(semanticLabel(agent.workflowState)) + '</strong></div></section>' +
-            '<section class="hr-detail-section"><h4>' + escHtml(tr('hr_identity_history', 'Identity and provenance')) + '</h4>' +
+            '<section class="hr-detail-section hr-identity-section"><h4>' + escHtml(tr('hr_identity_history', 'Identity and provenance')) + '</h4>' +
                 (identities.length ? '<ul class="hr-history-list">' + renderIdentityHistory(identities) + '</ul>' : '<div class="hr-inline-empty">—</div>') + '</section>' +
-            '<section class="hr-detail-section"><h4>' + escHtml(tr('hr_daily_reports', 'Daily reports')) + '</h4>' +
+            '<section class="hr-detail-section hr-reports-section"><h4>' + escHtml(tr('hr_daily_reports', 'Daily reports')) + '</h4>' +
                 (reports.length ? '<div class="hr-record-list">' + reports.map(renderReport).join('') + '</div>' : '<div class="hr-inline-empty">' + escHtml(tr('hr_no_reports', 'No daily reports')) + '</div>') +
                 loadMoreButton('reports', agent.reportNextCursor) + '</section>' +
-            '<section class="hr-detail-section"><h4>' + escHtml(tr('hr_assessments', 'HR assessments')) + '</h4>' +
+            '<section class="hr-detail-section hr-assessments-section"><h4>' + escHtml(tr('hr_assessments', 'HR assessments')) + '</h4>' +
                 (assessments.length ? '<div class="hr-record-list">' + assessments.map(renderAssessment).join('') + '</div>' : '<div class="hr-inline-empty">' + escHtml(tr('hr_no_assessments', 'No assessments')) + '</div>') +
                 loadMoreButton('assessments', agent.assessmentNextCursor) + '</section>' +
-            '<section class="hr-detail-section"><h4>' + escHtml(tr('hr_access_history', 'Agent access history')) + '</h4>' +
+            '<section class="hr-detail-section hr-access-section"><h4>' + escHtml(tr('hr_access_history', 'Agent access history')) + '</h4>' +
                 (accesses.length ? '<ul class="hr-history-list">' + renderAccessHistory(accesses) + '</ul>' : '<div class="hr-inline-empty">' + escHtml(tr('hr_no_access_history', 'No Agent has viewed this record')) + '</div>') +
                 loadMoreButton('access', agent.accessNextCursor) + '</section>' +
         '</div>';
@@ -704,6 +760,7 @@
             : orderedAgents.map(renderAgent).join('') || '<div class="hr-inline-empty">' + escHtml(tr('hr_empty_roster', 'No Agents are in the HR directory yet.')) + '</div>';
         if (embeddedContext) {
             element.innerHTML = '<div class="hr-shell hr-shell-embedded">' +
+                renderEmbeddedSummary() +
                 '<main class="hr-agent-detail" tabindex="-1">' +
                 (state.selectedAgentId ? renderAgentDetailPanel() : renderOverviewPanel()) +
                 '</main></div>';

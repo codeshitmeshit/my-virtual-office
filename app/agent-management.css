@@ -8,6 +8,10 @@
     background: rgba(4, 6, 18, .8);
 }
 
+.agent-management-modal.hidden {
+    display: none;
+}
+
 .agent-management-dialog {
     width: min(1500px, 96vw);
     height: min(900px, 92vh);
@@ -108,6 +112,7 @@
 .am-roster-avatar { font-size: 24px; }
 
 .agent-management-panel { min-width: 0; overflow: auto; padding: 18px; }
+.agent-management-panel[data-active-tab="configuration"] { overflow: hidden; }
 .agent-management-feedback { position: absolute; overflow: hidden; width: 1px; height: 1px; clip: rect(0 0 0 0); }
 .am-empty { padding: 32px; color: #9297bc; text-align: center; }
 

@@ -253,8 +253,8 @@ http://localhost:8090/setup
 | `VO_CODEX_WORKSPACE_ROOT` | `VO_STATUS_DIR/codex-agents` | Virtual Office 创建 Codex agent 的根目录 |
 | `VO_CODEX_MAIN_WORKSPACE` | `VO_CODEX_WORKSPACE` | `codex-main` 和 native agents 使用的主 workspace |
 | `VO_CODEX_MODEL` | 空 | Codex 模型覆盖 |
-| `VO_CODEX_SANDBOX` | `workspace-write` | Codex sandbox 模式 |
-| `VO_CODEX_APPROVAL_POLICY` | `on-request` | Codex approval policy |
+| `VO_CODEX_SANDBOX` | `danger-full-access` | 本地启动默认关闭 Codex sandbox；仅适用于受信任机器 |
+| `VO_CODEX_APPROVAL_POLICY` | `never` | 本地启动默认不请求 Codex approval |
 | `VO_CODEX_ROUTE_APPROVALS_THROUGH_VO` | `false` | 是否强制使用 `untrusted` 并把 Codex 审批路由到 VO |
 | `VO_CODEX_INCLUDE_MAIN` | `true` | 是否显示 `codex-main` |
 | `VO_CODEX_INCLUDE_NATIVE_AGENTS` | `true` | 是否发现 `$CODEX_HOME/agents/*.toml` |

@@ -234,6 +234,7 @@
         });
         const container = panel();
         if (container) {
+            container.setAttribute('data-active-tab', state.activeTab);
             container.setAttribute(
                 'aria-labelledby',
                 state.activeTab === 'configuration'
@@ -347,12 +348,20 @@
     root.openHumanResources = function () { return open('humanResources'); };
     root.closeHumanResources = close;
 
+    // Human Resources is loaded before Agent Management in the legacy page.
+    // Register it again from this side so script order can never leave the tab
+    // permanently on its loading placeholder.
+    if (root.HumanResources) {
+        api.mountTab('humanResources', root.HumanResources);
+    }
+
     if (root.document) {
         root.document.addEventListener('keydown', handleKeydown);
         root.document.addEventListener('DOMContentLoaded', function () {
             [
-                'agent-management.css?v=1784910000-merged-shell',
-                'agent-configuration.css?v=1784910000-configuration-panel',
+                'agent-management.css?v=1784940000-entry-visibility',
+                'agent-configuration.css?v=1784942600-dropdown-visibility',
+                'agent-configuration-figma.css?v=1784990400-three-column-scroll',
             ].forEach(function (href) {
                 const name = href.split('?')[0];
                 if (root.document.querySelector('link[href*="' + name + '"]')) return;
@@ -363,12 +372,12 @@
             });
             if (!root.AgentConfiguration && !root.document.querySelector('script[src*="agent-configuration.js"]')) {
                 const script = root.document.createElement('script');
-                script.src = 'agent-configuration.js?v=1784910000-configuration-panel';
+                script.src = 'agent-configuration.js?v=1784990400-three-column-scroll';
                 root.document.body.appendChild(script);
             }
             if (!root.AgentManagementAdapters && !root.document.querySelector('script[src*="agent-management-adapters.js"]')) {
                 const script = root.document.createElement('script');
-                script.src = 'agent-management-adapters.js?v=1784910000-audience-adapters';
+                script.src = 'agent-management-adapters.js?v=1784941800-roster-fallback';
                 root.document.body.appendChild(script);
             }
             const dialog = modal();
