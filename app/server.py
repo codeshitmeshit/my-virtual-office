@@ -77,6 +77,8 @@ from services import hr_runtime as hr_runtime_service
 from services import hr_scheduler as hr_scheduler_service
 from services import vo_agent_communication as vo_agent_communication_service
 from services import agent_legacy_mutation_policy as agent_legacy_mutation_policy_service
+from services import agent_management_http as agent_management_http_service
+from services import agent_management_runtime as agent_management_runtime_service
 from services.project_execution_ordering import first_incomplete_task
 from services.chat_history_jsonl_cache import JsonlSnapshotCache
 from services import system_agent_lifecycle as system_agent_lifecycle_service
@@ -21136,6 +21138,8 @@ _hr_scheduler_runtime = hr_scheduler_service.HRLoopRuntime()
 _hr_command_router = hr_runtime_service.HRCommandRouter()
 _hr_application_runtime = None
 _hr_application_runtime_lock = threading.Lock()
+_agent_management_runtime = None
+_agent_management_runtime_lock = threading.Lock()
 
 
 def _hr_provider_agent_id():
@@ -21207,6 +21211,18 @@ def _get_hr_application_runtime():
             if _hr_application_runtime.scheduler_loop is not None:
                 _install_hr_scheduler_loop(_hr_application_runtime.scheduler_loop)
         return _hr_application_runtime
+
+
+def _get_agent_management_runtime():
+    global _agent_management_runtime
+    with _agent_management_runtime_lock:
+        if _agent_management_runtime is None:
+            _agent_management_runtime = (
+                agent_management_runtime_service.build_agent_management_runtime(
+                    status_dir=STATUS_DIR,
+                )
+            )
+        return _agent_management_runtime
 
 
 def _install_hr_scheduler_loop(loop):
@@ -27164,6 +27180,38 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             )
             return None
 
+    def _agent_management_routes(self):
+        try:
+            return _get_agent_management_runtime().routes
+        except Exception:
+            self._send_json(
+                {"ok": False, "code": "agent_management_runtime_unavailable"},
+                status=503,
+            )
+            return None
+
+    def _handle_agent_management_get(self, request_path):
+        if self._reject_untrusted_management_request():
+            return
+        routes = self._agent_management_routes()
+        if routes is None:
+            return
+        response = routes.get(request_path)
+        self._send_json(response.payload, status=response.status)
+
+    def _handle_agent_management_post(self, request_path):
+        if self._reject_untrusted_management_request():
+            return
+        body, error = self._read_limited_json_body(limit=self._MANAGEMENT_BODY_LIMIT)
+        if error:
+            self._send_json_error(error)
+            return
+        routes = self._agent_management_routes()
+        if routes is None:
+            return
+        response = routes.post(request_path, body)
+        self._send_json(response.payload, status=response.status)
+
     def _hr_agent_auth_request(self):
         try:
             remote_host = str(self.client_address[0])
@@ -27410,6 +27458,11 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
         parsed_url = urllib.parse.urlparse(self.path)
         request_path = parsed_url.path
         query_params = urllib.parse.parse_qs(parsed_url.query)
+        if agent_management_http_service.AgentManagementHTTPRoutes.handles(
+            "GET", request_path
+        ):
+            self._handle_agent_management_get(request_path)
+            return
         if hr_http_service.HRHTTPRoutes.handles(request_path):
             self._handle_hr_get(request_path, query_params)
             return
@@ -30016,6 +30069,11 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
     def do_POST(self):
         parsed_url = urllib.parse.urlparse(self.path)
         request_path = parsed_url.path
+        if agent_management_http_service.AgentManagementHTTPRoutes.handles(
+            "POST", request_path
+        ):
+            self._handle_agent_management_post(request_path)
+            return
         if hr_http_service.HRHTTPRoutes.handles(request_path):
             self._handle_hr_post(request_path)
             return
