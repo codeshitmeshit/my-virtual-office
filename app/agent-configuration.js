@@ -240,7 +240,11 @@
                     restrictedCard(tr('agent_workspace', 'Workspace'), 'workspace', agent.workspace || agent.workspacePath) +
                     restrictedCard(tr('agent_assignment', 'Assignment'), 'assignment', agent.assignment || agent.role) +
                     restrictedCard(tr('agent_binding', 'Provider-Agent binding'), 'binding', agent.providerAgentId || agent.profile) +
+                    '<div class="ac-lifecycle-actions"><button type="button" data-high-risk-action="create">' +
+                        esc(tr('new_agent', 'Create Agent')) + '</button><button type="button" class="danger" data-high-risk-action="delete">' +
+                        esc(tr('delete_agent', 'Delete Agent')) + '</button></div>' +
                 '</section>' : '') +
+                '<div id="agent-high-risk-dialog"></div>' +
             '</div>';
         bindFieldEvents(context);
     }
@@ -447,6 +451,94 @@
                 commitField('appearance.' + input.getAttribute('data-appearance-color'), input.value);
             });
         });
+        context.container.querySelectorAll('[data-high-risk-action]').forEach(function (button) {
+            button.addEventListener('click', function () {
+                openHighRiskDialog(button.getAttribute('data-high-risk-action'));
+            });
+        });
+    }
+
+    function highRiskField(action) {
+        return {
+            provider: 'providerKind',
+            branch: 'branch',
+            workspace: 'workspace',
+            assignment: 'assignment',
+            binding: 'providerAgentId',
+        }[action] || action;
+    }
+
+    function openHighRiskDialog(action) {
+        const context = state.context;
+        if (!context || context.audience.kind !== 'human') return false;
+        const host = context.container.querySelector('#agent-high-risk-dialog');
+        if (!host) return false;
+        const agent = selectedAgent(context);
+        const field = highRiskField(action);
+        const beforeValue = action === 'create' ? null : (
+            action === 'delete' ? { exists: true } : (agent[field] || agent[action] || '')
+        );
+        const requiresValue = action !== 'delete';
+        host.innerHTML = '<div class="ac-confirm-backdrop"><section class="ac-confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="ac-confirm-title">' +
+            '<h4 id="ac-confirm-title">' + esc(tr('agent_confirm_change', 'Confirm high-risk change')) + '</h4>' +
+            '<dl><dt>' + esc(tr('agent_target', 'Agent')) + '</dt><dd>' + esc(action === 'create' ? tr('new_agent', 'New Agent') : context.selectedAiId) + '</dd>' +
+            '<dt>' + esc(tr('agent_action', 'Action')) + '</dt><dd>' + esc(action) + '</dd>' +
+            '<dt>' + esc(tr('agent_before', 'Before')) + '</dt><dd>' + esc(JSON.stringify(beforeValue)) + '</dd></dl>' +
+            (requiresValue ? '<label><span>' + esc(tr('agent_after', 'After')) + '</span><input type="text" data-high-risk-value value="' +
+                esc(action === 'create' ? '' : beforeValue) + '"></label>' : '') +
+            '<p class="ac-confirm-error" role="status"></p><footer><button type="button" data-confirm-cancel>' +
+                esc(tr('cancel', 'Cancel')) + '</button><button type="button" class="danger" data-confirm-submit>' +
+                esc(tr('confirm', 'Confirm')) + '</button></footer></section></div>';
+        host.querySelector('[data-confirm-cancel]').addEventListener('click', function () {
+            host.innerHTML = '';
+        });
+        host.querySelector('[data-confirm-submit]').addEventListener('click', async function (event) {
+            const valueInput = host.querySelector('[data-high-risk-value]');
+            const value = valueInput ? valueInput.value.trim() : '';
+            let targetAiId = context.selectedAiId;
+            let before = action === 'create' ? null : (
+                action === 'delete' ? { exists: true } : { [field]: beforeValue }
+            );
+            let after;
+            if (action === 'create') {
+                targetAiId = value.toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-|-$/g, '');
+                after = { id: targetAiId, name: value, providerKind: 'openclaw' };
+            } else if (action === 'delete') {
+                after = null;
+            } else {
+                after = { [field]: value };
+            }
+            const error = host.querySelector('.ac-confirm-error');
+            if (!targetAiId || (requiresValue && !value)) {
+                error.textContent = tr('agent_change_invalid', 'A new value is required');
+                return;
+            }
+            event.currentTarget.disabled = true;
+            try {
+                const adapter = context.adapter;
+                if (!adapter || typeof adapter.applyHighRisk !== 'function') {
+                    throw Object.assign(new Error('agent_management_command_unavailable'), { status: 503 });
+                }
+                await adapter.applyHighRisk({
+                    targetAiId: targetAiId,
+                    action: action,
+                    before: before,
+                    after: after,
+                    revision: action === 'create' ? 0 : Number((state.profiles.get(context.selectedAiId) || {}).revision || 0),
+                });
+                host.innerHTML = '';
+                state.profiles.delete(context.selectedAiId);
+                if (context.reportMutation) context.reportMutation({ state: 'saved', action: action, message: tr('agent_change_applied', 'Change applied') });
+                if (root.AgentManagement) root.AgentManagement.bootstrapAudience();
+                load(context);
+            } catch (failure) {
+                event.currentTarget.disabled = false;
+                error.textContent = failure && failure.message || tr('agent_change_failed', 'Change failed');
+            }
+        });
+        const input = host.querySelector('[data-high-risk-value]');
+        (input || host.querySelector('[data-confirm-submit]')).focus();
+        return true;
     }
 
     async function load(context) {
@@ -492,6 +584,7 @@
         },
         commitField: commitField,
         undoField: undoField,
+        openHighRiskDialog: openHighRiskDialog,
         helpers: {
             canEdit: canEdit,
             canSeeRestricted: canSeeRestricted,
@@ -501,6 +594,7 @@
             classifySaveError: classifySaveError,
             appearanceOptions: APPEARANCE_OPTIONS,
             renderAppearance: renderAppearance,
+            highRiskField: highRiskField,
         },
     };
 

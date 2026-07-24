@@ -78,6 +78,7 @@ from services import hr_scheduler as hr_scheduler_service
 from services import vo_agent_communication as vo_agent_communication_service
 from services import agent_legacy_mutation_policy as agent_legacy_mutation_policy_service
 from services import agent_management_http as agent_management_http_service
+from services import agent_management_executor as agent_management_executor_service
 from services import agent_management_runtime as agent_management_runtime_service
 from services import agent_management_session_mint as agent_management_session_mint_service
 from services import agent_management_session_exchange as agent_management_session_exchange_service
@@ -21229,6 +21230,11 @@ def _get_agent_management_runtime():
             _agent_management_runtime = (
                 agent_management_runtime_service.build_agent_management_runtime(
                     status_dir=STATUS_DIR,
+                    high_risk_executor=agent_management_executor_service.AgentManagementCommandExecutor(
+                        create_agent=_handle_agent_create,
+                        delete_agent=_handle_agent_delete,
+                        update_agent=_update_office_config_agent,
+                    ).execute,
                 )
             )
         return _agent_management_runtime

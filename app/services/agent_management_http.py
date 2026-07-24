@@ -10,6 +10,7 @@ from services.agent_management_confirmations import (
     AgentManagementConfirmationError,
     AgentManagementConfirmationService,
 )
+from services.agent_management_high_risk import AgentManagementHighRiskService
 from services.agent_profile_configuration import ConfigurationActor
 from services.agent_profile_mutations import AgentProfileMutationAPI
 from services.agent_profile_store import (
@@ -23,8 +24,9 @@ PROFILE_PREFIX = "/api/agent-management/profiles/"
 PROFILE_MUTATION_PATH = "/api/agent-management/profile/mutate"
 PROFILE_UNDO_PATH = "/api/agent-management/profile/undo"
 CONFIRMATION_PATH = "/api/agent-management/confirmations"
+COMMAND_PATH = "/api/agent-management/commands"
 POST_PATHS = frozenset(
-    {PROFILE_MUTATION_PATH, PROFILE_UNDO_PATH, CONFIRMATION_PATH}
+    {PROFILE_MUTATION_PATH, PROFILE_UNDO_PATH, CONFIRMATION_PATH, COMMAND_PATH}
 )
 
 
@@ -43,6 +45,7 @@ class AgentManagementHTTPRoutes:
         profiles: AgentProfileStore,
         mutations: AgentProfileMutationAPI,
         confirmations: AgentManagementConfirmationService,
+        high_risk: AgentManagementHighRiskService | None = None,
     ):
         if not isinstance(profiles, AgentProfileStore):
             raise TypeError("profiles must be an AgentProfileStore")
@@ -55,6 +58,7 @@ class AgentManagementHTTPRoutes:
         self._profiles = profiles
         self._mutations = mutations
         self._confirmations = confirmations
+        self._high_risk = high_risk
 
     @staticmethod
     def handles(method: str, path: str) -> bool:
@@ -103,6 +107,13 @@ class AgentManagementHTTPRoutes:
             return AgentManagementHTTPResponse(result.status, result.payload)
         if path == CONFIRMATION_PATH:
             return self._issue_confirmation(actor, body)
+        if path == COMMAND_PATH:
+            if self._high_risk is None:
+                return AgentManagementHTTPResponse(
+                    503, {"ok": False, "code": "agent_management_command_unavailable"}
+                )
+            result = self._high_risk.execute(actor, body)
+            return AgentManagementHTTPResponse(result.status, result.payload)
         return AgentManagementHTTPResponse(
             404, {"ok": False, "code": "agent_management_route_not_found"}
         )

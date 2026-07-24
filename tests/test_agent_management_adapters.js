@@ -35,6 +35,42 @@ global.fetch = async (url, options = {}) => {
 };
 
 (async () => {
+    const humanCalls = [];
+    global.i18n = {
+        managementFetch: async (url, options = {}) => {
+            humanCalls.push({
+                url: String(url),
+                body: options.body ? JSON.parse(options.body) : null,
+            });
+            if (String(url).endsWith('/confirmations')) {
+                return new Response(JSON.stringify({
+                    ok: true,
+                    confirmation: { challengeToken: 'challenge-token' },
+                }), { status: 201 });
+            }
+            if (String(url).endsWith('/commands')) {
+                return new Response(JSON.stringify({ ok: true }), { status: 200 });
+            }
+            throw new Error('unexpected human route');
+        },
+    };
+    const human = adapters.createHumanAdapter();
+    const change = {
+        targetAiId: 'codex-local',
+        action: 'branch',
+        before: { branch: 'hq' },
+        after: { branch: 'finance' },
+        revision: 0,
+    };
+    await human.applyHighRisk(change);
+    assert.deepEqual(humanCalls, [
+        { url: '/api/agent-management/confirmations', body: change },
+        {
+            url: '/api/agent-management/commands',
+            body: Object.assign({}, change, { challengeToken: 'challenge-token' }),
+        },
+    ]);
+
     const agent = adapters.createAgentAdapter();
     const bootstrap = await agent.bootstrap();
     assert.equal(bootstrap.audience.aiId, 'codex-local');
@@ -47,9 +83,11 @@ global.fetch = async (url, options = {}) => {
         () => agent.hrRequest('/api/human-resources/cycles/run', { method: 'POST' }),
         /agent_management_command_denied/,
     );
+    delete global.i18n;
     global.fetch = previousFetch;
     console.log('agent management adapters contract ok');
 })().catch((error) => {
+    delete global.i18n;
     global.fetch = previousFetch;
     console.error(error);
     process.exitCode = 1;

@@ -9,6 +9,7 @@ from services.agent_management_confirmations import (
     AgentManagementConfirmationService,
 )
 from services.agent_management_http import AgentManagementHTTPRoutes
+from services.agent_management_high_risk import AgentManagementHighRiskService
 from services.agent_profile_configuration import AgentProfileConfigurationService
 from services.agent_profile_mutations import AgentProfileMutationAPI
 from services.agent_profile_store import AgentProfileStore
@@ -25,6 +26,7 @@ class AgentManagementRuntime:
 def build_agent_management_runtime(
     *,
     status_dir: str | Path,
+    high_risk_executor=None,
 ) -> AgentManagementRuntime:
     root = Path(status_dir)
     profiles = AgentProfileStore(
@@ -34,10 +36,20 @@ def build_agent_management_runtime(
     configuration = AgentProfileConfigurationService(profiles)
     mutations = AgentProfileMutationAPI(configuration, profiles)
     confirmations = AgentManagementConfirmationService()
+    high_risk = (
+        AgentManagementHighRiskService(
+            profiles=profiles,
+            confirmations=confirmations,
+            executor=high_risk_executor,
+        )
+        if high_risk_executor is not None
+        else None
+    )
     routes = AgentManagementHTTPRoutes(
         profiles=profiles,
         mutations=mutations,
         confirmations=confirmations,
+        high_risk=high_risk,
     )
     return AgentManagementRuntime(
         routes=routes,

@@ -91,6 +91,42 @@ def test_http_routes_issue_payload_bound_confirmation(tmp_path):
     assert "challengeToken" in response.payload["confirmation"]
 
 
+def test_http_routes_consume_challenge_before_delegating_command(tmp_path):
+    calls = []
+    routes = build_agent_management_runtime(
+        status_dir=tmp_path,
+        high_risk_executor=lambda *args: calls.append(args) or {"ok": True},
+    ).routes
+    change = {
+        "targetAiId": "codex-local",
+        "action": "provider",
+        "before": {"providerKind": "openclaw"},
+        "after": {"providerKind": "codex"},
+        "revision": 0,
+    }
+    challenge = routes.post(
+        agent_management_http.CONFIRMATION_PATH,
+        change,
+    )
+    command = routes.post(
+        agent_management_http.COMMAND_PATH,
+        {
+            **change,
+            "challengeToken": challenge.payload["confirmation"]["challengeToken"],
+        },
+    )
+
+    assert command.status == 200
+    assert calls == [
+        (
+            "provider",
+            "codex-local",
+            {"providerKind": "openclaw"},
+            {"providerKind": "codex"},
+        )
+    ]
+
+
 def test_http_route_shape_is_strict_and_does_not_claim_future_session_paths(
     tmp_path,
 ):

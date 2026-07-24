@@ -65,6 +65,28 @@
                     body: JSON.stringify(body),
                 }));
             },
+            async applyHighRisk(change) {
+                const challenge = await responseJson(await humanFetch(
+                    '/api/agent-management/confirmations',
+                    {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(change),
+                    }
+                ));
+                return responseJson(await humanFetch(
+                    '/api/agent-management/commands',
+                    {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(Object.assign(
+                            {},
+                            change,
+                            { challengeToken: challenge.confirmation.challengeToken }
+                        )),
+                    }
+                ));
+            },
             async hrRequest(url, options) {
                 return responseJson(await humanFetch(url, options));
             },

@@ -32,4 +32,5 @@ const appearance = configuration.helpers.renderAppearance(
 assert(appearance.includes('aria-haspopup="listbox"'));
 assert(appearance.includes('data-appearance-color="hairColor"'));
 assert(!appearance.includes('<select'));
+assert.equal(configuration.helpers.highRiskField('binding'), 'providerAgentId');
 console.log('agent configuration audience contract ok');
