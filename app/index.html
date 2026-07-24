@@ -15,6 +15,7 @@
     <link rel="stylesheet" href="human-resources.css?v=1784780212-hr-daily-sync">
     <link rel="stylesheet" href="human-resources-figma.css?v=1784994300-compact-layout">
     <link rel="stylesheet" href="agent-management.css?v=1784940000-entry-visibility">
+    <link rel="stylesheet" href="meeting-center.css?v=1784824000-bold-list-title">
     <link rel="stylesheet" href="fonts.css?v=1784780212.05.07">
     <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
     <!-- i18n: inline locale data for immediate init -->
@@ -661,25 +662,27 @@
     <!-- Meetings Dashboard Modal -->
     <div id="meetingsModal" class="modal hidden">
         <div class="modal-content meetings-modal-content">
-            <div class="modal-header">
-                <span class="modal-emoji">📊</span>
-                <h2 data-i18n="meetings_title">Meetings</h2>
-                <span class="close-btn" onclick="closeMeetingsModal()">&times;</span>
+            <div class="meeting-center-header">
+                <div class="meeting-center-heading">
+                    <h2 data-i18n="meeting_center_title">AI Meeting Center</h2>
+                </div>
+                <span id="meeting-center-status" class="meeting-center-status" aria-live="polite"></span>
+                <button class="meeting-center-new" type="button" onclick="toggleNewMeetingForm()">＋ <span data-i18n="new_meeting">New Meeting</span></button>
+                <button class="meeting-center-close" type="button" onclick="closeMeetingsModal()" aria-label="Close">&times;</button>
             </div>
             <div class="mtg-tabs">
                 <button class="mtg-tab active" data-tab="active" onclick="switchMtgTab('active')" data-i18n="active">Active</button>
                 <button class="mtg-tab" data-tab="requests" onclick="switchMtgTab('requests')" data-i18n="meeting_ai_requests">AI Requests</button>
                 <button class="mtg-tab" data-tab="completed" onclick="switchMtgTab('completed')" data-i18n="history">History</button>
             </div>
-            <div class="mtg-bulk-actions">
-                <button class="mtg-btn" onclick="toggleNewMeetingForm()">➕ <span id="new-mtg-btn-label" data-i18n="new_meeting">New Meeting</span></button>
-                <button class="mtg-btn" onclick="mtgExpandAll()" data-i18n="sidebar_expand_all">▼ Expand All</button>
-                <button class="mtg-btn" onclick="mtgCollapseAll()" data-i18n="sidebar_collapse_all">▲ Collapse All</button>
-            </div>
             <div id="mtg-history-tools" class="mtg-history-tools hidden">
                 <input id="mtg-history-search" class="mtg-search-input" type="search" oninput="setMeetingHistorySearch(this.value)" data-i18n-placeholder="meeting_history_search_placeholder" placeholder="Search meeting history">
             </div>
-            <div id="mtg-cards" class="mtg-cards"></div>
+            <div id="mtg-cards" class="meeting-center-workspace">
+                <aside id="meeting-center-list" class="meeting-center-list" aria-label="Meetings and requests"></aside>
+                <main id="meeting-center-main" class="meeting-center-main"></main>
+                <aside id="meeting-center-controls" class="meeting-center-controls" aria-label="Human controls"></aside>
+            </div>
         </div>
     </div>
 
@@ -1130,7 +1133,8 @@
     }
     </script>
     <script src="internal-bubble.js?v=1784780212"></script>
-    <script src="game.js?v=1784780212-weather-updated-at"></script>
+    <script src="game.js?v=1784823000-history-layout"></script>
+    <script src="meeting-center.js?v=1784823000-history-layout"></script>
     <script src="agent-guide.js?v=1784780212-agent-guide-skill-md"></script>
     <script src="dashboard-realtime.js?v=1784780212-dashboard-realtime"></script>
     <script src="browser-viewer-url.js?v=1784780212-viewer-proxy"></script>
