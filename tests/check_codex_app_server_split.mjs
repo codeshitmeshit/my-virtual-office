@@ -7,7 +7,9 @@ const adapter = fs.readFileSync(path.join(root, 'app/providers/codex_app_server.
 const shim = fs.readFileSync(path.join(root, 'app/providers/codex_bridge.py'), 'utf8');
 
 const adapterMarkers = [
-  'from provider_app_server import JsonlAppServerRuntime',
+  'from provider_app_server import',
+  'AppServerResponseError',
+  'JsonlAppServerRuntime',
   'class CodexAppServerClient',
   'class CodexHttpBridgeClient',
   'def get_codex_bridge',

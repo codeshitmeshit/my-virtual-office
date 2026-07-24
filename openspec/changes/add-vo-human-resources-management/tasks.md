@@ -144,7 +144,7 @@
 
 - [x] 17.1 Run and record focused Python tests for profile store/configuration policy, undo, confirmation challenges, legacy-route hardening, Agent session mint/exchange/resolution, HR projections/audit, and thin HTTP delegation; resolve every failure without weakening specified assertions.
 - [x] 17.2 Run and record focused Node/static/browser tests for the merged shell, configuration panel, Human Resources embedding, localization, accessibility, modularity, and prohibition on new Agent Management logic in `app/game.js` or `app/server.py`.
-- [ ] 17.3 Run and record Archive Room Phase 1–8, archive-manager Phase 4, meetings, projects, Agent workspace, Agent create/delete, Provider/binding, communication Skill, management-token, existing HR, i18n, and server/service-boundary regressions.
+- [x] 17.3 Run and record Archive Room Phase 1–8, archive-manager Phase 4, meetings, projects, Agent workspace, Agent create/delete, Provider/binding, communication Skill, management-token, existing HR, i18n, and server/service-boundary regressions.
 - [ ] 17.4 Run local live-browser acceptance with deterministic fake Provider data for human authentication, Agent session exchange, both tabs, self/public/full disclosure, auto-save/undo, high-risk denial/confirmation, HR asynchronous commands, partial failures, degraded reads, and restart-invalidated session behavior; save assertions and screenshots as supporting evidence only.
 
 ## 18. Development-Machine End-To-End Regression Gate

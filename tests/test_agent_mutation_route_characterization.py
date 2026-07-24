@@ -9,6 +9,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SERVER = (ROOT / "app" / "server.py").read_text(encoding="utf-8")
 GAME = (ROOT / "app" / "game.js").read_text(encoding="utf-8")
+AGENT_MANAGEMENT_ADAPTERS = (
+    ROOT / "app" / "agent-management-adapters.js"
+).read_text(encoding="utf-8")
 INDEX = (ROOT / "app" / "index.html").read_text(encoding="utf-8")
 MODELS = (ROOT / "app" / "models.html").read_text(encoding="utf-8")
 SETUP = (ROOT / "app" / "setup.html").read_text(encoding="utf-8")
@@ -225,13 +228,17 @@ def test_current_browser_callers_distinguish_raw_and_managed_fetches():
     raw_calls = (
         "fetch('/api/office-config',",
         "fetch('/api/agent-workspace/'",
-        "fetch('/api/agent/create',",
-        "fetch('/api/agent/delete',",
         "fetch('/api/agent/'",
         "fetch('/api/skills-library/apply',",
     )
     for call in raw_calls:
         assert call in GAME
+
+    assert "fetch('/api/agent/create'," not in GAME
+    assert "fetch('/api/agent/delete'," not in GAME
+    assert "async applyHighRisk(change)" in AGENT_MANAGEMENT_ADAPTERS
+    assert "'/api/agent-management/confirmations'" in AGENT_MANAGEMENT_ADAPTERS
+    assert "'/api/agent-management/commands'" in AGENT_MANAGEMENT_ADAPTERS
 
     assert "i18n.managementFetch('/setup/save'," in GAME
     assert (

@@ -19,23 +19,23 @@
       },
       {
         "file": "app/server.py",
-        "line": 4505
+        "line": 4512
       },
       {
         "file": "app/server.py",
-        "line": 4891
+        "line": 4898
       },
       {
         "file": "app/server.py",
-        "line": 5348
+        "line": 5355
       },
       {
         "file": "app/server.py",
-        "line": 6130
+        "line": 6137
       },
       {
         "file": "app/server.py",
-        "line": 7464
+        "line": 7471
       },
       {
         "file": "app/services/conversation_timeline_events.py",
@@ -49,7 +49,7 @@
     "approval.required": [
       {
         "file": "app/server.py",
-        "line": 6126
+        "line": 6133
       },
       {
         "file": "app/services/conversation_timeline_events.py",
@@ -63,11 +63,11 @@
     "approval.resolved": [
       {
         "file": "app/server.py",
-        "line": 5912
+        "line": 5919
       },
       {
         "file": "app/server.py",
-        "line": 8739
+        "line": 8746
       },
       {
         "file": "app/services/conversation_timeline_events.py",
@@ -85,19 +85,15 @@
       },
       {
         "file": "app/server.py",
-        "line": 5813
+        "line": 5820
       },
       {
         "file": "app/server.py",
-        "line": 5932
+        "line": 5939
       },
       {
         "file": "app/server.py",
-        "line": 8521
-      },
-      {
-        "file": "app/server.py",
-        "line": 8570
+        "line": 8528
       },
       {
         "file": "app/server.py",
@@ -105,7 +101,11 @@
       },
       {
         "file": "app/server.py",
-        "line": 8751
+        "line": 8584
+      },
+      {
+        "file": "app/server.py",
+        "line": 8758
       },
       {
         "file": "app/services/conversation_timeline_events.py",
@@ -165,15 +165,15 @@
       },
       {
         "file": "app/server.py",
-        "line": 4484
+        "line": 4491
       },
       {
         "file": "app/server.py",
-        "line": 5319
+        "line": 5326
       },
       {
         "file": "app/server.py",
-        "line": 6093
+        "line": 6100
       },
       {
         "file": "app/services/conversation_timeline_events.py",
@@ -203,31 +203,31 @@
       },
       {
         "file": "app/server.py",
-        "line": 4482
+        "line": 4489
       },
       {
         "file": "app/server.py",
-        "line": 5316
+        "line": 5323
       },
       {
         "file": "app/server.py",
-        "line": 6093
+        "line": 6100
       },
       {
         "file": "app/server.py",
-        "line": 6094
+        "line": 6101
       },
       {
         "file": "app/server.py",
-        "line": 7466
+        "line": 7473
       },
       {
         "file": "app/server.py",
-        "line": 9879
+        "line": 9886
       },
       {
         "file": "app/server.py",
-        "line": 35382
+        "line": 35691
       },
       {
         "file": "app/services/codex_fast_path.py",
@@ -245,15 +245,15 @@
     "message.delta.text": [
       {
         "file": "app/server.py",
-        "line": 4482
+        "line": 4489
       },
       {
         "file": "app/server.py",
-        "line": 5316
+        "line": 5323
       },
       {
         "file": "app/server.py",
-        "line": 6093
+        "line": 6100
       },
       {
         "file": "app/services/codex_fast_path.py",
@@ -285,11 +285,11 @@
     "provider.activity": [
       {
         "file": "app/server.py",
-        "line": 7469
+        "line": 7476
       },
       {
         "file": "app/server.py",
-        "line": 7482
+        "line": 7489
       },
       {
         "file": "app/services/codex_fast_path.py",
@@ -355,31 +355,31 @@
       },
       {
         "file": "app/server.py",
-        "line": 4489
+        "line": 4496
       },
       {
         "file": "app/server.py",
-        "line": 5323
+        "line": 5330
       },
       {
         "file": "app/server.py",
-        "line": 6095
+        "line": 6102
       },
       {
         "file": "app/server.py",
-        "line": 6096
+        "line": 6103
       },
       {
         "file": "app/server.py",
-        "line": 7469
+        "line": 7476
       },
       {
         "file": "app/server.py",
-        "line": 9884
+        "line": 9891
       },
       {
         "file": "app/server.py",
-        "line": 35385
+        "line": 35694
       },
       {
         "file": "app/services/codex_fast_path.py",
@@ -423,19 +423,19 @@
       },
       {
         "file": "app/server.py",
-        "line": 4517
+        "line": 4524
       },
       {
         "file": "app/server.py",
-        "line": 5357
+        "line": 5364
       },
       {
         "file": "app/server.py",
-        "line": 5376
+        "line": 5383
       },
       {
         "file": "app/server.py",
-        "line": 7543
+        "line": 7550
       },
       {
         "file": "app/services/codex_fast_path.py",
@@ -485,43 +485,43 @@
       },
       {
         "file": "app/server.py",
-        "line": 4517
+        "line": 4524
       },
       {
         "file": "app/server.py",
-        "line": 5357
+        "line": 5364
       },
       {
         "file": "app/server.py",
-        "line": 5376
+        "line": 5383
       },
       {
         "file": "app/server.py",
-        "line": 5929
+        "line": 5936
       },
       {
         "file": "app/server.py",
-        "line": 6135
+        "line": 6142
       },
       {
         "file": "app/server.py",
-        "line": 6227
+        "line": 6234
       },
       {
         "file": "app/server.py",
-        "line": 7479
+        "line": 7486
       },
       {
         "file": "app/server.py",
-        "line": 7543
+        "line": 7550
       },
       {
         "file": "app/server.py",
-        "line": 7584
+        "line": 7591
       },
       {
         "file": "app/server.py",
-        "line": 7669
+        "line": 7676
       },
       {
         "file": "app/services/codex_fast_path.py",
@@ -603,59 +603,59 @@
       },
       {
         "file": "app/server.py",
-        "line": 4484
+        "line": 4491
       },
       {
         "file": "app/server.py",
-        "line": 4485
+        "line": 4492
       },
       {
         "file": "app/server.py",
-        "line": 4512
+        "line": 4519
       },
       {
         "file": "app/server.py",
-        "line": 5357
+        "line": 5364
       },
       {
         "file": "app/server.py",
-        "line": 5363
+        "line": 5370
       },
       {
         "file": "app/server.py",
-        "line": 5372
+        "line": 5379
       },
       {
         "file": "app/server.py",
-        "line": 6133
+        "line": 6140
       },
       {
         "file": "app/server.py",
-        "line": 7477
+        "line": 7484
       },
       {
         "file": "app/server.py",
-        "line": 7543
+        "line": 7550
       },
       {
         "file": "app/server.py",
-        "line": 7582
+        "line": 7589
       },
       {
         "file": "app/server.py",
-        "line": 8422
+        "line": 8429
       },
       {
         "file": "app/server.py",
-        "line": 9930
+        "line": 9937
       },
       {
         "file": "app/server.py",
-        "line": 9932
+        "line": 9939
       },
       {
         "file": "app/server.py",
-        "line": 35422
+        "line": 35731
       },
       {
         "file": "app/services/codex_fast_path.py",
@@ -717,63 +717,63 @@
       },
       {
         "file": "app/server.py",
-        "line": 4517
+        "line": 4524
       },
       {
         "file": "app/server.py",
-        "line": 5357
+        "line": 5364
       },
       {
         "file": "app/server.py",
-        "line": 5368
+        "line": 5375
       },
       {
         "file": "app/server.py",
-        "line": 5376
+        "line": 5383
       },
       {
         "file": "app/server.py",
-        "line": 6138
+        "line": 6145
       },
       {
         "file": "app/server.py",
-        "line": 6227
+        "line": 6234
       },
       {
         "file": "app/server.py",
-        "line": 7481
+        "line": 7488
       },
       {
         "file": "app/server.py",
-        "line": 7543
+        "line": 7550
       },
       {
         "file": "app/server.py",
-        "line": 7587
+        "line": 7594
       },
       {
         "file": "app/server.py",
-        "line": 7669
+        "line": 7676
       },
       {
         "file": "app/server.py",
-        "line": 8422
+        "line": 8429
       },
       {
         "file": "app/server.py",
-        "line": 8460
+        "line": 8467
       },
       {
         "file": "app/server.py",
-        "line": 9935
+        "line": 9942
       },
       {
         "file": "app/server.py",
-        "line": 9937
+        "line": 9944
       },
       {
         "file": "app/server.py",
-        "line": 35422
+        "line": 35731
       },
       {
         "file": "app/services/codex_fast_path.py",
@@ -831,15 +831,15 @@
     "run.native.started": [
       {
         "file": "app/server.py",
-        "line": 4469
+        "line": 4476
       },
       {
         "file": "app/server.py",
-        "line": 6091
+        "line": 6098
       },
       {
         "file": "app/server.py",
-        "line": 6092
+        "line": 6099
       },
       {
         "file": "app/services/provider_events.py",
@@ -873,31 +873,31 @@
       },
       {
         "file": "app/server.py",
-        "line": 5285
+        "line": 5292
       },
       {
         "file": "app/server.py",
-        "line": 5287
+        "line": 5294
       },
       {
         "file": "app/server.py",
-        "line": 6063
+        "line": 6070
       },
       {
         "file": "app/server.py",
-        "line": 6091
+        "line": 6098
       },
       {
         "file": "app/server.py",
-        "line": 7527
+        "line": 7534
       },
       {
         "file": "app/server.py",
-        "line": 9846
+        "line": 9853
       },
       {
         "file": "app/server.py",
-        "line": 35361
+        "line": 35670
       },
       {
         "file": "app/services/conversation_timeline_events.py",
@@ -915,7 +915,7 @@
     "run.stop_requested": [
       {
         "file": "app/server.py",
-        "line": 5423
+        "line": 5430
       },
       {
         "file": "app/services/provider_events.py",
@@ -963,7 +963,7 @@
       },
       {
         "file": "app/server.py",
-        "line": 24407
+        "line": 24479
       },
       {
         "file": "app/services/provider_events.py",
@@ -973,7 +973,7 @@
     "session.metrics": [
       {
         "file": "app/server.py",
-        "line": 9873
+        "line": 9880
       },
       {
         "file": "app/services/provider_events.py",
@@ -1017,23 +1017,23 @@
     "tool.call": [
       {
         "file": "app/server.py",
-        "line": 4042
+        "line": 4049
       },
       {
         "file": "app/server.py",
-        "line": 4066
+        "line": 4073
       },
       {
         "file": "app/server.py",
-        "line": 4493
+        "line": 4500
       },
       {
         "file": "app/server.py",
-        "line": 5327
+        "line": 5334
       },
       {
         "file": "app/server.py",
-        "line": 6097
+        "line": 6104
       },
       {
         "file": "app/services/conversation_timeline_events.py",
@@ -1087,31 +1087,31 @@
       },
       {
         "file": "app/server.py",
-        "line": 4497
+        "line": 4504
       },
       {
         "file": "app/server.py",
-        "line": 5336
+        "line": 5343
       },
       {
         "file": "app/server.py",
-        "line": 6101
+        "line": 6108
       },
       {
         "file": "app/server.py",
-        "line": 6104
+        "line": 6111
       },
       {
         "file": "app/server.py",
-        "line": 7472
+        "line": 7479
       },
       {
         "file": "app/server.py",
-        "line": 9898
+        "line": 9905
       },
       {
         "file": "app/server.py",
-        "line": 35388
+        "line": 35697
       },
       {
         "file": "app/services/conversation_timeline_events.py",
@@ -1179,39 +1179,39 @@
       },
       {
         "file": "app/server.py",
-        "line": 4497
+        "line": 4504
       },
       {
         "file": "app/server.py",
-        "line": 4498
+        "line": 4505
       },
       {
         "file": "app/server.py",
-        "line": 5336
+        "line": 5343
       },
       {
         "file": "app/server.py",
-        "line": 5342
+        "line": 5349
       },
       {
         "file": "app/server.py",
-        "line": 6105
+        "line": 6112
       },
       {
         "file": "app/server.py",
-        "line": 6108
+        "line": 6115
       },
       {
         "file": "app/server.py",
-        "line": 7474
+        "line": 7481
       },
       {
         "file": "app/server.py",
-        "line": 9898
+        "line": 9905
       },
       {
         "file": "app/server.py",
-        "line": 35388
+        "line": 35697
       },
       {
         "file": "app/services/conversation_timeline_events.py",
@@ -1249,23 +1249,23 @@
       },
       {
         "file": "app/server.py",
-        "line": 4042
+        "line": 4049
       },
       {
         "file": "app/server.py",
-        "line": 4070
+        "line": 4077
       },
       {
         "file": "app/server.py",
-        "line": 4497
+        "line": 4504
       },
       {
         "file": "app/server.py",
-        "line": 5336
+        "line": 5343
       },
       {
         "file": "app/server.py",
-        "line": 6101
+        "line": 6108
       },
       {
         "file": "app/services/conversation_timeline_events.py",
@@ -1305,35 +1305,35 @@
       },
       {
         "file": "app/server.py",
-        "line": 4493
+        "line": 4500
       },
       {
         "file": "app/server.py",
-        "line": 5327
+        "line": 5334
       },
       {
         "file": "app/server.py",
-        "line": 6097
+        "line": 6104
       },
       {
         "file": "app/server.py",
-        "line": 6100
+        "line": 6107
       },
       {
         "file": "app/server.py",
-        "line": 7475
+        "line": 7482
       },
       {
         "file": "app/server.py",
-        "line": 9894
+        "line": 9901
       },
       {
         "file": "app/server.py",
-        "line": 9896
+        "line": 9903
       },
       {
         "file": "app/server.py",
-        "line": 35388
+        "line": 35697
       },
       {
         "file": "app/services/conversation_timeline_events.py",
@@ -1371,7 +1371,7 @@
       },
       {
         "file": "app/server.py",
-        "line": 9862
+        "line": 9869
       },
       {
         "file": "app/services/provider_events.py",
