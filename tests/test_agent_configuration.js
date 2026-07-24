@@ -33,4 +33,8 @@ assert(appearance.includes('aria-haspopup="listbox"'));
 assert(appearance.includes('data-appearance-color="hairColor"'));
 assert(!appearance.includes('<select'));
 assert.equal(configuration.helpers.highRiskField('binding'), 'providerAgentId');
+assert.match(
+    configuration.helpers.fieldStatus('introduction'),
+    /data-field-status="introduction" role="status"/,
+);
 console.log('agent configuration audience contract ok');

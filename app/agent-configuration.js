@@ -97,7 +97,10 @@
 
     function fieldStatus(field) {
         const entry = state.saveState.get(field);
-        if (!entry) return '';
+        if (!entry) {
+            return '<span class="ac-field-feedback"><span class="ac-field-status" data-field-status="' +
+                esc(field) + '" role="status"></span></span>';
+        }
         const label = {
             saving: tr('agent_save_saving', 'Saving…'),
             saved: tr('agent_save_saved', 'Saved'),
@@ -617,6 +620,7 @@
             normalizeProfile: normalizeProfile,
             normalizeFieldValue: normalizeFieldValue,
             classifySaveError: classifySaveError,
+            fieldStatus: fieldStatus,
             appearanceOptions: APPEARANCE_OPTIONS,
             renderAppearance: renderAppearance,
             highRiskField: highRiskField,

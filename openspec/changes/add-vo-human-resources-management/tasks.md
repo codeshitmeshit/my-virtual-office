@@ -138,7 +138,7 @@
 - [x] 16.6 Implement separate human and Agent data adapters: humans use `managementFetch`; Agents use only the scoped Agent Management session routes; both keep the same two-tab navigation while Agent HR views omit commands, assessment evidence, unrelated access history, and all restricted mutations.
 - [x] 16.7 Add confirmed high-risk interaction UI with Agent/action/before/after impact text and server challenge submission; cover stale/rejected confirmation, create/delete, Provider, branch, workspace, assignment, and binding outcomes without reintroducing a generic save button.
 - [ ] 16.8 Complete English/Chinese localization, accessible tab/dialog/popover/status semantics, responsive layout, reduced-motion/focus behavior, and compatibility cleanup; remove obsolete independent HR modal and old `_acp*` implementation only after all callers and tests use the new modules.
-- [ ] 16.9 Add pure Node/component tests and a deterministic local browser fixture covering shared selection and tab state, human/Agent projections, auto-save/undo/conflict, selector keyboard behavior, high-risk confirmation, asynchronous HR command restoration, empty/degraded states, unique close control, and absence of hidden restricted data in DOM/network fixtures.
+- [x] 16.9 Add pure Node/component tests and a deterministic local browser fixture covering shared selection and tab state, human/Agent projections, auto-save/undo/conflict, selector keyboard behavior, high-risk confirmation, asynchronous HR command restoration, empty/degraded states, unique close control, and absence of hidden restricted data in DOM/network fixtures.
 
 ## 17. Automated Integrated Regression
 
