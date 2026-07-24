@@ -47,9 +47,12 @@
                     responseJson(await humanFetch('/api/human-resources/overview')),
                     responseJson(await humanFetch('/api/human-resources/export?table=agents&limit=100')),
                 ]);
+                const exportedRoster = ((results[1].export || {}).rows || []);
                 return {
                     audience: { kind: 'human', aiId: '' },
-                    roster: ((results[1].export || {}).rows || []),
+                    roster: exportedRoster.length
+                        ? exportedRoster
+                        : (Array.isArray(root.agents) ? root.agents.slice() : []),
                     overview: results[0],
                 };
             },

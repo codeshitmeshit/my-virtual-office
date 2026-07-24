@@ -164,25 +164,32 @@
         return labels[field] || field;
     }
 
+    function appearanceOptionLabel(value) {
+        const raw = String(value == null ? 'none' : value);
+        const key = raw === 'M' ? 'option_male' :
+            (raw === 'F' ? 'option_female' : 'option_' + raw);
+        return tr(key, raw);
+    }
+
     function appearanceSelector(field, value, editable) {
         const current = value == null ? 'none' : String(value);
         const options = APPEARANCE_OPTIONS[field] || [];
         if (!editable) {
             return '<div class="ac-appearance-readonly"><span>' + esc(appearanceLabel(field)) +
-                '</span><strong>' + esc(current) + '</strong></div>';
+                '</span><strong>' + esc(appearanceOptionLabel(current)) + '</strong></div>';
         }
         return '<div class="ac-selector" data-appearance-selector="' + esc(field) + '">' +
             '<span class="ac-selector-label">' + esc(appearanceLabel(field)) + '</span>' +
             '<button type="button" class="ac-selector-current" aria-haspopup="listbox" aria-expanded="false">' +
                 '<span class="ac-option-icon" aria-hidden="true">' + esc(current === 'none' ? '—' : current.slice(0, 2).toUpperCase()) + '</span>' +
-                '<strong>' + esc(current) + '</strong><span aria-hidden="true">▾</span></button>' +
+                '<strong>' + esc(appearanceOptionLabel(current)) + '</strong><span aria-hidden="true">▾</span></button>' +
             '<div class="ac-option-popover hidden" role="listbox" aria-label="' + esc(appearanceLabel(field)) + '">' +
                 options.map(function (option, index) {
                     return '<button type="button" role="option" tabindex="' + (index === 0 ? '0' : '-1') +
                         '" aria-selected="' + (option === current ? 'true' : 'false') +
                         '" data-appearance-option="' + esc(option) + '">' +
                         '<span class="ac-option-icon" aria-hidden="true">' + esc(option === 'none' ? '—' : option.slice(0, 2).toUpperCase()) +
-                        '</span><span>' + esc(option) + '</span></button>';
+                        '</span><span>' + esc(appearanceOptionLabel(option)) + '</span></button>';
                 }).join('') + '</div>' + fieldStatus('appearance.' + field) + '</div>';
     }
 
@@ -203,13 +210,27 @@
 
     function renderAppearance(profile, editable) {
         const appearance = profile.appearance || {};
-        return '<div class="ac-selector-grid">' +
-            Object.keys(APPEARANCE_OPTIONS).map(function (field) {
-                return appearanceSelector(field, appearance[field], editable);
-            }).join('') + '</div><div class="ac-color-grid">' +
-            APPEARANCE_COLORS.map(function (field) {
-                return appearanceColor(field, appearance[field], editable);
-            }).join('') + '</div>';
+        function selectorGroup(title, fields) {
+            return '<section class="ac-appearance-group"><h5>' + esc(title) + '</h5>' +
+                fields.map(function (field) {
+                    return appearanceSelector(field, appearance[field], editable);
+                }).join('') + '</section>';
+        }
+        return '<div class="ac-appearance-heading"><strong>' +
+                esc(tr('agent_appearance_editor_title', 'Appearance, accessories & items')) +
+                '</strong><span>' + esc(tr('agent_appearance_editor_hint', 'Dropdown selection · Live preview · Auto-save')) +
+                '</span></div>' +
+            '<section class="ac-appearance-group"><h5>' + esc(tr('agent_colors_bilingual', 'Colors / COLORS')) + '</h5>' +
+                '<div class="ac-color-grid">' + APPEARANCE_COLORS.map(function (field) {
+                    return appearanceColor(field, appearance[field], editable);
+                }).join('') + '</div></section>' +
+            selectorGroup(tr('agent_hair_face_bilingual', 'Hair + face / HAIR + FACE'), [
+                'gender', 'hairStyle', 'eyebrowStyle', 'facialHair',
+            ]) +
+            selectorGroup(tr('agent_costume_accessories_bilingual', 'Costume + accessories / COSTUME + ACCESSORIES'), [
+                'costume', 'headwear', 'glasses',
+            ]) +
+            selectorGroup(tr('agent_items_bilingual', 'Items / ITEMS'), ['heldItem', 'deskItem']);
     }
 
     function renderProfile(context, profile) {
@@ -218,37 +239,55 @@
         const editable = canEdit(context);
         const restricted = canSeeRestricted(context);
         const appearance = profile.appearance || {};
+        const role = agent.role || (profile.responsibilities || []).join(' / ') || '—';
+        const provider = agent.providerKind || agent.provider || '—';
+        const branch = agent.branchName || agent.branch || '—';
         container.innerHTML =
             '<div class="agent-configuration" data-audience="' + esc(context.audience.kind) + '">' +
-                '<section class="ac-hero"><div class="ac-avatar">' + esc(appearance.emoji || agent.emoji || '🤖') + '</div>' +
-                    '<div><span class="ac-eyebrow">' + esc(profile.aiId) + '</span>' +
-                    '<h3>' + esc(profile.name || profile.aiId) + '</h3>' +
-                    '<p>' + esc(tr('agent_responsibility_hint', 'Responsibilities and specialties guide discovery and recommendations; they are not permission gates.')) + '</p></div>' +
-                    '<span class="ac-revision">v' + esc(profile.revision) + '</span></section>' +
-                '<div class="ac-grid">' +
-                    '<section class="ac-card" data-section="identity"><h4>' + esc(tr('agent_identity', 'Identity')) + '</h4>' +
-                        textField(tr('agent_name', 'Name'), 'name', profile.name, editable, false) + '</section>' +
-                    '<section class="ac-card" data-section="introduction"><h4>' + esc(tr('agent_introduction', 'Introduction')) + '</h4>' +
-                        textField(tr('agent_introduction', 'Introduction'), 'introduction', profile.introduction, editable, true) + '</section>' +
-                    '<section class="ac-card" data-section="responsibilities"><h4>' + esc(tr('agent_responsibilities', 'Responsibilities & specialties')) + '</h4>' +
-                        tagsField(tr('agent_responsibilities', 'Responsibilities'), 'responsibilities', profile.responsibilities, editable) +
-                        tagsField(tr('agent_specialties', 'Specialties'), 'specialties', profile.specialties, editable) + '</section>' +
-                    '<section class="ac-card" data-section="appearance"><h4>' + esc(tr('agent_appearance', 'Appearance')) + '</h4>' +
+                '<div class="ac-profile-columns">' +
+                    '<section class="ac-profile-primary">' +
+                        '<section class="ac-hero"><canvas class="ac-avatar" width="80" height="104" data-agent-appearance-preview></canvas>' +
+                            '<div><span class="ac-eyebrow">' + esc(profile.aiId) + '</span>' +
+                            '<h3>' + esc(profile.name || profile.aiId) + '</h3>' +
+                            '<p>' + esc(profile.aiId + ' · ' + role) + '</p></div>' +
+                            '<span class="ac-active">● ACTIVE</span></section>' +
+                        '<section class="ac-card ac-identity-card" data-section="identity"><h4>' +
+                            esc(tr('agent_identity_bilingual', 'Identity / IDENTITY')) + '</h4>' +
+                            textField(tr('agent_name', 'Name'), 'name', profile.name, editable, false) +
+                            '<div class="ac-static-field"><span>' + esc(tr('agent_role', 'Role')) +
+                            '</span><strong>' + esc(role) + '</strong></div>' +
+                            '<div class="ac-static-field"><span>' + esc(tr('agent_gender', 'Gender')) +
+                            '</span><strong>' + esc(appearanceOptionLabel(appearance.gender || 'none')) + '</strong></div></section>' +
+                        (restricted ? '<section class="ac-restricted"><h4>' +
+                            esc(tr('agent_assignment_bilingual', 'Assignment / ASSIGNMENT')) + '</h4>' +
+                            restrictedCard(tr('agent_branch', 'Branch'), 'branch', branch) +
+                            restrictedCard(tr('agent_provider', 'Provider'), 'provider', provider) +
+                            restrictedCard(tr('agent_binding', 'Provider Agent'), 'binding', agent.providerAgentId || agent.profile) +
+                            restrictedCard(tr('agent_workspace', 'Workspace'), 'workspace', agent.workspace || agent.workspacePath) +
+                            restrictedCard(tr('agent_assignment', 'Assignment'), 'assignment', agent.assignment || agent.role) +
+                            '<div class="ac-lifecycle-actions"><button type="button" data-high-risk-action="create">' +
+                                esc(tr('new_agent', 'Create Agent')) + '</button><button type="button" class="danger" data-high-risk-action="delete">' +
+                                esc(tr('delete_agent', 'Delete Agent')) + '</button></div></section>' : '') +
+                        '<div class="ac-work-copy">' +
+                            '<section class="ac-card" data-section="introduction"><h4>' +
+                                esc(tr('agent_introduction', 'Introduction')) + '</h4>' +
+                                textField(tr('agent_introduction', 'Introduction'), 'introduction', profile.introduction, editable, true) + '</section>' +
+                            '<section class="ac-card" data-section="responsibilities"><h4>' +
+                                esc(tr('agent_responsibilities', 'Responsibilities & specialties')) + '</h4>' +
+                                tagsField(tr('agent_responsibilities', 'Responsibilities'), 'responsibilities', profile.responsibilities, editable) +
+                                tagsField(tr('agent_specialties', 'Specialties'), 'specialties', profile.specialties, editable) + '</section>' +
+                        '</div>' +
+                    '</section>' +
+                    '<section class="ac-card ac-appearance-card" data-section="appearance">' +
                         '<div id="agent-appearance-editor" class="ac-appearance-editor" data-editable="' + (editable ? 'true' : 'false') + '">' +
                             renderAppearance(profile, editable) + '</div></section>' +
                 '</div>' +
-                (restricted ? '<section class="ac-restricted"><h4>' + esc(tr('agent_restricted_configuration', 'Authenticated human configuration')) + '</h4>' +
-                    restrictedCard(tr('agent_provider', 'Provider'), 'provider', agent.providerKind || agent.provider) +
-                    restrictedCard(tr('agent_branch', 'Branch'), 'branch', agent.branchName || agent.branch) +
-                    restrictedCard(tr('agent_workspace', 'Workspace'), 'workspace', agent.workspace || agent.workspacePath) +
-                    restrictedCard(tr('agent_assignment', 'Assignment'), 'assignment', agent.assignment || agent.role) +
-                    restrictedCard(tr('agent_binding', 'Provider-Agent binding'), 'binding', agent.providerAgentId || agent.profile) +
-                    '<div class="ac-lifecycle-actions"><button type="button" data-high-risk-action="create">' +
-                        esc(tr('new_agent', 'Create Agent')) + '</button><button type="button" class="danger" data-high-risk-action="delete">' +
-                        esc(tr('delete_agent', 'Delete Agent')) + '</button></div>' +
-                '</section>' : '') +
                 '<div id="agent-high-risk-dialog"></div>' +
             '</div>';
+        const preview = container.querySelector('[data-agent-appearance-preview]');
+        if (preview && root.AgentAppearancePreview) {
+            root.AgentAppearancePreview.render(preview, appearance, agent);
+        }
         bindFieldEvents(context);
     }
 
@@ -418,17 +457,31 @@
             function closeSelector() {
                 popover.classList.add('hidden');
                 toggle.setAttribute('aria-expanded', 'false');
+                if (root.AgentAppearanceDropdown) {
+                    root.AgentAppearanceDropdown.reset(selector);
+                }
             }
             toggle.addEventListener('click', function () {
                 const opening = popover.classList.contains('hidden');
                 context.container.querySelectorAll('.ac-option-popover').forEach(function (other) {
                     other.classList.add('hidden');
+                    const otherToggle = other.closest('.ac-selector')?.querySelector('.ac-selector-current');
+                    if (otherToggle) otherToggle.setAttribute('aria-expanded', 'false');
                 });
                 popover.classList.toggle('hidden', !opening);
                 toggle.setAttribute('aria-expanded', opening ? 'true' : 'false');
+                if (opening && root.AgentAppearanceDropdown) {
+                    root.AgentAppearanceDropdown.place(selector, context.container);
+                }
                 if (opening && options[0]) options.find(function (option) {
                     return option.getAttribute('aria-selected') === 'true';
                 })?.focus();
+            });
+            toggle.addEventListener('keydown', function (event) {
+                if (event.key === 'Escape') {
+                    event.preventDefault();
+                    closeSelector();
+                }
             });
             options.forEach(function (option, index) {
                 option.addEventListener('click', function () {
@@ -624,6 +677,7 @@
             normalizeFieldValue: normalizeFieldValue,
             classifySaveError: classifySaveError,
             fieldStatus: fieldStatus,
+            appearanceOptionLabel: appearanceOptionLabel,
             appearanceOptions: APPEARANCE_OPTIONS,
             renderAppearance: renderAppearance,
             highRiskField: highRiskField,

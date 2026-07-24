@@ -1172,7 +1172,7 @@ button:active { transform: translateY(3px); box-shadow: none; }
 }
 
 .management-token-dialog {
-    z-index: 10060;
+    z-index: 13000;
 }
 .management-token-modal {
     width: 440px;

@@ -19,6 +19,20 @@ assert(source.includes("token = await requestManagementToken()"));
 assert(!source.includes("window.prompt(t('management_token_prompt')"));
 assert(styles.includes('.management-token-dialog'));
 assert(styles.includes('.management-token-input:focus'));
+const managementTokenLayer = Number(
+  styles.match(/\.management-token-dialog\s*\{[^}]*z-index:\s*(\d+)/s)?.[1]
+);
+const agentManagementStyles = fs.readFileSync(
+  path.join(root, 'app', 'agent-management.css'),
+  'utf8',
+);
+const agentManagementLayer = Number(
+  agentManagementStyles.match(/\.agent-management-modal\s*\{[^}]*z-index:\s*(\d+)/s)?.[1]
+);
+assert(
+  managementTokenLayer > agentManagementLayer,
+  'management token dialog must render above Agent Management',
+);
 assert(startup.includes('export VO_MANAGEMENT_TOKEN="${VO_MANAGEMENT_TOKEN:-4285}"'));
 
 for (const locale of ['en.json', 'zh.json']) {
