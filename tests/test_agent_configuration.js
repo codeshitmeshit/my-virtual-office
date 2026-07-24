@@ -17,6 +17,7 @@ assert.deepEqual(
     ['Backend'],
 );
 assert.equal(configuration.helpers.previewProfile({ aiId: 'a', name: 'Agent A' }).__preview, true);
+assert.equal(configuration.helpers.previewProfile({ aiId: 'a' }, 'unregistered').__previewState, 'unregistered');
 assert.deepEqual(
     configuration.helpers.normalizeFieldValue('responsibilities', 'Backend, Reviewer, backend'),
     ['Backend', 'Reviewer'],

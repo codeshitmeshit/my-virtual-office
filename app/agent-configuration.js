@@ -84,8 +84,11 @@
         }, profile || {});
     }
 
-    function previewProfile(agent) {
-        return Object.assign(normalizeProfile(null, agent || {}), { __preview: true });
+    function previewProfile(agent, state) {
+        return Object.assign(normalizeProfile(null, agent || {}), {
+            __preview: true,
+            __previewState: state || 'loading',
+        });
     }
 
     async function requestProfile(context, aiId) {
@@ -253,6 +256,9 @@
         const role = agent.role || (profile.responsibilities || []).join(' / ') || '—';
         const provider = agent.providerKind || agent.provider || '—';
         const branch = agent.branchName || agent.branch || '—';
+        const stateLabel = profile.__previewState === 'unregistered'
+            ? tr('agent_basic_profile_short', 'BASIC')
+            : tr('agent_loading_short', 'LOADING');
         container.innerHTML =
             '<div class="agent-configuration" data-audience="' + esc(context.audience.kind) + '">' +
                 '<div class="ac-profile-columns">' +
@@ -261,7 +267,7 @@
                             '<div><span class="ac-eyebrow">' + esc(profile.aiId) + '</span>' +
                             '<h3>' + esc(profile.name || profile.aiId) + '</h3>' +
                             '<p>' + esc(profile.aiId + ' · ' + role) + '</p></div>' +
-                            '<span class="ac-active">● ' + esc(isPreview ? tr('agent_loading_short', 'LOADING') : tr('agent_active_short', 'ACTIVE')) + '</span></section>' +
+                            '<span class="ac-active">● ' + esc(isPreview ? stateLabel : tr('agent_active_short', 'ACTIVE')) + '</span></section>' +
                         '<section class="ac-card ac-identity-card" data-section="identity"><h4>' +
                             esc(tr('agent_identity_bilingual', 'Identity / IDENTITY')) + '</h4>' +
                             textField(tr('agent_name', 'Name'), 'name', profile.name, editable, false) +
@@ -662,8 +668,12 @@
         } catch (error) {
             state.errors.set(aiId, String(error && error.message || 'agent_profile_load_failed'));
             if (state.context && state.context.selectedAiId === aiId && isContextActive(state.context)) {
-                state.context.container.innerHTML = '<div class="am-empty ac-error">' +
-                    esc(tr('agent_configuration_failed', 'Agent configuration could not be loaded')) + '</div>';
+                if (String(error && (error.code || error.message) || '') === 'agent_profile_not_found') {
+                    renderProfile(state.context, previewProfile(agent, 'unregistered'));
+                } else {
+                    state.context.container.innerHTML = '<div class="am-empty ac-error">' +
+                        esc(tr('agent_configuration_failed', 'Agent configuration could not be loaded')) + '</div>';
+                }
             }
         } finally {
             state.loading.delete(aiId);
