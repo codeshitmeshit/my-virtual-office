@@ -6,7 +6,7 @@ Status: **local implementation and regression complete; real-environment gate
 not started**.
 
 Reviewed runtime revision:
-`d06c49137a651a9cfe6ad26e952a6c5882d28f93`
+`66828bb10adba1c690a6cc89dcd36ce87704a85c`
 (`codex/merged-agent-management`). The later handoff-only commit does not change
 runtime behavior. Deploy this exact runtime revision, not the preparer's dirty
 working tree.
@@ -27,7 +27,7 @@ every `REQUIRED` value. Do not record secrets.
 | Service supervisor and stop/start/restart commands | `REQUIRED` |
 | Browser base URL and entry method | `REQUIRED` |
 | VO revision before deployment | `REQUIRED` |
-| VO reviewed revision | `d06c49137a651a9cfe6ad26e952a6c5882d28f93` |
+| VO reviewed revision | `66828bb10adba1c690a6cc89dcd36ce87704a85c` |
 | OpenClaw executable and version | `REQUIRED` |
 | `VO_PORT` | `REQUIRED` |
 | Resolved absolute `VO_STATUS_DIR` | `REQUIRED` |
@@ -92,7 +92,7 @@ The approved feature rollback order is:
 ## Deployment and switch sequence
 
 1. Deploy exactly
-   `d06c49137a651a9cfe6ad26e952a6c5882d28f93` into a clean checkout.
+   `66828bb10adba1c690a6cc89dcd36ce87704a85c` into a clean checkout.
 2. Start with `VO_HR_ENABLED=false` and
    `VO_HR_SCHEDULER_ENABLED=false`; restart and capture the Task 18.2 baseline.
 3. Set only `VO_HR_ENABLED=true`; restart and complete lifecycle/directory/UI
