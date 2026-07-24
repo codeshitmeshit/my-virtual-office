@@ -14,7 +14,7 @@ const keys = new Set();
 for (const match of source.matchAll(/\btr\('([^']+)'/g)) {
   if (!match[1].endsWith('_')) keys.add(match[1]);
 }
-const shell = html.slice(html.indexOf('<!-- Human Resources Modal -->'), html.indexOf('<!-- SMS Panel -->'));
+const shell = html.slice(html.indexOf('<!-- Merged Agent Management Modal -->'), html.indexOf('<!-- SMS Panel -->'));
 for (const match of shell.matchAll(/data-i18n(?:-title|-aria-label)?="([^"]+)"/g)) keys.add(match[1]);
 keys.add('human_resources');
 keys.add('hr_action_activity');
@@ -42,8 +42,9 @@ for (const required of [
 for (const required of [
   'role="dialog"',
   'aria-modal="true"',
-  'aria-labelledby="human-resources-title"',
-  'id="human-resources-close"',
+  'aria-labelledby="agent-management-title"',
+  'id="agent-management-close"',
+  'data-agent-management-tab="humanResources"',
 ]) {
   assert.ok(shell.includes(required), `missing HR modal accessibility marker: ${required}`);
 }

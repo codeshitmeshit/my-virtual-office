@@ -871,14 +871,14 @@
                     <small data-i18n="agent_management_subtitle">Configuration and Human Resources</small>
                 </h2>
                 <div class="agent-management-tabs" role="tablist" aria-label="Agent Management">
-                    <button class="agent-management-tab active" type="button" role="tab" aria-selected="true" data-agent-management-tab="configuration" onclick="AgentManagement.switchTab('configuration')" data-i18n="agent_configuration">Agent Configuration</button>
-                    <button class="agent-management-tab" type="button" role="tab" aria-selected="false" tabindex="-1" data-agent-management-tab="humanResources" onclick="AgentManagement.switchTab('humanResources')" data-i18n="human_resources">Human Resources</button>
+                    <button id="agent-management-tab-configuration" class="agent-management-tab active" type="button" role="tab" aria-selected="true" aria-controls="agent-management-panel" data-agent-management-tab="configuration" onclick="AgentManagement.switchTab('configuration')" data-i18n="agent_configuration">Agent Configuration</button>
+                    <button id="agent-management-tab-human-resources" class="agent-management-tab" type="button" role="tab" aria-selected="false" aria-controls="agent-management-panel" tabindex="-1" data-agent-management-tab="humanResources" onclick="AgentManagement.switchTab('humanResources')" data-i18n="human_resources">Human Resources</button>
                 </div>
                 <button id="agent-management-close" class="agent-management-close" type="button" onclick="closeAgentManagement()" aria-label="Close Agent Management" data-i18n-aria-label="agent_management_close">&times;</button>
             </header>
             <div class="agent-management-body">
                 <aside id="agent-management-roster" class="agent-management-roster" aria-label="Agent roster" data-i18n-aria-label="hr_agent_roster"></aside>
-                <main id="agent-management-panel" class="agent-management-panel" tabindex="-1"></main>
+                <main id="agent-management-panel" class="agent-management-panel" role="tabpanel" aria-labelledby="agent-management-tab-configuration" tabindex="-1"></main>
             </div>
             <div id="agent-management-feedback" class="agent-management-feedback" aria-live="polite"></div>
         </div>

@@ -49,7 +49,10 @@
 .ac-confirm-dialog dd { margin: 0; overflow-wrap: anywhere; }
 .ac-confirm-dialog label { display: grid; gap: 6px; }
 .ac-confirm-dialog input { padding: 9px; color: #eef0ff; border: 1px solid #3b4067; border-radius: 7px; background: #0f1125; }
+.ac-confirm-dialog input:focus-visible, .ac-confirm-dialog button:focus-visible { outline: 2px solid #57d7ff; outline-offset: 2px; }
 .ac-confirm-dialog footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 .ac-confirm-error { min-height: 18px; color: #ff7b88; }
 .ac-error { color: #ff6877; }
 @media (max-width: 980px) { .ac-grid { grid-template-columns: 1fr; } .ac-restricted { grid-template-columns: repeat(2, minmax(0, 1fr)); } .ac-selector-grid, .ac-color-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 620px) { .ac-hero { grid-template-columns: 58px 1fr; } .ac-avatar { width: 52px; height: 52px; } .ac-revision { grid-column: 1 / -1; } .ac-restricted, .ac-selector-grid, .ac-color-grid { grid-template-columns: 1fr; } .ac-confirm-dialog dl { grid-template-columns: 1fr; } }
+@media (prefers-reduced-motion: reduce) { .agent-configuration *, .ac-confirm-backdrop { scroll-behavior: auto !important; transition: none !important; animation: none !important; } }

@@ -220,6 +220,15 @@
             button.setAttribute('aria-selected', active ? 'true' : 'false');
             button.setAttribute('tabindex', active ? '0' : '-1');
         });
+        const container = panel();
+        if (container) {
+            container.setAttribute(
+                'aria-labelledby',
+                state.activeTab === 'configuration'
+                    ? 'agent-management-tab-configuration'
+                    : 'agent-management-tab-human-resources'
+            );
+        }
     }
 
     function render() {
@@ -261,9 +270,43 @@
 
     function handleKeydown(event) {
         if (!state.open) return;
+        const tab = event.target && typeof event.target.getAttribute === 'function'
+            ? event.target.getAttribute('data-agent-management-tab') : '';
+        if (tab && ['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) {
+            event.preventDefault();
+            const next = (
+                event.key === 'Home' || (event.key === 'ArrowLeft' && tab === 'humanResources')
+            ) ? 'configuration' : (
+                event.key === 'End' || (event.key === 'ArrowRight' && tab === 'configuration')
+            ) ? 'humanResources' : tab;
+            switchTab(next);
+            const nextButton = root.document.querySelector(
+                '[data-agent-management-tab="' + next + '"]'
+            );
+            if (nextButton) nextButton.focus();
+            return;
+        }
         if (event.key === 'Escape') {
             event.preventDefault();
             close();
+            return;
+        }
+        if (event.key === 'Tab') {
+            const dialog = modal() && modal().querySelector('.agent-management-dialog');
+            if (!dialog) return;
+            const focusable = Array.from(dialog.querySelectorAll(
+                'button:not([disabled]), [href], input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
+            ));
+            if (!focusable.length) return;
+            const first = focusable[0];
+            const last = focusable[focusable.length - 1];
+            if (event.shiftKey && root.document.activeElement === first) {
+                event.preventDefault();
+                last.focus();
+            } else if (!event.shiftKey && root.document.activeElement === last) {
+                event.preventDefault();
+                first.focus();
+            }
         }
     }
 
