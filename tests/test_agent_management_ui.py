@@ -40,5 +40,6 @@ def test_human_resources_is_embeddable_and_does_not_read_configuration_globals()
     assert "embeddedContext.adapter.hrRequest" in HR
     assert "embeddedContext.setRoster" in HR
     assert "AgentManagement.mountTab('humanResources', api)" in HR
+    assert "if (root.HumanResources) mountTab('humanResources', root.HumanResources);" in SHELL
     assert "AgentConfiguration" not in HR
     assert "_acp" not in HR

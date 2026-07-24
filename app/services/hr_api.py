@@ -146,6 +146,12 @@ class HRManagementAPI:
             raise HRAPIValidationError("API clock must be timezone-aware")
         return value.astimezone(timezone.utc)
 
+    def _effective_schedule_settings(self):
+        settings = self._schedule_settings.load()
+        if self._config.scheduler_enabled:
+            return settings
+        return replace(settings, enabled=False)
+
     @staticmethod
     def _limit(value: int) -> int:
         if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 100:
@@ -173,7 +179,7 @@ class HRManagementAPI:
         cycle_exists: bool,
         now: datetime,
     ) -> dict[str, object]:
-        settings = self._schedule_settings.load()
+        settings = self._effective_schedule_settings()
         effective_config = replace(
             self._config,
             scheduler_enabled=settings.enabled,
@@ -357,7 +363,7 @@ class HRManagementAPI:
         snapshot = self._observability.health(
             self._repository.management_health(),
             feature_enabled=self._config.enabled,
-            scheduler_enabled=self._schedule_settings.load().enabled,
+            scheduler_enabled=self._effective_schedule_settings().enabled,
         )
         return HRServiceResult(200, {"ok": True, "health": _json_safe(snapshot)})
 

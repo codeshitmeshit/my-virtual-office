@@ -184,6 +184,37 @@ def test_schedule_is_updated_from_the_management_page_and_used_immediately(setup
     assert schedule["nextLocalAt"] == "2026-07-19T07:35:00+00:00"
 
 
+def test_environment_scheduler_switch_overrides_persisted_page_schedule(setup):
+    repository, _reporting, _opened, lifecycle, api = setup
+    api.schedule_command(
+        {"enabled": True, "dailyTime": "07:35"},
+        body_bytes=43,
+    )
+    disabled = HRManagementAPI(
+        repository,
+        lifecycle,
+        manual_commands(),
+        HRReportingProjection(repository),
+        HRObservability(clock=lambda: NOW),
+        HRConfig.from_env(
+            {
+                "VO_HR_ENABLED": "1",
+                "VO_HR_SCHEDULER_ENABLED": "0",
+                "VO_HR_TIMEZONE": "UTC",
+            }
+        ),
+        clock=lambda: NOW,
+    )
+
+    overview = disabled.overview()
+    health = disabled.health()
+
+    assert overview.payload["reportSchedule"]["enabled"] is False
+    assert overview.payload["reportSchedule"]["state"] == "disabled"
+    assert overview.payload["reportSchedule"]["dailyTime"] == "07:35"
+    assert health.payload["health"]["schedulerEnabled"] is False
+
+
 def test_agent_detail_is_full_human_projection_with_independent_cursors(setup):
     repository, _reporting, _opened, _lifecycle, api = setup
     access_count = len(repository.list_access_log().items)

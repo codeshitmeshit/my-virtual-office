@@ -341,6 +341,8 @@
     root.AgentManagement = api;
     root.openAgentManagement = open;
     root.closeAgentManagement = close;
+    if (root.AgentConfiguration) mountTab('configuration', root.AgentConfiguration);
+    if (root.HumanResources) mountTab('humanResources', root.HumanResources);
     root.toggleAgentPanel = function () {
         return state.open ? close() : open('configuration');
     };

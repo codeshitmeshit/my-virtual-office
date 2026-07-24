@@ -173,3 +173,40 @@ def test_office_config_cannot_carry_agent_or_branch_changes(
     assert handler.responses == [410]
     assert _payload(handler)["code"] == "agent_management_route_migrated"
     assert json.loads((tmp_path / "office-config.json").read_text()) == current
+
+
+def test_agent_delete_removes_office_config_override(monkeypatch, tmp_path):
+    config = {
+        "agents": [
+            {"id": "keep-agent", "branch": "Keep"},
+            {
+                "id": "task18-disposable",
+                "statusKey": "task18-disposable",
+                "branch": "TASK18",
+                "workspace": "/tmp/task18",
+            },
+        ],
+    }
+    (tmp_path / "office-config.json").write_text(
+        json.dumps(config),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(server, "STATUS_DIR", str(tmp_path))
+    monkeypatch.setattr(
+        server,
+        "_office_agent_lookup",
+        lambda agent_id: {"id": agent_id, "providerKind": "openclaw"},
+    )
+    monkeypatch.setattr(
+        server,
+        "_gateway_rpc_call",
+        lambda method, params, timeout=30: {"ok": True},
+    )
+    monkeypatch.setattr(server, "_remove_openclaw_agent_paths", lambda agent_id: None)
+    monkeypatch.setattr(server, "refresh_agent_maps", lambda: None)
+
+    result = server._handle_agent_delete({"id": "task18-disposable"})
+
+    assert result["ok"] is True
+    saved = json.loads((tmp_path / "office-config.json").read_text())
+    assert saved["agents"] == [{"id": "keep-agent", "branch": "Keep"}]

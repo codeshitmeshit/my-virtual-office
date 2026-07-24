@@ -71,6 +71,7 @@ class Conversation:
                 "localDate": LOCAL_DATE,
                 "principalContributions": [],
                 "workload": "insufficient_information",
+                "workloadScore": 1,
                 "rationale": "Evidence is insufficient for a workload conclusion.",
                 "evidenceReferences": [],
                 "blockers": [],

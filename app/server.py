@@ -3024,6 +3024,33 @@ def _update_office_config_agent(agent_key, patch):
     return item
 
 
+def _remove_office_config_agent_override(agent_key):
+    path = os.path.join(STATUS_DIR, "office-config.json")
+    try:
+        with open(path, "r") as f:
+            cfg = json.load(f)
+    except Exception:
+        return False
+    agents = cfg.get("agents")
+    if not isinstance(agents, list):
+        return False
+    remaining = [
+        item for item in agents
+        if agent_key not in (item.get("id"), item.get("statusKey"))
+    ]
+    if len(remaining) == len(agents):
+        return False
+    cfg["agents"] = remaining
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        json.dump(cfg, f, indent=2)
+    try:
+        os.chmod(path, 0o666)
+    except OSError:
+        pass
+    return True
+
+
 def _get_agent_workspace_payload(agent_key):
     refresh_agent_maps()
     agent = _find_agent_record(agent_key)
@@ -25868,6 +25895,7 @@ def _handle_agent_delete(body):
             _remove_openclaw_agent_paths(agent_id)
 
         # Refresh discovery
+        _remove_office_config_agent_override(agent_id)
         global _discovered_at
         _discovered_at = 0
         refresh_agent_maps()

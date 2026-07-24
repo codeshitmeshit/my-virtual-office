@@ -66,7 +66,7 @@ warn_if_browser_unavailable() {
     local check_url
     check_url="${cdp_url/localhost/127.0.0.1}"
     check_url="${check_url%/}"
-    if curl -sf "${check_url}/json/version" >/dev/null 2>&1; then
+    if curl --max-time 2 -sf "${check_url}/json/version" >/dev/null 2>&1; then
         echo -e "  ${GREEN}✓${NC} 代理浏览器 CDP 可用: ${check_url}"
         return 0
     fi

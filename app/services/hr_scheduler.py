@@ -174,7 +174,7 @@ class HRScheduler:
             raise HRSchedulerValidationError("schedule settings are invalid")
         return replace(
             self._config,
-            scheduler_enabled=settings.enabled,
+            scheduler_enabled=self._config.scheduler_enabled and settings.enabled,
             daily_time=settings.daily_time,
         )
 

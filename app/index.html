@@ -9,23 +9,23 @@
     <link rel="apple-touch-icon" href="icon-192.png">
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#1a1a2e">
-    <link rel="stylesheet" href="style.css?v=1784780212-chat-bottom-follow-feishu-media-display">
-    <link rel="stylesheet" href="projects.css?v=1784780212-project-board-scroll">
-    <link rel="stylesheet" href="archive-room.css?v=1784780212-phase13">
-    <link rel="stylesheet" href="human-resources.css?v=1784780212-hr-daily-sync">
-    <link rel="stylesheet" href="fonts.css?v=1784780212.05.07">
+    <link rel="stylesheet" href="style.css?v=1784912535-chat-bottom-follow-feishu-media-display">
+    <link rel="stylesheet" href="projects.css?v=1784912535-project-board-scroll">
+    <link rel="stylesheet" href="archive-room.css?v=1784912535-phase13">
+    <link rel="stylesheet" href="human-resources.css?v=1784912535-hr-daily-sync">
+    <link rel="stylesheet" href="fonts.css?v=1784912535.05.07">
     <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
     <!-- i18n: inline locale data for immediate init -->
     <script id="locale-en" type="application/json">{}</script>
     <script id="locale-zh" type="application/json">{}</script>
-    <script src="i18n.js?v=1784780212-weather-updated-at"></script>
-    <script src="font-scale.js?v=1784780212-font-scale"></script>
+    <script src="i18n.js?v=1784912535-weather-updated-at"></script>
+    <script src="font-scale.js?v=1784912535-font-scale"></script>
     <script>
     (function(){
         var lang='en';
         try{var s=localStorage.getItem('vo-i18n-lang');if(s==='zh')lang='zh';else if(navigator.language&&navigator.language.toLowerCase().indexOf('zh')>=0)lang='zh';}catch(e){}
         var eE=document.getElementById('locale-en'),eZ=document.getElementById('locale-zh');
-        function load(l,el){fetch('locales/'+l+'.json?v=1784780212-weather-updated-at',{cache:'no-store'}).then(function(r){return r.json()}).then(function(d){el.textContent=JSON.stringify(d)}).catch(function(){});}
+        function load(l,el){fetch('locales/'+l+'.json?v=1784912535-weather-updated-at',{cache:'no-store'}).then(function(r){return r.json()}).then(function(d){el.textContent=JSON.stringify(d)}).catch(function(){});}
         load('en',eE);load('zh',eZ);
     })();
     </script>
@@ -1127,16 +1127,16 @@
         setTimeout(resizeCanvas, 320);
     }
     </script>
-    <script src="internal-bubble.js?v=1784780212"></script>
-    <script src="game.js?v=1784780212-weather-updated-at"></script>
-    <script src="agent-guide.js?v=1784780212-agent-guide-skill-md"></script>
-    <script src="dashboard-realtime.js?v=1784780212-dashboard-realtime"></script>
-    <script src="browser-viewer-url.js?v=1784780212-viewer-proxy"></script>
-    <script src="browser-panel.js?v=1784780212-viewer-reload"></script>
-    <script src="projects.js?v=1784780212-project-authoring-review"></script>
-    <script src="archive-room.js?v=1784780212-phase13"></script>
-    <script src="human-resources.js?v=1784780212-hr-daily-sync"></script>
-    <script src="agent-management.js?v=1784910000-merged-shell"></script>
+    <script src="internal-bubble.js?v=1784912535"></script>
+    <script src="game.js?v=1784912535-weather-updated-at"></script>
+    <script src="agent-guide.js?v=1784912535-agent-guide-skill-md"></script>
+    <script src="dashboard-realtime.js?v=1784912535-dashboard-realtime"></script>
+    <script src="browser-viewer-url.js?v=1784912535-viewer-proxy"></script>
+    <script src="browser-panel.js?v=1784912535-viewer-reload"></script>
+    <script src="projects.js?v=1784912535-project-authoring-review"></script>
+    <script src="archive-room.js?v=1784912535-phase13"></script>
+    <script src="human-resources.js?v=1784912535-hr-daily-sync"></script>
+    <script src="agent-management.js?v=1784912535-merged-shell"></script>
     <script>
     // Bio sections for agent modal
     let _bioCache = {};
@@ -1360,12 +1360,12 @@
     </script>
     <!-- marked.js v15.0.12 - bundled locally for airgapped/offline use -->
     <script src="marked.min.js"></script>
-    <script src="codex-chat-timing.js?v=1784745348"></script>
-    <script src="chat-history.js?v=1784745348-live-history-reconcile-feishu-media-display"></script>
-    <script src="chat.js?v=1784745348-live-history-reconcile-codex-chat-fast-path"></script>
-    <script src="sms-panel.js?v=1784745348"></script>
-    <script src="pc-monitor.js?v=1784745348"></script>
-    <script src="api-usage.js?v=1784745348-usage-tabs"></script>
+    <script src="codex-chat-timing.js?v=1784912535"></script>
+    <script src="chat-history.js?v=1784912535-live-history-reconcile-feishu-media-display"></script>
+    <script src="chat.js?v=1784912535-live-history-reconcile-codex-chat-fast-path"></script>
+    <script src="sms-panel.js?v=1784912535"></script>
+    <script src="pc-monitor.js?v=1784912535"></script>
+    <script src="api-usage.js?v=1784912535-usage-tabs"></script>
     <script>
     // License check — demo watermark + feature gates
     (function() {
